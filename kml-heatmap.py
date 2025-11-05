@@ -1014,7 +1014,10 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     # Create base map centered on all data with dark theme
     m = folium.Map(
         location=[center_lat, center_lon],
-        tiles=None  # Don't add default tiles
+        tiles=None,  # Don't add default tiles
+        zoom_snap=0.25,  # Allow zoom levels in 0.25 increments (e.g., 12.25, 12.5, 12.75)
+        zoom_delta=0.25,  # Zoom in/out by 0.25 instead of 1.0 for fine-grained control
+        wheel_pix_per_zoom_level=120  # Smooth mouse wheel scrolling
     )
 
     # Add CartoDB dark_matter as the only tile layer (without showing in layer control)
