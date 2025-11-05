@@ -95,11 +95,15 @@ python kml-heatmap.py track.kml --radius 15 --blur 20 --output custom.html
 ### Visualizations
 - ✓ **Altitude visualization** - Color-coded paths showing elevation changes (rounded to 100ft)
 - ✓ **Airport markers** - Automatically detects and marks airports with flight counts and dates
+- ✓ **ICAO code labels** - Airport ICAO codes displayed next to markers for easy identification
+- ✓ **Altitude legend** - Gradient legend showing actual color-to-altitude mapping
 - ✓ **Flight statistics panel** - Shows distance, altitude, airports visited, and more
+- ✓ **Image export** - Export current viewport as PNG image with timestamped filename (no UI controls)
 - ✓ Interactive map with zoom and pan
 - ✓ Dark theme optimized for map viewing
 - ✓ Toggle-able layers for different visualizations
 - ✓ Customizable heatmap colors (blue → cyan → lime → yellow → red)
+- ✓ **Leaflet tile rendering fix** - Eliminates gaps/lines between map tiles in dark mode
 
 ### Smart Filtering
 - ✓ Filters out logging event markers (Log Start, Log Stop)
@@ -122,14 +126,15 @@ The script generates an interactive HTML file that you can open in any web brows
 #### Altitude Profile (toggle-able layer)
 - Color-coded paths showing elevation changes
 - Blue segments = low altitude
-- Green segments = medium altitude
-- Red segments = high altitude
+- Cyan/Green segments = medium altitude
+- Yellow/Orange/Red segments = high altitude
 - Click on path segments to see exact altitude
-- Includes altitude legend with min/mid/max values (automatically shown when layer is enabled)
+- Includes gradient legend showing actual color mapping (automatically shown when layer is enabled)
 
 #### Airports (enabled by default)
 - Green airplane markers at visited airports
-- Shows airport ICAO code and name
+- ICAO codes displayed in white text next to each marker
+- Shows airport ICAO code and name in popup
 - Displays number of flights and dates
 - Click markers to see detailed information
 - Only shows valid airports (filters out mid-flight recording starts)
@@ -141,6 +146,14 @@ Click the "📊 Stats" button to view:
 - Total distance flown (in nautical miles)
 - Maximum altitude reached
 - Total elevation gain
+
+### Image Export
+Click the "📷 Export" button to:
+- Capture the current viewport as a PNG image (2x resolution for high quality)
+- Download the image with a timestamped filename (e.g., `heatmap_export_2025-11-05T14-30-00.png`)
+- Export includes all visible layers (density heatmap, altitude profile, airports) in their current state
+- UI controls (buttons, zoom, layers) are automatically hidden during export
+- Perfect for sharing specific views of your flight data on social media or in reports
 
 ## How It Works
 

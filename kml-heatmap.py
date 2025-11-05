@@ -22,13 +22,75 @@ from folium.plugins import HeatMap
 
 DEBUG = False
 
+# Constants
+EARTH_RADIUS_KM = 6371
+METERS_TO_FEET = 3.28084
+KM_TO_NAUTICAL_MILES = 0.539957
+
+# Altitude detection thresholds
+MID_FLIGHT_MIN_ALTITUDE = 400  # meters
+MID_FLIGHT_MAX_VARIATION = 100  # meters
+LANDING_MAX_VARIATION = 50  # meters
+LANDING_MAX_ALTITUDE = 600  # meters
+PATH_SAMPLE_MAX_SIZE = 50
+PATH_SAMPLE_MIN_SIZE = 5
+
+# Airport deduplication
+AIRPORT_DISTANCE_THRESHOLD_KM = 1.5
+
+# Marker types to filter out
+POINT_MARKERS = ['Log Start', 'Log Stop', 'Takeoff', 'Landing']
+
+# Heatmap configuration
+HEATMAP_GRADIENT = {
+    0.0: 'blue',
+    0.3: 'cyan',
+    0.5: 'lime',
+    0.7: 'yellow',
+    1.0: 'red'
+}
+
+
+def is_point_marker(name):
+    """Check if a name represents a point marker (not a flight path)."""
+    if not name:
+        return True
+    return any(marker in name for marker in POINT_MARKERS)
+
+
+def sample_path_altitudes(path, from_end=False):
+    """
+    Extract altitude statistics from a path sample.
+
+    Args:
+        path: List of [lat, lon, alt] coordinates
+        from_end: If True, sample from end of path; otherwise from start
+
+    Returns:
+        Dict with 'min', 'max', 'variation' keys, or None if sample too small
+    """
+    if len(path) <= 10:
+        return None
+
+    sample_size = min(PATH_SAMPLE_MAX_SIZE, len(path) // 4)
+    if sample_size <= PATH_SAMPLE_MIN_SIZE:
+        return None
+
+    sample = path[-sample_size:] if from_end else path[:sample_size]
+    alts = [coord[2] for coord in sample]
+    return {
+        'min': min(alts),
+        'max': max(alts),
+        'variation': max(alts) - min(alts)
+    }
+
 
 def is_mid_flight_start(path, start_alt, debug=False):
     """
     Detect if a path started mid-flight by analyzing altitude patterns.
 
     A mid-flight start is characterized by:
-    1. Starting at altitude (> 400m) AND
+    1. Starting at altitude (> MID_FLIGHT_MIN_ALTITUDE) AND
     2. NOT descending/ascending significantly in the first part of the path
 
     Args:
@@ -39,26 +101,17 @@ def is_mid_flight_start(path, start_alt, debug=False):
     Returns:
         bool: True if this is a mid-flight start
     """
-    if len(path) <= 10:
+    sample = sample_path_altitudes(path, from_end=False)
+    if not sample:
         return False
-
-    # Get altitudes from first 25% of path (or first 50 points, whichever is smaller)
-    sample_size = min(50, len(path) // 4)
-    if sample_size <= 5:
-        return False
-
-    start_alts = [coord[2] for coord in path[:sample_size]]
-    min_alt_in_sample = min(start_alts)
-    max_alt_in_sample = max(start_alts)
-    altitude_variation = max_alt_in_sample - min_alt_in_sample
 
     # Mid-flight indicators:
-    # - Starting altitude > 400m (above typical low-elevation airports)
-    # - AND altitude variation in first part < 100m (not climbing/descending much)
-    is_mid_flight = start_alt > 400 and altitude_variation < 100
+    # - Starting altitude above typical airports
+    # - AND altitude variation in first part is small (not climbing/descending much)
+    is_mid_flight = start_alt > MID_FLIGHT_MIN_ALTITUDE and sample['variation'] < MID_FLIGHT_MAX_VARIATION
 
     if is_mid_flight and debug:
-        print(f"  DEBUG: Detected mid-flight start at {start_alt:.0f}m (variation: {altitude_variation:.0f}m)")
+        print(f"  DEBUG: Detected mid-flight start at {start_alt:.0f}m (variation: {sample['variation']:.0f}m)")
 
     return is_mid_flight
 
@@ -77,23 +130,14 @@ def is_valid_landing(path, end_alt, debug=False):
     Returns:
         bool: True if this is a valid landing
     """
-    if len(path) <= 10:
+    sample = sample_path_altitudes(path, from_end=True)
+    if not sample:
         # Short path, just accept if altitude seems reasonable
         return end_alt < 1000
 
-    # Check last 25% of path (or last 50 points)
-    end_sample_size = min(50, len(path) // 4)
-    if end_sample_size <= 5:
-        return end_alt < 1000
-
-    end_alts = [coord[2] for coord in path[-end_sample_size:]]
-    min_end_alt = min(end_alts)
-    max_end_alt = max(end_alts)
-    end_variation = max_end_alt - min_end_alt
-
     # Valid landing: either descending significantly OR stable at low variation
-    # Also accept any endpoint if variation at end is small (< 50m) - indicates stable landing
-    return end_variation < 50 or end_alt < 600
+    # Also accept any endpoint if variation at end is small - indicates stable landing
+    return sample['variation'] < LANDING_MAX_VARIATION or end_alt < LANDING_MAX_ALTITUDE
 
 
 def extract_airport_name(full_name, is_at_path_end=False):
@@ -135,13 +179,12 @@ def extract_airport_name(full_name, is_at_path_end=False):
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """Calculate great circle distance in kilometers between two points."""
-    R = 6371  # Earth's radius in kilometers
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
     a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
     c = 2 * atan2(sqrt(a), sqrt(1-a))
-    return R * c
+    return EARTH_RADIUS_KM * c
 
 
 def parse_kml_coordinates(kml_file):
@@ -512,8 +555,6 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
     Returns:
         Dictionary of statistics
     """
-    from math import radians, sin, cos, sqrt, atan2
-
     stats = {
         'total_points': len(all_coordinates),
         'num_paths': len(all_path_groups),
@@ -532,19 +573,19 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
     if not all_path_groups:
         return stats
 
-    # Calculate statistics from all path groups
-    all_altitudes = []
+    # Calculate statistics from all path groups (filter out short paths)
+    valid_paths = [path for path in all_path_groups if len(path) >= 2]
+    if not valid_paths:
+        return stats
+
+    # Collect all altitudes
+    all_altitudes = [coord[2] for path in valid_paths for coord in path]
+
+    # Calculate distance and elevation changes
     total_distance_km = 0.0
     total_gain_m = 0.0
 
-    for path in all_path_groups:
-        if len(path) < 2:
-            continue
-
-        # Collect altitudes
-        all_altitudes.extend([coord[2] for coord in path])
-
-        # Calculate distance and elevation changes for this path
+    for path in valid_paths:
         for i in range(len(path) - 1):
             lat1, lon1, alt1 = path[i]
             lat2, lon2, alt2 = path[i + 1]
@@ -561,17 +602,16 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
     if all_altitudes:
         stats['min_altitude_m'] = min(all_altitudes)
         stats['max_altitude_m'] = max(all_altitudes)
-        stats['min_altitude_ft'] = stats['min_altitude_m'] * 3.28084
-        stats['max_altitude_ft'] = stats['max_altitude_m'] * 3.28084
+        stats['min_altitude_ft'] = stats['min_altitude_m'] * METERS_TO_FEET
+        stats['max_altitude_ft'] = stats['max_altitude_m'] * METERS_TO_FEET
 
     stats['total_distance_km'] = total_distance_km
-    stats['total_distance_nm'] = total_distance_km * 0.539957  # Convert km to nautical miles
+    stats['total_distance_nm'] = total_distance_km * KM_TO_NAUTICAL_MILES
     stats['total_altitude_gain_m'] = total_gain_m
-    stats['total_altitude_gain_ft'] = total_gain_m * 3.28084
+    stats['total_altitude_gain_ft'] = total_gain_m * METERS_TO_FEET
 
     # Calculate total flight time from path metadata
     if all_path_metadata:
-        from datetime import datetime
         total_seconds = 0
 
         for metadata in all_path_metadata:
@@ -604,6 +644,296 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
                 stats['total_flight_time_str'] = f"{minutes}m"
 
     return stats
+
+
+def create_altitude_layer(all_path_groups, m):
+    """
+    Create altitude visualization layer with color-coded paths and legend.
+
+    Args:
+        all_path_groups: List of path groups with altitude data
+        m: Folium map object to add elements to
+
+    Returns:
+        Tuple of (altitude_layer, min_alt_m, max_alt_m) or (None, None, None) if no altitude data
+    """
+    if not all_path_groups:
+        return None, None, None
+
+    # Calculate altitude range across all paths
+    all_altitudes = [coord[2] for path in all_path_groups for coord in path]
+    min_alt_m = min(all_altitudes)
+    max_alt_m = max(all_altitudes)
+
+    # Convert to feet and round to nearest 100ft
+    min_alt_ft = round(min_alt_m * METERS_TO_FEET / 100) * 100
+    max_alt_ft = round(max_alt_m * METERS_TO_FEET / 100) * 100
+
+    print(f"📊 Altitude range: {min_alt_ft:.0f}ft to {max_alt_ft:.0f}ft ({min_alt_m:.0f}m to {max_alt_m:.0f}m)")
+
+    # Calculate total segments for progress
+    total_segments = sum(len(path) - 1 for path in all_path_groups if len(path) > 1)
+
+    # Create altitude layer
+    altitude_layer = folium.FeatureGroup(name='Altitude Profile', show=False)
+
+    if total_segments > 100:
+        print(f"🎨 Generating altitude visualization ({total_segments} segments)...")
+
+    # Draw each path group separately
+    segments_drawn = 0
+    last_progress = 0
+
+    for path in all_path_groups:
+        if len(path) > 1:
+            # Draw subtle white border for anti-aliasing
+            path_coordinates = [[lat, lon] for lat, lon, _ in path]
+            folium.PolyLine(
+                locations=path_coordinates,
+                color='#FFFFFF',
+                weight=6,
+                opacity=0.15,
+            ).add_to(altitude_layer)
+
+            # Draw colored segments
+            for i in range(len(path) - 1):
+                lat1, lon1, alt1_m = path[i]
+                lat2, lon2, alt2_m = path[i + 1]
+
+                avg_alt_m = (alt1_m + alt2_m) / 2
+                avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+                color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
+
+                folium.PolyLine(
+                    locations=[[lat1, lon1], [lat2, lon2]],
+                    color=color,
+                    weight=4,
+                    opacity=0.85,
+                    popup=f'Altitude: {avg_alt_ft:.0f}ft ({avg_alt_m:.0f}m)'
+                ).add_to(altitude_layer)
+
+                # Update progress
+                if total_segments > 100:
+                    segments_drawn += 1
+                    progress = int((segments_drawn / total_segments) * 100)
+                    if progress >= last_progress + 10:
+                        print(f"  {progress}%...")
+                        last_progress = progress
+
+    if total_segments > 100:
+        print(f"  100% - Complete!")
+
+    # Generate altitude legend
+    num_stops = 20
+    gradient_stops = []
+    for i in range(num_stops):
+        ratio = i / (num_stops - 1)
+        alt = min_alt_m + ratio * (max_alt_m - min_alt_m)
+        color = get_altitude_color(alt, min_alt_m, max_alt_m)
+        gradient_stops.append(f"{color} {ratio * 100:.1f}%")
+
+    gradient_css = ", ".join(gradient_stops)
+
+    # Add legend HTML
+    legend_html = f'''
+    <div id="altitude-legend" style="position: fixed;
+                bottom: 50px; right: 50px; width: fit-content;
+                background-color: #2b2b2b; border:2px solid #555; z-index:9999;
+                font-size:13px; padding: 10px; display: none; color: #ffffff;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.3);">
+        <div style="margin:0 0 8px 0; font-weight:bold; white-space: nowrap;">Altitude</div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="width: 20px; height: 100px; background: linear-gradient(to top, {gradient_css}); border: 1px solid #555; border-radius: 2px;"></div>
+            <div style="display: flex; flex-direction: column; justify-content: space-between; height: 100px; font-size: 12px; white-space: nowrap;">
+                <div>{max_alt_ft:.0f}ft</div>
+                <div style="opacity: 0.7;">{((min_alt_ft + max_alt_ft) / 2):.0f}ft</div>
+                <div>{min_alt_ft:.0f}ft</div>
+            </div>
+        </div>
+    </div>
+    '''
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+    # Add legend toggle script
+    toggle_script = '''
+    <script>
+    // Wait for the map to be fully initialized
+    function initLegendToggle() {
+        var mapElement = document.querySelector('.folium-map');
+        if (!mapElement || !mapElement._leaflet_id) {
+            setTimeout(initLegendToggle, 100);
+            return;
+        }
+
+        var maps = [];
+        for (var key in window) {
+            if (key.startsWith('map_')) {
+                maps.push(window[key]);
+            }
+        }
+
+        if (maps.length === 0) {
+            setTimeout(initLegendToggle, 100);
+            return;
+        }
+
+        var map = maps[0];
+        var legend = document.getElementById('altitude-legend');
+
+        map.on('overlayadd', function(e) {
+            if (e.name === 'Altitude Profile') {
+                legend.style.display = 'block';
+            }
+        });
+
+        map.on('overlayremove', function(e) {
+            if (e.name === 'Altitude Profile') {
+                legend.style.display = 'none';
+            }
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initLegendToggle);
+    } else {
+        initLegendToggle();
+    }
+    </script>
+    '''
+    m.get_root().html.add_child(folium.Element(toggle_script))
+
+    return altitude_layer, min_alt_m, max_alt_m
+
+
+def deduplicate_airports(all_path_metadata, all_path_groups):
+    """
+    Deduplicate airports by location and extract valid airport information.
+
+    Args:
+        all_path_metadata: List of metadata dicts for each path
+        all_path_groups: List of path groups with altitude data
+
+    Returns:
+        List of unique airport dicts with lat, lon, timestamps, name, etc.
+    """
+    unique_airports = []
+
+    # Process start points from metadata
+    for idx, metadata in enumerate(all_path_metadata):
+        start_lat, start_lon = metadata['start_point'][0], metadata['start_point'][1]
+        start_alt = metadata['start_point'][2] if len(metadata['start_point']) > 2 else 0
+        airport_name = metadata.get('airport_name', '')
+
+        # Skip point markers - they don't contain airport info
+        if is_point_marker(airport_name):
+            if DEBUG:
+                print(f"  DEBUG: Skipping point marker '{airport_name}'")
+            continue
+
+        # Skip mid-flight starts
+        path = all_path_groups[idx] if idx < len(all_path_groups) else []
+        if is_mid_flight_start(path, start_alt, DEBUG):
+            if DEBUG:
+                print(f"  DEBUG: Skipping mid-flight start '{airport_name}'")
+            continue
+
+        # Check for duplicates
+        is_duplicate = False
+        for airport in unique_airports:
+            dist = haversine_distance(start_lat, start_lon, airport['lat'], airport['lon'])
+            if dist < AIRPORT_DISTANCE_THRESHOLD_KM:
+                # Update existing airport
+                if metadata['timestamp'] and not is_point_marker(airport_name):
+                    airport['timestamps'].append(metadata['timestamp'])
+
+                # Prefer route names over marker names
+                new_name = metadata.get('airport_name')
+                current_name = airport.get('name', '')
+                if new_name and (not current_name or
+                               (is_point_marker(current_name) and not is_point_marker(new_name))):
+                    airport['name'] = new_name
+                is_duplicate = True
+                break
+
+        if not is_duplicate:
+            # Add new unique airport
+            timestamps = [metadata['timestamp']] if metadata['timestamp'] and not is_point_marker(airport_name) else []
+            unique_airports.append({
+                'lat': start_lat,
+                'lon': start_lon,
+                'timestamps': timestamps,
+                'name': metadata.get('airport_name'),
+                'path_index': idx,
+                'is_at_path_end': False
+            })
+
+    # Process path endpoints (landings and takeoffs)
+    for idx, path in enumerate(all_path_groups):
+        if len(path) <= 1 or idx >= len(all_path_metadata):
+            continue
+
+        start_lat, start_lon, start_alt = path[0][0], path[0][1], path[0][2]
+        end_lat, end_lon, end_alt = path[-1][0], path[-1][1], path[-1][2]
+        route_name = all_path_metadata[idx].get('airport_name', '')
+        route_timestamp = all_path_metadata[idx].get('timestamp')
+
+        # Skip if not a proper route name
+        if is_point_marker(route_name):
+            continue
+
+        # Check for mid-flight starts
+        starts_at_high_altitude = is_mid_flight_start(path, start_alt, DEBUG)
+        if starts_at_high_altitude and DEBUG:
+            print(f"  DEBUG: Path '{route_name}' detected as mid-flight start")
+
+        # Process departure airport (if not high altitude start)
+        if not starts_at_high_altitude:
+            start_found = False
+            for airport in unique_airports:
+                if haversine_distance(airport['lat'], airport['lon'], start_lat, start_lon) < AIRPORT_DISTANCE_THRESHOLD_KM:
+                    start_found = True
+                    if ' - ' in route_name and airport.get('name', '') != route_name:
+                        airport['name'] = route_name
+                        airport['is_at_path_end'] = False
+                    if route_timestamp and route_timestamp not in airport['timestamps']:
+                        airport['timestamps'].append(route_timestamp)
+                    break
+
+            if not start_found and ' - ' in route_name:
+                unique_airports.append({
+                    'lat': start_lat,
+                    'lon': start_lon,
+                    'timestamps': [route_timestamp] if route_timestamp else [],
+                    'name': route_name,
+                    'is_at_path_end': False
+                })
+                if DEBUG:
+                    print(f"  DEBUG: Created departure airport for '{route_name}' at {start_alt:.0f}m altitude")
+
+        # Process landing airport
+        end_found = False
+        for airport in unique_airports:
+            if haversine_distance(airport['lat'], airport['lon'], end_lat, end_lon) < AIRPORT_DISTANCE_THRESHOLD_KM:
+                end_found = True
+                if is_point_marker(airport.get('name', '')):
+                    airport['name'] = route_name
+                    airport['is_at_path_end'] = True
+                if not starts_at_high_altitude and route_timestamp and route_timestamp not in airport['timestamps']:
+                    airport['timestamps'].append(route_timestamp)
+                break
+
+        if not end_found and ' - ' in route_name and is_valid_landing(path, end_alt, DEBUG):
+            unique_airports.append({
+                'lat': end_lat,
+                'lon': end_lon,
+                'timestamps': [route_timestamp] if not starts_at_high_altitude and route_timestamp else [],
+                'name': route_name,
+                'is_at_path_end': True
+            })
+            if DEBUG:
+                print(f"  DEBUG: Created endpoint airport for '{route_name}' at {end_alt:.0f}m altitude")
+
+    return unique_airports
 
 
 def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
@@ -707,357 +1037,30 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
         min_opacity=kwargs.get('min_opacity', 0.25),  # Reduced from 0.4 for less obstruction
         max_opacity=0.6,  # Cap maximum opacity to keep paths visible underneath
         max_zoom=kwargs.get('max_zoom', 18),
-        gradient={
-            0.0: 'blue',
-            0.3: 'cyan',
-            0.5: 'lime',
-            0.7: 'yellow',
-            1.0: 'red'
-        }
+        gradient=HEATMAP_GRADIENT
     ).add_to(heatmap_layer)
     heatmap_layer.add_to(m)
 
-    # Add altitude visualization layer if altitude data is available
-    if all_path_groups:
-        # Calculate altitude range across all paths (KML stores in meters)
-        all_altitudes = []
-        for path in all_path_groups:
-            all_altitudes.extend([coord[2] for coord in path])
+    # Create altitude visualization layer
+    altitude_layer, min_alt_m, max_alt_m = create_altitude_layer(all_path_groups, m)
 
-        min_alt_m = min(all_altitudes)
-        max_alt_m = max(all_altitudes)
-
-        # Convert to feet (1 meter = 3.28084 feet) and round to nearest 100ft
-        min_alt_ft = round(min_alt_m * 3.28084 / 100) * 100
-        max_alt_ft = round(max_alt_m * 3.28084 / 100) * 100
-
-        print(f"📊 Altitude range: {min_alt_ft:.0f}ft to {max_alt_ft:.0f}ft ({min_alt_m:.0f}m to {max_alt_m:.0f}m)")
-
-        # Calculate total segments for progress
-        total_segments = sum(len(path) - 1 for path in all_path_groups if len(path) > 1)
-
-        # Create altitude layer
-        altitude_layer = folium.FeatureGroup(name='Altitude Profile', show=False)
-
-        if total_segments > 100:  # Only show progress for larger datasets
-            print(f"🎨 Generating altitude visualization ({total_segments} segments)...")
-
-        # Draw each path group separately (this prevents connecting unrelated paths)
-        segments_drawn = 0
-        last_progress = 0
-
-        for path in all_path_groups:
-            if len(path) > 1:
-                # First, draw a single subtle white border for the entire path (anti-aliasing effect)
-                # This prevents the grid pattern from individual segment borders
-                path_coordinates = [[lat, lon] for lat, lon, _ in path]
-                folium.PolyLine(
-                    locations=path_coordinates,
-                    color='#FFFFFF',
-                    weight=6,
-                    opacity=0.15,  # Very subtle
-                ).add_to(altitude_layer)
-
-                # Then draw colored segments within this path
-                for i in range(len(path) - 1):
-                    lat1, lon1, alt1_m = path[i]
-                    lat2, lon2, alt2_m = path[i + 1]
-
-                    # Use average altitude for segment color (in meters for color calculation)
-                    avg_alt_m = (alt1_m + alt2_m) / 2
-                    avg_alt_ft = round(avg_alt_m * 3.28084 / 100) * 100  # Round to nearest 100ft
-                    color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
-
-                    # Create main colored line segment
-                    folium.PolyLine(
-                        locations=[[lat1, lon1], [lat2, lon2]],
-                        color=color,
-                        weight=4,  # Slightly thinner to let border show through
-                        opacity=0.85,
-                        popup=f'Altitude: {avg_alt_ft:.0f}ft ({avg_alt_m:.0f}m)'
-                    ).add_to(altitude_layer)
-
-                    # Update progress for large datasets (every 10%)
-                    if total_segments > 100:
-                        segments_drawn += 1
-                        progress = int((segments_drawn / total_segments) * 100)
-                        if progress >= last_progress + 10:
-                            print(f"  {progress}%...")
-                            last_progress = progress
-
-        if total_segments > 100:
-            print(f"  100% - Complete!")
-
-        altitude_layer.add_to(m)
-
-        # Add altitude legend with actual gradient colors (dark theme)
-        # Legend will be hidden by default and toggle with the altitude layer
-        mid_alt_ft = round((min_alt_ft + max_alt_ft) / 2 / 100) * 100
-
-        # Get actual colors from the gradient function
-        low_color = get_altitude_color(min_alt_m, min_alt_m, max_alt_m)
-        mid_color = get_altitude_color((min_alt_m + max_alt_m) / 2, min_alt_m, max_alt_m)
-        high_color = get_altitude_color(max_alt_m, min_alt_m, max_alt_m)
-
-        # Add JavaScript to toggle legend visibility with layer control
-        legend_html = f'''
-        <div id="altitude-legend" style="position: fixed;
-                    bottom: 50px; right: 50px; width: 160px; height: 190px;
-                    background-color: #2b2b2b; border:2px solid #555; z-index:9999;
-                    font-size:14px; padding: 10px; display: none; color: #ffffff;">
-        <p style="margin:0; font-weight:bold;">Altitude Legend</p>
-        <p style="margin:8px 0;">
-            <span style="display: inline-block; width: 20px; height: 20px; background-color:{low_color}; border: 1px solid #333; vertical-align: middle;"></span>
-            <span style="margin-left: 5px;">{min_alt_ft:.0f}ft (Low)</span>
-        </p>
-        <p style="margin:8px 0;">
-            <span style="display: inline-block; width: 20px; height: 20px; background-color:{mid_color}; border: 1px solid #333; vertical-align: middle;"></span>
-            <span style="margin-left: 5px;">{mid_alt_ft:.0f}ft (Mid)</span>
-        </p>
-        <p style="margin:8px 0;">
-            <span style="display: inline-block; width: 20px; height: 20px; background-color:{high_color}; border: 1px solid #333; vertical-align: middle;"></span>
-            <span style="margin-left: 5px;">{max_alt_ft:.0f}ft (High)</span>
-        </p>
-        </div>
-        '''
-        m.get_root().html.add_child(folium.Element(legend_html))
-
-        # Add script to handle layer toggle events using Leaflet's event system
-        toggle_script = '''
-        <script>
-        // Wait for the map to be fully initialized
-        function initLegendToggle() {
-            // Get the Leaflet map instance
-            var mapElement = document.querySelector('.folium-map');
-            if (!mapElement || !mapElement._leaflet_id) {
-                setTimeout(initLegendToggle, 100);
-                return;
-            }
-
-            // Get the map object from Leaflet
-            var maps = [];
-            for (var key in window) {
-                if (key.startsWith('map_')) {
-                    maps.push(window[key]);
-                }
-            }
-
-            if (maps.length === 0) {
-                setTimeout(initLegendToggle, 100);
-                return;
-            }
-
-            var map = maps[0];
-            var legend = document.getElementById('altitude-legend');
-
-            // Listen for layer add/remove events
-            map.on('overlayadd', function(e) {
-                if (e.name === 'Altitude Profile') {
-                    legend.style.display = 'block';
-                }
-            });
-
-            map.on('overlayremove', function(e) {
-                if (e.name === 'Altitude Profile') {
-                    legend.style.display = 'none';
-                }
-            });
-        }
-
-        // Start initialization when page loads
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initLegendToggle);
-        } else {
-            initLegendToggle();
-        }
-        </script>
-        '''
-        m.get_root().html.add_child(folium.Element(toggle_script))
+    # Store airport layer reference for later addition (will be added before altitude layer)
+    airport_layer = None
 
     # Add airport/start point markers
     if all_path_metadata:
         print(f"\n✈️  Processing {len(all_path_metadata)} start points...")
 
-        # Deduplicate airports by location (within ~1.5 km)
-        # Group airports that are close together (airports can be large, with different
-        # takeoff/landing points, taxiways, etc. - especially for round trips)
-        unique_airports = []
-        DISTANCE_THRESHOLD_KM = 1.5  # 1500 meters (1.5 km)
+        # Deduplicate airports and extract valid airport information
+        unique_airports = deduplicate_airports(all_path_metadata, all_path_groups)
 
-        for idx, metadata in enumerate(all_path_metadata):
-            start_lat, start_lon = metadata['start_point'][0], metadata['start_point'][1]
-            start_alt = metadata['start_point'][2] if len(metadata['start_point']) > 2 else 0
-
-            # Check if this is a point marker (Log Start, Takeoff, Landing, Log Stop)
-            # vs an actual flight path - only count actual paths as flights
-            airport_name = metadata.get('airport_name', '')
-            is_point_marker = any(marker in airport_name for marker in
-                                 ['Log Start', 'Log Stop', 'Takeoff', 'Landing'])
-
-            # Skip ALL point markers entirely - these don't contain airport info
-            # The actual airport names come from route/track names (e.g., "EDAV - EDBH")
-            # Point markers are just events: "Log Start: date", "Takeoff: date", "Landing: date", "Log Stop: date"
-            if is_point_marker:
-                if DEBUG:
-                    print(f"  DEBUG: Skipping point marker '{airport_name}'")
-                continue
-
-            # Check if this path started mid-flight
-            path = all_path_groups[idx] if idx < len(all_path_groups) else []
-            if is_mid_flight_start(path, start_alt, DEBUG):
-                if DEBUG:
-                    print(f"  DEBUG: Skipping mid-flight start '{airport_name}'")
-                continue
-
-            # Check if this location is already in unique_airports
-            is_duplicate = False
-            for airport in unique_airports:
-                dist = haversine_distance(start_lat, start_lon, airport['lat'], airport['lon'])
-                if dist < DISTANCE_THRESHOLD_KM:
-                    # This is a duplicate - only add timestamp if it's an actual flight path, not a point marker
-                    if metadata['timestamp'] and not is_point_marker:
-                        airport['timestamps'].append(metadata['timestamp'])
-                    # Update airport name - prefer route names over point marker names
-                    # Point markers have names like "Log Start", "Takeoff", "Landing", "Log Stop"
-                    # Route names are like "EDAV - EDBH" or just "EDCJ ChemnitzJahnsdorf"
-                    new_name = metadata.get('airport_name')
-                    current_name = airport.get('name', '')
-
-                    # Determine if new_name is a route/airport name (preferred) vs a point marker name
-                    new_is_marker = any(marker in new_name for marker in
-                                       ['Log Start', 'Log Stop', 'Takeoff', 'Landing']) if new_name else True
-                    current_is_marker = any(marker in current_name for marker in
-                                           ['Log Start', 'Log Stop', 'Takeoff', 'Landing']) if current_name else True
-
-                    # Update the name if:
-                    # 1. There's no current name, OR
-                    # 2. Current name is a marker but new name is a route/airport name
-                    if new_name and (not current_name or (current_is_marker and not new_is_marker)):
-                        airport['name'] = new_name
-                    is_duplicate = True
-                    break
-
-            if not is_duplicate:
-                # New unique airport - only add timestamp if it's an actual flight, not a point marker
-                timestamps = []
-                if metadata['timestamp'] and not is_point_marker:
-                    timestamps = [metadata['timestamp']]
-                # Note: This is a START point, so is_at_path_end should be False
-                unique_airports.append({
-                    'lat': start_lat,
-                    'lon': start_lon,
-                    'timestamps': timestamps,
-                    'name': metadata.get('airport_name'),
-                    'path_index': idx,  # Store the path index for later reference
-                    'is_at_path_end': False  # This is a departure/start point
-                })
-
-        # Also check for airports at path endpoints (landings) and startpoints (takeoffs)
-        # Some KML files have Point placemarks for "Landing"/"Takeoff" separate from the track
-        # OR the endpoint might not have any marker at all
-        for idx, path in enumerate(all_path_groups):
-            if len(path) > 1:
-                # Get the start and end points of the path
-                start_lat, start_lon, start_alt = path[0][0], path[0][1], path[0][2]
-                end_lat, end_lon, end_alt = path[-1][0], path[-1][1], path[-1][2]
-
-                # Get the route name and timestamp from the path metadata
-                if idx >= len(all_path_metadata):
-                    continue
-
-                route_name = all_path_metadata[idx].get('airport_name', '')
-                route_timestamp = all_path_metadata[idx].get('timestamp')
-
-                # Skip if this path doesn't have a proper route name
-                route_is_marker = any(marker in route_name for marker in
-                                     ['Log Start', 'Log Stop', 'Takeoff', 'Landing']) if route_name else True
-                if route_is_marker:
-                    continue
-
-                # Detect mid-flight starts
-                starts_at_high_altitude = is_mid_flight_start(path, start_alt, DEBUG)
-                if starts_at_high_altitude and DEBUG:
-                    print(f"  DEBUG: Path '{route_name}' detected as mid-flight start")
-
-                # Check if the startpoint (departure airport) should be added
-                # Only add if it's at ground level and not already in unique_airports
-                if not starts_at_high_altitude:
-                    start_found = False
-                    for airport in unique_airports:
-                        dist_to_start = haversine_distance(airport['lat'], airport['lon'], start_lat, start_lon)
-                        if dist_to_start < DISTANCE_THRESHOLD_KM:
-                            start_found = True
-                            # Update with route name if it's a better name
-                            current_name = airport.get('name', '')
-                            if ' - ' in route_name and current_name != route_name:
-                                airport['name'] = route_name
-                                airport['is_at_path_end'] = False
-                            # Add timestamp
-                            if route_timestamp and route_timestamp not in airport['timestamps']:
-                                airport['timestamps'].append(route_timestamp)
-                            break
-
-                    # Create new airport for departure if not found
-                    if not start_found and ' - ' in route_name:
-                        unique_airports.append({
-                            'lat': start_lat,
-                            'lon': start_lon,
-                            'timestamps': [route_timestamp] if route_timestamp else [],
-                            'name': route_name,
-                            'is_at_path_end': False  # Mark this as departure airport
-                        })
-                        if DEBUG:
-                            print(f"  DEBUG: Created departure airport for '{route_name}' at {start_alt:.0f}m altitude")
-
-                # Check if the endpoint already exists in unique_airports
-                end_found = False
-                for airport in unique_airports:
-                    dist_to_end = haversine_distance(airport['lat'], airport['lon'], end_lat, end_lon)
-                    if dist_to_end < DISTANCE_THRESHOLD_KM:
-                        # This endpoint matches an existing airport
-                        end_found = True
-                        current_name = airport.get('name', '')
-
-                        # Check if this is a point marker that should be updated
-                        is_marker = any(marker in current_name for marker in
-                                       ['Log Start', 'Log Stop', 'Takeoff', 'Landing'])
-
-                        if is_marker:
-                            # Update marker with route name
-                            airport['name'] = route_name
-                            airport['is_at_path_end'] = True
-
-                        # Add the timestamp for flights landing here (only if not a high-altitude start)
-                        if not starts_at_high_altitude and route_timestamp and route_timestamp not in airport['timestamps']:
-                            airport['timestamps'].append(route_timestamp)
-                        break
-
-                # If endpoint doesn't exist, create a new airport for it at the landing location
-                # (this handles cases where there's no Landing marker)
-                # Even for high-altitude starts, the landing location is valid
-                if not end_found and ' - ' in route_name:
-                    if is_valid_landing(path, end_alt, DEBUG):
-                        unique_airports.append({
-                            'lat': end_lat,
-                            'lon': end_lon,
-                            'timestamps': [route_timestamp] if not starts_at_high_altitude and route_timestamp else [],
-                            'name': route_name,
-                            'is_at_path_end': True  # Mark this as landing airport
-                        })
-                        if DEBUG:
-                            print(f"  DEBUG: Created endpoint airport for '{route_name}' at {end_alt:.0f}m altitude (start was at {start_alt:.0f}m)")
-                    else:
-                        if DEBUG:
-                            print(f"  DEBUG: Skipping endpoint for '{route_name}' - ends at {end_alt:.0f}m altitude (still in air)")
-
-        # Debug: print all path metadata to understand what's being counted
+        # Debug output
         if DEBUG:
             print(f"\n  DEBUG: All path_metadata entries:")
             for idx, meta in enumerate(all_path_metadata):
                 airport_name = meta.get('airport_name', '')
-                is_marker = any(marker in airport_name for marker in
-                              ['Log Start', 'Log Stop', 'Takeoff', 'Landing'])
-                print(f"    {idx+1}. {meta.get('airport_name')} at ({meta['start_point'][0]:.4f}, {meta['start_point'][1]:.4f}) - Timestamp: {meta.get('timestamp')} - IsMarker: {is_marker}")
+                marker_status = is_point_marker(airport_name)
+                print(f"    {idx+1}. {meta.get('airport_name')} at ({meta['start_point'][0]:.4f}, {meta['start_point'][1]:.4f}) - Timestamp: {meta.get('timestamp')} - IsMarker: {marker_status}")
 
         print(f"  Found {len(unique_airports)} unique airports (deduplicated from {len(all_path_metadata)} flights)")
 
@@ -1125,6 +1128,10 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
             # Add to valid airport names list for statistics
             valid_airport_names.append(airport_name)
 
+            # Extract ICAO code (4-letter code like EDAQ, EDMV, etc.)
+            icao_match = re.search(r'\b([A-Z]{4})\b', airport_name)
+            icao_code = icao_match.group(1) if icao_match else None
+
             popup_html = f"""
             <div style="font-size: 12px; min-width: 150px;">
                 <b>🛫 {airport_name}</b><br>
@@ -1140,8 +1147,26 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
                 icon=folium.Icon(color='green', icon='plane', prefix='fa')
             ).add_to(airport_layer)
 
-        airport_layer.add_to(m)
+            # Add ICAO code label next to the marker
+            if icao_code:
+                folium.Marker(
+                    location=[airport['lat'], airport['lon']],
+                    icon=folium.DivIcon(html=f'''
+                        <div style="font-size: 12px; font-weight: bold; color: #ffffff;
+                                    white-space: nowrap; margin-left: 30px; margin-top: -25px;
+                                    text-shadow: 1px 1px 2px rgba(0,0,0,0.8);">
+                            {icao_code}
+                        </div>
+                    ''')
+                ).add_to(airport_layer)
+
         print(f"  ✓ Added {len(unique_airports)} airport markers")
+
+    # Add layers to map in correct order (Airports before Altitude Profile in layer control)
+    if airport_layer:
+        airport_layer.add_to(m)
+    if all_path_groups and 'altitude_layer' in locals():
+        altitude_layer.add_to(m)
 
     # Calculate and add statistics dashboard
     print(f"\n📊 Calculating statistics...")
@@ -1166,7 +1191,7 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     stats_html = f'''
     <div id="statistics-panel" style="position: fixed;
                 top: 10px; left: 135px; width: 280px;
-                background-color: #2b2b2b; border:2px solid #555; z-index:9999;
+                background-color: #2b2b2b; border:2px solid #555; z-index:10001;
                 font-size:13px; padding: 12px; display: none; color: #ffffff;
                 box-shadow: 0 2px 6px rgba(0,0,0,0.3);">
     <p style="margin:0 0 10px 0; font-weight:bold; font-size:15px;">📊 Flight Statistics</p>
@@ -1223,7 +1248,7 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     '''
     m.get_root().html.add_child(folium.Element(stats_html))
 
-    # Add statistics toggle button and dark theme for layer control
+    # Add statistics toggle button, export button, and dark theme for layer control
     stats_toggle_script = '''
     <style>
     #stats-toggle-btn {
@@ -1243,6 +1268,34 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     }
     #stats-toggle-btn:hover {
         background-color: #3b3b3b;
+    }
+    #export-btn {
+        position: fixed;
+        top: 50px;
+        left: 50px;
+        background-color: #2b2b2b;
+        color: #ffffff;
+        border: 2px solid #555;
+        border-radius: 4px;
+        padding: 6px 12px;
+        cursor: pointer;
+        z-index: 10000;
+        font-size: 14px;
+        font-weight: bold;
+        box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+    }
+    #export-btn:hover {
+        background-color: #3b3b3b;
+    }
+    #export-btn:disabled {
+        background-color: #1b1b1b;
+        color: #888;
+        cursor: not-allowed;
+    }
+
+    /* Hide Leaflet attribution */
+    .leaflet-control-attribution {
+        display: none !important;
     }
 
     /* Dark theme for Leaflet layer control */
@@ -1300,14 +1353,132 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     </style>
 
     <button id="stats-toggle-btn" onclick="toggleStats()">📊 Stats</button>
+    <button id="export-btn" onclick="exportMap()">📷 Export</button>
+
+    <!-- Load html2canvas library for map export -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
     <script>
+    // Leaflet tile rendering workaround for gaps/lines between tiles
+    // Fixes rendering issues with fractional zoom levels, especially in dark mode
+    // See: https://github.com/Leaflet/Leaflet/issues/3575
+    (function(){
+        var originalInitTile = L.GridLayer.prototype._initTile;
+        L.GridLayer.include({
+            _initTile: function (tile) {
+                originalInitTile.call(this, tile);
+                var tileSize = this.getTileSize();
+                tile.style.width = tileSize.x + 1 + 'px';
+                tile.style.height = tileSize.y + 1 + 'px';
+            }
+        });
+    })();
+
     var statsVisible = false;
 
     function toggleStats() {
         var panel = document.getElementById('statistics-panel');
         statsVisible = !statsVisible;
         panel.style.display = statsVisible ? 'block' : 'none';
+    }
+
+    function exportMap() {
+        var exportBtn = document.getElementById('export-btn');
+
+        // Disable button and show loading state
+        exportBtn.disabled = true;
+        exportBtn.textContent = '⏳ Exporting...';
+
+        // Find the map container
+        var mapContainer = document.querySelector('.folium-map');
+
+        if (!mapContainer) {
+            alert('Map container not found. Please wait for the map to load.');
+            exportBtn.disabled = false;
+            exportBtn.textContent = '📷 Export';
+            return;
+        }
+
+        // Find all UI controls to hide during export
+        var controlsToHide = [
+            document.querySelector('.leaflet-control-zoom'),
+            document.querySelector('.leaflet-control-layers'),
+            document.getElementById('stats-toggle-btn'),
+            document.getElementById('export-btn'),
+            document.getElementById('statistics-panel'),
+            document.getElementById('altitude-legend')
+        ];
+
+        // Hide all controls
+        var previousDisplayStates = [];
+        controlsToHide.forEach(function(element) {
+            if (element) {
+                previousDisplayStates.push(element.style.display);
+                element.style.display = 'none';
+            } else {
+                previousDisplayStates.push(null);
+            }
+        });
+
+        // Small delay to ensure controls are hidden before capture
+        setTimeout(function() {
+            // Use html2canvas to capture the map
+            html2canvas(mapContainer, {
+                useCORS: true,
+                allowTaint: true,
+                backgroundColor: '#1a1a1a',
+                scale: 2,  // Higher quality export (2x resolution)
+                logging: false,
+                onclone: function(clonedDoc) {
+                    // Ensure all elements are visible in the clone
+                    var clonedMap = clonedDoc.querySelector('.folium-map');
+                    if (clonedMap) {
+                        clonedMap.style.width = mapContainer.offsetWidth + 'px';
+                        clonedMap.style.height = mapContainer.offsetHeight + 'px';
+                    }
+                }
+            }).then(function(canvas) {
+                // Restore all controls
+                controlsToHide.forEach(function(element, index) {
+                    if (element) {
+                        element.style.display = previousDisplayStates[index] || '';
+                    }
+                });
+
+                // Re-enable button
+                exportBtn.disabled = false;
+                exportBtn.textContent = '📷 Export';
+
+                // Convert canvas to blob and download
+                canvas.toBlob(function(blob) {
+                    // Create download link
+                    var link = document.createElement('a');
+                    var timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                    link.download = 'heatmap_export_' + timestamp + '.png';
+                    link.href = URL.createObjectURL(blob);
+                    link.click();
+
+                    // Clean up
+                    setTimeout(function() {
+                        URL.revokeObjectURL(link.href);
+                    }, 100);
+                }, 'image/png');
+            }).catch(function(error) {
+                // Restore all controls on error
+                controlsToHide.forEach(function(element, index) {
+                    if (element) {
+                        element.style.display = previousDisplayStates[index] || '';
+                    }
+                });
+
+                console.error('Export error:', error);
+                alert('Failed to export map: ' + error.message);
+
+                // Re-enable button
+                exportBtn.disabled = false;
+                exportBtn.textContent = '📷 Export';
+            });
+        }, 100);
     }
     </script>
     '''
