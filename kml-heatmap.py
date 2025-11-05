@@ -224,18 +224,27 @@ def parse_kml_coordinates(kml_file):
                 name_elem = placemark.find('.//name')
             airport_name = name_elem.text.strip() if name_elem is not None and name_elem.text else None
 
-            # Extract timestamp
-            time_elem = placemark.find('.//kml:TimeStamp/kml:when', namespaces)
-            if time_elem is None:
-                time_elem = placemark.find('.//TimeStamp/when')
-            if time_elem is None:
-                time_elem = placemark.find('.//gx:when', namespaces)
-            if time_elem is None:
-                time_elem = placemark.find('.//when')
+            # Extract timestamps - both start and end for tracks with multiple when elements
+            time_elems = placemark.findall('.//kml:when', namespaces)
+            if not time_elems:
+                time_elems = placemark.findall('.//when')
+
+            # Also try TimeStamp element (single timestamp)
+            if not time_elems:
+                time_elem = placemark.find('.//kml:TimeStamp/kml:when', namespaces)
+                if time_elem is None:
+                    time_elem = placemark.find('.//TimeStamp/when')
+                if time_elem is not None:
+                    time_elems = [time_elem]
 
             timestamp = None
-            if time_elem is not None and time_elem.text:
-                timestamp = time_elem.text.strip()
+            end_timestamp = None
+            if time_elems and len(time_elems) > 0:
+                if time_elems[0].text:
+                    timestamp = time_elems[0].text.strip()
+                # Get last timestamp if multiple exist
+                if len(time_elems) > 1 and time_elems[-1].text:
+                    end_timestamp = time_elems[-1].text.strip()
             elif airport_name:
                 # Try to extract date from name (e.g., "Log Start: 03 Mar 2025 08:58 Z")
                 date_pattern = r'(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})'
@@ -247,7 +256,8 @@ def parse_kml_coordinates(kml_file):
             for coord_elem in placemark_coords:
                 coord_to_metadata[id(coord_elem)] = {
                     'airport_name': airport_name,
-                    'timestamp': timestamp
+                    'timestamp': timestamp,
+                    'end_timestamp': end_timestamp
                 }
 
         for idx, coord_elem in enumerate(coord_elements):
@@ -267,6 +277,7 @@ def parse_kml_coordinates(kml_file):
             metadata = coord_to_metadata.get(id(coord_elem), {})
             airport_name = metadata.get('airport_name')
             timestamp = metadata.get('timestamp')
+            end_timestamp = metadata.get('end_timestamp')
 
             # Parse coordinates (format: lon,lat,alt or lon,lat)
             # Multiple coordinates can be separated by whitespace or newlines
@@ -317,6 +328,7 @@ def parse_kml_coordinates(kml_file):
                 path_groups.append(current_path)
                 path_metadata.append({
                     'timestamp': timestamp,
+                    'end_timestamp': end_timestamp,
                     'filename': Path(kml_file).name,
                     'start_point': current_path[0],  # [lat, lon, alt]
                     'airport_name': airport_name
@@ -332,6 +344,7 @@ def parse_kml_coordinates(kml_file):
         if gx_coords:
             gx_path = []
             gx_timestamp = None
+            gx_end_timestamp = None
             gx_airport_name = None
 
             # Try to find timestamp and airport name for gx:Track
@@ -350,16 +363,24 @@ def parse_kml_coordinates(kml_file):
                     if name_elem is not None and name_elem.text:
                         gx_airport_name = name_elem.text.strip()
 
-                    # Extract timestamp - try to get the first when element
+                    # Extract timestamps - try to get all when elements for start and end time
                     # The <when> elements in gx:Track are in the KML namespace, not gx namespace
-                    time_elem = placemark.find('.//kml:when', namespaces)
-                    if time_elem is None:
-                        time_elem = placemark.find('.//when')
+                    time_elems = placemark.findall('.//kml:when', namespaces)
+                    if not time_elems:
+                        time_elems = placemark.findall('.//when')
 
-                    if time_elem is not None and time_elem.text:
-                        gx_timestamp = time_elem.text.strip()
-                        if DEBUG:
-                            print(f"  DEBUG: Found gx:Track timestamp: {gx_timestamp}")
+                    if time_elems and len(time_elems) > 0:
+                        # Get first timestamp (start time)
+                        if time_elems[0].text:
+                            gx_timestamp = time_elems[0].text.strip()
+                            if DEBUG:
+                                print(f"  DEBUG: Found gx:Track start timestamp: {gx_timestamp}")
+
+                        # Get last timestamp (end time) if available
+                        if len(time_elems) > 1 and time_elems[-1].text:
+                            gx_end_timestamp = time_elems[-1].text.strip()
+                            if DEBUG:
+                                print(f"  DEBUG: Found gx:Track end timestamp: {gx_end_timestamp}")
                     elif gx_airport_name:
                         # Try to extract date from name
                         date_pattern = r'(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})'
@@ -407,6 +428,7 @@ def parse_kml_coordinates(kml_file):
                 path_groups.append(gx_path)
                 path_metadata.append({
                     'timestamp': gx_timestamp,
+                    'end_timestamp': gx_end_timestamp,
                     'filename': Path(kml_file).name,
                     'start_point': gx_path[0],  # [lat, lon, alt]
                     'airport_name': gx_airport_name
@@ -478,13 +500,14 @@ def get_altitude_color(altitude, min_alt, max_alt):
     return f'#{r:02x}{g:02x}{b:02x}'
 
 
-def calculate_statistics(all_coordinates, all_path_groups):
+def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=None):
     """
     Calculate statistics from coordinate and path data.
 
     Args:
         all_coordinates: List of [lat, lon] pairs
         all_path_groups: List of path groups with altitude data
+        all_path_metadata: List of metadata dicts for each path (optional)
 
     Returns:
         Dictionary of statistics
@@ -502,6 +525,8 @@ def calculate_statistics(all_coordinates, all_path_groups):
         'max_altitude_m': None,
         'min_altitude_ft': None,
         'max_altitude_ft': None,
+        'total_flight_time_seconds': 0,
+        'total_flight_time_str': None,
     }
 
     if not all_path_groups:
@@ -543,6 +568,40 @@ def calculate_statistics(all_coordinates, all_path_groups):
     stats['total_distance_nm'] = total_distance_km * 0.539957  # Convert km to nautical miles
     stats['total_altitude_gain_m'] = total_gain_m
     stats['total_altitude_gain_ft'] = total_gain_m * 3.28084
+
+    # Calculate total flight time from path metadata
+    if all_path_metadata:
+        from datetime import datetime
+        total_seconds = 0
+
+        for metadata in all_path_metadata:
+            start_ts = metadata.get('timestamp')
+            end_ts = metadata.get('end_timestamp')
+
+            # Only calculate duration if both start and end timestamps exist
+            if start_ts and end_ts:
+                try:
+                    # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z")
+                    if 'T' in start_ts and 'T' in end_ts:
+                        start_dt = datetime.fromisoformat(start_ts.replace('Z', '+00:00'))
+                        end_dt = datetime.fromisoformat(end_ts.replace('Z', '+00:00'))
+                        duration = (end_dt - start_dt).total_seconds()
+                        if duration > 0:  # Only count positive durations
+                            total_seconds += duration
+                except Exception:
+                    # Skip if parsing fails
+                    pass
+
+        stats['total_flight_time_seconds'] = total_seconds
+
+        # Format flight time as human-readable string
+        if total_seconds > 0:
+            hours = int(total_seconds // 3600)
+            minutes = int((total_seconds % 3600) // 60)
+            if hours > 0:
+                stats['total_flight_time_str'] = f"{hours}h {minutes}m"
+            else:
+                stats['total_flight_time_str'] = f"{minutes}m"
 
     return stats
 
@@ -1086,7 +1145,7 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
 
     # Calculate and add statistics dashboard
     print(f"\n📊 Calculating statistics...")
-    stats = calculate_statistics(all_coordinates, all_path_groups)
+    stats = calculate_statistics(all_coordinates, all_path_groups, all_path_metadata)
 
     # Add airport count and list to statistics
     num_airports = len(valid_airport_names) if all_path_metadata else 0
@@ -1097,6 +1156,8 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     print(f"  • Total distance: {stats['total_distance_nm']:.1f} nm")
     if stats['min_altitude_m'] is not None:
         print(f"  • Altitude gain: {stats['total_altitude_gain_ft']:.0f}ft")
+    if stats.get('total_flight_time_str'):
+        print(f"  • Total flight time: {stats['total_flight_time_str']}")
     print(f"  • Airports visited: {num_airports}")
     if stats['airport_names']:
         print(f"    - {', '.join(stats['airport_names'][:5])}" + (" ..." if len(stats['airport_names']) > 5 else ""))
@@ -1104,7 +1165,7 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     # Format statistics for display
     stats_html = f'''
     <div id="statistics-panel" style="position: fixed;
-                top: 10px; left: 130px; width: 280px;
+                top: 10px; left: 135px; width: 280px;
                 background-color: #2b2b2b; border:2px solid #555; z-index:9999;
                 font-size:13px; padding: 12px; display: none; color: #ffffff;
                 box-shadow: 0 2px 6px rgba(0,0,0,0.3);">
@@ -1134,6 +1195,14 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     stats_html += f'''
     <div style="margin-bottom: 8px;">
         <strong>Distance:</strong> {stats['total_distance_nm']:.1f} nm
+    </div>
+    '''
+
+    # Add flight time if available
+    if stats.get('total_flight_time_str'):
+        stats_html += f'''
+    <div style="margin-bottom: 8px;">
+        <strong>Total Flight Time:</strong> {stats['total_flight_time_str']}
     </div>
     '''
 
@@ -1197,6 +1266,36 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     }
     .leaflet-control-layers-separator {
         border-top: 1px solid #555 !important;
+    }
+
+    /* Dark theme for Leaflet zoom control */
+    .leaflet-control-zoom {
+        border: 2px solid #555 !important;
+        border-radius: 4px !important;
+    }
+    .leaflet-control-zoom a {
+        background-color: #2b2b2b !important;
+        color: #ffffff !important;
+        border-bottom: 1px solid #555 !important;
+    }
+    .leaflet-control-zoom a:hover {
+        background-color: #3b3b3b !important;
+        color: #ffffff !important;
+    }
+    .leaflet-control-zoom-in {
+        border-top-left-radius: 4px !important;
+        border-top-right-radius: 4px !important;
+    }
+    .leaflet-control-zoom-out {
+        border-bottom-left-radius: 4px !important;
+        border-bottom-right-radius: 4px !important;
+        border-bottom: none !important;
+    }
+    .leaflet-bar a {
+        border-bottom: 1px solid #555 !important;
+    }
+    .leaflet-bar a:last-child {
+        border-bottom: none !important;
     }
     </style>
 
