@@ -1143,25 +1143,59 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
             </div>
             """
 
-            # Add marker with custom airport icon
+            # Add marker with embedded ICAO code for better export compatibility
+            # Create a clean marker with ICAO code and simple arrow pointing to location
+            if icao_code:
+                # Marker with embedded ICAO code
+                airport_marker_svg = f'''
+                <div style="display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%);">
+                    <!-- ICAO code box -->
+                    <div style="background-color: #28a745; color: white; padding: 4px 8px;
+                                border: 2px solid #1e7e34; border-radius: 4px 4px 0 0;
+                                font-family: monospace; font-size: 13px; font-weight: bold;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                                white-space: nowrap;">
+                        {icao_code}
+                    </div>
+                    <!-- Arrow pointing down -->
+                    <div style="width: 0; height: 0;
+                                border-left: 6px solid transparent;
+                                border-right: 6px solid transparent;
+                                border-top: 8px solid #1e7e34;
+                                margin-top: 0;
+                                filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));"></div>
+                </div>
+                '''
+            else:
+                # Fallback for airports without ICAO code - use full name or generic marker
+                display_name = airport_name[:8] if airport_name and len(airport_name) <= 12 else "APT"
+                airport_marker_svg = f'''
+                <div style="display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%);">
+                    <div style="background-color: #28a745; color: white; padding: 4px 8px;
+                                border: 2px solid #1e7e34; border-radius: 4px 4px 0 0;
+                                font-family: sans-serif; font-size: 11px; font-weight: bold;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                                white-space: nowrap;">
+                        {display_name}
+                    </div>
+                    <div style="width: 0; height: 0;
+                                border-left: 6px solid transparent;
+                                border-right: 6px solid transparent;
+                                border-top: 8px solid #1e7e34;
+                                margin-top: 0;
+                                filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));"></div>
+                </div>
+                '''
+
             folium.Marker(
                 location=[airport['lat'], airport['lon']],
                 popup=folium.Popup(popup_html, max_width=250),
-                icon=folium.Icon(color='green', icon='plane', prefix='fa')
+                icon=folium.DivIcon(
+                    html=airport_marker_svg,
+                    icon_size=(1, 1),  # Let CSS handle sizing
+                    icon_anchor=(0, 0)  # CSS transform handles positioning
+                )
             ).add_to(airport_layer)
-
-            # Add ICAO code label next to the marker
-            if icao_code:
-                folium.Marker(
-                    location=[airport['lat'], airport['lon']],
-                    icon=folium.DivIcon(html=f'''
-                        <div style="font-size: 12px; font-weight: bold; color: #ffffff;
-                                    white-space: nowrap; margin-left: 30px; margin-top: -25px;
-                                    text-shadow: 1px 1px 2px rgba(0,0,0,0.8);">
-                            {icao_code}
-                        </div>
-                    ''')
-                ).add_to(airport_layer)
 
         print(f"  ✓ Added {len(unique_airports)} airport markers")
 
@@ -1358,8 +1392,8 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     <button id="stats-toggle-btn" onclick="toggleStats()">📊 Stats</button>
     <button id="export-btn" onclick="exportMap()">📷 Export</button>
 
-    <!-- Load html2canvas library for map export -->
-    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <!-- Load dom-to-image library for better Leaflet map export -->
+    <script src="https://cdn.jsdelivr.net/npm/dom-to-image@2.6.0/dist/dom-to-image.min.js"></script>
 
     <script>
     // Leaflet tile rendering workaround for gaps/lines between tiles
@@ -1423,24 +1457,20 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
             }
         });
 
-        // Small delay to ensure controls are hidden before capture
+        // Small delay to ensure controls are hidden and map is rendered
         setTimeout(function() {
-            // Use html2canvas to capture the map
-            html2canvas(mapContainer, {
-                useCORS: true,
-                allowTaint: true,
-                backgroundColor: '#1a1a1a',
-                scale: 2,  // Higher quality export (2x resolution)
-                logging: false,
-                onclone: function(clonedDoc) {
-                    // Ensure all elements are visible in the clone
-                    var clonedMap = clonedDoc.querySelector('.folium-map');
-                    if (clonedMap) {
-                        clonedMap.style.width = mapContainer.offsetWidth + 'px';
-                        clonedMap.style.height = mapContainer.offsetHeight + 'px';
-                    }
+            // Use dom-to-image to capture the map (better handling of SVG/Canvas layers)
+            // Export at 2x resolution for higher quality
+            domtoimage.toPng(mapContainer, {
+                width: mapContainer.offsetWidth * 2,
+                height: mapContainer.offsetHeight * 2,
+                bgcolor: '#1a1a1a',
+                quality: 1.0,
+                style: {
+                    transform: 'scale(2)',
+                    transformOrigin: 'top left'
                 }
-            }).then(function(canvas) {
+            }).then(function(dataUrl) {
                 // Restore all controls
                 controlsToHide.forEach(function(element, index) {
                     if (element) {
@@ -1452,20 +1482,12 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
                 exportBtn.disabled = false;
                 exportBtn.textContent = '📷 Export';
 
-                // Convert canvas to blob and download
-                canvas.toBlob(function(blob) {
-                    // Create download link
-                    var link = document.createElement('a');
-                    var timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                    link.download = 'heatmap_export_' + timestamp + '.png';
-                    link.href = URL.createObjectURL(blob);
-                    link.click();
-
-                    // Clean up
-                    setTimeout(function() {
-                        URL.revokeObjectURL(link.href);
-                    }, 100);
-                }, 'image/png');
+                // Create download link
+                var link = document.createElement('a');
+                var timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                link.download = 'heatmap_export_' + timestamp + '.png';
+                link.href = dataUrl;
+                link.click();
             }).catch(function(error) {
                 // Restore all controls on error
                 controlsToHide.forEach(function(element, index) {
@@ -1481,7 +1503,7 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
                 exportBtn.disabled = false;
                 exportBtn.textContent = '📷 Export';
             });
-        }, 100);
+        }, 200);
     }
     </script>
     '''
