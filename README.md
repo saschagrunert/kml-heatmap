@@ -12,6 +12,9 @@ docker build -t kml-heatmap .
 
 # Run with your KML files
 docker run -v $(pwd):/data kml-heatmap your_track.kml
+
+# Optional: Use Stadia Maps for detailed dark tiles (requires free API key)
+docker run -v $(pwd):/data -e STADIA_API_KEY=your_api_key_here kml-heatmap your_track.kml
 ```
 
 ### Option 2: Local Python Installation
@@ -19,6 +22,14 @@ docker run -v $(pwd):/data kml-heatmap your_track.kml
 ```bash
 pip install -r requirements.txt
 ```
+
+### Stadia Maps API Key (Optional)
+
+For enhanced map detail with Stadia Maps' Alidade Smooth Dark tiles:
+1. Get a free API key at [stadiamaps.com](https://stadiamaps.com/)
+2. Set the `STADIA_API_KEY` environment variable when running
+
+Without an API key, the tool falls back to CartoDB dark_matter tiles.
 
 ## Usage
 
@@ -31,8 +42,11 @@ docker run kml-heatmap --help
 # Basic usage (single file)
 docker run -v $(pwd):/data kml-heatmap your_track.kml
 
+# With Stadia Maps API key for enhanced detail
+docker run -v $(pwd):/data -e STADIA_API_KEY=your_api_key_here kml-heatmap your_track.kml
+
 # Process all KML files in a directory
-docker run -v $(pwd):/data kml-heatmap ./flights/
+docker run -v $(pwd):/data -e STADIA_API_KEY=your_api_key_here kml-heatmap ./flights/
 
 # Multiple files
 docker run -v $(pwd):/data kml-heatmap track1.kml track2.kml track3.kml
@@ -58,6 +72,12 @@ python kml-heatmap.py your_track.kml
 ```
 
 This creates `heatmap.html` in the current directory.
+
+#### With Stadia Maps API key:
+```bash
+export STADIA_API_KEY=your_api_key_here
+python kml-heatmap.py your_track.kml
+```
 
 #### Multiple files:
 ```bash
@@ -98,9 +118,9 @@ python kml-heatmap.py track.kml --radius 15 --blur 20 --output custom.html
 - ✓ **ICAO code labels** - Airport ICAO codes displayed next to markers for easy identification
 - ✓ **Altitude legend** - Gradient legend showing actual color-to-altitude mapping
 - ✓ **Flight statistics panel** - Shows distance, altitude, airports visited, and more
-- ✓ **Image export** - Export current viewport as PNG image with timestamped filename (no UI controls)
+- ✓ **Image export** - Export current viewport as high-quality JPG image (95% quality, 2x resolution) with timestamped filename (no UI controls)
 - ✓ Interactive map with zoom and pan
-- ✓ Dark theme optimized for map viewing
+- ✓ **Enhanced dark theme** - Stadia Maps Alidade Smooth Dark tiles (with API key) or CartoDB dark_matter fallback
 - ✓ Toggle-able layers for different visualizations
 - ✓ Customizable heatmap colors (blue → cyan → lime → yellow → red)
 - ✓ **Leaflet tile rendering fix** - Eliminates gaps/lines between map tiles in dark mode
@@ -149,8 +169,8 @@ Click the "📊 Stats" button to view:
 
 ### Image Export
 Click the "📷 Export" button to:
-- Capture the current viewport as a PNG image (2x resolution for high quality)
-- Download the image with a timestamped filename (e.g., `heatmap_export_2025-11-05T14-30-00.png`)
+- Capture the current viewport as a high-quality JPG image (95% quality, 2x resolution)
+- Download the image with a timestamped filename (e.g., `heatmap_export_2025-11-05T14-30-00.jpg`)
 - Export includes all visible layers (density heatmap, altitude profile, airports) in their current state
 - UI controls (buttons, zoom, layers) are automatically hidden during export
 - Perfect for sharing specific views of your flight data on social media or in reports
@@ -173,14 +193,14 @@ Airports are identified and validated using several criteria:
 ## Examples
 
 ### Aviation
-Visualize your flight logs:
+Visualize your flight logs with enhanced detail:
 ```bash
-docker run -v $(pwd):/data kml-heatmap ./flight_logs/
+docker run -v $(pwd):/data -e STADIA_API_KEY=your_api_key_here kml-heatmap ./flight_logs/
 ```
 
 View specific flights:
 ```bash
-docker run -v $(pwd):/data kml-heatmap flight1.kml flight2.kml flight3.kml
+docker run -v $(pwd):/data -e STADIA_API_KEY=your_api_key_here kml-heatmap flight1.kml flight2.kml flight3.kml
 ```
 
 ### Running/Hiking
