@@ -22,6 +22,9 @@ from folium.plugins import HeatMap
 
 DEBUG = False
 
+# Get Stadia Maps API key from environment variable
+STADIA_API_KEY = os.environ.get('STADIA_API_KEY', '')
+
 # Constants
 EARTH_RADIUS_KM = 6371
 METERS_TO_FEET = 3.28084
@@ -1020,12 +1023,21 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
         wheel_pix_per_zoom_level=120  # Smooth mouse wheel scrolling
     )
 
-    # Add CartoDB dark_matter as the only tile layer (without showing in layer control)
-    folium.TileLayer(
-        tiles='CartoDB dark_matter',
-        name='',  # Empty name prevents it from appearing in layer control
-        control=False  # Don't show in layer control
-    ).add_to(m)
+    # Add tile layer (Stadia AlidadeSmoothDark if API key available, otherwise CartoDB dark_matter)
+    if STADIA_API_KEY:
+        folium.TileLayer(
+            tiles=f'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{{z}}/{{x}}/{{y}}{{r}}.png?api_key={STADIA_API_KEY}',
+            attr='&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>, &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors',
+            name='',  # Empty name prevents it from appearing in layer control
+            control=False  # Don't show in layer control
+        ).add_to(m)
+    else:
+        # Fallback to CartoDB dark_matter if no API key provided
+        folium.TileLayer(
+            tiles='CartoDB dark_matter',
+            name='',  # Empty name prevents it from appearing in layer control
+            control=False  # Don't show in layer control
+        ).add_to(m)
 
     # Fit bounds to show all data with some padding
     m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]], padding=[30, 30])
@@ -1460,12 +1472,12 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
         // Small delay to ensure controls are hidden and map is rendered
         setTimeout(function() {
             // Use dom-to-image to capture the map (better handling of SVG/Canvas layers)
-            // Export at 2x resolution for higher quality
-            domtoimage.toPng(mapContainer, {
+            // Export at 2x resolution for higher quality as JPEG
+            domtoimage.toJpeg(mapContainer, {
                 width: mapContainer.offsetWidth * 2,
                 height: mapContainer.offsetHeight * 2,
                 bgcolor: '#1a1a1a',
-                quality: 1.0,
+                quality: 0.95,
                 style: {
                     transform: 'scale(2)',
                     transformOrigin: 'top left'
@@ -1485,7 +1497,7 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
                 // Create download link
                 var link = document.createElement('a');
                 var timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                link.download = 'heatmap_export_' + timestamp + '.png';
+                link.download = 'heatmap_export_' + timestamp + '.jpg';
                 link.href = dataUrl;
                 link.click();
             }).catch(function(error) {
