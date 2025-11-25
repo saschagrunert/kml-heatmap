@@ -1902,6 +1902,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     # Generate lightweight HTML with progressive loading
     print(f"\n💾 Generating progressive HTML...")
 
+    # Use only the directory name for DATA_DIR (relative path for web serving)
+    data_dir_name = os.path.basename(data_dir)
+
     html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -2018,7 +2021,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         const CENTER = [{center_lat}, {center_lon}];
         const BOUNDS = [[{min_lat}, {min_lon}], [{max_lat}, {max_lon}]];
         const STADIA_API_KEY = '{STADIA_API_KEY}';
-        const DATA_DIR = '{data_dir}';
+        const DATA_DIR = '{data_dir_name}';
 
         // Initialize map
         var map = L.map('map', {{
