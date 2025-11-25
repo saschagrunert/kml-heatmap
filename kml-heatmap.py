@@ -1264,7 +1264,7 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
         tiles=None,  # Don't add default tiles
         zoom_snap=0.25,  # Allow zoom levels in 0.25 increments (e.g., 12.25, 12.5, 12.75)
         zoom_delta=0.25,  # Zoom in/out by 0.25 instead of 1.0 for fine-grained control
-        wheel_pix_per_zoom_level=120  # Smooth mouse wheel scrolling
+        wheel_pix_per_zoom_level=120  # 2 scrolls = 1 zoom level (matches button steps)
     )
 
     # Add tile layer (Stadia AlidadeSmoothDark if API key available, otherwise CartoDB dark_matter)
@@ -2028,6 +2028,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             zoom: 10,
             zoomSnap: 0.25,
             zoomDelta: 0.25,
+            wheelPxPerZoomLevel: 120,  // 2 scrolls = 1 zoom level (matches button steps)
             preferCanvas: true  // Use canvas for better performance
         }});
 
@@ -2284,15 +2285,22 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 html += '</div>';
             }}
 
-            html += '<div style="margin-bottom: 8px;"><strong>Distance:</strong> ' + stats.total_distance_nm.toFixed(1) + ' nm</div>';
+            // Distance with km conversion
+            var distanceKm = (stats.total_distance_nm * 1.852).toFixed(1);
+            html += '<div style="margin-bottom: 8px;"><strong>Distance:</strong> ' + stats.total_distance_nm.toFixed(1) + ' nm (' + distanceKm + ' km)</div>';
 
             if (stats.total_flight_time_str) {{
                 html += '<div style="margin-bottom: 8px;"><strong>Total Flight Time:</strong> ' + stats.total_flight_time_str + '</div>';
             }}
 
             if (stats.max_altitude_ft) {{
-                html += '<div style="margin-bottom: 8px;"><strong>Max Altitude:</strong> ' + Math.round(stats.max_altitude_ft) + ' ft</div>';
-                html += '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' + Math.round(stats.total_altitude_gain_ft) + ' ft</div>';
+                // Altitude with meter conversion
+                var maxAltitudeM = Math.round(stats.max_altitude_ft * 0.3048);
+                html += '<div style="margin-bottom: 8px;"><strong>Max Altitude:</strong> ' + Math.round(stats.max_altitude_ft) + ' ft (' + maxAltitudeM + ' m)</div>';
+
+                // Elevation gain with meter conversion
+                var elevationGainM = Math.round(stats.total_altitude_gain_ft * 0.3048);
+                html += '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' + Math.round(stats.total_altitude_gain_ft) + ' ft (' + elevationGainM + ' m)</div>';
             }}
 
             document.getElementById('stats-panel').innerHTML = html;
@@ -2397,9 +2405,9 @@ OPTIONS:
     --help, -h           Show this help message
 
 PROGRESSIVE LOADING:
-    The generator now uses progressive loading by default, which:
-    • Creates a lightweight HTML file (~20-40 KB)
-    • Stores data in external JSON files at 3 resolution levels
+    The generator uses progressive loading by default, which:
+    • Creates a lightweight HTML file (10-20 KB)
+    • Stores data in external JSON files at 5 resolution levels
     • Loads appropriate data based on zoom level
     • Reduces initial load time and memory usage on mobile devices
     • Requires a local web server to view (see Docker usage below)
@@ -2436,10 +2444,10 @@ EXAMPLES:
 
 OUTPUT:
     Creates an interactive HTML map with:
-    • Toggle-able layers (Density Heatmap / Altitude Profile)
-    • Multiple map styles (OpenStreetMap / Light / Dark)
-    • Altitude legend with rounded feet values (100ft increments)
-    • Click paths to see altitude popups
+    • Toggle-able layers (Altitude Profile / Airports)
+    • Dark theme map tiles (Stadia Maps or CartoDB)
+    • Statistics panel with metric conversions
+    • Export map as JPG image
 
 For more information, see README.md
 """
