@@ -2,6 +2,8 @@
 
 Create interactive heatmap visualizations from KML files.
 
+**[Live Demo](https://saschagrunert.github.io/kml-heatmap)**
+
 ## Features
 
 - Interactive density heatmap showing visited locations
