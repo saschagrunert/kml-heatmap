@@ -1012,7 +1012,7 @@ def deduplicate_airports(all_path_metadata, all_path_groups):
     return unique_airports
 
 
-def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique_airports, stats, output_dir="data"):
+def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique_airports, stats, output_dir="data", strip_timestamps=False):
     """
     Export data to JSON files at multiple resolutions for progressive loading.
 
@@ -1023,6 +1023,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
         unique_airports: List of airport dicts
         stats: Statistics dictionary
         output_dir: Directory to save JSON files
+        strip_timestamps: If True, remove all date/time information for privacy
 
     Returns:
         Dictionary with paths to generated files
@@ -1030,6 +1031,8 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"\n📦 Exporting data to JSON files...")
+    if strip_timestamps:
+        print(f"  🔒 Privacy mode: Stripping all date/time information")
 
     # Calculate min/max altitude for color mapping
     if all_path_groups:
@@ -1135,13 +1138,20 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
             continue
 
         seen_locations.add(location_key)
-        valid_airports.append({
+
+        # Prepare airport data
+        airport_data = {
             'lat': apt['lat'],
             'lon': apt['lon'],
             'name': airport_name,
-            'timestamps': apt['timestamps'],
             'flight_count': len(apt['timestamps']) if apt['timestamps'] else 1
-        })
+        }
+
+        # Include timestamps only if not stripping
+        if not strip_timestamps:
+            airport_data['timestamps'] = apt['timestamps']
+
+        valid_airports.append(airport_data)
 
     airports_data = {'airports': valid_airports}
 
@@ -1810,6 +1820,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         output_file: Output HTML file path
         data_dir: Directory to save JSON data files
         **kwargs: Additional parameters (radius, blur, etc.)
+
+    Note:
+        Date/time information is automatically stripped from exported data for privacy.
     """
     # Parse all KML files (reusing code from create_heatmap)
     all_coordinates = []
@@ -1885,8 +1898,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     stats['num_airports'] = len(valid_airport_names)
     stats['airport_names'] = sorted(valid_airport_names)
 
-    # Export data to JSON files
-    data_files = export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique_airports, stats, data_dir)
+    # Export data to JSON files (strip timestamps by default for privacy)
+    data_files = export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique_airports, stats, data_dir, strip_timestamps=True)
 
     # Generate lightweight HTML with progressive loading
     print(f"\n💾 Generating progressive HTML...")
@@ -2196,7 +2209,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     weight: 4,
                     opacity: 0.85,
                     renderer: canvasRenderer  // Use canvas for better pan performance
-                }}).bindPopup('Altitude: ' + segment.altitude_ft + 'ft (' + segment.altitude_m + 'm)')
+                }}).bindPopup('Altitude: ' + segment.altitude_ft + ' ft (' + segment.altitude_m + ' m)')
                   .addTo(altitudeLayer);
             }});
 
@@ -2278,8 +2291,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             }}
 
             if (stats.max_altitude_ft) {{
-                html += '<div style="margin-bottom: 8px;"><strong>Max Altitude:</strong> ' + Math.round(stats.max_altitude_ft) + 'ft</div>';
-                html += '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' + Math.round(stats.total_altitude_gain_ft) + 'ft</div>';
+                html += '<div style="margin-bottom: 8px;"><strong>Max Altitude:</strong> ' + Math.round(stats.max_altitude_ft) + ' ft</div>';
+                html += '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' + Math.round(stats.total_altitude_gain_ft) + ' ft</div>';
             }}
 
             document.getElementById('stats-panel').innerHTML = html;
