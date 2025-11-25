@@ -12,6 +12,7 @@ Usage:
 import sys
 import os
 import re
+import json
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -52,6 +53,78 @@ HEATMAP_GRADIENT = {
     0.7: 'yellow',
     1.0: 'red'
 }
+
+
+def downsample_path_rdp(path, epsilon=0.0001):
+    """
+    Downsample a path using Ramer-Douglas-Peucker algorithm.
+
+    Args:
+        path: List of [lat, lon] or [lat, lon, alt] coordinates
+        epsilon: Tolerance for simplification (smaller = more detail)
+
+    Returns:
+        Simplified path
+    """
+    if len(path) <= 2:
+        return path
+
+    def perpendicular_distance(point, line_start, line_end):
+        """Calculate perpendicular distance from point to line."""
+        if line_start == line_end:
+            return haversine_distance(point[0], point[1], line_start[0], line_start[1])
+
+        # Using simple Euclidean approximation for small distances
+        x0, y0 = point[0], point[1]
+        x1, y1 = line_start[0], line_start[1]
+        x2, y2 = line_end[0], line_end[1]
+
+        num = abs((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1)
+        den = sqrt((y2 - y1)**2 + (x2 - x1)**2)
+
+        if den == 0:
+            return 0
+        return num / den
+
+    # Find point with maximum distance
+    dmax = 0
+    index = 0
+    end = len(path) - 1
+
+    for i in range(1, end):
+        d = perpendicular_distance(path[i], path[0], path[end])
+        if d > dmax:
+            index = i
+            dmax = d
+
+    # If max distance is greater than epsilon, recursively simplify
+    if dmax > epsilon:
+        # Recursive call
+        rec_results1 = downsample_path_rdp(path[:index + 1], epsilon)
+        rec_results2 = downsample_path_rdp(path[index:], epsilon)
+
+        # Build result list
+        result = rec_results1[:-1] + rec_results2
+    else:
+        result = [path[0], path[end]]
+
+    return result
+
+
+def downsample_coordinates(coordinates, factor=5):
+    """
+    Simple downsampling by keeping every Nth point.
+
+    Args:
+        coordinates: List of [lat, lon] or [lat, lon, alt]
+        factor: Keep every Nth point
+
+    Returns:
+        Downsampled coordinates
+    """
+    if factor <= 1:
+        return coordinates
+    return [coordinates[i] for i in range(0, len(coordinates), factor)]
 
 
 def is_point_marker(name):
@@ -939,6 +1012,167 @@ def deduplicate_airports(all_path_metadata, all_path_groups):
     return unique_airports
 
 
+def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique_airports, stats, output_dir="data"):
+    """
+    Export data to JSON files at multiple resolutions for progressive loading.
+
+    Args:
+        all_coordinates: List of [lat, lon] pairs
+        all_path_groups: List of path groups with altitude data
+        all_path_metadata: List of metadata dicts for each path
+        unique_airports: List of airport dicts
+        stats: Statistics dictionary
+        output_dir: Directory to save JSON files
+
+    Returns:
+        Dictionary with paths to generated files
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    print(f"\n📦 Exporting data to JSON files...")
+
+    # Calculate min/max altitude for color mapping
+    if all_path_groups:
+        all_altitudes = [coord[2] for path in all_path_groups for coord in path]
+        min_alt_m = min(all_altitudes)
+        max_alt_m = max(all_altitudes)
+    else:
+        min_alt_m = 0
+        max_alt_m = 1000
+
+    # Export at 5 resolution levels for more dynamic loading
+    resolutions = {
+        'z0_4': {'factor': 15, 'epsilon': 0.0008, 'description': 'Zoom 0-4 (continent level)'},
+        'z5_7': {'factor': 10, 'epsilon': 0.0004, 'description': 'Zoom 5-7 (country level)'},
+        'z8_10': {'factor': 5, 'epsilon': 0.0002, 'description': 'Zoom 8-10 (regional level)'},
+        'z11_13': {'factor': 2, 'epsilon': 0.0001, 'description': 'Zoom 11-13 (city level)'},
+        'z14_plus': {'factor': 1, 'epsilon': 0, 'description': 'Zoom 14+ (full detail)'}
+    }
+
+    files = {}
+
+    for res_name, res_config in resolutions.items():
+        # Downsample coordinates for heatmap
+        if res_config['epsilon'] > 0:
+            # Use RDP for path-based downsampling
+            downsampled_coords = []
+            for path in all_path_groups:
+                simplified = downsample_path_rdp([[c[0], c[1]] for c in path], res_config['epsilon'])
+                downsampled_coords.extend(simplified)
+            # If no paths, fall back to simple downsampling
+            if not downsampled_coords:
+                downsampled_coords = downsample_coordinates(all_coordinates, res_config['factor'])
+        else:
+            # Full resolution
+            downsampled_coords = all_coordinates
+
+        # Downsample path groups for altitude visualization
+        downsampled_paths = []
+        for path in all_path_groups:
+            if res_config['epsilon'] > 0:
+                simplified = downsample_path_rdp(path, res_config['epsilon'])
+                downsampled_paths.append(simplified)
+            else:
+                downsampled_paths.append(path)
+
+        # Prepare path segments with colors
+        path_segments = []
+        for path in downsampled_paths:
+            if len(path) > 1:
+                for i in range(len(path) - 1):
+                    lat1, lon1, alt1_m = path[i]
+                    lat2, lon2, alt2_m = path[i + 1]
+                    avg_alt_m = (alt1_m + alt2_m) / 2
+                    avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+                    color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
+
+                    path_segments.append({
+                        'coords': [[lat1, lon1], [lat2, lon2]],
+                        'color': color,
+                        'altitude_ft': avg_alt_ft,
+                        'altitude_m': round(avg_alt_m, 0)
+                    })
+
+        # Export data
+        data = {
+            'coordinates': downsampled_coords,
+            'path_segments': path_segments,
+            'resolution': res_name,
+            'original_points': len(all_coordinates),
+            'downsampled_points': len(downsampled_coords),
+            'compression_ratio': round(len(downsampled_coords) / max(len(all_coordinates), 1) * 100, 1)
+        }
+
+        output_file = os.path.join(output_dir, f'data_{res_name}.json')
+        with open(output_file, 'w') as f:
+            json.dump(data, f, separators=(',', ':'))
+
+        file_size = os.path.getsize(output_file)
+        files[res_name] = output_file
+
+        print(f"  ✓ {res_config['description']}: {len(downsampled_coords):,} points ({file_size / 1024:.1f} KB)")
+
+    # Export airports (same for all resolutions)
+    # Filter and extract valid airport names
+    valid_airports = []
+    seen_locations = set()  # Track by location to prevent duplicates
+
+    for apt in unique_airports:
+        # Extract clean airport name
+        full_name = apt.get('name', 'Unknown')
+        is_at_path_end = apt.get('is_at_path_end', False)
+        airport_name = extract_airport_name(full_name, is_at_path_end)
+
+        # Skip invalid airports
+        if not airport_name:
+            continue
+
+        # Create location key for deduplication
+        location_key = f"{apt['lat']:.4f},{apt['lon']:.4f}"
+
+        # Skip duplicates at same location
+        if location_key in seen_locations:
+            continue
+
+        seen_locations.add(location_key)
+        valid_airports.append({
+            'lat': apt['lat'],
+            'lon': apt['lon'],
+            'name': airport_name,
+            'timestamps': apt['timestamps'],
+            'flight_count': len(apt['timestamps']) if apt['timestamps'] else 1
+        })
+
+    airports_data = {'airports': valid_airports}
+
+    airports_file = os.path.join(output_dir, 'airports.json')
+    with open(airports_file, 'w') as f:
+        json.dump(airports_data, f, separators=(',', ':'))
+
+    files['airports'] = airports_file
+    print(f"  ✓ Airports: {len(valid_airports)} locations ({os.path.getsize(airports_file) / 1024:.1f} KB)")
+
+    # Export statistics and metadata
+    meta_data = {
+        'stats': stats,
+        'min_alt_m': min_alt_m,
+        'max_alt_m': max_alt_m,
+        'gradient': HEATMAP_GRADIENT
+    }
+
+    meta_file = os.path.join(output_dir, 'metadata.json')
+    with open(meta_file, 'w') as f:
+        json.dump(meta_data, f, separators=(',', ':'))
+
+    files['metadata'] = meta_file
+    print(f"  ✓ Metadata: {os.path.getsize(meta_file) / 1024:.1f} KB")
+
+    total_size = sum(os.path.getsize(f) for f in files.values())
+    print(f"  📊 Total data size: {total_size / 1024:.1f} KB")
+
+    return files
+
+
 def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     """
     Create an interactive heatmap from one or more KML files.
@@ -1533,6 +1767,586 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     return True
 
 
+def minify_html(html):
+    """
+    Minify HTML by removing unnecessary whitespace and newlines.
+
+    Args:
+        html: HTML string to minify
+
+    Returns:
+        Minified HTML string
+    """
+    import re
+
+    # Remove comments
+    html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
+
+    # Remove whitespace between tags
+    html = re.sub(r'>\s+<', '><', html)
+
+    # Remove leading/trailing whitespace on each line
+    html = re.sub(r'^\s+', '', html, flags=re.MULTILINE)
+    html = re.sub(r'\s+$', '', html, flags=re.MULTILINE)
+
+    # Replace multiple spaces with single space (but preserve spaces in strings)
+    html = re.sub(r'  +', ' ', html)
+
+    # Remove empty lines
+    html = re.sub(r'\n\s*\n', '\n', html)
+
+    return html.strip()
+
+
+def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="data", **kwargs):
+    """
+    Create a progressive-loading heatmap with external JSON data files.
+
+    This generates a lightweight HTML file that loads data based on zoom level,
+    significantly reducing initial load time and memory usage on mobile devices.
+
+    Args:
+        kml_files: List of KML file paths
+        output_file: Output HTML file path
+        data_dir: Directory to save JSON data files
+        **kwargs: Additional parameters (radius, blur, etc.)
+    """
+    # Parse all KML files (reusing code from create_heatmap)
+    all_coordinates = []
+    all_path_groups = []
+    all_path_metadata = []
+
+    valid_files = []
+    for kml_file in kml_files:
+        if not os.path.exists(kml_file):
+            print(f"✗ File not found: {kml_file}")
+        else:
+            valid_files.append(kml_file)
+
+    if not valid_files:
+        print("✗ No valid KML files to process!")
+        return False
+
+    print(f"📁 Parsing {len(valid_files)} KML file(s)...")
+
+    def parse_with_error_handling(kml_file):
+        try:
+            return kml_file, parse_kml_coordinates(kml_file)
+        except Exception as e:
+            print(f"✗ Error processing {kml_file}: {e}")
+            return kml_file, ([], [], [])
+
+    completed_count = 0
+    with ThreadPoolExecutor(max_workers=min(len(valid_files), 8)) as executor:
+        future_to_file = {executor.submit(parse_with_error_handling, f): f for f in valid_files}
+        for future in as_completed(future_to_file):
+            kml_file, (coords, path_groups, path_metadata) = future.result()
+            all_coordinates.extend(coords)
+            all_path_groups.extend(path_groups)
+            all_path_metadata.extend(path_metadata)
+            completed_count += 1
+            progress_pct = (completed_count / len(valid_files)) * 100
+            print(f"  [{completed_count}/{len(valid_files)}] {progress_pct:.0f}% - {Path(kml_file).name}")
+
+    if not all_coordinates:
+        print("✗ No coordinates found in any KML files!")
+        return False
+
+    print(f"\n📍 Total points: {len(all_coordinates)}")
+
+    # Calculate bounds
+    lats = [coord[0] for coord in all_coordinates]
+    lons = [coord[1] for coord in all_coordinates]
+    min_lat, max_lat = min(lats), max(lats)
+    min_lon, max_lon = min(lons), max(lons)
+    center_lat = (min_lat + max_lat) / 2
+    center_lon = (min_lon + max_lon) / 2
+
+    # Process airports
+    unique_airports = []
+    if all_path_metadata:
+        print(f"\n✈️  Processing {len(all_path_metadata)} start points...")
+        unique_airports = deduplicate_airports(all_path_metadata, all_path_groups)
+        print(f"  Found {len(unique_airports)} unique airports")
+
+    # Calculate statistics
+    print(f"\n📊 Calculating statistics...")
+    stats = calculate_statistics(all_coordinates, all_path_groups, all_path_metadata)
+
+    # Add airport info to stats
+    valid_airport_names = []
+    for airport in unique_airports:
+        full_name = airport.get('name', 'Unknown')
+        is_at_path_end = airport.get('is_at_path_end', False)
+        airport_name = extract_airport_name(full_name, is_at_path_end)
+        if airport_name:
+            valid_airport_names.append(airport_name)
+
+    stats['num_airports'] = len(valid_airport_names)
+    stats['airport_names'] = sorted(valid_airport_names)
+
+    # Export data to JSON files
+    data_files = export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique_airports, stats, data_dir)
+
+    # Generate lightweight HTML with progressive loading
+    print(f"\n💾 Generating progressive HTML...")
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KML Heatmap</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <style>
+        * {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif; }}
+        body {{ margin: 0; padding: 0; }}
+        #map {{ position: absolute; top: 0; bottom: 0; right: 0; left: 0; }}
+
+        /* Button styles */
+        .control-btn {{
+            position: fixed;
+            left: 50px;
+            background-color: #2b2b2b;
+            color: #ffffff;
+            border: 2px solid #555;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            z-index: 10000;
+            font-size: 14px;
+            font-weight: bold;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+        }}
+        .control-btn:hover {{ background-color: #3b3b3b; }}
+        #stats-btn {{ top: 10px; }}
+        #export-btn {{ top: 50px; }}
+
+        /* Statistics panel */
+        #stats-panel {{
+            position: fixed;
+            top: 10px;
+            left: 135px;
+            width: 280px;
+            background-color: #2b2b2b;
+            border: 2px solid #555;
+            z-index: 10001;
+            font-size: 13px;
+            padding: 12px;
+            display: none;
+            color: #ffffff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            max-height: 80vh;
+            overflow-y: auto;
+        }}
+
+        /* Loading indicator */
+        #loading {{
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background-color: #2b2b2b;
+            color: #ffffff;
+            border: 2px solid #555;
+            border-radius: 4px;
+            padding: 6px 12px;
+            z-index: 10000;
+            font-size: 12px;
+            display: none;
+        }}
+
+        /* Dark theme for Leaflet controls */
+        .leaflet-control-attribution {{ display: none !important; }}
+        .leaflet-control-layers {{
+            background-color: #2b2b2b !important;
+            color: #ffffff !important;
+            border: 1px solid #555 !important;
+        }}
+        .leaflet-control-layers-toggle {{
+            background-color: #2b2b2b !important;
+            border: 1px solid #555 !important;
+        }}
+        .leaflet-control-layers label {{ color: #ffffff !important; }}
+        .leaflet-control-zoom {{ border: 2px solid #555 !important; }}
+        .leaflet-control-zoom a {{
+            background-color: #2b2b2b !important;
+            color: #ffffff !important;
+        }}
+        .leaflet-control-zoom a:hover {{ background-color: #3b3b3b !important; }}
+
+        /* Airport cluster marker - custom styling */
+        .airport-cluster-marker {{
+            background: transparent;
+            border: none;
+        }}
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <button id="stats-btn" class="control-btn" onclick="toggleStats()">📊 Stats</button>
+    <button id="export-btn" class="control-btn" onclick="exportMap()">📷 Export</button>
+    <div id="stats-panel"></div>
+    <div id="loading">Loading data...</div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dom-to-image@2.6.0/dist/dom-to-image.min.js"></script>
+
+    <script>
+        // Configuration
+        const CENTER = [{center_lat}, {center_lon}];
+        const BOUNDS = [[{min_lat}, {min_lon}], [{max_lat}, {max_lon}]];
+        const STADIA_API_KEY = '{STADIA_API_KEY}';
+        const DATA_DIR = '{data_dir}';
+
+        // Initialize map
+        var map = L.map('map', {{
+            center: CENTER,
+            zoom: 10,
+            zoomSnap: 0.25,
+            zoomDelta: 0.25
+        }});
+
+        // Add tile layer
+        if (STADIA_API_KEY) {{
+            L.tileLayer(
+                'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{{z}}/{{x}}/{{y}}{{r}}.png?api_key=' + STADIA_API_KEY,
+                {{
+                    attribution: '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>'
+                }}
+            ).addTo(map);
+        }} else {{
+            L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+                attribution: '&copy; OpenStreetMap contributors, &copy; CARTO'
+            }}).addTo(map);
+        }}
+
+        // Fit bounds
+        map.fitBounds(BOUNDS, {{ padding: [30, 30] }});
+
+        // Data layers
+        var heatmapLayer = null;
+        var altitudeLayer = L.layerGroup();
+        var airportLayer = L.markerClusterGroup({{
+            showCoverageOnHover: false,
+            zoomToBoundsOnClick: true,
+            spiderfyOnMaxZoom: true,
+            disableClusteringAtZoom: 12,
+            maxClusterRadius: 25,
+            iconCreateFunction: function(cluster) {{
+                // Extract ICAO codes from all markers in cluster
+                var markers = cluster.getAllChildMarkers();
+                var icaoCodes = markers.map(function(marker) {{
+                    return marker.options.icao || 'APT';
+                }}).filter(function(value, index, self) {{
+                    return self.indexOf(value) === index;  // Remove duplicates
+                }});
+
+                // Join with commas, limit to 4 for readability
+                var displayText = icaoCodes.slice(0, 4).join(', ');
+                if (icaoCodes.length > 4) {{
+                    displayText += ' +' + (icaoCodes.length - 4);
+                }}
+
+                // Create merged airport marker
+                var html = `
+                <div style="display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%);">
+                    <div style="background-color: #28a745; color: white; padding: 4px 8px;
+                                border: 2px solid #1e7e34; border-radius: 4px 4px 0 0;
+                                font-family: monospace; font-size: 13px; font-weight: bold;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.3); white-space: nowrap;">
+                        ${{displayText}}
+                    </div>
+                    <div style="width: 0; height: 0;
+                                border-left: 6px solid transparent;
+                                border-right: 6px solid transparent;
+                                border-top: 8px solid #1e7e34;"></div>
+                </div>`;
+
+                return L.divIcon({{
+                    html: html,
+                    iconSize: [1, 1],
+                    iconAnchor: [0, 0],
+                    className: 'airport-cluster-marker'
+                }});
+            }}
+        }});
+        var currentResolution = null;
+        var loadedData = {{}};
+
+        // Layer control (only for altitude and airports - heatmap is always visible)
+        var layerControl = L.control.layers(null, {{
+            'Altitude Profile': altitudeLayer,
+            'Airports': airportLayer
+        }}, {{ collapsed: false }}).addTo(map);
+
+        // Add airports layer by default
+        airportLayer.addTo(map);
+
+        // Load data based on zoom level (5 resolution levels for smoother transitions)
+        function getResolutionForZoom(zoom) {{
+            if (zoom <= 4) return 'z0_4';
+            if (zoom <= 7) return 'z5_7';
+            if (zoom <= 10) return 'z8_10';
+            if (zoom <= 13) return 'z11_13';
+            return 'z14_plus';
+        }}
+
+        function showLoading() {{
+            document.getElementById('loading').style.display = 'block';
+        }}
+
+        function hideLoading() {{
+            document.getElementById('loading').style.display = 'none';
+        }}
+
+        async function loadData(resolution) {{
+            if (loadedData[resolution]) {{
+                return loadedData[resolution];
+            }}
+
+            showLoading();
+            try {{
+                const response = await fetch(DATA_DIR + '/data_' + resolution + '.json');
+                const data = await response.json();
+                loadedData[resolution] = data;
+                console.log('Loaded ' + resolution + ' resolution:', data.downsampled_points + ' points');
+                return data;
+            }} catch (error) {{
+                console.error('Error loading data:', error);
+                return null;
+            }} finally {{
+                hideLoading();
+            }}
+        }}
+
+        async function loadAirports() {{
+            try {{
+                const response = await fetch(DATA_DIR + '/airports.json');
+                const data = await response.json();
+                return data.airports;
+            }} catch (error) {{
+                console.error('Error loading airports:', error);
+                return [];
+            }}
+        }}
+
+        async function loadMetadata() {{
+            try {{
+                const response = await fetch(DATA_DIR + '/metadata.json');
+                return await response.json();
+            }} catch (error) {{
+                console.error('Error loading metadata:', error);
+                return null;
+            }}
+        }}
+
+        async function updateLayers() {{
+            const zoom = map.getZoom();
+            const resolution = getResolutionForZoom(zoom);
+
+            if (resolution === currentResolution) {{
+                return;
+            }}
+
+            currentResolution = resolution;
+            const data = await loadData(resolution);
+
+            if (!data) return;
+
+            // Update heatmap (always visible - not in layer control)
+            if (heatmapLayer) {{
+                map.removeLayer(heatmapLayer);
+            }}
+
+            heatmapLayer = L.heatLayer(data.coordinates, {{
+                radius: {kwargs.get('radius', 10)},
+                blur: {kwargs.get('blur', 15)},
+                minOpacity: 0.25,
+                maxOpacity: 0.6,
+                gradient: {{
+                    0.0: 'blue',
+                    0.3: 'cyan',
+                    0.5: 'lime',
+                    0.7: 'yellow',
+                    1.0: 'red'
+                }}
+            }}).addTo(map);
+
+            // Update altitude layer
+            altitudeLayer.clearLayers();
+            data.path_segments.forEach(function(segment) {{
+                L.polyline(segment.coords, {{
+                    color: segment.color,
+                    weight: 4,
+                    opacity: 0.85
+                }}).bindPopup('Altitude: ' + segment.altitude_ft + 'ft (' + segment.altitude_m + 'm)')
+                  .addTo(altitudeLayer);
+            }});
+
+            console.log('Updated to ' + resolution + ' resolution');
+        }}
+
+        // Load airports once
+        (async function() {{
+            const airports = await loadAirports();
+            const metadata = await loadMetadata();
+
+            // Add airport markers
+            airports.forEach(function(airport) {{
+                const icaoMatch = airport.name ? airport.name.match(/\\b([A-Z]{{4}})\\b/) : null;
+                const icao = icaoMatch ? icaoMatch[1] : 'APT';
+
+                const markerHtml = `
+                <div style="display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%);">
+                    <div style="background-color: #28a745; color: white; padding: 4px 8px;
+                                border: 2px solid #1e7e34; border-radius: 4px 4px 0 0;
+                                font-family: monospace; font-size: 13px; font-weight: bold;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.3); white-space: nowrap;">
+                        ${{icao}}
+                    </div>
+                    <div style="width: 0; height: 0;
+                                border-left: 6px solid transparent;
+                                border-right: 6px solid transparent;
+                                border-top: 8px solid #1e7e34;"></div>
+                </div>`;
+
+                const popup = `
+                <div style="font-size: 12px; min-width: 150px;">
+                    <b>🛫 ${{airport.name || 'Unknown'}}</b><br>
+                    <b>Flights:</b> ${{airport.flight_count}}<br>
+                </div>`;
+
+                L.marker([airport.lat, airport.lon], {{
+                    icon: L.divIcon({{
+                        html: markerHtml,
+                        iconSize: [1, 1],
+                        iconAnchor: [0, 0]
+                    }}),
+                    icao: icao  // Store ICAO for cluster icon function
+                }}).bindPopup(popup).addTo(airportLayer);
+            }});
+
+            // Load statistics
+            if (metadata && metadata.stats) {{
+                updateStatsPanel(metadata.stats);
+            }}
+
+            // Initial data load
+            updateLayers();
+        }})();
+
+        // Update on zoom
+        map.on('zoomend', updateLayers);
+
+        // Statistics panel
+        function updateStatsPanel(stats) {{
+            let html = '<p style="margin:0 0 10px 0; font-weight:bold; font-size:15px;">📊 Flight Statistics</p>';
+            html += '<div style="margin-bottom: 8px;"><strong>Data Points:</strong><br>';
+            html += '<span style="margin-left: 10px;">• Total Points: ' + stats.total_points.toLocaleString() + '</span><br>';
+            html += '<span style="margin-left: 10px;">• Number of Paths: ' + stats.num_paths + '</span></div>';
+            html += '<div style="margin-bottom: 8px;"><strong>Airports Visited:</strong> ' + stats.num_airports + '</div>';
+
+            if (stats.airport_names && stats.airport_names.length > 0) {{
+                html += '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Airports:</strong><br>';
+                stats.airport_names.forEach(function(name) {{
+                    html += '<span style="margin-left: 10px;">• ' + name + '</span><br>';
+                }});
+                html += '</div>';
+            }}
+
+            html += '<div style="margin-bottom: 8px;"><strong>Distance:</strong> ' + stats.total_distance_nm.toFixed(1) + ' nm</div>';
+
+            if (stats.total_flight_time_str) {{
+                html += '<div style="margin-bottom: 8px;"><strong>Total Flight Time:</strong> ' + stats.total_flight_time_str + '</div>';
+            }}
+
+            if (stats.max_altitude_ft) {{
+                html += '<div style="margin-bottom: 8px;"><strong>Max Altitude:</strong> ' + Math.round(stats.max_altitude_ft) + 'ft</div>';
+                html += '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' + Math.round(stats.total_altitude_gain_ft) + 'ft</div>';
+            }}
+
+            document.getElementById('stats-panel').innerHTML = html;
+        }}
+
+        function toggleStats() {{
+            const panel = document.getElementById('stats-panel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }}
+
+        function exportMap() {{
+            const btn = document.getElementById('export-btn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Exporting...';
+
+            const mapContainer = document.getElementById('map');
+            const controls = [
+                document.querySelector('.leaflet-control-zoom'),
+                document.querySelector('.leaflet-control-layers'),
+                document.getElementById('stats-btn'),
+                document.getElementById('export-btn'),
+                document.getElementById('stats-panel'),
+                document.getElementById('loading')
+            ];
+
+            const displayStates = controls.map(el => el ? el.style.display : null);
+            controls.forEach(el => {{ if (el) el.style.display = 'none'; }});
+
+            setTimeout(function() {{
+                domtoimage.toJpeg(mapContainer, {{
+                    width: mapContainer.offsetWidth * 2,
+                    height: mapContainer.offsetHeight * 2,
+                    bgcolor: '#1a1a1a',
+                    quality: 0.95,
+                    style: {{
+                        transform: 'scale(2)',
+                        transformOrigin: 'top left'
+                    }}
+                }}).then(function(dataUrl) {{
+                    controls.forEach((el, i) => {{ if (el) el.style.display = displayStates[i] || ''; }});
+                    btn.disabled = false;
+                    btn.textContent = '📷 Export';
+
+                    const link = document.createElement('a');
+                    link.download = 'heatmap_' + new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-') + '.jpg';
+                    link.href = dataUrl;
+                    link.click();
+                }}).catch(function(error) {{
+                    controls.forEach((el, i) => {{ if (el) el.style.display = displayStates[i] || ''; }});
+                    alert('Export failed: ' + error.message);
+                    btn.disabled = false;
+                    btn.textContent = '📷 Export';
+                }});
+            }}, 200);
+        }}
+    </script>
+</body>
+</html>
+"""
+
+    # Minify and write HTML file
+    print(f"\n💾 Generating and minifying HTML...")
+    minified_html = minify_html(html_content)
+
+    with open(output_file, 'w') as f:
+        f.write(minified_html)
+
+    file_size = os.path.getsize(output_file)
+    original_size = len(html_content)
+    minified_size = len(minified_html)
+    reduction = (1 - minified_size / original_size) * 100
+
+    print(f"✓ Progressive HTML saved: {output_file} ({file_size / 1024:.1f} KB)")
+    print(f"  Minification: {original_size / 1024:.1f} KB → {minified_size / 1024:.1f} KB ({reduction:.1f}% reduction)")
+    print(f"  Open {output_file} in a web browser (requires local server)")
+
+    return True
+
+
 def print_help():
     """Print comprehensive help message."""
     help_text = """
@@ -1540,6 +2354,7 @@ KML Heatmap Generator
 =====================
 
 Create interactive heatmap visualizations from KML files with altitude profiles.
+Uses progressive loading to generate mobile-friendly maps with smaller file sizes.
 
 USAGE:
     kml-heatmap.py <path> [path2 ...] [OPTIONS]
@@ -1549,11 +2364,20 @@ ARGUMENTS:
                          Directories will be scanned for all .kml files
 
 OPTIONS:
-    --output FILE        Output HTML filename (default: heatmap.html)
+    --output FILE        Output HTML filename (default: index.html)
+    --data-dir DIR       Directory for JSON data files (default: data)
     --radius N           Heatmap point radius in pixels (default: 10)
     --blur N             Heatmap blur amount (default: 15)
     --debug              Enable debug output to diagnose parsing issues
     --help, -h           Show this help message
+
+PROGRESSIVE LOADING:
+    The generator now uses progressive loading by default, which:
+    • Creates a lightweight HTML file (~20-40 KB)
+    • Stores data in external JSON files at 3 resolution levels
+    • Loads appropriate data based on zoom level
+    • Reduces initial load time and memory usage on mobile devices
+    • Requires a local web server to view (see Docker usage below)
 
 FEATURES:
     • Density Heatmap    - Shows where you've been most frequently
@@ -1563,23 +2387,27 @@ FEATURES:
     • Parallel Processing - Fast parsing of multiple files simultaneously
 
 EXAMPLES:
-    # Basic usage - single file
-    kml-heatmap.py flight.kml
+    # Basic usage with Docker - generate and serve
+    docker build -t kml-heatmap .
+    docker run -v $(pwd):/data kml-heatmap *.kml
+    docker run -p 8000:8000 -v $(pwd):/data --entrypoint python kml-heatmap /app/serve.py
+
+    # Or combine generation and serving:
+    docker run -v $(pwd):/data kml-heatmap *.kml && \
+    docker run -p 8000:8000 -v $(pwd):/data --entrypoint python kml-heatmap /app/serve.py
+
+    # Python usage - single file
+    python kml-heatmap.py flight.kml
+    python -m http.server 8000  # Serve the files
 
     # Process all KML files in a directory
-    kml-heatmap.py ./my_flights/
+    python kml-heatmap.py ./my_flights/
 
-    # Multiple files
-    kml-heatmap.py flight1.kml flight2.kml flight3.kml
-
-    # Mix files and directories
-    kml-heatmap.py flight.kml ./more_flights/ another.kml
-
-    # Custom output and styling
-    kml-heatmap.py *.kml --output my_flights.html --radius 15
+    # Multiple files with custom output
+    python kml-heatmap.py *.kml --output my_map.html --radius 15
 
     # Debug mode for troubleshooting
-    kml-heatmap.py --debug problematic.kml
+    python kml-heatmap.py --debug problematic.kml
 
 OUTPUT:
     Creates an interactive HTML map with:
@@ -1603,7 +2431,8 @@ def main():
 
     # Parse arguments
     kml_files = []
-    output_file = "heatmap.html"
+    output_file = "index.html"
+    data_dir = "data"
     kwargs = {}
 
     i = 1
@@ -1622,6 +2451,13 @@ def main():
                 i += 2
             else:
                 print("Error: --output requires a filename")
+                sys.exit(1)
+        elif arg == '--data-dir':
+            if i + 1 < len(sys.argv):
+                data_dir = sys.argv[i + 1]
+                i += 2
+            else:
+                print("Error: --data-dir requires a directory name")
                 sys.exit(1)
         elif arg == '--radius':
             if i + 1 < len(sys.argv):
@@ -1665,11 +2501,11 @@ def main():
         print("Error: No KML files specified or found!")
         sys.exit(1)
 
-    print(f"\nKML Heatmap Generator")
+    print(f"\nKML Heatmap Generator (Progressive Mode)")
     print(f"{'=' * 50}\n")
 
-    # Create heatmap
-    success = create_heatmap(kml_files, output_file, **kwargs)
+    # Create progressive heatmap (default)
+    success = create_progressive_heatmap(kml_files, output_file, data_dir, **kwargs)
 
     if not success:
         sys.exit(1)
