@@ -86,6 +86,15 @@ const CENTER = [51.227789, 13.3316945];
 const BOUNDS = [[48.101383, 9.362755], [54.354195, 17.300634]];
 const STADIA_API_KEY = 'ac4dd698-4222-457a-9fdd-763b5f9506b2';
 const DATA_DIR = 'data';
+// Convert decimal degrees to degrees, minutes, seconds
+function ddToDms(dd, isLat) {
+const direction = dd >= 0 ? (isLat ? 'N' : 'E') : (isLat ? 'S' : 'W');
+dd = Math.abs(dd);
+const degrees = Math.floor(dd);
+const minutes = Math.floor((dd - degrees) * 60);
+const seconds = ((dd - degrees) * 60 - minutes) * 60;
+return degrees + "°" + minutes + "'" + seconds.toFixed(1) + '"' + direction;
+}
 // Initialize map
 var map = L.map('map', {
 center: CENTER,
@@ -271,8 +280,12 @@ ${icao}
 border-left: 6px solid transparent;
 border-right: 6px solid transparent;
 border-top: 8px solid #1e7e34;"></div></div>`;
+const latDms = ddToDms(airport.lat, true);
+const lonDms = ddToDms(airport.lon, false);
+const googleMapsLink = `https://www.google.com/maps?q=${airport.lat},${airport.lon}`;
 const popup = `
-<div style="font-size: 12px; min-width: 150px;"><b>🛫 ${airport.name || 'Unknown'}</b><br><b>Flights:</b> ${airport.flight_count}<br></div>`;
+<div style="font-size: 12px; min-width: 150px;"><b>🛫 ${airport.name || 'Unknown'}</b><br><a href="${googleMapsLink}" target="_blank" style="color: #4285f4; text-decoration: none;">${latDms} ${lonDms}</a><br><b>Flights:</b> ${airport.flight_count}
+</div>`;
 L.marker([airport.lat, airport.lon], {
 icon: L.divIcon({
 html: markerHtml,
@@ -280,7 +293,10 @@ iconSize: [1, 1],
 iconAnchor: [0, 0]
 }),
 icao: icao // Store ICAO for cluster icon function
-}).bindPopup(popup).addTo(airportLayer);
+}).bindPopup(popup, {
+autoPanPadding: [50, 50],
+offset: [0, -10] // Offset popup slightly above marker
+}).addTo(airportLayer);
 });
 // Load statistics
 if (metadata && metadata.stats) {

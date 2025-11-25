@@ -1398,11 +1398,25 @@ def create_heatmap(kml_files, output_file="heatmap.html"):
             icao_match = re.search(r'\b([A-Z]{4})\b', airport_name)
             icao_code = icao_match.group(1) if icao_match else None
 
+            # Convert to degrees, minutes, seconds
+            def dd_to_dms(dd, is_lat):
+                direction = 'N' if dd >= 0 else 'S' if is_lat else 'E' if dd >= 0 else 'W'
+                dd = abs(dd)
+                degrees = int(dd)
+                minutes = int((dd - degrees) * 60)
+                seconds = ((dd - degrees) * 60 - minutes) * 60
+                return f"{degrees}°{minutes}'{seconds:.1f}\"{direction}"
+
+            lat_dms = dd_to_dms(airport['lat'], True)
+            lon_dms = dd_to_dms(airport['lon'], False)
+            google_maps_link = f"https://www.google.com/maps?q={airport['lat']},{airport['lon']}"
+
             popup_html = f"""
             <div style="font-size: 12px; min-width: 150px;">
                 <b>🛫 {airport_name}</b><br>
-                <b>Flights:</b> {len(airport['timestamps']) if airport['timestamps'] else '1'}<br>
-                <b>Dates:</b><br>{dates_str}
+                <a href="{google_maps_link}" target="_blank" style="color: #4285f4; text-decoration: none;">{lat_dms} {lon_dms}</a><br>
+                <b>Dates:</b><br>{dates_str}<br>
+                <b>Flights:</b> {len(airport['timestamps']) if airport['timestamps'] else '1'}
             </div>
             """
 
@@ -2040,6 +2054,16 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         const STADIA_API_KEY = '{STADIA_API_KEY}';
         const DATA_DIR = '{data_dir_name}';
 
+        // Convert decimal degrees to degrees, minutes, seconds
+        function ddToDms(dd, isLat) {{
+            const direction = dd >= 0 ? (isLat ? 'N' : 'E') : (isLat ? 'S' : 'W');
+            dd = Math.abs(dd);
+            const degrees = Math.floor(dd);
+            const minutes = Math.floor((dd - degrees) * 60);
+            const seconds = ((dd - degrees) * 60 - minutes) * 60;
+            return degrees + "°" + minutes + "'" + seconds.toFixed(1) + '"' + direction;
+        }}
+
         // Initialize map
         var map = L.map('map', {{
             center: CENTER,
@@ -2259,10 +2283,15 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                                 border-top: 8px solid #1e7e34;"></div>
                 </div>`;
 
+                const latDms = ddToDms(airport.lat, true);
+                const lonDms = ddToDms(airport.lon, false);
+                const googleMapsLink = `https://www.google.com/maps?q=${{airport.lat}},${{airport.lon}}`;
+
                 const popup = `
                 <div style="font-size: 12px; min-width: 150px;">
                     <b>🛫 ${{airport.name || 'Unknown'}}</b><br>
-                    <b>Flights:</b> ${{airport.flight_count}}<br>
+                    <a href="${{googleMapsLink}}" target="_blank" style="color: #4285f4; text-decoration: none;">${{latDms}} ${{lonDms}}</a><br>
+                    <b>Flights:</b> ${{airport.flight_count}}
                 </div>`;
 
                 L.marker([airport.lat, airport.lon], {{
@@ -2272,7 +2301,10 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                         iconAnchor: [0, 0]
                     }}),
                     icao: icao  // Store ICAO for cluster icon function
-                }}).bindPopup(popup).addTo(airportLayer);
+                }}).bindPopup(popup, {{
+                    autoPanPadding: [50, 50],
+                    offset: [0, -10]  // Offset popup slightly above marker
+                }}).addTo(airportLayer);
             }});
 
             // Load statistics
