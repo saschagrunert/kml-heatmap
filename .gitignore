@@ -1,4 +1,5 @@
+*.kml
+/data
+/index.html
 __pycache__
-data
-index.html
 kml

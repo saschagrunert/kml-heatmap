@@ -64,8 +64,8 @@ docker run -v $(pwd):/data kml-heatmap track1.kml track2.kml track3.kml
 # Directory of KML files
 docker run -v $(pwd):/data kml-heatmap ./flights/
 
-# Custom options
-docker run -v $(pwd):/data kml-heatmap *.kml --output my_map.html --radius 15 --blur 20
+# Custom output directory
+docker run -v $(pwd):/data kml-heatmap *.kml --output-dir mymap
 
 # Debug mode
 docker run -v $(pwd):/data kml-heatmap --debug your_track.kml
@@ -73,10 +73,7 @@ docker run -v $(pwd):/data kml-heatmap --debug your_track.kml
 
 ## Options
 
-- `--output FILE` - Output filename (default: `index.html`)
-- `--data-dir DIR` - Data directory (default: `data`)
-- `--radius N` - Heatmap point radius (default: 10)
-- `--blur N` - Heatmap blur amount (default: 15)
+- `--output-dir DIR` - Output directory (default: current directory)
 - `--debug` - Show debug output
 
 ## Privacy
@@ -93,9 +90,10 @@ Removed:
 
 ## Output
 
-Generates `index.html` (10-20 KB) and a `data/` directory with JSON files:
+Creates `index.html` (10-20 KB) and a `data/` subdirectory with JSON files in the output directory:
 
 ```
+output-dir/
 ├── index.html
 └── data/
     ├── data_z0_4.json      # Low zoom data
@@ -107,7 +105,7 @@ Generates `index.html` (10-20 KB) and a `data/` directory with JSON files:
     └── metadata.json       # Statistics
 ```
 
-Data is loaded based on zoom level for better performance on mobile devices.
+Data is loaded progressively based on zoom level for better performance on mobile devices.
 
 ## Map Features
 

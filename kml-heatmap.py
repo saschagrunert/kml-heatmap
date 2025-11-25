@@ -1183,18 +1183,17 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
     return files
 
 
-def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
+def create_heatmap(kml_files, output_file="heatmap.html"):
     """
     Create an interactive heatmap from one or more KML files.
 
     Args:
         kml_files: List of KML file paths
         output_file: Output HTML file path
-        **kwargs: Additional parameters for customization
-            - radius: Heatmap point radius (default: 10)
-            - blur: Heatmap blur amount (default: 15)
-            - min_opacity: Minimum opacity (default: 0.4)
-            - max_zoom: Maximum zoom level (default: 18)
+
+    Note:
+        This function generates a standalone HTML file with all data embedded.
+        For better performance, use create_progressive_heatmap() instead.
     """
     all_coordinates = []
     all_path_groups = []
@@ -1291,11 +1290,11 @@ def create_heatmap(kml_files, output_file="heatmap.html", **kwargs):
     heatmap_layer = folium.FeatureGroup(name='Density Heatmap', show=True)
     HeatMap(
         all_coordinates,
-        radius=kwargs.get('radius', 10),
-        blur=kwargs.get('blur', 15),
-        min_opacity=kwargs.get('min_opacity', 0.25),  # Reduced from 0.4 for less obstruction
+        radius=10,
+        blur=15,
+        min_opacity=0.25,  # Reduced from 0.4 for less obstruction
         max_opacity=0.6,  # Cap maximum opacity to keep paths visible underneath
-        max_zoom=kwargs.get('max_zoom', 18),
+        max_zoom=18,
         gradient=HEATMAP_GRADIENT
     ).add_to(heatmap_layer)
     heatmap_layer.add_to(m)
@@ -1808,7 +1807,7 @@ def minify_html(html):
     return html.strip()
 
 
-def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="data", **kwargs):
+def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="data"):
     """
     Create a progressive-loading heatmap with external JSON data files.
 
@@ -1819,7 +1818,6 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         kml_files: List of KML file paths
         output_file: Output HTML file path
         data_dir: Directory to save JSON data files
-        **kwargs: Additional parameters (radius, blur, etc.)
 
     Note:
         Date/time information is automatically stripped from exported data for privacy.
@@ -2188,8 +2186,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             }}
 
             heatmapLayer = L.heatLayer(data.coordinates, {{
-                radius: {kwargs.get('radius', 10)},
-                blur: {kwargs.get('blur', 15)},
+                radius: 10,
+                blur: 15,
                 minOpacity: 0.25,
                 maxOpacity: 0.6,
                 max: 1.0,  // Maximum point intensity for better performance
@@ -2397,10 +2395,8 @@ ARGUMENTS:
                          Directories will be scanned for all .kml files
 
 OPTIONS:
-    --output FILE        Output HTML filename (default: index.html)
-    --data-dir DIR       Directory for JSON data files (default: data)
-    --radius N           Heatmap point radius in pixels (default: 10)
-    --blur N             Heatmap blur amount (default: 15)
+    --output-dir DIR     Output directory (default: current directory)
+                         Creates index.html and data/ subdirectory
     --debug              Enable debug output to diagnose parsing issues
     --help, -h           Show this help message
 
@@ -2436,8 +2432,8 @@ EXAMPLES:
     # Process all KML files in a directory
     python kml-heatmap.py ./my_flights/
 
-    # Multiple files with custom output
-    python kml-heatmap.py *.kml --output my_map.html --radius 15
+    # Multiple files with custom output directory
+    python kml-heatmap.py *.kml --output-dir mymap
 
     # Debug mode for troubleshooting
     python kml-heatmap.py --debug problematic.kml
@@ -2464,9 +2460,7 @@ def main():
 
     # Parse arguments
     kml_files = []
-    output_file = "index.html"
-    data_dir = "data"
-    kwargs = {}
+    output_dir = "."
 
     i = 1
     while i < len(sys.argv):
@@ -2478,33 +2472,12 @@ def main():
         elif arg == '--debug':
             DEBUG = True
             i += 1
-        elif arg == '--output':
+        elif arg == '--output-dir':
             if i + 1 < len(sys.argv):
-                output_file = sys.argv[i + 1]
+                output_dir = sys.argv[i + 1]
                 i += 2
             else:
-                print("Error: --output requires a filename")
-                sys.exit(1)
-        elif arg == '--data-dir':
-            if i + 1 < len(sys.argv):
-                data_dir = sys.argv[i + 1]
-                i += 2
-            else:
-                print("Error: --data-dir requires a directory name")
-                sys.exit(1)
-        elif arg == '--radius':
-            if i + 1 < len(sys.argv):
-                kwargs['radius'] = int(sys.argv[i + 1])
-                i += 2
-            else:
-                print("Error: --radius requires a number")
-                sys.exit(1)
-        elif arg == '--blur':
-            if i + 1 < len(sys.argv):
-                kwargs['blur'] = int(sys.argv[i + 1])
-                i += 2
-            else:
-                print("Error: --blur requires a number")
+                print("Error: --output-dir requires a directory name")
                 sys.exit(1)
         elif arg.startswith('--'):
             print(f"Unknown option: {arg}")
@@ -2534,11 +2507,18 @@ def main():
         print("Error: No KML files specified or found!")
         sys.exit(1)
 
-    print(f"\nKML Heatmap Generator (Progressive Mode)")
+    print(f"\nKML Heatmap Generator")
     print(f"{'=' * 50}\n")
 
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create paths for output files
+    output_file = os.path.join(output_dir, "index.html")
+    data_dir = os.path.join(output_dir, "data")
+
     # Create progressive heatmap (default)
-    success = create_progressive_heatmap(kml_files, output_file, data_dir, **kwargs)
+    success = create_progressive_heatmap(kml_files, output_file, data_dir)
 
     if not success:
         sys.exit(1)
