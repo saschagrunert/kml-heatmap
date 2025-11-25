@@ -1108,7 +1108,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
 
         output_file = os.path.join(output_dir, f'data_{res_name}.json')
         with open(output_file, 'w') as f:
-            json.dump(data, f, separators=(',', ':'))
+            json.dump(data, f, separators=(',', ':'), sort_keys=True)
 
         file_size = os.path.getsize(output_file)
         files[res_name] = output_file
@@ -1157,7 +1157,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
 
     airports_file = os.path.join(output_dir, 'airports.json')
     with open(airports_file, 'w') as f:
-        json.dump(airports_data, f, separators=(',', ':'))
+        json.dump(airports_data, f, separators=(',', ':'), sort_keys=True)
 
     files['airports'] = airports_file
     print(f"  ✓ Airports: {len(valid_airports)} locations ({os.path.getsize(airports_file) / 1024:.1f} KB)")
@@ -1172,7 +1172,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
 
     meta_file = os.path.join(output_dir, 'metadata.json')
     with open(meta_file, 'w') as f:
-        json.dump(meta_data, f, separators=(',', ':'))
+        json.dump(meta_data, f, separators=(',', ':'), sort_keys=True)
 
     files['metadata'] = meta_file
     print(f"  ✓ Metadata: {os.path.getsize(meta_file) / 1024:.1f} KB")
@@ -1223,6 +1223,7 @@ def create_heatmap(kml_files, output_file="heatmap.html"):
             return kml_file, ([], [], [])
 
     # Use ThreadPoolExecutor for parallel file parsing
+    results = []
     completed_count = 0
     with ThreadPoolExecutor(max_workers=min(len(valid_files), 8)) as executor:
         # Submit all parsing tasks
@@ -1231,14 +1232,21 @@ def create_heatmap(kml_files, output_file="heatmap.html"):
         # Collect results as they complete with progress
         for future in as_completed(future_to_file):
             kml_file, (coords, path_groups, path_metadata) = future.result()
-            all_coordinates.extend(coords)
-            all_path_groups.extend(path_groups)
-            all_path_metadata.extend(path_metadata)
+            results.append((kml_file, coords, path_groups, path_metadata))
 
             # Update progress
             completed_count += 1
             progress_pct = (completed_count / len(valid_files)) * 100
             print(f"  [{completed_count}/{len(valid_files)}] {progress_pct:.0f}% - {Path(kml_file).name}")
+
+    # Sort results by filename for deterministic output
+    results.sort(key=lambda x: x[0])
+
+    # Extend arrays in sorted order
+    for kml_file, coords, path_groups, path_metadata in results:
+        all_coordinates.extend(coords)
+        all_path_groups.extend(path_groups)
+        all_path_metadata.extend(path_metadata)
 
     if not all_coordinates:
         print("✗ No coordinates found in any KML files!")
@@ -1847,17 +1855,26 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             print(f"✗ Error processing {kml_file}: {e}")
             return kml_file, ([], [], [])
 
+    # Parse files in parallel but collect results in order
+    results = []
     completed_count = 0
     with ThreadPoolExecutor(max_workers=min(len(valid_files), 8)) as executor:
         future_to_file = {executor.submit(parse_with_error_handling, f): f for f in valid_files}
         for future in as_completed(future_to_file):
             kml_file, (coords, path_groups, path_metadata) = future.result()
-            all_coordinates.extend(coords)
-            all_path_groups.extend(path_groups)
-            all_path_metadata.extend(path_metadata)
+            results.append((kml_file, coords, path_groups, path_metadata))
             completed_count += 1
             progress_pct = (completed_count / len(valid_files)) * 100
             print(f"  [{completed_count}/{len(valid_files)}] {progress_pct:.0f}% - {Path(kml_file).name}")
+
+    # Sort results by filename for deterministic output
+    results.sort(key=lambda x: x[0])
+
+    # Extend arrays in sorted order
+    for kml_file, coords, path_groups, path_metadata in results:
+        all_coordinates.extend(coords)
+        all_path_groups.extend(path_groups)
+        all_path_metadata.extend(path_metadata)
 
     if not all_coordinates:
         print("✗ No coordinates found in any KML files!")
@@ -2488,14 +2505,13 @@ def main():
         else:
             # It's a KML file or directory
             if os.path.isdir(arg):
-                # Add all .kml files from directory
+                # Add all .kml files from directory (sorted for deterministic output)
                 dir_kml_files = []
-                for filename in os.listdir(arg):
+                for filename in sorted(os.listdir(arg)):
                     if filename.lower().endswith('.kml'):
                         dir_kml_files.append(os.path.join(arg, filename))
 
                 if dir_kml_files:
-                    dir_kml_files.sort()  # Sort alphabetically
                     kml_files.extend(dir_kml_files)
                     print(f"Found {len(dir_kml_files)} KML file(s) in directory: {arg}")
                 else:
