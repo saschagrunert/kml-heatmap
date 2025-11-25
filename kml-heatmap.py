@@ -1904,7 +1904,13 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     <style>
         * {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif; }}
         body {{ margin: 0; padding: 0; }}
-        #map {{ position: absolute; top: 0; bottom: 0; right: 0; left: 0; }}
+        #map {{
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            right: 0;
+            left: 0;
+        }}
 
         /* Button styles */
         .control-btn {{
@@ -2008,7 +2014,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             center: CENTER,
             zoom: 10,
             zoomSnap: 0.25,
-            zoomDelta: 0.25
+            zoomDelta: 0.25,
+            preferCanvas: true  // Use canvas for better performance
         }});
 
         // Add tile layer
@@ -2027,6 +2034,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
         // Fit bounds
         map.fitBounds(BOUNDS, {{ padding: [30, 30] }});
+
+        // Create canvas renderer for better performance during pan
+        var canvasRenderer = L.canvas({{ padding: 0.5 }});
 
         // Data layers
         var heatmapLayer = null;
@@ -2168,6 +2178,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 blur: {kwargs.get('blur', 15)},
                 minOpacity: 0.25,
                 maxOpacity: 0.6,
+                max: 1.0,  // Maximum point intensity for better performance
                 gradient: {{
                     0.0: 'blue',
                     0.3: 'cyan',
@@ -2177,13 +2188,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 }}
             }}).addTo(map);
 
-            // Update altitude layer
+            // Update altitude layer (using canvas renderer for smooth panning)
             altitudeLayer.clearLayers();
             data.path_segments.forEach(function(segment) {{
                 L.polyline(segment.coords, {{
                     color: segment.color,
                     weight: 4,
-                    opacity: 0.85
+                    opacity: 0.85,
+                    renderer: canvasRenderer  // Use canvas for better pan performance
                 }}).bindPopup('Altitude: ' + segment.altitude_ft + 'ft (' + segment.altitude_m + 'm)')
                   .addTo(altitudeLayer);
             }});
@@ -2240,7 +2252,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             updateLayers();
         }})();
 
-        // Update on zoom
+        // Update layers on zoom change only
         map.on('zoomend', updateLayers);
 
         // Statistics panel
