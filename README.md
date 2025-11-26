@@ -14,86 +14,84 @@ Create interactive heatmap visualizations from KML files.
 - Mobile-friendly with zoom-based data loading
 - Export map as JPG image
 
-## Installation
-
-### Docker (Recommended)
-
-```bash
-docker build -t kml-heatmap .
-```
-
-### Python
-
-```bash
-pip install -r requirements.txt
-```
-
 ## Usage
 
 ### Quick Start
 
+Place your KML files in a `kml/` directory, then:
+
 ```bash
-# Generate
-docker run -v $(pwd):/data kml-heatmap your_track.kml
+# Build and generate heatmap
+make
 
 # Serve locally
-docker run -p 8000:8000 -v $(pwd):/data --entrypoint python kml-heatmap /app/serve.py
+make serve
 ```
 
 Then open http://localhost:8000/
 
-### With Stadia Maps (Optional)
+### With API Keys (Optional)
 
-Get a free API key at [stadiamaps.com](https://stadiamaps.com/) for enhanced dark theme tiles:
+**Stadia Maps** - Get a free API key at [stadiamaps.com](https://stadiamaps.com/) for enhanced dark theme tiles
 
-```bash
-docker run -v $(pwd):/data -e STADIA_API_KEY=your_key kml-heatmap *.kml
-```
-
-### With OpenAIP Aviation Data (Optional)
-
-Get a free API key at [openaip.net](https://www.openaip.net/) to display airspaces and navigation aids:
+**OpenAIP** - Get a free API key at [openaip.net](https://www.openaip.net/) for aviation data overlay (airspaces, airports, navaids). **Required** for the Aviation Data layer.
 
 ```bash
-docker run -v $(pwd):/data -e OPENAIP_API_KEY=your_key kml-heatmap *.kml
+# With one or both API keys
+make STADIA_API_KEY=your_stadia_key OPENAIP_API_KEY=your_openaip_key
 
-# Combine with Stadia Maps
-docker run -v $(pwd):/data -e STADIA_API_KEY=stadia_key -e OPENAIP_API_KEY=openaip_key kml-heatmap *.kml
+# Then serve
+make serve
 ```
 
-Adds optional overlay layer:
-- **Aviation Data** - Airspaces, airports, navaids, and reporting points
-
-**Note:** If you see CORS/CORB errors in the browser console, verify your API key is valid by testing a tile URL directly:
+**Note:** OpenAIP tiles return 403 Forbidden without a valid API key. To verify your key works:
+```bash
+# Should return HTTP 200 with PNG image
+curl -I "https://a.api.tiles.openaip.net/api/data/openaip/8/136/85.png?apiKey=YOUR_KEY"
 ```
-https://a.api.tiles.openaip.net/api/data/openaip/10/536/348.png?apiKey=YOUR_KEY
-```
-A valid key returns a PNG image; an invalid key returns JSON/HTML error (which triggers CORB).
 
-### Python Usage
+### Makefile Variables
+
+- `STADIA_API_KEY` - Stadia Maps API key for enhanced base tiles (optional)
+- `OPENAIP_API_KEY` - OpenAIP API key for aviation data overlay (required for Aviation Data layer)
+- `OUTPUT_DIR` - Output directory (default: `docs`)
+- `CONTAINER_RUNTIME` - Container runtime to use (default: `docker`)
+
+### Docker Usage
+
+If you prefer using Docker directly:
 
 ```bash
-python kml-heatmap.py your_track.kml
-python -m http.server 8000
-```
+# Build
+docker build -t kml-heatmap .
 
-### Examples
+# Generate from specific files
+docker run -v $(pwd):/data kml-heatmap your_track.kml
 
-```bash
-# Multiple files
-docker run -v $(pwd):/data kml-heatmap track1.kml track2.kml track3.kml
-
-# Directory of KML files
-docker run -v $(pwd):/data kml-heatmap ./flights/
+# With API keys
+docker run -v $(pwd):/data -e STADIA_API_KEY=key -e OPENAIP_API_KEY=key kml-heatmap *.kml
 
 # Custom output directory
 docker run -v $(pwd):/data kml-heatmap *.kml --output-dir mymap
 
 # Debug mode
 docker run -v $(pwd):/data kml-heatmap --debug your_track.kml
+
+# Serve
+docker run -p 8000:8000 -v $(pwd):/data --entrypoint python kml-heatmap /app/serve.py
 ```
 
-## Options
+### Python Usage
+
+```bash
+pip install -r requirements.txt
+python kml-heatmap.py your_track.kml
+python -m http.server 8000
+```
+
+### Command-Line Options
+
+When using Docker or Python directly:
 
 - `--output-dir DIR` - Output directory (default: current directory)
 - `--debug` - Show debug output
@@ -136,7 +134,7 @@ Data is loaded progressively based on zoom level for better performance on mobil
 - **Density Heatmap** (always visible) - Shows frequently visited locations
 - **Altitude Profile** (toggle) - Color-coded paths by elevation
 - **Airports** (toggle) - Airport markers with ICAO codes
-- **Aviation Data** (toggle, requires API key) - Airspaces, airports, navaids, and reporting points
+- **Aviation Data** (toggle, requires OpenAIP API key) - Airspaces, airports, navaids, and reporting points from OpenAIP
 
 ### Controls
 
