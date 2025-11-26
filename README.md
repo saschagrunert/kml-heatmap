@@ -50,6 +50,26 @@ Get a free API key at [stadiamaps.com](https://stadiamaps.com/) for enhanced dar
 docker run -v $(pwd):/data -e STADIA_API_KEY=your_key kml-heatmap *.kml
 ```
 
+### With OpenAIP Aviation Data (Optional)
+
+Get a free API key at [openaip.net](https://www.openaip.net/) to display airspaces and navigation aids:
+
+```bash
+docker run -v $(pwd):/data -e OPENAIP_API_KEY=your_key kml-heatmap *.kml
+
+# Combine with Stadia Maps
+docker run -v $(pwd):/data -e STADIA_API_KEY=stadia_key -e OPENAIP_API_KEY=openaip_key kml-heatmap *.kml
+```
+
+Adds optional overlay layer:
+- **Aviation Data** - Airspaces, airports, navaids, and reporting points
+
+**Note:** If you see CORS/CORB errors in the browser console, verify your API key is valid by testing a tile URL directly:
+```
+https://a.api.tiles.openaip.net/api/data/openaip/10/536/348.png?apiKey=YOUR_KEY
+```
+A valid key returns a PNG image; an invalid key returns JSON/HTML error (which triggers CORB).
+
 ### Python Usage
 
 ```bash
@@ -116,6 +136,7 @@ Data is loaded progressively based on zoom level for better performance on mobil
 - **Density Heatmap** (always visible) - Shows frequently visited locations
 - **Altitude Profile** (toggle) - Color-coded paths by elevation
 - **Airports** (toggle) - Airport markers with ICAO codes
+- **Aviation Data** (toggle, requires API key) - Airspaces, airports, navaids, and reporting points
 
 ### Controls
 

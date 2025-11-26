@@ -23,8 +23,9 @@ from folium.plugins import HeatMap
 
 DEBUG = False
 
-# Get Stadia Maps API key from environment variable
+# Get API keys from environment variables
 STADIA_API_KEY = os.environ.get('STADIA_API_KEY', '')
+OPENAIP_API_KEY = os.environ.get('OPENAIP_API_KEY', '')
 
 # Constants
 EARTH_RADIUS_KM = 6371
@@ -2060,6 +2061,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         const CENTER = [{center_lat}, {center_lon}];
         const BOUNDS = [[{min_lat}, {min_lon}], [{max_lat}, {max_lon}]];
         const STADIA_API_KEY = '{STADIA_API_KEY}';
+        const OPENAIP_API_KEY = '{OPENAIP_API_KEY}';
         const DATA_DIR = '{data_dir_name}';
 
         // Convert decimal degrees to degrees, minutes, seconds
@@ -2152,11 +2154,34 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         var currentResolution = null;
         var loadedData = {{}};
 
-        // Layer control (only for altitude and airports - heatmap is always visible)
-        var layerControl = L.control.layers(null, {{
+        // OpenAIP layer (if API key is provided)
+        // Note: As of May 2023, OpenAIP consolidated all layers into one "openaip" layer
+        var openaipLayers = {{}};
+        if (OPENAIP_API_KEY) {{
+            openaipLayers['Aviation Data'] = L.tileLayer(
+                'https://{{s}}.api.tiles.openaip.net/api/data/openaip/{{z}}/{{x}}/{{y}}.png?apiKey=' + OPENAIP_API_KEY,
+                {{
+                    attribution: '&copy; <a href="https://www.openaip.net">OpenAIP</a>',
+                    maxZoom: 18,
+                    minZoom: 7,
+                    subdomains: ['a', 'b', 'c']
+                }}
+            );
+        }}
+
+        // Build overlay layers object
+        var overlayLayers = {{
             'Altitude Profile': altitudeLayer,
             'Airports': airportLayer
-        }}, {{ collapsed: false }}).addTo(map);
+        }};
+
+        // Add OpenAIP layer if available
+        if (OPENAIP_API_KEY) {{
+            overlayLayers['Aviation Data'] = openaipLayers['Aviation Data'];
+        }}
+
+        // Layer control (heatmap is always visible)
+        var layerControl = L.control.layers(null, overlayLayers, {{ collapsed: false }}).addTo(map);
 
         // Add airports layer by default
         airportLayer.addTo(map);
