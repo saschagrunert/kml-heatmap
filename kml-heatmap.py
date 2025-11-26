@@ -1800,7 +1800,7 @@ def create_heatmap(kml_files, output_file="heatmap.html"):
 
 def minify_html(html):
     """
-    Minify HTML by removing unnecessary whitespace and newlines.
+    Minify HTML, CSS, and JavaScript using specialized minification libraries.
 
     Args:
         html: HTML string to minify
@@ -1809,24 +1809,32 @@ def minify_html(html):
         Minified HTML string
     """
     import re
+    import rcssmin
+    import rjsmin
+    import minify_html as mh
 
-    # Remove comments
-    html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
+    # First, minify inline CSS and JavaScript
+    def minify_css_tags(match):
+        css_content = match.group(1)
+        minified_css = rcssmin.cssmin(css_content)
+        return f'<style>{minified_css}</style>'
 
-    # Remove whitespace between tags
-    html = re.sub(r'>\s+<', '><', html)
+    def minify_js_tags(match):
+        js_content = match.group(1)
+        minified_js = rjsmin.jsmin(js_content)
+        return f'<script>{minified_js}</script>'
 
-    # Remove leading/trailing whitespace on each line
-    html = re.sub(r'^\s+', '', html, flags=re.MULTILINE)
-    html = re.sub(r'\s+$', '', html, flags=re.MULTILINE)
+    # Minify inline CSS
+    html = re.sub(r'<style>(.*?)</style>', minify_css_tags, html, flags=re.DOTALL)
 
-    # Replace multiple spaces with single space (but preserve spaces in strings)
-    html = re.sub(r'  +', ' ', html)
+    # Minify inline JavaScript (not script tags with src attribute)
+    html = re.sub(r'<script>(.*?)</script>', minify_js_tags, html, flags=re.DOTALL)
 
-    # Remove empty lines
-    html = re.sub(r'\n\s*\n', '\n', html)
+    # Use minify-html for HTML minification
+    # minify-html is a Rust-based minifier with simple API
+    minified = mh.minify(html)
 
-    return html.strip()
+    return minified
 
 
 def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="data"):

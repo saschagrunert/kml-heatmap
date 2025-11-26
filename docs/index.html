@@ -1,385 +1,49 @@
-<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>KML Heatmap</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" /><link rel="stylesheet" href="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.css" /><link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" /><link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" /><style>
-* { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif; }
-body { margin: 0; padding: 0; }
-#map {
-position: absolute;
-top: 0;
-bottom: 0;
-right: 0;
-left: 0;
-}
-/* Button styles */
-.control-btn {
-position: fixed;
-left: 50px;
-background-color: #2b2b2b;
-color: #ffffff;
-border: 2px solid #555;
-border-radius: 4px;
-padding: 6px 12px;
-cursor: pointer;
-z-index: 10000;
-font-size: 14px;
-font-weight: bold;
-box-shadow: 0 1px 5px rgba(0,0,0,0.4);
-}
-.control-btn:hover { background-color: #3b3b3b; }
-#stats-btn { top: 10px; }
-#export-btn { top: 50px; }
-/* Statistics panel */
-#stats-panel {
-position: fixed;
-top: 10px;
-left: 135px;
-width: 280px;
-background-color: #2b2b2b;
-border: 2px solid #555;
-z-index: 10001;
-font-size: 13px;
-padding: 12px;
-display: none;
-color: #ffffff;
-box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-max-height: 80vh;
-overflow-y: auto;
-}
-/* Loading indicator */
-#loading {
-position: fixed;
-bottom: 10px;
-right: 10px;
-background-color: #2b2b2b;
-color: #ffffff;
-border: 2px solid #555;
-border-radius: 4px;
-padding: 6px 12px;
-z-index: 10000;
-font-size: 12px;
-display: none;
-}
-/* Dark theme for Leaflet controls */
-.leaflet-control-attribution { display: none !important; }
-.leaflet-control-layers {
-background-color: #2b2b2b !important;
-color: #ffffff !important;
-border: 1px solid #555 !important;
-}
-.leaflet-control-layers-toggle {
-background-color: #2b2b2b !important;
-border: 1px solid #555 !important;
-}
-.leaflet-control-layers label { color: #ffffff !important; }
-.leaflet-control-zoom { border: 2px solid #555 !important; }
-.leaflet-control-zoom a {
-background-color: #2b2b2b !important;
-color: #ffffff !important;
-}
-.leaflet-control-zoom a:hover { background-color: #3b3b3b !important; }
-/* Airport cluster marker - custom styling */
-.airport-cluster-marker {
-background: transparent;
-border: none;
-}
-</style></head><body><div id="map"></div><button id="stats-btn" class="control-btn" onclick="toggleStats()">📊 Stats</button><button id="export-btn" class="control-btn" onclick="exportMap()">📷 Export</button><div id="stats-panel"></div><div id="loading">Loading data...</div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script><script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script><script src="https://cdn.jsdelivr.net/npm/dom-to-image@2.6.0/dist/dom-to-image.min.js"></script><script>
-// Configuration
-const CENTER = [51.227789, 13.3316945];
-const BOUNDS = [[48.101383, 9.362755], [54.354195, 17.300634]];
-const STADIA_API_KEY = 'ac4dd698-4222-457a-9fdd-763b5f9506b2';
-const DATA_DIR = 'data';
-// Convert decimal degrees to degrees, minutes, seconds
-function ddToDms(dd, isLat) {
-const direction = dd >= 0 ? (isLat ? 'N' : 'E') : (isLat ? 'S' : 'W');
-dd = Math.abs(dd);
-const degrees = Math.floor(dd);
-const minutes = Math.floor((dd - degrees) * 60);
-const seconds = ((dd - degrees) * 60 - minutes) * 60;
-return degrees + "°" + minutes + "'" + seconds.toFixed(1) + '"' + direction;
-}
-// Initialize map
-var map = L.map('map', {
-center: CENTER,
-zoom: 10,
-zoomSnap: 0.25,
-zoomDelta: 0.25,
-wheelPxPerZoomLevel: 120, // 2 scrolls = 1 zoom level (matches button steps)
-preferCanvas: true // Use canvas for better performance
-});
-// Add tile layer
-if (STADIA_API_KEY) {
-L.tileLayer(
-'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png?api_key=' + STADIA_API_KEY,
-{
-attribution: '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>'
-}
-).addTo(map);
-} else {
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-attribution: '&copy; OpenStreetMap contributors, &copy; CARTO'
-}).addTo(map);
-}
-// Fit bounds
-map.fitBounds(BOUNDS, { padding: [30, 30] });
-// Create canvas renderer for better performance during pan
-var canvasRenderer = L.canvas({ padding: 0.5 });
-// Data layers
-var heatmapLayer = null;
-var altitudeLayer = L.layerGroup();
-var airportLayer = L.markerClusterGroup({
-showCoverageOnHover: false,
-zoomToBoundsOnClick: true,
-spiderfyOnMaxZoom: true,
-disableClusteringAtZoom: 12,
-maxClusterRadius: 25,
-iconCreateFunction: function(cluster) {
-// Extract ICAO codes from all markers in cluster
-var markers = cluster.getAllChildMarkers();
-var icaoCodes = markers.map(function(marker) {
-return marker.options.icao || 'APT';
-}).filter(function(value, index, self) {
-return self.indexOf(value) === index; // Remove duplicates
-});
-// Join with commas, limit to 4 for readability
-var displayText = icaoCodes.slice(0, 4).join(', ');
-if (icaoCodes.length > 4) {
-displayText += ' +' + (icaoCodes.length - 4);
-}
-// Create merged airport marker
-var html = `
-<div style="display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%);"><div style="background-color: #28a745; color: white; padding: 4px 8px;
-border: 2px solid #1e7e34; border-radius: 4px 4px 0 0;
-font-family: monospace; font-size: 13px; font-weight: bold;
-box-shadow: 0 2px 4px rgba(0,0,0,0.3); white-space: nowrap;">
-${displayText}
-</div><div style="width: 0; height: 0;
-border-left: 6px solid transparent;
-border-right: 6px solid transparent;
-border-top: 8px solid #1e7e34;"></div></div>`;
-return L.divIcon({
-html: html,
-iconSize: [1, 1],
-iconAnchor: [0, 0],
-className: 'airport-cluster-marker'
-});
-}
-});
-var currentResolution = null;
-var loadedData = {};
-// Layer control (only for altitude and airports - heatmap is always visible)
-var layerControl = L.control.layers(null, {
-'Altitude Profile': altitudeLayer,
-'Airports': airportLayer
-}, { collapsed: false }).addTo(map);
-// Add airports layer by default
-airportLayer.addTo(map);
-// Load data based on zoom level (5 resolution levels for smoother transitions)
-function getResolutionForZoom(zoom) {
-if (zoom <= 4) return 'z0_4';
-if (zoom <= 7) return 'z5_7';
-if (zoom <= 10) return 'z8_10';
-if (zoom <= 13) return 'z11_13';
-return 'z14_plus';
-}
-function showLoading() {
-document.getElementById('loading').style.display = 'block';
-}
-function hideLoading() {
-document.getElementById('loading').style.display = 'none';
-}
-async function loadData(resolution) {
-if (loadedData[resolution]) {
-return loadedData[resolution];
-}
-showLoading();
-try {
-const response = await fetch(DATA_DIR + '/data_' + resolution + '.json');
-const data = await response.json();
-loadedData[resolution] = data;
-console.log('Loaded ' + resolution + ' resolution:', data.downsampled_points + ' points');
-return data;
-} catch (error) {
-console.error('Error loading data:', error);
-return null;
-} finally {
-hideLoading();
-}
-}
-async function loadAirports() {
-try {
-const response = await fetch(DATA_DIR + '/airports.json');
-const data = await response.json();
-return data.airports;
-} catch (error) {
-console.error('Error loading airports:', error);
-return [];
-}
-}
-async function loadMetadata() {
-try {
-const response = await fetch(DATA_DIR + '/metadata.json');
-return await response.json();
-} catch (error) {
-console.error('Error loading metadata:', error);
-return null;
-}
-}
-async function updateLayers() {
-const zoom = map.getZoom();
-const resolution = getResolutionForZoom(zoom);
-if (resolution === currentResolution) {
-return;
-}
-currentResolution = resolution;
-const data = await loadData(resolution);
-if (!data) return;
-// Update heatmap (always visible - not in layer control)
-if (heatmapLayer) {
-map.removeLayer(heatmapLayer);
-}
-heatmapLayer = L.heatLayer(data.coordinates, {
-radius: 10,
-blur: 15,
-minOpacity: 0.25,
-maxOpacity: 0.6,
-max: 1.0, // Maximum point intensity for better performance
-gradient: {
-0.0: 'blue',
-0.3: 'cyan',
-0.5: 'lime',
-0.7: 'yellow',
-1.0: 'red'
-}
-}).addTo(map);
-// Update altitude layer (using canvas renderer for smooth panning)
-altitudeLayer.clearLayers();
-data.path_segments.forEach(function(segment) {
-L.polyline(segment.coords, {
-color: segment.color,
-weight: 4,
-opacity: 0.85,
-renderer: canvasRenderer // Use canvas for better pan performance
-}).bindPopup('Altitude: ' + segment.altitude_ft + ' ft (' + segment.altitude_m + ' m)')
-.addTo(altitudeLayer);
-});
-console.log('Updated to ' + resolution + ' resolution');
-}
-// Load airports once
-(async function() {
-const airports = await loadAirports();
-const metadata = await loadMetadata();
-// Add airport markers
-airports.forEach(function(airport) {
-const icaoMatch = airport.name ? airport.name.match(/\b([A-Z]{4})\b/) : null;
-const icao = icaoMatch ? icaoMatch[1] : 'APT';
-const markerHtml = `
-<div style="display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%);"><div style="background-color: #28a745; color: white; padding: 4px 8px;
-border: 2px solid #1e7e34; border-radius: 4px 4px 0 0;
-font-family: monospace; font-size: 13px; font-weight: bold;
-box-shadow: 0 2px 4px rgba(0,0,0,0.3); white-space: nowrap;">
-${icao}
-</div><div style="width: 0; height: 0;
-border-left: 6px solid transparent;
-border-right: 6px solid transparent;
-border-top: 8px solid #1e7e34;"></div></div>`;
-const latDms = ddToDms(airport.lat, true);
-const lonDms = ddToDms(airport.lon, false);
-const googleMapsLink = `https://www.google.com/maps?q=${airport.lat},${airport.lon}`;
-const popup = `
-<div style="font-size: 12px; min-width: 150px;"><b>🛫 ${airport.name || 'Unknown'}</b><br><a href="${googleMapsLink}" target="_blank" style="color: #4285f4; text-decoration: none;">${latDms} ${lonDms}</a><br><b>Flights:</b> ${airport.flight_count}
-</div>`;
-L.marker([airport.lat, airport.lon], {
-icon: L.divIcon({
-html: markerHtml,
-iconSize: [1, 1],
-iconAnchor: [0, 0]
-}),
-icao: icao // Store ICAO for cluster icon function
-}).bindPopup(popup, {
-autoPanPadding: [50, 50],
-offset: [0, -10] // Offset popup slightly above marker
-}).addTo(airportLayer);
-});
-// Load statistics
-if (metadata && metadata.stats) {
-updateStatsPanel(metadata.stats);
-}
-// Initial data load
-updateLayers();
-})();
-// Update layers on zoom change only
-map.on('zoomend', updateLayers);
-// Statistics panel
-function updateStatsPanel(stats) {
-let html = '<p style="margin:0 0 10px 0; font-weight:bold; font-size:15px;">📊 Flight Statistics</p>';
-html += '<div style="margin-bottom: 8px;"><strong>Data Points:</strong><br>';
-html += '<span style="margin-left: 10px;">• Total Points: ' + stats.total_points.toLocaleString() + '</span><br>';
-html += '<span style="margin-left: 10px;">• Number of Paths: ' + stats.num_paths + '</span></div>';
-html += '<div style="margin-bottom: 8px;"><strong>Airports Visited:</strong> ' + stats.num_airports + '</div>';
-if (stats.airport_names && stats.airport_names.length > 0) {
-html += '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Airports:</strong><br>';
-stats.airport_names.forEach(function(name) {
-html += '<span style="margin-left: 10px;">• ' + name + '</span><br>';
-});
-html += '</div>';
-}
-// Distance with km conversion
-var distanceKm = (stats.total_distance_nm * 1.852).toFixed(1);
-html += '<div style="margin-bottom: 8px;"><strong>Distance:</strong> ' + stats.total_distance_nm.toFixed(1) + ' nm (' + distanceKm + ' km)</div>';
-if (stats.total_flight_time_str) {
-html += '<div style="margin-bottom: 8px;"><strong>Total Flight Time:</strong> ' + stats.total_flight_time_str + '</div>';
-}
-if (stats.max_altitude_ft) {
-// Altitude with meter conversion
-var maxAltitudeM = Math.round(stats.max_altitude_ft * 0.3048);
-html += '<div style="margin-bottom: 8px;"><strong>Max Altitude:</strong> ' + Math.round(stats.max_altitude_ft) + ' ft (' + maxAltitudeM + ' m)</div>';
-// Elevation gain with meter conversion
-var elevationGainM = Math.round(stats.total_altitude_gain_ft * 0.3048);
-html += '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' + Math.round(stats.total_altitude_gain_ft) + ' ft (' + elevationGainM + ' m)</div>';
-}
-document.getElementById('stats-panel').innerHTML = html;
-}
-function toggleStats() {
-const panel = document.getElementById('stats-panel');
-panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-}
-function exportMap() {
-const btn = document.getElementById('export-btn');
-btn.disabled = true;
-btn.textContent = '⏳ Exporting...';
-const mapContainer = document.getElementById('map');
-const controls = [
-document.querySelector('.leaflet-control-zoom'),
-document.querySelector('.leaflet-control-layers'),
-document.getElementById('stats-btn'),
-document.getElementById('export-btn'),
-document.getElementById('stats-panel'),
-document.getElementById('loading')
-];
-const displayStates = controls.map(el => el ? el.style.display : null);
-controls.forEach(el => { if (el) el.style.display = 'none'; });
-setTimeout(function() {
-domtoimage.toJpeg(mapContainer, {
-width: mapContainer.offsetWidth * 2,
-height: mapContainer.offsetHeight * 2,
-bgcolor: '#1a1a1a',
-quality: 0.95,
-style: {
-transform: 'scale(2)',
-transformOrigin: 'top left'
-}
-}).then(function(dataUrl) {
-controls.forEach((el, i) => { if (el) el.style.display = displayStates[i] || ''; });
-btn.disabled = false;
-btn.textContent = '📷 Export';
-const link = document.createElement('a');
-link.download = 'heatmap_' + new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-') + '.jpg';
-link.href = dataUrl;
-link.click();
-}).catch(function(error) {
-controls.forEach((el, i) => { if (el) el.style.display = displayStates[i] || ''; });
-alert('Export failed: ' + error.message);
-btn.disabled = false;
-btn.textContent = '📷 Export';
-});
-}, 200);
-}
-</script></body></html>
+<!doctype html><meta charset=utf-8><meta content="width=device-width,initial-scale=1.0" name=viewport><title>KML Heatmap</title><link href=https://unpkg.com/leaflet@1.9.4/dist/leaflet.css rel=stylesheet><link href=https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.css rel=stylesheet><link href=https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css rel=stylesheet><link href=https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css rel=stylesheet><style>*{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Helvetica Neue',Arial,sans-serif}body{margin:0;padding:0}#map{position:absolute;top:0;bottom:0;right:0;left:0}.control-btn{position:fixed;left:50px;background-color:#2b2b2b;color:#ffffff;border:2px solid #555;border-radius:4px;padding:6px 12px;cursor:pointer;z-index:10000;font-size:14px;font-weight:bold;box-shadow:0 1px 5px rgba(0,0,0,0.4)}.control-btn:hover{background-color:#3b3b3b}#stats-btn{top:10px}#export-btn{top:50px}#stats-panel{position:fixed;top:10px;left:135px;width:280px;background-color:#2b2b2b;border:2px solid #555;z-index:10001;font-size:13px;padding:12px;display:none;color:#ffffff;box-shadow:0 2px 6px rgba(0,0,0,0.3);max-height:80vh;overflow-y:auto}#loading{position:fixed;bottom:10px;right:10px;background-color:#2b2b2b;color:#ffffff;border:2px solid #555;border-radius:4px;padding:6px 12px;z-index:10000;font-size:12px;display:none}.leaflet-control-attribution{display:none!important}.leaflet-control-layers{background-color:#2b2b2b!important;color:#ffffff!important;border:1px solid #555!important}.leaflet-control-layers-toggle{background-color:#2b2b2b!important;border:1px solid #555!important}.leaflet-control-layers label{color:#ffffff!important}.leaflet-control-zoom{border:2px solid #555!important}.leaflet-control-zoom a{background-color:#2b2b2b!important;color:#ffffff!important}.leaflet-control-zoom a:hover{background-color:#3b3b3b!important}.airport-cluster-marker{background:transparent;border:none}</style><body><div id=map></div><button class=control-btn id=stats-btn onclick=toggleStats()>📊 Stats</button><button class=control-btn id=export-btn onclick=exportMap()>📷 Export</button><div id=stats-panel></div><div id=loading>Loading data...</div><script src=https://unpkg.com/leaflet@1.9.4/dist/leaflet.js></script><script src=https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js></script><script src=https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js></script><script src=https://cdn.jsdelivr.net/npm/dom-to-image@2.6.0/dist/dom-to-image.min.js></script><script>const CENTER=[51.227789,13.3316945];const BOUNDS=[[48.101383,9.362755],[54.354195,17.300634]];const STADIA_API_KEY='ac4dd698-4222-457a-9fdd-763b5f9506b2';const DATA_DIR='data';function ddToDms(dd,isLat){const direction=dd>=0?(isLat?'N':'E'):(isLat?'S':'W');dd=Math.abs(dd);const degrees=Math.floor(dd);const minutes=Math.floor((dd-degrees)*60);const seconds=((dd-degrees)*60-minutes)*60;return degrees+"°"+minutes+"'"+seconds.toFixed(1)+'"'+direction;}
+var map=L.map('map',{center:CENTER,zoom:10,zoomSnap:0.25,zoomDelta:0.25,wheelPxPerZoomLevel:120,preferCanvas:true});if(STADIA_API_KEY){L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png?api_key='+STADIA_API_KEY,{attribution:'&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>'}).addTo(map);}else{L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'&copy; OpenStreetMap contributors, &copy; CARTO'}).addTo(map);}
+map.fitBounds(BOUNDS,{padding:[30,30]});var canvasRenderer=L.canvas({padding:0.5});var heatmapLayer=null;var altitudeLayer=L.layerGroup();var airportLayer=L.markerClusterGroup({showCoverageOnHover:false,zoomToBoundsOnClick:true,spiderfyOnMaxZoom:true,disableClusteringAtZoom:12,maxClusterRadius:25,iconCreateFunction:function(cluster){var markers=cluster.getAllChildMarkers();var icaoCodes=markers.map(function(marker){return marker.options.icao||'APT';}).filter(function(value,index,self){return self.indexOf(value)===index;});var displayText=icaoCodes.slice(0,4).join(', ');if(icaoCodes.length>4){displayText+=' +'+(icaoCodes.length-4);}
+var html=`
+                <div style="display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%);">
+                    <div style="background-color: #28a745; color: white; padding: 4px 8px;
+                                border: 2px solid #1e7e34; border-radius: 4px 4px 0 0;
+                                font-family: monospace; font-size: 13px; font-weight: bold;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.3); white-space: nowrap;">
+                        ${displayText}
+                    </div>
+                    <div style="width: 0; height: 0;
+                                border-left: 6px solid transparent;
+                                border-right: 6px solid transparent;
+                                border-top: 8px solid #1e7e34;"></div>
+                </div>`;return L.divIcon({html:html,iconSize:[1,1],iconAnchor:[0,0],className:'airport-cluster-marker'});}});var currentResolution=null;var loadedData={};var layerControl=L.control.layers(null,{'Altitude Profile':altitudeLayer,'Airports':airportLayer},{collapsed:false}).addTo(map);airportLayer.addTo(map);function getResolutionForZoom(zoom){if(zoom<=4)return'z0_4';if(zoom<=7)return'z5_7';if(zoom<=10)return'z8_10';if(zoom<=13)return'z11_13';return'z14_plus';}
+function showLoading(){document.getElementById('loading').style.display='block';}
+function hideLoading(){document.getElementById('loading').style.display='none';}
+async function loadData(resolution){if(loadedData[resolution]){return loadedData[resolution];}
+showLoading();try{const response=await fetch(DATA_DIR+'/data_'+resolution+'.json');const data=await response.json();loadedData[resolution]=data;console.log('Loaded '+resolution+' resolution:',data.downsampled_points+' points');return data;}catch(error){console.error('Error loading data:',error);return null;}finally{hideLoading();}}
+async function loadAirports(){try{const response=await fetch(DATA_DIR+'/airports.json');const data=await response.json();return data.airports;}catch(error){console.error('Error loading airports:',error);return[];}}
+async function loadMetadata(){try{const response=await fetch(DATA_DIR+'/metadata.json');return await response.json();}catch(error){console.error('Error loading metadata:',error);return null;}}
+async function updateLayers(){const zoom=map.getZoom();const resolution=getResolutionForZoom(zoom);if(resolution===currentResolution){return;}
+currentResolution=resolution;const data=await loadData(resolution);if(!data)return;if(heatmapLayer){map.removeLayer(heatmapLayer);}
+heatmapLayer=L.heatLayer(data.coordinates,{radius:10,blur:15,minOpacity:0.25,maxOpacity:0.6,max:1.0,gradient:{0.0:'blue',0.3:'cyan',0.5:'lime',0.7:'yellow',1.0:'red'}}).addTo(map);altitudeLayer.clearLayers();data.path_segments.forEach(function(segment){L.polyline(segment.coords,{color:segment.color,weight:4,opacity:0.85,renderer:canvasRenderer}).bindPopup('Altitude: '+segment.altitude_ft+' ft ('+segment.altitude_m+' m)').addTo(altitudeLayer);});console.log('Updated to '+resolution+' resolution');}
+(async function(){const airports=await loadAirports();const metadata=await loadMetadata();airports.forEach(function(airport){const icaoMatch=airport.name?airport.name.match(/\b([A-Z]{4})\b/):null;const icao=icaoMatch?icaoMatch[1]:'APT';const markerHtml=`
+                <div style="display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%);">
+                    <div style="background-color: #28a745; color: white; padding: 4px 8px;
+                                border: 2px solid #1e7e34; border-radius: 4px 4px 0 0;
+                                font-family: monospace; font-size: 13px; font-weight: bold;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.3); white-space: nowrap;">
+                        ${icao}
+                    </div>
+                    <div style="width: 0; height: 0;
+                                border-left: 6px solid transparent;
+                                border-right: 6px solid transparent;
+                                border-top: 8px solid #1e7e34;"></div>
+                </div>`;const latDms=ddToDms(airport.lat,true);const lonDms=ddToDms(airport.lon,false);const googleMapsLink=`https://www.google.com/maps?q=${airport.lat},${airport.lon}`;const popup=`
+                <div style="font-size: 12px; min-width: 150px;">
+                    <b>🛫 ${airport.name || 'Unknown'}</b><br>
+                    <a href="${googleMapsLink}" target="_blank" style="color: #4285f4; text-decoration: none;">${latDms} ${lonDms}</a><br>
+                    <b>Flights:</b> ${airport.flight_count}
+                </div>`;L.marker([airport.lat,airport.lon],{icon:L.divIcon({html:markerHtml,iconSize:[1,1],iconAnchor:[0,0]}),icao:icao}).bindPopup(popup,{autoPanPadding:[50,50],offset:[0,-10]}).addTo(airportLayer);});if(metadata&&metadata.stats){updateStatsPanel(metadata.stats);}
+updateLayers();})();map.on('zoomend',updateLayers);function updateStatsPanel(stats){let html='<p style="margin:0 0 10px 0; font-weight:bold; font-size:15px;">📊 Flight Statistics</p>';html+='<div style="margin-bottom: 8px;"><strong>Data Points:</strong><br>';html+='<span style="margin-left: 10px;">• Total Points: '+stats.total_points.toLocaleString()+'</span><br>';html+='<span style="margin-left: 10px;">• Number of Paths: '+stats.num_paths+'</span></div>';html+='<div style="margin-bottom: 8px;"><strong>Airports Visited:</strong> '+stats.num_airports+'</div>';if(stats.airport_names&&stats.airport_names.length>0){html+='<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Airports:</strong><br>';stats.airport_names.forEach(function(name){html+='<span style="margin-left: 10px;">• '+name+'</span><br>';});html+='</div>';}
+var distanceKm=(stats.total_distance_nm*1.852).toFixed(1);html+='<div style="margin-bottom: 8px;"><strong>Distance:</strong> '+stats.total_distance_nm.toFixed(1)+' nm ('+distanceKm+' km)</div>';if(stats.total_flight_time_str){html+='<div style="margin-bottom: 8px;"><strong>Total Flight Time:</strong> '+stats.total_flight_time_str+'</div>';}
+if(stats.max_altitude_ft){var maxAltitudeM=Math.round(stats.max_altitude_ft*0.3048);html+='<div style="margin-bottom: 8px;"><strong>Max Altitude:</strong> '+Math.round(stats.max_altitude_ft)+' ft ('+maxAltitudeM+' m)</div>';var elevationGainM=Math.round(stats.total_altitude_gain_ft*0.3048);html+='<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> '+Math.round(stats.total_altitude_gain_ft)+' ft ('+elevationGainM+' m)</div>';}
+document.getElementById('stats-panel').innerHTML=html;}
+function toggleStats(){const panel=document.getElementById('stats-panel');panel.style.display=panel.style.display==='none'?'block':'none';}
+function exportMap(){const btn=document.getElementById('export-btn');btn.disabled=true;btn.textContent='⏳ Exporting...';const mapContainer=document.getElementById('map');const controls=[document.querySelector('.leaflet-control-zoom'),document.querySelector('.leaflet-control-layers'),document.getElementById('stats-btn'),document.getElementById('export-btn'),document.getElementById('stats-panel'),document.getElementById('loading')];const displayStates=controls.map(el=>el?el.style.display:null);controls.forEach(el=>{if(el)el.style.display='none';});setTimeout(function(){domtoimage.toJpeg(mapContainer,{width:mapContainer.offsetWidth*2,height:mapContainer.offsetHeight*2,bgcolor:'#1a1a1a',quality:0.95,style:{transform:'scale(2)',transformOrigin:'top left'}}).then(function(dataUrl){controls.forEach((el,i)=>{if(el)el.style.display=displayStates[i]||'';});btn.disabled=false;btn.textContent='📷 Export';const link=document.createElement('a');link.download='heatmap_'+new Date().toISOString().slice(0,19).replace(/[:.]/g,'-')+'.jpg';link.href=dataUrl;link.click();}).catch(function(error){controls.forEach((el,i)=>{if(el)el.style.display=displayStates[i]||'';});alert('Export failed: '+error.message);btn.disabled=false;btn.textContent='📷 Export';});},200);}</script>
