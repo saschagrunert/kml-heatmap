@@ -1079,10 +1079,37 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
             else:
                 downsampled_paths.append(path)
 
-        # Prepare path segments with colors
+        # Prepare path segments with colors and track relationships
         path_segments = []
-        for path in downsampled_paths:
+        path_info = []  # Track path-to-airport relationships
+
+        for path_idx, path in enumerate(downsampled_paths):
             if len(path) > 1:
+                # Get original path metadata if available
+                metadata = all_path_metadata[path_idx] if path_idx < len(all_path_metadata) else {}
+
+                # Extract airport information from metadata
+                airport_name = metadata.get('airport_name', '')
+                start_airport = None
+                end_airport = None
+
+                if airport_name and ' - ' in airport_name:
+                    parts = airport_name.split(' - ')
+                    if len(parts) == 2:
+                        start_airport = parts[0].strip()
+                        end_airport = parts[1].strip()
+
+                # Store path info with airport relationships
+                path_info.append({
+                    'id': path_idx,
+                    'start_airport': start_airport,
+                    'end_airport': end_airport,
+                    'start_coords': [path[0][0], path[0][1]],
+                    'end_coords': [path[-1][0], path[-1][1]],
+                    'segment_count': len(path) - 1
+                })
+
+                # Create segments for this path
                 for i in range(len(path) - 1):
                     lat1, lon1, alt1_m = path[i]
                     lat2, lon2, alt2_m = path[i + 1]
@@ -1094,13 +1121,15 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                         'coords': [[lat1, lon1], [lat2, lon2]],
                         'color': color,
                         'altitude_ft': avg_alt_ft,
-                        'altitude_m': round(avg_alt_m, 0)
+                        'altitude_m': round(avg_alt_m, 0),
+                        'path_id': path_idx  # Link segment to its path
                     })
 
         # Export data
         data = {
             'coordinates': downsampled_coords,
             'path_segments': path_segments,
+            'path_info': path_info,  # Include path-to-airport relationships
             'resolution': res_name,
             'original_points': len(all_coordinates),
             'downsampled_points': len(downsampled_coords),
@@ -1969,7 +1998,6 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         /* Button styles */
         .control-btn {{
             position: fixed;
-            left: 50px;
             background-color: #2b2b2b;
             color: #ffffff;
             border: 2px solid #555;
@@ -1982,8 +2010,60 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             box-shadow: 0 1px 5px rgba(0,0,0,0.4);
         }}
         .control-btn:hover {{ background-color: #3b3b3b; }}
+
+        /* Left side buttons */
+        .control-btn.left {{ left: 50px; }}
         #stats-btn {{ top: 10px; }}
         #export-btn {{ top: 50px; }}
+
+        /* Right side buttons */
+        .control-btn.right {{
+            right: 10px;
+            min-width: 120px;
+            text-align: center;
+        }}
+        #heatmap-btn {{ top: 10px; }}
+        #airports-btn {{ top: 50px; }}
+        #altitude-btn {{ top: 90px; }}
+        #aviation-btn {{ top: 130px; }}
+
+        /* Altitude legend */
+        #altitude-legend {{
+            position: fixed;
+            bottom: 30px;
+            left: 10px;
+            background-color: rgba(43, 43, 43, 0.9);
+            color: #ffffff;
+            border: 2px solid #555;
+            border-radius: 4px;
+            padding: 10px;
+            z-index: 1000;
+            font-size: 12px;
+            min-width: 200px;
+            display: none;
+        }}
+        #altitude-legend .legend-title {{
+            font-weight: bold;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }}
+        #altitude-legend .gradient-bar {{
+            height: 20px;
+            background: linear-gradient(to right,
+                rgb(80, 160, 255) 0%,
+                rgb(0, 255, 255) 20%,
+                rgb(0, 255, 0) 40%,
+                rgb(255, 255, 0) 60%,
+                rgb(255, 165, 0) 80%,
+                rgb(255, 66, 66) 100%);
+            border-radius: 3px;
+            margin-bottom: 5px;
+        }}
+        #altitude-legend .labels {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+        }}
 
         /* Statistics panel */
         #stats-panel {{
@@ -2046,9 +2126,25 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 </head>
 <body>
     <div id="map"></div>
-    <button id="stats-btn" class="control-btn" onclick="toggleStats()">📊 Stats</button>
-    <button id="export-btn" class="control-btn" onclick="exportMap()">📷 Export</button>
+    <!-- Left side buttons -->
+    <button id="stats-btn" class="control-btn left" onclick="toggleStats()">📊 Stats</button>
+    <button id="export-btn" class="control-btn left" onclick="exportMap()">📷 Export</button>
+
+    <!-- Right side buttons -->
+    <button id="heatmap-btn" class="control-btn right" onclick="toggleHeatmap()">🔥 Heatmap</button>
+    <button id="airports-btn" class="control-btn right" onclick="toggleAirports()">✈️ Airports</button>
+    <button id="altitude-btn" class="control-btn right" onclick="toggleAltitude()">⛰️ Altitude</button>
+    <button id="aviation-btn" class="control-btn right" onclick="toggleAviation()" style="display: none;">🗺️ Aviation</button>
+
     <div id="stats-panel"></div>
+    <div id="altitude-legend">
+        <div class="legend-title">⛰️ Altitude</div>
+        <div class="gradient-bar"></div>
+        <div class="labels">
+            <span id="legend-min">0 ft</span>
+            <span id="legend-max">10,000 ft</span>
+        </div>
+    </div>
     <div id="loading">Loading data...</div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -2153,6 +2249,22 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         }});
         var currentResolution = null;
         var loadedData = {{}};
+        var currentData = null;  // Store current loaded data for redrawing
+        var fullStats = null;  // Store original full statistics
+        var altitudeRange = {{ min: 0, max: 10000 }};  // Store altitude range for legend
+
+        // Layer visibility state
+        var heatmapVisible = true;
+        var altitudeVisible = false;
+        var airportsVisible = true;
+        var aviationVisible = false;
+
+        // Track selection state
+        var selectedPathIds = new Set();  // Set of selected path IDs
+        var pathSegments = {{}};  // Map of path_id to array of polyline objects
+        var pathToAirports = {{}};  // Map of path_id to {{start: name, end: name}}
+        var airportToPaths = {{}};  // Map of airport name to array of path IDs
+        var airportMarkers = {{}};  // Map of airport name to marker object
 
         // OpenAIP layer (if API key is provided)
         // Note: As of May 2023, OpenAIP consolidated all layers into one "openaip" layer
@@ -2169,22 +2281,17 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             );
         }}
 
-        // Build overlay layers object
-        var overlayLayers = {{
-            'Altitude Profile': altitudeLayer,
-            'Airports': airportLayer
-        }};
-
-        // Add OpenAIP layer if available
-        if (OPENAIP_API_KEY) {{
-            overlayLayers['Aviation Data'] = openaipLayers['Aviation Data'];
-        }}
-
-        // Layer control (heatmap is always visible)
-        var layerControl = L.control.layers(null, overlayLayers, {{ collapsed: false }}).addTo(map);
-
         // Add airports layer by default
         airportLayer.addTo(map);
+
+        // Set initial button states
+        document.getElementById('altitude-btn').style.opacity = '0.5';  // Altitude starts hidden
+        document.getElementById('aviation-btn').style.opacity = '0.5';  // Aviation starts hidden
+
+        // Show aviation button if API key is available
+        if (OPENAIP_API_KEY) {{
+            document.getElementById('aviation-btn').style.display = 'block';
+        }}
 
         // Load data based on zoom level (5 resolution levels for smoother transitions)
         function getResolutionForZoom(zoom) {{
@@ -2257,7 +2364,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
             if (!data) return;
 
-            // Update heatmap (always visible - not in layer control)
+            currentData = data;  // Store for redrawing
+
+            // Update heatmap - only add if visible
             if (heatmapLayer) {{
                 map.removeLayer(heatmapLayer);
             }}
@@ -2275,21 +2384,201 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     0.7: 'yellow',
                     1.0: 'red'
                 }}
-            }}).addTo(map);
-
-            // Update altitude layer (using canvas renderer for smooth panning)
-            altitudeLayer.clearLayers();
-            data.path_segments.forEach(function(segment) {{
-                L.polyline(segment.coords, {{
-                    color: segment.color,
-                    weight: 4,
-                    opacity: 0.85,
-                    renderer: canvasRenderer  // Use canvas for better pan performance
-                }}).bindPopup('Altitude: ' + segment.altitude_ft + ' ft (' + segment.altitude_m + ' m)')
-                  .addTo(altitudeLayer);
             }});
 
+            // Make heatmap non-interactive so clicks pass through to paths
+            if (heatmapLayer._canvas) {{
+                heatmapLayer._canvas.style.pointerEvents = 'none';
+            }}
+
+            // Only add to map if heatmap is visible
+            if (heatmapVisible) {{
+                heatmapLayer.addTo(map);
+            }}
+
+            // Build path-to-airport relationships from path_info
+            pathToAirports = {{}};
+            airportToPaths = {{}};
+
+            if (data.path_info) {{
+                data.path_info.forEach(function(pathInfo) {{
+                    var pathId = pathInfo.id;
+
+                    // Store path-to-airport mapping
+                    pathToAirports[pathId] = {{
+                        start: pathInfo.start_airport,
+                        end: pathInfo.end_airport
+                    }};
+
+                    // Build reverse mapping: airport to paths
+                    if (pathInfo.start_airport) {{
+                        if (!airportToPaths[pathInfo.start_airport]) {{
+                            airportToPaths[pathInfo.start_airport] = [];
+                        }}
+                        airportToPaths[pathInfo.start_airport].push(pathId);
+                    }}
+                    if (pathInfo.end_airport) {{
+                        if (!airportToPaths[pathInfo.end_airport]) {{
+                            airportToPaths[pathInfo.end_airport] = [];
+                        }}
+                        airportToPaths[pathInfo.end_airport].push(pathId);
+                    }}
+                }});
+            }}
+
+            // Calculate altitude range from all segments
+            if (data.path_segments && data.path_segments.length > 0) {{
+                var altitudes = data.path_segments.map(function(s) {{ return s.altitude_ft; }});
+                altitudeRange.min = Math.min(...altitudes);
+                altitudeRange.max = Math.max(...altitudes);
+            }}
+
+            // Create altitude layer paths (this will also update the legend)
+            redrawAltitudePaths();
+
             console.log('Updated to ' + resolution + ' resolution');
+        }}
+
+        function redrawAltitudePaths() {{
+            if (!currentData) return;
+
+            // Clear altitude layer and path references
+            altitudeLayer.clearLayers();
+            pathSegments = {{}};
+
+            // Calculate altitude range for color scaling
+            var colorMinAlt, colorMaxAlt;
+            if (selectedPathIds.size > 0) {{
+                // Use selected paths' altitude range
+                var selectedSegments = currentData.path_segments.filter(function(segment) {{
+                    return selectedPathIds.has(segment.path_id);
+                }});
+                if (selectedSegments.length > 0) {{
+                    var altitudes = selectedSegments.map(function(s) {{ return s.altitude_ft; }});
+                    colorMinAlt = Math.min(...altitudes);
+                    colorMaxAlt = Math.max(...altitudes);
+                }} else {{
+                    colorMinAlt = altitudeRange.min;
+                    colorMaxAlt = altitudeRange.max;
+                }}
+            }} else {{
+                // Use full altitude range
+                colorMinAlt = altitudeRange.min;
+                colorMaxAlt = altitudeRange.max;
+            }}
+
+            // Create path segments with interactivity and rescaled colors
+            currentData.path_segments.forEach(function(segment) {{
+                var pathId = segment.path_id;
+                var isSelected = selectedPathIds.has(pathId);
+
+                // Recalculate color based on current altitude range
+                var color = getColorForAltitude(segment.altitude_ft, colorMinAlt, colorMaxAlt);
+
+                var polyline = L.polyline(segment.coords, {{
+                    color: color,
+                    weight: isSelected ? 6 : 4,
+                    opacity: isSelected ? 1.0 : (selectedPathIds.size > 0 ? 0.1 : 0.85),
+                    renderer: canvasRenderer
+                }}).bindPopup('Altitude: ' + segment.altitude_ft + ' ft (' + segment.altitude_m + ' m)')
+                  .addTo(altitudeLayer);
+
+                // Make path clickable
+                polyline.on('click', function(e) {{
+                    L.DomEvent.stopPropagation(e);
+                    togglePathSelection(pathId);
+                }});
+
+                // Store reference to polyline by path_id
+                if (!pathSegments[pathId]) {{
+                    pathSegments[pathId] = [];
+                }}
+                pathSegments[pathId].push(polyline);
+            }});
+
+            // Update legend to show current altitude range
+            updateAltitudeLegend(colorMinAlt, colorMaxAlt);
+
+            // Update airport marker opacity based on selection
+            updateAirportOpacity();
+
+            // Update statistics panel based on selection
+            updateStatsForSelection();
+        }}
+
+        function getColorForAltitude(altitude, minAlt, maxAlt) {{
+            // Normalize altitude to 0-1 range
+            var normalized = (altitude - minAlt) / Math.max(maxAlt - minAlt, 1);
+            normalized = Math.max(0, Math.min(1, normalized)); // Clamp to 0-1
+
+            // Color gradient: light blue → cyan → green → yellow → orange → light red
+            // Lighter terminal colors for better visibility on dark background
+            var r, g, b;
+
+            if (normalized < 0.2) {{
+                // Light Blue to Cyan (0.0 - 0.2)
+                var t = normalized / 0.2;
+                r = Math.round(80 * (1 - t)); // Start at 80, go to 0
+                g = Math.round(160 + 95 * t); // 160 to 255
+                b = 255;
+            }} else if (normalized < 0.4) {{
+                // Cyan to Green (0.2 - 0.4)
+                var t = (normalized - 0.2) / 0.2;
+                r = 0;
+                g = 255;
+                b = Math.round(255 * (1 - t));
+            }} else if (normalized < 0.6) {{
+                // Green to Yellow (0.4 - 0.6)
+                var t = (normalized - 0.4) / 0.2;
+                r = Math.round(255 * t);
+                g = 255;
+                b = 0;
+            }} else if (normalized < 0.8) {{
+                // Yellow to Orange (0.6 - 0.8)
+                var t = (normalized - 0.6) / 0.2;
+                r = 255;
+                g = Math.round(255 * (1 - t * 0.35)); // ~165 at t=1
+                b = 0;
+            }} else {{
+                // Orange to Light Red (0.8 - 1.0)
+                var t = (normalized - 0.8) / 0.2;
+                r = 255;
+                g = Math.round(165 * (1 - t * 0.6)); // End at ~66 instead of 0
+                b = Math.round(66 * t); // Add some blue component for lighter red
+            }}
+
+            return 'rgb(' + r + ',' + g + ',' + b + ')';
+        }}
+
+        function updateAirportOpacity() {{
+            if (selectedPathIds.size === 0) {{
+                // No selection - restore all airports to full opacity
+                Object.keys(airportMarkers).forEach(function(airportName) {{
+                    var marker = airportMarkers[airportName];
+                    marker.setOpacity(1.0);
+                }});
+                return;
+            }}
+
+            // Collect airports involved in selected paths
+            var selectedAirports = new Set();
+            selectedPathIds.forEach(function(pathId) {{
+                var airports = pathToAirports[pathId];
+                if (airports) {{
+                    if (airports.start) selectedAirports.add(airports.start);
+                    if (airports.end) selectedAirports.add(airports.end);
+                }}
+            }});
+
+            // Update opacity for all airport markers
+            Object.keys(airportMarkers).forEach(function(airportName) {{
+                var marker = airportMarkers[airportName];
+                if (selectedAirports.has(airportName)) {{
+                    marker.setOpacity(1.0);  // Full opacity for selected airports
+                }} else {{
+                    marker.setOpacity(0.3);  // Dim non-selected airports
+                }}
+            }});
         }}
 
         // Load airports once
@@ -2327,7 +2616,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     <b>Flights:</b> ${{airport.flight_count}}
                 </div>`;
 
-                L.marker([airport.lat, airport.lon], {{
+                var marker = L.marker([airport.lat, airport.lon], {{
                     icon: L.divIcon({{
                         html: markerHtml,
                         iconSize: [1, 1],
@@ -2337,12 +2626,23 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 }}).bindPopup(popup, {{
                     autoPanPadding: [50, 50],
                     offset: [0, -10]  // Offset popup slightly above marker
-                }}).addTo(airportLayer);
+                }});
+
+                // Add click handler to select paths connected to this airport
+                marker.on('click', function(e) {{
+                    selectPathsByAirport(airport.name);
+                }});
+
+                marker.addTo(airportLayer);
+
+                // Store marker reference for opacity control
+                airportMarkers[airport.name] = marker;
             }});
 
-            // Load statistics
+            // Load and store full statistics
             if (metadata && metadata.stats) {{
-                updateStatsPanel(metadata.stats);
+                fullStats = metadata.stats;
+                updateStatsPanel(fullStats, false);
             }}
 
             // Initial data load
@@ -2352,9 +2652,125 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         // Update layers on zoom change only
         map.on('zoomend', updateLayers);
 
+        // Clear selection when clicking on the map background
+        map.on('click', function(e) {{
+            if (selectedPathIds.size > 0) {{
+                clearSelection();
+            }}
+        }});
+
+        // Path and airport selection functions
+        function togglePathSelection(pathId) {{
+            if (selectedPathIds.has(pathId)) {{
+                selectedPathIds.delete(pathId);
+            }} else {{
+                selectedPathIds.add(pathId);
+            }}
+            redrawAltitudePaths();
+        }}
+
+        function selectPathsByAirport(airportName) {{
+            var pathIds = airportToPaths[airportName] || [];
+            pathIds.forEach(function(pathId) {{
+                selectedPathIds.add(pathId);
+            }});
+            redrawAltitudePaths();
+        }}
+
+        function clearSelection() {{
+            selectedPathIds.clear();
+            redrawAltitudePaths();
+        }}
+
+        function updateAltitudeLegend(minAlt, maxAlt) {{
+            var minFt = Math.round(minAlt);
+            var maxFt = Math.round(maxAlt);
+            var minM = Math.round(minAlt * 0.3048);
+            var maxM = Math.round(maxAlt * 0.3048);
+
+            document.getElementById('legend-min').textContent = minFt.toLocaleString() + ' ft (' + minM.toLocaleString() + ' m)';
+            document.getElementById('legend-max').textContent = maxFt.toLocaleString() + ' ft (' + maxM.toLocaleString() + ' m)';
+        }}
+
+        function updateStatsForSelection() {{
+            if (selectedPathIds.size === 0) {{
+                // No selection - show full stats
+                if (fullStats) {{
+                    updateStatsPanel(fullStats, false);
+                }}
+                return;
+            }}
+
+            // Calculate stats for selected paths only
+            var selectedSegments = currentData.path_segments.filter(function(segment) {{
+                return selectedPathIds.has(segment.path_id);
+            }});
+
+            if (selectedSegments.length === 0) return;
+
+            // Calculate statistics from selected segments
+            var selectedPathInfos = currentData.path_info.filter(function(pathInfo) {{
+                return selectedPathIds.has(pathInfo.id);
+            }});
+
+            // Collect unique airports from selected paths
+            var selectedAirports = new Set();
+            selectedPathInfos.forEach(function(pathInfo) {{
+                if (pathInfo.start_airport) selectedAirports.add(pathInfo.start_airport);
+                if (pathInfo.end_airport) selectedAirports.add(pathInfo.end_airport);
+            }});
+
+            // Calculate distance (approximate using segment coordinates)
+            var totalDistanceKm = 0;
+            selectedSegments.forEach(function(segment) {{
+                var coords = segment.coords;
+                if (coords && coords.length === 2) {{
+                    var lat1 = coords[0][0] * Math.PI / 180;
+                    var lon1 = coords[0][1] * Math.PI / 180;
+                    var lat2 = coords[1][0] * Math.PI / 180;
+                    var lon2 = coords[1][1] * Math.PI / 180;
+
+                    var dlat = lat2 - lat1;
+                    var dlon = lon2 - lon1;
+                    var a = Math.sin(dlat/2) * Math.sin(dlat/2) +
+                            Math.cos(lat1) * Math.cos(lat2) *
+                            Math.sin(dlon/2) * Math.sin(dlon/2);
+                    var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                    totalDistanceKm += 6371 * c;  // Earth radius in km
+                }}
+            }});
+
+            // Get altitude range from selected segments
+            var altitudes = selectedSegments.map(function(s) {{ return s.altitude_m; }});
+            var minAltitudeM = Math.min(...altitudes);
+            var maxAltitudeM = Math.max(...altitudes);
+
+            // Build selected stats object
+            var selectedStats = {{
+                total_points: selectedSegments.length * 2,  // Each segment has 2 points
+                num_paths: selectedPathIds.size,
+                num_airports: selectedAirports.size,
+                airport_names: Array.from(selectedAirports).sort(),
+                total_distance_nm: totalDistanceKm * 0.539957,
+                max_altitude_ft: maxAltitudeM * 3.28084,
+                min_altitude_ft: minAltitudeM * 3.28084
+            }};
+
+            updateStatsPanel(selectedStats, true);
+        }}
+
         // Statistics panel
-        function updateStatsPanel(stats) {{
-            let html = '<p style="margin:0 0 10px 0; font-weight:bold; font-size:15px;">📊 Flight Statistics</p>';
+        function updateStatsPanel(stats, isSelection) {{
+            let html = '';
+
+            // Add indicator if showing selected paths only
+            if (isSelection) {{
+                html += '<p style="margin:0 0 10px 0; font-weight:bold; font-size:15px;">📊 Selected Paths Statistics</p>';
+                html += '<div style="background-color: #3a5a7a; padding: 4px 8px; margin-bottom: 8px; border-radius: 3px; font-size: 11px; color: #a0c0e0;">Showing stats for ' + stats.num_paths + ' selected path(s)</div>';
+            }} else {{
+                html += '<p style="margin:0 0 10px 0; font-weight:bold; font-size:15px;">📊 Flight Statistics</p>';
+            }}
+
             html += '<div style="margin-bottom: 8px;"><strong>Data Points:</strong><br>';
             html += '<span style="margin-left: 10px;">• Total Points: ' + stats.total_points.toLocaleString() + '</span><br>';
             html += '<span style="margin-left: 10px;">• Number of Paths: ' + stats.num_paths + '</span></div>';
@@ -2381,9 +2797,11 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 var maxAltitudeM = Math.round(stats.max_altitude_ft * 0.3048);
                 html += '<div style="margin-bottom: 8px;"><strong>Max Altitude:</strong> ' + Math.round(stats.max_altitude_ft) + ' ft (' + maxAltitudeM + ' m)</div>';
 
-                // Elevation gain with meter conversion
-                var elevationGainM = Math.round(stats.total_altitude_gain_ft * 0.3048);
-                html += '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' + Math.round(stats.total_altitude_gain_ft) + ' ft (' + elevationGainM + ' m)</div>';
+                // Elevation gain with meter conversion (only show for full stats)
+                if (!isSelection && stats.total_altitude_gain_ft) {{
+                    var elevationGainM = Math.round(stats.total_altitude_gain_ft * 0.3048);
+                    html += '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' + Math.round(stats.total_altitude_gain_ft) + ' ft (' + elevationGainM + ' m)</div>';
+                }}
             }}
 
             document.getElementById('stats-panel').innerHTML = html;
@@ -2394,6 +2812,66 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
         }}
 
+        function toggleHeatmap() {{
+            if (heatmapVisible) {{
+                if (heatmapLayer) {{
+                    map.removeLayer(heatmapLayer);
+                }}
+                heatmapVisible = false;
+                document.getElementById('heatmap-btn').style.opacity = '0.5';
+            }} else {{
+                if (heatmapLayer) {{
+                    map.addLayer(heatmapLayer);
+                    // Ensure heatmap is non-interactive after adding to map
+                    if (heatmapLayer._canvas) {{
+                        heatmapLayer._canvas.style.pointerEvents = 'none';
+                    }}
+                }}
+                heatmapVisible = true;
+                document.getElementById('heatmap-btn').style.opacity = '1.0';
+            }}
+        }}
+
+        function toggleAltitude() {{
+            if (altitudeVisible) {{
+                map.removeLayer(altitudeLayer);
+                altitudeVisible = false;
+                document.getElementById('altitude-btn').style.opacity = '0.5';
+                document.getElementById('altitude-legend').style.display = 'none';
+            }} else {{
+                map.addLayer(altitudeLayer);
+                altitudeVisible = true;
+                document.getElementById('altitude-btn').style.opacity = '1.0';
+                document.getElementById('altitude-legend').style.display = 'block';
+            }}
+        }}
+
+        function toggleAirports() {{
+            if (airportsVisible) {{
+                map.removeLayer(airportLayer);
+                airportsVisible = false;
+                document.getElementById('airports-btn').style.opacity = '0.5';
+            }} else {{
+                map.addLayer(airportLayer);
+                airportsVisible = true;
+                document.getElementById('airports-btn').style.opacity = '1.0';
+            }}
+        }}
+
+        function toggleAviation() {{
+            if (OPENAIP_API_KEY && openaipLayers['Aviation Data']) {{
+                if (aviationVisible) {{
+                    map.removeLayer(openaipLayers['Aviation Data']);
+                    aviationVisible = false;
+                    document.getElementById('aviation-btn').style.opacity = '0.5';
+                }} else {{
+                    map.addLayer(openaipLayers['Aviation Data']);
+                    aviationVisible = true;
+                    document.getElementById('aviation-btn').style.opacity = '1.0';
+                }}
+            }}
+        }}
+
         function exportMap() {{
             const btn = document.getElementById('export-btn');
             btn.disabled = true;
@@ -2402,10 +2880,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             const mapContainer = document.getElementById('map');
             const controls = [
                 document.querySelector('.leaflet-control-zoom'),
-                document.querySelector('.leaflet-control-layers'),
                 document.getElementById('stats-btn'),
                 document.getElementById('export-btn'),
+                document.getElementById('heatmap-btn'),
+                document.getElementById('altitude-btn'),
+                document.getElementById('airports-btn'),
+                document.getElementById('aviation-btn'),
                 document.getElementById('stats-panel'),
+                document.getElementById('altitude-legend'),
                 document.getElementById('loading')
             ];
 
