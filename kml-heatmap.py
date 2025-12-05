@@ -2008,6 +2008,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             font-size: 14px;
             font-weight: bold;
             box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+            touch-action: manipulation;
         }}
         .control-btn:hover {{ background-color: #3b3b3b; }}
 
