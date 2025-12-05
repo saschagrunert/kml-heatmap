@@ -2122,6 +2122,69 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             background: transparent;
             border: none;
         }}
+
+        /* Modern dot marker styles */
+        .airport-marker {{
+            width: 12px;
+            height: 12px;
+            background-color: #28a745;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }}
+        .airport-marker:hover {{
+            transform: scale(1.3);
+            box-shadow: 0 3px 8px rgba(0,0,0,0.6);
+        }}
+
+        /* Cluster dot styles */
+        .airport-cluster-dot {{
+            width: 20px;
+            height: 20px;
+            background-color: #28a745;
+            border: 3px solid #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            font-weight: bold;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }}
+        .airport-cluster-dot:hover {{
+            transform: scale(1.2);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.7);
+        }}
+
+        /* Tooltip styles */
+        .leaflet-tooltip {{
+            background-color: #2b2b2b;
+            border: 2px solid #28a745;
+            color: #ffffff;
+            font-family: monospace;
+            font-weight: bold;
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }}
+        .leaflet-tooltip-top:before {{
+            border-top-color: #28a745;
+        }}
+        .leaflet-tooltip-bottom:before {{
+            border-bottom-color: #28a745;
+        }}
+        .leaflet-tooltip-left:before {{
+            border-left-color: #28a745;
+        }}
+        .leaflet-tooltip-right:before {{
+            border-right-color: #28a745;
+        }}
     </style>
 </head>
 <body>
@@ -2218,31 +2281,15 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     return self.indexOf(value) === index;  // Remove duplicates
                 }});
 
-                // Join with commas, limit to 4 for readability
-                var displayText = icaoCodes.slice(0, 4).join(', ');
-                if (icaoCodes.length > 4) {{
-                    displayText += ' +' + (icaoCodes.length - 4);
-                }}
-
-                // Create merged airport marker
-                var html = `
-                <div style="display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%);">
-                    <div style="background-color: #28a745; color: white; padding: 4px 8px;
-                                border: 2px solid #1e7e34; border-radius: 4px 4px 0 0;
-                                font-family: monospace; font-size: 13px; font-weight: bold;
-                                box-shadow: 0 2px 4px rgba(0,0,0,0.3); white-space: nowrap;">
-                        ${{displayText}}
-                    </div>
-                    <div style="width: 0; height: 0;
-                                border-left: 6px solid transparent;
-                                border-right: 6px solid transparent;
-                                border-top: 8px solid #1e7e34;"></div>
-                </div>`;
+                // Create cluster dot with count
+                var count = markers.length;
+                var html = '<div class="airport-cluster-dot">' + count + '</div>';
 
                 return L.divIcon({{
                     html: html,
-                    iconSize: [1, 1],
-                    iconAnchor: [0, 0],
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10],
+                    popupAnchor: [0, -10],
                     className: 'airport-cluster-marker'
                 }});
             }}
@@ -2280,6 +2327,21 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 }}
             );
         }}
+
+        // Add cluster click handler to show popup with ICAO codes
+        airportLayer.on('clusterclick', function(cluster) {{
+            var markers = cluster.layer.getAllChildMarkers();
+            var icaoCodes = markers.map(function(marker) {{
+                return marker.options.icao || 'APT';
+            }}).filter(function(value, index, self) {{
+                return self.indexOf(value) === index;
+            }}).sort();
+
+            var popupContent = '<div style="font-size: 12px;"><b>' + markers.length + ' Airports</b><br>' +
+                             '<div style="max-height: 150px; overflow-y: auto; margin-top: 5px;">' +
+                             icaoCodes.join(', ') + '</div></div>';
+            cluster.layer.bindPopup(popupContent).openPopup();
+        }});
 
         // Add airports layer by default
         airportLayer.addTo(map);
@@ -2591,19 +2653,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 const icaoMatch = airport.name ? airport.name.match(/\\b([A-Z]{{4}})\\b/) : null;
                 const icao = icaoMatch ? icaoMatch[1] : 'APT';
 
-                const markerHtml = `
-                <div style="display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%);">
-                    <div style="background-color: #28a745; color: white; padding: 4px 8px;
-                                border: 2px solid #1e7e34; border-radius: 4px 4px 0 0;
-                                font-family: monospace; font-size: 13px; font-weight: bold;
-                                box-shadow: 0 2px 4px rgba(0,0,0,0.3); white-space: nowrap;">
-                        ${{icao}}
-                    </div>
-                    <div style="width: 0; height: 0;
-                                border-left: 6px solid transparent;
-                                border-right: 6px solid transparent;
-                                border-top: 8px solid #1e7e34;"></div>
-                </div>`;
+                const markerHtml = '<div class="airport-marker"></div>';
 
                 const latDms = ddToDms(airport.lat, true);
                 const lonDms = ddToDms(airport.lon, false);
@@ -2619,13 +2669,18 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 var marker = L.marker([airport.lat, airport.lon], {{
                     icon: L.divIcon({{
                         html: markerHtml,
-                        iconSize: [1, 1],
-                        iconAnchor: [0, 0]
+                        iconSize: [12, 12],
+                        iconAnchor: [6, 6],
+                        popupAnchor: [0, -6],
+                        className: ''
                     }}),
                     icao: icao  // Store ICAO for cluster icon function
-                }}).bindPopup(popup, {{
-                    autoPanPadding: [50, 50],
-                    offset: [0, -10]  // Offset popup slightly above marker
+                }})
+                .bindPopup(popup, {{ autoPanPadding: [50, 50] }})
+                .bindTooltip(icao, {{
+                    permanent: false,
+                    direction: 'top',
+                    offset: [2, -10]
                 }});
 
                 // Add click handler to select paths connected to this airport
