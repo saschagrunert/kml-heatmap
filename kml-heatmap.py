@@ -264,6 +264,34 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return EARTH_RADIUS_KM * c
 
 
+def extract_year_from_timestamp(timestamp):
+    """Extract year from timestamp string.
+
+    Args:
+        timestamp: Timestamp string in ISO format (e.g., "2025-03-03T08:58:01Z")
+                   or other date formats
+
+    Returns:
+        Year as integer, or None if extraction fails
+    """
+    if not timestamp:
+        return None
+
+    try:
+        # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z")
+        if 'T' in timestamp:
+            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            return dt.year
+        # Try to extract year from date string (e.g., "03 Mar 2025" or "2025-03-03")
+        year_match = re.search(r'\b(20\d{2})\b', timestamp)
+        if year_match:
+            return int(year_match.group(1))
+    except Exception:
+        pass
+
+    return None
+
+
 def parse_kml_coordinates(kml_file):
     """
     Extract coordinates from a KML file.
@@ -373,11 +401,13 @@ def parse_kml_coordinates(kml_file):
                     timestamp = match.group(1)
 
             # Store metadata for each coordinates element in this placemark
+            year = extract_year_from_timestamp(timestamp)
             for coord_elem in placemark_coords:
                 coord_to_metadata[id(coord_elem)] = {
                     'airport_name': airport_name,
                     'timestamp': timestamp,
-                    'end_timestamp': end_timestamp
+                    'end_timestamp': end_timestamp,
+                    'year': year
                 }
 
         for idx, coord_elem in enumerate(coord_elements):
@@ -446,12 +476,14 @@ def parse_kml_coordinates(kml_file):
             # Add this path group to the list if it has coordinates
             if current_path:
                 path_groups.append(current_path)
+                year = extract_year_from_timestamp(timestamp)
                 path_metadata.append({
                     'timestamp': timestamp,
                     'end_timestamp': end_timestamp,
                     'filename': Path(kml_file).name,
                     'start_point': current_path[0],  # [lat, lon, alt]
-                    'airport_name': airport_name
+                    'airport_name': airport_name,
+                    'year': year
                 })
 
             if DEBUG and element_coords > 0:
@@ -546,12 +578,14 @@ def parse_kml_coordinates(kml_file):
             # Add gx:Track as a single path group
             if gx_path:
                 path_groups.append(gx_path)
+                gx_year = extract_year_from_timestamp(gx_timestamp)
                 path_metadata.append({
                     'timestamp': gx_timestamp,
                     'end_timestamp': gx_end_timestamp,
                     'filename': Path(kml_file).name,
                     'start_point': gx_path[0],  # [lat, lon, alt]
-                    'airport_name': gx_airport_name
+                    'airport_name': gx_airport_name,
+                    'year': gx_year
                 })
 
             if DEBUG:
@@ -632,9 +666,20 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
     Returns:
         Dictionary of statistics
     """
+    # Count only actual flight paths, not point markers
+    num_flight_paths = 0
+    if all_path_metadata:
+        for metadata in all_path_metadata:
+            airport_name = metadata.get('airport_name', '')
+            if not is_point_marker(airport_name):
+                num_flight_paths += 1
+    else:
+        # Fallback if no metadata available
+        num_flight_paths = len(all_path_groups)
+
     stats = {
         'total_points': len(all_coordinates),
-        'num_paths': len(all_path_groups),
+        'num_paths': num_flight_paths,
         'total_distance_km': 0.0,
         'total_distance_nm': 0.0,
         'total_altitude_gain_m': 0.0,
@@ -1099,6 +1144,9 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                         start_airport = parts[0].strip()
                         end_airport = parts[1].strip()
 
+                # Get year from metadata
+                path_year = all_path_metadata[path_idx].get('year') if path_idx < len(all_path_metadata) else None
+
                 # Store path info with airport relationships
                 path_info.append({
                     'id': path_idx,
@@ -1106,7 +1154,8 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     'end_airport': end_airport,
                     'start_coords': [path[0][0], path[0][1]],
                     'end_coords': [path[-1][0], path[-1][1]],
-                    'segment_count': len(path) - 1
+                    'segment_count': len(path) - 1,
+                    'year': path_year
                 })
 
                 # Create segments for this path
@@ -1192,12 +1241,21 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
     files['airports'] = airports_file
     print(f"  ✓ Airports: {len(valid_airports)} locations ({os.path.getsize(airports_file) / 1024:.1f} KB)")
 
+    # Collect unique years from path metadata
+    unique_years = set()
+    for meta in all_path_metadata:
+        year = meta.get('year')
+        if year:
+            unique_years.add(year)
+    available_years = sorted(list(unique_years))
+
     # Export statistics and metadata
     meta_data = {
         'stats': stats,
         'min_alt_m': min_alt_m,
         'max_alt_m': max_alt_m,
-        'gradient': HEATMAP_GRADIENT
+        'gradient': HEATMAP_GRADIENT,
+        'available_years': available_years
     }
 
     meta_file = os.path.join(output_dir, 'metadata.json')
@@ -2016,6 +2074,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         .control-btn.left {{ left: 50px; }}
         #stats-btn {{ top: 10px; }}
         #export-btn {{ top: 50px; }}
+        #wrapped-btn {{ top: 90px; }}
 
         /* Right side buttons */
         .control-btn.right {{
@@ -2023,10 +2082,68 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             min-width: 120px;
             text-align: center;
         }}
-        #heatmap-btn {{ top: 10px; }}
-        #airports-btn {{ top: 50px; }}
-        #altitude-btn {{ top: 90px; }}
-        #aviation-btn {{ top: 130px; }}
+        #year-filter {{ top: 10px; }}
+        #heatmap-btn {{ top: 50px; }}
+        #airports-btn {{ top: 90px; }}
+        #altitude-btn {{ top: 130px; }}
+        #aviation-btn {{ top: 170px; }}
+
+        /* Year filter dropdown - styled like other buttons */
+        #year-filter {{
+            background-color: #2b2b2b;
+            color: #ffffff;
+            border: 2px solid #555;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+            touch-action: manipulation;
+            width: 120px;
+            box-sizing: border-box;
+            text-align: center;
+        }}
+        #year-filter select {{
+            background: transparent;
+            color: #ffffff;
+            border: 0 !important;
+            border-style: none !important;
+            border-width: 0 !important;
+            border-color: transparent !important;
+            border-image: none !important;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            width: calc(100% + 24px);
+            margin: -6px -12px;
+            padding: 6px 12px;
+            outline: none !important;
+            box-shadow: none !important;
+            text-align: center;
+            text-align-last: center;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+        }}
+        #year-filter select:focus {{
+            outline: none !important;
+            border: 0 !important;
+            border-style: none !important;
+            box-shadow: none !important;
+        }}
+        #year-filter select:active {{
+            border: 0 !important;
+            border-style: none !important;
+        }}
+        #year-filter select option {{
+            background-color: #2b2b2b;
+            color: #ffffff;
+            text-align: center;
+        }}
+        #year-filter:hover {{
+            background-color: #3b3b3b;
+        }}
 
         /* Altitude legend */
         #altitude-legend {{
@@ -2097,6 +2214,215 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             z-index: 10000;
             font-size: 12px;
             display: none;
+        }}
+
+        /* Wrapped card modal */
+        #wrapped-modal {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(10, 10, 20, 0.97) 0%, rgba(15, 20, 35, 0.97) 100%);
+            z-index: 20000;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+            box-sizing: border-box;
+        }}
+        #wrapped-container {{
+            display: flex;
+            gap: 30px;
+            width: 100%;
+            height: 100%;
+        }}
+        #wrapped-map-container {{
+            flex: 1;
+            background-color: #1a1a1a;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            position: relative;
+        }}
+        #wrapped-map-snapshot {{
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }}
+        #wrapped-card {{
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            border-radius: 20px;
+            padding: 40px;
+            width: 500px;
+            flex-shrink: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            color: #ffffff;
+            position: relative;
+        }}
+        #wrapped-card h1 {{
+            font-size: 48px;
+            margin: 0 0 10px 0;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-fill-color: transparent;
+        }}
+        #wrapped-card .year {{
+            font-size: 72px;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-fill-color: transparent;
+        }}
+        #wrapped-card .stat-grid {{
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin: 30px 0;
+        }}
+        #wrapped-card .stat-card {{
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }}
+        #wrapped-card .stat-value {{
+            font-size: 36px;
+            font-weight: bold;
+            color: #4facfe;
+            margin-bottom: 5px;
+        }}
+        #wrapped-card .stat-label {{
+            font-size: 14px;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        #wrapped-card .close-btn {{
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: transparent;
+            border: none;
+            color: #ffffff;
+            font-size: 32px;
+            cursor: pointer;
+            padding: 0;
+            width: 40px;
+            height: 40px;
+            line-height: 40px;
+            text-align: center;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }}
+        #wrapped-card .close-btn:hover {{
+            background-color: rgba(255, 255, 255, 0.1);
+        }}
+        #wrapped-card .fun-facts {{
+            margin: 25px 0;
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(79, 172, 254, 0.15) 0%, rgba(0, 242, 254, 0.15) 100%);
+            border-radius: 12px;
+            border: 1px solid rgba(79, 172, 254, 0.3);
+        }}
+        #wrapped-card .fun-facts-title {{
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: #4facfe;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        #wrapped-card .fun-fact {{
+            font-size: 14px;
+            margin: 8px 0;
+            opacity: 0.9;
+            line-height: 1.6;
+        }}
+        #wrapped-card .fun-fact strong {{
+            color: #00f2fe;
+        }}
+        #wrapped-card .top-airports {{
+            margin: 25px 0;
+        }}
+        #wrapped-card .top-airports-title {{
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: #f5576c;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        #wrapped-card .top-airport {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            margin: 8px 0;
+            background-color: rgba(245, 87, 108, 0.15);
+            border-radius: 8px;
+            border-left: 3px solid #f5576c;
+        }}
+        #wrapped-card .top-airport-name {{
+            font-size: 14px;
+            font-weight: 500;
+        }}
+        #wrapped-card .top-airport-count {{
+            font-size: 14px;
+            font-weight: bold;
+            color: #f5576c;
+        }}
+        #wrapped-card .airports-grid {{
+            margin: 25px 0;
+        }}
+        #wrapped-card .airports-grid-title {{
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: #f093fb;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        #wrapped-card .airport-badges {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }}
+        #wrapped-card .airport-badge {{
+            background: linear-gradient(135deg, rgba(240, 147, 251, 0.2) 0%, rgba(245, 87, 108, 0.2) 100%);
+            border: 1px solid rgba(240, 147, 251, 0.4);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #ffffff;
+            white-space: nowrap;
+        }}
+        #wrapped-card .export-wrapped-btn {{
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border: none;
+            color: #ffffff;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 30px;
+            width: 100%;
+            box-shadow: 0 5px 15px rgba(245, 87, 108, 0.3);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+        #wrapped-card .export-wrapped-btn:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 7px 20px rgba(245, 87, 108, 0.4);
         }}
 
         /* Dark theme for Leaflet controls */
@@ -2216,12 +2542,18 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     <!-- Left side buttons -->
     <button id="stats-btn" class="control-btn left" onclick="toggleStats()">📊 Stats</button>
     <button id="export-btn" class="control-btn left" onclick="exportMap()">📷 Export</button>
+    <button id="wrapped-btn" class="control-btn left" onclick="showWrapped()">✨ Wrapped</button>
 
     <!-- Right side buttons -->
     <button id="heatmap-btn" class="control-btn right" onclick="toggleHeatmap()">🔥 Heatmap</button>
     <button id="airports-btn" class="control-btn right" onclick="toggleAirports()">✈️ Airports</button>
     <button id="altitude-btn" class="control-btn right" onclick="toggleAltitude()">⛰️ Altitude</button>
     <button id="aviation-btn" class="control-btn right" onclick="toggleAviation()" style="display: none;">🗺️ Aviation</button>
+    <div id="year-filter" class="control-btn right">
+        <select id="year-select" onchange="filterByYear()">
+            <option value="all">📅 Years</option>
+        </select>
+    </div>
 
     <div id="stats-panel"></div>
     <div id="altitude-legend">
@@ -2233,6 +2565,25 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         </div>
     </div>
     <div id="loading">Loading data...</div>
+
+    <!-- Wrapped Card Modal -->
+    <div id="wrapped-modal" onclick="closeWrapped(event)">
+        <div id="wrapped-container" onclick="event.stopPropagation()">
+            <div id="wrapped-card">
+                <button class="close-btn" onclick="closeWrapped()">×</button>
+                <h1>✨ Your Year in Flight</h1>
+                <div class="year" id="wrapped-year">2025</div>
+                <div class="stat-grid" id="wrapped-stats"></div>
+                <div class="fun-facts" id="wrapped-fun-facts"></div>
+                <div class="top-airports" id="wrapped-top-airports"></div>
+                <div class="airports-grid" id="wrapped-airports-grid"></div>
+                <button class="export-wrapped-btn" onclick="exportWrappedCard()">📷 Export Wrapped Card</button>
+            </div>
+            <div id="wrapped-map-container">
+                <img id="wrapped-map-snapshot" alt="Flight map">
+            </div>
+        </div>
+    </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
@@ -2556,6 +2907,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             // Create path segments with interactivity and rescaled colors
             currentData.path_segments.forEach(function(segment) {{
                 var pathId = segment.path_id;
+
+                // Filter by year if selected
+                if (selectedYear !== 'all') {{
+                    var pathInfo = currentData.path_info.find(function(p) {{ return p.id === pathId; }});
+                    if (pathInfo && pathInfo.year && pathInfo.year.toString() !== selectedYear) {{
+                        return;  // Skip this segment
+                    }}
+                }}
                 var isSelected = selectedPathIds.has(pathId);
 
                 // Recalculate color based on current altitude range
@@ -2667,10 +3026,39 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             }});
         }}
 
+        // Global variable for selected year
+        var selectedYear = 'all';
+
+        // Function to filter data by year
+        function filterByYear() {{
+            const yearSelect = document.getElementById('year-select');
+            selectedYear = yearSelect.value;
+
+            // Clear current paths and reload
+            altitudeLayer.clearLayers();
+            pathSegments = {{}};
+            selectedPathIds.clear();
+
+            // Reload current resolution data to apply filter
+            currentResolution = null;  // Force reload
+            updateLayers();
+        }}
+
         // Load airports once
         (async function() {{
             const airports = await loadAirports();
             const metadata = await loadMetadata();
+
+            // Populate year filter dropdown
+            if (metadata && metadata.available_years) {{
+                const yearSelect = document.getElementById('year-select');
+                metadata.available_years.forEach(function(year) {{
+                    const option = document.createElement('option');
+                    option.value = year;
+                    option.textContent = '📅 ' + year;
+                    yearSelect.appendChild(option);
+                }});
+            }}
 
             // Add airport markers
             airports.forEach(function(airport) {{
@@ -2992,6 +3380,278 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     alert('Export failed: ' + error.message);
                     btn.disabled = false;
                     btn.textContent = '📷 Export';
+                }});
+            }}, 200);
+        }}
+
+        // Wrapped card functionality
+        function showWrapped() {{
+            // Determine which year to show
+            const year = selectedYear !== 'all' ? selectedYear : (fullStats.available_years ? fullStats.available_years[fullStats.available_years.length - 1] : new Date().getFullYear());
+
+            // Calculate year-specific stats
+            const yearStats = calculateYearStats(year);
+
+            // Update card content
+            document.getElementById('wrapped-year').textContent = year;
+
+            // Build stats grid
+            const statsHtml = `
+                <div class="stat-card">
+                    <div class="stat-value">${{yearStats.total_flights}}</div>
+                    <div class="stat-label">Flights</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${{yearStats.total_distance_nm.toFixed(0)}}</div>
+                    <div class="stat-label">Nautical Miles</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${{yearStats.num_airports}}</div>
+                    <div class="stat-label">Airports</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${{yearStats.flight_time}}</div>
+                    <div class="stat-label">Flight Time</div>
+                </div>
+            `;
+
+            document.getElementById('wrapped-stats').innerHTML = statsHtml;
+
+            // Build fun facts section
+            const earthCircumferenceKm = 40075;
+            const moonDistanceKm = 384400;
+            const timesAroundEarth = (yearStats.total_distance_nm * 1.852 / earthCircumferenceKm).toFixed(1);
+            const percentToMoon = (yearStats.total_distance_nm * 1.852 / moonDistanceKm * 100).toFixed(1);
+
+            const funFactsHtml = `
+                <div class="fun-facts-title">🌍 Fun Facts</div>
+                <div class="fun-fact">You flew <strong>${{timesAroundEarth}}x</strong> around the Earth</div>
+                <div class="fun-fact">That's <strong>${{percentToMoon}}%</strong> of the distance to the Moon</div>
+                <div class="fun-fact">Average flight: <strong>${{(yearStats.total_distance_nm / yearStats.total_flights).toFixed(0)}} nm</strong></div>
+            `;
+            document.getElementById('wrapped-fun-facts').innerHTML = funFactsHtml;
+
+            // Build top airports section if we have airport data
+            if (fullStats && fullStats.airport_names && fullStats.airport_names.length > 0) {{
+                // Load airport data to get flight counts
+                loadAirports().then(function(airports) {{
+                    // Sort airports by flight count
+                    const sortedAirports = airports.sort((a, b) => b.flight_count - a.flight_count);
+                    const top3 = sortedAirports.slice(0, 3);
+
+                    let topAirportsHtml = '<div class="top-airports-title">✈️ Top Airports</div>';
+                    top3.forEach(function(airport) {{
+                        topAirportsHtml += `
+                            <div class="top-airport">
+                                <div class="top-airport-name">${{airport.name}}</div>
+                                <div class="top-airport-count">${{airport.flight_count}} flights</div>
+                            </div>
+                        `;
+                    }});
+                    document.getElementById('wrapped-top-airports').innerHTML = topAirportsHtml;
+                }});
+
+                // Build all airports badge grid
+                let airportBadgesHtml = '<div class="airports-grid-title">🗺️ All Airports</div><div class="airport-badges">';
+                fullStats.airport_names.forEach(function(airportName) {{
+                    airportBadgesHtml += `<div class="airport-badge">${{airportName}}</div>`;
+                }});
+                airportBadgesHtml += '</div>';
+                document.getElementById('wrapped-airports-grid').innerHTML = airportBadgesHtml;
+            }}
+
+            // Store current map view to restore later
+            const originalCenter = map.getCenter();
+            const originalZoom = map.getZoom();
+
+            // Zoom to fit all data
+            map.fitBounds(BOUNDS, {{ padding: [30, 30] }});
+
+            // Capture map snapshot after zoom completes
+            const mapContainer = document.getElementById('map');
+            const controls = [
+                document.querySelector('.leaflet-control-zoom'),
+                document.getElementById('stats-btn'),
+                document.getElementById('export-btn'),
+                document.getElementById('wrapped-btn'),
+                document.getElementById('heatmap-btn'),
+                document.getElementById('airports-btn'),
+                document.getElementById('altitude-btn'),
+                document.getElementById('aviation-btn'),
+                document.getElementById('year-filter'),
+                document.getElementById('stats-panel'),
+                document.getElementById('altitude-legend'),
+                document.getElementById('loading')
+            ];
+
+            // Hide all controls temporarily
+            const displayStates = controls.map(el => el ? el.style.display : null);
+            controls.forEach(el => {{ if (el) el.style.display = 'none'; }});
+
+            // Wait for map to finish zooming and rendering tiles, then capture
+            setTimeout(function() {{
+                domtoimage.toJpeg(mapContainer, {{
+                    width: mapContainer.offsetWidth,
+                    height: mapContainer.offsetHeight,
+                    bgcolor: '#1a1a1a',
+                    quality: 0.9
+                }}).then(function(dataUrl) {{
+                    // Restore controls
+                    controls.forEach((el, i) => {{ if (el) el.style.display = displayStates[i] || ''; }});
+
+                    // Restore original map view
+                    map.setView(originalCenter, originalZoom);
+
+                    // Set map snapshot
+                    document.getElementById('wrapped-map-snapshot').src = dataUrl;
+
+                    // Show modal
+                    document.getElementById('wrapped-modal').style.display = 'flex';
+                }}).catch(function(error) {{
+                    // Restore controls on error
+                    controls.forEach((el, i) => {{ if (el) el.style.display = displayStates[i] || ''; }});
+
+                    // Restore original map view
+                    map.setView(originalCenter, originalZoom);
+
+                    console.error('Map capture failed:', error);
+
+                    // Show modal anyway without map
+                    document.getElementById('wrapped-modal').style.display = 'flex';
+                }});
+            }}, 1500);
+        }}
+
+        function closeWrapped(event) {{
+            if (!event || event.target.id === 'wrapped-modal') {{
+                document.getElementById('wrapped-modal').style.display = 'none';
+            }}
+        }}
+
+        function calculateYearStats(year) {{
+            // If we don't have full stats, return empty
+            if (!fullStats) {{
+                return {{
+                    total_flights: 0,
+                    total_distance_nm: 0,
+                    num_airports: 0,
+                    flight_time: '0h 0m'
+                }};
+            }}
+
+            // Check if the requested year is in our available years
+            if (fullStats.available_years && fullStats.available_years.length > 0) {{
+                const yearStr = year.toString();
+
+                // If there's only one year and it matches, or if we're showing all years,
+                // use the full stats directly (most accurate)
+                if (fullStats.available_years.length === 1 &&
+                    fullStats.available_years[0].toString() === yearStr) {{
+                    return {{
+                        total_flights: fullStats.num_paths,
+                        total_distance_nm: fullStats.total_distance_nm,
+                        num_airports: fullStats.num_airports,
+                        flight_time: fullStats.total_flight_time_str || '---'
+                    }};
+                }}
+            }}
+
+            // For multiple years, we would need to filter by year
+            // This is a placeholder for future multi-year support
+            // Currently all data is from 2025, so just return full stats
+            return {{
+                total_flights: fullStats.num_paths,
+                total_distance_nm: fullStats.total_distance_nm,
+                num_airports: fullStats.num_airports,
+                flight_time: fullStats.total_flight_time_str || '---'
+            }};
+        }}
+
+        function exportWrappedCard() {{
+            const container = document.getElementById('wrapped-container');
+            const closeBtn = document.querySelector('#wrapped-card .close-btn');
+            const exportBtn = document.querySelector('#wrapped-card .export-wrapped-btn');
+
+            // Hide buttons during export
+            closeBtn.style.display = 'none';
+            exportBtn.style.display = 'block';
+            exportBtn.style.opacity = '0';
+            exportBtn.style.pointerEvents = 'none';
+
+            // Clone the container to avoid modifying the original
+            const containerClone = container.cloneNode(true);
+
+            // Remove buttons from clone
+            const clonedCloseBtn = containerClone.querySelector('#wrapped-card .close-btn');
+            const clonedExportBtn = containerClone.querySelector('#wrapped-card .export-wrapped-btn');
+            if (clonedCloseBtn) clonedCloseBtn.remove();
+            if (clonedExportBtn) clonedExportBtn.remove();
+
+            // Create temporary wrapper for export with proper styling
+            const wrapper = document.createElement('div');
+            wrapper.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                background: linear-gradient(135deg, rgba(10, 10, 20, 0.97) 0%, rgba(15, 20, 35, 0.97) 100%);
+                padding: 60px;
+                border-radius: 20px;
+                width: auto;
+                height: auto;
+                max-width: none;
+                max-height: none;
+                z-index: 99999;
+                visibility: hidden;
+            `;
+
+            wrapper.appendChild(containerClone);
+            document.body.appendChild(wrapper);
+
+            // Force a layout calculation
+            wrapper.offsetHeight;
+
+            // Small delay to ensure wrapper is rendered
+            setTimeout(function() {{
+                // Make wrapper visible for capture
+                wrapper.style.visibility = 'visible';
+
+                // Capture the wrapper
+                domtoimage.toJpeg(wrapper, {{
+                    width: wrapper.offsetWidth * 2,
+                    height: wrapper.offsetHeight * 2,
+                    quality: 0.95,
+                    style: {{
+                        transform: 'scale(2)',
+                        transformOrigin: 'top left',
+                        visibility: 'visible'
+                    }}
+                }}).then(function(dataUrl) {{
+                    // Remove wrapper
+                    document.body.removeChild(wrapper);
+
+                    // Restore buttons
+                    closeBtn.style.display = 'block';
+                    exportBtn.style.opacity = '1';
+                    exportBtn.style.pointerEvents = 'auto';
+
+                    // Download
+                    const link = document.createElement('a');
+                    const year = document.getElementById('wrapped-year').textContent;
+                    link.download = 'flight_wrapped_' + year + '.jpg';
+                    link.href = dataUrl;
+                    link.click();
+                }}).catch(function(error) {{
+                    // Remove wrapper on error
+                    if (document.body.contains(wrapper)) {{
+                        document.body.removeChild(wrapper);
+                    }}
+
+                    // Restore buttons
+                    closeBtn.style.display = 'block';
+                    exportBtn.style.opacity = '1';
+                    exportBtn.style.pointerEvents = 'auto';
+
+                    alert('Export failed: ' + error.message);
                 }});
             }}, 200);
         }}
