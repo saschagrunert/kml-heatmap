@@ -2133,8 +2133,31 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             box-shadow: 0 2px 6px rgba(0,0,0,0.4);
             cursor: pointer;
             transition: all 0.2s ease;
+            flex-shrink: 0;
         }}
-        .airport-marker:hover {{
+
+        /* Airport label styles */
+        .airport-label {{
+            background-color: rgba(43, 43, 43, 0.9);
+            border: 1px solid #28a745;
+            color: #ffffff;
+            font-family: monospace;
+            font-weight: bold;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+            margin-left: 6px;
+        }}
+        .airport-marker-container {{
+            display: flex;
+            align-items: center;
+            width: auto;
+            height: 16px;
+        }}
+        .airport-marker-container:hover .airport-marker {{
             transform: scale(1.3);
             box-shadow: 0 3px 8px rgba(0,0,0,0.6);
         }}
@@ -2653,7 +2676,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 const icaoMatch = airport.name ? airport.name.match(/\\b([A-Z]{{4}})\\b/) : null;
                 const icao = icaoMatch ? icaoMatch[1] : 'APT';
 
-                const markerHtml = '<div class="airport-marker"></div>';
+                const markerHtml = '<div class="airport-marker-container"><div class="airport-marker"></div><div class="airport-label">' + icao + '</div></div>';
 
                 const latDms = ddToDms(airport.lat, true);
                 const lonDms = ddToDms(airport.lon, false);
@@ -2671,17 +2694,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                         html: markerHtml,
                         iconSize: [12, 12],
                         iconAnchor: [6, 6],
-                        popupAnchor: [0, -6],
+                        popupAnchor: [2, -6],
                         className: ''
                     }}),
                     icao: icao  // Store ICAO for cluster icon function
                 }})
-                .bindPopup(popup, {{ autoPanPadding: [50, 50] }})
-                .bindTooltip(icao, {{
-                    permanent: false,
-                    direction: 'top',
-                    offset: [2, -10]
-                }});
+                .bindPopup(popup, {{ autoPanPadding: [50, 50] }});
 
                 // Add click handler to select paths connected to this airport
                 marker.on('click', function(e) {{
