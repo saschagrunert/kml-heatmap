@@ -2256,11 +2256,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             padding: 40px;
             width: 500px;
             flex-shrink: 0;
-            overflow-y: auto;
-            overflow-x: hidden;
+            overflow: hidden;
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
             color: #ffffff;
             position: relative;
+            display: flex;
+            flex-direction: column;
         }}
         #wrapped-card h1 {{
             font-size: 48px;
@@ -2406,6 +2407,27 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             color: #ffffff;
             white-space: nowrap;
         }}
+        #wrapped-card-content {{
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            margin: 0 -40px;
+            padding: 0 40px;
+        }}
+        #wrapped-card-content::-webkit-scrollbar {{
+            width: 8px;
+        }}
+        #wrapped-card-content::-webkit-scrollbar-track {{
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }}
+        #wrapped-card-content::-webkit-scrollbar-thumb {{
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }}
+        #wrapped-card-content::-webkit-scrollbar-thumb:hover {{
+            background: rgba(255, 255, 255, 0.3);
+        }}
         #wrapped-card .export-wrapped-btn {{
             background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             border: none;
@@ -2419,6 +2441,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             width: 100%;
             box-shadow: 0 5px 15px rgba(245, 87, 108, 0.3);
             transition: transform 0.2s, box-shadow 0.2s;
+            flex-shrink: 0;
         }}
         #wrapped-card .export-wrapped-btn:hover {{
             transform: translateY(-2px);
@@ -2573,10 +2596,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 <button class="close-btn" onclick="closeWrapped()">×</button>
                 <h1>✨ Your Year in Flight</h1>
                 <div class="year" id="wrapped-year">2025</div>
-                <div class="stat-grid" id="wrapped-stats"></div>
-                <div class="fun-facts" id="wrapped-fun-facts"></div>
-                <div class="top-airports" id="wrapped-top-airports"></div>
-                <div class="airports-grid" id="wrapped-airports-grid"></div>
+                <div id="wrapped-card-content">
+                    <div class="stat-grid" id="wrapped-stats"></div>
+                    <div class="fun-facts" id="wrapped-fun-facts"></div>
+                    <div class="top-airports" id="wrapped-top-airports"></div>
+                    <div class="airports-grid" id="wrapped-airports-grid"></div>
+                </div>
                 <button class="export-wrapped-btn" onclick="exportWrappedCard()">📷 Export Wrapped Card</button>
             </div>
             <div id="wrapped-map-container">
