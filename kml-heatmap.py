@@ -2244,6 +2244,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             overflow: hidden;
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
             position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }}
         #wrapped-map-snapshot {{
             width: 100%;
@@ -2499,13 +2502,18 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             white-space: nowrap;
             pointer-events: none;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-            margin-left: 6px;
+            position: absolute;
+            bottom: 18px;
+            left: 50%;
+            transform: translateX(-50%);
         }}
         .airport-marker-container {{
+            position: relative;
             display: flex;
             align-items: center;
-            width: auto;
-            height: 16px;
+            justify-content: center;
+            width: 12px;
+            height: 12px;
         }}
         .airport-marker-container:hover .airport-marker {{
             transform: scale(1.3);
@@ -3491,6 +3499,23 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
             // Zoom to fit all data
             map.fitBounds(BOUNDS, {{ padding: [30, 30] }});
+
+            // Force map to invalidate and recalculate size
+            setTimeout(function() {{
+                map.invalidateSize();
+
+                // Calculate actual pixel dimensions of the bounds on the map after fitBounds completes
+                const bounds = map.getBounds();
+                const northWest = map.latLngToContainerPoint(bounds.getNorthWest());
+                const southEast = map.latLngToContainerPoint(bounds.getSouthEast());
+                const mapWidth = Math.abs(southEast.x - northWest.x);
+                const mapHeight = Math.abs(southEast.y - northWest.y);
+                const actualAspectRatio = mapWidth / mapHeight;
+
+                // Set the aspect ratio of the wrapped map container
+                const wrappedMapContainer = document.getElementById('wrapped-map-container');
+                wrappedMapContainer.style.aspectRatio = actualAspectRatio.toString();
+            }}, 100);
 
             // Capture map snapshot after zoom completes
             const mapContainer = document.getElementById('map');
