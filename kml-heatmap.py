@@ -2451,6 +2451,104 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             box-shadow: 0 7px 20px rgba(245, 87, 108, 0.4);
         }}
 
+        /* Responsive styles for mobile portrait mode */
+        @media (max-width: 768px) {{
+            #wrapped-modal {{
+                padding: 10px;
+            }}
+            #wrapped-container {{
+                flex-direction: column;
+                gap: 15px;
+                overflow-y: auto;
+            }}
+            #wrapped-map-container {{
+                order: 2;
+                min-height: 300px;
+                max-height: 400px;
+            }}
+            #wrapped-card {{
+                order: 1;
+                width: 100%;
+                max-width: 100%;
+                padding: 20px;
+                box-sizing: border-box;
+            }}
+            #wrapped-card h1 {{
+                font-size: 28px;
+                word-wrap: break-word;
+                line-height: 1.2;
+            }}
+            #wrapped-card .year {{
+                font-size: 48px;
+                margin: 15px 0;
+            }}
+            #wrapped-card .stat-grid {{
+                gap: 12px;
+                margin: 20px 0;
+            }}
+            #wrapped-card .stat-card {{
+                padding: 15px 10px;
+            }}
+            #wrapped-card .stat-value {{
+                font-size: 28px;
+            }}
+            #wrapped-card .stat-label {{
+                font-size: 11px;
+            }}
+            #wrapped-card .fun-facts {{
+                margin: 15px 0;
+                padding: 15px;
+            }}
+            #wrapped-card .fun-facts-title {{
+                font-size: 14px;
+            }}
+            #wrapped-card .fun-fact {{
+                font-size: 12px;
+            }}
+            #wrapped-card .top-airports {{
+                margin: 15px 0;
+            }}
+            #wrapped-card .top-airports-title {{
+                font-size: 14px;
+            }}
+            #wrapped-card .top-airport {{
+                padding: 8px 12px;
+            }}
+            #wrapped-card .top-airport-name {{
+                font-size: 12px;
+            }}
+            #wrapped-card .top-airport-count {{
+                font-size: 12px;
+            }}
+            #wrapped-card .airports-grid {{
+                margin: 15px 0;
+            }}
+            #wrapped-card .airports-grid-title {{
+                font-size: 14px;
+            }}
+            #wrapped-card .airport-badge {{
+                padding: 5px 10px;
+                font-size: 11px;
+            }}
+            #wrapped-card-content {{
+                margin: 0 -20px;
+                padding: 0 20px;
+            }}
+            #wrapped-card .export-wrapped-btn {{
+                padding: 12px 20px;
+                font-size: 14px;
+                margin-top: 20px;
+            }}
+            #wrapped-card .close-btn {{
+                top: 10px;
+                right: 10px;
+                font-size: 28px;
+                width: 36px;
+                height: 36px;
+                line-height: 36px;
+            }}
+        }}
+
         /* Dark theme for Leaflet controls */
         .leaflet-control-attribution {{ display: none !important; }}
         .leaflet-control-layers {{
@@ -3499,8 +3597,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             const originalCenter = map.getCenter();
             const originalZoom = map.getZoom();
 
-            // Zoom to fit all data
-            map.fitBounds(BOUNDS, {{ padding: [30, 30] }});
+            // Zoom to fit all data with extra padding to ensure all airports are visible
+            map.fitBounds(BOUNDS, {{ padding: [80, 80] }});
 
             // Force map to invalidate and recalculate size
             setTimeout(function() {{
