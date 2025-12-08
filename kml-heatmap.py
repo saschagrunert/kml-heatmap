@@ -547,6 +547,16 @@ def parse_kml_coordinates(kml_file):
 
                     break
 
+            # Get all <when> elements in order - they correspond 1:1 with gx:coord elements
+            when_elems = []
+            for placemark in placemarks:
+                placemark_when = placemark.findall('.//kml:when', namespaces)
+                if not placemark_when:
+                    placemark_when = placemark.findall('.//when')
+                if placemark_when and len(placemark_when) == len(gx_coords):
+                    when_elems = placemark_when
+                    break
+
             for idx, gx_coord in enumerate(gx_coords):
                 if gx_coord.text is None:
                     continue
@@ -562,6 +572,11 @@ def parse_kml_coordinates(kml_file):
                         lat = float(parts[1])
                         alt = float(parts[2]) if len(parts) >= 3 else None
 
+                        # Get corresponding timestamp
+                        timestamp_str = None
+                        if idx < len(when_elems) and when_elems[idx].text:
+                            timestamp_str = when_elems[idx].text.strip()
+
                         # Clamp negative altitudes to 0 (below sea level = 0ft)
                         if alt is not None and alt < 0:
                             alt = 0.0
@@ -569,7 +584,11 @@ def parse_kml_coordinates(kml_file):
                         coordinates.append([lat, lon])
 
                         if alt is not None:
-                            gx_path.append([lat, lon, alt])
+                            # Store as [lat, lon, alt, timestamp]
+                            if timestamp_str:
+                                gx_path.append([lat, lon, alt, timestamp_str])
+                            else:
+                                gx_path.append([lat, lon, alt])
                     except ValueError:
                         if DEBUG:
                             print(f"  DEBUG: Failed to parse gx:coord: {coord_text}")
@@ -709,8 +728,9 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
 
     for path in valid_paths:
         for i in range(len(path) - 1):
-            lat1, lon1, alt1 = path[i]
-            lat2, lon2, alt2 = path[i + 1]
+            # Handle both 3-element [lat,lon,alt] and 4-element [lat,lon,alt,timestamp]
+            lat1, lon1, alt1 = path[i][0], path[i][1], path[i][2]
+            lat2, lon2, alt2 = path[i + 1][0], path[i + 1][1], path[i + 1][2]
 
             # Add to total distance
             total_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
@@ -764,6 +784,16 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
                 stats['total_flight_time_str'] = f"{hours}h {minutes}m"
             else:
                 stats['total_flight_time_str'] = f"{minutes}m"
+
+    # Calculate average groundspeed in knots (nautical miles per hour)
+    if stats['total_flight_time_seconds'] > 0 and stats['total_distance_nm'] > 0:
+        hours = stats['total_flight_time_seconds'] / 3600
+        stats['average_groundspeed_knots'] = stats['total_distance_nm'] / hours
+    else:
+        stats['average_groundspeed_knots'] = 0
+
+    # Max groundspeed will be added later from path segments
+    stats['max_groundspeed_knots'] = 0
 
     return stats
 
@@ -819,8 +849,9 @@ def create_altitude_layer(all_path_groups, m):
 
             # Draw colored segments
             for i in range(len(path) - 1):
-                lat1, lon1, alt1_m = path[i]
-                lat2, lon2, alt2_m = path[i + 1]
+                # Handle both 3-element [lat,lon,alt] and 4-element [lat,lon,alt,timestamp]
+                lat1, lon1, alt1_m = path[i][0], path[i][1], path[i][2]
+                lat2, lon2, alt2_m = path[i + 1][0], path[i + 1][1], path[i + 1][2]
 
                 avg_alt_m = (alt1_m + alt2_m) / 2
                 avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
@@ -1099,8 +1130,19 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
     }
 
     files = {}
+    max_groundspeed_knots = 0  # Track maximum groundspeed across all segments
+    min_groundspeed_knots = float('inf')  # Track minimum groundspeed across all segments
 
-    for res_name, res_config in resolutions.items():
+    # Track cruise speed statistics (only segments >1000ft AGL)
+    cruise_speed_total_distance = 0  # Total distance in cruise (nm)
+    cruise_speed_total_time = 0  # Total time in cruise (seconds)
+    CRUISE_ALTITUDE_THRESHOLD_FT = 1000  # AGL threshold for cruise
+
+    # Process resolutions in order, with z14_plus first to establish the groundspeed baseline
+    resolution_order = ['z14_plus', 'z11_13', 'z8_10', 'z5_7', 'z0_4']
+
+    for res_name in resolution_order:
+        res_config = resolutions[res_name]
         # Downsample coordinates for heatmap
         if res_config['epsilon'] > 0:
             # Use RDP for path-based downsampling
@@ -1147,6 +1189,27 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                 # Get year from metadata
                 path_year = all_path_metadata[path_idx].get('year') if path_idx < len(all_path_metadata) else None
 
+                # Calculate total path duration and distance for groundspeed calculation
+                path_duration_seconds = 0
+                path_distance_km = 0
+                start_ts = metadata.get('timestamp')
+                end_ts = metadata.get('end_timestamp')
+
+                if start_ts and end_ts:
+                    try:
+                        if 'T' in start_ts and 'T' in end_ts:
+                            start_dt = datetime.fromisoformat(start_ts.replace('Z', '+00:00'))
+                            end_dt = datetime.fromisoformat(end_ts.replace('Z', '+00:00'))
+                            path_duration_seconds = (end_dt - start_dt).total_seconds()
+                    except Exception:
+                        pass
+
+                # Calculate total path distance
+                for i in range(len(path) - 1):
+                    lat1, lon1 = path[i][0], path[i][1]
+                    lat2, lon2 = path[i + 1][0], path[i + 1][1]
+                    path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+
                 # Store path info with airport relationships
                 path_info.append({
                     'id': path_idx,
@@ -1158,19 +1221,134 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     'year': path_year
                 })
 
-                # Create segments for this path
+                # Define realistic groundspeed limits for general aviation
+                MAX_GROUNDSPEED_KNOTS = 200  # Reasonable max for typical general aviation
+                MIN_SEGMENT_TIME_SECONDS = 0.1  # Avoid division by very small time differences
+                SPEED_WINDOW_SECONDS = 120  # 2 minute rolling average window
+
+                # Calculate ground level for this path (minimum altitude in meters)
+                ground_level_m = min([coord[2] for coord in path]) if path else 0
+
+                # First pass: calculate instantaneous speeds and timestamps for all segments
+                segment_speeds = []  # List of (timestamp, speed, distance, time_delta)
+
                 for i in range(len(path) - 1):
-                    lat1, lon1, alt1_m = path[i]
-                    lat2, lon2, alt2_m = path[i + 1]
+                    coord1 = path[i]
+                    coord2 = path[i + 1]
+
+                    lat1, lon1 = coord1[0], coord1[1]
+                    lat2, lon2 = coord2[0], coord2[1]
+                    segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
+
+                    # Try to calculate speed from timestamps
+                    instant_speed = 0
+                    timestamp = None
+                    time_delta = 0
+
+                    if len(coord1) >= 4 and len(coord2) >= 4:
+                        ts1, ts2 = coord1[3], coord2[3]
+                        try:
+                            if 'T' in ts1 and 'T' in ts2:
+                                dt1 = datetime.fromisoformat(ts1.replace('Z', '+00:00'))
+                                dt2 = datetime.fromisoformat(ts2.replace('Z', '+00:00'))
+                                time_delta = (dt2 - dt1).total_seconds()
+                                timestamp = dt1  # Use start time of segment
+
+                                if time_delta >= MIN_SEGMENT_TIME_SECONDS:
+                                    segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
+                                    instant_speed = (segment_distance_nm / time_delta) * 3600
+                                    # Cap at max speed
+                                    if instant_speed > MAX_GROUNDSPEED_KNOTS:
+                                        instant_speed = 0  # Ignore unrealistic speeds
+                        except Exception:
+                            pass
+
+                    segment_speeds.append({
+                        'index': i,
+                        'timestamp': timestamp,
+                        'speed': instant_speed,
+                        'distance': segment_distance_km,
+                        'time_delta': time_delta
+                    })
+
+                # Second pass: calculate rolling average speeds using time window
+                for i in range(len(path) - 1):
+                    coord1 = path[i]
+                    coord2 = path[i + 1]
+                    lat1, lon1, alt1_m = coord1[0], coord1[1], coord1[2]
+                    lat2, lon2, alt2_m = coord2[0], coord2[1], coord2[2]
+
                     avg_alt_m = (alt1_m + alt2_m) / 2
                     avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
                     color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
+
+                    # Calculate windowed average groundspeed
+                    groundspeed_knots = 0
+                    current_segment = segment_speeds[i]
+                    current_timestamp = current_segment['timestamp']
+
+                    if current_timestamp is not None:
+                        # Collect segments within time window (±60 seconds from current point)
+                        window_distance = 0
+                        window_time = 0
+
+                        for seg in segment_speeds:
+                            if seg['timestamp'] is None or seg['speed'] == 0:
+                                continue
+
+                            # Calculate time difference from current segment
+                            time_diff = abs((seg['timestamp'] - current_timestamp).total_seconds())
+
+                            # Include segments within the window
+                            if time_diff <= SPEED_WINDOW_SECONDS / 2:
+                                window_distance += seg['distance']
+                                window_time += seg['time_delta']
+
+                        # Calculate average speed over the window
+                        if window_time >= MIN_SEGMENT_TIME_SECONDS:
+                            window_distance_nm = window_distance * KM_TO_NAUTICAL_MILES
+                            groundspeed_knots = (window_distance_nm / window_time) * 3600
+                            # Cap at max speed
+                            if groundspeed_knots > MAX_GROUNDSPEED_KNOTS:
+                                groundspeed_knots = 0
+
+                    # Fall back to path average if no timestamp-based calculation
+                    if groundspeed_knots == 0 and path_duration_seconds > 0 and path_distance_km > 0:
+                        segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
+                        segment_time_seconds = (segment_distance_km / path_distance_km) * path_duration_seconds
+                        if segment_time_seconds >= MIN_SEGMENT_TIME_SECONDS:
+                            segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
+                            calculated_speed = (segment_distance_nm / segment_time_seconds) * 3600
+                            if 0 < calculated_speed <= MAX_GROUNDSPEED_KNOTS:
+                                groundspeed_knots = calculated_speed
+
+                    # Track maximum and minimum groundspeed (only for full resolution to get accurate range)
+                    if res_name == 'z14_plus' and groundspeed_knots > 0:
+                        if groundspeed_knots > max_groundspeed_knots:
+                            max_groundspeed_knots = groundspeed_knots
+                        if groundspeed_knots < min_groundspeed_knots:
+                            min_groundspeed_knots = groundspeed_knots
+
+                        # Track cruise speed (only segments >1000ft AGL)
+                        altitude_agl_m = avg_alt_m - ground_level_m
+                        altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
+                        if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
+                            # This is a cruise segment
+                            if window_time >= MIN_SEGMENT_TIME_SECONDS:
+                                cruise_speed_total_distance += window_distance * KM_TO_NAUTICAL_MILES
+                                cruise_speed_total_time += window_time
+
+                    # For downsampled resolutions, clamp to the max from full resolution to avoid
+                    # artificially high speeds caused by downsampling (fewer GPS points = longer segments)
+                    if res_name != 'z14_plus' and max_groundspeed_knots > 0 and groundspeed_knots > max_groundspeed_knots:
+                        groundspeed_knots = max_groundspeed_knots
 
                     path_segments.append({
                         'coords': [[lat1, lon1], [lat2, lon2]],
                         'color': color,
                         'altitude_ft': avg_alt_ft,
                         'altitude_m': round(avg_alt_m, 0),
+                        'groundspeed_knots': round(groundspeed_knots, 1),
                         'path_id': path_idx  # Link segment to its path
                     })
 
@@ -1249,11 +1427,27 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
             unique_years.add(year)
     available_years = sorted(list(unique_years))
 
+    # Update stats with maximum groundspeed
+    stats['max_groundspeed_knots'] = round(max_groundspeed_knots, 1)
+
+    # Calculate and add cruise speed (average speed at >1000ft AGL)
+    if cruise_speed_total_time > 0:
+        cruise_speed_knots = (cruise_speed_total_distance / cruise_speed_total_time) * 3600
+        stats['cruise_speed_knots'] = round(cruise_speed_knots, 1)
+    else:
+        stats['cruise_speed_knots'] = 0
+
+    # Handle case where no groundspeed was calculated
+    if min_groundspeed_knots == float('inf'):
+        min_groundspeed_knots = 0
+
     # Export statistics and metadata
     meta_data = {
         'stats': stats,
         'min_alt_m': min_alt_m,
         'max_alt_m': max_alt_m,
+        'min_groundspeed_knots': round(min_groundspeed_knots, 1),
+        'max_groundspeed_knots': round(max_groundspeed_knots, 1),
         'gradient': HEATMAP_GRADIENT,
         'available_years': available_years
     }
@@ -1585,6 +1779,12 @@ def create_heatmap(kml_files, output_file="heatmap.html"):
         print(f"  • Altitude gain: {stats['total_altitude_gain_ft']:.0f}ft")
     if stats.get('total_flight_time_str'):
         print(f"  • Total flight time: {stats['total_flight_time_str']}")
+    if stats.get('average_groundspeed_knots', 0) > 0:
+        kmh_avg = stats['average_groundspeed_knots'] * 1.852
+        print(f"  • Average groundspeed: {stats['average_groundspeed_knots']:.1f} kt ({kmh_avg:.1f} km/h)")
+    if stats.get('max_groundspeed_knots', 0) > 0:
+        kmh_max = stats['max_groundspeed_knots'] * 1.852
+        print(f"  • Max groundspeed: {stats['max_groundspeed_knots']:.1f} kt ({kmh_max:.1f} km/h)")
     print(f"  • Airports visited: {num_airports}")
     if stats['airport_names']:
         print(f"    - {', '.join(stats['airport_names'][:5])}" + (" ..." if len(stats['airport_names']) > 5 else ""))
@@ -2115,7 +2315,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         #heatmap-btn {{ top: 50px; }}
         #airports-btn {{ top: 90px; }}
         #altitude-btn {{ top: 130px; }}
-        #aviation-btn {{ top: 170px; }}
+        #airspeed-btn {{ top: 170px; }}
+        #aviation-btn {{ top: 210px; }}
 
         /* Year filter dropdown - styled like other buttons */
         #year-filter {{
@@ -2207,6 +2408,44 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             margin-bottom: 5px;
         }}
         #altitude-legend .labels {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+        }}
+
+        /* Airspeed legend */
+        #airspeed-legend {{
+            position: fixed;
+            bottom: 30px;
+            left: 10px;
+            background-color: rgba(43, 43, 43, 0.9);
+            color: #ffffff;
+            border: 2px solid #555;
+            border-radius: 4px;
+            padding: 10px;
+            z-index: 1000;
+            font-size: 12px;
+            min-width: 200px;
+            display: none;
+        }}
+        #airspeed-legend .legend-title {{
+            font-weight: bold;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }}
+        #airspeed-legend .gradient-bar {{
+            height: 20px;
+            background: linear-gradient(to right,
+                rgb(80, 160, 255) 0%,
+                rgb(0, 255, 255) 20%,
+                rgb(0, 255, 0) 40%,
+                rgb(255, 255, 0) 60%,
+                rgb(255, 165, 0) 80%,
+                rgb(255, 66, 66) 100%);
+            border-radius: 3px;
+            margin-bottom: 5px;
+        }}
+        #airspeed-legend .labels {{
             display: flex;
             justify-content: space-between;
             font-size: 11px;
@@ -2815,6 +3054,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     <button id="heatmap-btn" class="control-btn right" onclick="toggleHeatmap()">🔥 Heatmap</button>
     <button id="airports-btn" class="control-btn right" onclick="toggleAirports()">✈️ Airports</button>
     <button id="altitude-btn" class="control-btn right" onclick="toggleAltitude()">⛰️ Altitude</button>
+    <button id="airspeed-btn" class="control-btn right" onclick="toggleAirspeed()">🚀 Speed</button>
     <button id="aviation-btn" class="control-btn right" onclick="toggleAviation()" style="display: none;">🗺️ Aviation</button>
     <div id="year-filter" class="control-btn right">
         <select id="year-select" onchange="filterByYear()">
@@ -2829,6 +3069,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         <div class="labels">
             <span id="legend-min">0 ft</span>
             <span id="legend-max">10,000 ft</span>
+        </div>
+    </div>
+    <div id="airspeed-legend">
+        <div class="legend-title">🚀 Groundspeed</div>
+        <div class="gradient-bar"></div>
+        <div class="labels">
+            <span id="airspeed-legend-min">0 kt</span>
+            <span id="airspeed-legend-max">200 kt</span>
         </div>
     </div>
     <div id="loading">Loading data...</div>
@@ -2918,22 +3166,27 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         // Fit bounds
         map.fitBounds(BOUNDS, {{ padding: [30, 30] }});
 
-        // Create canvas renderer for better performance during pan
-        var canvasRenderer = L.canvas({{ padding: 0.5 }});
+        // Use SVG renderer for better click detection reliability
+        // Canvas has known issues with event handling after layer updates
+        var altitudeRenderer = L.svg();
+        var airspeedRenderer = L.svg();
 
         // Data layers
         var heatmapLayer = null;
         var altitudeLayer = L.layerGroup();
+        var airspeedLayer = L.layerGroup();
         var airportLayer = L.layerGroup();
         var currentResolution = null;
         var loadedData = {{}};
         var currentData = null;  // Store current loaded data for redrawing
         var fullStats = null;  // Store original full statistics
         var altitudeRange = {{ min: 0, max: 10000 }};  // Store altitude range for legend
+        var airspeedRange = {{ min: 0, max: 200 }};  // Store airspeed range for legend
 
         // Layer visibility state
         var heatmapVisible = true;
         var altitudeVisible = false;
+        var airspeedVisible = false;
         var airportsVisible = true;
         var aviationVisible = false;
 
@@ -2964,6 +3217,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
         // Set initial button states
         document.getElementById('altitude-btn').style.opacity = '0.5';  // Altitude starts hidden
+        document.getElementById('airspeed-btn').style.opacity = '0.5';  // Airspeed starts hidden
         document.getElementById('aviation-btn').style.opacity = '0.5';  // Aviation starts hidden
 
         // Show aviation button if API key is available
@@ -3165,7 +3419,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     color: color,
                     weight: isSelected ? 6 : 4,
                     opacity: isSelected ? 1.0 : (selectedPathIds.size > 0 ? 0.1 : 0.85),
-                    renderer: canvasRenderer
+                    renderer: altitudeRenderer,
+                    interactive: true
                 }}).bindPopup('Altitude: ' + segment.altitude_ft + ' ft (' + segment.altitude_m + ' m)')
                   .addTo(altitudeLayer);
 
@@ -3361,6 +3616,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 updateStatsPanel(fullStats, false);
             }}
 
+            // Load groundspeed range from metadata (from full resolution data)
+            if (metadata && metadata.min_groundspeed_knots !== undefined && metadata.max_groundspeed_knots !== undefined) {{
+                airspeedRange.min = metadata.min_groundspeed_knots;
+                airspeedRange.max = metadata.max_groundspeed_knots;
+                // Update airspeed legend with the correct range
+                updateAirspeedLegend(airspeedRange.min, airspeedRange.max);
+            }}
+
             // Initial data load
             updateLayers();
 
@@ -3389,6 +3652,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 selectedPathIds.add(pathId);
             }}
             redrawAltitudePaths();
+            if (airspeedVisible) {{
+                redrawAirspeedPaths();
+            }}
         }}
 
         function selectPathsByAirport(airportName) {{
@@ -3397,11 +3663,17 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 selectedPathIds.add(pathId);
             }});
             redrawAltitudePaths();
+            if (airspeedVisible) {{
+                redrawAirspeedPaths();
+            }}
         }}
 
         function clearSelection() {{
             selectedPathIds.clear();
             redrawAltitudePaths();
+            if (airspeedVisible) {{
+                redrawAirspeedPaths();
+            }}
         }}
 
         function updateAirportMarkerSizes() {{
@@ -3454,6 +3726,81 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
             document.getElementById('legend-min').textContent = minFt.toLocaleString() + ' ft (' + minM.toLocaleString() + ' m)';
             document.getElementById('legend-max').textContent = maxFt.toLocaleString() + ' ft (' + maxM.toLocaleString() + ' m)';
+        }}
+
+        function redrawAirspeedPaths() {{
+            if (!currentData) return;
+
+            // Clear airspeed layer
+            airspeedLayer.clearLayers();
+
+            // Calculate groundspeed range for color scaling
+            var colorMinSpeed, colorMaxSpeed;
+            if (selectedPathIds.size > 0) {{
+                // Use selected paths' groundspeed range
+                var selectedSegments = currentData.path_segments.filter(function(segment) {{
+                    return selectedPathIds.has(segment.path_id) && segment.groundspeed_knots > 0;
+                }});
+                if (selectedSegments.length > 0) {{
+                    var groundspeeds = selectedSegments.map(function(s) {{ return s.groundspeed_knots; }});
+                    colorMinSpeed = Math.min(...groundspeeds);
+                    colorMaxSpeed = Math.max(...groundspeeds);
+                }} else {{
+                    colorMinSpeed = airspeedRange.min;
+                    colorMaxSpeed = airspeedRange.max;
+                }}
+            }} else {{
+                // Use full groundspeed range from metadata (not from current resolution)
+                colorMinSpeed = airspeedRange.min;
+                colorMaxSpeed = airspeedRange.max;
+            }}
+
+            // Create path segments with groundspeed colors and rescaled colors
+            currentData.path_segments.forEach(function(segment) {{
+                var pathId = segment.path_id;
+
+                // Filter by year if selected
+                if (selectedYear !== 'all') {{
+                    var pathInfo = currentData.path_info.find(function(p) {{ return p.id === pathId; }});
+                    if (pathInfo && pathInfo.year && pathInfo.year.toString() !== selectedYear) {{
+                        return;  // Skip this segment
+                    }}
+                }}
+
+                if (segment.groundspeed_knots > 0) {{
+                    var isSelected = selectedPathIds.has(pathId);
+
+                    // Recalculate color based on current groundspeed range
+                    var color = getColorForAltitude(segment.groundspeed_knots, colorMinSpeed, colorMaxSpeed);
+
+                    var polyline = L.polyline(segment.coords, {{
+                        color: color,
+                        weight: isSelected ? 6 : 4,
+                        opacity: isSelected ? 1.0 : (selectedPathIds.size > 0 ? 0.1 : 0.85),
+                        renderer: airspeedRenderer,
+                        interactive: true
+                    }}).addTo(airspeedLayer);
+
+                    // Make path clickable
+                    polyline.on('click', function(e) {{
+                        L.DomEvent.stopPropagation(e);
+                        togglePathSelection(pathId);
+                    }});
+                }}
+            }});
+
+            // Update legend
+            updateAirspeedLegend(colorMinSpeed, colorMaxSpeed);
+        }}
+
+        function updateAirspeedLegend(minSpeed, maxSpeed) {{
+            var minKnots = Math.round(minSpeed);
+            var maxKnots = Math.round(maxSpeed);
+            var minKmh = Math.round(minSpeed * 1.852);
+            var maxKmh = Math.round(maxSpeed * 1.852);
+
+            document.getElementById('airspeed-legend-min').textContent = minKnots.toLocaleString() + ' kt (' + minKmh.toLocaleString() + ' km/h)';
+            document.getElementById('airspeed-legend-max').textContent = maxKnots.toLocaleString() + ' kt (' + maxKmh.toLocaleString() + ' km/h)';
         }}
 
         function updateStatsForSelection() {{
@@ -3509,6 +3856,32 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             var minAltitudeM = Math.min(...altitudes);
             var maxAltitudeM = Math.max(...altitudes);
 
+            // Calculate altitude gain for selected paths
+            var totalAltitudeGainM = 0;
+            var prevAltitudeM = null;
+            selectedSegments.forEach(function(segment) {{
+                if (prevAltitudeM !== null) {{
+                    var gain = segment.altitude_m - prevAltitudeM;
+                    if (gain > 0) {{
+                        totalAltitudeGainM += gain;
+                    }}
+                }}
+                prevAltitudeM = segment.altitude_m;
+            }});
+
+            // Get groundspeed range from selected segments
+            var groundspeeds = selectedSegments
+                .map(function(s) {{ return s.groundspeed_knots; }})
+                .filter(function(s) {{ return s > 0; }});
+            var maxGroundspeedKnots = groundspeeds.length > 0 ? Math.max(...groundspeeds) : 0;
+
+            // Calculate average groundspeed
+            var avgGroundspeedKnots = 0;
+            if (groundspeeds.length > 0) {{
+                var sumSpeed = groundspeeds.reduce(function(a, b) {{ return a + b; }}, 0);
+                avgGroundspeedKnots = sumSpeed / groundspeeds.length;
+            }}
+
             // Build selected stats object
             var selectedStats = {{
                 total_points: selectedSegments.length * 2,  // Each segment has 2 points
@@ -3517,7 +3890,10 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 airport_names: Array.from(selectedAirports).sort(),
                 total_distance_nm: totalDistanceKm * 0.539957,
                 max_altitude_ft: maxAltitudeM * 3.28084,
-                min_altitude_ft: minAltitudeM * 3.28084
+                min_altitude_ft: minAltitudeM * 3.28084,
+                total_altitude_gain_ft: totalAltitudeGainM * 3.28084,
+                average_groundspeed_knots: avgGroundspeedKnots,
+                max_groundspeed_knots: maxGroundspeedKnots
             }};
 
             updateStatsPanel(selectedStats, true);
@@ -3535,9 +3911,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 html += '<p style="margin:0 0 10px 0; font-weight:bold; font-size:15px;">📊 Flight Statistics</p>';
             }}
 
-            html += '<div style="margin-bottom: 8px;"><strong>Data Points:</strong><br>';
-            html += '<span style="margin-left: 10px;">• Total Points: ' + stats.total_points.toLocaleString() + '</span><br>';
-            html += '<span style="margin-left: 10px;">• Number of Paths: ' + stats.num_paths + '</span></div>';
+            html += '<div style="margin-bottom: 8px;"><strong>Data Points:</strong> ' + stats.total_points.toLocaleString() + '</div>';
+            html += '<div style="margin-bottom: 8px;"><strong>Flights:</strong> ' + stats.num_paths + '</div>';
             html += '<div style="margin-bottom: 8px;"><strong>Airports Visited:</strong> ' + stats.num_airports + '</div>';
 
             if (stats.airport_names && stats.airport_names.length > 0) {{
@@ -3548,12 +3923,34 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 html += '</div>';
             }}
 
+            if (stats.total_flight_time_str) {{
+                html += '<div style="margin-bottom: 8px;"><strong>Total Flight Time:</strong> ' + stats.total_flight_time_str + '</div>';
+            }}
+
             // Distance with km conversion
             var distanceKm = (stats.total_distance_nm * 1.852).toFixed(1);
             html += '<div style="margin-bottom: 8px;"><strong>Distance:</strong> ' + stats.total_distance_nm.toFixed(1) + ' nm (' + distanceKm + ' km)</div>';
 
-            if (stats.total_flight_time_str) {{
-                html += '<div style="margin-bottom: 8px;"><strong>Total Flight Time:</strong> ' + stats.total_flight_time_str + '</div>';
+            // Average distance per trip
+            if (stats.num_paths > 0) {{
+                var avgDistanceNm = (stats.total_distance_nm / stats.num_paths).toFixed(1);
+                var avgDistanceKm = (avgDistanceNm * 1.852).toFixed(1);
+                html += '<div style="margin-bottom: 8px;"><strong>Average Distance per Trip:</strong> ' + avgDistanceNm + ' nm (' + avgDistanceKm + ' km)</div>';
+            }}
+
+            if (stats.average_groundspeed_knots && stats.average_groundspeed_knots > 0) {{
+                var kmh = (stats.average_groundspeed_knots * 1.852).toFixed(1);
+                html += '<div style="margin-bottom: 8px;"><strong>Average Groundspeed:</strong> ' + stats.average_groundspeed_knots.toFixed(1) + ' kt (' + kmh + ' km/h)</div>';
+            }}
+
+            if (stats.cruise_speed_knots && stats.cruise_speed_knots > 0) {{
+                var kmh_cruise = (stats.cruise_speed_knots * 1.852).toFixed(1);
+                html += '<div style="margin-bottom: 8px;"><strong>Cruise Speed (>1000ft AGL):</strong> ' + stats.cruise_speed_knots.toFixed(1) + ' kt (' + kmh_cruise + ' km/h)</div>';
+            }}
+
+            if (stats.max_groundspeed_knots && stats.max_groundspeed_knots > 0) {{
+                var kmh_max = (stats.max_groundspeed_knots * 1.852).toFixed(1);
+                html += '<div style="margin-bottom: 8px;"><strong>Max Groundspeed:</strong> ' + stats.max_groundspeed_knots.toFixed(1) + ' kt (' + kmh_max + ' km/h)</div>';
             }}
 
             if (stats.max_altitude_ft) {{
@@ -3603,10 +4000,39 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 document.getElementById('altitude-btn').style.opacity = '0.5';
                 document.getElementById('altitude-legend').style.display = 'none';
             }} else {{
+                // Hide airspeed if it's visible
+                if (airspeedVisible) {{
+                    map.removeLayer(airspeedLayer);
+                    airspeedVisible = false;
+                    document.getElementById('airspeed-btn').style.opacity = '0.5';
+                    document.getElementById('airspeed-legend').style.display = 'none';
+                }}
                 map.addLayer(altitudeLayer);
                 altitudeVisible = true;
                 document.getElementById('altitude-btn').style.opacity = '1.0';
                 document.getElementById('altitude-legend').style.display = 'block';
+            }}
+        }}
+
+        function toggleAirspeed() {{
+            if (airspeedVisible) {{
+                map.removeLayer(airspeedLayer);
+                airspeedVisible = false;
+                document.getElementById('airspeed-btn').style.opacity = '0.5';
+                document.getElementById('airspeed-legend').style.display = 'none';
+            }} else {{
+                // Hide altitude if it's visible
+                if (altitudeVisible) {{
+                    map.removeLayer(altitudeLayer);
+                    altitudeVisible = false;
+                    document.getElementById('altitude-btn').style.opacity = '0.5';
+                    document.getElementById('altitude-legend').style.display = 'none';
+                }}
+                map.addLayer(airspeedLayer);
+                airspeedVisible = true;
+                document.getElementById('airspeed-btn').style.opacity = '1.0';
+                document.getElementById('airspeed-legend').style.display = 'block';
+                redrawAirspeedPaths();  // Draw airspeed paths when enabled
             }}
         }}
 
@@ -3650,10 +4076,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 document.getElementById('year-filter'),
                 document.getElementById('heatmap-btn'),
                 document.getElementById('altitude-btn'),
+                document.getElementById('airspeed-btn'),
                 document.getElementById('airports-btn'),
                 document.getElementById('aviation-btn'),
                 document.getElementById('stats-panel'),
                 document.getElementById('altitude-legend'),
+                document.getElementById('airspeed-legend'),
                 document.getElementById('loading')
             ];
 
@@ -3744,62 +4172,25 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 }});
             }}
 
-            // Altitude facts (from fullStats)
-            if (fullStats && fullStats.max_altitude_ft) {{
-                const maxAltFt = Math.round(fullStats.max_altitude_ft);
-                const maxAltM = Math.round(fullStats.max_altitude_ft * 0.3048);
+            // Altitude facts (from fullStats) - only elevation gain, not max altitude
+            if (fullStats && fullStats.total_altitude_gain_ft) {{
+                const gainFt = Math.round(fullStats.total_altitude_gain_ft);
+                const timesEverest = gainFt / everestHeightFt;
 
-                if (maxAltFt > everestHeightFt) {{
+                if (timesEverest >= 1) {{
                     allFacts.push({{
                         category: 'altitude',
-                        icon: '🏔️',
-                        text: `You peaked at <strong>${{maxAltFt.toLocaleString()}} ft</strong> - higher than Mount Everest!`,
-                        priority: 10
+                        icon: '⬆️',
+                        text: `You climbed <strong>${{gainFt.toLocaleString()}} ft</strong> - that's scaling Everest <strong>${{timesEverest.toFixed(1)}}x</strong>!`,
+                        priority: 9
                     }});
-                }} else if (maxAltFt > commercialCruiseAltFt) {{
+                }} else if (gainFt > 10000) {{
                     allFacts.push({{
                         category: 'altitude',
-                        icon: '⛰️',
-                        text: `You reached <strong>${{maxAltFt.toLocaleString()}} ft</strong> - above commercial cruise altitude!`,
-                        priority: 8
+                        icon: '⬆️',
+                        text: `Total elevation gain: <strong>${{gainFt.toLocaleString()}} ft</strong>`,
+                        priority: 5
                     }});
-                }} else if (maxAltFt > everestHeightFt * 0.5) {{
-                    const percentOfEverest = ((maxAltFt / everestHeightFt) * 100).toFixed(0);
-                    allFacts.push({{
-                        category: 'altitude',
-                        icon: '⛰️',
-                        text: `Max altitude: <strong>${{maxAltFt.toLocaleString()}} ft</strong> (that's ${{percentOfEverest}}% of Everest)`,
-                        priority: 6
-                    }});
-                }} else {{
-                    allFacts.push({{
-                        category: 'altitude',
-                        icon: '📈',
-                        text: `Top altitude: <strong>${{maxAltFt.toLocaleString()}} ft</strong>`,
-                        priority: 7  // Increased priority to ensure it's always shown
-                    }});
-                }}
-
-                // Elevation gain facts
-                if (fullStats.total_altitude_gain_ft) {{
-                    const gainFt = Math.round(fullStats.total_altitude_gain_ft);
-                    const timesEverest = gainFt / everestHeightFt;
-
-                    if (timesEverest >= 1) {{
-                        allFacts.push({{
-                            category: 'altitude',
-                            icon: '⬆️',
-                            text: `You climbed <strong>${{gainFt.toLocaleString()}} ft</strong> - that's scaling Everest <strong>${{timesEverest.toFixed(1)}}x</strong>!`,
-                            priority: 9
-                        }});
-                    }} else if (gainFt > 10000) {{
-                        allFacts.push({{
-                            category: 'altitude',
-                            icon: '⬆️',
-                            text: `Total elevation gain: <strong>${{gainFt.toLocaleString()}} ft</strong>`,
-                            priority: 5
-                        }});
-                    }}
                 }}
             }}
 
@@ -3827,8 +4218,17 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 }}
             }}
 
-            // Airport diversity facts - REMOVED per user request
-            // Flight frequency facts - REMOVED per user request
+            // Cruise speed fun fact (with average distance per trip)
+            if (fullStats && fullStats.cruise_speed_knots && fullStats.cruise_speed_knots > 0 && yearStats.total_flights > 0) {{
+                const cruiseSpeedKt = Math.round(fullStats.cruise_speed_knots);
+                const avgDistanceNm = Math.round(yearStats.total_distance_nm / yearStats.total_flights);
+                allFacts.push({{
+                    category: 'speed',
+                    icon: '✈️',
+                    text: `Cruising at <strong>${{cruiseSpeedKt}} kt</strong>, averaging <strong>${{avgDistanceNm}} nm</strong> per adventure`,
+                    priority: 8
+                }});
+            }}
 
             // Special achievements
             if (fullStats && fullStats.max_altitude_ft > 40000) {{
@@ -3891,23 +4291,31 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             // Update card content
             document.getElementById('wrapped-year').textContent = year;
 
-            // Build stats grid
+            // Build stats grid (6 cards: changed Max Speed to Max Groundspeed, added Max Altitude)
             const statsHtml = `
                 <div class="stat-card">
                     <div class="stat-value">${{yearStats.total_flights}}</div>
                     <div class="stat-label">Flights</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value">${{yearStats.total_distance_nm.toFixed(0)}}</div>
-                    <div class="stat-label">Nautical Miles</div>
-                </div>
-                <div class="stat-card">
                     <div class="stat-value">${{yearStats.num_airports}}</div>
                     <div class="stat-label">Airports</div>
                 </div>
                 <div class="stat-card">
+                    <div class="stat-value">${{yearStats.total_distance_nm.toFixed(0)}}</div>
+                    <div class="stat-label">Nautical Miles</div>
+                </div>
+                <div class="stat-card">
                     <div class="stat-value">${{yearStats.flight_time}}</div>
                     <div class="stat-label">Flight Time</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${{(fullStats.max_groundspeed_knots || 0).toFixed(0)}} kt</div>
+                    <div class="stat-label">Max Groundspeed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${{Math.round(fullStats.max_altitude_ft || 0).toLocaleString()}} ft</div>
+                    <div class="stat-label">Max Altitude</div>
                 </div>
             `;
 
@@ -3973,10 +4381,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 document.getElementById('heatmap-btn'),
                 document.getElementById('airports-btn'),
                 document.getElementById('altitude-btn'),
+                document.getElementById('airspeed-btn'),
                 document.getElementById('aviation-btn'),
                 document.getElementById('year-filter'),
                 document.getElementById('stats-panel'),
                 document.getElementById('altitude-legend'),
+                document.getElementById('airspeed-legend'),
                 document.getElementById('loading')
             ];
             controls.forEach(el => {{ if (el) el.style.display = 'none'; }});
@@ -4033,10 +4443,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                         document.getElementById('heatmap-btn'),
                         document.getElementById('airports-btn'),
                         document.getElementById('altitude-btn'),
+                        document.getElementById('airspeed-btn'),
                         document.getElementById('aviation-btn'),
                         document.getElementById('year-filter'),
                         document.getElementById('stats-panel'),
                         document.getElementById('altitude-legend'),
+                        document.getElementById('airspeed-legend'),
                         document.getElementById('loading')
                     ];
                     controls.forEach(el => {{ if (el) el.style.display = ''; }});
