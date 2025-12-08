@@ -2228,14 +2228,31 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             display: none;
             justify-content: center;
             align-items: center;
-            padding: 40px;
+            padding: 0;
             box-sizing: border-box;
         }}
         #wrapped-container {{
             display: flex;
-            gap: 30px;
+            flex-direction: column;
             width: 100%;
             height: 100%;
+            overflow-y: auto;
+        }}
+        #wrapped-header {{
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            padding: 12px 40px;
+            background: transparent;
+            flex-shrink: 0;
+        }}
+        #wrapped-content {{
+            display: flex;
+            gap: 30px;
+            flex: 1;
+            overflow-y: auto;
+            align-items: stretch;
+            padding: 0 40px 40px 40px;
         }}
         #wrapped-map-container {{
             flex: 1;
@@ -2259,7 +2276,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             padding: 40px;
             width: 500px;
             flex-shrink: 0;
-            overflow: hidden;
+            overflow-y: auto;
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
             color: #ffffff;
             position: relative;
@@ -2310,25 +2327,24 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             text-transform: uppercase;
             letter-spacing: 1px;
         }}
-        #wrapped-card .close-btn {{
-            position: absolute;
-            top: 20px;
-            right: 20px;
+        #wrapped-header .close-btn {{
             background: transparent;
             border: none;
-            color: #ffffff;
-            font-size: 32px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 14px;
             cursor: pointer;
-            padding: 0;
-            width: 40px;
-            height: 40px;
-            line-height: 40px;
-            text-align: center;
-            border-radius: 50%;
-            transition: background-color 0.2s;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            letter-spacing: 0.5px;
         }}
-        #wrapped-card .close-btn:hover {{
-            background-color: rgba(255, 255, 255, 0.1);
+        #wrapped-header .close-btn:hover {{
+            background-color: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.9);
         }}
         #wrapped-card .fun-facts {{
             margin: 25px 0;
@@ -2347,12 +2363,43 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         }}
         #wrapped-card .fun-fact {{
             font-size: 14px;
-            margin: 8px 0;
-            opacity: 0.9;
+            margin: 10px 0;
+            padding: 10px 12px;
+            opacity: 0.95;
             line-height: 1.6;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-left: 3px solid;
+            transition: all 0.2s ease;
+        }}
+        #wrapped-card .fun-fact:hover {{
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.08);
+            transform: translateX(3px);
         }}
         #wrapped-card .fun-fact strong {{
             color: #00f2fe;
+            font-weight: 600;
+        }}
+        /* Category-specific colors */
+        #wrapped-card .fun-fact[data-category="distance"] {{
+            border-left-color: #4facfe;
+        }}
+        #wrapped-card .fun-fact[data-category="altitude"] {{
+            border-left-color: #f093fb;
+        }}
+        #wrapped-card .fun-fact[data-category="time"] {{
+            border-left-color: #ffd93d;
+        }}
+        #wrapped-card .fun-fact[data-category="airports"] {{
+            border-left-color: #6bcf7f;
+        }}
+        #wrapped-card .fun-fact[data-category="frequency"] {{
+            border-left-color: #ff6b9d;
+        }}
+        #wrapped-card .fun-fact[data-category="achievement"] {{
+            border-left-color: #ffa500;
+            background: linear-gradient(135deg, rgba(255, 165, 0, 0.1) 0%, rgba(255, 215, 0, 0.1) 100%);
         }}
         #wrapped-card .top-airports {{
             margin: 25px 0;
@@ -2412,59 +2459,40 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         }}
         #wrapped-card-content {{
             flex: 1;
-            overflow-y: auto;
-            overflow-x: hidden;
             margin: 0 -40px;
             padding: 0 40px;
-        }}
-        #wrapped-card-content::-webkit-scrollbar {{
-            width: 8px;
-        }}
-        #wrapped-card-content::-webkit-scrollbar-track {{
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 4px;
-        }}
-        #wrapped-card-content::-webkit-scrollbar-thumb {{
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 4px;
-        }}
-        #wrapped-card-content::-webkit-scrollbar-thumb:hover {{
-            background: rgba(255, 255, 255, 0.3);
-        }}
-        #wrapped-card .export-wrapped-btn {{
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            border: none;
-            color: #ffffff;
-            padding: 15px 30px;
-            border-radius: 25px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            margin-top: 30px;
-            width: 100%;
-            box-shadow: 0 5px 15px rgba(245, 87, 108, 0.3);
-            transition: transform 0.2s, box-shadow 0.2s;
-            flex-shrink: 0;
-        }}
-        #wrapped-card .export-wrapped-btn:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 7px 20px rgba(245, 87, 108, 0.4);
         }}
 
         /* Responsive styles for mobile portrait mode */
         @media (max-width: 768px) {{
             #wrapped-modal {{
-                padding: 10px;
+                padding: 0;
             }}
-            #wrapped-container {{
+            #wrapped-header {{
+                padding: 10px 20px;
+            }}
+            #wrapped-header .close-btn {{
+                font-size: 13px;
+                padding: 5px 10px;
+            }}
+            #wrapped-content {{
                 flex-direction: column;
                 gap: 15px;
-                overflow-y: auto;
+                padding: 0 20px 20px 20px;
             }}
             #wrapped-map-container {{
                 order: 2;
-                min-height: 300px;
-                max-height: 400px;
+                width: 100%;
+                padding-bottom: 100%;
+                position: relative;
+                height: 0;
+            }}
+            #wrapped-map-container > * {{
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
             }}
             #wrapped-card {{
                 order: 1;
@@ -2504,6 +2532,11 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             }}
             #wrapped-card .fun-fact {{
                 font-size: 12px;
+                padding: 8px 10px;
+                margin: 8px 0;
+            }}
+            #wrapped-card .fun-fact:hover {{
+                transform: translateX(2px);
             }}
             #wrapped-card .top-airports {{
                 margin: 15px 0;
@@ -2533,19 +2566,6 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             #wrapped-card-content {{
                 margin: 0 -20px;
                 padding: 0 20px;
-            }}
-            #wrapped-card .export-wrapped-btn {{
-                padding: 12px 20px;
-                font-size: 14px;
-                margin-top: 20px;
-            }}
-            #wrapped-card .close-btn {{
-                top: 10px;
-                right: 10px;
-                font-size: 28px;
-                width: 36px;
-                height: 36px;
-                line-height: 36px;
             }}
         }}
 
@@ -2698,20 +2718,23 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     <!-- Wrapped Card Modal -->
     <div id="wrapped-modal" onclick="closeWrapped(event)">
         <div id="wrapped-container" onclick="event.stopPropagation()">
-            <div id="wrapped-card">
-                <button class="close-btn" onclick="closeWrapped()">×</button>
-                <h1>✨ Your Year in Flight</h1>
-                <div class="year" id="wrapped-year">2025</div>
-                <div id="wrapped-card-content">
-                    <div class="stat-grid" id="wrapped-stats"></div>
-                    <div class="fun-facts" id="wrapped-fun-facts"></div>
-                    <div class="top-airports" id="wrapped-top-airports"></div>
-                    <div class="airports-grid" id="wrapped-airports-grid"></div>
-                </div>
-                <button class="export-wrapped-btn" onclick="exportWrappedCard()">📷 Export Wrapped Card</button>
+            <div id="wrapped-header">
+                <button class="close-btn" onclick="closeWrapped()">✕ Close</button>
             </div>
-            <div id="wrapped-map-container">
-                <img id="wrapped-map-snapshot" alt="Flight map">
+            <div id="wrapped-content">
+                <div id="wrapped-card">
+                    <h1>✨ Your Year in Flight</h1>
+                    <div class="year" id="wrapped-year">2025</div>
+                    <div id="wrapped-card-content">
+                        <div class="stat-grid" id="wrapped-stats"></div>
+                        <div class="fun-facts" id="wrapped-fun-facts"></div>
+                        <div class="top-airports" id="wrapped-top-airports"></div>
+                        <div class="airports-grid" id="wrapped-airports-grid"></div>
+                    </div>
+                </div>
+                <div id="wrapped-map-container">
+                    <!-- Map will be moved here when wrapped is shown -->
+                </div>
             </div>
         </div>
     </div>
@@ -3517,6 +3540,198 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             }}, 200);
         }}
 
+        // Generate dynamic fun facts based on data
+        function generateFunFacts(yearStats) {{
+            const allFacts = [];
+
+            // Distance comparisons
+            const earthCircumferenceKm = 40075;
+            const moonDistanceKm = 384400;
+            const issAltitudeKm = 408;
+            const everestHeightFt = 29032;
+            const everestHeightM = 8849;
+            const commercialCruiseAltFt = 35000;
+
+            const totalDistanceKm = yearStats.total_distance_nm * 1.852;
+            const timesAroundEarth = totalDistanceKm / earthCircumferenceKm;
+            const percentToMoon = (totalDistanceKm / moonDistanceKm) * 100;
+
+            // Distance facts
+            if (timesAroundEarth >= 0.5) {{
+                allFacts.push({{
+                    category: 'distance',
+                    icon: '🌍',
+                    text: `You flew <strong>${{timesAroundEarth.toFixed(1)}}x</strong> around the Earth`,
+                    priority: timesAroundEarth >= 1 ? 10 : 7
+                }});
+            }}
+
+            if (percentToMoon >= 0.1) {{
+                allFacts.push({{
+                    category: 'distance',
+                    icon: '🌙',
+                    text: `That's <strong>${{percentToMoon.toFixed(1)}}%</strong> of the flight distance to the Moon`,
+                    priority: percentToMoon >= 1 ? 9 : 5
+                }});
+            }}
+
+            if (totalDistanceKm >= issAltitudeKm) {{
+                const timesToISS = (totalDistanceKm / issAltitudeKm).toFixed(1);
+                allFacts.push({{
+                    category: 'distance',
+                    icon: '🛰️',
+                    text: `You could have reached the ISS <strong>${{timesToISS}}x</strong> times`,
+                    priority: 6
+                }});
+            }}
+
+            // Average flight distance
+            if (yearStats.total_flights > 0) {{
+                const avgFlight = (yearStats.total_distance_nm / yearStats.total_flights).toFixed(0);
+                allFacts.push({{
+                    category: 'distance',
+                    icon: '📏',
+                    text: `Average flight: <strong>${{avgFlight}} nm</strong>`,
+                    priority: 4
+                }});
+            }}
+
+            // Altitude facts (from fullStats)
+            if (fullStats && fullStats.max_altitude_ft) {{
+                const maxAltFt = Math.round(fullStats.max_altitude_ft);
+                const maxAltM = Math.round(fullStats.max_altitude_ft * 0.3048);
+
+                if (maxAltFt > everestHeightFt) {{
+                    allFacts.push({{
+                        category: 'altitude',
+                        icon: '🏔️',
+                        text: `You peaked at <strong>${{maxAltFt.toLocaleString()}} ft</strong> - higher than Mount Everest!`,
+                        priority: 10
+                    }});
+                }} else if (maxAltFt > commercialCruiseAltFt) {{
+                    allFacts.push({{
+                        category: 'altitude',
+                        icon: '⛰️',
+                        text: `You reached <strong>${{maxAltFt.toLocaleString()}} ft</strong> - above commercial cruise altitude!`,
+                        priority: 8
+                    }});
+                }} else if (maxAltFt > everestHeightFt * 0.5) {{
+                    const percentOfEverest = ((maxAltFt / everestHeightFt) * 100).toFixed(0);
+                    allFacts.push({{
+                        category: 'altitude',
+                        icon: '⛰️',
+                        text: `Max altitude: <strong>${{maxAltFt.toLocaleString()}} ft</strong> (that's ${{percentOfEverest}}% of Everest)`,
+                        priority: 6
+                    }});
+                }} else {{
+                    allFacts.push({{
+                        category: 'altitude',
+                        icon: '📈',
+                        text: `Top altitude: <strong>${{maxAltFt.toLocaleString()}} ft</strong>`,
+                        priority: 7  // Increased priority to ensure it's always shown
+                    }});
+                }}
+
+                // Elevation gain facts
+                if (fullStats.total_altitude_gain_ft) {{
+                    const gainFt = Math.round(fullStats.total_altitude_gain_ft);
+                    const timesEverest = gainFt / everestHeightFt;
+
+                    if (timesEverest >= 1) {{
+                        allFacts.push({{
+                            category: 'altitude',
+                            icon: '⬆️',
+                            text: `You climbed <strong>${{gainFt.toLocaleString()}} ft</strong> - that's scaling Everest <strong>${{timesEverest.toFixed(1)}}x</strong>!`,
+                            priority: 9
+                        }});
+                    }} else if (gainFt > 10000) {{
+                        allFacts.push({{
+                            category: 'altitude',
+                            icon: '⬆️',
+                            text: `Total elevation gain: <strong>${{gainFt.toLocaleString()}} ft</strong>`,
+                            priority: 5
+                        }});
+                    }}
+                }}
+            }}
+
+            // Time-based facts
+            if (fullStats && fullStats.total_flight_time_seconds) {{
+                const totalHours = fullStats.total_flight_time_seconds / 3600;
+                const totalDays = totalHours / 24;
+                const hoursPerYear = 8760;
+                const percentOfYear = (totalHours / hoursPerYear * 100).toFixed(2);
+
+                if (totalDays >= 1) {{
+                    allFacts.push({{
+                        category: 'time',
+                        icon: '⏱️',
+                        text: `You spent <strong>${{totalDays.toFixed(1)}} days</strong> in the air - that's <strong>${{percentOfYear}}%</strong> of the year!`,
+                        priority: 8
+                    }});
+                }} else if (totalHours >= 10) {{
+                    allFacts.push({{
+                        category: 'time',
+                        icon: '⏰',
+                        text: `Total airtime: <strong>${{totalHours.toFixed(1)}} hours</strong>`,
+                        priority: 5
+                    }});
+                }}
+            }}
+
+            // Airport diversity facts - REMOVED per user request
+            // Flight frequency facts - REMOVED per user request
+
+            // Special achievements
+            if (fullStats && fullStats.max_altitude_ft > 40000) {{
+                allFacts.push({{
+                    category: 'achievement',
+                    icon: '🚀',
+                    text: `You're practically an astronaut at <strong>${{Math.round(fullStats.max_altitude_ft).toLocaleString()}} ft</strong>!`,
+                    priority: 10
+                }});
+            }}
+
+            // Sort by priority (highest first) and select top facts
+            allFacts.sort((a, b) => b.priority - a.priority);
+
+            // Select diverse facts - aim for 4-6 facts from different categories
+            const selectedFacts = [];
+            const usedCategories = new Set();
+            const maxFactsPerCategory = 2;
+            const categoryCount = {{}};
+
+            for (const fact of allFacts) {{
+                const catCount = categoryCount[fact.category] || 0;
+
+                // Add fact if we haven't maxed out this category yet
+                if (catCount < maxFactsPerCategory) {{
+                    selectedFacts.push(fact);
+                    categoryCount[fact.category] = catCount + 1;
+                    usedCategories.add(fact.category);
+
+                    // Stop when we have enough facts
+                    if (selectedFacts.length >= 6) break;
+                }}
+            }}
+
+            // If we still need more facts, add remaining high-priority ones
+            if (selectedFacts.length < 4) {{
+                for (const fact of allFacts) {{
+                    if (!selectedFacts.includes(fact)) {{
+                        selectedFacts.push(fact);
+                        if (selectedFacts.length >= 4) break;
+                    }}
+                }}
+            }}
+
+            return selectedFacts;
+        }}
+
+        // Store original map parent for restoring later
+        let originalMapParent = null;
+        let originalMapIndex = 0;
+
         // Wrapped card functionality
         function showWrapped() {{
             // Determine which year to show
@@ -3550,18 +3765,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
             document.getElementById('wrapped-stats').innerHTML = statsHtml;
 
-            // Build fun facts section
-            const earthCircumferenceKm = 40075;
-            const moonDistanceKm = 384400;
-            const timesAroundEarth = (yearStats.total_distance_nm * 1.852 / earthCircumferenceKm).toFixed(1);
-            const percentToMoon = (yearStats.total_distance_nm * 1.852 / moonDistanceKm * 100).toFixed(1);
+            // Build fun facts section with dynamic, varied facts
+            const funFacts = generateFunFacts(yearStats);
 
-            const funFactsHtml = `
-                <div class="fun-facts-title">🌍 Fun Facts</div>
-                <div class="fun-fact">You flew <strong>${{timesAroundEarth}}x</strong> around the Earth</div>
-                <div class="fun-fact">That's <strong>${{percentToMoon}}%</strong> of the distance to the Moon</div>
-                <div class="fun-fact">Average flight: <strong>${{(yearStats.total_distance_nm / yearStats.total_flights).toFixed(0)}} nm</strong></div>
-            `;
+            let funFactsHtml = '<div class="fun-facts-title">✨ Fun Facts</div>';
+            funFacts.forEach(function(fact) {{
+                funFactsHtml += `<div class="fun-fact" data-category="${{fact.category}}">${{fact.icon}} ${{fact.text}}</div>`;
+            }});
+
             document.getElementById('wrapped-fun-facts').innerHTML = funFactsHtml;
 
             // Build top airports section if we have airport data
@@ -3593,32 +3804,20 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 document.getElementById('wrapped-airports-grid').innerHTML = airportBadgesHtml;
             }}
 
-            // Store current map view to restore later
-            const originalCenter = map.getCenter();
-            const originalZoom = map.getZoom();
+            // Move the map into the wrapped container
+            const mapContainer = document.getElementById('map');
+            const wrappedMapContainer = document.getElementById('wrapped-map-container');
 
-            // Zoom to fit all data with extra padding to ensure all airports are visible
+            // Store original position if not already stored
+            if (!originalMapParent) {{
+                originalMapParent = mapContainer.parentNode;
+                originalMapIndex = Array.from(originalMapParent.children).indexOf(mapContainer);
+            }}
+
+            // Zoom to fit all data with extra padding
             map.fitBounds(BOUNDS, {{ padding: [80, 80] }});
 
-            // Force map to invalidate and recalculate size
-            setTimeout(function() {{
-                map.invalidateSize();
-
-                // Calculate actual pixel dimensions of the bounds on the map after fitBounds completes
-                const bounds = map.getBounds();
-                const northWest = map.latLngToContainerPoint(bounds.getNorthWest());
-                const southEast = map.latLngToContainerPoint(bounds.getSouthEast());
-                const mapWidth = Math.abs(southEast.x - northWest.x);
-                const mapHeight = Math.abs(southEast.y - northWest.y);
-                const actualAspectRatio = mapWidth / mapHeight;
-
-                // Set the aspect ratio of the wrapped map container
-                const wrappedMapContainer = document.getElementById('wrapped-map-container');
-                wrappedMapContainer.style.aspectRatio = actualAspectRatio.toString();
-            }}, 100);
-
-            // Capture map snapshot after zoom completes
-            const mapContainer = document.getElementById('map');
+            // Hide controls in wrapped view FIRST
             const controls = [
                 document.querySelector('.leaflet-control-zoom'),
                 document.getElementById('stats-btn'),
@@ -3633,47 +3832,74 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 document.getElementById('altitude-legend'),
                 document.getElementById('loading')
             ];
-
-            // Hide all controls temporarily
-            const displayStates = controls.map(el => el ? el.style.display : null);
             controls.forEach(el => {{ if (el) el.style.display = 'none'; }});
 
-            // Wait for map to finish zooming and rendering tiles, then capture
+            // Show modal first to ensure wrapped-map-container has dimensions
+            document.getElementById('wrapped-modal').style.display = 'flex';
+
+            // Wait for modal to render and have dimensions
             setTimeout(function() {{
-                domtoimage.toJpeg(mapContainer, {{
-                    width: mapContainer.offsetWidth,
-                    height: mapContainer.offsetHeight,
-                    bgcolor: '#1a1a1a',
-                    quality: 0.9
-                }}).then(function(dataUrl) {{
-                    // Restore controls
-                    controls.forEach((el, i) => {{ if (el) el.style.display = displayStates[i] || ''; }});
+                // Now move map into wrapped container (which now has dimensions)
+                wrappedMapContainer.appendChild(mapContainer);
 
-                    // Restore original map view
-                    map.setView(originalCenter, originalZoom);
+                // Make sure the map container fills the wrapped container
+                mapContainer.style.width = '100%';
+                mapContainer.style.height = '100%';
+                mapContainer.style.borderRadius = '12px';
+                mapContainer.style.overflow = 'hidden';
 
-                    // Set map snapshot
-                    document.getElementById('wrapped-map-snapshot').src = dataUrl;
+                // Force a layout recalculation
+                wrappedMapContainer.offsetHeight;
 
-                    // Show modal
-                    document.getElementById('wrapped-modal').style.display = 'flex';
-                }}).catch(function(error) {{
-                    // Restore controls on error
-                    controls.forEach((el, i) => {{ if (el) el.style.display = displayStates[i] || ''; }});
-
-                    // Restore original map view
-                    map.setView(originalCenter, originalZoom);
-
-                    console.error('Map capture failed:', error);
-
-                    // Show modal anyway without map
-                    document.getElementById('wrapped-modal').style.display = 'flex';
-                }});
-            }}, 1500);
+                // Now that container has dimensions, invalidate map size
+                setTimeout(function() {{
+                    map.invalidateSize();
+                    map.fitBounds(BOUNDS, {{ padding: [80, 80] }});
+                }}, 100);
+            }}, 50);
         }}
 
         function closeWrapped(event) {{
             if (!event || event.target.id === 'wrapped-modal') {{
+                // Move map back to original position
+                const mapContainer = document.getElementById('map');
+                if (originalMapParent) {{
+                    const children = Array.from(originalMapParent.children);
+                    if (originalMapIndex >= children.length) {{
+                        originalMapParent.appendChild(mapContainer);
+                    }} else {{
+                        originalMapParent.insertBefore(mapContainer, children[originalMapIndex]);
+                    }}
+
+                    // Restore map styling
+                    mapContainer.style.width = '';
+                    mapContainer.style.height = '';
+                    mapContainer.style.borderRadius = '';
+                    mapContainer.style.overflow = '';
+
+                    // Show controls again
+                    const controls = [
+                        document.querySelector('.leaflet-control-zoom'),
+                        document.getElementById('stats-btn'),
+                        document.getElementById('export-btn'),
+                        document.getElementById('wrapped-btn'),
+                        document.getElementById('heatmap-btn'),
+                        document.getElementById('airports-btn'),
+                        document.getElementById('altitude-btn'),
+                        document.getElementById('aviation-btn'),
+                        document.getElementById('year-filter'),
+                        document.getElementById('stats-panel'),
+                        document.getElementById('altitude-legend'),
+                        document.getElementById('loading')
+                    ];
+                    controls.forEach(el => {{ if (el) el.style.display = ''; }});
+
+                    // Force map to recalculate size
+                    setTimeout(function() {{
+                        map.invalidateSize();
+                    }}, 100);
+                }}
+
                 document.getElementById('wrapped-modal').style.display = 'none';
             }}
         }}
@@ -3717,94 +3943,6 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             }};
         }}
 
-        function exportWrappedCard() {{
-            const container = document.getElementById('wrapped-container');
-            const closeBtn = document.querySelector('#wrapped-card .close-btn');
-            const exportBtn = document.querySelector('#wrapped-card .export-wrapped-btn');
-
-            // Hide buttons during export
-            closeBtn.style.display = 'none';
-            exportBtn.style.display = 'block';
-            exportBtn.style.opacity = '0';
-            exportBtn.style.pointerEvents = 'none';
-
-            // Clone the container to avoid modifying the original
-            const containerClone = container.cloneNode(true);
-
-            // Remove buttons from clone
-            const clonedCloseBtn = containerClone.querySelector('#wrapped-card .close-btn');
-            const clonedExportBtn = containerClone.querySelector('#wrapped-card .export-wrapped-btn');
-            if (clonedCloseBtn) clonedCloseBtn.remove();
-            if (clonedExportBtn) clonedExportBtn.remove();
-
-            // Create temporary wrapper for export with proper styling
-            const wrapper = document.createElement('div');
-            wrapper.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                background: linear-gradient(135deg, rgba(10, 10, 20, 0.97) 0%, rgba(15, 20, 35, 0.97) 100%);
-                padding: 60px;
-                border-radius: 20px;
-                width: auto;
-                height: auto;
-                max-width: none;
-                max-height: none;
-                z-index: 99999;
-                visibility: hidden;
-            `;
-
-            wrapper.appendChild(containerClone);
-            document.body.appendChild(wrapper);
-
-            // Force a layout calculation
-            wrapper.offsetHeight;
-
-            // Small delay to ensure wrapper is rendered
-            setTimeout(function() {{
-                // Make wrapper visible for capture
-                wrapper.style.visibility = 'visible';
-
-                // Capture the wrapper
-                domtoimage.toJpeg(wrapper, {{
-                    width: wrapper.offsetWidth * 2,
-                    height: wrapper.offsetHeight * 2,
-                    quality: 0.95,
-                    style: {{
-                        transform: 'scale(2)',
-                        transformOrigin: 'top left',
-                        visibility: 'visible'
-                    }}
-                }}).then(function(dataUrl) {{
-                    // Remove wrapper
-                    document.body.removeChild(wrapper);
-
-                    // Restore buttons
-                    closeBtn.style.display = 'block';
-                    exportBtn.style.opacity = '1';
-                    exportBtn.style.pointerEvents = 'auto';
-
-                    // Download
-                    const link = document.createElement('a');
-                    const year = document.getElementById('wrapped-year').textContent;
-                    link.download = 'flight_wrapped_' + year + '.jpg';
-                    link.href = dataUrl;
-                    link.click();
-                }}).catch(function(error) {{
-                    // Remove wrapper on error
-                    if (document.body.contains(wrapper)) {{
-                        document.body.removeChild(wrapper);
-                    }}
-
-                    // Restore buttons
-                    closeBtn.style.display = 'block';
-                    exportBtn.style.opacity = '1';
-                    exportBtn.style.pointerEvents = 'auto';
-
-                    alert('Export failed: ' + error.message);
-                }});
-            }}, 200);
-        }}
     </script>
 </body>
 </html>
