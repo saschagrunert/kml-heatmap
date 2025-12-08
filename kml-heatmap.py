@@ -3377,6 +3377,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 document.querySelector('.leaflet-control-zoom'),
                 document.getElementById('stats-btn'),
                 document.getElementById('export-btn'),
+                document.getElementById('wrapped-btn'),
+                document.getElementById('year-filter'),
                 document.getElementById('heatmap-btn'),
                 document.getElementById('altitude-btn'),
                 document.getElementById('airports-btn'),
