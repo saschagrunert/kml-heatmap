@@ -2044,7 +2044,23 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     <style>
         * {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif; }}
-        body {{ margin: 0; padding: 0; }}
+        html {{
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a1a1a;
+        }}
+        body {{
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            position: fixed;
+        }}
         #map {{
             position: absolute;
             top: 0;
