@@ -1138,6 +1138,12 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
     cruise_speed_total_time = 0  # Total time in cruise (seconds)
     CRUISE_ALTITUDE_THRESHOLD_FT = 1000  # AGL threshold for cruise
 
+    # Track longest single flight distance
+    max_path_distance_nm = 0  # Longest flight in nautical miles
+
+    # Track cruise altitude histogram (500ft bins for altitudes >1000ft AGL)
+    cruise_altitude_histogram = {}  # Dict of {altitude_bin_ft: time_seconds}
+
     # Process resolutions in order, with z14_plus first to establish the groundspeed baseline
     resolution_order = ['z14_plus', 'z11_13', 'z8_10', 'z5_7', 'z0_4']
 
@@ -1209,6 +1215,11 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     lat1, lon1 = path[i][0], path[i][1]
                     lat2, lon2 = path[i + 1][0], path[i + 1][1]
                     path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+
+                # Track longest single flight distance
+                path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
+                if path_distance_nm > max_path_distance_nm:
+                    max_path_distance_nm = path_distance_nm
 
                 # Store path info with airport relationships
                 path_info.append({
@@ -1338,6 +1349,12 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                                 cruise_speed_total_distance += window_distance * KM_TO_NAUTICAL_MILES
                                 cruise_speed_total_time += window_time
 
+                                # Track cruise altitude in 500ft bins
+                                altitude_bin_ft = int(altitude_agl_ft / 500) * 500
+                                if altitude_bin_ft not in cruise_altitude_histogram:
+                                    cruise_altitude_histogram[altitude_bin_ft] = 0
+                                cruise_altitude_histogram[altitude_bin_ft] += window_time
+
                     # For downsampled resolutions, clamp to the max from full resolution to avoid
                     # artificially high speeds caused by downsampling (fewer GPS points = longer segments)
                     if res_name != 'z14_plus' and max_groundspeed_knots > 0 and groundspeed_knots > max_groundspeed_knots:
@@ -1436,6 +1453,19 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
         stats['cruise_speed_knots'] = round(cruise_speed_knots, 1)
     else:
         stats['cruise_speed_knots'] = 0
+
+    # Calculate most common cruise altitude (altitude spent most time at)
+    if cruise_altitude_histogram:
+        most_common_altitude_ft = max(cruise_altitude_histogram.items(), key=lambda x: x[1])[0]
+        stats['most_common_cruise_altitude_ft'] = most_common_altitude_ft
+        stats['most_common_cruise_altitude_m'] = round(most_common_altitude_ft * 0.3048, 1)
+    else:
+        stats['most_common_cruise_altitude_ft'] = 0
+        stats['most_common_cruise_altitude_m'] = 0
+
+    # Add longest single flight distance
+    stats['longest_flight_nm'] = round(max_path_distance_nm, 1)
+    stats['longest_flight_km'] = round(max_path_distance_nm * 1.852, 1)
 
     # Handle case where no groundspeed was calculated
     if min_groundspeed_knots == float('inf'):
@@ -3938,6 +3968,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 html += '<div style="margin-bottom: 8px;"><strong>Average Distance per Trip:</strong> ' + avgDistanceNm + ' nm (' + avgDistanceKm + ' km)</div>';
             }}
 
+            // Longest single flight distance
+            if (stats.longest_flight_nm && stats.longest_flight_nm > 0) {{
+                var longestKm = stats.longest_flight_km.toFixed(1);
+                html += '<div style="margin-bottom: 8px;"><strong>Longest Flight:</strong> ' + stats.longest_flight_nm.toFixed(1) + ' nm (' + longestKm + ' km)</div>';
+            }}
+
             if (stats.average_groundspeed_knots && stats.average_groundspeed_knots > 0) {{
                 var kmh = (stats.average_groundspeed_knots * 1.852).toFixed(1);
                 html += '<div style="margin-bottom: 8px;"><strong>Average Groundspeed:</strong> ' + stats.average_groundspeed_knots.toFixed(1) + ' kt (' + kmh + ' km/h)</div>';
@@ -3963,6 +3999,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     var elevationGainM = Math.round(stats.total_altitude_gain_ft * 0.3048);
                     html += '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' + Math.round(stats.total_altitude_gain_ft) + ' ft (' + elevationGainM + ' m)</div>';
                 }}
+            }}
+
+            // Most common cruise altitude
+            if (stats.most_common_cruise_altitude_ft && stats.most_common_cruise_altitude_ft > 0) {{
+                var cruiseAltM = Math.round(stats.most_common_cruise_altitude_m);
+                html += '<div style="margin-bottom: 8px;"><strong>Most Common Cruise Altitude:</strong> ' + stats.most_common_cruise_altitude_ft.toLocaleString() + ' ft (' + cruiseAltM.toLocaleString() + ' m) AGL</div>';
             }}
 
             document.getElementById('stats-panel').innerHTML = html;
@@ -4122,15 +4164,19 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
             // Distance comparisons
             const earthCircumferenceKm = 40075;
-            const moonDistanceKm = 384400;
-            const issAltitudeKm = 408;
             const everestHeightFt = 29032;
             const everestHeightM = 8849;
             const commercialCruiseAltFt = 35000;
 
+            // Famous flight routes (approximate great circle distances)
+            const newYorkToLondonKm = 5585;
+            const newYorkToLAKm = 3944;
+            const parisToTokyoKm = 9715;
+            const londonToSydneyKm = 17015;
+            const berlinToNewYorkKm = 6385;
+
             const totalDistanceKm = yearStats.total_distance_nm * 1.852;
             const timesAroundEarth = totalDistanceKm / earthCircumferenceKm;
-            const percentToMoon = (totalDistanceKm / moonDistanceKm) * 100;
 
             // Distance facts
             if (timesAroundEarth >= 0.5) {{
@@ -4142,35 +4188,41 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 }});
             }}
 
-            if (percentToMoon >= 0.1) {{
+            // Compare to famous routes
+            if (totalDistanceKm >= londonToSydneyKm) {{
+                const timesLondonSydney = (totalDistanceKm / londonToSydneyKm).toFixed(1);
                 allFacts.push({{
                     category: 'distance',
-                    icon: '🌙',
-                    text: `That's <strong>${{percentToMoon.toFixed(1)}}%</strong> of the flight distance to the Moon`,
-                    priority: percentToMoon >= 1 ? 9 : 5
+                    icon: '✈️',
+                    text: `Your <strong>${{yearStats.total_distance_nm.toFixed(0)}} nm</strong> could fly you London to Sydney <strong>${{timesLondonSydney}}x</strong>`,
+                    priority: 9
                 }});
-            }}
-
-            if (totalDistanceKm >= issAltitudeKm) {{
-                const timesToISS = (totalDistanceKm / issAltitudeKm).toFixed(1);
+            }} else if (totalDistanceKm >= parisToTokyoKm) {{
+                const timesParisToTokyo = (totalDistanceKm / parisToTokyoKm).toFixed(1);
                 allFacts.push({{
                     category: 'distance',
-                    icon: '🛰️',
-                    text: `You could have reached the ISS <strong>${{timesToISS}}x</strong> times`,
+                    icon: '🗼',
+                    text: `Your <strong>${{yearStats.total_distance_nm.toFixed(0)}} nm</strong> could fly you Paris to Tokyo <strong>${{timesParisToTokyo}}x</strong>`,
+                    priority: 8
+                }});
+            }} else if (totalDistanceKm >= berlinToNewYorkKm) {{
+                const timesBerlinNY = (totalDistanceKm / berlinToNewYorkKm).toFixed(1);
+                allFacts.push({{
+                    category: 'distance',
+                    icon: '🗽',
+                    text: `Your <strong>${{yearStats.total_distance_nm.toFixed(0)}} nm</strong> could fly you Berlin to New York <strong>${{timesBerlinNY}}x</strong>`,
+                    priority: 7
+                }});
+            }} else if (totalDistanceKm >= newYorkToLAKm) {{
+                const timesNYToLA = (totalDistanceKm / newYorkToLAKm).toFixed(1);
+                allFacts.push({{
+                    category: 'distance',
+                    icon: '🌉',
+                    text: `Your <strong>${{yearStats.total_distance_nm.toFixed(0)}} nm</strong> could fly you New York to LA <strong>${{timesNYToLA}}x</strong>`,
                     priority: 6
                 }});
             }}
 
-            // Average flight distance
-            if (yearStats.total_flights > 0) {{
-                const avgFlight = (yearStats.total_distance_nm / yearStats.total_flights).toFixed(0);
-                allFacts.push({{
-                    category: 'distance',
-                    icon: '📏',
-                    text: `Average flight: <strong>${{avgFlight}} nm</strong>`,
-                    priority: 4
-                }});
-            }}
 
             // Altitude facts (from fullStats) - only elevation gain, not max altitude
             if (fullStats && fullStats.total_altitude_gain_ft) {{
@@ -4228,6 +4280,84 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     text: `Cruising at <strong>${{cruiseSpeedKt}} kt</strong>, averaging <strong>${{avgDistanceNm}} nm</strong> per adventure`,
                     priority: 8
                 }});
+            }}
+
+            // Longest flight fun facts
+            if (fullStats && fullStats.longest_flight_nm && fullStats.longest_flight_nm > 0) {{
+                const longestFlightNm = fullStats.longest_flight_nm;
+                const longestFlightKm = fullStats.longest_flight_km;
+
+                // Famous distances for comparison
+                const munichToHamburgKm = 612;  // Similar to longest flight!
+                const berlinToMunichKm = 504;
+                const frankfurtToViennaKm = 516;
+                const parisToBarcelonaKm = 831;
+                const londonToEdinburghKm = 534;
+
+                if (longestFlightKm >= munichToHamburgKm * 0.9 && longestFlightKm <= munichToHamburgKm * 1.1) {{
+                    allFacts.push({{
+                        category: 'distance',
+                        icon: '🛫',
+                        text: `Your longest adventure was <strong>${{longestFlightNm.toFixed(0)}} nm</strong> - like flying Munich to Hamburg!`,
+                        priority: 8
+                    }});
+                }} else if (longestFlightKm >= berlinToMunichKm * 0.9) {{
+                    allFacts.push({{
+                        category: 'distance',
+                        icon: '🛫',
+                        text: `Your longest journey: <strong>${{longestFlightNm.toFixed(0)}} nm</strong> - that's Berlin to Munich distance!`,
+                        priority: 8
+                    }});
+                }} else if (longestFlightKm >= 200) {{
+                    allFacts.push({{
+                        category: 'distance',
+                        icon: '🛫',
+                        text: `Your longest single flight covered <strong>${{longestFlightNm.toFixed(0)}} nm</strong> (<strong>${{longestFlightKm.toFixed(0)}} km</strong>)`,
+                        priority: 7
+                    }});
+                }}
+            }}
+
+            // Most common cruise altitude fun facts
+            if (fullStats && fullStats.most_common_cruise_altitude_ft && fullStats.most_common_cruise_altitude_ft > 0) {{
+                const cruiseAltFt = fullStats.most_common_cruise_altitude_ft;
+                const cruiseAltM = Math.round(fullStats.most_common_cruise_altitude_m);
+
+                // Famous heights for comparison
+                const eiffelTowerM = 330;
+                const empireStateBuildingM = 381;
+                const berlinTVTowerM = 368;
+                const cologneMonM = 157;
+
+                if (cruiseAltM >= empireStateBuildingM * 0.9 && cruiseAltM <= empireStateBuildingM * 1.3) {{
+                    allFacts.push({{
+                        category: 'altitude',
+                        icon: '🏔️',
+                        text: `Your sweet spot: <strong>${{cruiseAltFt.toLocaleString()}} ft</strong> AGL - about the height of the Empire State Building!`,
+                        priority: 8
+                    }});
+                }} else if (cruiseAltM >= eiffelTowerM * 0.9 && cruiseAltM <= eiffelTowerM * 1.5) {{
+                    allFacts.push({{
+                        category: 'altitude',
+                        icon: '🗼',
+                        text: `Preferred cruise altitude: <strong>${{cruiseAltFt.toLocaleString()}} ft</strong> AGL - like flying over the Eiffel Tower!`,
+                        priority: 8
+                    }});
+                }} else if (cruiseAltFt >= 1000 && cruiseAltFt <= 3000) {{
+                    allFacts.push({{
+                        category: 'altitude',
+                        icon: '✈️',
+                        text: `You love the low-level views at <strong>${{cruiseAltFt.toLocaleString()}} ft</strong> AGL - classic VFR territory!`,
+                        priority: 7
+                    }});
+                }} else if (cruiseAltFt > 3000) {{
+                    allFacts.push({{
+                        category: 'altitude',
+                        icon: '⬆️',
+                        text: `Most common cruise: <strong>${{cruiseAltFt.toLocaleString()}} ft</strong> AGL (<strong>${{cruiseAltM.toLocaleString()}} m</strong>)`,
+                        priority: 7
+                    }});
+                }}
             }}
 
             // Special achievements
