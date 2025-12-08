@@ -2036,30 +2036,38 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <meta name="theme-color" content="#1a1a1a">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>KML Heatmap</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     <style>
-        * {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif; }}
+        * {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }}
         html {{
             margin: 0;
             padding: 0;
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #1a1a1a;
+            background: #1a1a1a;
+            overscroll-behavior: none;
+            -webkit-overflow-scrolling: touch;
         }}
         body {{
             margin: 0;
             padding: 0;
-            width: 100%;
-            height: 100%;
+            width: 100vw;
+            min-height: 100vh;
+            min-height: 100dvh;
             overflow: hidden;
-            background-color: #1a1a1a;
-            position: fixed;
+            background: #1a1a1a;
+            position: relative;
+            overscroll-behavior: none;
+            -webkit-overflow-scrolling: touch;
         }}
         #map {{
             position: absolute;
@@ -2067,6 +2075,11 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             bottom: 0;
             right: 0;
             left: 0;
+            background: #1a1a1a;
+            overscroll-behavior: none;
+        }}
+        .leaflet-control-zoom {{
+            display: none !important;
         }}
 
         /* Button styles */
@@ -2087,7 +2100,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         .control-btn:hover {{ background-color: #3b3b3b; }}
 
         /* Left side buttons */
-        .control-btn.left {{ left: 50px; }}
+        .control-btn.left {{ left: 10px; }}
         #stats-btn {{ top: 10px; }}
         #export-btn {{ top: 50px; }}
         #wrapped-btn {{ top: 90px; }}
@@ -2202,11 +2215,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         /* Statistics panel */
         #stats-panel {{
             position: fixed;
-            top: 10px;
-            left: 135px;
+            top: 130px;
+            left: 10px;
             width: 280px;
             background-color: #2b2b2b;
             border: 2px solid #555;
+            border-radius: 4px;
             z-index: 10001;
             font-size: 13px;
             padding: 12px;
@@ -2270,6 +2284,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             align-items: stretch;
             padding: 0 40px 40px 40px;
         }}
+
+        /* Map container - left side */
         #wrapped-map-container {{
             flex: 1;
             background-color: #1a1a1a;
@@ -2280,36 +2296,61 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             display: flex;
             align-items: center;
             justify-content: center;
+            min-width: 400px;
         }}
         #wrapped-map-snapshot {{
             width: 100%;
             height: 100%;
             object-fit: cover;
         }}
-        #wrapped-card {{
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            border-radius: 20px;
-            padding: 40px;
+
+        /* Cards container - right side */
+        #wrapped-cards-column {{
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
             width: 500px;
             flex-shrink: 0;
-            overflow-y: auto;
+        }}
+
+        /* Square card base styles */
+        .wrapped-square-card {{
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            border-radius: 20px;
+            padding: 30px;
+            flex-shrink: 0;
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
             color: #ffffff;
             position: relative;
             display: flex;
             flex-direction: column;
         }}
-        #wrapped-card h1 {{
-            font-size: 48px;
+
+        /* Card 1: Stats */
+        #wrapped-card-stats {{
+        }}
+
+        /* Card 2: Fun Facts */
+        #wrapped-card-facts {{
+        }}
+
+        /* Card 3: Airports */
+        #wrapped-card-airports {{
+        }}
+
+        /* Shared card styles */
+        .wrapped-square-card h1 {{
+            font-size: 36px;
             margin: 0 0 10px 0;
+            text-align: center;
             background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
             text-fill-color: transparent;
         }}
-        #wrapped-card .year {{
-            font-size: 72px;
+        .wrapped-square-card .year {{
+            font-size: 64px;
             font-weight: bold;
             text-align: center;
             margin: 20px 0;
@@ -2319,26 +2360,26 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             background-clip: text;
             text-fill-color: transparent;
         }}
-        #wrapped-card .stat-grid {{
+        .wrapped-square-card .stat-grid {{
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 20px;
             margin: 30px 0;
         }}
-        #wrapped-card .stat-card {{
+        .wrapped-square-card .stat-card {{
             background-color: rgba(255, 255, 255, 0.1);
             border-radius: 12px;
             padding: 20px;
             text-align: center;
         }}
-        #wrapped-card .stat-value {{
-            font-size: 36px;
+        .wrapped-square-card .stat-value {{
+            font-size: 32px;
             font-weight: bold;
             color: #4facfe;
             margin-bottom: 5px;
         }}
-        #wrapped-card .stat-label {{
-            font-size: 14px;
+        .wrapped-square-card .stat-label {{
+            font-size: 12px;
             opacity: 0.8;
             text-transform: uppercase;
             letter-spacing: 1px;
@@ -2362,14 +2403,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             background-color: rgba(255, 255, 255, 0.08);
             color: rgba(255, 255, 255, 0.9);
         }}
-        #wrapped-card .fun-facts {{
+        .wrapped-square-card .fun-facts {{
             margin: 25px 0;
             padding: 20px;
             background: linear-gradient(135deg, rgba(79, 172, 254, 0.15) 0%, rgba(0, 242, 254, 0.15) 100%);
             border-radius: 12px;
             border: 1px solid rgba(79, 172, 254, 0.3);
         }}
-        #wrapped-card .fun-facts-title {{
+        .wrapped-square-card .fun-facts-title {{
             font-size: 16px;
             font-weight: bold;
             margin-bottom: 12px;
@@ -2377,7 +2418,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             text-transform: uppercase;
             letter-spacing: 1px;
         }}
-        #wrapped-card .fun-fact {{
+        .wrapped-square-card .fun-fact {{
             font-size: 14px;
             margin: 10px 0;
             padding: 10px 12px;
@@ -2388,39 +2429,39 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             border-left: 3px solid;
             transition: all 0.2s ease;
         }}
-        #wrapped-card .fun-fact:hover {{
+        .wrapped-square-card .fun-fact:hover {{
             opacity: 1;
             background: rgba(255, 255, 255, 0.08);
             transform: translateX(3px);
         }}
-        #wrapped-card .fun-fact strong {{
+        .wrapped-square-card .fun-fact strong {{
             color: #00f2fe;
             font-weight: 600;
         }}
         /* Category-specific colors */
-        #wrapped-card .fun-fact[data-category="distance"] {{
+        .wrapped-square-card .fun-fact[data-category="distance"] {{
             border-left-color: #4facfe;
         }}
-        #wrapped-card .fun-fact[data-category="altitude"] {{
+        .wrapped-square-card .fun-fact[data-category="altitude"] {{
             border-left-color: #f093fb;
         }}
-        #wrapped-card .fun-fact[data-category="time"] {{
+        .wrapped-square-card .fun-fact[data-category="time"] {{
             border-left-color: #ffd93d;
         }}
-        #wrapped-card .fun-fact[data-category="airports"] {{
+        .wrapped-square-card .fun-fact[data-category="airports"] {{
             border-left-color: #6bcf7f;
         }}
-        #wrapped-card .fun-fact[data-category="frequency"] {{
+        .wrapped-square-card .fun-fact[data-category="frequency"] {{
             border-left-color: #ff6b9d;
         }}
-        #wrapped-card .fun-fact[data-category="achievement"] {{
+        .wrapped-square-card .fun-fact[data-category="achievement"] {{
             border-left-color: #ffa500;
             background: linear-gradient(135deg, rgba(255, 165, 0, 0.1) 0%, rgba(255, 215, 0, 0.1) 100%);
         }}
-        #wrapped-card .top-airports {{
+        .wrapped-square-card .top-airports {{
             margin: 25px 0;
         }}
-        #wrapped-card .top-airports-title {{
+        .wrapped-square-card .top-airports-title {{
             font-size: 16px;
             font-weight: bold;
             margin-bottom: 12px;
@@ -2428,7 +2469,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             text-transform: uppercase;
             letter-spacing: 1px;
         }}
-        #wrapped-card .top-airport {{
+        .wrapped-square-card .top-airport {{
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -2438,19 +2479,19 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             border-radius: 8px;
             border-left: 3px solid #f5576c;
         }}
-        #wrapped-card .top-airport-name {{
+        .wrapped-square-card .top-airport-name {{
             font-size: 14px;
             font-weight: 500;
         }}
-        #wrapped-card .top-airport-count {{
+        .wrapped-square-card .top-airport-count {{
             font-size: 14px;
             font-weight: bold;
             color: #f5576c;
         }}
-        #wrapped-card .airports-grid {{
+        .wrapped-square-card .airports-grid {{
             margin: 25px 0;
         }}
-        #wrapped-card .airports-grid-title {{
+        .wrapped-square-card .airports-grid-title {{
             font-size: 16px;
             font-weight: bold;
             margin-bottom: 12px;
@@ -2458,12 +2499,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             text-transform: uppercase;
             letter-spacing: 1px;
         }}
-        #wrapped-card .airport-badges {{
+        .wrapped-square-card .airport-badges {{
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
         }}
-        #wrapped-card .airport-badge {{
+        .wrapped-square-card .airport-badge {{
             background: linear-gradient(135deg, rgba(240, 147, 251, 0.2) 0%, rgba(245, 87, 108, 0.2) 100%);
             border: 1px solid rgba(240, 147, 251, 0.4);
             padding: 6px 12px;
@@ -2493,15 +2534,25 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             }}
             #wrapped-content {{
                 flex-direction: column;
-                gap: 15px;
+                gap: 20px;
                 padding: 0 20px 20px 20px;
             }}
+            #wrapped-cards-column {{
+                width: 100%;
+                gap: 15px;
+            }}
+            .wrapped-square-card {{
+                width: 100%;
+                height: auto;
+                padding: 20px;
+                box-sizing: border-box;
+            }}
             #wrapped-map-container {{
-                order: 2;
                 width: 100%;
                 padding-bottom: 100%;
                 position: relative;
                 height: 0;
+                min-width: 0;
             }}
             #wrapped-map-container > * {{
                 position: absolute;
@@ -2510,78 +2561,67 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 width: 100%;
                 height: 100%;
             }}
-            #wrapped-card {{
-                order: 1;
-                width: 100%;
-                max-width: 100%;
-                padding: 20px;
-                box-sizing: border-box;
-            }}
-            #wrapped-card h1 {{
-                font-size: 28px;
+            .wrapped-square-card h1 {{
+                font-size: 24px;
                 word-wrap: break-word;
                 line-height: 1.2;
             }}
-            #wrapped-card .year {{
+            .wrapped-square-card .year {{
                 font-size: 48px;
                 margin: 15px 0;
             }}
-            #wrapped-card .stat-grid {{
+            .wrapped-square-card .stat-grid {{
                 gap: 12px;
                 margin: 20px 0;
             }}
-            #wrapped-card .stat-card {{
+            .wrapped-square-card .stat-card {{
                 padding: 15px 10px;
             }}
-            #wrapped-card .stat-value {{
+            .wrapped-square-card .stat-value {{
                 font-size: 28px;
             }}
-            #wrapped-card .stat-label {{
+            .wrapped-square-card .stat-label {{
                 font-size: 11px;
             }}
-            #wrapped-card .fun-facts {{
+            .wrapped-square-card .fun-facts {{
                 margin: 15px 0;
                 padding: 15px;
             }}
-            #wrapped-card .fun-facts-title {{
+            .wrapped-square-card .fun-facts-title {{
                 font-size: 14px;
             }}
-            #wrapped-card .fun-fact {{
+            .wrapped-square-card .fun-fact {{
                 font-size: 12px;
                 padding: 8px 10px;
                 margin: 8px 0;
             }}
-            #wrapped-card .fun-fact:hover {{
+            .wrapped-square-card .fun-fact:hover {{
                 transform: translateX(2px);
             }}
-            #wrapped-card .top-airports {{
+            .wrapped-square-card .top-airports {{
                 margin: 15px 0;
             }}
-            #wrapped-card .top-airports-title {{
+            .wrapped-square-card .top-airports-title {{
                 font-size: 14px;
             }}
-            #wrapped-card .top-airport {{
+            .wrapped-square-card .top-airport {{
                 padding: 8px 12px;
             }}
-            #wrapped-card .top-airport-name {{
+            .wrapped-square-card .top-airport-name {{
                 font-size: 12px;
             }}
-            #wrapped-card .top-airport-count {{
+            .wrapped-square-card .top-airport-count {{
                 font-size: 12px;
             }}
-            #wrapped-card .airports-grid {{
+            .wrapped-square-card .airports-grid {{
                 margin: 15px 0;
             }}
-            #wrapped-card .airports-grid-title {{
+            .wrapped-square-card .airports-grid-title {{
                 font-size: 14px;
             }}
-            #wrapped-card .airport-badge {{
+            .wrapped-square-card .airport-badge {{
                 padding: 5px 10px;
                 font-size: 11px;
-            }}
-            #wrapped-card-content {{
-                margin: 0 -20px;
-                padding: 0 20px;
             }}
         }}
 
@@ -2604,18 +2644,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         }}
         .leaflet-control-zoom a:hover {{ background-color: #3b3b3b !important; }}
 
-        /* Airport cluster marker - custom styling */
-        .airport-cluster-marker {{
-            background: transparent;
-            border: none;
-        }}
-
-        /* Modern dot marker styles */
+        /* Modern dot marker styles - base (zoom < 6) */
         .airport-marker {{
-            width: 12px;
-            height: 12px;
+            width: 6px;
+            height: 6px;
             background-color: #28a745;
-            border: 2px solid #ffffff;
+            border: 1px solid #ffffff;
             border-radius: 50%;
             box-shadow: 0 2px 6px rgba(0,0,0,0.4);
             cursor: pointer;
@@ -2623,57 +2657,125 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             flex-shrink: 0;
         }}
 
-        /* Airport label styles */
+        /* Home base marker (airport with most flights) */
+        .airport-marker-home {{
+            background-color: #007bff !important;
+        }}
+
+        /* Airport label styles - base (zoom < 6) */
         .airport-label {{
             background-color: rgba(43, 43, 43, 0.9);
             border: 1px solid #28a745;
             color: #ffffff;
             font-family: monospace;
             font-weight: bold;
-            font-size: 11px;
-            padding: 2px 6px;
+            font-size: 9px;
+            padding: 1px 3px;
             border-radius: 3px;
             white-space: nowrap;
             pointer-events: none;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
             position: absolute;
-            bottom: 18px;
+            bottom: 10px;
             left: 50%;
             transform: translateX(-50%);
+        }}
+
+        /* Home base label */
+        .airport-label-home {{
+            border-color: #007bff !important;
         }}
         .airport-marker-container {{
             position: relative;
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 12px;
-            height: 12px;
+            width: 6px;
+            height: 6px;
         }}
         .airport-marker-container:hover .airport-marker {{
             transform: scale(1.3);
             box-shadow: 0 3px 8px rgba(0,0,0,0.6);
         }}
 
-        /* Cluster dot styles */
-        .airport-cluster-dot {{
-            width: 20px;
-            height: 20px;
-            background-color: #28a745;
-            border: 3px solid #ffffff;
-            border-radius: 50%;
-            box-shadow: 0 3px 8px rgba(0,0,0,0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #ffffff;
-            font-weight: bold;
-            font-size: 11px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+        /* Small zoom (6-7) */
+        .airport-marker-small {{
+            width: 7px;
+            height: 7px;
+            border: 1px solid #ffffff;
         }}
-        .airport-cluster-dot:hover {{
-            transform: scale(1.2);
-            box-shadow: 0 4px 10px rgba(0,0,0,0.7);
+        .airport-label-small {{
+            font-size: 10px;
+            padding: 1px 3px;
+            bottom: 11px;
+        }}
+        .airport-marker-container-small {{
+            width: 7px;
+            height: 7px;
+        }}
+
+        /* Medium-small zoom (8-9) */
+        .airport-marker-medium-small {{
+            width: 8px;
+            height: 8px;
+            border: 1px solid #ffffff;
+        }}
+        .airport-label-medium-small {{
+            font-size: 11px;
+            padding: 1px 4px;
+            bottom: 12px;
+        }}
+        .airport-marker-container-medium-small {{
+            width: 8px;
+            height: 8px;
+        }}
+
+        /* Medium zoom (10-11) */
+        .airport-marker-medium {{
+            width: 10px;
+            height: 10px;
+            border: 2px solid #ffffff;
+        }}
+        .airport-label-medium {{
+            font-size: 12px;
+            padding: 2px 5px;
+            bottom: 14px;
+        }}
+        .airport-marker-container-medium {{
+            width: 10px;
+            height: 10px;
+        }}
+
+        /* Large zoom (12-13) */
+        .airport-marker-large {{
+            width: 11px;
+            height: 11px;
+            border: 2px solid #ffffff;
+        }}
+        .airport-label-large {{
+            font-size: 12px;
+            padding: 2px 5px;
+            bottom: 16px;
+        }}
+        .airport-marker-container-large {{
+            width: 11px;
+            height: 11px;
+        }}
+
+        /* Extra large zoom (14+) */
+        .airport-marker-xlarge {{
+            width: 12px;
+            height: 12px;
+            border: 2px solid #ffffff;
+        }}
+        .airport-label-xlarge {{
+            font-size: 13px;
+            padding: 2px 6px;
+            bottom: 18px;
+        }}
+        .airport-marker-container-xlarge {{
+            width: 12px;
+            height: 12px;
         }}
 
         /* Tooltip styles */
@@ -2738,16 +2840,28 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 <button class="close-btn" onclick="closeWrapped()">✕ Close</button>
             </div>
             <div id="wrapped-content">
-                <div id="wrapped-card">
-                    <h1>✨ Your Year in Flight</h1>
-                    <div class="year" id="wrapped-year">2025</div>
-                    <div id="wrapped-card-content">
+                <!-- Cards column - left side -->
+                <div id="wrapped-cards-column">
+                    <!-- Card 1: Stats -->
+                    <div id="wrapped-card-stats" class="wrapped-square-card">
+                        <h1>✨ Your Year in Flight</h1>
+                        <div class="year" id="wrapped-year">2025</div>
                         <div class="stat-grid" id="wrapped-stats"></div>
+                    </div>
+
+                    <!-- Card 2: Fun Facts -->
+                    <div id="wrapped-card-facts" class="wrapped-square-card">
                         <div class="fun-facts" id="wrapped-fun-facts"></div>
+                    </div>
+
+                    <!-- Card 3: Airports -->
+                    <div id="wrapped-card-airports" class="wrapped-square-card">
                         <div class="top-airports" id="wrapped-top-airports"></div>
                         <div class="airports-grid" id="wrapped-airports-grid"></div>
                     </div>
                 </div>
+
+                <!-- Map - right side -->
                 <div id="wrapped-map-container">
                     <!-- Map will be moved here when wrapped is shown -->
                 </div>
@@ -2757,7 +2871,6 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dom-to-image@2.6.0/dist/dom-to-image.min.js"></script>
 
     <script>
@@ -2811,34 +2924,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         // Data layers
         var heatmapLayer = null;
         var altitudeLayer = L.layerGroup();
-        var airportLayer = L.markerClusterGroup({{
-            showCoverageOnHover: false,
-            zoomToBoundsOnClick: true,
-            spiderfyOnMaxZoom: true,
-            disableClusteringAtZoom: 12,
-            maxClusterRadius: 25,
-            iconCreateFunction: function(cluster) {{
-                // Extract ICAO codes from all markers in cluster
-                var markers = cluster.getAllChildMarkers();
-                var icaoCodes = markers.map(function(marker) {{
-                    return marker.options.icao || 'APT';
-                }}).filter(function(value, index, self) {{
-                    return self.indexOf(value) === index;  // Remove duplicates
-                }});
-
-                // Create cluster dot with count
-                var count = markers.length;
-                var html = '<div class="airport-cluster-dot">' + count + '</div>';
-
-                return L.divIcon({{
-                    html: html,
-                    iconSize: [20, 20],
-                    iconAnchor: [10, 10],
-                    popupAnchor: [0, -10],
-                    className: 'airport-cluster-marker'
-                }});
-            }}
-        }});
+        var airportLayer = L.layerGroup();
         var currentResolution = null;
         var loadedData = {{}};
         var currentData = null;  // Store current loaded data for redrawing
@@ -2872,21 +2958,6 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 }}
             );
         }}
-
-        // Add cluster click handler to show popup with ICAO codes
-        airportLayer.on('clusterclick', function(cluster) {{
-            var markers = cluster.layer.getAllChildMarkers();
-            var icaoCodes = markers.map(function(marker) {{
-                return marker.options.icao || 'APT';
-            }}).filter(function(value, index, self) {{
-                return self.indexOf(value) === index;
-            }}).sort();
-
-            var popupContent = '<div style="font-size: 12px;"><b>' + markers.length + ' Airports</b><br>' +
-                             '<div style="max-height: 150px; overflow-y: auto; margin-top: 5px;">' +
-                             icaoCodes.join(', ') + '</div></div>';
-            cluster.layer.bindPopup(popupContent).openPopup();
-        }});
 
         // Add airports layer by default
         airportLayer.addTo(map);
@@ -3230,12 +3301,25 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 }});
             }}
 
+            // Find the airport with the most flights (home base)
+            let homeBaseAirport = null;
+            if (airports.length > 0) {{
+                homeBaseAirport = airports.reduce((max, airport) =>
+                    airport.flight_count > max.flight_count ? airport : max
+                , airports[0]);
+            }}
+
             // Add airport markers
             airports.forEach(function(airport) {{
                 const icaoMatch = airport.name ? airport.name.match(/\\b([A-Z]{{4}})\\b/) : null;
                 const icao = icaoMatch ? icaoMatch[1] : 'APT';
 
-                const markerHtml = '<div class="airport-marker-container"><div class="airport-marker"></div><div class="airport-label">' + icao + '</div></div>';
+                // Check if this is the home base
+                const isHomeBase = homeBaseAirport && airport.name === homeBaseAirport.name;
+                const homeClass = isHomeBase ? ' airport-marker-home' : '';
+                const homeLabelClass = isHomeBase ? ' airport-label-home' : '';
+
+                const markerHtml = '<div class="airport-marker-container"><div class="airport-marker' + homeClass + '"></div><div class="airport-label' + homeLabelClass + '">' + icao + '</div></div>';
 
                 const latDms = ddToDms(airport.lat, true);
                 const lonDms = ddToDms(airport.lon, false);
@@ -3279,10 +3363,16 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
             // Initial data load
             updateLayers();
+
+            // Set initial airport marker sizes based on current zoom
+            updateAirportMarkerSizes();
         }})();
 
         // Update layers on zoom change only
-        map.on('zoomend', updateLayers);
+        map.on('zoomend', function() {{
+            updateLayers();
+            updateAirportMarkerSizes();
+        }});
 
         // Clear selection when clicking on the map background
         map.on('click', function(e) {{
@@ -3312,6 +3402,48 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         function clearSelection() {{
             selectedPathIds.clear();
             redrawAltitudePaths();
+        }}
+
+        function updateAirportMarkerSizes() {{
+            const zoom = map.getZoom();
+            let sizeClass = '';
+
+            if (zoom >= 14) {{
+                sizeClass = 'xlarge';
+            }} else if (zoom >= 12) {{
+                sizeClass = 'large';
+            }} else if (zoom >= 10) {{
+                sizeClass = 'medium';
+            }} else if (zoom >= 8) {{
+                sizeClass = 'medium-small';
+            }} else if (zoom >= 6) {{
+                sizeClass = 'small';
+            }}
+
+            // Update all airport markers
+            document.querySelectorAll('.airport-marker-container').forEach(function(container) {{
+                const marker = container.querySelector('.airport-marker');
+                const label = container.querySelector('.airport-label');
+
+                // Hide labels when zoomed out below level 5, but keep dots visible
+                if (zoom < 5) {{
+                    label.style.display = 'none';
+                }} else {{
+                    label.style.display = '';
+                }}
+
+                // Remove all size classes
+                container.classList.remove('airport-marker-container-small', 'airport-marker-container-medium-small', 'airport-marker-container-medium', 'airport-marker-container-large', 'airport-marker-container-xlarge');
+                marker.classList.remove('airport-marker-small', 'airport-marker-medium-small', 'airport-marker-medium', 'airport-marker-large', 'airport-marker-xlarge');
+                label.classList.remove('airport-label-small', 'airport-label-medium-small', 'airport-label-medium', 'airport-label-large', 'airport-label-xlarge');
+
+                // Add appropriate size class
+                if (sizeClass) {{
+                    container.classList.add('airport-marker-container-' + sizeClass);
+                    marker.classList.add('airport-marker-' + sizeClass);
+                    label.classList.add('airport-label-' + sizeClass);
+                }}
+            }});
         }}
 
         function updateAltitudeLegend(minAlt, maxAlt) {{
@@ -3791,33 +3923,32 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
             document.getElementById('wrapped-fun-facts').innerHTML = funFactsHtml;
 
-            // Build top airports section if we have airport data
+            // Build home base section if we have airport data
             if (fullStats && fullStats.airport_names && fullStats.airport_names.length > 0) {{
                 // Load airport data to get flight counts
                 loadAirports().then(function(airports) {{
-                    // Sort airports by flight count
+                    // Sort airports by flight count to find home base
                     const sortedAirports = airports.sort((a, b) => b.flight_count - a.flight_count);
-                    const top3 = sortedAirports.slice(0, 3);
+                    const homeBase = sortedAirports[0];
 
-                    let topAirportsHtml = '<div class="top-airports-title">✈️ Top Airports</div>';
-                    top3.forEach(function(airport) {{
-                        topAirportsHtml += `
-                            <div class="top-airport">
-                                <div class="top-airport-name">${{airport.name}}</div>
-                                <div class="top-airport-count">${{airport.flight_count}} flights</div>
-                            </div>
-                        `;
+                    let homeBaseHtml = '<div class="top-airports-title">🏠 Home Base</div>';
+                    homeBaseHtml += `
+                        <div class="top-airport">
+                            <div class="top-airport-name">${{homeBase.name}}</div>
+                            <div class="top-airport-count">${{homeBase.flight_count}} flights</div>
+                        </div>
+                    `;
+                    document.getElementById('wrapped-top-airports').innerHTML = homeBaseHtml;
+
+                    // Build all destinations badge grid (excluding home base)
+                    const destinations = fullStats.airport_names.filter(name => name !== homeBase.name);
+                    let airportBadgesHtml = '<div class="airports-grid-title">🗺️ All Destinations</div><div class="airport-badges">';
+                    destinations.forEach(function(airportName) {{
+                        airportBadgesHtml += `<div class="airport-badge">${{airportName}}</div>`;
                     }});
-                    document.getElementById('wrapped-top-airports').innerHTML = topAirportsHtml;
+                    airportBadgesHtml += '</div>';
+                    document.getElementById('wrapped-airports-grid').innerHTML = airportBadgesHtml;
                 }});
-
-                // Build all airports badge grid
-                let airportBadgesHtml = '<div class="airports-grid-title">🗺️ All Airports</div><div class="airport-badges">';
-                fullStats.airport_names.forEach(function(airportName) {{
-                    airportBadgesHtml += `<div class="airport-badge">${{airportName}}</div>`;
-                }});
-                airportBadgesHtml += '</div>';
-                document.getElementById('wrapped-airports-grid').innerHTML = airportBadgesHtml;
             }}
 
             // Move the map into the wrapped container
