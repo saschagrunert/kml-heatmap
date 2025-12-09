@@ -72,7 +72,8 @@ def downsample_path_rdp(path, epsilon=0.0001):
 
     def perpendicular_distance(point, line_start, line_end):
         """Calculate perpendicular distance from point to line."""
-        if line_start == line_end:
+        # For circular paths where start == end, use haversine distance from start
+        if line_start[:2] == line_end[:2]:
             return haversine_distance(point[0], point[1], line_start[0], line_start[1])
 
         # Using simple Euclidean approximation for small distances
@@ -84,7 +85,8 @@ def downsample_path_rdp(path, epsilon=0.0001):
         den = sqrt((y2 - y1)**2 + (x2 - x1)**2)
 
         if den == 0:
-            return 0
+            # Shouldn't happen if we checked line_start == line_end above, but safety fallback
+            return haversine_distance(point[0], point[1], line_start[0], line_start[1])
         return num / den
 
     # Find point with maximum distance
@@ -292,6 +294,47 @@ def extract_year_from_timestamp(timestamp):
     return None
 
 
+def parse_aircraft_from_filename(filename):
+    """
+    Parse aircraft information from KML filename.
+
+    Expected format: YYYYMMDD_HHMM_AIRPORT_REGISTRATION_TYPE.kml
+    Example: 20250822_1013_EDAV_DEHYL_DA40.kml
+
+    Args:
+        filename: KML filename (without path)
+
+    Returns:
+        Dict with 'registration' and 'type' keys, or empty dict if parsing fails
+    """
+    import re
+
+    # Remove .kml extension
+    name = filename.replace('.kml', '')
+
+    # Pattern: YYYYMMDD_HHMM_AIRPORT_REGISTRATION_TYPE
+    # Registration is typically D-EXXX format (but stored as DEEXXX in filename)
+    # Type is typically letters/numbers like DA20, DA40, C172, etc.
+    parts = name.split('_')
+
+    if len(parts) >= 5:
+        # Format: DATE_TIME_AIRPORT_REGISTRATION_TYPE
+        registration_raw = parts[3]
+        aircraft_type = parts[4]
+
+        # Format registration: if starts with D, insert hyphen after first char (D-EXXX)
+        registration = registration_raw
+        if registration_raw.startswith('D') and len(registration_raw) > 1:
+            registration = registration_raw[0] + '-' + registration_raw[1:]
+
+        return {
+            'registration': registration,
+            'type': aircraft_type
+        }
+
+    return {}
+
+
 def parse_kml_coordinates(kml_file):
     """
     Extract coordinates from a KML file.
@@ -477,14 +520,20 @@ def parse_kml_coordinates(kml_file):
             if current_path:
                 path_groups.append(current_path)
                 year = extract_year_from_timestamp(timestamp)
-                path_metadata.append({
+                aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
+                metadata = {
                     'timestamp': timestamp,
                     'end_timestamp': end_timestamp,
                     'filename': Path(kml_file).name,
                     'start_point': current_path[0],  # [lat, lon, alt]
                     'airport_name': airport_name,
                     'year': year
-                })
+                }
+                # Add aircraft info if available
+                if aircraft_info:
+                    metadata['aircraft_registration'] = aircraft_info.get('registration')
+                    metadata['aircraft_type'] = aircraft_info.get('type')
+                path_metadata.append(metadata)
 
             if DEBUG and element_coords > 0:
                 coord_type = "Point" if element_coords == 1 else f"Path ({element_coords} points)"
@@ -598,14 +647,20 @@ def parse_kml_coordinates(kml_file):
             if gx_path:
                 path_groups.append(gx_path)
                 gx_year = extract_year_from_timestamp(gx_timestamp)
-                path_metadata.append({
+                aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
+                metadata = {
                     'timestamp': gx_timestamp,
                     'end_timestamp': gx_end_timestamp,
                     'filename': Path(kml_file).name,
                     'start_point': gx_path[0],  # [lat, lon, alt]
                     'airport_name': gx_airport_name,
                     'year': gx_year
-                })
+                }
+                # Add aircraft info if available
+                if aircraft_info:
+                    metadata['aircraft_registration'] = aircraft_info.get('registration')
+                    metadata['aircraft_type'] = aircraft_info.get('type')
+                path_metadata.append(metadata)
 
             if DEBUG:
                 print(f"  DEBUG: Parsed {len(gx_coords)} gx:coord elements into 1 track")
@@ -794,6 +849,43 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
 
     # Max groundspeed will be added later from path segments
     stats['max_groundspeed_knots'] = 0
+
+    # Collect unique aircraft from metadata
+    if all_path_metadata:
+        aircraft_registrations = set()
+        aircraft_types = set()
+        aircraft_list = []  # List of {registration, type, flights_count}
+        aircraft_flights = {}  # Count unique flights (KML files) per aircraft registration
+
+        for metadata in all_path_metadata:
+            reg = metadata.get('aircraft_registration')
+            atype = metadata.get('aircraft_type')
+            filename = metadata.get('filename')
+
+            if reg:
+                aircraft_registrations.add(reg)
+                if reg not in aircraft_flights:
+                    aircraft_flights[reg] = {'type': atype, 'count': 0, 'files': set()}
+
+                # Only count unique filenames (each file = one flight)
+                if filename and filename not in aircraft_flights[reg]['files']:
+                    aircraft_flights[reg]['files'].add(filename)
+                    aircraft_flights[reg]['count'] += 1
+
+            if atype:
+                aircraft_types.add(atype)
+
+        # Create sorted aircraft list by flight count
+        for reg, info in sorted(aircraft_flights.items(), key=lambda x: x[1]['count'], reverse=True):
+            aircraft_list.append({
+                'registration': reg,
+                'type': info['type'],
+                'flights': info['count']
+            })
+
+        stats['num_aircraft'] = len(aircraft_registrations)
+        stats['aircraft_types'] = sorted(aircraft_types)
+        stats['aircraft_list'] = aircraft_list
 
     return stats
 
@@ -1221,8 +1313,8 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                 if path_distance_nm > max_path_distance_nm:
                     max_path_distance_nm = path_distance_nm
 
-                # Store path info with airport relationships
-                path_info.append({
+                # Store path info with airport relationships and aircraft info
+                info = {
                     'id': path_idx,
                     'start_airport': start_airport,
                     'end_airport': end_airport,
@@ -1230,7 +1322,13 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     'end_coords': [path[-1][0], path[-1][1]],
                     'segment_count': len(path) - 1,
                     'year': path_year
-                })
+                }
+                # Add aircraft information if available in metadata
+                if 'aircraft_registration' in metadata:
+                    info['aircraft_registration'] = metadata['aircraft_registration']
+                if 'aircraft_type' in metadata:
+                    info['aircraft_type'] = metadata['aircraft_type']
+                path_info.append(info)
 
                 # Define realistic groundspeed limits for general aviation
                 MAX_GROUNDSPEED_KNOTS = 200  # Reasonable max for typical general aviation
@@ -1360,14 +1458,16 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     if res_name != 'z14_plus' and max_groundspeed_knots > 0 and groundspeed_knots > max_groundspeed_knots:
                         groundspeed_knots = max_groundspeed_knots
 
-                    path_segments.append({
-                        'coords': [[lat1, lon1], [lat2, lon2]],
-                        'color': color,
-                        'altitude_ft': avg_alt_ft,
-                        'altitude_m': round(avg_alt_m, 0),
-                        'groundspeed_knots': round(groundspeed_knots, 1),
-                        'path_id': path_idx  # Link segment to its path
-                    })
+                    # Skip zero-length segments (identical coordinates)
+                    if lat1 != lat2 or lon1 != lon2:
+                        path_segments.append({
+                            'coords': [[lat1, lon1], [lat2, lon2]],
+                            'color': color,
+                            'altitude_ft': avg_alt_ft,
+                            'altitude_m': round(avg_alt_m, 0),
+                            'groundspeed_knots': round(groundspeed_knots, 1),
+                            'path_id': path_idx  # Link segment to its path
+                        })
 
         # Export data
         data = {
@@ -2140,6 +2240,10 @@ def minify_html(html):
     def minify_js_tags(match):
         js_content = match.group(1)
         minified_js = rjsmin.jsmin(js_content)
+        # rjsmin preserves some newlines for ASI (Automatic Semicolon Insertion) safety.
+        # Since our generated code uses explicit semicolons, we can safely remove
+        # remaining newlines. Replace with space to maintain token separation where needed.
+        minified_js = re.sub(r'\s*\n\s*', '', minified_js)
         return f'<script>{minified_js}</script>'
 
     # Minify inline CSS
@@ -2342,11 +2446,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             text-align: center;
         }}
         #year-filter {{ top: 10px; }}
-        #heatmap-btn {{ top: 50px; }}
-        #airports-btn {{ top: 90px; }}
-        #altitude-btn {{ top: 130px; }}
-        #airspeed-btn {{ top: 170px; }}
-        #aviation-btn {{ top: 210px; }}
+        #aircraft-filter {{ top: 50px; }}
+        #heatmap-btn {{ top: 90px; }}
+        #airports-btn {{ top: 130px; }}
+        #altitude-btn {{ top: 170px; }}
+        #airspeed-btn {{ top: 210px; }}
+        #aviation-btn {{ top: 250px; }}
 
         /* Year filter dropdown - styled like other buttons */
         #year-filter {{
@@ -2402,6 +2507,63 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             text-align: center;
         }}
         #year-filter:hover {{
+            background-color: #3b3b3b;
+        }}
+
+        /* Aircraft filter dropdown - styled like year filter */
+        #aircraft-filter {{
+            background-color: #2b2b2b;
+            color: #ffffff;
+            border: 2px solid #555;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+            touch-action: manipulation;
+            width: 120px;
+            box-sizing: border-box;
+            text-align: center;
+        }}
+        #aircraft-filter select {{
+            background: transparent;
+            color: #ffffff;
+            border: 0 !important;
+            border-style: none !important;
+            border-width: 0 !important;
+            border-color: transparent !important;
+            border-image: none !important;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            width: calc(100% + 24px);
+            margin: -6px -12px;
+            padding: 6px 12px;
+            outline: none !important;
+            box-shadow: none !important;
+            text-align: center;
+            text-align-last: center;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+        }}
+        #aircraft-filter select:focus {{
+            outline: none !important;
+            border: 0 !important;
+            border-style: none !important;
+            box-shadow: none !important;
+        }}
+        #aircraft-filter select:active {{
+            border: 0 !important;
+            border-style: none !important;
+        }}
+        #aircraft-filter select option {{
+            background-color: #2b2b2b;
+            color: #ffffff;
+            text-align: center;
+        }}
+        #aircraft-filter:hover {{
             background-color: #3b3b3b;
         }}
 
@@ -3082,13 +3244,19 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
     <!-- Right side buttons -->
     <button id="heatmap-btn" class="control-btn right" onclick="toggleHeatmap()">🔥 Heatmap</button>
-    <button id="airports-btn" class="control-btn right" onclick="toggleAirports()">✈️ Airports</button>
+    <button id="airports-btn" class="control-btn right" onclick="toggleAirports()">🏢 Airports</button>
     <button id="altitude-btn" class="control-btn right" onclick="toggleAltitude()">⛰️ Altitude</button>
     <button id="airspeed-btn" class="control-btn right" onclick="toggleAirspeed()">🚀 Speed</button>
     <button id="aviation-btn" class="control-btn right" onclick="toggleAviation()" style="display: none;">🗺️ Aviation</button>
     <div id="year-filter" class="control-btn right">
         <select id="year-select" onchange="filterByYear()">
             <option value="all">📅 Years</option>
+        </select>
+    </div>
+
+    <div id="aircraft-filter" class="control-btn right">
+        <select id="aircraft-select" onchange="filterByAircraft()">
+            <option value="all">✈️ Aircraft</option>
         </select>
     </div>
 
@@ -3210,6 +3378,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         var loadedData = {{}};
         var currentData = null;  // Store current loaded data for redrawing
         var fullStats = null;  // Store original full statistics
+        var fullPathInfo = null;  // Store full resolution path_info for filtering
+        var fullPathSegments = null;  // Store full resolution path_segments for filtering
         var altitudeRange = {{ min: 0, max: 10000 }};  // Store altitude range for legend
         var airspeedRange = {{ min: 0, max: 200 }};  // Store airspeed range for legend
 
@@ -3328,12 +3498,44 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
             currentData = data;  // Store for redrawing
 
+            // Filter coordinates based on active filters
+            var filteredCoordinates = data.coordinates;
+            if ((selectedYear !== 'all' || selectedAircraft !== 'all') && data.path_segments) {{
+                // Get filtered path IDs
+                var filteredPathIds = new Set();
+                if (data.path_info) {{
+                    data.path_info.forEach(function(pathInfo) {{
+                        var matchesYear = selectedYear === 'all' || (pathInfo.year && pathInfo.year.toString() === selectedYear);
+                        var matchesAircraft = selectedAircraft === 'all' || (pathInfo.aircraft_registration === selectedAircraft);
+                        if (matchesYear && matchesAircraft) {{
+                            filteredPathIds.add(pathInfo.id);
+                        }}
+                    }});
+                }}
+
+                // Extract coordinates from filtered segments
+                var coordSet = new Set();
+                data.path_segments.forEach(function(segment) {{
+                    if (filteredPathIds.has(segment.path_id)) {{
+                        var coords = segment.coords;
+                        if (coords && coords.length === 2) {{
+                            coordSet.add(JSON.stringify(coords[0]));
+                            coordSet.add(JSON.stringify(coords[1]));
+                        }}
+                    }}
+                }});
+
+                filteredCoordinates = Array.from(coordSet).map(function(str) {{
+                    return JSON.parse(str);
+                }});
+            }}
+
             // Update heatmap - only add if visible
             if (heatmapLayer) {{
                 map.removeLayer(heatmapLayer);
             }}
 
-            heatmapLayer = L.heatLayer(data.coordinates, {{
+            heatmapLayer = L.heatLayer(filteredCoordinates, {{
                 radius: 10,
                 blur: 15,
                 minOpacity: 0.25,
@@ -3433,13 +3635,22 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             currentData.path_segments.forEach(function(segment) {{
                 var pathId = segment.path_id;
 
+                var pathInfo = currentData.path_info.find(function(p) {{ return p.id === pathId; }});
+
                 // Filter by year if selected
                 if (selectedYear !== 'all') {{
-                    var pathInfo = currentData.path_info.find(function(p) {{ return p.id === pathId; }});
                     if (pathInfo && pathInfo.year && pathInfo.year.toString() !== selectedYear) {{
                         return;  // Skip this segment
                     }}
                 }}
+
+                // Filter by aircraft if selected
+                if (selectedAircraft !== 'all') {{
+                    if (pathInfo && pathInfo.aircraft_registration !== selectedAircraft) {{
+                        return;  // Skip this segment
+                    }}
+                }}
+
                 var isSelected = selectedPathIds.has(pathId);
 
                 // Recalculate color based on current altitude range
@@ -3522,8 +3733,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         }}
 
         function updateAirportOpacity() {{
-            if (selectedPathIds.size === 0) {{
-                // No selection - restore all airports to full opacity
+            // Check if filters are active
+            var hasFilters = selectedYear !== 'all' || selectedAircraft !== 'all';
+            var hasSelection = selectedPathIds.size > 0;
+
+            if (!hasFilters && !hasSelection) {{
+                // No filters or selection - show all airports
                 Object.keys(airportMarkers).forEach(function(airportName) {{
                     var marker = airportMarkers[airportName];
                     marker.setOpacity(1.0);
@@ -3531,29 +3746,260 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 return;
             }}
 
-            // Collect airports involved in selected paths
-            var selectedAirports = new Set();
-            selectedPathIds.forEach(function(pathId) {{
-                var airports = pathToAirports[pathId];
-                if (airports) {{
-                    if (airports.start) selectedAirports.add(airports.start);
-                    if (airports.end) selectedAirports.add(airports.end);
-                }}
-            }});
+            var visibleAirports = new Set();
+
+            // If filters are active, collect airports from filtered paths
+            if (hasFilters && fullPathInfo) {{
+                fullPathInfo.forEach(function(pathInfo) {{
+                    // Check if path matches filters
+                    var matchesYear = selectedYear === 'all' || (pathInfo.year && pathInfo.year.toString() === selectedYear);
+                    var matchesAircraft = selectedAircraft === 'all' || (pathInfo.aircraft_registration === selectedAircraft);
+
+                    if (matchesYear && matchesAircraft) {{
+                        if (pathInfo.start_airport) visibleAirports.add(pathInfo.start_airport);
+                        if (pathInfo.end_airport) visibleAirports.add(pathInfo.end_airport);
+                    }}
+                }});
+            }}
+
+            // If paths are selected, collect airports from selected paths (overrides filter)
+            if (hasSelection) {{
+                selectedPathIds.forEach(function(pathId) {{
+                    var airports = pathToAirports[pathId];
+                    if (airports) {{
+                        if (airports.start) visibleAirports.add(airports.start);
+                        if (airports.end) visibleAirports.add(airports.end);
+                    }}
+                }});
+            }}
 
             // Update opacity for all airport markers
             Object.keys(airportMarkers).forEach(function(airportName) {{
                 var marker = airportMarkers[airportName];
-                if (selectedAirports.has(airportName)) {{
-                    marker.setOpacity(1.0);  // Full opacity for selected airports
+                if (visibleAirports.has(airportName)) {{
+                    marker.setOpacity(1.0);  // Full opacity for visited airports
                 }} else {{
-                    marker.setOpacity(0.3);  // Dim non-selected airports
+                    marker.setOpacity(0.0);  // Hide non-visited airports
                 }}
             }});
         }}
 
         // Global variable for selected year
         var selectedYear = 'all';
+        var selectedAircraft = 'all';
+
+        // Function to calculate filtered statistics
+        function calculateFilteredStats() {{
+            if (!fullPathInfo || !fullPathSegments) {{
+                return fullStats;
+            }}
+
+            // Filter path_info based on current filters
+            var filteredPathInfo = fullPathInfo.filter(function(pathInfo) {{
+                // Apply year filter
+                if (selectedYear !== 'all') {{
+                    if (!pathInfo.year || pathInfo.year.toString() !== selectedYear) {{
+                        return false;
+                    }}
+                }}
+
+                // Apply aircraft filter
+                if (selectedAircraft !== 'all') {{
+                    if (!pathInfo.aircraft_registration || pathInfo.aircraft_registration !== selectedAircraft) {{
+                        return false;
+                    }}
+                }}
+
+                return true;
+            }});
+
+            // If no paths match filters, return empty stats
+            if (filteredPathInfo.length === 0) {{
+                return {{
+                    total_points: 0,
+                    num_paths: 0,
+                    num_airports: 0,
+                    airport_names: [],
+                    num_aircraft: 0,
+                    aircraft_list: [],
+                    total_distance_nm: 0
+                }};
+            }}
+
+            // Collect airports
+            var airports = new Set();
+            filteredPathInfo.forEach(function(pathInfo) {{
+                if (pathInfo.start_airport) airports.add(pathInfo.start_airport);
+                if (pathInfo.end_airport) airports.add(pathInfo.end_airport);
+            }});
+
+            // Collect aircraft
+            var aircraftMap = {{}};
+            filteredPathInfo.forEach(function(pathInfo) {{
+                if (pathInfo.aircraft_registration) {{
+                    var reg = pathInfo.aircraft_registration;
+                    if (!aircraftMap[reg]) {{
+                        aircraftMap[reg] = {{
+                            registration: reg,
+                            type: pathInfo.aircraft_type,
+                            flights: 0
+                        }};
+                    }}
+                    aircraftMap[reg].flights += 1;
+                }}
+            }});
+
+            var aircraftList = Object.values(aircraftMap).sort(function(a, b) {{
+                return b.flights - a.flights;
+            }});
+
+            // Calculate filtered stats from FULL RESOLUTION segments
+            var filteredSegments = fullPathSegments.filter(function(segment) {{
+                var pathInfo = filteredPathInfo.find(function(p) {{ return p.id === segment.path_id; }});
+                return pathInfo !== undefined;
+            }});
+
+            var totalDistanceKm = 0;
+            filteredSegments.forEach(function(segment) {{
+                var coords = segment.coords;
+                if (coords && coords.length === 2) {{
+                    var lat1 = coords[0][0] * Math.PI / 180;
+                    var lon1 = coords[0][1] * Math.PI / 180;
+                    var lat2 = coords[1][0] * Math.PI / 180;
+                    var lon2 = coords[1][1] * Math.PI / 180;
+                    var dlat = lat2 - lat1;
+                    var dlon = lon2 - lon1;
+                    var a = Math.sin(dlat/2) * Math.sin(dlat/2) +
+                            Math.cos(lat1) * Math.cos(lat2) *
+                            Math.sin(dlon/2) * Math.sin(dlon/2);
+                    var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                    totalDistanceKm += 6371 * c;
+                }}
+            }});
+
+            // Get altitude range
+            var altitudes = filteredSegments.map(function(s) {{ return s.altitude_m; }});
+            var maxAltitudeM = altitudes.length > 0 ? Math.max(...altitudes) : 0;
+            var minAltitudeM = altitudes.length > 0 ? Math.min(...altitudes) : 0;
+
+            // Get groundspeed
+            var groundspeeds = filteredSegments
+                .map(function(s) {{ return s.groundspeed_knots; }})
+                .filter(function(s) {{ return s > 0; }});
+            var maxGroundspeedKnots = groundspeeds.length > 0 ? Math.max(...groundspeeds) : 0;
+            var avgGroundspeedKnots = 0;
+            if (groundspeeds.length > 0) {{
+                avgGroundspeedKnots = groundspeeds.reduce(function(a, b) {{ return a + b; }}, 0) / groundspeeds.length;
+            }}
+
+            // Calculate total altitude gain
+            var totalAltitudeGainM = 0;
+            var prevAltM = null;
+            filteredSegments.forEach(function(segment) {{
+                if (prevAltM !== null && segment.altitude_m > prevAltM) {{
+                    totalAltitudeGainM += segment.altitude_m - prevAltM;
+                }}
+                prevAltM = segment.altitude_m;
+            }});
+
+            // Calculate longest flight (max distance per path)
+            var longestFlightKm = 0;
+            var pathDistances = {{}};
+            filteredSegments.forEach(function(segment) {{
+                var coords = segment.coords;
+                if (coords && coords.length === 2) {{
+                    var lat1 = coords[0][0] * Math.PI / 180;
+                    var lon1 = coords[0][1] * Math.PI / 180;
+                    var lat2 = coords[1][0] * Math.PI / 180;
+                    var lon2 = coords[1][1] * Math.PI / 180;
+                    var dlat = lat2 - lat1;
+                    var dlon = lon2 - lon1;
+                    var a = Math.sin(dlat/2) * Math.sin(dlat/2) +
+                            Math.cos(lat1) * Math.cos(lat2) *
+                            Math.sin(dlon/2) * Math.sin(dlon/2);
+                    var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                    var dist = 6371 * c;
+
+                    if (!pathDistances[segment.path_id]) {{
+                        pathDistances[segment.path_id] = 0;
+                    }}
+                    pathDistances[segment.path_id] += dist;
+                }}
+            }});
+            Object.values(pathDistances).forEach(function(dist) {{
+                if (dist > longestFlightKm) longestFlightKm = dist;
+            }});
+
+            // Calculate total flight time from filtered paths
+            var totalFlightTimeSeconds = 0;
+            filteredPathInfo.forEach(function(pathInfo) {{
+                // We don't have duration per path in path_info, so we estimate from fullStats
+                if (fullStats && fullStats.total_flight_time_seconds && fullStats.num_paths > 0) {{
+                    totalFlightTimeSeconds += fullStats.total_flight_time_seconds / fullStats.num_paths;
+                }}
+            }});
+
+            var hours = Math.floor(totalFlightTimeSeconds / 3600);
+            var minutes = Math.floor((totalFlightTimeSeconds % 3600) / 60);
+            var totalFlightTimeStr = hours + 'h ' + minutes + 'm';
+
+            // Calculate cruise speed and most common cruise altitude
+            // Filter segments above 1000ft AGL (we approximate AGL as altitude - min_altitude)
+            var cruiseSegments = filteredSegments.filter(function(seg) {{
+                return seg.altitude_ft > (minAltitudeM * 3.28084 + 1000);
+            }});
+
+            var cruiseSpeedKnots = 0;
+            if (cruiseSegments.length > 0) {{
+                var cruiseSpeeds = cruiseSegments
+                    .map(function(s) {{ return s.groundspeed_knots; }})
+                    .filter(function(s) {{ return s > 0; }});
+                if (cruiseSpeeds.length > 0) {{
+                    cruiseSpeedKnots = cruiseSpeeds.reduce(function(a, b) {{ return a + b; }}, 0) / cruiseSpeeds.length;
+                }}
+            }}
+
+            // Most common cruise altitude (500ft bins)
+            var altitudeBins = {{}};
+            cruiseSegments.forEach(function(seg) {{
+                var bin = Math.round(seg.altitude_ft / 500) * 500;
+                altitudeBins[bin] = (altitudeBins[bin] || 0) + 1;
+            }});
+            var mostCommonCruiseAltFt = 0;
+            var maxCount = 0;
+            Object.keys(altitudeBins).forEach(function(bin) {{
+                if (altitudeBins[bin] > maxCount) {{
+                    maxCount = altitudeBins[bin];
+                    mostCommonCruiseAltFt = parseInt(bin);
+                }}
+            }});
+
+            return {{
+                total_points: filteredSegments.length * 2,
+                num_paths: filteredPathInfo.length,
+                num_airports: airports.size,
+                airport_names: Array.from(airports).sort(),
+                num_aircraft: aircraftList.length,
+                aircraft_list: aircraftList,
+                total_distance_nm: totalDistanceKm * 0.539957,
+                total_distance_km: totalDistanceKm,
+                longest_flight_nm: longestFlightKm * 0.539957,
+                longest_flight_km: longestFlightKm,
+                max_altitude_ft: maxAltitudeM * 3.28084,
+                max_altitude_m: maxAltitudeM,
+                min_altitude_ft: minAltitudeM * 3.28084,
+                min_altitude_m: minAltitudeM,
+                total_altitude_gain_ft: totalAltitudeGainM * 3.28084,
+                total_altitude_gain_m: totalAltitudeGainM,
+                max_groundspeed_knots: maxGroundspeedKnots,
+                average_groundspeed_knots: avgGroundspeedKnots,
+                cruise_speed_knots: cruiseSpeedKnots,
+                most_common_cruise_altitude_ft: mostCommonCruiseAltFt,
+                most_common_cruise_altitude_m: Math.round(mostCommonCruiseAltFt * 0.3048),
+                total_flight_time_seconds: totalFlightTimeSeconds,
+                total_flight_time_str: totalFlightTimeStr
+            }};
+        }}
 
         // Function to filter data by year
         function filterByYear() {{
@@ -3568,6 +4014,35 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             // Reload current resolution data to apply filter
             currentResolution = null;  // Force reload
             updateLayers();
+
+            // Update stats based on filter
+            var filteredStats = calculateFilteredStats();
+            updateStatsPanel(filteredStats, false);
+
+            // Update airport visibility based on filter
+            updateAirportOpacity();
+        }}
+
+        // Function to filter data by aircraft
+        function filterByAircraft() {{
+            const aircraftSelect = document.getElementById('aircraft-select');
+            selectedAircraft = aircraftSelect.value;
+
+            // Clear current paths and reload
+            altitudeLayer.clearLayers();
+            pathSegments = {{}};
+            selectedPathIds.clear();
+
+            // Reload current resolution data to apply filter
+            currentResolution = null;  // Force reload
+            updateLayers();
+
+            // Update stats based on filter
+            var filteredStats = calculateFilteredStats();
+            updateStatsPanel(filteredStats, false);
+
+            // Update airport visibility based on filter
+            updateAirportOpacity();
         }}
 
         // Load airports once
@@ -3583,6 +4058,18 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     option.value = year;
                     option.textContent = '📅 ' + year;
                     yearSelect.appendChild(option);
+                }});
+            }}
+
+            // Populate aircraft filter dropdown
+            if (metadata && metadata.stats && metadata.stats.aircraft_list) {{
+                const aircraftSelect = document.getElementById('aircraft-select');
+                metadata.stats.aircraft_list.forEach(function(aircraft) {{
+                    const option = document.createElement('option');
+                    option.value = aircraft.registration;
+                    var typeStr = aircraft.type ? ' (' + aircraft.type + ')' : '';
+                    option.textContent = '✈️ ' + aircraft.registration + typeStr;
+                    aircraftSelect.appendChild(option);
                 }});
             }}
 
@@ -3644,6 +4131,19 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             if (metadata && metadata.stats) {{
                 fullStats = metadata.stats;
                 updateStatsPanel(fullStats, false);
+            }}
+
+            // Load full resolution path_info and path_segments for accurate filtering
+            try {{
+                const fullResData = await loadData('z14_plus');
+                if (fullResData && fullResData.path_info) {{
+                    fullPathInfo = fullResData.path_info;
+                }}
+                if (fullResData && fullResData.path_segments) {{
+                    fullPathSegments = fullResData.path_segments;
+                }}
+            }} catch (error) {{
+                console.error('Failed to load full path data:', error);
             }}
 
             // Load groundspeed range from metadata (from full resolution data)
@@ -3789,10 +4289,18 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             currentData.path_segments.forEach(function(segment) {{
                 var pathId = segment.path_id;
 
+                var pathInfo = currentData.path_info.find(function(p) {{ return p.id === pathId; }});
+
                 // Filter by year if selected
                 if (selectedYear !== 'all') {{
-                    var pathInfo = currentData.path_info.find(function(p) {{ return p.id === pathId; }});
                     if (pathInfo && pathInfo.year && pathInfo.year.toString() !== selectedYear) {{
+                        return;  // Skip this segment
+                    }}
+                }}
+
+                // Filter by aircraft if selected
+                if (selectedAircraft !== 'all') {{
+                    if (pathInfo && pathInfo.aircraft_registration !== selectedAircraft) {{
                         return;  // Skip this segment
                     }}
                 }}
@@ -3835,9 +4343,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
         function updateStatsForSelection() {{
             if (selectedPathIds.size === 0) {{
-                // No selection - show full stats
-                if (fullStats) {{
-                    updateStatsPanel(fullStats, false);
+                // No selection - show filtered stats (or full stats if no filter active)
+                var statsToShow = (selectedYear !== 'all' || selectedAircraft !== 'all')
+                    ? calculateFilteredStats()
+                    : fullStats;
+                if (statsToShow) {{
+                    updateStatsPanel(statsToShow, false);
                 }}
                 return;
             }}
@@ -3859,6 +4370,27 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             selectedPathInfos.forEach(function(pathInfo) {{
                 if (pathInfo.start_airport) selectedAirports.add(pathInfo.start_airport);
                 if (pathInfo.end_airport) selectedAirports.add(pathInfo.end_airport);
+            }});
+
+            // Collect unique aircraft from selected paths
+            var selectedAircraftMap = {{}};
+            selectedPathInfos.forEach(function(pathInfo) {{
+                if (pathInfo.aircraft_registration) {{
+                    var reg = pathInfo.aircraft_registration;
+                    if (!selectedAircraftMap[reg]) {{
+                        selectedAircraftMap[reg] = {{
+                            registration: reg,
+                            type: pathInfo.aircraft_type,
+                            flights: 0
+                        }};
+                    }}
+                    selectedAircraftMap[reg].flights += 1;
+                }}
+            }});
+
+            // Convert aircraft map to sorted array
+            var selectedAircraftList = Object.values(selectedAircraftMap).sort(function(a, b) {{
+                return b.flights - a.flights;
             }});
 
             // Calculate distance (approximate using segment coordinates)
@@ -3912,18 +4444,100 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 avgGroundspeedKnots = sumSpeed / groundspeeds.length;
             }}
 
+            // Calculate longest flight (max distance per selected path)
+            var longestFlightKm = 0;
+            var pathDistances = {{}};
+            selectedSegments.forEach(function(segment) {{
+                var coords = segment.coords;
+                if (coords && coords.length === 2) {{
+                    var lat1 = coords[0][0] * Math.PI / 180;
+                    var lon1 = coords[0][1] * Math.PI / 180;
+                    var lat2 = coords[1][0] * Math.PI / 180;
+                    var lon2 = coords[1][1] * Math.PI / 180;
+                    var dlat = lat2 - lat1;
+                    var dlon = lon2 - lon1;
+                    var a = Math.sin(dlat/2) * Math.sin(dlat/2) +
+                            Math.cos(lat1) * Math.cos(lat2) *
+                            Math.sin(dlon/2) * Math.sin(dlon/2);
+                    var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                    var dist = 6371 * c;
+
+                    if (!pathDistances[segment.path_id]) {{
+                        pathDistances[segment.path_id] = 0;
+                    }}
+                    pathDistances[segment.path_id] += dist;
+                }}
+            }});
+            Object.values(pathDistances).forEach(function(dist) {{
+                if (dist > longestFlightKm) longestFlightKm = dist;
+            }});
+
+            // Estimate total flight time for selected paths
+            var totalFlightTimeSeconds = 0;
+            selectedPathInfos.forEach(function(pathInfo) {{
+                if (fullStats && fullStats.total_flight_time_seconds && fullStats.num_paths > 0) {{
+                    totalFlightTimeSeconds += fullStats.total_flight_time_seconds / fullStats.num_paths;
+                }}
+            }});
+            var hours = Math.floor(totalFlightTimeSeconds / 3600);
+            var minutes = Math.floor((totalFlightTimeSeconds % 3600) / 60);
+            var totalFlightTimeStr = hours + 'h ' + minutes + 'm';
+
+            // Calculate cruise speed and most common cruise altitude for selected paths
+            var cruiseSegments = selectedSegments.filter(function(seg) {{
+                return seg.altitude_ft > (minAltitudeM * 3.28084 + 1000);
+            }});
+
+            var cruiseSpeedKnots = 0;
+            if (cruiseSegments.length > 0) {{
+                var cruiseSpeeds = cruiseSegments
+                    .map(function(s) {{ return s.groundspeed_knots; }})
+                    .filter(function(s) {{ return s > 0; }});
+                if (cruiseSpeeds.length > 0) {{
+                    cruiseSpeedKnots = cruiseSpeeds.reduce(function(a, b) {{ return a + b; }}, 0) / cruiseSpeeds.length;
+                }}
+            }}
+
+            // Most common cruise altitude (500ft bins)
+            var altitudeBins = {{}};
+            cruiseSegments.forEach(function(seg) {{
+                var bin = Math.round(seg.altitude_ft / 500) * 500;
+                altitudeBins[bin] = (altitudeBins[bin] || 0) + 1;
+            }});
+            var mostCommonCruiseAltFt = 0;
+            var maxCount = 0;
+            Object.keys(altitudeBins).forEach(function(bin) {{
+                if (altitudeBins[bin] > maxCount) {{
+                    maxCount = altitudeBins[bin];
+                    mostCommonCruiseAltFt = parseInt(bin);
+                }}
+            }});
+
             // Build selected stats object
             var selectedStats = {{
-                total_points: selectedSegments.length * 2,  // Each segment has 2 points
+                total_points: selectedSegments.length * 2,
                 num_paths: selectedPathIds.size,
                 num_airports: selectedAirports.size,
                 airport_names: Array.from(selectedAirports).sort(),
+                num_aircraft: selectedAircraftList.length,
+                aircraft_list: selectedAircraftList,
                 total_distance_nm: totalDistanceKm * 0.539957,
+                total_distance_km: totalDistanceKm,
+                longest_flight_nm: longestFlightKm * 0.539957,
+                longest_flight_km: longestFlightKm,
                 max_altitude_ft: maxAltitudeM * 3.28084,
+                max_altitude_m: maxAltitudeM,
                 min_altitude_ft: minAltitudeM * 3.28084,
+                min_altitude_m: minAltitudeM,
                 total_altitude_gain_ft: totalAltitudeGainM * 3.28084,
+                total_altitude_gain_m: totalAltitudeGainM,
                 average_groundspeed_knots: avgGroundspeedKnots,
-                max_groundspeed_knots: maxGroundspeedKnots
+                max_groundspeed_knots: maxGroundspeedKnots,
+                cruise_speed_knots: cruiseSpeedKnots,
+                most_common_cruise_altitude_ft: mostCommonCruiseAltFt,
+                most_common_cruise_altitude_m: Math.round(mostCommonCruiseAltFt * 0.3048),
+                total_flight_time_seconds: totalFlightTimeSeconds,
+                total_flight_time_str: totalFlightTimeStr
             }};
 
             updateStatsPanel(selectedStats, true);
@@ -3951,6 +4565,20 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     html += '<span style="margin-left: 10px;">• ' + name + '</span><br>';
                 }});
                 html += '</div>';
+            }}
+
+            // Aircraft information (below airports)
+            if (stats.num_aircraft && stats.num_aircraft > 0) {{
+                html += '<div style="margin-bottom: 8px;"><strong>Aircrafts Used:</strong> ' + stats.num_aircraft + '</div>';
+
+                if (stats.aircraft_list && stats.aircraft_list.length > 0) {{
+                    html += '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Aircraft Details:</strong><br>';
+                    stats.aircraft_list.forEach(function(aircraft) {{
+                        var typeStr = aircraft.type ? ' (' + aircraft.type + ')' : '';
+                        html += '<span style="margin-left: 10px;">• ' + aircraft.registration + typeStr + ' - ' + aircraft.flights + ' flight(s)</span><br>';
+                    }});
+                    html += '</div>';
+                }}
             }}
 
             if (stats.total_flight_time_str) {{
@@ -4053,6 +4681,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 altitudeVisible = true;
                 document.getElementById('altitude-btn').style.opacity = '1.0';
                 document.getElementById('altitude-legend').style.display = 'block';
+                redrawAltitudePaths();  // Draw altitude paths when enabled
             }}
         }}
 
@@ -4116,6 +4745,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 document.getElementById('export-btn'),
                 document.getElementById('wrapped-btn'),
                 document.getElementById('year-filter'),
+                document.getElementById('aircraft-filter'),
                 document.getElementById('heatmap-btn'),
                 document.getElementById('altitude-btn'),
                 document.getElementById('airspeed-btn'),
@@ -4514,6 +5144,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 document.getElementById('airspeed-btn'),
                 document.getElementById('aviation-btn'),
                 document.getElementById('year-filter'),
+                document.getElementById('aircraft-filter'),
                 document.getElementById('stats-panel'),
                 document.getElementById('altitude-legend'),
                 document.getElementById('airspeed-legend'),
@@ -4576,6 +5207,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                         document.getElementById('airspeed-btn'),
                         document.getElementById('aviation-btn'),
                         document.getElementById('year-filter'),
+                        document.getElementById('aircraft-filter'),
                         document.getElementById('stats-panel'),
                         document.getElementById('altitude-legend'),
                         document.getElementById('airspeed-legend'),
