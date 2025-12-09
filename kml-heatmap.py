@@ -20,6 +20,9 @@ from datetime import datetime
 from math import radians, sin, cos, sqrt, atan2
 import folium
 from folium.plugins import HeatMap
+import urllib.request
+import urllib.error
+from html.parser import HTMLParser
 
 DEBUG = False
 
@@ -254,6 +257,83 @@ def extract_airport_name(full_name, is_at_path_end=False):
         return None
 
     return airport_name
+
+
+class AircraftDataParser(HTMLParser):
+    """HTML parser to extract aircraft model from airport-data.com"""
+    def __init__(self):
+        super().__init__()
+        self.model = None
+        self.in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'title':
+            self.in_title = True
+
+    def handle_data(self, data):
+        if self.in_title and 'Aircraft Data' in data:
+            # Extract model from title like "Aircraft Data D-EAGJ, Diamond DA-20A-1 Katana C/N 10115..."
+            match = re.search(r', ([^,]+) C/N', data)
+            if match:
+                model = match.group(1).strip()
+                # Remove leading year (e.g., "1978 Cessna 172N" -> "Cessna 172N")
+                model = re.sub(r'^\d{4}\s+', '', model)
+                self.model = model
+
+    def handle_endtag(self, tag):
+        if tag == 'title':
+            self.in_title = False
+
+
+def lookup_aircraft_model(registration, cache_file='aircraft_cache.json'):
+    """
+    Look up aircraft model from airport-data.com
+
+    Args:
+        registration: Aircraft registration (e.g., 'D-EAGJ')
+        cache_file: Path to JSON cache file
+
+    Returns:
+        Full aircraft model name or None if not found
+    """
+    # Load cache
+    cache = {}
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r') as f:
+                cache = json.load(f)
+        except:
+            pass
+
+    # Check cache
+    if registration in cache:
+        return cache[registration]
+
+    # Fetch from airport-data.com
+    try:
+        url = f'https://airport-data.com/aircraft/{registration}.html'
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html = response.read().decode('utf-8')
+
+        parser = AircraftDataParser()
+        parser.feed(html)
+
+        if parser.model:
+            # Update cache
+            cache[registration] = parser.model
+            try:
+                with open(cache_file, 'w') as f:
+                    json.dump(cache, f, indent=2)
+            except:
+                pass
+
+            return parser.model
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+        pass
+
+    return None
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -875,11 +955,22 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
             if atype:
                 aircraft_types.add(atype)
 
-        # Create sorted aircraft list by flight count
+        # Create sorted aircraft list by flight count with full model lookup
+        print("✈️  Looking up aircraft model information...")
         for reg, info in sorted(aircraft_flights.items(), key=lambda x: x[1]['count'], reverse=True):
+            # Try to lookup full aircraft model
+            full_model = lookup_aircraft_model(reg)
+            if full_model:
+                print(f"  ✓ {reg}: {full_model}")
+            else:
+                full_model = info['type']  # Fallback to basic type if lookup fails
+                if full_model:
+                    print(f"  ⚠ {reg}: {full_model} (lookup failed, using KML type)")
+
             aircraft_list.append({
                 'registration': reg,
-                'type': info['type'],
+                'type': info['type'],  # Keep original type for backwards compatibility
+                'model': full_model,   # Full model name
                 'flights': info['count']
             })
 
@@ -2761,7 +2852,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         #wrapped-card-stats {{
         }}
 
-        /* Card 2: Fun Facts */
+        /* Card 2: Facts */
         #wrapped-card-facts {{
         }}
 
@@ -2781,15 +2872,28 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             text-fill-color: transparent;
         }}
         .wrapped-square-card .year {{
-            font-size: 64px;
-            font-weight: bold;
+            font-size: 80px;
+            font-weight: 900;
             text-align: center;
-            margin: 20px 0;
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            margin: 25px 0;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 50%, #ffd700 100%);
+            background-size: 200% 200%;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
             text-fill-color: transparent;
+            letter-spacing: 8px;
+            text-shadow: 0 0 30px rgba(79, 172, 254, 0.5);
+            animation: shimmer 3s ease-in-out infinite;
+            position: relative;
+        }}
+        @keyframes shimmer {{
+            0%, 100% {{
+                background-position: 0% 50%;
+            }}
+            50% {{
+                background-position: 100% 50%;
+            }}
         }}
         .wrapped-square-card .stat-grid {{
             display: grid;
@@ -2859,6 +2963,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             background: rgba(255, 255, 255, 0.05);
             border-left: 3px solid;
             transition: all 0.2s ease;
+            display: flex;
+            gap: 8px;
+        }}
+        .wrapped-square-card .fun-fact-icon {{
+            flex-shrink: 0;
+        }}
+        .wrapped-square-card .fun-fact-text {{
+            flex: 1;
         }}
         .wrapped-square-card .fun-fact:hover {{
             opacity: 1;
@@ -2945,6 +3057,61 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             color: #ffffff;
             white-space: nowrap;
         }}
+        .wrapped-square-card .aircraft-fleet {{
+            margin: 25px 0;
+        }}
+        .wrapped-square-card .aircraft-fleet-title {{
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: #4facfe;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        .wrapped-square-card .fleet-aircraft {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            margin: 8px 0;
+            border-radius: 8px;
+        }}
+        .wrapped-square-card .fleet-aircraft-high {{
+            background-color: rgba(245, 87, 108, 0.15);
+            border-left: 3px solid #f5576c;
+        }}
+        .wrapped-square-card .fleet-aircraft-high .fleet-aircraft-count {{
+            color: #f5576c;
+        }}
+        .wrapped-square-card .fleet-aircraft-medium-high {{
+            background-color: rgba(107, 207, 127, 0.15);
+            border-left: 3px solid #6bcf7f;
+        }}
+        .wrapped-square-card .fleet-aircraft-medium-high .fleet-aircraft-count {{
+            color: #6bcf7f;
+        }}
+        .wrapped-square-card .fleet-aircraft-medium-low {{
+            background-color: rgba(0, 242, 254, 0.15);
+            border-left: 3px solid #00f2fe;
+        }}
+        .wrapped-square-card .fleet-aircraft-medium-low .fleet-aircraft-count {{
+            color: #00f2fe;
+        }}
+        .wrapped-square-card .fleet-aircraft-low {{
+            background-color: rgba(79, 172, 254, 0.15);
+            border-left: 3px solid #4facfe;
+        }}
+        .wrapped-square-card .fleet-aircraft-low .fleet-aircraft-count {{
+            color: #4facfe;
+        }}
+        .wrapped-square-card .fleet-aircraft-name {{
+            font-size: 14px;
+            font-weight: 500;
+        }}
+        .wrapped-square-card .fleet-aircraft-count {{
+            font-size: 14px;
+            font-weight: bold;
+        }}
         #wrapped-card-content {{
             flex: 1;
             margin: 0 -40px;
@@ -2998,8 +3165,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 line-height: 1.2;
             }}
             .wrapped-square-card .year {{
-                font-size: 48px;
-                margin: 15px 0;
+                font-size: 56px;
+                margin: 20px 0;
+                letter-spacing: 4px;
             }}
             .wrapped-square-card .stat-grid {{
                 gap: 12px;
@@ -3053,6 +3221,21 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             .wrapped-square-card .airport-badge {{
                 padding: 5px 10px;
                 font-size: 11px;
+            }}
+            .wrapped-square-card .aircraft-fleet {{
+                margin: 15px 0;
+            }}
+            .wrapped-square-card .aircraft-fleet-title {{
+                font-size: 14px;
+            }}
+            .wrapped-square-card .fleet-aircraft {{
+                padding: 8px 12px;
+            }}
+            .wrapped-square-card .fleet-aircraft-name {{
+                font-size: 12px;
+            }}
+            .wrapped-square-card .fleet-aircraft-count {{
+                font-size: 12px;
             }}
         }}
 
@@ -3295,12 +3478,17 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                         <div class="stat-grid" id="wrapped-stats"></div>
                     </div>
 
-                    <!-- Card 2: Fun Facts -->
+                    <!-- Card 2: Facts -->
                     <div id="wrapped-card-facts" class="wrapped-square-card">
                         <div class="fun-facts" id="wrapped-fun-facts"></div>
                     </div>
 
-                    <!-- Card 3: Airports -->
+                    <!-- Card 3: Aircraft Fleet -->
+                    <div id="wrapped-card-fleet" class="wrapped-square-card">
+                        <div class="aircraft-fleet" id="wrapped-aircraft-fleet"></div>
+                    </div>
+
+                    <!-- Card 4: Airports -->
                     <div id="wrapped-card-airports" class="wrapped-square-card">
                         <div class="top-airports" id="wrapped-top-airports"></div>
                         <div class="airports-grid" id="wrapped-airports-grid"></div>
@@ -4990,6 +5178,37 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 }}
             }}
 
+            // Aircraft fun facts
+            if (fullStats && fullStats.aircraft_list && fullStats.aircraft_list.length > 0) {{
+                const primaryAircraft = fullStats.aircraft_list[0];
+                const totalAircraft = fullStats.aircraft_list.length;
+
+                const primaryModel = primaryAircraft.model || primaryAircraft.type || 'aircraft';
+
+                if (totalAircraft === 1) {{
+                    allFacts.push({{
+                        category: 'aircraft',
+                        icon: '✈️',
+                        text: `Loyal to <strong>${{primaryAircraft.registration}}</strong> - all ${{primaryAircraft.flights}} flights in this ${{primaryModel}}!`,
+                        priority: 9
+                    }});
+                }} else if (totalAircraft >= 4) {{
+                    allFacts.push({{
+                        category: 'aircraft',
+                        icon: '🛩️',
+                        text: `You explored <strong>${{totalAircraft}} different aircraft</strong> - a true aviator!`,
+                        priority: 9
+                    }});
+                }} else {{
+                    allFacts.push({{
+                        category: 'aircraft',
+                        icon: '✈️',
+                        text: `Your go-to: <strong>${{primaryAircraft.registration}}</strong> (${{primaryModel}}) with <strong>${{primaryAircraft.flights}} flights</strong>`,
+                        priority: 9
+                    }});
+                }}
+            }}
+
             // Special achievements
             if (fullStats && fullStats.max_altitude_ft > 40000) {{
                 allFacts.push({{
@@ -5084,12 +5303,51 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             // Build fun facts section with dynamic, varied facts
             const funFacts = generateFunFacts(yearStats);
 
-            let funFactsHtml = '<div class="fun-facts-title">✨ Fun Facts</div>';
+            let funFactsHtml = '<div class="fun-facts-title">✨ Facts</div>';
             funFacts.forEach(function(fact) {{
-                funFactsHtml += `<div class="fun-fact" data-category="${{fact.category}}">${{fact.icon}} ${{fact.text}}</div>`;
+                funFactsHtml += `<div class="fun-fact" data-category="${{fact.category}}"><span class="fun-fact-icon">${{fact.icon}}</span><span class="fun-fact-text">${{fact.text}}</span></div>`;
             }});
 
             document.getElementById('wrapped-fun-facts').innerHTML = funFactsHtml;
+
+            // Build aircraft fleet section
+            if (fullStats && fullStats.aircraft_list && fullStats.aircraft_list.length > 0) {{
+                let fleetHtml = '<div class="aircraft-fleet-title">✈️ Fleet</div>';
+
+                // Show all aircraft sorted by flight count with color coding based on flights
+                const maxFlights = fullStats.aircraft_list[0].flights;
+                const minFlights = fullStats.aircraft_list[fullStats.aircraft_list.length - 1].flights;
+                const flightRange = maxFlights - minFlights;
+
+                fullStats.aircraft_list.forEach(function(aircraft, index) {{
+                    // Use full model if available, otherwise fall back to type
+                    const modelStr = aircraft.model || aircraft.type || '';
+
+                    // Calculate color based on flight count (normalized 0-1)
+                    const normalized = flightRange > 0 ? (aircraft.flights - minFlights) / flightRange : 1;
+
+                    // Determine color class based on normalized value
+                    let colorClass;
+                    if (normalized >= 0.75) {{
+                        colorClass = 'fleet-aircraft-high';  // Most flights - warm color
+                    }} else if (normalized >= 0.5) {{
+                        colorClass = 'fleet-aircraft-medium-high';
+                    }} else if (normalized >= 0.25) {{
+                        colorClass = 'fleet-aircraft-medium-low';
+                    }} else {{
+                        colorClass = 'fleet-aircraft-low';  // Least flights - cool color
+                    }}
+
+                    fleetHtml += `
+                        <div class="fleet-aircraft ${{colorClass}}">
+                            <div class="fleet-aircraft-name">${{aircraft.registration}} - ${{modelStr}}</div>
+                            <div class="fleet-aircraft-count">${{aircraft.flights}} flights</div>
+                        </div>
+                    `;
+                }});
+
+                document.getElementById('wrapped-aircraft-fleet').innerHTML = fleetHtml;
+            }}
 
             // Build home base section if we have airport data
             if (fullStats && fullStats.airport_names && fullStats.airport_names.length > 0) {{
@@ -5110,7 +5368,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
                     // Build all destinations badge grid (excluding home base)
                     const destinations = fullStats.airport_names.filter(name => name !== homeBase.name);
-                    let airportBadgesHtml = '<div class="airports-grid-title">🗺️ All Destinations</div><div class="airport-badges">';
+                    let airportBadgesHtml = '<div class="airports-grid-title">🗺️ Destinations</div><div class="airport-badges">';
                     destinations.forEach(function(airportName) {{
                         airportBadgesHtml += `<div class="airport-badge">${{airportName}}</div>`;
                     }});
@@ -5205,7 +5463,6 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                         document.getElementById('airports-btn'),
                         document.getElementById('altitude-btn'),
                         document.getElementById('airspeed-btn'),
-                        document.getElementById('aviation-btn'),
                         document.getElementById('year-filter'),
                         document.getElementById('aircraft-filter'),
                         document.getElementById('stats-panel'),
@@ -5214,6 +5471,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                         document.getElementById('loading')
                     ];
                     controls.forEach(el => {{ if (el) el.style.display = ''; }});
+
+                    // Only show aviation button if API key is available
+                    if (OPENAIP_API_KEY) {{
+                        const aviationBtn = document.getElementById('aviation-btn');
+                        if (aviationBtn) aviationBtn.style.display = '';
+                    }}
 
                     // Force map to recalculate size
                     setTimeout(function() {{
