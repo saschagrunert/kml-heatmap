@@ -2819,6 +2819,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             align-items: center;
             justify-content: center;
             min-width: 400px;
+            opacity: 0;
+            animation: fadeInUp 0.8s ease-out 0.9s forwards;
         }}
         #wrapped-map-snapshot {{
             width: 100%;
@@ -2846,6 +2848,20 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             position: relative;
             display: flex;
             flex-direction: column;
+            opacity: 0;
+            animation: fadeInUp 0.6s ease-out forwards;
+        }}
+        .wrapped-square-card:nth-child(1) {{
+            animation-delay: 0.1s;
+        }}
+        .wrapped-square-card:nth-child(2) {{
+            animation-delay: 0.3s;
+        }}
+        .wrapped-square-card:nth-child(3) {{
+            animation-delay: 0.5s;
+        }}
+        .wrapped-square-card:nth-child(4) {{
+            animation-delay: 0.7s;
         }}
 
         /* Card 1: Stats */
@@ -2865,11 +2881,13 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             font-size: 36px;
             margin: 0 0 10px 0;
             text-align: center;
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 50%, #ffd93d 100%);
+            background-size: 200% 200%;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
             text-fill-color: transparent;
+            animation: shimmer 4s ease-in-out infinite;
         }}
         .wrapped-square-card .year {{
             font-size: 80px;
@@ -2895,6 +2913,34 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 background-position: 100% 50%;
             }}
         }}
+        @keyframes fadeInUp {{
+            from {{
+                opacity: 0;
+                transform: translateY(30px);
+            }}
+            to {{
+                opacity: 1;
+                transform: translateY(0);
+            }}
+        }}
+        @keyframes countUp {{
+            from {{
+                opacity: 0;
+                transform: scale(0.5);
+            }}
+            to {{
+                opacity: 1;
+                transform: scale(1);
+            }}
+        }}
+        @keyframes pulse {{
+            0%, 100% {{
+                transform: scale(1);
+            }}
+            50% {{
+                transform: scale(1.05);
+            }}
+        }}
         .wrapped-square-card .stat-grid {{
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -2902,16 +2948,25 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             margin: 30px 0;
         }}
         .wrapped-square-card .stat-card {{
-            background-color: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.08);
             border-radius: 12px;
             padding: 20px;
             text-align: center;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(79, 172, 254, 0.15);
+        }}
+        .wrapped-square-card .stat-card:hover {{
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.12);
+            box-shadow: 0 10px 25px rgba(79, 172, 254, 0.2);
+            border: 1px solid rgba(79, 172, 254, 0.4);
         }}
         .wrapped-square-card .stat-value {{
             font-size: 32px;
             font-weight: bold;
             color: #4facfe;
             margin-bottom: 5px;
+            animation: countUp 0.8s ease-out;
         }}
         .wrapped-square-card .stat-label {{
             font-size: 12px;
@@ -2957,7 +3012,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             font-size: 14px;
             margin: 10px 0;
             padding: 10px 12px;
-            opacity: 0.95;
+            opacity: 0;
             line-height: 1.6;
             border-radius: 8px;
             background: rgba(255, 255, 255, 0.05);
@@ -2965,6 +3020,25 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             transition: all 0.2s ease;
             display: flex;
             gap: 8px;
+            animation: fadeInUp 0.5s ease-out forwards;
+        }}
+        .wrapped-square-card .fun-fact:nth-child(2) {{
+            animation-delay: 0.1s;
+        }}
+        .wrapped-square-card .fun-fact:nth-child(3) {{
+            animation-delay: 0.2s;
+        }}
+        .wrapped-square-card .fun-fact:nth-child(4) {{
+            animation-delay: 0.3s;
+        }}
+        .wrapped-square-card .fun-fact:nth-child(5) {{
+            animation-delay: 0.4s;
+        }}
+        .wrapped-square-card .fun-fact:nth-child(6) {{
+            animation-delay: 0.5s;
+        }}
+        .wrapped-square-card .fun-fact:nth-child(7) {{
+            animation-delay: 0.6s;
         }}
         .wrapped-square-card .fun-fact-icon {{
             flex-shrink: 0;
@@ -3056,6 +3130,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             font-weight: 500;
             color: #ffffff;
             white-space: nowrap;
+            transition: all 0.3s ease;
+            opacity: 0;
+            animation: fadeInUp 0.4s ease-out forwards;
+        }}
+        .wrapped-square-card .airport-badge:hover {{
+            transform: scale(1.1);
+            box-shadow: 0 5px 15px rgba(240, 147, 251, 0.4);
+            border: 1px solid rgba(240, 147, 251, 0.8);
         }}
         .wrapped-square-card .aircraft-fleet {{
             margin: 25px 0;
@@ -4828,7 +4910,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
         function toggleStats() {{
             const panel = document.getElementById('stats-panel');
-            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
         }}
 
         function toggleHeatmap() {{
