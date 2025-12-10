@@ -1743,10 +1743,10 @@ function initializeReplay() {
     replayAirplaneMarker.addTo(map);
 
     // Add smooth CSS transition to the marker element for fluid movement
-    // Using a longer transition time (150ms) for smoother, less jittery movement
+    // Using a shorter transition time (80ms) to keep up with high speed playback (100x, 200x)
     var markerElement = replayAirplaneMarker.getElement();
     if (markerElement) {
-        markerElement.style.transition = 'transform 0.15s linear';
+        markerElement.style.transition = 'transform 0.08s linear';
     }
 
     // Reset time and drawing state
