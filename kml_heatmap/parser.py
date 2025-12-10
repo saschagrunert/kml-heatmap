@@ -1,0 +1,490 @@
+"""KML file parsing functionality."""
+
+import re
+from pathlib import Path
+from xml.etree import ElementTree as ET
+from datetime import datetime
+
+from .aircraft import parse_aircraft_from_filename
+
+# Altitude detection thresholds
+MID_FLIGHT_MIN_ALTITUDE = 400  # meters
+MID_FLIGHT_MAX_VARIATION = 100  # meters
+LANDING_MAX_VARIATION = 50  # meters
+LANDING_MAX_ALTITUDE = 600  # meters
+PATH_SAMPLE_MAX_SIZE = 50
+PATH_SAMPLE_MIN_SIZE = 5
+
+# Global DEBUG flag (will be set by main script)
+DEBUG = False
+
+
+def extract_year_from_timestamp(timestamp):
+    """Extract year from timestamp string.
+
+    Args:
+        timestamp: Timestamp string in ISO format (e.g., "2025-03-03T08:58:01Z")
+                   or other date formats
+
+    Returns:
+        Year as integer, or None if extraction fails
+    """
+    if not timestamp:
+        return None
+
+    try:
+        # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z")
+        if 'T' in timestamp:
+            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            return dt.year
+        # Try to extract year from date string (e.g., "03 Mar 2025" or "2025-03-03")
+        year_match = re.search(r'\b(20\d{2})\b', timestamp)
+        if year_match:
+            return int(year_match.group(1))
+    except ValueError as e:
+        if DEBUG:
+            print(f"  DEBUG: Could not parse timestamp '{timestamp}': {e}")
+    except Exception as e:
+        if DEBUG:
+            print(f"  DEBUG: Unexpected error parsing timestamp '{timestamp}': {e}")
+
+    return None
+
+
+def sample_path_altitudes(path, from_end=False):
+    """
+    Extract altitude statistics from a path sample.
+
+    Args:
+        path: List of [lat, lon, alt] coordinates
+        from_end: If True, sample from end of path; otherwise from start
+
+    Returns:
+        Dict with 'min', 'max', 'variation' keys, or None if sample too small
+    """
+    if len(path) <= 10:
+        return None
+
+    sample_size = min(PATH_SAMPLE_MAX_SIZE, len(path) // 4)
+    if sample_size <= PATH_SAMPLE_MIN_SIZE:
+        return None
+
+    sample = path[-sample_size:] if from_end else path[:sample_size]
+    alts = [coord[2] for coord in sample]
+    return {
+        'min': min(alts),
+        'max': max(alts),
+        'variation': max(alts) - min(alts)
+    }
+
+
+def is_mid_flight_start(path, start_alt, debug=False):
+    """
+    Detect if a path started mid-flight by analyzing altitude patterns.
+
+    A mid-flight start is characterized by:
+    1. Starting at altitude (> MID_FLIGHT_MIN_ALTITUDE) AND
+    2. NOT descending/ascending significantly in the first part of the path
+
+    Args:
+        path: List of [lat, lon, alt] coordinates
+        start_alt: Starting altitude in meters
+        debug: Enable debug output
+
+    Returns:
+        bool: True if this is a mid-flight start
+    """
+    sample = sample_path_altitudes(path, from_end=False)
+    if not sample:
+        return False
+
+    # Mid-flight indicators:
+    # - Starting altitude above typical airports
+    # - AND altitude variation in first part is small (not climbing/descending much)
+    is_mid_flight = start_alt > MID_FLIGHT_MIN_ALTITUDE and sample['variation'] < MID_FLIGHT_MAX_VARIATION
+
+    if is_mid_flight and debug:
+        print(f"  DEBUG: Detected mid-flight start at {start_alt:.0f}m (variation: {sample['variation']:.0f}m)")
+
+    return is_mid_flight
+
+
+def is_valid_landing(path, end_alt, debug=False):
+    """
+    Check if a path ends with a valid landing.
+
+    A valid landing shows descent or stable low altitude at the end.
+
+    Args:
+        path: List of [lat, lon, alt] coordinates
+        end_alt: Ending altitude in meters
+        debug: Enable debug output
+
+    Returns:
+        bool: True if this is a valid landing
+    """
+    sample = sample_path_altitudes(path, from_end=True)
+    if not sample:
+        # Short path, just accept if altitude seems reasonable
+        return end_alt < 1000
+
+    # Valid landing: either descending significantly OR stable at low variation
+    # Also accept any endpoint if variation at end is small - indicates stable landing
+    return sample['variation'] < LANDING_MAX_VARIATION or end_alt < LANDING_MAX_ALTITUDE
+
+
+def parse_kml_coordinates(kml_file):
+    """
+    Extract coordinates from a KML file.
+
+    Args:
+        kml_file: Path to KML file
+
+    Returns:
+        Tuple of (coordinates, path_groups, path_metadata)
+        - coordinates: List of [lat, lon] pairs for heatmap (all points)
+        - path_groups: List of path groups, where each group is a list of [lat, lon, alt]
+                      (keeps separate paths separate for proper line drawing)
+        - path_metadata: List of metadata dicts for each path (timestamp, filename, etc.)
+    """
+    coordinates = []
+    path_groups = []  # List of separate paths
+    path_metadata = []  # Metadata for each path
+
+    try:
+        tree = ET.parse(kml_file)
+        root = tree.getroot()
+
+        if DEBUG:
+            print(f"\n  DEBUG: Root tag: {root.tag}")
+            print(f"  DEBUG: Root attrib: {root.attrib}")
+            all_tags = set()
+            for elem in root.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                all_tags.add(tag)
+            print(f"  DEBUG: All unique tags in file: {sorted(all_tags)}")
+
+        # KML uses XML namespaces
+        namespaces = {
+            'kml': 'http://www.opengis.net/kml/2.2',
+            'gx': 'http://www.google.com/kml/ext/2.2'
+        }
+
+        # Try with namespace
+        coord_elements = root.findall('.//kml:coordinates', namespaces)
+
+        # Also try to find gx:coord elements (Google Earth Track extension)
+        gx_coords = root.findall('.//gx:coord', namespaces)
+
+        if DEBUG and gx_coords:
+            print(f"  DEBUG: Found {len(gx_coords)} gx:coord elements (Google Earth Track)")
+
+        # If no results, try without namespace (some KML files don't use it)
+        if not coord_elements and not gx_coords:
+            # Remove namespace from tags
+            for elem in root.iter():
+                if '}' in elem.tag:
+                    elem.tag = elem.tag.split('}', 1)[1]
+            coord_elements = root.findall('.//coordinates')
+            gx_coords = root.findall('.//coord')  # gx:coord without namespace
+
+        if DEBUG:
+            print(f"  DEBUG: Found {len(coord_elements)} coordinate elements")
+            if coord_elements:
+                for i, elem in enumerate(coord_elements[:2]):  # Show first 2
+                    print(f"  DEBUG: Element {i} text preview: {str(elem.text)[:100] if elem.text else 'None'}")
+
+        # Find all Placemarks to extract name and timestamp information
+        placemarks = root.findall('.//kml:Placemark', namespaces)
+        if not placemarks:
+            placemarks = root.findall('.//Placemark')  # Without namespace
+
+        # Create a mapping from coordinates element to placemark metadata
+        coord_to_metadata = {}
+        for placemark in placemarks:
+            # Find coordinates within this placemark
+            placemark_coords = placemark.findall('.//kml:coordinates', namespaces)
+            if not placemark_coords:
+                placemark_coords = placemark.findall('.//coordinates')
+
+            # Extract name
+            name_elem = placemark.find('.//kml:name', namespaces)
+            if name_elem is None:
+                name_elem = placemark.find('.//name')
+            airport_name = name_elem.text.strip() if name_elem is not None and name_elem.text else None
+
+            # Extract timestamps - both start and end for tracks with multiple when elements
+            time_elems = placemark.findall('.//kml:when', namespaces)
+            if not time_elems:
+                time_elems = placemark.findall('.//when')
+
+            # Also try TimeStamp element (single timestamp)
+            if not time_elems:
+                time_elem = placemark.find('.//kml:TimeStamp/kml:when', namespaces)
+                if time_elem is None:
+                    time_elem = placemark.find('.//TimeStamp/when')
+                if time_elem is not None:
+                    time_elems = [time_elem]
+
+            timestamp = None
+            end_timestamp = None
+            if time_elems and len(time_elems) > 0:
+                if time_elems[0].text:
+                    timestamp = time_elems[0].text.strip()
+                # Get last timestamp if multiple exist
+                if len(time_elems) > 1 and time_elems[-1].text:
+                    end_timestamp = time_elems[-1].text.strip()
+            elif airport_name:
+                # Try to extract date from name (e.g., "Log Start: 03 Mar 2025 08:58 Z")
+                date_pattern = r'(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})'
+                match = re.search(date_pattern, airport_name)
+                if match:
+                    timestamp = match.group(1)
+
+            # Store metadata for each coordinates element in this placemark
+            year = extract_year_from_timestamp(timestamp)
+            for coord_elem in placemark_coords:
+                coord_to_metadata[id(coord_elem)] = {
+                    'airport_name': airport_name,
+                    'timestamp': timestamp,
+                    'end_timestamp': end_timestamp,
+                    'year': year
+                }
+
+        for idx, coord_elem in enumerate(coord_elements):
+            # Handle None text
+            if coord_elem.text is None:
+                if DEBUG:
+                    print(f"  DEBUG: Coordinate element {idx} has None text, skipping")
+                continue
+
+            coord_text = coord_elem.text.strip()
+            if not coord_text:
+                if DEBUG:
+                    print(f"  DEBUG: Coordinate element {idx} has empty text, skipping")
+                continue
+
+            # Get metadata for this coordinate element
+            metadata = coord_to_metadata.get(id(coord_elem), {})
+            airport_name = metadata.get('airport_name')
+            timestamp = metadata.get('timestamp')
+            end_timestamp = metadata.get('end_timestamp')
+
+            # Parse coordinates (format: lon,lat,alt or lon,lat)
+            # Multiple coordinates can be separated by whitespace or newlines
+            # This handles:
+            # - Single points (Placemarks)
+            # - Paths/LineStrings (tracks, routes)
+            # - Polygons (areas)
+
+            # Split by whitespace (spaces, tabs, newlines)
+            points = coord_text.split()
+
+            # Create a new path group for this coordinate element
+            current_path = []
+            element_coords = 0
+
+            for point in points:
+                point = point.strip()
+                if not point:
+                    continue
+
+                parts = point.split(',')
+                if len(parts) >= 2:
+                    try:
+                        lon = float(parts[0])
+                        lat = float(parts[1])
+                        alt = float(parts[2]) if len(parts) >= 3 else None
+
+                        # Clamp negative altitudes to 0 (below sea level = 0ft)
+                        if alt is not None and alt < 0:
+                            alt = 0.0
+
+                        # Swap to [lat, lon] for folium
+                        coordinates.append([lat, lon])
+
+                        # Add to current path group with altitude
+                        if alt is not None:
+                            current_path.append([lat, lon, alt])
+
+                        element_coords += 1
+                    except ValueError:
+                        # Skip invalid coordinates
+                        if DEBUG:
+                            print(f"  DEBUG: Failed to parse coordinate: {point}")
+                        continue
+
+            # Add this path group to the list if it has coordinates
+            if current_path:
+                path_groups.append(current_path)
+                year = extract_year_from_timestamp(timestamp)
+                aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
+                metadata = {
+                    'timestamp': timestamp,
+                    'end_timestamp': end_timestamp,
+                    'filename': Path(kml_file).name,
+                    'start_point': current_path[0],  # [lat, lon, alt]
+                    'airport_name': airport_name,
+                    'year': year
+                }
+                # Add aircraft info if available
+                if aircraft_info:
+                    metadata['aircraft_registration'] = aircraft_info.get('registration')
+                    metadata['aircraft_type'] = aircraft_info.get('type')
+                path_metadata.append(metadata)
+
+            if DEBUG and element_coords > 0:
+                coord_type = "Point" if element_coords == 1 else f"Path ({element_coords} points)"
+                print(f"  DEBUG: Element {idx}: {coord_type}")
+
+        # Parse gx:coord elements (Google Earth Track extension)
+        # Format: "lon lat alt" (space-separated instead of comma-separated)
+        # Note: gx:coord elements are typically all part of one gx:Track, so treat as one path
+        if gx_coords:
+            gx_path = []
+            gx_timestamp = None
+            gx_end_timestamp = None
+            gx_airport_name = None
+
+            # Try to find timestamp and airport name for gx:Track
+            # Find the Placemark that contains the gx:Track
+            for placemark in placemarks:
+                # Check if this placemark contains gx:coord elements
+                placemark_gx_coords = placemark.findall('.//gx:coord', namespaces)
+                if not placemark_gx_coords:
+                    placemark_gx_coords = placemark.findall('.//coord')
+
+                if placemark_gx_coords:
+                    # Extract name
+                    name_elem = placemark.find('.//kml:name', namespaces)
+                    if name_elem is None:
+                        name_elem = placemark.find('.//name')
+                    if name_elem is not None and name_elem.text:
+                        gx_airport_name = name_elem.text.strip()
+
+                    # Extract timestamps - try to get all when elements for start and end time
+                    # The <when> elements in gx:Track are in the KML namespace, not gx namespace
+                    time_elems = placemark.findall('.//kml:when', namespaces)
+                    if not time_elems:
+                        time_elems = placemark.findall('.//when')
+
+                    if time_elems and len(time_elems) > 0:
+                        # Get first timestamp (start time)
+                        if time_elems[0].text:
+                            gx_timestamp = time_elems[0].text.strip()
+                            if DEBUG:
+                                print(f"  DEBUG: Found gx:Track start timestamp: {gx_timestamp}")
+
+                        # Get last timestamp (end time) if available
+                        if len(time_elems) > 1 and time_elems[-1].text:
+                            gx_end_timestamp = time_elems[-1].text.strip()
+                            if DEBUG:
+                                print(f"  DEBUG: Found gx:Track end timestamp: {gx_end_timestamp}")
+                    elif gx_airport_name:
+                        # Try to extract date from name
+                        date_pattern = r'(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})'
+                        match = re.search(date_pattern, gx_airport_name)
+                        if match:
+                            gx_timestamp = match.group(1)
+                            if DEBUG:
+                                print(f"  DEBUG: Extracted timestamp from gx:Track name: {gx_timestamp}")
+
+                    if DEBUG and gx_timestamp is None:
+                        print(f"  DEBUG: No timestamp found for gx:Track with name: {gx_airport_name}")
+
+                    break
+
+            # Get all <when> elements in order - they correspond 1:1 with gx:coord elements
+            when_elems = []
+            for placemark in placemarks:
+                placemark_when = placemark.findall('.//kml:when', namespaces)
+                if not placemark_when:
+                    placemark_when = placemark.findall('.//when')
+                if placemark_when and len(placemark_when) == len(gx_coords):
+                    when_elems = placemark_when
+                    break
+
+            for idx, gx_coord in enumerate(gx_coords):
+                if gx_coord.text is None:
+                    continue
+
+                coord_text = gx_coord.text.strip()
+                if not coord_text:
+                    continue
+
+                parts = coord_text.split()
+                if len(parts) >= 2:
+                    try:
+                        lon = float(parts[0])
+                        lat = float(parts[1])
+                        alt = float(parts[2]) if len(parts) >= 3 else None
+
+                        # Get corresponding timestamp
+                        timestamp_str = None
+                        if idx < len(when_elems) and when_elems[idx].text:
+                            timestamp_str = when_elems[idx].text.strip()
+
+                        # Clamp negative altitudes to 0 (below sea level = 0ft)
+                        if alt is not None and alt < 0:
+                            alt = 0.0
+
+                        coordinates.append([lat, lon])
+
+                        if alt is not None:
+                            # Store as [lat, lon, alt, timestamp]
+                            if timestamp_str:
+                                gx_path.append([lat, lon, alt, timestamp_str])
+                            else:
+                                gx_path.append([lat, lon, alt])
+                    except ValueError:
+                        if DEBUG:
+                            print(f"  DEBUG: Failed to parse gx:coord: {coord_text}")
+                        continue
+
+            # Add gx:Track as a single path group
+            if gx_path:
+                path_groups.append(gx_path)
+                gx_year = extract_year_from_timestamp(gx_timestamp)
+                aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
+                metadata = {
+                    'timestamp': gx_timestamp,
+                    'end_timestamp': gx_end_timestamp,
+                    'filename': Path(kml_file).name,
+                    'start_point': gx_path[0],  # [lat, lon, alt]
+                    'airport_name': gx_airport_name,
+                    'year': gx_year
+                }
+                # Add aircraft info if available
+                if aircraft_info:
+                    metadata['aircraft_registration'] = aircraft_info.get('registration')
+                    metadata['aircraft_type'] = aircraft_info.get('type')
+                path_metadata.append(metadata)
+
+            if DEBUG:
+                print(f"  DEBUG: Parsed {len(gx_coords)} gx:coord elements into 1 track")
+
+        # Count total points with altitude across all path groups
+        total_alt_points = sum(len(path) for path in path_groups)
+
+        print(f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name}")
+        if path_groups:
+            print(f"  ({total_alt_points} points have altitude data in {len(path_groups)} path(s))")
+
+        if len(coordinates) == 0:
+            print(f"  WARNING: No valid coordinates found!")
+            print(f"  This could mean:")
+            print(f"    - The KML file uses a different structure")
+            print(f"    - The coordinates are in an unexpected format")
+            print(f"    - Try running with --debug flag for more information")
+
+        return coordinates, path_groups, path_metadata
+
+    except ET.ParseError as e:
+        print(f"✗ XML parsing error in {kml_file}: {e}")
+        print(f"  The file may be corrupted or not a valid KML file")
+        return [], [], []
+    except Exception as e:
+        print(f"✗ Error parsing {kml_file}: {e}")
+        import traceback
+        traceback.print_exc()
+        return [], [], []

@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application
 COPY kml-heatmap.py .
+COPY kml_heatmap/ ./kml_heatmap/
 
 # Copy server script
 COPY <<'EOF' /app/serve.py
