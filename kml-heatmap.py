@@ -12,6 +12,7 @@ Usage:
 import sys
 import os
 import json
+import shutil
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -701,6 +702,56 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
     print(f"✓ Progressive HTML saved: {output_file} ({file_size / 1024:.1f} KB)")
     print(f"  Minification: {original_size / 1024:.1f} KB → {minified_size / 1024:.1f} KB ({reduction:.1f}% reduction)")
+
+    # Copy map.js to the output directory
+    output_dir = os.path.dirname(output_file) or '.'
+    static_dir = Path(__file__).parent / 'kml_heatmap' / 'static'
+    map_js_src = static_dir / 'map.js'
+    map_js_dst = os.path.join(output_dir, 'map.js')
+
+    # Process map.js template with variable substitution
+    with open(map_js_src, 'r') as f:
+        map_js_content = f.read()
+
+    # Replace template variables in map.js
+    map_js_content = map_js_content.replace('{{STADIA_API_KEY}}', STADIA_API_KEY)
+    map_js_content = map_js_content.replace('{{OPENAIP_API_KEY}}', OPENAIP_API_KEY)
+    map_js_content = map_js_content.replace('{{data_dir_name}}', data_dir_name)
+    map_js_content = map_js_content.replace('{{center_lat}}', str(center_lat))
+    map_js_content = map_js_content.replace('{{center_lon}}', str(center_lon))
+    map_js_content = map_js_content.replace('{{min_lat}}', str(min_lat))
+    map_js_content = map_js_content.replace('{{max_lat}}', str(max_lat))
+    map_js_content = map_js_content.replace('{{min_lon}}', str(min_lon))
+    map_js_content = map_js_content.replace('{{max_lon}}', str(max_lon))
+
+    # Minify JavaScript
+    from kml_heatmap.renderer import minify_html as minify_module
+    import rjsmin
+    map_js_minified = rjsmin.jsmin(map_js_content)
+
+    with open(map_js_dst, 'w') as f:
+        f.write(map_js_minified)
+
+    map_js_size = os.path.getsize(map_js_dst)
+    print(f"✓ JavaScript copied: {map_js_dst} ({map_js_size / 1024:.1f} KB)")
+
+    # Copy styles.css to the output directory
+    styles_css_src = static_dir / 'styles.css'
+    styles_css_dst = os.path.join(output_dir, 'styles.css')
+
+    # Read CSS file
+    with open(styles_css_src, 'r') as f:
+        styles_css_content = f.read()
+
+    # Minify CSS
+    import rcssmin
+    styles_css_minified = rcssmin.cssmin(styles_css_content)
+
+    with open(styles_css_dst, 'w') as f:
+        f.write(styles_css_minified)
+
+    styles_css_size = os.path.getsize(styles_css_dst)
+    print(f"✓ CSS copied: {styles_css_dst} ({styles_css_size / 1024:.1f} KB)")
     print(f"  Open {output_file} in a web browser (requires local server)")
 
     return True
