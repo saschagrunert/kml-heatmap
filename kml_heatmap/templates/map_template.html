@@ -64,12 +64,21 @@
             touch-action: manipulation;
         }
         .control-btn:hover { background-color: #3b3b3b; }
+        .control-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            background-color: #1a1a1a;
+        }
+        .control-btn:disabled:hover {
+            background-color: #1a1a1a;
+        }
 
         /* Left side buttons */
         .control-btn.left { left: 10px; }
         #stats-btn { top: 10px; }
         #export-btn { top: 50px; }
         #wrapped-btn { top: 90px; }
+        #replay-btn { top: 130px; }
 
         /* Right side buttons */
         .control-btn.right {
@@ -84,6 +93,136 @@
         #altitude-btn { top: 170px; }
         #airspeed-btn { top: 210px; }
         #aviation-btn { top: 250px; }
+
+        /* Replay controls */
+        #replay-controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(43, 43, 43, 0.95);
+            border: 2px solid #555;
+            border-radius: 8px;
+            padding: 12px 20px;
+            z-index: 10000;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            min-width: 400px;
+        }
+        .replay-airplane-icon {
+            width: 32px;
+            height: 32px;
+            font-size: 32px;
+            line-height: 32px;
+            text-align: center;
+            filter: drop-shadow(0 3px 6px rgba(0,0,0,0.7));
+            /* Use hardware acceleration for smoother rotation */
+            transform-origin: center center;
+            will-change: transform;
+            /* Make airplane more visible with a glow effect */
+            text-shadow: 0 0 8px rgba(79,172,254,0.8);
+        }
+        #replay-controls-inner {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        #replay-buttons {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: center;
+        }
+        .replay-btn {
+            background-color: #3b3b3b;
+            color: #ffffff;
+            border: 1px solid #666;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+        /* Icon-only buttons (play/pause/stop) - smaller to match speed dropdown */
+        #replay-play-btn, #replay-pause-btn, #replay-stop-btn {
+            font-size: 16px;
+            padding: 6px 12px;
+            min-width: auto;
+            line-height: 1;
+            /* Ensure emojis render properly */
+            font-family: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", sans-serif;
+        }
+        .replay-btn:hover {
+            background-color: #4a4a4a;
+        }
+        .replay-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #replay-time-display {
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: bold;
+            font-family: monospace;
+            text-align: center;
+            min-width: 120px;
+        }
+        #replay-slider-container {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        #replay-slider {
+            flex: 1;
+            height: 6px;
+            border-radius: 3px;
+            background: #555;
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        #replay-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #4facfe;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        #replay-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #4facfe;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            border: none;
+        }
+        #replay-slider-start, #replay-slider-end {
+            color: #999;
+            font-size: 11px;
+            font-family: monospace;
+            min-width: 50px;
+            text-align: center;
+        }
+        @media (max-width: 768px) {
+            #replay-controls {
+                min-width: 300px;
+                padding: 10px 15px;
+            }
+            .replay-btn {
+                padding: 5px 10px;
+                font-size: 12px;
+            }
+            /* Hide legends on mobile only during replay mode */
+            body.replay-active #altitude-legend,
+            body.replay-active #airspeed-legend {
+                display: none !important;
+            }
+        }
 
         /* Year filter dropdown - styled like other buttons */
         #year-filter {
@@ -141,6 +280,17 @@
         #year-filter:hover {
             background-color: #3b3b3b;
         }
+        #year-filter:has(select:disabled) {
+            opacity: 0.3;
+            cursor: not-allowed;
+            background-color: #1a1a1a;
+        }
+        #year-filter:has(select:disabled):hover {
+            background-color: #1a1a1a;
+        }
+        #year-filter select:disabled {
+            cursor: not-allowed;
+        }
 
         /* Aircraft filter dropdown - styled like year filter */
         #aircraft-filter {
@@ -197,6 +347,17 @@
         }
         #aircraft-filter:hover {
             background-color: #3b3b3b;
+        }
+        #aircraft-filter:has(select:disabled) {
+            opacity: 0.3;
+            cursor: not-allowed;
+            background-color: #1a1a1a;
+        }
+        #aircraft-filter:has(select:disabled):hover {
+            background-color: #1a1a1a;
+        }
+        #aircraft-filter select:disabled {
+            cursor: not-allowed;
         }
 
         /* Altitude legend */
@@ -1047,6 +1208,7 @@
     <button id="stats-btn" class="control-btn left" onclick="toggleStats()">📊 Stats</button>
     <button id="export-btn" class="control-btn left" onclick="exportMap()">📷 Export</button>
     <button id="wrapped-btn" class="control-btn left" onclick="showWrapped()">✨ Wrapped</button>
+    <button id="replay-btn" class="control-btn left" onclick="toggleReplay()" style="opacity: 0.5;">▶️ Replay</button>
 
     <!-- Right side buttons -->
     <button id="heatmap-btn" class="control-btn right" onclick="toggleHeatmap()">🔥 Heatmap</button>
@@ -1084,6 +1246,30 @@
         </div>
     </div>
     <div id="loading">Loading data...</div>
+
+    <!-- Replay Controls -->
+    <div id="replay-controls">
+        <div id="replay-controls-inner">
+            <div id="replay-buttons">
+                <button id="replay-play-btn" class="replay-btn" onclick="playReplay()">▶️</button>
+                <button id="replay-pause-btn" class="replay-btn" onclick="pauseReplay()" style="display:none">⏸️</button>
+                <button id="replay-stop-btn" class="replay-btn" onclick="stopReplay()">⏹️</button>
+                <div id="replay-time-display">00:00 / 00:00</div>
+                <select id="replay-speed" class="replay-btn" onchange="changeReplaySpeed()">
+                    <option value="10">10x</option>
+                    <option value="25">25x</option>
+                    <option value="50" selected>50x</option>
+                    <option value="100">100x</option>
+                    <option value="200">200x</option>
+                </select>
+            </div>
+            <div id="replay-slider-container">
+                <span id="replay-slider-start">0:00</span>
+                <input type="range" id="replay-slider" min="0" max="100" value="0" oninput="seekReplay(this.value)">
+                <span id="replay-slider-end">0:00</span>
+            </div>
+        </div>
+    </div>
 
     <!-- Wrapped Card Modal -->
     <div id="wrapped-modal" onclick="closeWrapped(event)">
@@ -1207,6 +1393,21 @@
         var pathToAirports = {};  // Map of path_id to {start: name, end: name}
         var airportToPaths = {};  // Map of airport name to array of path IDs
         var airportMarkers = {};  // Map of airport name to marker object
+
+        // Replay state
+        var replayActive = false;
+        var replayPlaying = false;
+        var replayCurrentTime = 0;  // Current replay time in seconds
+        var replayMaxTime = 0;  // Maximum time in seconds
+        var replaySpeed = 50.0;  // Playback speed multiplier (default 50x)
+        var replayInterval = null;  // Interval for updating replay
+        var replayLayer = null;  // Layer for showing replay paths
+        var replaySegments = [];  // All segments sorted by time
+        var replayAirplaneMarker = null;  // Airplane icon marker
+        var replayLastDrawnIndex = -1;  // Track last drawn segment for incremental rendering
+        var replayLastBearing = null;  // Track last applied bearing to keep rotation stable when stationary
+        var replayAnimationFrameId = null;  // Track requestAnimationFrame ID for smooth 60fps updates
+        var replayLastFrameTime = null;  // Track last frame timestamp for accurate time progression
 
         // OpenAIP layer (if API key is provided)
         // Note: As of May 2023, OpenAIP consolidated all layers into one "openaip" layer
@@ -1366,8 +1567,8 @@
                 heatmapLayer._canvas.style.pointerEvents = 'none';
             }
 
-            // Only add to map if heatmap is visible
-            if (heatmapVisible) {
+            // Only add to map if heatmap is visible AND not in replay mode
+            if (heatmapVisible && !replayActive) {
                 heatmapLayer.addTo(map);
             }
 
@@ -1944,7 +2145,7 @@
                 updateStatsPanel(fullStats, false);
             }
 
-            // Load full resolution path_info and path_segments for accurate filtering
+            // Load full resolution path_info and path_segments for accurate filtering and replay
             try {
                 const fullResData = await loadData('z14_plus');
                 if (fullResData && fullResData.path_info) {
@@ -1996,6 +2197,7 @@
             if (airspeedVisible) {
                 redrawAirspeedPaths();
             }
+            updateReplayButtonState();
         }
 
         function selectPathsByAirport(airportName) {
@@ -2007,6 +2209,7 @@
             if (airspeedVisible) {
                 redrawAirspeedPaths();
             }
+            updateReplayButtonState();
         }
 
         function clearSelection() {
@@ -2015,6 +2218,7 @@
             if (airspeedVisible) {
                 redrawAirspeedPaths();
             }
+            updateReplayButtonState();
         }
 
         function updateAirportMarkerSizes() {
@@ -2542,6 +2746,465 @@
                     document.getElementById('aviation-btn').style.opacity = '1.0';
                 }
             }
+        }
+
+        // Replay functions
+        function formatTime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            if (hours > 0) {
+                return hours + ':' + minutes.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
+            }
+            return minutes + ':' + secs.toString().padStart(2, '0');
+        }
+
+        function toggleReplay() {
+            const panel = document.getElementById('replay-controls');
+            if (replayActive) {
+                // Stop replay and hide panel
+                stopReplay();
+                panel.style.display = 'none';
+                replayActive = false;
+                document.getElementById('replay-btn').textContent = '▶️ Replay';
+
+                // Remove replay-active class from body
+                document.body.classList.remove('replay-active');
+
+                // Remove airplane marker when closing replay completely
+                if (replayAirplaneMarker) {
+                    map.removeLayer(replayAirplaneMarker);
+                    replayAirplaneMarker = null;
+                }
+
+                // Restore visibility of other layers
+                restoreLayerVisibility();
+
+                // Update button opacity based on selection
+                updateReplayButtonState();
+            } else {
+                // Check if exactly one path is selected
+                if (selectedPathIds.size !== 1) {
+                    return;  // Do nothing if wrong number of paths selected
+                }
+
+                // Initialize and show replay
+                if (initializeReplay()) {
+                    panel.style.display = 'block';
+                    replayActive = true;
+                    document.getElementById('replay-btn').textContent = '⏹️ Replay';
+                    document.getElementById('replay-btn').style.opacity = '1.0';
+
+                    // Add replay-active class to body for mobile legend hiding
+                    document.body.classList.add('replay-active');
+
+                    // Hide other layers during replay
+                    hideOtherLayersDuringReplay();
+                }
+            }
+        }
+
+        function updateReplayButtonState() {
+            // Enable replay button only when exactly one path is selected
+            const btn = document.getElementById('replay-btn');
+            if (selectedPathIds.size === 1) {
+                btn.style.opacity = '1.0';
+            } else {
+                btn.style.opacity = '0.5';
+            }
+        }
+
+        function initializeReplay() {
+            // Get all segments with time data from full resolution
+            if (!fullPathSegments) {
+                alert('No flight data available for replay. Please wait for data to load or refresh the page.');
+                return false;
+            }
+
+            // Get the single selected path ID
+            const selectedPathId = Array.from(selectedPathIds)[0];
+
+            // Filter segments that belong to selected path and have time data
+            replaySegments = fullPathSegments.filter(function(seg) {
+                return seg.path_id === selectedPathId &&
+                       seg.time !== undefined &&
+                       seg.time !== null;
+            });
+
+            if (replaySegments.length === 0) {
+                alert('No timestamp data available for this path. The flight may not have timing information.');
+                return false;
+            }
+
+            // Sort by time
+            replaySegments.sort(function(a, b) {
+                return a.time - b.time;
+            });
+
+            // Find max time
+            replayMaxTime = replaySegments[replaySegments.length - 1].time;
+
+            // Update UI
+            document.getElementById('replay-slider').max = replayMaxTime;
+            document.getElementById('replay-slider-end').textContent = formatTime(replayMaxTime);
+
+            // Create replay layer
+            if (!replayLayer) {
+                replayLayer = L.layerGroup();
+            }
+            replayLayer.clearLayers();
+            replayLayer.addTo(map);
+
+            // Remove old airplane marker if it exists
+            if (replayAirplaneMarker) {
+                map.removeLayer(replayAirplaneMarker);
+                replayAirplaneMarker = null;
+            }
+
+            // Create airplane marker
+            var airplaneIcon = L.divIcon({
+                html: '<div class="replay-airplane-icon">✈️</div>',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+                className: ''
+            });
+
+            // Position at start of path
+            var startCoords = replaySegments[0].coords[0];
+            replayAirplaneMarker = L.marker([startCoords[0], startCoords[1]], {
+                icon: airplaneIcon,
+                zIndexOffset: 1000
+            });
+            replayAirplaneMarker.addTo(map);
+
+            // Reset time and drawing state
+            replayCurrentTime = 0;
+            replayLastDrawnIndex = -1;
+            replayLastBearing = null;
+            updateReplayDisplay();
+
+            return true;
+        }
+
+        function hideOtherLayersDuringReplay() {
+            // Hide heatmap
+            if (heatmapLayer && heatmapVisible) {
+                map.removeLayer(heatmapLayer);
+            }
+
+            // Hide altitude layer but keep legend visible if it was visible
+            if (altitudeVisible) {
+                map.removeLayer(altitudeLayer);
+                // Keep altitude legend visible during replay
+            }
+
+            // Hide airspeed layer but keep legend visible if it was visible
+            if (airspeedVisible) {
+                map.removeLayer(airspeedLayer);
+                // Keep airspeed legend visible during replay
+            }
+
+            // Disable layer toggle buttons and filters during replay
+            document.getElementById('heatmap-btn').disabled = true;
+            document.getElementById('altitude-btn').disabled = true;
+            document.getElementById('airspeed-btn').disabled = true;
+            document.getElementById('airports-btn').disabled = true;
+            document.getElementById('aviation-btn').disabled = true;
+            document.getElementById('year-select').disabled = true;
+            document.getElementById('aircraft-select').disabled = true;
+        }
+
+        function restoreLayerVisibility() {
+            // Restore heatmap
+            if (heatmapLayer && heatmapVisible) {
+                map.addLayer(heatmapLayer);
+                if (heatmapLayer._canvas) {
+                    heatmapLayer._canvas.style.pointerEvents = 'none';
+                }
+            }
+
+            // Restore altitude layer (legend was kept visible during replay)
+            if (altitudeVisible) {
+                map.addLayer(altitudeLayer);
+                // Legend stays visible, no need to re-show
+            }
+
+            // Restore airspeed layer (legend was kept visible during replay)
+            if (airspeedVisible) {
+                map.addLayer(airspeedLayer);
+                // Legend stays visible, no need to re-show
+            }
+
+            // Re-enable layer toggle buttons and filters
+            document.getElementById('heatmap-btn').disabled = false;
+            document.getElementById('altitude-btn').disabled = false;
+            document.getElementById('airspeed-btn').disabled = false;
+            document.getElementById('airports-btn').disabled = false;
+            document.getElementById('aviation-btn').disabled = false;
+            document.getElementById('year-select').disabled = false;
+            document.getElementById('aircraft-select').disabled = false;
+        }
+
+        function playReplay() {
+            if (!replayActive) return;
+
+            replayPlaying = true;
+            document.getElementById('replay-play-btn').style.display = 'none';
+            document.getElementById('replay-pause-btn').style.display = 'inline-block';
+
+            // Reset frame time for smooth animation start
+            replayLastFrameTime = null;
+
+            // Start animation loop using requestAnimationFrame for browser-synchronized updates
+            function animateReplay(timestamp) {
+                if (!replayPlaying) return;
+
+                // Calculate delta time based on actual elapsed time
+                if (replayLastFrameTime === null) {
+                    replayLastFrameTime = timestamp;
+                }
+                const deltaMs = timestamp - replayLastFrameTime;
+                replayLastFrameTime = timestamp;
+
+                // Update replay time based on actual elapsed time and speed multiplier
+                const deltaTime = (deltaMs / 1000) * replaySpeed;
+                replayCurrentTime += deltaTime;
+
+                if (replayCurrentTime >= replayMaxTime) {
+                    replayCurrentTime = replayMaxTime;
+                    pauseReplay();
+                } else {
+                    // Continue animation loop
+                    replayAnimationFrameId = requestAnimationFrame(animateReplay);
+                }
+
+                updateReplayDisplay();
+            }
+
+            // Start the animation
+            replayAnimationFrameId = requestAnimationFrame(animateReplay);
+        }
+
+        function pauseReplay() {
+            replayPlaying = false;
+            document.getElementById('replay-play-btn').style.display = 'inline-block';
+            document.getElementById('replay-pause-btn').style.display = 'none';
+
+            // Cancel animation frame
+            if (replayAnimationFrameId) {
+                cancelAnimationFrame(replayAnimationFrameId);
+                replayAnimationFrameId = null;
+            }
+
+            // Reset frame time
+            replayLastFrameTime = null;
+        }
+
+        function stopReplay() {
+            pauseReplay();
+            replayCurrentTime = 0;
+            replayLastDrawnIndex = -1;
+            replayLastBearing = null;  // Reset bearing
+            if (replayLayer) {
+                replayLayer.clearLayers();
+            }
+            // Reset airplane to start position instead of removing it
+            if (replayAirplaneMarker && replaySegments.length > 0) {
+                var startCoords = replaySegments[0].coords[0];
+                replayAirplaneMarker.setLatLng([startCoords[0], startCoords[1]]);
+            }
+            updateReplayDisplay();
+        }
+
+        function seekReplay(value) {
+            var newTime = parseFloat(value);
+
+            // If seeking backward, need to clear and redraw
+            if (newTime < replayCurrentTime) {
+                replayLayer.clearLayers();
+                replayLastDrawnIndex = -1;
+            }
+
+            replayCurrentTime = newTime;
+            updateReplayDisplay();
+        }
+
+        function changeReplaySpeed() {
+            const select = document.getElementById('replay-speed');
+            replaySpeed = parseFloat(select.value);
+        }
+
+        function updateReplayDisplay() {
+            // Update time display
+            document.getElementById('replay-time-display').textContent =
+                formatTime(replayCurrentTime) + ' / ' + formatTime(replayMaxTime) + ' min';
+
+            // Update slider position
+            document.getElementById('replay-slider').value = replayCurrentTime;
+            document.getElementById('replay-slider-start').textContent = formatTime(replayCurrentTime);
+
+            // Find current position in replay timeline (for airplane positioning)
+            var lastSegment = null;
+            var nextSegment = null;
+            var currentIndex = -1;
+
+            // Search through ALL segments to find airplane position
+            for (var i = 0; i < replaySegments.length; i++) {
+                var seg = replaySegments[i];
+                if (seg.time <= replayCurrentTime) {
+                    lastSegment = seg;
+                    currentIndex = i;
+                } else {
+                    // Found the next segment beyond current time
+                    nextSegment = seg;
+                    break;
+                }
+            }
+
+            // Draw path segments (separate loop for incremental rendering)
+            if (replayLayer) {
+                for (var i = 0; i < replaySegments.length; i++) {
+                    var seg = replaySegments[i];
+                    if (seg.time <= replayCurrentTime) {
+                        // Only draw if we haven't drawn this segment yet (incremental rendering)
+                        if (i > replayLastDrawnIndex) {
+                            L.polyline(seg.coords, {
+                                color: seg.color,
+                                weight: 3,
+                                opacity: 0.8
+                            }).addTo(replayLayer);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                // Update last drawn index
+                replayLastDrawnIndex = currentIndex;
+            }
+
+            // Update airplane marker position and rotation
+            // Ensure marker is on the map (in case it was removed during seeking/zooming)
+            if (replayAirplaneMarker && !map.hasLayer(replayAirplaneMarker)) {
+                replayAirplaneMarker.addTo(map);
+            }
+
+            if (replayAirplaneMarker) {
+                // If we have a lastSegment, use it for positioning
+                if (lastSegment) {
+                var currentPos;
+                var bearing = 0;
+
+                if (nextSegment && lastSegment.time < replayCurrentTime) {
+                    // Interpolate between last and next segment
+                    var timeFraction = (replayCurrentTime - lastSegment.time) / (nextSegment.time - lastSegment.time);
+                    var lat1 = lastSegment.coords[1][0];
+                    var lon1 = lastSegment.coords[1][1];
+                    var lat2 = nextSegment.coords[0][0];
+                    var lon2 = nextSegment.coords[0][1];
+
+                    currentPos = [
+                        lat1 + (lat2 - lat1) * timeFraction,
+                        lon1 + (lon2 - lon1) * timeFraction
+                    ];
+
+                    // Calculate bearing for rotation
+                    bearing = calculateBearing(lat1, lon1, lat2, lon2);
+                } else {
+                    // Use end of last segment
+                    currentPos = lastSegment.coords[1];
+
+                    // Calculate bearing from this segment
+                    var lat1 = lastSegment.coords[0][0];
+                    var lon1 = lastSegment.coords[0][1];
+                    var lat2 = lastSegment.coords[1][0];
+                    var lon2 = lastSegment.coords[1][1];
+                    bearing = calculateBearing(lat1, lon1, lat2, lon2);
+                }
+
+                // Calculate smoothed bearing by looking ahead several segments
+                var smoothedBearing = calculateSmoothedBearing(currentIndex, 5);
+                if (smoothedBearing !== null) {
+                    bearing = smoothedBearing;
+                    replayLastBearing = bearing;  // Store for use when stationary
+                } else if (replayLastBearing !== null) {
+                    // Plane is stationary - use last known bearing to avoid rotation jitter
+                    bearing = replayLastBearing;
+                }
+
+                // Update marker position
+                replayAirplaneMarker.setLatLng(currentPos);
+
+                // Update rotation using hardware-accelerated transforms
+                // Airplane emoji typically points right/northeast, adjust to match bearing
+                // The offset may vary by system - adjust if airplane orientation looks wrong
+                var iconElement = replayAirplaneMarker.getElement();
+                if (iconElement) {
+                    var iconDiv = iconElement.querySelector('.replay-airplane-icon');
+                    if (iconDiv) {
+                        // Most systems: emoji points at ~45° (northeast), so adjust by -45°
+                        var adjustedBearing = bearing - 45;
+                        // Use translate3d(0,0,0) to force hardware acceleration
+                        iconDiv.style.transform = 'translate3d(0,0,0) rotate(' + adjustedBearing + 'deg)';
+                    }
+                }
+                } else if (replaySegments.length > 0) {
+                    // No segment yet (at start of replay) - position at first coordinate
+                    var startCoords = replaySegments[0].coords[0];
+                    replayAirplaneMarker.setLatLng([startCoords[0], startCoords[1]]);
+                }
+            }
+        }
+
+        function calculateSmoothedBearing(currentIdx, lookAhead) {
+            // Calculate bearing by looking ahead several segments to smooth out GPS noise
+            if (currentIdx < 0 || currentIdx >= replaySegments.length) {
+                return null;
+            }
+
+            var startSeg = replaySegments[currentIdx];
+            var endIdx = Math.min(currentIdx + lookAhead, replaySegments.length - 1);
+            var endSeg = replaySegments[endIdx];
+
+            var lat1 = startSeg.coords[1][0];
+            var lon1 = startSeg.coords[1][1];
+            var lat2 = endSeg.coords[1][0];
+            var lon2 = endSeg.coords[1][1];
+
+            // Calculate distance to check if plane is moving
+            // Using Haversine formula
+            var φ1 = lat1 * Math.PI / 180;
+            var φ2 = lat2 * Math.PI / 180;
+            var Δφ = (lat2 - lat1) * Math.PI / 180;
+            var Δλ = (lon2 - lon1) * Math.PI / 180;
+            var a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                    Math.cos(φ1) * Math.cos(φ2) *
+                    Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            var distanceKm = 6371 * c;
+
+            // Only return bearing if plane has moved at least 50 meters
+            // This prevents rotation jitter when stationary on the ground
+            if (distanceKm < 0.05) {
+                return null;
+            }
+
+            return calculateBearing(lat1, lon1, lat2, lon2);
+        }
+
+        function calculateBearing(lat1, lon1, lat2, lon2) {
+            // Convert to radians
+            var φ1 = lat1 * Math.PI / 180;
+            var φ2 = lat2 * Math.PI / 180;
+            var Δλ = (lon2 - lon1) * Math.PI / 180;
+
+            // Calculate bearing
+            var y = Math.sin(Δλ) * Math.cos(φ2);
+            var x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+            var θ = Math.atan2(y, x);
+
+            // Convert to degrees
+            return (θ * 180 / Math.PI + 360) % 360;
         }
 
         function exportMap() {

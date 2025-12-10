@@ -276,6 +276,17 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                 # Calculate ground level for this path (minimum altitude in meters)
                 ground_level_m = min([coord[2] for coord in path]) if path else 0
 
+                # Find path start time (first valid timestamp) for relative time calculation
+                path_start_time = None
+                for coord in path:
+                    if len(coord) >= 4:
+                        try:
+                            if 'T' in coord[3]:
+                                path_start_time = datetime.fromisoformat(coord[3].replace('Z', '+00:00'))
+                                break
+                        except (ValueError, TypeError):
+                            continue
+
                 # First pass: calculate instantaneous speeds and timestamps for all segments
                 segment_speeds = []  # List of (timestamp, speed, distance, time_delta)
 
@@ -291,6 +302,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     instant_speed = 0
                     timestamp = None
                     time_delta = 0
+                    relative_time = None  # Seconds from path start
 
                     if len(coord1) >= 4 and len(coord2) >= 4:
                         ts1, ts2 = coord1[3], coord2[3]
@@ -300,6 +312,10 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                                 dt2 = datetime.fromisoformat(ts2.replace('Z', '+00:00'))
                                 time_delta = (dt2 - dt1).total_seconds()
                                 timestamp = dt1  # Use start time of segment
+
+                                # Calculate relative time from path start (for replay feature)
+                                if path_start_time is not None:
+                                    relative_time = (dt1 - path_start_time).total_seconds()
 
                                 if time_delta >= MIN_SEGMENT_TIME_SECONDS:
                                     segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
@@ -315,6 +331,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     segment_speeds.append({
                         'index': i,
                         'timestamp': timestamp,
+                        'relative_time': relative_time,
                         'speed': instant_speed,
                         'distance': segment_distance_km,
                         'time_delta': time_delta
@@ -335,6 +352,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     groundspeed_knots = 0
                     current_segment = segment_speeds[i]
                     current_timestamp = current_segment['timestamp']
+                    current_relative_time = current_segment['relative_time']
 
                     if current_timestamp is not None:
                         # Collect segments within time window (±60 seconds from current point)
@@ -400,14 +418,18 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
 
                     # Skip zero-length segments (identical coordinates)
                     if lat1 != lat2 or lon1 != lon2:
-                        path_segments.append({
+                        segment_data = {
                             'coords': [[lat1, lon1], [lat2, lon2]],
                             'color': color,
                             'altitude_ft': avg_alt_ft,
                             'altitude_m': round(avg_alt_m, 0),
                             'groundspeed_knots': round(groundspeed_knots, 1),
                             'path_id': path_idx  # Link segment to its path
-                        })
+                        }
+                        # Add relative time for replay feature (privacy-preserving)
+                        if current_relative_time is not None:
+                            segment_data['time'] = round(current_relative_time, 1)
+                        path_segments.append(segment_data)
 
         # Export data
         data = {
