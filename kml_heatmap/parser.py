@@ -6,6 +6,7 @@ from xml.etree import ElementTree as ET
 from datetime import datetime
 
 from .aircraft import parse_aircraft_from_filename
+from .validation import validate_coordinates, validate_altitude
 
 # Altitude detection thresholds
 MID_FLIGHT_MIN_ALTITUDE = 400  # meters
@@ -296,6 +297,22 @@ def parse_kml_coordinates(kml_file):
                         lat = float(parts[1])
                         alt = float(parts[2]) if len(parts) >= 3 else None
 
+                        # Validate coordinates
+                        is_valid, error_msg = validate_coordinates(lat, lon, f" in {Path(kml_file).name}")
+                        if not is_valid:
+                            if DEBUG:
+                                print(f"  DEBUG: {error_msg}")
+                            continue
+
+                        # Validate altitude if present
+                        if alt is not None:
+                            is_valid_alt, alt_error_msg = validate_altitude(alt, f" in {Path(kml_file).name}")
+                            if not is_valid_alt:
+                                if DEBUG:
+                                    print(f"  DEBUG: {alt_error_msg}")
+                                # Still use the coordinate, just skip altitude
+                                alt = None
+
                         # Clamp negative altitudes to 0 (below sea level = 0ft)
                         if alt is not None and alt < 0:
                             alt = 0.0
@@ -308,10 +325,10 @@ def parse_kml_coordinates(kml_file):
                             current_path.append([lat, lon, alt])
 
                         element_coords += 1
-                    except ValueError:
+                    except ValueError as e:
                         # Skip invalid coordinates
                         if DEBUG:
-                            print(f"  DEBUG: Failed to parse coordinate: {point}")
+                            print(f"  DEBUG: Failed to parse coordinate '{point}': {e}")
                         continue
 
             # Add this path group to the list if it has coordinates
@@ -418,6 +435,21 @@ def parse_kml_coordinates(kml_file):
                         lon = float(parts[0])
                         lat = float(parts[1])
                         alt = float(parts[2]) if len(parts) >= 3 else None
+
+                        # Validate coordinates
+                        is_valid, error_msg = validate_coordinates(lat, lon, f" in {Path(kml_file).name} (gx:Track)")
+                        if not is_valid:
+                            if DEBUG:
+                                print(f"  DEBUG: {error_msg}")
+                            continue
+
+                        # Validate altitude if present
+                        if alt is not None:
+                            is_valid_alt, alt_error_msg = validate_altitude(alt, f" in {Path(kml_file).name} (gx:Track)")
+                            if not is_valid_alt:
+                                if DEBUG:
+                                    print(f"  DEBUG: {alt_error_msg}")
+                                alt = None
 
                         # Get corresponding timestamp
                         timestamp_str = None

@@ -107,8 +107,8 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
                         duration = (end_dt - start_dt).total_seconds()
                         if duration > 0:  # Only count positive durations
                             total_seconds += duration
-                except Exception:
-                    # Skip if parsing fails
+                except (ValueError, TypeError):
+                    # Skip if parsing fails - timestamps are optional
                     pass
 
         stats['total_flight_time_seconds'] = total_seconds

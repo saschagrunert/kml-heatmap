@@ -35,6 +35,7 @@ from kml_heatmap.airports import (
 )
 from kml_heatmap.statistics import calculate_statistics
 from kml_heatmap.renderer import minify_html, load_template
+from kml_heatmap.validation import validate_kml_file, validate_api_keys
 
 # Module-level DEBUG flag
 DEBUG = False
@@ -234,7 +235,9 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                             start_dt = datetime.fromisoformat(start_ts.replace('Z', '+00:00'))
                             end_dt = datetime.fromisoformat(end_ts.replace('Z', '+00:00'))
                             path_duration_seconds = (end_dt - start_dt).total_seconds()
-                    except Exception:
+                    except (ValueError, TypeError) as e:
+                        if DEBUG:
+                            print(f"  DEBUG: Could not parse timestamps '{start_ts}' -> '{end_ts}': {e}")
                         pass
 
                 # Calculate total path distance
@@ -304,7 +307,9 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                                     # Cap at max speed
                                     if instant_speed > MAX_GROUNDSPEED_KNOTS:
                                         instant_speed = 0  # Ignore unrealistic speeds
-                        except Exception:
+                        except (ValueError, TypeError) as e:
+                            if DEBUG:
+                                print(f"  DEBUG: Could not parse segment timestamps '{ts1}' -> '{ts2}': {e}")
                             pass
 
                     segment_speeds.append({
@@ -553,8 +558,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
     valid_files = []
     for kml_file in kml_files:
-        if not os.path.exists(kml_file):
-            print(f"✗ File not found: {kml_file}")
+        is_valid, error_msg = validate_kml_file(kml_file)
+        if not is_valid:
+            print(f"✗ {error_msg}")
         else:
             valid_files.append(kml_file)
 
@@ -567,8 +573,17 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     def parse_with_error_handling(kml_file):
         try:
             return kml_file, parse_kml_coordinates(kml_file)
+        except ET.ParseError as e:
+            print(f"✗ XML parsing error in {kml_file}: {e}")
+            return kml_file, ([], [], [])
+        except (IOError, OSError) as e:
+            print(f"✗ File error reading {kml_file}: {e}")
+            return kml_file, ([], [], [])
         except Exception as e:
-            print(f"✗ Error processing {kml_file}: {e}")
+            print(f"✗ Unexpected error processing {kml_file}: {e}")
+            if DEBUG:
+                import traceback
+                traceback.print_exc()
             return kml_file, ([], [], [])
 
     # Parse files in parallel but collect results in order
@@ -734,6 +749,10 @@ def main():
 
     print(f"\nKML Heatmap Generator")
     print(f"{'=' * 50}\n")
+
+    # Validate API keys and warn if missing
+    validate_api_keys(STADIA_API_KEY, OPENAIP_API_KEY, verbose=True)
+    print()  # Empty line after warnings
 
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)

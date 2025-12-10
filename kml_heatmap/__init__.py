@@ -13,6 +13,7 @@ from .aircraft import lookup_aircraft_model, parse_aircraft_from_filename
 from .airports import deduplicate_airports, extract_airport_name
 from .statistics import calculate_statistics
 from .renderer import minify_html, load_template
+from .validation import validate_coordinates, validate_kml_file, validate_api_keys, validate_altitude
 from .exceptions import (
     KMLHeatmapError,
     KMLParseError,
@@ -45,6 +46,12 @@ __all__ = [
     # Renderer
     'minify_html',
     'load_template',
+
+    # Validation
+    'validate_coordinates',
+    'validate_kml_file',
+    'validate_api_keys',
+    'validate_altitude',
 
     # Exceptions
     'KMLHeatmapError',

@@ -95,7 +95,7 @@ def lookup_aircraft_model(registration, cache_file='aircraft_cache.json'):
     except TimeoutError:
         print(f"Warning: Timeout looking up {registration} (server did not respond)")
     except Exception as e:
-        print(f"Warning: Unexpected error looking up {registration}: {e}")
+        print(f"Warning: Unexpected error looking up {registration}: {type(e).__name__}: {e}")
 
     return None
 
