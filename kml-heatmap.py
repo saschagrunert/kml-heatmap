@@ -406,8 +406,8 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                                 cruise_speed_total_distance += window_distance * KM_TO_NAUTICAL_MILES
                                 cruise_speed_total_time += window_time
 
-                                # Track cruise altitude in 500ft bins
-                                altitude_bin_ft = int(altitude_agl_ft / 500) * 500
+                                # Track cruise altitude in 100ft bins
+                                altitude_bin_ft = int(altitude_agl_ft / 100) * 100
                                 if altitude_bin_ft not in cruise_altitude_histogram:
                                     cruise_altitude_histogram[altitude_bin_ft] = 0
                                 cruise_altitude_histogram[altitude_bin_ft] += window_time
@@ -752,6 +752,24 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
     styles_css_size = os.path.getsize(styles_css_dst)
     print(f"✓ CSS copied: {styles_css_dst} ({styles_css_size / 1024:.1f} KB)")
+
+    # Copy favicon files to the output directory
+    favicon_files = [
+        'favicon.svg',
+        'favicon.ico',
+        'favicon-192.png',
+        'favicon-512.png',
+        'apple-touch-icon.png'
+    ]
+
+    for favicon_file in favicon_files:
+        favicon_src = static_dir / favicon_file
+        favicon_dst = os.path.join(output_dir, favicon_file)
+        if favicon_src.exists():
+            import shutil
+            shutil.copy2(favicon_src, favicon_dst)
+
+    print(f"✓ Favicon files copied to {output_dir}")
     print(f"  Open {output_file} in a web browser (requires local server)")
 
     return True

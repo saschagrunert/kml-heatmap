@@ -6,31 +6,39 @@
     <meta name="theme-color" content="#1a1a1a">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>KML Heatmap</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="shortcut icon" href="favicon.ico">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.css" />
     <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
     <div id="map"></div>
+    <!-- Hide buttons toggle (top-center) -->
+    <button id="hide-buttons-btn" class="control-btn hide-toggle" onclick="toggleButtonsVisibility()">🔼</button>
+
     <!-- Left side buttons -->
-    <button id="stats-btn" class="control-btn left" onclick="toggleStats()">📊 Stats</button>
-    <button id="export-btn" class="control-btn left" onclick="exportMap()">📷 Export</button>
-    <button id="wrapped-btn" class="control-btn left" onclick="showWrapped()">✨ Wrapped</button>
-    <button id="replay-btn" class="control-btn left" onclick="toggleReplay()" style="opacity: 0.5;">▶️ Replay</button>
+    <button id="stats-btn" class="control-btn left toggleable-btn" onclick="toggleStats()">📊 Stats</button>
+    <button id="export-btn" class="control-btn left toggleable-btn" onclick="exportMap()">📷 Export</button>
+    <button id="wrapped-btn" class="control-btn left toggleable-btn" onclick="showWrapped()">✨ Wrapped</button>
+    <button id="replay-btn" class="control-btn left toggleable-btn" onclick="toggleReplay()" style="opacity: 0.5;">▶️ Replay</button>
 
     <!-- Right side buttons -->
-    <button id="heatmap-btn" class="control-btn right" onclick="toggleHeatmap()">🔥 Heatmap</button>
-    <button id="airports-btn" class="control-btn right" onclick="toggleAirports()">🏢 Airports</button>
-    <button id="altitude-btn" class="control-btn right" onclick="toggleAltitude()">⛰️ Altitude</button>
-    <button id="airspeed-btn" class="control-btn right" onclick="toggleAirspeed()">🚀 Speed</button>
-    <button id="aviation-btn" class="control-btn right" onclick="toggleAviation()" style="display: none;">🗺️ Aviation</button>
-    <div id="year-filter" class="control-btn right">
+    <button id="heatmap-btn" class="control-btn right toggleable-btn" onclick="toggleHeatmap()">🔥 Heatmap</button>
+    <button id="airports-btn" class="control-btn right toggleable-btn" onclick="toggleAirports()">🏢 Airports</button>
+    <button id="altitude-btn" class="control-btn right toggleable-btn" onclick="toggleAltitude()">⛰️ Altitude</button>
+    <button id="airspeed-btn" class="control-btn right toggleable-btn" onclick="toggleAirspeed()">🚀 Speed</button>
+    <button id="aviation-btn" class="control-btn right toggleable-btn" onclick="toggleAviation()" style="display: none;">🗺️ Aviation</button>
+    <div id="year-filter" class="control-btn right toggleable-btn">
         <select id="year-select" onchange="filterByYear()">
             <option value="all">📅 Years</option>
         </select>
     </div>
 
-    <div id="aircraft-filter" class="control-btn right">
+    <div id="aircraft-filter" class="control-btn right toggleable-btn">
         <select id="aircraft-select" onchange="filterByAircraft()">
             <option value="all">✈️ Aircraft</option>
         </select>
@@ -69,7 +77,9 @@
                     <option value="50" selected>50x</option>
                     <option value="100">100x</option>
                     <option value="200">200x</option>
+                    <option value="500">500x</option>
                 </select>
+                <button id="replay-autozoom-btn" class="replay-btn" onclick="toggleAutoZoom()" title="Auto-zoom based on speed/altitude">🔍</button>
             </div>
             <div id="replay-slider-container">
                 <span id="replay-slider-start">0:00</span>

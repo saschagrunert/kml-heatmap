@@ -93,6 +93,12 @@ var replayColorMinAlt = 0;  // Min altitude for replay color scaling (selected p
 var replayColorMaxAlt = 10000;  // Max altitude for replay color scaling (selected path only)
 var replayColorMinSpeed = 0;  // Min groundspeed for replay color scaling (selected path only)
 var replayColorMaxSpeed = 200;  // Max groundspeed for replay color scaling (selected path only)
+var replayAutoZoom = false;  // Auto-zoom based on speed/altitude
+var replayLastZoom = null;  // Track last zoom level to avoid redundant changes
+var replayRecenterTimestamps = [];  // Track timestamps of recent recenters (sliding window)
+
+// Button visibility state
+var buttonsHidden = false;
 
 // OpenAIP layer (if API key is provided)
 // Note: As of May 2023, OpenAIP consolidated all layers into one "openaip" layer
@@ -657,11 +663,58 @@ function calculateFilteredStats() {
     }
 
     // Most common cruise altitude (500ft bins)
+    // Weight by time spent at each altitude for accurate results
     var altitudeBins = {};
-    cruiseSegments.forEach(function(seg) {
-        var bin = Math.round(seg.altitude_ft / 500) * 500;
-        altitudeBins[bin] = (altitudeBins[bin] || 0) + 1;
-    });
+
+    // Group segments by path_id and calculate time weights per path
+    if (cruiseSegments.length > 0 && cruiseSegments[0].time !== undefined && cruiseSegments[0].path_id !== undefined) {
+        // Group cruise segments by path_id
+        var segmentsByPath = {};
+        cruiseSegments.forEach(function(seg) {
+            if (!segmentsByPath[seg.path_id]) {
+                segmentsByPath[seg.path_id] = [];
+            }
+            segmentsByPath[seg.path_id].push(seg);
+        });
+
+        // Process each path separately
+        Object.keys(segmentsByPath).forEach(function(pathId) {
+            var pathSegments = segmentsByPath[pathId];
+
+            // Sort segments within this path by time
+            pathSegments.sort(function(a, b) {
+                return a.time - b.time;
+            });
+
+            // Calculate time spent at each altitude within this path
+            for (var i = 0; i < pathSegments.length; i++) {
+                var seg = pathSegments[i];
+                var bin = Math.round(seg.altitude_ft / 100) * 100;
+
+                // Calculate time duration for this segment
+                var duration = 0;
+                if (i < pathSegments.length - 1) {
+                    // Time until next segment in same path
+                    duration = pathSegments[i + 1].time - seg.time;
+                } else if (i > 0) {
+                    // For last segment in path, use same duration as previous segment
+                    duration = seg.time - pathSegments[i - 1].time;
+                } else {
+                    // Single segment in path, give it unit weight
+                    duration = 1;
+                }
+
+                altitudeBins[bin] = (altitudeBins[bin] || 0) + duration;
+            }
+        });
+    } else {
+        // Fallback to counting segments if no time data
+        cruiseSegments.forEach(function(seg) {
+            var bin = Math.round(seg.altitude_ft / 100) * 100;
+            altitudeBins[bin] = (altitudeBins[bin] || 0) + 1;
+        });
+    }
+
     var mostCommonCruiseAltFt = 0;
     var maxCount = 0;
     Object.keys(altitudeBins).forEach(function(bin) {
@@ -1149,8 +1202,17 @@ function updateStatsForSelection() {
         }
     });
 
-    // Get altitude range from selected segments
-    var altitudes = selectedSegments.map(function(s) { return s.altitude_m; });
+    // Calculate cruise speed and most common cruise altitude for selected paths
+    // Use full resolution segments for accurate cruise altitude detection
+    var fullSelectedSegments = selectedSegments;
+    if (fullPathSegments) {
+        fullSelectedSegments = fullPathSegments.filter(function(seg) {
+            return selectedPathIds.has(seg.path_id);
+        });
+    }
+
+    // Get altitude range from full resolution selected segments
+    var altitudes = fullSelectedSegments.map(function(s) { return s.altitude_m; });
     var minAltitudeM = Math.min(...altitudes);
     var maxAltitudeM = Math.max(...altitudes);
 
@@ -1208,19 +1270,36 @@ function updateStatsForSelection() {
         if (dist > longestFlightKm) longestFlightKm = dist;
     });
 
-    // Estimate total flight time for selected paths
+    // Calculate actual total flight time for selected paths using segment timestamps
     var totalFlightTimeSeconds = 0;
-    selectedPathInfos.forEach(function(pathInfo) {
-        if (fullStats && fullStats.total_flight_time_seconds && fullStats.num_paths > 0) {
-            totalFlightTimeSeconds += fullStats.total_flight_time_seconds / fullStats.num_paths;
-        }
-    });
+    if (fullPathSegments) {
+        // For each selected path, find min and max timestamps
+        selectedPathIds.forEach(function(pathId) {
+            var pathSegments = fullPathSegments.filter(function(seg) {
+                return seg.path_id === pathId && seg.time !== undefined && seg.time !== null;
+            });
+
+            if (pathSegments.length > 0) {
+                var times = pathSegments.map(function(seg) { return seg.time; });
+                var minTime = Math.min(...times);
+                var maxTime = Math.max(...times);
+                totalFlightTimeSeconds += (maxTime - minTime);
+            }
+        });
+    } else {
+        // Fallback to estimation if fullPathSegments not available
+        selectedPathInfos.forEach(function(pathInfo) {
+            if (fullStats && fullStats.total_flight_time_seconds && fullStats.num_paths > 0) {
+                totalFlightTimeSeconds += fullStats.total_flight_time_seconds / fullStats.num_paths;
+            }
+        });
+    }
     var hours = Math.floor(totalFlightTimeSeconds / 3600);
     var minutes = Math.floor((totalFlightTimeSeconds % 3600) / 60);
     var totalFlightTimeStr = hours + 'h ' + minutes + 'm';
 
-    // Calculate cruise speed and most common cruise altitude for selected paths
-    var cruiseSegments = selectedSegments.filter(function(seg) {
+    // Filter for cruise segments (already using fullSelectedSegments from above)
+    var cruiseSegments = fullSelectedSegments.filter(function(seg) {
         return seg.altitude_ft > (minAltitudeM * 3.28084 + 1000);
     });
 
@@ -1235,11 +1314,58 @@ function updateStatsForSelection() {
     }
 
     // Most common cruise altitude (500ft bins)
+    // Weight by time spent at each altitude for accurate results
     var altitudeBins = {};
-    cruiseSegments.forEach(function(seg) {
-        var bin = Math.round(seg.altitude_ft / 500) * 500;
-        altitudeBins[bin] = (altitudeBins[bin] || 0) + 1;
-    });
+
+    // Group segments by path_id and calculate time weights per path
+    if (cruiseSegments.length > 0 && cruiseSegments[0].time !== undefined && cruiseSegments[0].path_id !== undefined) {
+        // Group cruise segments by path_id
+        var segmentsByPath = {};
+        cruiseSegments.forEach(function(seg) {
+            if (!segmentsByPath[seg.path_id]) {
+                segmentsByPath[seg.path_id] = [];
+            }
+            segmentsByPath[seg.path_id].push(seg);
+        });
+
+        // Process each path separately
+        Object.keys(segmentsByPath).forEach(function(pathId) {
+            var pathSegments = segmentsByPath[pathId];
+
+            // Sort segments within this path by time
+            pathSegments.sort(function(a, b) {
+                return a.time - b.time;
+            });
+
+            // Calculate time spent at each altitude within this path
+            for (var i = 0; i < pathSegments.length; i++) {
+                var seg = pathSegments[i];
+                var bin = Math.round(seg.altitude_ft / 100) * 100;
+
+                // Calculate time duration for this segment
+                var duration = 0;
+                if (i < pathSegments.length - 1) {
+                    // Time until next segment in same path
+                    duration = pathSegments[i + 1].time - seg.time;
+                } else if (i > 0) {
+                    // For last segment in path, use same duration as previous segment
+                    duration = seg.time - pathSegments[i - 1].time;
+                } else {
+                    // Single segment in path, give it unit weight
+                    duration = 1;
+                }
+
+                altitudeBins[bin] = (altitudeBins[bin] || 0) + duration;
+            }
+        });
+    } else {
+        // Fallback to counting segments if no time data
+        cruiseSegments.forEach(function(seg) {
+            var bin = Math.round(seg.altitude_ft / 100) * 100;
+            altitudeBins[bin] = (altitudeBins[bin] || 0) + 1;
+        });
+    }
+
     var mostCommonCruiseAltFt = 0;
     var maxCount = 0;
     Object.keys(altitudeBins).forEach(function(bin) {
@@ -1356,10 +1482,10 @@ function updateStatsPanel(stats, isSelection) {
     if (stats.max_altitude_ft) {
         // Altitude with meter conversion
         var maxAltitudeM = Math.round(stats.max_altitude_ft * 0.3048);
-        html += '<div style="margin-bottom: 8px;"><strong>Max Altitude:</strong> ' + Math.round(stats.max_altitude_ft) + ' ft (' + maxAltitudeM + ' m)</div>';
+        html += '<div style="margin-bottom: 8px;"><strong>Max Altitude (MSL):</strong> ' + Math.round(stats.max_altitude_ft) + ' ft (' + maxAltitudeM + ' m)</div>';
 
-        // Elevation gain with meter conversion (only show for full stats)
-        if (!isSelection && stats.total_altitude_gain_ft) {
+        // Elevation gain with meter conversion
+        if (stats.total_altitude_gain_ft) {
             var elevationGainM = Math.round(stats.total_altitude_gain_ft * 0.3048);
             html += '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' + Math.round(stats.total_altitude_gain_ft) + ' ft (' + elevationGainM + ' m)</div>';
         }
@@ -1368,7 +1494,7 @@ function updateStatsPanel(stats, isSelection) {
     // Most common cruise altitude
     if (stats.most_common_cruise_altitude_ft && stats.most_common_cruise_altitude_ft > 0) {
         var cruiseAltM = Math.round(stats.most_common_cruise_altitude_m);
-        html += '<div style="margin-bottom: 8px;"><strong>Most Common Cruise Altitude:</strong> ' + stats.most_common_cruise_altitude_ft.toLocaleString() + ' ft (' + cruiseAltM.toLocaleString() + ' m) AGL</div>';
+        html += '<div style="margin-bottom: 8px;"><strong>Most Common Cruise Altitude (AGL):</strong> ' + stats.most_common_cruise_altitude_ft.toLocaleString() + ' ft (' + cruiseAltM.toLocaleString() + ' m)</div>';
     }
 
     document.getElementById('stats-panel').innerHTML = html;
@@ -1617,6 +1743,13 @@ function toggleReplay() {
             document.getElementById('replay-btn').textContent = '⏹️ Replay';
             document.getElementById('replay-btn').style.opacity = '1.0';
 
+            // Initialize auto-zoom button style
+            const autoZoomBtn = document.getElementById('replay-autozoom-btn');
+            if (autoZoomBtn) {
+                autoZoomBtn.style.opacity = replayAutoZoom ? '1.0' : '0.5';
+                autoZoomBtn.title = replayAutoZoom ? 'Auto-zoom enabled' : 'Auto-zoom disabled';
+            }
+
             // Add replay-active class to body for mobile legend hiding
             document.body.classList.add('replay-active');
 
@@ -1753,6 +1886,17 @@ function initializeReplay() {
     replayCurrentTime = 0;
     replayLastDrawnIndex = -1;
     replayLastBearing = null;
+
+    // Set initial zoom level to show takeoff details at airport
+    // Only do this if auto-zoom is enabled, otherwise respect user's current zoom
+    if (replayAutoZoom) {
+        map.setView([startCoords[0], startCoords[1]], 16, { animate: true, duration: 0.8 });
+        replayLastZoom = 16;
+    } else {
+        // Just center on start position without changing zoom
+        map.panTo([startCoords[0], startCoords[1]], { animate: true, duration: 0.8 });
+    }
+
     updateReplayDisplay();
 
     return true;
@@ -1830,6 +1974,29 @@ function restoreLayerVisibility() {
 function playReplay() {
     if (!replayActive) return;
 
+    // If at the end, restart from beginning
+    if (replayCurrentTime >= replayMaxTime) {
+        replayCurrentTime = 0;
+        replayLastDrawnIndex = -1;
+        replayLayer.clearLayers();
+
+        // Reset airplane to start position
+        if (replayAirplaneMarker && replaySegments.length > 0) {
+            var startCoords = replaySegments[0].coords[0];
+            replayAirplaneMarker.setLatLng([startCoords[0], startCoords[1]]);
+
+            // Reset to initial zoom if auto-zoom is enabled
+            if (replayAutoZoom) {
+                map.setView([startCoords[0], startCoords[1]], 16, { animate: true, duration: 0.5 });
+                replayLastZoom = 16;
+            }
+        }
+
+        // Reset recenter tracking
+        replayRecenterTimestamps = [];
+        replayLastBearing = null;
+    }
+
     replayPlaying = true;
     document.getElementById('replay-play-btn').style.display = 'none';
     document.getElementById('replay-pause-btn').style.display = 'inline-block';
@@ -1855,6 +2022,29 @@ function playReplay() {
         if (replayCurrentTime >= replayMaxTime) {
             replayCurrentTime = replayMaxTime;
             pauseReplay();
+
+            // Zoom out to show the full path when replay ends
+            if (replaySegments.length > 0) {
+                // Collect all coordinates from the path
+                var allCoords = [];
+                replaySegments.forEach(function(seg) {
+                    if (seg.coords && seg.coords.length > 0) {
+                        seg.coords.forEach(function(coord) {
+                            allCoords.push(coord);
+                        });
+                    }
+                });
+
+                // Fit the map to show all coordinates
+                if (allCoords.length > 0) {
+                    var bounds = L.latLngBounds(allCoords);
+                    map.fitBounds(bounds, {
+                        padding: [50, 50],
+                        animate: true,
+                        duration: 1.0
+                    });
+                }
+            }
         } else {
             // Continue animation loop
             replayAnimationFrameId = requestAnimationFrame(animateReplay);
@@ -1887,6 +2077,7 @@ function stopReplay() {
     replayCurrentTime = 0;
     replayLastDrawnIndex = -1;
     replayLastBearing = null;  // Reset bearing
+    replayRecenterTimestamps = [];  // Reset recenter tracking
     if (replayLayer) {
         replayLayer.clearLayers();
     }
@@ -2045,35 +2236,82 @@ function updateReplayDisplay() {
             var mapSize = map.getSize();
             var airplanePoint = map.latLngToContainerPoint(currentPos);
 
-            // Define comfortable margin from edge (in pixels) before triggering pan
-            // Use larger margin to keep airplane well within viewport
-            var marginPercent = 0.25; // 25% margin from each edge
+            // Define margin from edge (in pixels) before triggering pan
+            // Smaller margin allows airplane to get closer to edges before recentering
+            var marginPercent = 0.10; // 10% margin from each edge
             var marginX = mapSize.x * marginPercent;
             var marginY = mapSize.y * marginPercent;
 
-            var panX = 0;
-            var panY = 0;
-
-            // Check if airplane is approaching edges and pan to keep it centered in safe zone
-            if (airplanePoint.x < marginX) {
-                // Approaching left edge - pan to keep airplane at marginX distance from left
-                panX = airplanePoint.x - marginX;
-            } else if (airplanePoint.x > mapSize.x - marginX) {
-                // Approaching right edge - pan to keep airplane at marginX distance from right
-                panX = airplanePoint.x - (mapSize.x - marginX);
+            // Check if airplane is approaching edges - if so, center on airplane
+            var needsRecenter = false;
+            if (airplanePoint.x < marginX || airplanePoint.x > mapSize.x - marginX ||
+                airplanePoint.y < marginY || airplanePoint.y > mapSize.y - marginY) {
+                needsRecenter = true;
             }
 
-            if (airplanePoint.y < marginY) {
-                // Approaching top edge - pan to keep airplane at marginY distance from top
-                panY = airplanePoint.y - marginY;
-            } else if (airplanePoint.y > mapSize.y - marginY) {
-                // Approaching bottom edge - pan to keep airplane at marginY distance from bottom
-                panY = airplanePoint.y - (mapSize.y - marginY);
+            // Center map on airplane instead of incremental panning
+            if (needsRecenter) {
+                map.panTo(currentPos, { animate: true, duration: 0.5, easeLinearity: 0.25, noMoveStart: true });
+
+                // Track recenter events for auto-zoom using sliding window
+                var now = Date.now();
+                replayRecenterTimestamps.push(now);
+
+                // Remove timestamps older than 30 seconds (sliding window)
+                var cutoffTime = now - 30000; // 30 seconds ago
+                replayRecenterTimestamps = replayRecenterTimestamps.filter(function(ts) {
+                    return ts > cutoffTime;
+                });
             }
 
-            // Pan the map smoothly if needed
-            if (panX !== 0 || panY !== 0) {
-                map.panBy([panX, panY], { animate: true, duration: 0.25, easeLinearity: 0.1, noMoveStart: true });
+            // Auto-zoom based on map recenter frequency
+            if (replayAutoZoom) {
+                // Clean up old timestamps from sliding window
+                var now = Date.now();
+                var cutoffTime = now - 30000;
+                replayRecenterTimestamps = replayRecenterTimestamps.filter(function(ts) {
+                    return ts > cutoffTime;
+                });
+
+                var recenterCount = replayRecenterTimestamps.length;
+
+                // Trigger zoom-out when more than 2 recenters happen within 5 seconds
+                if (recenterCount > 2) {
+                    // Check if we have more than 2 recenters within the last 5 seconds
+                    var now = Date.now();
+                    var fiveSecondsAgo = now - 5000;
+                    var recentRecenters = replayRecenterTimestamps.filter(function(ts) {
+                        return ts >= fiveSecondsAgo;
+                    });
+
+                    if (recentRecenters.length > 2) {
+                        // More than 2 recenters in 5 seconds - zoom out aggressively
+                        var zoomOutStep = 0;
+
+                        // Calculate how fast the recenters are happening
+                        var oldestRecent = Math.min(...recentRecenters);
+                        var newestRecent = Math.max(...recentRecenters);
+                        var recentWindow = (newestRecent - oldestRecent) / 1000;
+                        var avgInterval = recentWindow / (recentRecenters.length - 1);
+
+                        // Always zoom out 1 level for fine-granular control
+                        var zoomOutStep = 1;
+
+                        // Only zoom out, never zoom in
+                        // Zoom out by 1 level, but don't go below level 9
+                        if (zoomOutStep > 0 && replayLastZoom !== null && replayLastZoom > 9) {
+                            var newZoom = Math.max(9, replayLastZoom - zoomOutStep);
+
+                            // Zoom out without recentering
+                            map.setZoom(newZoom, { animate: true, duration: 0.5 });
+                            replayLastZoom = newZoom;
+
+                            // Clear ALL recenter timestamps after zoom-out to allow fresh evaluation
+                            // This prevents immediate re-triggering with the same old timestamps
+                            replayRecenterTimestamps = [];
+                        }
+                    }
+                }
             }
         }
 
@@ -2522,7 +2760,7 @@ function showWrapped() {
         </div>
         <div class="stat-card">
             <div class="stat-value">${Math.round(fullStats.max_altitude_ft || 0).toLocaleString()} ft</div>
-            <div class="stat-label">Max Altitude</div>
+            <div class="stat-label">Max Altitude (MSL)</div>
         </div>
     `;
 
@@ -2753,4 +2991,48 @@ function calculateYearStats(year) {
         num_airports: fullStats.num_airports,
         flight_time: fullStats.total_flight_time_str || '---'
     };
+}
+
+// Toggle button visibility
+function toggleButtonsVisibility() {
+    const toggleableButtons = document.querySelectorAll('.toggleable-btn');
+    const hideButton = document.getElementById('hide-buttons-btn');
+
+    if (buttonsHidden) {
+        // Show buttons
+        toggleableButtons.forEach(function(btn) {
+            btn.classList.remove('buttons-hidden');
+        });
+        hideButton.textContent = '🔼';
+        buttonsHidden = false;
+    } else {
+        // Hide buttons
+        toggleableButtons.forEach(function(btn) {
+            btn.classList.add('buttons-hidden');
+        });
+        hideButton.textContent = '🔽';
+        buttonsHidden = true;
+    }
+}
+
+// Toggle auto-zoom for replay
+function toggleAutoZoom() {
+    replayAutoZoom = !replayAutoZoom;
+    const autoZoomBtn = document.getElementById('replay-autozoom-btn');
+
+    if (replayAutoZoom) {
+        autoZoomBtn.style.opacity = '1.0';
+        autoZoomBtn.title = 'Auto-zoom enabled';
+
+        // If replay is active, immediately zoom to current airplane position
+        if (replayActive && replayAirplaneMarker) {
+            var currentPos = replayAirplaneMarker.getLatLng();
+            map.setView(currentPos, 16, { animate: true, duration: 0.5 });
+            replayLastZoom = 16;
+        }
+    } else {
+        autoZoomBtn.style.opacity = '0.5';
+        autoZoomBtn.title = 'Auto-zoom disabled';
+        replayLastZoom = null;  // Reset last zoom
+    }
 }

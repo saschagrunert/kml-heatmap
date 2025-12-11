@@ -83,6 +83,31 @@ body {
 #airspeed-btn { top: 210px; }
 #aviation-btn { top: 250px; }
 
+/* Hide buttons toggle (top-center) */
+.control-btn.hide-toggle {
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 44px;
+    width: 44px;
+    padding: 6px;
+    text-align: center;
+    z-index: 10001;
+    font-size: 20px;
+}
+
+/* Hidden state for buttons */
+.toggleable-btn.buttons-hidden {
+    opacity: 0 !important;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+/* Show toggleable buttons by default with transition */
+.toggleable-btn {
+    transition: opacity 0.3s ease;
+}
+
 /* Replay controls */
 #replay-controls {
     position: fixed;
