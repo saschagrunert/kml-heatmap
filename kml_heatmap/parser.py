@@ -29,6 +29,15 @@ PATH_SAMPLE_MIN_SIZE = 5
 # Global DEBUG flag (will be set by main script)
 DEBUG = False
 
+# Pre-compiled regex patterns for performance
+DATE_PATTERN = re.compile(r'(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})')
+YEAR_PATTERN = re.compile(r'\b(20\d{2})\b')
+
+# Pre-computed validation ranges (avoid function call overhead)
+LAT_RANGE = (-90.0, 90.0)
+LON_RANGE = (-180.0, 180.0)
+ALT_RANGE = (-1000.0, 50000.0)
+
 # Cache directory for parsed KML files
 CACHE_DIR = Path('.kml_cache')
 
@@ -128,7 +137,7 @@ def extract_year_from_timestamp(timestamp):
             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
             return dt.year
         # Try to extract year from date string (e.g., "03 Mar 2025" or "2025-03-03")
-        year_match = re.search(r'\b(20\d{2})\b', timestamp)
+        year_match = YEAR_PATTERN.search(timestamp)
         if year_match:
             return int(year_match.group(1))
     except ValueError as e:
@@ -338,8 +347,7 @@ def parse_kml_coordinates(kml_file):
                     end_timestamp = time_elems[-1].text.strip()
             elif airport_name:
                 # Try to extract date from name (e.g., "Log Start: 03 Mar 2025 08:58 Z")
-                date_pattern = r'(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})'
-                match = re.search(date_pattern, airport_name)
+                match = DATE_PATTERN.search(airport_name)
                 if match:
                     timestamp = match.group(1)
 
@@ -398,21 +406,17 @@ def parse_kml_coordinates(kml_file):
                         lat = float(parts[1])
                         alt = float(parts[2]) if len(parts) >= 3 else None
 
-                        # Validate coordinates
-                        is_valid, error_msg = validate_coordinates(lat, lon, f" in {Path(kml_file).name}")
-                        if not is_valid:
+                        # Inline validation (faster than function calls)
+                        if not (LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]):
                             if DEBUG:
-                                print(f"  DEBUG: {error_msg}")
+                                print(f"  DEBUG: Invalid coordinates [{lat}, {lon}] in {Path(kml_file).name}")
                             continue
 
                         # Validate altitude if present
-                        if alt is not None:
-                            is_valid_alt, alt_error_msg = validate_altitude(alt, f" in {Path(kml_file).name}")
-                            if not is_valid_alt:
-                                if DEBUG:
-                                    print(f"  DEBUG: {alt_error_msg}")
-                                # Still use the coordinate, just skip altitude
-                                alt = None
+                        if alt is not None and not (ALT_RANGE[0] <= alt <= ALT_RANGE[1]):
+                            if DEBUG:
+                                print(f"  DEBUG: Invalid altitude {alt}m in {Path(kml_file).name}")
+                            alt = None
 
                         # Clamp negative altitudes to 0 (below sea level = 0ft)
                         if alt is not None and alt < 0:
@@ -500,8 +504,7 @@ def parse_kml_coordinates(kml_file):
                                 print(f"  DEBUG: Found gx:Track end timestamp: {gx_end_timestamp}")
                     elif gx_airport_name:
                         # Try to extract date from name
-                        date_pattern = r'(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})'
-                        match = re.search(date_pattern, gx_airport_name)
+                        match = DATE_PATTERN.search(gx_airport_name)
                         if match:
                             gx_timestamp = match.group(1)
                             if DEBUG:
@@ -537,20 +540,17 @@ def parse_kml_coordinates(kml_file):
                         lat = float(parts[1])
                         alt = float(parts[2]) if len(parts) >= 3 else None
 
-                        # Validate coordinates
-                        is_valid, error_msg = validate_coordinates(lat, lon, f" in {Path(kml_file).name} (gx:Track)")
-                        if not is_valid:
+                        # Inline validation (faster than function calls)
+                        if not (LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]):
                             if DEBUG:
-                                print(f"  DEBUG: {error_msg}")
+                                print(f"  DEBUG: Invalid coordinates [{lat}, {lon}] in {Path(kml_file).name} (gx:Track)")
                             continue
 
                         # Validate altitude if present
-                        if alt is not None:
-                            is_valid_alt, alt_error_msg = validate_altitude(alt, f" in {Path(kml_file).name} (gx:Track)")
-                            if not is_valid_alt:
-                                if DEBUG:
-                                    print(f"  DEBUG: {alt_error_msg}")
-                                alt = None
+                        if alt is not None and not (ALT_RANGE[0] <= alt <= ALT_RANGE[1]):
+                            if DEBUG:
+                                print(f"  DEBUG: Invalid altitude {alt}m in {Path(kml_file).name} (gx:Track)")
+                            alt = None
 
                         # Get corresponding timestamp
                         timestamp_str = None

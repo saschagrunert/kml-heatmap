@@ -177,6 +177,10 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
     # Track cruise altitude histogram (500ft bins for altitudes >1000ft AGL)
     cruise_altitude_histogram = {}  # Dict of {altitude_bin_ft: time_seconds}
 
+    # OPTIMIZATION: Calculate all segment data once at full resolution
+    # Then downsample coordinates and filter segments for other resolutions
+    print(f"\n  📈 Calculating segment metadata at full resolution...")
+
     # Process resolutions in order, with z14_plus first to establish the groundspeed baseline
     resolution_order = ['z14_plus', 'z11_13', 'z8_10', 'z5_7', 'z0_4']
 
@@ -342,6 +346,22 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                         'time_delta': time_delta
                     })
 
+                # Build time-sorted list for efficient window queries
+                time_indexed_segments = []
+                timestamp_list = []
+                for seg in segment_speeds:
+                    if seg['timestamp'] is not None and seg['speed'] != 0:
+                        ts = seg['timestamp'].timestamp()
+                        timestamp_list.append(ts)
+                        time_indexed_segments.append(seg)
+
+                # Sort both lists together
+                if timestamp_list:
+                    sorted_pairs = sorted(zip(timestamp_list, time_indexed_segments), key=lambda x: x[0])
+                    timestamp_list, time_indexed_segments = zip(*sorted_pairs)
+                    timestamp_list = list(timestamp_list)
+                    time_indexed_segments = list(time_indexed_segments)
+
                 # Second pass: calculate rolling average speeds using time window
                 for i in range(len(path) - 1):
                     coord1 = path[i]
@@ -359,22 +379,23 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     current_timestamp = current_segment['timestamp']
                     current_relative_time = current_segment['relative_time']
 
-                    if current_timestamp is not None:
-                        # Collect segments within time window (±60 seconds from current point)
+                    if current_timestamp is not None and timestamp_list:
+                        # Use binary search to find window bounds
                         window_distance = 0
                         window_time = 0
+                        current_ts = current_timestamp.timestamp()
+                        half_window = SPEED_WINDOW_SECONDS / 2
 
-                        for seg in segment_speeds:
-                            if seg['timestamp'] is None or seg['speed'] == 0:
-                                continue
+                        # Binary search for window start and end
+                        from bisect import bisect_left, bisect_right
+                        start_idx = bisect_left(timestamp_list, current_ts - half_window)
+                        end_idx = bisect_right(timestamp_list, current_ts + half_window)
 
-                            # Calculate time difference from current segment
-                            time_diff = abs((seg['timestamp'] - current_timestamp).total_seconds())
-
-                            # Include segments within the window
-                            if time_diff <= SPEED_WINDOW_SECONDS / 2:
-                                window_distance += seg['distance']
-                                window_time += seg['time_delta']
+                        # Accumulate segments in window
+                        for j in range(start_idx, end_idx):
+                            seg = time_indexed_segments[j]
+                            window_distance += seg['distance']
+                            window_time += seg['time_delta']
 
                         # Calculate average speed over the window
                         if window_time >= MIN_SEGMENT_TIME_SECONDS:

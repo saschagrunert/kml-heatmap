@@ -18,7 +18,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 def downsample_path_rdp(path, epsilon=0.0001):
     """
-    Downsample a path using Ramer-Douglas-Peucker algorithm.
+    Downsample a path using Ramer-Douglas-Peucker algorithm (iterative).
 
     Args:
         path: List of [lat, lon] or [lat, lon, alt] coordinates
@@ -49,29 +49,31 @@ def downsample_path_rdp(path, epsilon=0.0001):
             return haversine_distance(point[0], point[1], line_start[0], line_start[1])
         return num / den
 
-    # Find point with maximum distance
-    dmax = 0
-    index = 0
-    end = len(path) - 1
+    # Iterative RDP using stack (avoids recursion overhead and stack limits)
+    stack = [(0, len(path) - 1)]
+    keep_indices = {0, len(path) - 1}  # Use set for O(1) lookups
 
-    for i in range(1, end):
-        d = perpendicular_distance(path[i], path[0], path[end])
-        if d > dmax:
-            index = i
-            dmax = d
+    while stack:
+        start_idx, end_idx = stack.pop()
 
-    # If max distance is greater than epsilon, recursively simplify
-    if dmax > epsilon:
-        # Recursive call
-        rec_results1 = downsample_path_rdp(path[:index + 1], epsilon)
-        rec_results2 = downsample_path_rdp(path[index:], epsilon)
+        # Find point with maximum distance from line
+        dmax = 0
+        max_idx = 0
 
-        # Build result list
-        result = rec_results1[:-1] + rec_results2
-    else:
-        result = [path[0], path[end]]
+        for i in range(start_idx + 1, end_idx):
+            d = perpendicular_distance(path[i], path[start_idx], path[end_idx])
+            if d > dmax:
+                max_idx = i
+                dmax = d
 
-    return result
+        # If max distance exceeds epsilon, keep the point and subdivide
+        if dmax > epsilon:
+            keep_indices.add(max_idx)
+            stack.append((start_idx, max_idx))
+            stack.append((max_idx, end_idx))
+
+    # Build result from kept indices in order
+    return [path[i] for i in sorted(keep_indices)]
 
 
 def downsample_coordinates(coordinates, factor=5):
