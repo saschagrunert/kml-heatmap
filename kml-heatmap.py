@@ -186,21 +186,9 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
 
     for res_name in resolution_order:
         res_config = resolutions[res_name]
-        # Downsample coordinates for heatmap
-        if res_config['epsilon'] > 0:
-            # Use RDP for path-based downsampling
-            downsampled_coords = []
-            for path in all_path_groups:
-                simplified = downsample_path_rdp([[c[0], c[1]] for c in path], res_config['epsilon'])
-                downsampled_coords.extend(simplified)
-            # If no paths, fall back to simple downsampling
-            if not downsampled_coords:
-                downsampled_coords = downsample_coordinates(all_coordinates, res_config['factor'])
-        else:
-            # Full resolution
-            downsampled_coords = all_coordinates
 
-        # Downsample path groups for altitude visualization
+        # OPTIMIZATION: Downsample paths once (with altitude), then extract 2D coords
+        # This avoids calling RDP twice per path
         downsampled_paths = []
         for path in all_path_groups:
             if res_config['epsilon'] > 0:
@@ -208,6 +196,14 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                 downsampled_paths.append(simplified)
             else:
                 downsampled_paths.append(path)
+
+        # Extract 2D coordinates from already-downsampled paths
+        if res_config['epsilon'] > 0:
+            downsampled_coords = [[p[0], p[1]] for path in downsampled_paths for p in path]
+            if not downsampled_coords:
+                downsampled_coords = downsample_coordinates(all_coordinates, res_config['factor'])
+        else:
+            downsampled_coords = all_coordinates
 
         # Prepare path segments with colors and track relationships
         path_segments = []
@@ -232,33 +228,36 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                 # Get year from metadata
                 path_year = all_path_metadata[path_idx].get('year') if path_idx < len(all_path_metadata) else None
 
-                # Calculate total path duration and distance for groundspeed calculation
+                # OPTIMIZATION: Only calculate distances/durations for z14_plus
+                # Other resolutions don't need accurate groundspeed (will be clamped to z14_plus max)
                 path_duration_seconds = 0
                 path_distance_km = 0
-                start_ts = metadata.get('timestamp')
-                end_ts = metadata.get('end_timestamp')
 
-                if start_ts and end_ts:
-                    try:
-                        if 'T' in start_ts and 'T' in end_ts:
-                            start_dt = datetime.fromisoformat(start_ts.replace('Z', '+00:00'))
-                            end_dt = datetime.fromisoformat(end_ts.replace('Z', '+00:00'))
-                            path_duration_seconds = (end_dt - start_dt).total_seconds()
-                    except (ValueError, TypeError) as e:
-                        if DEBUG:
-                            print(f"  DEBUG: Could not parse timestamps '{start_ts}' -> '{end_ts}': {e}")
-                        pass
+                if res_name == 'z14_plus':
+                    start_ts = metadata.get('timestamp')
+                    end_ts = metadata.get('end_timestamp')
 
-                # Calculate total path distance
-                for i in range(len(path) - 1):
-                    lat1, lon1 = path[i][0], path[i][1]
-                    lat2, lon2 = path[i + 1][0], path[i + 1][1]
-                    path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+                    if start_ts and end_ts:
+                        try:
+                            if 'T' in start_ts and 'T' in end_ts:
+                                start_dt = datetime.fromisoformat(start_ts.replace('Z', '+00:00'))
+                                end_dt = datetime.fromisoformat(end_ts.replace('Z', '+00:00'))
+                                path_duration_seconds = (end_dt - start_dt).total_seconds()
+                        except (ValueError, TypeError) as e:
+                            if DEBUG:
+                                print(f"  DEBUG: Could not parse timestamps '{start_ts}' -> '{end_ts}': {e}")
+                            pass
 
-                # Track longest single flight distance
-                path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
-                if path_distance_nm > max_path_distance_nm:
-                    max_path_distance_nm = path_distance_nm
+                    # Calculate total path distance
+                    for i in range(len(path) - 1):
+                        lat1, lon1 = path[i][0], path[i][1]
+                        lat2, lon2 = path[i + 1][0], path[i + 1][1]
+                        path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+
+                    # Track longest single flight distance
+                    path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
+                    if path_distance_nm > max_path_distance_nm:
+                        max_path_distance_nm = path_distance_nm
 
                 # Store path info with airport relationships and aircraft info
                 info = {
@@ -277,7 +276,32 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     info['aircraft_type'] = metadata['aircraft_type']
                 path_info.append(info)
 
-                # Define realistic groundspeed limits for general aviation
+                # OPTIMIZATION: Only calculate detailed speeds for z14_plus
+                # Other resolutions will use simplified speed calculation
+                if res_name != 'z14_plus':
+                    # For downsampled resolutions, create simple segments without speed calculation
+                    for i in range(len(path) - 1):
+                        coord1 = path[i]
+                        coord2 = path[i + 1]
+                        lat1, lon1, alt1_m = coord1[0], coord1[1], coord1[2]
+                        lat2, lon2, alt2_m = coord2[0], coord2[1], coord2[2]
+
+                        avg_alt_m = (alt1_m + alt2_m) / 2
+                        avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+                        color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
+
+                        if lat1 != lat2 or lon1 != lon2:
+                            path_segments.append({
+                                'coords': [[lat1, lon1], [lat2, lon2]],
+                                'color': color,
+                                'altitude_ft': avg_alt_ft,
+                                'altitude_m': round(avg_alt_m, 0),
+                                'groundspeed_knots': 0,  # Will be filled in later if needed
+                                'path_id': path_idx
+                            })
+                    continue  # Skip to next path
+
+                # Full speed calculation only for z14_plus
                 MAX_GROUNDSPEED_KNOTS = 200  # Reasonable max for typical general aviation
                 MIN_SEGMENT_TIME_SECONDS = 0.1  # Avoid division by very small time differences
                 SPEED_WINDOW_SECONDS = 120  # 2 minute rolling average window
