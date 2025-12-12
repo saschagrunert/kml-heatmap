@@ -902,7 +902,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         'favicon.ico',
         'favicon-192.png',
         'favicon-512.png',
-        'apple-touch-icon.png'
+        'apple-touch-icon.png',
+        'manifest.json'
     ]
 
     for favicon_file in favicon_files:
