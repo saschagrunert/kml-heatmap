@@ -2,26 +2,34 @@
   "name": "KML Heatmap",
   "short_name": "KML Heatmap",
   "description": "Interactive flight path heatmap visualization",
-  "start_url": "/kml-heatmap/",
+  "start_url": "https://saschagrunert.github.io/kml-heatmap/",
   "display": "standalone",
   "background_color": "#1a1a1a",
   "theme_color": "#1a1a1a",
   "icons": [
     {
-      "src": "/kml-heatmap/favicon-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "/kml-heatmap/favicon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    },
-    {
-      "src": "/kml-heatmap/apple-touch-icon.png",
+      "src": "https://saschagrunert.github.io/kml-heatmap/apple-touch-icon.png",
       "sizes": "180x180",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "https://saschagrunert.github.io/kml-heatmap/favicon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://saschagrunert.github.io/kml-heatmap/favicon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://saschagrunert.github.io/kml-heatmap/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
