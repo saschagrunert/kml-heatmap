@@ -2285,7 +2285,7 @@ function seekReplay(value) {
     }
 
     replayCurrentTime = newTime;
-    updateReplayDisplay();
+    updateReplayDisplay(true); // Pass true to indicate this is a manual seek
 }
 
 function changeReplaySpeed() {
@@ -2293,7 +2293,7 @@ function changeReplaySpeed() {
     replaySpeed = parseFloat(select.value);
 }
 
-function updateReplayDisplay() {
+function updateReplayDisplay(isManualSeek) {
     // Update time display
     document.getElementById('replay-time-display').textContent =
         formatTime(replayCurrentTime) + ' / ' + formatTime(replayMaxTime);
@@ -2417,8 +2417,8 @@ function updateReplayDisplay() {
         // The CSS transition on the marker element provides smooth movement
         replayAirplaneMarker.setLatLng(currentPos);
 
-        // Auto-pan map if airplane is near viewport edge (only when playing)
-        if (replayPlaying) {
+        // Auto-pan map if airplane is near viewport edge (when playing or manually seeking)
+        if (replayPlaying || isManualSeek) {
             var mapSize = map.getSize();
             var airplanePoint = map.latLngToContainerPoint(currentPos);
 
@@ -2432,6 +2432,11 @@ function updateReplayDisplay() {
             var needsRecenter = false;
             if (airplanePoint.x < marginX || airplanePoint.x > mapSize.x - marginX ||
                 airplanePoint.y < marginY || airplanePoint.y > mapSize.y - marginY) {
+                needsRecenter = true;
+            }
+
+            // For manual seek, always center on airplane position
+            if (isManualSeek) {
                 needsRecenter = true;
             }
 
