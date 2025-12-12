@@ -133,6 +133,7 @@ body {
     /* Use hardware acceleration for smoother rotation */
     transform-origin: center center;
     will-change: transform;
+    transition: transform 0.3s ease-out;
     /* Make airplane more visible with a glow effect */
     text-shadow: 0 0 8px rgba(79,172,254,0.8);
 }
