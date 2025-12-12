@@ -468,10 +468,20 @@ function updateAirportOpacity() {
     // If paths are selected, collect airports from selected paths (overrides filter)
     if (hasSelection) {
         selectedPathIds.forEach(function(pathId) {
-            var airports = pathToAirports[pathId];
-            if (airports) {
-                if (airports.start) visibleAirports.add(airports.start);
-                if (airports.end) visibleAirports.add(airports.end);
+            // Use fullPathInfo for reliable path-to-airport mapping (not affected by zoom level)
+            if (fullPathInfo) {
+                var pathInfo = fullPathInfo.find(function(p) { return p.id === pathId; });
+                if (pathInfo) {
+                    if (pathInfo.start_airport) visibleAirports.add(pathInfo.start_airport);
+                    if (pathInfo.end_airport) visibleAirports.add(pathInfo.end_airport);
+                }
+            } else {
+                // Fallback to pathToAirports if fullPathInfo not loaded yet
+                var airports = pathToAirports[pathId];
+                if (airports) {
+                    if (airports.start) visibleAirports.add(airports.start);
+                    if (airports.end) visibleAirports.add(airports.end);
+                }
             }
         });
     }
@@ -635,12 +645,23 @@ function calculateFilteredStats() {
 
     // Calculate total flight time from filtered paths
     var totalFlightTimeSeconds = 0;
-    filteredPathInfo.forEach(function(pathInfo) {
-        // We don't have duration per path in path_info, so we estimate from fullStats
-        if (fullStats && fullStats.total_flight_time_seconds && fullStats.num_paths > 0) {
-            totalFlightTimeSeconds += fullStats.total_flight_time_seconds / fullStats.num_paths;
-        }
-    });
+    if (filteredSegments.length > 0 && filteredSegments[0].time !== undefined) {
+        var segmentsByPath = {};
+        filteredSegments.forEach(function(seg) {
+            if (!segmentsByPath[seg.path_id]) {
+                segmentsByPath[seg.path_id] = [];
+            }
+            segmentsByPath[seg.path_id].push(seg);
+        });
+        Object.keys(segmentsByPath).forEach(function(pathId) {
+            var pathSegments = segmentsByPath[pathId];
+            pathSegments.sort(function(a, b) { return a.time - b.time; });
+            if (pathSegments.length > 0) {
+                var pathDuration = pathSegments[pathSegments.length - 1].time - pathSegments[0].time;
+                totalFlightTimeSeconds += pathDuration;
+            }
+        });
+    }
 
     var hours = Math.floor(totalFlightTimeSeconds / 3600);
     var minutes = Math.floor((totalFlightTimeSeconds % 3600) / 60);
@@ -848,10 +869,59 @@ function filterByAircraft() {
         const googleMapsLink = `https://www.google.com/maps?q=${airport.lat},${airport.lon}`;
 
         const popup = `
-        <div style="font-size: 12px; min-width: 150px;">
-            <b>🛫 ${airport.name || 'Unknown'}</b><br>
-            <a href="${googleMapsLink}" target="_blank" style="color: #4285f4; text-decoration: none;">${latDms} ${lonDms}</a><br>
-            <b>Flights:</b> ${airport.flight_count}
+        <div style="
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            min-width: 220px;
+            padding: 8px 4px;
+            background-color: #2b2b2b;
+            color: #ffffff;
+        ">
+            <div style="
+                font-size: 15px;
+                font-weight: bold;
+                color: #28a745;
+                margin-bottom: 10px;
+                padding-bottom: 8px;
+                border-bottom: 2px solid #28a745;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            ">
+                <span style="font-size: 18px;">🛫</span>
+                <span>${airport.name || 'Unknown'}</span>
+                ${isHomeBase ? '<span style="font-size: 12px; background: #007bff; color: white; padding: 2px 6px; border-radius: 3px; margin-left: 4px;">HOME</span>' : ''}
+            </div>
+            <div style="margin-bottom: 8px;">
+                <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Coordinates</div>
+                <a href="${googleMapsLink}"
+                   target="_blank"
+                   style="
+                       color: #4facfe;
+                       text-decoration: none;
+                       font-size: 12px;
+                       font-family: monospace;
+                       display: flex;
+                       align-items: center;
+                       gap: 4px;
+                   "
+                   onmouseover="this.style.textDecoration='underline'"
+                   onmouseout="this.style.textDecoration='none'">
+                    <span>📍</span>
+                    <span>${latDms}<br>${lonDms}</span>
+                </a>
+            </div>
+            <div style="
+                background: linear-gradient(135deg, rgba(79, 172, 254, 0.15) 0%, rgba(0, 242, 254, 0.15) 100%);
+                padding: 8px 10px;
+                border-radius: 6px;
+                border-left: 3px solid #4facfe;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            ">
+                <span style="font-size: 12px; color: #ccc; font-weight: 500;">Total Flights</span>
+                <span style="font-size: 16px; font-weight: bold; color: #4facfe;">${airport.flight_count}</span>
+            </div>
         </div>`;
 
         var marker = L.marker([airport.lat, airport.lon], {
@@ -868,7 +938,10 @@ function filterByAircraft() {
 
         // Add click handler to select paths connected to this airport
         marker.on('click', function(e) {
-            selectPathsByAirport(airport.name);
+            // Don't allow selecting paths during replay mode
+            if (!replayActive) {
+                selectPathsByAirport(airport.name);
+            }
         });
 
         marker.addTo(airportLayer);
@@ -919,6 +992,10 @@ map.on('zoomend', function() {
 
 // Clear selection when clicking on the map background
 map.on('click', function(e) {
+    // Close replay airplane popup if open
+    if (replayActive && replayAirplaneMarker && replayAirplaneMarker.isPopupOpen()) {
+        replayAirplaneMarker.closePopup();
+    }
     // Don't clear selection during replay mode
     if (!replayActive && selectedPathIds.size > 0) {
         clearSelection();
@@ -1582,6 +1659,11 @@ function toggleAltitude() {
         document.getElementById('altitude-btn').style.opacity = '1.0';
         document.getElementById('altitude-legend').style.display = 'block';
     }
+
+    // Update airplane popup if it's open during replay
+    if (replayActive && replayAirplaneMarker && replayAirplaneMarker.isPopupOpen()) {
+        updateReplayAirplanePopup();
+    }
 }
 
 function toggleAirspeed() {
@@ -1640,6 +1722,11 @@ function toggleAirspeed() {
         airspeedVisible = true;
         document.getElementById('airspeed-btn').style.opacity = '1.0';
         document.getElementById('airspeed-legend').style.display = 'block';
+    }
+
+    // Update airplane popup if it's open during replay
+    if (replayActive && replayAirplaneMarker && replayAirplaneMarker.isPopupOpen()) {
+        updateReplayAirplanePopup();
     }
 }
 
@@ -1769,6 +1856,93 @@ function updateReplayButtonState() {
     }
 }
 
+function updateReplayAirplanePopup() {
+    if (!replayAirplaneMarker || !replayActive) return;
+
+    // Find the current segment for data
+    var currentSegment = null;
+    for (var i = 0; i < replaySegments.length; i++) {
+        var seg = replaySegments[i];
+        if (seg.time <= replayCurrentTime) {
+            currentSegment = seg;
+        } else {
+            break;
+        }
+    }
+
+    if (!currentSegment) {
+        currentSegment = replaySegments[0];
+    }
+
+    // Determine what to show based on visible layers
+    var showAltitude = altitudeVisible;
+    var showSpeed = airspeedVisible;
+
+    // Build popup content
+    var popupContent = '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Arial, sans-serif; min-width: 180px; padding: 8px 4px; background-color: #2b2b2b; color: #ffffff;">';
+
+    popupContent += '<div style="font-size: 14px; font-weight: bold; color: #4facfe; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 2px solid #4facfe; display: flex; align-items: center; gap: 6px;">';
+    popupContent += '<span style="font-size: 16px;">✈️</span>';
+    popupContent += '<span>Current Position</span>';
+    popupContent += '</div>';
+
+    if (showAltitude) {
+        var altFt = currentSegment.altitude_ft;
+        var altM = currentSegment.altitude_m;
+        // Round altitude to nearest 50ft
+        var altFtRounded = Math.round(altFt / 50) * 50;
+        var altMRounded = Math.round(altFtRounded * 0.3048);
+        // Get color based on current altitude using the same scale as the path
+        var altColor = getColorForAltitude(altFt, replayColorMinAlt, replayColorMaxAlt);
+        // Convert rgb color to rgba with transparency for background
+        var altColorBg = altColor.replace('rgb(', 'rgba(').replace(')', ', 0.15)');
+        popupContent += '<div style="margin-bottom: 8px;">';
+        popupContent += '<div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Altitude (MSL)</div>';
+        popupContent += '<div style="background: ' + altColorBg + '; padding: 6px 8px; border-radius: 6px; border-left: 3px solid ' + altColor + ';">';
+        popupContent += '<span style="font-size: 16px; font-weight: bold; color: ' + altColor + ';">' + altFtRounded.toLocaleString() + ' ft</span>';
+        popupContent += '<span style="font-size: 12px; color: #ccc; margin-left: 6px;">(' + altMRounded.toLocaleString() + ' m)</span>';
+        popupContent += '</div>';
+        popupContent += '</div>';
+    }
+
+    if (showSpeed && currentSegment.groundspeed_knots > 0) {
+        var speedKt = currentSegment.groundspeed_knots;
+        var speedKmh = currentSegment.groundspeed_knots * 1.852;
+        // Round groundspeed to whole numbers
+        var speedKtRounded = Math.round(speedKt);
+        var speedKmhRounded = Math.round(speedKmh);
+        // Get color based on current groundspeed using the same scale as the path
+        var speedColor = getColorForAltitude(speedKt, replayColorMinSpeed, replayColorMaxSpeed);
+        // Convert rgb color to rgba with transparency for background
+        var speedColorBg = speedColor.replace('rgb(', 'rgba(').replace(')', ', 0.15)');
+        popupContent += '<div style="margin-bottom: 8px;">';
+        popupContent += '<div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Groundspeed</div>';
+        popupContent += '<div style="background: ' + speedColorBg + '; padding: 6px 8px; border-radius: 6px; border-left: 3px solid ' + speedColor + ';">';
+        popupContent += '<span style="font-size: 16px; font-weight: bold; color: ' + speedColor + ';">' + speedKtRounded.toLocaleString() + ' kt</span>';
+        popupContent += '<span style="font-size: 12px; color: #ccc; margin-left: 6px;">(' + speedKmhRounded.toLocaleString() + ' km/h)</span>';
+        popupContent += '</div>';
+        popupContent += '</div>';
+    }
+
+    if (!showAltitude && !showSpeed) {
+        popupContent += '<div style="font-size: 12px; color: #999; padding: 8px 0;">Enable altitude or speed view to see flight data</div>';
+    }
+
+    popupContent += '</div>';
+
+    // Update or create popup
+    if (!replayAirplaneMarker.getPopup()) {
+        replayAirplaneMarker.bindPopup(popupContent, {
+            autoPanPadding: [50, 50]
+        });
+    } else {
+        replayAirplaneMarker.getPopup().setContent(popupContent);
+    }
+
+    // Open the popup
+    replayAirplaneMarker.openPopup();
+}
+
 function initializeReplay() {
     // Get all segments with time data from full resolution
     if (!fullPathSegments) {
@@ -1880,6 +2054,18 @@ function initializeReplay() {
     var markerElement = replayAirplaneMarker.getElement();
     if (markerElement) {
         markerElement.style.transition = 'transform 0.08s linear';
+        markerElement.style.cursor = 'pointer';
+        markerElement.style.pointerEvents = 'auto';
+
+        // Add click handler directly to the DOM element for better reliability
+        markerElement.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (replayAirplaneMarker.isPopupOpen()) {
+                replayAirplaneMarker.closePopup();
+            } else {
+                updateReplayAirplanePopup();
+            }
+        });
     }
 
     // Reset time and drawing state
@@ -2334,6 +2520,11 @@ function updateReplayDisplay() {
             replayAirplaneMarker.setLatLng([startCoords[0], startCoords[1]]);
         }
     }
+
+    // Update popup content if it's open
+    if (replayAirplaneMarker && replayAirplaneMarker.getPopup() && replayAirplaneMarker.isPopupOpen()) {
+        updateReplayAirplanePopup();
+    }
 }
 
 function calculateSmoothedBearing(currentIdx, lookAhead) {
@@ -2398,6 +2589,7 @@ function exportMap() {
         document.getElementById('stats-btn'),
         document.getElementById('export-btn'),
         document.getElementById('wrapped-btn'),
+        document.getElementById('replay-btn'),
         document.getElementById('year-filter'),
         document.getElementById('aircraft-filter'),
         document.getElementById('heatmap-btn'),
@@ -2804,10 +2996,11 @@ function showWrapped() {
                 colorClass = 'fleet-aircraft-low';  // Least flights - cool color
             }
 
+            const flightTimeStr = aircraft.flight_time_str || '---';
             fleetHtml += `
                 <div class="fleet-aircraft ${colorClass}">
                     <div class="fleet-aircraft-name">${aircraft.registration} - ${modelStr}</div>
-                    <div class="fleet-aircraft-count">${aircraft.flights} flights</div>
+                    <div class="fleet-aircraft-count">${aircraft.flights} flights • ${flightTimeStr}</div>
                 </div>
             `;
         });

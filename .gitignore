@@ -5,3 +5,4 @@ AGENTS.md
 __pycache__
 kml
 aircraft_cache.json
+.kml_cache

@@ -14,7 +14,7 @@ import os
 import json
 import shutil
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 import folium
 from folium.plugins import HeatMap
@@ -169,6 +169,10 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
 
     # Track longest single flight distance
     max_path_distance_nm = 0  # Longest flight in nautical miles
+
+    # Store z14_plus data to avoid reloading it later
+    z14_plus_segments = None
+    z14_plus_path_info = None
 
     # Track cruise altitude histogram (500ft bins for altitudes >1000ft AGL)
     cruise_altitude_histogram = {}  # Dict of {altitude_bin_ft: time_seconds}
@@ -450,6 +454,11 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
         file_size = os.path.getsize(output_file)
         files[res_name] = output_file
 
+        # Store z14_plus data for later use (avoid reloading)
+        if res_name == 'z14_plus':
+            z14_plus_segments = path_segments
+            z14_plus_path_info = path_info
+
         print(f"  ✓ {res_config['description']}: {len(downsampled_coords):,} points ({file_size / 1024:.1f} KB)")
 
     # Export airports (same for all resolutions)
@@ -555,8 +564,26 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
     total_size = sum(os.path.getsize(f) for f in files.values())
     print(f"  📊 Total data size: {total_size / 1024:.1f} KB")
 
-    return files
+    return files, z14_plus_segments, z14_plus_path_info
 
+
+def parse_with_error_handling(kml_file):
+    """Parse a KML file with error handling.
+
+    Args:
+        kml_file: Path to KML file
+
+    Returns:
+        Tuple of (kml_file, (coordinates, path_groups, path_metadata))
+    """
+    try:
+        return kml_file, parse_kml_coordinates(kml_file)
+    except Exception as e:
+        print(f"✗ Error processing {kml_file}: {e}")
+        if DEBUG:
+            import traceback
+            traceback.print_exc()
+        return kml_file, ([], [], [])
 
 
 def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="data"):
@@ -593,26 +620,13 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
     print(f"📁 Parsing {len(valid_files)} KML file(s)...")
 
-    def parse_with_error_handling(kml_file):
-        try:
-            return kml_file, parse_kml_coordinates(kml_file)
-        except ET.ParseError as e:
-            print(f"✗ XML parsing error in {kml_file}: {e}")
-            return kml_file, ([], [], [])
-        except (IOError, OSError) as e:
-            print(f"✗ File error reading {kml_file}: {e}")
-            return kml_file, ([], [], [])
-        except Exception as e:
-            print(f"✗ Unexpected error processing {kml_file}: {e}")
-            if DEBUG:
-                import traceback
-                traceback.print_exc()
-            return kml_file, ([], [], [])
+    import time
+    parse_start = time.time()
 
-    # Parse files in parallel but collect results in order
+    # Parse files in parallel using multiprocessing for CPU-bound XML parsing
     results = []
     completed_count = 0
-    with ThreadPoolExecutor(max_workers=min(len(valid_files), 8)) as executor:
+    with ProcessPoolExecutor(max_workers=min(len(valid_files), os.cpu_count() or 4)) as executor:
         future_to_file = {executor.submit(parse_with_error_handling, f): f for f in valid_files}
         for future in as_completed(future_to_file):
             kml_file, (coords, path_groups, path_metadata) = future.result()
@@ -629,6 +643,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         all_coordinates.extend(coords)
         all_path_groups.extend(path_groups)
         all_path_metadata.extend(path_metadata)
+
+    parse_time = time.time() - parse_start
+    print(f"  ⏱️  Parsing took {parse_time:.1f}s ({parse_time/len(valid_files):.2f}s per file)")
 
     if not all_coordinates:
         print("✗ No coordinates found in any KML files!")
@@ -668,7 +685,133 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     stats['airport_names'] = sorted(valid_airport_names)
 
     # Export data to JSON files (strip timestamps by default for privacy)
-    data_files = export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique_airports, stats, data_dir, strip_timestamps=True)
+    data_files, z14_segments, z14_path_info = export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique_airports, stats, data_dir, strip_timestamps=True)
+
+    # Recalculate ALL statistics from exported segment data to match JavaScript
+    # This ensures wrapped panel and filtered stats show perfectly consistent values
+    print(f"\n🔄 Recalculating statistics from segment data...")
+
+    # First, load the existing metadata to preserve available_years and gradient
+    meta_file = os.path.join(data_dir, 'metadata.json')
+    existing_meta = {}
+    if os.path.exists(meta_file):
+        with open(meta_file, 'r') as f:
+            existing_meta = json.load(f)
+
+    # Use the segments data we just created instead of reloading from disk
+    if z14_segments is not None and z14_path_info is not None:
+        segments = z14_segments
+
+        # 1. Total Points (segments × 2)
+        stats['total_points'] = len(segments) * 2
+
+        # 2. Altitude statistics from segments
+        altitudes_m = [seg['altitude_m'] for seg in segments]
+        stats['min_altitude_m'] = min(altitudes_m) if altitudes_m else 0
+        stats['max_altitude_m'] = max(altitudes_m) if altitudes_m else 0
+        stats['min_altitude_ft'] = stats['min_altitude_m'] * 3.28084
+        stats['max_altitude_ft'] = stats['max_altitude_m'] * 3.28084
+
+        # 3. Total altitude gain from segments
+        total_gain_m = 0
+        prev_alt = None
+        for seg in segments:
+            alt = seg['altitude_m']
+            if prev_alt is not None and alt > prev_alt:
+                total_gain_m += alt - prev_alt
+            prev_alt = alt
+        stats['total_altitude_gain_m'] = total_gain_m
+        stats['total_altitude_gain_ft'] = total_gain_m * 3.28084
+
+        # 4. Average groundspeed from segments
+        groundspeeds = [seg['groundspeed_knots'] for seg in segments if seg['groundspeed_knots'] > 0]
+        stats['average_groundspeed_knots'] = sum(groundspeeds) / len(groundspeeds) if groundspeeds else 0
+
+        # 5. Cruise speed (segments > 1000ft AGL)
+        min_alt_m = stats['min_altitude_m']
+        cruise_segs = [seg for seg in segments if seg['altitude_ft'] > (min_alt_m * 3.28084 + 1000)]
+        cruise_speeds = [seg['groundspeed_knots'] for seg in cruise_segs if seg['groundspeed_knots'] > 0]
+        stats['cruise_speed_knots'] = sum(cruise_speeds) / len(cruise_speeds) if cruise_speeds else 0
+
+        # 6. Most common cruise altitude (time-weighted)
+        altitude_bins = {}
+        for seg in cruise_segs:
+            if 'time' in seg:
+                bin_alt = round(seg['altitude_ft'] / 100) * 100
+                altitude_bins[bin_alt] = altitude_bins.get(bin_alt, 0) + 1
+
+        if altitude_bins:
+            stats['most_common_cruise_altitude_ft'] = max(altitude_bins.keys(), key=lambda k: altitude_bins[k])
+            stats['most_common_cruise_altitude_m'] = round(stats['most_common_cruise_altitude_ft'] * 0.3048)
+
+        # 7. Flight time from segments
+        total_flight_time = 0
+        path_durations = {}
+        for segment in segments:
+            if 'time' in segment and 'path_id' in segment:
+                path_id = segment['path_id']
+                if path_id not in path_durations:
+                    path_durations[path_id] = []
+                path_durations[path_id].append(segment['time'])
+
+        for path_id, times in path_durations.items():
+            if len(times) >= 2:
+                duration = max(times) - min(times)
+                total_flight_time += duration
+
+        stats['total_flight_time_seconds'] = total_flight_time
+
+        # 8. Per-aircraft flight times from segments
+        if stats.get('aircraft_list'):
+            aircraft_times = {}
+            for path_info in z14_path_info:
+                reg = path_info.get('aircraft_registration')
+                path_id = path_info.get('id')
+                if reg and path_id is not None and path_id in path_durations:
+                    if reg not in aircraft_times:
+                        aircraft_times[reg] = 0
+                    times = path_durations[path_id]
+                    if len(times) >= 2:
+                        aircraft_times[reg] += max(times) - min(times)
+
+            # Update aircraft list with recalculated times
+            # Also sum up the formatted times to ensure total matches
+            total_formatted_hours = 0
+            total_formatted_minutes = 0
+
+            for aircraft in stats['aircraft_list']:
+                reg = aircraft['registration']
+                if reg in aircraft_times:
+                    aircraft['flight_time_seconds'] = aircraft_times[reg]
+                    hours = int(aircraft_times[reg] // 3600)
+                    minutes = int((aircraft_times[reg] % 3600) // 60)
+                    aircraft['flight_time_str'] = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+
+                    # Accumulate formatted times
+                    total_formatted_hours += hours
+                    total_formatted_minutes += minutes
+
+            # Convert accumulated minutes to hours for total
+            total_formatted_hours += total_formatted_minutes // 60
+            total_formatted_minutes = total_formatted_minutes % 60
+
+            # Set total to match sum of individual aircraft formatted times
+            stats['total_flight_time_str'] = f"{total_formatted_hours}h {total_formatted_minutes}m" if total_formatted_hours > 0 else f"{total_formatted_minutes}m"
+
+        # Re-export metadata with all recalculated statistics
+        # Preserve available_years and gradient from the original metadata
+        meta_data = {
+            'available_years': existing_meta.get('available_years', []),
+            'gradient': existing_meta.get('gradient', {}),
+            'max_alt_m': stats['max_altitude_m'],
+            'max_groundspeed_knots': stats.get('max_groundspeed_knots', 0),
+            'min_alt_m': stats['min_altitude_m'],
+            'min_groundspeed_knots': stats.get('min_groundspeed_knots', 0),
+            'stats': stats
+        }
+        with open(meta_file, 'w') as f:
+            json.dump(meta_data, f, separators=(',', ':'), sort_keys=True)
+        print(f"  ✓ Updated metadata with segment-based statistics (matches JavaScript)")
 
     # Generate lightweight HTML with progressive loading
     print(f"\n💾 Generating progressive HTML...")

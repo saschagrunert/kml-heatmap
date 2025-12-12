@@ -16,7 +16,7 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
 
     Args:
         all_coordinates: List of [lat, lon] pairs
-        all_path_groups: List of path groups with altitude data
+        all_path_groups: List of path groups with altitude data (can be [lat,lon,alt] or [lat,lon,alt,timestamp])
         all_path_metadata: List of metadata dicts for each path (optional)
 
     Returns:
@@ -89,38 +89,48 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
     stats['total_altitude_gain_m'] = total_gain_m
     stats['total_altitude_gain_ft'] = total_gain_m * METERS_TO_FEET
 
-    # Calculate total flight time from path metadata
-    if all_path_metadata:
-        total_seconds = 0
+    # Calculate total flight time from path timestamps (4th element in coordinates)
+    total_seconds = 0
+    paths_with_timestamps = 0
+    for path_idx, path in enumerate(valid_paths):
+        # Extract timestamps from path coordinates (4th element if present)
+        timestamps = []
+        for coord in path:
+            if len(coord) >= 4 and coord[3] is not None:
+                # Parse timestamp if it's a string (ISO format)
+                timestamp = coord[3]
+                if isinstance(timestamp, str):
+                    try:
+                        if 'T' in timestamp:
+                            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                            timestamp = dt.timestamp()
+                    except (ValueError, TypeError):
+                        continue
+                timestamps.append(timestamp)
 
-        for metadata in all_path_metadata:
-            start_ts = metadata.get('timestamp')
-            end_ts = metadata.get('end_timestamp')
+        # Calculate flight duration from min/max timestamps
+        if len(timestamps) >= 2:
+            min_time = min(timestamps)
+            max_time = max(timestamps)
+            duration = max_time - min_time
+            if duration > 0:
+                total_seconds += duration
+                paths_with_timestamps += 1
 
-            # Only calculate duration if both start and end timestamps exist
-            if start_ts and end_ts:
-                try:
-                    # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z")
-                    if 'T' in start_ts and 'T' in end_ts:
-                        start_dt = datetime.fromisoformat(start_ts.replace('Z', '+00:00'))
-                        end_dt = datetime.fromisoformat(end_ts.replace('Z', '+00:00'))
-                        duration = (end_dt - start_dt).total_seconds()
-                        if duration > 0:  # Only count positive durations
-                            total_seconds += duration
-                except (ValueError, TypeError):
-                    # Skip if parsing fails - timestamps are optional
-                    pass
+    # Debug output
+    if paths_with_timestamps > 0:
+        print(f"  Calculated flight time from {paths_with_timestamps}/{len(valid_paths)} paths with timestamps")
 
-        stats['total_flight_time_seconds'] = total_seconds
+    stats['total_flight_time_seconds'] = total_seconds
 
-        # Format flight time as human-readable string
-        if total_seconds > 0:
-            hours = int(total_seconds // 3600)
-            minutes = int((total_seconds % 3600) // 60)
-            if hours > 0:
-                stats['total_flight_time_str'] = f"{hours}h {minutes}m"
-            else:
-                stats['total_flight_time_str'] = f"{minutes}m"
+    # Format flight time as human-readable string
+    if total_seconds > 0:
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        if hours > 0:
+            stats['total_flight_time_str'] = f"{hours}h {minutes}m"
+        else:
+            stats['total_flight_time_str'] = f"{minutes}m"
 
     # Calculate average groundspeed in knots (nautical miles per hour)
     if stats['total_flight_time_seconds'] > 0 and stats['total_distance_nm'] > 0:
@@ -139,7 +149,9 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
         aircraft_list = []  # List of {registration, type, flights_count}
         aircraft_flights = {}  # Count unique flights (KML files) per aircraft registration
 
-        for metadata in all_path_metadata:
+        # Build a map of path index to aircraft registration
+        path_to_aircraft = {}
+        for idx, metadata in enumerate(all_path_metadata):
             reg = metadata.get('aircraft_registration')
             atype = metadata.get('aircraft_type')
             filename = metadata.get('filename')
@@ -147,15 +159,53 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
             if reg:
                 aircraft_registrations.add(reg)
                 if reg not in aircraft_flights:
-                    aircraft_flights[reg] = {'type': atype, 'count': 0, 'files': set()}
+                    aircraft_flights[reg] = {'type': atype, 'count': 0, 'files': set(), 'flight_time_seconds': 0}
 
                 # Only count unique filenames (each file = one flight)
                 if filename and filename not in aircraft_flights[reg]['files']:
                     aircraft_flights[reg]['files'].add(filename)
                     aircraft_flights[reg]['count'] += 1
 
+                # Store the mapping for later use
+                path_to_aircraft[idx] = reg
+
             if atype:
                 aircraft_types.add(atype)
+
+        # Calculate flight time per aircraft from path timestamps (4th element in coordinates)
+        # Use same filter as total flight time calculation (paths with >= 2 points)
+        for idx, path in enumerate(all_path_groups):
+            # Skip short paths (same filter as valid_paths)
+            if len(path) < 2:
+                continue
+
+            if idx not in path_to_aircraft:
+                continue
+
+            reg = path_to_aircraft[idx]
+
+            # Extract timestamps from path coordinates (4th element if present)
+            timestamps = []
+            for coord in path:
+                if len(coord) >= 4 and coord[3] is not None:
+                    # Parse timestamp if it's a string (ISO format)
+                    timestamp = coord[3]
+                    if isinstance(timestamp, str):
+                        try:
+                            if 'T' in timestamp:
+                                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                                timestamp = dt.timestamp()
+                        except (ValueError, TypeError):
+                            continue
+                    timestamps.append(timestamp)
+
+            # Calculate flight duration from min/max timestamps
+            if len(timestamps) >= 2:
+                min_time = min(timestamps)
+                max_time = max(timestamps)
+                duration = max_time - min_time
+                if duration > 0:
+                    aircraft_flights[reg]['flight_time_seconds'] += duration
 
         # Create sorted aircraft list by flight count with full model lookup
         print("✈️  Looking up aircraft model information...")
@@ -169,11 +219,25 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
                 if full_model:
                     print(f"  ⚠ {reg}: {full_model} (lookup failed, using KML type)")
 
+            # Format flight time as human-readable string
+            flight_time_seconds = info['flight_time_seconds']
+            if flight_time_seconds > 0:
+                hours = int(flight_time_seconds // 3600)
+                minutes = int((flight_time_seconds % 3600) // 60)
+                if hours > 0:
+                    flight_time_str = f"{hours}h {minutes}m"
+                else:
+                    flight_time_str = f"{minutes}m"
+            else:
+                flight_time_str = "---"
+
             aircraft_list.append({
                 'registration': reg,
                 'type': info['type'],  # Keep original type for backwards compatibility
                 'model': full_model,   # Full model name
-                'flights': info['count']
+                'flights': info['count'],
+                'flight_time_seconds': flight_time_seconds,
+                'flight_time_str': flight_time_str
             })
 
         stats['num_aircraft'] = len(aircraft_registrations)

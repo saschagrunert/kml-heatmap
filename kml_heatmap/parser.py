@@ -1,9 +1,19 @@
 """KML file parsing functionality."""
 
 import re
+import os
+import json
+import hashlib
 from pathlib import Path
-from xml.etree import ElementTree as ET
 from datetime import datetime
+
+# Try to use lxml for better performance, fall back to standard library
+try:
+    from lxml import etree as ET
+    USING_LXML = True
+except ImportError:
+    from xml.etree import ElementTree as ET
+    USING_LXML = False
 
 from .aircraft import parse_aircraft_from_filename
 from .validation import validate_coordinates, validate_altitude
@@ -18,6 +28,85 @@ PATH_SAMPLE_MIN_SIZE = 5
 
 # Global DEBUG flag (will be set by main script)
 DEBUG = False
+
+# Cache directory for parsed KML files
+CACHE_DIR = Path('.kml_cache')
+
+
+def get_cache_key(kml_file):
+    """Generate cache key based on file path and modification time.
+
+    Args:
+        kml_file: Path to KML file
+
+    Returns:
+        Tuple of (cache_path, is_valid) where is_valid indicates if cached data can be used
+    """
+    kml_path = Path(kml_file)
+
+    # Create cache directory if it doesn't exist
+    CACHE_DIR.mkdir(exist_ok=True)
+
+    # Get file modification time
+    try:
+        mtime = kml_path.stat().st_mtime
+    except (OSError, FileNotFoundError):
+        return None, False
+
+    # Create cache filename from KML filename and modification time
+    cache_name = f"{kml_path.stem}_{int(mtime)}.json"
+    cache_path = CACHE_DIR / cache_name
+
+    # Check if cache file exists
+    if cache_path.exists():
+        return cache_path, True
+
+    # Clean up old cache files for this KML file
+    for old_cache in CACHE_DIR.glob(f"{kml_path.stem}_*.json"):
+        try:
+            old_cache.unlink()
+        except OSError:
+            pass
+
+    return cache_path, False
+
+
+def load_cached_parse(cache_path):
+    """Load cached parse results.
+
+    Args:
+        cache_path: Path to cache file
+
+    Returns:
+        Tuple of (coordinates, path_groups, path_metadata) or None if cache invalid
+    """
+    try:
+        with open(cache_path, 'r') as f:
+            cached = json.load(f)
+        return cached['coordinates'], cached['path_groups'], cached['path_metadata']
+    except (json.JSONDecodeError, KeyError, OSError):
+        return None
+
+
+def save_to_cache(cache_path, coordinates, path_groups, path_metadata):
+    """Save parse results to cache.
+
+    Args:
+        cache_path: Path to cache file
+        coordinates: List of coordinates
+        path_groups: List of path groups
+        path_metadata: List of path metadata dicts
+    """
+    try:
+        with open(cache_path, 'w') as f:
+            json.dump({
+                'coordinates': coordinates,
+                'path_groups': path_groups,
+                'path_metadata': path_metadata
+            }, f)
+    except OSError as e:
+        if DEBUG:
+            print(f"  DEBUG: Failed to save cache: {e}")
 
 
 def extract_year_from_timestamp(timestamp):
@@ -148,6 +237,18 @@ def parse_kml_coordinates(kml_file):
                       (keeps separate paths separate for proper line drawing)
         - path_metadata: List of metadata dicts for each path (timestamp, filename, etc.)
     """
+    # Check cache first
+    cache_path, cache_valid = get_cache_key(kml_file)
+    if cache_valid and cache_path:
+        cached_result = load_cached_parse(cache_path)
+        if cached_result:
+            coordinates, path_groups, path_metadata = cached_result
+            print(f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name} (cached)")
+            if path_groups:
+                total_alt_points = sum(len(path) for path in path_groups)
+                print(f"  ({total_alt_points} points have altitude data in {len(path_groups)} path(s))")
+            return coordinates, path_groups, path_metadata
+
     coordinates = []
     path_groups = []  # List of separate paths
     path_metadata = []  # Metadata for each path
@@ -508,6 +609,10 @@ def parse_kml_coordinates(kml_file):
             print(f"    - The KML file uses a different structure")
             print(f"    - The coordinates are in an unexpected format")
             print(f"    - Try running with --debug flag for more information")
+
+        # Save to cache
+        if cache_path:
+            save_to_cache(cache_path, coordinates, path_groups, path_metadata)
 
         return coordinates, path_groups, path_metadata
 

@@ -453,7 +453,7 @@ body {
 /* Statistics panel */
 #stats-panel {
     position: fixed;
-    top: 130px;
+    top: 50px;  /* Positioned directly under stats button (10px + ~40px button height) */
     left: 10px;
     width: 280px;
     background-color: #2b2b2b;
@@ -465,7 +465,7 @@ body {
     display: none;
     color: #ffffff;
     box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-    max-height: 80vh;
+    max-height: calc(100vh - 70px);  /* Ensure it doesn't overflow viewport */
     overflow-y: auto;
 }
 
@@ -1085,12 +1085,22 @@ body {
     padding: 1px 3px;
     border-radius: 3px;
     white-space: nowrap;
-    pointer-events: none;
+    pointer-events: auto;  /* Make labels clickable */
+    cursor: pointer;       /* Show pointer cursor on hover */
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     position: absolute;
     bottom: 10px;
     left: 50%;
     transform: translateX(-50%);
+    transition: all 0.2s ease;
+}
+
+/* Label hover effect */
+.airport-label:hover {
+    background-color: rgba(43, 43, 43, 1);
+    border-width: 2px;
+    transform: translateX(-50%) scale(1.1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
 }
 
 /* Home base label */
@@ -1213,4 +1223,34 @@ body {
 }
 .leaflet-tooltip-right:before {
     border-right-color: #28a745;
+}
+
+/* Popup styles - dark theme */
+.leaflet-popup-content-wrapper {
+    background-color: #2b2b2b;
+    color: #ffffff;
+    border: 2px solid #555;
+    border-radius: 6px;
+    box-shadow: 0 3px 14px rgba(0,0,0,0.6);
+    padding: 0;
+}
+.leaflet-popup-content {
+    margin: 0;
+    line-height: 1.4;
+}
+.leaflet-popup-tip {
+    background-color: #2b2b2b;
+    border: 2px solid #555;
+    border-top: none;
+    border-right: none;
+}
+.leaflet-popup-close-button {
+    color: #ffffff !important;
+    font-size: 20px;
+    font-weight: bold;
+    opacity: 0.7;
+}
+.leaflet-popup-close-button:hover {
+    color: #ffffff !important;
+    opacity: 1;
 }
