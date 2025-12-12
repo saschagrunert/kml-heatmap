@@ -929,7 +929,7 @@ function filterByAircraft() {
                 html: markerHtml,
                 iconSize: [12, 12],
                 iconAnchor: [6, 6],
-                popupAnchor: [2, -6],
+                popupAnchor: [0, -6],
                 className: ''
             }),
             icao: icao  // Store ICAO for cluster icon function
