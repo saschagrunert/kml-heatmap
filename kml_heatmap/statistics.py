@@ -1,16 +1,19 @@
 """Statistics calculation for flight data."""
 
 from datetime import datetime
+from typing import List, Dict, Optional, Any
 from .geometry import haversine_distance
 from .aircraft import lookup_aircraft_model
 from .airports import is_point_marker
-
-# Constants
-METERS_TO_FEET = 3.28084
-KM_TO_NAUTICAL_MILES = 0.539957
+from .constants import METERS_TO_FEET, KM_TO_NAUTICAL_MILES
+from .helpers import parse_iso_timestamp, format_flight_time
 
 
-def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=None):
+def calculate_statistics(
+    all_coordinates: List[List[float]],
+    all_path_groups: List[List[List[float]]],
+    all_path_metadata: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
     """
     Calculate statistics from coordinate and path data.
 
@@ -100,11 +103,10 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
                 # Parse timestamp if it's a string (ISO format)
                 timestamp = coord[3]
                 if isinstance(timestamp, str):
-                    try:
-                        if 'T' in timestamp:
-                            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                            timestamp = dt.timestamp()
-                    except (ValueError, TypeError):
+                    dt = parse_iso_timestamp(timestamp)
+                    if dt:
+                        timestamp = dt.timestamp()
+                    else:
                         continue
                 timestamps.append(timestamp)
 
@@ -124,13 +126,7 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
     stats['total_flight_time_seconds'] = total_seconds
 
     # Format flight time as human-readable string
-    if total_seconds > 0:
-        hours = int(total_seconds // 3600)
-        minutes = int((total_seconds % 3600) // 60)
-        if hours > 0:
-            stats['total_flight_time_str'] = f"{hours}h {minutes}m"
-        else:
-            stats['total_flight_time_str'] = f"{minutes}m"
+    stats['total_flight_time_str'] = format_flight_time(total_seconds)
 
     # Calculate average groundspeed in knots (nautical miles per hour)
     if stats['total_flight_time_seconds'] > 0 and stats['total_distance_nm'] > 0:
@@ -191,11 +187,10 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
                     # Parse timestamp if it's a string (ISO format)
                     timestamp = coord[3]
                     if isinstance(timestamp, str):
-                        try:
-                            if 'T' in timestamp:
-                                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                                timestamp = dt.timestamp()
-                        except (ValueError, TypeError):
+                        dt = parse_iso_timestamp(timestamp)
+                        if dt:
+                            timestamp = dt.timestamp()
+                        else:
                             continue
                     timestamps.append(timestamp)
 
@@ -221,15 +216,7 @@ def calculate_statistics(all_coordinates, all_path_groups, all_path_metadata=Non
 
             # Format flight time as human-readable string
             flight_time_seconds = info['flight_time_seconds']
-            if flight_time_seconds > 0:
-                hours = int(flight_time_seconds // 3600)
-                minutes = int((flight_time_seconds % 3600) // 60)
-                if hours > 0:
-                    flight_time_str = f"{hours}h {minutes}m"
-                else:
-                    flight_time_str = f"{minutes}m"
-            else:
-                flight_time_str = "---"
+            flight_time_str = format_flight_time(flight_time_seconds)
 
             aircraft_list.append({
                 'registration': reg,

@@ -33,29 +33,26 @@ from kml_heatmap.airports import (
     deduplicate_airports,
     extract_airport_name,
     is_point_marker,
-    AIRPORT_DISTANCE_THRESHOLD_KM
 )
 from kml_heatmap.statistics import calculate_statistics
 from kml_heatmap.renderer import minify_html, load_template
 from kml_heatmap.validation import validate_kml_file, validate_api_keys
+from kml_heatmap.constants import (
+    METERS_TO_FEET,
+    KM_TO_NAUTICAL_MILES,
+    MAX_GROUNDSPEED_KNOTS,
+    MIN_SEGMENT_TIME_SECONDS,
+    SPEED_WINDOW_SECONDS,
+    CRUISE_ALTITUDE_THRESHOLD_FT,
+    ALTITUDE_BIN_SIZE_FT,
+    RESOLUTION_LEVELS,
+    HEATMAP_GRADIENT,
+)
+from kml_heatmap.helpers import parse_iso_timestamp, calculate_duration_seconds, format_flight_time
 
 # Get API keys from environment variables
 STADIA_API_KEY = os.environ.get('STADIA_API_KEY', '')
 OPENAIP_API_KEY = os.environ.get('OPENAIP_API_KEY', '')
-
-# Constants (re-exported from modules for compatibility)
-from kml_heatmap.geometry import EARTH_RADIUS_KM
-METERS_TO_FEET = 3.28084
-KM_TO_NAUTICAL_MILES = 0.539957
-
-# Heatmap configuration
-HEATMAP_GRADIENT = {
-    0.0: 'blue',
-    0.3: 'cyan',
-    0.5: 'lime',
-    0.7: 'yellow',
-    1.0: 'red'
-}
 
 
 def set_debug(enabled):
@@ -142,22 +139,15 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
         max_alt_m = 1000
 
     # Export at 5 resolution levels for more dynamic loading
-    resolutions = {
-        'z0_4': {'factor': 15, 'epsilon': 0.0008, 'description': 'Zoom 0-4 (continent level)'},
-        'z5_7': {'factor': 10, 'epsilon': 0.0004, 'description': 'Zoom 5-7 (country level)'},
-        'z8_10': {'factor': 5, 'epsilon': 0.0002, 'description': 'Zoom 8-10 (regional level)'},
-        'z11_13': {'factor': 2, 'epsilon': 0.0001, 'description': 'Zoom 11-13 (city level)'},
-        'z14_plus': {'factor': 1, 'epsilon': 0, 'description': 'Zoom 14+ (full detail)'}
-    }
+    resolutions = RESOLUTION_LEVELS
 
     files = {}
     max_groundspeed_knots = 0  # Track maximum groundspeed across all segments
     min_groundspeed_knots = float('inf')  # Track minimum groundspeed across all segments
 
-    # Track cruise speed statistics (only segments >1000ft AGL)
+    # Track cruise speed statistics (only segments above threshold AGL)
     cruise_speed_total_distance = 0  # Total distance in cruise (nm)
     cruise_speed_total_time = 0  # Total time in cruise (seconds)
-    CRUISE_ALTITUDE_THRESHOLD_FT = 1000  # AGL threshold for cruise
 
     # Track longest single flight distance
     max_path_distance_nm = 0  # Longest flight in nautical miles
@@ -166,7 +156,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
     z14_plus_segments = None
     z14_plus_path_info = None
 
-    # Track cruise altitude histogram (500ft bins for altitudes >1000ft AGL)
+    # Track cruise altitude histogram (bins for altitudes above threshold AGL)
     cruise_altitude_histogram = {}  # Dict of {altitude_bin_ft: time_seconds}
 
     # OPTIMIZATION: Calculate all segment data once at full resolution
@@ -228,14 +218,9 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                 end_ts = metadata.get('end_timestamp')
 
                 if start_ts and end_ts:
-                    try:
-                        if 'T' in start_ts and 'T' in end_ts:
-                            start_dt = datetime.fromisoformat(start_ts.replace('Z', '+00:00'))
-                            end_dt = datetime.fromisoformat(end_ts.replace('Z', '+00:00'))
-                            path_duration_seconds = (end_dt - start_dt).total_seconds()
-                    except (ValueError, TypeError) as e:
-                        logger.debug(f"  Could not parse timestamps '{start_ts}' -> '{end_ts}': {e}")
-                        pass
+                    path_duration_seconds = calculate_duration_seconds(start_ts, end_ts)
+                    if path_duration_seconds == 0:
+                        logger.debug(f"  Could not parse timestamps '{start_ts}' -> '{end_ts}'")
 
                 # Calculate total path distance
                 for i in range(len(path) - 1):
@@ -268,9 +253,6 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
 
                 # Calculate groundspeed for all resolutions (not just z14_plus)
                 # This ensures airspeed visualization works at all zoom levels
-                MAX_GROUNDSPEED_KNOTS = 200  # Reasonable max for typical general aviation
-                MIN_SEGMENT_TIME_SECONDS = 0.1  # Avoid division by very small time differences
-                SPEED_WINDOW_SECONDS = 120  # 2 minute rolling average window
 
                 # Calculate ground level for this path (minimum altitude in meters)
                 ground_level_m = min([coord[2] for coord in path]) if path else 0
@@ -279,12 +261,9 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                 path_start_time = None
                 for coord in path:
                     if len(coord) >= 4:
-                        try:
-                            if 'T' in coord[3]:
-                                path_start_time = datetime.fromisoformat(coord[3].replace('Z', '+00:00'))
-                                break
-                        except (ValueError, TypeError):
-                            continue
+                        path_start_time = parse_iso_timestamp(coord[3])
+                        if path_start_time:
+                            break
 
                 # First pass: calculate instantaneous speeds and timestamps for all segments
                 segment_speeds = []  # List of (timestamp, speed, distance, time_delta)
@@ -305,26 +284,24 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
 
                     if len(coord1) >= 4 and len(coord2) >= 4:
                         ts1, ts2 = coord1[3], coord2[3]
-                        try:
-                            if 'T' in ts1 and 'T' in ts2:
-                                dt1 = datetime.fromisoformat(ts1.replace('Z', '+00:00'))
-                                dt2 = datetime.fromisoformat(ts2.replace('Z', '+00:00'))
-                                time_delta = (dt2 - dt1).total_seconds()
-                                timestamp = dt1  # Use start time of segment
+                        dt1 = parse_iso_timestamp(ts1)
+                        dt2 = parse_iso_timestamp(ts2)
+                        if dt1 and dt2:
+                            time_delta = (dt2 - dt1).total_seconds()
+                            timestamp = dt1  # Use start time of segment
 
-                                # Calculate relative time from path start (for replay feature)
-                                if path_start_time is not None:
-                                    relative_time = (dt1 - path_start_time).total_seconds()
+                            # Calculate relative time from path start (for replay feature)
+                            if path_start_time is not None:
+                                relative_time = (dt1 - path_start_time).total_seconds()
 
-                                if time_delta >= MIN_SEGMENT_TIME_SECONDS:
-                                    segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
-                                    instant_speed = (segment_distance_nm / time_delta) * 3600
-                                    # Cap at max speed
-                                    if instant_speed > MAX_GROUNDSPEED_KNOTS:
-                                        instant_speed = 0  # Ignore unrealistic speeds
-                        except (ValueError, TypeError) as e:
-                            logger.debug(f"  Could not parse segment timestamps '{ts1}' -> '{ts2}': {e}")
-                            pass
+                            if time_delta >= MIN_SEGMENT_TIME_SECONDS:
+                                segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
+                                instant_speed = (segment_distance_nm / time_delta) * 3600
+                                # Cap at max speed
+                                if instant_speed > MAX_GROUNDSPEED_KNOTS:
+                                    instant_speed = 0  # Ignore unrealistic speeds
+                        else:
+                            logger.debug(f"  Could not parse segment timestamps '{ts1}' -> '{ts2}'")
 
                     segment_speeds.append({
                         'index': i,
@@ -420,8 +397,8 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                                 cruise_speed_total_distance += window_distance * KM_TO_NAUTICAL_MILES
                                 cruise_speed_total_time += window_time
 
-                                # Track cruise altitude in 100ft bins
-                                altitude_bin_ft = int(altitude_agl_ft / 100) * 100
+                                # Track cruise altitude in bins
+                                altitude_bin_ft = int(altitude_agl_ft / ALTITUDE_BIN_SIZE_FT) * ALTITUDE_BIN_SIZE_FT
                                 if altitude_bin_ft not in cruise_altitude_histogram:
                                     cruise_altitude_histogram[altitude_bin_ft] = 0
                                 cruise_altitude_histogram[altitude_bin_ft] += window_time
@@ -794,7 +771,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     aircraft['flight_time_seconds'] = aircraft_times[reg]
                     hours = int(aircraft_times[reg] // 3600)
                     minutes = int((aircraft_times[reg] % 3600) // 60)
-                    aircraft['flight_time_str'] = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+                    aircraft['flight_time_str'] = format_flight_time(aircraft_times[reg])
 
                     # Accumulate formatted times
                     total_formatted_hours += hours
@@ -805,7 +782,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             total_formatted_minutes = total_formatted_minutes % 60
 
             # Set total to match sum of individual aircraft formatted times
-            stats['total_flight_time_str'] = f"{total_formatted_hours}h {total_formatted_minutes}m" if total_formatted_hours > 0 else f"{total_formatted_minutes}m"
+            total_seconds_formatted = total_formatted_hours * 3600 + total_formatted_minutes * 60
+            stats['total_flight_time_str'] = format_flight_time(total_seconds_formatted)
 
         # Re-export metadata with all recalculated statistics
         # Preserve available_years and gradient from the original metadata

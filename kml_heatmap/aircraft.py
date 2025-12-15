@@ -6,6 +6,7 @@ import re
 import urllib.request
 import urllib.error
 from html.parser import HTMLParser
+from typing import Optional, Dict, List, Any
 from .logger import logger
 
 
@@ -17,11 +18,11 @@ class AircraftDataParser(HTMLParser):
         self.in_title = False
         self.model = None
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: List[tuple]) -> None:
         if tag == 'title':
             self.in_title = True
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         if self.in_title and 'Aircraft info for' in data:
             # Extract from title like: "Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana"
             parts = data.split(' - ', 1)
@@ -31,12 +32,12 @@ class AircraftDataParser(HTMLParser):
                 model = re.sub(r'^\d{4}\s+', '', model)
                 self.model = model
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         if tag == 'title':
             self.in_title = False
 
 
-def lookup_aircraft_model(registration, cache_file='aircraft_cache.json'):
+def lookup_aircraft_model(registration: str, cache_file: str = 'aircraft_cache.json') -> Optional[str]:
     """
     Look up aircraft model from airport-data.com
 
@@ -101,7 +102,7 @@ def lookup_aircraft_model(registration, cache_file='aircraft_cache.json'):
     return None
 
 
-def parse_aircraft_from_filename(filename):
+def parse_aircraft_from_filename(filename: str) -> Dict[str, str]:
     """
     Parse aircraft information from KML filename.
 

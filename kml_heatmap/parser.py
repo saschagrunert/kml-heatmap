@@ -6,6 +6,7 @@ import json
 import hashlib
 from pathlib import Path
 from datetime import datetime
+from typing import List, Dict, Tuple, Optional, Any
 
 # Try to use lxml for better performance, fall back to standard library
 try:
@@ -18,29 +19,36 @@ except ImportError:
 from .aircraft import parse_aircraft_from_filename
 from .validation import validate_coordinates, validate_altitude
 from .logger import logger
-
-# Altitude detection thresholds
-MID_FLIGHT_MIN_ALTITUDE = 400  # meters
-MID_FLIGHT_MAX_VARIATION = 100  # meters
-LANDING_MAX_VARIATION = 50  # meters
-LANDING_MAX_ALTITUDE = 600  # meters
-PATH_SAMPLE_MAX_SIZE = 50
-PATH_SAMPLE_MIN_SIZE = 5
+from .constants import (
+    MID_FLIGHT_MIN_ALTITUDE_M,
+    MID_FLIGHT_MAX_VARIATION_M,
+    LANDING_MAX_VARIATION_M,
+    LANDING_MAX_ALTITUDE_M,
+    PATH_SAMPLE_MAX_SIZE,
+    PATH_SAMPLE_MIN_SIZE,
+    LAT_MIN,
+    LAT_MAX,
+    LON_MIN,
+    LON_MAX,
+    ALT_MIN_M,
+    ALT_MAX_M,
+    CACHE_DIR_NAME,
+)
 
 # Pre-compiled regex patterns for performance
 DATE_PATTERN = re.compile(r'(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})')
 YEAR_PATTERN = re.compile(r'\b(20\d{2})\b')
 
 # Pre-computed validation ranges (avoid function call overhead)
-LAT_RANGE = (-90.0, 90.0)
-LON_RANGE = (-180.0, 180.0)
-ALT_RANGE = (-1000.0, 50000.0)
+LAT_RANGE = (LAT_MIN, LAT_MAX)
+LON_RANGE = (LON_MIN, LON_MAX)
+ALT_RANGE = (ALT_MIN_M, ALT_MAX_M)
 
 # Cache directory for parsed KML files
-CACHE_DIR = Path('.kml_cache')
+CACHE_DIR = Path(CACHE_DIR_NAME)
 
 
-def get_cache_key(kml_file):
+def get_cache_key(kml_file: str) -> Tuple[Optional[Path], bool]:
     """Generate cache key based on file path and modification time.
 
     Args:
@@ -78,7 +86,7 @@ def get_cache_key(kml_file):
     return cache_path, False
 
 
-def load_cached_parse(cache_path):
+def load_cached_parse(cache_path: Path) -> Optional[Tuple[List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]]:
     """Load cached parse results.
 
     Args:
@@ -95,7 +103,7 @@ def load_cached_parse(cache_path):
         return None
 
 
-def save_to_cache(cache_path, coordinates, path_groups, path_metadata):
+def save_to_cache(cache_path: Path, coordinates: List[List[float]], path_groups: List[List[List[float]]], path_metadata: List[Dict[str, Any]]) -> None:
     """Save parse results to cache.
 
     Args:
@@ -115,7 +123,7 @@ def save_to_cache(cache_path, coordinates, path_groups, path_metadata):
         logger.debug(f"Failed to save cache: {e}")
 
 
-def extract_year_from_timestamp(timestamp):
+def extract_year_from_timestamp(timestamp: Optional[str]) -> Optional[int]:
     """Extract year from timestamp string.
 
     Args:
@@ -145,7 +153,7 @@ def extract_year_from_timestamp(timestamp):
     return None
 
 
-def sample_path_altitudes(path, from_end=False):
+def sample_path_altitudes(path: List[List[float]], from_end: bool = False) -> Optional[Dict[str, float]]:
     """
     Extract altitude statistics from a path sample.
 
@@ -172,7 +180,7 @@ def sample_path_altitudes(path, from_end=False):
     }
 
 
-def is_mid_flight_start(path, start_alt, debug=False):
+def is_mid_flight_start(path: List[List[float]], start_alt: float, debug: bool = False) -> bool:
     """
     Detect if a path started mid-flight by analyzing altitude patterns.
 
@@ -195,7 +203,7 @@ def is_mid_flight_start(path, start_alt, debug=False):
     # Mid-flight indicators:
     # - Starting altitude above typical airports
     # - AND altitude variation in first part is small (not climbing/descending much)
-    is_mid_flight = start_alt > MID_FLIGHT_MIN_ALTITUDE and sample['variation'] < MID_FLIGHT_MAX_VARIATION
+    is_mid_flight = start_alt > MID_FLIGHT_MIN_ALTITUDE_M and sample['variation'] < MID_FLIGHT_MAX_VARIATION_M
 
     if is_mid_flight and debug:
         logger.debug(f"Detected mid-flight start at {start_alt:.0f}m (variation: {sample['variation']:.0f}m)")
@@ -203,7 +211,7 @@ def is_mid_flight_start(path, start_alt, debug=False):
     return is_mid_flight
 
 
-def is_valid_landing(path, end_alt, debug=False):
+def is_valid_landing(path: List[List[float]], end_alt: float, debug: bool = False) -> bool:
     """
     Check if a path ends with a valid landing.
 
@@ -224,10 +232,10 @@ def is_valid_landing(path, end_alt, debug=False):
 
     # Valid landing: either descending significantly OR stable at low variation
     # Also accept any endpoint if variation at end is small - indicates stable landing
-    return sample['variation'] < LANDING_MAX_VARIATION or end_alt < LANDING_MAX_ALTITUDE
+    return sample['variation'] < LANDING_MAX_VARIATION_M or end_alt < LANDING_MAX_ALTITUDE_M
 
 
-def parse_kml_coordinates(kml_file):
+def parse_kml_coordinates(kml_file: str) -> Tuple[List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]:
     """
     Extract coordinates from a KML file.
 

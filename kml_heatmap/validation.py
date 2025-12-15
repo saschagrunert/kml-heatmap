@@ -2,9 +2,10 @@
 
 import os
 from pathlib import Path
+from typing import Tuple, Optional, Dict
 
 
-def validate_coordinates(lat, lon, context=""):
+def validate_coordinates(lat: float, lon: float, context: str = "") -> Tuple[bool, Optional[str]]:
     """
     Validate latitude and longitude values.
 
@@ -31,7 +32,7 @@ def validate_coordinates(lat, lon, context=""):
     return True, None
 
 
-def validate_kml_file(file_path):
+def validate_kml_file(file_path: str) -> Tuple[bool, Optional[str]]:
     """
     Validate KML file exists and is readable.
 
@@ -63,7 +64,7 @@ def validate_kml_file(file_path):
     return True, None
 
 
-def validate_api_keys(stadia_key, openaip_key, verbose=True):
+def validate_api_keys(stadia_key: str, openaip_key: str, verbose: bool = True) -> Dict[str, bool]:
     """
     Validate API keys and warn if missing.
 
@@ -92,7 +93,7 @@ def validate_api_keys(stadia_key, openaip_key, verbose=True):
     return status
 
 
-def validate_altitude(altitude, context=""):
+def validate_altitude(altitude: float, context: str = "") -> Tuple[bool, Optional[str]]:
     """
     Validate altitude value.
 

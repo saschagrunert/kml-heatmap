@@ -4,7 +4,7 @@ import logging
 import sys
 
 
-def setup_logger(name='kml_heatmap', level=logging.INFO, debug=False):
+def setup_logger(name: str = 'kml_heatmap', level: int = logging.INFO, debug: bool = False) -> logging.Logger:
     """
     Configure and return a logger instance.
 
@@ -48,7 +48,7 @@ def setup_logger(name='kml_heatmap', level=logging.INFO, debug=False):
 logger = setup_logger()
 
 
-def set_debug_mode(enabled):
+def set_debug_mode(enabled: bool) -> None:
     """Enable or disable debug logging globally.
 
     Args:
