@@ -5,14 +5,14 @@ import json
 import re
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, Any, Optional, List
 import rcssmin
 import rjsmin
 import minify_html as mh
 
-from .geometry import downsample_path_rdp, get_altitude_color
-from .airports import extract_airport_name, deduplicate_airports
+from .airports import extract_airport_name
 from .statistics import calculate_statistics
-from .parser import parse_kml_coordinates, is_mid_flight_start, is_valid_landing
+from .parser import parse_kml_coordinates
 
 # Heatmap configuration
 HEATMAP_GRADIENT = {
@@ -24,14 +24,18 @@ HEATMAP_GRADIENT = {
 }
 
 
-def load_template():
-    """Load the HTML template from file."""
+def load_template() -> str:
+    """Load the HTML template from file.
+
+    Returns:
+        HTML template content as string
+    """
     template_path = Path(__file__).parent / 'templates' / 'map_template.html'
     with open(template_path, 'r') as f:
         return f.read()
 
 
-def minify_html(html):
+def minify_html(html: str) -> str:
     """
     Minify HTML, CSS, and JavaScript using specialized minification libraries.
 
@@ -68,18 +72,37 @@ def minify_html(html):
     return minified
 
 
-def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique_airports, stats, output_dir="data", strip_timestamps=False):
+def export_data_json(
+    all_coordinates: List[List[float]],
+    all_path_groups: List[List[List[float]]],
+    all_path_metadata: List[Dict[str, Any]],
+    unique_airports: List[Dict[str, Any]],
+    stats: Dict[str, Any],
+    output_dir: str = "data",
+    strip_timestamps: bool = False
+) -> None:
     """
     Export data to JSON files at multiple resolutions for progressive loading.
-    
-    This function will be implemented by reading from the original kml-heatmap.py
+
+    Args:
+        all_coordinates: List of all coordinate pairs
+        all_path_groups: List of path groups with altitude data
+        all_path_metadata: Metadata for each path
+        unique_airports: List of deduplicated airports
+        stats: Statistics dictionary
+        output_dir: Directory to save JSON files
+        strip_timestamps: If True, remove timestamp data for privacy
     """
     # This is a complex function - for now, we'll keep a reference to call the original
     # In a full refactor, this would be extracted completely
     pass
 
 
-def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="data"):
+def create_progressive_heatmap(
+    kml_files: List[str],
+    output_file: str = "index.html",
+    data_dir: str = "data"
+) -> None:
     """
     Create a progressive-loading heatmap with external JSON data files.
 

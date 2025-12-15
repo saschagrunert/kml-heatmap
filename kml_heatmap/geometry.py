@@ -3,6 +3,18 @@
 from math import radians, sin, cos, sqrt, atan2
 from typing import List, Union
 
+__all__ = [
+    'EARTH_RADIUS_KM',
+    'Coordinate2D',
+    'Coordinate3D',
+    'Coordinate4D',
+    'PathCoordinate',
+    'haversine_distance',
+    'downsample_path_rdp',
+    'downsample_coordinates',
+    'get_altitude_color',
+]
+
 # Constants
 EARTH_RADIUS_KM = 6371
 

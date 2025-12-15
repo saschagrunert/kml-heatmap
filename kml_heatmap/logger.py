@@ -3,6 +3,12 @@
 import logging
 import sys
 
+__all__ = [
+    'setup_logger',
+    'logger',
+    'set_debug_mode',
+]
+
 
 def setup_logger(name: str = 'kml_heatmap', level: int = logging.INFO, debug: bool = False) -> logging.Logger:
     """

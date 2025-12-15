@@ -6,17 +6,20 @@ import numpy as np
 from datetime import datetime
 from bisect import bisect_left, bisect_right
 
+from typing import List, Dict, Any, Tuple, Optional
 from .geometry import haversine_distance, downsample_path_rdp, get_altitude_color
 from .airports import extract_airport_name
 from .logger import logger
-
-# Constants
-METERS_TO_FEET = 3.28084
-KM_TO_NAUTICAL_MILES = 0.539957
-MAX_GROUNDSPEED_KNOTS = 200  # Reasonable max for typical general aviation
-MIN_SEGMENT_TIME_SECONDS = 0.1  # Avoid division by very small time differences
-SPEED_WINDOW_SECONDS = 120  # 2 minute rolling average window
-CRUISE_ALTITUDE_THRESHOLD_FT = 1000  # AGL threshold for cruise
+from .constants import (
+    METERS_TO_FEET,
+    KM_TO_NAUTICAL_MILES,
+    MAX_GROUNDSPEED_KNOTS,
+    MIN_SEGMENT_TIME_SECONDS,
+    SPEED_WINDOW_SECONDS,
+    CRUISE_ALTITUDE_THRESHOLD_FT,
+    ALTITUDE_BIN_SIZE_FT,
+    SECONDS_PER_HOUR,
+)
 
 
 class SegmentSpeedCalculator:
@@ -95,7 +98,7 @@ class SegmentSpeedCalculator:
         distances_nm = distances_km * KM_TO_NAUTICAL_MILES
         mask = time_deltas >= MIN_SEGMENT_TIME_SECONDS
         speeds = np.zeros(n_segments)
-        speeds[mask] = (distances_nm[mask] / time_deltas[mask]) * 3600
+        speeds[mask] = (distances_nm[mask] / time_deltas[mask]) * SECONDS_PER_HOUR
 
         # Cap unrealistic speeds
         speeds[speeds > MAX_GROUNDSPEED_KNOTS] = 0
@@ -164,20 +167,23 @@ class SegmentSpeedCalculator:
                 # Calculate average speed
                 if window_time >= MIN_SEGMENT_TIME_SECONDS:
                     window_distance_nm = window_distance * KM_TO_NAUTICAL_MILES
-                    speed = (window_distance_nm / window_time) * 3600
+                    speed = (window_distance_nm / window_time) * SECONDS_PER_HOUR
                     if speed <= MAX_GROUNDSPEED_KNOTS:
                         groundspeeds[i] = speed
 
         return groundspeeds, relative_times
 
 
-def calculate_path_duration_and_distance(path, metadata):
+def calculate_path_duration_and_distance(
+    path: List[List[float]],
+    metadata: Dict[str, Any]
+) -> Tuple[float, float]:
     """
     Calculate total duration and distance for a flight path.
 
     Args:
-        path: List of coordinates
-        metadata: Path metadata dictionary
+        path: List of coordinates [[lat, lon, alt], ...]
+        metadata: Path metadata dictionary with 'timestamp' and 'end_timestamp'
 
     Returns:
         Tuple of (duration_seconds, distance_km)
@@ -207,10 +213,107 @@ def calculate_path_duration_and_distance(path, metadata):
     return duration_seconds, distance_km
 
 
+def _update_speed_statistics(
+    groundspeed_knots: float,
+    speed_stats: Dict[str, float]
+) -> None:
+    """
+    Update speed statistics with new groundspeed reading.
+
+    Args:
+        groundspeed_knots: Groundspeed in knots
+        speed_stats: Dictionary to update with max/min speeds
+    """
+    if groundspeed_knots > 0:
+        if groundspeed_knots > speed_stats['max']:
+            speed_stats['max'] = groundspeed_knots
+        if groundspeed_knots < speed_stats['min']:
+            speed_stats['min'] = groundspeed_knots
+
+
+def _update_cruise_statistics(
+    avg_alt_m: float,
+    ground_level_m: float,
+    seg_info: Dict[str, Any],
+    cruise_stats: Dict[str, Any]
+) -> None:
+    """
+    Update cruise statistics for segments at cruise altitude.
+
+    Args:
+        avg_alt_m: Average altitude in meters
+        ground_level_m: Ground level altitude in meters
+        seg_info: Segment information with distance and time_delta
+        cruise_stats: Dictionary to accumulate cruise statistics
+    """
+    altitude_agl_m = avg_alt_m - ground_level_m
+    altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
+
+    if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
+        if seg_info['time_delta'] >= MIN_SEGMENT_TIME_SECONDS:
+            cruise_stats['total_distance_nm'] += seg_info['distance'] * KM_TO_NAUTICAL_MILES
+            cruise_stats['total_time_s'] += seg_info['time_delta']
+
+            # Track cruise altitude histogram
+            altitude_bin_ft = int(altitude_agl_ft / ALTITUDE_BIN_SIZE_FT) * ALTITUDE_BIN_SIZE_FT
+            if altitude_bin_ft not in cruise_stats['altitude_histogram']:
+                cruise_stats['altitude_histogram'][altitude_bin_ft] = 0
+            cruise_stats['altitude_histogram'][altitude_bin_ft] += seg_info['time_delta']
+
+
+def _build_path_info(
+    path: List[List[float]],
+    path_idx: int,
+    metadata: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Build path information dictionary from metadata.
+
+    Args:
+        path: Path coordinates
+        path_idx: Path index
+        metadata: Path metadata
+
+    Returns:
+        Dictionary with path information
+    """
+    # Extract airport names
+    airport_name = metadata.get('airport_name', '')
+    start_airport, end_airport = None, None
+    if airport_name and ' - ' in airport_name:
+        parts = airport_name.split(' - ')
+        if len(parts) == 2:
+            start_airport = parts[0].strip()
+            end_airport = parts[1].strip()
+
+    path_info = {
+        'id': path_idx,
+        'start_airport': start_airport,
+        'end_airport': end_airport,
+        'start_coords': [path[0][0], path[0][1]],
+        'end_coords': [path[-1][0], path[-1][1]],
+        'segment_count': len(path) - 1,
+        'year': metadata.get('year')
+    }
+
+    # Add aircraft info if available
+    if 'aircraft_registration' in metadata:
+        path_info['aircraft_registration'] = metadata['aircraft_registration']
+    if 'aircraft_type' in metadata:
+        path_info['aircraft_type'] = metadata['aircraft_type']
+
+    return path_info
+
+
 def process_path_segments_full_resolution(
-    path, path_idx, metadata, min_alt_m, max_alt_m,
-    cruise_stats, speed_stats
-):
+    path: List[List[float]],
+    path_idx: int,
+    metadata: Dict[str, Any],
+    min_alt_m: float,
+    max_alt_m: float,
+    cruise_stats: Dict[str, Any],
+    speed_stats: Dict[str, float]
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Process a single path at full resolution with detailed speed calculations.
 
@@ -248,31 +351,15 @@ def process_path_segments_full_resolution(
             continue
 
         avg_alt_m = (alt1_m + alt2_m) / 2
-        avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+        avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / ALTITUDE_BIN_SIZE_FT) * ALTITUDE_BIN_SIZE_FT
         color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
         groundspeed_knots = groundspeeds[i]
 
-        # Track speed statistics
+        # Update statistics
+        _update_speed_statistics(groundspeed_knots, speed_stats)
         if groundspeed_knots > 0:
-            if groundspeed_knots > speed_stats['max']:
-                speed_stats['max'] = groundspeed_knots
-            if groundspeed_knots < speed_stats['min']:
-                speed_stats['min'] = groundspeed_knots
-
-            # Track cruise statistics
-            altitude_agl_m = avg_alt_m - ground_level_m
-            altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
-            if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
-                seg_info = speed_calc.segment_speeds[i]
-                if seg_info['time_delta'] >= MIN_SEGMENT_TIME_SECONDS:
-                    cruise_stats['total_distance_nm'] += seg_info['distance'] * KM_TO_NAUTICAL_MILES
-                    cruise_stats['total_time_s'] += seg_info['time_delta']
-
-                    # Track cruise altitude histogram
-                    altitude_bin_ft = int(altitude_agl_ft / 100) * 100
-                    if altitude_bin_ft not in cruise_stats['altitude_histogram']:
-                        cruise_stats['altitude_histogram'][altitude_bin_ft] = 0
-                    cruise_stats['altitude_histogram'][altitude_bin_ft] += seg_info['time_delta']
+            seg_info = speed_calc.segment_speeds[i]
+            _update_cruise_statistics(avg_alt_m, ground_level_m, seg_info, cruise_stats)
 
         # Build segment data
         segment_data = {
@@ -290,35 +377,19 @@ def process_path_segments_full_resolution(
 
         segments.append(segment_data)
 
-    # Extract path info
-    airport_name = metadata.get('airport_name', '')
-    start_airport, end_airport = None, None
-    if airport_name and ' - ' in airport_name:
-        parts = airport_name.split(' - ')
-        if len(parts) == 2:
-            start_airport = parts[0].strip()
-            end_airport = parts[1].strip()
-
-    path_info = {
-        'id': path_idx,
-        'start_airport': start_airport,
-        'end_airport': end_airport,
-        'start_coords': [path[0][0], path[0][1]],
-        'end_coords': [path[-1][0], path[-1][1]],
-        'segment_count': len(path) - 1,
-        'year': metadata.get('year')
-    }
-
-    # Add aircraft info
-    if 'aircraft_registration' in metadata:
-        path_info['aircraft_registration'] = metadata['aircraft_registration']
-    if 'aircraft_type' in metadata:
-        path_info['aircraft_type'] = metadata['aircraft_type']
+    # Build path info
+    path_info = _build_path_info(path, path_idx, metadata)
 
     return segments, path_info
 
 
-def process_path_segments_downsampled(path, path_idx, metadata, min_alt_m, max_alt_m):
+def process_path_segments_downsampled(
+    path: List[List[float]],
+    path_idx: int,
+    metadata: Dict[str, Any],
+    min_alt_m: float,
+    max_alt_m: float
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Process a single path at reduced resolution (no speed calculation).
 
@@ -345,7 +416,7 @@ def process_path_segments_downsampled(path, path_idx, metadata, min_alt_m, max_a
             continue
 
         avg_alt_m = (alt1_m + alt2_m) / 2
-        avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+        avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / ALTITUDE_BIN_SIZE_FT) * ALTITUDE_BIN_SIZE_FT
         color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
 
         segments.append({
@@ -384,7 +455,11 @@ def process_path_segments_downsampled(path, path_idx, metadata, min_alt_m, max_a
     return segments, path_info
 
 
-def export_airports_json(unique_airports, output_dir, strip_timestamps=False):
+def export_airports_json(
+    unique_airports: List[Dict[str, Any]],
+    output_dir: str,
+    strip_timestamps: bool = False
+) -> None:
     """
     Export airport data to JSON file.
 
@@ -433,7 +508,15 @@ def export_airports_json(unique_airports, output_dir, strip_timestamps=False):
     return airports_file
 
 
-def export_metadata_json(stats, min_alt_m, max_alt_m, speed_stats, heatmap_gradient, available_years, output_dir):
+def export_metadata_json(
+    stats: Dict[str, Any],
+    min_alt_m: float,
+    max_alt_m: float,
+    speed_stats: Dict[str, float],
+    heatmap_gradient: Dict[float, str],
+    available_years: List[int],
+    output_dir: str
+) -> None:
     """
     Export metadata and statistics to JSON file.
 

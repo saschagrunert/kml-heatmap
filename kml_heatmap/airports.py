@@ -35,7 +35,15 @@ import re
 from typing import List, Dict, Optional, Any, Callable
 from .geometry import haversine_distance
 from .logger import logger
-from .constants import AIRPORT_DISTANCE_THRESHOLD_KM
+from .constants import AIRPORT_DISTANCE_THRESHOLD_KM, AIRPORT_GRID_SIZE_DEGREES
+
+__all__ = [
+    'POINT_MARKERS',
+    'is_point_marker',
+    'extract_airport_name',
+    'deduplicate_airports',
+    'AirportDeduplicator',
+]
 
 # Marker types to filter out
 POINT_MARKERS = ['Log Start', 'Log Stop', 'Takeoff', 'Landing']
@@ -119,6 +127,125 @@ def extract_airport_name(full_name: str, is_at_path_end: bool = False) -> Option
     return airport_name
 
 
+class AirportDeduplicator:
+    """
+    Efficiently deduplicate airports using spatial grid indexing.
+
+    This class provides O(1) average-case airport proximity lookups using
+    a spatial grid approach, much faster than naive O(n²) distance checks.
+
+    Attributes:
+        grid_size: Size of spatial grid cells (~2km at equator)
+        unique_airports: List of deduplicated airport dicts
+        spatial_grid: Dict mapping grid cells to airport indices
+    """
+
+    def __init__(self, grid_size: float = AIRPORT_GRID_SIZE_DEGREES):
+        """
+        Initialize the airport deduplicator.
+
+        Args:
+            grid_size: Grid cell size in degrees (~2km at equator)
+        """
+        self.grid_size = grid_size
+        self.unique_airports: List[Dict[str, Any]] = []
+        self.spatial_grid: Dict[tuple, List[int]] = {}
+
+    def _get_grid_key(self, lat: float, lon: float) -> tuple:
+        """Get grid cell key for a coordinate."""
+        return (int(lat / self.grid_size), int(lon / self.grid_size))
+
+    def _find_nearby_airport(self, lat: float, lon: float) -> Optional[int]:
+        """
+        Find airport within threshold using spatial grid.
+
+        Args:
+            lat: Latitude
+            lon: Longitude
+
+        Returns:
+            Index of nearby airport or None if not found
+        """
+        grid_key = self._get_grid_key(lat, lon)
+        # Check current cell and 8 neighbors
+        for dlat in [-1, 0, 1]:
+            for dlon in [-1, 0, 1]:
+                neighbor_key = (grid_key[0] + dlat, grid_key[1] + dlon)
+                if neighbor_key in self.spatial_grid:
+                    for apt_idx in self.spatial_grid[neighbor_key]:
+                        airport = self.unique_airports[apt_idx]
+                        dist = haversine_distance(lat, lon, airport['lat'], airport['lon'])
+                        if dist < AIRPORT_DISTANCE_THRESHOLD_KM:
+                            return apt_idx
+        return None
+
+    def _add_to_grid(self, lat: float, lon: float, airport_idx: int) -> None:
+        """Add airport to spatial grid."""
+        grid_key = self._get_grid_key(lat, lon)
+        if grid_key not in self.spatial_grid:
+            self.spatial_grid[grid_key] = []
+        self.spatial_grid[grid_key].append(airport_idx)
+
+    def add_or_update_airport(
+        self,
+        lat: float,
+        lon: float,
+        name: Optional[str],
+        timestamp: Optional[str],
+        path_index: int,
+        is_at_path_end: bool
+    ) -> int:
+        """
+        Add new airport or update existing one.
+
+        Args:
+            lat: Latitude
+            lon: Longitude
+            name: Airport name
+            timestamp: Timestamp string
+            path_index: Index of the path
+            is_at_path_end: Whether this is at the end of a path
+
+        Returns:
+            Index of the airport (new or existing)
+        """
+        # Check for duplicates
+        apt_idx = self._find_nearby_airport(lat, lon)
+
+        if apt_idx is not None:
+            # Update existing airport
+            airport = self.unique_airports[apt_idx]
+            # Only add timestamp if it's not already present (avoid duplicates)
+            if timestamp and not is_point_marker(name or '') and timestamp not in airport['timestamps']:
+                airport['timestamps'].append(timestamp)
+
+            # Prefer route names over marker names
+            current_name = airport.get('name', '')
+            if name and (not current_name or
+                        (is_point_marker(current_name) and not is_point_marker(name))):
+                airport['name'] = name
+
+            return apt_idx
+        else:
+            # Add new unique airport
+            timestamps = [timestamp] if timestamp and not is_point_marker(name or '') else []
+            new_idx = len(self.unique_airports)
+            self.unique_airports.append({
+                'lat': lat,
+                'lon': lon,
+                'timestamps': timestamps,
+                'name': name,
+                'path_index': path_index,
+                'is_at_path_end': is_at_path_end
+            })
+            self._add_to_grid(lat, lon, new_idx)
+            return new_idx
+
+    def get_unique_airports(self) -> List[Dict[str, Any]]:
+        """Get the list of deduplicated airports."""
+        return self.unique_airports
+
+
 def deduplicate_airports(
     all_path_metadata: List[Dict[str, Any]],
     all_path_groups: List[List[List[float]]],
@@ -127,6 +254,8 @@ def deduplicate_airports(
 ) -> List[Dict[str, Any]]:
     """
     Deduplicate airports by location and extract valid airport information.
+
+    This function uses AirportDeduplicator class for efficient spatial indexing.
 
     Args:
         all_path_metadata: List of metadata dicts for each path
@@ -137,31 +266,7 @@ def deduplicate_airports(
     Returns:
         List of unique airport dicts with lat, lon, timestamps, name, etc.
     """
-    unique_airports = []
-
-    # Spatial grid for fast proximity lookups (grid cells of ~2km at equator)
-    # Key: (lat_grid, lon_grid), Value: list of airport indices
-    grid_size = 0.018  # ~2km at equator
-    spatial_grid = {}
-
-    def get_grid_key(lat, lon):
-        """Get grid cell key for a coordinate."""
-        return (int(lat / grid_size), int(lon / grid_size))
-
-    def find_nearby_airport(lat, lon):
-        """Find airport within threshold using spatial grid."""
-        grid_key = get_grid_key(lat, lon)
-        # Check current cell and 8 neighbors
-        for dlat in [-1, 0, 1]:
-            for dlon in [-1, 0, 1]:
-                neighbor_key = (grid_key[0] + dlat, grid_key[1] + dlon)
-                if neighbor_key in spatial_grid:
-                    for apt_idx in spatial_grid[neighbor_key]:
-                        airport = unique_airports[apt_idx]
-                        dist = haversine_distance(lat, lon, airport['lat'], airport['lon'])
-                        if dist < AIRPORT_DISTANCE_THRESHOLD_KM:
-                            return apt_idx
-        return None
+    deduplicator = AirportDeduplicator()
 
     # Process start points from metadata
     for idx, metadata in enumerate(all_path_metadata):
@@ -180,38 +285,15 @@ def deduplicate_airports(
             logger.debug(f"Skipping mid-flight start '{airport_name}'")
             continue
 
-        # Check for duplicates using spatial grid
-        apt_idx = find_nearby_airport(start_lat, start_lon)
-
-        if apt_idx is not None:
-            # Update existing airport
-            airport = unique_airports[apt_idx]
-            if metadata['timestamp'] and not is_point_marker(airport_name):
-                airport['timestamps'].append(metadata['timestamp'])
-
-            # Prefer route names over marker names
-            new_name = metadata.get('airport_name')
-            current_name = airport.get('name', '')
-            if new_name and (not current_name or
-                           (is_point_marker(current_name) and not is_point_marker(new_name))):
-                airport['name'] = new_name
-        else:
-            # Add new unique airport
-            timestamps = [metadata['timestamp']] if metadata['timestamp'] and not is_point_marker(airport_name) else []
-            new_idx = len(unique_airports)
-            unique_airports.append({
-                'lat': start_lat,
-                'lon': start_lon,
-                'timestamps': timestamps,
-                'name': metadata.get('airport_name'),
-                'path_index': idx,
-                'is_at_path_end': False
-            })
-            # Add to spatial grid
-            grid_key = get_grid_key(start_lat, start_lon)
-            if grid_key not in spatial_grid:
-                spatial_grid[grid_key] = []
-            spatial_grid[grid_key].append(new_idx)
+        # Add or update airport
+        deduplicator.add_or_update_airport(
+            lat=start_lat,
+            lon=start_lon,
+            name=airport_name,
+            timestamp=metadata.get('timestamp'),
+            path_index=idx,
+            is_at_path_end=False
+        )
 
     # Process path endpoints (landings and takeoffs)
     for idx, path in enumerate(all_path_groups):
@@ -232,57 +314,28 @@ def deduplicate_airports(
         if starts_at_high_altitude:
             logger.debug(f"Path '{route_name}' detected as mid-flight start")
 
-        # Process departure airport (if not high altitude start)
-        if not starts_at_high_altitude:
-            apt_idx = find_nearby_airport(start_lat, start_lon)
+        # Process departure airport (if not high altitude start and is a route)
+        if not starts_at_high_altitude and ' - ' in route_name:
+            deduplicator.add_or_update_airport(
+                lat=start_lat,
+                lon=start_lon,
+                name=route_name,
+                timestamp=route_timestamp,
+                path_index=idx,
+                is_at_path_end=False
+            )
+            logger.debug(f"Processed departure airport for '{route_name}' at {start_alt:.0f}m altitude")
 
-            if apt_idx is not None:
-                airport = unique_airports[apt_idx]
-                if ' - ' in route_name and airport.get('name', '') != route_name:
-                    airport['name'] = route_name
-                    airport['is_at_path_end'] = False
-                if route_timestamp and route_timestamp not in airport['timestamps']:
-                    airport['timestamps'].append(route_timestamp)
-            elif ' - ' in route_name:
-                new_idx = len(unique_airports)
-                unique_airports.append({
-                    'lat': start_lat,
-                    'lon': start_lon,
-                    'timestamps': [route_timestamp] if route_timestamp else [],
-                    'name': route_name,
-                    'is_at_path_end': False
-                })
-                # Add to spatial grid
-                grid_key = get_grid_key(start_lat, start_lon)
-                if grid_key not in spatial_grid:
-                    spatial_grid[grid_key] = []
-                spatial_grid[grid_key].append(new_idx)
-                logger.debug(f"Created departure airport for '{route_name}' at {start_alt:.0f}m altitude")
+        # Process landing airport (if valid landing and is a route)
+        if ' - ' in route_name and is_valid_landing_func(path, end_alt):
+            deduplicator.add_or_update_airport(
+                lat=end_lat,
+                lon=end_lon,
+                name=route_name,
+                timestamp=route_timestamp if not starts_at_high_altitude else None,
+                path_index=idx,
+                is_at_path_end=True
+            )
+            logger.debug(f"Processed arrival airport for '{route_name}' at {end_alt:.0f}m altitude")
 
-        # Process landing airport
-        apt_idx = find_nearby_airport(end_lat, end_lon)
-
-        if apt_idx is not None:
-            airport = unique_airports[apt_idx]
-            if is_point_marker(airport.get('name', '')):
-                airport['name'] = route_name
-                airport['is_at_path_end'] = True
-            if not starts_at_high_altitude and route_timestamp and route_timestamp not in airport['timestamps']:
-                airport['timestamps'].append(route_timestamp)
-        elif ' - ' in route_name and is_valid_landing_func(path, end_alt):
-            new_idx = len(unique_airports)
-            unique_airports.append({
-                'lat': end_lat,
-                'lon': end_lon,
-                'timestamps': [route_timestamp] if not starts_at_high_altitude and route_timestamp else [],
-                'name': route_name,
-                'is_at_path_end': True
-            })
-            # Add to spatial grid
-            grid_key = get_grid_key(end_lat, end_lon)
-            if grid_key not in spatial_grid:
-                spatial_grid[grid_key] = []
-            spatial_grid[grid_key].append(new_idx)
-            logger.debug(f"Created endpoint airport for '{route_name}' at {end_alt:.0f}m altitude")
-
-    return unique_airports
+    return deduplicator.get_unique_airports()

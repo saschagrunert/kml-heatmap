@@ -39,9 +39,7 @@ import json
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
-from .geometry import downsample_path_rdp, get_altitude_color
 from .airports import extract_airport_name
-from .constants import RESOLUTION_LEVELS, HEATMAP_GRADIENT, METERS_TO_FEET
 from .logger import logger
 
 

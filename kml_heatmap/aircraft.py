@@ -9,6 +9,12 @@ from html.parser import HTMLParser
 from typing import Optional, Dict, List, Any
 from .logger import logger
 
+__all__ = [
+    'AircraftDataParser',
+    'lookup_aircraft_model',
+    'parse_aircraft_from_filename',
+]
+
 
 class AircraftDataParser(HTMLParser):
     """HTML parser to extract aircraft model from airport-data.com"""

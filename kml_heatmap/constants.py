@@ -29,6 +29,10 @@ FEET_TO_METERS = 1.0 / METERS_TO_FEET
 NAUTICAL_MILES_TO_KM = 1.852
 KM_TO_NAUTICAL_MILES = 1.0 / NAUTICAL_MILES_TO_KM
 
+# Time conversion
+SECONDS_PER_HOUR = 3600
+BYTES_PER_KB = 1024
+
 # === Groundspeed Calculations ===
 MAX_GROUNDSPEED_KNOTS = 200  # Reasonable max for typical general aviation
 MIN_SEGMENT_TIME_SECONDS = 0.1  # Avoid division by very small time differences
@@ -48,6 +52,7 @@ ALT_MAX_M = 50000.0  # Upper atmosphere limit
 
 # === Airport Detection ===
 AIRPORT_DISTANCE_THRESHOLD_KM = 1.5  # Distance threshold for deduplicating airports
+AIRPORT_GRID_SIZE_DEGREES = 0.018  # Grid cell size in degrees (~2km at equator) for spatial indexing
 
 # === Path Sampling ===
 PATH_SAMPLE_MAX_SIZE = 50  # Maximum sample size for path analysis
@@ -60,6 +65,7 @@ MID_FLIGHT_MAX_VARIATION_M = 100  # Maximum altitude variation for stable flight
 # === Landing Detection ===
 LANDING_MAX_VARIATION_M = 50  # Maximum altitude variation for stable landing
 LANDING_MAX_ALTITUDE_M = 600  # Maximum altitude for valid landing endpoint
+LANDING_FALLBACK_ALTITUDE_M = 1000  # Fallback altitude threshold for short paths
 
 # === Cache Settings ===
 CACHE_DIR_NAME = '.kml_cache'  # Directory name for KML parsing cache
@@ -101,3 +107,16 @@ HEATMAP_GRADIENT = {
     0.7: 'yellow',
     1.0: 'red'
 }
+
+# === XML/KML Namespaces ===
+KML_NAMESPACE = 'http://www.opengis.net/kml/2.2'
+GX_NAMESPACE = 'http://www.google.com/kml/ext/2.2'
+
+KML_NAMESPACES = {
+    'kml': KML_NAMESPACE,
+    'gx': GX_NAMESPACE
+}
+
+# === File Size Limits ===
+LARGE_FILE_WARNING_MB = 100  # Warn if input file exceeds this size
+MAX_KML_FILES_WARNING = 1000  # Warn if processing this many files

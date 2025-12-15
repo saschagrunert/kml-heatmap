@@ -3,21 +3,67 @@
 This module provides reusable utility functions that are used across
 multiple modules to reduce code duplication and maintain consistency.
 
-Functions in this module handle:
-- Timestamp parsing and manipulation
-- Duration calculations
-- Time formatting for display
-- Coordinate string parsing
+Functions Overview:
+-------------------
 
-All functions are designed to be:
-- Type-safe with full type hints
-- Robust with proper error handling
-- Well-documented for easy reuse
+parse_iso_timestamp(timestamp_str)
+    Parse ISO 8601 timestamp strings into datetime objects.
+    Handles various formats including Zulu time (Z suffix) and timezone offsets.
+
+    Example:
+        >>> dt = parse_iso_timestamp("2025-03-15T14:30:00Z")
+        >>> dt.year, dt.month, dt.day
+        (2025, 3, 15)
+
+calculate_duration_seconds(start_timestamp, end_timestamp)
+    Calculate duration in seconds between two ISO timestamps.
+    Returns None if either timestamp is invalid.
+
+    Example:
+        >>> duration = calculate_duration_seconds(
+        ...     "2025-03-15T14:00:00Z",
+        ...     "2025-03-15T16:30:00Z"
+        ... )
+        >>> duration  # 2.5 hours = 9000 seconds
+        9000
+
+format_flight_time(total_seconds)
+    Format duration as human-readable string (e.g., "2h 30m").
+
+    Example:
+        >>> format_flight_time(9000)
+        '2h 30m'
+        >>> format_flight_time(45)
+        '45s'
+
+parse_coordinates_from_string(coord_str)
+    Parse coordinate string in KML format (lon,lat,alt or lon,lat).
+    Returns tuple of (lat, lon, alt) with altitude optional.
+
+    Example:
+        >>> lat, lon, alt = parse_coordinates_from_string("8.5,50.0,300")
+        >>> lat, lon, alt
+        (50.0, 8.5, 300.0)
+
+Design Principles:
+------------------
+- Type-safe with comprehensive type hints
+- Robust error handling (returns None on failure)
 - Pure functions without side effects
+- No external dependencies beyond stdlib
+- Consistent naming and parameter order
 """
 
 from datetime import datetime
 from typing import Optional, Tuple
+from .constants import SECONDS_PER_HOUR
+
+__all__ = [
+    'parse_iso_timestamp',
+    'calculate_duration_seconds',
+    'format_flight_time',
+    'parse_coordinates_from_string',
+]
 
 
 def parse_iso_timestamp(timestamp_str: str) -> Optional[datetime]:
@@ -75,8 +121,8 @@ def format_flight_time(seconds: float) -> str:
     if seconds <= 0:
         return "---"
 
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
+    hours = int(seconds // SECONDS_PER_HOUR)
+    minutes = int((seconds % SECONDS_PER_HOUR) // 60)
 
     if hours > 0:
         return f"{hours}h {minutes}m"

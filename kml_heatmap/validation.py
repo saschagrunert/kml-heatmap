@@ -4,6 +4,13 @@ import os
 from pathlib import Path
 from typing import Tuple, Optional, Dict
 
+__all__ = [
+    'validate_coordinates',
+    'validate_kml_file',
+    'validate_api_keys',
+    'validate_altitude',
+]
+
 
 def validate_coordinates(lat: float, lon: float, context: str = "") -> Tuple[bool, Optional[str]]:
     """
