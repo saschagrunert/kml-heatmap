@@ -35,10 +35,9 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from bisect import bisect_left, bisect_right
 
-from .geometry import haversine_distance, get_altitude_color
+from .geometry import haversine_distance
 from .helpers import parse_iso_timestamp
 from .constants import (
-    METERS_TO_FEET,
     KM_TO_NAUTICAL_MILES,
     MAX_GROUNDSPEED_KNOTS,
     MIN_SEGMENT_TIME_SECONDS,
@@ -46,7 +45,6 @@ from .constants import (
     CRUISE_ALTITUDE_THRESHOLD_FT,
     ALTITUDE_BIN_SIZE_FT,
 )
-from .logger import logger
 
 
 class SegmentData:
@@ -55,7 +53,7 @@ class SegmentData:
     def __init__(self):
         self.segments: List[Dict[str, Any]] = []
         self.max_groundspeed_knots: float = 0.0
-        self.min_groundspeed_knots: float = float('inf')
+        self.min_groundspeed_knots: float = float("inf")
         self.cruise_speed_total_distance: float = 0.0
         self.cruise_speed_total_time: float = 0.0
         self.cruise_altitude_histogram: Dict[int, float] = {}
@@ -63,8 +61,7 @@ class SegmentData:
 
 
 def calculate_path_duration(
-    start_timestamp: Optional[str],
-    end_timestamp: Optional[str]
+    start_timestamp: Optional[str], end_timestamp: Optional[str]
 ) -> float:
     """
     Calculate path duration from timestamps.
@@ -111,8 +108,7 @@ def calculate_path_distance(path: List[List[float]]) -> float:
 
 
 def extract_segment_speeds(
-    path: List[List[float]],
-    path_start_time: Optional[datetime]
+    path: List[List[float]], path_start_time: Optional[datetime]
 ) -> List[Dict[str, Any]]:
     """
     Calculate instantaneous speeds for all segments in a path.
@@ -157,20 +153,22 @@ def extract_segment_speeds(
                     if instant_speed > MAX_GROUNDSPEED_KNOTS:
                         instant_speed = 0.0  # Ignore unrealistic speeds
 
-        segment_speeds.append({
-            'index': i,
-            'timestamp': timestamp,
-            'relative_time': relative_time,
-            'speed': instant_speed,
-            'distance': segment_distance_km,
-            'time_delta': time_delta
-        })
+        segment_speeds.append(
+            {
+                "index": i,
+                "timestamp": timestamp,
+                "relative_time": relative_time,
+                "speed": instant_speed,
+                "distance": segment_distance_km,
+                "time_delta": time_delta,
+            }
+        )
 
     return segment_speeds
 
 
 def build_time_indexed_segments(
-    segment_speeds: List[Dict[str, Any]]
+    segment_speeds: List[Dict[str, Any]],
 ) -> Tuple[List[float], List[Dict[str, Any]]]:
     """
     Build time-sorted lists for efficient window queries.
@@ -185,15 +183,14 @@ def build_time_indexed_segments(
     timestamp_list = []
 
     for seg in segment_speeds:
-        if seg['timestamp'] is not None and seg['speed'] != 0:
-            ts = seg['timestamp'].timestamp()
+        if seg["timestamp"] is not None and seg["speed"] != 0:
+            ts = seg["timestamp"].timestamp()
             timestamp_list.append(ts)
             time_indexed_segments.append(seg)
 
     if timestamp_list:
         sorted_pairs = sorted(
-            zip(timestamp_list, time_indexed_segments),
-            key=lambda x: x[0]
+            zip(timestamp_list, time_indexed_segments), key=lambda x: x[0]
         )
         timestamp_list, time_indexed_segments = zip(*sorted_pairs)
         timestamp_list = list(timestamp_list)
@@ -205,7 +202,7 @@ def build_time_indexed_segments(
 def calculate_windowed_groundspeed(
     current_timestamp: datetime,
     timestamp_list: List[float],
-    time_indexed_segments: List[Dict[str, Any]]
+    time_indexed_segments: List[Dict[str, Any]],
 ) -> float:
     """
     Calculate rolling average groundspeed using a time window.
@@ -231,8 +228,8 @@ def calculate_windowed_groundspeed(
 
     for j in range(start_idx, end_idx):
         seg = time_indexed_segments[j]
-        window_distance += seg['distance']
-        window_time += seg['time_delta']
+        window_distance += seg["distance"]
+        window_time += seg["time_delta"]
 
     if window_time >= MIN_SEGMENT_TIME_SECONDS:
         window_distance_nm = window_distance * KM_TO_NAUTICAL_MILES
@@ -247,9 +244,7 @@ def calculate_windowed_groundspeed(
 
 
 def calculate_fallback_groundspeed(
-    segment_distance_km: float,
-    path_distance_km: float,
-    path_duration_seconds: float
+    segment_distance_km: float, path_distance_km: float, path_duration_seconds: float
 ) -> float:
     """
     Calculate groundspeed from path averages when timestamps are unavailable.
@@ -265,7 +260,9 @@ def calculate_fallback_groundspeed(
     if path_duration_seconds <= 0 or path_distance_km <= 0:
         return 0.0
 
-    segment_time_seconds = (segment_distance_km / path_distance_km) * path_duration_seconds
+    segment_time_seconds = (
+        segment_distance_km / path_distance_km
+    ) * path_duration_seconds
 
     if segment_time_seconds < MIN_SEGMENT_TIME_SECONDS:
         return 0.0
@@ -283,7 +280,7 @@ def update_cruise_statistics(
     altitude_agl_ft: float,
     window_time: float,
     window_distance: float,
-    cruise_stats: Dict[str, Any]
+    cruise_stats: Dict[str, Any],
 ) -> None:
     """
     Update cruise speed and altitude statistics.
@@ -301,13 +298,13 @@ def update_cruise_statistics(
         return
 
     # Update cruise speed totals
-    cruise_stats['total_distance'] += window_distance * KM_TO_NAUTICAL_MILES
-    cruise_stats['total_time'] += window_time
+    cruise_stats["total_distance"] += window_distance * KM_TO_NAUTICAL_MILES
+    cruise_stats["total_time"] += window_time
 
     # Update altitude histogram
     altitude_bin_ft = int(altitude_agl_ft / ALTITUDE_BIN_SIZE_FT) * ALTITUDE_BIN_SIZE_FT
 
-    if altitude_bin_ft not in cruise_stats['altitude_histogram']:
-        cruise_stats['altitude_histogram'][altitude_bin_ft] = 0
+    if altitude_bin_ft not in cruise_stats["altitude_histogram"]:
+        cruise_stats["altitude_histogram"][altitude_bin_ft] = 0
 
-    cruise_stats['altitude_histogram'][altitude_bin_ft] += window_time
+    cruise_stats["altitude_histogram"][altitude_bin_ft] += window_time

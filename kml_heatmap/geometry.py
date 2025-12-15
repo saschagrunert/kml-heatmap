@@ -4,15 +4,15 @@ from math import radians, sin, cos, sqrt, atan2
 from typing import List, Union
 
 __all__ = [
-    'EARTH_RADIUS_KM',
-    'Coordinate2D',
-    'Coordinate3D',
-    'Coordinate4D',
-    'PathCoordinate',
-    'haversine_distance',
-    'downsample_path_rdp',
-    'downsample_coordinates',
-    'get_altitude_color',
+    "EARTH_RADIUS_KM",
+    "Coordinate2D",
+    "Coordinate3D",
+    "Coordinate4D",
+    "PathCoordinate",
+    "haversine_distance",
+    "downsample_path_rdp",
+    "downsample_coordinates",
+    "get_altitude_color",
 ]
 
 # Constants
@@ -53,12 +53,14 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1-a))
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return EARTH_RADIUS_KM * c
 
 
-def downsample_path_rdp(path: List[PathCoordinate], epsilon: float = 0.0001) -> List[PathCoordinate]:
+def downsample_path_rdp(
+    path: List[PathCoordinate], epsilon: float = 0.0001
+) -> List[PathCoordinate]:
     """
     Downsample a path using Ramer-Douglas-Peucker algorithm (iterative).
 
@@ -105,7 +107,7 @@ def downsample_path_rdp(path: List[PathCoordinate], epsilon: float = 0.0001) -> 
         x2, y2 = line_end[0], line_end[1]
 
         num = abs((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1)
-        den = sqrt((y2 - y1)**2 + (x2 - x1)**2)
+        den = sqrt((y2 - y1) ** 2 + (x2 - x1) ** 2)
 
         if den == 0:
             # Shouldn't happen if we checked line_start == line_end above, but safety fallback
@@ -139,7 +141,9 @@ def downsample_path_rdp(path: List[PathCoordinate], epsilon: float = 0.0001) -> 
     return [path[i] for i in sorted(keep_indices)]
 
 
-def downsample_coordinates(coordinates: List[Union[Coordinate2D, Coordinate3D]], factor: int = 5) -> List[Union[Coordinate2D, Coordinate3D]]:
+def downsample_coordinates(
+    coordinates: List[Union[Coordinate2D, Coordinate3D]], factor: int = 5
+) -> List[Union[Coordinate2D, Coordinate3D]]:
     """
     Simple downsampling by keeping every Nth point.
 
@@ -190,7 +194,7 @@ def get_altitude_color(altitude: float, min_alt: float, max_alt: float) -> str:
         too bright or overwhelming.
     """
     if max_alt == min_alt:
-        return '#00AA88'  # Teal if all altitudes are the same
+        return "#00AA88"  # Teal if all altitudes are the same
 
     # Normalize altitude to 0-1 range
     normalized = (altitude - min_alt) / (max_alt - min_alt)
@@ -217,4 +221,4 @@ def get_altitude_color(altitude: float, min_alt: float, max_alt: float) -> str:
         ratio = (normalized - 0.8) * 5
         r, g, b = 255, int(155 - ratio * 155), 0
 
-    return f'#{r:02x}{g:02x}{b:02x}'
+    return f"#{r:02x}{g:02x}{b:02x}"

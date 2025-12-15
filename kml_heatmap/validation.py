@@ -5,14 +5,16 @@ from pathlib import Path
 from typing import Tuple, Optional, Dict
 
 __all__ = [
-    'validate_coordinates',
-    'validate_kml_file',
-    'validate_api_keys',
-    'validate_altitude',
+    "validate_coordinates",
+    "validate_kml_file",
+    "validate_api_keys",
+    "validate_altitude",
 ]
 
 
-def validate_coordinates(lat: float, lon: float, context: str = "") -> Tuple[bool, Optional[str]]:
+def validate_coordinates(
+    lat: float, lon: float, context: str = ""
+) -> Tuple[bool, Optional[str]]:
     """
     Validate latitude and longitude values.
 
@@ -61,7 +63,7 @@ def validate_kml_file(file_path: str) -> Tuple[bool, Optional[str]]:
         return False, f"File not readable: {file_path}"
 
     # Check if it looks like a KML file
-    if not str(path).lower().endswith('.kml'):
+    if not str(path).lower().endswith(".kml"):
         return False, f"File does not have .kml extension: {file_path}"
 
     # Check file is not empty
@@ -71,7 +73,9 @@ def validate_kml_file(file_path: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
-def validate_api_keys(stadia_key: str, openaip_key: str, verbose: bool = True) -> Dict[str, bool]:
+def validate_api_keys(
+    stadia_key: str, openaip_key: str, verbose: bool = True
+) -> Dict[str, bool]:
     """
     Validate API keys and warn if missing.
 
@@ -83,18 +87,19 @@ def validate_api_keys(stadia_key: str, openaip_key: str, verbose: bool = True) -
     Returns:
         dict: Status of each key
     """
-    status = {
-        'stadia': bool(stadia_key),
-        'openaip': bool(openaip_key)
-    }
+    status = {"stadia": bool(stadia_key), "openaip": bool(openaip_key)}
 
     if verbose:
         if not stadia_key:
-            print("⚠️  Warning: STADIA_API_KEY not set - map tiles will use fallback (CartoDB)")
+            print(
+                "⚠️  Warning: STADIA_API_KEY not set - map tiles will use fallback (CartoDB)"
+            )
             print("   Get a free key at: https://client.stadiamaps.com/")
 
         if not openaip_key:
-            print("⚠️  Warning: OPENAIP_API_KEY not set - aviation data layer will be disabled")
+            print(
+                "⚠️  Warning: OPENAIP_API_KEY not set - aviation data layer will be disabled"
+            )
             print("   Get a free key at: https://www.openaip.net/")
 
     return status
@@ -120,6 +125,9 @@ def validate_altitude(altitude: float, context: str = "") -> Tuple[bool, Optiona
     MAX_ALTITUDE = 15000
 
     if altitude < MIN_ALTITUDE or altitude > MAX_ALTITUDE:
-        return False, f"Altitude {altitude}m seems unrealistic (expected {MIN_ALTITUDE} to {MAX_ALTITUDE}m){context}"
+        return (
+            False,
+            f"Altitude {altitude}m seems unrealistic (expected {MIN_ALTITUDE} to {MAX_ALTITUDE}m){context}",
+        )
 
     return True, None

@@ -4,13 +4,15 @@ import logging
 import sys
 
 __all__ = [
-    'setup_logger',
-    'logger',
-    'set_debug_mode',
+    "setup_logger",
+    "logger",
+    "set_debug_mode",
 ]
 
 
-def setup_logger(name: str = 'kml_heatmap', level: int = logging.INFO, debug: bool = False) -> logging.Logger:
+def setup_logger(
+    name: str = "kml_heatmap", level: int = logging.INFO, debug: bool = False
+) -> logging.Logger:
     """
     Configure and return a logger instance.
 
@@ -39,9 +41,7 @@ def setup_logger(name: str = 'kml_heatmap', level: int = logging.INFO, debug: bo
     handler.setLevel(logging.DEBUG if debug else logging.INFO)
 
     # Create formatter
-    formatter = logging.Formatter(
-        '%(levelname)s: %(message)s'
-    )
+    formatter = logging.Formatter("%(levelname)s: %(message)s")
     handler.setFormatter(formatter)
 
     # Add handler to logger

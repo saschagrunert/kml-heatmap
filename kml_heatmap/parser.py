@@ -31,7 +31,6 @@ Example:
 """
 
 import re
-import os
 import json
 from pathlib import Path
 from datetime import datetime
@@ -40,9 +39,11 @@ from typing import List, Dict, Tuple, Optional, Any
 # Try to use lxml for better performance, fall back to standard library
 try:
     from lxml import etree as ET
+
     USING_LXML = True
 except ImportError:
     from xml.etree import ElementTree as ET
+
     USING_LXML = False
 
 from .aircraft import parse_aircraft_from_filename
@@ -63,30 +64,29 @@ from .constants import (
     ALT_MIN_M,
     ALT_MAX_M,
     CACHE_DIR_NAME,
-    KML_NAMESPACES,
 )
 
 __all__ = [
-    'USING_LXML',
-    'get_cache_key',
-    'load_cached_parse',
-    'save_to_cache',
-    'extract_year_from_timestamp',
-    'sample_path_altitudes',
-    'is_mid_flight_start',
-    'is_valid_landing',
-    'parse_kml_coordinates',
-    'parse_coordinate_point',
-    'find_xml_element',
-    'find_xml_elements',
-    'extract_placemark_metadata',
-    'process_standard_coordinates',
-    'process_gx_track',
+    "USING_LXML",
+    "get_cache_key",
+    "load_cached_parse",
+    "save_to_cache",
+    "extract_year_from_timestamp",
+    "sample_path_altitudes",
+    "is_mid_flight_start",
+    "is_valid_landing",
+    "parse_kml_coordinates",
+    "parse_coordinate_point",
+    "find_xml_element",
+    "find_xml_elements",
+    "extract_placemark_metadata",
+    "process_standard_coordinates",
+    "process_gx_track",
 ]
 
 # Pre-compiled regex patterns for performance
-DATE_PATTERN = re.compile(r'(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})')
-YEAR_PATTERN = re.compile(r'\b(20\d{2})\b')
+DATE_PATTERN = re.compile(r"(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
+YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
 
 # Pre-computed validation ranges (avoid function call overhead)
 LAT_RANGE = (LAT_MIN, LAT_MAX)
@@ -135,7 +135,9 @@ def get_cache_key(kml_file: str) -> Tuple[Optional[Path], bool]:
     return cache_path, False
 
 
-def load_cached_parse(cache_path: Path) -> Optional[Tuple[List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]]:
+def load_cached_parse(
+    cache_path: Path,
+) -> Optional[Tuple[List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]]:
     """Load cached parse results.
 
     Args:
@@ -145,14 +147,19 @@ def load_cached_parse(cache_path: Path) -> Optional[Tuple[List[List[float]], Lis
         Tuple of (coordinates, path_groups, path_metadata) or None if cache invalid
     """
     try:
-        with open(cache_path, 'r') as f:
+        with open(cache_path, "r") as f:
             cached = json.load(f)
-        return cached['coordinates'], cached['path_groups'], cached['path_metadata']
+        return cached["coordinates"], cached["path_groups"], cached["path_metadata"]
     except (json.JSONDecodeError, KeyError, OSError):
         return None
 
 
-def save_to_cache(cache_path: Path, coordinates: List[List[float]], path_groups: List[List[List[float]]], path_metadata: List[Dict[str, Any]]) -> None:
+def save_to_cache(
+    cache_path: Path,
+    coordinates: List[List[float]],
+    path_groups: List[List[List[float]]],
+    path_metadata: List[Dict[str, Any]],
+) -> None:
     """Save parse results to cache.
 
     Args:
@@ -162,12 +169,15 @@ def save_to_cache(cache_path: Path, coordinates: List[List[float]], path_groups:
         path_metadata: List of path metadata dicts
     """
     try:
-        with open(cache_path, 'w') as f:
-            json.dump({
-                'coordinates': coordinates,
-                'path_groups': path_groups,
-                'path_metadata': path_metadata
-            }, f)
+        with open(cache_path, "w") as f:
+            json.dump(
+                {
+                    "coordinates": coordinates,
+                    "path_groups": path_groups,
+                    "path_metadata": path_metadata,
+                },
+                f,
+            )
     except OSError as e:
         logger.debug(f"Failed to save cache: {e}")
 
@@ -187,8 +197,8 @@ def extract_year_from_timestamp(timestamp: Optional[str]) -> Optional[int]:
 
     try:
         # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z")
-        if 'T' in timestamp:
-            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        if "T" in timestamp:
+            dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             return dt.year
         # Try to extract year from date string (e.g., "03 Mar 2025" or "2025-03-03")
         year_match = YEAR_PATTERN.search(timestamp)
@@ -200,7 +210,9 @@ def extract_year_from_timestamp(timestamp: Optional[str]) -> Optional[int]:
     return None
 
 
-def sample_path_altitudes(path: List[List[float]], from_end: bool = False) -> Optional[Dict[str, float]]:
+def sample_path_altitudes(
+    path: List[List[float]], from_end: bool = False
+) -> Optional[Dict[str, float]]:
     """
     Extract altitude statistics from a path sample.
 
@@ -220,14 +232,12 @@ def sample_path_altitudes(path: List[List[float]], from_end: bool = False) -> Op
 
     sample = path[-sample_size:] if from_end else path[:sample_size]
     alts = [coord[2] for coord in sample]
-    return {
-        'min': min(alts),
-        'max': max(alts),
-        'variation': max(alts) - min(alts)
-    }
+    return {"min": min(alts), "max": max(alts), "variation": max(alts) - min(alts)}
 
 
-def is_mid_flight_start(path: List[List[float]], start_alt: float, debug: bool = False) -> bool:
+def is_mid_flight_start(
+    path: List[List[float]], start_alt: float, debug: bool = False
+) -> bool:
     """
     Detect if a path started mid-flight by analyzing altitude patterns.
 
@@ -250,15 +260,22 @@ def is_mid_flight_start(path: List[List[float]], start_alt: float, debug: bool =
     # Mid-flight indicators:
     # - Starting altitude above typical airports
     # - AND altitude variation in first part is small (not climbing/descending much)
-    is_mid_flight = start_alt > MID_FLIGHT_MIN_ALTITUDE_M and sample['variation'] < MID_FLIGHT_MAX_VARIATION_M
+    is_mid_flight = (
+        start_alt > MID_FLIGHT_MIN_ALTITUDE_M
+        and sample["variation"] < MID_FLIGHT_MAX_VARIATION_M
+    )
 
     if is_mid_flight and debug:
-        logger.debug(f"Detected mid-flight start at {start_alt:.0f}m (variation: {sample['variation']:.0f}m)")
+        logger.debug(
+            f"Detected mid-flight start at {start_alt:.0f}m (variation: {sample['variation']:.0f}m)"
+        )
 
     return is_mid_flight
 
 
-def is_valid_landing(path: List[List[float]], end_alt: float, debug: bool = False) -> bool:
+def is_valid_landing(
+    path: List[List[float]], end_alt: float, debug: bool = False
+) -> bool:
     """
     Check if a path ends with a valid landing.
 
@@ -279,10 +296,15 @@ def is_valid_landing(path: List[List[float]], end_alt: float, debug: bool = Fals
 
     # Valid landing: either descending significantly OR stable at low variation
     # Also accept any endpoint if variation at end is small - indicates stable landing
-    return sample['variation'] < LANDING_MAX_VARIATION_M or end_alt < LANDING_MAX_ALTITUDE_M
+    return (
+        sample["variation"] < LANDING_MAX_VARIATION_M
+        or end_alt < LANDING_MAX_ALTITUDE_M
+    )
 
 
-def parse_coordinate_point(point: str, kml_file: str) -> Optional[Tuple[float, float, Optional[float]]]:
+def parse_coordinate_point(
+    point: str, kml_file: str
+) -> Optional[Tuple[float, float, Optional[float]]]:
     """
     Parse a single coordinate point from KML format.
 
@@ -297,7 +319,7 @@ def parse_coordinate_point(point: str, kml_file: str) -> Optional[Tuple[float, f
     if not point:
         return None
 
-    parts = point.split(',')
+    parts = point.split(",")
     if len(parts) < 2:
         return None
 
@@ -313,7 +335,9 @@ def parse_coordinate_point(point: str, kml_file: str) -> Optional[Tuple[float, f
         return None
 
 
-def find_xml_element(parent: Any, namespaced_path: str, fallback_path: str, namespaces: Dict[str, str]) -> Optional[Any]:
+def find_xml_element(
+    parent: Any, namespaced_path: str, fallback_path: str, namespaces: Dict[str, str]
+) -> Optional[Any]:
     """
     Find XML element trying namespaced path first, then fallback without namespace.
 
@@ -332,7 +356,9 @@ def find_xml_element(parent: Any, namespaced_path: str, fallback_path: str, name
     return elem
 
 
-def find_xml_elements(parent: Any, namespaced_path: str, fallback_path: str, namespaces: Dict[str, str]) -> List[Any]:
+def find_xml_elements(
+    parent: Any, namespaced_path: str, fallback_path: str, namespaces: Dict[str, str]
+) -> List[Any]:
     """
     Find XML elements trying namespaced path first, then fallback without namespace.
 
@@ -351,7 +377,9 @@ def find_xml_elements(parent: Any, namespaced_path: str, fallback_path: str, nam
     return elems
 
 
-def extract_placemark_metadata(placemark: Any, namespaces: Dict[str, str]) -> Dict[str, Any]:
+def extract_placemark_metadata(
+    placemark: Any, namespaces: Dict[str, str]
+) -> Dict[str, Any]:
     """
     Extract metadata from a KML Placemark element.
 
@@ -363,15 +391,19 @@ def extract_placemark_metadata(placemark: Any, namespaces: Dict[str, str]) -> Di
         Dict with 'airport_name', 'timestamp', 'end_timestamp', 'year' keys
     """
     # Extract name
-    name_elem = find_xml_element(placemark, './/kml:name', './/name', namespaces)
-    airport_name = name_elem.text.strip() if name_elem is not None and name_elem.text else None
+    name_elem = find_xml_element(placemark, ".//kml:name", ".//name", namespaces)
+    airport_name = (
+        name_elem.text.strip() if name_elem is not None and name_elem.text else None
+    )
 
     # Extract timestamps - both start and end for tracks with multiple when elements
-    time_elems = find_xml_elements(placemark, './/kml:when', './/when', namespaces)
+    time_elems = find_xml_elements(placemark, ".//kml:when", ".//when", namespaces)
 
     # Also try TimeStamp element (single timestamp)
     if not time_elems:
-        time_elem = find_xml_element(placemark, './/kml:TimeStamp/kml:when', './/TimeStamp/when', namespaces)
+        time_elem = find_xml_element(
+            placemark, ".//kml:TimeStamp/kml:when", ".//TimeStamp/when", namespaces
+        )
         if time_elem is not None:
             time_elems = [time_elem]
 
@@ -392,10 +424,10 @@ def extract_placemark_metadata(placemark: Any, namespaces: Dict[str, str]) -> Di
     year = extract_year_from_timestamp(timestamp)
 
     return {
-        'airport_name': airport_name,
-        'timestamp': timestamp,
-        'end_timestamp': end_timestamp,
-        'year': year
+        "airport_name": airport_name,
+        "timestamp": timestamp,
+        "end_timestamp": end_timestamp,
+        "year": year,
     }
 
 
@@ -404,7 +436,7 @@ def _build_path_metadata_dict(
     path_start: List[float],
     airport_name: Optional[str],
     timestamp: Optional[str],
-    end_timestamp: Optional[str]
+    end_timestamp: Optional[str],
 ) -> Dict[str, Any]:
     """
     Build path metadata dictionary.
@@ -423,18 +455,18 @@ def _build_path_metadata_dict(
     aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
 
     meta = {
-        'timestamp': timestamp,
-        'end_timestamp': end_timestamp,
-        'filename': Path(kml_file).name,
-        'start_point': path_start,
-        'airport_name': airport_name,
-        'year': year
+        "timestamp": timestamp,
+        "end_timestamp": end_timestamp,
+        "filename": Path(kml_file).name,
+        "start_point": path_start,
+        "airport_name": airport_name,
+        "year": year,
     }
 
     # Add aircraft info if available
     if aircraft_info:
-        meta['aircraft_registration'] = aircraft_info.get('registration')
-        meta['aircraft_type'] = aircraft_info.get('type')
+        meta["aircraft_registration"] = aircraft_info.get("registration")
+        meta["aircraft_type"] = aircraft_info.get("type")
 
     return meta
 
@@ -445,7 +477,7 @@ def process_standard_coordinates(
     kml_file: str,
     coordinates: List[List[float]],
     path_groups: List[List[List[float]]],
-    path_metadata: List[Dict[str, Any]]
+    path_metadata: List[Dict[str, Any]],
 ) -> None:
     """
     Process standard KML <coordinates> elements.
@@ -471,9 +503,9 @@ def process_standard_coordinates(
 
         # Get metadata for this coordinate element
         metadata = coord_to_metadata.get(id(coord_elem), {})
-        airport_name = metadata.get('airport_name')
-        timestamp = metadata.get('timestamp')
-        end_timestamp = metadata.get('end_timestamp')
+        airport_name = metadata.get("airport_name")
+        timestamp = metadata.get("timestamp")
+        end_timestamp = metadata.get("end_timestamp")
 
         # Split by whitespace (spaces, tabs, newlines)
         points = coord_text.split()
@@ -507,13 +539,14 @@ def process_standard_coordinates(
             path_metadata.append(meta)
 
         if element_coords > 0:
-            coord_type = "Point" if element_coords == 1 else f"Path ({element_coords} points)"
+            coord_type = (
+                "Point" if element_coords == 1 else f"Path ({element_coords} points)"
+            )
             logger.debug(f"Element {idx}: {coord_type}")
 
 
 def _extract_gx_track_metadata(
-    placemarks: List[Any],
-    namespaces: Dict[str, str]
+    placemarks: List[Any], namespaces: Dict[str, str]
 ) -> Dict[str, Optional[str]]:
     """
     Extract metadata from gx:Track placemarks.
@@ -527,27 +560,34 @@ def _extract_gx_track_metadata(
     """
     for placemark in placemarks:
         # Check if this placemark contains gx:coord elements
-        placemark_gx_coords = find_xml_elements(placemark, './/gx:coord', './/coord', namespaces)
+        placemark_gx_coords = find_xml_elements(
+            placemark, ".//gx:coord", ".//coord", namespaces
+        )
 
         if placemark_gx_coords:
             meta = extract_placemark_metadata(placemark, namespaces)
 
-            if meta['timestamp']:
+            if meta["timestamp"]:
                 logger.debug(f"Found gx:Track start timestamp: {meta['timestamp']}")
-            if meta['end_timestamp']:
+            if meta["end_timestamp"]:
                 logger.debug(f"Found gx:Track end timestamp: {meta['end_timestamp']}")
-            if meta['timestamp'] is None and meta['airport_name']:
-                logger.debug(f"No timestamp found for gx:Track with name: {meta['airport_name']}")
+            if meta["timestamp"] is None and meta["airport_name"]:
+                logger.debug(
+                    f"No timestamp found for gx:Track with name: {meta['airport_name']}"
+                )
 
             return meta
 
-    return {'airport_name': None, 'timestamp': None, 'end_timestamp': None, 'year': None}
+    return {
+        "airport_name": None,
+        "timestamp": None,
+        "end_timestamp": None,
+        "year": None,
+    }
 
 
 def _extract_gx_when_elements(
-    placemarks: List[Any],
-    gx_coords: List[Any],
-    namespaces: Dict[str, str]
+    placemarks: List[Any], gx_coords: List[Any], namespaces: Dict[str, str]
 ) -> List[Any]:
     """
     Extract <when> elements that correspond to gx:coord elements.
@@ -561,7 +601,7 @@ def _extract_gx_when_elements(
         List of <when> elements matching gx:coord count
     """
     for placemark in placemarks:
-        when_elems = find_xml_elements(placemark, './/kml:when', './/when', namespaces)
+        when_elems = find_xml_elements(placemark, ".//kml:when", ".//when", namespaces)
         if when_elems and len(when_elems) == len(gx_coords):
             return when_elems
     return []
@@ -571,7 +611,7 @@ def _parse_gx_coordinates(
     gx_coords: List[Any],
     when_elems: List[Any],
     kml_file: str,
-    coordinates: List[List[float]]
+    coordinates: List[List[float]],
 ) -> List[List[Any]]:
     """
     Parse gx:coord elements into path coordinates.
@@ -605,7 +645,9 @@ def _parse_gx_coordinates(
             alt = float(parts[2]) if len(parts) >= 3 else None
 
             # Use centralized validation and normalization
-            validated = validate_and_normalize_coordinate(lat, lon, alt, f"{Path(kml_file).name} (gx:Track)")
+            validated = validate_and_normalize_coordinate(
+                lat, lon, alt, f"{Path(kml_file).name} (gx:Track)"
+            )
             if validated is None:
                 continue
 
@@ -638,7 +680,7 @@ def process_gx_track(
     kml_file: str,
     coordinates: List[List[float]],
     path_groups: List[List[List[float]]],
-    path_metadata: List[Dict[str, Any]]
+    path_metadata: List[Dict[str, Any]],
 ) -> None:
     """
     Process Google Earth Track (gx:coord) elements.
@@ -670,9 +712,9 @@ def process_gx_track(
         meta = _build_path_metadata_dict(
             kml_file,
             gx_path[0],
-            track_meta['airport_name'],
-            track_meta['timestamp'],
-            track_meta['end_timestamp']
+            track_meta["airport_name"],
+            track_meta["timestamp"],
+            track_meta["end_timestamp"],
         )
         path_metadata.append(meta)
 
@@ -697,7 +739,7 @@ def _parse_kml_tree(kml_file: str) -> Optional[Any]:
         logger.debug(f"Root attrib: {root.attrib}")
         all_tags = set()
         for elem in root.iter():
-            tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+            tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
             all_tags.add(tag)
         logger.debug(f"All unique tags in file: {sorted(all_tags)}")
 
@@ -712,7 +754,9 @@ def _parse_kml_tree(kml_file: str) -> Optional[Any]:
         return None
 
 
-def _extract_kml_elements(root: Any, namespaces: Dict[str, str]) -> Tuple[List[Any], List[Any], List[Any]]:
+def _extract_kml_elements(
+    root: Any, namespaces: Dict[str, str]
+) -> Tuple[List[Any], List[Any], List[Any]]:
     """
     Extract coordinate elements and placemarks from KML root.
 
@@ -724,8 +768,8 @@ def _extract_kml_elements(root: Any, namespaces: Dict[str, str]) -> Tuple[List[A
         Tuple of (coord_elements, gx_coords, placemarks)
     """
     # Try with namespace
-    coord_elements = root.findall('.//kml:coordinates', namespaces)
-    gx_coords = root.findall('.//gx:coord', namespaces)
+    coord_elements = root.findall(".//kml:coordinates", namespaces)
+    gx_coords = root.findall(".//gx:coord", namespaces)
 
     if gx_coords:
         logger.debug(f"Found {len(gx_coords)} gx:coord elements (Google Earth Track)")
@@ -734,27 +778,28 @@ def _extract_kml_elements(root: Any, namespaces: Dict[str, str]) -> Tuple[List[A
     if not coord_elements and not gx_coords:
         # Remove namespace from tags
         for elem in root.iter():
-            if '}' in elem.tag:
-                elem.tag = elem.tag.split('}', 1)[1]
-        coord_elements = root.findall('.//coordinates')
-        gx_coords = root.findall('.//coord')  # gx:coord without namespace
+            if "}" in elem.tag:
+                elem.tag = elem.tag.split("}", 1)[1]
+        coord_elements = root.findall(".//coordinates")
+        gx_coords = root.findall(".//coord")  # gx:coord without namespace
 
     logger.debug(f"Found {len(coord_elements)} coordinate elements")
     if coord_elements:
         for i, elem in enumerate(coord_elements[:2]):  # Show first 2
-            logger.debug(f"Element {i} text preview: {str(elem.text)[:100] if elem.text else 'None'}")
+            logger.debug(
+                f"Element {i} text preview: {str(elem.text)[:100] if elem.text else 'None'}"
+            )
 
     # Find all Placemarks
-    placemarks = root.findall('.//kml:Placemark', namespaces)
+    placemarks = root.findall(".//kml:Placemark", namespaces)
     if not placemarks:
-        placemarks = root.findall('.//Placemark')  # Without namespace
+        placemarks = root.findall(".//Placemark")  # Without namespace
 
     return coord_elements, gx_coords, placemarks
 
 
 def _build_coord_metadata_map(
-    placemarks: List[Any],
-    namespaces: Dict[str, str]
+    placemarks: List[Any], namespaces: Dict[str, str]
 ) -> Dict[int, Dict[str, Any]]:
     """
     Create mapping from coordinate elements to their metadata.
@@ -769,7 +814,9 @@ def _build_coord_metadata_map(
     coord_to_metadata = {}
     for placemark in placemarks:
         # Find coordinates within this placemark
-        placemark_coords = find_xml_elements(placemark, './/kml:coordinates', './/coordinates', namespaces)
+        placemark_coords = find_xml_elements(
+            placemark, ".//kml:coordinates", ".//coordinates", namespaces
+        )
 
         # Extract metadata using helper function
         metadata = extract_placemark_metadata(placemark, namespaces)
@@ -781,7 +828,9 @@ def _build_coord_metadata_map(
     return coord_to_metadata
 
 
-def parse_kml_coordinates(kml_file: str) -> Tuple[List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]:
+def parse_kml_coordinates(
+    kml_file: str,
+) -> Tuple[List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]:
     """
     Extract coordinates from a KML file.
 
@@ -801,10 +850,14 @@ def parse_kml_coordinates(kml_file: str) -> Tuple[List[List[float]], List[List[L
         cached_result = load_cached_parse(cache_path)
         if cached_result:
             coordinates, path_groups, path_metadata = cached_result
-            logger.info(f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name} (cached)")
+            logger.info(
+                f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name} (cached)"
+            )
             if path_groups:
                 total_alt_points = sum(len(path) for path in path_groups)
-                logger.info(f"  ({total_alt_points} points have altitude data in {len(path_groups)} path(s))")
+                logger.info(
+                    f"  ({total_alt_points} points have altitude data in {len(path_groups)} path(s))"
+                )
             return coordinates, path_groups, path_metadata
 
     # Initialize output lists
@@ -820,8 +873,8 @@ def parse_kml_coordinates(kml_file: str) -> Tuple[List[List[float]], List[List[L
 
         # KML namespaces
         namespaces = {
-            'kml': 'http://www.opengis.net/kml/2.2',
-            'gx': 'http://www.google.com/kml/ext/2.2'
+            "kml": "http://www.opengis.net/kml/2.2",
+            "gx": "http://www.google.com/kml/ext/2.2",
         }
 
         # Extract elements
@@ -837,7 +890,7 @@ def parse_kml_coordinates(kml_file: str) -> Tuple[List[List[float]], List[List[L
             kml_file,
             coordinates,
             path_groups,
-            path_metadata
+            path_metadata,
         )
 
         # Process Google Earth Track (gx:coord) elements
@@ -848,14 +901,16 @@ def parse_kml_coordinates(kml_file: str) -> Tuple[List[List[float]], List[List[L
             kml_file,
             coordinates,
             path_groups,
-            path_metadata
+            path_metadata,
         )
 
         # Log results
         total_alt_points = sum(len(path) for path in path_groups)
         logger.info(f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name}")
         if path_groups:
-            logger.info(f"  ({total_alt_points} points have altitude data in {len(path_groups)} path(s))")
+            logger.info(
+                f"  ({total_alt_points} points have altitude data in {len(path_groups)} path(s))"
+            )
 
         if len(coordinates) == 0:
             logger.warning("No valid coordinates found!")

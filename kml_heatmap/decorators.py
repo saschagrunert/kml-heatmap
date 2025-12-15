@@ -69,12 +69,12 @@ from typing import Callable, Any, TypeVar
 from .logger import logger
 
 __all__ = [
-    'timed',
-    'log_calls',
-    'validate_not_none',
+    "timed",
+    "log_calls",
+    "validate_not_none",
 ]
 
-F = TypeVar('F', bound=Callable[..., Any])
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 def timed(func: F) -> F:
@@ -97,6 +97,7 @@ def timed(func: F) -> F:
         >>> result = slow_function()
         INFO: slow_function took 1.00s
     """
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         start_time = time.perf_counter()
@@ -108,8 +109,7 @@ def timed(func: F) -> F:
         # Log warning if function is slow
         if elapsed > 5.0:
             logger.warning(
-                f"{func.__name__} took {elapsed:.2f}s "
-                "(consider optimization)"
+                f"{func.__name__} took {elapsed:.2f}s (consider optimization)"
             )
 
         return result
@@ -137,6 +137,7 @@ def log_calls(func: F) -> F:
         DEBUG: Calling calculate(3, 4)
         DEBUG: calculate returned 7
     """
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         # Format arguments for logging
@@ -176,11 +177,13 @@ def validate_not_none(*param_names: str) -> Callable[[F], F]:
         >>> process_files(None, '/tmp')  # Raises ValueError
         ValueError: Parameter 'path' cannot be None
     """
+
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             # Get function signature
             import inspect
+
             sig = inspect.signature(func)
             bound_args = sig.bind(*args, **kwargs)
             bound_args.apply_defaults()

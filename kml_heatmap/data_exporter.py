@@ -36,14 +36,16 @@ This progressive loading approach dramatically improves:
 
 import os
 import json
-from typing import List, Dict, Any, Optional, Tuple
-from pathlib import Path
+from typing import List, Dict, Any, Tuple
 
 from .airports import extract_airport_name
 from .logger import logger
+from .constants import HEATMAP_GRADIENT
 
 
-def downsample_coordinates(coordinates: List[List[float]], factor: int) -> List[List[float]]:
+def downsample_coordinates(
+    coordinates: List[List[float]], factor: int
+) -> List[List[float]]:
     """
     Simple downsampling by keeping every Nth point.
 
@@ -65,7 +67,7 @@ def export_resolution_data(
     all_coordinates: List[List[float]],
     path_segments: List[Dict[str, Any]],
     path_info: List[Dict[str, Any]],
-    output_dir: str
+    output_dir: str,
 ) -> Tuple[str, int]:
     """
     Export data for a single resolution level.
@@ -82,19 +84,19 @@ def export_resolution_data(
         Tuple of (output_file_path, file_size_bytes)
     """
     data = {
-        'coordinates': all_coordinates,
-        'path_segments': path_segments,
-        'path_info': path_info,
-        'resolution': resolution_name,
-        'original_points': len(all_coordinates),
-        'downsampled_points': len(all_coordinates),
-        'compression_ratio': 100.0
+        "coordinates": all_coordinates,
+        "path_segments": path_segments,
+        "path_info": path_info,
+        "resolution": resolution_name,
+        "original_points": len(all_coordinates),
+        "downsampled_points": len(all_coordinates),
+        "compression_ratio": 100.0,
     }
 
-    output_file = os.path.join(output_dir, f'data_{resolution_name}.json')
+    output_file = os.path.join(output_dir, f"data_{resolution_name}.json")
 
-    with open(output_file, 'w') as f:
-        json.dump(data, f, separators=(',', ':'), sort_keys=True)
+    with open(output_file, "w") as f:
+        json.dump(data, f, separators=(",", ":"), sort_keys=True)
 
     file_size = os.path.getsize(output_file)
 
@@ -109,7 +111,7 @@ def export_resolution_data(
 def export_airports_data(
     unique_airports: List[Dict[str, Any]],
     output_dir: str,
-    strip_timestamps: bool = False
+    strip_timestamps: bool = False,
 ) -> Tuple[str, int]:
     """
     Export airport data to JSON file.
@@ -126,8 +128,8 @@ def export_airports_data(
     seen_locations = set()
 
     for apt in unique_airports:
-        full_name = apt.get('name', 'Unknown')
-        is_at_path_end = apt.get('is_at_path_end', False)
+        full_name = apt.get("name", "Unknown")
+        is_at_path_end = apt.get("is_at_path_end", False)
         airport_name = extract_airport_name(full_name, is_at_path_end)
 
         if not airport_name:
@@ -141,28 +143,27 @@ def export_airports_data(
         seen_locations.add(location_key)
 
         airport_data = {
-            'lat': apt['lat'],
-            'lon': apt['lon'],
-            'name': airport_name,
-            'flight_count': len(apt['timestamps']) if apt['timestamps'] else 1
+            "lat": apt["lat"],
+            "lon": apt["lon"],
+            "name": airport_name,
+            "flight_count": len(apt["timestamps"]) if apt["timestamps"] else 1,
         }
 
         if not strip_timestamps:
-            airport_data['timestamps'] = apt['timestamps']
+            airport_data["timestamps"] = apt["timestamps"]
 
         valid_airports.append(airport_data)
 
-    airports_data = {'airports': valid_airports}
-    airports_file = os.path.join(output_dir, 'airports.json')
+    airports_data = {"airports": valid_airports}
+    airports_file = os.path.join(output_dir, "airports.json")
 
-    with open(airports_file, 'w') as f:
-        json.dump(airports_data, f, separators=(',', ':'), sort_keys=True)
+    with open(airports_file, "w") as f:
+        json.dump(airports_data, f, separators=(",", ":"), sort_keys=True)
 
     file_size = os.path.getsize(airports_file)
 
     logger.info(
-        f"  ✓ Airports: {len(valid_airports)} locations "
-        f"({file_size / 1024:.1f} KB)"
+        f"  ✓ Airports: {len(valid_airports)} locations ({file_size / 1024:.1f} KB)"
     )
 
     return airports_file, file_size
@@ -175,7 +176,7 @@ def export_metadata(
     min_groundspeed_knots: float,
     max_groundspeed_knots: float,
     available_years: List[int],
-    output_dir: str
+    output_dir: str,
 ) -> Tuple[str, int]:
     """
     Export metadata including statistics and ranges.
@@ -193,23 +194,23 @@ def export_metadata(
         Tuple of (output_file_path, file_size_bytes)
     """
     # Handle infinity case
-    if min_groundspeed_knots == float('inf'):
+    if min_groundspeed_knots == float("inf"):
         min_groundspeed_knots = 0.0
 
     meta_data = {
-        'stats': stats,
-        'min_alt_m': min_alt_m,
-        'max_alt_m': max_alt_m,
-        'min_groundspeed_knots': round(min_groundspeed_knots, 1),
-        'max_groundspeed_knots': round(max_groundspeed_knots, 1),
-        'gradient': HEATMAP_GRADIENT,
-        'available_years': available_years
+        "stats": stats,
+        "min_alt_m": min_alt_m,
+        "max_alt_m": max_alt_m,
+        "min_groundspeed_knots": round(min_groundspeed_knots, 1),
+        "max_groundspeed_knots": round(max_groundspeed_knots, 1),
+        "gradient": HEATMAP_GRADIENT,
+        "available_years": available_years,
     }
 
-    meta_file = os.path.join(output_dir, 'metadata.json')
+    meta_file = os.path.join(output_dir, "metadata.json")
 
-    with open(meta_file, 'w') as f:
-        json.dump(meta_data, f, separators=(',', ':'), sort_keys=True)
+    with open(meta_file, "w") as f:
+        json.dump(meta_data, f, separators=(",", ":"), sort_keys=True)
 
     file_size = os.path.getsize(meta_file)
 
@@ -231,7 +232,7 @@ def collect_unique_years(all_path_metadata: List[Dict[str, Any]]) -> List[int]:
     unique_years = set()
 
     for meta in all_path_metadata:
-        year = meta.get('year')
+        year = meta.get("year")
         if year:
             unique_years.add(year)
 

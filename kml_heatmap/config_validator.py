@@ -25,9 +25,8 @@ messages rather than cryptic failures deep in processing.
 """
 
 import os
-import sys
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from .exceptions import ConfigurationError
 from .logger import logger
@@ -45,7 +44,7 @@ class ConfigValidator:
         input_path: str,
         output_dir: str,
         stadia_key: Optional[str] = None,
-        openaip_key: Optional[str] = None
+        openaip_key: Optional[str] = None,
     ) -> Tuple[bool, List[str], List[str]]:
         """
         Run all validation checks.
@@ -79,7 +78,7 @@ class ConfigValidator:
             return
 
         if path.is_file():
-            if not path.suffix.lower() == '.kml':
+            if not path.suffix.lower() == ".kml":
                 self.warnings.append(
                     f"Input file doesn't have .kml extension: {input_path}"
                 )
@@ -92,11 +91,9 @@ class ConfigValidator:
                 )
 
         elif path.is_dir():
-            kml_files = list(path.glob('**/*.kml'))
+            kml_files = list(path.glob("**/*.kml"))
             if not kml_files:
-                self.errors.append(
-                    f"No .kml files found in directory: {input_path}"
-                )
+                self.errors.append(f"No .kml files found in directory: {input_path}")
             elif len(kml_files) > 1000:
                 self.warnings.append(
                     f"Large number of KML files ({len(kml_files)}), "
@@ -117,9 +114,7 @@ class ConfigValidator:
                 path.mkdir(parents=True, exist_ok=True)
                 logger.info(f"Created output directory: {output_dir}")
             except OSError as e:
-                self.errors.append(
-                    f"Cannot create output directory {output_dir}: {e}"
-                )
+                self.errors.append(f"Cannot create output directory {output_dir}: {e}")
                 return
 
         if not path.is_dir():
@@ -131,16 +126,12 @@ class ConfigValidator:
             self.errors.append(f"No write permission for: {output_dir}")
 
     def _validate_api_keys(
-        self,
-        stadia_key: Optional[str],
-        openaip_key: Optional[str]
+        self, stadia_key: Optional[str], openaip_key: Optional[str]
     ) -> None:
         """Validate API keys if provided."""
         if stadia_key:
             if len(stadia_key) < 20:
-                self.warnings.append(
-                    "Stadia API key seems too short, might be invalid"
-                )
+                self.warnings.append("Stadia API key seems too short, might be invalid")
         else:
             self.warnings.append(
                 "STADIA_API_KEY not set - map tiles will use fallback provider"
@@ -159,12 +150,12 @@ class ConfigValidator:
     def _validate_dependencies(self) -> None:
         """Check required Python packages are installed."""
         required_packages = {
-            'folium': 'Map generation',
-            'numpy': 'Numerical operations',
+            "folium": "Map generation",
+            "numpy": "Numerical operations",
         }
 
         optional_packages = {
-            'lxml': 'Faster XML parsing (falls back to standard library)',
+            "lxml": "Faster XML parsing (falls back to standard library)",
         }
 
         for package, purpose in required_packages.items():
@@ -207,7 +198,7 @@ def validate_environment(
     output_dir: str,
     stadia_key: Optional[str] = None,
     openaip_key: Optional[str] = None,
-    fail_on_warnings: bool = False
+    fail_on_warnings: bool = False,
 ) -> None:
     """
     Validate environment and raise exception if invalid.

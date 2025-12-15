@@ -52,7 +52,9 @@ ALT_MAX_M = 50000.0  # Upper atmosphere limit
 
 # === Airport Detection ===
 AIRPORT_DISTANCE_THRESHOLD_KM = 1.5  # Distance threshold for deduplicating airports
-AIRPORT_GRID_SIZE_DEGREES = 0.018  # Grid cell size in degrees (~2km at equator) for spatial indexing
+AIRPORT_GRID_SIZE_DEGREES = (
+    0.018  # Grid cell size in degrees (~2km at equator) for spatial indexing
+)
 
 # === Path Sampling ===
 PATH_SAMPLE_MAX_SIZE = 50  # Maximum sample size for path analysis
@@ -68,54 +70,41 @@ LANDING_MAX_ALTITUDE_M = 600  # Maximum altitude for valid landing endpoint
 LANDING_FALLBACK_ALTITUDE_M = 1000  # Fallback altitude threshold for short paths
 
 # === Cache Settings ===
-CACHE_DIR_NAME = '.kml_cache'  # Directory name for KML parsing cache
+CACHE_DIR_NAME = ".kml_cache"  # Directory name for KML parsing cache
 
 # === Data Export Resolution Levels ===
 RESOLUTION_LEVELS = {
-    'z0_4': {
-        'factor': 15,
-        'epsilon': 0.0008,
-        'description': 'Zoom 0-4 (continent level)'
+    "z0_4": {
+        "factor": 15,
+        "epsilon": 0.0008,
+        "description": "Zoom 0-4 (continent level)",
     },
-    'z5_7': {
-        'factor': 10,
-        'epsilon': 0.0004,
-        'description': 'Zoom 5-7 (country level)'
+    "z5_7": {
+        "factor": 10,
+        "epsilon": 0.0004,
+        "description": "Zoom 5-7 (country level)",
     },
-    'z8_10': {
-        'factor': 5,
-        'epsilon': 0.0002,
-        'description': 'Zoom 8-10 (regional level)'
+    "z8_10": {
+        "factor": 5,
+        "epsilon": 0.0002,
+        "description": "Zoom 8-10 (regional level)",
     },
-    'z11_13': {
-        'factor': 2,
-        'epsilon': 0.0001,
-        'description': 'Zoom 11-13 (city level)'
+    "z11_13": {
+        "factor": 2,
+        "epsilon": 0.0001,
+        "description": "Zoom 11-13 (city level)",
     },
-    'z14_plus': {
-        'factor': 1,
-        'epsilon': 0,
-        'description': 'Zoom 14+ (full detail)'
-    }
+    "z14_plus": {"factor": 1, "epsilon": 0, "description": "Zoom 14+ (full detail)"},
 }
 
 # === Heatmap Configuration ===
-HEATMAP_GRADIENT = {
-    0.0: 'blue',
-    0.3: 'cyan',
-    0.5: 'lime',
-    0.7: 'yellow',
-    1.0: 'red'
-}
+HEATMAP_GRADIENT = {0.0: "blue", 0.3: "cyan", 0.5: "lime", 0.7: "yellow", 1.0: "red"}
 
 # === XML/KML Namespaces ===
-KML_NAMESPACE = 'http://www.opengis.net/kml/2.2'
-GX_NAMESPACE = 'http://www.google.com/kml/ext/2.2'
+KML_NAMESPACE = "http://www.opengis.net/kml/2.2"
+GX_NAMESPACE = "http://www.google.com/kml/ext/2.2"
 
-KML_NAMESPACES = {
-    'kml': KML_NAMESPACE,
-    'gx': GX_NAMESPACE
-}
+KML_NAMESPACES = {"kml": KML_NAMESPACE, "gx": GX_NAMESPACE}
 
 # === File Size Limits ===
 LARGE_FILE_WARNING_MB = 100  # Warn if input file exceeds this size

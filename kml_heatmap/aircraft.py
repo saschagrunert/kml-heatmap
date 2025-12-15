@@ -6,13 +6,13 @@ import re
 import urllib.request
 import urllib.error
 from html.parser import HTMLParser
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 from .logger import logger
 
 __all__ = [
-    'AircraftDataParser',
-    'lookup_aircraft_model',
-    'parse_aircraft_from_filename',
+    "AircraftDataParser",
+    "lookup_aircraft_model",
+    "parse_aircraft_from_filename",
 ]
 
 
@@ -25,25 +25,27 @@ class AircraftDataParser(HTMLParser):
         self.model = None
 
     def handle_starttag(self, tag: str, attrs: List[tuple]) -> None:
-        if tag == 'title':
+        if tag == "title":
             self.in_title = True
 
     def handle_data(self, data: str) -> None:
-        if self.in_title and 'Aircraft info for' in data:
+        if self.in_title and "Aircraft info for" in data:
             # Extract from title like: "Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana"
-            parts = data.split(' - ', 1)
+            parts = data.split(" - ", 1)
             if len(parts) > 1:
                 # Remove year prefix if present (e.g., "2001 Diamond DA-20A-1 Katana")
                 model = parts[1].strip()
-                model = re.sub(r'^\d{4}\s+', '', model)
+                model = re.sub(r"^\d{4}\s+", "", model)
                 self.model = model
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == 'title':
+        if tag == "title":
             self.in_title = False
 
 
-def lookup_aircraft_model(registration: str, cache_file: str = 'aircraft_cache.json') -> Optional[str]:
+def lookup_aircraft_model(
+    registration: str, cache_file: str = "aircraft_cache.json"
+) -> Optional[str]:
     """
     Look up aircraft model from airport-data.com
 
@@ -58,7 +60,7 @@ def lookup_aircraft_model(registration: str, cache_file: str = 'aircraft_cache.j
     cache = {}
     if os.path.exists(cache_file):
         try:
-            with open(cache_file, 'r') as f:
+            with open(cache_file, "r") as f:
                 cache = json.load(f)
         except (json.JSONDecodeError, IOError) as e:
             # Cache file is corrupted or unreadable, start with empty cache
@@ -71,11 +73,11 @@ def lookup_aircraft_model(registration: str, cache_file: str = 'aircraft_cache.j
 
     # Fetch from airport-data.com
     try:
-        url = f'https://airport-data.com/aircraft/{registration}.html'
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        url = f"https://airport-data.com/aircraft/{registration}.html"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
 
         with urllib.request.urlopen(req, timeout=10) as response:
-            html = response.read().decode('utf-8')
+            html = response.read().decode("utf-8")
 
         parser = AircraftDataParser()
         parser.feed(html)
@@ -84,7 +86,7 @@ def lookup_aircraft_model(registration: str, cache_file: str = 'aircraft_cache.j
             # Update cache
             cache[registration] = parser.model
             try:
-                with open(cache_file, 'w') as f:
+                with open(cache_file, "w") as f:
                     json.dump(cache, f, indent=2)
             except IOError as e:
                 logger.warning(f"Could not update aircraft cache: {e}")
@@ -103,7 +105,9 @@ def lookup_aircraft_model(registration: str, cache_file: str = 'aircraft_cache.j
     except TimeoutError:
         logger.warning(f"Timeout looking up {registration} (server did not respond)")
     except Exception as e:
-        logger.warning(f"Unexpected error looking up {registration}: {type(e).__name__}: {e}")
+        logger.warning(
+            f"Unexpected error looking up {registration}: {type(e).__name__}: {e}"
+        )
 
     return None
 
@@ -122,12 +126,12 @@ def parse_aircraft_from_filename(filename: str) -> Dict[str, str]:
         Dict with 'registration' and 'type' keys, or empty dict if parsing fails
     """
     # Remove .kml extension
-    name = filename.replace('.kml', '')
+    name = filename.replace(".kml", "")
 
     # Pattern: YYYYMMDD_HHMM_AIRPORT_REGISTRATION_TYPE
     # Registration is typically D-EXXX format (but stored as DEEXXX in filename)
     # Type is typically letters/numbers like DA20, DA40, C172, etc.
-    parts = name.split('_')
+    parts = name.split("_")
 
     if len(parts) >= 5:
         # Format: DATE_TIME_AIRPORT_REGISTRATION_TYPE
@@ -136,12 +140,9 @@ def parse_aircraft_from_filename(filename: str) -> Dict[str, str]:
 
         # Format registration: if starts with D, insert hyphen after first char (D-EXXX)
         registration = registration_raw
-        if registration_raw.startswith('D') and len(registration_raw) > 1:
-            registration = registration_raw[0] + '-' + registration_raw[1:]
+        if registration_raw.startswith("D") and len(registration_raw) > 1:
+            registration = registration_raw[0] + "-" + registration_raw[1:]
 
-        return {
-            'registration': registration,
-            'type': aircraft_type
-        }
+        return {"registration": registration, "type": aircraft_type}
 
     return {}

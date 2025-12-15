@@ -1,27 +1,15 @@
 """HTML generation and rendering functionality."""
 
-import os
-import json
 import re
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 import rcssmin
 import rjsmin
 import minify_html as mh
 
-from .airports import extract_airport_name
-from .statistics import calculate_statistics
-from .parser import parse_kml_coordinates
 
 # Heatmap configuration
-HEATMAP_GRADIENT = {
-    0.0: 'blue',
-    0.3: 'cyan',
-    0.5: 'lime',
-    0.7: 'yellow',
-    1.0: 'red'
-}
+HEATMAP_GRADIENT = {0.0: "blue", 0.3: "cyan", 0.5: "lime", 0.7: "yellow", 1.0: "red"}
 
 
 def load_template() -> str:
@@ -30,8 +18,8 @@ def load_template() -> str:
     Returns:
         HTML template content as string
     """
-    template_path = Path(__file__).parent / 'templates' / 'map_template.html'
-    with open(template_path, 'r') as f:
+    template_path = Path(__file__).parent / "templates" / "map_template.html"
+    with open(template_path, "r") as f:
         return f.read()
 
 
@@ -45,11 +33,12 @@ def minify_html(html: str) -> str:
     Returns:
         Minified HTML string
     """
+
     # First, minify inline CSS and JavaScript
     def minify_css_tags(match):
         css_content = match.group(1)
         minified_css = rcssmin.cssmin(css_content)
-        return f'<style>{minified_css}</style>'
+        return f"<style>{minified_css}</style>"
 
     def minify_js_tags(match):
         js_content = match.group(1)
@@ -57,14 +46,14 @@ def minify_html(html: str) -> str:
         # rjsmin preserves some newlines for ASI (Automatic Semicolon Insertion) safety.
         # Since our generated code uses explicit semicolons, we can safely remove
         # remaining newlines. Replace with space to maintain token separation where needed.
-        minified_js = re.sub(r'\s*\n\s*', '', minified_js)
-        return f'<script>{minified_js}</script>'
+        minified_js = re.sub(r"\s*\n\s*", "", minified_js)
+        return f"<script>{minified_js}</script>"
 
     # Minify inline CSS
-    html = re.sub(r'<style>(.*?)</style>', minify_css_tags, html, flags=re.DOTALL)
+    html = re.sub(r"<style>(.*?)</style>", minify_css_tags, html, flags=re.DOTALL)
 
     # Minify inline JavaScript (not script tags with src attribute)
-    html = re.sub(r'<script>(.*?)</script>', minify_js_tags, html, flags=re.DOTALL)
+    html = re.sub(r"<script>(.*?)</script>", minify_js_tags, html, flags=re.DOTALL)
 
     # Use minify-html for HTML minification
     minified = mh.minify(html)
@@ -79,7 +68,7 @@ def export_data_json(
     unique_airports: List[Dict[str, Any]],
     stats: Dict[str, Any],
     output_dir: str = "data",
-    strip_timestamps: bool = False
+    strip_timestamps: bool = False,
 ) -> None:
     """
     Export data to JSON files at multiple resolutions for progressive loading.
@@ -99,9 +88,7 @@ def export_data_json(
 
 
 def create_progressive_heatmap(
-    kml_files: List[str],
-    output_file: str = "index.html",
-    data_dir: str = "data"
+    kml_files: List[str], output_file: str = "index.html", data_dir: str = "data"
 ) -> None:
     """
     Create a progressive-loading heatmap with external JSON data files.
@@ -119,5 +106,3 @@ def create_progressive_heatmap(
     """
     # This function will be a wrapper that calls the modularized components
     pass
-
-

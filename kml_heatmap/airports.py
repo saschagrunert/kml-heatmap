@@ -38,15 +38,15 @@ from .logger import logger
 from .constants import AIRPORT_DISTANCE_THRESHOLD_KM, AIRPORT_GRID_SIZE_DEGREES
 
 __all__ = [
-    'POINT_MARKERS',
-    'is_point_marker',
-    'extract_airport_name',
-    'deduplicate_airports',
-    'AirportDeduplicator',
+    "POINT_MARKERS",
+    "is_point_marker",
+    "extract_airport_name",
+    "deduplicate_airports",
+    "AirportDeduplicator",
 ]
 
 # Marker types to filter out
-POINT_MARKERS = ['Log Start', 'Log Stop', 'Takeoff', 'Landing']
+POINT_MARKERS = ["Log Start", "Log Stop", "Takeoff", "Landing"]
 
 
 def is_point_marker(name: Optional[str]) -> bool:
@@ -101,27 +101,27 @@ def extract_airport_name(full_name: str, is_at_path_end: bool = False) -> Option
         Filters out single-word names without ICAO codes to avoid
         false positives like "Unknown" or arbitrary marker names.
     """
-    if not full_name or full_name in ['Airport', 'Unknown', '']:
+    if not full_name or full_name in ["Airport", "Unknown", ""]:
         return None
 
     # Check if it's a marker prefix that shouldn't have made it here
-    marker_pattern = r'^(Log Start|Takeoff|Landing|Log Stop):\s*.+$'
+    marker_pattern = r"^(Log Start|Takeoff|Landing|Log Stop):\s*.+$"
     if re.match(marker_pattern, full_name):
         return None
 
     # Extract airport from route format "XXX - YYY"
-    if ' - ' in full_name and full_name.count(' - ') == 1:
-        parts = full_name.split(' - ')
+    if " - " in full_name and full_name.count(" - ") == 1:
+        parts = full_name.split(" - ")
         airport_name = parts[1].strip() if is_at_path_end else parts[0].strip()
     else:
         airport_name = full_name
 
     # Validate: must have ICAO code OR be multi-word name
-    has_icao_code = bool(re.search(r'\b[A-Z]{4}\b', airport_name))
+    has_icao_code = bool(re.search(r"\b[A-Z]{4}\b", airport_name))
     is_single_word = len(airport_name.split()) == 1
 
     # Skip if it's "Unknown" or single-word without ICAO code
-    if airport_name == 'Unknown' or (not has_icao_code and is_single_word):
+    if airport_name == "Unknown" or (not has_icao_code and is_single_word):
         return None
 
     return airport_name
@@ -174,7 +174,9 @@ class AirportDeduplicator:
                 if neighbor_key in self.spatial_grid:
                     for apt_idx in self.spatial_grid[neighbor_key]:
                         airport = self.unique_airports[apt_idx]
-                        dist = haversine_distance(lat, lon, airport['lat'], airport['lon'])
+                        dist = haversine_distance(
+                            lat, lon, airport["lat"], airport["lon"]
+                        )
                         if dist < AIRPORT_DISTANCE_THRESHOLD_KM:
                             return apt_idx
         return None
@@ -193,7 +195,7 @@ class AirportDeduplicator:
         name: Optional[str],
         timestamp: Optional[str],
         path_index: int,
-        is_at_path_end: bool
+        is_at_path_end: bool,
     ) -> int:
         """
         Add new airport or update existing one.
@@ -216,28 +218,38 @@ class AirportDeduplicator:
             # Update existing airport
             airport = self.unique_airports[apt_idx]
             # Only add timestamp if it's not already present (avoid duplicates)
-            if timestamp and not is_point_marker(name or '') and timestamp not in airport['timestamps']:
-                airport['timestamps'].append(timestamp)
+            if (
+                timestamp
+                and not is_point_marker(name or "")
+                and timestamp not in airport["timestamps"]
+            ):
+                airport["timestamps"].append(timestamp)
 
             # Prefer route names over marker names
-            current_name = airport.get('name', '')
-            if name and (not current_name or
-                        (is_point_marker(current_name) and not is_point_marker(name))):
-                airport['name'] = name
+            current_name = airport.get("name", "")
+            if name and (
+                not current_name
+                or (is_point_marker(current_name) and not is_point_marker(name))
+            ):
+                airport["name"] = name
 
             return apt_idx
         else:
             # Add new unique airport
-            timestamps = [timestamp] if timestamp and not is_point_marker(name or '') else []
+            timestamps = (
+                [timestamp] if timestamp and not is_point_marker(name or "") else []
+            )
             new_idx = len(self.unique_airports)
-            self.unique_airports.append({
-                'lat': lat,
-                'lon': lon,
-                'timestamps': timestamps,
-                'name': name,
-                'path_index': path_index,
-                'is_at_path_end': is_at_path_end
-            })
+            self.unique_airports.append(
+                {
+                    "lat": lat,
+                    "lon": lon,
+                    "timestamps": timestamps,
+                    "name": name,
+                    "path_index": path_index,
+                    "is_at_path_end": is_at_path_end,
+                }
+            )
             self._add_to_grid(lat, lon, new_idx)
             return new_idx
 
@@ -250,7 +262,7 @@ def deduplicate_airports(
     all_path_metadata: List[Dict[str, Any]],
     all_path_groups: List[List[List[float]]],
     is_mid_flight_start_func: Callable[[List[List[float]], float], bool],
-    is_valid_landing_func: Callable[[List[List[float]], float], bool]
+    is_valid_landing_func: Callable[[List[List[float]], float], bool],
 ) -> List[Dict[str, Any]]:
     """
     Deduplicate airports by location and extract valid airport information.
@@ -270,9 +282,11 @@ def deduplicate_airports(
 
     # Process start points from metadata
     for idx, metadata in enumerate(all_path_metadata):
-        start_lat, start_lon = metadata['start_point'][0], metadata['start_point'][1]
-        start_alt = metadata['start_point'][2] if len(metadata['start_point']) > 2 else 0
-        airport_name = metadata.get('airport_name', '')
+        start_lat, start_lon = metadata["start_point"][0], metadata["start_point"][1]
+        start_alt = (
+            metadata["start_point"][2] if len(metadata["start_point"]) > 2 else 0
+        )
+        airport_name = metadata.get("airport_name", "")
 
         # Skip point markers - they don't contain airport info
         if is_point_marker(airport_name):
@@ -290,9 +304,9 @@ def deduplicate_airports(
             lat=start_lat,
             lon=start_lon,
             name=airport_name,
-            timestamp=metadata.get('timestamp'),
+            timestamp=metadata.get("timestamp"),
             path_index=idx,
-            is_at_path_end=False
+            is_at_path_end=False,
         )
 
     # Process path endpoints (landings and takeoffs)
@@ -302,8 +316,8 @@ def deduplicate_airports(
 
         start_lat, start_lon, start_alt = path[0][0], path[0][1], path[0][2]
         end_lat, end_lon, end_alt = path[-1][0], path[-1][1], path[-1][2]
-        route_name = all_path_metadata[idx].get('airport_name', '')
-        route_timestamp = all_path_metadata[idx].get('timestamp')
+        route_name = all_path_metadata[idx].get("airport_name", "")
+        route_timestamp = all_path_metadata[idx].get("timestamp")
 
         # Skip if not a proper route name
         if is_point_marker(route_name):
@@ -315,27 +329,31 @@ def deduplicate_airports(
             logger.debug(f"Path '{route_name}' detected as mid-flight start")
 
         # Process departure airport (if not high altitude start and is a route)
-        if not starts_at_high_altitude and ' - ' in route_name:
+        if not starts_at_high_altitude and " - " in route_name:
             deduplicator.add_or_update_airport(
                 lat=start_lat,
                 lon=start_lon,
                 name=route_name,
                 timestamp=route_timestamp,
                 path_index=idx,
-                is_at_path_end=False
+                is_at_path_end=False,
             )
-            logger.debug(f"Processed departure airport for '{route_name}' at {start_alt:.0f}m altitude")
+            logger.debug(
+                f"Processed departure airport for '{route_name}' at {start_alt:.0f}m altitude"
+            )
 
         # Process landing airport (if valid landing and is a route)
-        if ' - ' in route_name and is_valid_landing_func(path, end_alt):
+        if " - " in route_name and is_valid_landing_func(path, end_alt):
             deduplicator.add_or_update_airport(
                 lat=end_lat,
                 lon=end_lon,
                 name=route_name,
                 timestamp=route_timestamp if not starts_at_high_altitude else None,
                 path_index=idx,
-                is_at_path_end=True
+                is_at_path_end=True,
             )
-            logger.debug(f"Processed arrival airport for '{route_name}' at {end_alt:.0f}m altitude")
+            logger.debug(
+                f"Processed arrival airport for '{route_name}' at {end_alt:.0f}m altitude"
+            )
 
     return deduplicator.get_unique_airports()

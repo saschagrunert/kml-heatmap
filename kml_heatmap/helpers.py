@@ -59,10 +59,10 @@ from typing import Optional, Tuple
 from .constants import SECONDS_PER_HOUR
 
 __all__ = [
-    'parse_iso_timestamp',
-    'calculate_duration_seconds',
-    'format_flight_time',
-    'parse_coordinates_from_string',
+    "parse_iso_timestamp",
+    "calculate_duration_seconds",
+    "format_flight_time",
+    "parse_coordinates_from_string",
 ]
 
 
@@ -76,16 +76,18 @@ def parse_iso_timestamp(timestamp_str: str) -> Optional[datetime]:
     Returns:
         datetime object or None if parsing fails
     """
-    if not timestamp_str or 'T' not in timestamp_str:
+    if not timestamp_str or "T" not in timestamp_str:
         return None
 
     try:
-        return datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
 
 
-def calculate_duration_seconds(start_timestamp: Optional[str], end_timestamp: Optional[str]) -> float:
+def calculate_duration_seconds(
+    start_timestamp: Optional[str], end_timestamp: Optional[str]
+) -> float:
     """
     Calculate duration in seconds between two ISO timestamp strings.
 
@@ -129,7 +131,9 @@ def format_flight_time(seconds: float) -> str:
     return f"{minutes}m"
 
 
-def parse_coordinates_from_string(coord_str: str) -> Optional[Tuple[float, float, Optional[float]]]:
+def parse_coordinates_from_string(
+    coord_str: str,
+) -> Optional[Tuple[float, float, Optional[float]]]:
     """
     Parse coordinate string in KML format.
 
@@ -142,7 +146,7 @@ def parse_coordinates_from_string(coord_str: str) -> Optional[Tuple[float, float
     if not coord_str:
         return None
 
-    parts = coord_str.strip().split(',')
+    parts = coord_str.strip().split(",")
     if len(parts) < 2:
         return None
 

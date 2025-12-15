@@ -80,9 +80,9 @@ For more information, see README.md
 def main():
     """Main CLI entry point."""
     # Check for help flag first
-    if len(sys.argv) < 2 or '--help' in sys.argv or '-h' in sys.argv:
+    if len(sys.argv) < 2 or "--help" in sys.argv or "-h" in sys.argv:
         print_help()
-        sys.exit(0 if '--help' in sys.argv or '-h' in sys.argv else 1)
+        sys.exit(0 if "--help" in sys.argv or "-h" in sys.argv else 1)
 
     # Parse arguments
     kml_files = []
@@ -92,20 +92,20 @@ def main():
     while i < len(sys.argv):
         arg = sys.argv[i]
 
-        if arg == '--help' or arg == '-h':
+        if arg == "--help" or arg == "-h":
             print_help()
             sys.exit(0)
-        elif arg == '--debug':
+        elif arg == "--debug":
             set_debug_mode(True)
             i += 1
-        elif arg == '--output-dir':
+        elif arg == "--output-dir":
             if i + 1 < len(sys.argv):
                 output_dir = sys.argv[i + 1]
                 i += 2
             else:
                 print("Error: --output-dir requires a directory name")
                 sys.exit(1)
-        elif arg.startswith('--'):
+        elif arg.startswith("--"):
             logger.error(f"Unknown option: {arg}")
             sys.exit(1)
         else:
@@ -114,12 +114,14 @@ def main():
                 # Add all .kml files from directory (sorted for deterministic output)
                 dir_kml_files = []
                 for filename in sorted(os.listdir(arg)):
-                    if filename.lower().endswith('.kml'):
+                    if filename.lower().endswith(".kml"):
                         dir_kml_files.append(os.path.join(arg, filename))
 
                 if dir_kml_files:
                     kml_files.extend(dir_kml_files)
-                    logger.info(f"Found {len(dir_kml_files)} KML file(s) in directory: {arg}")
+                    logger.info(
+                        f"Found {len(dir_kml_files)} KML file(s) in directory: {arg}"
+                    )
                 else:
                     logger.warning(f"No KML files found in directory: {arg}")
             elif os.path.isfile(arg):
@@ -132,7 +134,7 @@ def main():
         print("Error: No KML files specified or found!")
         sys.exit(1)
 
-    print(f"\nKML Heatmap Generator")
+    print("\nKML Heatmap Generator")
     print(f"{'=' * 50}\n")
 
     # Ensure output directory exists
@@ -145,7 +147,6 @@ def main():
     # For now, call the original create_progressive_heatmap from the monolithic script
     # This will be replaced once renderer is fully implemented
     # Import the original function
-    import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from kml_heatmap_original import create_progressive_heatmap as original_create
 

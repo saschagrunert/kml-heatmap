@@ -18,14 +18,13 @@ Usage:
         pass
 """
 
-from typing import Any, Callable, List, Dict, Optional, TypeVar, Union
+from typing import Any, Callable, List, Dict, TypeVar, Union
 from pathlib import Path
-from functools import wraps
 
 from .exceptions import ConfigurationError, InvalidCoordinateError, InvalidAltitudeError
 from .constants import LAT_MIN, LAT_MAX, LON_MIN, LON_MAX, ALT_MIN_M, ALT_MAX_M
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 def validate_latitude(lat: float, context: str = "") -> None:
@@ -40,15 +39,11 @@ def validate_latitude(lat: float, context: str = "") -> None:
         InvalidCoordinateError: If latitude is out of range
     """
     if not isinstance(lat, (int, float)):
-        raise InvalidCoordinateError(
-            f"Latitude must be numeric{context}",
-            latitude=lat
-        )
+        raise InvalidCoordinateError(f"Latitude must be numeric{context}", latitude=lat)
 
     if not (LAT_MIN <= lat <= LAT_MAX):
         raise InvalidCoordinateError(
-            f"Latitude out of range [{LAT_MIN}, {LAT_MAX}]{context}",
-            latitude=lat
+            f"Latitude out of range [{LAT_MIN}, {LAT_MAX}]{context}", latitude=lat
         )
 
 
@@ -65,14 +60,12 @@ def validate_longitude(lon: float, context: str = "") -> None:
     """
     if not isinstance(lon, (int, float)):
         raise InvalidCoordinateError(
-            f"Longitude must be numeric{context}",
-            longitude=lon
+            f"Longitude must be numeric{context}", longitude=lon
         )
 
     if not (LON_MIN <= lon <= LON_MAX):
         raise InvalidCoordinateError(
-            f"Longitude out of range [{LON_MIN}, {LON_MAX}]{context}",
-            longitude=lon
+            f"Longitude out of range [{LON_MIN}, {LON_MAX}]{context}", longitude=lon
         )
 
 
@@ -88,15 +81,11 @@ def validate_altitude(alt: float, context: str = "") -> None:
         InvalidAltitudeError: If altitude is out of range
     """
     if not isinstance(alt, (int, float)):
-        raise InvalidAltitudeError(
-            f"Altitude must be numeric{context}",
-            altitude=alt
-        )
+        raise InvalidAltitudeError(f"Altitude must be numeric{context}", altitude=alt)
 
     if not (ALT_MIN_M <= alt <= ALT_MAX_M):
         raise InvalidAltitudeError(
-            f"Altitude out of range [{ALT_MIN_M}, {ALT_MAX_M}]m{context}",
-            altitude=alt
+            f"Altitude out of range [{ALT_MIN_M}, {ALT_MAX_M}]m{context}", altitude=alt
         )
 
 
@@ -173,7 +162,7 @@ def validate_in_range(
     value: Union[int, float],
     min_val: Union[int, float],
     max_val: Union[int, float],
-    name: str = "value"
+    name: str = "value",
 ) -> None:
     """
     Validate that a number is within a range.
@@ -237,12 +226,7 @@ class ValidationContext:
             raise ConfigurationError(error_msg)
         return False
 
-    def validate(
-        self,
-        value: Any,
-        validator: Callable[[Any], None],
-        name: str
-    ) -> None:
+    def validate(self, value: Any, validator: Callable[[Any], None], name: str) -> None:
         """
         Run a validator and collect any errors.
 

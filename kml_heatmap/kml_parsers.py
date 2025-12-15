@@ -16,19 +16,16 @@ Each parser is designed to:
 """
 
 from typing import List, Dict, Any, Optional, Tuple
-from pathlib import Path
-from datetime import datetime
 
 from .logger import logger
 from .constants import LAT_MIN, LAT_MAX, LON_MIN, LON_MAX, ALT_MIN_M, ALT_MAX_M
 from .helpers import parse_iso_timestamp
-from .exceptions import KMLParseError
 
 __all__ = [
-    'validate_coordinate',
-    'validate_and_normalize_coordinate',
-    'parse_coordinate_string',
-    'parse_gx_coordinate_string',
+    "validate_coordinate",
+    "validate_and_normalize_coordinate",
+    "parse_coordinate_string",
+    "parse_gx_coordinate_string",
 ]
 
 # Pre-computed validation ranges
@@ -37,7 +34,9 @@ LON_RANGE = (LON_MIN, LON_MAX)
 ALT_RANGE = (ALT_MIN_M, ALT_MAX_M)
 
 
-def validate_coordinate(lat: float, lon: float, alt: Optional[float], filename: str) -> bool:
+def validate_coordinate(
+    lat: float, lon: float, alt: Optional[float], filename: str
+) -> bool:
     """
     Validate a single coordinate point.
 
@@ -50,7 +49,9 @@ def validate_coordinate(lat: float, lon: float, alt: Optional[float], filename: 
     Returns:
         True if valid, False otherwise
     """
-    if not (LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]):
+    if not (
+        LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]
+    ):
         logger.debug(f"Invalid coordinates [{lat}, {lon}] in {filename}")
         return False
 
@@ -62,10 +63,7 @@ def validate_coordinate(lat: float, lon: float, alt: Optional[float], filename: 
 
 
 def validate_and_normalize_coordinate(
-    lat: float,
-    lon: float,
-    alt: Optional[float],
-    filename: str
+    lat: float, lon: float, alt: Optional[float], filename: str
 ) -> Optional[Tuple[float, float, Optional[float]]]:
     """
     Validate and normalize a coordinate point.
@@ -91,7 +89,9 @@ def validate_and_normalize_coordinate(
         (50.0, 8.0, 0.0)  # Negative altitude clamped to 0
     """
     # Validate latitude and longitude
-    if not (LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]):
+    if not (
+        LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]
+    ):
         logger.debug(f"Invalid coordinates [{lat}, {lon}] in {filename}")
         return None
 
@@ -108,7 +108,9 @@ def validate_and_normalize_coordinate(
     return (lat, lon, normalized_alt)
 
 
-def parse_coordinate_string(coord_str: str) -> Optional[Tuple[float, float, Optional[float]]]:
+def parse_coordinate_string(
+    coord_str: str,
+) -> Optional[Tuple[float, float, Optional[float]]]:
     """
     Parse KML coordinate string (lon,lat,alt or lon,lat).
 
@@ -118,7 +120,7 @@ def parse_coordinate_string(coord_str: str) -> Optional[Tuple[float, float, Opti
     Returns:
         Tuple of (lat, lon, alt) or None if parsing fails
     """
-    parts = coord_str.split(',')
+    parts = coord_str.split(",")
     if len(parts) < 2:
         return None
 
@@ -131,7 +133,9 @@ def parse_coordinate_string(coord_str: str) -> Optional[Tuple[float, float, Opti
         return None
 
 
-def parse_gx_coordinate_string(coord_str: str) -> Optional[Tuple[float, float, Optional[float]]]:
+def parse_gx_coordinate_string(
+    coord_str: str,
+) -> Optional[Tuple[float, float, Optional[float]]]:
     """
     Parse gx:coord string (lon lat alt - space-separated).
 
@@ -166,14 +170,16 @@ class PlacemarkMetadata:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format."""
         return {
-            'airport_name': self.name,
-            'timestamp': self.timestamp,
-            'end_timestamp': self.end_timestamp,
-            'year': self.year
+            "airport_name": self.name,
+            "timestamp": self.timestamp,
+            "end_timestamp": self.end_timestamp,
+            "year": self.year,
         }
 
 
-def extract_placemark_metadata(placemark, namespaces: Dict[str, str]) -> PlacemarkMetadata:
+def extract_placemark_metadata(
+    placemark, namespaces: Dict[str, str]
+) -> PlacemarkMetadata:
     """
     Extract metadata from a Placemark element.
 
@@ -187,22 +193,22 @@ def extract_placemark_metadata(placemark, namespaces: Dict[str, str]) -> Placema
     metadata = PlacemarkMetadata()
 
     # Extract name
-    name_elem = placemark.find('.//kml:name', namespaces)
+    name_elem = placemark.find(".//kml:name", namespaces)
     if name_elem is None:
-        name_elem = placemark.find('.//name')
+        name_elem = placemark.find(".//name")
     if name_elem is not None and name_elem.text:
         metadata.name = name_elem.text.strip()
 
     # Extract timestamps
-    time_elems = placemark.findall('.//kml:when', namespaces)
+    time_elems = placemark.findall(".//kml:when", namespaces)
     if not time_elems:
-        time_elems = placemark.findall('.//when')
+        time_elems = placemark.findall(".//when")
 
     # Also try TimeStamp element
     if not time_elems:
-        time_elem = placemark.find('.//kml:TimeStamp/kml:when', namespaces)
+        time_elem = placemark.find(".//kml:TimeStamp/kml:when", namespaces)
         if time_elem is None:
-            time_elem = placemark.find('.//TimeStamp/when')
+            time_elem = placemark.find(".//TimeStamp/when")
         if time_elem is not None:
             time_elems = [time_elem]
 
@@ -222,9 +228,7 @@ def extract_placemark_metadata(placemark, namespaces: Dict[str, str]) -> Placema
 
 
 def parse_standard_coordinates(
-    coord_elem,
-    metadata: PlacemarkMetadata,
-    filename: str
+    coord_elem, metadata: PlacemarkMetadata, filename: str
 ) -> Tuple[List[List[float]], List[List[float]]]:
     """
     Parse standard KML <coordinates> element.
@@ -279,9 +283,7 @@ def parse_standard_coordinates(
 
 
 def parse_gx_track_coordinates(
-    placemark,
-    namespaces: Dict[str, str],
-    filename: str
+    placemark, namespaces: Dict[str, str], filename: str
 ) -> Tuple[List[List[float]], List[List[float]], PlacemarkMetadata]:
     """
     Parse Google Earth Track (gx:Track) format.
@@ -297,9 +299,9 @@ def parse_gx_track_coordinates(
         Tuple of (coordinates_2d, coordinates_3d, metadata)
     """
     # Find gx:coord elements
-    gx_coords = placemark.findall('.//gx:coord', namespaces)
+    gx_coords = placemark.findall(".//gx:coord", namespaces)
     if not gx_coords:
-        gx_coords = placemark.findall('.//coord')
+        gx_coords = placemark.findall(".//coord")
 
     if not gx_coords:
         return [], [], PlacemarkMetadata()
@@ -308,9 +310,9 @@ def parse_gx_track_coordinates(
     metadata = extract_placemark_metadata(placemark, namespaces)
 
     # Get corresponding when elements
-    when_elems = placemark.findall('.//kml:when', namespaces)
+    when_elems = placemark.findall(".//kml:when", namespaces)
     if not when_elems:
-        when_elems = placemark.findall('.//when')
+        when_elems = placemark.findall(".//when")
 
     coordinates_2d = []
     coordinates_3d = []
@@ -362,5 +364,5 @@ def remove_xml_namespaces(root):
         root: XML root element
     """
     for elem in root.iter():
-        if '}' in elem.tag:
-            elem.tag = elem.tag.split('}', 1)[1]
+        if "}" in elem.tag:
+            elem.tag = elem.tag.split("}", 1)[1]

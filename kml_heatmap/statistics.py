@@ -1,6 +1,5 @@
 """Statistics calculation for flight data."""
 
-from datetime import datetime
 from typing import List, Dict, Optional, Any, Tuple
 from .geometry import haversine_distance
 from .aircraft import lookup_aircraft_model
@@ -10,12 +9,12 @@ from .helpers import parse_iso_timestamp, format_flight_time
 from .logger import logger
 
 __all__ = [
-    'calculate_statistics',
-    'calculate_basic_stats',
-    'calculate_altitude_stats',
-    'calculate_flight_time',
-    'aggregate_aircraft_stats',
-    'extract_timestamps_from_path',
+    "calculate_statistics",
+    "calculate_basic_stats",
+    "calculate_altitude_stats",
+    "calculate_flight_time",
+    "aggregate_aircraft_stats",
+    "extract_timestamps_from_path",
 ]
 
 
@@ -72,12 +71,14 @@ def calculate_basic_stats(valid_paths: List[List[List[float]]]) -> Dict[str, flo
                 total_gain_m += alt_change
 
     return {
-        'total_distance_km': total_distance_km,
-        'total_altitude_gain_m': total_gain_m
+        "total_distance_km": total_distance_km,
+        "total_altitude_gain_m": total_gain_m,
     }
 
 
-def calculate_altitude_stats(valid_paths: List[List[List[float]]]) -> Dict[str, Optional[float]]:
+def calculate_altitude_stats(
+    valid_paths: List[List[List[float]]],
+) -> Dict[str, Optional[float]]:
     """
     Calculate altitude statistics from valid paths.
 
@@ -92,20 +93,20 @@ def calculate_altitude_stats(valid_paths: List[List[List[float]]]) -> Dict[str, 
 
     if not all_altitudes:
         return {
-            'min_altitude_m': None,
-            'max_altitude_m': None,
-            'min_altitude_ft': None,
-            'max_altitude_ft': None
+            "min_altitude_m": None,
+            "max_altitude_m": None,
+            "min_altitude_ft": None,
+            "max_altitude_ft": None,
         }
 
     min_alt_m = min(all_altitudes)
     max_alt_m = max(all_altitudes)
 
     return {
-        'min_altitude_m': min_alt_m,
-        'max_altitude_m': max_alt_m,
-        'min_altitude_ft': min_alt_m * METERS_TO_FEET,
-        'max_altitude_ft': max_alt_m * METERS_TO_FEET
+        "min_altitude_m": min_alt_m,
+        "max_altitude_m": max_alt_m,
+        "min_altitude_ft": min_alt_m * METERS_TO_FEET,
+        "max_altitude_ft": max_alt_m * METERS_TO_FEET,
     }
 
 
@@ -135,13 +136,13 @@ def calculate_flight_time(valid_paths: List[List[List[float]]]) -> Dict[str, Any
                 paths_with_timestamps += 1
 
     return {
-        'total_seconds': total_seconds,
-        'paths_with_timestamps': paths_with_timestamps
+        "total_seconds": total_seconds,
+        "paths_with_timestamps": paths_with_timestamps,
     }
 
 
 def _build_aircraft_flights_map(
-    all_path_metadata: List[Dict[str, Any]]
+    all_path_metadata: List[Dict[str, Any]],
 ) -> Tuple[Dict[str, Dict[str, Any]], Dict[int, str], set, set]:
     """
     Build aircraft flights mapping from metadata.
@@ -158,24 +159,24 @@ def _build_aircraft_flights_map(
     path_to_aircraft = {}
 
     for idx, metadata in enumerate(all_path_metadata):
-        reg = metadata.get('aircraft_registration')
-        atype = metadata.get('aircraft_type')
-        filename = metadata.get('filename')
+        reg = metadata.get("aircraft_registration")
+        atype = metadata.get("aircraft_type")
+        filename = metadata.get("filename")
 
         if reg:
             aircraft_registrations.add(reg)
             if reg not in aircraft_flights:
                 aircraft_flights[reg] = {
-                    'type': atype,
-                    'count': 0,
-                    'files': set(),
-                    'flight_time_seconds': 0
+                    "type": atype,
+                    "count": 0,
+                    "files": set(),
+                    "flight_time_seconds": 0,
                 }
 
             # Only count unique filenames (each file = one flight)
-            if filename and filename not in aircraft_flights[reg]['files']:
-                aircraft_flights[reg]['files'].add(filename)
-                aircraft_flights[reg]['count'] += 1
+            if filename and filename not in aircraft_flights[reg]["files"]:
+                aircraft_flights[reg]["files"].add(filename)
+                aircraft_flights[reg]["count"] += 1
 
             # Store the mapping for later use
             path_to_aircraft[idx] = reg
@@ -189,7 +190,7 @@ def _build_aircraft_flights_map(
 def _calculate_aircraft_flight_times(
     all_path_groups: List[List[List[float]]],
     path_to_aircraft: Dict[int, str],
-    aircraft_flights: Dict[str, Dict[str, Any]]
+    aircraft_flights: Dict[str, Dict[str, Any]],
 ) -> None:
     """
     Calculate flight times for each aircraft.
@@ -213,11 +214,11 @@ def _calculate_aircraft_flight_times(
             max_time = max(timestamps)
             duration = max_time - min_time
             if duration > 0:
-                aircraft_flights[reg]['flight_time_seconds'] += duration
+                aircraft_flights[reg]["flight_time_seconds"] += duration
 
 
 def _create_aircraft_list_with_models(
-    aircraft_flights: Dict[str, Dict[str, Any]]
+    aircraft_flights: Dict[str, Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """
     Create sorted aircraft list with model lookups.
@@ -231,35 +232,38 @@ def _create_aircraft_list_with_models(
     aircraft_list = []
     logger.info("✈️  Looking up aircraft model information...")
 
-    for reg, info in sorted(aircraft_flights.items(), key=lambda x: x[1]['count'], reverse=True):
+    for reg, info in sorted(
+        aircraft_flights.items(), key=lambda x: x[1]["count"], reverse=True
+    ):
         # Try to lookup full aircraft model
         full_model = lookup_aircraft_model(reg)
         if full_model:
             logger.info(f"  ✓ {reg}: {full_model}")
         else:
-            full_model = info['type']  # Fallback to basic type if lookup fails
+            full_model = info["type"]  # Fallback to basic type if lookup fails
             if full_model:
                 logger.info(f"  ⚠ {reg}: {full_model} (lookup failed, using KML type)")
 
         # Format flight time as human-readable string
-        flight_time_seconds = info['flight_time_seconds']
+        flight_time_seconds = info["flight_time_seconds"]
         flight_time_str = format_flight_time(flight_time_seconds)
 
-        aircraft_list.append({
-            'registration': reg,
-            'type': info['type'],  # Keep original type for backwards compatibility
-            'model': full_model,   # Full model name
-            'flights': info['count'],
-            'flight_time_seconds': flight_time_seconds,
-            'flight_time_str': flight_time_str
-        })
+        aircraft_list.append(
+            {
+                "registration": reg,
+                "type": info["type"],  # Keep original type for backwards compatibility
+                "model": full_model,  # Full model name
+                "flights": info["count"],
+                "flight_time_seconds": flight_time_seconds,
+                "flight_time_str": flight_time_str,
+            }
+        )
 
     return aircraft_list
 
 
 def aggregate_aircraft_stats(
-    all_path_metadata: List[Dict[str, Any]],
-    all_path_groups: List[List[List[float]]]
+    all_path_metadata: List[Dict[str, Any]], all_path_groups: List[List[List[float]]]
 ) -> Dict[str, Any]:
     """
     Aggregate aircraft statistics from metadata and paths.
@@ -272,26 +276,29 @@ def aggregate_aircraft_stats(
         Dict with num_aircraft, aircraft_types, and aircraft_list
     """
     # Build aircraft flights map
-    aircraft_flights, path_to_aircraft, aircraft_registrations, aircraft_types = \
+    aircraft_flights, path_to_aircraft, aircraft_registrations, aircraft_types = (
         _build_aircraft_flights_map(all_path_metadata)
+    )
 
     # Calculate flight times per aircraft
-    _calculate_aircraft_flight_times(all_path_groups, path_to_aircraft, aircraft_flights)
+    _calculate_aircraft_flight_times(
+        all_path_groups, path_to_aircraft, aircraft_flights
+    )
 
     # Create aircraft list with model lookups
     aircraft_list = _create_aircraft_list_with_models(aircraft_flights)
 
     return {
-        'num_aircraft': len(aircraft_registrations),
-        'aircraft_types': sorted(aircraft_types),
-        'aircraft_list': aircraft_list
+        "num_aircraft": len(aircraft_registrations),
+        "aircraft_types": sorted(aircraft_types),
+        "aircraft_list": aircraft_list,
     }
 
 
 def calculate_statistics(
     all_coordinates: List[List[float]],
     all_path_groups: List[List[List[float]]],
-    all_path_metadata: Optional[List[Dict[str, Any]]] = None
+    all_path_metadata: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Calculate statistics from coordinate and path data.
@@ -318,8 +325,9 @@ def calculate_statistics(
     num_flight_paths = 0
     if all_path_metadata:
         num_flight_paths = sum(
-            1 for metadata in all_path_metadata
-            if not is_point_marker(metadata.get('airport_name', ''))
+            1
+            for metadata in all_path_metadata
+            if not is_point_marker(metadata.get("airport_name", ""))
         )
     else:
         # Fallback if no metadata available
@@ -327,20 +335,20 @@ def calculate_statistics(
 
     # Initialize base stats
     stats = {
-        'total_points': len(all_coordinates),
-        'num_paths': num_flight_paths,
-        'total_distance_km': 0.0,
-        'total_distance_nm': 0.0,
-        'total_altitude_gain_m': 0.0,
-        'total_altitude_gain_ft': 0.0,
-        'min_altitude_m': None,
-        'max_altitude_m': None,
-        'min_altitude_ft': None,
-        'max_altitude_ft': None,
-        'total_flight_time_seconds': 0,
-        'total_flight_time_str': None,
-        'average_groundspeed_knots': 0,
-        'max_groundspeed_knots': 0,  # Will be added later from path segments
+        "total_points": len(all_coordinates),
+        "num_paths": num_flight_paths,
+        "total_distance_km": 0.0,
+        "total_distance_nm": 0.0,
+        "total_altitude_gain_m": 0.0,
+        "total_altitude_gain_ft": 0.0,
+        "min_altitude_m": None,
+        "max_altitude_m": None,
+        "min_altitude_ft": None,
+        "max_altitude_ft": None,
+        "total_flight_time_seconds": 0,
+        "total_flight_time_str": None,
+        "average_groundspeed_knots": 0,
+        "max_groundspeed_knots": 0,  # Will be added later from path segments
     }
 
     if not all_path_groups:
@@ -353,10 +361,12 @@ def calculate_statistics(
 
     # Calculate basic distance and altitude gain statistics
     basic_stats = calculate_basic_stats(valid_paths)
-    stats['total_distance_km'] = basic_stats['total_distance_km']
-    stats['total_distance_nm'] = basic_stats['total_distance_km'] * KM_TO_NAUTICAL_MILES
-    stats['total_altitude_gain_m'] = basic_stats['total_altitude_gain_m']
-    stats['total_altitude_gain_ft'] = basic_stats['total_altitude_gain_m'] * METERS_TO_FEET
+    stats["total_distance_km"] = basic_stats["total_distance_km"]
+    stats["total_distance_nm"] = basic_stats["total_distance_km"] * KM_TO_NAUTICAL_MILES
+    stats["total_altitude_gain_m"] = basic_stats["total_altitude_gain_m"]
+    stats["total_altitude_gain_ft"] = (
+        basic_stats["total_altitude_gain_m"] * METERS_TO_FEET
+    )
 
     # Calculate altitude statistics
     altitude_stats = calculate_altitude_stats(valid_paths)
@@ -364,17 +374,20 @@ def calculate_statistics(
 
     # Calculate flight time statistics
     time_stats = calculate_flight_time(valid_paths)
-    stats['total_flight_time_seconds'] = time_stats['total_seconds']
-    stats['total_flight_time_str'] = format_flight_time(time_stats['total_seconds'])
+    stats["total_flight_time_seconds"] = time_stats["total_seconds"]
+    stats["total_flight_time_str"] = format_flight_time(time_stats["total_seconds"])
 
     # Debug output
-    if time_stats['paths_with_timestamps'] > 0:
-        logger.debug(f"Calculated flight time from {time_stats['paths_with_timestamps']}/{len(valid_paths)} paths with timestamps")
+    if time_stats["paths_with_timestamps"] > 0:
+        logger.debug(
+            f"Calculated flight time from {time_stats['paths_with_timestamps']}/{len(valid_paths)} "
+            f"paths with timestamps"
+        )
 
     # Calculate average groundspeed
-    if stats['total_flight_time_seconds'] > 0 and stats['total_distance_nm'] > 0:
-        hours = stats['total_flight_time_seconds'] / SECONDS_PER_HOUR
-        stats['average_groundspeed_knots'] = stats['total_distance_nm'] / hours
+    if stats["total_flight_time_seconds"] > 0 and stats["total_distance_nm"] > 0:
+        hours = stats["total_flight_time_seconds"] / SECONDS_PER_HOUR
+        stats["average_groundspeed_knots"] = stats["total_distance_nm"] / hours
 
     # Aggregate aircraft statistics
     if all_path_metadata:
