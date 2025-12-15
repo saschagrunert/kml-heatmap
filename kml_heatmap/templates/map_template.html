@@ -1,138 +1,267 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
-    <meta name="theme-color" content="#1a1a1a">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="KML Heatmap">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"
+    />
+    <meta name="theme-color" content="#1a1a1a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="KML Heatmap" />
     <title>KML Heatmap</title>
-    <link rel="icon" href="./favicon.ico" sizes="any">
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg">
-    <link rel="icon" type="image/png" sizes="192x192" href="./favicon-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="./favicon-512.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="https://saschagrunert.github.io/kml-heatmap/apple-touch-icon.png">
-    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="https://saschagrunert.github.io/kml-heatmap/apple-touch-icon.png">
-    <link rel="manifest" href="./manifest.json">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.css" />
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="192x192"
+      href="./favicon-192.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="512x512"
+      href="./favicon-512.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="https://saschagrunert.github.io/kml-heatmap/apple-touch-icon.png"
+    />
+    <link
+      rel="apple-touch-icon-precomposed"
+      sizes="180x180"
+      href="https://saschagrunert.github.io/kml-heatmap/apple-touch-icon.png"
+    />
+    <link rel="manifest" href="./manifest.json" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.css"
+    />
     <link rel="stylesheet" href="./styles.css" />
-</head>
-<body>
+  </head>
+  <body>
     <div id="map"></div>
     <!-- Hide buttons toggle (top-center) -->
-    <button id="hide-buttons-btn" class="control-btn hide-toggle" onclick="toggleButtonsVisibility()">🔼</button>
+    <button
+      id="hide-buttons-btn"
+      class="control-btn hide-toggle"
+      onclick="toggleButtonsVisibility()"
+    >
+      🔼
+    </button>
 
     <!-- Left side buttons -->
-    <button id="stats-btn" class="control-btn left toggleable-btn" onclick="toggleStats()">📊 Stats</button>
-    <button id="export-btn" class="control-btn left toggleable-btn" onclick="exportMap()">📷 Export</button>
-    <button id="wrapped-btn" class="control-btn left toggleable-btn" onclick="showWrapped()">✨ Wrapped</button>
-    <button id="replay-btn" class="control-btn left toggleable-btn" onclick="toggleReplay()" style="opacity: 0.5;">▶️ Replay</button>
+    <button
+      id="stats-btn"
+      class="control-btn left toggleable-btn"
+      onclick="toggleStats()"
+    >
+      📊 Stats
+    </button>
+    <button
+      id="export-btn"
+      class="control-btn left toggleable-btn"
+      onclick="exportMap()"
+    >
+      📷 Export
+    </button>
+    <button
+      id="wrapped-btn"
+      class="control-btn left toggleable-btn"
+      onclick="showWrapped()"
+    >
+      ✨ Wrapped
+    </button>
+    <button
+      id="replay-btn"
+      class="control-btn left toggleable-btn"
+      onclick="toggleReplay()"
+      style="opacity: 0.5"
+    >
+      ▶️ Replay
+    </button>
 
     <!-- Right side buttons -->
-    <button id="heatmap-btn" class="control-btn right toggleable-btn" onclick="toggleHeatmap()">🔥 Heatmap</button>
-    <button id="airports-btn" class="control-btn right toggleable-btn" onclick="toggleAirports()">🏢 Airports</button>
-    <button id="altitude-btn" class="control-btn right toggleable-btn" onclick="toggleAltitude()">⛰️ Altitude</button>
-    <button id="airspeed-btn" class="control-btn right toggleable-btn" onclick="toggleAirspeed()">🚀 Speed</button>
-    <button id="aviation-btn" class="control-btn right toggleable-btn" onclick="toggleAviation()" style="display: none;">🗺️ Aviation</button>
+    <button
+      id="heatmap-btn"
+      class="control-btn right toggleable-btn"
+      onclick="toggleHeatmap()"
+    >
+      🔥 Heatmap
+    </button>
+    <button
+      id="airports-btn"
+      class="control-btn right toggleable-btn"
+      onclick="toggleAirports()"
+    >
+      🏢 Airports
+    </button>
+    <button
+      id="altitude-btn"
+      class="control-btn right toggleable-btn"
+      onclick="toggleAltitude()"
+    >
+      ⛰️ Altitude
+    </button>
+    <button
+      id="airspeed-btn"
+      class="control-btn right toggleable-btn"
+      onclick="toggleAirspeed()"
+    >
+      🚀 Speed
+    </button>
+    <button
+      id="aviation-btn"
+      class="control-btn right toggleable-btn"
+      onclick="toggleAviation()"
+      style="display: none"
+    >
+      🗺️ Aviation
+    </button>
     <div id="year-filter" class="control-btn right toggleable-btn">
-        <select id="year-select" onchange="filterByYear()">
-            <option value="all">📅 Years</option>
-        </select>
+      <select id="year-select" onchange="filterByYear()">
+        <option value="all">📅 Years</option>
+      </select>
     </div>
 
     <div id="aircraft-filter" class="control-btn right toggleable-btn">
-        <select id="aircraft-select" onchange="filterByAircraft()">
-            <option value="all">✈️ Aircraft</option>
-        </select>
+      <select id="aircraft-select" onchange="filterByAircraft()">
+        <option value="all">✈️ Aircraft</option>
+      </select>
     </div>
 
     <div id="stats-panel"></div>
     <div id="altitude-legend">
-        <div class="legend-title">⛰️ Altitude</div>
-        <div class="gradient-bar"></div>
-        <div class="labels">
-            <span id="legend-min">0 ft</span>
-            <span id="legend-max">10,000 ft</span>
-        </div>
+      <div class="legend-title">⛰️ Altitude</div>
+      <div class="gradient-bar"></div>
+      <div class="labels">
+        <span id="legend-min">0 ft</span>
+        <span id="legend-max">10,000 ft</span>
+      </div>
     </div>
     <div id="airspeed-legend">
-        <div class="legend-title">🚀 Groundspeed</div>
-        <div class="gradient-bar"></div>
-        <div class="labels">
-            <span id="airspeed-legend-min">0 kt</span>
-            <span id="airspeed-legend-max">200 kt</span>
-        </div>
+      <div class="legend-title">🚀 Groundspeed</div>
+      <div class="gradient-bar"></div>
+      <div class="labels">
+        <span id="airspeed-legend-min">0 kt</span>
+        <span id="airspeed-legend-max">200 kt</span>
+      </div>
     </div>
     <div id="loading">⏳ Loading data…</div>
 
     <!-- Replay Controls -->
     <div id="replay-controls">
-        <div id="replay-controls-inner">
-            <div id="replay-buttons">
-                <button id="replay-play-btn" class="replay-btn" onclick="playReplay()">▶️</button>
-                <button id="replay-pause-btn" class="replay-btn" onclick="pauseReplay()" style="display:none">⏸️</button>
-                <button id="replay-stop-btn" class="replay-btn" onclick="stopReplay()">⏹️</button>
-                <div id="replay-time-display">00:00 / 00:00</div>
-                <select id="replay-speed" class="replay-btn" onchange="changeReplaySpeed()">
-                    <option value="10">10x</option>
-                    <option value="25">25x</option>
-                    <option value="50" selected>50x</option>
-                    <option value="100">100x</option>
-                    <option value="200">200x</option>
-                    <option value="500">500x</option>
-                </select>
-                <button id="replay-autozoom-btn" class="replay-btn" onclick="toggleAutoZoom()" title="Auto-zoom based on speed/altitude">🔍</button>
-            </div>
-            <div id="replay-slider-container">
-                <span id="replay-slider-start">0:00</span>
-                <input type="range" id="replay-slider" min="0" max="100" value="0" oninput="seekReplay(this.value)">
-                <span id="replay-slider-end">0:00</span>
-            </div>
+      <div id="replay-controls-inner">
+        <div id="replay-buttons">
+          <button
+            id="replay-play-btn"
+            class="replay-btn"
+            onclick="playReplay()"
+          >
+            ▶️
+          </button>
+          <button
+            id="replay-pause-btn"
+            class="replay-btn"
+            onclick="pauseReplay()"
+            style="display: none"
+          >
+            ⏸️
+          </button>
+          <button
+            id="replay-stop-btn"
+            class="replay-btn"
+            onclick="stopReplay()"
+          >
+            ⏹️
+          </button>
+          <div id="replay-time-display">00:00 / 00:00</div>
+          <select
+            id="replay-speed"
+            class="replay-btn"
+            onchange="changeReplaySpeed()"
+          >
+            <option value="10">10x</option>
+            <option value="25">25x</option>
+            <option value="50" selected>50x</option>
+            <option value="100">100x</option>
+            <option value="200">200x</option>
+            <option value="500">500x</option>
+          </select>
+          <button
+            id="replay-autozoom-btn"
+            class="replay-btn"
+            onclick="toggleAutoZoom()"
+            title="Auto-zoom based on speed/altitude"
+          >
+            🔍
+          </button>
         </div>
+        <div id="replay-slider-container">
+          <span id="replay-slider-start">0:00</span>
+          <input
+            type="range"
+            id="replay-slider"
+            min="0"
+            max="100"
+            value="0"
+            oninput="seekReplay(this.value)"
+          />
+          <span id="replay-slider-end">0:00</span>
+        </div>
+      </div>
     </div>
 
     <!-- Wrapped Card Modal -->
     <div id="wrapped-modal" onclick="closeWrapped(event)">
-        <div id="wrapped-container" onclick="event.stopPropagation()">
-            <div id="wrapped-header">
-                <button class="close-btn" onclick="closeWrapped()">✕ Close</button>
-            </div>
-            <div id="wrapped-content">
-                <!-- Cards column - left side -->
-                <div id="wrapped-cards-column">
-                    <!-- Card 1: Stats -->
-                    <div id="wrapped-card-stats" class="wrapped-square-card">
-                        <h1>✨ Your Year in Flight</h1>
-                        <div class="year" id="wrapped-year">2025</div>
-                        <div class="stat-grid" id="wrapped-stats"></div>
-                    </div>
-
-                    <!-- Card 2: Facts -->
-                    <div id="wrapped-card-facts" class="wrapped-square-card">
-                        <div class="fun-facts" id="wrapped-fun-facts"></div>
-                    </div>
-
-                    <!-- Card 3: Aircraft Fleet -->
-                    <div id="wrapped-card-fleet" class="wrapped-square-card">
-                        <div class="aircraft-fleet" id="wrapped-aircraft-fleet"></div>
-                    </div>
-
-                    <!-- Card 4: Airports -->
-                    <div id="wrapped-card-airports" class="wrapped-square-card">
-                        <div class="top-airports" id="wrapped-top-airports"></div>
-                        <div class="airports-grid" id="wrapped-airports-grid"></div>
-                    </div>
-                </div>
-
-                <!-- Map - right side -->
-                <div id="wrapped-map-container">
-                    <!-- Map will be moved here when wrapped is shown -->
-                </div>
-            </div>
+      <div id="wrapped-container" onclick="event.stopPropagation()">
+        <div id="wrapped-header">
+          <button class="close-btn" onclick="closeWrapped()">✕ Close</button>
         </div>
+        <div id="wrapped-content">
+          <!-- Cards column - left side -->
+          <div id="wrapped-cards-column">
+            <!-- Card 1: Stats -->
+            <div id="wrapped-card-stats" class="wrapped-square-card">
+              <h1>✨ Your Year in Flight</h1>
+              <div class="year" id="wrapped-year">2025</div>
+              <div class="stat-grid" id="wrapped-stats"></div>
+            </div>
+
+            <!-- Card 2: Facts -->
+            <div id="wrapped-card-facts" class="wrapped-square-card">
+              <div class="fun-facts" id="wrapped-fun-facts"></div>
+            </div>
+
+            <!-- Card 3: Aircraft Fleet -->
+            <div id="wrapped-card-fleet" class="wrapped-square-card">
+              <div class="aircraft-fleet" id="wrapped-aircraft-fleet"></div>
+            </div>
+
+            <!-- Card 4: Airports -->
+            <div id="wrapped-card-airports" class="wrapped-square-card">
+              <div class="top-airports" id="wrapped-top-airports"></div>
+              <div class="airports-grid" id="wrapped-airports-grid"></div>
+            </div>
+          </div>
+
+          <!-- Map - right side -->
+          <div id="wrapped-map-container">
+            <!-- Map will be moved here when wrapped is shown -->
+          </div>
+        </div>
+      </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -141,5 +270,5 @@
 
     <!-- Main application JavaScript -->
     <script src="./map.js"></script>
-</body>
+  </body>
 </html>

@@ -1,0 +1,23 @@
+# Test Docker Image for KML Heatmap
+FROM python:3.14-slim
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements
+COPY requirements.txt requirements-test.txt ./
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -r requirements-test.txt
+
+# Copy application code
+COPY kml-heatmap.py .
+COPY kml_heatmap/ ./kml_heatmap/
+COPY pytest.ini .
+
+# Copy tests
+COPY tests/ ./tests/
+
+# Run pytest
+CMD ["pytest"]
