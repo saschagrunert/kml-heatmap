@@ -17,6 +17,7 @@ except ImportError:
 
 from .aircraft import parse_aircraft_from_filename
 from .validation import validate_coordinates, validate_altitude
+from .logger import logger
 
 # Altitude detection thresholds
 MID_FLIGHT_MIN_ALTITUDE = 400  # meters
@@ -25,9 +26,6 @@ LANDING_MAX_VARIATION = 50  # meters
 LANDING_MAX_ALTITUDE = 600  # meters
 PATH_SAMPLE_MAX_SIZE = 50
 PATH_SAMPLE_MIN_SIZE = 5
-
-# Global DEBUG flag (will be set by main script)
-DEBUG = False
 
 # Pre-compiled regex patterns for performance
 DATE_PATTERN = re.compile(r'(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})')
@@ -114,8 +112,7 @@ def save_to_cache(cache_path, coordinates, path_groups, path_metadata):
                 'path_metadata': path_metadata
             }, f)
     except OSError as e:
-        if DEBUG:
-            print(f"  DEBUG: Failed to save cache: {e}")
+        logger.debug(f"Failed to save cache: {e}")
 
 
 def extract_year_from_timestamp(timestamp):
@@ -141,11 +138,9 @@ def extract_year_from_timestamp(timestamp):
         if year_match:
             return int(year_match.group(1))
     except ValueError as e:
-        if DEBUG:
-            print(f"  DEBUG: Could not parse timestamp '{timestamp}': {e}")
+        logger.debug(f"Could not parse timestamp '{timestamp}': {e}")
     except Exception as e:
-        if DEBUG:
-            print(f"  DEBUG: Unexpected error parsing timestamp '{timestamp}': {e}")
+        logger.debug(f"Unexpected error parsing timestamp '{timestamp}': {e}")
 
     return None
 
@@ -203,7 +198,7 @@ def is_mid_flight_start(path, start_alt, debug=False):
     is_mid_flight = start_alt > MID_FLIGHT_MIN_ALTITUDE and sample['variation'] < MID_FLIGHT_MAX_VARIATION
 
     if is_mid_flight and debug:
-        print(f"  DEBUG: Detected mid-flight start at {start_alt:.0f}m (variation: {sample['variation']:.0f}m)")
+        logger.debug(f"Detected mid-flight start at {start_alt:.0f}m (variation: {sample['variation']:.0f}m)")
 
     return is_mid_flight
 
@@ -252,7 +247,7 @@ def parse_kml_coordinates(kml_file):
         cached_result = load_cached_parse(cache_path)
         if cached_result:
             coordinates, path_groups, path_metadata = cached_result
-            print(f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name} (cached)")
+            logger.info(f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name} (cached)")
             if path_groups:
                 total_alt_points = sum(len(path) for path in path_groups)
                 print(f"  ({total_alt_points} points have altitude data in {len(path_groups)} path(s))")
@@ -266,14 +261,13 @@ def parse_kml_coordinates(kml_file):
         tree = ET.parse(kml_file)
         root = tree.getroot()
 
-        if DEBUG:
-            print(f"\n  DEBUG: Root tag: {root.tag}")
-            print(f"  DEBUG: Root attrib: {root.attrib}")
-            all_tags = set()
-            for elem in root.iter():
-                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
-                all_tags.add(tag)
-            print(f"  DEBUG: All unique tags in file: {sorted(all_tags)}")
+        logger.debug(f"\n  Root tag: {root.tag}")
+        logger.debug(f"Root attrib: {root.attrib}")
+        all_tags = set()
+        for elem in root.iter():
+            tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+            all_tags.add(tag)
+        logger.debug(f"All unique tags in file: {sorted(all_tags)}")
 
         # KML uses XML namespaces
         namespaces = {
@@ -287,8 +281,8 @@ def parse_kml_coordinates(kml_file):
         # Also try to find gx:coord elements (Google Earth Track extension)
         gx_coords = root.findall('.//gx:coord', namespaces)
 
-        if DEBUG and gx_coords:
-            print(f"  DEBUG: Found {len(gx_coords)} gx:coord elements (Google Earth Track)")
+        if gx_coords:
+            logger.debug(f"Found {len(gx_coords)} gx:coord elements (Google Earth Track)")
 
         # If no results, try without namespace (some KML files don't use it)
         if not coord_elements and not gx_coords:
@@ -299,11 +293,10 @@ def parse_kml_coordinates(kml_file):
             coord_elements = root.findall('.//coordinates')
             gx_coords = root.findall('.//coord')  # gx:coord without namespace
 
-        if DEBUG:
-            print(f"  DEBUG: Found {len(coord_elements)} coordinate elements")
-            if coord_elements:
-                for i, elem in enumerate(coord_elements[:2]):  # Show first 2
-                    print(f"  DEBUG: Element {i} text preview: {str(elem.text)[:100] if elem.text else 'None'}")
+        logger.debug(f"Found {len(coord_elements)} coordinate elements")
+        if coord_elements:
+            for i, elem in enumerate(coord_elements[:2]):  # Show first 2
+                logger.debug(f"Element {i} text preview: {str(elem.text)[:100] if elem.text else 'None'}")
 
         # Find all Placemarks to extract name and timestamp information
         placemarks = root.findall('.//kml:Placemark', namespaces)
@@ -364,14 +357,12 @@ def parse_kml_coordinates(kml_file):
         for idx, coord_elem in enumerate(coord_elements):
             # Handle None text
             if coord_elem.text is None:
-                if DEBUG:
-                    print(f"  DEBUG: Coordinate element {idx} has None text, skipping")
+                logger.debug(f"Coordinate element {idx} has None text, skipping")
                 continue
 
             coord_text = coord_elem.text.strip()
             if not coord_text:
-                if DEBUG:
-                    print(f"  DEBUG: Coordinate element {idx} has empty text, skipping")
+                logger.debug(f"Coordinate element {idx} has empty text, skipping")
                 continue
 
             # Get metadata for this coordinate element
@@ -408,14 +399,12 @@ def parse_kml_coordinates(kml_file):
 
                         # Inline validation (faster than function calls)
                         if not (LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]):
-                            if DEBUG:
-                                print(f"  DEBUG: Invalid coordinates [{lat}, {lon}] in {Path(kml_file).name}")
+                            logger.debug(f"Invalid coordinates [{lat}, {lon}] in {Path(kml_file).name}")
                             continue
 
                         # Validate altitude if present
                         if alt is not None and not (ALT_RANGE[0] <= alt <= ALT_RANGE[1]):
-                            if DEBUG:
-                                print(f"  DEBUG: Invalid altitude {alt}m in {Path(kml_file).name}")
+                            logger.debug(f"Invalid altitude {alt}m in {Path(kml_file).name}")
                             alt = None
 
                         # Clamp negative altitudes to 0 (below sea level = 0ft)
@@ -432,8 +421,7 @@ def parse_kml_coordinates(kml_file):
                         element_coords += 1
                     except ValueError as e:
                         # Skip invalid coordinates
-                        if DEBUG:
-                            print(f"  DEBUG: Failed to parse coordinate '{point}': {e}")
+                        logger.debug(f"Failed to parse coordinate '{point}': {e}")
                         continue
 
             # Add this path group to the list if it has coordinates
@@ -455,9 +443,9 @@ def parse_kml_coordinates(kml_file):
                     metadata['aircraft_type'] = aircraft_info.get('type')
                 path_metadata.append(metadata)
 
-            if DEBUG and element_coords > 0:
+            if element_coords > 0:
                 coord_type = "Point" if element_coords == 1 else f"Path ({element_coords} points)"
-                print(f"  DEBUG: Element {idx}: {coord_type}")
+                logger.debug(f"Element {idx}: {coord_type}")
 
         # Parse gx:coord elements (Google Earth Track extension)
         # Format: "lon lat alt" (space-separated instead of comma-separated)
@@ -494,24 +482,21 @@ def parse_kml_coordinates(kml_file):
                         # Get first timestamp (start time)
                         if time_elems[0].text:
                             gx_timestamp = time_elems[0].text.strip()
-                            if DEBUG:
-                                print(f"  DEBUG: Found gx:Track start timestamp: {gx_timestamp}")
+                            logger.debug(f"Found gx:Track start timestamp: {gx_timestamp}")
 
                         # Get last timestamp (end time) if available
                         if len(time_elems) > 1 and time_elems[-1].text:
                             gx_end_timestamp = time_elems[-1].text.strip()
-                            if DEBUG:
-                                print(f"  DEBUG: Found gx:Track end timestamp: {gx_end_timestamp}")
+                            logger.debug(f"Found gx:Track end timestamp: {gx_end_timestamp}")
                     elif gx_airport_name:
                         # Try to extract date from name
                         match = DATE_PATTERN.search(gx_airport_name)
                         if match:
                             gx_timestamp = match.group(1)
-                            if DEBUG:
-                                print(f"  DEBUG: Extracted timestamp from gx:Track name: {gx_timestamp}")
+                            logger.debug(f"Extracted timestamp from gx:Track name: {gx_timestamp}")
 
-                    if DEBUG and gx_timestamp is None:
-                        print(f"  DEBUG: No timestamp found for gx:Track with name: {gx_airport_name}")
+                    if gx_timestamp is None:
+                        logger.debug(f"No timestamp found for gx:Track with name: {gx_airport_name}")
 
                     break
 
@@ -542,14 +527,12 @@ def parse_kml_coordinates(kml_file):
 
                         # Inline validation (faster than function calls)
                         if not (LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]):
-                            if DEBUG:
-                                print(f"  DEBUG: Invalid coordinates [{lat}, {lon}] in {Path(kml_file).name} (gx:Track)")
+                            logger.debug(f"Invalid coordinates [{lat}, {lon}] in {Path(kml_file).name} (gx:Track)")
                             continue
 
                         # Validate altitude if present
                         if alt is not None and not (ALT_RANGE[0] <= alt <= ALT_RANGE[1]):
-                            if DEBUG:
-                                print(f"  DEBUG: Invalid altitude {alt}m in {Path(kml_file).name} (gx:Track)")
+                            logger.debug(f"Invalid altitude {alt}m in {Path(kml_file).name} (gx:Track)")
                             alt = None
 
                         # Get corresponding timestamp
@@ -570,8 +553,7 @@ def parse_kml_coordinates(kml_file):
                             else:
                                 gx_path.append([lat, lon, alt])
                     except ValueError:
-                        if DEBUG:
-                            print(f"  DEBUG: Failed to parse gx:coord: {coord_text}")
+                        logger.debug(f"Failed to parse gx:coord: {coord_text}")
                         continue
 
             # Add gx:Track as a single path group
@@ -593,13 +575,12 @@ def parse_kml_coordinates(kml_file):
                     metadata['aircraft_type'] = aircraft_info.get('type')
                 path_metadata.append(metadata)
 
-            if DEBUG:
-                print(f"  DEBUG: Parsed {len(gx_coords)} gx:coord elements into 1 track")
+            logger.debug(f"Parsed {len(gx_coords)} gx:coord elements into 1 track")
 
         # Count total points with altitude across all path groups
         total_alt_points = sum(len(path) for path in path_groups)
 
-        print(f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name}")
+        logger.info(f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name}")
         if path_groups:
             print(f"  ({total_alt_points} points have altitude data in {len(path_groups)} path(s))")
 

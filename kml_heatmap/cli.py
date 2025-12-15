@@ -2,6 +2,7 @@
 
 import sys
 import os
+from .logger import logger, set_debug_mode
 
 
 def print_help():
@@ -78,11 +79,6 @@ For more information, see README.md
 
 def main():
     """Main CLI entry point."""
-    # Import here to avoid circular imports
-    import kml_heatmap.parser as parser
-
-    global DEBUG
-
     # Check for help flag first
     if len(sys.argv) < 2 or '--help' in sys.argv or '-h' in sys.argv:
         print_help()
@@ -100,8 +96,7 @@ def main():
             print_help()
             sys.exit(0)
         elif arg == '--debug':
-            DEBUG = True
-            parser.DEBUG = True  # Set DEBUG in parser module
+            set_debug_mode(True)
             i += 1
         elif arg == '--output-dir':
             if i + 1 < len(sys.argv):
@@ -111,7 +106,7 @@ def main():
                 print("Error: --output-dir requires a directory name")
                 sys.exit(1)
         elif arg.startswith('--'):
-            print(f"Unknown option: {arg}")
+            logger.error(f"Unknown option: {arg}")
             sys.exit(1)
         else:
             # It's a KML file or directory
@@ -124,13 +119,13 @@ def main():
 
                 if dir_kml_files:
                     kml_files.extend(dir_kml_files)
-                    print(f"Found {len(dir_kml_files)} KML file(s) in directory: {arg}")
+                    logger.info(f"Found {len(dir_kml_files)} KML file(s) in directory: {arg}")
                 else:
-                    print(f"Warning: No KML files found in directory: {arg}")
+                    logger.warning(f"No KML files found in directory: {arg}")
             elif os.path.isfile(arg):
                 kml_files.append(arg)
             else:
-                print(f"Warning: File or directory not found: {arg}")
+                logger.warning(f"File or directory not found: {arg}")
             i += 1
 
     if not kml_files:

@@ -2,15 +2,13 @@
 
 import re
 from .geometry import haversine_distance
+from .logger import logger
 
 # Airport deduplication threshold
 AIRPORT_DISTANCE_THRESHOLD_KM = 1.5
 
 # Marker types to filter out
 POINT_MARKERS = ['Log Start', 'Log Stop', 'Takeoff', 'Landing']
-
-# Global DEBUG flag (will be set by main script)
-DEBUG = False
 
 
 def is_point_marker(name):
@@ -104,15 +102,13 @@ def deduplicate_airports(all_path_metadata, all_path_groups, is_mid_flight_start
 
         # Skip point markers - they don't contain airport info
         if is_point_marker(airport_name):
-            if DEBUG:
-                print(f"  DEBUG: Skipping point marker '{airport_name}'")
+            logger.debug(f"Skipping point marker '{airport_name}'")
             continue
 
         # Skip mid-flight starts
         path = all_path_groups[idx] if idx < len(all_path_groups) else []
-        if is_mid_flight_start_func(path, start_alt, DEBUG):
-            if DEBUG:
-                print(f"  DEBUG: Skipping mid-flight start '{airport_name}'")
+        if is_mid_flight_start_func(path, start_alt):
+            logger.debug(f"Skipping mid-flight start '{airport_name}'")
             continue
 
         # Check for duplicates using spatial grid
@@ -163,9 +159,9 @@ def deduplicate_airports(all_path_metadata, all_path_groups, is_mid_flight_start
             continue
 
         # Check for mid-flight starts
-        starts_at_high_altitude = is_mid_flight_start_func(path, start_alt, DEBUG)
-        if starts_at_high_altitude and DEBUG:
-            print(f"  DEBUG: Path '{route_name}' detected as mid-flight start")
+        starts_at_high_altitude = is_mid_flight_start_func(path, start_alt)
+        if starts_at_high_altitude:
+            logger.debug(f"Path '{route_name}' detected as mid-flight start")
 
         # Process departure airport (if not high altitude start)
         if not starts_at_high_altitude:
@@ -192,8 +188,7 @@ def deduplicate_airports(all_path_metadata, all_path_groups, is_mid_flight_start
                 if grid_key not in spatial_grid:
                     spatial_grid[grid_key] = []
                 spatial_grid[grid_key].append(new_idx)
-                if DEBUG:
-                    print(f"  DEBUG: Created departure airport for '{route_name}' at {start_alt:.0f}m altitude")
+                logger.debug(f"Created departure airport for '{route_name}' at {start_alt:.0f}m altitude")
 
         # Process landing airport
         apt_idx = find_nearby_airport(end_lat, end_lon)
@@ -205,7 +200,7 @@ def deduplicate_airports(all_path_metadata, all_path_groups, is_mid_flight_start
                 airport['is_at_path_end'] = True
             if not starts_at_high_altitude and route_timestamp and route_timestamp not in airport['timestamps']:
                 airport['timestamps'].append(route_timestamp)
-        elif ' - ' in route_name and is_valid_landing_func(path, end_alt, DEBUG):
+        elif ' - ' in route_name and is_valid_landing_func(path, end_alt):
             new_idx = len(unique_airports)
             unique_airports.append({
                 'lat': end_lat,
@@ -219,7 +214,6 @@ def deduplicate_airports(all_path_metadata, all_path_groups, is_mid_flight_start
             if grid_key not in spatial_grid:
                 spatial_grid[grid_key] = []
             spatial_grid[grid_key].append(new_idx)
-            if DEBUG:
-                print(f"  DEBUG: Created endpoint airport for '{route_name}' at {end_alt:.0f}m altitude")
+            logger.debug(f"Created endpoint airport for '{route_name}' at {end_alt:.0f}m altitude")
 
     return unique_airports

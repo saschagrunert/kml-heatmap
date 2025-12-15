@@ -28,6 +28,7 @@ from kml_heatmap.parser import (
     extract_year_from_timestamp
 )
 from kml_heatmap.aircraft import lookup_aircraft_model, parse_aircraft_from_filename
+from kml_heatmap.logger import logger, set_debug_mode
 from kml_heatmap.airports import (
     deduplicate_airports,
     extract_airport_name,
@@ -37,9 +38,6 @@ from kml_heatmap.airports import (
 from kml_heatmap.statistics import calculate_statistics
 from kml_heatmap.renderer import minify_html, load_template
 from kml_heatmap.validation import validate_kml_file, validate_api_keys
-
-# Module-level DEBUG flag
-DEBUG = False
 
 # Get API keys from environment variables
 STADIA_API_KEY = os.environ.get('STADIA_API_KEY', '')
@@ -61,15 +59,9 @@ HEATMAP_GRADIENT = {
 
 
 def set_debug(enabled):
-    """Set debug mode globally across all modules."""
-    global DEBUG
-    DEBUG = enabled
-
-    # Set DEBUG in all imported modules
-    import kml_heatmap.parser as parser
-    import kml_heatmap.airports as airports
-    parser.DEBUG = enabled
-    airports.DEBUG = enabled
+    """Set debug mode globally."""
+    # Set logging debug mode
+    set_debug_mode(enabled)
 
 
 def create_altitude_layer(all_path_groups, m):
@@ -136,9 +128,9 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    print(f"\n📦 Exporting data to JSON files...")
+    logger.info("\n📦 Exporting data to JSON files...")
     if strip_timestamps:
-        print(f"  🔒 Privacy mode: Stripping all date/time information")
+        logger.info(f"  🔒 Privacy mode: Stripping all date/time information")
 
     # Calculate min/max altitude for color mapping
     if all_path_groups:
@@ -179,7 +171,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
 
     # OPTIMIZATION: Calculate all segment data once at full resolution
     # Then downsample coordinates and filter segments for other resolutions
-    print(f"\n  📈 Calculating segment metadata at full resolution...")
+    logger.info("\n  📈 Calculating segment metadata at full resolution...")
 
     # Process resolutions in order, with z14_plus first to establish the groundspeed baseline
     resolution_order = ['z14_plus', 'z11_13', 'z8_10', 'z5_7', 'z0_4']
@@ -228,33 +220,31 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                 # Get year from metadata
                 path_year = all_path_metadata[path_idx].get('year') if path_idx < len(all_path_metadata) else None
 
-                # OPTIMIZATION: Only calculate distances/durations for z14_plus
-                # Other resolutions don't need accurate groundspeed (will be clamped to z14_plus max)
+                # Calculate path duration and distance for ALL resolutions (needed for groundspeed)
                 path_duration_seconds = 0
                 path_distance_km = 0
 
+                start_ts = metadata.get('timestamp')
+                end_ts = metadata.get('end_timestamp')
+
+                if start_ts and end_ts:
+                    try:
+                        if 'T' in start_ts and 'T' in end_ts:
+                            start_dt = datetime.fromisoformat(start_ts.replace('Z', '+00:00'))
+                            end_dt = datetime.fromisoformat(end_ts.replace('Z', '+00:00'))
+                            path_duration_seconds = (end_dt - start_dt).total_seconds()
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"  Could not parse timestamps '{start_ts}' -> '{end_ts}': {e}")
+                        pass
+
+                # Calculate total path distance
+                for i in range(len(path) - 1):
+                    lat1, lon1 = path[i][0], path[i][1]
+                    lat2, lon2 = path[i + 1][0], path[i + 1][1]
+                    path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+
+                # Track longest single flight distance (only for z14_plus to avoid duplication)
                 if res_name == 'z14_plus':
-                    start_ts = metadata.get('timestamp')
-                    end_ts = metadata.get('end_timestamp')
-
-                    if start_ts and end_ts:
-                        try:
-                            if 'T' in start_ts and 'T' in end_ts:
-                                start_dt = datetime.fromisoformat(start_ts.replace('Z', '+00:00'))
-                                end_dt = datetime.fromisoformat(end_ts.replace('Z', '+00:00'))
-                                path_duration_seconds = (end_dt - start_dt).total_seconds()
-                        except (ValueError, TypeError) as e:
-                            if DEBUG:
-                                print(f"  DEBUG: Could not parse timestamps '{start_ts}' -> '{end_ts}': {e}")
-                            pass
-
-                    # Calculate total path distance
-                    for i in range(len(path) - 1):
-                        lat1, lon1 = path[i][0], path[i][1]
-                        lat2, lon2 = path[i + 1][0], path[i + 1][1]
-                        path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
-
-                    # Track longest single flight distance
                     path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
                     if path_distance_nm > max_path_distance_nm:
                         max_path_distance_nm = path_distance_nm
@@ -276,32 +266,8 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                     info['aircraft_type'] = metadata['aircraft_type']
                 path_info.append(info)
 
-                # OPTIMIZATION: Only calculate detailed speeds for z14_plus
-                # Other resolutions will use simplified speed calculation
-                if res_name != 'z14_plus':
-                    # For downsampled resolutions, create simple segments without speed calculation
-                    for i in range(len(path) - 1):
-                        coord1 = path[i]
-                        coord2 = path[i + 1]
-                        lat1, lon1, alt1_m = coord1[0], coord1[1], coord1[2]
-                        lat2, lon2, alt2_m = coord2[0], coord2[1], coord2[2]
-
-                        avg_alt_m = (alt1_m + alt2_m) / 2
-                        avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
-                        color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
-
-                        if lat1 != lat2 or lon1 != lon2:
-                            path_segments.append({
-                                'coords': [[lat1, lon1], [lat2, lon2]],
-                                'color': color,
-                                'altitude_ft': avg_alt_ft,
-                                'altitude_m': round(avg_alt_m, 0),
-                                'groundspeed_knots': 0,  # Will be filled in later if needed
-                                'path_id': path_idx
-                            })
-                    continue  # Skip to next path
-
-                # Full speed calculation only for z14_plus
+                # Calculate groundspeed for all resolutions (not just z14_plus)
+                # This ensures airspeed visualization works at all zoom levels
                 MAX_GROUNDSPEED_KNOTS = 200  # Reasonable max for typical general aviation
                 MIN_SEGMENT_TIME_SECONDS = 0.1  # Avoid division by very small time differences
                 SPEED_WINDOW_SECONDS = 120  # 2 minute rolling average window
@@ -357,8 +323,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
                                     if instant_speed > MAX_GROUNDSPEED_KNOTS:
                                         instant_speed = 0  # Ignore unrealistic speeds
                         except (ValueError, TypeError) as e:
-                            if DEBUG:
-                                print(f"  DEBUG: Could not parse segment timestamps '{ts1}' -> '{ts2}': {e}")
+                            logger.debug(f"  Could not parse segment timestamps '{ts1}' -> '{ts2}': {e}")
                             pass
 
                     segment_speeds.append({
@@ -504,7 +469,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
             z14_plus_segments = path_segments
             z14_plus_path_info = path_info
 
-        print(f"  ✓ {res_config['description']}: {len(downsampled_coords):,} points ({file_size / 1024:.1f} KB)")
+        logger.info(f"  ✓ {res_config['description']}: {len(downsampled_coords):,} points ({file_size / 1024:.1f} KB)")
 
     # Export airports (same for all resolutions)
     # Filter and extract valid airport names
@@ -551,7 +516,7 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
         json.dump(airports_data, f, separators=(',', ':'), sort_keys=True)
 
     files['airports'] = airports_file
-    print(f"  ✓ Airports: {len(valid_airports)} locations ({os.path.getsize(airports_file) / 1024:.1f} KB)")
+    logger.info(f"  ✓ Airports: {len(valid_airports)} locations ({os.path.getsize(airports_file) / 1024:.1f} KB)")
 
     # Collect unique years from path metadata
     unique_years = set()
@@ -604,10 +569,10 @@ def export_data_json(all_coordinates, all_path_groups, all_path_metadata, unique
         json.dump(meta_data, f, separators=(',', ':'), sort_keys=True)
 
     files['metadata'] = meta_file
-    print(f"  ✓ Metadata: {os.path.getsize(meta_file) / 1024:.1f} KB")
+    logger.info(f"  ✓ Metadata: {os.path.getsize(meta_file) / 1024:.1f} KB")
 
     total_size = sum(os.path.getsize(f) for f in files.values())
-    print(f"  📊 Total data size: {total_size / 1024:.1f} KB")
+    logger.info(f"  📊 Total data size: {total_size / 1024:.1f} KB")
 
     return files, z14_plus_segments, z14_plus_path_info
 
@@ -624,10 +589,9 @@ def parse_with_error_handling(kml_file):
     try:
         return kml_file, parse_kml_coordinates(kml_file)
     except Exception as e:
-        print(f"✗ Error processing {kml_file}: {e}")
-        if DEBUG:
-            import traceback
-            traceback.print_exc()
+        logger.error(f"✗ Error processing {kml_file}: {e}")
+        import traceback
+        traceback.print_exc()
         return kml_file, ([], [], [])
 
 
@@ -655,15 +619,15 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     for kml_file in kml_files:
         is_valid, error_msg = validate_kml_file(kml_file)
         if not is_valid:
-            print(f"✗ {error_msg}")
+            logger.error(f"✗ {error_msg}")
         else:
             valid_files.append(kml_file)
 
     if not valid_files:
-        print("✗ No valid KML files to process!")
+        logger.error("✗ No valid KML files to process!")
         return False
 
-    print(f"📁 Parsing {len(valid_files)} KML file(s)...")
+    logger.info(f"📁 Parsing {len(valid_files)} KML file(s)...")
 
     import time
     parse_start = time.time()
@@ -678,7 +642,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             results.append((kml_file, coords, path_groups, path_metadata))
             completed_count += 1
             progress_pct = (completed_count / len(valid_files)) * 100
-            print(f"  [{completed_count}/{len(valid_files)}] {progress_pct:.0f}% - {Path(kml_file).name}")
+            logger.info(f"  [{completed_count}/{len(valid_files)}] {progress_pct:.0f}% - {Path(kml_file).name}")
 
     # Sort results by filename for deterministic output
     results.sort(key=lambda x: x[0])
@@ -690,13 +654,13 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         all_path_metadata.extend(path_metadata)
 
     parse_time = time.time() - parse_start
-    print(f"  ⏱️  Parsing took {parse_time:.1f}s ({parse_time/len(valid_files):.2f}s per file)")
+    logger.info(f"  ⏱️  Parsing took {parse_time:.1f}s ({parse_time/len(valid_files):.2f}s per file)")
 
     if not all_coordinates:
-        print("✗ No coordinates found in any KML files!")
+        logger.error("✗ No coordinates found in any KML files!")
         return False
 
-    print(f"\n📍 Total points: {len(all_coordinates)}")
+    logger.info(f"\n📍 Total points: {len(all_coordinates)}")
 
     # Calculate bounds
     lats = [coord[0] for coord in all_coordinates]
@@ -709,12 +673,12 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     # Process airports
     unique_airports = []
     if all_path_metadata:
-        print(f"\n✈️  Processing {len(all_path_metadata)} start points...")
+        logger.info(f"\n✈️  Processing {len(all_path_metadata)} start points...")
         unique_airports = deduplicate_airports(all_path_metadata, all_path_groups, is_mid_flight_start, is_valid_landing)
-        print(f"  Found {len(unique_airports)} unique airports")
+        logger.info(f"  Found {len(unique_airports)} unique airports")
 
     # Calculate statistics
-    print(f"\n📊 Calculating statistics...")
+    logger.info("\n📊 Calculating statistics...")
     stats = calculate_statistics(all_coordinates, all_path_groups, all_path_metadata)
 
     # Add airport info to stats
@@ -734,7 +698,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
     # Recalculate ALL statistics from exported segment data to match JavaScript
     # This ensures wrapped panel and filtered stats show perfectly consistent values
-    print(f"\n🔄 Recalculating statistics from segment data...")
+    logger.info("\n🔄 Recalculating statistics from segment data...")
 
     # First, load the existing metadata to preserve available_years and gradient
     meta_file = os.path.join(data_dir, 'metadata.json')
@@ -856,10 +820,10 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         }
         with open(meta_file, 'w') as f:
             json.dump(meta_data, f, separators=(',', ':'), sort_keys=True)
-        print(f"  ✓ Updated metadata with segment-based statistics (matches JavaScript)")
+        logger.info(f"  ✓ Updated metadata with segment-based statistics (matches JavaScript)")
 
     # Generate lightweight HTML with progressive loading
-    print(f"\n💾 Generating progressive HTML...")
+    logger.info("\n💾 Generating progressive HTML...")
 
     # Use only the directory name for DATA_DIR (relative path for web serving)
     data_dir_name = os.path.basename(data_dir)
@@ -877,7 +841,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     html_content = html_content.replace('{max_lon}', str(max_lon))
 
     # Minify and write HTML file
-    print(f"\n💾 Generating and minifying HTML...")
+    logger.info("\n💾 Generating and minifying HTML...")
     minified_html = minify_html(html_content)
 
     with open(output_file, 'w') as f:
@@ -888,8 +852,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     minified_size = len(minified_html)
     reduction = (1 - minified_size / original_size) * 100
 
-    print(f"✓ Progressive HTML saved: {output_file} ({file_size / 1024:.1f} KB)")
-    print(f"  Minification: {original_size / 1024:.1f} KB → {minified_size / 1024:.1f} KB ({reduction:.1f}% reduction)")
+    logger.info(f"✓ Progressive HTML saved: {output_file} ({file_size / 1024:.1f} KB)")
+    logger.info(f"  Minification: {original_size / 1024:.1f} KB → {minified_size / 1024:.1f} KB ({reduction:.1f}% reduction)")
 
     # Copy map.js to the output directory
     output_dir = os.path.dirname(output_file) or '.'
@@ -921,7 +885,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         f.write(map_js_minified)
 
     map_js_size = os.path.getsize(map_js_dst)
-    print(f"✓ JavaScript copied: {map_js_dst} ({map_js_size / 1024:.1f} KB)")
+    logger.info(f"✓ JavaScript copied: {map_js_dst} ({map_js_size / 1024:.1f} KB)")
 
     # Copy styles.css to the output directory
     styles_css_src = static_dir / 'styles.css'
@@ -939,7 +903,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         f.write(styles_css_minified)
 
     styles_css_size = os.path.getsize(styles_css_dst)
-    print(f"✓ CSS copied: {styles_css_dst} ({styles_css_size / 1024:.1f} KB)")
+    logger.info(f"✓ CSS copied: {styles_css_dst} ({styles_css_size / 1024:.1f} KB)")
 
     # Copy favicon files to the output directory
     favicon_files = [
@@ -958,8 +922,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             import shutil
             shutil.copy2(favicon_src, favicon_dst)
 
-    print(f"✓ Favicon files copied to {output_dir}")
-    print(f"  Open {output_file} in a web browser (requires local server)")
+    logger.info(f"✓ Favicon files copied to {output_dir}")
+    logger.info(f"  Open {output_file} in a web browser (requires local server)")
 
     return True
 
@@ -972,8 +936,6 @@ def print_help():
 
 def main():
     """Main CLI entry point."""
-    global DEBUG
-
     # Check for help flag first
     if len(sys.argv) < 2 or '--help' in sys.argv or '-h' in sys.argv:
         print_help()
@@ -998,10 +960,10 @@ def main():
                 output_dir = sys.argv[i + 1]
                 i += 2
             else:
-                print("Error: --output-dir requires a directory name")
+                logger.error("Error: --output-dir requires a directory name")
                 sys.exit(1)
         elif arg.startswith('--'):
-            print(f"Unknown option: {arg}")
+            logger.error(f"Unknown option: {arg}")
             sys.exit(1)
         else:
             # It's a KML file or directory
@@ -1014,25 +976,25 @@ def main():
 
                 if dir_kml_files:
                     kml_files.extend(dir_kml_files)
-                    print(f"Found {len(dir_kml_files)} KML file(s) in directory: {arg}")
+                    logger.info(f"Found {len(dir_kml_files)} KML file(s) in directory: {arg}")
                 else:
-                    print(f"Warning: No KML files found in directory: {arg}")
+                    logger.warning(f"Warning: No KML files found in directory: {arg}")
             elif os.path.isfile(arg):
                 kml_files.append(arg)
             else:
-                print(f"Warning: File or directory not found: {arg}")
+                logger.warning(f"Warning: File or directory not found: {arg}")
             i += 1
 
     if not kml_files:
-        print("Error: No KML files specified or found!")
+        logger.error("Error: No KML files specified or found!")
         sys.exit(1)
 
-    print(f"\nKML Heatmap Generator")
-    print(f"{'=' * 50}\n")
+    logger.info("\nKML Heatmap Generator")
+    logger.info(f"{'=' * 50}\n")
 
     # Validate API keys and warn if missing
     validate_api_keys(STADIA_API_KEY, OPENAIP_API_KEY, verbose=True)
-    print()  # Empty line after warnings
+    # Empty line handled by logger
 
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)

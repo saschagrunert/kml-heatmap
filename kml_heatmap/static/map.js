@@ -15,6 +15,45 @@ function ddToDms(dd, isLat) {
     return degrees + "°" + minutes + "'" + seconds.toFixed(1) + '"' + direction;
 }
 
+// State persistence functions
+function saveMapState() {
+    const state = {
+        center: map.getCenter(),
+        zoom: map.getZoom(),
+        heatmapVisible: heatmapVisible,
+        altitudeVisible: altitudeVisible,
+        airspeedVisible: airspeedVisible,
+        airportsVisible: airportsVisible,
+        aviationVisible: aviationVisible,
+        selectedYear: selectedYear,
+        selectedAircraft: selectedAircraft,
+        selectedPathIds: Array.from(selectedPathIds),
+        statsPanelVisible: document.getElementById('stats-panel').classList.contains('visible'),
+        replayActive: replayActive,
+        replayPlaying: replayPlaying,
+        replayCurrentTime: replayCurrentTime,
+        replaySpeed: replaySpeed,
+        replayAutoZoom: replayAutoZoom
+    };
+    try {
+        localStorage.setItem('kml-heatmap-state', JSON.stringify(state));
+    } catch (e) {
+        // Silently fail if localStorage is not available
+    }
+}
+
+function loadMapState() {
+    try {
+        const saved = localStorage.getItem('kml-heatmap-state');
+        if (saved) {
+            return JSON.parse(saved);
+        }
+    } catch (e) {
+        // Silently fail if localStorage is not available or data is corrupt
+    }
+    return null;
+}
+
 // Initialize map
 var map = L.map('map', {
     center: CENTER,
@@ -39,8 +78,17 @@ if (STADIA_API_KEY) {
     }).addTo(map);
 }
 
-// Fit bounds
-map.fitBounds(BOUNDS, { padding: [30, 30] });
+// Restore saved state or fit bounds
+const savedState = loadMapState();
+if (savedState && savedState.center && savedState.zoom) {
+    map.setView([savedState.center.lat, savedState.center.lng], savedState.zoom);
+} else {
+    map.fitBounds(BOUNDS, { padding: [30, 30] });
+}
+
+// Save state when map moves or zooms
+map.on('moveend', saveMapState);
+map.on('zoomend', saveMapState);
 
 // Use SVG renderer for better click detection reliability
 // Canvas has known issues with event handling after layer updates
@@ -61,12 +109,12 @@ var fullPathSegments = null;  // Store full resolution path_segments for filteri
 var altitudeRange = { min: 0, max: 10000 };  // Store altitude range for legend
 var airspeedRange = { min: 0, max: 200 };  // Store airspeed range for legend
 
-// Layer visibility state
-var heatmapVisible = true;
-var altitudeVisible = false;
-var airspeedVisible = false;
-var airportsVisible = true;
-var aviationVisible = false;
+// Layer visibility state - restore from saved state or use defaults
+var heatmapVisible = savedState && savedState.heatmapVisible !== undefined ? savedState.heatmapVisible : true;
+var altitudeVisible = savedState && savedState.altitudeVisible !== undefined ? savedState.altitudeVisible : false;
+var airspeedVisible = savedState && savedState.airspeedVisible !== undefined ? savedState.airspeedVisible : false;
+var airportsVisible = savedState && savedState.airportsVisible !== undefined ? savedState.airportsVisible : true;
+var aviationVisible = savedState && savedState.aviationVisible !== undefined ? savedState.aviationVisible : false;
 
 // Track selection state
 var selectedPathIds = new Set();  // Set of selected path IDs
@@ -115,13 +163,17 @@ if (OPENAIP_API_KEY) {
     );
 }
 
-// Add airports layer by default
-airportLayer.addTo(map);
+// Add airports layer based on saved state
+if (airportsVisible) {
+    airportLayer.addTo(map);
+}
 
-// Set initial button states
-document.getElementById('altitude-btn').style.opacity = '0.5';  // Altitude starts hidden
-document.getElementById('airspeed-btn').style.opacity = '0.5';  // Airspeed starts hidden
-document.getElementById('aviation-btn').style.opacity = '0.5';  // Aviation starts hidden
+// Set initial button states based on restored visibility
+document.getElementById('heatmap-btn').style.opacity = heatmapVisible ? '1.0' : '0.5';
+document.getElementById('altitude-btn').style.opacity = altitudeVisible ? '1.0' : '0.5';
+document.getElementById('airspeed-btn').style.opacity = airspeedVisible ? '1.0' : '0.5';
+document.getElementById('airports-btn').style.opacity = airportsVisible ? '1.0' : '0.5';
+document.getElementById('aviation-btn').style.opacity = aviationVisible ? '1.0' : '0.5';
 
 // Show aviation button if API key is available
 if (OPENAIP_API_KEY) {
@@ -302,6 +354,11 @@ async function updateLayers() {
 
     // Create altitude layer paths (this will also update the legend)
     redrawAltitudePaths();
+
+    // Redraw airspeed paths if airspeed is visible
+    if (airspeedVisible) {
+        redrawAirspeedPaths();
+    }
 
     console.log('Updated to ' + resolution + ' resolution');
 }
@@ -792,6 +849,8 @@ function filterByYear() {
 
     // Update airport visibility based on filter
     updateAirportOpacity();
+
+    saveMapState();
 }
 
 // Function to filter data by aircraft
@@ -814,6 +873,8 @@ function filterByAircraft() {
 
     // Update airport visibility based on filter
     updateAirportOpacity();
+
+    saveMapState();
 }
 
 // Load airports once
@@ -830,6 +891,12 @@ function filterByAircraft() {
             option.textContent = '📅 ' + year;
             yearSelect.appendChild(option);
         });
+
+        // Restore saved year filter
+        if (savedState && savedState.selectedYear) {
+            yearSelect.value = savedState.selectedYear;
+            selectedYear = savedState.selectedYear;
+        }
     }
 
     // Populate aircraft filter dropdown
@@ -842,6 +909,12 @@ function filterByAircraft() {
             option.textContent = '✈️ ' + aircraft.registration + typeStr;
             aircraftSelect.appendChild(option);
         });
+
+        // Restore saved aircraft filter
+        if (savedState && savedState.selectedAircraft) {
+            aircraftSelect.value = savedState.selectedAircraft;
+            selectedAircraft = savedState.selectedAircraft;
+        }
     }
 
     // Find the airport with the most flights (home base)
@@ -982,6 +1055,46 @@ function filterByAircraft() {
 
     // Set initial airport marker sizes based on current zoom
     updateAirportMarkerSizes();
+
+    // Restore layer visibility based on saved state
+    // This must happen after updateLayers() creates the layers
+    if (altitudeVisible) {
+        map.addLayer(altitudeLayer);
+        document.getElementById('altitude-legend').style.display = 'block';
+    }
+    if (airspeedVisible) {
+        map.addLayer(airspeedLayer);
+        document.getElementById('airspeed-legend').style.display = 'block';
+    }
+    if (aviationVisible && OPENAIP_API_KEY && openaipLayers['Aviation Data']) {
+        map.addLayer(openaipLayers['Aviation Data']);
+    }
+
+    // Restore selected paths from saved state
+    if (savedState && savedState.selectedPathIds && savedState.selectedPathIds.length > 0) {
+        savedState.selectedPathIds.forEach(function(pathId) {
+            selectedPathIds.add(pathId);
+        });
+        if (altitudeVisible) {
+            redrawAltitudePaths();
+        }
+        if (airspeedVisible) {
+            redrawAirspeedPaths();
+        }
+        updateReplayButtonState();
+    }
+
+    // Restore stats panel visibility
+    if (savedState && savedState.statsPanelVisible) {
+        const panel = document.getElementById('stats-panel');
+        panel.style.display = 'block';
+        // Trigger reflow to ensure transition works
+        panel.offsetHeight;
+        panel.classList.add('visible');
+    }
+
+    // Don't restore replay mode - it's too complex with layer state management
+    // User can manually restart replay after page refresh
 })();
 
 // Update layers on zoom change only
@@ -1025,6 +1138,7 @@ function togglePathSelection(pathId) {
     }
 
     updateReplayButtonState();
+    saveMapState();
 }
 
 function selectPathsByAirport(airportName) {
@@ -1048,6 +1162,7 @@ function selectPathsByAirport(airportName) {
     }
 
     updateReplayButtonState();
+    saveMapState();
 }
 
 function clearSelection() {
@@ -1070,6 +1185,7 @@ function clearSelection() {
     }
 
     updateReplayButtonState();
+    saveMapState();
 }
 
 function updateAirportMarkerSizes() {
@@ -1125,7 +1241,10 @@ function updateAltitudeLegend(minAlt, maxAlt) {
 }
 
 function redrawAirspeedPaths() {
-    if (!currentData) return;
+    if (!currentData) {
+        console.warn('redrawAirspeedPaths: No current data available');
+        return;
+    }
 
     // Clear airspeed layer
     airspeedLayer.clearLayers();
@@ -1177,13 +1296,15 @@ function redrawAirspeedPaths() {
             // Recalculate color based on current groundspeed range
             var color = getColorForAltitude(segment.groundspeed_knots, colorMinSpeed, colorMaxSpeed);
 
+            var kmh = Math.round(segment.groundspeed_knots * 1.852);
             var polyline = L.polyline(segment.coords, {
                 color: color,
                 weight: isSelected ? 6 : 4,
                 opacity: isSelected ? 1.0 : (selectedPathIds.size > 0 ? 0.1 : 0.85),
                 renderer: airspeedRenderer,
                 interactive: true
-            }).addTo(airspeedLayer);
+            }).bindPopup('Groundspeed: ' + segment.groundspeed_knots + ' kt (' + kmh + ' km/h)')
+              .addTo(airspeedLayer);
 
             // Make path clickable
             polyline.on('click', function(e) {
@@ -1195,6 +1316,12 @@ function redrawAirspeedPaths() {
 
     // Update legend
     updateAirspeedLegend(colorMinSpeed, colorMaxSpeed);
+
+    // Update airport marker opacity based on selection
+    updateAirportOpacity();
+
+    // Update statistics panel based on selection
+    updateStatsForSelection();
 }
 
 function updateAirspeedLegend(minSpeed, maxSpeed) {
@@ -1496,10 +1623,9 @@ function updateStatsPanel(stats, isSelection) {
 
     html += '<div style="margin-bottom: 8px;"><strong>Data Points:</strong> ' + stats.total_points.toLocaleString() + '</div>';
     html += '<div style="margin-bottom: 8px;"><strong>Flights:</strong> ' + stats.num_paths + '</div>';
-    html += '<div style="margin-bottom: 8px;"><strong>Airports Visited:</strong> ' + stats.num_airports + '</div>';
 
     if (stats.airport_names && stats.airport_names.length > 0) {
-        html += '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Airports:</strong><br>';
+        html += '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Airports (' + stats.num_airports + '):</strong><br>';
         stats.airport_names.forEach(function(name) {
             html += '<span style="margin-left: 10px;">• ' + name + '</span><br>';
         });
@@ -1507,17 +1633,13 @@ function updateStatsPanel(stats, isSelection) {
     }
 
     // Aircraft information (below airports)
-    if (stats.num_aircraft && stats.num_aircraft > 0) {
-        html += '<div style="margin-bottom: 8px;"><strong>Aircrafts Used:</strong> ' + stats.num_aircraft + '</div>';
-
-        if (stats.aircraft_list && stats.aircraft_list.length > 0) {
-            html += '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Aircraft Details:</strong><br>';
-            stats.aircraft_list.forEach(function(aircraft) {
-                var typeStr = aircraft.type ? ' (' + aircraft.type + ')' : '';
-                html += '<span style="margin-left: 10px;">• ' + aircraft.registration + typeStr + ' - ' + aircraft.flights + ' flight(s)</span><br>';
-            });
-            html += '</div>';
-        }
+    if (stats.num_aircraft && stats.num_aircraft > 0 && stats.aircraft_list && stats.aircraft_list.length > 0) {
+        html += '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Aircrafts (' + stats.num_aircraft + '):</strong><br>';
+        stats.aircraft_list.forEach(function(aircraft) {
+            var typeStr = aircraft.type ? ' (' + aircraft.type + ')' : '';
+            html += '<span style="margin-left: 10px;">• ' + aircraft.registration + typeStr + ' - ' + aircraft.flights + ' flight(s)</span><br>';
+        });
+        html += '</div>';
     }
 
     if (stats.total_flight_time_str) {
@@ -1542,18 +1664,18 @@ function updateStatsPanel(stats, isSelection) {
     }
 
     if (stats.average_groundspeed_knots && stats.average_groundspeed_knots > 0) {
-        var kmh = (stats.average_groundspeed_knots * 1.852).toFixed(1);
-        html += '<div style="margin-bottom: 8px;"><strong>Average Groundspeed:</strong> ' + stats.average_groundspeed_knots.toFixed(1) + ' kt (' + kmh + ' km/h)</div>';
+        var kmh = Math.round(stats.average_groundspeed_knots * 1.852);
+        html += '<div style="margin-bottom: 8px;"><strong>Average Groundspeed:</strong> ' + Math.round(stats.average_groundspeed_knots) + ' kt (' + kmh + ' km/h)</div>';
     }
 
     if (stats.cruise_speed_knots && stats.cruise_speed_knots > 0) {
-        var kmh_cruise = (stats.cruise_speed_knots * 1.852).toFixed(1);
-        html += '<div style="margin-bottom: 8px;"><strong>Cruise Speed (>1000ft AGL):</strong> ' + stats.cruise_speed_knots.toFixed(1) + ' kt (' + kmh_cruise + ' km/h)</div>';
+        var kmh_cruise = Math.round(stats.cruise_speed_knots * 1.852);
+        html += '<div style="margin-bottom: 8px;"><strong>Cruise Speed (>1000ft AGL):</strong> ' + Math.round(stats.cruise_speed_knots) + ' kt (' + kmh_cruise + ' km/h)</div>';
     }
 
     if (stats.max_groundspeed_knots && stats.max_groundspeed_knots > 0) {
-        var kmh_max = (stats.max_groundspeed_knots * 1.852).toFixed(1);
-        html += '<div style="margin-bottom: 8px;"><strong>Max Groundspeed:</strong> ' + stats.max_groundspeed_knots.toFixed(1) + ' kt (' + kmh_max + ' km/h)</div>';
+        var kmh_max = Math.round(stats.max_groundspeed_knots * 1.852);
+        html += '<div style="margin-bottom: 8px;"><strong>Max Groundspeed:</strong> ' + Math.round(stats.max_groundspeed_knots) + ' kt (' + kmh_max + ' km/h)</div>';
     }
 
     if (stats.max_altitude_ft) {
@@ -1579,7 +1701,23 @@ function updateStatsPanel(stats, isSelection) {
 
 function toggleStats() {
     const panel = document.getElementById('stats-panel');
-    panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+
+    if (panel.classList.contains('visible')) {
+        // Hide with animation
+        panel.classList.remove('visible');
+        // Wait for animation to complete before hiding
+        setTimeout(() => {
+            panel.style.display = 'none';
+            saveMapState();
+        }, 300);
+    } else {
+        // Show with animation
+        panel.style.display = 'block';
+        // Trigger reflow to ensure transition works
+        panel.offsetHeight;
+        panel.classList.add('visible');
+        saveMapState();
+    }
 }
 
 function toggleHeatmap() {
@@ -1600,6 +1738,7 @@ function toggleHeatmap() {
         heatmapVisible = true;
         document.getElementById('heatmap-btn').style.opacity = '1.0';
     }
+    saveMapState();
 }
 
 function toggleAltitude() {
@@ -1664,6 +1803,8 @@ function toggleAltitude() {
     if (replayActive && replayAirplaneMarker && replayAirplaneMarker.isPopupOpen()) {
         updateReplayAirplanePopup();
     }
+
+    saveMapState();
 }
 
 function toggleAirspeed() {
@@ -1728,6 +1869,8 @@ function toggleAirspeed() {
     if (replayActive && replayAirplaneMarker && replayAirplaneMarker.isPopupOpen()) {
         updateReplayAirplanePopup();
     }
+
+    saveMapState();
 }
 
 function toggleAirports() {
@@ -1740,6 +1883,7 @@ function toggleAirports() {
         airportsVisible = true;
         document.getElementById('airports-btn').style.opacity = '1.0';
     }
+    saveMapState();
 }
 
 function toggleAviation() {
@@ -1753,6 +1897,7 @@ function toggleAviation() {
             aviationVisible = true;
             document.getElementById('aviation-btn').style.opacity = '1.0';
         }
+        saveMapState();
     }
 }
 
@@ -1817,6 +1962,7 @@ function toggleReplay() {
 
         // Update button opacity based on selection
         updateReplayButtonState();
+        saveMapState();
     } else {
         // Check if exactly one path is selected
         if (selectedPathIds.size !== 1) {
@@ -1842,6 +1988,7 @@ function toggleReplay() {
 
             // Hide other layers during replay
             hideOtherLayersDuringReplay();
+            saveMapState();
         }
     }
 }
@@ -1874,10 +2021,6 @@ function updateReplayAirplanePopup() {
         currentSegment = replaySegments[0];
     }
 
-    // Determine what to show based on visible layers
-    var showAltitude = altitudeVisible;
-    var showSpeed = airspeedVisible;
-
     // Build popup content
     var popupContent = '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Arial, sans-serif; min-width: 180px; padding: 8px 4px; background-color: #2b2b2b; color: #ffffff;">';
 
@@ -1886,47 +2029,41 @@ function updateReplayAirplanePopup() {
     popupContent += '<span>Current Position</span>';
     popupContent += '</div>';
 
-    if (showAltitude) {
-        var altFt = currentSegment.altitude_ft;
-        var altM = currentSegment.altitude_m;
-        // Round altitude to nearest 50ft
-        var altFtRounded = Math.round(altFt / 50) * 50;
-        var altMRounded = Math.round(altFtRounded * 0.3048);
-        // Get color based on current altitude using the same scale as the path
-        var altColor = getColorForAltitude(altFt, replayColorMinAlt, replayColorMaxAlt);
-        // Convert rgb color to rgba with transparency for background
-        var altColorBg = altColor.replace('rgb(', 'rgba(').replace(')', ', 0.15)');
-        popupContent += '<div style="margin-bottom: 8px;">';
-        popupContent += '<div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Altitude (MSL)</div>';
-        popupContent += '<div style="background: ' + altColorBg + '; padding: 6px 8px; border-radius: 6px; border-left: 3px solid ' + altColor + ';">';
-        popupContent += '<span style="font-size: 16px; font-weight: bold; color: ' + altColor + ';">' + altFtRounded.toLocaleString() + ' ft</span>';
-        popupContent += '<span style="font-size: 12px; color: #ccc; margin-left: 6px;">(' + altMRounded.toLocaleString() + ' m)</span>';
-        popupContent += '</div>';
-        popupContent += '</div>';
-    }
+    // Altitude
+    var altFt = currentSegment.altitude_ft;
+    var altM = currentSegment.altitude_m;
+    // Round altitude to nearest 50ft
+    var altFtRounded = Math.round(altFt / 50) * 50;
+    var altMRounded = Math.round(altFtRounded * 0.3048);
+    // Get color based on current altitude using the same scale as the path
+    var altColor = getColorForAltitude(altFt, replayColorMinAlt, replayColorMaxAlt);
+    // Convert rgb color to rgba with transparency for background
+    var altColorBg = altColor.replace('rgb(', 'rgba(').replace(')', ', 0.15)');
+    popupContent += '<div style="margin-bottom: 8px;">';
+    popupContent += '<div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Altitude (MSL)</div>';
+    popupContent += '<div style="background: ' + altColorBg + '; padding: 6px 8px; border-radius: 6px; border-left: 3px solid ' + altColor + ';">';
+    popupContent += '<span style="font-size: 16px; font-weight: bold; color: ' + altColor + ';">' + altFtRounded.toLocaleString() + ' ft</span>';
+    popupContent += '<span style="font-size: 12px; color: #ccc; margin-left: 6px;">(' + altMRounded.toLocaleString() + ' m)</span>';
+    popupContent += '</div>';
+    popupContent += '</div>';
 
-    if (showSpeed && currentSegment.groundspeed_knots > 0) {
-        var speedKt = currentSegment.groundspeed_knots;
-        var speedKmh = currentSegment.groundspeed_knots * 1.852;
-        // Round groundspeed to whole numbers
-        var speedKtRounded = Math.round(speedKt);
-        var speedKmhRounded = Math.round(speedKmh);
-        // Get color based on current groundspeed using the same scale as the path
-        var speedColor = getColorForAltitude(speedKt, replayColorMinSpeed, replayColorMaxSpeed);
-        // Convert rgb color to rgba with transparency for background
-        var speedColorBg = speedColor.replace('rgb(', 'rgba(').replace(')', ', 0.15)');
-        popupContent += '<div style="margin-bottom: 8px;">';
-        popupContent += '<div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Groundspeed</div>';
-        popupContent += '<div style="background: ' + speedColorBg + '; padding: 6px 8px; border-radius: 6px; border-left: 3px solid ' + speedColor + ';">';
-        popupContent += '<span style="font-size: 16px; font-weight: bold; color: ' + speedColor + ';">' + speedKtRounded.toLocaleString() + ' kt</span>';
-        popupContent += '<span style="font-size: 12px; color: #ccc; margin-left: 6px;">(' + speedKmhRounded.toLocaleString() + ' km/h)</span>';
-        popupContent += '</div>';
-        popupContent += '</div>';
-    }
-
-    if (!showAltitude && !showSpeed) {
-        popupContent += '<div style="font-size: 12px; color: #999; padding: 8px 0;">Enable altitude or speed view to see flight data</div>';
-    }
+    // Groundspeed
+    var speedKt = currentSegment.groundspeed_knots || 0;
+    var speedKmh = speedKt * 1.852;
+    // Round groundspeed to whole numbers
+    var speedKtRounded = Math.round(speedKt);
+    var speedKmhRounded = Math.round(speedKmh);
+    // Get color based on current groundspeed using the same scale as the path
+    var speedColor = getColorForAltitude(speedKt, replayColorMinSpeed, replayColorMaxSpeed);
+    // Convert rgb color to rgba with transparency for background
+    var speedColorBg = speedColor.replace('rgb(', 'rgba(').replace(')', ', 0.15)');
+    popupContent += '<div style="margin-bottom: 8px;">';
+    popupContent += '<div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Groundspeed</div>';
+    popupContent += '<div style="background: ' + speedColorBg + '; padding: 6px 8px; border-radius: 6px; border-left: 3px solid ' + speedColor + ';">';
+    popupContent += '<span style="font-size: 16px; font-weight: bold; color: ' + speedColor + ';">' + speedKtRounded.toLocaleString() + ' kt</span>';
+    popupContent += '<span style="font-size: 12px; color: #ccc; margin-left: 6px;">(' + speedKmhRounded.toLocaleString() + ' km/h)</span>';
+    popupContent += '</div>';
+    popupContent += '</div>';
 
     popupContent += '</div>';
 
@@ -2019,6 +2156,10 @@ function initializeReplay() {
     // Update UI
     document.getElementById('replay-slider').max = replayMaxTime;
     document.getElementById('replay-slider-end').textContent = formatTime(replayMaxTime);
+
+    // Update legends to show selected path's color ranges
+    updateAltitudeLegend(replayColorMinAlt, replayColorMaxAlt);
+    updateAirspeedLegend(replayColorMinSpeed, replayColorMaxSpeed);
 
     // Create replay layer
     if (!replayLayer) {
@@ -2241,6 +2382,7 @@ function playReplay() {
 
     // Start the animation
     replayAnimationFrameId = requestAnimationFrame(animateReplay);
+    saveMapState();
 }
 
 function pauseReplay() {
@@ -2256,6 +2398,7 @@ function pauseReplay() {
 
     // Reset frame time
     replayLastFrameTime = null;
+    saveMapState();
 }
 
 function stopReplay() {
@@ -2286,11 +2429,13 @@ function seekReplay(value) {
 
     replayCurrentTime = newTime;
     updateReplayDisplay(true); // Pass true to indicate this is a manual seek
+    saveMapState();
 }
 
 function changeReplaySpeed() {
     const select = document.getElementById('replay-speed');
     replaySpeed = parseFloat(select.value);
+    saveMapState();
 }
 
 function updateReplayDisplay(isManualSeek) {
@@ -3233,4 +3378,5 @@ function toggleAutoZoom() {
         autoZoomBtn.title = 'Auto-zoom disabled';
         replayLastZoom = null;  // Reset last zoom
     }
+    saveMapState();
 }

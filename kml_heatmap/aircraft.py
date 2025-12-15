@@ -6,6 +6,7 @@ import re
 import urllib.request
 import urllib.error
 from html.parser import HTMLParser
+from .logger import logger
 
 
 class AircraftDataParser(HTMLParser):
@@ -54,7 +55,7 @@ def lookup_aircraft_model(registration, cache_file='aircraft_cache.json'):
                 cache = json.load(f)
         except (json.JSONDecodeError, IOError) as e:
             # Cache file is corrupted or unreadable, start with empty cache
-            print(f"Warning: Could not load aircraft cache from {cache_file}: {e}")
+            logger.warning(f"Could not load aircraft cache from {cache_file}: {e}")
             cache = {}
 
     # Check cache
@@ -79,7 +80,7 @@ def lookup_aircraft_model(registration, cache_file='aircraft_cache.json'):
                 with open(cache_file, 'w') as f:
                     json.dump(cache, f, indent=2)
             except IOError as e:
-                print(f"Warning: Could not update aircraft cache: {e}")
+                logger.warning(f"Could not update aircraft cache: {e}")
 
             return parser.model
     except urllib.error.HTTPError as e:
@@ -87,15 +88,15 @@ def lookup_aircraft_model(registration, cache_file='aircraft_cache.json'):
             # Aircraft not found in database - this is normal, not an error
             pass
         elif e.code == 429:
-            print(f"Warning: Rate limited by aircraft database for {registration}")
+            logger.warning(f"Rate limited by aircraft database for {registration}")
         else:
-            print(f"Warning: HTTP error {e.code} looking up {registration}: {e.reason}")
+            logger.warning(f"HTTP error {e.code} looking up {registration}: {e.reason}")
     except urllib.error.URLError as e:
-        print(f"Warning: Network error looking up {registration}: {e.reason}")
+        logger.warning(f"Network error looking up {registration}: {e.reason}")
     except TimeoutError:
-        print(f"Warning: Timeout looking up {registration} (server did not respond)")
+        logger.warning(f"Timeout looking up {registration} (server did not respond)")
     except Exception as e:
-        print(f"Warning: Unexpected error looking up {registration}: {type(e).__name__}: {e}")
+        logger.warning(f"Unexpected error looking up {registration}: {type(e).__name__}: {e}")
 
     return None
 
