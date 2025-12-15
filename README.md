@@ -1,5 +1,7 @@
 # KML Heatmap Generator
 
+[![codecov](https://codecov.io/gh/saschagrunert/kml-heatmap/graph/badge.svg?token=AxIuoWeFSy)](https://codecov.io/gh/saschagrunert/kml-heatmap)
+
 Create interactive heatmap visualizations from KML files.
 
 **[Live Demo](https://saschagrunert.github.io/kml-heatmap)**
@@ -45,6 +47,7 @@ make serve
 ```
 
 **Note:** OpenAIP tiles return 403 Forbidden without a valid API key. To verify your key works:
+
 ```bash
 # Should return HTTP 200 with PNG image
 curl -I "https://a.api.tiles.openaip.net/api/data/openaip/8/136/85.png?apiKey=YOUR_KEY"
@@ -101,11 +104,13 @@ When using Docker or Python directly:
 Individual flight timestamps are automatically removed from exported data. The map shows where you've been and how much you've flown, but not when.
 
 Kept:
+
 - Coordinates, altitudes, distances
 - Airport visit counts
 - Total flight time
 
 Removed:
+
 - Individual flight dates/times
 
 ## Output
