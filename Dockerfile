@@ -4,6 +4,16 @@ FROM python:3.14-slim
 # Set working directory
 WORKDIR /app
 
+# Install Node.js 25 for frontend build
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates && \
+    curl -fsSL https://deb.nodesource.com/setup_25.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy requirements first for better caching
 COPY requirements.txt .
 

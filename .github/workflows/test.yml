@@ -46,11 +46,83 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
         with:
-          node-version: "20"
+          node-version: "25"
       - name: Install Prettier
         run: npm install --global prettier
       - name: Run Prettier check
         run: prettier --check .
+
+  frontend-lint:
+    name: frontend / lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: "25"
+      - name: Install dependencies
+        working-directory: kml_heatmap/frontend
+        run: npm install
+      - name: Run ESLint
+        working-directory: kml_heatmap/frontend
+        run: npm run lint
+
+  frontend-typecheck:
+    name: frontend / typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: "25"
+      - name: Install dependencies
+        working-directory: kml_heatmap/frontend
+        run: npm install
+      - name: Run TypeScript type check
+        working-directory: kml_heatmap/frontend
+        run: npm run type-check
+
+  frontend-test:
+    name: frontend / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: "25"
+      - name: Install dependencies
+        working-directory: kml_heatmap/frontend
+        run: npm install
+      - name: Run tests with coverage
+        working-directory: kml_heatmap/frontend
+        run: npm run test:coverage
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./kml_heatmap/frontend/coverage/coverage-final.json
+          flags: frontend
+          fail_ci_if_error: false
+          verbose: true
+
+  frontend-build:
+    name: frontend / build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: "25"
+      - name: Install dependencies
+        working-directory: kml_heatmap/frontend
+        run: npm install
+      - name: Build frontend
+        working-directory: kml_heatmap/frontend
+        run: npm run build
 
   unit:
     runs-on: ubuntu-latest
@@ -73,5 +145,6 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
+          flags: backend
           fail_ci_if_error: true
           verbose: true

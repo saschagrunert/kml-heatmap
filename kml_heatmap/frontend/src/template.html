@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flight Heatmap</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <style>
+      /* Your existing CSS styles here - will be injected by Python */
+      {{CSS_CONTENT}}
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <!-- UI Elements -->
+    <div id="loading">Loading...</div>
+    <button id="stats-btn">Stats</button>
+    <button id="export-btn">Export</button>
+    <button id="heatmap-btn">Heatmap</button>
+    <button id="altitude-btn">Altitude</button>
+    <button id="airspeed-btn">Airspeed</button>
+    <button id="airports-btn">Airports</button>
+    <button id="aviation-btn" style="display: none">Aviation</button>
+
+    <div id="stats-panel"></div>
+    <div id="altitude-legend"></div>
+    <div id="airspeed-legend"></div>
+
+    <select id="year-filter">
+      <option value="all">All Years</option>
+    </select>
+
+    <select id="aircraft-filter">
+      <option value="all">All Aircraft</option>
+    </select>
+
+    <!-- Configuration injected by Python -->
+    <script>
+      window.kmlHeatmapConfig = {
+          center: [{{center_lat}}, {{center_lon}}],
+          bounds: [[{{min_lat}}, {{min_lon}}], [{{max_lat}}, {{max_lon}}]],
+          stadiaApiKey: '{{STADIA_API_KEY}}',
+          openaipApiKey: '{{OPENAIP_API_KEY}}',
+          dataDir: '{{data_dir_name}}'
+      };
+    </script>
+
+    <!-- Compiled TypeScript application -->
+    <script src="map.js"></script>
+  </body>
+</html>

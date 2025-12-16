@@ -928,12 +928,13 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     html_content = template.replace("{STADIA_API_KEY}", STADIA_API_KEY)
     html_content = html_content.replace("{OPENAIP_API_KEY}", OPENAIP_API_KEY)
     html_content = html_content.replace("{data_dir_name}", data_dir_name)
-    html_content = html_content.replace("{center_lat}", str(center_lat))
-    html_content = html_content.replace("{center_lon}", str(center_lon))
-    html_content = html_content.replace("{min_lat}", str(min_lat))
-    html_content = html_content.replace("{max_lat}", str(max_lat))
-    html_content = html_content.replace("{min_lon}", str(min_lon))
-    html_content = html_content.replace("{max_lon}", str(max_lon))
+    # Replace placeholders with spaces (as they appear in template)
+    html_content = html_content.replace("{ center_lat }", str(center_lat))
+    html_content = html_content.replace("{ center_lon }", str(center_lon))
+    html_content = html_content.replace("{ min_lat }", str(min_lat))
+    html_content = html_content.replace("{ max_lat }", str(max_lat))
+    html_content = html_content.replace("{ min_lon }", str(min_lon))
+    html_content = html_content.replace("{ max_lon }", str(max_lon))
 
     # Minify and write HTML file
     logger.info("\n💾 Generating and minifying HTML...")
@@ -1040,6 +1041,15 @@ def main():
     if len(sys.argv) < 2 or "--help" in sys.argv or "-h" in sys.argv:
         print_help()
         sys.exit(0 if "--help" in sys.argv or "-h" in sys.argv else 1)
+
+    # Build frontend TypeScript
+    from kml_heatmap.frontend_builder import ensure_frontend_built
+
+    try:
+        ensure_frontend_built()
+    except RuntimeError as e:
+        logger.error(str(e))
+        sys.exit(1)
 
     # Parse arguments
     kml_files = []

@@ -25,6 +25,11 @@ from .exceptions import (
     AircraftLookupError,
     InvalidCoordinateError,
 )
+from .frontend_builder import (
+    build_frontend,
+    ensure_frontend_built,
+    run_frontend_tests,
+)
 
 __all__ = [
     # Geometry
@@ -56,4 +61,8 @@ __all__ = [
     "KMLParseError",
     "AircraftLookupError",
     "InvalidCoordinateError",
+    # Frontend
+    "build_frontend",
+    "ensure_frontend_built",
+    "run_frontend_tests",
 ]

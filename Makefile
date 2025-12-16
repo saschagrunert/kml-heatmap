@@ -1,4 +1,4 @@
-.PHONY: all build serve test-image test lint format clean
+.PHONY: all build serve test-image test test-frontend lint lint-frontend format clean
 
 STADIA_API_KEY ?=
 OPENAIP_API_KEY ?=
@@ -21,11 +21,18 @@ test-image:
 test: test-image
 	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd)/htmlcov:/app/htmlcov $(IMAGE_NAME)-test
 
+test-frontend: test-image
+	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test /bin/bash -c "cd kml_heatmap/frontend && npm install && npm test"
+
 lint: test-image
 	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test ruff check
+
+lint-frontend: test-image
+	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test /bin/bash -c "cd kml_heatmap/frontend && npm install && npm run lint"
 
 format: test-image
 	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test ruff format
 
 clean:
 	$(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) $(IMAGE_NAME)-test 2>/dev/null || true
+	rm -rf kml_heatmap/frontend/node_modules kml_heatmap/frontend/coverage kml_heatmap/static/map.js*

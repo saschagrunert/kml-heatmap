@@ -1,0 +1,35 @@
+{
+  "name": "kml-heatmap",
+  "version": "1.0.0",
+  "description": "Interactive heatmap visualizations from KML flight data",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc && vite build",
+    "dev": "vite",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/leaflet": "^1.9.14",
+    "@types/leaflet.heat": "^0.2.5",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "@vitest/coverage-v8": "^4.0.16",
+    "eslint": "^9.17.0",
+    "jsdom": "^27.3.0",
+    "typescript": "^5.7.2",
+    "vite": "^7.3.0",
+    "vitest": "^4.0.16"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "leaflet.heat": "^0.2.0"
+  }
+}

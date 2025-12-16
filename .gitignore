@@ -1,9 +1,41 @@
+# Python
 .coverage
-AGENTS.md
+__pycache__
+*.py[cod]
+htmlcov/
+.pytest_cache/
+
+# KML data
 *.kml
 /data
 /index.html
-__pycache__
-kml
+kml/
 aircraft_cache.json
-.kml_cache
+.kml_cache/
+
+# Node.js / TypeScript
+node_modules/
+coverage/
+.vitest/
+dist/
+*.tsbuildinfo
+
+# Build output
+kml_heatmap/static/map.js
+kml_heatmap/static/map.js.map
+
+# Frontend
+kml_heatmap/frontend/node_modules/
+kml_heatmap/frontend/coverage/
+kml_heatmap/frontend/.vitest/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Misc
+AGENTS.md
