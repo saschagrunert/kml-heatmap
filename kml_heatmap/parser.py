@@ -39,12 +39,8 @@ from typing import List, Dict, Tuple, Optional, Any
 # Try to use lxml for better performance, fall back to standard library
 try:
     from lxml import etree as ET
-
-    USING_LXML = True
 except ImportError:
     from xml.etree import ElementTree as ET
-
-    USING_LXML = False
 
 from .aircraft import parse_aircraft_from_filename
 from .logger import logger
@@ -67,7 +63,6 @@ from .constants import (
 )
 
 __all__ = [
-    "USING_LXML",
     "get_cache_key",
     "load_cached_parse",
     "save_to_cache",
