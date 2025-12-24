@@ -7,3 +7,4 @@ __pycache__
 kml
 aircraft_cache.json
 .kml_cache
+flight_time_offsets.json

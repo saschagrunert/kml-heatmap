@@ -99,6 +99,27 @@ When using Docker or Python directly:
 - `--output-dir DIR` - Output directory (default: current directory)
 - `--debug` - Show debug output
 
+### Flight Time Offsets (Optional)
+
+Add non-recorded flight time to specific aircraft by creating a `flight_time_offsets.json` file:
+
+```json
+{
+  "D-EAGJ": {
+    "2025": 10.5,
+    "2024": 15.0
+  },
+  "D-EHYL": {
+    "2025": 5.0
+  }
+}
+```
+
+- Aircraft registration → Year → Hours to add
+- Offsets are applied silently to displayed flight times
+- File is gitignored by default (private data)
+- Useful for including non-GPS flights, simulator time, or manual logbook entries
+
 ## Privacy
 
 Individual flight timestamps are automatically removed from exported data. The map shows where you've been and how much you've flown, but not when.
