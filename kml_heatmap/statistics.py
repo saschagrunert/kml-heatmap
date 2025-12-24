@@ -1,5 +1,8 @@
 """Statistics calculation for flight data."""
 
+import os
+import json
+from datetime import datetime
 from typing import List, Dict, Optional, Any, Tuple
 from .geometry import haversine_distance
 from .aircraft import lookup_aircraft_model
@@ -15,7 +18,34 @@ __all__ = [
     "calculate_flight_time",
     "aggregate_aircraft_stats",
     "extract_timestamps_from_path",
+    "load_flight_time_offsets",
 ]
+
+
+def load_flight_time_offsets(
+    config_file: str = "flight_time_offsets.json",
+) -> Dict[str, Dict[str, float]]:
+    """
+    Load flight time offsets from configuration file.
+
+    Args:
+        config_file: Path to JSON configuration file
+
+    Returns:
+        Dict mapping aircraft registration -> year -> offset hours
+    """
+    if not os.path.exists(config_file):
+        logger.debug(f"Flight time offsets file not found: {config_file}")
+        return {}
+
+    try:
+        with open(config_file, "r") as f:
+            offsets = json.load(f)
+        logger.debug(f"Loaded flight time offsets from {config_file}")
+        return offsets
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"Could not load flight time offsets from {config_file}: {e}")
+        return {}
 
 
 def extract_timestamps_from_path(path: List[List[Any]]) -> List[float]:
@@ -216,12 +246,20 @@ def _calculate_aircraft_flight_times(
             if duration > 0:
                 aircraft_flights[reg]["flight_time_seconds"] += duration
 
+                # Track years seen for this aircraft
+                if "years" not in aircraft_flights[reg]:
+                    aircraft_flights[reg]["years"] = set()
+
+                # Extract year from timestamp
+                dt = datetime.fromtimestamp(min_time)
+                aircraft_flights[reg]["years"].add(str(dt.year))
+
 
 def _create_aircraft_list_with_models(
     aircraft_flights: Dict[str, Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """
-    Create sorted aircraft list with model lookups.
+    Create sorted aircraft list with model lookups and apply time offsets.
 
     Args:
         aircraft_flights: Dict of aircraft flight information
@@ -231,6 +269,9 @@ def _create_aircraft_list_with_models(
     """
     aircraft_list = []
     logger.info("✈️  Looking up aircraft model information...")
+
+    # Load time offsets
+    time_offsets = load_flight_time_offsets()
 
     for reg, info in sorted(
         aircraft_flights.items(), key=lambda x: x[1]["count"], reverse=True
@@ -244,8 +285,26 @@ def _create_aircraft_list_with_models(
             if full_model:
                 logger.info(f"  ⚠ {reg}: {full_model} (lookup failed, using KML type)")
 
-        # Format flight time as human-readable string
+        # Calculate total flight time with offsets
         flight_time_seconds = info["flight_time_seconds"]
+
+        # Apply per-year offsets if configured
+        if reg in time_offsets:
+            years_seen = info.get("years", set())
+            total_offset_hours = 0.0
+            for year in years_seen:
+                if year in time_offsets[reg]:
+                    offset_hours = time_offsets[reg][year]
+                    total_offset_hours += offset_hours
+                    logger.debug(f"  Adding {offset_hours}h offset for {reg} in {year}")
+
+            if total_offset_hours > 0:
+                offset_seconds = total_offset_hours * SECONDS_PER_HOUR
+                flight_time_seconds += offset_seconds
+                logger.info(
+                    f"  ⏱  {reg}: Added {total_offset_hours}h offset ({', '.join(sorted(years_seen))})"
+                )
+
         flight_time_str = format_flight_time(flight_time_seconds)
 
         aircraft_list.append(

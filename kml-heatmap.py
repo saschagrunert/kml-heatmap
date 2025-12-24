@@ -33,7 +33,7 @@ from kml_heatmap.airports import (
     deduplicate_airports,
     extract_airport_name,
 )
-from kml_heatmap.statistics import calculate_statistics
+from kml_heatmap.statistics import calculate_statistics, load_flight_time_offsets
 from kml_heatmap.renderer import minify_html, load_template
 from kml_heatmap.validation import validate_kml_file, validate_api_keys
 from kml_heatmap.constants import (
@@ -782,6 +782,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     # Use the segments data we just created instead of reloading from disk
     if z14_segments is not None and z14_path_info is not None:
         segments = z14_segments
+        logger.debug(
+            f"  Recalc: {len(segments)} segments, {len(z14_path_info)} path_info entries"
+        )
 
         # 1. Total Points (segments × 2)
         stats["total_points"] = len(segments) * 2
@@ -860,16 +863,36 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
         # 8. Per-aircraft flight times from segments
         if stats.get("aircraft_list"):
+            logger.debug(
+                f"    Recalculating per-aircraft times from {len(z14_path_info)} paths"
+            )
             aircraft_times = {}
-            for path_info in z14_path_info:
+            aircraft_years = {}
+
+            for idx, path_info in enumerate(z14_path_info):
                 reg = path_info.get("aircraft_registration")
                 path_id = path_info.get("id")
+                year = path_info.get("year")
+                if idx == 0:  # Debug first path
+                    logger.debug(f"    First path_info: {path_info}")
                 if reg and path_id is not None and path_id in path_durations:
                     if reg not in aircraft_times:
                         aircraft_times[reg] = 0
+                        aircraft_years[reg] = set()
                     times = path_durations[path_id]
                     if len(times) >= 2:
                         aircraft_times[reg] += max(times) - min(times)
+                        # Track year from the path metadata
+                        if year:
+                            aircraft_years[reg].add(str(year))
+                        else:
+                            logger.debug(f"    No year for path {path_id}, reg={reg}")
+
+            # Load time offsets and apply them
+            time_offsets = load_flight_time_offsets()
+            logger.info("  ⏱  Applying time offsets in recalculation...")
+            logger.debug(f"    Time offsets loaded: {list(time_offsets.keys())}")
+            logger.debug(f"    Aircraft years: {aircraft_years}")
 
             # Update aircraft list with recalculated times
             # Also sum up the formatted times to ensure total matches
@@ -879,11 +902,31 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             for aircraft in stats["aircraft_list"]:
                 reg = aircraft["registration"]
                 if reg in aircraft_times:
-                    aircraft["flight_time_seconds"] = aircraft_times[reg]
-                    hours = int(aircraft_times[reg] // 3600)
-                    minutes = int((aircraft_times[reg] % 3600) // 60)
+                    flight_time_seconds = aircraft_times[reg]
+
+                    # Apply per-year offsets if configured
+                    logger.debug(
+                        f"    Checking {reg}: in offsets={reg in time_offsets}, in years={reg in aircraft_years}"
+                    )
+                    if reg in time_offsets and reg in aircraft_years:
+                        total_offset_hours = 0.0
+                        for year in aircraft_years[reg]:
+                            if year in time_offsets[reg]:
+                                offset_hours = time_offsets[reg][year]
+                                total_offset_hours += offset_hours
+
+                        if total_offset_hours > 0:
+                            offset_seconds = total_offset_hours * 3600
+                            flight_time_seconds += offset_seconds
+                            logger.info(
+                                f"    ✓ {reg}: Added {total_offset_hours}h offset (recalc)"
+                            )
+
+                    aircraft["flight_time_seconds"] = flight_time_seconds
+                    hours = int(flight_time_seconds // 3600)
+                    minutes = int((flight_time_seconds % 3600) // 60)
                     aircraft["flight_time_str"] = format_flight_time(
-                        aircraft_times[reg]
+                        flight_time_seconds
                     )
 
                     # Accumulate formatted times
