@@ -99,26 +99,37 @@ When using Docker or Python directly:
 - `--output-dir DIR` - Output directory (default: current directory)
 - `--debug` - Show debug output
 
-### Flight Time Offsets (Optional)
+### Flight Supplements (Optional)
 
-Add non-recorded flight time to specific aircraft by creating a `flight_time_offsets.json` file:
+Add non-recorded flight time and missing airports to specific aircraft by creating a `flight_supplements.json` file.
+
+**Format:**
 
 ```json
 {
   "D-EAGJ": {
-    "2025": 10.5,
-    "2024": 15.0
-  },
-  "D-EHYL": {
-    "2025": 5.0
+    "2025": {
+      "hours": 10.5,
+      "airports": ["EDAZ", "EDCB", "EDDH"]
+    },
+    "2024": {
+      "hours": 15.0,
+      "airports": ["EDDK", "EDDF"]
+    }
   }
 }
 ```
 
-- Aircraft registration → Year → Hours to add
-- Offsets are applied silently to displayed flight times
+Each year entry must be a dict with:
+
+- `hours` - Additional flight time hours (can be 0.0)
+- `airports` - List of ICAO codes for airports not in KML files (can be empty `[]`)
+
+Missing airports are displayed alongside flight time in the build output.
+
 - File is gitignored by default (private data)
 - Useful for including non-GPS flights, simulator time, or manual logbook entries
+- The file is named `flight_supplements.json` to reflect its dual purpose (time + airport tracking)
 
 ## Privacy
 

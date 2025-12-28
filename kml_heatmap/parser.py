@@ -45,6 +45,7 @@ except ImportError:
 from .aircraft import parse_aircraft_from_filename
 from .logger import logger
 from .kml_parsers import validate_and_normalize_coordinate
+from .cache import CACHE_DIR
 from .constants import (
     MID_FLIGHT_MIN_ALTITUDE_M,
     MID_FLIGHT_MAX_VARIATION_M,
@@ -59,7 +60,6 @@ from .constants import (
     LON_MAX,
     ALT_MIN_M,
     ALT_MAX_M,
-    CACHE_DIR_NAME,
 )
 
 __all__ = [
@@ -67,6 +67,8 @@ __all__ = [
     "load_cached_parse",
     "save_to_cache",
     "extract_year_from_timestamp",
+    "extract_icao_codes_from_name",
+    "standardize_airport_name",
     "sample_path_altitudes",
     "is_mid_flight_start",
     "is_valid_landing",
@@ -88,8 +90,11 @@ LAT_RANGE = (LAT_MIN, LAT_MAX)
 LON_RANGE = (LON_MIN, LON_MAX)
 ALT_RANGE = (ALT_MIN_M, ALT_MAX_M)
 
-# Cache directory for parsed KML files
-CACHE_DIR = Path(CACHE_DIR_NAME)
+# KML parse cache subdirectory
+KML_CACHE_DIR = CACHE_DIR / "kml"
+
+# Cache version - increment this when parser logic changes to invalidate old caches
+CACHE_VERSION = 2  # v2: Added OurAirports standardization for airport names
 
 
 def get_cache_key(kml_file: str) -> Tuple[Optional[Path], bool]:
@@ -104,7 +109,7 @@ def get_cache_key(kml_file: str) -> Tuple[Optional[Path], bool]:
     kml_path = Path(kml_file)
 
     # Create cache directory if it doesn't exist
-    CACHE_DIR.mkdir(exist_ok=True)
+    KML_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Get file modification time
     try:
@@ -112,20 +117,27 @@ def get_cache_key(kml_file: str) -> Tuple[Optional[Path], bool]:
     except (OSError, FileNotFoundError):
         return None, False
 
-    # Create cache filename from KML filename and modification time
-    cache_name = f"{kml_path.stem}_{int(mtime)}.json"
-    cache_path = CACHE_DIR / cache_name
+    # Create cache filename from KML filename, modification time, and cache version
+    cache_name = f"{kml_path.stem}_{int(mtime)}_v{CACHE_VERSION}.json"
+    cache_path = KML_CACHE_DIR / cache_name
 
     # Check if cache file exists
     if cache_path.exists():
         return cache_path, True
 
-    # Clean up old cache files for this KML file
-    for old_cache in CACHE_DIR.glob(f"{kml_path.stem}_*.json"):
+    # Clean up old cache files for this KML file (different mtime or version)
+    for old_cache in KML_CACHE_DIR.glob(f"{kml_path.stem}_*_v*.json"):
         try:
             old_cache.unlink()
         except OSError:
             pass
+    # Also clean up pre-v2 cache files (without version suffix)
+    for old_cache in KML_CACHE_DIR.glob(f"{kml_path.stem}_*.json"):
+        if "_v" not in old_cache.stem:  # Only delete files without version
+            try:
+                old_cache.unlink()
+            except OSError:
+                pass
 
     return cache_path, False
 
@@ -203,6 +215,119 @@ def extract_year_from_timestamp(timestamp: Optional[str]) -> Optional[int]:
         logger.debug(f"Could not parse timestamp '{timestamp}': {e}")
 
     return None
+
+
+def extract_icao_codes_from_name(airport_name: str) -> List[str]:
+    """Extract ICAO codes from airport name string.
+
+    Extracts 4-letter uppercase codes that look like ICAO codes.
+    Handles both single airports and route formats.
+
+    Args:
+        airport_name: Airport name (e.g., "EDAQ Halle - EDMV Vilshofen" or "EDCJ")
+
+    Returns:
+        List of ICAO codes found (e.g., ["EDAQ", "EDMV"] or ["EDCJ"])
+
+    Examples:
+        >>> extract_icao_codes_from_name("EDAQ Halle - EDMV Vilshofen")
+        ["EDAQ", "EDMV"]
+        >>> extract_icao_codes_from_name("EDCJ ChemnitzJahnsdorf")
+        ["EDCJ"]
+        >>> extract_icao_codes_from_name("Log Start: 03 Mar 2025")
+        []
+    """
+    if not airport_name:
+        return []
+
+    # Pattern: 4 uppercase letters that look like ICAO codes
+    # Must be word boundary to avoid matching parts of longer words
+    icao_pattern = re.compile(r"\b([A-Z]{4})\b")
+    matches = icao_pattern.findall(airport_name)
+
+    # Filter out common non-ICAO words (like months, etc.)
+    # ICAO codes typically start with letter indicating region (E for Europe, K for USA, etc.)
+    return [code for code in matches if code[0] in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
+
+
+def standardize_airport_name(airport_name: Optional[str]) -> Optional[str]:
+    """Standardize airport name using OurAirports database.
+
+    Extracts ICAO codes from the name, looks them up in OurAirports,
+    and reconstructs the name with standardized names.
+
+    Args:
+        airport_name: Original airport name from KML
+
+    Returns:
+        Standardized airport name, or original if lookup fails
+
+    Examples:
+        >>> standardize_airport_name("EDAQ Halle - EDMV Vilshofen")
+        "EDAQ Halle-Oppin - EDMV Vilshofen"
+        >>> standardize_airport_name("EDCJ ChemnitzJahnsdorf")
+        "EDCJ Chemnitz/Jahnsdorf"
+    """
+    if not airport_name:
+        return airport_name
+
+    # Import here to avoid circular dependency
+    from .airport_lookup import lookup_airport_coordinates
+
+    # Extract ICAO codes from the name
+    icao_codes = extract_icao_codes_from_name(airport_name)
+
+    if not icao_codes:
+        # No ICAO codes found, return original
+        return airport_name
+
+    # Handle route format "AIRPORT1 Name1 - AIRPORT2 Name2"
+    if " - " in airport_name and len(icao_codes) == 2:
+        # Look up both airports
+        coords1 = lookup_airport_coordinates(icao_codes[0])
+        coords2 = lookup_airport_coordinates(icao_codes[1])
+
+        if coords1 and coords2:
+            _, _, name1 = coords1
+            _, _, name2 = coords2
+            # Remove common airport suffixes for cleaner display
+            clean_name1 = name1.replace(" Airport", "").replace(" Airfield", "")
+            clean_name2 = name2.replace(" Airport", "").replace(" Airfield", "")
+            standardized = (
+                f"{icao_codes[0]} {clean_name1} - {icao_codes[1]} {clean_name2}"
+            )
+            logger.debug(f"Standardized route: {airport_name} -> {standardized}")
+            return standardized
+        elif coords1:
+            # Only first airport found
+            _, _, name1 = coords1
+            clean_name1 = name1.replace(" Airport", "").replace(" Airfield", "")
+            parts = airport_name.split(" - ")
+            standardized = f"{icao_codes[0]} {clean_name1} - {parts[1]}"
+            logger.debug(f"Standardized start: {airport_name} -> {standardized}")
+            return standardized
+        elif coords2:
+            # Only second airport found
+            _, _, name2 = coords2
+            clean_name2 = name2.replace(" Airport", "").replace(" Airfield", "")
+            parts = airport_name.split(" - ")
+            standardized = f"{parts[0]} - {icao_codes[1]} {clean_name2}"
+            logger.debug(f"Standardized end: {airport_name} -> {standardized}")
+            return standardized
+
+    # Single airport format
+    elif len(icao_codes) == 1:
+        coords = lookup_airport_coordinates(icao_codes[0])
+        if coords:
+            _, _, name = coords
+            # Remove common airport suffixes for cleaner display
+            clean_name = name.replace(" Airport", "").replace(" Airfield", "")
+            standardized = f"{icao_codes[0]} {clean_name}"
+            logger.debug(f"Standardized airport: {airport_name} -> {standardized}")
+            return standardized
+
+    # Fallback to original name
+    return airport_name
 
 
 def sample_path_altitudes(
@@ -373,7 +498,7 @@ def find_xml_elements(
 
 
 def extract_placemark_metadata(
-    placemark: Any, namespaces: Dict[str, str]
+    placemark: Any, namespaces: Dict[str, str], kml_file: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Extract metadata from a KML Placemark element.
@@ -381,15 +506,19 @@ def extract_placemark_metadata(
     Args:
         placemark: XML element representing a Placemark
         namespaces: XML namespace dict
+        kml_file: Optional KML filename (unused, kept for backward compatibility)
 
     Returns:
         Dict with 'airport_name', 'timestamp', 'end_timestamp', 'year' keys
     """
-    # Extract name
+    # Extract name from KML
     name_elem = find_xml_element(placemark, ".//kml:name", ".//name", namespaces)
-    airport_name = (
+    kml_name = (
         name_elem.text.strip() if name_elem is not None and name_elem.text else None
     )
+
+    # Standardize airport name using ICAO codes from the name itself
+    airport_name = standardize_airport_name(kml_name)
 
     # Extract timestamps - both start and end for tracks with multiple when elements
     time_elems = find_xml_elements(placemark, ".//kml:when", ".//when", namespaces)
@@ -541,7 +670,7 @@ def process_standard_coordinates(
 
 
 def _extract_gx_track_metadata(
-    placemarks: List[Any], namespaces: Dict[str, str]
+    placemarks: List[Any], namespaces: Dict[str, str], kml_file: str
 ) -> Dict[str, Optional[str]]:
     """
     Extract metadata from gx:Track placemarks.
@@ -549,6 +678,7 @@ def _extract_gx_track_metadata(
     Args:
         placemarks: List of Placemark XML elements
         namespaces: XML namespace dict
+        kml_file: KML filename for ICAO extraction
 
     Returns:
         Dict with 'airport_name', 'timestamp', 'end_timestamp' keys
@@ -560,7 +690,7 @@ def _extract_gx_track_metadata(
         )
 
         if placemark_gx_coords:
-            meta = extract_placemark_metadata(placemark, namespaces)
+            meta = extract_placemark_metadata(placemark, namespaces, kml_file)
 
             if meta["timestamp"]:
                 logger.debug(f"Found gx:Track start timestamp: {meta['timestamp']}")
@@ -693,7 +823,7 @@ def process_gx_track(
         return
 
     # Extract metadata from placemarks
-    track_meta = _extract_gx_track_metadata(placemarks, namespaces)
+    track_meta = _extract_gx_track_metadata(placemarks, namespaces, kml_file)
 
     # Extract timestamp elements
     when_elems = _extract_gx_when_elements(placemarks, gx_coords, namespaces)
@@ -794,7 +924,7 @@ def _extract_kml_elements(
 
 
 def _build_coord_metadata_map(
-    placemarks: List[Any], namespaces: Dict[str, str]
+    placemarks: List[Any], namespaces: Dict[str, str], kml_file: str
 ) -> Dict[int, Dict[str, Any]]:
     """
     Create mapping from coordinate elements to their metadata.
@@ -802,6 +932,7 @@ def _build_coord_metadata_map(
     Args:
         placemarks: List of Placemark XML elements
         namespaces: XML namespace dict
+        kml_file: KML filename for ICAO extraction
 
     Returns:
         Dict mapping element ID to metadata dict
@@ -814,7 +945,7 @@ def _build_coord_metadata_map(
         )
 
         # Extract metadata using helper function
-        metadata = extract_placemark_metadata(placemark, namespaces)
+        metadata = extract_placemark_metadata(placemark, namespaces, kml_file)
 
         # Store metadata for each coordinates element in this placemark
         for coord_elem in placemark_coords:
@@ -876,7 +1007,7 @@ def parse_kml_coordinates(
         coord_elements, gx_coords, placemarks = _extract_kml_elements(root, namespaces)
 
         # Build metadata mapping
-        coord_to_metadata = _build_coord_metadata_map(placemarks, namespaces)
+        coord_to_metadata = _build_coord_metadata_map(placemarks, namespaces, kml_file)
 
         # Process standard KML coordinates
         process_standard_coordinates(

@@ -5,6 +5,8 @@ AGENTS.md
 /index.html
 __pycache__
 kml
+flight_supplements.json
+
+# Old cache files (now using ~/.cache/kml-heatmap/)
+.kml_cache/
 aircraft_cache.json
-.kml_cache
-flight_time_offsets.json

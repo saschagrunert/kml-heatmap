@@ -16,7 +16,6 @@ Categories:
 - Path Sampling: Sample sizes for altitude analysis
 - Mid-Flight Detection: Criteria for detecting non-ground starts
 - Landing Detection: Criteria for valid landing endpoints
-- Cache Settings: File system cache configuration
 - Resolution Levels: Multi-resolution export configuration
 - Heatmap Configuration: Visual styling parameters
 """
@@ -68,9 +67,6 @@ MID_FLIGHT_MAX_VARIATION_M = 100  # Maximum altitude variation for stable flight
 LANDING_MAX_VARIATION_M = 50  # Maximum altitude variation for stable landing
 LANDING_MAX_ALTITUDE_M = 600  # Maximum altitude for valid landing endpoint
 LANDING_FALLBACK_ALTITUDE_M = 1000  # Fallback altitude threshold for short paths
-
-# === Cache Settings ===
-CACHE_DIR_NAME = ".kml_cache"  # Directory name for KML parsing cache
 
 # === Data Export Resolution Levels ===
 RESOLUTION_LEVELS = {

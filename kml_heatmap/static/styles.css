@@ -946,37 +946,56 @@ body {
   background-color: rgba(245, 87, 108, 0.15);
   border-left: 3px solid #f5576c;
 }
-.wrapped-square-card .fleet-aircraft-high .fleet-aircraft-count {
+.wrapped-square-card .fleet-aircraft-high .fleet-aircraft-stats {
   color: #f5576c;
 }
 .wrapped-square-card .fleet-aircraft-medium-high {
   background-color: rgba(107, 207, 127, 0.15);
   border-left: 3px solid #6bcf7f;
 }
-.wrapped-square-card .fleet-aircraft-medium-high .fleet-aircraft-count {
+.wrapped-square-card .fleet-aircraft-medium-high .fleet-aircraft-stats {
   color: #6bcf7f;
 }
 .wrapped-square-card .fleet-aircraft-medium-low {
   background-color: rgba(0, 242, 254, 0.15);
   border-left: 3px solid #00f2fe;
 }
-.wrapped-square-card .fleet-aircraft-medium-low .fleet-aircraft-count {
+.wrapped-square-card .fleet-aircraft-medium-low .fleet-aircraft-stats {
   color: #00f2fe;
 }
 .wrapped-square-card .fleet-aircraft-low {
   background-color: rgba(79, 172, 254, 0.15);
   border-left: 3px solid #4facfe;
 }
-.wrapped-square-card .fleet-aircraft-low .fleet-aircraft-count {
+.wrapped-square-card .fleet-aircraft-low .fleet-aircraft-stats {
   color: #4facfe;
 }
-.wrapped-square-card .fleet-aircraft-name {
+.wrapped-square-card .fleet-aircraft-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wrapped-square-card .fleet-aircraft-model {
   font-size: 14px;
   font-weight: 500;
 }
-.wrapped-square-card .fleet-aircraft-count {
+.wrapped-square-card .fleet-aircraft-registration {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.wrapped-square-card .fleet-aircraft-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: right;
+}
+.wrapped-square-card .fleet-aircraft-flights {
   font-size: 14px;
   font-weight: bold;
+}
+.wrapped-square-card .fleet-aircraft-time {
+  font-size: 12px;
+  opacity: 0.8;
 }
 #wrapped-card-content {
   flex: 1;
@@ -1097,11 +1116,17 @@ body {
   .wrapped-square-card .fleet-aircraft {
     padding: 8px 12px;
   }
-  .wrapped-square-card .fleet-aircraft-name {
+  .wrapped-square-card .fleet-aircraft-model {
     font-size: 12px;
   }
-  .wrapped-square-card .fleet-aircraft-count {
+  .wrapped-square-card .fleet-aircraft-registration {
+    font-size: 11px;
+  }
+  .wrapped-square-card .fleet-aircraft-flights {
     font-size: 12px;
+  }
+  .wrapped-square-card .fleet-aircraft-time {
+    font-size: 11px;
   }
 }
 

@@ -520,6 +520,23 @@ function updateAirportOpacity() {
                 if (pathInfo.end_airport) visibleAirports.add(pathInfo.end_airport);
             }
         });
+
+        // Also add supplemental airports that match the filters
+        if (allAirportsData && allAirportsData.length > 0) {
+            allAirportsData.forEach(function(airport) {
+                if (airport.is_supplemental) {
+                    // Check if supplemental airport matches the current filters
+                    var matchesYear = selectedYear === 'all' ||
+                                    (airport.years && airport.years.includes(parseInt(selectedYear)));
+                    var matchesAircraft = selectedAircraft === 'all' ||
+                                        (airport.aircraft && airport.aircraft.includes(selectedAircraft));
+
+                    if (matchesYear && matchesAircraft) {
+                        visibleAirports.add(airport.name);
+                    }
+                }
+            });
+        }
     }
 
     // If paths are selected, collect airports from selected paths (overrides filter)
@@ -557,6 +574,7 @@ function updateAirportOpacity() {
 // Global variable for selected year
 var selectedYear = 'all';
 var selectedAircraft = 'all';
+var allAirportsData = [];
 
 // Function to calculate filtered statistics
 function calculateFilteredStats() {
@@ -619,6 +637,18 @@ function calculateFilteredStats() {
         }
     });
 
+    // Use pre-calculated flight counts from fullStats when filtering by specific aircraft
+    // This ensures supplement flights are included in the count
+    if (selectedAircraft !== 'all' && fullStats && fullStats.aircraft_list) {
+        var fullAircraft = fullStats.aircraft_list.find(function(a) {
+            return a.registration === selectedAircraft;
+        });
+        if (fullAircraft && aircraftMap[selectedAircraft]) {
+            // Use the pre-calculated flight count which includes supplements
+            aircraftMap[selectedAircraft].flights = fullAircraft.flights;
+        }
+    }
+
     var aircraftList = Object.values(aircraftMap).sort(function(a, b) {
         return b.flights - a.flights;
     });
@@ -630,22 +660,35 @@ function calculateFilteredStats() {
     });
 
     var totalDistanceKm = 0;
-    filteredSegments.forEach(function(segment) {
-        var coords = segment.coords;
-        if (coords && coords.length === 2) {
-            var lat1 = coords[0][0] * Math.PI / 180;
-            var lon1 = coords[0][1] * Math.PI / 180;
-            var lat2 = coords[1][0] * Math.PI / 180;
-            var lon2 = coords[1][1] * Math.PI / 180;
-            var dlat = lat2 - lat1;
-            var dlon = lon2 - lon1;
-            var a = Math.sin(dlat/2) * Math.sin(dlat/2) +
-                    Math.cos(lat1) * Math.cos(lat2) *
-                    Math.sin(dlon/2) * Math.sin(dlon/2);
-            var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            totalDistanceKm += 6371 * c;
+
+    // When filtering by specific aircraft, use pre-calculated distance from fullStats
+    // This ensures supplement distances are included
+    if (selectedAircraft !== 'all' && fullStats && fullStats.aircraft_list) {
+        var fullAircraft = fullStats.aircraft_list.find(function(a) {
+            return a.registration === selectedAircraft;
+        });
+        if (fullAircraft && fullAircraft.flight_distance_km) {
+            totalDistanceKm = fullAircraft.flight_distance_km;
         }
-    });
+    } else {
+        // Calculate from segments for 'all' filter or when fullStats not available
+        filteredSegments.forEach(function(segment) {
+            var coords = segment.coords;
+            if (coords && coords.length === 2) {
+                var lat1 = coords[0][0] * Math.PI / 180;
+                var lon1 = coords[0][1] * Math.PI / 180;
+                var lat2 = coords[1][0] * Math.PI / 180;
+                var lon2 = coords[1][1] * Math.PI / 180;
+                var dlat = lat2 - lat1;
+                var dlon = lon2 - lon1;
+                var a = Math.sin(dlat/2) * Math.sin(dlat/2) +
+                        Math.cos(lat1) * Math.cos(lat2) *
+                        Math.sin(dlon/2) * Math.sin(dlon/2);
+                var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                totalDistanceKm += 6371 * c;
+            }
+        });
+    }
 
     // Get altitude range
     var altitudes = filteredSegments.map(function(s) { return s.altitude_m; });
@@ -702,22 +745,35 @@ function calculateFilteredStats() {
 
     // Calculate total flight time from filtered paths
     var totalFlightTimeSeconds = 0;
-    if (filteredSegments.length > 0 && filteredSegments[0].time !== undefined) {
-        var segmentsByPath = {};
-        filteredSegments.forEach(function(seg) {
-            if (!segmentsByPath[seg.path_id]) {
-                segmentsByPath[seg.path_id] = [];
-            }
-            segmentsByPath[seg.path_id].push(seg);
+
+    // When filtering by specific aircraft, use pre-calculated time from fullStats
+    // This ensures supplement flight times are included
+    if (selectedAircraft !== 'all' && fullStats && fullStats.aircraft_list) {
+        var fullAircraft = fullStats.aircraft_list.find(function(a) {
+            return a.registration === selectedAircraft;
         });
-        Object.keys(segmentsByPath).forEach(function(pathId) {
-            var pathSegments = segmentsByPath[pathId];
-            pathSegments.sort(function(a, b) { return a.time - b.time; });
-            if (pathSegments.length > 0) {
-                var pathDuration = pathSegments[pathSegments.length - 1].time - pathSegments[0].time;
-                totalFlightTimeSeconds += pathDuration;
-            }
-        });
+        if (fullAircraft && fullAircraft.flight_time_seconds) {
+            totalFlightTimeSeconds = fullAircraft.flight_time_seconds;
+        }
+    } else {
+        // Calculate from segments for 'all' filter or when fullStats not available
+        if (filteredSegments.length > 0 && filteredSegments[0].time !== undefined) {
+            var segmentsByPath = {};
+            filteredSegments.forEach(function(seg) {
+                if (!segmentsByPath[seg.path_id]) {
+                    segmentsByPath[seg.path_id] = [];
+                }
+                segmentsByPath[seg.path_id].push(seg);
+            });
+            Object.keys(segmentsByPath).forEach(function(pathId) {
+                var pathSegments = segmentsByPath[pathId];
+                pathSegments.sort(function(a, b) { return a.time - b.time; });
+                if (pathSegments.length > 0) {
+                    var pathDuration = pathSegments[pathSegments.length - 1].time - pathSegments[0].time;
+                    totalFlightTimeSeconds += pathDuration;
+                }
+            });
+        }
     }
 
     var hours = Math.floor(totalFlightTimeSeconds / 3600);
@@ -802,9 +858,15 @@ function calculateFilteredStats() {
         }
     });
 
+    // Calculate total flights - use sum of aircraft flights instead of path count
+    // This ensures supplements are included when filtering by specific aircraft
+    var totalFlights = aircraftList.reduce(function(sum, aircraft) {
+        return sum + aircraft.flights;
+    }, 0);
+
     return {
         total_points: filteredSegments.length * 2,
-        num_paths: filteredPathInfo.length,
+        num_paths: totalFlights,
         num_airports: airports.size,
         airport_names: Array.from(airports).sort(),
         num_aircraft: aircraftList.length,
@@ -880,6 +942,7 @@ function filterByAircraft() {
 // Load airports once
 (async function() {
     const airports = await loadAirports();
+    allAirportsData = airports;  // Store globally for filtering
     const metadata = await loadMetadata();
 
     // Populate year filter dropdown
@@ -1026,7 +1089,6 @@ function filterByAircraft() {
     // Load and store full statistics
     if (metadata && metadata.stats) {
         fullStats = metadata.stats;
-        updateStatsPanel(fullStats, false);
     }
 
     // Load full resolution path_info and path_segments for accurate filtering and replay
@@ -1040,6 +1102,15 @@ function filterByAircraft() {
         }
     } catch (error) {
         console.error('Failed to load full path data:', error);
+    }
+
+    // Initialize stats panel with filter-aware data
+    // If filters are active from restored state, show filtered stats; otherwise show all
+    if (fullStats) {
+        const initialStats = (selectedYear !== 'all' || selectedAircraft !== 'all')
+            ? calculateFilteredStats()
+            : fullStats;
+        updateStatsPanel(initialStats, false);
     }
 
     // Load groundspeed range from metadata (from full resolution data)
@@ -3149,8 +3220,14 @@ function showWrapped() {
             const flightTimeStr = aircraft.flight_time_str || '---';
             fleetHtml += `
                 <div class="fleet-aircraft ${colorClass}">
-                    <div class="fleet-aircraft-name">${aircraft.registration} - ${modelStr}</div>
-                    <div class="fleet-aircraft-count">${aircraft.flights} flights • ${flightTimeStr}</div>
+                    <div class="fleet-aircraft-info">
+                        <div class="fleet-aircraft-model">${modelStr}</div>
+                        <div class="fleet-aircraft-registration">${aircraft.registration}</div>
+                    </div>
+                    <div class="fleet-aircraft-stats">
+                        <div class="fleet-aircraft-flights">${aircraft.flights} flights</div>
+                        <div class="fleet-aircraft-time">${flightTimeStr}</div>
+                    </div>
                 </div>
             `;
         });
