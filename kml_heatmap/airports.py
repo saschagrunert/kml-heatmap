@@ -201,8 +201,8 @@ class AirportDeduplicator:
         Add new airport or update existing one.
 
         Args:
-            lat: Latitude
-            lon: Longitude
+            lat: Latitude (from KML - may be corrected using OurAirports)
+            lon: Longitude (from KML - may be corrected using OurAirports)
             name: Airport name
             timestamp: Timestamp string
             path_index: Index of the path
@@ -211,8 +211,39 @@ class AirportDeduplicator:
         Returns:
             Index of the airport (new or existing)
         """
-        # Check for duplicates
-        apt_idx = self._find_nearby_airport(lat, lon)
+        # If name contains ICAO code, use OurAirports coordinates for deduplication
+        # This ensures all references to the same ICAO code are merged at the correct location
+        corrected_lat = lat
+        corrected_lon = lon
+
+        if name:
+            from .parser import extract_icao_codes_from_name
+            from .airport_lookup import lookup_airport_coordinates
+
+            icao_codes = extract_icao_codes_from_name(name)
+
+            # For routes, extract the relevant ICAO code based on position
+            if " - " in name and len(icao_codes) == 2:
+                # Use departure ICAO for start, arrival ICAO for end
+                icao_code = icao_codes[1] if is_at_path_end else icao_codes[0]
+            elif len(icao_codes) == 1:
+                icao_code = icao_codes[0]
+            else:
+                icao_code = None
+
+            # Look up correct coordinates if we have an ICAO code
+            if icao_code:
+                coords = lookup_airport_coordinates(icao_code)
+                if coords:
+                    corrected_lat, corrected_lon, _ = coords
+                    logger.debug(
+                        f"Using OurAirports coordinates for {icao_code}: "
+                        f"({corrected_lat:.6f}, {corrected_lon:.6f}) "
+                        f"instead of KML ({lat:.6f}, {lon:.6f})"
+                    )
+
+        # Check for duplicates using corrected coordinates
+        apt_idx = self._find_nearby_airport(corrected_lat, corrected_lon)
 
         if apt_idx is not None:
             # Update existing airport
@@ -235,22 +266,22 @@ class AirportDeduplicator:
 
             return apt_idx
         else:
-            # Add new unique airport
+            # Add new unique airport using corrected coordinates
             timestamps = (
                 [timestamp] if timestamp and not is_point_marker(name or "") else []
             )
             new_idx = len(self.unique_airports)
             self.unique_airports.append(
                 {
-                    "lat": lat,
-                    "lon": lon,
+                    "lat": corrected_lat,
+                    "lon": corrected_lon,
                     "timestamps": timestamps,
                     "name": name,
                     "path_index": path_index,
                     "is_at_path_end": is_at_path_end,
                 }
             )
-            self._add_to_grid(lat, lon, new_idx)
+            self._add_to_grid(corrected_lat, corrected_lon, new_idx)
             return new_idx
 
     def get_unique_airports(self) -> List[Dict[str, Any]]:

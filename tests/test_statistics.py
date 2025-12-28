@@ -398,17 +398,23 @@ class TestAggregateAircraftStats:
 
     def test_empty_metadata(self):
         """Test with empty metadata."""
-        result = aggregate_aircraft_stats([], [])
+        result, offset_distance, additional_flights = aggregate_aircraft_stats([], [])
         assert result["num_aircraft"] == 0
         assert result["aircraft_types"] == []
         assert result["aircraft_list"] == []
+        assert offset_distance == 0.0
+        assert additional_flights == 0
 
     def test_single_aircraft_no_registration(self):
         """Test with metadata but no registration."""
         metadata = [{"airport_name": "EDDF - KJFK"}]
         paths = [[[50.0, 8.5, 100], [51.0, 9.5, 200]]]
-        result = aggregate_aircraft_stats(metadata, paths)
+        result, offset_distance, additional_flights = aggregate_aircraft_stats(
+            metadata, paths
+        )
         assert result["num_aircraft"] == 0
+        assert offset_distance == 0.0
+        assert additional_flights == 0
 
     def test_single_aircraft_with_registration(self):
         """Test single aircraft with registration."""
@@ -420,7 +426,9 @@ class TestAggregateAircraftStats:
             }
         ]
         paths = [[[50.0, 8.5, 100], [51.0, 9.5, 200]]]
-        result = aggregate_aircraft_stats(metadata, paths)
+        result, offset_distance, additional_flights = aggregate_aircraft_stats(
+            metadata, paths
+        )
         assert result["num_aircraft"] == 1
         assert "DA20" in result["aircraft_types"]
         assert len(result["aircraft_list"]) == 1
@@ -445,7 +453,9 @@ class TestAggregateAircraftStats:
             [[50.0, 8.5, 100], [51.0, 9.5, 200]],
             [[52.0, 10.5, 300], [53.0, 11.5, 400]],
         ]
-        result = aggregate_aircraft_stats(metadata, paths)
+        result, offset_distance, additional_flights = aggregate_aircraft_stats(
+            metadata, paths
+        )
         assert result["num_aircraft"] == 1
         assert result["aircraft_list"][0]["flights"] == 2
 
@@ -467,7 +477,9 @@ class TestAggregateAircraftStats:
             [[50.0, 8.5, 100], [51.0, 9.5, 200]],
             [[52.0, 10.5, 300], [53.0, 11.5, 400]],
         ]
-        result = aggregate_aircraft_stats(metadata, paths)
+        result, offset_distance, additional_flights = aggregate_aircraft_stats(
+            metadata, paths
+        )
         assert result["aircraft_list"][0]["flights"] == 1
 
     def test_multiple_aircraft(self):
@@ -488,7 +500,9 @@ class TestAggregateAircraftStats:
             [[50.0, 8.5, 100], [51.0, 9.5, 200]],
             [[52.0, 10.5, 300], [53.0, 11.5, 400]],
         ]
-        result = aggregate_aircraft_stats(metadata, paths)
+        result, offset_distance, additional_flights = aggregate_aircraft_stats(
+            metadata, paths
+        )
         assert result["num_aircraft"] == 2
         assert len(result["aircraft_types"]) == 2
 
@@ -507,7 +521,9 @@ class TestAggregateAircraftStats:
                 [51.0, 9.5, 200, "2025-03-15T11:00:00Z"],
             ]
         ]
-        result = aggregate_aircraft_stats(metadata, paths)
+        result, offset_distance, additional_flights = aggregate_aircraft_stats(
+            metadata, paths
+        )
         assert result["aircraft_list"][0]["flight_time_seconds"] == 3600
         assert result["aircraft_list"][0]["flight_time_str"] is not None
 
@@ -535,7 +551,9 @@ class TestAggregateAircraftStats:
             [[52.0, 10.5, 300], [53.0, 11.5, 400]],
             [[54.0, 12.5, 500], [55.0, 13.5, 600]],
         ]
-        result = aggregate_aircraft_stats(metadata, paths)
+        result, offset_distance, additional_flights = aggregate_aircraft_stats(
+            metadata, paths
+        )
         # D-EHYL has 2 flights, D-EAGJ has 1, so D-EHYL should be first
         assert result["aircraft_list"][0]["registration"] == "D-EHYL"
         assert result["aircraft_list"][0]["flights"] == 2
@@ -546,7 +564,9 @@ class TestAggregateAircraftStats:
         """Test aircraft type is collected even without registration."""
         metadata = [{"aircraft_type": "C172"}]
         paths = [[[50.0, 8.5, 100], [51.0, 9.5, 200]]]
-        result = aggregate_aircraft_stats(metadata, paths)
+        result, offset_distance, additional_flights = aggregate_aircraft_stats(
+            metadata, paths
+        )
         assert "C172" in result["aircraft_types"]
 
     def test_short_path_skipped_in_flight_time(self):
@@ -560,7 +580,9 @@ class TestAggregateAircraftStats:
         ]
         # Path with only 1 point (too short)
         paths = [[[50.0, 8.5, 100, "2025-03-15T10:00:00Z"]]]
-        result = aggregate_aircraft_stats(metadata, paths)
+        result, offset_distance, additional_flights = aggregate_aircraft_stats(
+            metadata, paths
+        )
         assert result["aircraft_list"][0]["flight_time_seconds"] == 0
 
     def test_aircraft_no_type_and_lookup_fails(self):
@@ -573,7 +595,9 @@ class TestAggregateAircraftStats:
             }
         ]
         paths = [[[50.0, 8.5, 100], [51.0, 9.5, 200]]]
-        result = aggregate_aircraft_stats(metadata, paths)
+        result, offset_distance, additional_flights = aggregate_aircraft_stats(
+            metadata, paths
+        )
         # Should still create aircraft entry, model will be None
         assert len(result["aircraft_list"]) == 1
         assert result["aircraft_list"][0]["type"] is None
@@ -602,7 +626,13 @@ class TestLoadFlightTimeOffsets:
 
     def test_valid_offsets(self):
         """Test loading valid offset configuration."""
-        offsets = {"D-EAGJ": {"2025": 5.5, "2024": 10.0}, "D-EHYL": {"2025": 3.0}}
+        offsets = {
+            "D-EAGJ": {
+                "2025": {"hours": 5.5, "airports": []},
+                "2024": {"hours": 10.0, "airports": []},
+            },
+            "D-EHYL": {"2025": {"hours": 3.0, "airports": []}},
+        }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(offsets, f)
             f.flush()
@@ -611,9 +641,9 @@ class TestLoadFlightTimeOffsets:
         try:
             result = load_flight_time_offsets(filename)
             assert result == offsets
-            assert result["D-EAGJ"]["2025"] == 5.5
-            assert result["D-EAGJ"]["2024"] == 10.0
-            assert result["D-EHYL"]["2025"] == 3.0
+            assert result["D-EAGJ"]["2025"]["hours"] == 5.5
+            assert result["D-EAGJ"]["2024"]["hours"] == 10.0
+            assert result["D-EHYL"]["2025"]["hours"] == 3.0
         finally:
             os.unlink(filename)
 
@@ -630,6 +660,28 @@ class TestLoadFlightTimeOffsets:
         finally:
             os.unlink(filename)
 
+    def test_enhanced_format_with_airports(self):
+        """Test loading enhanced format with hours and airports."""
+        offsets = {
+            "D-EAGJ": {
+                "2025": {"hours": 5.5, "airports": ["EDAZ", "EDCB"]},
+                "2024": {"hours": 10.0, "airports": []},
+            }
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(offsets, f)
+            f.flush()
+            filename = f.name
+
+        try:
+            result = load_flight_time_offsets(filename)
+            assert result == offsets
+            assert result["D-EAGJ"]["2025"]["hours"] == 5.5
+            assert result["D-EAGJ"]["2025"]["airports"] == ["EDAZ", "EDCB"]
+            assert result["D-EAGJ"]["2024"]["hours"] == 10.0
+        finally:
+            os.unlink(filename)
+
 
 class TestFlightTimeOffsetsIntegration:
     """Integration tests for flight time offsets in aggregate_aircraft_stats."""
@@ -637,7 +689,7 @@ class TestFlightTimeOffsetsIntegration:
     def test_offsets_applied_to_aircraft_stats(self):
         """Test that offsets are correctly applied to aircraft flight times."""
         # Create temporary offset file
-        offsets = {"D-EAGJ": {"2025": 5.5}}
+        offsets = {"D-EAGJ": {"2025": {"hours": 5.5, "airports": []}}}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(offsets, f)
             f.flush()
@@ -670,11 +722,15 @@ class TestFlightTimeOffsetsIntegration:
             )
 
             try:
-                result = aggregate_aircraft_stats(metadata, paths)
+                result, offset_distance, additional_flights = aggregate_aircraft_stats(
+                    metadata, paths
+                )
                 # Should have 1 hour (3600s) + 5.5 hours (19800s) = 23400s
                 assert result["aircraft_list"][0][
                     "flight_time_seconds"
                 ] == pytest.approx(23400, abs=1)
+                # Check that offset distance was calculated (should be > 0)
+                assert offset_distance > 0
             finally:
                 stats_module.load_flight_time_offsets = original_load
         finally:
@@ -682,7 +738,12 @@ class TestFlightTimeOffsetsIntegration:
 
     def test_offsets_multiple_years(self):
         """Test offsets applied across multiple years."""
-        offsets = {"D-EAGJ": {"2025": 5.0, "2024": 10.0}}
+        offsets = {
+            "D-EAGJ": {
+                "2025": {"hours": 5.0, "airports": []},
+                "2024": {"hours": 10.0, "airports": []},
+            }
+        }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(offsets, f)
             f.flush()
@@ -722,11 +783,15 @@ class TestFlightTimeOffsetsIntegration:
             )
 
             try:
-                result = aggregate_aircraft_stats(metadata, paths)
+                result, offset_distance, additional_flights = aggregate_aircraft_stats(
+                    metadata, paths
+                )
                 # 3 hours recorded + 5.0 (2025) + 10.0 (2024) = 18 hours = 64800s
                 assert result["aircraft_list"][0][
                     "flight_time_seconds"
                 ] == pytest.approx(64800, abs=1)
+                # Check that offset distance was calculated
+                assert offset_distance > 0
             finally:
                 stats_module.load_flight_time_offsets = original_load
         finally:
@@ -734,7 +799,7 @@ class TestFlightTimeOffsetsIntegration:
 
     def test_no_offset_for_aircraft(self):
         """Test aircraft without offset configuration."""
-        offsets = {"D-EAGJ": {"2025": 5.0}}
+        offsets = {"D-EAGJ": {"2025": {"hours": 5.0, "airports": []}}}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(offsets, f)
             f.flush()
@@ -764,9 +829,66 @@ class TestFlightTimeOffsetsIntegration:
             )
 
             try:
-                result = aggregate_aircraft_stats(metadata, paths)
+                result, offset_distance, additional_flights = aggregate_aircraft_stats(
+                    metadata, paths
+                )
                 # No offset, just 1 hour
                 assert result["aircraft_list"][0]["flight_time_seconds"] == 3600
+                # No offset distance for this aircraft
+                assert offset_distance == 0.0
+            finally:
+                stats_module.load_flight_time_offsets = original_load
+        finally:
+            os.unlink(offset_file)
+
+    def test_enhanced_format_with_airports_integration(self):
+        """Test that enhanced format with airports works in aggregate_aircraft_stats."""
+        # Create offset with enhanced format
+        offsets = {
+            "D-EAGJ": {
+                "2025": {"hours": 5.5, "airports": ["EDAZ", "EDCB"]},
+            }
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(offsets, f)
+            f.flush()
+            offset_file = f.name
+
+        try:
+            metadata = [
+                {
+                    "aircraft_registration": "D-EAGJ",
+                    "aircraft_type": "DA20",
+                    "filename": "flight1.kml",
+                    "year": 2025,
+                }
+            ]
+            paths = [
+                [
+                    [50.0, 8.5, 100, "2025-03-15T10:00:00Z"],
+                    [51.0, 9.5, 200, "2025-03-15T11:00:00Z"],
+                ]
+            ]
+
+            import kml_heatmap.statistics as stats_module
+
+            original_load = stats_module.load_flight_time_offsets
+            stats_module.load_flight_time_offsets = (
+                lambda f="": load_flight_time_offsets(offset_file)
+            )
+
+            try:
+                result, offset_distance, additional_flights = aggregate_aircraft_stats(
+                    metadata, paths
+                )
+                # Should have 1 hour (3600s) + 5.5 hours (19800s) = 23400s
+                assert result["aircraft_list"][0][
+                    "flight_time_seconds"
+                ] == pytest.approx(23400, abs=1)
+                # Check that offset distance was calculated
+                assert offset_distance > 0
+                # Airports are tracked but not returned in stats
+                # They're only shown in logging
             finally:
                 stats_module.load_flight_time_offsets = original_load
         finally:

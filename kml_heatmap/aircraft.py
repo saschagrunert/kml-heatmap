@@ -1,12 +1,13 @@
 """Aircraft registration and model lookup functionality."""
 
-import os
 import json
 import re
 import urllib.request
 import urllib.error
 from html.parser import HTMLParser
 from typing import Optional, Dict, List
+
+from .cache import CACHE_DIR
 from .logger import logger
 
 __all__ = [
@@ -14,6 +15,9 @@ __all__ = [
     "lookup_aircraft_model",
     "parse_aircraft_from_filename",
 ]
+
+# Aircraft cache file
+AIRCRAFT_CACHE_FILE = CACHE_DIR / "aircraft.json"
 
 
 class AircraftDataParser(HTMLParser):
@@ -43,22 +47,32 @@ class AircraftDataParser(HTMLParser):
             self.in_title = False
 
 
-def lookup_aircraft_model(
-    registration: str, cache_file: str = "aircraft_cache.json"
-) -> Optional[str]:
+def lookup_aircraft_model(registration: str, cache_file: str = None) -> Optional[str]:
     """
     Look up aircraft model from airport-data.com
 
     Args:
         registration: Aircraft registration (e.g., 'D-EAGJ')
-        cache_file: Path to JSON cache file
+        cache_file: Path to JSON cache file (deprecated, uses unified cache)
 
     Returns:
         Full aircraft model name or None if not found
     """
+    # Use unified cache directory
+    if cache_file is None:
+        cache_file = AIRCRAFT_CACHE_FILE
+    else:
+        # Support legacy cache_file parameter for backward compatibility
+        from pathlib import Path
+
+        cache_file = Path(cache_file)
+
+    # Ensure cache directory exists
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
     # Load cache
     cache = {}
-    if os.path.exists(cache_file):
+    if cache_file.exists():
         try:
             with open(cache_file, "r") as f:
                 cache = json.load(f)

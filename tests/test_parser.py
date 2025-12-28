@@ -294,10 +294,10 @@ class TestCacheFunctions:
             old_cache1.write_text("{}")
             old_cache2.write_text("{}")
 
-            # Mock CACHE_DIR to use our temp directory
+            # Mock KML_CACHE_DIR to use our temp directory
             from unittest.mock import patch
 
-            with patch("kml_heatmap.parser.CACHE_DIR", cache_dir):
+            with patch("kml_heatmap.parser.KML_CACHE_DIR", cache_dir):
                 cache_path, is_valid = get_cache_key(str(kml_file))
 
                 # Old caches should be cleaned up
@@ -322,10 +322,10 @@ class TestCacheFunctions:
             old_cache = cache_dir / "test_readonly.json"
             old_cache.write_text("{}")
 
-            # Mock CACHE_DIR
+            # Mock KML_CACHE_DIR
             from unittest.mock import patch
 
-            with patch("kml_heatmap.parser.CACHE_DIR", cache_dir):
+            with patch("kml_heatmap.parser.KML_CACHE_DIR", cache_dir):
                 # Should not raise even if cleanup fails
                 cache_path, is_valid = get_cache_key(str(kml_file))
                 assert cache_path is not None

@@ -34,6 +34,7 @@ from kml_heatmap.airports import (
     extract_airport_name,
 )
 from kml_heatmap.statistics import calculate_statistics, load_flight_time_offsets
+from kml_heatmap.airport_lookup import lookup_airport_coordinates
 from kml_heatmap.renderer import minify_html, load_template
 from kml_heatmap.validation import validate_kml_file, validate_api_keys
 from kml_heatmap.constants import (
@@ -551,6 +552,14 @@ def export_data_json(
         if not strip_timestamps:
             airport_data["timestamps"] = apt["timestamps"]
 
+        # Add supplemental airport metadata (aircraft and years)
+        if apt.get("is_supplemental"):
+            airport_data["is_supplemental"] = True
+            if "aircraft" in apt:
+                airport_data["aircraft"] = apt["aircraft"]
+            if "years" in apt:
+                airport_data["years"] = apt["years"]
+
         valid_airports.append(airport_data)
 
     airports_data = {"airports": valid_airports}
@@ -741,6 +750,72 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         )
         logger.info(f"  Found {len(unique_airports)} unique airports")
 
+        # Add supplemental airports from flight_supplements.json
+        flight_supplements = load_flight_time_offsets()
+        supplemental_airports_added = 0
+        if flight_supplements:
+            logger.info("\n🗺️  Processing supplemental airports...")
+            # Collect ICAO codes with their aircraft and year associations
+            # Structure: {icao_code: {aircraft: [years], ...}}
+            supplement_airport_metadata = {}
+            for aircraft_reg, years_data in flight_supplements.items():
+                for year, year_data in years_data.items():
+                    # Enhanced format: {"hours": X, "airports": [...]}
+                    if not isinstance(year_data, dict):
+                        logger.warning(
+                            f"Invalid format for {aircraft_reg}/{year}: expected dict with 'hours' and 'airports', got {type(year_data).__name__}"
+                        )
+                        continue
+                    airports = year_data.get("airports", [])
+                    for icao_code in airports:
+                        if icao_code not in supplement_airport_metadata:
+                            supplement_airport_metadata[icao_code] = {}
+                        if aircraft_reg not in supplement_airport_metadata[icao_code]:
+                            supplement_airport_metadata[icao_code][aircraft_reg] = []
+                        supplement_airport_metadata[icao_code][aircraft_reg].append(
+                            int(year)
+                        )
+
+            # Look up coordinates and add to unique_airports
+            for icao_code in sorted(supplement_airport_metadata.keys()):
+                coords = lookup_airport_coordinates(icao_code)
+                if coords:
+                    lat, lon, name = coords
+                    # Add as supplemental airport (no timestamps, marked as supplemental)
+                    # Format: "ICAO Airport Name" (e.g., "EDDP Leipzig/Halle")
+                    clean_name = name.replace(" Airport", "").replace(" Airfield", "")
+                    full_name = f"{icao_code} {clean_name}"
+
+                    # Collect all aircraft and years for this airport
+                    aircraft_list = list(supplement_airport_metadata[icao_code].keys())
+                    year_list = []
+                    for years in supplement_airport_metadata[icao_code].values():
+                        year_list.extend(years)
+                    year_list = sorted(list(set(year_list)))  # Unique, sorted
+
+                    unique_airports.append(
+                        {
+                            "lat": lat,
+                            "lon": lon,
+                            "name": full_name,
+                            "timestamps": [],
+                            "is_supplemental": True,  # Mark as supplemental
+                            "aircraft": aircraft_list,  # Which aircraft used this airport
+                            "years": year_list,  # Which years this airport was used
+                        }
+                    )
+                    supplemental_airports_added += 1
+                    logger.info(
+                        f"  ✓ Added supplemental airport: {full_name} ({', '.join(aircraft_list)}, {', '.join(map(str, year_list))})"
+                    )
+                else:
+                    logger.warning(f"  ✗ Could not find coordinates for {icao_code}")
+
+            if supplemental_airports_added > 0:
+                logger.info(
+                    f"  Added {supplemental_airports_added} supplemental airport(s)"
+                )
+
     # Calculate statistics
     logger.info("\n📊 Calculating statistics...")
     stats = calculate_statistics(all_coordinates, all_path_groups, all_path_metadata)
@@ -861,14 +936,16 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
         stats["total_flight_time_seconds"] = total_flight_time
 
-        # 8. Per-aircraft flight times from segments
+        # 8. Per-aircraft flight times and distances from segments
         if stats.get("aircraft_list"):
             logger.debug(
-                f"    Recalculating per-aircraft times from {len(z14_path_info)} paths"
+                f"    Recalculating per-aircraft times and distances from {len(z14_path_info)} paths"
             )
             aircraft_times = {}
+            aircraft_distances = {}
             aircraft_years = {}
 
+            # Calculate times and distances per aircraft
             for idx, path_info in enumerate(z14_path_info):
                 reg = path_info.get("aircraft_registration")
                 path_id = path_info.get("id")
@@ -878,6 +955,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 if reg and path_id is not None and path_id in path_durations:
                     if reg not in aircraft_times:
                         aircraft_times[reg] = 0
+                        aircraft_distances[reg] = 0.0
                         aircraft_years[reg] = set()
                     times = path_durations[path_id]
                     if len(times) >= 2:
@@ -888,21 +966,51 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                         else:
                             logger.debug(f"    No year for path {path_id}, reg={reg}")
 
+            # Calculate distances per aircraft from segments
+            for segment in segments:
+                path_id = segment.get("path_id")
+                if path_id is not None and path_id < len(z14_path_info):
+                    path_info = z14_path_info[path_id]
+                    reg = path_info.get("aircraft_registration")
+                    if reg and reg in aircraft_distances:
+                        # Calculate segment distance using haversine
+                        coords = segment.get("coords", [])
+                        if len(coords) == 2:
+                            lat1, lon1 = coords[0]
+                            lat2, lon2 = coords[1]
+                            segment_distance_km = haversine_distance(
+                                lat1, lon1, lat2, lon2
+                            )
+                            aircraft_distances[reg] += segment_distance_km
+
             # Load time offsets and apply them
             time_offsets = load_flight_time_offsets()
-            logger.info("  ⏱  Applying time offsets in recalculation...")
+            logger.info("  ⏱  Applying flight supplements in recalculation...")
             logger.debug(f"    Time offsets loaded: {list(time_offsets.keys())}")
             logger.debug(f"    Aircraft years: {aircraft_years}")
 
-            # Update aircraft list with recalculated times
+            # Update aircraft list with recalculated times and distances
             # Also sum up the formatted times to ensure total matches
             total_formatted_hours = 0
             total_formatted_minutes = 0
+            total_offset_distance_km = 0.0
 
             for aircraft in stats["aircraft_list"]:
                 reg = aircraft["registration"]
                 if reg in aircraft_times:
                     flight_time_seconds = aircraft_times[reg]
+                    flight_distance_km = aircraft_distances.get(reg, 0.0)
+                    flight_count = aircraft.get("flights", 0)
+
+                    # Calculate average speed and distance per flight (before applying offsets)
+                    avg_speed_kmh = 0.0
+                    avg_distance_per_flight_km = 0.0
+                    if flight_time_seconds > 0 and flight_distance_km > 0:
+                        avg_speed_kmh = flight_distance_km / (
+                            flight_time_seconds / 3600
+                        )
+                    if flight_count > 0 and flight_distance_km > 0:
+                        avg_distance_per_flight_km = flight_distance_km / flight_count
 
                     # Apply per-year offsets if configured
                     logger.debug(
@@ -910,19 +1018,67 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     )
                     if reg in time_offsets and reg in aircraft_years:
                         total_offset_hours = 0.0
+                        all_missing_airports = []
+
                         for year in aircraft_years[reg]:
                             if year in time_offsets[reg]:
-                                offset_hours = time_offsets[reg][year]
+                                entry = time_offsets[reg][year]
+                                # Enhanced format only: {"hours": X, "airports": [...]}
+                                if not isinstance(entry, dict):
+                                    logger.warning(
+                                        f"Invalid format for {reg}/{year}: expected dict with 'hours' and 'airports', got {type(entry).__name__}"
+                                    )
+                                    continue
+                                offset_hours = entry.get("hours", 0)
+                                airports = entry.get("airports", [])
                                 total_offset_hours += offset_hours
+                                all_missing_airports.extend(airports)
 
                         if total_offset_hours > 0:
                             offset_seconds = total_offset_hours * 3600
                             flight_time_seconds += offset_seconds
-                            logger.info(
-                                f"    ✓ {reg}: Added {total_offset_hours}h offset (recalc)"
-                            )
+
+                            # Calculate additional distance based on average speed
+                            if avg_speed_kmh > 0:
+                                offset_distance_km = avg_speed_kmh * total_offset_hours
+                                flight_distance_km += offset_distance_km
+                                total_offset_distance_km += offset_distance_km
+
+                                # Calculate additional flights based on average distance per flight
+                                additional_flights = 0
+                                if avg_distance_per_flight_km > 0:
+                                    additional_flights = int(
+                                        offset_distance_km / avg_distance_per_flight_km
+                                    )
+                                    flight_count += additional_flights
+
+                                # Format the log message with optional airports
+                                airports_str = ""
+                                if all_missing_airports:
+                                    airports_str = (
+                                        f" | Missing: {', '.join(all_missing_airports)}"
+                                    )
+
+                                logger.info(
+                                    f"    ✓ {reg}: Added {total_offset_hours}h supplement (recalc) "
+                                    f"→ +{offset_distance_km:.1f} km, +{additional_flights} flights "
+                                    f"(avg speed: {avg_speed_kmh:.1f} km/h, avg distance/flight: {avg_distance_per_flight_km:.1f} km){airports_str}"
+                                )
+                            else:
+                                # Format the log message with optional airports
+                                airports_str = ""
+                                if all_missing_airports:
+                                    airports_str = (
+                                        f" | Missing: {', '.join(all_missing_airports)}"
+                                    )
+
+                                logger.info(
+                                    f"    ✓ {reg}: Added {total_offset_hours}h supplement (recalc){airports_str}"
+                                )
 
                     aircraft["flight_time_seconds"] = flight_time_seconds
+                    aircraft["flight_distance_km"] = flight_distance_km
+                    aircraft["flights"] = flight_count
                     hours = int(flight_time_seconds // 3600)
                     minutes = int((flight_time_seconds % 3600) // 60)
                     aircraft["flight_time_str"] = format_flight_time(
@@ -933,6 +1089,15 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                     total_formatted_hours += hours
                     total_formatted_minutes += minutes
 
+            # Add offset distance to total distance
+            if total_offset_distance_km > 0:
+                stats["total_distance_km"] += total_offset_distance_km
+                stats["total_distance_nm"] = stats["total_distance_km"] * 0.539957
+                logger.info(
+                    f"  📏 Added {total_offset_distance_km:.1f} km from flight supplements (recalc) "
+                    f"(new total: {stats['total_distance_km']:.1f} km)"
+                )
+
             # Convert accumulated minutes to hours for total
             total_formatted_hours += total_formatted_minutes // 60
             total_formatted_minutes = total_formatted_minutes % 60
@@ -942,6 +1107,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                 total_formatted_hours * 3600 + total_formatted_minutes * 60
             )
             stats["total_flight_time_str"] = format_flight_time(total_seconds_formatted)
+
+            # Recalculate num_paths to match sum of per-aircraft flights
+            # This ensures consistency after applying flight supplements
+            total_flights = sum(
+                aircraft["flights"] for aircraft in stats["aircraft_list"]
+            )
+            stats["num_paths"] = total_flights
+            logger.debug(f"  Updated num_paths to match aircraft sum: {total_flights}")
 
         # Re-export metadata with all recalculated statistics
         # Preserve available_years and gradient from the original metadata
