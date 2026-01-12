@@ -33,8 +33,7 @@ from kml_heatmap.airports import (
     deduplicate_airports,
     extract_airport_name,
 )
-from kml_heatmap.statistics import calculate_statistics, load_flight_time_offsets
-from kml_heatmap.airport_lookup import lookup_airport_coordinates
+from kml_heatmap.statistics import calculate_statistics
 from kml_heatmap.renderer import minify_html, load_template
 from kml_heatmap.validation import validate_kml_file, validate_api_keys
 from kml_heatmap.constants import (
@@ -173,6 +172,24 @@ def export_data_json(
     # Track cruise altitude histogram (bins for altitudes above threshold AGL)
     cruise_altitude_histogram = {}  # Dict of {altitude_bin_ft: time_seconds}
 
+    # Group paths by year for year-based file splitting
+    paths_by_year = {}
+    for path_idx, metadata in enumerate(all_path_metadata):
+        year = metadata.get("year")
+        if year is None:
+            year = "unknown"
+        else:
+            year = str(year)  # Convert to string for consistency
+
+        if year not in paths_by_year:
+            paths_by_year[year] = []
+        paths_by_year[year].append(path_idx)
+
+    logger.info(f"\n  📅 Splitting data by year: {sorted(paths_by_year.keys())}")
+
+    # Track file structure for metadata
+    file_structure = {}
+
     # OPTIMIZATION: Calculate all segment data once at full resolution
     # Then downsample coordinates and filter segments for other resolutions
     logger.info("\n  📈 Calculating segment metadata at full resolution...")
@@ -180,341 +197,373 @@ def export_data_json(
     # Process resolutions in order, with z14_plus first to establish the groundspeed baseline
     resolution_order = ["z14_plus", "z11_13", "z8_10", "z5_7", "z0_4"]
 
-    for res_name in resolution_order:
-        res_config = resolutions[res_name]
+    # Iterate over years to create year-specific files
+    for year in sorted(paths_by_year.keys()):
+        year_path_indices = paths_by_year[year]
+        logger.info(f"\n  Processing year {year} ({len(year_path_indices)} paths)...")
+        file_structure[year] = []
 
-        # OPTIMIZATION: Downsample paths once (with altitude), then extract 2D coords
-        # This avoids calling RDP twice per path
-        downsampled_paths = []
-        for path in all_path_groups:
+        for res_name in resolution_order:
+            res_config = resolutions[res_name]
+
+            # OPTIMIZATION: Downsample paths once (with altitude), then extract 2D coords
+            # This avoids calling RDP twice per path
+            # Filter to only process paths for this year
+            downsampled_paths = []
+            for path_idx in year_path_indices:
+                path = all_path_groups[path_idx]
+                if res_config["epsilon"] > 0:
+                    simplified = downsample_path_rdp(path, res_config["epsilon"])
+                    downsampled_paths.append(simplified)
+                else:
+                    downsampled_paths.append(path)
+
+            # Extract 2D coordinates from already-downsampled paths
             if res_config["epsilon"] > 0:
-                simplified = downsample_path_rdp(path, res_config["epsilon"])
-                downsampled_paths.append(simplified)
+                downsampled_coords = [
+                    [p[0], p[1]] for path in downsampled_paths for p in path
+                ]
+                if not downsampled_coords:
+                    downsampled_coords = downsample_coordinates(
+                        all_coordinates, res_config["factor"]
+                    )
             else:
-                downsampled_paths.append(path)
+                downsampled_coords = all_coordinates
 
-        # Extract 2D coordinates from already-downsampled paths
-        if res_config["epsilon"] > 0:
-            downsampled_coords = [
-                [p[0], p[1]] for path in downsampled_paths for p in path
-            ]
-            if not downsampled_coords:
-                downsampled_coords = downsample_coordinates(
-                    all_coordinates, res_config["factor"]
-                )
-        else:
-            downsampled_coords = all_coordinates
+            # Prepare path segments with colors and track relationships
+            path_segments = []
+            path_info = []  # Track path-to-airport relationships
 
-        # Prepare path segments with colors and track relationships
-        path_segments = []
-        path_info = []  # Track path-to-airport relationships
+            # Iterate using original path indices to access metadata correctly
+            for local_idx, (orig_path_idx, path) in enumerate(
+                zip(year_path_indices, downsampled_paths)
+            ):
+                if len(path) > 1:
+                    # Get original path metadata if available
+                    metadata = (
+                        all_path_metadata[orig_path_idx]
+                        if orig_path_idx < len(all_path_metadata)
+                        else {}
+                    )
 
-        for path_idx, path in enumerate(downsampled_paths):
-            if len(path) > 1:
-                # Get original path metadata if available
-                metadata = (
-                    all_path_metadata[path_idx]
-                    if path_idx < len(all_path_metadata)
-                    else {}
-                )
+                    # Extract airport information from metadata
+                    airport_name = metadata.get("airport_name", "")
+                    start_airport = None
+                    end_airport = None
 
-                # Extract airport information from metadata
-                airport_name = metadata.get("airport_name", "")
-                start_airport = None
-                end_airport = None
+                    if airport_name and " - " in airport_name:
+                        parts = airport_name.split(" - ")
+                        if len(parts) == 2:
+                            start_airport = parts[0].strip()
+                            end_airport = parts[1].strip()
 
-                if airport_name and " - " in airport_name:
-                    parts = airport_name.split(" - ")
-                    if len(parts) == 2:
-                        start_airport = parts[0].strip()
-                        end_airport = parts[1].strip()
+                    # Get year from metadata
+                    path_year = (
+                        all_path_metadata[orig_path_idx].get("year")
+                        if orig_path_idx < len(all_path_metadata)
+                        else None
+                    )
 
-                # Get year from metadata
-                path_year = (
-                    all_path_metadata[path_idx].get("year")
-                    if path_idx < len(all_path_metadata)
-                    else None
-                )
+                    # Calculate path duration and distance for ALL resolutions (needed for groundspeed)
+                    path_duration_seconds = 0
+                    path_distance_km = 0
 
-                # Calculate path duration and distance for ALL resolutions (needed for groundspeed)
-                path_duration_seconds = 0
-                path_distance_km = 0
+                    start_ts = metadata.get("timestamp")
+                    end_ts = metadata.get("end_timestamp")
 
-                start_ts = metadata.get("timestamp")
-                end_ts = metadata.get("end_timestamp")
+                    if start_ts and end_ts:
+                        path_duration_seconds = calculate_duration_seconds(
+                            start_ts, end_ts
+                        )
+                        if path_duration_seconds == 0:
+                            logger.debug(
+                                f"  Could not parse timestamps '{start_ts}' -> '{end_ts}'"
+                            )
 
-                if start_ts and end_ts:
-                    path_duration_seconds = calculate_duration_seconds(start_ts, end_ts)
-                    if path_duration_seconds == 0:
-                        logger.debug(
-                            f"  Could not parse timestamps '{start_ts}' -> '{end_ts}'"
+                    # Calculate total path distance
+                    for i in range(len(path) - 1):
+                        lat1, lon1 = path[i][0], path[i][1]
+                        lat2, lon2 = path[i + 1][0], path[i + 1][1]
+                        path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+
+                    # Track longest single flight distance (only for z14_plus to avoid duplication)
+                    if res_name == "z14_plus":
+                        path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
+                        if path_distance_nm > max_path_distance_nm:
+                            max_path_distance_nm = path_distance_nm
+
+                    # Store path info with airport relationships and aircraft info
+                    info = {
+                        "id": local_idx,
+                        "start_airport": start_airport,
+                        "end_airport": end_airport,
+                        "start_coords": [path[0][0], path[0][1]],
+                        "end_coords": [path[-1][0], path[-1][1]],
+                        "segment_count": len(path) - 1,
+                        "year": path_year,
+                    }
+                    # Add aircraft information if available in metadata
+                    if "aircraft_registration" in metadata:
+                        info["aircraft_registration"] = metadata[
+                            "aircraft_registration"
+                        ]
+                    if "aircraft_type" in metadata:
+                        info["aircraft_type"] = metadata["aircraft_type"]
+                    path_info.append(info)
+
+                    # Calculate groundspeed for all resolutions (not just z14_plus)
+                    # This ensures airspeed visualization works at all zoom levels
+
+                    # Calculate ground level for this path (minimum altitude in meters)
+                    ground_level_m = min([coord[2] for coord in path]) if path else 0
+
+                    # Find path start time (first valid timestamp) for relative time calculation
+                    path_start_time = None
+                    for coord in path:
+                        if len(coord) >= 4:
+                            path_start_time = parse_iso_timestamp(coord[3])
+                            if path_start_time:
+                                break
+
+                    # First pass: calculate instantaneous speeds and timestamps for all segments
+                    segment_speeds = []  # List of (timestamp, speed, distance, time_delta)
+
+                    for i in range(len(path) - 1):
+                        coord1 = path[i]
+                        coord2 = path[i + 1]
+
+                        lat1, lon1 = coord1[0], coord1[1]
+                        lat2, lon2 = coord2[0], coord2[1]
+                        segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
+
+                        # Try to calculate speed from timestamps
+                        instant_speed = 0
+                        timestamp = None
+                        time_delta = 0
+                        relative_time = None  # Seconds from path start
+
+                        if len(coord1) >= 4 and len(coord2) >= 4:
+                            ts1, ts2 = coord1[3], coord2[3]
+                            dt1 = parse_iso_timestamp(ts1)
+                            dt2 = parse_iso_timestamp(ts2)
+                            if dt1 and dt2:
+                                time_delta = (dt2 - dt1).total_seconds()
+                                timestamp = dt1  # Use start time of segment
+
+                                # Calculate relative time from path start (for replay feature)
+                                if path_start_time is not None:
+                                    relative_time = (
+                                        dt1 - path_start_time
+                                    ).total_seconds()
+
+                                if time_delta >= MIN_SEGMENT_TIME_SECONDS:
+                                    segment_distance_nm = (
+                                        segment_distance_km * KM_TO_NAUTICAL_MILES
+                                    )
+                                    instant_speed = (
+                                        segment_distance_nm / time_delta
+                                    ) * 3600
+                                    # Cap at max speed
+                                    if instant_speed > MAX_GROUNDSPEED_KNOTS:
+                                        instant_speed = 0  # Ignore unrealistic speeds
+                            else:
+                                logger.debug(
+                                    f"  Could not parse segment timestamps '{ts1}' -> '{ts2}'"
+                                )
+
+                        segment_speeds.append(
+                            {
+                                "index": i,
+                                "timestamp": timestamp,
+                                "relative_time": relative_time,
+                                "speed": instant_speed,
+                                "distance": segment_distance_km,
+                                "time_delta": time_delta,
+                            }
                         )
 
-                # Calculate total path distance
-                for i in range(len(path) - 1):
-                    lat1, lon1 = path[i][0], path[i][1]
-                    lat2, lon2 = path[i + 1][0], path[i + 1][1]
-                    path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+                    # Build time-sorted list for efficient window queries
+                    time_indexed_segments = []
+                    timestamp_list = []
+                    for seg in segment_speeds:
+                        if seg["timestamp"] is not None and seg["speed"] != 0:
+                            ts = seg["timestamp"].timestamp()
+                            timestamp_list.append(ts)
+                            time_indexed_segments.append(seg)
 
-                # Track longest single flight distance (only for z14_plus to avoid duplication)
-                if res_name == "z14_plus":
-                    path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
-                    if path_distance_nm > max_path_distance_nm:
-                        max_path_distance_nm = path_distance_nm
+                    # Sort both lists together
+                    if timestamp_list:
+                        sorted_pairs = sorted(
+                            zip(timestamp_list, time_indexed_segments),
+                            key=lambda x: x[0],
+                        )
+                        timestamp_list, time_indexed_segments = zip(*sorted_pairs)
+                        timestamp_list = list(timestamp_list)
+                        time_indexed_segments = list(time_indexed_segments)
 
-                # Store path info with airport relationships and aircraft info
-                info = {
-                    "id": path_idx,
-                    "start_airport": start_airport,
-                    "end_airport": end_airport,
-                    "start_coords": [path[0][0], path[0][1]],
-                    "end_coords": [path[-1][0], path[-1][1]],
-                    "segment_count": len(path) - 1,
-                    "year": path_year,
-                }
-                # Add aircraft information if available in metadata
-                if "aircraft_registration" in metadata:
-                    info["aircraft_registration"] = metadata["aircraft_registration"]
-                if "aircraft_type" in metadata:
-                    info["aircraft_type"] = metadata["aircraft_type"]
-                path_info.append(info)
+                    # Second pass: calculate rolling average speeds using time window
+                    for i in range(len(path) - 1):
+                        coord1 = path[i]
+                        coord2 = path[i + 1]
+                        lat1, lon1, alt1_m = coord1[0], coord1[1], coord1[2]
+                        lat2, lon2, alt2_m = coord2[0], coord2[1], coord2[2]
 
-                # Calculate groundspeed for all resolutions (not just z14_plus)
-                # This ensures airspeed visualization works at all zoom levels
+                        avg_alt_m = (alt1_m + alt2_m) / 2
+                        avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+                        color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
 
-                # Calculate ground level for this path (minimum altitude in meters)
-                ground_level_m = min([coord[2] for coord in path]) if path else 0
+                        # Calculate windowed average groundspeed
+                        groundspeed_knots = 0
+                        current_segment = segment_speeds[i]
+                        current_timestamp = current_segment["timestamp"]
+                        current_relative_time = current_segment["relative_time"]
 
-                # Find path start time (first valid timestamp) for relative time calculation
-                path_start_time = None
-                for coord in path:
-                    if len(coord) >= 4:
-                        path_start_time = parse_iso_timestamp(coord[3])
-                        if path_start_time:
-                            break
+                        if current_timestamp is not None and timestamp_list:
+                            # Use binary search to find window bounds
+                            window_distance = 0
+                            window_time = 0
+                            current_ts = current_timestamp.timestamp()
+                            half_window = SPEED_WINDOW_SECONDS / 2
 
-                # First pass: calculate instantaneous speeds and timestamps for all segments
-                segment_speeds = []  # List of (timestamp, speed, distance, time_delta)
+                            # Binary search for window start and end
+                            from bisect import bisect_left, bisect_right
 
-                for i in range(len(path) - 1):
-                    coord1 = path[i]
-                    coord2 = path[i + 1]
+                            start_idx = bisect_left(
+                                timestamp_list, current_ts - half_window
+                            )
+                            end_idx = bisect_right(
+                                timestamp_list, current_ts + half_window
+                            )
 
-                    lat1, lon1 = coord1[0], coord1[1]
-                    lat2, lon2 = coord2[0], coord2[1]
-                    segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
+                            # Accumulate segments in window
+                            for j in range(start_idx, end_idx):
+                                seg = time_indexed_segments[j]
+                                window_distance += seg["distance"]
+                                window_time += seg["time_delta"]
 
-                    # Try to calculate speed from timestamps
-                    instant_speed = 0
-                    timestamp = None
-                    time_delta = 0
-                    relative_time = None  # Seconds from path start
+                            # Calculate average speed over the window
+                            if window_time >= MIN_SEGMENT_TIME_SECONDS:
+                                window_distance_nm = (
+                                    window_distance * KM_TO_NAUTICAL_MILES
+                                )
+                                groundspeed_knots = (
+                                    window_distance_nm / window_time
+                                ) * 3600
+                                # Cap at max speed
+                                if groundspeed_knots > MAX_GROUNDSPEED_KNOTS:
+                                    groundspeed_knots = 0
 
-                    if len(coord1) >= 4 and len(coord2) >= 4:
-                        ts1, ts2 = coord1[3], coord2[3]
-                        dt1 = parse_iso_timestamp(ts1)
-                        dt2 = parse_iso_timestamp(ts2)
-                        if dt1 and dt2:
-                            time_delta = (dt2 - dt1).total_seconds()
-                            timestamp = dt1  # Use start time of segment
-
-                            # Calculate relative time from path start (for replay feature)
-                            if path_start_time is not None:
-                                relative_time = (dt1 - path_start_time).total_seconds()
-
-                            if time_delta >= MIN_SEGMENT_TIME_SECONDS:
+                        # Fall back to path average if no timestamp-based calculation
+                        if (
+                            groundspeed_knots == 0
+                            and path_duration_seconds > 0
+                            and path_distance_km > 0
+                        ):
+                            segment_distance_km = haversine_distance(
+                                lat1, lon1, lat2, lon2
+                            )
+                            segment_time_seconds = (
+                                segment_distance_km / path_distance_km
+                            ) * path_duration_seconds
+                            if segment_time_seconds >= MIN_SEGMENT_TIME_SECONDS:
                                 segment_distance_nm = (
                                     segment_distance_km * KM_TO_NAUTICAL_MILES
                                 )
-                                instant_speed = (
-                                    segment_distance_nm / time_delta
+                                calculated_speed = (
+                                    segment_distance_nm / segment_time_seconds
                                 ) * 3600
-                                # Cap at max speed
-                                if instant_speed > MAX_GROUNDSPEED_KNOTS:
-                                    instant_speed = 0  # Ignore unrealistic speeds
-                        else:
-                            logger.debug(
-                                f"  Could not parse segment timestamps '{ts1}' -> '{ts2}'"
-                            )
+                                if 0 < calculated_speed <= MAX_GROUNDSPEED_KNOTS:
+                                    groundspeed_knots = calculated_speed
 
-                    segment_speeds.append(
-                        {
-                            "index": i,
-                            "timestamp": timestamp,
-                            "relative_time": relative_time,
-                            "speed": instant_speed,
-                            "distance": segment_distance_km,
-                            "time_delta": time_delta,
-                        }
-                    )
+                        # Track maximum and minimum groundspeed (only for full resolution to get accurate range)
+                        if res_name == "z14_plus" and groundspeed_knots > 0:
+                            if groundspeed_knots > max_groundspeed_knots:
+                                max_groundspeed_knots = groundspeed_knots
+                            if groundspeed_knots < min_groundspeed_knots:
+                                min_groundspeed_knots = groundspeed_knots
 
-                # Build time-sorted list for efficient window queries
-                time_indexed_segments = []
-                timestamp_list = []
-                for seg in segment_speeds:
-                    if seg["timestamp"] is not None and seg["speed"] != 0:
-                        ts = seg["timestamp"].timestamp()
-                        timestamp_list.append(ts)
-                        time_indexed_segments.append(seg)
+                            # Track cruise speed (only segments >1000ft AGL)
+                            altitude_agl_m = avg_alt_m - ground_level_m
+                            altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
+                            if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
+                                # This is a cruise segment
+                                if window_time >= MIN_SEGMENT_TIME_SECONDS:
+                                    cruise_speed_total_distance += (
+                                        window_distance * KM_TO_NAUTICAL_MILES
+                                    )
+                                    cruise_speed_total_time += window_time
 
-                # Sort both lists together
-                if timestamp_list:
-                    sorted_pairs = sorted(
-                        zip(timestamp_list, time_indexed_segments), key=lambda x: x[0]
-                    )
-                    timestamp_list, time_indexed_segments = zip(*sorted_pairs)
-                    timestamp_list = list(timestamp_list)
-                    time_indexed_segments = list(time_indexed_segments)
+                                    # Track cruise altitude in bins
+                                    altitude_bin_ft = (
+                                        int(altitude_agl_ft / ALTITUDE_BIN_SIZE_FT)
+                                        * ALTITUDE_BIN_SIZE_FT
+                                    )
+                                    if altitude_bin_ft not in cruise_altitude_histogram:
+                                        cruise_altitude_histogram[altitude_bin_ft] = 0
+                                    cruise_altitude_histogram[altitude_bin_ft] += (
+                                        window_time
+                                    )
 
-                # Second pass: calculate rolling average speeds using time window
-                for i in range(len(path) - 1):
-                    coord1 = path[i]
-                    coord2 = path[i + 1]
-                    lat1, lon1, alt1_m = coord1[0], coord1[1], coord1[2]
-                    lat2, lon2, alt2_m = coord2[0], coord2[1], coord2[2]
+                        # For downsampled resolutions, clamp to the max from full resolution to avoid
+                        # artificially high speeds caused by downsampling (fewer GPS points = longer segments)
+                        if (
+                            res_name != "z14_plus"
+                            and max_groundspeed_knots > 0
+                            and groundspeed_knots > max_groundspeed_knots
+                        ):
+                            groundspeed_knots = max_groundspeed_knots
 
-                    avg_alt_m = (alt1_m + alt2_m) / 2
-                    avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
-                    color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
+                        # Skip zero-length segments (identical coordinates)
+                        if lat1 != lat2 or lon1 != lon2:
+                            segment_data = {
+                                "coords": [[lat1, lon1], [lat2, lon2]],
+                                "color": color,
+                                "altitude_ft": avg_alt_ft,
+                                "altitude_m": round(avg_alt_m, 0),
+                                "groundspeed_knots": round(groundspeed_knots, 1),
+                                "path_id": local_idx,  # Link segment to its path
+                            }
+                            # Add relative time for replay feature (privacy-preserving)
+                            if current_relative_time is not None:
+                                segment_data["time"] = round(current_relative_time, 1)
+                            path_segments.append(segment_data)
 
-                    # Calculate windowed average groundspeed
-                    groundspeed_knots = 0
-                    current_segment = segment_speeds[i]
-                    current_timestamp = current_segment["timestamp"]
-                    current_relative_time = current_segment["relative_time"]
+            # Export data
+            data = {
+                "coordinates": downsampled_coords,
+                "path_segments": path_segments,
+                "path_info": path_info,  # Include path-to-airport relationships
+                "resolution": res_name,
+                "original_points": len(all_coordinates),
+                "downsampled_points": len(downsampled_coords),
+                "compression_ratio": round(
+                    len(downsampled_coords) / max(len(all_coordinates), 1) * 100, 1
+                ),
+            }
 
-                    if current_timestamp is not None and timestamp_list:
-                        # Use binary search to find window bounds
-                        window_distance = 0
-                        window_time = 0
-                        current_ts = current_timestamp.timestamp()
-                        half_window = SPEED_WINDOW_SECONDS / 2
+            # Create year directory if it doesn't exist
+            year_dir = os.path.join(output_dir, year)
+            os.makedirs(year_dir, exist_ok=True)
 
-                        # Binary search for window start and end
-                        from bisect import bisect_left, bisect_right
+            # Export to year directory with simple filename
+            output_file = os.path.join(year_dir, f"{res_name}.json")
+            with open(output_file, "w") as f:
+                json.dump(data, f, separators=(",", ":"), sort_keys=True)
 
-                        start_idx = bisect_left(
-                            timestamp_list, current_ts - half_window
-                        )
-                        end_idx = bisect_right(timestamp_list, current_ts + half_window)
+            file_size = os.path.getsize(output_file)
 
-                        # Accumulate segments in window
-                        for j in range(start_idx, end_idx):
-                            seg = time_indexed_segments[j]
-                            window_distance += seg["distance"]
-                            window_time += seg["time_delta"]
+            # Track this resolution for this year
+            file_structure[year].append(res_name)
 
-                        # Calculate average speed over the window
-                        if window_time >= MIN_SEGMENT_TIME_SECONDS:
-                            window_distance_nm = window_distance * KM_TO_NAUTICAL_MILES
-                            groundspeed_knots = (
-                                window_distance_nm / window_time
-                            ) * 3600
-                            # Cap at max speed
-                            if groundspeed_knots > MAX_GROUNDSPEED_KNOTS:
-                                groundspeed_knots = 0
+            # Store z14_plus data for later use (avoid reloading)
+            # Only store for the latest year to avoid confusion
+            if res_name == "z14_plus" and year == sorted(paths_by_year.keys())[-1]:
+                z14_plus_segments = path_segments
+                z14_plus_path_info = path_info
 
-                    # Fall back to path average if no timestamp-based calculation
-                    if (
-                        groundspeed_knots == 0
-                        and path_duration_seconds > 0
-                        and path_distance_km > 0
-                    ):
-                        segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
-                        segment_time_seconds = (
-                            segment_distance_km / path_distance_km
-                        ) * path_duration_seconds
-                        if segment_time_seconds >= MIN_SEGMENT_TIME_SECONDS:
-                            segment_distance_nm = (
-                                segment_distance_km * KM_TO_NAUTICAL_MILES
-                            )
-                            calculated_speed = (
-                                segment_distance_nm / segment_time_seconds
-                            ) * 3600
-                            if 0 < calculated_speed <= MAX_GROUNDSPEED_KNOTS:
-                                groundspeed_knots = calculated_speed
-
-                    # Track maximum and minimum groundspeed (only for full resolution to get accurate range)
-                    if res_name == "z14_plus" and groundspeed_knots > 0:
-                        if groundspeed_knots > max_groundspeed_knots:
-                            max_groundspeed_knots = groundspeed_knots
-                        if groundspeed_knots < min_groundspeed_knots:
-                            min_groundspeed_knots = groundspeed_knots
-
-                        # Track cruise speed (only segments >1000ft AGL)
-                        altitude_agl_m = avg_alt_m - ground_level_m
-                        altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
-                        if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
-                            # This is a cruise segment
-                            if window_time >= MIN_SEGMENT_TIME_SECONDS:
-                                cruise_speed_total_distance += (
-                                    window_distance * KM_TO_NAUTICAL_MILES
-                                )
-                                cruise_speed_total_time += window_time
-
-                                # Track cruise altitude in bins
-                                altitude_bin_ft = (
-                                    int(altitude_agl_ft / ALTITUDE_BIN_SIZE_FT)
-                                    * ALTITUDE_BIN_SIZE_FT
-                                )
-                                if altitude_bin_ft not in cruise_altitude_histogram:
-                                    cruise_altitude_histogram[altitude_bin_ft] = 0
-                                cruise_altitude_histogram[altitude_bin_ft] += (
-                                    window_time
-                                )
-
-                    # For downsampled resolutions, clamp to the max from full resolution to avoid
-                    # artificially high speeds caused by downsampling (fewer GPS points = longer segments)
-                    if (
-                        res_name != "z14_plus"
-                        and max_groundspeed_knots > 0
-                        and groundspeed_knots > max_groundspeed_knots
-                    ):
-                        groundspeed_knots = max_groundspeed_knots
-
-                    # Skip zero-length segments (identical coordinates)
-                    if lat1 != lat2 or lon1 != lon2:
-                        segment_data = {
-                            "coords": [[lat1, lon1], [lat2, lon2]],
-                            "color": color,
-                            "altitude_ft": avg_alt_ft,
-                            "altitude_m": round(avg_alt_m, 0),
-                            "groundspeed_knots": round(groundspeed_knots, 1),
-                            "path_id": path_idx,  # Link segment to its path
-                        }
-                        # Add relative time for replay feature (privacy-preserving)
-                        if current_relative_time is not None:
-                            segment_data["time"] = round(current_relative_time, 1)
-                        path_segments.append(segment_data)
-
-        # Export data
-        data = {
-            "coordinates": downsampled_coords,
-            "path_segments": path_segments,
-            "path_info": path_info,  # Include path-to-airport relationships
-            "resolution": res_name,
-            "original_points": len(all_coordinates),
-            "downsampled_points": len(downsampled_coords),
-            "compression_ratio": round(
-                len(downsampled_coords) / max(len(all_coordinates), 1) * 100, 1
-            ),
-        }
-
-        output_file = os.path.join(output_dir, f"data_{res_name}.json")
-        with open(output_file, "w") as f:
-            json.dump(data, f, separators=(",", ":"), sort_keys=True)
-
-        file_size = os.path.getsize(output_file)
-        files[res_name] = output_file
-
-        # Store z14_plus data for later use (avoid reloading)
-        if res_name == "z14_plus":
-            z14_plus_segments = path_segments
-            z14_plus_path_info = path_info
-
-        logger.info(
-            f"  ✓ {res_config['description']}: {len(downsampled_coords):,} points ({file_size / 1024:.1f} KB)"
-        )
+            logger.info(
+                f"    ✓ {res_config['description']}: {len(downsampled_coords):,} points ({file_size / 1024:.1f} KB)"
+            )
 
     # Export airports (same for all resolutions)
     # Filter and extract valid airport names
@@ -551,14 +600,6 @@ def export_data_json(
         # Include timestamps only if not stripping
         if not strip_timestamps:
             airport_data["timestamps"] = apt["timestamps"]
-
-        # Add supplemental airport metadata (aircraft and years)
-        if apt.get("is_supplemental"):
-            airport_data["is_supplemental"] = True
-            if "aircraft" in apt:
-                airport_data["aircraft"] = apt["aircraft"]
-            if "years" in apt:
-                airport_data["years"] = apt["years"]
 
         valid_airports.append(airport_data)
 
@@ -623,6 +664,7 @@ def export_data_json(
         "max_groundspeed_knots": round(max_groundspeed_knots, 1),
         "gradient": HEATMAP_GRADIENT,
         "available_years": available_years,
+        "file_structure": file_structure,
     }
 
     meta_file = os.path.join(output_dir, "metadata.json")
@@ -749,72 +791,6 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             all_path_metadata, all_path_groups, is_mid_flight_start, is_valid_landing
         )
         logger.info(f"  Found {len(unique_airports)} unique airports")
-
-        # Add supplemental airports from flight_supplements.json
-        flight_supplements = load_flight_time_offsets()
-        supplemental_airports_added = 0
-        if flight_supplements:
-            logger.info("\n🗺️  Processing supplemental airports...")
-            # Collect ICAO codes with their aircraft and year associations
-            # Structure: {icao_code: {aircraft: [years], ...}}
-            supplement_airport_metadata = {}
-            for aircraft_reg, years_data in flight_supplements.items():
-                for year, year_data in years_data.items():
-                    # Enhanced format: {"hours": X, "airports": [...]}
-                    if not isinstance(year_data, dict):
-                        logger.warning(
-                            f"Invalid format for {aircraft_reg}/{year}: expected dict with 'hours' and 'airports', got {type(year_data).__name__}"
-                        )
-                        continue
-                    airports = year_data.get("airports", [])
-                    for icao_code in airports:
-                        if icao_code not in supplement_airport_metadata:
-                            supplement_airport_metadata[icao_code] = {}
-                        if aircraft_reg not in supplement_airport_metadata[icao_code]:
-                            supplement_airport_metadata[icao_code][aircraft_reg] = []
-                        supplement_airport_metadata[icao_code][aircraft_reg].append(
-                            int(year)
-                        )
-
-            # Look up coordinates and add to unique_airports
-            for icao_code in sorted(supplement_airport_metadata.keys()):
-                coords = lookup_airport_coordinates(icao_code)
-                if coords:
-                    lat, lon, name = coords
-                    # Add as supplemental airport (no timestamps, marked as supplemental)
-                    # Format: "ICAO Airport Name" (e.g., "EDDP Leipzig/Halle")
-                    clean_name = name.replace(" Airport", "").replace(" Airfield", "")
-                    full_name = f"{icao_code} {clean_name}"
-
-                    # Collect all aircraft and years for this airport
-                    aircraft_list = list(supplement_airport_metadata[icao_code].keys())
-                    year_list = []
-                    for years in supplement_airport_metadata[icao_code].values():
-                        year_list.extend(years)
-                    year_list = sorted(list(set(year_list)))  # Unique, sorted
-
-                    unique_airports.append(
-                        {
-                            "lat": lat,
-                            "lon": lon,
-                            "name": full_name,
-                            "timestamps": [],
-                            "is_supplemental": True,  # Mark as supplemental
-                            "aircraft": aircraft_list,  # Which aircraft used this airport
-                            "years": year_list,  # Which years this airport was used
-                        }
-                    )
-                    supplemental_airports_added += 1
-                    logger.info(
-                        f"  ✓ Added supplemental airport: {full_name} ({', '.join(aircraft_list)}, {', '.join(map(str, year_list))})"
-                    )
-                else:
-                    logger.warning(f"  ✗ Could not find coordinates for {icao_code}")
-
-            if supplemental_airports_added > 0:
-                logger.info(
-                    f"  Added {supplemental_airports_added} supplemental airport(s)"
-                )
 
     # Calculate statistics
     logger.info("\n📊 Calculating statistics...")
@@ -983,144 +959,25 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
                             )
                             aircraft_distances[reg] += segment_distance_km
 
-            # Load time offsets and apply them
-            time_offsets = load_flight_time_offsets()
-            logger.info("  ⏱  Applying flight supplements in recalculation...")
-            logger.debug(f"    Time offsets loaded: {list(time_offsets.keys())}")
-            logger.debug(f"    Aircraft years: {aircraft_years}")
-
-            # Update aircraft list with recalculated times and distances
-            # Also sum up the formatted times to ensure total matches
-            total_formatted_hours = 0
-            total_formatted_minutes = 0
-            total_offset_distance_km = 0.0
-
+            # Update aircraft list with recalculated times and distances from actual GPS data
             for aircraft in stats["aircraft_list"]:
                 reg = aircraft["registration"]
                 if reg in aircraft_times:
                     flight_time_seconds = aircraft_times[reg]
                     flight_distance_km = aircraft_distances.get(reg, 0.0)
-                    flight_count = aircraft.get("flights", 0)
-
-                    # Calculate average speed and distance per flight (before applying offsets)
-                    avg_speed_kmh = 0.0
-                    avg_distance_per_flight_km = 0.0
-                    if flight_time_seconds > 0 and flight_distance_km > 0:
-                        avg_speed_kmh = flight_distance_km / (
-                            flight_time_seconds / 3600
-                        )
-                    if flight_count > 0 and flight_distance_km > 0:
-                        avg_distance_per_flight_km = flight_distance_km / flight_count
-
-                    # Apply per-year offsets if configured
-                    logger.debug(
-                        f"    Checking {reg}: in offsets={reg in time_offsets}, in years={reg in aircraft_years}"
-                    )
-                    if reg in time_offsets and reg in aircraft_years:
-                        total_offset_hours = 0.0
-                        all_missing_airports = []
-
-                        for year in aircraft_years[reg]:
-                            if year in time_offsets[reg]:
-                                entry = time_offsets[reg][year]
-                                # Enhanced format only: {"hours": X, "airports": [...]}
-                                if not isinstance(entry, dict):
-                                    logger.warning(
-                                        f"Invalid format for {reg}/{year}: expected dict with 'hours' and 'airports', got {type(entry).__name__}"
-                                    )
-                                    continue
-                                offset_hours = entry.get("hours", 0)
-                                airports = entry.get("airports", [])
-                                total_offset_hours += offset_hours
-                                all_missing_airports.extend(airports)
-
-                        if total_offset_hours > 0:
-                            offset_seconds = total_offset_hours * 3600
-                            flight_time_seconds += offset_seconds
-
-                            # Calculate additional distance based on average speed
-                            if avg_speed_kmh > 0:
-                                offset_distance_km = avg_speed_kmh * total_offset_hours
-                                flight_distance_km += offset_distance_km
-                                total_offset_distance_km += offset_distance_km
-
-                                # Calculate additional flights based on average distance per flight
-                                additional_flights = 0
-                                if avg_distance_per_flight_km > 0:
-                                    additional_flights = int(
-                                        offset_distance_km / avg_distance_per_flight_km
-                                    )
-                                    flight_count += additional_flights
-
-                                # Format the log message with optional airports
-                                airports_str = ""
-                                if all_missing_airports:
-                                    airports_str = (
-                                        f" | Missing: {', '.join(all_missing_airports)}"
-                                    )
-
-                                logger.info(
-                                    f"    ✓ {reg}: Added {total_offset_hours}h supplement (recalc) "
-                                    f"→ +{offset_distance_km:.1f} km, +{additional_flights} flights "
-                                    f"(avg speed: {avg_speed_kmh:.1f} km/h, avg distance/flight: {avg_distance_per_flight_km:.1f} km){airports_str}"
-                                )
-                            else:
-                                # Format the log message with optional airports
-                                airports_str = ""
-                                if all_missing_airports:
-                                    airports_str = (
-                                        f" | Missing: {', '.join(all_missing_airports)}"
-                                    )
-
-                                logger.info(
-                                    f"    ✓ {reg}: Added {total_offset_hours}h supplement (recalc){airports_str}"
-                                )
 
                     aircraft["flight_time_seconds"] = flight_time_seconds
                     aircraft["flight_distance_km"] = flight_distance_km
-                    aircraft["flights"] = flight_count
-                    hours = int(flight_time_seconds // 3600)
-                    minutes = int((flight_time_seconds % 3600) // 60)
                     aircraft["flight_time_str"] = format_flight_time(
                         flight_time_seconds
                     )
 
-                    # Accumulate formatted times
-                    total_formatted_hours += hours
-                    total_formatted_minutes += minutes
-
-            # Add offset distance to total distance
-            if total_offset_distance_km > 0:
-                stats["total_distance_km"] += total_offset_distance_km
-                stats["total_distance_nm"] = stats["total_distance_km"] * 0.539957
-                logger.info(
-                    f"  📏 Added {total_offset_distance_km:.1f} km from flight supplements (recalc) "
-                    f"(new total: {stats['total_distance_km']:.1f} km)"
-                )
-
-            # Convert accumulated minutes to hours for total
-            total_formatted_hours += total_formatted_minutes // 60
-            total_formatted_minutes = total_formatted_minutes % 60
-
-            # Set total to match sum of individual aircraft formatted times
-            total_seconds_formatted = (
-                total_formatted_hours * 3600 + total_formatted_minutes * 60
-            )
-            stats["total_flight_time_str"] = format_flight_time(total_seconds_formatted)
-
-            # Recalculate num_paths to match sum of per-aircraft flights
-            # This ensures consistency after applying flight supplements
-            total_flights = sum(
-                aircraft["flights"] for aircraft in stats["aircraft_list"]
-            )
-            stats["num_paths"] = total_flights
-            logger.debug(f"  Updated num_paths to match aircraft sum: {total_flights}")
-
         # Re-export metadata with all recalculated statistics
-        # Preserve available_years and gradient from the original metadata
+        # Preserve available_years, gradient, and file_structure from the original metadata
         meta_data = {
             "available_years": existing_meta.get("available_years", []),
             "gradient": existing_meta.get("gradient", {}),
+            "file_structure": existing_meta.get("file_structure", {}),
             "max_alt_m": stats["max_altitude_m"],
             "max_groundspeed_knots": stats.get("max_groundspeed_knots", 0),
             "min_alt_m": stats["min_altitude_m"],

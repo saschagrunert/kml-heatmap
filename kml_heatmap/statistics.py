@@ -1,7 +1,5 @@
 """Statistics calculation for flight data."""
 
-import os
-import json
 from datetime import datetime
 from typing import List, Dict, Optional, Any, Tuple
 from .geometry import haversine_distance
@@ -18,34 +16,7 @@ __all__ = [
     "calculate_flight_time",
     "aggregate_aircraft_stats",
     "extract_timestamps_from_path",
-    "load_flight_time_offsets",
 ]
-
-
-def load_flight_time_offsets(
-    config_file: str = "flight_supplements.json",
-) -> Dict[str, Dict[str, float]]:
-    """
-    Load flight supplements from configuration file.
-
-    Args:
-        config_file: Path to JSON configuration file
-
-    Returns:
-        Dict mapping aircraft registration -> year -> offset hours
-    """
-    if not os.path.exists(config_file):
-        logger.debug(f"Flight supplements file not found: {config_file}")
-        return {}
-
-    try:
-        with open(config_file, "r") as f:
-            offsets = json.load(f)
-        logger.debug(f"Loaded flight supplements from {config_file}")
-        return offsets
-    except (json.JSONDecodeError, IOError) as e:
-        logger.warning(f"Could not load flight supplements from {config_file}: {e}")
-        return {}
 
 
 def extract_timestamps_from_path(path: List[List[Any]]) -> List[float]:
@@ -270,30 +241,18 @@ def _calculate_aircraft_flight_times(
 
 def _create_aircraft_list_with_models(
     aircraft_flights: Dict[str, Dict[str, Any]],
-) -> Tuple[List[Dict[str, Any]], float, int]:
+) -> List[Dict[str, Any]]:
     """
-    Create sorted aircraft list with model lookups and apply time offsets.
-    Also calculates additional distance and flights based on average speed and time offsets.
+    Create sorted aircraft list with model lookups.
 
     Args:
         aircraft_flights: Dict of aircraft flight information
 
     Returns:
-        Tuple of (aircraft_list, total_offset_distance_km, total_additional_flights)
+        List of aircraft with their stats
     """
     aircraft_list = []
-    total_offset_distance_km = 0.0
-    total_additional_flights = 0
     logger.info("✈️  Looking up aircraft model information...")
-
-    # Load time offsets
-    time_offsets = load_flight_time_offsets()
-
-    def _parse_offset_entry(entry):
-        """Parse offset entry which can be either a float (hours) or dict with hours/airports."""
-        if isinstance(entry, dict):
-            return entry.get("hours", 0), entry.get("airports", [])
-        return entry, []
 
     for reg, info in sorted(
         aircraft_flights.items(), key=lambda x: x[1]["count"], reverse=True
@@ -307,97 +266,26 @@ def _create_aircraft_list_with_models(
             if full_model:
                 logger.info(f"  ⚠ {reg}: {full_model} (lookup failed, using KML type)")
 
-        # Calculate total flight time with offsets
-        flight_time_seconds = info["flight_time_seconds"]
-        flight_distance_km = info.get("flight_distance_km", 0.0)
-        flight_count = info["count"]
-
-        # Calculate average speed and distance per flight (before applying offsets)
-        avg_speed_kmh = 0.0
-        avg_distance_per_flight_km = 0.0
-        if flight_time_seconds > 0 and flight_distance_km > 0:
-            avg_speed_kmh = flight_distance_km / (
-                flight_time_seconds / SECONDS_PER_HOUR
-            )
-        if flight_count > 0 and flight_distance_km > 0:
-            avg_distance_per_flight_km = flight_distance_km / flight_count
-
-        # Apply per-year offsets if configured
-        if reg in time_offsets:
-            years_seen = info.get("years", set())
-            total_offset_hours = 0.0
-            all_missing_airports = []
-            for year in years_seen:
-                if year in time_offsets[reg]:
-                    offset_hours, airports = _parse_offset_entry(
-                        time_offsets[reg][year]
-                    )
-                    total_offset_hours += offset_hours
-                    all_missing_airports.extend(airports)
-                    logger.debug(
-                        f"  Adding {offset_hours}h supplement for {reg} in {year}"
-                    )
-
-            if total_offset_hours > 0:
-                offset_seconds = total_offset_hours * SECONDS_PER_HOUR
-                flight_time_seconds += offset_seconds
-
-                # Calculate additional distance based on average speed
-                if avg_speed_kmh > 0:
-                    offset_distance_km = avg_speed_kmh * total_offset_hours
-                    flight_distance_km += offset_distance_km
-                    total_offset_distance_km += offset_distance_km
-
-                    # Calculate additional flights based on average distance per flight
-                    additional_flights = 0
-                    if avg_distance_per_flight_km > 0:
-                        additional_flights = int(
-                            offset_distance_km / avg_distance_per_flight_km
-                        )
-                        flight_count += additional_flights
-                        total_additional_flights += additional_flights
-
-                    # Format the log message with optional airports
-                    airports_str = ""
-                    if all_missing_airports:
-                        airports_str = f" | Missing: {', '.join(all_missing_airports)}"
-
-                    logger.info(
-                        f"  ⏱  {reg}: Added {total_offset_hours}h supplement ({', '.join(sorted(years_seen))}) "
-                        f"→ +{offset_distance_km:.1f} km, +{additional_flights} flights "
-                        f"(avg speed: {avg_speed_kmh:.1f} km/h, avg distance/flight: {avg_distance_per_flight_km:.1f} km){airports_str}"
-                    )
-                else:
-                    # Format the log message with optional airports
-                    airports_str = ""
-                    if all_missing_airports:
-                        airports_str = f" | Missing: {', '.join(all_missing_airports)}"
-
-                    logger.info(
-                        f"  ⏱  {reg}: Added {total_offset_hours}h supplement ({', '.join(sorted(years_seen))}) "
-                        f"(no distance added - avg speed unknown){airports_str}"
-                    )
-
-        flight_time_str = format_flight_time(flight_time_seconds)
+        flight_time_str = format_flight_time(info["flight_time_seconds"])
 
         aircraft_list.append(
             {
                 "registration": reg,
-                "type": info["type"],  # Keep original type for backwards compatibility
-                "model": full_model,  # Full model name
-                "flights": flight_count,  # Use updated flight count (includes offsets)
-                "flight_time_seconds": flight_time_seconds,
+                "type": info["type"],
+                "model": full_model,
+                "flights": info["count"],
+                "flight_time_seconds": info["flight_time_seconds"],
                 "flight_time_str": flight_time_str,
-                "flight_distance_km": flight_distance_km,
+                "flight_distance_km": info.get("flight_distance_km", 0.0),
             }
         )
 
-    return aircraft_list, total_offset_distance_km, total_additional_flights
+    return aircraft_list
 
 
 def aggregate_aircraft_stats(
     all_path_metadata: List[Dict[str, Any]], all_path_groups: List[List[List[float]]]
-) -> Tuple[Dict[str, Any], float, int]:
+) -> Dict[str, Any]:
     """
     Aggregate aircraft statistics from metadata and paths.
 
@@ -406,8 +294,7 @@ def aggregate_aircraft_stats(
         all_path_groups: List of all path groups
 
     Returns:
-        Tuple of (stats dict, total_offset_distance_km, total_additional_flights)
-        Stats dict contains: num_aircraft, aircraft_types, and aircraft_list
+        Stats dict containing: num_aircraft, aircraft_types, and aircraft_list
     """
     # Build aircraft flights map
     aircraft_flights, path_to_aircraft, aircraft_registrations, aircraft_types = (
@@ -419,20 +306,14 @@ def aggregate_aircraft_stats(
         all_path_groups, path_to_aircraft, aircraft_flights
     )
 
-    # Create aircraft list with model lookups and get offset distance and flights
-    aircraft_list, total_offset_distance_km, total_additional_flights = (
-        _create_aircraft_list_with_models(aircraft_flights)
-    )
+    # Create aircraft list with model lookups
+    aircraft_list = _create_aircraft_list_with_models(aircraft_flights)
 
-    return (
-        {
-            "num_aircraft": len(aircraft_registrations),
-            "aircraft_types": sorted(aircraft_types),
-            "aircraft_list": aircraft_list,
-        },
-        total_offset_distance_km,
-        total_additional_flights,
-    )
+    return {
+        "num_aircraft": len(aircraft_registrations),
+        "aircraft_types": sorted(aircraft_types),
+        "aircraft_list": aircraft_list,
+    }
 
 
 def calculate_statistics(
@@ -524,34 +405,12 @@ def calculate_statistics(
             f"paths with timestamps"
         )
 
-    # Aggregate aircraft statistics and get offset distance and flights
-    offset_distance_km = 0.0
-    additional_flights = 0
+    # Aggregate aircraft statistics
     if all_path_metadata:
-        aircraft_stats, offset_distance_km, additional_flights = (
-            aggregate_aircraft_stats(all_path_metadata, all_path_groups)
-        )
+        aircraft_stats = aggregate_aircraft_stats(all_path_metadata, all_path_groups)
         stats.update(aircraft_stats)
 
-        # Add offset distance and flights to totals
-        if offset_distance_km > 0:
-            stats["total_distance_km"] += offset_distance_km
-            stats["total_distance_nm"] = (
-                stats["total_distance_km"] * KM_TO_NAUTICAL_MILES
-            )
-            logger.info(
-                f"  📏 Added {offset_distance_km:.1f} km from flight supplements "
-                f"(new total: {stats['total_distance_km']:.1f} km)"
-            )
-
-        if additional_flights > 0:
-            stats["num_paths"] += additional_flights
-            logger.info(
-                f"  ✈️  Added {additional_flights} flights from supplements "
-                f"(new total: {stats['num_paths']} flights)"
-            )
-
-    # Calculate average groundspeed (after adding offset distance)
+    # Calculate average groundspeed
     if stats["total_flight_time_seconds"] > 0 and stats["total_distance_nm"] > 0:
         hours = stats["total_flight_time_seconds"] / SECONDS_PER_HOUR
         stats["average_groundspeed_knots"] = stats["total_distance_nm"] / hours
