@@ -1,7 +1,5 @@
 """Statistics calculation for flight data."""
 
-import os
-import json
 from datetime import datetime
 from typing import List, Dict, Optional, Any, Tuple
 from .geometry import haversine_distance

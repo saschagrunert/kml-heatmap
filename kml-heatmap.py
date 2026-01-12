@@ -34,7 +34,6 @@ from kml_heatmap.airports import (
     extract_airport_name,
 )
 from kml_heatmap.statistics import calculate_statistics
-from kml_heatmap.airport_lookup import lookup_airport_coordinates
 from kml_heatmap.renderer import minify_html, load_template
 from kml_heatmap.validation import validate_kml_file, validate_api_keys
 from kml_heatmap.constants import (
@@ -969,7 +968,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
                     aircraft["flight_time_seconds"] = flight_time_seconds
                     aircraft["flight_distance_km"] = flight_distance_km
-                    aircraft["flight_time_str"] = format_flight_time(flight_time_seconds)
+                    aircraft["flight_time_str"] = format_flight_time(
+                        flight_time_seconds
+                    )
 
         # Re-export metadata with all recalculated statistics
         # Preserve available_years, gradient, and file_structure from the original metadata

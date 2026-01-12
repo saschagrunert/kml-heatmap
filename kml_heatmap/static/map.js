@@ -335,14 +335,19 @@ function calculateAirportFlightCounts() {
         return true;
     });
 
-    // Count visits to each airport
+    // Count unique airports per flight (avoid double-counting round trips)
     filteredPaths.forEach(function(pathInfo) {
+        var uniqueAirports = new Set();
         if (pathInfo.start_airport) {
-            counts[pathInfo.start_airport] = (counts[pathInfo.start_airport] || 0) + 1;
+            uniqueAirports.add(pathInfo.start_airport);
         }
         if (pathInfo.end_airport) {
-            counts[pathInfo.end_airport] = (counts[pathInfo.end_airport] || 0) + 1;
+            uniqueAirports.add(pathInfo.end_airport);
         }
+        // Increment count for each unique airport in this flight
+        uniqueAirports.forEach(function(airport) {
+            counts[airport] = (counts[airport] || 0) + 1;
+        });
     });
 
     return counts;
@@ -3686,7 +3691,9 @@ function calculateYearStats(year) {
             total_flights: 0,
             total_distance_nm: 0,
             num_airports: 0,
-            flight_time: '0h 0m'
+            flight_time: '0h 0m',
+            aircraft_list: [],
+            airport_names: []
         };
     }
 
@@ -3709,7 +3716,9 @@ function calculateYearStats(year) {
             total_flights: 0,
             total_distance_nm: 0,
             num_airports: 0,
-            flight_time: '0h 0m'
+            flight_time: '0h 0m',
+            aircraft_list: [],
+            airport_names: []
         };
     }
 
@@ -3836,6 +3845,7 @@ function calculateYearStats(year) {
     });
 
     return {
+        total_flights: filteredPathInfo.length,
         total_distance_nm: totalDistanceKm * 0.539957,  // Convert km to nautical miles
         num_airports: airports.size,
         flight_time: flightTimeStr,
