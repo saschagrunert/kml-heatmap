@@ -15,6 +15,7 @@ Create interactive heatmap visualizations from KML files.
 - Year and aircraft filtering
 - Flight replay with animated airplane marker
 - Year-in-review "Wrapped" summary
+- Shareable URLs - Copy URL to share exact map state
 - Automatic privacy protection (individual timestamps removed)
 - Mobile-friendly with zoom-based data loading
 - Export map as JPG image
@@ -161,13 +162,33 @@ Data is loaded progressively based on zoom level and filtered by year for better
 - **Aircraft Filter** - Filter by aircraft registration to see flights per aircraft
 - **Path Selection** - Click paths to highlight and view detailed statistics
 
+### Shareable URLs
+
+Map state is automatically encoded in the URL for easy sharing. Copy the URL from your browser's address bar to share:
+
+- Specific year or all years (`?y=2025` or `?y=all`)
+- Aircraft filter (`?a=D-EAGJ`)
+- Selected paths (`?p=1,5,12`)
+- Layer visibility (`?v=101010`)
+- Map position (`?lat=51.5&lng=13.4&z=10`)
+
+**Example URLs:**
+
+```
+?y=all                                    # Show all years
+?y=2025&v=010000                         # 2025 with altitude view
+?y=2025&a=D-EAGJ&lat=51.5&lng=13.4&z=10  # Complete state
+```
+
+URL parameters take precedence over localStorage, allowing shared links to override saved preferences.
+
 ### Smart Features
 
 - Mid-flight detection - Filters recordings started mid-flight
 - Airport deduplication - Merges nearby airports (within 1.5km)
 - ICAO validation - Only shows valid airports with ICAO codes
 - Parallel processing - Fast parsing of multiple files
-- State persistence - Saves zoom, position, layer visibility, and filters to localStorage
+- State persistence - Saves to localStorage and syncs with URL for shareable links
 - Year-based organization - Automatically extracts and organizes flights by year
 - Per-aircraft statistics - Tracks flight time and distance per aircraft registration
 

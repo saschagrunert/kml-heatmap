@@ -41,6 +41,9 @@ function saveMapState() {
     } catch (e) {
         // Silently fail if localStorage is not available
     }
+
+    // Update URL to reflect current state (for shareable links)
+    updateUrl(state);
 }
 
 function loadMapState() {
@@ -53,6 +56,158 @@ function loadMapState() {
         // Silently fail if localStorage is not available or data is corrupt
     }
     return null;
+}
+
+/**
+ * Parse URL parameters into state object
+ * URL parameter schema:
+ *   y - selectedYear (string: 'all' or year like '2024')
+ *   a - selectedAircraft (string: 'all' or aircraft identifier)
+ *   p - selectedPathIds (comma-separated integers: '1,5,12')
+ *   v - layer visibility (6-char binary string: '101010')
+ *   lat, lng - map center coordinates
+ *   z - map zoom level
+ * @returns {Object|null} Parsed state or null if no params
+ */
+function parseUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.toString() === '') {
+        return null;
+    }
+
+    const state = {};
+
+    // Year filter
+    if (params.has('y')) {
+        state.selectedYear = params.get('y');
+    }
+
+    // Aircraft filter
+    if (params.has('a')) {
+        state.selectedAircraft = params.get('a');
+    }
+
+    // Selected paths
+    if (params.has('p')) {
+        const pathStr = params.get('p');
+        if (pathStr) {
+            state.selectedPathIds = pathStr.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+        }
+    }
+
+    // Layer visibility (6 flags: heatmap, altitude, airspeed, airports, aviation, stats)
+    if (params.has('v')) {
+        const vis = params.get('v');
+        if (vis.length === 6) {
+            state.heatmapVisible = vis[0] === '1';
+            state.altitudeVisible = vis[1] === '1';
+            state.airspeedVisible = vis[2] === '1';
+            state.airportsVisible = vis[3] === '1';
+            state.aviationVisible = vis[4] === '1';
+            state.statsPanelVisible = vis[5] === '1';
+        }
+    }
+
+    // Map position
+    if (params.has('lat') && params.has('lng')) {
+        const lat = parseFloat(params.get('lat'));
+        const lng = parseFloat(params.get('lng'));
+        if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+            state.center = { lat: lat, lng: lng };
+        }
+    }
+
+    // Zoom level
+    if (params.has('z')) {
+        const zoom = parseFloat(params.get('z'));
+        if (!isNaN(zoom)) {
+            // Clamp zoom to reasonable range
+            state.zoom = Math.max(1, Math.min(18, zoom));
+        }
+    }
+
+    return state;
+}
+
+/**
+ * Encode current state to URL parameters
+ * @param {Object} state - Current state object
+ * @returns {string} URL search params string
+ */
+function encodeStateToUrl(state) {
+    const params = new URLSearchParams();
+
+    // Always include year parameter (including 'all') because default is current year
+    if (state.selectedYear) {
+        params.set('y', state.selectedYear);
+    }
+
+    // Only add aircraft if not 'all' (default is 'all')
+    if (state.selectedAircraft && state.selectedAircraft !== 'all') {
+        params.set('a', state.selectedAircraft);
+    }
+
+    if (state.selectedPathIds && state.selectedPathIds.length > 0) {
+        params.set('p', state.selectedPathIds.join(','));
+    }
+
+    // Build visibility string (6 characters: heatmap, altitude, airspeed, airports, aviation, stats)
+    const vis = [
+        state.heatmapVisible ? '1' : '0',
+        state.altitudeVisible ? '1' : '0',
+        state.airspeedVisible ? '1' : '0',
+        state.airportsVisible ? '1' : '0',
+        state.aviationVisible ? '1' : '0',
+        state.statsPanelVisible ? '1' : '0'
+    ].join('');
+
+    // Only add if not default (100100 = heatmap+airports on, rest off, stats hidden)
+    if (vis !== '100100') {
+        params.set('v', vis);
+    }
+
+    // Add map position (always include for complete shareable state)
+    if (state.center) {
+        params.set('lat', state.center.lat.toFixed(6));
+        params.set('lng', state.center.lng.toFixed(6));
+    }
+
+    if (state.zoom !== undefined) {
+        params.set('z', state.zoom.toFixed(2));
+    }
+
+    return params.toString();
+}
+
+/**
+ * Update browser URL without reloading page
+ * @param {Object} state - Current state object
+ */
+function updateUrl(state) {
+    const urlParams = encodeStateToUrl(state);
+    const newUrl = urlParams ? '?' + urlParams : window.location.pathname;
+
+    // Use replaceState to avoid adding to browser history on every change
+    try {
+        history.replaceState(null, '', newUrl);
+    } catch (e) {
+        // Silently fail if history API is not available
+    }
+}
+
+/**
+ * Load state with priority: URL params > localStorage > defaults
+ * @returns {Object|null} State object to restore
+ */
+function loadState() {
+    // Priority 1: URL parameters
+    const urlState = parseUrlParams();
+    if (urlState && Object.keys(urlState).length > 0) {
+        return urlState;
+    }
+
+    // Priority 2: localStorage
+    return loadMapState();
 }
 
 // Initialize map
@@ -79,8 +234,8 @@ if (STADIA_API_KEY) {
     }).addTo(map);
 }
 
-// Restore saved state or fit bounds
-const savedState = loadMapState();
+// Restore saved state or fit bounds (priority: URL params > localStorage > defaults)
+const savedState = loadState();
 
 // Track if we restored year from saved state (to distinguish from default 'all')
 var restoredYearFromState = false;
