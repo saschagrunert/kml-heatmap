@@ -12,6 +12,9 @@ Create interactive heatmap visualizations from KML files.
 - Altitude-colored flight paths
 - Airport markers with ICAO codes and visit counts
 - Statistics panel (distance, altitude, flight time)
+- Year and aircraft filtering
+- Flight replay with animated airplane marker
+- Year-in-review "Wrapped" summary
 - Automatic privacy protection (individual timestamps removed)
 - Mobile-friendly with zoom-based data loading
 - Export map as JPG image
@@ -115,22 +118,25 @@ Removed:
 
 ## Output
 
-Creates `index.html` (10-20 KB) and a `data/` subdirectory with JSON files in the output directory:
+Creates `index.html` (10-20 KB) and a `data/` subdirectory with JSON files organized by year:
 
 ```
 output-dir/
 ├── index.html
 └── data/
-    ├── data_z0_4.json      # Low zoom data
-    ├── data_z5_7.json      # Medium zoom data
-    ├── data_z8_10.json     # Regional data
-    ├── data_z11_13.json    # City-level data
-    ├── data_z14_plus.json  # Full detail data
+    ├── 2025/
+    │   ├── z0_4.json       # Low zoom data
+    │   ├── z5_7.json       # Medium zoom data
+    │   ├── z8_10.json      # Regional data
+    │   ├── z11_13.json     # City-level data
+    │   └── z14_plus.json   # Full detail data
+    ├── 2026/
+    │   └── (same structure)
     ├── airports.json       # Airport markers
-    └── metadata.json       # Statistics
+    └── metadata.json       # Statistics and available years
 ```
 
-Data is loaded progressively based on zoom level for better performance on mobile devices.
+Data is loaded progressively based on zoom level and filtered by year for better performance on mobile devices.
 
 ## Map Features
 
@@ -138,6 +144,7 @@ Data is loaded progressively based on zoom level for better performance on mobil
 
 - **Density Heatmap** (always visible) - Shows frequently visited locations
 - **Altitude Profile** (toggle) - Color-coded paths by elevation
+- **Airspeed Profile** (toggle) - Color-coded paths by groundspeed
 - **Airports** (toggle) - Airport markers with ICAO codes
 - **Aviation Data** (toggle, requires OpenAIP API key) - Airspaces, airports, navaids, and reporting points from OpenAIP
 
@@ -145,6 +152,14 @@ Data is loaded progressively based on zoom level for better performance on mobil
 
 - **Stats Button** - View statistics (distance, altitude, airports, flight time)
 - **Export Button** - Save current map view as JPG image
+- **Wrapped Button** - View year-in-review summary with fun facts
+- **Replay Controls** - Animate flight paths with adjustable speed (default 50x)
+
+### Filtering
+
+- **Year Filter** - View flights from specific years or all years combined
+- **Aircraft Filter** - Filter by aircraft registration to see flights per aircraft
+- **Path Selection** - Click paths to highlight and view detailed statistics
 
 ### Smart Features
 
@@ -152,6 +167,9 @@ Data is loaded progressively based on zoom level for better performance on mobil
 - Airport deduplication - Merges nearby airports (within 1.5km)
 - ICAO validation - Only shows valid airports with ICAO codes
 - Parallel processing - Fast parsing of multiple files
+- State persistence - Saves zoom, position, layer visibility, and filters to localStorage
+- Year-based organization - Automatically extracts and organizes flights by year
+- Per-aircraft statistics - Tracks flight time and distance per aircraft registration
 
 ## Technical Details
 
