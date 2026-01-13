@@ -9,6 +9,7 @@ const DATA_DIR = '{{data_dir_name}}';
 var selectedYear = 'all';
 var selectedAircraft = 'all';
 var allAirportsData = [];
+var isInitializing = true;  // Flag to prevent clearing selectedPathIds during init
 
 // Convert decimal degrees to degrees, minutes, seconds
 function ddToDms(dd, isLat) {
@@ -872,6 +873,10 @@ function updateAirportOpacity() {
         Object.keys(airportMarkers).forEach(function(airportName) {
             var marker = airportMarkers[airportName];
             marker.setOpacity(1.0);
+            // Ensure marker is on the map
+            if (!airportLayer.hasLayer(marker)) {
+                marker.addTo(airportLayer);
+            }
         });
         return;
     }
@@ -914,13 +919,20 @@ function updateAirportOpacity() {
         });
     }
 
-    // Update opacity for all airport markers
+    // Update visibility for all airport markers
     Object.keys(airportMarkers).forEach(function(airportName) {
         var marker = airportMarkers[airportName];
         if (visibleAirports.has(airportName)) {
-            marker.setOpacity(1.0);  // Full opacity for visited airports
+            // Show visited airports - add to map if not already present
+            marker.setOpacity(1.0);
+            if (!airportLayer.hasLayer(marker)) {
+                marker.addTo(airportLayer);
+            }
         } else {
-            marker.setOpacity(0.0);  // Hide non-visited airports
+            // Hide non-visited airports - completely remove from map to prevent clicks
+            if (airportLayer.hasLayer(marker)) {
+                airportLayer.removeLayer(marker);
+            }
         }
     });
 }
@@ -1305,10 +1317,12 @@ function filterByYear() {
     loadedData = {};
     currentResolution = null;
 
-    // Clear current paths
+    // Clear current paths (but preserve selectedPathIds during initialization)
     altitudeLayer.clearLayers();
     pathSegments = {};
-    selectedPathIds.clear();
+    if (!isInitializing) {
+        selectedPathIds.clear();
+    }
 
     // Reload current resolution data for new year
     updateLayers();
@@ -1334,7 +1348,10 @@ function filterByYear() {
         updateAirportPopups();
     });
 
-    saveMapState();
+    // Don't save state during initialization (will be saved after path restoration)
+    if (!isInitializing) {
+        saveMapState();
+    }
 }
 
 // Function to filter data by aircraft
@@ -1342,10 +1359,12 @@ function filterByAircraft() {
     const aircraftSelect = document.getElementById('aircraft-select');
     selectedAircraft = aircraftSelect.value;
 
-    // Clear current paths and reload
+    // Clear current paths and reload (but preserve selectedPathIds during initialization)
     altitudeLayer.clearLayers();
     pathSegments = {};
-    selectedPathIds.clear();
+    if (!isInitializing) {
+        selectedPathIds.clear();
+    }
 
     // Reload current resolution data to apply filter
     currentResolution = null;  // Force reload
@@ -1361,7 +1380,10 @@ function filterByAircraft() {
     // Update airport popups with current filter counts
     updateAirportPopups();
 
-    saveMapState();
+    // Don't save state during initialization (will be saved after path restoration)
+    if (!isInitializing) {
+        saveMapState();
+    }
 }
 
 // Load airports once
@@ -1535,9 +1557,6 @@ function filterByAircraft() {
     // Update airport opacity based on restored filters
     updateAirportOpacity();
 
-    // Save state to ensure filter restoration is persisted correctly
-    saveMapState();
-
     // Load groundspeed range from metadata (from full resolution data)
     if (metadata && metadata.min_groundspeed_knots !== undefined && metadata.max_groundspeed_knots !== undefined) {
         airspeedRange.min = metadata.min_groundspeed_knots;
@@ -1546,8 +1565,8 @@ function filterByAircraft() {
         updateAirspeedLegend(airspeedRange.min, airspeedRange.max);
     }
 
-    // Initial data load
-    updateLayers();
+    // Initial data load - MUST await to ensure paths exist before restoration
+    await updateLayers();
 
     // Set initial airport marker sizes based on current zoom
     updateAirportMarkerSizes();
@@ -1579,6 +1598,13 @@ function filterByAircraft() {
         }
         updateReplayButtonState();
     }
+
+    // Mark initialization as complete (allows filters to clear selection on future changes)
+    isInitializing = false;
+
+    // Save state to ensure filter restoration is persisted correctly
+    // Must happen AFTER isInitializing is set to false AND paths are restored
+    saveMapState();
 
     // Restore stats panel visibility
     if (savedState && savedState.statsPanelVisible) {
@@ -3484,10 +3510,10 @@ function generateFunFacts(yearStats) {
         }
     }
 
-    // Aircraft fun facts
-    if (fullStats && fullStats.aircraft_list && fullStats.aircraft_list.length > 0) {
-        const primaryAircraft = fullStats.aircraft_list[0];
-        const totalAircraft = fullStats.aircraft_list.length;
+    // Aircraft fun facts - use yearStats for filtered data
+    if (yearStats && yearStats.aircraft_list && yearStats.aircraft_list.length > 0) {
+        const primaryAircraft = yearStats.aircraft_list[0];
+        const totalAircraft = yearStats.aircraft_list.length;
 
         const primaryModel = primaryAircraft.model || primaryAircraft.type || 'aircraft';
 
@@ -3719,12 +3745,19 @@ function showWrapped() {
 
             // Build all destinations badge grid (excluding home base)
             const destinations = yearStats.airport_names.filter(name => name !== homeBase.name);
-            let airportBadgesHtml = '<div class="airports-grid-title">🗺️ Destinations</div><div class="airport-badges">';
-            destinations.forEach(function(airportName) {
-                airportBadgesHtml += `<div class="airport-badge">${airportName}</div>`;
-            });
-            airportBadgesHtml += '</div>';
-            document.getElementById('wrapped-airports-grid').innerHTML = airportBadgesHtml;
+
+            // Only show destinations section if there are destinations other than home base
+            if (destinations.length > 0) {
+                let airportBadgesHtml = '<div class="airports-grid-title">🗺️ Destinations</div><div class="airport-badges">';
+                destinations.forEach(function(airportName) {
+                    airportBadgesHtml += `<div class="airport-badge">${airportName}</div>`;
+                });
+                airportBadgesHtml += '</div>';
+                document.getElementById('wrapped-airports-grid').innerHTML = airportBadgesHtml;
+            } else {
+                // Clear the destinations section if no destinations
+                document.getElementById('wrapped-airports-grid').innerHTML = '';
+            }
         });
     }
 
