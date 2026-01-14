@@ -36,6 +36,42 @@ make serve
 
 Then open http://localhost:8000/
 
+### KML File Naming Convention
+
+For best results, name your KML files using this format:
+
+```
+YYYYMMDD_HHMM_AIRPORT_REGISTRATION_TYPE.kml
+```
+
+**Example:** `20250822_1013_EDAV_DEHYL_DA40.kml`
+
+Where:
+
+- `YYYYMMDD` - Flight date (e.g., `20250822`)
+- `HHMM` - Flight time (e.g., `1013`)
+- `AIRPORT` - Airport ICAO code (e.g., `EDAV`)
+- `REGISTRATION` - Aircraft registration without hyphen (e.g., `DEHYL` becomes `D-EHYL`)
+- `TYPE` - Aircraft type (e.g., `DA40`, `C172`)
+
+**Why this format?**
+
+The filename format enables:
+
+- **Aircraft filtering** - Filter map by specific aircraft registration
+- **Per-aircraft statistics** - View distance and flight time per aircraft
+- **Aircraft model lookup** - Automatic lookup of aircraft make/model from registration
+
+**Without this format:**
+
+Files will still be processed and paths will be displayed, but:
+
+- Aircraft filtering will not be available
+- Per-aircraft statistics will be grouped under "Unknown"
+- Aircraft model information will not be fetched
+
+If you have KML files with different naming conventions, they will work fine for basic visualization - you just won't get aircraft-specific features.
+
 ### With API Keys (Optional)
 
 **Stadia Maps** - Get a free API key at [stadiamaps.com](https://stadiamaps.com/) for enhanced dark theme tiles
