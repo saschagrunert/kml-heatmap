@@ -1,11 +1,7 @@
-.coverage
-AGENTS.md
 *.kml
+.coverage
 /data
 /index.html
+AGENTS.md
 __pycache__
 kml
-
-# Old cache files (now using ~/.cache/kml-heatmap/)
-.kml_cache/
-aircraft_cache.json

@@ -38,7 +38,9 @@ Then open http://localhost:8000/
 
 ### KML File Naming Convention
 
-For best results, name your KML files using this format:
+The tool automatically detects and supports **two KML filename formats**:
+
+#### SkyDemon Format
 
 ```
 YYYYMMDD_HHMM_AIRPORT_REGISTRATION_TYPE.kml
@@ -54,15 +56,33 @@ Where:
 - `REGISTRATION` - Aircraft registration without hyphen (e.g., `DEHYL` becomes `D-EHYL`)
 - `TYPE` - Aircraft type (e.g., `DA40`, `C172`)
 
-**Why this format?**
+#### Charterware Format
 
-The filename format enables:
+```
+YYYY-MM-DD_HHMMh_REGISTRATION_ROUTE.kml
+```
+
+**Example:** `2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml`
+
+Where:
+
+- `YYYY-MM-DD` - Flight date with hyphens (e.g., `2026-01-12`)
+- `HHMMh` - Flight time with 'h' suffix (e.g., `1513h`)
+- `REGISTRATION` - Aircraft registration with hyphen (e.g., `OE-AKI`, `D-EXYZ`)
+- `ROUTE` - Route in DEPARTURE-ARRIVAL format (e.g., `LOAV-LOAV`, `EDDF-EDDM`)
+
+**Note:** Charterware KML files use a 2-second logging interval. The tool automatically generates synthetic timestamps for each coordinate point, enabling speed calculations, flight duration tracking, and time-based statistics even though Charterware files don't include per-point timestamps in the KML data.
+
+**Why these formats?**
+
+The filename formats enable:
 
 - **Aircraft filtering** - Filter map by specific aircraft registration
 - **Per-aircraft statistics** - View distance and flight time per aircraft
-- **Aircraft model lookup** - Automatic lookup of aircraft make/model from registration
+- **Aircraft model lookup** - Automatic lookup of aircraft make/model from registration (SkyDemon only; Charterware files don't include aircraft type in filename)
+- **Route information** - Charterware files include departure and arrival airports
 
-**Without this format:**
+**Without these formats:**
 
 Files will still be processed and paths will be displayed, but:
 
@@ -71,6 +91,16 @@ Files will still be processed and paths will be displayed, but:
 - Aircraft model information will not be fetched
 
 If you have KML files with different naming conventions, they will work fine for basic visualization - you just won't get aircraft-specific features.
+
+### Multiple Directories
+
+You can process KML files from multiple directories at once:
+
+```bash
+python kml-heatmap.py kml/ kml-new/ --output-dir combined_output
+```
+
+The tool will automatically detect the format of each file and process them accordingly.
 
 ### With API Keys (Optional)
 
