@@ -1,10 +1,9 @@
 # KML Heatmap Generator
 
+> Create interactive heatmap visualizations from KML files.
+
+[![Demo](https://img.shields.io/badge/live-demo-blue.svg)](https://saschagrunert.github.io/kml-heatmap)
 [![codecov](https://codecov.io/gh/saschagrunert/kml-heatmap/graph/badge.svg?token=AxIuoWeFSy)](https://codecov.io/gh/saschagrunert/kml-heatmap)
-
-Create interactive heatmap visualizations from KML files.
-
-**[Live Demo](https://saschagrunert.github.io/kml-heatmap)**
 
 ## Table of Contents
 
