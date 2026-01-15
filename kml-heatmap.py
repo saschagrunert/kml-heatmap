@@ -546,9 +546,13 @@ def export_data_json(
             os.makedirs(year_dir, exist_ok=True)
 
             # Export to year directory with simple filename
-            output_file = os.path.join(year_dir, f"{res_name}.json")
+            output_file = os.path.join(year_dir, f"{res_name}.js")
             with open(output_file, "w") as f:
+                # Export as JavaScript file for file:// protocol compatibility
+                var_name = f"KML_DATA_{year}_{res_name.upper().replace('-', '_')}"
+                f.write(f"window.{var_name} = ")
                 json.dump(data, f, separators=(",", ":"), sort_keys=True)
+                f.write(";")
 
             file_size = os.path.getsize(output_file)
 
@@ -605,9 +609,12 @@ def export_data_json(
 
     airports_data = {"airports": valid_airports}
 
-    airports_file = os.path.join(output_dir, "airports.json")
+    airports_file = os.path.join(output_dir, "airports.js")
     with open(airports_file, "w") as f:
+        # Export as JavaScript file for file:// protocol compatibility
+        f.write("window.KML_AIRPORTS = ")
         json.dump(airports_data, f, separators=(",", ":"), sort_keys=True)
+        f.write(";")
 
     files["airports"] = airports_file
     logger.info(
@@ -667,9 +674,12 @@ def export_data_json(
         "file_structure": file_structure,
     }
 
-    meta_file = os.path.join(output_dir, "metadata.json")
+    meta_file = os.path.join(output_dir, "metadata.js")
     with open(meta_file, "w") as f:
+        # Export as JavaScript file for file:// protocol compatibility
+        f.write("window.KML_METADATA = ")
         json.dump(meta_data, f, separators=(",", ":"), sort_keys=True)
+        f.write(";")
 
     files["metadata"] = meta_file
     logger.info(f"  ✓ Metadata: {os.path.getsize(meta_file) / 1024:.1f} KB")
@@ -824,11 +834,15 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     logger.info("\n🔄 Recalculating statistics from segment data...")
 
     # First, load the existing metadata to preserve available_years and gradient
-    meta_file = os.path.join(data_dir, "metadata.json")
+    meta_file = os.path.join(data_dir, "metadata.js")
     existing_meta = {}
     if os.path.exists(meta_file):
         with open(meta_file, "r") as f:
-            existing_meta = json.load(f)
+            # Read JS file and extract JSON data
+            content = f.read()
+            # Remove "window.KML_METADATA = " prefix and trailing ";"
+            json_str = content.replace("window.KML_METADATA = ", "").rstrip(";")
+            existing_meta = json.loads(json_str)
 
     # Use the segments data we just created instead of reloading from disk
     if z14_segments is not None and z14_path_info is not None:
@@ -985,7 +999,10 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             "stats": stats,
         }
         with open(meta_file, "w") as f:
+            # Export as JavaScript file for file:// protocol compatibility
+            f.write("window.KML_METADATA = ")
             json.dump(meta_data, f, separators=(",", ":"), sort_keys=True)
+            f.write(";")
         logger.info(
             "  ✓ Updated metadata with segment-based statistics (matches JavaScript)"
         )
@@ -1095,7 +1112,9 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             shutil.copy2(favicon_src, favicon_dst)
 
     logger.info(f"✓ Favicon files copied to {output_dir}")
-    logger.info(f"  Open {output_file} in a web browser (requires local server)")
+    logger.info(
+        f"  Open {output_file} in a web browser (works with file:// or serve via HTTP)"
+    )
 
     return True
 
