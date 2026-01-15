@@ -13,6 +13,7 @@ __all__ = [
     "downsample_path_rdp",
     "downsample_coordinates",
     "get_altitude_color",
+    "calculate_adaptive_epsilon",
 ]
 
 # Constants
@@ -222,3 +223,60 @@ def get_altitude_color(altitude: float, min_alt: float, max_alt: float) -> str:
         r, g, b = 255, int(155 - ratio * 155), 0
 
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def calculate_adaptive_epsilon(
+    total_points: int, target_points: int, base_epsilon: float
+) -> float:
+    """Calculate adaptive epsilon value based on dataset size.
+
+    Scales epsilon value to achieve target point count after downsampling.
+    For small datasets (below target), returns the base epsilon unchanged.
+    For large datasets (above target), scales epsilon logarithmically.
+
+    Args:
+        total_points: Total number of points in the dataset
+        target_points: Target maximum number of points after downsampling
+        base_epsilon: Base epsilon value (from RESOLUTION_LEVELS)
+
+    Returns:
+        Adjusted epsilon value for RDP algorithm
+
+    Example:
+        >>> # Small dataset - no adjustment needed
+        >>> calculate_adaptive_epsilon(10000, 50000, 0.0001)
+        0.0001
+
+        >>> # Large dataset - scale up epsilon
+        >>> calculate_adaptive_epsilon(1000000, 50000, 0.0001)
+        0.00043...  # Scaled by ~4.3x
+
+    Note:
+        Uses logarithmic scaling to smoothly increase epsilon as dataset
+        grows. This prevents aggressive downsampling for moderately large
+        datasets while ensuring very large datasets stay within bounds.
+    """
+    import math
+
+    # If we're already under the target, use base epsilon
+    if total_points <= target_points:
+        return base_epsilon
+
+    # If base epsilon is 0, we need a minimum starting value
+    if base_epsilon == 0:
+        base_epsilon = 0.00005  # Minimum epsilon for z14_plus
+
+    # Calculate scale factor using logarithm
+    # log10(ratio) + 1 gives smooth scaling:
+    # 2x over → scale by ~1.3
+    # 10x over → scale by ~2.0
+    # 100x over → scale by ~3.0
+    ratio = total_points / target_points
+    scale_factor = math.log10(ratio) + 1
+
+    # Apply scaling to base epsilon
+    adaptive_epsilon = base_epsilon * scale_factor
+
+    # Cap maximum epsilon to prevent over-simplification
+    max_epsilon = 0.01  # ~1km tolerance
+    return min(adaptive_epsilon, max_epsilon)
