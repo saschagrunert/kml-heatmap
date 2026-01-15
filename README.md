@@ -30,11 +30,15 @@ Place your KML files in a `kml/` directory, then:
 # Build and generate heatmap
 make
 
-# Serve locally
+# Option 1: Open directly in browser (works with file:// protocol)
+open docs/index.html
+
+# Option 2: Serve via HTTP
 make serve
+# Then open http://localhost:8000/
 ```
 
-Then open http://localhost:8000/
+Both methods work equally well. Opening directly is simpler, while serving via HTTP allows for easier sharing on your local network.
 
 ### KML File Naming Convention
 
@@ -150,7 +154,7 @@ docker run -v $(pwd):/data kml-heatmap *.kml --output-dir mymap
 # Debug mode
 docker run -v $(pwd):/data kml-heatmap --debug your_track.kml
 
-# Serve
+# Serve (optional - can also open index.html directly)
 docker run -p 8000:8000 -v $(pwd):/data --entrypoint python kml-heatmap /app/serve.py
 ```
 
@@ -159,6 +163,11 @@ docker run -p 8000:8000 -v $(pwd):/data --entrypoint python kml-heatmap /app/ser
 ```bash
 pip install -r requirements.txt
 python kml-heatmap.py your_track.kml
+
+# Option 1: Open directly
+open index.html
+
+# Option 2: Serve via HTTP
 python -m http.server 8000
 ```
 
@@ -185,25 +194,25 @@ Removed:
 
 ## Output
 
-Creates `index.html` (10-20 KB) and a `data/` subdirectory with JSON files organized by year:
+Creates `index.html` (10-20 KB) and a `data/` subdirectory with JavaScript files organized by year:
 
 ```
 output-dir/
 ├── index.html
 └── data/
     ├── 2025/
-    │   ├── z0_4.json       # Low zoom data
-    │   ├── z5_7.json       # Medium zoom data
-    │   ├── z8_10.json      # Regional data
-    │   ├── z11_13.json     # City-level data
-    │   └── z14_plus.json   # Full detail data
+    │   ├── z0_4.js       # Low zoom data
+    │   ├── z5_7.js       # Medium zoom data
+    │   ├── z8_10.js      # Regional data
+    │   ├── z11_13.js     # City-level data
+    │   └── z14_plus.js   # Full detail data
     ├── 2026/
     │   └── (same structure)
-    ├── airports.json       # Airport markers
-    └── metadata.json       # Statistics and available years
+    ├── airports.js       # Airport markers
+    └── metadata.js       # Statistics and available years
 ```
 
-Data is loaded progressively based on zoom level and filtered by year for better performance on mobile devices.
+Data is exported as JavaScript files (instead of JSON) for compatibility with both the `file://` protocol (opening directly) and HTTP serving. Data is loaded progressively based on zoom level and filtered by year for better performance on mobile devices.
 
 ## Map Features
 

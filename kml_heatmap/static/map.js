@@ -5,6 +5,17 @@ const STADIA_API_KEY = '{{STADIA_API_KEY}}';
 const OPENAIP_API_KEY = '{{OPENAIP_API_KEY}}';
 const DATA_DIR = '{{data_dir_name}}';
 
+// Load JavaScript file dynamically (supports both file:// and https://)
+function loadScript(url) {
+    return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = url;
+        script.onload = () => resolve();
+        script.onerror = (err) => reject(new Error('Failed to load script: ' + url));
+        document.head.appendChild(script);
+    });
+}
+
 // Filter state - must be declared before restoration code
 var selectedYear = 'all';
 var selectedAircraft = 'all';
@@ -386,9 +397,13 @@ async function loadData(resolution, year) {
 
     showLoading();
     try {
-        const filename = DATA_DIR + '/' + year + '/' + resolution + '.json';
-        const response = await fetch(filename);
-        const data = await response.json();
+        const globalVarName = 'KML_DATA_' + year + '_' + resolution.toUpperCase().replace(/-/g, '_');
+        if (!window[globalVarName]) {
+            const filename = DATA_DIR + '/' + year + '/' + resolution + '.js';
+            await loadScript(filename);
+        }
+
+        const data = window[globalVarName];
         loadedData[cacheKey] = data;
         console.log('Loaded ' + resolution + ' (' + year + '):', data.downsampled_points + ' points');
         return data;
@@ -459,9 +474,10 @@ async function loadAndCombineAllYears(resolution) {
 
 async function loadAirports() {
     try {
-        const response = await fetch(DATA_DIR + '/airports.json');
-        const data = await response.json();
-        return data.airports;
+        if (!window.KML_AIRPORTS) {
+            await loadScript(DATA_DIR + '/airports.js');
+        }
+        return window.KML_AIRPORTS.airports;
     } catch (error) {
         console.error('Error loading airports:', error);
         return [];
@@ -601,8 +617,10 @@ function updateAirportPopups() {
 
 async function loadMetadata() {
     try {
-        const response = await fetch(DATA_DIR + '/metadata.json');
-        return await response.json();
+        if (!window.KML_METADATA) {
+            await loadScript(DATA_DIR + '/metadata.js');
+        }
+        return window.KML_METADATA;
     } catch (error) {
         console.error('Error loading metadata:', error);
         return null;
