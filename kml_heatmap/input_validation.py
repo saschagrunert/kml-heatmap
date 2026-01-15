@@ -212,13 +212,32 @@ class ValidationContext:
     """
 
     def __init__(self, operation: str):
+        """Initialize validation context.
+
+        Args:
+            operation: Description of the operation being validated
+        """
         self.operation = operation
         self.errors: List[str] = []
 
     def __enter__(self):
+        """Enter the context manager."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit the context manager, raising ConfigurationError if any errors occurred.
+
+        Args:
+            exc_type: Exception type if raised
+            exc_val: Exception value if raised
+            exc_tb: Exception traceback if raised
+
+        Returns:
+            False to propagate exceptions
+
+        Raises:
+            ConfigurationError: If validation errors were collected
+        """
         if self.errors:
             error_msg = f"{self.operation} failed:\n" + "\n".join(
                 f"  - {err}" for err in self.errors

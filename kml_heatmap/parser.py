@@ -93,9 +93,6 @@ ALT_RANGE = (ALT_MIN_M, ALT_MAX_M)
 # KML parse cache subdirectory
 KML_CACHE_DIR = CACHE_DIR / "kml"
 
-# Cache version - increment this when parser logic changes to invalidate old caches
-CACHE_VERSION = 2  # v2: Added OurAirports standardization for airport names
-
 
 def get_cache_key(kml_file: str) -> Tuple[Optional[Path], bool]:
     """Generate cache key based on file path and modification time.
@@ -117,27 +114,20 @@ def get_cache_key(kml_file: str) -> Tuple[Optional[Path], bool]:
     except (OSError, FileNotFoundError):
         return None, False
 
-    # Create cache filename from KML filename, modification time, and cache version
-    cache_name = f"{kml_path.stem}_{int(mtime)}_v{CACHE_VERSION}.json"
+    # Create cache filename from KML filename and modification time
+    cache_name = f"{kml_path.stem}_{int(mtime)}.json"
     cache_path = KML_CACHE_DIR / cache_name
 
     # Check if cache file exists
     if cache_path.exists():
         return cache_path, True
 
-    # Clean up old cache files for this KML file (different mtime or version)
-    for old_cache in KML_CACHE_DIR.glob(f"{kml_path.stem}_*_v*.json"):
+    # Clean up old cache files for this KML file (different mtime)
+    for old_cache in KML_CACHE_DIR.glob(f"{kml_path.stem}_*.json"):
         try:
             old_cache.unlink()
         except OSError:
             pass
-    # Also clean up pre-v2 cache files (without version suffix)
-    for old_cache in KML_CACHE_DIR.glob(f"{kml_path.stem}_*.json"):
-        if "_v" not in old_cache.stem:  # Only delete files without version
-            try:
-                old_cache.unlink()
-            except OSError:
-                pass
 
     return cache_path, False
 

@@ -265,3 +265,175 @@ class TestDeduplicateAirports:
         )
 
         # Short paths should be skipped in endpoint processing
+
+
+class TestAirportDeduplicator:
+    """Tests for AirportDeduplicator class."""
+
+    def test_initialization(self):
+        """Test AirportDeduplicator initialization."""
+        from kml_heatmap.airports import AirportDeduplicator
+
+        deduplicator = AirportDeduplicator()
+        assert deduplicator.unique_airports == []
+        assert deduplicator.spatial_grid == {}
+
+    def test_custom_grid_size(self):
+        """Test AirportDeduplicator with custom grid size."""
+        from kml_heatmap.airports import AirportDeduplicator
+
+        deduplicator = AirportDeduplicator(grid_size=0.5)
+        assert deduplicator.grid_size == 0.5
+
+    def test_add_new_airport(self):
+        """Test adding a new airport."""
+        from kml_heatmap.airports import AirportDeduplicator
+
+        deduplicator = AirportDeduplicator()
+        idx = deduplicator.add_or_update_airport(
+            lat=50.0,
+            lon=8.5,
+            name="EDDF Frankfurt",
+            timestamp="2025-03-15T10:00:00Z",
+            path_index=0,
+            is_at_path_end=False,
+        )
+
+        assert idx == 0
+        assert len(deduplicator.unique_airports) == 1
+        assert deduplicator.unique_airports[0]["name"] == "EDDF Frankfurt"
+
+    def test_update_existing_airport(self):
+        """Test updating an existing airport with new timestamp."""
+        from kml_heatmap.airports import AirportDeduplicator
+
+        deduplicator = AirportDeduplicator()
+
+        # Add first
+        idx1 = deduplicator.add_or_update_airport(
+            lat=50.0,
+            lon=8.5,
+            name="EDDF",
+            timestamp="2025-03-15T10:00:00Z",
+            path_index=0,
+            is_at_path_end=False,
+        )
+
+        # Add same location (should update)
+        idx2 = deduplicator.add_or_update_airport(
+            lat=50.0001,  # Very close
+            lon=8.5001,
+            name="EDDF",
+            timestamp="2025-03-16T10:00:00Z",
+            path_index=1,
+            is_at_path_end=False,
+        )
+
+        assert idx1 == idx2  # Should be the same airport
+        assert len(deduplicator.unique_airports) == 1
+        # Should have both timestamps
+        assert len(deduplicator.unique_airports[0]["timestamps"]) == 2
+
+    def test_prefer_route_names_over_markers(self):
+        """Test that route names are preferred over point marker names."""
+        from kml_heatmap.airports import AirportDeduplicator
+
+        deduplicator = AirportDeduplicator()
+
+        # Add with marker name first
+        idx1 = deduplicator.add_or_update_airport(
+            lat=50.0,
+            lon=8.5,
+            name="Log Start: EDDF",
+            timestamp="2025-03-15T10:00:00Z",
+            path_index=0,
+            is_at_path_end=False,
+        )
+
+        # Update with proper route name
+        idx2 = deduplicator.add_or_update_airport(
+            lat=50.0001,
+            lon=8.5001,
+            name="EDDF Frankfurt - EDDM Munich",
+            timestamp="2025-03-16T10:00:00Z",
+            path_index=1,
+            is_at_path_end=False,
+        )
+
+        assert idx1 == idx2
+        # Should prefer route name
+        assert "EDDF Frankfurt" in deduplicator.unique_airports[0]["name"]
+
+    def test_skip_duplicate_timestamps(self):
+        """Test that duplicate timestamps are not added."""
+        from kml_heatmap.airports import AirportDeduplicator
+
+        deduplicator = AirportDeduplicator()
+
+        # Add with timestamp
+        idx1 = deduplicator.add_or_update_airport(
+            lat=50.0,
+            lon=8.5,
+            name="EDDF",
+            timestamp="2025-03-15T10:00:00Z",
+            path_index=0,
+            is_at_path_end=False,
+        )
+
+        # Add same timestamp again
+        idx2 = deduplicator.add_or_update_airport(
+            lat=50.0001,
+            lon=8.5001,
+            name="EDDF",
+            timestamp="2025-03-15T10:00:00Z",  # Same timestamp
+            path_index=1,
+            is_at_path_end=False,
+        )
+
+        assert idx1 == idx2
+        # Should only have one timestamp
+        assert len(deduplicator.unique_airports[0]["timestamps"]) == 1
+
+    def test_get_unique_airports(self):
+        """Test getting unique airports list."""
+        from kml_heatmap.airports import AirportDeduplicator
+
+        deduplicator = AirportDeduplicator()
+
+        deduplicator.add_or_update_airport(
+            lat=50.0,
+            lon=8.5,
+            name="EDDF",
+            timestamp=None,
+            path_index=0,
+            is_at_path_end=False,
+        )
+        deduplicator.add_or_update_airport(
+            lat=51.0,
+            lon=9.5,
+            name="EDDM",
+            timestamp=None,
+            path_index=1,
+            is_at_path_end=False,
+        )
+
+        airports = deduplicator.get_unique_airports()
+        assert len(airports) == 2
+
+    def test_airport_with_no_name(self):
+        """Test adding airport with no name."""
+        from kml_heatmap.airports import AirportDeduplicator
+
+        deduplicator = AirportDeduplicator()
+
+        idx = deduplicator.add_or_update_airport(
+            lat=50.0,
+            lon=8.5,
+            name=None,
+            timestamp="2025-03-15T10:00:00Z",
+            path_index=0,
+            is_at_path_end=False,
+        )
+
+        assert idx == 0
+        assert deduplicator.unique_airports[0]["name"] is None

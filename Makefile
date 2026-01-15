@@ -23,8 +23,7 @@ test-image:
 	$(CONTAINER_RUNTIME) build -f Dockerfile.test -t $(IMAGE_NAME)-test .
 
 test: test-image
-	mkdir -p $(CACHE_DIR)
-	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd)/htmlcov:/app/htmlcov -v $(CACHE_DIR):/root/.cache/kml-heatmap $(IMAGE_NAME)-test
+	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd)/htmlcov:/app/htmlcov $(IMAGE_NAME)-test
 
 lint: test-image
 	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test ruff check

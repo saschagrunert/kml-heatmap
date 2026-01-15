@@ -162,6 +162,7 @@ class PlacemarkMetadata:
     """Container for placemark metadata (names, timestamps, etc.)."""
 
     def __init__(self):
+        """Initialize metadata with None values."""
         self.name: Optional[str] = None
         self.timestamp: Optional[str] = None
         self.end_timestamp: Optional[str] = None

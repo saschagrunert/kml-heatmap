@@ -6,6 +6,29 @@ Create interactive heatmap visualizations from KML files.
 
 **[Live Demo](https://saschagrunert.github.io/kml-heatmap)**
 
+## Table of Contents
+
+- [Features](#features)
+- [Usage](#usage)
+  - [Quick Start](#quick-start)
+  - [KML File Naming Convention](#kml-file-naming-convention)
+  - [Multiple Directories](#multiple-directories)
+  - [With API Keys (Optional)](#with-api-keys-optional)
+  - [Makefile Variables](#makefile-variables)
+  - [Docker Usage](#docker-usage)
+  - [Python Usage](#python-usage)
+  - [Command-Line Options](#command-line-options)
+- [Privacy](#privacy)
+- [Output](#output)
+- [Map Features](#map-features)
+  - [Layers](#layers)
+  - [Controls](#controls)
+  - [Filtering](#filtering)
+  - [Shareable URLs](#shareable-urls)
+  - [Smart Features](#smart-features)
+- [Technical Details](#technical-details)
+  - [Adaptive Downsampling](#adaptive-downsampling)
+
 ## Features
 
 - Interactive density heatmap showing visited locations

@@ -1,4 +1,5 @@
 .pytest_cache
 .ruff_cache
 docs
+htmlcov
 kml_heatmap/static/map.js
