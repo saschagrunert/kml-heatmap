@@ -22,6 +22,7 @@ from kml_heatmap.geometry import (
     downsample_path_rdp,
     get_altitude_color,
     downsample_coordinates,
+    calculate_adaptive_epsilon,
 )
 from kml_heatmap.parser import (
     parse_kml_coordinates,
@@ -45,6 +46,7 @@ from kml_heatmap.constants import (
     CRUISE_ALTITUDE_THRESHOLD_FT,
     ALTITUDE_BIN_SIZE_FT,
     RESOLUTION_LEVELS,
+    TARGET_POINTS_PER_RESOLUTION,
     HEATMAP_GRADIENT,
 )
 from kml_heatmap.helpers import (
@@ -203,8 +205,28 @@ def export_data_json(
         logger.info(f"\n  Processing year {year} ({len(year_path_indices)} paths)...")
         file_structure[year] = []
 
+        # Calculate total points for this year (for adaptive downsampling)
+        year_total_points = sum(
+            len(all_path_groups[path_idx]) for path_idx in year_path_indices
+        )
+        logger.info(f"    Total points for {year}: {year_total_points:,}")
+
         for res_name in resolution_order:
             res_config = resolutions[res_name]
+
+            # Calculate adaptive epsilon based on dataset size
+            base_epsilon = res_config["epsilon"]
+            target_points = TARGET_POINTS_PER_RESOLUTION[res_name]
+            adaptive_epsilon = calculate_adaptive_epsilon(
+                year_total_points, target_points, base_epsilon
+            )
+
+            # Log adaptive behavior if epsilon was adjusted
+            if adaptive_epsilon != base_epsilon:
+                logger.info(
+                    f"    {res_name}: Adaptive downsampling "
+                    f"(ε={adaptive_epsilon:.6f}, target={target_points:,} points)"
+                )
 
             # OPTIMIZATION: Downsample paths once (with altitude), then extract 2D coords
             # This avoids calling RDP twice per path
@@ -212,14 +234,14 @@ def export_data_json(
             downsampled_paths = []
             for path_idx in year_path_indices:
                 path = all_path_groups[path_idx]
-                if res_config["epsilon"] > 0:
-                    simplified = downsample_path_rdp(path, res_config["epsilon"])
+                if adaptive_epsilon > 0:
+                    simplified = downsample_path_rdp(path, adaptive_epsilon)
                     downsampled_paths.append(simplified)
                 else:
                     downsampled_paths.append(path)
 
             # Extract 2D coordinates from already-downsampled paths
-            if res_config["epsilon"] > 0:
+            if adaptive_epsilon > 0:
                 downsampled_coords = [
                     [p[0], p[1]] for path in downsampled_paths for p in path
                 ]

@@ -93,6 +93,16 @@ RESOLUTION_LEVELS = {
     "z14_plus": {"factor": 1, "epsilon": 0, "description": "Zoom 14+ (full detail)"},
 }
 
+# Target maximum points per resolution (for adaptive downsampling)
+# These limits ensure reasonable file sizes regardless of dataset size
+TARGET_POINTS_PER_RESOLUTION = {
+    "z14_plus": 500_000,  # ~40MB per year max
+    "z11_13": 100_000,  # ~8MB per year max
+    "z8_10": 50_000,  # ~4MB per year max
+    "z5_7": 25_000,  # ~2MB per year max
+    "z0_4": 10_000,  # ~800KB per year max
+}
+
 # === Heatmap Configuration ===
 HEATMAP_GRADIENT = {0.0: "blue", 0.3: "cyan", 0.5: "lime", 0.7: "yellow", 1.0: "red"}
 

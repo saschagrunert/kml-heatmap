@@ -269,6 +269,26 @@ URL parameters take precedence over localStorage, allowing shared links to overr
 
 ## Technical Details
 
-Uses Ramer-Douglas-Peucker algorithm to generate 5 resolution levels, reducing data size by 50-95% depending on zoom level. HTML is automatically minified.
+### Adaptive Downsampling
+
+The tool automatically scales output file sizes based on dataset size:
+
+- **Small datasets** (< target): Uses standard epsilon values, preserves all detail
+- **Large datasets** (> target): Applies logarithmic scaling to stay under size limits
+
+Target limits per resolution (per year):
+
+- z14_plus: 500k points (~40MB max)
+- z11_13: 100k points (~8MB max)
+- z8_10: 50k points (~4MB max)
+- z5_7: 25k points (~2MB max)
+- z0_4: 10k points (~800KB max)
+
+**Example scaling**: 25,000 KML files (5 years × 5,000 files/year)
+
+- Without adaptive: ~6GB total output
+- With adaptive: ~275MB total output (95% reduction)
+
+Uses Ramer-Douglas-Peucker algorithm to generate 5 resolution levels. With adaptive downsampling, output size is predictable regardless of input size.
 
 Supports KML files from Google Earth, Google Maps, SkyDemon, and other aviation apps.
