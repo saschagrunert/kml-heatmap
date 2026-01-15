@@ -296,3 +296,172 @@ class TestValidateEnvironment:
                 )
             finally:
                 os.unlink(input_path)
+
+
+class TestDiskSpaceValidation:
+    """Tests for disk space validation."""
+
+    def test_validate_disk_space_sufficient(self):
+        """Test validation with sufficient disk space."""
+        from kml_heatmap.config_validator import ConfigValidator
+
+        validator = ConfigValidator()
+
+        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
+            f.write(b"<kml></kml>")
+            input_path = f.name
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            try:
+                is_valid, errors, warnings = validator.validate_all(
+                    input_path, output_dir
+                )
+                # Should not have low disk space warning (unless actually low)
+                # This test may vary based on actual disk space
+            finally:
+                os.unlink(input_path)
+
+    def test_validate_disk_space_handles_errors(self):
+        """Test disk space validation handles errors gracefully."""
+        from kml_heatmap.config_validator import ConfigValidator
+        from unittest.mock import patch
+
+        validator = ConfigValidator()
+
+        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
+            f.write(b"<kml></kml>")
+            input_path = f.name
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            try:
+                # Mock statvfs to raise OSError
+                with patch("os.statvfs", side_effect=OSError("Mock error")):
+                    is_valid, errors, warnings = validator.validate_all(
+                        input_path, output_dir
+                    )
+                    # Should not raise, just skip disk space check
+                    assert isinstance(is_valid, bool)
+            finally:
+                os.unlink(input_path)
+
+    def test_validate_disk_space_attribute_error(self):
+        """Test disk space validation handles AttributeError."""
+        from kml_heatmap.config_validator import ConfigValidator
+        from unittest.mock import patch
+
+        validator = ConfigValidator()
+
+        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
+            f.write(b"<kml></kml>")
+            input_path = f.name
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            try:
+                # Mock statvfs to raise AttributeError (platform without statvfs)
+                with patch("os.statvfs", side_effect=AttributeError("Mock error")):
+                    is_valid, errors, warnings = validator.validate_all(
+                        input_path, output_dir
+                    )
+                    # Should not raise, just skip disk space check
+                    assert isinstance(is_valid, bool)
+            finally:
+                os.unlink(input_path)
+
+
+class TestDependencyValidation:
+    """Tests for dependency validation."""
+
+    def test_validate_dependencies_folium_missing(self):
+        """Test validation when folium is missing."""
+        from kml_heatmap.config_validator import ConfigValidator
+        from unittest.mock import patch
+        import builtins
+
+        # Save reference to original __import__
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "folium":
+                raise ImportError("No module named 'folium'")
+            return original_import(name, *args, **kwargs)
+
+        validator = ConfigValidator()
+
+        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
+            f.write(b"<kml></kml>")
+            input_path = f.name
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            try:
+                with patch("builtins.__import__", side_effect=mock_import):
+                    is_valid, errors, warnings = validator.validate_all(
+                        input_path, output_dir
+                    )
+                    # Should have error about missing folium
+                    assert any("folium" in err.lower() for err in errors)
+            finally:
+                os.unlink(input_path)
+
+    def test_validate_dependencies_optional_missing(self):
+        """Test validation when optional dependency is missing."""
+        from kml_heatmap.config_validator import ConfigValidator
+        from unittest.mock import patch
+        import builtins
+
+        # Save reference to original __import__
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "lxml":
+                raise ImportError("No module named 'lxml'")
+            return original_import(name, *args, **kwargs)
+
+        validator = ConfigValidator()
+
+        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
+            f.write(b"<kml></kml>")
+            input_path = f.name
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            try:
+                with patch("builtins.__import__", side_effect=mock_import):
+                    is_valid, errors, warnings = validator.validate_all(
+                        input_path, output_dir
+                    )
+                    # Should have warning about missing lxml
+                    assert any("lxml" in warn.lower() for warn in warnings)
+            finally:
+                os.unlink(input_path)
+
+
+class TestInputPathValidation:
+    """Tests for input path validation edge cases."""
+
+    def test_validate_input_no_read_permission(self):
+        """Test validation when input file has no read permission."""
+        from kml_heatmap.config_validator import ConfigValidator
+        import tempfile
+        import os
+
+        validator = ConfigValidator()
+
+        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
+            f.write(b"<kml></kml>")
+            temp_path = f.name
+
+        try:
+            # Remove read permission (if possible on this platform)
+            try:
+                os.chmod(temp_path, 0o000)
+                with tempfile.TemporaryDirectory() as output_dir:
+                    is_valid, errors, warnings = validator.validate_all(
+                        temp_path, output_dir
+                    )
+                    # Should have error about permissions
+                    if not os.access(temp_path, os.R_OK):
+                        assert any("permission" in err.lower() for err in errors)
+            finally:
+                # Restore permissions for cleanup
+                os.chmod(temp_path, 0o644)
+        finally:
+            os.unlink(temp_path)

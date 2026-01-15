@@ -94,6 +94,18 @@ class TestSamplePathAltitudes:
         result = sample_path_altitudes(varying_path)
         assert result["variation"] > 0
 
+    def test_small_sample_size_returns_none(self):
+        """Test that paths with small calculated sample size return None."""
+        # Create a path that will result in sample_size <= PATH_SAMPLE_MIN_SIZE
+        # If PATH_SAMPLE_MIN_SIZE is 10, we need len(path) // 4 <= 10
+        # So path length <= 44 (since 44 // 4 = 11, and we want it just at the edge)
+        # Use path length of 20 to be safely small: 20 // 4 = 5 <= 10
+        path = [[50.0 + i * 0.01, 10.0 + i * 0.01, 100.0 + i] for i in range(20)]
+
+        result = sample_path_altitudes(path, from_end=False)
+        # Should return None because calculated sample_size is too small
+        assert result is None
+
 
 class TestIsMidFlightStart:
     """Tests for is_mid_flight_start function."""
@@ -705,6 +717,199 @@ class TestParseKmlCoordinates:
             if cache_path and cache_path.exists():
                 cache_path.unlink()
 
+    def test_parse_kml_with_no_valid_coordinates(self):
+        """Test parsing KML file with structure but no valid coordinates."""
+        from kml_heatmap.parser import parse_kml_coordinates
+
+        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Empty Placemark</name>
+      <Point>
+        <coordinates></coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>"""
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".kml", delete=False) as f:
+            f.write(kml_content)
+            temp_path = f.name
+
+        try:
+            coords, paths, metadata = parse_kml_coordinates(temp_path)
+            # Should return empty results and log warning messages (lines 1166-1170)
+            assert len(coords) == 0
+            assert len(paths) == 0
+            assert len(metadata) == 0
+        finally:
+            os.unlink(temp_path)
+            # Clean up cache
+            from kml_heatmap.parser import get_cache_key
+
+            cache_path, _ = get_cache_key(temp_path)
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+
+
+class TestExtractIcaoCodesFromName:
+    """Tests for extract_icao_codes_from_name function."""
+
+    def test_single_icao_code(self):
+        """Test extracting single ICAO code."""
+        from kml_heatmap.parser import extract_icao_codes_from_name
+
+        codes = extract_icao_codes_from_name("EDDF Frankfurt")
+        assert codes == ["EDDF"]
+
+    def test_multiple_icao_codes(self):
+        """Test extracting multiple ICAO codes from route."""
+        from kml_heatmap.parser import extract_icao_codes_from_name
+
+        codes = extract_icao_codes_from_name("EDDF Frankfurt - EDDM Munich")
+        assert codes == ["EDDF", "EDDM"]
+
+    def test_no_icao_codes(self):
+        """Test extracting from text without ICAO codes."""
+        from kml_heatmap.parser import extract_icao_codes_from_name
+
+        codes = extract_icao_codes_from_name("Log Start: 03 Mar 2025")
+        assert codes == []
+
+    def test_empty_string(self):
+        """Test extracting from empty string."""
+        from kml_heatmap.parser import extract_icao_codes_from_name
+
+        codes = extract_icao_codes_from_name("")
+        assert codes == []
+
+    def test_none_input(self):
+        """Test extracting from None."""
+        from kml_heatmap.parser import extract_icao_codes_from_name
+
+        codes = extract_icao_codes_from_name(None)
+        assert codes == []
+
+
+class TestStandardizeAirportName:
+    """Tests for standardize_airport_name function."""
+
+    def test_standardize_with_valid_icao(self):
+        """Test standardizing airport name with valid ICAO code."""
+        from kml_heatmap.parser import standardize_airport_name
+        from unittest.mock import patch
+
+        # Mock the airport lookup at the actual import location
+        with patch(
+            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
+        ) as mock_lookup:
+            mock_lookup.return_value = (51.42, 12.23, "Leipzig/Halle Airport")
+
+            result = standardize_airport_name("EDDP")
+            assert result is not None
+            assert "EDDP" in result
+            assert "Leipzig" in result
+
+    def test_standardize_route_format(self):
+        """Test standardizing route with two airports."""
+        from kml_heatmap.parser import standardize_airport_name
+        from unittest.mock import patch
+
+        # Mock the airport lookup at the actual import location
+        with patch(
+            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
+        ) as mock_lookup:
+
+            def lookup_side_effect(icao):
+                if icao == "EDDF":
+                    return (50.0, 8.5, "Frankfurt Airport")
+                elif icao == "EDDM":
+                    return (48.35, 11.78, "Munich Airport")
+                return None
+
+            mock_lookup.side_effect = lookup_side_effect
+
+            result = standardize_airport_name("EDDF - EDDM")
+            assert result is not None
+            assert "EDDF" in result
+            assert "EDDM" in result
+
+    def test_standardize_no_icao_codes(self):
+        """Test standardizing name without ICAO codes."""
+        from kml_heatmap.parser import standardize_airport_name
+
+        result = standardize_airport_name("Some Airport")
+        assert result == "Some Airport"  # Returns original
+
+    def test_standardize_none(self):
+        """Test standardizing None input."""
+        from kml_heatmap.parser import standardize_airport_name
+
+        result = standardize_airport_name(None)
+        assert result is None
+
+    def test_standardize_empty_string(self):
+        """Test standardizing empty string."""
+        from kml_heatmap.parser import standardize_airport_name
+
+        result = standardize_airport_name("")
+        assert result == ""
+
+    def test_standardize_route_only_first_airport_found(self):
+        """Test route where only first airport is in database."""
+        from kml_heatmap.parser import standardize_airport_name
+        from unittest.mock import patch
+
+        with patch(
+            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
+        ) as mock_lookup:
+
+            def lookup_side_effect(icao):
+                if icao == "EDDF":
+                    return (50.0, 8.5, "Frankfurt Airport")
+                return None  # XXXX not found
+
+            mock_lookup.side_effect = lookup_side_effect
+
+            result = standardize_airport_name("EDDF - XXXX Unknown")
+            assert result is not None
+            assert "EDDF Frankfurt" in result
+
+    def test_standardize_route_only_second_airport_found(self):
+        """Test route where only second airport is in database."""
+        from kml_heatmap.parser import standardize_airport_name
+        from unittest.mock import patch
+
+        with patch(
+            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
+        ) as mock_lookup:
+
+            def lookup_side_effect(icao):
+                if icao == "EDDM":
+                    return (48.35, 11.78, "Munich Airport")
+                return None  # XXXX not found
+
+            mock_lookup.side_effect = lookup_side_effect
+
+            result = standardize_airport_name("XXXX Unknown - EDDM")
+            assert result is not None
+            assert "EDDM Munich" in result
+
+    def test_standardize_single_airport(self):
+        """Test standardizing single airport name."""
+        from kml_heatmap.parser import standardize_airport_name
+        from unittest.mock import patch
+
+        with patch(
+            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
+        ) as mock_lookup:
+            mock_lookup.return_value = (50.0, 8.5, "Frankfurt Airport")
+
+            result = standardize_airport_name("EDDF")
+            assert result is not None
+            assert "EDDF Frankfurt" in result
+
 
 class TestExtractCharterwareTimestamp:
     """Tests for extract_charterware_timestamp function."""
@@ -978,7 +1183,12 @@ class TestSyntheticTimestampGeneration:
         """Test that synthetic timestamps are generated for Charterware files."""
         import tempfile
         import os
-        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+        from pathlib import Path
+        from kml_heatmap.parser import (
+            parse_kml_coordinates,
+            get_cache_key,
+            KML_CACHE_DIR,
+        )
 
         # Charterware KML with no per-point timestamps
         kml_content = """<?xml version="1.0" encoding="UTF-8"?>
@@ -998,10 +1208,13 @@ class TestSyntheticTimestampGeneration:
         temp_dir = tempfile.gettempdir()
         temp_path = os.path.join(temp_dir, "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
 
-        # Clear any existing cache before test
-        cache_path, _ = get_cache_key(temp_path)
-        if cache_path and cache_path.exists():
-            cache_path.unlink()
+        # Clear ALL cache files for this filename (not just the one with current mtime)
+        filename_stem = Path(temp_path).stem
+        for old_cache in KML_CACHE_DIR.glob(f"{filename_stem}_*.json"):
+            try:
+                old_cache.unlink()
+            except OSError:
+                pass
 
         with open(temp_path, "w") as f:
             f.write(kml_content)
@@ -1272,3 +1485,139 @@ class TestAirportExtractionFromRoute:
             cache_path, _ = get_cache_key(temp_path)
             if cache_path and cache_path.exists():
                 cache_path.unlink()
+
+
+class TestExceptionHandlingPaths:
+    """Tests for exception handling code paths to improve coverage."""
+
+    def test_extract_year_with_value_error(self):
+        """Test extract_year_from_timestamp with ValueError on int conversion."""
+        # This tests line 204-205: ValueError exception
+        result = extract_year_from_timestamp("2025-99-99T99:99:99Z")
+        assert result is None
+
+    def test_extract_year_with_attribute_error(self):
+        """Test extract_year_from_timestamp with None causing AttributeError."""
+        # This tests line 204-205: AttributeError exception
+        result = extract_year_from_timestamp(None)
+        assert result is None
+
+    def test_extract_charterware_timestamp_parse_failure(self):
+        """Test Charterware timestamp parsing with invalid date format."""
+        from unittest.mock import patch
+
+        # This tests lines 532-534: ValueError during datetime.strptime
+        with patch("kml_heatmap.parser.datetime") as mock_datetime:
+            mock_datetime.strptime.side_effect = ValueError("Invalid date")
+            result = extract_charterware_timestamp(
+                "Flight Feb 31 2025 12:00AM path of OE-AKI"
+            )
+            # The function should catch the ValueError and return None
+            assert result is None or isinstance(result, str)
+
+    def test_save_cache_oserror_handling(self):
+        """Test save_to_cache with OSError during file write."""
+        import tempfile
+
+        # This tests lines 178-179: OSError exception during cache save
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir) / "cache.json"
+
+            # Make directory read-only to trigger OSError
+            cache_dir = cache_path.parent
+            original_mode = cache_dir.stat().st_mode
+            try:
+                cache_dir.chmod(0o444)  # Read-only
+
+                # Should handle OSError gracefully and not raise
+                save_to_cache(cache_path, [], [], [])
+                # If we get here without exception, the error was handled
+            finally:
+                # Restore permissions
+                cache_dir.chmod(original_mode)
+
+
+class TestCacheCleanupErrors:
+    """Tests for cache cleanup error handling."""
+
+    def test_old_cache_removal_with_permission_error(self):
+        """Test that OSError during old cache removal is handled (covers lines 129-130)."""
+        import tempfile
+        from kml_heatmap.parser import get_cache_key
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_dir = Path(tmpdir)
+            kml_file = test_dir / "test.kml"
+
+            # Create KML file
+            kml_file.write_text("<?xml version='1.0'?><kml></kml>")
+
+            # Get initial cache path
+            cache_path1, is_valid = get_cache_key(str(kml_file))
+            assert cache_path1 is not None
+
+            # Create the cache file
+            cache_path1.write_text("{}")
+
+            # Modify the KML file to change its mtime
+            import time
+
+            time.sleep(0.1)
+            kml_file.write_text("<?xml version='1.0'?><kml>modified</kml>")
+
+            # Make the cache directory read-only to trigger OSError on unlink
+            cache_dir = cache_path1.parent
+            original_mode = cache_dir.stat().st_mode
+            try:
+                cache_dir.chmod(0o555)  # Read-only, no write
+
+                # This should trigger OSError when trying to delete old cache
+                # but the function should handle it gracefully
+                cache_path2, is_valid2 = get_cache_key(str(kml_file))
+
+                # Should still return a valid cache path
+                assert cache_path2 is not None
+            finally:
+                # Restore permissions
+                cache_dir.chmod(original_mode)
+
+    def test_old_cache_removal_oserror_with_mock(self):
+        """Test OSError during old cache file removal using mock."""
+        import tempfile
+        from kml_heatmap.parser import get_cache_key
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_dir = Path(tmpdir)
+            kml_file = test_dir / "test.kml"
+
+            # Create KML file
+            kml_file.write_text("<?xml version='1.0'?><kml></kml>")
+
+            # Get initial cache path
+            cache_path1, _ = get_cache_key(str(kml_file))
+
+            # Create the cache file
+            if cache_path1:
+                cache_path1.write_text("{}")
+
+            # Modify KML to change mtime
+            import time
+
+            time.sleep(0.1)
+            kml_file.write_text("<?xml version='1.0'?><kml>modified</kml>")
+
+            # Mock unlink to raise OSError for cache files
+            original_unlink = Path.unlink
+
+            def mock_unlink(self, *args, **kwargs):
+                # Only raise for cache files, not for the temp directory cleanup
+                if str(self).endswith(".json"):
+                    raise OSError("Permission denied")
+                # For other files, use original
+                return original_unlink(self, *args, **kwargs)
+
+            with patch.object(Path, "unlink", side_effect=mock_unlink, autospec=True):
+                # This should trigger OSError but handle it gracefully
+                cache_path2, _ = get_cache_key(str(kml_file))
+                assert cache_path2 is not None

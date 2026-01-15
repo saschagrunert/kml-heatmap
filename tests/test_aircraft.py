@@ -3,6 +3,9 @@
 import tempfile
 import os
 import json
+import pytest
+from unittest.mock import patch
+from pathlib import Path
 from kml_heatmap.aircraft import (
     AircraftDataParser,
     parse_aircraft_from_filename,
@@ -232,55 +235,60 @@ class TestAircraftDataParserEdgeCases:
 class TestLookupAircraftModel:
     """Tests for lookup_aircraft_model function."""
 
-    def test_lookup_from_cache(self):
-        """Test looking up aircraft from cache."""
-        # Create temporary cache file
+    @pytest.fixture
+    def temp_cache(self):
+        """Create a temporary cache file for testing."""
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            cache = {"D-EAGJ": "Diamond DA-20A-1 Katana"}
-            json.dump(cache, f)
-            cache_file = f.name
+            json.dump({}, f)
+            temp_path = Path(f.name)
 
-        try:
-            result = lookup_aircraft_model("D-EAGJ", cache_file=cache_file)
-            assert result == "Diamond DA-20A-1 Katana"
-        finally:
-            os.unlink(cache_file)
+        # Patch AIRCRAFT_CACHE_FILE to use temp cache
+        with patch("kml_heatmap.aircraft.AIRCRAFT_CACHE_FILE", temp_path):
+            yield temp_path
+
+        # Cleanup
+        if temp_path.exists():
+            temp_path.unlink()
+
+    def test_lookup_from_cache(self, temp_cache):
+        """Test looking up aircraft from cache."""
+        # Pre-populate cache
+        with open(temp_cache, "w") as f:
+            json.dump({"D-EAGJ": "Diamond DA-20A-1 Katana"}, f)
+
+        result = lookup_aircraft_model("D-EAGJ")
+        assert result == "Diamond DA-20A-1 Katana"
 
     def test_lookup_nonexistent_cache(self):
         """Test lookup when cache file doesn't exist."""
-        result = lookup_aircraft_model("D-EAGJ", cache_file="/nonexistent/cache.json")
-        # Should handle gracefully (either return None or attempt web lookup)
-        assert isinstance(result, (str, type(None)))
+        # Mock cache file to point to nonexistent location
+        with patch(
+            "kml_heatmap.aircraft.AIRCRAFT_CACHE_FILE", Path("/nonexistent/cache.json")
+        ):
+            result = lookup_aircraft_model("D-EAGJ")
+            # Should handle gracefully (either return None or attempt web lookup)
+            assert isinstance(result, (str, type(None)))
 
-    def test_lookup_empty_registration(self):
+    def test_lookup_empty_registration(self, temp_cache):
         """Test lookup with empty registration."""
-        result = lookup_aircraft_model("", cache_file="test_cache.json")
+        result = lookup_aircraft_model("")
         assert result is None or isinstance(result, str)
 
-    def test_cache_persists_new_lookup(self):
+    def test_cache_persists_new_lookup(self, temp_cache):
         """Test that new lookups are persisted to cache."""
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            cache = {}
-            json.dump(cache, f)
-            cache_file = f.name
+        # First lookup (will try web lookup)
+        lookup_aircraft_model("D-TEST")
 
-        try:
-            # First lookup (will try web lookup)
-            lookup_aircraft_model("D-TEST", cache_file=cache_file)
+        # Check cache was updated (if lookup succeeded)
+        if temp_cache.exists():
+            with open(temp_cache, "r") as f:
+                updated_cache = json.load(f)
+                # Cache should have been accessed
+                assert isinstance(updated_cache, dict)
 
-            # Check cache was updated (if lookup succeeded)
-            if os.path.exists(cache_file):
-                with open(cache_file, "r") as f:
-                    updated_cache = json.load(f)
-                    # Cache should have been accessed
-                    assert isinstance(updated_cache, dict)
-        finally:
-            if os.path.exists(cache_file):
-                os.unlink(cache_file)
-
-    def test_lookup_invalid_registration_format(self):
+    def test_lookup_invalid_registration_format(self, temp_cache):
         """Test lookup with invalid registration format."""
-        result = lookup_aircraft_model("INVALID123", cache_file="test_cache.json")
+        result = lookup_aircraft_model("INVALID123")
         # Should handle gracefully
         assert isinstance(result, (str, type(None)))
 
@@ -289,182 +297,122 @@ class TestLookupAircraftModel:
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
             # Write invalid JSON
             f.write("{invalid json content")
-            cache_file = f.name
+            temp_path = Path(f.name)
 
         try:
-            # Should handle corrupted cache gracefully (start with empty cache)
-            result = lookup_aircraft_model("D-TEST", cache_file=cache_file)
-            # Will try to fetch from web (likely returns None in tests)
-            assert isinstance(result, (str, type(None)))
+            with patch("kml_heatmap.aircraft.AIRCRAFT_CACHE_FILE", temp_path):
+                # Should handle corrupted cache gracefully (start with empty cache)
+                result = lookup_aircraft_model("D-TEST")
+                # Will try to fetch from web (likely returns None in tests)
+                assert isinstance(result, (str, type(None)))
         finally:
-            os.unlink(cache_file)
+            temp_path.unlink()
 
-    def test_cache_write_failure(self):
+    def test_cache_write_failure(self, temp_cache):
         """Test handling when cache write fails."""
-        # Use a read-only directory to trigger write failure
+        # Pre-populate cache with valid data
+        with open(temp_cache, "w") as f:
+            json.dump({"D-EAGJ": "Diamond DA-20A-1 Katana"}, f)
+
+        # Make file read-only
         import stat
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache_file = os.path.join(tmpdir, "cache.json")
+        os.chmod(temp_cache, stat.S_IRUSR)
 
-            # Create an initial valid cache
-            with open(cache_file, "w") as f:
-                json.dump({"D-EAGJ": "Diamond DA-20A-1 Katana"}, f)
+        try:
+            # Lookup existing entry (from cache, no write needed)
+            result = lookup_aircraft_model("D-EAGJ")
+            assert result == "Diamond DA-20A-1 Katana"
+        finally:
+            # Restore permissions
+            os.chmod(temp_cache, stat.S_IRUSR | stat.S_IWUSR)
 
-            # Make directory read-only
-            os.chmod(tmpdir, stat.S_IRUSR | stat.S_IXUSR)
-
-            try:
-                # Lookup existing entry (from cache, no write needed)
-                result = lookup_aircraft_model("D-EAGJ", cache_file=cache_file)
-                assert result == "Diamond DA-20A-1 Katana"
-            finally:
-                # Restore permissions for cleanup
-                os.chmod(tmpdir, stat.S_IRWXU)
-
-    def test_http_404_not_found(self):
+    def test_http_404_not_found(self, temp_cache):
         """Test handling of 404 HTTP error (aircraft not found)."""
-        from unittest.mock import patch
         import urllib.error
 
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump({}, f)
-            cache_file = f.name
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = urllib.error.HTTPError(
+                url="test", code=404, msg="Not Found", hdrs={}, fp=None
+            )
+            result = lookup_aircraft_model("D-NOTFOUND")
+            # Should return None for 404
+            assert result is None
 
-        try:
-            with patch("urllib.request.urlopen") as mock_urlopen:
-                mock_urlopen.side_effect = urllib.error.HTTPError(
-                    url="test", code=404, msg="Not Found", hdrs={}, fp=None
-                )
-                result = lookup_aircraft_model("D-NOTFOUND", cache_file=cache_file)
-                # Should return None for 404
-                assert result is None
-        finally:
-            os.unlink(cache_file)
-
-    def test_http_429_rate_limit(self):
+    def test_http_429_rate_limit(self, temp_cache):
         """Test handling of 429 rate limit error."""
-        from unittest.mock import patch
         import urllib.error
 
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump({}, f)
-            cache_file = f.name
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = urllib.error.HTTPError(
+                url="test", code=429, msg="Too Many Requests", hdrs={}, fp=None
+            )
+            result = lookup_aircraft_model("D-EAGJ")
+            # Should return None and log warning
+            assert result is None
 
-        try:
-            with patch("urllib.request.urlopen") as mock_urlopen:
-                mock_urlopen.side_effect = urllib.error.HTTPError(
-                    url="test", code=429, msg="Too Many Requests", hdrs={}, fp=None
-                )
-                result = lookup_aircraft_model("D-EAGJ", cache_file=cache_file)
-                # Should return None and log warning
-                assert result is None
-        finally:
-            os.unlink(cache_file)
-
-    def test_http_other_error(self):
+    def test_http_other_error(self, temp_cache):
         """Test handling of other HTTP errors (500, etc)."""
-        from unittest.mock import patch
         import urllib.error
 
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump({}, f)
-            cache_file = f.name
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = urllib.error.HTTPError(
+                url="test", code=500, msg="Internal Server Error", hdrs={}, fp=None
+            )
+            result = lookup_aircraft_model("D-EAGJ")
+            # Should return None and log warning
+            assert result is None
 
-        try:
-            with patch("urllib.request.urlopen") as mock_urlopen:
-                mock_urlopen.side_effect = urllib.error.HTTPError(
-                    url="test", code=500, msg="Internal Server Error", hdrs={}, fp=None
-                )
-                result = lookup_aircraft_model("D-EAGJ", cache_file=cache_file)
-                # Should return None and log warning
-                assert result is None
-        finally:
-            os.unlink(cache_file)
-
-    def test_network_error(self):
+    def test_network_error(self, temp_cache):
         """Test handling of network errors."""
-        from unittest.mock import patch
         import urllib.error
 
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump({}, f)
-            cache_file = f.name
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = urllib.error.URLError("Network unreachable")
+            result = lookup_aircraft_model("D-EAGJ")
+            # Should return None and log warning
+            assert result is None
 
-        try:
-            with patch("urllib.request.urlopen") as mock_urlopen:
-                mock_urlopen.side_effect = urllib.error.URLError("Network unreachable")
-                result = lookup_aircraft_model("D-EAGJ", cache_file=cache_file)
-                # Should return None and log warning
-                assert result is None
-        finally:
-            os.unlink(cache_file)
-
-    def test_timeout_error(self):
+    def test_timeout_error(self, temp_cache):
         """Test handling of timeout errors."""
-        from unittest.mock import patch
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = TimeoutError("Request timed out")
+            result = lookup_aircraft_model("D-EAGJ")
+            # Should return None and log warning
+            assert result is None
 
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump({}, f)
-            cache_file = f.name
-
-        try:
-            with patch("urllib.request.urlopen") as mock_urlopen:
-                mock_urlopen.side_effect = TimeoutError("Request timed out")
-                result = lookup_aircraft_model("D-EAGJ", cache_file=cache_file)
-                # Should return None and log warning
-                assert result is None
-        finally:
-            os.unlink(cache_file)
-
-    def test_unexpected_exception(self):
+    def test_unexpected_exception(self, temp_cache):
         """Test handling of unexpected exceptions."""
-        from unittest.mock import patch
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = RuntimeError("Unexpected error")
+            result = lookup_aircraft_model("D-EAGJ")
+            # Should return None and log warning
+            assert result is None
 
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump({}, f)
-            cache_file = f.name
-
-        try:
-            with patch("urllib.request.urlopen") as mock_urlopen:
-                mock_urlopen.side_effect = RuntimeError("Unexpected error")
-                result = lookup_aircraft_model("D-EAGJ", cache_file=cache_file)
-                # Should return None and log warning
-                assert result is None
-        finally:
-            os.unlink(cache_file)
-
-    def test_successful_lookup_with_cache_update(self):
+    def test_successful_lookup_with_cache_update(self, temp_cache):
         """Test successful lookup updates cache."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock
 
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump({}, f)
-            cache_file = f.name
+        # Mock successful HTTP response with aircraft data
+        html_content = b"""<html>
+        <head><title>Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana</title></head>
+        <body></body>
+        </html>"""
 
-        try:
-            # Mock successful HTTP response with aircraft data
-            html_content = b"""<html>
-            <head><title>Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana</title></head>
-            <body></body>
-            </html>"""
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            # Create a mock response that behaves like a file object
+            mock_response = MagicMock()
+            mock_response.read.return_value = html_content
+            mock_response.__enter__.return_value = mock_response
+            mock_response.__exit__.return_value = None
+            mock_urlopen.return_value = mock_response
 
-            with patch("urllib.request.urlopen") as mock_urlopen:
-                # Create a mock response that behaves like a file object
-                mock_response = MagicMock()
-                mock_response.read.return_value = html_content
-                mock_response.__enter__.return_value = mock_response
-                mock_response.__exit__.return_value = None
-                mock_urlopen.return_value = mock_response
+            result = lookup_aircraft_model("D-EAGJ")
 
-                result = lookup_aircraft_model("D-EAGJ", cache_file=cache_file)
+            # Should return the model
+            assert result == "Diamond DA-20A-1 Katana"
 
-                # Should return the model
-                assert result == "Diamond DA-20A-1 Katana"
-
-                # Verify cache was updated
-                with open(cache_file, "r") as f:
-                    cache = json.load(f)
-                    assert cache.get("D-EAGJ") == "Diamond DA-20A-1 Katana"
-        finally:
-            os.unlink(cache_file)
+            # Verify cache was updated
+            with open(temp_cache, "r") as f:
+                cache = json.load(f)
+                assert cache.get("D-EAGJ") == "Diamond DA-20A-1 Katana"

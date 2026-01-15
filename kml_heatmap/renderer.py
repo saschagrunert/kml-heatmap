@@ -36,11 +36,13 @@ def minify_html(html: str) -> str:
 
     # First, minify inline CSS and JavaScript
     def minify_css_tags(match):
+        """Minify CSS content within style tags using rcssmin."""
         css_content = match.group(1)
         minified_css = rcssmin.cssmin(css_content)
         return f"<style>{minified_css}</style>"
 
     def minify_js_tags(match):
+        """Minify JavaScript content within script tags using rjsmin."""
         js_content = match.group(1)
         minified_js = rjsmin.jsmin(js_content)
         # rjsmin preserves some newlines for ASI (Automatic Semicolon Insertion) safety.

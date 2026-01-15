@@ -24,15 +24,31 @@ class AircraftDataParser(HTMLParser):
     """HTML parser to extract aircraft model from airport-data.com"""
 
     def __init__(self):
+        """Initialize the parser with default state."""
         super().__init__()
         self.in_title = False
         self.model = None
 
     def handle_starttag(self, tag: str, attrs: List[tuple]) -> None:
+        """Handle opening HTML tags.
+
+        Args:
+            tag: HTML tag name
+            attrs: List of (attribute, value) tuples
+        """
         if tag == "title":
             self.in_title = True
 
     def handle_data(self, data: str) -> None:
+        """Handle text data within HTML tags.
+
+        Extracts aircraft model from title tag in both old and new formats:
+        - New: "Aircraft Data D-EAGJ, Diamond DA-20A-1 Katana C/N 10115, ..."
+        - Old: "Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana"
+
+        Args:
+            data: Text content from HTML
+        """
         if self.in_title:
             # New format: "Aircraft Data D-EAGJ, Diamond DA-20A-1 Katana C/N 10115, ..."
             if "Aircraft Data" in data:
@@ -54,29 +70,27 @@ class AircraftDataParser(HTMLParser):
                     self.model = model
 
     def handle_endtag(self, tag: str) -> None:
+        """Handle closing HTML tags.
+
+        Args:
+            tag: HTML tag name
+        """
         if tag == "title":
             self.in_title = False
 
 
-def lookup_aircraft_model(registration: str, cache_file: str = None) -> Optional[str]:
+def lookup_aircraft_model(registration: str) -> Optional[str]:
     """
     Look up aircraft model from airport-data.com
 
     Args:
         registration: Aircraft registration (e.g., 'D-EAGJ')
-        cache_file: Path to JSON cache file (deprecated, uses unified cache)
 
     Returns:
         Full aircraft model name or None if not found
     """
     # Use unified cache directory
-    if cache_file is None:
-        cache_file = AIRCRAFT_CACHE_FILE
-    else:
-        # Support legacy cache_file parameter for backward compatibility
-        from pathlib import Path
-
-        cache_file = Path(cache_file)
+    cache_file = AIRCRAFT_CACHE_FILE
 
     # Ensure cache directory exists
     CACHE_DIR.mkdir(parents=True, exist_ok=True)

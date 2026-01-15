@@ -36,6 +36,7 @@ class ConfigValidator:
     """Validates runtime configuration and environment."""
 
     def __init__(self):
+        """Initialize the validator with empty error and warning lists."""
         self.errors: List[str] = []
         self.warnings: List[str] = []
 

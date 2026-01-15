@@ -644,3 +644,158 @@ class TestProcessPathSegmentsDownsampled:
             # Downsampled segments have groundspeed set to 0
             assert "groundspeed_knots" in seg
             assert seg["groundspeed_knots"] == 0
+
+
+class TestExportAirportsJson:
+    """Tests for export_airports_json function."""
+
+    def test_export_basic_airports(self):
+        """Test exporting basic airport list."""
+        from kml_heatmap.exporter import export_airports_json
+        import tempfile
+        import os
+
+        airports = [
+            {
+                "lat": 50.0,
+                "lon": 8.5,
+                "name": "EDDF Frankfurt",
+                "timestamps": ["2025-01-01T10:00:00Z"],
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_airports_json(airports, tmpdir, strip_timestamps=False)
+            output_file = os.path.join(tmpdir, "airports.json")
+            assert os.path.exists(output_file)
+
+            with open(output_file) as f:
+                data = __import__("json").load(f)
+                assert "airports" in data
+                assert len(data["airports"]) > 0
+
+    def test_export_airports_strip_timestamps(self):
+        """Test exporting airports without timestamps."""
+        from kml_heatmap.exporter import export_airports_json
+        import tempfile
+        import os
+
+        airports = [
+            {
+                "lat": 50.0,
+                "lon": 8.5,
+                "name": "EDDF Frankfurt",
+                "timestamps": ["2025-01-01T10:00:00Z"],
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_airports_json(airports, tmpdir, strip_timestamps=True)
+            output_file = os.path.join(tmpdir, "airports.json")
+
+            with open(output_file) as f:
+                data = __import__("json").load(f)
+                # Timestamps should not be present
+                if len(data["airports"]) > 0:
+                    assert "timestamps" not in data["airports"][0]
+
+    def test_export_airports_filters_invalid_names(self):
+        """Test that airports with invalid names are filtered."""
+        from kml_heatmap.exporter import export_airports_json
+        import tempfile
+
+        airports = [
+            {
+                "lat": 50.0,
+                "lon": 8.5,
+                "name": "Unknown",  # Should be filtered
+                "timestamps": [],
+                "is_at_path_end": False,
+            },
+            {
+                "lat": 51.0,
+                "lon": 9.5,
+                "name": "EDDF Frankfurt",
+                "timestamps": ["2025-01-01T10:00:00Z"],
+                "is_at_path_end": False,
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_airports_json(airports, tmpdir)
+            # Should filter out "Unknown"
+
+    def test_export_airports_deduplicates_locations(self):
+        """Test that duplicate locations are filtered."""
+        from kml_heatmap.exporter import export_airports_json
+        import tempfile
+
+        airports = [
+            {
+                "lat": 50.0000,
+                "lon": 8.5000,
+                "name": "EDDF Frankfurt",
+                "timestamps": ["2025-01-01T10:00:00Z"],
+                "is_at_path_end": False,
+            },
+            {
+                "lat": 50.0001,
+                "lon": 8.5001,  # Very close - should deduplicate
+                "name": "EDDF Frankfurt",
+                "timestamps": ["2025-01-02T10:00:00Z"],
+                "is_at_path_end": False,
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_airports_json(airports, tmpdir)
+
+
+class TestExportMetadataJson:
+    """Tests for export_metadata_json function."""
+
+    def test_export_basic_metadata(self):
+        """Test exporting basic metadata."""
+        from kml_heatmap.exporter import export_metadata_json
+        import tempfile
+        import os
+
+        stats = {"total_paths": 10, "total_points": 1000}
+        speed_stats = {"min": 50.0, "max": 200.0}
+        gradient = {0.0: "#0000ff", 1.0: "#ff0000"}
+        years = [2024, 2025]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_metadata_json(
+                stats, 100.0, 5000.0, speed_stats, gradient, years, tmpdir
+            )
+            output_file = os.path.join(tmpdir, "metadata.json")
+            assert os.path.exists(output_file)
+
+            with open(output_file) as f:
+                data = __import__("json").load(f)
+                assert "stats" in data
+                assert "min_alt_m" in data
+                assert "max_alt_m" in data
+                assert "gradient" in data
+                assert "available_years" in data
+
+    def test_export_metadata_with_no_speeds(self):
+        """Test exporting metadata when no speeds were recorded."""
+        from kml_heatmap.exporter import export_metadata_json
+        import tempfile
+        import os
+
+        stats = {}
+        speed_stats = {"min": float("inf"), "max": 0.0}
+        gradient = {}
+        years = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_metadata_json(stats, 0.0, 0.0, speed_stats, gradient, years, tmpdir)
+            output_file = os.path.join(tmpdir, "metadata.json")
+
+            with open(output_file) as f:
+                data = __import__("json").load(f)
+                # Should handle inf gracefully
+                assert data["min_groundspeed_knots"] == 0

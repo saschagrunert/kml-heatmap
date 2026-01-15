@@ -51,6 +51,7 @@ class SegmentData:
     """Container for segment calculation results."""
 
     def __init__(self):
+        """Initialize segment data with default values."""
         self.segments: List[Dict[str, Any]] = []
         self.max_groundspeed_knots: float = 0.0
         self.min_groundspeed_knots: float = float("inf")

@@ -100,6 +100,7 @@ def timed(func: F) -> F:
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        """Wrapper function that measures and logs execution time."""
         start_time = time.perf_counter()
         result = func(*args, **kwargs)
         elapsed = time.perf_counter() - start_time
@@ -140,6 +141,7 @@ def log_calls(func: F) -> F:
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        """Wrapper function that logs function calls with arguments and return values."""
         # Format arguments for logging
         args_repr = [repr(a) for a in args]
         kwargs_repr = [f"{k}={v!r}" for k, v in kwargs.items()]
@@ -179,8 +181,11 @@ def validate_not_none(*param_names: str) -> Callable[[F], F]:
     """
 
     def decorator(func: F) -> F:
+        """Decorator function that validates parameters are not None."""
+
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
+            """Wrapper function that validates parameters before calling the function."""
             # Get function signature
             import inspect
 

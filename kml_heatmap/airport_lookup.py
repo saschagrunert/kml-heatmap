@@ -6,8 +6,18 @@ ICAO codes using the OurAirports database with local caching.
 
 import csv
 import time
+import threading
 from typing import Dict, Optional, Tuple
 from urllib.request import urlretrieve
+
+# Try to import fcntl for Unix-like systems (for process-safe file locking)
+try:
+    import fcntl
+
+    HAS_FCNTL = True
+except ImportError:
+    # Windows doesn't have fcntl
+    HAS_FCNTL = False
 
 from .cache import CACHE_DIR
 from .logger import logger
@@ -19,10 +29,14 @@ OURAIRPORTS_URL = "https://davidmegginson.github.io/ourairports-data/airports.cs
 
 # Cache settings
 CACHE_FILE = CACHE_DIR / "airports.csv"
+CACHE_LOCK_FILE = CACHE_DIR / "airports.lock"
 CACHE_MAX_AGE_DAYS = 30
 
 # Global cache for parsed airport data
 _airport_cache: Optional[Dict[str, Tuple[float, float, str]]] = None
+
+# Thread lock for database loading (prevents race conditions within a single process)
+_cache_lock = threading.Lock()
 
 
 def _is_cache_valid() -> bool:
@@ -72,51 +86,87 @@ def _download_airport_database() -> bool:
 def _load_airport_database() -> Dict[str, Tuple[float, float, str]]:
     """Load airport database from cache or download if needed.
 
+    This function is thread-safe and process-safe. It will only download
+    the database once even when called from multiple threads or processes
+    simultaneously.
+
     Returns:
         Dictionary mapping ICAO codes to (lat, lon, name) tuples
     """
     global _airport_cache
 
-    # Return cached data if already loaded
+    # Fast path: return cached data if already loaded (no lock needed)
     if _airport_cache is not None:
         return _airport_cache
 
-    # Check if cache is valid, download if not
-    if not _is_cache_valid():
-        logger.debug("Airport database cache is stale or missing")
-        _download_airport_database()
+    # Acquire thread lock to ensure only one thread in this process loads the database
+    with _cache_lock:
+        # Double-check: another thread might have loaded it while we waited for the lock
+        if _airport_cache is not None:
+            return _airport_cache
 
-    # Try to load from cache
-    if CACHE_FILE.exists():
+        # Use file-based lock to coordinate across processes (Unix only)
+        # Create cache directory if it doesn't exist
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+        lock_file = None
         try:
-            airports = {}
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    icao = row.get("ident", "").strip().upper()
-                    # Only include airports with valid ICAO codes (4 characters)
-                    if icao and len(icao) == 4:
-                        try:
-                            lat = float(row.get("latitude_deg", ""))
-                            lon = float(row.get("longitude_deg", ""))
-                            name = row.get("name", "").strip()
-                            if name:
-                                airports[icao] = (lat, lon, name)
-                        except (ValueError, TypeError):
-                            # Skip invalid entries
-                            continue
+            # Acquire exclusive lock if supported (works across processes on Unix)
+            if HAS_FCNTL:
+                lock_file = open(CACHE_LOCK_FILE, "w")
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 
-            _airport_cache = airports
-            logger.debug(f"Loaded {len(airports):,} airports from cache")
-            return airports
+            # Check again if cache is valid after acquiring lock
+            # (another process might have downloaded it while we waited)
+            if not _is_cache_valid():
+                logger.debug("Airport database cache is stale or missing")
+                _download_airport_database()
 
-        except Exception as e:
-            logger.warning(f"Failed to load airport cache: {e}")
+            # Try to load from cache
+            if CACHE_FILE.exists():
+                try:
+                    airports = {}
+                    with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            icao = row.get("ident", "").strip().upper()
+                            # Only include airports with valid ICAO codes (4 characters)
+                            if icao and len(icao) == 4:
+                                try:
+                                    lat = float(row.get("latitude_deg", ""))
+                                    lon = float(row.get("longitude_deg", ""))
+                                    name = row.get("name", "").strip()
+                                    if name:
+                                        airports[icao] = (lat, lon, name)
+                                except (ValueError, TypeError):
+                                    # Skip invalid entries
+                                    continue
 
-    # Return empty dict if cache loading failed
-    logger.warning("Airport database unavailable - airport lookups will fail")
-    _airport_cache = {}
-    return _airport_cache
+                    _airport_cache = airports
+                    logger.debug(f"Loaded {len(airports):,} airports from cache")
+                    return airports
+
+                except Exception as e:
+                    logger.warning(f"Failed to load airport cache: {e}")
+
+            # Return empty dict if cache loading failed
+            logger.warning("Airport database unavailable - airport lookups will fail")
+            _airport_cache = {}
+            return _airport_cache
+
+        finally:
+            # Release file lock if we acquired one
+            if lock_file and HAS_FCNTL:
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    lock_file.close()
+                except Exception:
+                    pass
+            elif lock_file:
+                try:
+                    lock_file.close()
+                except Exception:
+                    pass
 
 
 def lookup_airport_coordinates(icao_code: str) -> Optional[Tuple[float, float, str]]:
