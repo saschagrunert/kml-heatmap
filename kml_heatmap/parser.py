@@ -497,6 +497,58 @@ def find_xml_elements(
     return elems
 
 
+def extract_charterware_timestamp(description: str) -> Optional[str]:
+    """
+    Extract timestamp from Charterware description field.
+
+    Example: "Flight Jan 12 2026 03:01PM path of OE-AKI"
+    Returns ISO-format timestamp like "2026-01-12T15:01:00Z"
+
+    Args:
+        description: Description text from Charterware KML
+
+    Returns:
+        ISO-format timestamp or None if extraction fails
+    """
+    import re
+    from datetime import datetime
+
+    if not description:
+        return None
+
+    # Pattern: "Flight Jan 12 2026 03:01PM" or "Flight January 12 2026 03:01PM"
+    pattern = r"Flight\s+(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}):(\d{2})(AM|PM)"
+    match = re.search(pattern, description)
+
+    if match:
+        month_str, day, year, hour, minute, meridiem = match.groups()
+
+        # Convert 12-hour to 24-hour
+        hour = int(hour)
+        if meridiem == "PM" and hour != 12:
+            hour += 12
+        elif meridiem == "AM" and hour == 12:
+            hour = 0
+
+        # Parse month name (supports both short and full month names)
+        try:
+            dt_str = f"{day} {month_str} {year} {hour:02d}:{minute}"
+            # Try short month name first (Jan, Feb, etc.)
+            dt = datetime.strptime(dt_str, "%d %b %Y %H:%M")
+        except ValueError:
+            # Try full month name (January, February, etc.)
+            try:
+                dt = datetime.strptime(dt_str, "%d %B %Y %H:%M")
+            except ValueError:
+                logger.debug(f"Failed to parse Charterware timestamp: {description}")
+                return None
+
+        # Return ISO format with UTC timezone
+        return dt.isoformat() + "Z"
+
+    return None
+
+
 def extract_placemark_metadata(
     placemark: Any, namespaces: Dict[str, str], kml_file: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -545,6 +597,15 @@ def extract_placemark_metadata(
         if match:
             timestamp = match.group(1)
 
+    # If still no timestamp, check description for Charterware format
+    if timestamp is None:
+        desc_elem = find_xml_element(
+            placemark, ".//kml:description", ".//description", namespaces
+        )
+        if desc_elem is not None and desc_elem.text:
+            # Try Charterware format: "Flight Jan 12 2026 03:01PM path of OE-AKI"
+            timestamp = extract_charterware_timestamp(desc_elem.text.strip())
+
     year = extract_year_from_timestamp(timestamp)
 
     return {
@@ -578,6 +639,29 @@ def _build_path_metadata_dict(
     year = extract_year_from_timestamp(timestamp)
     aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
 
+    # For Charterware files, use route information for airport name
+    # Route format: DEPARTURE-ARRIVAL (e.g., LOAV-LOAV or EDDF-EDDM)
+    # Convert to exporter format: "DEPARTURE - ARRIVAL" (with spaces around hyphen)
+    if (
+        aircraft_info
+        and aircraft_info.get("route")
+        and aircraft_info.get("format") == "charterware"
+    ):
+        route = aircraft_info.get("route")
+        # Extract airports from route and format for exporter
+        if "-" in route:
+            route_parts = route.split("-")
+            departure_airport = route_parts[0]
+            arrival_airport = route_parts[1]
+            # Use route as airport_name if current name is empty or is not a 4-letter ICAO code
+            # ICAO codes are exactly 4 uppercase letters (e.g., LOAV, EDDF, EDDM)
+            # Aircraft registrations contain hyphens (e.g., OE-AKI, D-EXYZ)
+            # Format: "DEPARTURE - ARRIVAL" (with spaces) for exporter compatibility
+            if not airport_name or len(airport_name) != 4:
+                airport_name = f"{departure_airport} - {arrival_airport}"
+                # Look up full airport names from ICAO codes
+                airport_name = standardize_airport_name(airport_name)
+
     meta = {
         "timestamp": timestamp,
         "end_timestamp": end_timestamp,
@@ -590,7 +674,16 @@ def _build_path_metadata_dict(
     # Add aircraft info if available
     if aircraft_info:
         meta["aircraft_registration"] = aircraft_info.get("registration")
-        meta["aircraft_type"] = aircraft_info.get("type")
+
+        # Handle optional aircraft type (may be None for Charterware)
+        aircraft_type = aircraft_info.get("type")
+        if aircraft_type is not None:
+            meta["aircraft_type"] = aircraft_type
+
+        # Handle optional route (Charterware specific)
+        route = aircraft_info.get("route")
+        if route is not None:
+            meta["route"] = route
 
     return meta
 
@@ -656,6 +749,47 @@ def process_standard_coordinates(
 
         # Add this path group to the list if it has coordinates
         if current_path:
+            # Generate synthetic timestamps for Charterware files (2-second logging interval)
+            # Charterware files have a start timestamp but no per-point timestamps
+            if timestamp and end_timestamp is None:
+                from datetime import datetime, timedelta
+
+                try:
+                    # Parse the start timestamp
+                    start_dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    # Charterware logging interval: 2 seconds
+                    CHARTERWARE_INTERVAL_SECONDS = 2
+
+                    # Add synthetic timestamps to coordinates
+                    path_with_timestamps = []
+                    for i, coord in enumerate(current_path):
+                        # Calculate timestamp for this point
+                        point_time = start_dt + timedelta(
+                            seconds=i * CHARTERWARE_INTERVAL_SECONDS
+                        )
+                        timestamp_str = point_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+                        # Append timestamp as 4th element
+                        path_with_timestamps.append(coord + [timestamp_str])
+
+                    # Replace current_path with timestamped version
+                    current_path = path_with_timestamps
+
+                    # Calculate end timestamp
+                    if current_path:
+                        last_point_time = start_dt + timedelta(
+                            seconds=(len(current_path) - 1)
+                            * CHARTERWARE_INTERVAL_SECONDS
+                        )
+                        end_timestamp = last_point_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+                    logger.debug(
+                        f"Generated {len(current_path)} synthetic timestamps "
+                        f"for {Path(kml_file).name} (2s interval)"
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not generate synthetic timestamps: {e}")
+
             path_groups.append(current_path)
             meta = _build_path_metadata_dict(
                 kml_file, current_path[0], airport_name, timestamp, end_timestamp

@@ -241,7 +241,11 @@ def parse_standard_coordinates(
     Returns:
         Tuple of (coordinates_2d, coordinates_3d)
         - coordinates_2d: [[lat, lon], ...]
-        - coordinates_3d: [[lat, lon, alt], ...] or [[lat, lon, alt, timestamp], ...]
+        - coordinates_3d: [[lat, lon, alt], ...]
+
+    Note:
+        Synthetic timestamp generation for Charterware files is handled
+        in parser.py during the main parsing flow.
     """
     if coord_elem.text is None or not coord_elem.text.strip():
         return [], []

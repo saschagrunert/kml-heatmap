@@ -53,6 +53,27 @@ class TestAircraftDataParser:
         # Should get the model from the second title
         assert parser.model == "Piper PA-28"
 
+    def test_parse_new_format_with_serial(self):
+        """Test parsing new HTML format with C/N serial number."""
+        parser = AircraftDataParser()
+        html = "<html><head><title>Aircraft Data D-EAGJ, Diamond DA-20A-1 Katana C/N 10115, Diamond DA-20A-1 Katana C/N 10115</title></head></html>"
+        parser.feed(html)
+        assert parser.model == "Diamond DA-20A-1 Katana"
+
+    def test_parse_new_format_without_serial(self):
+        """Test parsing new HTML format without C/N serial number."""
+        parser = AircraftDataParser()
+        html = "<html><head><title>Aircraft Data D-EHYL, Diamond DA-40TDI Diamond Star</title></head></html>"
+        parser.feed(html)
+        assert parser.model == "Diamond DA-40TDI Diamond Star"
+
+    def test_parse_new_format_cessna(self):
+        """Test parsing new HTML format for Cessna with year."""
+        parser = AircraftDataParser()
+        html = "<html><head><title>Aircraft Data D-ESST, 1978 Cessna 172N C/N 17268953, 1978 Cessna 172N C/N 17268953</title></head></html>"
+        parser.feed(html)
+        assert parser.model == "1978 Cessna 172N"
+
 
 class TestParseAircraftFromFilename:
     """Tests for parse_aircraft_from_filename function."""
@@ -112,6 +133,89 @@ class TestParseAircraftFromFilename:
         result = parse_aircraft_from_filename("20250101_1200_EDDF_DEABC_PA28.kml")
         assert isinstance(result, dict)
         assert result.get("type") == "PA28"
+
+
+class TestParseAircraftFromFilenameCharterware:
+    """Tests for Charterware filename format."""
+
+    def test_charterware_format(self):
+        """Test parsing Charterware filename."""
+        # Format: YYYY-MM-DD_HHMMh_REGISTRATION_ROUTE.kml
+        result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
+        assert isinstance(result, dict)
+        assert result.get("registration") == "OE-AKI"
+        assert result.get("type") is None  # Charterware doesn't include type
+        assert result.get("route") == "LOAV-LOAV"
+        assert result.get("format") == "charterware"
+
+    def test_charterware_different_registration(self):
+        """Test Charterware with different registration."""
+        result = parse_aircraft_from_filename("2026-01-15_1000h_D-EXYZ_EDDF-EDDM.kml")
+        assert isinstance(result, dict)
+        assert result.get("registration") == "D-EXYZ"
+        assert result.get("type") is None
+        assert result.get("route") == "EDDF-EDDM"
+        assert result.get("format") == "charterware"
+
+    def test_charterware_round_trip(self):
+        """Test Charterware round trip route (same departure/arrival)."""
+        result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
+        assert isinstance(result, dict)
+        assert result.get("route") == "LOAV-LOAV"
+
+    def test_charterware_international_registration(self):
+        """Test Charterware with various international registrations."""
+        # Austrian registration
+        result = parse_aircraft_from_filename("2026-02-10_0900h_OE-ABC_LOWW-LOWI.kml")
+        assert result.get("registration") == "OE-ABC"
+        assert result.get("format") == "charterware"
+
+        # Swiss registration
+        result = parse_aircraft_from_filename("2026-03-15_1200h_HB-XYZ_LSZH-LSGG.kml")
+        assert result.get("registration") == "HB-XYZ"
+        assert result.get("format") == "charterware"
+
+    def test_charterware_different_routes(self):
+        """Test Charterware with different route combinations."""
+        # Domestic flight
+        result = parse_aircraft_from_filename("2026-01-20_1400h_D-EAGJ_EDDF-EDDM.kml")
+        assert result.get("route") == "EDDF-EDDM"
+
+        # International flight
+        result = parse_aircraft_from_filename("2026-02-05_1100h_OE-AKI_LOWW-EDDF.kml")
+        assert result.get("route") == "LOWW-EDDF"
+
+    def test_backward_compatibility_skydemon(self):
+        """Ensure SkyDemon format still works and includes format field."""
+        result = parse_aircraft_from_filename("20250822_1013_EDAV_DEHYL_DA40.kml")
+        assert isinstance(result, dict)
+        assert result.get("registration") == "D-EHYL"
+        assert result.get("type") == "DA40"
+        assert result.get("format") == "skydemon"
+        assert result.get("route") is None  # SkyDemon doesn't have route
+
+    def test_skydemon_format_field(self):
+        """Test that SkyDemon format includes format indicator."""
+        result = parse_aircraft_from_filename("20250101_1200_EDDF_DEAGJ_DA20.kml")
+        assert result.get("format") == "skydemon"
+
+    def test_charterware_without_extension(self):
+        """Test Charterware filename without .kml extension."""
+        result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV")
+        assert isinstance(result, dict)
+        assert result.get("registration") == "OE-AKI"
+
+    def test_format_detection_by_date(self):
+        """Test that format is detected by date pattern."""
+        # Charterware has hyphens in date
+        charterware = parse_aircraft_from_filename(
+            "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml"
+        )
+        assert charterware.get("format") == "charterware"
+
+        # SkyDemon has no hyphens in date
+        skydemon = parse_aircraft_from_filename("20260112_1513_LOAV_OEAKI_DA40.kml")
+        assert skydemon.get("format") == "skydemon"
 
 
 class TestAircraftDataParserEdgeCases:

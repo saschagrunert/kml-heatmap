@@ -13,6 +13,7 @@ from kml_heatmap.parser import (
     get_cache_key,
     load_cached_parse,
     save_to_cache,
+    extract_charterware_timestamp,
 )
 
 
@@ -700,6 +701,574 @@ class TestParseKmlCoordinates:
             # Clean up cache
             from kml_heatmap.parser import get_cache_key
 
+            cache_path, _ = get_cache_key(temp_path)
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+
+
+class TestExtractCharterwareTimestamp:
+    """Tests for extract_charterware_timestamp function."""
+
+    def test_basic_format(self):
+        """Test parsing basic Charterware description format."""
+        desc = "Flight Jan 12 2026 03:01PM path of OE-AKI"
+        result = extract_charterware_timestamp(desc)
+        assert result == "2026-01-12T15:01:00Z"
+
+    def test_different_months(self):
+        """Test parsing different months."""
+        # January
+        assert (
+            extract_charterware_timestamp("Flight Jan 15 2026 02:30PM path of OE-AKI")
+            == "2026-01-15T14:30:00Z"
+        )
+        # December
+        assert (
+            extract_charterware_timestamp("Flight Dec 25 2025 11:45AM path of OE-AKI")
+            == "2025-12-25T11:45:00Z"
+        )
+        # March
+        assert (
+            extract_charterware_timestamp("Flight Mar 3 2025 08:15AM path of D-EAGJ")
+            == "2025-03-03T08:15:00Z"
+        )
+
+    def test_am_pm_conversion(self):
+        """Test AM/PM to 24-hour conversion."""
+        # 12 AM (midnight)
+        assert (
+            extract_charterware_timestamp("Flight Jan 1 2026 12:00AM path of OE-AKI")
+            == "2026-01-01T00:00:00Z"
+        )
+        # 12 PM (noon)
+        assert (
+            extract_charterware_timestamp("Flight Jan 1 2026 12:00PM path of OE-AKI")
+            == "2026-01-01T12:00:00Z"
+        )
+        # 1 AM
+        assert (
+            extract_charterware_timestamp("Flight Jan 1 2026 01:30AM path of OE-AKI")
+            == "2026-01-01T01:30:00Z"
+        )
+        # 1 PM
+        assert (
+            extract_charterware_timestamp("Flight Jan 1 2026 01:30PM path of OE-AKI")
+            == "2026-01-01T13:30:00Z"
+        )
+        # 11 PM
+        assert (
+            extract_charterware_timestamp("Flight Jan 1 2026 11:59PM path of OE-AKI")
+            == "2026-01-01T23:59:00Z"
+        )
+
+    def test_invalid_format(self):
+        """Test that invalid formats return None."""
+        assert extract_charterware_timestamp("") is None
+        assert extract_charterware_timestamp(None) is None
+        assert extract_charterware_timestamp("Invalid description") is None
+        assert extract_charterware_timestamp("Flight without timestamp") is None
+
+    def test_full_month_names(self):
+        """Test parsing with full month names (if supported)."""
+        # Should handle full month names
+        result = extract_charterware_timestamp(
+            "Flight January 12 2026 03:01PM path of OE-AKI"
+        )
+        assert result == "2026-01-12T15:01:00Z"
+
+
+class TestParseCharterwareKML:
+    """Integration tests for parsing Charterware KML files."""
+
+    def test_parse_charterware_kml(self):
+        """Test parsing actual Charterware KML format."""
+        import tempfile
+        import os
+        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+
+        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+    <Document id="1">
+        <Style id="4">
+            <LineStyle id="5">
+                <color>ff8c4426</color>
+                <colorMode>normal</colorMode>
+                <width>4</width>
+            </LineStyle>
+        </Style>
+        <Placemark id="3">
+            <name>OE-AKI</name>
+            <description>Flight Jan 12 2026 03:01PM path of OE-AKI</description>
+            <styleUrl>#4</styleUrl>
+            <LineString id="2">
+                <coordinates>
+                    16.252537,47.96571,232.800003 16.252432,47.965717,231.800003 16.252419,47.96571,231.800003
+                </coordinates>
+                <extrude>1</extrude>
+                <altitudeMode>absolute</altitudeMode>
+            </LineString>
+        </Placemark>
+    </Document>
+</kml>"""
+
+        # Create temp file with exact Charterware filename format
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
+
+        with open(temp_path, "w") as f:
+            f.write(kml_content)
+
+        try:
+            coords, paths, metadata = parse_kml_coordinates(temp_path)
+
+            # Check coordinates were extracted
+            assert len(coords) > 0
+            assert len(paths) > 0
+            assert len(metadata) > 0
+
+            # Check metadata
+            meta = metadata[0]
+            assert meta.get("aircraft_registration") == "OE-AKI"
+            assert meta.get("route") == "LOAV-LOAV"
+            assert meta.get("aircraft_type") is None  # Charterware doesn't include type
+            assert (
+                meta.get("timestamp") is not None
+            )  # Should be extracted from description
+            assert meta.get("year") == 2026
+
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            # Clean up cache
+            cache_path, _ = get_cache_key(temp_path)
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+
+    def test_charterware_metadata_extraction(self):
+        """Test that Charterware metadata is correctly extracted."""
+        import tempfile
+        import os
+        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+
+        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+    <Document>
+        <Placemark>
+            <name>D-EXYZ</name>
+            <description>Flight Feb 15 2026 10:30AM path of D-EXYZ</description>
+            <LineString>
+                <coordinates>8.5,50.0,300 9.0,51.0,400</coordinates>
+            </LineString>
+        </Placemark>
+    </Document>
+</kml>"""
+
+        # Create temp file with exact Charterware filename format
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, "2026-02-15_1030h_D-EXYZ_EDDF-EDDM.kml")
+
+        with open(temp_path, "w") as f:
+            f.write(kml_content)
+
+        try:
+            coords, paths, metadata = parse_kml_coordinates(temp_path)
+
+            assert len(metadata) > 0
+            meta = metadata[0]
+
+            # Check aircraft info from filename
+            assert meta.get("aircraft_registration") == "D-EXYZ"
+            assert meta.get("route") == "EDDF-EDDM"
+
+            # Check timestamp from description
+            assert meta.get("timestamp") == "2026-02-15T10:30:00Z"
+            assert meta.get("year") == 2026
+
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            # Clean up cache
+            cache_path, _ = get_cache_key(temp_path)
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+
+    def test_mixed_formats(self):
+        """Test that parser handles both SkyDemon and Charterware formats correctly."""
+        import tempfile
+        import os
+        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+
+        # Create SkyDemon format KML
+        skydemon_kml = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+    <Document>
+        <Placemark>
+            <name>EDAV - EDBH</name>
+            <gx:Track>
+                <when>2025-08-22T10:13:29Z</when>
+                <gx:coord>13.710165 52.827545 42.392002</gx:coord>
+            </gx:Track>
+        </Placemark>
+    </Document>
+</kml>"""
+
+        # Create Charterware format KML
+        charterware_kml = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+    <Document>
+        <Placemark>
+            <name>OE-AKI</name>
+            <description>Flight Jan 12 2026 03:01PM path of OE-AKI</description>
+            <LineString>
+                <coordinates>16.252537,47.96571,232.8</coordinates>
+            </LineString>
+        </Placemark>
+    </Document>
+</kml>"""
+
+        # Create temp files with exact filenames (unique for this test)
+        temp_dir = tempfile.gettempdir()
+        skydemon_path = os.path.join(temp_dir, "20250822_1013_EDAV_DEHYL_DA40.kml")
+        charterware_path = os.path.join(
+            temp_dir, "2026-01-15_1513h_OE-AKI_EDDF-EDDM.kml"
+        )
+
+        # Clear any existing caches before test
+        for path in [skydemon_path, charterware_path]:
+            cache_path, _ = get_cache_key(path)
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+
+        with open(skydemon_path, "w") as f:
+            f.write(skydemon_kml)
+
+        with open(charterware_path, "w") as f:
+            f.write(charterware_kml)
+
+        try:
+            # Parse SkyDemon
+            coords_sd, paths_sd, metadata_sd = parse_kml_coordinates(skydemon_path)
+            assert len(metadata_sd) > 0
+            assert metadata_sd[0].get("aircraft_registration") == "D-EHYL"
+            assert metadata_sd[0].get("aircraft_type") == "DA40"
+
+            # Parse Charterware
+            coords_cw, paths_cw, metadata_cw = parse_kml_coordinates(charterware_path)
+            assert len(metadata_cw) > 0
+            assert metadata_cw[0].get("aircraft_registration") == "OE-AKI"
+            assert metadata_cw[0].get("route") == "EDDF-EDDM"
+            assert metadata_cw[0].get("aircraft_type") is None
+
+        finally:
+            if os.path.exists(skydemon_path):
+                os.unlink(skydemon_path)
+            if os.path.exists(charterware_path):
+                os.unlink(charterware_path)
+            # Clean up caches
+            for path in [skydemon_path, charterware_path]:
+                cache_path, _ = get_cache_key(path)
+                if cache_path and cache_path.exists():
+                    cache_path.unlink()
+
+
+class TestSyntheticTimestampGeneration:
+    """Tests for synthetic timestamp generation in Charterware files."""
+
+    def test_synthetic_timestamps_charterware(self):
+        """Test that synthetic timestamps are generated for Charterware files."""
+        import tempfile
+        import os
+        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+
+        # Charterware KML with no per-point timestamps
+        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+    <Document>
+        <Placemark>
+            <name>OE-AKI</name>
+            <description>Flight Jan 12 2026 03:01PM path of OE-AKI</description>
+            <LineString>
+                <coordinates>16.25,47.96,232.8 16.26,47.97,240.0 16.27,47.98,250.0</coordinates>
+            </LineString>
+        </Placemark>
+    </Document>
+</kml>"""
+
+        # Create temp file with exact Charterware filename format
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
+
+        # Clear any existing cache before test
+        cache_path, _ = get_cache_key(temp_path)
+        if cache_path and cache_path.exists():
+            cache_path.unlink()
+
+        with open(temp_path, "w") as f:
+            f.write(kml_content)
+
+        try:
+            coords, paths, metadata = parse_kml_coordinates(temp_path)
+
+            # Should have 3 points
+            assert len(coords) == 3
+            assert len(paths) == 1
+            assert len(paths[0]) == 3
+
+            # Each point should have 4 elements: [lat, lon, alt, timestamp]
+            assert len(paths[0][0]) == 4
+            assert len(paths[0][1]) == 4
+            assert len(paths[0][2]) == 4
+
+            # Check timestamps are 2 seconds apart
+            ts1 = paths[0][0][3]
+            ts2 = paths[0][1][3]
+            ts3 = paths[0][2][3]
+
+            assert ts1 == "2026-01-12T15:01:00Z"
+            assert ts2 == "2026-01-12T15:01:02Z"  # +2 seconds
+            assert ts3 == "2026-01-12T15:01:04Z"  # +4 seconds total
+
+            # Metadata should have end_timestamp
+            assert metadata[0].get("end_timestamp") == "2026-01-12T15:01:04Z"
+
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            cache_path, _ = get_cache_key(temp_path)
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+
+    def test_synthetic_timestamps_interval(self):
+        """Test that synthetic timestamps use correct 2-second interval."""
+        import tempfile
+        import os
+        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+
+        # Create 10 points
+        coords_str = " ".join([f"16.{i},47.{i},230.0" for i in range(10)])
+        kml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+    <Document>
+        <Placemark>
+            <name>OE-AKI</name>
+            <description>Flight Jan 15 2026 10:00AM path of OE-AKI</description>
+            <LineString>
+                <coordinates>{coords_str}</coordinates>
+            </LineString>
+        </Placemark>
+    </Document>
+</kml>"""
+
+        # Create temp file with exact Charterware filename format
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, "2026-01-15_1000h_OE-AKI_EDDF-EDDM.kml")
+
+        with open(temp_path, "w") as f:
+            f.write(kml_content)
+
+        try:
+            coords, paths, metadata = parse_kml_coordinates(temp_path)
+
+            # Should have 10 points with timestamps
+            assert len(paths[0]) == 10
+
+            # First and last timestamps
+            first_ts = paths[0][0][3]
+            last_ts = paths[0][9][3]
+
+            assert first_ts == "2026-01-15T10:00:00Z"
+            assert last_ts == "2026-01-15T10:00:18Z"  # 9 intervals * 2s = 18s
+
+            # Check metadata
+            meta = metadata[0]
+            assert meta.get("timestamp") == "2026-01-15T10:00:00Z"
+            assert meta.get("end_timestamp") == "2026-01-15T10:00:18Z"
+
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            cache_path, _ = get_cache_key(temp_path)
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+
+    def test_no_synthetic_timestamps_for_skydemon(self):
+        """Test that SkyDemon files with real timestamps don't get synthetic ones."""
+        import tempfile
+        import os
+        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+
+        # SkyDemon format with real timestamps
+        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+    <Document>
+        <Placemark>
+            <name>EDAV - EDBH</name>
+            <gx:Track>
+                <when>2025-08-22T10:13:00Z</when>
+                <when>2025-08-22T10:13:05Z</when>
+                <gx:coord>13.71 52.82 42.0</gx:coord>
+                <gx:coord>13.72 52.83 45.0</gx:coord>
+            </gx:Track>
+        </Placemark>
+    </Document>
+</kml>"""
+
+        # Create temp file with exact SkyDemon filename format (unique)
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, "20250823_1013_EDBH_DEHYL_DA40.kml")
+
+        with open(temp_path, "w") as f:
+            f.write(kml_content)
+
+        try:
+            coords, paths, metadata = parse_kml_coordinates(temp_path)
+
+            # Should preserve original timestamps
+            if paths and len(paths[0]) > 0:
+                # Timestamps should be from the original <when> elements
+                ts1 = paths[0][0][3] if len(paths[0][0]) > 3 else None
+                ts2 = paths[0][1][3] if len(paths[0][1]) > 3 else None
+
+                # Should have original timestamps, not synthetic 2s intervals
+                if ts1 and ts2:
+                    assert ts1 == "2025-08-22T10:13:00Z"
+                    assert ts2 == "2025-08-22T10:13:05Z"  # 5s apart, not 2s
+
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            cache_path, _ = get_cache_key(temp_path)
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+
+
+class TestAirportExtractionFromRoute:
+    """Tests for airport extraction from Charterware route field."""
+
+    def test_airport_from_route_charterware(self):
+        """Test that airport is extracted from route for Charterware files."""
+        import tempfile
+        import os
+        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+
+        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+    <Document>
+        <Placemark>
+            <name>OE-AKI</name>
+            <description>Flight Jan 12 2026 03:01PM path of OE-AKI</description>
+            <LineString>
+                <coordinates>16.25,47.96,232.8</coordinates>
+            </LineString>
+        </Placemark>
+    </Document>
+</kml>"""
+
+        # Create temp file with exact Charterware filename format
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
+
+        with open(temp_path, "w") as f:
+            f.write(kml_content)
+
+        try:
+            coords, paths, metadata = parse_kml_coordinates(temp_path)
+
+            # Airport should be extracted from route (LOAV-LOAV)
+            # Format: "DEPARTURE - ARRIVAL" with full names from OurAirports lookup
+            assert (
+                metadata[0].get("airport_name")
+                == "LOAV Vöslau-Kottingbrunn - LOAV Vöslau-Kottingbrunn"
+            )
+            assert metadata[0].get("route") == "LOAV-LOAV"
+
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            cache_path, _ = get_cache_key(temp_path)
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+
+    def test_airport_from_route_different_airports(self):
+        """Test route with different departure and arrival airports."""
+        import tempfile
+        import os
+        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+
+        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+    <Document>
+        <Placemark>
+            <name>D-EXYZ</name>
+            <description>Flight Feb 15 2026 10:30AM path of D-EXYZ</description>
+            <LineString>
+                <coordinates>8.5,50.0,300.0</coordinates>
+            </LineString>
+        </Placemark>
+    </Document>
+</kml>"""
+
+        # Create temp file with exact Charterware filename format
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, "2026-02-15_1030h_D-EXYZ_EDDF-EDDM.kml")
+
+        with open(temp_path, "w") as f:
+            f.write(kml_content)
+
+        try:
+            coords, paths, metadata = parse_kml_coordinates(temp_path)
+
+            # Should extract route and format as "DEPARTURE - ARRIVAL" with full names from OurAirports
+            assert metadata[0].get("airport_name") == "EDDF Frankfurt - EDDM Munich"
+            assert metadata[0].get("route") == "EDDF-EDDM"
+
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            cache_path, _ = get_cache_key(temp_path)
+            if cache_path and cache_path.exists():
+                cache_path.unlink()
+
+    def test_skydemon_airport_not_replaced(self):
+        """Test that SkyDemon airport names are not replaced by route logic."""
+        import tempfile
+        import os
+        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+
+        # SkyDemon with airport pair in name
+        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+    <Document>
+        <Placemark>
+            <name>EDAV - EDBH</name>
+            <gx:Track>
+                <when>2025-08-22T10:13:00Z</when>
+                <gx:coord>13.71 52.82 42.0</gx:coord>
+            </gx:Track>
+        </Placemark>
+    </Document>
+</kml>"""
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix="20250822_1013_EDAV_DEHYL_DA40.kml", delete=False
+        ) as f:
+            f.write(kml_content)
+            temp_path = f.name
+
+        try:
+            coords, paths, metadata = parse_kml_coordinates(temp_path)
+
+            # Should preserve SkyDemon airport name format (with standardization)
+            assert (
+                metadata[0].get("airport_name")
+                == "EDAV Eberswalde-Finow - EDBH Stralsund-Barth"
+            )
+            # SkyDemon files don't have route field
+            assert metadata[0].get("route") is None
+
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
             cache_path, _ = get_cache_key(temp_path)
             if cache_path and cache_path.exists():
                 cache_path.unlink()
