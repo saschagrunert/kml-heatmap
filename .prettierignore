@@ -1,5 +1,10 @@
 .pytest_cache
 .ruff_cache
+coverage
 docs
 htmlcov
-kml_heatmap/static/map.js
+kml_heatmap/templates/map_config_template.js
+kml_heatmap/static/bundle.js
+kml_heatmap/static/bundle.js.map
+kml_heatmap/static/mapApp.bundle.js
+kml_heatmap/static/mapApp.bundle.js.map

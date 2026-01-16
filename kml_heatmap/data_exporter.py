@@ -348,6 +348,18 @@ def process_year_data(
         else:
             downsampled_coords = all_coordinates
 
+        # ADDITIONAL: Uniform sampling if RDP didn't get us under target
+        if len(downsampled_coords) > target_points:
+            # Sample every Nth point to stay under target
+            step = len(downsampled_coords) // target_points
+            if step > 1:
+                downsampled_coords = downsampled_coords[::step]
+                if not quiet:
+                    logger.info(
+                        f"    {res_name}: Uniform sampling applied "
+                        f"({len(downsampled_coords):,} points, step={step})"
+                    )
+
         # Prepare path segments with colors and track relationships
         path_segments = []
         path_info = []
@@ -611,6 +623,29 @@ def process_year_data(
                     if current_relative_time is not None:
                         segment_data["time"] = round(current_relative_time, 1)
                     path_segments.append(segment_data)
+
+        # ADDITIONAL: Uniform sampling of path_segments if over target
+        if len(path_segments) > target_points:
+            step = len(path_segments) // target_points
+            if step > 1:
+                path_segments = path_segments[::step]
+                if not quiet:
+                    logger.info(
+                        f"    {res_name}: Uniform sampling of segments "
+                        f"({len(path_segments):,} segments, step={step})"
+                    )
+
+        # ADDITIONAL: Filter path_info to only include paths present in downsampled segments
+        # This dramatically reduces file size by removing metadata for unused paths
+        if len(path_segments) < len(path_info):
+            used_path_ids = set(seg["path_id"] for seg in path_segments)
+            filtered_path_info = [p for p in path_info if p["id"] in used_path_ids]
+            if not quiet and len(filtered_path_info) < len(path_info):
+                logger.info(
+                    f"    {res_name}: Filtered path_info "
+                    f"({len(filtered_path_info):,} paths, was {len(path_info):,})"
+                )
+            path_info = filtered_path_info
 
         # Export data
         data = {
