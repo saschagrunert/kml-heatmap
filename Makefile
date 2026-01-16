@@ -23,13 +23,15 @@ test-image:
 	$(CONTAINER_RUNTIME) build -f Dockerfile.test -t $(IMAGE_NAME)-test .
 
 test: test-image
-	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd)/htmlcov:/app/htmlcov $(IMAGE_NAME)-test
+	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd)/htmlcov:/app/htmlcov -v $(shell pwd)/coverage:/app/coverage $(IMAGE_NAME)-test
 
 lint: test-image
 	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test ruff check
+	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test npm run lint
 
 format: test-image
 	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test ruff format
+	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test npm run format
 
 clean:
 	$(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) $(IMAGE_NAME)-test 2>/dev/null || true

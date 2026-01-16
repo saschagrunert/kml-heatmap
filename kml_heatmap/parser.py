@@ -581,9 +581,10 @@ def extract_placemark_metadata(
         # Get last timestamp if multiple exist
         if len(time_elems) > 1 and time_elems[-1].text:
             end_timestamp = time_elems[-1].text.strip()
-    elif airport_name:
-        # Try to extract date from name (e.g., "Log Start: 03 Mar 2025 08:58 Z")
-        match = DATE_PATTERN.search(airport_name)
+    elif kml_name:
+        # Try to extract date from original KML name (before standardization)
+        # (e.g., "Log Start: 03 Mar 2025 08:58 Z" or "EDDS to EDDP - 16 Aug 2026")
+        match = DATE_PATTERN.search(kml_name)
         if match:
             timestamp = match.group(1)
 

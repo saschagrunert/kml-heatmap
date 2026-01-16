@@ -94,13 +94,15 @@ RESOLUTION_LEVELS = {
 }
 
 # Target maximum points per resolution (for adaptive downsampling)
-# These limits ensure reasonable file sizes regardless of dataset size
+# These limits ensure reasonable file sizes and browser performance
+# Optimized for fast loading and smooth rendering in web browsers
+# Targets multi-year datasets (e.g., flight schools with 5k files/year × 10 years)
 TARGET_POINTS_PER_RESOLUTION = {
-    "z14_plus": 500_000,  # ~40MB per year max
-    "z11_13": 100_000,  # ~8MB per year max
-    "z8_10": 50_000,  # ~4MB per year max
-    "z5_7": 25_000,  # ~2MB per year max
-    "z0_4": 10_000,  # ~800KB per year max
+    "z14_plus": 30_000,  # ~2.5MB per year max - smooth even with 10+ years
+    "z11_13": 15_000,  # ~1.2MB per year max
+    "z8_10": 10_000,  # ~800KB per year max
+    "z5_7": 5_000,  # ~400KB per year max
+    "z0_4": 3_000,  # ~250KB per year max
 }
 
 # === Heatmap Configuration ===

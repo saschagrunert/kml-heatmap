@@ -13,6 +13,7 @@ import sys
 import os
 import json
 import shutil
+import subprocess
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import folium
@@ -414,6 +415,67 @@ def parse_with_error_handling(kml_file):
         return kml_file, ([], [], [])
 
 
+def build_javascript_bundle():
+    """
+    Build the JavaScript bundle using npm.
+
+    Returns:
+        bool: True if build succeeded, False otherwise
+    """
+    try:
+        # Get the project root directory (where package.json is)
+        project_root = Path(__file__).parent
+
+        # Check if package.json exists
+        package_json = project_root / "package.json"
+        if not package_json.exists():
+            logger.warning("⚠️  package.json not found - skipping JavaScript build")
+            return False
+
+        # Check if node_modules exists
+        node_modules = project_root / "node_modules"
+        if not node_modules.exists():
+            logger.info("📦 Installing Node.js dependencies...")
+            result = subprocess.run(
+                ["npm", "install"],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minute timeout for npm install
+            )
+            if result.returncode != 0:
+                logger.error(f"✗ npm install failed: {result.stderr}")
+                return False
+
+        # Run the build
+        logger.info("🔨 Building JavaScript bundle...")
+        result = subprocess.run(
+            ["npm", "run", "build"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=60,  # 1 minute timeout for build
+        )
+
+        if result.returncode != 0:
+            logger.error(f"✗ JavaScript build failed: {result.stderr}")
+            return False
+
+        logger.info("✓ JavaScript bundle built successfully")
+        return True
+
+    except FileNotFoundError:
+        logger.warning("⚠️  npm not found - skipping JavaScript build")
+        logger.warning("   Install Node.js to enable modular JavaScript features")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.error("✗ JavaScript build timed out")
+        return False
+    except Exception as e:
+        logger.error(f"✗ JavaScript build error: {e}")
+        return False
+
+
 def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="data"):
     """
     Create a progressive-loading heatmap with external JSON data files.
@@ -753,37 +815,83 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         f"  Minification: {original_size / 1024:.1f} KB → {minified_size / 1024:.1f} KB ({reduction:.1f}% reduction)"
     )
 
-    # Copy map.js to the output directory
+    # Build JavaScript bundle (only if running outside Docker)
+    # In Docker, bundles are already built during image creation
+    bundle_exists = (
+        Path(__file__).parent / "kml_heatmap" / "static" / "bundle.js"
+    ).exists()
+    mapapp_exists = (
+        Path(__file__).parent / "kml_heatmap" / "static" / "mapApp.bundle.js"
+    ).exists()
+
+    if not (bundle_exists and mapapp_exists):
+        logger.info("\n📦 Building JavaScript modules...")
+        build_javascript_bundle()  # Non-fatal if it fails
+    else:
+        logger.info("\n📦 Using pre-built JavaScript bundles...")
+
+    # Generate map_config.js from template with variable substitution
     output_dir = os.path.dirname(output_file) or "."
+    templates_dir = Path(__file__).parent / "kml_heatmap" / "templates"
     static_dir = Path(__file__).parent / "kml_heatmap" / "static"
-    map_js_src = static_dir / "map.js"
-    map_js_dst = os.path.join(output_dir, "map.js")
 
-    # Process map.js template with variable substitution
-    with open(map_js_src, "r") as f:
-        map_js_content = f.read()
+    map_config_template = templates_dir / "map_config_template.js"
+    map_config_dst = os.path.join(output_dir, "map_config.js")
 
-    # Replace template variables in map.js
-    map_js_content = map_js_content.replace("{{STADIA_API_KEY}}", STADIA_API_KEY)
-    map_js_content = map_js_content.replace("{{OPENAIP_API_KEY}}", OPENAIP_API_KEY)
-    map_js_content = map_js_content.replace("{{data_dir_name}}", data_dir_name)
-    map_js_content = map_js_content.replace("{{center_lat}}", str(center_lat))
-    map_js_content = map_js_content.replace("{{center_lon}}", str(center_lon))
-    map_js_content = map_js_content.replace("{{min_lat}}", str(min_lat))
-    map_js_content = map_js_content.replace("{{max_lat}}", str(max_lat))
-    map_js_content = map_js_content.replace("{{min_lon}}", str(min_lon))
-    map_js_content = map_js_content.replace("{{max_lon}}", str(max_lon))
+    # Process map_config template with variable substitution
+    with open(map_config_template, "r") as f:
+        map_config_content = f.read()
+
+    # Replace template variables in map_config.js
+    map_config_content = map_config_content.replace(
+        "{{STADIA_API_KEY}}", STADIA_API_KEY
+    )
+    map_config_content = map_config_content.replace(
+        "{{OPENAIP_API_KEY}}", OPENAIP_API_KEY
+    )
+    map_config_content = map_config_content.replace("{{data_dir_name}}", data_dir_name)
+    map_config_content = map_config_content.replace("{{center_lat}}", str(center_lat))
+    map_config_content = map_config_content.replace("{{center_lon}}", str(center_lon))
+    map_config_content = map_config_content.replace("{{min_lat}}", str(min_lat))
+    map_config_content = map_config_content.replace("{{max_lat}}", str(max_lat))
+    map_config_content = map_config_content.replace("{{min_lon}}", str(min_lon))
+    map_config_content = map_config_content.replace("{{max_lon}}", str(max_lon))
 
     # Minify JavaScript
     import rjsmin
 
-    map_js_minified = rjsmin.jsmin(map_js_content)
+    map_config_minified = rjsmin.jsmin(map_config_content)
 
-    with open(map_js_dst, "w") as f:
-        f.write(map_js_minified)
+    with open(map_config_dst, "w") as f:
+        f.write(map_config_minified)
 
-    map_js_size = os.path.getsize(map_js_dst)
-    logger.info(f"✓ JavaScript copied: {map_js_dst} ({map_js_size / 1024:.1f} KB)")
+    map_config_size = os.path.getsize(map_config_dst)
+    logger.info(
+        f"✓ Configuration generated: {map_config_dst} ({map_config_size / 1024:.1f} KB)"
+    )
+
+    # Copy modular JavaScript bundles
+    bundle_js_src = static_dir / "bundle.js"
+    if bundle_js_src.exists():
+        bundle_js_dst = os.path.join(output_dir, "bundle.js")
+        shutil.copy2(bundle_js_src, bundle_js_dst)
+        bundle_js_size = os.path.getsize(bundle_js_dst)
+        logger.info(
+            f"✓ JavaScript library copied: {bundle_js_dst} ({bundle_js_size / 1024:.1f} KB)"
+        )
+    else:
+        logger.warning("⚠️  bundle.js not found - run npm build to generate it")
+
+    mapapp_bundle_src = static_dir / "mapApp.bundle.js"
+    if mapapp_bundle_src.exists():
+        mapapp_bundle_dst = os.path.join(output_dir, "mapApp.bundle.js")
+        shutil.copy2(mapapp_bundle_src, mapapp_bundle_dst)
+        mapapp_bundle_size = os.path.getsize(mapapp_bundle_dst)
+        logger.info(
+            f"✓ JavaScript application copied: {mapapp_bundle_dst} ({mapapp_bundle_size / 1024:.1f} KB)"
+        )
+    else:
+        logger.warning("⚠️  mapApp.bundle.js not found - run npm build to generate it")
 
     # Copy styles.css to the output directory
     styles_css_src = static_dir / "styles.css"
@@ -818,8 +926,6 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         favicon_src = static_dir / favicon_file
         favicon_dst = os.path.join(output_dir, favicon_file)
         if favicon_src.exists():
-            import shutil
-
             shutil.copy2(favicon_src, favicon_dst)
 
     logger.info(f"✓ Favicon files copied to {output_dir}")

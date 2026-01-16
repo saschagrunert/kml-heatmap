@@ -27,6 +27,10 @@
   - [Smart Features](#smart-features)
 - [Technical Details](#technical-details)
   - [Adaptive Downsampling](#adaptive-downsampling)
+- [Development](#development)
+  - [Frontend (TypeScript)](#frontend-typescript)
+  - [Backend (Python)](#backend-python)
+  - [Test Data Generation](#test-data-generation)
 
 ## Features
 
@@ -300,17 +304,96 @@ The tool automatically scales output file sizes based on dataset size:
 
 Target limits per resolution (per year):
 
-- z14_plus: 500k points (~40MB max)
-- z11_13: 100k points (~8MB max)
-- z8_10: 50k points (~4MB max)
-- z5_7: 25k points (~2MB max)
-- z0_4: 10k points (~800KB max)
+- z14_plus: 30k points (~2.5MB max)
+- z11_13: 15k points (~1.2MB max)
+- z8_10: 10k points (~800KB max)
+- z5_7: 5k points (~400KB max)
+- z0_4: 3k points (~250KB max)
 
-**Example scaling**: 25,000 KML files (5 years × 5,000 files/year)
+**Example scaling**: 100,000 KML files (5M points)
 
-- Without adaptive: ~6GB total output
-- With adaptive: ~275MB total output (95% reduction)
+- Processing time: ~11 minutes
+- Total output: 31MB (all zoom levels)
+- Compression ratio: 166:1 (5M points → 30k in browser)
 
 Uses Ramer-Douglas-Peucker algorithm to generate 5 resolution levels. With adaptive downsampling, output size is predictable regardless of input size.
 
 Supports KML files from Google Earth, Google Maps, SkyDemon, and other aviation apps.
+
+## Development
+
+### Frontend (TypeScript)
+
+The interactive map interface is built with TypeScript 5.9.3 and achieves 93% test coverage.
+
+**Setup:**
+
+```bash
+npm install
+```
+
+**Available commands:**
+
+```bash
+npm run build         # Build JavaScript bundles
+npm run build:watch   # Watch mode for development
+npm test             # Run tests
+npm run test:watch   # Watch mode for tests
+npm run test:coverage # Generate coverage report
+npm run typecheck    # Type checking
+npm run lint         # Lint TypeScript code
+npm run lint:fix     # Auto-fix linting issues
+npm run format       # Format code with Prettier
+npm run update-deps  # Update dependencies to latest versions
+```
+
+**Architecture:**
+
+- **TypeScript modules** in `kml_heatmap/frontend/`
+  - `calculations/` - Statistics and data processing
+  - `features/` - Airports, layers, replay, wrapped
+  - `services/` - Data loading and caching
+  - `state/` - URL state management
+  - `ui/` - UI managers for controls and interactions
+  - `utils/` - Formatters, colors, geometry helpers
+- **Tests** in `tests/frontend/unit/` (Vitest, 522 tests)
+- **Build output** in `docs/` (bundle.js, mapApp.bundle.js)
+
+### Backend (Python)
+
+**Setup:**
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-test.txt
+```
+
+**Testing:**
+
+```bash
+pytest --cov=kml_heatmap --cov-report=term
+```
+
+### Test Data Generation
+
+Generate realistic test KML files for performance testing:
+
+```bash
+# Generate 10,000 files (default: 1,000)
+python3 scripts/generate_test_data.py 10000
+
+# Custom output directory
+python3 scripts/generate_test_data.py 5000 --output custom_test_data
+
+# Test with generated data
+make build INPUT_DIR=kml_test_10000
+```
+
+Features:
+
+- Curved flight paths using Bezier curves (not straight lines)
+- Realistic altitude profiles (climb, cruise, descend)
+- Random deviations across Germany for better heatmap visualization
+- Supports stress testing up to 100k+ flights
+
+See `scripts/README.md` for more details.

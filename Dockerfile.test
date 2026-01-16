@@ -4,6 +4,14 @@ FROM python:3.14-slim
 # Set working directory
 WORKDIR /app
 
+# Install Node.js (latest LTS version)
+RUN apt-get update && \
+    apt-get install -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
+    apt-get install -y nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy requirements
 COPY requirements.txt requirements-test.txt ./
 
@@ -16,8 +24,34 @@ COPY kml-heatmap.py .
 COPY kml_heatmap/ ./kml_heatmap/
 COPY pytest.ini .
 
+# Copy JavaScript/TypeScript build configuration
+COPY package.json build.js vitest.config.js tsconfig.json tsconfig.eslint.json eslint.config.js ./
+
+# Install Node.js dependencies
+RUN npm install
+
 # Copy tests
 COPY tests/ ./tests/
 
-# Run pytest
-CMD ["pytest"]
+# Create a script to run both test suites
+RUN cat > /app/run-tests.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "=== Running JavaScript tests with coverage ==="
+npm run test:coverage
+
+echo ""
+echo "=== Running Python tests with coverage ==="
+pytest --cov=kml_heatmap --cov-report=xml:coverage/coverage.xml --cov-report=html --cov-report=term
+
+echo ""
+echo "=== Test Summary ==="
+echo "✓ JavaScript coverage: coverage/coverage-final.json"
+echo "✓ Python coverage: coverage/coverage.xml, htmlcov/"
+EOF
+
+RUN chmod +x /app/run-tests.sh
+
+# Run both test suites
+CMD ["/app/run-tests.sh"]

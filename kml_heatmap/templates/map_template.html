@@ -44,10 +44,6 @@
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     />
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.css"
-    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -272,7 +268,13 @@
     <script src="{data_dir_name}/metadata.js"></script>
     <script src="{data_dir_name}/airports.js"></script>
 
-    <!-- Main application JavaScript -->
-    <script src="./map.js"></script>
+    <!-- Configuration with template variables -->
+    <script src="./map_config.js"></script>
+
+    <!-- Modular JavaScript library (utilities and features) -->
+    <script src="./bundle.js"></script>
+
+    <!-- Main application -->
+    <script src="./mapApp.bundle.js"></script>
   </body>
 </html>
