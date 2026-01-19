@@ -60,6 +60,474 @@ from .geometry import (
 from .helpers import parse_iso_timestamp, calculate_duration_seconds
 
 
+def process_single_path(args):
+    """
+    Process a single path at all resolution levels.
+
+    This function is designed to be called in parallel for maximum CPU utilization.
+
+    Args:
+        args: Tuple of (path_idx, path, metadata, min_alt_m, max_alt_m,
+                        resolutions, resolution_order, epsilon_values)
+
+    Returns:
+        Dictionary with processed path data for all resolutions
+    """
+    (
+        path_idx,
+        path,
+        metadata,
+        min_alt_m,
+        max_alt_m,
+        resolutions,
+        resolution_order,
+        epsilon_values,
+    ) = args
+
+    if len(path) <= 1:
+        return None
+
+    # Extract metadata
+    airport_name = metadata.get("airport_name", "")
+    start_airport = None
+    end_airport = None
+
+    if airport_name and " - " in airport_name:
+        parts = airport_name.split(" - ")
+        if len(parts) == 2:
+            start_airport = parts[0].strip()
+            end_airport = parts[1].strip()
+
+    path_year = metadata.get("year")
+
+    # Calculate path duration and distance
+    path_duration_seconds = 0
+    path_distance_km = 0
+
+    start_ts = metadata.get("timestamp")
+    end_ts = metadata.get("end_timestamp")
+
+    if start_ts and end_ts:
+        path_duration_seconds = calculate_duration_seconds(start_ts, end_ts)
+
+    # Calculate total path distance
+    for i in range(len(path) - 1):
+        lat1, lon1 = path[i][0], path[i][1]
+        lat2, lon2 = path[i + 1][0], path[i + 1][1]
+        path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+
+    path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
+
+    # Calculate ground level for this path
+    ground_level_m = min([coord[2] for coord in path]) if path else 0
+
+    # Find path start time for relative time calculation
+    path_start_time = None
+    for coord in path:
+        if len(coord) >= 4:
+            path_start_time = parse_iso_timestamp(coord[3])
+            if path_start_time:
+                break
+
+    # Calculate instantaneous speeds and timestamps (once for all resolutions)
+    segment_speeds = []
+    for i in range(len(path) - 1):
+        coord1 = path[i]
+        coord2 = path[i + 1]
+
+        lat1, lon1 = coord1[0], coord1[1]
+        lat2, lon2 = coord2[0], coord2[1]
+        segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
+
+        instant_speed = 0
+        timestamp = None
+        time_delta = 0
+        relative_time = None
+
+        if len(coord1) >= 4 and len(coord2) >= 4:
+            ts1, ts2 = coord1[3], coord2[3]
+            dt1 = parse_iso_timestamp(ts1)
+            dt2 = parse_iso_timestamp(ts2)
+            if dt1 and dt2:
+                time_delta = (dt2 - dt1).total_seconds()
+                timestamp = dt1
+
+                if path_start_time is not None:
+                    relative_time = (dt1 - path_start_time).total_seconds()
+
+                if time_delta >= MIN_SEGMENT_TIME_SECONDS:
+                    segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
+                    instant_speed = (segment_distance_nm / time_delta) * 3600
+                    if instant_speed > MAX_GROUNDSPEED_KNOTS:
+                        instant_speed = 0
+
+        segment_speeds.append(
+            {
+                "index": i,
+                "timestamp": timestamp,
+                "relative_time": relative_time,
+                "speed": instant_speed,
+                "distance": segment_distance_km,
+                "time_delta": time_delta,
+            }
+        )
+
+    # Build time-sorted list for efficient window queries
+    time_indexed_segments = []
+    timestamp_list = []
+    for seg in segment_speeds:
+        if seg["timestamp"] is not None and seg["speed"] != 0:
+            ts = seg["timestamp"].timestamp()
+            timestamp_list.append(ts)
+            time_indexed_segments.append(seg)
+
+    # Sort both lists together
+    if timestamp_list:
+        sorted_pairs = sorted(
+            zip(timestamp_list, time_indexed_segments),
+            key=lambda x: x[0],
+        )
+        timestamp_list, time_indexed_segments = zip(*sorted_pairs)
+        timestamp_list = list(timestamp_list)
+        time_indexed_segments = list(time_indexed_segments)
+
+    # Process path at each resolution level
+    resolution_data = {}
+    for res_name in resolution_order:
+        res_config = resolutions[res_name]
+
+        # Use pre-calculated year-level epsilon for consistent downsampling
+        adaptive_epsilon = epsilon_values.get(res_name, res_config["epsilon"])
+
+        if adaptive_epsilon > 0:
+            downsampled_path = downsample_path_rdp(path, adaptive_epsilon)
+        else:
+            downsampled_path = path
+
+        # Generate segments for this resolution
+        path_segments = []
+        max_groundspeed = 0
+        min_groundspeed = float("inf")
+        cruise_distance = 0
+        cruise_time = 0
+        cruise_altitude_histogram = {}
+
+        for i in range(len(downsampled_path) - 1):
+            coord1 = downsampled_path[i]
+            coord2 = downsampled_path[i + 1]
+            lat1, lon1, alt1_m = coord1[0], coord1[1], coord1[2]
+            lat2, lon2, alt2_m = coord2[0], coord2[1], coord2[2]
+
+            avg_alt_m = (alt1_m + alt2_m) / 2
+            avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+            color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
+
+            # Find corresponding segment in original path for speed calculation
+            groundspeed_knots = 0
+            current_relative_time = None
+            window_time = 0
+            window_distance = 0
+
+            # For downsampled paths, find nearest segment in original
+            if i < len(segment_speeds):
+                current_segment = segment_speeds[min(i, len(segment_speeds) - 1)]
+                current_timestamp = current_segment["timestamp"]
+                current_relative_time = current_segment["relative_time"]
+
+                if current_timestamp is not None and timestamp_list:
+                    current_ts = current_timestamp.timestamp()
+                    half_window = SPEED_WINDOW_SECONDS / 2
+
+                    from bisect import bisect_left, bisect_right
+
+                    start_idx = bisect_left(timestamp_list, current_ts - half_window)
+                    end_idx = bisect_right(timestamp_list, current_ts + half_window)
+
+                    for j in range(start_idx, end_idx):
+                        seg = time_indexed_segments[j]
+                        window_distance += seg["distance"]
+                        window_time += seg["time_delta"]
+
+                    if window_time >= MIN_SEGMENT_TIME_SECONDS:
+                        window_distance_nm = window_distance * KM_TO_NAUTICAL_MILES
+                        groundspeed_knots = (window_distance_nm / window_time) * 3600
+                        if groundspeed_knots > MAX_GROUNDSPEED_KNOTS:
+                            groundspeed_knots = 0
+
+            # Fall back to path average if no timestamp-based calculation
+            if (
+                groundspeed_knots == 0
+                and path_duration_seconds > 0
+                and path_distance_km > 0
+            ):
+                segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
+                segment_time_seconds = (
+                    segment_distance_km / path_distance_km
+                ) * path_duration_seconds
+                if segment_time_seconds >= MIN_SEGMENT_TIME_SECONDS:
+                    segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
+                    calculated_speed = (
+                        segment_distance_nm / segment_time_seconds
+                    ) * 3600
+                    if 0 < calculated_speed <= MAX_GROUNDSPEED_KNOTS:
+                        groundspeed_knots = calculated_speed
+
+            # Track statistics (only for z14_plus to avoid duplication)
+            if res_name == "z14_plus" and groundspeed_knots > 0:
+                if groundspeed_knots > max_groundspeed:
+                    max_groundspeed = groundspeed_knots
+                if groundspeed_knots < min_groundspeed:
+                    min_groundspeed = groundspeed_knots
+
+                # Track cruise speed (only segments >1000ft AGL)
+                altitude_agl_m = avg_alt_m - ground_level_m
+                altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
+                if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
+                    if window_time >= MIN_SEGMENT_TIME_SECONDS:
+                        cruise_distance += window_distance * KM_TO_NAUTICAL_MILES
+                        cruise_time += window_time
+
+                        altitude_bin_ft = (
+                            int(altitude_agl_ft / ALTITUDE_BIN_SIZE_FT)
+                            * ALTITUDE_BIN_SIZE_FT
+                        )
+                        if altitude_bin_ft not in cruise_altitude_histogram:
+                            cruise_altitude_histogram[altitude_bin_ft] = 0
+                        cruise_altitude_histogram[altitude_bin_ft] += window_time
+
+            # Skip zero-length segments
+            if lat1 != lat2 or lon1 != lon2:
+                segment_data = {
+                    "coords": [[lat1, lon1], [lat2, lon2]],
+                    "color": color,
+                    "altitude_ft": avg_alt_ft,
+                    "altitude_m": round(avg_alt_m, 0),
+                    "groundspeed_knots": round(groundspeed_knots, 1),
+                    "path_id": path_idx,  # Will be remapped later
+                }
+                if current_relative_time is not None:
+                    segment_data["time"] = round(current_relative_time, 1)
+                path_segments.append(segment_data)
+
+        # Store path info
+        path_info = {
+            "id": path_idx,  # Will be remapped later
+            "start_airport": start_airport,
+            "end_airport": end_airport,
+            "start_coords": [path[0][0], path[0][1]],
+            "end_coords": [path[-1][0], path[-1][1]],
+            "segment_count": len(path_segments),
+            "year": path_year,
+        }
+        if "aircraft_registration" in metadata:
+            path_info["aircraft_registration"] = metadata["aircraft_registration"]
+        if "aircraft_type" in metadata:
+            path_info["aircraft_type"] = metadata["aircraft_type"]
+
+        # Store resolution data
+        resolution_data[res_name] = {
+            "segments": path_segments,
+            "path_info": path_info,
+            "downsampled_coords": [[p[0], p[1]] for p in downsampled_path],
+        }
+
+        # Store statistics only for z14_plus
+        if res_name == "z14_plus":
+            resolution_data[res_name]["max_groundspeed"] = max_groundspeed
+            resolution_data[res_name]["min_groundspeed"] = (
+                min_groundspeed if min_groundspeed != float("inf") else 0
+            )
+            resolution_data[res_name]["cruise_distance"] = cruise_distance
+            resolution_data[res_name]["cruise_time"] = cruise_time
+            resolution_data[res_name]["cruise_altitude_histogram"] = (
+                cruise_altitude_histogram
+            )
+            resolution_data[res_name]["path_distance_nm"] = path_distance_nm
+
+    return {
+        "path_idx": path_idx,
+        "year": str(path_year) if path_year else "unknown",
+        "resolution_data": resolution_data,
+    }
+
+
+def aggregate_results_by_year(path_results, resolutions, resolution_order, output_dir):
+    """
+    Aggregate path processing results by year and write to files.
+
+    Args:
+        path_results: List of results from process_single_path
+        resolutions: Resolution configuration
+        resolution_order: Order to process resolutions
+        output_dir: Output directory
+
+    Returns:
+        Dictionary with aggregated statistics per year
+    """
+    # Group results by year
+    years_data = {}
+
+    for result in path_results:
+        if result is None:  # Skip empty paths
+            continue
+
+        year = result["year"]
+        if year not in years_data:
+            years_data[year] = {
+                "paths": [],
+                "max_groundspeed": 0,
+                "min_groundspeed": float("inf"),
+                "cruise_distance": 0,
+                "cruise_time": 0,
+                "max_path_distance": 0,
+                "cruise_altitude_histogram": {},
+            }
+
+        years_data[year]["paths"].append(result)
+
+        # Aggregate z14_plus statistics
+        z14_data = result["resolution_data"].get("z14_plus", {})
+        if z14_data:
+            year_data = years_data[year]
+            year_data["max_groundspeed"] = max(
+                year_data["max_groundspeed"], z14_data.get("max_groundspeed", 0)
+            )
+            year_data["min_groundspeed"] = min(
+                year_data["min_groundspeed"],
+                z14_data.get("min_groundspeed", float("inf")),
+            )
+            year_data["cruise_distance"] += z14_data.get("cruise_distance", 0)
+            year_data["cruise_time"] += z14_data.get("cruise_time", 0)
+            year_data["max_path_distance"] = max(
+                year_data["max_path_distance"], z14_data.get("path_distance_nm", 0)
+            )
+
+            # Merge cruise altitude histograms
+            for altitude_bin, time_spent in z14_data.get(
+                "cruise_altitude_histogram", {}
+            ).items():
+                if altitude_bin not in year_data["cruise_altitude_histogram"]:
+                    year_data["cruise_altitude_histogram"][altitude_bin] = 0
+                year_data["cruise_altitude_histogram"][altitude_bin] += time_spent
+
+    # Write files for each year
+    year_results = []
+    for year in sorted(years_data.keys()):
+        year_data = years_data[year]
+        year_file_structure = []
+        year_z14_segments = None
+        year_z14_path_info = None
+
+        # Create year directory
+        year_dir = os.path.join(output_dir, year)
+        os.makedirs(year_dir, exist_ok=True)
+
+        # Sort paths by original path_idx for deterministic output
+        year_data["paths"].sort(key=lambda x: x["path_idx"])
+
+        # Write each resolution level
+        for res_name in resolution_order:
+            res_config = resolutions[res_name]
+
+            # Collect all segments and paths for this resolution
+            all_segments = []
+            all_path_info = []
+            all_downsampled_coords = []
+            path_id_remap = {}  # Map old path_idx to new sequential IDs
+
+            for path_result in year_data["paths"]:
+                res_data = path_result["resolution_data"].get(res_name, {})
+                if not res_data:
+                    continue
+
+                old_path_idx = path_result["path_idx"]
+                new_path_id = len(all_path_info)
+                path_id_remap[old_path_idx] = new_path_id
+
+                # Add path info with remapped ID
+                path_info = res_data["path_info"].copy()
+                path_info["id"] = new_path_id
+                all_path_info.append(path_info)
+
+                # Add segments with remapped path_id
+                for segment in res_data["segments"]:
+                    segment_copy = segment.copy()
+                    segment_copy["path_id"] = new_path_id
+                    all_segments.append(segment_copy)
+
+                # Add downsampled coordinates
+                all_downsampled_coords.extend(res_data["downsampled_coords"])
+
+            # Apply uniform sampling if over target
+            target_points = TARGET_POINTS_PER_RESOLUTION[res_name]
+            if len(all_segments) > target_points:
+                step = len(all_segments) // target_points
+                if step > 1:
+                    all_segments = all_segments[::step]
+                    logger.debug(
+                        f"    {year}/{res_name}: Uniform sampling of segments "
+                        f"({len(all_segments):,} segments, step={step})"
+                    )
+
+            # Filter path_info to only include paths with segments
+            if len(all_segments) < len(all_path_info):
+                used_path_ids = set(seg["path_id"] for seg in all_segments)
+                all_path_info = [p for p in all_path_info if p["id"] in used_path_ids]
+
+            # Export data
+            data = {
+                "coordinates": all_downsampled_coords,
+                "path_segments": all_segments,
+                "path_info": all_path_info,
+                "resolution": res_name,
+                "original_points": len(all_downsampled_coords),
+                "downsampled_points": len(all_downsampled_coords),
+                "compression_ratio": 100.0,
+            }
+
+            output_file = os.path.join(year_dir, f"{res_name}.js")
+            with open(output_file, "w") as f:
+                var_name = f"KML_DATA_{year}_{res_name.upper().replace('-', '_')}"
+                f.write(f"window.{var_name} = ")
+                json.dump(data, f, separators=(",", ":"), sort_keys=True)
+                f.write(";")
+
+            file_size = os.path.getsize(output_file)
+            year_file_structure.append(res_name)
+
+            # Store z14_plus data
+            if res_name == "z14_plus":
+                year_z14_segments = all_segments
+                year_z14_path_info = all_path_info
+
+            logger.info(
+                f"    ✓ {year}/{res_config['description']}: "
+                f"{len(all_downsampled_coords):,} points ({file_size / 1024:.1f} KB)"
+            )
+
+        # Handle infinity case for min_groundspeed
+        min_gs = year_data["min_groundspeed"]
+        if min_gs == float("inf"):
+            min_gs = 0
+
+        year_results.append(
+            {
+                "year": year,
+                "max_groundspeed": year_data["max_groundspeed"],
+                "min_groundspeed": min_gs,
+                "cruise_distance": year_data["cruise_distance"],
+                "cruise_time": year_data["cruise_time"],
+                "max_path_distance": year_data["max_path_distance"],
+                "cruise_altitude_histogram": year_data["cruise_altitude_histogram"],
+                "file_structure": year_file_structure,
+                "z14_segments": year_z14_segments,
+                "z14_path_info": year_z14_path_info,
+            }
+        )
+
+    return year_results
+
+
 def downsample_coordinates(
     coordinates: List[List[float]], factor: int
 ) -> List[List[float]]:
@@ -254,446 +722,3 @@ def collect_unique_years(all_path_metadata: List[Dict[str, Any]]) -> List[int]:
             unique_years.add(year)
 
     return sorted(list(unique_years))
-
-
-def process_year_data(
-    year,
-    year_path_indices,
-    all_coordinates,
-    all_path_groups,
-    all_path_metadata,
-    min_alt_m,
-    max_alt_m,
-    output_dir,
-    resolutions,
-    resolution_order,
-    quiet=False,
-):
-    """
-    Process a single year's data and export to files.
-
-    Args:
-        year: Year string or "unknown"
-        year_path_indices: List of path indices for this year
-        all_coordinates: Full coordinate list
-        all_path_groups: Full path groups list
-        all_path_metadata: Full metadata list
-        min_alt_m: Minimum altitude
-        max_alt_m: Maximum altitude
-        output_dir: Output directory
-        resolutions: Resolution configuration
-        resolution_order: Order to process resolutions
-        quiet: If True, suppress verbose logging (for parallel execution)
-
-    Returns:
-        Dictionary with year statistics and data
-    """
-    if not quiet:
-        logger.info(f"\n  Processing year {year} ({len(year_path_indices)} paths)...")
-
-    # Initialize statistics for this year
-    year_max_groundspeed = 0
-    year_min_groundspeed = float("inf")
-    year_cruise_distance = 0
-    year_cruise_time = 0
-    year_max_path_distance = 0
-    year_cruise_altitude_histogram = {}
-    year_file_structure = []
-    year_z14_segments = None
-    year_z14_path_info = None
-
-    # Calculate total points for this year (for adaptive downsampling)
-    year_total_points = sum(
-        len(all_path_groups[path_idx]) for path_idx in year_path_indices
-    )
-    if not quiet:
-        logger.info(f"    Total points for {year}: {year_total_points:,}")
-
-    for res_name in resolution_order:
-        res_config = resolutions[res_name]
-
-        # Calculate adaptive epsilon based on dataset size
-        base_epsilon = res_config["epsilon"]
-        target_points = TARGET_POINTS_PER_RESOLUTION[res_name]
-        adaptive_epsilon = calculate_adaptive_epsilon(
-            year_total_points, target_points, base_epsilon
-        )
-
-        # Log adaptive behavior if epsilon was adjusted
-        if adaptive_epsilon != base_epsilon and not quiet:
-            logger.info(
-                f"    {res_name}: Adaptive downsampling "
-                f"(ε={adaptive_epsilon:.6f}, target={target_points:,} points)"
-            )
-
-        # OPTIMIZATION: Downsample paths once (with altitude), then extract 2D coords
-        downsampled_paths = []
-        for path_idx in year_path_indices:
-            path = all_path_groups[path_idx]
-            if adaptive_epsilon > 0:
-                simplified = downsample_path_rdp(path, adaptive_epsilon)
-                downsampled_paths.append(simplified)
-            else:
-                downsampled_paths.append(path)
-
-        # Extract 2D coordinates from already-downsampled paths
-        if adaptive_epsilon > 0:
-            downsampled_coords = [
-                [p[0], p[1]] for path in downsampled_paths for p in path
-            ]
-            if not downsampled_coords:
-                downsampled_coords = downsample_coordinates(
-                    all_coordinates, res_config["factor"]
-                )
-        else:
-            downsampled_coords = all_coordinates
-
-        # ADDITIONAL: Uniform sampling if RDP didn't get us under target
-        if len(downsampled_coords) > target_points:
-            # Sample every Nth point to stay under target
-            step = len(downsampled_coords) // target_points
-            if step > 1:
-                downsampled_coords = downsampled_coords[::step]
-                if not quiet:
-                    logger.info(
-                        f"    {res_name}: Uniform sampling applied "
-                        f"({len(downsampled_coords):,} points, step={step})"
-                    )
-
-        # Prepare path segments with colors and track relationships
-        path_segments = []
-        path_info = []
-
-        # Iterate using original path indices to access metadata correctly
-        for local_idx, (orig_path_idx, path) in enumerate(
-            zip(year_path_indices, downsampled_paths)
-        ):
-            if len(path) <= 1:
-                continue
-
-            # Get original path metadata if available
-            metadata = (
-                all_path_metadata[orig_path_idx]
-                if orig_path_idx < len(all_path_metadata)
-                else {}
-            )
-
-            # Extract airport information from metadata
-            airport_name = metadata.get("airport_name", "")
-            start_airport = None
-            end_airport = None
-
-            if airport_name and " - " in airport_name:
-                parts = airport_name.split(" - ")
-                if len(parts) == 2:
-                    start_airport = parts[0].strip()
-                    end_airport = parts[1].strip()
-
-            # Get year from metadata
-            path_year = (
-                all_path_metadata[orig_path_idx].get("year")
-                if orig_path_idx < len(all_path_metadata)
-                else None
-            )
-
-            # Calculate path duration and distance
-            path_duration_seconds = 0
-            path_distance_km = 0
-
-            start_ts = metadata.get("timestamp")
-            end_ts = metadata.get("end_timestamp")
-
-            if start_ts and end_ts:
-                path_duration_seconds = calculate_duration_seconds(start_ts, end_ts)
-                if path_duration_seconds == 0:
-                    logger.debug(
-                        f"  Could not parse timestamps '{start_ts}' -> '{end_ts}'"
-                    )
-
-            # Calculate total path distance
-            for i in range(len(path) - 1):
-                lat1, lon1 = path[i][0], path[i][1]
-                lat2, lon2 = path[i + 1][0], path[i + 1][1]
-                path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
-
-            # Track longest single flight distance (only for z14_plus to avoid duplication)
-            if res_name == "z14_plus":
-                path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
-                if path_distance_nm > year_max_path_distance:
-                    year_max_path_distance = path_distance_nm
-
-            # Store path info with airport relationships and aircraft info
-            info = {
-                "id": local_idx,
-                "start_airport": start_airport,
-                "end_airport": end_airport,
-                "start_coords": [path[0][0], path[0][1]],
-                "end_coords": [path[-1][0], path[-1][1]],
-                "segment_count": len(path) - 1,
-                "year": path_year,
-            }
-            if "aircraft_registration" in metadata:
-                info["aircraft_registration"] = metadata["aircraft_registration"]
-            if "aircraft_type" in metadata:
-                info["aircraft_type"] = metadata["aircraft_type"]
-            path_info.append(info)
-
-            # Calculate ground level for this path
-            ground_level_m = min([coord[2] for coord in path]) if path else 0
-
-            # Find path start time for relative time calculation
-            path_start_time = None
-            for coord in path:
-                if len(coord) >= 4:
-                    path_start_time = parse_iso_timestamp(coord[3])
-                    if path_start_time:
-                        break
-
-            # First pass: calculate instantaneous speeds and timestamps
-            segment_speeds = []
-
-            for i in range(len(path) - 1):
-                coord1 = path[i]
-                coord2 = path[i + 1]
-
-                lat1, lon1 = coord1[0], coord1[1]
-                lat2, lon2 = coord2[0], coord2[1]
-                segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
-
-                instant_speed = 0
-                timestamp = None
-                time_delta = 0
-                relative_time = None
-
-                if len(coord1) >= 4 and len(coord2) >= 4:
-                    ts1, ts2 = coord1[3], coord2[3]
-                    dt1 = parse_iso_timestamp(ts1)
-                    dt2 = parse_iso_timestamp(ts2)
-                    if dt1 and dt2:
-                        time_delta = (dt2 - dt1).total_seconds()
-                        timestamp = dt1
-
-                        if path_start_time is not None:
-                            relative_time = (dt1 - path_start_time).total_seconds()
-
-                        if time_delta >= MIN_SEGMENT_TIME_SECONDS:
-                            segment_distance_nm = (
-                                segment_distance_km * KM_TO_NAUTICAL_MILES
-                            )
-                            instant_speed = (segment_distance_nm / time_delta) * 3600
-                            if instant_speed > MAX_GROUNDSPEED_KNOTS:
-                                instant_speed = 0
-                    else:
-                        logger.debug(
-                            f"  Could not parse segment timestamps '{ts1}' -> '{ts2}'"
-                        )
-
-                segment_speeds.append(
-                    {
-                        "index": i,
-                        "timestamp": timestamp,
-                        "relative_time": relative_time,
-                        "speed": instant_speed,
-                        "distance": segment_distance_km,
-                        "time_delta": time_delta,
-                    }
-                )
-
-            # Build time-sorted list for efficient window queries
-            time_indexed_segments = []
-            timestamp_list = []
-            for seg in segment_speeds:
-                if seg["timestamp"] is not None and seg["speed"] != 0:
-                    ts = seg["timestamp"].timestamp()
-                    timestamp_list.append(ts)
-                    time_indexed_segments.append(seg)
-
-            # Sort both lists together
-            if timestamp_list:
-                sorted_pairs = sorted(
-                    zip(timestamp_list, time_indexed_segments),
-                    key=lambda x: x[0],
-                )
-                timestamp_list, time_indexed_segments = zip(*sorted_pairs)
-                timestamp_list = list(timestamp_list)
-                time_indexed_segments = list(time_indexed_segments)
-
-            # Second pass: calculate rolling average speeds using time window
-            for i in range(len(path) - 1):
-                coord1 = path[i]
-                coord2 = path[i + 1]
-                lat1, lon1, alt1_m = coord1[0], coord1[1], coord1[2]
-                lat2, lon2, alt2_m = coord2[0], coord2[1], coord2[2]
-
-                avg_alt_m = (alt1_m + alt2_m) / 2
-                avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
-                color = get_altitude_color(avg_alt_m, min_alt_m, max_alt_m)
-
-                # Calculate windowed average groundspeed
-                groundspeed_knots = 0
-                current_segment = segment_speeds[i]
-                current_timestamp = current_segment["timestamp"]
-                current_relative_time = current_segment["relative_time"]
-
-                if current_timestamp is not None and timestamp_list:
-                    window_distance = 0
-                    window_time = 0
-                    current_ts = current_timestamp.timestamp()
-                    half_window = SPEED_WINDOW_SECONDS / 2
-
-                    from bisect import bisect_left, bisect_right
-
-                    start_idx = bisect_left(timestamp_list, current_ts - half_window)
-                    end_idx = bisect_right(timestamp_list, current_ts + half_window)
-
-                    for j in range(start_idx, end_idx):
-                        seg = time_indexed_segments[j]
-                        window_distance += seg["distance"]
-                        window_time += seg["time_delta"]
-
-                    if window_time >= MIN_SEGMENT_TIME_SECONDS:
-                        window_distance_nm = window_distance * KM_TO_NAUTICAL_MILES
-                        groundspeed_knots = (window_distance_nm / window_time) * 3600
-                        if groundspeed_knots > MAX_GROUNDSPEED_KNOTS:
-                            groundspeed_knots = 0
-
-                # Fall back to path average if no timestamp-based calculation
-                if (
-                    groundspeed_knots == 0
-                    and path_duration_seconds > 0
-                    and path_distance_km > 0
-                ):
-                    segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
-                    segment_time_seconds = (
-                        segment_distance_km / path_distance_km
-                    ) * path_duration_seconds
-                    if segment_time_seconds >= MIN_SEGMENT_TIME_SECONDS:
-                        segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
-                        calculated_speed = (
-                            segment_distance_nm / segment_time_seconds
-                        ) * 3600
-                        if 0 < calculated_speed <= MAX_GROUNDSPEED_KNOTS:
-                            groundspeed_knots = calculated_speed
-
-                # Track maximum and minimum groundspeed (only for z14_plus)
-                if res_name == "z14_plus" and groundspeed_knots > 0:
-                    if groundspeed_knots > year_max_groundspeed:
-                        year_max_groundspeed = groundspeed_knots
-                    if groundspeed_knots < year_min_groundspeed:
-                        year_min_groundspeed = groundspeed_knots
-
-                    # Track cruise speed (only segments >1000ft AGL)
-                    altitude_agl_m = avg_alt_m - ground_level_m
-                    altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
-                    if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
-                        if window_time >= MIN_SEGMENT_TIME_SECONDS:
-                            year_cruise_distance += (
-                                window_distance * KM_TO_NAUTICAL_MILES
-                            )
-                            year_cruise_time += window_time
-
-                            altitude_bin_ft = (
-                                int(altitude_agl_ft / ALTITUDE_BIN_SIZE_FT)
-                                * ALTITUDE_BIN_SIZE_FT
-                            )
-                            if altitude_bin_ft not in year_cruise_altitude_histogram:
-                                year_cruise_altitude_histogram[altitude_bin_ft] = 0
-                            year_cruise_altitude_histogram[altitude_bin_ft] += (
-                                window_time
-                            )
-
-                # For downsampled resolutions, clamp to the max from z14_plus
-                if (
-                    res_name != "z14_plus"
-                    and year_max_groundspeed > 0
-                    and groundspeed_knots > year_max_groundspeed
-                ):
-                    groundspeed_knots = year_max_groundspeed
-
-                # Skip zero-length segments
-                if lat1 != lat2 or lon1 != lon2:
-                    segment_data = {
-                        "coords": [[lat1, lon1], [lat2, lon2]],
-                        "color": color,
-                        "altitude_ft": avg_alt_ft,
-                        "altitude_m": round(avg_alt_m, 0),
-                        "groundspeed_knots": round(groundspeed_knots, 1),
-                        "path_id": local_idx,
-                    }
-                    if current_relative_time is not None:
-                        segment_data["time"] = round(current_relative_time, 1)
-                    path_segments.append(segment_data)
-
-        # ADDITIONAL: Uniform sampling of path_segments if over target
-        if len(path_segments) > target_points:
-            step = len(path_segments) // target_points
-            if step > 1:
-                path_segments = path_segments[::step]
-                if not quiet:
-                    logger.info(
-                        f"    {res_name}: Uniform sampling of segments "
-                        f"({len(path_segments):,} segments, step={step})"
-                    )
-
-        # ADDITIONAL: Filter path_info to only include paths present in downsampled segments
-        # This dramatically reduces file size by removing metadata for unused paths
-        if len(path_segments) < len(path_info):
-            used_path_ids = set(seg["path_id"] for seg in path_segments)
-            filtered_path_info = [p for p in path_info if p["id"] in used_path_ids]
-            if not quiet and len(filtered_path_info) < len(path_info):
-                logger.info(
-                    f"    {res_name}: Filtered path_info "
-                    f"({len(filtered_path_info):,} paths, was {len(path_info):,})"
-                )
-            path_info = filtered_path_info
-
-        # Export data
-        data = {
-            "coordinates": downsampled_coords,
-            "path_segments": path_segments,
-            "path_info": path_info,
-            "resolution": res_name,
-            "original_points": len(all_coordinates),
-            "downsampled_points": len(downsampled_coords),
-            "compression_ratio": round(
-                len(downsampled_coords) / max(len(all_coordinates), 1) * 100, 1
-            ),
-        }
-
-        # Create year directory if it doesn't exist
-        year_dir = os.path.join(output_dir, year)
-        os.makedirs(year_dir, exist_ok=True)
-
-        # Export to year directory with simple filename
-        output_file = os.path.join(year_dir, f"{res_name}.js")
-        with open(output_file, "w") as f:
-            var_name = f"KML_DATA_{year}_{res_name.upper().replace('-', '_')}"
-            f.write(f"window.{var_name} = ")
-            json.dump(data, f, separators=(",", ":"), sort_keys=True)
-            f.write(";")
-
-        file_size = os.path.getsize(output_file)
-        year_file_structure.append(res_name)
-
-        # Store z14_plus data
-        if res_name == "z14_plus":
-            year_z14_segments = path_segments
-            year_z14_path_info = path_info
-
-        if not quiet:
-            logger.info(
-                f"    ✓ {res_config['description']}: {len(downsampled_coords):,} points ({file_size / 1024:.1f} KB)"
-            )
-
-    return {
-        "year": year,
-        "max_groundspeed": year_max_groundspeed,
-        "min_groundspeed": year_min_groundspeed,
-        "cruise_distance": year_cruise_distance,
-        "cruise_time": year_cruise_time,
-        "max_path_distance": year_max_path_distance,
-        "cruise_altitude_histogram": year_cruise_altitude_histogram,
-        "file_structure": year_file_structure,
-        "z14_segments": year_z14_segments,
-        "z14_path_info": year_z14_path_info,
-    }

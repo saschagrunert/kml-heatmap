@@ -15,7 +15,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import folium
 
 # Import from our refactored modules
@@ -41,7 +41,7 @@ from kml_heatmap.constants import (
     HEATMAP_GRADIENT,
 )
 from kml_heatmap.helpers import format_flight_time
-from kml_heatmap.data_exporter import process_year_data
+from kml_heatmap.data_exporter import process_single_path, aggregate_results_by_year
 
 # Get API keys from environment variables
 STADIA_API_KEY = os.environ.get("STADIA_API_KEY", "")
@@ -163,8 +163,8 @@ def export_data_json(
     max_path_distance_nm = 0  # Longest flight in nautical miles
 
     # Store z14_plus data to avoid reloading it later
-    z14_plus_segments = None
-    z14_plus_path_info = None
+    z14_plus_segments = []
+    z14_plus_path_info = []
 
     # Track cruise altitude histogram (bins for altitudes above threshold AGL)
     cruise_altitude_histogram = {}  # Dict of {altitude_bin_ft: time_seconds}
@@ -194,55 +194,113 @@ def export_data_json(
     # Process resolutions in order, with z14_plus first to establish the groundspeed baseline
     resolution_order = ["z14_plus", "z11_13", "z8_10", "z5_7", "z0_4"]
 
-    # Process years in parallel for faster export
-    logger.info(f"\n  📊 Processing {len(paths_by_year)} year(s) in parallel...")
+    # Calculate year-level epsilon values for consistent downsampling
+    # This ensures output matches the old year-based parallelization approach
+    logger.info("\n  📐 Calculating year-level epsilon values...")
+    from kml_heatmap.geometry import calculate_adaptive_epsilon
+    from kml_heatmap.constants import TARGET_POINTS_PER_RESOLUTION
 
-    year_results = []
-    with ThreadPoolExecutor(
-        max_workers=min(len(paths_by_year), os.cpu_count() or 4)
-    ) as executor:
-        futures = {}
-        for year in sorted(paths_by_year.keys()):
-            year_path_indices = paths_by_year[year]
-            future = executor.submit(
-                process_year_data,
-                year,
-                year_path_indices,
-                all_coordinates,
-                all_path_groups,
-                all_path_metadata,
+    year_epsilon_values = {}
+    for year, year_path_indices in paths_by_year.items():
+        # Calculate total points for this year
+        year_total_points = sum(
+            len(all_path_groups[path_idx]) for path_idx in year_path_indices
+        )
+
+        # Calculate epsilon for each resolution level based on year totals
+        year_epsilons = {}
+        for res_name in resolution_order:
+            base_epsilon = resolutions[res_name]["epsilon"]
+            target_points = TARGET_POINTS_PER_RESOLUTION[res_name]
+            adaptive_epsilon = calculate_adaptive_epsilon(
+                year_total_points, target_points, base_epsilon
+            )
+            year_epsilons[res_name] = adaptive_epsilon
+
+        year_epsilon_values[year] = year_epsilons
+        logger.info(f"    {year}: {year_total_points:,} points, z14_plus ε={year_epsilons['z14_plus']:.6f}")
+
+    # Process paths in parallel for maximum CPU utilization
+    logger.info(f"\n  📊 Processing {len(all_path_groups)} path(s) in parallel...")
+
+    # Prepare arguments for parallel processing
+    path_args = []
+    for path_idx in range(len(all_path_groups)):
+        path = all_path_groups[path_idx]
+        metadata = (
+            all_path_metadata[path_idx] if path_idx < len(all_path_metadata) else {}
+        )
+
+        # Get year for this path to lookup epsilon values
+        year = metadata.get("year")
+        if year is None:
+            year = "unknown"
+        else:
+            year = str(year)
+
+        epsilon_values = year_epsilon_values.get(year, {res: resolutions[res]["epsilon"] for res in resolution_order})
+
+        path_args.append(
+            (
+                path_idx,
+                path,
+                metadata,
                 min_alt_m,
                 max_alt_m,
-                output_dir,
                 resolutions,
                 resolution_order,
-                True,  # quiet=True for parallel execution
+                epsilon_values,
             )
-            futures[future] = year
+        )
 
-        # Collect results as they complete
-        completed_count = 0
-        total_years = len(futures)
+    # Use ProcessPoolExecutor for CPU-bound processing
+    path_results_dict = {}  # Use dict to preserve original indices
+    completed_count = 0
+    total_paths = len(path_args)
+
+    with ProcessPoolExecutor(
+        max_workers=min(total_paths, os.cpu_count() or 4)
+    ) as executor:
+        # Submit all paths for processing
+        futures = {
+            executor.submit(process_single_path, args): i
+            for i, args in enumerate(path_args)
+        }
+
+        # Collect results as they complete, preserving original indices
         for future in as_completed(futures):
-            year = futures[future]
+            original_idx = futures[future]
             try:
                 result = future.result()
-                year_results.append(result)
+                if result is not None:
+                    path_results_dict[original_idx] = result
                 completed_count += 1
 
-                # Calculate total points for this year
-                year_points = sum(
-                    len(all_path_groups[idx]) for idx in paths_by_year[year]
-                )
-
-                logger.info(
-                    f"  [{completed_count}/{total_years}] ✓ Year {year}: {year_points:,} points"
-                )
+                # Log progress every 10% or every 100 paths
+                if (
+                    completed_count % max(1, total_paths // 10) == 0
+                    or completed_count % 100 == 0
+                ):
+                    progress_pct = (completed_count / total_paths) * 100
+                    logger.info(
+                        f"  [{completed_count}/{total_paths}] {progress_pct:.0f}% complete"
+                    )
             except Exception as e:
-                logger.error(f"  ✗ Error processing year {year}: {e}")
+                completed_count += 1
+                logger.error(f"  ✗ Error processing path {original_idx}: {e}")
                 import traceback
 
                 traceback.print_exc()
+
+    # Sort results by original index for deterministic output
+    path_results = [path_results_dict[i] for i in sorted(path_results_dict.keys())]
+    logger.info(f"  ✓ Processed {len(path_results)} paths successfully")
+
+    # Aggregate results by year and write files
+    logger.info("\n  📁 Aggregating results by year...")
+    year_results = aggregate_results_by_year(
+        path_results, resolutions, resolution_order, output_dir
+    )
 
     # Aggregate results from all years
     for result in year_results:
@@ -269,11 +327,11 @@ def export_data_json(
                 cruise_altitude_histogram[altitude_bin] = 0
             cruise_altitude_histogram[altitude_bin] += time_spent
 
-        # Store z14_plus data for the last year
-        sorted_years = sorted(paths_by_year.keys())
-        if year == sorted_years[-1]:
-            z14_plus_segments = result["z14_segments"]
-            z14_plus_path_info = result["z14_path_info"]
+        # Accumulate z14_plus data from all years
+        if result["z14_segments"]:
+            z14_plus_segments.extend(result["z14_segments"])
+        if result["z14_path_info"]:
+            z14_plus_path_info.extend(result["z14_path_info"])
 
     # Export airports (same for all resolutions)
     # Filter and extract valid airport names
@@ -618,7 +676,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             existing_meta = json.loads(json_str)
 
     # Use the segments data we just created instead of reloading from disk
-    if z14_segments is not None and z14_path_info is not None:
+    if z14_segments and z14_path_info:
         segments = z14_segments
         logger.debug(
             f"  Recalc: {len(segments)} segments, {len(z14_path_info)} path_info entries"
