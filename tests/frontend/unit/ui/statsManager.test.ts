@@ -43,29 +43,29 @@ describe("StatsManager", () => {
 
     // Create mock app
     mockApp = {
-      selectedPathIds: new Set<string>(),
+      selectedPathIds: new Set<number>(),
       fullPathInfo: [
         {
-          id: "path1",
+          id: 1,
           year: 2025,
           aircraft_registration: "D-ABCD",
         },
         {
-          id: "path2",
+          id: 2,
           year: 2025,
           aircraft_registration: "D-EFGH",
         },
       ],
       fullPathSegments: [
         {
-          path_id: "path1",
+          path_id: 1,
           coords: [
             [50.0, 8.0],
             [50.1, 8.1],
           ],
         },
         {
-          path_id: "path2",
+          path_id: 2,
           coords: [
             [50.1, 8.1],
             [50.2, 8.2],
@@ -105,7 +105,7 @@ describe("StatsManager", () => {
     });
 
     it("calculates stats for selected paths only", () => {
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       statsManager.updateStatsForSelection();
 
@@ -118,23 +118,23 @@ describe("StatsManager", () => {
     });
 
     it("filters pathInfo by selected IDs", () => {
-      mockApp.selectedPathIds.add("path2");
+      mockApp.selectedPathIds.add(2);
 
       statsManager.updateStatsForSelection();
 
       const calls = (window as any).KMLHeatmap.calculateFilteredStatistics.mock
         .calls;
-      expect(calls[0][0].pathInfo[0].id).toBe("path2");
+      expect(calls[0][0].pathInfo[0].id).toBe(2);
     });
 
     it("filters segments by selected path IDs", () => {
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       statsManager.updateStatsForSelection();
 
       const calls = (window as any).KMLHeatmap.calculateFilteredStatistics.mock
         .calls;
-      expect(calls[0][0].segments[0].path_id).toBe("path1");
+      expect(calls[0][0].segments[0].path_id).toBe(1);
     });
 
     it("does nothing if selected segments are empty", () => {
@@ -149,14 +149,14 @@ describe("StatsManager", () => {
 
     it("handles empty fullPathInfo", () => {
       mockApp.fullPathInfo = null;
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       expect(() => statsManager.updateStatsForSelection()).not.toThrow();
     });
 
     it("handles empty fullPathSegments", () => {
       mockApp.fullPathSegments = null;
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       expect(() => statsManager.updateStatsForSelection()).not.toThrow();
     });

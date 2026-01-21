@@ -198,7 +198,7 @@ export function calculateSpeedStats(segments: PathSegment[]): SpeedStats {
  * @returns Longest flight distance in kilometers
  */
 export function calculateLongestFlight(segments: PathSegment[]): number {
-  const pathDistances: Record<string, number> = {};
+  const pathDistances: Record<number, number> = {};
 
   segments.forEach(function (segment) {
     const coords = segment.coords;

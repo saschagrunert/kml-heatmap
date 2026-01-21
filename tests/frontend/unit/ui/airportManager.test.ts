@@ -43,17 +43,17 @@ describe("AirportManager", () => {
     mockApp = {
       selectedYear: "all",
       selectedAircraft: "all",
-      selectedPathIds: new Set<string>(),
+      selectedPathIds: new Set<number>(),
       fullPathInfo: [
         {
-          id: "path1",
+          id: 1,
           year: 2025,
           aircraft_registration: "D-ABCD",
           start_airport: "EDDF",
           end_airport: "EDDM",
         },
         {
-          id: "path2",
+          id: 2,
           year: 2025,
           aircraft_registration: "D-EFGH",
           start_airport: "EDDM",
@@ -75,8 +75,8 @@ describe("AirportManager", () => {
         removeLayer: vi.fn(),
       },
       pathToAirports: {
-        path1: { start: "EDDF", end: "EDDM" },
-        path2: { start: "EDDM", end: "EDDF" },
+        1: { start: "EDDF", end: "EDDM" },
+        2: { start: "EDDM", end: "EDDF" },
       },
       map: {
         getZoom: vi.fn().mockReturnValue(10),
@@ -263,7 +263,7 @@ describe("AirportManager", () => {
     it("shows only airports from selected paths", () => {
       mockApp.selectedYear = "all";
       mockApp.selectedAircraft = "all";
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       airportManager.updateAirportOpacity();
 
@@ -278,7 +278,7 @@ describe("AirportManager", () => {
 
     it("uses pathToAirports fallback when fullPathInfo not available", () => {
       mockApp.fullPathInfo = null;
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       airportManager.updateAirportOpacity();
 
@@ -289,7 +289,7 @@ describe("AirportManager", () => {
 
     it("adds marker to layer if not already present", () => {
       mockApp.airportLayer.hasLayer.mockReturnValue(false);
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       airportManager.updateAirportOpacity();
 
@@ -298,7 +298,7 @@ describe("AirportManager", () => {
 
     it("does not add marker if already in layer", () => {
       mockApp.airportLayer.hasLayer.mockReturnValue(true);
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       airportManager.updateAirportOpacity();
 
@@ -307,7 +307,7 @@ describe("AirportManager", () => {
 
     it("removes hidden markers from layer", () => {
       mockApp.airportLayer.hasLayer.mockReturnValue(true);
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       airportManager.updateAirportOpacity();
 
@@ -333,7 +333,7 @@ describe("AirportManager", () => {
       // Set filters that would show EDDF/EDDM
       mockApp.selectedYear = "2025";
       // But select only path2
-      mockApp.selectedPathIds.add("path2");
+      mockApp.selectedPathIds.add(2);
 
       airportManager.updateAirportOpacity();
 

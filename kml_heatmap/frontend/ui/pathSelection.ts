@@ -10,7 +10,7 @@ export class PathSelection {
     this.app = app;
   }
 
-  togglePathSelection(pathId: string): void {
+  togglePathSelection(pathId: number): void {
     if (this.app.selectedPathIds.has(pathId)) {
       this.app.selectedPathIds.delete(pathId);
     } else {

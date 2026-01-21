@@ -49,7 +49,7 @@ export interface LayerStats {
  */
 export function calculateAltitudeRange(
   segments: PathSegment[],
-  selectedPathIds: Set<string> | null = null
+  selectedPathIds: Set<number> | null = null
 ): Range {
   let segmentsToUse = segments;
 
@@ -89,7 +89,7 @@ export function calculateAltitudeRange(
  */
 export function calculateAirspeedRange(
   segments: PathSegment[],
-  selectedPathIds: Set<string> | null = null
+  selectedPathIds: Set<number> | null = null
 ): Range {
   let segmentsToUse = segments;
 
@@ -161,14 +161,14 @@ export function shouldRenderSegment(
 export function calculateSegmentProperties(
   _segment: PathSegment,
   options: {
-    pathId: string;
-    selectedPathIds?: Set<string>;
+    pathId: number;
+    selectedPathIds?: Set<number>;
     hasSelection?: boolean;
     colorFunction?: (value: number, min: number, max: number) => string;
     colorMin?: number;
     colorMax?: number;
     value?: number; // altitude_ft or groundspeed_knots
-  } = { pathId: "" }
+  } = { pathId: 0 }
 ): SegmentProperties {
   const {
     pathId,

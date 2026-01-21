@@ -69,7 +69,7 @@ describe("StateManager", () => {
       aviationVisible: false,
       selectedYear: "all",
       selectedAircraft: "all",
-      selectedPathIds: new Set<string>(),
+      selectedPathIds: new Set<number>(),
     };
 
     // Mock stats panel element
@@ -109,17 +109,15 @@ describe("StateManager", () => {
     });
 
     it("saves selected path IDs as array", () => {
-      mockApp.selectedPathIds.add("path1");
-      mockApp.selectedPathIds.add("path2");
+      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
 
       stateManager.saveMapState();
 
       const savedData = mockLocalStorage["kml-heatmap-state"];
       const state = JSON.parse(savedData);
 
-      expect(state.selectedPathIds).toEqual(
-        expect.arrayContaining(["path1", "path2"])
-      );
+      expect(state.selectedPathIds).toEqual(expect.arrayContaining([1, 2]));
       expect(state.selectedPathIds).toHaveLength(2);
     });
 
@@ -186,7 +184,7 @@ describe("StateManager", () => {
         aviationVisible: false,
         selectedYear: "2025",
         selectedAircraft: "D-ABCD",
-        selectedPathIds: ["path1", "path2"],
+        selectedPathIds: [1, 2],
         statsPanelVisible: true,
       };
 

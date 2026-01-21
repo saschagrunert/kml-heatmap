@@ -79,6 +79,14 @@ export class LayerManager {
 
       const isSelected = this.app.selectedPathIds.has(pathId);
 
+      // When buttons are hidden and paths are selected: hide unselected paths
+      // When buttons are visible: dim unselected paths to opacity 0.1
+      if (this.app.selectedPathIds.size > 0 && !isSelected) {
+        if (this.app.buttonsHidden) {
+          return; // Hide completely
+        }
+      }
+
       // Recalculate color based on current altitude range
       const color = (window as any).KMLHeatmap.getColorForAltitude(
         segment.altitude_ft,
@@ -204,6 +212,14 @@ export class LayerManager {
 
       if ((segment.groundspeed_knots || 0) > 0) {
         const isSelected = this.app.selectedPathIds.has(pathId);
+
+        // When buttons are hidden and paths are selected: hide unselected paths
+        // When buttons are visible: dim unselected paths to opacity 0.1
+        if (this.app.selectedPathIds.size > 0 && !isSelected) {
+          if (this.app.buttonsHidden) {
+            return; // Hide completely
+          }
+        }
 
         // Recalculate color based on current groundspeed range
         const color = (window as any).KMLHeatmap.getColorForAirspeed(

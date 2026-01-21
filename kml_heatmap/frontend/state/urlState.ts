@@ -56,7 +56,9 @@ export function parseUrlParams(
     if (pathStr) {
       state.selectedPathIds = pathStr
         .split(",")
-        .filter((id) => id.trim().length > 0);
+        .filter((id) => id.trim().length > 0)
+        .map((id) => parseInt(id, 10))
+        .filter((id) => !isNaN(id));
     }
   }
 

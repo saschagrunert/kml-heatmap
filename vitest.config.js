@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   test: {
@@ -10,6 +11,11 @@ export default defineConfig({
       include: ["kml_heatmap/frontend/**/*.{js,ts}"],
       exclude: ["**/node_modules/**", "**/tests/**"],
       clean: false,
+    },
+    alias: {
+      leaflet: fileURLToPath(
+        new URL("./tests/mocks/leaflet.ts", import.meta.url)
+      ),
     },
   },
 });

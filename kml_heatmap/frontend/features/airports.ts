@@ -25,7 +25,7 @@ export interface AirportVisibility {
  * Path to airports mapping
  */
 export interface PathToAirports {
-  [pathId: string]: {
+  [pathId: number]: {
     start?: string;
     end?: string;
   };
@@ -227,7 +227,7 @@ export function calculateAirportVisibility(options: {
   airportCounts: AirportCounts;
   selectedYear?: string;
   selectedAircraft?: string;
-  selectedPathIds?: Set<string>;
+  selectedPathIds?: Set<number>;
   pathToAirports?: PathToAirports;
 }): Record<string, AirportVisibility> {
   const {
