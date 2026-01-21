@@ -303,6 +303,11 @@ var MapAppModule = (() => {
           }
         }
         const isSelected = this.app.selectedPathIds.has(pathId);
+        if (this.app.selectedPathIds.size > 0 && !isSelected) {
+          if (this.app.buttonsHidden) {
+            return;
+          }
+        }
         const color = window.KMLHeatmap.getColorForAltitude(
           segment.altitude_ft,
           colorMinAlt,
@@ -380,6 +385,11 @@ var MapAppModule = (() => {
         }
         if ((segment.groundspeed_knots || 0) > 0) {
           const isSelected = this.app.selectedPathIds.has(pathId);
+          if (this.app.selectedPathIds.size > 0 && !isSelected) {
+            if (this.app.buttonsHidden) {
+              return;
+            }
+          }
           const color = window.KMLHeatmap.getColorForAirspeed(
             segment.groundspeed_knots,
             colorMinSpeed,
@@ -1908,7 +1918,6 @@ var MapAppModule = (() => {
   var UIToggles = class {
     constructor(app) {
       this.app = app;
-      this.buttonsHidden = false;
     }
     toggleHeatmap() {
       if (!this.app.map) return;
@@ -2089,18 +2098,24 @@ var MapAppModule = (() => {
     toggleButtonsVisibility() {
       const toggleableButtons = document.querySelectorAll(".toggleable-btn");
       const hideButton = document.getElementById("hide-buttons-btn");
-      if (this.buttonsHidden) {
+      if (this.app.buttonsHidden) {
         toggleableButtons.forEach((btn) => {
           btn.classList.remove("buttons-hidden");
         });
         if (hideButton) hideButton.textContent = "\u{1F53C}";
-        this.buttonsHidden = false;
+        this.app.buttonsHidden = false;
       } else {
         toggleableButtons.forEach((btn) => {
           btn.classList.add("buttons-hidden");
         });
         if (hideButton) hideButton.textContent = "\u{1F53D}";
-        this.buttonsHidden = true;
+        this.app.buttonsHidden = true;
+      }
+      if (this.app.altitudeVisible) {
+        this.app.layerManager.redrawAltitudePaths();
+      }
+      if (this.app.airspeedVisible) {
+        this.app.layerManager.redrawAirspeedPaths();
       }
     }
     exportMap() {
@@ -2195,6 +2210,7 @@ var MapAppModule = (() => {
       this.airspeedVisible = false;
       this.airportsVisible = true;
       this.aviationVisible = false;
+      this.buttonsHidden = false;
       this.selectedPathIds = /* @__PURE__ */ new Set();
       this.pathSegments = {};
       this.pathToAirports = {};
@@ -2224,6 +2240,12 @@ var MapAppModule = (() => {
         }
         if (this.savedState.selectedAircraft) {
           this.selectedAircraft = this.savedState.selectedAircraft;
+        }
+        if (this.savedState.selectedPathIds && this.savedState.selectedPathIds.length > 0) {
+          this.savedState.selectedPathIds.forEach((pathId) => {
+            const pathIdNum = typeof pathId === "string" ? parseInt(pathId, 10) : pathId;
+            this.selectedPathIds.add(pathIdNum);
+          });
         }
         if (this.savedState.heatmapVisible !== void 0) {
           this.heatmapVisible = this.savedState.heatmapVisible;
@@ -2383,16 +2405,7 @@ var MapAppModule = (() => {
       if (this.aviationVisible && this.config.openaipApiKey && this.openaipLayers["Aviation Data"]) {
         this.map.addLayer(this.openaipLayers["Aviation Data"]);
       }
-      if (this.savedState && this.savedState.selectedPathIds && this.savedState.selectedPathIds.length > 0) {
-        this.savedState.selectedPathIds.forEach((pathId) => {
-          this.selectedPathIds.add(pathId.toString());
-        });
-        if (this.altitudeVisible) {
-          this.layerManager.redrawAltitudePaths();
-        }
-        if (this.airspeedVisible) {
-          this.layerManager.redrawAirspeedPaths();
-        }
+      if (this.selectedPathIds.size > 0) {
         this.replayManager.updateReplayButtonState();
       }
       if (this.savedState && this.savedState.statsPanelVisible) {

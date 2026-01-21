@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["kml_heatmap/frontend/**/*", "tests/frontend/**/*"],
+  "include": ["kml_heatmap/frontend/**/*", "tests/**/*"],
   "compilerOptions": {
     "noEmit": true
   }

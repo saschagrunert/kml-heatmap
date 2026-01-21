@@ -6,11 +6,9 @@ import type { MapApp } from "../mapApp";
 
 export class UIToggles {
   private app: MapApp;
-  private buttonsHidden: boolean;
 
   constructor(app: MapApp) {
     this.app = app;
-    this.buttonsHidden = false;
   }
 
   toggleHeatmap(): void {
@@ -253,20 +251,28 @@ export class UIToggles {
     const toggleableButtons = document.querySelectorAll(".toggleable-btn");
     const hideButton = document.getElementById("hide-buttons-btn");
 
-    if (this.buttonsHidden) {
+    if (this.app.buttonsHidden) {
       // Show buttons
       toggleableButtons.forEach((btn) => {
         btn.classList.remove("buttons-hidden");
       });
       if (hideButton) hideButton.textContent = "🔼";
-      this.buttonsHidden = false;
+      this.app.buttonsHidden = false;
     } else {
       // Hide buttons
       toggleableButtons.forEach((btn) => {
         btn.classList.add("buttons-hidden");
       });
       if (hideButton) hideButton.textContent = "🔽";
-      this.buttonsHidden = true;
+      this.app.buttonsHidden = true;
+    }
+
+    // Redraw paths to apply hide/dim behavior based on button state
+    if (this.app.altitudeVisible) {
+      this.app.layerManager!.redrawAltitudePaths();
+    }
+    if (this.app.airspeedVisible) {
+      this.app.layerManager!.redrawAirspeedPaths();
     }
   }
 

@@ -54,7 +54,7 @@ export interface ValidationResult {
  */
 export function prepareReplaySegments(
   segments: PathSegment[],
-  pathId: string
+  pathId: number
 ): PathSegment[] {
   // Filter segments that belong to selected path and have time data
   const replaySegments = segments.filter(

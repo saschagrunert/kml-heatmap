@@ -30,18 +30,18 @@ describe("URL state management", () => {
 
     it("parses single path ID", () => {
       const result = parseUrlParams("p=5");
-      expect(result).toEqual({ selectedPathIds: ["5"] });
+      expect(result).toEqual({ selectedPathIds: [5] });
     });
 
     it("parses multiple path IDs", () => {
       const result = parseUrlParams("p=1,5,12,25");
-      expect(result).toEqual({ selectedPathIds: ["1", "5", "12", "25"] });
+      expect(result).toEqual({ selectedPathIds: [1, 5, 12, 25] });
     });
 
     it("filters out invalid path IDs", () => {
       const result = parseUrlParams("p=1,invalid,5,NaN,12");
       expect(result).toEqual({
-        selectedPathIds: ["1", "invalid", "5", "NaN", "12"],
+        selectedPathIds: [1, 5, 12],
       });
     });
 
@@ -117,7 +117,7 @@ describe("URL state management", () => {
       expect(result).toEqual({
         selectedYear: "2025",
         selectedAircraft: "D-EAGJ",
-        selectedPathIds: ["1", "5", "12"],
+        selectedPathIds: [1, 5, 12],
         heatmapVisible: false,
         altitudeVisible: true,
         airspeedVisible: false,
@@ -261,7 +261,7 @@ describe("URL state management", () => {
       const original = {
         selectedYear: "2025",
         selectedAircraft: "D-EAGJ",
-        selectedPathIds: ["1", "5", "12"],
+        selectedPathIds: [1, 5, 12],
         heatmapVisible: false,
         altitudeVisible: true,
         airspeedVisible: false,

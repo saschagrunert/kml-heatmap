@@ -8,7 +8,7 @@ import type { Coordinate } from "./utils/geometry";
  * Path information from KML data
  */
 export interface PathInfo {
-  id: string;
+  id: number;
   aircraft?: string;
   aircraft_registration?: string;
   aircraft_type?: string;
@@ -24,7 +24,7 @@ export interface PathInfo {
  * Path segment with altitude and speed data
  */
 export interface PathSegment {
-  path_id: string;
+  path_id: number;
   coords?: [Coordinate, Coordinate];
   coordinates?: Coordinate;
   altitude?: number;
@@ -165,7 +165,7 @@ export interface MapCenter {
 export interface AppState {
   selectedYear?: string;
   selectedAircraft?: string;
-  selectedPathIds?: string[];
+  selectedPathIds?: number[];
   heatmapVisible?: boolean;
   altitudeVisible?: boolean;
   airspeedVisible?: boolean;

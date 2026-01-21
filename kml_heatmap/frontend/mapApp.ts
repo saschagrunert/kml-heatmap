@@ -63,14 +63,14 @@ export interface Range {
  * Airport to paths mapping
  */
 export interface AirportToPathsMap {
-  [airportName: string]: Set<string>;
+  [airportName: string]: Set<number>;
 }
 
 /**
  * Path to airports mapping
  */
 export interface PathToAirportsMap {
-  [pathId: string]: {
+  [pathId: number]: {
     start?: string;
     end?: string;
   };
@@ -124,10 +124,11 @@ export class MapApp {
   airspeedVisible: boolean;
   airportsVisible: boolean;
   aviationVisible: boolean;
+  buttonsHidden: boolean;
 
   // Selection state
-  selectedPathIds: Set<string>;
-  pathSegments: { [pathId: string]: PathSegment[] };
+  selectedPathIds: Set<number>;
+  pathSegments: { [pathId: number]: PathSegment[] };
   pathToAirports: PathToAirportsMap;
   airportToPaths: AirportToPathsMap;
   airportMarkers: AirportMarkersMap;
@@ -184,6 +185,7 @@ export class MapApp {
     this.airspeedVisible = false;
     this.airportsVisible = true;
     this.aviationVisible = false;
+    this.buttonsHidden = false;
 
     // Selection state
     this.selectedPathIds = new Set();
@@ -227,6 +229,19 @@ export class MapApp {
       }
       if (this.savedState.selectedAircraft) {
         this.selectedAircraft = this.savedState.selectedAircraft;
+      }
+
+      // Restore selected paths BEFORE updateLayers() so paths are drawn with correct selection
+      if (
+        this.savedState.selectedPathIds &&
+        this.savedState.selectedPathIds.length > 0
+      ) {
+        this.savedState.selectedPathIds.forEach((pathId) => {
+          // Parse as number since URL params are strings
+          const pathIdNum =
+            typeof pathId === "string" ? parseInt(pathId, 10) : pathId;
+          this.selectedPathIds.add(pathIdNum);
+        });
       }
 
       // Restore layer visibility
@@ -472,21 +487,8 @@ export class MapApp {
       this.map!.addLayer(this.openaipLayers["Aviation Data"]);
     }
 
-    // Restore selected paths from saved state
-    if (
-      this.savedState &&
-      this.savedState.selectedPathIds &&
-      this.savedState.selectedPathIds.length > 0
-    ) {
-      this.savedState.selectedPathIds.forEach((pathId) => {
-        this.selectedPathIds.add(pathId.toString());
-      });
-      if (this.altitudeVisible) {
-        this.layerManager!.redrawAltitudePaths();
-      }
-      if (this.airspeedVisible) {
-        this.layerManager!.redrawAirspeedPaths();
-      }
+    // Update replay button state if paths were restored
+    if (this.selectedPathIds.size > 0) {
       this.replayManager!.updateReplayButtonState();
     }
 

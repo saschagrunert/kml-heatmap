@@ -72,7 +72,7 @@ export class DataManager {
       data.path_segments
     ) {
       // Get filtered path IDs
-      const filteredPathIds = new Set<string>();
+      const filteredPathIds = new Set<number>();
       if (data.path_info) {
         data.path_info.forEach((pathInfo) => {
           const matchesYear =
@@ -164,13 +164,13 @@ export class DataManager {
         // Build reverse mapping: airport to paths
         if (pathInfo.start_airport) {
           if (!this.app.airportToPaths[pathInfo.start_airport]) {
-            this.app.airportToPaths[pathInfo.start_airport] = new Set<string>();
+            this.app.airportToPaths[pathInfo.start_airport] = new Set<number>();
           }
           this.app.airportToPaths[pathInfo.start_airport]!.add(pathId);
         }
         if (pathInfo.end_airport) {
           if (!this.app.airportToPaths[pathInfo.end_airport]) {
-            this.app.airportToPaths[pathInfo.end_airport] = new Set<string>();
+            this.app.airportToPaths[pathInfo.end_airport] = new Set<number>();
           }
           this.app.airportToPaths[pathInfo.end_airport]!.add(pathId);
         }

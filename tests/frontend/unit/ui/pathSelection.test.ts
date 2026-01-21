@@ -8,7 +8,7 @@ describe("PathSelection", () => {
   beforeEach(() => {
     // Create mock app with all required properties
     mockApp = {
-      selectedPathIds: new Set<string>(),
+      selectedPathIds: new Set<number>(),
       altitudeVisible: false,
       airspeedVisible: false,
       airportToPaths: {},
@@ -32,19 +32,19 @@ describe("PathSelection", () => {
 
   describe("togglePathSelection", () => {
     it("adds path to selection if not selected", () => {
-      pathSelection.togglePathSelection("path1");
+      pathSelection.togglePathSelection(1);
 
-      expect(mockApp.selectedPathIds.has("path1")).toBe(true);
+      expect(mockApp.selectedPathIds.has(1)).toBe(true);
       expect(mockApp.replayManager.updateReplayButtonState).toHaveBeenCalled();
       expect(mockApp.stateManager.saveMapState).toHaveBeenCalled();
     });
 
     it("removes path from selection if already selected", () => {
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
-      pathSelection.togglePathSelection("path1");
+      pathSelection.togglePathSelection(1);
 
-      expect(mockApp.selectedPathIds.has("path1")).toBe(false);
+      expect(mockApp.selectedPathIds.has(1)).toBe(false);
       expect(mockApp.replayManager.updateReplayButtonState).toHaveBeenCalled();
       expect(mockApp.stateManager.saveMapState).toHaveBeenCalled();
     });
@@ -52,7 +52,7 @@ describe("PathSelection", () => {
     it("redraws altitude paths when altitude visible", () => {
       mockApp.altitudeVisible = true;
 
-      pathSelection.togglePathSelection("path1");
+      pathSelection.togglePathSelection(1);
 
       expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalled();
       expect(mockApp.map.invalidateSize).not.toHaveBeenCalled(); // Not called immediately
@@ -61,7 +61,7 @@ describe("PathSelection", () => {
     it("redraws airspeed paths when airspeed visible", () => {
       mockApp.airspeedVisible = true;
 
-      pathSelection.togglePathSelection("path1");
+      pathSelection.togglePathSelection(1);
 
       expect(mockApp.layerManager.redrawAirspeedPaths).toHaveBeenCalled();
       expect(mockApp.map.invalidateSize).not.toHaveBeenCalled(); // Not called immediately
@@ -71,7 +71,7 @@ describe("PathSelection", () => {
       mockApp.altitudeVisible = false;
       mockApp.airspeedVisible = false;
 
-      pathSelection.togglePathSelection("path1");
+      pathSelection.togglePathSelection(1);
 
       expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
       expect(mockApp.layerManager.redrawAirspeedPaths).not.toHaveBeenCalled();
@@ -80,13 +80,13 @@ describe("PathSelection", () => {
 
   describe("selectPathsByAirport", () => {
     it("selects all paths associated with an airport", () => {
-      mockApp.airportToPaths["EDDF"] = new Set(["path1", "path2", "path3"]);
+      mockApp.airportToPaths["EDDF"] = new Set([1, 2, 3]);
 
       pathSelection.selectPathsByAirport("EDDF");
 
-      expect(mockApp.selectedPathIds.has("path1")).toBe(true);
-      expect(mockApp.selectedPathIds.has("path2")).toBe(true);
-      expect(mockApp.selectedPathIds.has("path3")).toBe(true);
+      expect(mockApp.selectedPathIds.has(1)).toBe(true);
+      expect(mockApp.selectedPathIds.has(2)).toBe(true);
+      expect(mockApp.selectedPathIds.has(3)).toBe(true);
       expect(mockApp.replayManager.updateReplayButtonState).toHaveBeenCalled();
       expect(mockApp.stateManager.saveMapState).toHaveBeenCalled();
     });
@@ -101,7 +101,7 @@ describe("PathSelection", () => {
 
     it("redraws altitude paths when altitude visible", () => {
       mockApp.altitudeVisible = true;
-      mockApp.airportToPaths["EDDF"] = new Set(["path1"]);
+      mockApp.airportToPaths["EDDF"] = new Set([1]);
 
       pathSelection.selectPathsByAirport("EDDF");
 
@@ -110,7 +110,7 @@ describe("PathSelection", () => {
 
     it("redraws airspeed paths when airspeed visible", () => {
       mockApp.airspeedVisible = true;
-      mockApp.airportToPaths["EDDF"] = new Set(["path1"]);
+      mockApp.airportToPaths["EDDF"] = new Set([1]);
 
       pathSelection.selectPathsByAirport("EDDF");
 
@@ -120,9 +120,9 @@ describe("PathSelection", () => {
 
   describe("clearSelection", () => {
     it("clears all selected paths", () => {
-      mockApp.selectedPathIds.add("path1");
-      mockApp.selectedPathIds.add("path2");
-      mockApp.selectedPathIds.add("path3");
+      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds.add(3);
 
       pathSelection.clearSelection();
 
@@ -133,7 +133,7 @@ describe("PathSelection", () => {
 
     it("redraws altitude paths when altitude visible", () => {
       mockApp.altitudeVisible = true;
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       pathSelection.clearSelection();
 
@@ -142,7 +142,7 @@ describe("PathSelection", () => {
 
     it("redraws airspeed paths when airspeed visible", () => {
       mockApp.airspeedVisible = true;
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       pathSelection.clearSelection();
 

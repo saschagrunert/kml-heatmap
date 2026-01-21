@@ -234,7 +234,7 @@ var KMLHeatmapModules = (() => {
     if (urlParams.has("p")) {
       const pathStr = urlParams.get("p");
       if (pathStr) {
-        state.selectedPathIds = pathStr.split(",").filter((id) => id.trim().length > 0);
+        state.selectedPathIds = pathStr.split(",").filter((id) => id.trim().length > 0).map((id) => parseInt(id, 10)).filter((id) => !isNaN(id));
       }
     }
     if (urlParams.has("v")) {
@@ -972,7 +972,7 @@ var KMLHeatmapModules = (() => {
     }
     return true;
   }
-  function calculateSegmentProperties(_segment, options = { pathId: "" }) {
+  function calculateSegmentProperties(_segment, options = { pathId: 0 }) {
     const {
       pathId,
       selectedPathIds = /* @__PURE__ */ new Set(),

@@ -34,19 +34,19 @@ describe("FilterManager", () => {
       isInitializing: false,
       fullPathInfo: [
         {
-          id: "path1",
+          id: 1,
           year: 2025,
           aircraft_registration: "D-ABCD",
           aircraft_type: "DA40",
         },
         {
-          id: "path2",
+          id: 2,
           year: 2025,
           aircraft_registration: "D-EFGH",
           aircraft_type: "C172",
         },
         {
-          id: "path3",
+          id: 3,
           year: 2024,
           aircraft_registration: "D-ABCD",
           aircraft_type: "DA40",
@@ -54,7 +54,7 @@ describe("FilterManager", () => {
       ],
       fullPathSegments: [],
       currentResolution: null,
-      selectedPathIds: new Set<string>(),
+      selectedPathIds: new Set<number>(),
       pathSegments: {},
       altitudeLayer: {
         clearLayers: vi.fn(),
@@ -63,9 +63,7 @@ describe("FilterManager", () => {
         loadedData: {},
         updateLayers: vi.fn().mockResolvedValue(undefined),
         loadData: vi.fn().mockResolvedValue({
-          path_info: [
-            { id: "path1", year: 2025, aircraft_registration: "D-ABCD" },
-          ],
+          path_info: [{ id: 1, year: 2025, aircraft_registration: "D-ABCD" }],
           path_segments: [],
         }),
       },
@@ -120,19 +118,19 @@ describe("FilterManager", () => {
     it("sorts aircraft by flight count descending", () => {
       mockApp.fullPathInfo = [
         {
-          id: "path1",
+          id: 1,
           year: 2025,
           aircraft_registration: "D-ABCD",
           aircraft_type: "DA40",
         },
         {
-          id: "path2",
+          id: 2,
           year: 2025,
           aircraft_registration: "D-ABCD",
           aircraft_type: "DA40",
         },
         {
-          id: "path3",
+          id: 3,
           year: 2025,
           aircraft_registration: "D-EFGH",
           aircraft_type: "C172",
@@ -245,7 +243,7 @@ describe("FilterManager", () => {
 
     it("clears selected paths when not initializing", async () => {
       mockApp.isInitializing = false;
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       await filterManager.filterByYear();
 
@@ -254,7 +252,7 @@ describe("FilterManager", () => {
 
     it("preserves selected paths when initializing", async () => {
       mockApp.isInitializing = true;
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       await filterManager.filterByYear();
 
@@ -387,7 +385,7 @@ describe("FilterManager", () => {
 
     it("clears selected paths when not initializing", async () => {
       mockApp.isInitializing = false;
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       await filterManager.filterByAircraft();
 
@@ -396,7 +394,7 @@ describe("FilterManager", () => {
 
     it("preserves selected paths when initializing", async () => {
       mockApp.isInitializing = true;
-      mockApp.selectedPathIds.add("path1");
+      mockApp.selectedPathIds.add(1);
 
       await filterManager.filterByAircraft();
 

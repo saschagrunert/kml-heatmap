@@ -66,7 +66,7 @@ describe("DataManager", () => {
       selectedAircraft: "all",
       currentResolution: null,
       currentData: null,
-      selectedPathIds: new Set<string>(),
+      selectedPathIds: new Set<number>(),
       pathToAirports: {},
       airportToPaths: {},
       altitudeRange: { min: 0, max: 0 },
@@ -343,12 +343,12 @@ describe("DataManager", () => {
         path_segments: [],
         path_info: [
           {
-            id: "path1",
+            id: 1,
             start_airport: "EDDF",
             end_airport: "EDDM",
           },
           {
-            id: "path2",
+            id: 2,
             start_airport: "EDDM",
             end_airport: "EDDF",
           },
@@ -362,28 +362,28 @@ describe("DataManager", () => {
 
       await dataManager.updateLayers();
 
-      expect(mockApp.pathToAirports["path1"]).toEqual({
+      expect(mockApp.pathToAirports[1]).toEqual({
         start: "EDDF",
         end: "EDDM",
       });
-      expect(mockApp.pathToAirports["path2"]).toEqual({
+      expect(mockApp.pathToAirports[2]).toEqual({
         start: "EDDM",
         end: "EDDF",
       });
 
-      expect(mockApp.airportToPaths["EDDF"]).toContain("path1");
-      expect(mockApp.airportToPaths["EDDF"]).toContain("path2");
-      expect(mockApp.airportToPaths["EDDM"]).toContain("path1");
-      expect(mockApp.airportToPaths["EDDM"]).toContain("path2");
+      expect(mockApp.airportToPaths["EDDF"]).toContain(1);
+      expect(mockApp.airportToPaths["EDDF"]).toContain(2);
+      expect(mockApp.airportToPaths["EDDM"]).toContain(1);
+      expect(mockApp.airportToPaths["EDDM"]).toContain(2);
     });
 
     it("calculates altitude range from segments", async () => {
       const mockData = {
         coordinates: [[50.0, 8.0]],
         path_segments: [
-          { path_id: "path1", altitude_ft: 1000 },
-          { path_id: "path1", altitude_ft: 5000 },
-          { path_id: "path1", altitude_ft: 3000 },
+          { path_id: 1, altitude_ft: 1000 },
+          { path_id: 1, altitude_ft: 5000 },
+          { path_id: 1, altitude_ft: 3000 },
         ],
         path_info: [],
         resolution: "z5-10",
@@ -409,14 +409,14 @@ describe("DataManager", () => {
         ],
         path_segments: [
           {
-            path_id: "path1",
+            path_id: 1,
             coords: [
               [50.0, 8.0],
               [51.0, 9.0],
             ],
           },
           {
-            path_id: "path2",
+            path_id: 2,
             coords: [
               [52.0, 10.0],
               [53.0, 11.0],
@@ -424,8 +424,8 @@ describe("DataManager", () => {
           },
         ],
         path_info: [
-          { id: "path1", year: 2025, aircraft_registration: "D-ABCD" },
-          { id: "path2", year: 2024, aircraft_registration: "D-EFGH" },
+          { id: 1, year: 2025, aircraft_registration: "D-ABCD" },
+          { id: 2, year: 2024, aircraft_registration: "D-EFGH" },
         ],
         resolution: "z5-10",
         original_points: 1000,
@@ -452,14 +452,14 @@ describe("DataManager", () => {
         ],
         path_segments: [
           {
-            path_id: "path1",
+            path_id: 1,
             coords: [
               [50.0, 8.0],
               [51.0, 9.0],
             ],
           },
           {
-            path_id: "path2",
+            path_id: 2,
             coords: [
               [52.0, 10.0],
               [53.0, 11.0],
@@ -467,8 +467,8 @@ describe("DataManager", () => {
           },
         ],
         path_info: [
-          { id: "path1", year: 2025, aircraft_registration: "D-ABCD" },
-          { id: "path2", year: 2025, aircraft_registration: "D-EFGH" },
+          { id: 1, year: 2025, aircraft_registration: "D-ABCD" },
+          { id: 2, year: 2025, aircraft_registration: "D-EFGH" },
         ],
         resolution: "z5-10",
         original_points: 1000,

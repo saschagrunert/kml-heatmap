@@ -13,7 +13,7 @@ interface SavedState {
   aviationVisible: boolean;
   selectedYear: string;
   selectedAircraft: string;
-  selectedPathIds: string[];
+  selectedPathIds: number[];
   statsPanelVisible: boolean;
 }
 
