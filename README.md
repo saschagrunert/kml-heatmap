@@ -292,6 +292,7 @@ URL parameters take precedence over localStorage, allowing shared links to overr
 - State persistence - Saves to localStorage and syncs with URL for shareable links
 - Year-based organization - Automatically extracts and organizes flights by year
 - Per-aircraft statistics - Tracks flight time and distance per aircraft registration
+- Aircraft model lookup - Automatically fetches aircraft make/model from airport-data.com, with smart handling of re-registered callsigns (prefers current registration)
 
 ## Technical Details
 
@@ -304,17 +305,17 @@ The tool automatically scales output file sizes based on dataset size:
 
 Target limits per resolution (per year):
 
-- z14_plus: 30k points (~2.5MB max)
-- z11_13: 15k points (~1.2MB max)
-- z8_10: 10k points (~800KB max)
-- z5_7: 5k points (~400KB max)
-- z0_4: 3k points (~250KB max)
+- z14_plus: 100k points (~8.3MB max) - Full resolution detail
+- z11_13: 50k points (~4.1MB max) - High detail for city level
+- z8_10: 30k points (~2.5MB max) - Enhanced regional detail
+- z5_7: 15k points (~1.2MB max) - Improved country level
+- z0_4: 10k points (~830KB max) - Better continent view
 
 **Example scaling**: 100,000 KML files (5M points)
 
 - Processing time: ~11 minutes
-- Total output: 31MB (all zoom levels)
-- Compression ratio: 166:1 (5M points → 30k in browser)
+- Total output: ~100MB (all zoom levels)
+- Compression ratio: 50:1 (5M points → 100k in browser)
 
 Uses Ramer-Douglas-Peucker algorithm to generate 5 resolution levels. With adaptive downsampling, output size is predictable regardless of input size.
 
