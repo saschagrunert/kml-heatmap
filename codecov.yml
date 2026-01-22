@@ -9,19 +9,8 @@ coverage:
         target: auto
         threshold: 1%
 
-  # Separate coverage tracking for backend and frontend
-  flags:
-    backend:
-      paths:
-        - "kml_heatmap/"
-      carryforward: true
-    frontend:
-      paths:
-        - "kml_heatmap/frontend/"
-      carryforward: true
-
 comment:
-  layout: "reach,diff,flags,files,footer"
+  layout: "reach,diff,files,footer"
   behavior: default
   require_changes: false
 

@@ -90,20 +90,11 @@ jobs:
         run: npm run test:coverage
       - name: Run Python tests with coverage
         run: pytest --cov=kml_heatmap --cov-report=xml:coverage/coverage.xml --cov-report=term
-      - name: Upload Python coverage to Codecov
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage/coverage.xml
-          flags: backend
-          fail_ci_if_error: true
-          verbose: true
-      - name: Upload JavaScript coverage to Codecov
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage/coverage-final.json
-          flags: frontend
+          files: ./coverage/coverage.xml,./coverage/coverage-final.json
           fail_ci_if_error: true
           verbose: true
 

@@ -3,9 +3,7 @@
 > Create interactive heatmap visualizations from KML files.
 
 [![Demo](https://img.shields.io/badge/live-demo-blue.svg)](https://saschagrunert.github.io/kml-heatmap)
-[![Overall Coverage](https://codecov.io/gh/saschagrunert/kml-heatmap/badge.svg?token=AxIuoWeFSy)](https://codecov.io/gh/saschagrunert/kml-heatmap)
-[![Backend Coverage](https://codecov.io/gh/saschagrunert/kml-heatmap/badge.svg?token=AxIuoWeFSy&flag=backend)](https://codecov.io/gh/saschagrunert/kml-heatmap)
-[![Frontend Coverage](https://codecov.io/gh/saschagrunert/kml-heatmap/badge.svg?token=AxIuoWeFSy&flag=frontend)](https://codecov.io/gh/saschagrunert/kml-heatmap)
+[![Coverage](https://codecov.io/gh/saschagrunert/kml-heatmap/badge.svg?token=AxIuoWeFSy)](https://codecov.io/gh/saschagrunert/kml-heatmap)
 
 ## Table of Contents
 
