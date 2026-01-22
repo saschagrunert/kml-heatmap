@@ -15,6 +15,8 @@ interface SavedState {
   selectedAircraft: string;
   selectedPathIds: number[];
   statsPanelVisible: boolean;
+  wrappedVisible: boolean;
+  buttonsHidden: boolean;
 }
 
 export class StateManager {
@@ -28,6 +30,7 @@ export class StateManager {
     if (!this.app.map) return;
 
     const statsPanelEl = document.getElementById("stats-panel");
+    const wrappedModalEl = document.getElementById("wrapped-modal");
     const state: SavedState = {
       center: this.app.map.getCenter(),
       zoom: this.app.map.getZoom(),
@@ -42,6 +45,10 @@ export class StateManager {
       statsPanelVisible: statsPanelEl
         ? statsPanelEl.classList.contains("visible")
         : false,
+      wrappedVisible: wrappedModalEl
+        ? wrappedModalEl.style.display === "flex"
+        : false,
+      buttonsHidden: this.app.buttonsHidden,
       // Note: replay state is NOT persisted - too complex to restore reliably
     };
     try {

@@ -11,7 +11,7 @@ import type { AppState } from "../types";
  *   y - selectedYear (string: 'all' or year like '2024')
  *   a - selectedAircraft (string: 'all' or aircraft identifier)
  *   p - selectedPathIds (comma-separated integers: '1,5,12')
- *   v - layer visibility (6-char binary string: '101010')
+ *   v - layer visibility (8-char binary string: '10010000')
  *   lat, lng - map center coordinates
  *   z - map zoom level
  * @param params - URLSearchParams object or search string
@@ -62,16 +62,25 @@ export function parseUrlParams(
     }
   }
 
-  // Layer visibility (6 flags: heatmap, altitude, airspeed, airports, aviation, stats)
+  // Layer visibility (8 flags: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden)
   if (urlParams.has("v")) {
     const vis = urlParams.get("v");
-    if (vis && vis.length === 6) {
+    // Support old 6-char, 7-char, and new 8-char format for backwards compatibility
+    if (vis && (vis.length === 6 || vis.length === 7 || vis.length === 8)) {
       state.heatmapVisible = vis[0] === "1";
       state.altitudeVisible = vis[1] === "1";
       state.airspeedVisible = vis[2] === "1";
       state.airportsVisible = vis[3] === "1";
       state.aviationVisible = vis[4] === "1";
       state.statsPanelVisible = vis[5] === "1";
+      // Only parse wrapped state if 7th character exists
+      if (vis.length >= 7) {
+        state.wrappedVisible = vis[6] === "1";
+      }
+      // Only parse buttonsHidden state if 8th character exists
+      if (vis.length === 8) {
+        state.buttonsHidden = vis[7] === "1";
+      }
     }
   }
 
@@ -132,7 +141,7 @@ export function encodeStateToUrl(state: AppState): string {
     params.set("p", state.selectedPathIds.join(","));
   }
 
-  // Build visibility string (6 characters: heatmap, altitude, airspeed, airports, aviation, stats)
+  // Build visibility string (8 characters: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden)
   // Only include if visibility properties are actually defined
   const hasVisibility =
     state.heatmapVisible !== undefined ||
@@ -140,7 +149,9 @@ export function encodeStateToUrl(state: AppState): string {
     state.airspeedVisible !== undefined ||
     state.airportsVisible !== undefined ||
     state.aviationVisible !== undefined ||
-    state.statsPanelVisible !== undefined;
+    state.statsPanelVisible !== undefined ||
+    state.wrappedVisible !== undefined ||
+    state.buttonsHidden !== undefined;
 
   if (hasVisibility) {
     const vis = [
@@ -150,10 +161,12 @@ export function encodeStateToUrl(state: AppState): string {
       state.airportsVisible ? "1" : "0",
       state.aviationVisible ? "1" : "0",
       state.statsPanelVisible ? "1" : "0",
+      state.wrappedVisible ? "1" : "0",
+      state.buttonsHidden ? "1" : "0",
     ].join("");
 
-    // Only add if not default (100100 = heatmap+airports on, rest off, stats hidden)
-    if (vis !== "100100") {
+    // Only add if not default (10010000 = heatmap+airports on, rest off, stats/wrapped/buttonsHidden hidden)
+    if (vis !== "10010000") {
       params.set("v", vis);
     }
   }
@@ -186,6 +199,8 @@ export function getDefaultState(): AppState {
     airportsVisible: true,
     aviationVisible: false,
     statsPanelVisible: false,
+    wrappedVisible: false,
+    buttonsHidden: false,
   };
 }
 

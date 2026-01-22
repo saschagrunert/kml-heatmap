@@ -45,7 +45,7 @@ describe("URL state management", () => {
       });
     });
 
-    it("parses visibility flags", () => {
+    it("parses visibility flags (6-char legacy format)", () => {
       const result = parseUrlParams("v=101010");
       expect(result).toEqual({
         heatmapVisible: true,
@@ -54,6 +54,33 @@ describe("URL state management", () => {
         airportsVisible: false,
         aviationVisible: true,
         statsPanelVisible: false,
+      });
+    });
+
+    it("parses visibility flags (7-char format with wrapped)", () => {
+      const result = parseUrlParams("v=1010101");
+      expect(result).toEqual({
+        heatmapVisible: true,
+        altitudeVisible: false,
+        airspeedVisible: true,
+        airportsVisible: false,
+        aviationVisible: true,
+        statsPanelVisible: false,
+        wrappedVisible: true,
+      });
+    });
+
+    it("parses visibility flags (8-char format with wrapped and buttonsHidden)", () => {
+      const result = parseUrlParams("v=10101011");
+      expect(result).toEqual({
+        heatmapVisible: true,
+        altitudeVisible: false,
+        airspeedVisible: true,
+        airportsVisible: false,
+        aviationVisible: true,
+        statsPanelVisible: false,
+        wrappedVisible: true,
+        buttonsHidden: true,
       });
     });
 
@@ -194,7 +221,7 @@ describe("URL state management", () => {
       expect(url).toContain("v=101010");
     });
 
-    it("omits default visibility (100100)", () => {
+    it("omits default visibility (10010000)", () => {
       const url = encodeStateToUrl({
         heatmapVisible: true,
         altitudeVisible: false,
@@ -202,8 +229,38 @@ describe("URL state management", () => {
         airportsVisible: true,
         aviationVisible: false,
         statsPanelVisible: false,
+        wrappedVisible: false,
+        buttonsHidden: false,
       });
       expect(url).not.toContain("v=");
+    });
+
+    it("encodes wrappedVisible flag", () => {
+      const url = encodeStateToUrl({
+        heatmapVisible: true,
+        altitudeVisible: false,
+        airspeedVisible: false,
+        airportsVisible: true,
+        aviationVisible: false,
+        statsPanelVisible: false,
+        wrappedVisible: true,
+        buttonsHidden: false,
+      });
+      expect(url).toContain("v=10010010");
+    });
+
+    it("encodes buttonsHidden flag", () => {
+      const url = encodeStateToUrl({
+        heatmapVisible: true,
+        altitudeVisible: false,
+        airspeedVisible: false,
+        airportsVisible: true,
+        aviationVisible: false,
+        statsPanelVisible: false,
+        wrappedVisible: false,
+        buttonsHidden: true,
+      });
+      expect(url).toContain("v=10010001");
     });
 
     it("encodes map center with 6 decimal places", () => {
@@ -232,6 +289,8 @@ describe("URL state management", () => {
         airportsVisible: true,
         aviationVisible: false,
         statsPanelVisible: true,
+        wrappedVisible: false,
+        buttonsHidden: false,
         center: { lat: 51.5, lng: 13.4 },
         zoom: 10.5,
       };
@@ -242,7 +301,7 @@ describe("URL state management", () => {
       expect(params.get("y")).toBe("2025");
       expect(params.get("a")).toBe("D-EAGJ");
       expect(params.get("p")).toBe("1,5");
-      expect(params.get("v")).toBe("010101");
+      expect(params.get("v")).toBe("01010100");
       expect(params.get("lat")).toBe("51.500000");
       expect(params.get("lng")).toBe("13.400000");
       expect(params.get("z")).toBe("10.50");
@@ -300,6 +359,8 @@ describe("URL state management", () => {
         airportsVisible: true,
         aviationVisible: false,
         statsPanelVisible: false,
+        wrappedVisible: false,
+        buttonsHidden: false,
       });
     });
 

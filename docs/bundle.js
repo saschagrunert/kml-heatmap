@@ -239,13 +239,19 @@ var KMLHeatmapModules = (() => {
     }
     if (urlParams.has("v")) {
       const vis = urlParams.get("v");
-      if (vis && vis.length === 6) {
+      if (vis && (vis.length === 6 || vis.length === 7 || vis.length === 8)) {
         state.heatmapVisible = vis[0] === "1";
         state.altitudeVisible = vis[1] === "1";
         state.airspeedVisible = vis[2] === "1";
         state.airportsVisible = vis[3] === "1";
         state.aviationVisible = vis[4] === "1";
         state.statsPanelVisible = vis[5] === "1";
+        if (vis.length >= 7) {
+          state.wrappedVisible = vis[6] === "1";
+        }
+        if (vis.length === 8) {
+          state.buttonsHidden = vis[7] === "1";
+        }
       }
     }
     if (urlParams.has("lat") && urlParams.has("lng")) {
@@ -281,7 +287,7 @@ var KMLHeatmapModules = (() => {
     if (state.selectedPathIds && state.selectedPathIds.length > 0) {
       params.set("p", state.selectedPathIds.join(","));
     }
-    const hasVisibility = state.heatmapVisible !== void 0 || state.altitudeVisible !== void 0 || state.airspeedVisible !== void 0 || state.airportsVisible !== void 0 || state.aviationVisible !== void 0 || state.statsPanelVisible !== void 0;
+    const hasVisibility = state.heatmapVisible !== void 0 || state.altitudeVisible !== void 0 || state.airspeedVisible !== void 0 || state.airportsVisible !== void 0 || state.aviationVisible !== void 0 || state.statsPanelVisible !== void 0 || state.wrappedVisible !== void 0 || state.buttonsHidden !== void 0;
     if (hasVisibility) {
       const vis = [
         state.heatmapVisible ? "1" : "0",
@@ -289,9 +295,11 @@ var KMLHeatmapModules = (() => {
         state.airspeedVisible ? "1" : "0",
         state.airportsVisible ? "1" : "0",
         state.aviationVisible ? "1" : "0",
-        state.statsPanelVisible ? "1" : "0"
+        state.statsPanelVisible ? "1" : "0",
+        state.wrappedVisible ? "1" : "0",
+        state.buttonsHidden ? "1" : "0"
       ].join("");
-      if (vis !== "100100") {
+      if (vis !== "10010000") {
         params.set("v", vis);
       }
     }
@@ -314,7 +322,9 @@ var KMLHeatmapModules = (() => {
       airspeedVisible: false,
       airportsVisible: true,
       aviationVisible: false,
-      statsPanelVisible: false
+      statsPanelVisible: false,
+      wrappedVisible: false,
+      buttonsHidden: false
     };
   }
   function mergeState(defaultState, urlState) {

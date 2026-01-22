@@ -172,6 +172,8 @@ export interface AppState {
   airportsVisible?: boolean;
   aviationVisible?: boolean;
   statsPanelVisible?: boolean;
+  wrappedVisible?: boolean;
+  buttonsHidden?: boolean;
   center?: MapCenter;
   zoom?: number;
 }

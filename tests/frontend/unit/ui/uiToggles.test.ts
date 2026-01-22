@@ -22,6 +22,9 @@ describe("UIToggles", () => {
         redrawAltitudePaths: vi.fn(),
         redrawAirspeedPaths: vi.fn(),
       },
+      stateManager: {
+        saveMapState: vi.fn(),
+      },
     };
 
     uiToggles = new UIToggles(mockApp);

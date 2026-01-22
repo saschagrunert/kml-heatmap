@@ -260,6 +260,9 @@ export class MapApp {
       if (this.savedState.aviationVisible !== undefined) {
         this.aviationVisible = this.savedState.aviationVisible;
       }
+      if (this.savedState.buttonsHidden !== undefined) {
+        this.buttonsHidden = this.savedState.buttonsHidden;
+      }
     }
 
     // Initialize Leaflet map
@@ -359,6 +362,27 @@ export class MapApp {
 
     // Mark initialization as complete
     this.isInitializing = false;
+
+    // Restore buttonsHidden state if it was saved
+    if (this.savedState && this.savedState.buttonsHidden) {
+      const toggleableButtons = document.querySelectorAll(".toggleable-btn");
+      const hideButton = document.getElementById("hide-buttons-btn");
+
+      toggleableButtons.forEach((btn) => {
+        btn.classList.add("buttons-hidden");
+      });
+      if (hideButton) hideButton.textContent = "🔽";
+    }
+
+    // Restore wrapped panel state if it was open
+    if (this.savedState && this.savedState.wrappedVisible) {
+      // Show wrapped panel after a delay to ensure everything is loaded
+      setTimeout(() => {
+        if (this.wrappedManager) {
+          this.wrappedManager.showWrapped();
+        }
+      }, 500);
+    }
 
     // Save state after initialization
     this.stateManager.saveMapState();
