@@ -13,11 +13,11 @@ coverage:
   flags:
     backend:
       paths:
-        - kml_heatmap/**/*.py
+        - "kml_heatmap/"
       carryforward: true
     frontend:
       paths:
-        - kml_heatmap/frontend/**/*.ts
+        - "kml_heatmap/frontend/"
       carryforward: true
 
 comment:
