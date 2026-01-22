@@ -110,19 +110,7 @@ export class DataManager {
       this.app.map.removeLayer(this.app.heatmapLayer);
     }
 
-    // Performance optimization: limit heatmap points for very large datasets
-    const MAX_HEATMAP_POINTS = 20000;
-    let heatmapCoords = filteredCoordinates;
-    if (filteredCoordinates.length > MAX_HEATMAP_POINTS) {
-      // Sample every Nth point to stay under limit
-      const step = Math.ceil(filteredCoordinates.length / MAX_HEATMAP_POINTS);
-      heatmapCoords = filteredCoordinates.filter((_, i) => i % step === 0);
-      console.log(
-        `Heatmap: Downsampled ${filteredCoordinates.length} points to ${heatmapCoords.length} for better performance`
-      );
-    }
-
-    this.app.heatmapLayer = (window as any).L.heatLayer(heatmapCoords, {
+    this.app.heatmapLayer = (window as any).L.heatLayer(filteredCoordinates, {
       radius: 10,
       blur: 15,
       minOpacity: 0.25,

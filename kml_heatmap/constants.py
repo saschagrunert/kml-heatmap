@@ -72,22 +72,22 @@ LANDING_FALLBACK_ALTITUDE_M = 1000  # Fallback altitude threshold for short path
 RESOLUTION_LEVELS = {
     "z0_4": {
         "factor": 15,
-        "epsilon": 0.0008,
+        "epsilon": 0.0004,
         "description": "Zoom 0-4 (continent level)",
     },
     "z5_7": {
         "factor": 10,
-        "epsilon": 0.0004,
+        "epsilon": 0.0002,
         "description": "Zoom 5-7 (country level)",
     },
     "z8_10": {
         "factor": 5,
-        "epsilon": 0.0002,
+        "epsilon": 0.0001,
         "description": "Zoom 8-10 (regional level)",
     },
     "z11_13": {
         "factor": 2,
-        "epsilon": 0.0001,
+        "epsilon": 0.00005,
         "description": "Zoom 11-13 (city level)",
     },
     "z14_plus": {"factor": 1, "epsilon": 0, "description": "Zoom 14+ (full detail)"},
@@ -98,11 +98,11 @@ RESOLUTION_LEVELS = {
 # Optimized for fast loading and smooth rendering in web browsers
 # Targets multi-year datasets (e.g., flight schools with 5k files/year × 10 years)
 TARGET_POINTS_PER_RESOLUTION = {
-    "z14_plus": 30_000,  # ~2.5MB per year max - smooth even with 10+ years
-    "z11_13": 15_000,  # ~1.2MB per year max
-    "z8_10": 10_000,  # ~800KB per year max
-    "z5_7": 5_000,  # ~400KB per year max
-    "z0_4": 3_000,  # ~250KB per year max
+    "z14_plus": 100_000,  # Higher detail - full resolution
+    "z11_13": 50_000,  # More detail at city level
+    "z8_10": 30_000,  # More detail at regional level
+    "z5_7": 15_000,  # More detail at country level
+    "z0_4": 10_000,  # More detail at continent level
 }
 
 # === Heatmap Configuration ===

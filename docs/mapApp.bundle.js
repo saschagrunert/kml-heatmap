@@ -115,16 +115,7 @@ var MapAppModule = (() => {
       if (this.app.heatmapLayer) {
         this.app.map.removeLayer(this.app.heatmapLayer);
       }
-      const MAX_HEATMAP_POINTS = 2e4;
-      let heatmapCoords = filteredCoordinates;
-      if (filteredCoordinates.length > MAX_HEATMAP_POINTS) {
-        const step = Math.ceil(filteredCoordinates.length / MAX_HEATMAP_POINTS);
-        heatmapCoords = filteredCoordinates.filter((_, i) => i % step === 0);
-        console.log(
-          `Heatmap: Downsampled ${filteredCoordinates.length} points to ${heatmapCoords.length} for better performance`
-        );
-      }
-      this.app.heatmapLayer = window.L.heatLayer(heatmapCoords, {
+      this.app.heatmapLayer = window.L.heatLayer(filteredCoordinates, {
         radius: 10,
         blur: 15,
         minOpacity: 0.25,
