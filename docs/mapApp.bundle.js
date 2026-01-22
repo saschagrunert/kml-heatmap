@@ -186,6 +186,7 @@ var MapAppModule = (() => {
     saveMapState() {
       if (!this.app.map) return;
       const statsPanelEl = document.getElementById("stats-panel");
+      const wrappedModalEl = document.getElementById("wrapped-modal");
       const state = {
         center: this.app.map.getCenter(),
         zoom: this.app.map.getZoom(),
@@ -197,7 +198,9 @@ var MapAppModule = (() => {
         selectedYear: this.app.selectedYear,
         selectedAircraft: this.app.selectedAircraft,
         selectedPathIds: Array.from(this.app.selectedPathIds),
-        statsPanelVisible: statsPanelEl ? statsPanelEl.classList.contains("visible") : false
+        statsPanelVisible: statsPanelEl ? statsPanelEl.classList.contains("visible") : false,
+        wrappedVisible: wrappedModalEl ? wrappedModalEl.style.display === "flex" : false,
+        buttonsHidden: this.app.buttonsHidden
         // Note: replay state is NOT persisted - too complex to restore reliably
       };
       try {
@@ -1850,6 +1853,9 @@ var MapAppModule = (() => {
         setTimeout(() => {
           this.app.map.invalidateSize();
           this.app.map.fitBounds(this.app.config.bounds, { padding: [80, 80] });
+          if (this.app.stateManager) {
+            this.app.stateManager.saveMapState();
+          }
         }, 100);
       }, 50);
     }
@@ -1896,6 +1902,9 @@ var MapAppModule = (() => {
           }
           setTimeout(() => {
             if (this.app.map) this.app.map.invalidateSize();
+            if (this.app.stateManager) {
+              this.app.stateManager.saveMapState();
+            }
           }, 100);
         }
         const modal = document.getElementById("wrapped-modal");
@@ -2108,6 +2117,7 @@ var MapAppModule = (() => {
       if (this.app.airspeedVisible) {
         this.app.layerManager.redrawAirspeedPaths();
       }
+      this.app.stateManager.saveMapState();
     }
     exportMap() {
       const btn = document.getElementById(
@@ -2253,6 +2263,9 @@ var MapAppModule = (() => {
         if (this.savedState.aviationVisible !== void 0) {
           this.aviationVisible = this.savedState.aviationVisible;
         }
+        if (this.savedState.buttonsHidden !== void 0) {
+          this.buttonsHidden = this.savedState.buttonsHidden;
+        }
       }
       this.map = L4.map("map", {
         center: this.config.center,
@@ -2319,6 +2332,21 @@ var MapAppModule = (() => {
       await this.loadInitialData();
       this.setupEventHandlers();
       this.isInitializing = false;
+      if (this.savedState && this.savedState.buttonsHidden) {
+        const toggleableButtons = document.querySelectorAll(".toggleable-btn");
+        const hideButton = document.getElementById("hide-buttons-btn");
+        toggleableButtons.forEach((btn) => {
+          btn.classList.add("buttons-hidden");
+        });
+        if (hideButton) hideButton.textContent = "\u{1F53D}";
+      }
+      if (this.savedState && this.savedState.wrappedVisible) {
+        setTimeout(() => {
+          if (this.wrappedManager) {
+            this.wrappedManager.showWrapped();
+          }
+        }, 500);
+      }
       this.stateManager.saveMapState();
     }
     async loadInitialData() {

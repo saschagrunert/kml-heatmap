@@ -269,6 +269,11 @@ export class WrappedManager {
       setTimeout(() => {
         this.app.map!.invalidateSize();
         this.app.map!.fitBounds(this.app.config.bounds, { padding: [80, 80] });
+
+        // Save state after wrapped panel is shown
+        if (this.app.stateManager) {
+          this.app.stateManager.saveMapState();
+        }
       }, 100);
     }, 50);
   }
@@ -326,6 +331,11 @@ export class WrappedManager {
         // Force map to recalculate size
         setTimeout(() => {
           if (this.app.map) this.app.map.invalidateSize();
+
+          // Save state after wrapped panel is closed
+          if (this.app.stateManager) {
+            this.app.stateManager.saveMapState();
+          }
         }, 100);
       }
 

@@ -274,6 +274,9 @@ export class UIToggles {
     if (this.app.airspeedVisible) {
       this.app.layerManager!.redrawAirspeedPaths();
     }
+
+    // Save state after toggling button visibility
+    this.app.stateManager!.saveMapState();
   }
 
   exportMap(): void {
