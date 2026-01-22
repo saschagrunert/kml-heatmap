@@ -3,18 +3,24 @@
  */
 import type { MapApp } from "../mapApp";
 import type { KMLDataset, Airport, Metadata } from "../types";
+import type { Coordinate } from "../utils/geometry";
+import type { DataLoader } from "../services/dataLoader";
+import { domCache } from "../utils/domCache";
 
 export class DataManager {
   private app: MapApp;
-  private dataLoader: any; // KMLHeatmap.DataLoader type from library
+  private dataLoader: DataLoader;
   loadedData: { [key: string]: KMLDataset };
   currentData: KMLDataset | null;
 
   constructor(app: MapApp) {
     this.app = app;
 
+    // Pre-cache loading element
+    domCache.cacheElements(["loading"]);
+
     // Create DataLoader instance
-    this.dataLoader = new (window as any).KMLHeatmap.DataLoader({
+    this.dataLoader = new window.KMLHeatmap.DataLoader({
       dataDir: app.config.dataDir,
       showLoading: () => this.showLoading(),
       hideLoading: () => this.hideLoading(),
@@ -25,12 +31,12 @@ export class DataManager {
   }
 
   showLoading(): void {
-    const loadingEl = document.getElementById("loading");
+    const loadingEl = domCache.get("loading");
     if (loadingEl) loadingEl.style.display = "block";
   }
 
   hideLoading(): void {
-    const loadingEl = document.getElementById("loading");
+    const loadingEl = domCache.get("loading");
     if (loadingEl) loadingEl.style.display = "none";
   }
 
@@ -42,7 +48,7 @@ export class DataManager {
     return await this.dataLoader.loadAirports();
   }
 
-  async loadMetadata(): Promise<Metadata> {
+  async loadMetadata(): Promise<Metadata | null> {
     return await this.dataLoader.loadMetadata();
   }
 
@@ -50,7 +56,7 @@ export class DataManager {
     if (!this.app.map) return;
 
     const zoom = this.app.map.getZoom();
-    const resolution = (window as any).KMLHeatmap.getResolutionForZoom(zoom);
+    const resolution = window.KMLHeatmap.getResolutionForZoom(zoom);
 
     if (resolution === this.app.currentResolution) {
       return;
@@ -101,7 +107,7 @@ export class DataManager {
       });
 
       filteredCoordinates = Array.from(coordSet).map((str) => {
-        return JSON.parse(str);
+        return JSON.parse(str) as Coordinate;
       });
     }
 
@@ -110,7 +116,7 @@ export class DataManager {
       this.app.map.removeLayer(this.app.heatmapLayer);
     }
 
-    this.app.heatmapLayer = (window as any).L.heatLayer(filteredCoordinates, {
+    this.app.heatmapLayer = L.heatLayer(filteredCoordinates, {
       radius: 10,
       blur: 15,
       minOpacity: 0.25,
@@ -169,11 +175,12 @@ export class DataManager {
     if (data.path_segments && data.path_segments.length > 0) {
       const altitudes = data.path_segments.map((s) => s.altitude_ft || 0);
       // Use iterative approach to avoid stack overflow with large arrays
-      let min = altitudes[0];
-      let max = altitudes[0];
+      let min = altitudes[0] ?? 0;
+      let max = altitudes[0] ?? 0;
       for (let i = 1; i < altitudes.length; i++) {
-        if (altitudes[i] < min) min = altitudes[i];
-        if (altitudes[i] > max) max = altitudes[i];
+        const alt = altitudes[i] ?? 0;
+        if (alt < min) min = alt;
+        if (alt > max) max = alt;
       }
       this.app.altitudeRange.min = min;
       this.app.altitudeRange.max = max;

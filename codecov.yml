@@ -1,0 +1,33 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+        threshold: 1%
+
+  # Separate coverage tracking for backend and frontend
+  flags:
+    backend:
+      paths:
+        - kml_heatmap/**/*.py
+      carryforward: true
+    frontend:
+      paths:
+        - kml_heatmap/frontend/**/*.ts
+      carryforward: true
+
+comment:
+  layout: "reach,diff,flags,files,footer"
+  behavior: default
+  require_changes: false
+
+ignore:
+  - "tests/**"
+  - "scripts/**"
+  - "**/*.test.ts"
+  - "**/*.test.js"
+  - "**/mocks/**"

@@ -4,6 +4,7 @@
 import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import type { PathSegment } from "../types";
+import { domCache } from "../utils/domCache";
 
 export class ReplayManager {
   private app: MapApp;
@@ -33,6 +34,22 @@ export class ReplayManager {
   constructor(app: MapApp) {
     this.app = app;
 
+    // Pre-cache replay control elements
+    domCache.cacheElements([
+      "replay-controls",
+      "replay-btn",
+      "replay-play-btn",
+      "replay-pause-btn",
+      "replay-slider",
+      "replay-slider-start",
+      "replay-slider-end",
+      "replay-time-display",
+      "replay-speed",
+      "replay-autozoom-btn",
+      "altitude-btn",
+      "altitude-legend",
+    ]);
+
     // Replay state
     this.replayActive = false;
     this.replayPlaying = false;
@@ -57,7 +74,7 @@ export class ReplayManager {
   }
 
   toggleReplay(): void {
-    const panel = document.getElementById("replay-controls");
+    const panel = domCache.get("replay-controls");
     if (!panel) return;
 
     if (this.replayActive) {
@@ -65,7 +82,7 @@ export class ReplayManager {
       this.stopReplay();
       panel.style.display = "none";
       this.replayActive = false;
-      const replayBtn = document.getElementById("replay-btn");
+      const replayBtn = domCache.get("replay-btn");
       if (replayBtn) replayBtn.textContent = "▶️ Replay";
 
       // Remove replay-active class from body
@@ -93,9 +110,9 @@ export class ReplayManager {
         this.app.map
       ) {
         this.app.altitudeVisible = true;
-        const altBtn = document.getElementById("altitude-btn");
+        const altBtn = domCache.get("altitude-btn");
         if (altBtn) altBtn.style.opacity = "1.0";
-        const altLegend = document.getElementById("altitude-legend");
+        const altLegend = domCache.get("altitude-legend");
         if (altLegend) altLegend.style.display = "block";
         // Add layer first, then redraw with a small delay for mobile Safari
         this.app.map.addLayer(this.app.altitudeLayer);
@@ -126,14 +143,14 @@ export class ReplayManager {
       if (this.initializeReplay()) {
         panel.style.display = "block";
         this.replayActive = true;
-        const replayBtn = document.getElementById("replay-btn");
+        const replayBtn = domCache.get("replay-btn");
         if (replayBtn) {
           replayBtn.textContent = "⏹️ Replay";
           replayBtn.style.opacity = "1.0";
         }
 
         // Initialize auto-zoom button style
-        const autoZoomBtn = document.getElementById(
+        const autoZoomBtn = domCache.get(
           "replay-autozoom-btn"
         ) as HTMLButtonElement | null;
         if (autoZoomBtn) {
@@ -155,7 +172,7 @@ export class ReplayManager {
 
   updateReplayButtonState(): void {
     // Enable replay button only when exactly one path is selected
-    const btn = document.getElementById("replay-btn");
+    const btn = domCache.get("replay-btn");
     if (!btn) return;
 
     if (this.app.selectedPathIds.size === 1) {
@@ -201,7 +218,7 @@ export class ReplayManager {
     const altFtRounded = Math.round(altFt / 50) * 50;
     const altMRounded = Math.round(altFtRounded * 0.3048);
     // Get color based on current altitude using the same scale as the path
-    const altColor = (window as any).KMLHeatmap.getColorForAltitude(
+    const altColor = window.KMLHeatmap.getColorForAltitude(
       altFt,
       this.replayColorMinAlt,
       this.replayColorMaxAlt
@@ -239,7 +256,7 @@ export class ReplayManager {
     const speedKtRounded = Math.round(speedKt);
     const speedKmhRounded = Math.round(speedKmh);
     // Get color based on current groundspeed using the same scale as the path
-    const speedColor = (window as any).KMLHeatmap.getColorForAirspeed(
+    const speedColor = window.KMLHeatmap.getColorForAirspeed(
       speedKt,
       this.replayColorMinSpeed,
       this.replayColorMaxSpeed
@@ -333,11 +350,12 @@ export class ReplayManager {
           return s.altitude_ft || 0;
         });
         // Use iterative approach to avoid stack overflow with large arrays
-        let min = altitudes[0];
-        let max = altitudes[0];
+        let min = altitudes[0] ?? 0;
+        let max = altitudes[0] ?? 0;
         for (let i = 1; i < altitudes.length; i++) {
-          if (altitudes[i] < min) min = altitudes[i];
-          if (altitudes[i] > max) max = altitudes[i];
+          const alt = altitudes[i] ?? 0;
+          if (alt < min) min = alt;
+          if (alt > max) max = alt;
         }
         this.replayColorMinAlt = min;
         this.replayColorMaxAlt = max;
@@ -352,11 +370,12 @@ export class ReplayManager {
           });
         if (groundspeeds.length > 0) {
           // Use iterative approach to avoid stack overflow with large arrays
-          let min = groundspeeds[0];
-          let max = groundspeeds[0];
+          let min = groundspeeds[0] ?? 0;
+          let max = groundspeeds[0] ?? 0;
           for (let i = 1; i < groundspeeds.length; i++) {
-            if (groundspeeds[i] < min) min = groundspeeds[i];
-            if (groundspeeds[i] > max) max = groundspeeds[i];
+            const speed = groundspeeds[i] ?? 0;
+            if (speed < min) min = speed;
+            if (speed > max) max = speed;
           }
           this.replayColorMinSpeed = min;
           this.replayColorMaxSpeed = max;
@@ -370,11 +389,12 @@ export class ReplayManager {
           return s.altitude_ft || 0;
         });
         // Use iterative approach to avoid stack overflow with large arrays
-        let min = altitudes[0];
-        let max = altitudes[0];
+        let min = altitudes[0] ?? 0;
+        let max = altitudes[0] ?? 0;
         for (let i = 1; i < altitudes.length; i++) {
-          if (altitudes[i] < min) min = altitudes[i];
-          if (altitudes[i] > max) max = altitudes[i];
+          const alt = altitudes[i] ?? 0;
+          if (alt < min) min = alt;
+          if (alt > max) max = alt;
         }
         this.replayColorMinAlt = min;
         this.replayColorMaxAlt = max;
@@ -388,11 +408,12 @@ export class ReplayManager {
           });
         if (groundspeeds.length > 0) {
           // Use iterative approach to avoid stack overflow with large arrays
-          let min = groundspeeds[0];
-          let max = groundspeeds[0];
+          let min = groundspeeds[0] ?? 0;
+          let max = groundspeeds[0] ?? 0;
           for (let i = 1; i < groundspeeds.length; i++) {
-            if (groundspeeds[i] < min) min = groundspeeds[i];
-            if (groundspeeds[i] > max) max = groundspeeds[i];
+            const speed = groundspeeds[i] ?? 0;
+            if (speed < min) min = speed;
+            if (speed > max) max = speed;
           }
           this.replayColorMinSpeed = min;
           this.replayColorMaxSpeed = max;
@@ -408,17 +429,13 @@ export class ReplayManager {
     this.replayMaxTime = lastSegment?.time || 0;
 
     // Update UI
-    const slider = document.getElementById(
-      "replay-slider"
-    ) as HTMLInputElement | null;
+    const slider = domCache.get("replay-slider") as HTMLInputElement | null;
     if (slider) {
       slider.max = this.replayMaxTime.toString();
     }
-    const sliderEnd = document.getElementById("replay-slider-end");
+    const sliderEnd = domCache.get("replay-slider-end");
     if (sliderEnd) {
-      sliderEnd.textContent = (window as any).KMLHeatmap.formatTime(
-        this.replayMaxTime
-      );
+      sliderEnd.textContent = window.KMLHeatmap.formatTime(this.replayMaxTime);
     }
 
     // Update legends to show selected path's color ranges
@@ -640,8 +657,8 @@ export class ReplayManager {
     }
 
     this.replayPlaying = true;
-    const playBtn = document.getElementById("replay-play-btn");
-    const pauseBtn = document.getElementById("replay-pause-btn");
+    const playBtn = domCache.get("replay-play-btn");
+    const pauseBtn = domCache.get("replay-pause-btn");
     if (playBtn) playBtn.style.display = "none";
     if (pauseBtn) pauseBtn.style.display = "inline-block";
 
@@ -704,8 +721,8 @@ export class ReplayManager {
 
   pauseReplay(): void {
     this.replayPlaying = false;
-    const playBtn = document.getElementById("replay-play-btn");
-    const pauseBtn = document.getElementById("replay-pause-btn");
+    const playBtn = domCache.get("replay-play-btn");
+    const pauseBtn = domCache.get("replay-pause-btn");
     if (playBtn) playBtn.style.display = "inline-block";
     if (pauseBtn) pauseBtn.style.display = "none";
 
@@ -755,9 +772,7 @@ export class ReplayManager {
   }
 
   changeReplaySpeed(): void {
-    const select = document.getElementById(
-      "replay-speed"
-    ) as HTMLSelectElement | null;
+    const select = domCache.get("replay-speed") as HTMLSelectElement | null;
     if (!select) return;
 
     this.replaySpeed = parseFloat(select.value);
@@ -766,7 +781,7 @@ export class ReplayManager {
 
   toggleAutoZoom(): void {
     this.replayAutoZoom = !this.replayAutoZoom;
-    const autoZoomBtn = document.getElementById("replay-autozoom-btn");
+    const autoZoomBtn = domCache.get("replay-autozoom-btn");
     if (autoZoomBtn) {
       autoZoomBtn.style.opacity = this.replayAutoZoom ? "1.0" : "0.5";
       autoZoomBtn.title = this.replayAutoZoom
@@ -778,23 +793,21 @@ export class ReplayManager {
 
   updateReplayDisplay(isManualSeek: boolean = false): void {
     // Update time display
-    const timeDisplay = document.getElementById("replay-time-display");
+    const timeDisplay = domCache.get("replay-time-display");
     if (timeDisplay) {
       timeDisplay.textContent =
-        (window as any).KMLHeatmap.formatTime(this.replayCurrentTime) +
+        window.KMLHeatmap.formatTime(this.replayCurrentTime) +
         " / " +
-        (window as any).KMLHeatmap.formatTime(this.replayMaxTime);
+        window.KMLHeatmap.formatTime(this.replayMaxTime);
     }
 
     // Update slider position
-    const slider = document.getElementById(
-      "replay-slider"
-    ) as HTMLInputElement | null;
+    const slider = domCache.get("replay-slider") as HTMLInputElement | null;
     if (slider) slider.value = this.replayCurrentTime.toString();
 
-    const sliderStart = document.getElementById("replay-slider-start");
+    const sliderStart = domCache.get("replay-slider-start");
     if (sliderStart) {
-      sliderStart.textContent = (window as any).KMLHeatmap.formatTime(
+      sliderStart.textContent = window.KMLHeatmap.formatTime(
         this.replayCurrentTime
       );
     }
@@ -838,15 +851,15 @@ export class ReplayManager {
             let segmentColor: string;
             if (useAirspeedColors && (seg.groundspeed_knots || 0) > 0) {
               // Use airspeed colors with selected path's groundspeed range
-              segmentColor = (window as any).KMLHeatmap.getColorForAltitude(
-                seg.groundspeed_knots,
+              segmentColor = window.KMLHeatmap.getColorForAltitude(
+                seg.groundspeed_knots ?? 0,
                 this.replayColorMinSpeed,
                 this.replayColorMaxSpeed
               );
             } else {
               // Use altitude colors with selected path's altitude range (default)
-              segmentColor = (window as any).KMLHeatmap.getColorForAltitude(
-                seg.altitude_ft,
+              segmentColor = window.KMLHeatmap.getColorForAltitude(
+                seg.altitude_ft ?? 0,
                 this.replayColorMinAlt,
                 this.replayColorMaxAlt
               );
@@ -899,12 +912,7 @@ export class ReplayManager {
           ];
 
           // Calculate bearing for rotation
-          bearing = (window as any).KMLHeatmap.calculateBearing(
-            lat1,
-            lon1,
-            lat2,
-            lon2
-          );
+          bearing = window.KMLHeatmap.calculateBearing(lat1, lon1, lat2, lon2);
         } else {
           // Use end of last segment
           currentPos = (lastSegment.coords?.[1] || [0, 0]) as [number, number];
@@ -914,18 +922,11 @@ export class ReplayManager {
           const lon1 = lastSegment.coords?.[0]?.[1] || 0;
           const lat2 = lastSegment.coords?.[1]?.[0] || 0;
           const lon2 = lastSegment.coords?.[1]?.[1] || 0;
-          bearing = (window as any).KMLHeatmap.calculateBearing(
-            lat1,
-            lon1,
-            lat2,
-            lon2
-          );
+          bearing = window.KMLHeatmap.calculateBearing(lat1, lon1, lat2, lon2);
         }
 
         // Calculate smoothed bearing by looking ahead several segments
-        const smoothedBearing = (
-          window as any
-        ).KMLHeatmap.calculateSmoothedBearing(
+        const smoothedBearing = window.KMLHeatmap.calculateSmoothedBearing(
           this.replaySegments,
           currentIndex,
           5

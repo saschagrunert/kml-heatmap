@@ -42,7 +42,9 @@ export interface PathSegment {
 export interface AircraftAggregate {
   registration: string;
   type?: string;
+  model?: string;
   flights: number;
+  flight_time_str?: string;
 }
 
 /**
@@ -176,6 +178,27 @@ export interface AppState {
   buttonsHidden?: boolean;
   center?: MapCenter;
   zoom?: number;
+}
+
+/**
+ * Fun fact for wrapped/year-in-review feature
+ */
+export interface FunFact {
+  category: string;
+  icon: string;
+  text: string;
+}
+
+/**
+ * Year statistics for wrapped feature
+ */
+export interface YearStats {
+  total_flights: number;
+  num_airports: number;
+  total_distance_nm: number;
+  flight_time: string;
+  airport_names: string[];
+  aircraft_list: AircraftAggregate[];
 }
 
 /**

@@ -71,11 +71,12 @@ export function calculateAltitudeRange(
   }
 
   // Use iterative approach to avoid stack overflow with large arrays
-  let min = altitudes[0];
-  let max = altitudes[0];
+  let min = altitudes[0] ?? 0;
+  let max = altitudes[0] ?? 0;
   for (let i = 1; i < altitudes.length; i++) {
-    if (altitudes[i] < min) min = altitudes[i];
-    if (altitudes[i] > max) max = altitudes[i];
+    const alt = altitudes[i] ?? 0;
+    if (alt < min) min = alt;
+    if (alt > max) max = alt;
   }
 
   return { min, max };
@@ -111,11 +112,12 @@ export function calculateAirspeedRange(
   }
 
   // Use iterative approach to avoid stack overflow with large arrays
-  let min = speeds[0];
-  let max = speeds[0];
+  let min = speeds[0] ?? 0;
+  let max = speeds[0] ?? 0;
   for (let i = 1; i < speeds.length; i++) {
-    if (speeds[i] < min) min = speeds[i];
-    if (speeds[i] > max) max = speeds[i];
+    const speed = speeds[i] ?? 0;
+    if (speed < min) min = speed;
+    if (speed > max) max = speed;
   }
 
   return { min, max };
@@ -251,8 +253,8 @@ export function filterSegmentsForRendering(
  */
 export function groupSegmentsByPath(
   segments: PathSegment[]
-): Map<string, PathSegment[]> {
-  const grouped = new Map<string, PathSegment[]>();
+): Map<number, PathSegment[]> {
+  const grouped = new Map<number, PathSegment[]>();
 
   segments.forEach((segment) => {
     const pathId = segment.path_id;

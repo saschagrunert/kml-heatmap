@@ -10,6 +10,38 @@ import type {
   DataLoaderOptions,
 } from "../types";
 
+// Valid resolutions for data loading (security: whitelist)
+const VALID_RESOLUTIONS = [
+  "z0_4",
+  "z5_7",
+  "z8_10",
+  "z11_13",
+  "z14_plus",
+] as const;
+
+/**
+ * Validate year parameter to prevent path traversal attacks
+ * @param year - Year string to validate
+ * @returns true if valid
+ */
+function isValidYear(year: string): boolean {
+  // Must be 'all' or a 4-digit year between 2000-2099
+  if (year === "all") return true;
+  const yearNum = parseInt(year, 10);
+  return /^\d{4}$/.test(year) && yearNum >= 2000 && yearNum <= 2099;
+}
+
+/**
+ * Validate resolution parameter to prevent arbitrary file loading
+ * @param resolution - Resolution string to validate
+ * @returns true if valid
+ */
+function isValidResolution(resolution: string): boolean {
+  return VALID_RESOLUTIONS.includes(
+    resolution as (typeof VALID_RESOLUTIONS)[number]
+  );
+}
+
 /**
  * Load JavaScript file dynamically (supports both file:// and https://)
  * @param url - URL to load
@@ -121,6 +153,16 @@ export class DataLoader {
     resolution: string,
     year: string = "all"
   ): Promise<KMLDataset | null> {
+    // Security: Validate inputs to prevent path traversal and arbitrary file loading
+    if (!isValidYear(year)) {
+      console.error(`Invalid year parameter: ${year}`);
+      return null;
+    }
+    if (!isValidResolution(resolution)) {
+      console.error(`Invalid resolution parameter: ${resolution}`);
+      return null;
+    }
+
     const cacheKey = getCacheKey(resolution, year);
 
     // Check cache

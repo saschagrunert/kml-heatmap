@@ -1,9 +1,10 @@
+import type { MockMapApp } from "../../testHelpers";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { PathSelection } from "../../../../kml_heatmap/frontend/ui/pathSelection";
 
 describe("PathSelection", () => {
   let pathSelection: PathSelection;
-  let mockApp: any;
+  let mockApp: MockMapApp;
 
   beforeEach(() => {
     // Create mock app with all required properties

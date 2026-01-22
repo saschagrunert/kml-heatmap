@@ -161,7 +161,7 @@ def parse_gx_coordinate_string(
 class PlacemarkMetadata:
     """Container for placemark metadata (names, timestamps, etc.)."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize metadata with None values."""
         self.name: Optional[str] = None
         self.timestamp: Optional[str] = None

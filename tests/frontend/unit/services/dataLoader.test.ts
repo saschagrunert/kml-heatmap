@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import {
   combineYearData,
   getGlobalVarName,
@@ -129,17 +129,19 @@ describe("dataLoader service", () => {
   });
 
   describe("DataLoader", () => {
-    let loader;
-    let mockWindow;
-    let mockScriptLoader;
-    let mockShowLoading;
-    let mockHideLoading;
+    let loader: DataLoader;
+    let mockWindow: Window & typeof globalThis;
+    let mockScriptLoader: Mock<[string], Promise<void>>;
+    let mockShowLoading: Mock<[], void>;
+    let mockHideLoading: Mock<[], void>;
 
     beforeEach(() => {
-      mockWindow = {};
-      mockScriptLoader = vi.fn().mockResolvedValue(undefined);
-      mockShowLoading = vi.fn();
-      mockHideLoading = vi.fn();
+      mockWindow = {} as Window & typeof globalThis;
+      mockScriptLoader = vi
+        .fn<[string], Promise<void>>()
+        .mockResolvedValue(undefined);
+      mockShowLoading = vi.fn<[], void>();
+      mockHideLoading = vi.fn<[], void>();
 
       loader = new DataLoader({
         dataDir: "test-data",

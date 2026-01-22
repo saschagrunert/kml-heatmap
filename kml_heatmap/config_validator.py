@@ -35,7 +35,7 @@ from .logger import logger
 class ConfigValidator:
     """Validates runtime configuration and environment."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the validator with empty error and warning lists."""
         self.errors: List[str] = []
         self.warnings: List[str] = []

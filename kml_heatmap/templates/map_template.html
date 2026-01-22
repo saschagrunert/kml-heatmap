@@ -47,12 +47,18 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div id="map"></div>
+    <div
+      id="map"
+      role="application"
+      aria-label="Flight map visualization"
+    ></div>
     <!-- Hide buttons toggle (top-center) -->
     <button
       id="hide-buttons-btn"
       class="control-btn hide-toggle"
       onclick="toggleButtonsVisibility()"
+      aria-label="Show or hide control buttons"
+      aria-pressed="false"
     >
       🔼
     </button>
@@ -62,6 +68,8 @@
       id="stats-btn"
       class="control-btn left toggleable-btn"
       onclick="toggleStats()"
+      aria-label="Toggle flight statistics panel"
+      aria-pressed="false"
     >
       📊 Stats
     </button>
@@ -69,6 +77,7 @@
       id="export-btn"
       class="control-btn left toggleable-btn"
       onclick="exportMap()"
+      aria-label="Export map as image"
     >
       📷 Export
     </button>
@@ -76,6 +85,7 @@
       id="wrapped-btn"
       class="control-btn left toggleable-btn"
       onclick="showWrapped()"
+      aria-label="Show year in review summary"
     >
       ✨ Wrapped
     </button>
@@ -84,6 +94,9 @@
       class="control-btn left toggleable-btn"
       onclick="toggleReplay()"
       style="opacity: 0.5"
+      aria-label="Replay selected flight path"
+      aria-pressed="false"
+      aria-disabled="true"
     >
       ▶️ Replay
     </button>
@@ -93,6 +106,8 @@
       id="heatmap-btn"
       class="control-btn right toggleable-btn"
       onclick="toggleHeatmap()"
+      aria-label="Toggle heatmap overlay"
+      aria-pressed="true"
     >
       🔥 Heatmap
     </button>
@@ -100,6 +115,8 @@
       id="airports-btn"
       class="control-btn right toggleable-btn"
       onclick="toggleAirports()"
+      aria-label="Toggle airport markers"
+      aria-pressed="true"
     >
       🏢 Airports
     </button>
@@ -107,6 +124,8 @@
       id="altitude-btn"
       class="control-btn right toggleable-btn"
       onclick="toggleAltitude()"
+      aria-label="Toggle altitude color visualization"
+      aria-pressed="true"
     >
       ⛰️ Altitude
     </button>
@@ -114,6 +133,8 @@
       id="airspeed-btn"
       class="control-btn right toggleable-btn"
       onclick="toggleAirspeed()"
+      aria-label="Toggle groundspeed color visualization"
+      aria-pressed="false"
     >
       🚀 Speed
     </button>
@@ -122,48 +143,79 @@
       class="control-btn right toggleable-btn"
       onclick="toggleAviation()"
       style="display: none"
+      aria-label="Toggle aviation data overlay"
+      aria-pressed="false"
     >
       🗺️ Aviation
     </button>
     <div id="year-filter" class="control-btn right toggleable-btn">
-      <select id="year-select" onchange="filterByYear()">
+      <select
+        id="year-select"
+        onchange="filterByYear()"
+        aria-label="Filter flights by year"
+      >
         <option value="all">📅 All</option>
       </select>
     </div>
 
     <div id="aircraft-filter" class="control-btn right toggleable-btn">
-      <select id="aircraft-select" onchange="filterByAircraft()">
+      <select
+        id="aircraft-select"
+        onchange="filterByAircraft()"
+        aria-label="Filter flights by aircraft"
+      >
         <option value="all">✈️ Aircraft</option>
       </select>
     </div>
 
-    <div id="stats-panel"></div>
-    <div id="altitude-legend">
+    <div id="stats-panel" role="region" aria-label="Flight statistics"></div>
+    <div
+      id="altitude-legend"
+      role="region"
+      aria-label="Altitude color scale legend"
+    >
       <div class="legend-title">⛰️ Altitude</div>
-      <div class="gradient-bar"></div>
+      <div
+        class="gradient-bar"
+        role="img"
+        aria-label="Altitude gradient from low to high"
+      ></div>
       <div class="labels">
         <span id="legend-min">0 ft</span>
         <span id="legend-max">10,000 ft</span>
       </div>
     </div>
-    <div id="airspeed-legend">
+    <div
+      id="airspeed-legend"
+      role="region"
+      aria-label="Groundspeed color scale legend"
+    >
       <div class="legend-title">🚀 Groundspeed</div>
-      <div class="gradient-bar"></div>
+      <div
+        class="gradient-bar"
+        role="img"
+        aria-label="Groundspeed gradient from slow to fast"
+      ></div>
       <div class="labels">
         <span id="airspeed-legend-min">0 kt</span>
         <span id="airspeed-legend-max">200 kt</span>
       </div>
     </div>
-    <div id="loading">⏳ Loading data…</div>
+    <div id="loading" role="status" aria-live="polite">⏳ Loading data…</div>
 
     <!-- Replay Controls -->
-    <div id="replay-controls">
+    <div id="replay-controls" role="region" aria-label="Flight replay controls">
       <div id="replay-controls-inner">
-        <div id="replay-buttons">
+        <div
+          id="replay-buttons"
+          role="group"
+          aria-label="Replay playback controls"
+        >
           <button
             id="replay-play-btn"
             class="replay-btn"
             onclick="playReplay()"
+            aria-label="Play replay"
           >
             ▶️
           </button>
@@ -172,6 +224,7 @@
             class="replay-btn"
             onclick="pauseReplay()"
             style="display: none"
+            aria-label="Pause replay"
           >
             ⏸️
           </button>
@@ -179,14 +232,18 @@
             id="replay-stop-btn"
             class="replay-btn"
             onclick="stopReplay()"
+            aria-label="Stop replay and reset to beginning"
           >
             ⏹️
           </button>
-          <div id="replay-time-display">00:00 / 00:00</div>
+          <div id="replay-time-display" aria-live="polite" aria-atomic="true">
+            00:00 / 00:00
+          </div>
           <select
             id="replay-speed"
             class="replay-btn"
             onchange="changeReplaySpeed()"
+            aria-label="Replay speed multiplier"
           >
             <option value="10">10x</option>
             <option value="25">25x</option>
@@ -200,12 +257,14 @@
             class="replay-btn"
             onclick="toggleAutoZoom()"
             title="Auto-zoom based on speed/altitude"
+            aria-label="Toggle automatic zoom adjustment"
+            aria-pressed="false"
           >
             🔍
           </button>
         </div>
         <div id="replay-slider-container">
-          <span id="replay-slider-start">0:00</span>
+          <span id="replay-slider-start" aria-hidden="true">0:00</span>
           <input
             type="range"
             id="replay-slider"
@@ -213,47 +272,92 @@
             max="100"
             value="0"
             oninput="seekReplay(this.value)"
+            aria-label="Replay timeline position"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            aria-valuetext="0 seconds"
           />
-          <span id="replay-slider-end">0:00</span>
+          <span id="replay-slider-end" aria-hidden="true">0:00</span>
         </div>
       </div>
     </div>
 
     <!-- Wrapped Card Modal -->
-    <div id="wrapped-modal" onclick="closeWrapped(event)">
+    <div
+      id="wrapped-modal"
+      onclick="closeWrapped(event)"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wrapped-title"
+    >
       <div id="wrapped-container" onclick="event.stopPropagation()">
         <div id="wrapped-header">
-          <button class="close-btn" onclick="closeWrapped()">✕ Close</button>
+          <button
+            class="close-btn"
+            onclick="closeWrapped()"
+            aria-label="Close year in review"
+          >
+            ✕ Close
+          </button>
         </div>
         <div id="wrapped-content">
           <!-- Cards column - left side -->
           <div id="wrapped-cards-column">
             <!-- Card 1: Stats -->
-            <div id="wrapped-card-stats" class="wrapped-square-card">
+            <div
+              id="wrapped-card-stats"
+              class="wrapped-square-card"
+              role="region"
+              aria-labelledby="wrapped-title"
+            >
               <h1 id="wrapped-title">✨ Your Year in Flight</h1>
               <div class="year" id="wrapped-year">2025</div>
-              <div class="stat-grid" id="wrapped-stats"></div>
+              <div class="stat-grid" id="wrapped-stats" role="list"></div>
             </div>
 
             <!-- Card 2: Facts -->
-            <div id="wrapped-card-facts" class="wrapped-square-card">
-              <div class="fun-facts" id="wrapped-fun-facts"></div>
+            <div
+              id="wrapped-card-facts"
+              class="wrapped-square-card"
+              role="region"
+              aria-label="Fun facts"
+            >
+              <div class="fun-facts" id="wrapped-fun-facts" role="list"></div>
             </div>
 
             <!-- Card 3: Aircraft Fleet -->
-            <div id="wrapped-card-fleet" class="wrapped-square-card">
-              <div class="aircraft-fleet" id="wrapped-aircraft-fleet"></div>
+            <div
+              id="wrapped-card-fleet"
+              class="wrapped-square-card"
+              role="region"
+              aria-label="Aircraft fleet"
+            >
+              <div
+                class="aircraft-fleet"
+                id="wrapped-aircraft-fleet"
+                role="list"
+              ></div>
             </div>
 
             <!-- Card 4: Airports -->
-            <div id="wrapped-card-airports" class="wrapped-square-card">
+            <div
+              id="wrapped-card-airports"
+              class="wrapped-square-card"
+              role="region"
+              aria-label="Airports visited"
+            >
               <div class="top-airports" id="wrapped-top-airports"></div>
-              <div class="airports-grid" id="wrapped-airports-grid"></div>
+              <div
+                class="airports-grid"
+                id="wrapped-airports-grid"
+                role="list"
+              ></div>
             </div>
           </div>
 
           <!-- Map - right side -->
-          <div id="wrapped-map-container">
+          <div id="wrapped-map-container" aria-label="Flight map overview">
             <!-- Map will be moved here when wrapped is shown -->
           </div>
         </div>

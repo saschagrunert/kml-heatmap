@@ -1,12 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { DataManager } from "../../../../kml_heatmap/frontend/ui/dataManager";
+import type { MockMapApp } from "../../testHelpers";
+import type { HeatmapLayer } from "../../../../kml_heatmap/frontend/globals";
+import type { DataLoader } from "../../../../kml_heatmap/frontend/services/dataLoader";
 
 describe("DataManager", () => {
   let dataManager: DataManager;
-  let mockApp: any;
-  let mockDataLoader: any;
-  let mockHeatLayer: any;
-  let heatLayerSpy: any;
+  let mockApp: MockMapApp;
+  let mockDataLoader: Partial<DataLoader>;
+  let mockHeatLayer: Partial<HeatmapLayer>;
+  let heatLayerSpy: Mock;
 
   beforeEach(() => {
     // Mock loading element
@@ -31,23 +34,23 @@ describe("DataManager", () => {
     };
 
     // Mock window.KMLHeatmap
-    (global.window as any).KMLHeatmap = {
+    window.KMLHeatmap = {
       DataLoader: function () {
-        return mockDataLoader;
+        return mockDataLoader as DataLoader;
       },
-      getResolutionForZoom: vi.fn((zoom) => {
+      getResolutionForZoom: vi.fn((zoom: number) => {
         if (zoom < 5) return "z0-4";
         if (zoom < 11) return "z5-10";
         if (zoom < 14) return "z11-13";
         return "z14_plus";
       }),
-    };
+    } as typeof window.KMLHeatmap;
 
     // Mock L.heatLayer
-    heatLayerSpy = vi.fn(() => mockHeatLayer);
-    (global.window as any).L = {
+    heatLayerSpy = vi.fn(() => mockHeatLayer as HeatmapLayer);
+    (global.window as typeof window & { L: typeof import("leaflet") }).L = {
       heatLayer: heatLayerSpy,
-    };
+    } as typeof import("leaflet");
 
     // Create mock app
     mockApp = {

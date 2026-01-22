@@ -30,23 +30,23 @@ export default tseslint.config(
       },
     },
     rules: {
-      // Allow explicit any for now (can be tightened later)
-      "@typescript-eslint/no-explicit-any": "off",
-      // Allow unsafe operations for legacy code
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
-      // Allow floating promises (fire-and-forget)
-      "@typescript-eslint/no-floating-promises": "off",
-      // Allow async functions without await
-      "@typescript-eslint/require-await": "off",
-      // Allow standalone expressions (e.g., for conditional rendering)
-      "@typescript-eslint/no-unused-expressions": "off",
-      // Allow unnecessary type assertions (sometimes needed for clarity)
-      "@typescript-eslint/no-unnecessary-type-assertion": "off",
-      // Allow unused vars with underscore prefix
+      // Gradually enable strict rules - these are now warnings to track progress
+      "@typescript-eslint/no-explicit-any": "warn", // Upgraded from "off"
+      "@typescript-eslint/no-unsafe-assignment": "warn", // Upgraded from "off"
+      "@typescript-eslint/no-unsafe-call": "warn", // Upgraded from "off"
+      "@typescript-eslint/no-unsafe-member-access": "warn", // Upgraded from "off"
+      "@typescript-eslint/no-unsafe-argument": "warn", // Upgraded from "off"
+      "@typescript-eslint/no-unsafe-return": "warn", // Upgraded from "off"
+
+      // Enable important rules that prevent bugs
+      "@typescript-eslint/no-floating-promises": "error", // Catch unhandled promises
+      "@typescript-eslint/require-await": "warn", // Flag unnecessary async
+      "@typescript-eslint/no-unnecessary-type-assertion": "warn", // Clean up redundant assertions
+
+      // Keep disabled for legitimate use cases
+      "@typescript-eslint/no-unused-expressions": "off", // Allow standalone expressions
+
+      // Enforce no unused vars with underscore prefix support
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
@@ -58,10 +58,18 @@ export default tseslint.config(
     },
   },
   {
-    files: ["**/*.test.ts"],
+    files: ["**/*.test.ts", "tests/**/*.ts"],
     rules: {
       // Allow unbound methods in tests (common pattern with mocks/spies)
       "@typescript-eslint/unbound-method": "off",
+
+      // Relax type safety rules for test files - mocking often requires type flexibility
+      "@typescript-eslint/no-explicit-any": "off", // Mocks often need any
+      "@typescript-eslint/no-unsafe-assignment": "off", // Mock data assignments
+      "@typescript-eslint/no-unsafe-call": "off", // Calling mocked functions
+      "@typescript-eslint/no-unsafe-member-access": "off", // Accessing mock properties
+      "@typescript-eslint/no-unsafe-argument": "off", // Passing mock arguments
+      "@typescript-eslint/no-unsafe-return": "off", // Returning mock values
     },
   },
   {

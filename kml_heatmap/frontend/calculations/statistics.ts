@@ -139,11 +139,12 @@ export function calculateAltitudeStats(segments: PathSegment[]): AltitudeStats {
   }
 
   // Use reduce to avoid stack overflow with large arrays
-  let min = altitudes[0];
-  let max = altitudes[0];
+  let min = altitudes[0] ?? 0;
+  let max = altitudes[0] ?? 0;
   for (let i = 1; i < altitudes.length; i++) {
-    if (altitudes[i] < min) min = altitudes[i];
-    if (altitudes[i] > max) max = altitudes[i];
+    const alt = altitudes[i] ?? 0;
+    if (alt < min) min = alt;
+    if (alt > max) max = alt;
   }
 
   // Calculate total altitude gain
@@ -181,11 +182,12 @@ export function calculateSpeedStats(segments: PathSegment[]): SpeedStats {
   }
 
   // Use loop to avoid stack overflow with large arrays
-  let max = speeds[0];
+  let max = speeds[0] ?? 0;
   let sum = 0;
   for (let i = 0; i < speeds.length; i++) {
-    if (speeds[i] > max) max = speeds[i];
-    sum += speeds[i];
+    const speed = speeds[i] ?? 0;
+    if (speed > max) max = speed;
+    sum += speed;
   }
   const avg = sum / speeds.length;
 
@@ -216,9 +218,10 @@ export function calculateLongestFlight(segments: PathSegment[]): number {
   if (distances.length === 0) return 0;
 
   // Use loop to avoid stack overflow with large arrays
-  let max = distances[0];
+  let max = distances[0] ?? 0;
   for (let i = 1; i < distances.length; i++) {
-    if (distances[i] > max) max = distances[i];
+    const dist = distances[i] ?? 0;
+    if (dist > max) max = dist;
   }
   return max;
 }
@@ -245,11 +248,12 @@ export function calculateFlightTime(
     if (pathSegments.length > 0) {
       const times = pathSegments.map((seg) => seg.time!);
       // Use loop to avoid stack overflow with large arrays
-      let minTime = times[0];
-      let maxTime = times[0];
+      let minTime = times[0] ?? 0;
+      let maxTime = times[0] ?? 0;
       for (let i = 1; i < times.length; i++) {
-        if (times[i] < minTime) minTime = times[i];
-        if (times[i] > maxTime) maxTime = times[i];
+        const time = times[i] ?? 0;
+        if (time < minTime) minTime = time;
+        if (time > maxTime) maxTime = time;
       }
       totalSeconds += maxTime - minTime;
     }

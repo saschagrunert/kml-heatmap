@@ -22,7 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # Copy application code
 COPY kml-heatmap.py .
 COPY kml_heatmap/ ./kml_heatmap/
-COPY pytest.ini .
+COPY scripts/ ./scripts/
+COPY pytest.ini mypy.ini .
 
 # Copy JavaScript/TypeScript build configuration
 COPY package.json build.js vitest.config.js tsconfig.json tsconfig.eslint.json eslint.config.js ./

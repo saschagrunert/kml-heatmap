@@ -640,7 +640,7 @@ def _build_path_metadata_dict(
     ):
         route = aircraft_info.get("route")
         # Extract airports from route and format for exporter
-        if "-" in route:
+        if route and "-" in route:
             route_parts = route.split("-")
             departure_airport = route_parts[0]
             arrival_airport = route_parts[1]
@@ -764,7 +764,7 @@ def process_standard_coordinates(
                         path_with_timestamps.append(coord + [timestamp_str])
 
                     # Replace current_path with timestamped version
-                    current_path = path_with_timestamps
+                    current_path = path_with_timestamps  # type: ignore[assignment]
 
                     # Calculate end timestamp
                     if current_path:

@@ -1,14 +1,15 @@
+import type { MockMapApp } from "../../testHelpers";
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { StatsManager } from "../../../../kml_heatmap/frontend/ui/statsManager";
 
 describe("StatsManager", () => {
   let statsManager: StatsManager;
-  let mockApp: any;
+  let mockApp: MockMapApp;
   let statsPanel: HTMLElement;
 
   beforeEach(() => {
     // Mock window.KMLHeatmap
-    (global.window as any).KMLHeatmap = {
+    window.KMLHeatmap = {
       calculateFilteredStatistics: vi.fn(() => ({
         total_points: 10000,
         num_paths: 50,
@@ -95,7 +96,7 @@ describe("StatsManager", () => {
       statsManager.updateStatsForSelection();
 
       expect(
-        (window as any).KMLHeatmap.calculateFilteredStatistics
+        window.KMLHeatmap.calculateFilteredStatistics
       ).toHaveBeenCalledWith({
         pathInfo: mockApp.fullPathInfo,
         segments: mockApp.fullPathSegments,
@@ -109,8 +110,7 @@ describe("StatsManager", () => {
 
       statsManager.updateStatsForSelection();
 
-      const calls = (window as any).KMLHeatmap.calculateFilteredStatistics.mock
-        .calls;
+      const calls = window.KMLHeatmap.calculateFilteredStatistics.mock.calls;
       expect(calls[0][0].pathInfo).toHaveLength(1);
       expect(calls[0][0].segments).toHaveLength(1);
       expect(calls[0][0].year).toBe("all"); // No year filter for selection
@@ -122,8 +122,7 @@ describe("StatsManager", () => {
 
       statsManager.updateStatsForSelection();
 
-      const calls = (window as any).KMLHeatmap.calculateFilteredStatistics.mock
-        .calls;
+      const calls = window.KMLHeatmap.calculateFilteredStatistics.mock.calls;
       expect(calls[0][0].pathInfo[0].id).toBe(2);
     });
 
@@ -132,8 +131,7 @@ describe("StatsManager", () => {
 
       statsManager.updateStatsForSelection();
 
-      const calls = (window as any).KMLHeatmap.calculateFilteredStatistics.mock
-        .calls;
+      const calls = window.KMLHeatmap.calculateFilteredStatistics.mock.calls;
       expect(calls[0][0].segments[0].path_id).toBe(1);
     });
 

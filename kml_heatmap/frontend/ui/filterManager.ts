@@ -2,20 +2,22 @@
  * Filter Manager - Handles year/aircraft filtering
  */
 import type { MapApp } from "../mapApp";
+import { domCache } from "../utils/domCache";
 
 export class FilterManager {
   private app: MapApp;
 
   constructor(app: MapApp) {
     this.app = app;
+
+    // Pre-cache filter elements
+    domCache.cacheElements(["aircraft-select", "year-select"]);
   }
 
   updateAircraftDropdown(): void {
     if (!this.app.fullPathInfo) return;
 
-    const aircraftSelect = document.getElementById(
-      "aircraft-select"
-    ) as HTMLSelectElement;
+    const aircraftSelect = domCache.get("aircraft-select") as HTMLSelectElement;
     if (!aircraftSelect) return;
 
     const currentSelection = this.app.selectedAircraft;
@@ -88,9 +90,7 @@ export class FilterManager {
   }
 
   async filterByYear(): Promise<void> {
-    const yearSelect = document.getElementById(
-      "year-select"
-    ) as HTMLSelectElement;
+    const yearSelect = domCache.get("year-select") as HTMLSelectElement;
     if (!yearSelect) return;
 
     this.app.selectedYear = yearSelect.value;
@@ -123,11 +123,9 @@ export class FilterManager {
     this.updateAircraftDropdown();
 
     // Update stats based on filter
-    const filteredStats = (
-      window as any
-    ).KMLHeatmap.calculateFilteredStatistics({
-      pathInfo: this.app.fullPathInfo,
-      segments: this.app.fullPathSegments,
+    const filteredStats = window.KMLHeatmap.calculateFilteredStatistics({
+      pathInfo: this.app.fullPathInfo ?? [],
+      segments: this.app.fullPathSegments ?? [],
       year: this.app.selectedYear,
       aircraft: this.app.selectedAircraft,
     });
@@ -146,9 +144,7 @@ export class FilterManager {
   }
 
   async filterByAircraft(): Promise<void> {
-    const aircraftSelect = document.getElementById(
-      "aircraft-select"
-    ) as HTMLSelectElement;
+    const aircraftSelect = domCache.get("aircraft-select") as HTMLSelectElement;
     if (!aircraftSelect) return;
 
     this.app.selectedAircraft = aircraftSelect.value;
@@ -165,11 +161,9 @@ export class FilterManager {
     await this.app.dataManager!.updateLayers();
 
     // Update stats based on filter
-    const filteredStats = (
-      window as any
-    ).KMLHeatmap.calculateFilteredStatistics({
-      pathInfo: this.app.fullPathInfo,
-      segments: this.app.fullPathSegments,
+    const filteredStats = window.KMLHeatmap.calculateFilteredStatistics({
+      pathInfo: this.app.fullPathInfo ?? [],
+      segments: this.app.fullPathSegments ?? [],
       year: this.app.selectedYear,
       aircraft: this.app.selectedAircraft,
     });

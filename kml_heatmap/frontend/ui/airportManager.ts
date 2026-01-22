@@ -13,8 +13,8 @@ export class AirportManager {
   // Calculate airport flight counts based on current filters
   calculateAirportFlightCounts(): { [airportName: string]: number } {
     // Use KMLHeatmap library function
-    return (window as any).KMLHeatmap.calculateAirportFlightCounts(
-      this.app.fullPathInfo,
+    return window.KMLHeatmap.calculateAirportFlightCounts(
+      this.app.fullPathInfo ?? [],
       this.app.selectedYear,
       this.app.selectedAircraft
     );
@@ -45,8 +45,8 @@ export class AirportManager {
       const flightCount = airportCounts[airport.name] || 0;
       const isHomeBase = airport.name === homeBaseName;
 
-      const latDms = (window as any).KMLHeatmap.ddToDms(airport.lat, true);
-      const lonDms = (window as any).KMLHeatmap.ddToDms(airport.lon, false);
+      const latDms = window.KMLHeatmap.ddToDms(airport.lat, true);
+      const lonDms = window.KMLHeatmap.ddToDms(airport.lon, false);
       const googleMapsLink = `https://www.google.com/maps?q=${airport.lat},${airport.lon}`;
 
       const popup = `

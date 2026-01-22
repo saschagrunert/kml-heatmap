@@ -82,11 +82,12 @@ export function calculateTimeRange(segments: PathSegment[]): {
   const times = segments.map((s) => s.time!);
 
   // Use iterative approach to avoid stack overflow with large arrays
-  let min = times[0];
-  let max = times[0];
+  let min = times[0] ?? 0;
+  let max = times[0] ?? 0;
   for (let i = 1; i < times.length; i++) {
-    if (times[i] < min) min = times[i];
-    if (times[i] > max) max = times[i];
+    const time = times[i] ?? 0;
+    if (time < min) min = time;
+    if (time > max) max = time;
   }
 
   return { min, max };
