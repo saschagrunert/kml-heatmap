@@ -77,6 +77,38 @@ class TestAircraftDataParser:
         parser.feed(html)
         assert parser.model == "1978 Cessna 172N"
 
+    def test_parse_multiple_aircraft_prefer_not_found(self):
+        """Test parsing multiple aircraft with 'C/N Not found' - should prefer current registration."""
+        parser = AircraftDataParser()
+        # Real case: D-ELGD has both Piper (old) and Cessna (current, C/N not found)
+        html = "<html><head><title>Aircraft Data D-ELGD, Piper PA-12 Super Cruiser C/N 12-3395, Cessna T182T Turbo Skylane C/N Not found D-ELGD</title></head></html>"
+        parser.feed(html)
+        # Should prefer Cessna (has "C/N Not found" = current registration)
+        assert parser.model == "Cessna T182T Turbo Skylane"
+
+    def test_parse_multiple_aircraft_no_not_found(self):
+        """Test parsing multiple aircraft without 'C/N Not found' - should take last one."""
+        parser = AircraftDataParser()
+        html = "<html><head><title>Aircraft Data D-TEST, Piper PA-28 C/N 1234, Cessna 172 C/N 5678</title></head></html>"
+        parser.feed(html)
+        # Should take last aircraft when none have "Not found"
+        assert parser.model == "Cessna 172"
+
+    def test_parse_multiple_aircraft_multiple_not_found(self):
+        """Test parsing multiple aircraft with multiple 'C/N Not found' entries."""
+        parser = AircraftDataParser()
+        html = "<html><head><title>Aircraft Data D-TEST, Piper PA-28 C/N Not found, Cessna 172 C/N Not found D-TEST</title></head></html>"
+        parser.feed(html)
+        # Should take last aircraft with "Not found"
+        assert parser.model == "Cessna 172"
+
+    def test_parse_three_aircraft(self):
+        """Test parsing three aircraft - should prefer one with 'Not found'."""
+        parser = AircraftDataParser()
+        html = "<html><head><title>Aircraft Data D-TEST, Boeing 737 C/N 1111, Piper PA-28 C/N 2222, Cessna 172 C/N Not found</title></head></html>"
+        parser.feed(html)
+        assert parser.model == "Cessna 172"
+
 
 class TestParseAircraftFromFilename:
     """Tests for parse_aircraft_from_filename function."""

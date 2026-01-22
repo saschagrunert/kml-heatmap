@@ -46,20 +46,47 @@ class AircraftDataParser(HTMLParser):
         - New: "Aircraft Data D-EAGJ, Diamond DA-20A-1 Katana C/N 10115, ..."
         - Old: "Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana"
 
+        When multiple aircraft are listed (e.g., re-registrations), prefers
+        the one without "C/N Not found" as it's likely the current aircraft.
+
         Args:
             data: Text content from HTML
         """
         if self.in_title:
             # New format: "Aircraft Data D-EAGJ, Diamond DA-20A-1 Katana C/N 10115, ..."
             if "Aircraft Data" in data:
-                parts = data.split(",", 2)
+                # Split by comma to get all aircraft (not limiting to 2 splits)
+                parts = data.split(",")
                 if len(parts) >= 2:
-                    # Extract model from second part (before C/N if present)
-                    model = parts[1].strip()
-                    # Remove C/N and serial number if present
-                    if " C/N " in model:
-                        model = model.split(" C/N ")[0].strip()
-                    self.model = model
+                    # Extract all aircraft models (skip first part which is "Aircraft Data REG")
+                    aircraft_models = []
+                    for i in range(1, len(parts)):
+                        part = parts[i].strip()
+                        # Skip if empty or looks like just a registration
+                        if not part or part.startswith(("C/N", "D-", "OE-", "N-")):
+                            continue
+
+                        # Extract model before C/N if present
+                        model = part
+                        if " C/N " in model:
+                            cn_info = model.split(" C/N ", 1)[1]
+                            model = model.split(" C/N ")[0].strip()
+                            # Store tuple of (model, has_cn_not_found)
+                            has_not_found = "Not found" in cn_info
+                            aircraft_models.append((model, has_not_found))
+                        else:
+                            aircraft_models.append((model, False))
+
+                    # Prefer aircraft WITH "C/N Not found" (current registration, C/N not yet documented)
+                    # Otherwise take the last one (most recent)
+                    if aircraft_models:
+                        current = [m for m, nf in aircraft_models if nf]
+                        if current:
+                            self.model = current[
+                                -1
+                            ]  # Take last aircraft with "Not found"
+                        else:
+                            self.model = aircraft_models[-1][0]  # Take last aircraft
             # Old format: "Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana"
             elif "Aircraft info for" in data:
                 parts = data.split(" - ", 1)
