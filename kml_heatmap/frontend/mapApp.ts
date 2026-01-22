@@ -4,6 +4,7 @@
  */
 
 import * as L from "leaflet";
+import type { HeatmapLayer } from "./globals";
 import { DataManager } from "./ui/dataManager";
 import { StateManager } from "./ui/stateManager";
 import { LayerManager } from "./ui/layerManager";
@@ -102,7 +103,7 @@ export class MapApp {
 
   // Map and layers
   map: L.Map | null;
-  heatmapLayer: any; // HeatmapOverlay type from heatmap.js library
+  heatmapLayer: HeatmapLayer | null;
   altitudeLayer: L.LayerGroup;
   airspeedLayer: L.LayerGroup;
   airportLayer: L.LayerGroup;
@@ -377,9 +378,9 @@ export class MapApp {
     // Restore wrapped panel state if it was open
     if (this.savedState && this.savedState.wrappedVisible) {
       // Show wrapped panel after a delay to ensure everything is loaded
-      setTimeout(() => {
+      void setTimeout(() => {
         if (this.wrappedManager) {
-          this.wrappedManager.showWrapped();
+          void this.wrappedManager.showWrapped();
         }
       }, 500);
     }
@@ -456,11 +457,9 @@ export class MapApp {
 
     // Initialize stats panel
     if (this.fullStats) {
-      const initialStats = (
-        window as any
-      ).KMLHeatmap.calculateFilteredStatistics({
-        pathInfo: this.fullPathInfo,
-        segments: this.fullPathSegments,
+      const initialStats = window.KMLHeatmap.calculateFilteredStatistics({
+        pathInfo: this.fullPathInfo ?? [],
+        segments: this.fullPathSegments ?? [],
         year: this.selectedYear,
         aircraft: this.selectedAircraft,
       });
@@ -530,8 +529,10 @@ export class MapApp {
     let homeBaseAirport: Airport | null = null;
     if (airports.length > 0) {
       homeBaseAirport = airports.reduce((max, airport) => {
-        const airportCount = (airport as any).flight_count ?? 0;
-        const maxCount = (max as any)?.flight_count ?? 0;
+        const airportExt = airport as AirportWithFlightCount;
+        const maxExt = max as AirportWithFlightCount;
+        const airportCount = airportExt.flight_count ?? 0;
+        const maxCount = maxExt?.flight_count ?? 0;
         return airportCount > maxCount ? airport : max;
       });
     }
@@ -556,8 +557,8 @@ export class MapApp {
         icao +
         "</div></div>";
 
-      const latDms = (window as any).KMLHeatmap.ddToDms(airport.lat, true);
-      const lonDms = (window as any).KMLHeatmap.ddToDms(airport.lon, false);
+      const latDms = window.KMLHeatmap.ddToDms(airport.lat, true);
+      const lonDms = window.KMLHeatmap.ddToDms(airport.lon, false);
       const googleMapsLink = `https://www.google.com/maps?q=${airport.lat},${airport.lon}`;
 
       const popup = `
@@ -612,7 +613,7 @@ export class MapApp {
                     align-items: center;
                 ">
                     <span style="font-size: 12px; color: #ccc; font-weight: 500;">Total Flights</span>
-                    <span style="font-size: 16px; font-weight: bold; color: #4facfe;">${(airport as any).flight_count || 0}</span>
+                    <span style="font-size: 16px; font-weight: bold; color: #4facfe;">${(airport as AirportWithFlightCount).flight_count || 0}</span>
                 </div>
             </div>`;
 
@@ -624,7 +625,7 @@ export class MapApp {
           popupAnchor: [0, -6],
           className: "",
         }),
-      } as any).bindPopup(popup, { autoPanPadding: [50, 50] });
+      }).bindPopup(popup, { autoPanPadding: [50, 50] });
 
       // Add click handler to select paths connected to this airport
       marker.on("click", (_e: L.LeafletMouseEvent) => {
@@ -643,7 +644,7 @@ export class MapApp {
     this.map!.on("moveend", () => this.stateManager!.saveMapState());
     this.map!.on("zoomend", () => {
       this.stateManager!.saveMapState();
-      this.dataManager!.updateLayers();
+      void this.dataManager!.updateLayers();
       this.airportManager!.updateAirportMarkerSizes();
     });
 
@@ -687,19 +688,19 @@ export class MapApp {
     this.replayManager!.toggleReplay();
   }
   filterByYear(): void {
-    this.filterManager!.filterByYear();
+    void this.filterManager!.filterByYear();
   }
   filterByAircraft(): void {
-    this.filterManager!.filterByAircraft();
+    void this.filterManager!.filterByAircraft();
   }
   togglePathSelection(id: string): void {
-    this.pathSelection!.togglePathSelection(id);
+    void this.pathSelection!.togglePathSelection(Number(id));
   }
   exportMap(): void {
     this.uiToggles!.exportMap();
   }
   showWrapped(): void {
-    this.wrappedManager!.showWrapped();
+    void this.wrappedManager!.showWrapped();
   }
   closeWrapped(e?: MouseEvent): void {
     this.wrappedManager!.closeWrapped(e);
@@ -777,12 +778,12 @@ if (typeof window !== "undefined") {
       app.togglePathSelection(id);
     window.exportMap = (): void => app.exportMap();
     window.showWrapped = (): void => app.showWrapped();
-    window.closeWrapped = (e?: any) => app.closeWrapped(e as MouseEvent);
+    window.closeWrapped = (e?: Event) => app.closeWrapped(e as MouseEvent);
     window.toggleButtonsVisibility = (): void => app.toggleButtonsVisibility();
     window.playReplay = (): void => app.playReplay();
     window.pauseReplay = (): void => app.pauseReplay();
     window.stopReplay = (): void => app.stopReplay();
-    window.seekReplay = (v: any) => app.seekReplay(v);
+    window.seekReplay = (v: number) => app.seekReplay(String(v));
     window.changeReplaySpeed = (): void => app.changeReplaySpeed();
     window.toggleAutoZoom = (): void => app.toggleAutoZoom();
   };
@@ -790,5 +791,5 @@ if (typeof window !== "undefined") {
 
 // Auto-initialize when module loads
 if (typeof window !== "undefined" && window.MAP_CONFIG && window.initMapApp) {
-  window.initMapApp(window.MAP_CONFIG);
+  void window.initMapApp(window.MAP_CONFIG);
 }

@@ -3,7 +3,9 @@
 > Create interactive heatmap visualizations from KML files.
 
 [![Demo](https://img.shields.io/badge/live-demo-blue.svg)](https://saschagrunert.github.io/kml-heatmap)
-[![codecov](https://codecov.io/gh/saschagrunert/kml-heatmap/graph/badge.svg?token=AxIuoWeFSy)](https://codecov.io/gh/saschagrunert/kml-heatmap)
+[![Overall Coverage](https://codecov.io/gh/saschagrunert/kml-heatmap/graph/badge.svg?token=AxIuoWeFSy)](https://codecov.io/gh/saschagrunert/kml-heatmap)
+[![Backend Coverage](https://codecov.io/gh/saschagrunert/kml-heatmap/branch/main/graph/badge.svg?token=AxIuoWeFSy&flag=backend)](https://codecov.io/gh/saschagrunert/kml-heatmap)
+[![Frontend Coverage](https://codecov.io/gh/saschagrunert/kml-heatmap/branch/main/graph/badge.svg?token=AxIuoWeFSy&flag=frontend)](https://codecov.io/gh/saschagrunert/kml-heatmap)
 
 ## Table of Contents
 
@@ -238,7 +240,7 @@ output-dir/
     └── metadata.js       # Statistics and available years
 ```
 
-Data is exported as JavaScript files (instead of JSON) for compatibility with both the `file://` protocol (opening directly) and HTTP serving. Data is loaded progressively based on zoom level and filtered by year for better performance on mobile devices.
+Data is exported as JavaScript files (instead of JSON) for compatibility with the `file://` protocol (opening index.html directly in browser). Data is loaded progressively based on zoom level and filtered by year for better performance on mobile devices.
 
 ## Map Features
 
@@ -336,7 +338,8 @@ npm install
 **Available commands:**
 
 ```bash
-npm run build         # Build JavaScript bundles
+npm run build         # Build production bundles (minified)
+npm run build:dev     # Build development bundles (with sourcemaps)
 npm run build:watch   # Watch mode for development
 npm test             # Run tests
 npm run test:watch   # Watch mode for tests
@@ -348,6 +351,13 @@ npm run format       # Format code with Prettier
 npm run update-deps  # Update dependencies to latest versions
 ```
 
+**Build Output:**
+
+- **Format**: IIFE (Immediately Invoked Function Expression)
+- **Protocol**: Compatible with `file://` protocol - open index.html directly in browser
+- **Production**: Minified bundles (bundle.js: 24.8kb, mapApp.bundle.js: 63.5kb)
+- **Development**: Unminified with sourcemaps for debugging
+
 **Architecture:**
 
 - **TypeScript modules** in `kml_heatmap/frontend/`
@@ -357,8 +367,9 @@ npm run update-deps  # Update dependencies to latest versions
   - `state/` - URL state management
   - `ui/` - UI managers for controls and interactions
   - `utils/` - Formatters, colors, geometry helpers
-- **Tests** in `tests/frontend/unit/` (Vitest, 522 tests)
-- **Build output** in `docs/` (bundle.js, mapApp.bundle.js)
+- **Tests**
+  - Unit tests: `tests/frontend/unit/` (Vitest, 532 tests, 93% coverage)
+- **Build output** in `kml_heatmap/static/` (bundle.js, mapApp.bundle.js)
 
 ### Backend (Python)
 

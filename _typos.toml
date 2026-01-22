@@ -1,0 +1,10 @@
+[files]
+# Ignore generated/minified bundle files
+extend-exclude = [
+  "docs/bundle.js",
+  "docs/mapApp.bundle.js",
+  "kml_heatmap/static/bundle.js",
+  "kml_heatmap/static/bundle.esm.js",
+  "kml_heatmap/static/mapApp.bundle.js",
+  "kml_heatmap/static/mapApp.bundle.esm.js",
+]

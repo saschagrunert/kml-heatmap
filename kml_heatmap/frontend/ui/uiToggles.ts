@@ -3,12 +3,34 @@
  */
 import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
+import { domCache } from "../utils/domCache";
 
 export class UIToggles {
   private app: MapApp;
 
   constructor(app: MapApp) {
     this.app = app;
+
+    // Pre-cache frequently accessed DOM elements
+    domCache.cacheElements([
+      "heatmap-btn",
+      "altitude-btn",
+      "airspeed-btn",
+      "airports-btn",
+      "aviation-btn",
+      "altitude-legend",
+      "airspeed-legend",
+      "export-btn",
+      "hide-buttons-btn",
+      "map",
+      "stats-btn",
+      "wrapped-btn",
+      "replay-btn",
+      "year-filter",
+      "aircraft-filter",
+      "stats-panel",
+      "loading",
+    ]);
   }
 
   toggleHeatmap(): void {
@@ -19,7 +41,7 @@ export class UIToggles {
         this.app.map.removeLayer(this.app.heatmapLayer);
       }
       this.app.heatmapVisible = false;
-      const btn = document.getElementById("heatmap-btn");
+      const btn = domCache.get("heatmap-btn");
       if (btn) btn.style.opacity = "0.5";
     } else {
       if (this.app.heatmapLayer) {
@@ -30,7 +52,7 @@ export class UIToggles {
         }
       }
       this.app.heatmapVisible = true;
-      const btn = document.getElementById("heatmap-btn");
+      const btn = domCache.get("heatmap-btn");
       if (btn) btn.style.opacity = "1.0";
     }
     this.app.stateManager!.saveMapState();
@@ -46,9 +68,9 @@ export class UIToggles {
       }
       this.app.map.removeLayer(this.app.altitudeLayer);
       this.app.altitudeVisible = false;
-      const btn = document.getElementById("altitude-btn");
+      const btn = domCache.get("altitude-btn");
       if (btn) btn.style.opacity = "0.5";
-      const legend = document.getElementById("altitude-legend");
+      const legend = domCache.get("altitude-legend");
       if (legend) legend.style.display = "none";
     } else {
       // Hide airspeed if it's visible
@@ -57,9 +79,9 @@ export class UIToggles {
           this.app.map.removeLayer(this.app.airspeedLayer);
         }
         this.app.airspeedVisible = false;
-        const airspeedBtn = document.getElementById("airspeed-btn");
+        const airspeedBtn = domCache.get("airspeed-btn");
         if (airspeedBtn) airspeedBtn.style.opacity = "0.5";
-        const airspeedLegend = document.getElementById("airspeed-legend");
+        const airspeedLegend = domCache.get("airspeed-legend");
         if (airspeedLegend) airspeedLegend.style.display = "none";
       }
 
@@ -84,8 +106,8 @@ export class UIToggles {
         ) {
           const seg = this.app.replayManager!.replaySegments[i];
           if (seg && (seg.time || 0) <= savedTime) {
-            const segmentColor = (window as any).KMLHeatmap.getColorForAltitude(
-              seg.altitude_ft,
+            const segmentColor = window.KMLHeatmap.getColorForAltitude(
+              seg.altitude_ft || 0,
               this.app.replayManager!.replayColorMinAlt,
               this.app.replayManager!.replayColorMaxAlt
             );
@@ -102,9 +124,9 @@ export class UIToggles {
       }
 
       this.app.altitudeVisible = true;
-      const btn = document.getElementById("altitude-btn");
+      const btn = domCache.get("altitude-btn");
       if (btn) btn.style.opacity = "1.0";
-      const legend = document.getElementById("altitude-legend");
+      const legend = domCache.get("altitude-legend");
       if (legend) legend.style.display = "block";
     }
 
@@ -130,9 +152,9 @@ export class UIToggles {
       }
       this.app.map.removeLayer(this.app.airspeedLayer);
       this.app.airspeedVisible = false;
-      const btn = document.getElementById("airspeed-btn");
+      const btn = domCache.get("airspeed-btn");
       if (btn) btn.style.opacity = "0.5";
-      const legend = document.getElementById("airspeed-legend");
+      const legend = domCache.get("airspeed-legend");
       if (legend) legend.style.display = "none";
     } else {
       // Hide altitude if it's visible
@@ -141,9 +163,9 @@ export class UIToggles {
           this.app.map.removeLayer(this.app.altitudeLayer);
         }
         this.app.altitudeVisible = false;
-        const altBtn = document.getElementById("altitude-btn");
+        const altBtn = domCache.get("altitude-btn");
         if (altBtn) altBtn.style.opacity = "0.5";
-        const altLegend = document.getElementById("altitude-legend");
+        const altLegend = domCache.get("altitude-legend");
         if (altLegend) altLegend.style.display = "none";
       }
 
@@ -172,8 +194,8 @@ export class UIToggles {
             (seg.time || 0) <= savedTime &&
             (seg.groundspeed_knots || 0) > 0
           ) {
-            const segmentColor = (window as any).KMLHeatmap.getColorForAltitude(
-              seg.groundspeed_knots,
+            const segmentColor = window.KMLHeatmap.getColorForAltitude(
+              seg.groundspeed_knots || 0,
               this.app.replayManager!.replayColorMinSpeed,
               this.app.replayManager!.replayColorMaxSpeed
             );
@@ -190,9 +212,9 @@ export class UIToggles {
       }
 
       this.app.airspeedVisible = true;
-      const btn = document.getElementById("airspeed-btn");
+      const btn = domCache.get("airspeed-btn");
       if (btn) btn.style.opacity = "1.0";
-      const legend = document.getElementById("airspeed-legend");
+      const legend = domCache.get("airspeed-legend");
       if (legend) legend.style.display = "block";
     }
 
@@ -214,12 +236,12 @@ export class UIToggles {
     if (this.app.airportsVisible) {
       this.app.map.removeLayer(this.app.airportLayer);
       this.app.airportsVisible = false;
-      const btn = document.getElementById("airports-btn");
+      const btn = domCache.get("airports-btn");
       if (btn) btn.style.opacity = "0.5";
     } else {
       this.app.map.addLayer(this.app.airportLayer);
       this.app.airportsVisible = true;
-      const btn = document.getElementById("airports-btn");
+      const btn = domCache.get("airports-btn");
       if (btn) btn.style.opacity = "1.0";
     }
     this.app.stateManager!.saveMapState();
@@ -235,12 +257,12 @@ export class UIToggles {
       if (this.app.aviationVisible) {
         this.app.map.removeLayer(this.app.openaipLayers["Aviation Data"]);
         this.app.aviationVisible = false;
-        const btn = document.getElementById("aviation-btn");
+        const btn = domCache.get("aviation-btn");
         if (btn) btn.style.opacity = "0.5";
       } else {
         this.app.map.addLayer(this.app.openaipLayers["Aviation Data"]);
         this.app.aviationVisible = true;
-        const btn = document.getElementById("aviation-btn");
+        const btn = domCache.get("aviation-btn");
         if (btn) btn.style.opacity = "1.0";
       }
       this.app.stateManager!.saveMapState();
@@ -249,7 +271,7 @@ export class UIToggles {
 
   toggleButtonsVisibility(): void {
     const toggleableButtons = document.querySelectorAll(".toggleable-btn");
-    const hideButton = document.getElementById("hide-buttons-btn");
+    const hideButton = domCache.get("hide-buttons-btn");
 
     if (this.app.buttonsHidden) {
       // Show buttons
@@ -280,34 +302,32 @@ export class UIToggles {
   }
 
   exportMap(): void {
-    const btn = document.getElementById(
-      "export-btn"
-    ) as HTMLButtonElement | null;
+    const btn = domCache.get("export-btn") as HTMLButtonElement | null;
     if (!btn) return;
 
     btn.disabled = true;
     btn.textContent = "⏳ Exporting...";
 
-    const mapContainer = document.getElementById("map");
+    const mapContainer = domCache.get("map");
     if (!mapContainer) return;
 
     const controls = [
       document.querySelector(".leaflet-control-zoom"),
-      document.getElementById("stats-btn"),
-      document.getElementById("export-btn"),
-      document.getElementById("wrapped-btn"),
-      document.getElementById("replay-btn"),
-      document.getElementById("year-filter"),
-      document.getElementById("aircraft-filter"),
-      document.getElementById("heatmap-btn"),
-      document.getElementById("altitude-btn"),
-      document.getElementById("airspeed-btn"),
-      document.getElementById("airports-btn"),
-      document.getElementById("aviation-btn"),
-      document.getElementById("stats-panel"),
-      document.getElementById("altitude-legend"),
-      document.getElementById("airspeed-legend"),
-      document.getElementById("loading"),
+      domCache.get("stats-btn"),
+      domCache.get("export-btn"),
+      domCache.get("wrapped-btn"),
+      domCache.get("replay-btn"),
+      domCache.get("year-filter"),
+      domCache.get("aircraft-filter"),
+      domCache.get("heatmap-btn"),
+      domCache.get("altitude-btn"),
+      domCache.get("airspeed-btn"),
+      domCache.get("airports-btn"),
+      domCache.get("aviation-btn"),
+      domCache.get("stats-panel"),
+      domCache.get("altitude-legend"),
+      domCache.get("airspeed-legend"),
+      domCache.get("loading"),
     ];
 
     const displayStates = controls.map((el) =>
@@ -318,16 +338,12 @@ export class UIToggles {
     });
 
     setTimeout(() => {
-      (window as any).domtoimage
-        .toJpeg(mapContainer, {
+      window.domtoimage
+        ?.toJpeg(mapContainer, {
           width: mapContainer.offsetWidth * 2,
           height: mapContainer.offsetHeight * 2,
           bgcolor: "#1a1a1a",
           quality: 0.95,
-          style: {
-            transform: "scale(2)",
-            transformOrigin: "top left",
-          },
         })
         .then((dataUrl: string) => {
           controls.forEach((el, i) => {

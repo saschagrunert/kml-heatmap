@@ -13,6 +13,7 @@
     "format": "npx prettier --write .",
     "format:check": "npx prettier --check .",
     "build": "node build.js",
+    "build:dev": "NODE_ENV=development node build.js",
     "build:watch": "node build.js --watch",
     "update-deps": "ncu -u"
   },
@@ -25,9 +26,12 @@
     "eslint": "^9.39.2",
     "jsdom": "^27.4.0",
     "npm-check-updates": "^19.3.1",
-    "prettier": "^3.8.0",
+    "prettier": "^3.8.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.53.0",
+    "typescript-eslint": "^8.53.1",
     "vitest": "^4.0.17"
+  },
+  "dependencies": {
+    "dompurify": "^3.3.1"
   }
 }

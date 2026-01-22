@@ -1,26 +1,27 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { AirportManager } from "../../../../kml_heatmap/frontend/ui/airportManager";
+import type { MockMapApp, MockMarker } from "../../testHelpers";
 
 describe("AirportManager", () => {
   let airportManager: AirportManager;
-  let mockApp: any;
-  let mockMarker1: any;
-  let mockMarker2: any;
-  let mockMarker3: any;
+  let mockApp: MockMapApp;
+  let mockMarker1: MockMarker;
+  let mockMarker2: MockMarker;
+  let mockMarker3: MockMarker;
 
   beforeEach(() => {
     // Mock window.KMLHeatmap
-    (global.window as any).KMLHeatmap = {
+    window.KMLHeatmap = {
       calculateAirportFlightCounts: vi.fn(() => ({
         EDDF: 20,
         EDDM: 15,
         EDDK: 5,
       })),
-      ddToDms: vi.fn((coord, isLat) => {
+      ddToDms: vi.fn((coord: number, isLat: boolean) => {
         if (isLat) return "50°06'00\"N";
         return "008°40'00\"E";
       }),
-    };
+    } as typeof window.KMLHeatmap;
 
     // Create mock markers
     mockMarker1 = {
@@ -91,7 +92,7 @@ describe("AirportManager", () => {
       const result = airportManager.calculateAirportFlightCounts();
 
       expect(
-        (window as any).KMLHeatmap.calculateAirportFlightCounts
+        window.KMLHeatmap.calculateAirportFlightCounts
       ).toHaveBeenCalledWith(
         mockApp.fullPathInfo,
         mockApp.selectedYear,

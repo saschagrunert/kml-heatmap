@@ -2,30 +2,48 @@
 
 /**
  * Build script for KML Heatmap JavaScript modules
- * Uses esbuild to bundle ES6 modules into a single file
+ * Uses esbuild to bundle ES6 modules into IIFE format for file:// protocol compatibility
  */
 
 import * as esbuild from "esbuild";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { statSync } from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const isWatch = process.argv.includes("--watch");
+const isDevelopment = process.env.NODE_ENV === "development" || isWatch;
+const minify = !isDevelopment;
 
-// Build KMLHeatmap library (bundle.js) - IIFE format for global window.KMLHeatmap
+// Build KMLHeatmap library - IIFE format for file:// protocol compatibility
 const libraryBuildOptions = {
   entryPoints: [join(__dirname, "kml_heatmap/frontend/main.ts")],
   bundle: true,
   format: "iife",
   globalName: "KMLHeatmapModules",
   outfile: join(__dirname, "kml_heatmap/static/bundle.js"),
-  sourcemap: true,
+  sourcemap: isDevelopment,
   target: ["es2020"],
   platform: "browser",
   logLevel: "info",
-  minify: false, // Set to true for production
+  minify,
+  metafile: true, // Enable metafile for analysis
+
+  // Advanced minification options
+  minifyWhitespace: !isDevelopment,
+  minifyIdentifiers: !isDevelopment,
+  minifySyntax: !isDevelopment,
+
+  // Tree shaking
+  treeShaking: true,
+
+  // Drop console logs and debugger in production
+  drop: isDevelopment ? [] : ["console", "debugger"],
+
+  // Enable mangling for smaller identifiers
+  mangleProps: isDevelopment ? undefined : /^_/,
 };
 
 // Plugin to replace Leaflet import with global L variable
@@ -43,23 +61,154 @@ const leafletGlobalPlugin = {
   },
 };
 
-// Build MapApp (mapApp.js) - IIFE format to work with file:// protocol
+// Build MapApp - IIFE format for file:// protocol compatibility
 const appBuildOptions = {
   entryPoints: [join(__dirname, "kml_heatmap/frontend/mapApp.ts")],
   bundle: true,
   format: "iife",
   globalName: "MapAppModule",
   outfile: join(__dirname, "kml_heatmap/static/mapApp.bundle.js"),
-  sourcemap: true,
+  sourcemap: isDevelopment,
   target: ["es2020"],
   platform: "browser",
   logLevel: "info",
-  minify: false,
+  minify,
   plugins: [leafletGlobalPlugin],
+  metafile: true, // Enable metafile for analysis
+
+  // Advanced minification options
+  minifyWhitespace: !isDevelopment,
+  minifyIdentifiers: !isDevelopment,
+  minifySyntax: !isDevelopment,
+
+  // Tree shaking
+  treeShaking: true,
+
+  // Drop console logs and debugger in production
+  drop: isDevelopment ? [] : ["console", "debugger"],
+
+  // Enable mangling for smaller identifiers
+  mangleProps: isDevelopment ? undefined : /^_/,
 };
+
+/**
+ * Format bytes to human-readable size
+ */
+function formatBytes(bytes) {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
+/**
+ * Analyze bundle composition from metafile
+ */
+function analyzeBundleComposition(metafile, bundleName) {
+  console.log(`\n📊 ${bundleName} Composition:`);
+
+  const outputs = Object.values(metafile.outputs)[0];
+  if (!outputs || !outputs.inputs) {
+    console.log("  No composition data available");
+    return;
+  }
+
+  // Group imports by type
+  const composition = {};
+  const totalBytes = outputs.bytes;
+
+  for (const [file, data] of Object.entries(outputs.inputs)) {
+    const bytes = data.bytesInOutput || 0;
+
+    // Categorize files
+    let category;
+    if (file.includes("node_modules")) {
+      const match = file.match(/node_modules\/([^/]+)/);
+      category = match ? `📦 ${match[1]}` : "📦 dependencies";
+    } else if (file.includes("frontend/calculations")) {
+      category = "🧮 calculations";
+    } else if (file.includes("frontend/features")) {
+      category = "✨ features";
+    } else if (file.includes("frontend/ui")) {
+      category = "🎨 ui";
+    } else if (file.includes("frontend/utils")) {
+      category = "🔧 utils";
+    } else if (file.includes("frontend/services")) {
+      category = "⚙️  services";
+    } else if (file.includes("frontend/state")) {
+      category = "💾 state";
+    } else {
+      category = "📄 other";
+    }
+
+    composition[category] = (composition[category] || 0) + bytes;
+  }
+
+  // Sort by size descending
+  const sorted = Object.entries(composition)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 10); // Top 10
+
+  console.log("  Top contributors:");
+  for (const [category, bytes] of sorted) {
+    const percentage = ((bytes / totalBytes) * 100).toFixed(1);
+    console.log(
+      `    ${category.padEnd(25)} ${formatBytes(bytes).padStart(10)}  (${percentage}%)`
+    );
+  }
+}
+
+/**
+ * Print bundle size analysis
+ */
+function analyzeBundleSizes() {
+  console.log("\n📦 Bundle Size Analysis:");
+  console.log("─".repeat(60));
+
+  const bundlePath = join(__dirname, "kml_heatmap/static/bundle.js");
+  const appBundlePath = join(__dirname, "kml_heatmap/static/mapApp.bundle.js");
+
+  try {
+    const bundleSize = statSync(bundlePath).size;
+    const appBundleSize = statSync(appBundlePath).size;
+    const totalSize = bundleSize + appBundleSize;
+
+    console.log(
+      `  📚 KMLHeatmap Library:  ${formatBytes(bundleSize).padStart(10)}`
+    );
+    console.log(
+      `  🗺️  MapApp Bundle:      ${formatBytes(appBundleSize).padStart(10)}`
+    );
+    console.log(`  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(
+      `  📊 Total:              ${formatBytes(totalSize).padStart(10)}`
+    );
+
+    // Size warnings
+    if (bundleSize > 50 * 1024) {
+      console.log(`  ⚠️  Library bundle is large (>${formatBytes(50 * 1024)})`);
+    }
+    if (appBundleSize > 100 * 1024) {
+      console.log(`  ⚠️  MapApp bundle is large (>${formatBytes(100 * 1024)})`);
+    }
+    if (totalSize > 150 * 1024) {
+      console.log(
+        `  ⚠️  Total bundle size is large (>${formatBytes(150 * 1024)})`
+      );
+    }
+  } catch (error) {
+    console.error("  ❌ Could not analyze bundle sizes:", error.message);
+  }
+
+  console.log("─".repeat(60));
+}
 
 async function build() {
   try {
+    const mode = isDevelopment ? "development" : "production";
+    console.log(`📦 Build mode: ${mode} (minify: ${minify})`);
+
     if (isWatch) {
       console.log("👀 Watching for changes...");
       const libraryCtx = await esbuild.context(libraryBuildOptions);
@@ -67,11 +216,23 @@ async function build() {
       await Promise.all([libraryCtx.watch(), appCtx.watch()]);
     } else {
       console.log("🔨 Building JavaScript bundles...");
-      await Promise.all([
+      const [libraryResult, appResult] = await Promise.all([
         esbuild.build(libraryBuildOptions),
         esbuild.build(appBuildOptions),
       ]);
+
       console.log("✅ Build complete!");
+
+      // Analyze bundle sizes and composition
+      analyzeBundleSizes();
+
+      if (libraryResult.metafile) {
+        analyzeBundleComposition(libraryResult.metafile, "KMLHeatmap Library");
+      }
+
+      if (appResult.metafile) {
+        analyzeBundleComposition(appResult.metafile, "MapApp Bundle");
+      }
     }
   } catch (error) {
     console.error("❌ Build failed:", error);

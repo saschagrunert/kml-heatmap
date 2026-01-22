@@ -1,23 +1,26 @@
 /**
  * Stats Manager - Handles statistics panel updates
  */
+import DOMPurify from "dompurify";
 import type { MapApp } from "../mapApp";
 import type { FilteredStatistics } from "../types";
+import { domCache } from "../utils/domCache";
 
 export class StatsManager {
   private app: MapApp;
 
   constructor(app: MapApp) {
     this.app = app;
+
+    // Pre-cache stats panel element
+    domCache.cacheElements(["stats-panel"]);
   }
 
   updateStatsForSelection(): void {
     if (this.app.selectedPathIds.size === 0) {
-      const statsToShow = (
-        window as any
-      ).KMLHeatmap.calculateFilteredStatistics({
-        pathInfo: this.app.fullPathInfo,
-        segments: this.app.fullPathSegments,
+      const statsToShow = window.KMLHeatmap.calculateFilteredStatistics({
+        pathInfo: this.app.fullPathInfo || [],
+        segments: this.app.fullPathSegments || [],
         year: this.app.selectedYear,
         aircraft: this.app.selectedAircraft,
       });
@@ -42,9 +45,7 @@ export class StatsManager {
     if (selectedSegments.length === 0) return;
 
     // Use KMLHeatmap library to calculate stats for selected paths
-    const selectedStats = (
-      window as any
-    ).KMLHeatmap.calculateFilteredStatistics({
+    const selectedStats = window.KMLHeatmap.calculateFilteredStatistics({
       pathInfo: selectedPathInfo,
       segments: selectedSegments,
       year: "all", // Don't filter by year for selection
@@ -101,7 +102,7 @@ export class StatsManager {
         '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Aircrafts (' +
         stats.num_aircraft +
         "):</strong><br>";
-      stats.aircraft_list.forEach((aircraft: any) => {
+      stats.aircraft_list.forEach((aircraft) => {
         const typeStr = aircraft.type ? " (" + aircraft.type + ")" : "";
         html +=
           '<span style="margin-left: 10px;">• ' +
@@ -214,26 +215,24 @@ export class StatsManager {
 
     // Most common cruise altitude
     if (
-      (stats as any).most_common_cruise_altitude_ft &&
-      (stats as any).most_common_cruise_altitude_ft > 0
+      stats.most_common_cruise_altitude_ft &&
+      stats.most_common_cruise_altitude_ft > 0
     ) {
-      const cruiseAltM = Math.round(
-        (stats as any).most_common_cruise_altitude_m
-      );
+      const cruiseAltM = Math.round(stats.most_common_cruise_altitude_m || 0);
       html +=
         '<div style="margin-bottom: 8px;"><strong>Most Common Cruise Altitude (AGL):</strong> ' +
-        (stats as any).most_common_cruise_altitude_ft.toLocaleString() +
+        stats.most_common_cruise_altitude_ft.toLocaleString() +
         " ft (" +
         cruiseAltM.toLocaleString() +
         " m)</div>";
     }
 
-    const panel = document.getElementById("stats-panel");
-    if (panel) panel.innerHTML = html;
+    const panel = domCache.get("stats-panel");
+    if (panel) panel.innerHTML = DOMPurify.sanitize(html);
   }
 
   toggleStats(): void {
-    const panel = document.getElementById("stats-panel");
+    const panel = domCache.get("stats-panel");
     if (!panel) return;
 
     if (panel.classList.contains("visible")) {

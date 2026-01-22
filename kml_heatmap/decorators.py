@@ -65,7 +65,7 @@ Note: When stacking decorators, order matters:
 
 import time
 import functools
-from typing import Callable, Any, TypeVar
+from typing import Callable, Any, TypeVar, cast
 from .logger import logger
 
 __all__ = [
@@ -115,7 +115,7 @@ def timed(func: F) -> F:
 
         return result
 
-    return wrapper
+    return cast(F, wrapper)
 
 
 def log_calls(func: F) -> F:
@@ -157,7 +157,7 @@ def log_calls(func: F) -> F:
             logger.error(f"{func.__name__} raised {type(e).__name__}: {e}")
             raise
 
-    return wrapper
+    return cast(F, wrapper)
 
 
 def validate_not_none(*param_names: str) -> Callable[[F], F]:
@@ -205,6 +205,6 @@ def validate_not_none(*param_names: str) -> Callable[[F], F]:
 
             return func(*args, **kwargs)
 
-        return wrapper
+        return cast(F, wrapper)
 
     return decorator

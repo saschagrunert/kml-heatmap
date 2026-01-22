@@ -1,19 +1,25 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { FilterManager } from "../../../../kml_heatmap/frontend/ui/filterManager";
+import type { MockMapApp } from "../../testHelpers";
 
 describe("FilterManager", () => {
   let filterManager: FilterManager;
-  let mockApp: any;
+  let mockApp: MockMapApp;
 
   beforeEach(() => {
     // Mock window.KMLHeatmap
-    (global.window as any).KMLHeatmap = {
+    window.KMLHeatmap = {
       calculateFilteredStatistics: vi.fn(() => ({
         total_points: 1000,
         num_paths: 10,
         total_distance_km: 500,
+        num_airports: 0,
+        airport_names: [],
+        num_aircraft: 0,
+        aircraft_list: [],
+        total_distance_nm: 0,
       })),
-    };
+    } as typeof window.KMLHeatmap;
 
     // Create year select element
     const yearSelect = document.createElement("select");
@@ -311,7 +317,7 @@ describe("FilterManager", () => {
       await filterManager.filterByYear();
 
       expect(
-        (window as any).KMLHeatmap.calculateFilteredStatistics
+        window.KMLHeatmap.calculateFilteredStatistics
       ).toHaveBeenCalledWith({
         pathInfo: mockApp.fullPathInfo,
         segments: mockApp.fullPathSegments,
@@ -419,7 +425,7 @@ describe("FilterManager", () => {
       await filterManager.filterByAircraft();
 
       expect(
-        (window as any).KMLHeatmap.calculateFilteredStatistics
+        window.KMLHeatmap.calculateFilteredStatistics
       ).toHaveBeenCalledWith({
         pathInfo: mockApp.fullPathInfo,
         segments: mockApp.fullPathSegments,

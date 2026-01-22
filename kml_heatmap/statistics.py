@@ -121,8 +121,8 @@ def calculate_flight_time(valid_paths: List[List[List[float]]]) -> Dict[str, Any
     Returns:
         Dict with total_seconds and paths_with_timestamps count
     """
-    total_seconds = 0
-    paths_with_timestamps = 0
+    total_seconds = 0.0
+    paths_with_timestamps = 0.0
 
     for path in valid_paths:
         timestamps = extract_timestamps_from_path(path)
@@ -134,7 +134,7 @@ def calculate_flight_time(valid_paths: List[List[List[float]]]) -> Dict[str, Any
             duration = max_time - min_time
             if duration > 0:
                 total_seconds += duration
-                paths_with_timestamps += 1
+                paths_with_timestamps += 1.0
 
     return {
         "total_seconds": total_seconds,
@@ -156,7 +156,7 @@ def _build_aircraft_flights_map(
     """
     aircraft_registrations = set()
     aircraft_types = set()
-    aircraft_flights = {}
+    aircraft_flights: Dict[str, Dict[str, Any]] = {}
     path_to_aircraft = {}
 
     for idx, metadata in enumerate(all_path_metadata):
@@ -395,8 +395,9 @@ def calculate_statistics(
 
     # Calculate flight time statistics
     time_stats = calculate_flight_time(valid_paths)
-    stats["total_flight_time_seconds"] = time_stats["total_seconds"]
-    stats["total_flight_time_str"] = format_flight_time(time_stats["total_seconds"])
+    total_seconds = float(time_stats["total_seconds"])
+    stats["total_flight_time_seconds"] = total_seconds
+    stats["total_flight_time_str"] = format_flight_time(total_seconds)  # type: ignore[assignment]
 
     # Debug output
     if time_stats["paths_with_timestamps"] > 0:
@@ -411,8 +412,11 @@ def calculate_statistics(
         stats.update(aircraft_stats)
 
     # Calculate average groundspeed
-    if stats["total_flight_time_seconds"] > 0 and stats["total_distance_nm"] > 0:
-        hours = stats["total_flight_time_seconds"] / SECONDS_PER_HOUR
-        stats["average_groundspeed_knots"] = stats["total_distance_nm"] / hours
+    flight_time = stats.get("total_flight_time_seconds", 0)
+    distance_nm = stats.get("total_distance_nm", 0)
+    if isinstance(flight_time, (int, float)) and isinstance(distance_nm, (int, float)):
+        if flight_time > 0 and distance_nm > 0:
+            hours = flight_time / SECONDS_PER_HOUR
+            stats["average_groundspeed_knots"] = distance_nm / hours
 
     return stats

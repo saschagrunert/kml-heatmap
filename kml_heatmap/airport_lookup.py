@@ -7,7 +7,7 @@ ICAO codes using the OurAirports database with local caching.
 import csv
 import time
 import threading
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from urllib.request import urlretrieve
 
 # Try to import fcntl for Unix-like systems (for process-safe file locking)
@@ -201,7 +201,7 @@ def lookup_airport_coordinates(icao_code: str) -> Optional[Tuple[float, float, s
     return None
 
 
-def get_cache_info() -> Dict[str, any]:
+def get_cache_info() -> Dict[str, Any]:
     """Get information about the airport database cache.
 
     Returns:

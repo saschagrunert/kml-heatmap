@@ -1,9 +1,10 @@
+import type { MockMapApp } from "../../testHelpers";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { StateManager } from "../../../../kml_heatmap/frontend/ui/stateManager";
 
 describe("StateManager", () => {
   let stateManager: StateManager;
-  let mockApp: any;
+  let mockApp: MockMapApp;
   let mockLocalStorage: { [key: string]: string };
 
   beforeEach(() => {
@@ -22,12 +23,12 @@ describe("StateManager", () => {
       }),
       length: 0,
       key: vi.fn(),
-    } as any;
+    } as Storage;
 
     // Mock history API
     global.history = {
       replaceState: vi.fn(),
-    } as any;
+    } as Pick<History, "replaceState">;
 
     // Mock window.location
     Object.defineProperty(window, "location", {
@@ -39,7 +40,7 @@ describe("StateManager", () => {
     });
 
     // Mock KMLHeatmap library
-    (global.window as any).KMLHeatmap = {
+    window.KMLHeatmap = {
       encodeStateToUrl: vi.fn((state) => {
         return `year=${state.selectedYear}&aircraft=${state.selectedAircraft}`;
       }),
@@ -147,7 +148,7 @@ describe("StateManager", () => {
     it("updates URL with current state", () => {
       stateManager.saveMapState();
 
-      expect((window as any).KMLHeatmap.encodeStateToUrl).toHaveBeenCalled();
+      expect(window.KMLHeatmap.encodeStateToUrl).toHaveBeenCalled();
       expect(history.replaceState).toHaveBeenCalledWith(
         null,
         "",
@@ -238,14 +239,12 @@ describe("StateManager", () => {
 
       stateManager.updateUrl(state);
 
-      expect((window as any).KMLHeatmap.encodeStateToUrl).toHaveBeenCalledWith(
-        state
-      );
+      expect(window.KMLHeatmap.encodeStateToUrl).toHaveBeenCalledWith(state);
       expect(history.replaceState).toHaveBeenCalled();
     });
 
     it("handles empty URL params", () => {
-      (window as any).KMLHeatmap.encodeStateToUrl.mockReturnValueOnce("");
+      window.KMLHeatmap.encodeStateToUrl.mockReturnValueOnce("");
 
       const state = {
         center: { lat: 50.0, lng: 8.0 },

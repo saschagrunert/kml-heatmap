@@ -1,7 +1,10 @@
 /**
  * Wrapped Manager - Handles year-in-review/wrapped feature
  */
+import DOMPurify from "dompurify";
 import type { MapApp } from "../mapApp";
+import type { FunFact } from "../types";
+import { domCache } from "../utils/domCache";
 
 export class WrappedManager {
   private app: MapApp;
@@ -12,25 +15,53 @@ export class WrappedManager {
     this.app = app;
     this.originalMapParent = null;
     this.originalMapIndex = null;
+
+    // Pre-cache wrapped modal elements
+    domCache.cacheElements([
+      "wrapped-title",
+      "wrapped-year",
+      "wrapped-stats",
+      "wrapped-fun-facts",
+      "wrapped-aircraft-fleet",
+      "wrapped-top-airports",
+      "wrapped-airports-grid",
+      "map",
+      "wrapped-map-container",
+      "wrapped-modal",
+      "stats-btn",
+      "export-btn",
+      "wrapped-btn",
+      "heatmap-btn",
+      "airports-btn",
+      "altitude-btn",
+      "airspeed-btn",
+      "aviation-btn",
+      "year-filter",
+      "aircraft-filter",
+      "stats-panel",
+      "altitude-legend",
+      "airspeed-legend",
+      "loading",
+    ]);
   }
 
-  async showWrapped(): Promise<void> {
+  showWrapped(): void {
     if (!this.app.map) return;
 
     // Use the currently selected year (including 'all')
     const year = this.app.selectedYear;
 
     // Calculate stats for selected year
-    const yearStats = (window as any).KMLHeatmap.calculateYearStats(
-      this.app.fullPathInfo,
-      this.app.fullPathSegments,
+    const yearStats = window.KMLHeatmap.calculateYearStats(
+      this.app.fullPathInfo || [],
+      this.app.fullPathSegments || [],
       year,
       this.app.fullStats
     );
 
     // Update title and year display based on selection
-    const titleEl = document.getElementById("wrapped-title");
-    const yearEl = document.getElementById("wrapped-year");
+    const titleEl = domCache.get("wrapped-title");
+    const yearEl = domCache.get("wrapped-year");
 
     if (year === "all") {
       if (titleEl) titleEl.textContent = "✨ Your Flight History";
@@ -68,34 +99,35 @@ export class WrappedManager {
             </div>
         `;
 
-    const statsEl = document.getElementById("wrapped-stats");
-    if (statsEl) statsEl.innerHTML = statsHtml;
+    const statsEl = domCache.get("wrapped-stats");
+    if (statsEl) statsEl.innerHTML = DOMPurify.sanitize(statsHtml);
 
     // Build fun facts section with dynamic, varied facts
-    const funFacts = (window as any).KMLHeatmap.generateFunFacts(
+    const funFacts = window.KMLHeatmap.generateFunFacts(
       yearStats,
       this.app.fullStats
     );
 
     let funFactsHtml = '<div class="fun-facts-title">✨ Facts</div>';
-    funFacts.forEach((fact: any) => {
+    funFacts.forEach((fact: FunFact) => {
       funFactsHtml += `<div class="fun-fact" data-category="${fact.category}"><span class="fun-fact-icon">${fact.icon}</span><span class="fun-fact-text">${fact.text}</span></div>`;
     });
 
-    const funFactsEl = document.getElementById("wrapped-fun-facts");
-    if (funFactsEl) funFactsEl.innerHTML = funFactsHtml;
+    const funFactsEl = domCache.get("wrapped-fun-facts");
+    if (funFactsEl) funFactsEl.innerHTML = DOMPurify.sanitize(funFactsHtml);
 
     // Build aircraft fleet section using year-filtered data
     if (yearStats.aircraft_list && yearStats.aircraft_list.length > 0) {
       let fleetHtml = '<div class="aircraft-fleet-title">✈️ Fleet</div>';
 
       // Show all aircraft sorted by flight count with color coding based on flights
-      const maxFlights = yearStats.aircraft_list[0].flights;
+      const maxFlights = yearStats.aircraft_list[0]?.flights ?? 0;
       const minFlights =
-        yearStats.aircraft_list[yearStats.aircraft_list.length - 1].flights;
+        yearStats.aircraft_list[yearStats.aircraft_list.length - 1]?.flights ??
+        0;
       const flightRange = maxFlights - minFlights;
 
-      yearStats.aircraft_list.forEach((aircraft: any) => {
+      yearStats.aircraft_list.forEach((aircraft) => {
         // Use full model if available, otherwise fall back to type
         const modelStr = aircraft.model || aircraft.type || "";
 
@@ -130,8 +162,8 @@ export class WrappedManager {
                 `;
       });
 
-      const fleetEl = document.getElementById("wrapped-aircraft-fleet");
-      if (fleetEl) fleetEl.innerHTML = fleetHtml;
+      const fleetEl = domCache.get("wrapped-aircraft-fleet");
+      if (fleetEl) fleetEl.innerHTML = DOMPurify.sanitize(fleetHtml);
     }
 
     // Build home base section using year-filtered airport data
@@ -171,46 +203,47 @@ export class WrappedManager {
       });
 
       // Sort by flight count to find home base
-      yearAirports.sort((a: any, b: any) => b.flight_count - a.flight_count);
+      yearAirports.sort((a, b) => b.flight_count - a.flight_count);
       const homeBase = yearAirports[0];
 
-      let homeBaseHtml = '<div class="top-airports-title">🏠 Home Base</div>';
-      homeBaseHtml += `
+      if (homeBase) {
+        let homeBaseHtml = '<div class="top-airports-title">🏠 Home Base</div>';
+        homeBaseHtml += `
                 <div class="top-airport">
                     <div class="top-airport-name">${homeBase.name}</div>
                     <div class="top-airport-count">${homeBase.flight_count} flights</div>
                 </div>
             `;
-      const topAirportsEl = document.getElementById("wrapped-top-airports");
-      if (topAirportsEl) topAirportsEl.innerHTML = homeBaseHtml;
+        const topAirportsEl = domCache.get("wrapped-top-airports");
+        if (topAirportsEl)
+          topAirportsEl.innerHTML = DOMPurify.sanitize(homeBaseHtml);
 
-      // Build all destinations badge grid (excluding home base)
-      const destinations = yearStats.airport_names.filter(
-        (name: string) => name !== homeBase.name
-      );
+        // Build all destinations badge grid (excluding home base)
+        const destinations = yearStats.airport_names.filter(
+          (name) => name !== homeBase.name
+        );
 
-      // Only show destinations section if there are destinations other than home base
-      if (destinations.length > 0) {
-        let airportBadgesHtml =
-          '<div class="airports-grid-title">🗺️ Destinations</div><div class="airport-badges">';
-        destinations.forEach((airportName: string) => {
-          airportBadgesHtml += `<div class="airport-badge">${airportName}</div>`;
-        });
-        airportBadgesHtml += "</div>";
-        const gridEl = document.getElementById("wrapped-airports-grid");
-        if (gridEl) gridEl.innerHTML = airportBadgesHtml;
-      } else {
-        // Clear the destinations section if no destinations
-        const gridEl = document.getElementById("wrapped-airports-grid");
-        if (gridEl) gridEl.innerHTML = "";
+        // Only show destinations section if there are destinations other than home base
+        if (destinations.length > 0) {
+          let airportBadgesHtml =
+            '<div class="airports-grid-title">🗺️ Destinations</div><div class="airport-badges">';
+          destinations.forEach((airportName) => {
+            airportBadgesHtml += `<div class="airport-badge">${airportName}</div>`;
+          });
+          airportBadgesHtml += "</div>";
+          const gridEl = domCache.get("wrapped-airports-grid");
+          if (gridEl) gridEl.innerHTML = DOMPurify.sanitize(airportBadgesHtml);
+        } else {
+          // Clear the destinations section if no destinations
+          const gridEl = domCache.get("wrapped-airports-grid");
+          if (gridEl) gridEl.innerHTML = "";
+        }
       }
     }
 
     // Move the map into the wrapped container
-    const mapContainer = document.getElementById("map");
-    const wrappedMapContainer = document.getElementById(
-      "wrapped-map-container"
-    );
+    const mapContainer = domCache.get("map");
+    const wrappedMapContainer = domCache.get("wrapped-map-container");
 
     if (!mapContainer || !wrappedMapContainer) return;
 
@@ -228,27 +261,27 @@ export class WrappedManager {
     // Hide controls in wrapped view FIRST
     const controls = [
       document.querySelector(".leaflet-control-zoom"),
-      document.getElementById("stats-btn"),
-      document.getElementById("export-btn"),
-      document.getElementById("wrapped-btn"),
-      document.getElementById("heatmap-btn"),
-      document.getElementById("airports-btn"),
-      document.getElementById("altitude-btn"),
-      document.getElementById("airspeed-btn"),
-      document.getElementById("aviation-btn"),
-      document.getElementById("year-filter"),
-      document.getElementById("aircraft-filter"),
-      document.getElementById("stats-panel"),
-      document.getElementById("altitude-legend"),
-      document.getElementById("airspeed-legend"),
-      document.getElementById("loading"),
+      domCache.get("stats-btn"),
+      domCache.get("export-btn"),
+      domCache.get("wrapped-btn"),
+      domCache.get("heatmap-btn"),
+      domCache.get("airports-btn"),
+      domCache.get("altitude-btn"),
+      domCache.get("airspeed-btn"),
+      domCache.get("aviation-btn"),
+      domCache.get("year-filter"),
+      domCache.get("aircraft-filter"),
+      domCache.get("stats-panel"),
+      domCache.get("altitude-legend"),
+      domCache.get("airspeed-legend"),
+      domCache.get("loading"),
     ];
     controls.forEach((el) => {
       if (el) (el as HTMLElement).style.display = "none";
     });
 
     // Show modal first to ensure wrapped-map-container has dimensions
-    const modal = document.getElementById("wrapped-modal");
+    const modal = domCache.get("wrapped-modal");
     if (modal) modal.style.display = "flex";
 
     // Wait for modal to render and have dimensions
@@ -281,7 +314,7 @@ export class WrappedManager {
   closeWrapped(event?: MouseEvent): void {
     if (!event || (event.target as HTMLElement).id === "wrapped-modal") {
       // Move map back to original position
-      const mapContainer = document.getElementById("map");
+      const mapContainer = domCache.get("map");
       if (!mapContainer) return;
 
       if (this.originalMapParent && this.originalMapIndex !== null) {
@@ -304,19 +337,19 @@ export class WrappedManager {
         // Show controls again
         const controls = [
           document.querySelector(".leaflet-control-zoom"),
-          document.getElementById("stats-btn"),
-          document.getElementById("export-btn"),
-          document.getElementById("wrapped-btn"),
-          document.getElementById("heatmap-btn"),
-          document.getElementById("airports-btn"),
-          document.getElementById("altitude-btn"),
-          document.getElementById("airspeed-btn"),
-          document.getElementById("year-filter"),
-          document.getElementById("aircraft-filter"),
-          document.getElementById("stats-panel"),
-          document.getElementById("altitude-legend"),
-          document.getElementById("airspeed-legend"),
-          document.getElementById("loading"),
+          domCache.get("stats-btn"),
+          domCache.get("export-btn"),
+          domCache.get("wrapped-btn"),
+          domCache.get("heatmap-btn"),
+          domCache.get("airports-btn"),
+          domCache.get("altitude-btn"),
+          domCache.get("airspeed-btn"),
+          domCache.get("year-filter"),
+          domCache.get("aircraft-filter"),
+          domCache.get("stats-panel"),
+          domCache.get("altitude-legend"),
+          domCache.get("airspeed-legend"),
+          domCache.get("loading"),
         ];
         controls.forEach((el) => {
           if (el) (el as HTMLElement).style.display = "";
@@ -324,7 +357,7 @@ export class WrappedManager {
 
         // Only show aviation button if API key is available
         if (this.app.config.openaipApiKey) {
-          const aviationBtn = document.getElementById("aviation-btn");
+          const aviationBtn = domCache.get("aviation-btn");
           if (aviationBtn) aviationBtn.style.display = "";
         }
 
@@ -339,7 +372,7 @@ export class WrappedManager {
         }, 100);
       }
 
-      const modal = document.getElementById("wrapped-modal");
+      const modal = domCache.get("wrapped-modal");
       if (modal) modal.style.display = "none";
     }
   }

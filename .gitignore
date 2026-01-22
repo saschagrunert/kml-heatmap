@@ -6,6 +6,7 @@ AGENTS.md
 __pycache__
 kml
 node_modules
+.mypy_cache
 
 # Test coverage reports
 coverage

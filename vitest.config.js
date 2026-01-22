@@ -5,6 +5,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
+    include: ["tests/frontend/unit/**/*.test.ts"],
+    exclude: ["**/node_modules/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

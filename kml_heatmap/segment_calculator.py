@@ -50,7 +50,7 @@ from .constants import (
 class SegmentData:
     """Container for segment calculation results."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize segment data with default values."""
         self.segments: List[Dict[str, Any]] = []
         self.max_groundspeed_knots: float = 0.0
@@ -109,7 +109,7 @@ def calculate_path_distance(path: List[List[float]]) -> float:
 
 
 def extract_segment_speeds(
-    path: List[List[float]], path_start_time: Optional[datetime]
+    path: List[List[float | str]], path_start_time: Optional[datetime]
 ) -> List[Dict[str, Any]]:
     """
     Calculate instantaneous speeds for all segments in a path.
@@ -127,8 +127,8 @@ def extract_segment_speeds(
         coord1 = path[i]
         coord2 = path[i + 1]
 
-        lat1, lon1 = coord1[0], coord1[1]
-        lat2, lon2 = coord2[0], coord2[1]
+        lat1, lon1 = float(coord1[0]), float(coord1[1])
+        lat2, lon2 = float(coord2[0]), float(coord2[1])
         segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
 
         instant_speed = 0.0
@@ -137,8 +137,14 @@ def extract_segment_speeds(
         relative_time = None
 
         if len(coord1) >= 4 and len(coord2) >= 4:
-            dt1 = parse_iso_timestamp(coord1[3])
-            dt2 = parse_iso_timestamp(coord2[3])
+            ts1 = coord1[3]
+            ts2 = coord2[3]
+            if isinstance(ts1, str) and isinstance(ts2, str):
+                dt1 = parse_iso_timestamp(ts1)
+                dt2 = parse_iso_timestamp(ts2)
+            else:
+                dt1 = None
+                dt2 = None
 
             if dt1 and dt2:
                 time_delta = (dt2 - dt1).total_seconds()
@@ -193,9 +199,9 @@ def build_time_indexed_segments(
         sorted_pairs = sorted(
             zip(timestamp_list, time_indexed_segments), key=lambda x: x[0]
         )
-        timestamp_list, time_indexed_segments = zip(*sorted_pairs)
-        timestamp_list = list(timestamp_list)
-        time_indexed_segments = list(time_indexed_segments)
+        unzipped = list(zip(*sorted_pairs))
+        timestamp_list = list(unzipped[0])
+        time_indexed_segments = list(unzipped[1])
 
     return timestamp_list, time_indexed_segments
 

@@ -191,7 +191,7 @@ def lookup_aircraft_model(registration: str) -> Optional[str]:
     return model
 
 
-def parse_aircraft_from_filename(filename: str) -> Dict[str, str]:
+def parse_aircraft_from_filename(filename: str) -> Dict[str, str | None]:
     """
     Parse aircraft information from KML filename.
 
@@ -225,7 +225,7 @@ def parse_aircraft_from_filename(filename: str) -> Dict[str, str]:
             return {
                 "registration": registration,
                 "type": None,  # Charterware doesn't include type in filename
-                "route": route,  # DEPARTURE-ARRIVAL format
+                "route": route if route else None,  # DEPARTURE-ARRIVAL format
                 "format": "charterware",
             }
 

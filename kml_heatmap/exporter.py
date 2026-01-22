@@ -199,8 +199,8 @@ def calculate_path_duration_and_distance(
     Returns:
         Tuple of (duration_seconds, distance_km)
     """
-    duration_seconds = 0
-    distance_km = 0
+    duration_seconds = 0.0
+    distance_km = 0.0
 
     # Calculate duration from timestamps
     start_ts = metadata.get("timestamp")
@@ -211,7 +211,7 @@ def calculate_path_duration_and_distance(
             if "T" in start_ts and "T" in end_ts:
                 start_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
                 end_dt = datetime.fromisoformat(end_ts.replace("Z", "+00:00"))
-                duration_seconds = (end_dt - start_dt).total_seconds()
+                duration_seconds = float((end_dt - start_dt).total_seconds())
         except (ValueError, TypeError) as e:
             logger.debug(
                 f"Could not parse path timestamps '{start_ts}' -> '{end_ts}': {e}"
@@ -221,7 +221,7 @@ def calculate_path_duration_and_distance(
     for i in range(len(path) - 1):
         lat1, lon1 = path[i][0], path[i][1]
         lat2, lon2 = path[i + 1][0], path[i + 1][1]
-        distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+        distance_km += float(haversine_distance(lat1, lon1, lat2, lon2))
 
     return duration_seconds, distance_km
 
@@ -483,7 +483,7 @@ def export_airports_json(
     unique_airports: List[Dict[str, Any]],
     output_dir: str,
     strip_timestamps: bool = False,
-) -> None:
+) -> str:
     """
     Export airport data to JSON file.
 
@@ -544,7 +544,7 @@ def export_metadata_json(
     heatmap_gradient: Dict[float, str],
     available_years: List[int],
     output_dir: str,
-) -> None:
+) -> str:
     """
     Export metadata and statistics to JSON file.
 

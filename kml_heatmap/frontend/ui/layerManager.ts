@@ -3,12 +3,21 @@
  */
 import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
+import { domCache } from "../utils/domCache";
 
 export class LayerManager {
   private app: MapApp;
 
   constructor(app: MapApp) {
     this.app = app;
+
+    // Pre-cache legend elements
+    domCache.cacheElements([
+      "legend-min",
+      "legend-max",
+      "airspeed-legend-min",
+      "airspeed-legend-max",
+    ]);
   }
 
   redrawAltitudePaths(): void {
@@ -30,11 +39,12 @@ export class LayerManager {
       if (selectedSegments.length > 0) {
         const altitudes = selectedSegments.map((s) => s.altitude_ft || 0);
         // Use iterative approach to avoid stack overflow with large arrays
-        let min = altitudes[0];
-        let max = altitudes[0];
+        let min = altitudes[0] ?? 0;
+        let max = altitudes[0] ?? 0;
         for (let i = 1; i < altitudes.length; i++) {
-          if (altitudes[i] < min) min = altitudes[i];
-          if (altitudes[i] > max) max = altitudes[i];
+          const alt = altitudes[i] ?? 0;
+          if (alt < min) min = alt;
+          if (alt > max) max = alt;
         }
         colorMinAlt = min;
         colorMaxAlt = max;
@@ -88,8 +98,8 @@ export class LayerManager {
       }
 
       // Recalculate color based on current altitude range
-      const color = (window as any).KMLHeatmap.getColorForAltitude(
-        segment.altitude_ft,
+      const color = window.KMLHeatmap.getColorForAltitude(
+        segment.altitude_ft ?? 0,
         colorMinAlt,
         colorMaxAlt
       );
@@ -163,11 +173,12 @@ export class LayerManager {
           (s) => s.groundspeed_knots || 0
         );
         // Use iterative approach to avoid stack overflow with large arrays
-        let min = groundspeeds[0];
-        let max = groundspeeds[0];
+        let min = groundspeeds[0] ?? 0;
+        let max = groundspeeds[0] ?? 0;
         for (let i = 1; i < groundspeeds.length; i++) {
-          if (groundspeeds[i] < min) min = groundspeeds[i];
-          if (groundspeeds[i] > max) max = groundspeeds[i];
+          const speed = groundspeeds[i] ?? 0;
+          if (speed < min) min = speed;
+          if (speed > max) max = speed;
         }
         colorMinSpeed = min;
         colorMaxSpeed = max;
@@ -222,8 +233,8 @@ export class LayerManager {
         }
 
         // Recalculate color based on current groundspeed range
-        const color = (window as any).KMLHeatmap.getColorForAirspeed(
-          segment.groundspeed_knots,
+        const color = window.KMLHeatmap.getColorForAirspeed(
+          segment.groundspeed_knots ?? 0,
           colorMinSpeed,
           colorMaxSpeed
         );
@@ -273,8 +284,8 @@ export class LayerManager {
     const minM = Math.round(minAlt * 0.3048);
     const maxM = Math.round(maxAlt * 0.3048);
 
-    const minEl = document.getElementById("legend-min");
-    const maxEl = document.getElementById("legend-max");
+    const minEl = domCache.get("legend-min");
+    const maxEl = domCache.get("legend-max");
 
     if (minEl) {
       minEl.textContent =
@@ -292,8 +303,8 @@ export class LayerManager {
     const minKmh = Math.round(minSpeed * 1.852);
     const maxKmh = Math.round(maxSpeed * 1.852);
 
-    const minEl = document.getElementById("airspeed-legend-min");
-    const maxEl = document.getElementById("airspeed-legend-max");
+    const minEl = domCache.get("airspeed-legend-min");
+    const maxEl = domCache.get("airspeed-legend-max");
 
     if (minEl) {
       minEl.textContent =
