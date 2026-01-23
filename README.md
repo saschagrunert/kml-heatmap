@@ -270,14 +270,15 @@ Map state is automatically encoded in the URL for easy sharing. Copy the URL fro
 - Specific year or all years (`?y=2025` or `?y=all`)
 - Aircraft filter (`?a=D-EAGJ`)
 - Selected paths (`?p=1,5,12`)
-- Layer visibility (`?v=101010`)
+- Layer visibility (8 flags: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden)
+  - Example: `?v=10010000`
 - Map position (`?lat=51.5&lng=13.4&z=10`)
 
 **Example URLs:**
 
 ```
-?y=all                                    # Show all years
-?y=2025&v=010000                         # 2025 with altitude view
+?y=all                                   # Show all years
+?y=2025&v=01000000                       # 2025 with altitude view only
 ?y=2025&a=D-EAGJ&lat=51.5&lng=13.4&z=10  # Complete state
 ```
 
@@ -325,7 +326,7 @@ Supports KML files from Google Earth, Google Maps, SkyDemon, and other aviation 
 
 ### Frontend (TypeScript)
 
-The interactive map interface is built with TypeScript 5.9.3 and achieves 93% test coverage.
+The interactive map interface is built with TypeScript and has comprehensive test coverage.
 
 **Setup:**
 
@@ -336,24 +337,26 @@ npm install
 **Available commands:**
 
 ```bash
-npm run build         # Build production bundles (minified)
-npm run build:dev     # Build development bundles (with sourcemaps)
-npm run build:watch   # Watch mode for development
-npm test             # Run tests
-npm run test:watch   # Watch mode for tests
-npm run test:coverage # Generate coverage report
-npm run typecheck    # Type checking
-npm run lint         # Lint TypeScript code
-npm run lint:fix     # Auto-fix linting issues
-npm run format       # Format code with Prettier
-npm run update-deps  # Update dependencies to latest versions
+npm run build          # Build production bundles (minified)
+npm run build:dev      # Build development bundles (with sourcemaps)
+npm run build:watch    # Watch mode for development
+npm test               # Run tests
+npm run test:watch     # Watch mode for tests
+npm run test:ui        # Run tests with UI
+npm run test:coverage  # Generate coverage report
+npm run typecheck      # Type checking
+npm run lint           # Lint TypeScript code
+npm run lint:fix       # Auto-fix linting issues
+npm run format         # Format code with Prettier
+npm run format:check   # Check code formatting
+npm run update-deps    # Update dependencies to latest versions
 ```
 
 **Build Output:**
 
 - **Format**: IIFE (Immediately Invoked Function Expression)
 - **Protocol**: Compatible with `file://` protocol - open index.html directly in browser
-- **Production**: Minified bundles (bundle.js: 24.8kb, mapApp.bundle.js: 63.5kb)
+- **Production**: Minified bundles for optimal performance
 - **Development**: Unminified with sourcemaps for debugging
 
 **Architecture:**
@@ -366,7 +369,7 @@ npm run update-deps  # Update dependencies to latest versions
   - `ui/` - UI managers for controls and interactions
   - `utils/` - Formatters, colors, geometry helpers
 - **Tests**
-  - Unit tests: `tests/frontend/unit/` (Vitest, 532 tests, 93% coverage)
+  - Unit tests: `tests/frontend/unit/` (Vitest)
 - **Build output** in `kml_heatmap/static/` (bundle.js, mapApp.bundle.js)
 
 ### Backend (Python)
