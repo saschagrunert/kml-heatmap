@@ -11,7 +11,13 @@ Features:
 - Random deviations to spread data across Germany
 - Realistic altitude profiles (climb, cruise, descend)
 - Configurable number of files
-- SkyDemon-compatible KML format
+- Charterware-format KML (LineString without per-point timestamps)
+- SkyDemon-compatible filename format for metadata extraction
+
+Note: Uses Charterware KML format (LineString with flat coordinates) without
+per-point timing information. Only the flight start date is included in the
+filename. This tests the code path where altitude and airspeed visualization
+is not available due to lack of timing data.
 """
 
 import os

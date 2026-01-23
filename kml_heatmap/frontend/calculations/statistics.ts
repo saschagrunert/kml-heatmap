@@ -272,8 +272,15 @@ export function calculateFilteredStatistics(options: {
   segments: PathSegment[];
   year?: string;
   aircraft?: string;
+  coordinateCount?: number;
 }): FilteredStatistics {
-  const { pathInfo, segments, year = "all", aircraft = "all" } = options;
+  const {
+    pathInfo,
+    segments,
+    year = "all",
+    aircraft = "all",
+    coordinateCount,
+  } = options;
 
   if (!pathInfo || !segments) {
     return {
@@ -397,9 +404,9 @@ export function calculateFilteredStatistics(options: {
     }
   }
 
-  // Calculate total data points: each segment has 2 coordinate points (start and end)
-  // This matches the Python backend which counts coordinate pairs from segments
-  const totalPoints = filteredSegments.length * 2;
+  // Use provided coordinate count if available, otherwise count unique coordinates from filtered segments
+  // Note: coordinateCount represents the actual heatmap coordinates, not segment endpoints
+  const totalPoints = coordinateCount ?? filteredSegments.length * 2;
 
   return {
     total_points: totalPoints,

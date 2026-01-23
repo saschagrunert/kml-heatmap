@@ -4,7 +4,8 @@
  */
 
 import * as L from "leaflet";
-import type { HeatmapLayer } from "./globals";
+import { logError } from "./utils/logger";
+import { domCache } from "./utils/domCache";
 import { DataManager } from "./ui/dataManager";
 import { StateManager } from "./ui/stateManager";
 import { LayerManager } from "./ui/layerManager";
@@ -15,6 +16,7 @@ import { AirportManager } from "./ui/airportManager";
 import { ReplayManager } from "./ui/replayManager";
 import { WrappedManager } from "./ui/wrappedManager";
 import { UIToggles } from "./ui/uiToggles";
+import type { HeatmapLayer } from "./globals";
 import type {
   PathInfo,
   PathSegment,
@@ -111,7 +113,6 @@ export class MapApp {
   airspeedRenderer: L.SVG;
 
   // Data
-  currentResolution: string | null;
   currentData: KMLDataset | null;
   fullStats: FilteredStatistics | null;
   fullPathInfo: PathInfo[] | null;
@@ -172,7 +173,6 @@ export class MapApp {
     this.airspeedRenderer = L.svg();
 
     // Data
-    this.currentResolution = null;
     this.currentData = null;
     this.fullStats = null;
     this.fullPathInfo = null;
@@ -436,7 +436,7 @@ export class MapApp {
     // Load full resolution path_info and path_segments
     try {
       const fullResData = await this.dataManager!.loadData(
-        "z14_plus",
+        "data",
         this.selectedYear
       );
       if (fullResData && fullResData.path_info) {
@@ -446,7 +446,7 @@ export class MapApp {
         this.fullPathSegments = fullResData.path_segments;
       }
     } catch (error) {
-      console.error("Failed to load full path data:", error);
+      logError("Failed to load full path data:", error);
     }
 
     // Populate aircraft dropdown
@@ -462,6 +462,7 @@ export class MapApp {
         segments: this.fullPathSegments ?? [],
         year: this.selectedYear,
         aircraft: this.selectedAircraft,
+        coordinateCount: this.currentData?.original_points,
       });
       this.statsManager!.updateStatsPanel(initialStats, false);
     }
@@ -470,17 +471,35 @@ export class MapApp {
     this.airportManager!.updateAirportOpacity();
 
     // Load groundspeed range from metadata
-    if (
+    const hasTimingData =
       metadata &&
-      metadata.min_groundspeed_knots !== undefined &&
-      metadata.max_groundspeed_knots !== undefined
-    ) {
+      metadata.max_groundspeed_knots !== undefined &&
+      metadata.max_groundspeed_knots > 0;
+
+    if (hasTimingData) {
       this.airspeedRange.min = metadata.min_groundspeed_knots!;
       this.airspeedRange.max = metadata.max_groundspeed_knots!;
       this.layerManager!.updateAirspeedLegend(
         this.airspeedRange.min,
         this.airspeedRange.max
       );
+    }
+
+    // Enable/disable airspeed button based on timing data availability
+    // (e.g., Charterware files without per-point timestamps won't have speed data)
+    // Note: Altitude visualization still works (altitude data is in coordinates)
+    const airspeedBtn = domCache.get(
+      "airspeed-btn"
+    ) as HTMLButtonElement | null;
+    if (airspeedBtn) {
+      if (!hasTimingData) {
+        airspeedBtn.disabled = true;
+        airspeedBtn.style.opacity = "0.3";
+      } else {
+        airspeedBtn.disabled = false;
+        // Set opacity based on visibility state (0.5 = off, 1.0 = on)
+        airspeedBtn.style.opacity = this.airspeedVisible ? "1.0" : "0.5";
+      }
     }
 
     // Initial data load
@@ -644,7 +663,7 @@ export class MapApp {
     this.map!.on("moveend", () => this.stateManager!.saveMapState());
     this.map!.on("zoomend", () => {
       this.stateManager!.saveMapState();
-      void this.dataManager!.updateLayers();
+      // No need to reload data on zoom - we always use full resolution
       this.airportManager!.updateAirportMarkerSizes();
     });
 

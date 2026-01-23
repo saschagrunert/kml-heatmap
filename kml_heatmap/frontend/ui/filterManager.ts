@@ -97,7 +97,6 @@ export class FilterManager {
 
     // Clear data cache to force reload for new year
     this.app.dataManager!.loadedData = {};
-    this.app.currentResolution = null;
 
     // Clear current paths (but preserve selectedPathIds during initialization)
     this.app.altitudeLayer.clearLayers();
@@ -111,7 +110,7 @@ export class FilterManager {
 
     // Reload full resolution data for filtering/stats
     const fullResData = await this.app.dataManager!.loadData(
-      "z14_plus",
+      "data",
       this.app.selectedYear
     );
     if (fullResData) {
@@ -128,6 +127,7 @@ export class FilterManager {
       segments: this.app.fullPathSegments ?? [],
       year: this.app.selectedYear,
       aircraft: this.app.selectedAircraft,
+      coordinateCount: this.app.currentData?.original_points,
     });
     this.app.statsManager!.updateStatsPanel(filteredStats, false);
 
@@ -156,8 +156,7 @@ export class FilterManager {
       this.app.selectedPathIds.clear();
     }
 
-    // Reload current resolution data to apply filter
-    this.app.currentResolution = null; // Force reload
+    // Reload data to apply filter
     await this.app.dataManager!.updateLayers();
 
     // Update stats based on filter
@@ -166,6 +165,7 @@ export class FilterManager {
       segments: this.app.fullPathSegments ?? [],
       year: this.app.selectedYear,
       aircraft: this.app.selectedAircraft,
+      coordinateCount: this.app.currentData?.original_points,
     });
     this.app.statsManager!.updateStatsPanel(filteredStats, false);
 

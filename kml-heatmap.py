@@ -37,7 +37,7 @@ from kml_heatmap.statistics import calculate_statistics
 from kml_heatmap.renderer import minify_html, load_template
 from kml_heatmap.validation import validate_kml_file, validate_api_keys
 from kml_heatmap.constants import (
-    RESOLUTION_LEVELS,
+    DATA_RESOLUTION,
     HEATMAP_GRADIENT,
 )
 from kml_heatmap.helpers import format_flight_time
@@ -110,7 +110,7 @@ def export_data_json(
     strip_timestamps=False,
 ):
     """
-    Export data to JSON files at multiple resolutions for progressive loading.
+    Export data to JSON files at full resolution.
 
     Args:
         all_coordinates: List of [lat, lon] pairs
@@ -146,8 +146,10 @@ def export_data_json(
         min_alt_m = 0
         max_alt_m = 1000
 
-    # Export at 5 resolution levels for more dynamic loading
-    resolutions = RESOLUTION_LEVELS
+    # Export at full resolution only
+    resolutions = {
+        DATA_RESOLUTION: {"factor": 1, "epsilon": 0, "description": "Full resolution"}
+    }
 
     files = {}
     max_groundspeed_knots = 0  # Track maximum groundspeed across all segments
@@ -162,9 +164,9 @@ def export_data_json(
     # Track longest single flight distance
     max_path_distance_nm = 0  # Longest flight in nautical miles
 
-    # Store z14_plus data to avoid reloading it later
-    z14_plus_segments = None
-    z14_plus_path_info = None
+    # Store full resolution data to avoid reloading it later
+    full_res_segments = None
+    full_res_path_info = None
 
     # Track cruise altitude histogram (bins for altitudes above threshold AGL)
     cruise_altitude_histogram = {}  # Dict of {altitude_bin_ft: time_seconds}
@@ -187,12 +189,11 @@ def export_data_json(
     # Track file structure for metadata
     file_structure = {}
 
-    # OPTIMIZATION: Calculate all segment data once at full resolution
-    # Then downsample coordinates and filter segments for other resolutions
+    # Calculate segment metadata at full resolution
     logger.info("\n  📈 Calculating segment metadata at full resolution...")
 
-    # Process resolutions in order, with z14_plus first to establish the groundspeed baseline
-    resolution_order = ["z14_plus", "z11_13", "z8_10", "z5_7", "z0_4"]
+    # Only process full resolution
+    resolution_order = ["data"]
 
     # Process years in parallel for faster export
     logger.info(f"\n  📊 Processing {len(paths_by_year)} year(s) in parallel...")
@@ -269,11 +270,11 @@ def export_data_json(
                 cruise_altitude_histogram[altitude_bin] = 0
             cruise_altitude_histogram[altitude_bin] += time_spent
 
-        # Store z14_plus data for the last year
+        # Store full resolution data for the last year
         sorted_years = sorted(paths_by_year.keys())
         if year == sorted_years[-1]:
-            z14_plus_segments = result["z14_segments"]
-            z14_plus_path_info = result["z14_path_info"]
+            full_res_segments = result["full_res_segments"]
+            full_res_path_info = result["full_res_path_info"]
 
     # Export airports (same for all resolutions)
     # Filter and extract valid airport names
@@ -393,7 +394,7 @@ def export_data_json(
     total_size = sum(os.path.getsize(f) for f in files.values())
     logger.info(f"  📊 Total data size: {total_size / 1024:.1f} KB")
 
-    return files, z14_plus_segments, z14_plus_path_info
+    return files, full_res_segments, full_res_path_info
 
 
 def parse_with_error_handling(kml_file):
@@ -478,10 +479,9 @@ def build_javascript_bundle():
 
 def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="data"):
     """
-    Create a progressive-loading heatmap with external JSON data files.
+    Create a full resolution heatmap with external JSON data files.
 
-    This generates a lightweight HTML file that loads data based on zoom level,
-    significantly reducing initial load time and memory usage on mobile devices.
+    This generates a lightweight HTML file that loads full resolution data split by year.
 
     Args:
         kml_files: List of KML file paths
@@ -592,7 +592,7 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     stats["airport_names"] = sorted(valid_airport_names)
 
     # Export data to JSON files (strip timestamps by default for privacy)
-    data_files, z14_segments, z14_path_info = export_data_json(
+    data_files, full_res_segments, full_res_path_info = export_data_json(
         all_coordinates,
         all_path_groups,
         all_path_metadata,
@@ -618,10 +618,10 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             existing_meta = json.loads(json_str)
 
     # Use the segments data we just created instead of reloading from disk
-    if z14_segments is not None and z14_path_info is not None:
-        segments = z14_segments
+    if full_res_segments is not None and full_res_path_info is not None:
+        segments = full_res_segments
         logger.debug(
-            f"  Recalc: {len(segments)} segments, {len(z14_path_info)} path_info entries"
+            f"  Recalc: {len(segments)} segments, {len(full_res_path_info)} path_info entries"
         )
 
         # 1. Total Points (segments × 2)
@@ -702,14 +702,14 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
         # 8. Per-aircraft flight times and distances from segments
         if stats.get("aircraft_list"):
             logger.debug(
-                f"    Recalculating per-aircraft times and distances from {len(z14_path_info)} paths"
+                f"    Recalculating per-aircraft times and distances from {len(full_res_path_info)} paths"
             )
             aircraft_times = {}
             aircraft_distances = {}
             aircraft_years = {}
 
             # Calculate times and distances per aircraft
-            for idx, path_info in enumerate(z14_path_info):
+            for idx, path_info in enumerate(full_res_path_info):
                 reg = path_info.get("aircraft_registration")
                 path_id = path_info.get("id")
                 year = path_info.get("year")
@@ -732,8 +732,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
             # Calculate distances per aircraft from segments
             for segment in segments:
                 path_id = segment.get("path_id")
-                if path_id is not None and path_id < len(z14_path_info):
-                    path_info = z14_path_info[path_id]
+                if path_id is not None and path_id < len(full_res_path_info):
+                    path_info = full_res_path_info[path_id]
                     reg = path_info.get("aircraft_registration")
                     if reg and reg in aircraft_distances:
                         # Calculate segment distance using haversine

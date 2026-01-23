@@ -121,11 +121,22 @@ export function parseUrlParams(
 
 /**
  * Encode current state to URL parameters
+ * Preserves non-state parameters like debug
  * @param state - Current state object
  * @returns URL search params string (without leading '?')
  */
 export function encodeStateToUrl(state: AppState): string {
   const params = new URLSearchParams();
+
+  // Preserve non-state parameters from current URL
+  const currentParams = new URLSearchParams(window.location.search);
+  const preservedParams = ["debug"];
+  for (const param of preservedParams) {
+    const value = currentParams.get(param);
+    if (value !== null) {
+      params.set(param, value);
+    }
+  }
 
   // Always include year parameter (including 'all') because default is current year
   if (state.selectedYear) {

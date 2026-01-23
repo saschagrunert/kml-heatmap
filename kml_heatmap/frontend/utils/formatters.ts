@@ -58,16 +58,3 @@ export function formatAltitude(meters: number): string {
 export function formatSpeed(knots: number): string {
   return Math.round(knots).toLocaleString("en-US") + " kt";
 }
-
-/**
- * Get zoom resolution name for a given zoom level
- * @param zoom - Map zoom level
- * @returns Resolution identifier (e.g., 'z14_plus')
- */
-export function getResolutionForZoom(zoom: number): string {
-  if (zoom <= 4) return "z0_4";
-  if (zoom <= 7) return "z5_7";
-  if (zoom <= 10) return "z8_10";
-  if (zoom <= 13) return "z11_13";
-  return "z14_plus";
-}

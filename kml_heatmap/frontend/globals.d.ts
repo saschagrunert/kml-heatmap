@@ -17,7 +17,6 @@ export type KMLHeatmapModule = {
   formatDistance: typeof KMLHeatmapLib.formatDistance;
   formatAltitude: typeof KMLHeatmapLib.formatAltitude;
   formatSpeed: typeof KMLHeatmapLib.formatSpeed;
-  getResolutionForZoom: typeof KMLHeatmapLib.getResolutionForZoom;
   getColorForAltitude: typeof KMLHeatmapLib.getColorForAltitude;
   getColorForAirspeed: typeof KMLHeatmapLib.getColorForAirspeed;
 

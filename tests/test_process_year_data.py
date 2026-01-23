@@ -9,7 +9,12 @@ from unittest.mock import patch
 import pytest
 
 from kml_heatmap.data_exporter import process_year_data
-from kml_heatmap.constants import RESOLUTION_LEVELS
+from kml_heatmap.constants import DATA_RESOLUTION
+
+# Test helper constant
+RESOLUTION_LEVELS = {
+    DATA_RESOLUTION: {"factor": 1, "epsilon": 0, "description": "Full resolution"}
+}
 
 
 class TestProcessYearData:
@@ -85,7 +90,7 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus", "z11_13", "z8_10", "z5_7", "z0_4"],
+            resolution_order=["data"],
             quiet=True,
         )
 
@@ -98,18 +103,14 @@ class TestProcessYearData:
         assert result["max_path_distance"] >= 0
         assert isinstance(result["cruise_altitude_histogram"], dict)
         assert isinstance(result["file_structure"], list)
-        assert len(result["file_structure"]) == 5  # 5 resolutions
-        assert result["z14_segments"] is not None
-        assert result["z14_path_info"] is not None
+        assert len(result["file_structure"]) == 1  # 1 resolution (data)
+        assert result["full_res_segments"] is not None
+        assert result["full_res_path_info"] is not None
 
-        # Verify files were created
+        # Verify file was created
         year_dir = os.path.join(temp_output_dir, "2025")
         assert os.path.exists(year_dir)
-        assert os.path.exists(os.path.join(year_dir, "z14_plus.js"))
-        assert os.path.exists(os.path.join(year_dir, "z11_13.js"))
-        assert os.path.exists(os.path.join(year_dir, "z8_10.js"))
-        assert os.path.exists(os.path.join(year_dir, "z5_7.js"))
-        assert os.path.exists(os.path.join(year_dir, "z0_4.js"))
+        assert os.path.exists(os.path.join(year_dir, "data.js"))
 
     def test_quiet_mode(
         self,
@@ -130,7 +131,7 @@ class TestProcessYearData:
                 max_alt_m=300.0,
                 output_dir=temp_output_dir,
                 resolutions=RESOLUTION_LEVELS,
-                resolution_order=["z14_plus"],
+                resolution_order=["data"],
                 quiet=True,
             )
 
@@ -156,7 +157,7 @@ class TestProcessYearData:
                 max_alt_m=300.0,
                 output_dir=temp_output_dir,
                 resolutions=RESOLUTION_LEVELS,
-                resolution_order=["z14_plus"],
+                resolution_order=["data"],
                 quiet=False,
             )
 
@@ -181,7 +182,7 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
@@ -207,7 +208,7 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
@@ -232,13 +233,13 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Path should be skipped, no segments created
-        assert result["z14_path_info"] == []
-        assert result["z14_segments"] == []
+        assert result["full_res_path_info"] == []
+        assert result["full_res_segments"] == []
 
     def test_aircraft_metadata_extraction(
         self, sample_coordinates, sample_path_groups, temp_output_dir
@@ -262,12 +263,12 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Verify aircraft info is in path_info
-        path_info = result["z14_path_info"]
+        path_info = result["full_res_path_info"]
         assert len(path_info) > 0
         assert path_info[0]["aircraft_registration"] == "D-ABCD"
         assert path_info[0]["aircraft_type"] == "DA40"
@@ -293,12 +294,12 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Verify airport info is in path_info
-        path_info = result["z14_path_info"]
+        path_info = result["full_res_path_info"]
         assert len(path_info) > 0
         assert path_info[0]["start_airport"] == "EDDF"
         assert path_info[0]["end_airport"] == "EDDM"
@@ -321,21 +322,21 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Read and verify file format
-        file_path = os.path.join(temp_output_dir, "2025", "z14_plus.js")
+        file_path = os.path.join(temp_output_dir, "2025", "data.js")
         with open(file_path, "r") as f:
             content = f.read()
 
         # Should start with window.KML_DATA_
-        assert content.startswith("window.KML_DATA_2025_Z14_PLUS = ")
+        assert content.startswith("window.KML_DATA_2025_DATA = ")
         assert content.endswith(";")
 
         # Extract JSON data
-        json_str = content.replace("window.KML_DATA_2025_Z14_PLUS = ", "").rstrip(";")
+        json_str = content.replace("window.KML_DATA_2025_DATA = ", "").rstrip(";")
         data = json.loads(json_str)
 
         # Verify structure
@@ -343,7 +344,7 @@ class TestProcessYearData:
         assert "path_segments" in data
         assert "path_info" in data
         assert "resolution" in data
-        assert data["resolution"] == "z14_plus"
+        assert data["resolution"] == "data"
 
     def test_groundspeed_tracking(
         self,
@@ -363,7 +364,7 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
@@ -398,7 +399,7 @@ class TestProcessYearData:
             max_alt_m=2000.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
@@ -425,7 +426,7 @@ class TestProcessYearData:
                 max_alt_m=200100.0,
                 output_dir=temp_output_dir,
                 resolutions=RESOLUTION_LEVELS,
-                resolution_order=["z14_plus", "z11_13"],
+                resolution_order=["data", "data"],
                 quiet=False,
             )
 
@@ -455,7 +456,7 @@ class TestProcessYearData:
             max_alt_m=100.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
@@ -478,13 +479,13 @@ class TestProcessYearData:
             max_alt_m=200.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Should handle missing metadata gracefully
         assert result["year"] == "2025"
-        path_info = result["z14_path_info"]
+        path_info = result["full_res_path_info"]
         assert len(path_info) > 0
         assert path_info[0]["start_airport"] is None
         assert path_info[0]["end_airport"] is None
@@ -511,26 +512,26 @@ class TestProcessYearData:
             max_alt_m=200.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Verify zero-length segments were excluded
-        segments = result["z14_segments"]
+        segments = result["full_res_segments"]
         for segment in segments:
             coord1 = segment["coords"][0]
             coord2 = segment["coords"][1]
             # No identical coordinates
             assert coord1 != coord2
 
-    def test_multiple_resolutions(
+    def test_single_resolution(
         self,
         sample_coordinates,
         sample_path_groups,
         sample_path_metadata,
         temp_output_dir,
     ):
-        """Test processing all resolution levels."""
+        """Test processing single resolution level."""
         result = process_year_data(
             year="2025",
             year_path_indices=[0, 1],
@@ -541,23 +542,16 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus", "z11_13", "z8_10", "z5_7", "z0_4"],
+            resolution_order=["data"],
             quiet=True,
         )
 
-        # Verify all resolutions were processed
-        assert result["file_structure"] == [
-            "z14_plus",
-            "z11_13",
-            "z8_10",
-            "z5_7",
-            "z0_4",
-        ]
+        # Verify single resolution was processed
+        assert result["file_structure"] == ["data"]
 
-        # Verify all files exist
+        # Verify file exists
         year_dir = os.path.join(temp_output_dir, "2025")
-        for res in ["z14_plus", "z11_13", "z8_10", "z5_7", "z0_4"]:
-            assert os.path.exists(os.path.join(year_dir, f"{res}.js"))
+        assert os.path.exists(os.path.join(year_dir, "data.js"))
 
     def test_path_info_structure(
         self,
@@ -577,11 +571,11 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
-        path_info = result["z14_path_info"]
+        path_info = result["full_res_path_info"]
         assert len(path_info) > 0
 
         # Verify required fields
@@ -612,11 +606,11 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
-        segments = result["z14_segments"]
+        segments = result["full_res_segments"]
         assert len(segments) > 0
 
         # Verify required fields
@@ -651,13 +645,13 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Should still process, but without speed calculations
         assert result["year"] == "2025"
-        assert len(result["z14_segments"]) > 0
+        assert len(result["full_res_segments"]) > 0
 
     def test_invalid_timestamp_parsing(self, temp_output_dir):
         """Test handling of invalid timestamps."""
@@ -680,7 +674,7 @@ class TestProcessYearData:
             max_alt_m=200.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
@@ -716,13 +710,13 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Should calculate groundspeed from path average
         assert result["year"] == "2025"
-        segments = result["z14_segments"]
+        segments = result["full_res_segments"]
         # Some segments should have groundspeed
         has_groundspeed = any(s["groundspeed_knots"] > 0 for s in segments)
         assert has_groundspeed
@@ -750,14 +744,14 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus", "z0_4"],
+            resolution_order=["data", "data"],
             quiet=True,
         )
 
         assert result["year"] == "2025"
         # Both files should exist
-        assert "z14_plus" in result["file_structure"]
-        assert "z0_4" in result["file_structure"]
+        assert "data" in result["file_structure"]
+        assert "data" in result["file_structure"]
 
     def test_relative_time_calculation(self, temp_output_dir):
         """Test that relative time from path start is calculated."""
@@ -781,11 +775,11 @@ class TestProcessYearData:
             max_alt_m=300.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
-        segments = result["z14_segments"]
+        segments = result["full_res_segments"]
         # Check if time field exists in segments
         time_fields = [s.get("time") for s in segments if "time" in s]
         # At least some segments should have time data
@@ -814,12 +808,12 @@ class TestProcessYearData:
             max_alt_m=100.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Unrealistic speed should be filtered to 0
-        segments = result["z14_segments"]
+        segments = result["full_res_segments"]
         assert len(segments) > 0
 
     def test_altitude_bins_at_different_levels(self, temp_output_dir):
@@ -866,7 +860,7 @@ class TestProcessYearData:
             max_alt_m=4000.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
@@ -896,7 +890,7 @@ class TestProcessYearData:
             max_alt_m=200.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
@@ -920,7 +914,7 @@ class TestProcessYearData:
             max_alt_m=100.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z0_4"],  # Aggressive downsampling
+            resolution_order=["data"],  # Aggressive downsampling
             quiet=True,
         )
 
@@ -958,7 +952,7 @@ class TestProcessYearData:
             max_alt_m=100.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
@@ -988,11 +982,11 @@ class TestProcessYearData:
             max_alt_m=200.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
-        path_info = result["z14_path_info"]
+        path_info = result["full_res_path_info"]
         # Should have None for both airports
         assert path_info[0]["start_airport"] is None
         assert path_info[0]["end_airport"] is None
@@ -1013,46 +1007,14 @@ class TestProcessYearData:
             max_alt_m=200.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Should handle gracefully with empty metadata
         assert result["year"] == "2025"
-        path_info = result["z14_path_info"]
+        path_info = result["full_res_path_info"]
         assert len(path_info) > 0
-
-    def test_compression_ratio_calculation(self, temp_output_dir):
-        """Test that compression ratio is calculated correctly."""
-        coords = [[50.0 + i * 0.01, 8.0 + i * 0.01] for i in range(100)]
-        groups = [[[50.0 + i * 0.01, 8.0 + i * 0.01, 100.0] for i in range(100)]]
-        metadata = [{"year": 2025}]
-
-        process_year_data(
-            year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
-            min_alt_m=100.0,
-            max_alt_m=100.0,
-            output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
-            quiet=True,
-        )
-
-        # Read exported file and check compression ratio
-        file_path = os.path.join(temp_output_dir, "2025", "z14_plus.js")
-        with open(file_path, "r") as f:
-            content = f.read()
-
-        json_str = content.replace("window.KML_DATA_2025_Z14_PLUS = ", "").rstrip(";")
-        data = json.loads(json_str)
-
-        assert "compression_ratio" in data
-        assert isinstance(data["compression_ratio"], (int, float))
-        assert data["compression_ratio"] > 0
 
     def test_segment_altitude_metadata(self, temp_output_dir):
         """Test that segment altitude metadata is correctly set."""
@@ -1070,11 +1032,11 @@ class TestProcessYearData:
             max_alt_m=2000.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
-        segments = result["z14_segments"]
+        segments = result["full_res_segments"]
         assert len(segments) > 0
 
         segment = segments[0]
@@ -1108,12 +1070,12 @@ class TestProcessYearData:
             max_alt_m=200.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Should handle multiple separators gracefully
-        path_info = result["z14_path_info"]
+        path_info = result["full_res_path_info"]
         assert len(path_info) > 0
 
     def test_invalid_duration_parsing(self, temp_output_dir):
@@ -1138,38 +1100,9 @@ class TestProcessYearData:
             max_alt_m=200.0,
             output_dir=temp_output_dir,
             resolutions=RESOLUTION_LEVELS,
-            resolution_order=["z14_plus"],
+            resolution_order=["data"],
             quiet=True,
         )
 
         # Should handle gracefully
         assert result["year"] == "2025"
-
-    def test_adaptive_epsilon_adjustment_logged(self, temp_output_dir):
-        """Test that adaptive epsilon adjustment is logged in verbose mode."""
-        # Create large enough dataset to trigger adaptive downsampling
-        coords = [[50.0 + i * 0.001, 8.0] for i in range(150000)]
-        groups = [[[50.0 + i * 0.001, 8.0, 100.0] for i in range(150000)]]
-        metadata = [{"year": 2025}]
-
-        with patch("kml_heatmap.data_exporter.logger") as mock_logger:
-            process_year_data(
-                year="2025",
-                year_path_indices=[0],
-                all_coordinates=coords,
-                all_path_groups=groups,
-                all_path_metadata=metadata,
-                min_alt_m=100.0,
-                max_alt_m=100.0,
-                output_dir=temp_output_dir,
-                resolutions=RESOLUTION_LEVELS,
-                resolution_order=["z11_13"],  # Will trigger adaptive
-                quiet=False,
-            )
-
-            # Check that adaptive downsampling was logged
-            assert mock_logger.info.call_count > 0
-            # Check if any call mentioned adaptive downsampling
-            calls = [str(call) for call in mock_logger.info.call_args_list]
-            has_adaptive_log = any("Adaptive downsampling" in call for call in calls)
-            assert has_adaptive_log

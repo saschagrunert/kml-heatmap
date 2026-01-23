@@ -274,12 +274,23 @@ export function generateFunFacts(
   if (yearStats.total_flights > 0 && distanceNm > 0) {
     const avgDistanceNm = Math.round(distanceNm / yearStats.total_flights);
     if (avgDistanceNm > 0) {
-      facts.push({
-        icon: "✈️",
-        text: `Cruising at <strong>${fullStats?.cruise_speed_knots ? Math.round(fullStats.cruise_speed_knots) : "?"} kt</strong>, averaging <strong>${avgDistanceNm} nm</strong> per adventure`,
-        category: "distance",
-        priority: 8,
-      });
+      // Only show cruise speed if timing data is available
+      if (fullStats?.cruise_speed_knots) {
+        facts.push({
+          icon: "✈️",
+          text: `Cruising at <strong>${Math.round(fullStats.cruise_speed_knots)} kt</strong>, averaging <strong>${avgDistanceNm} nm</strong> per adventure`,
+          category: "distance",
+          priority: 8,
+        });
+      } else {
+        // Show distance-only fact when speed data unavailable
+        facts.push({
+          icon: "✈️",
+          text: `Averaging <strong>${avgDistanceNm} nm</strong> per adventure`,
+          category: "distance",
+          priority: 8,
+        });
+      }
     }
   }
 

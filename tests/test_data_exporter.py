@@ -4,57 +4,11 @@ import os
 import json
 import tempfile
 from kml_heatmap.data_exporter import (
-    downsample_coordinates,
     export_resolution_data,
     export_airports_data,
     export_metadata,
     collect_unique_years,
 )
-
-
-class TestDownsampleCoordinates:
-    """Tests for downsample_coordinates function."""
-
-    def test_downsample_factor_1(self):
-        """Test downsampling with factor 1 returns original data."""
-        coords = [[50.0, 8.5], [51.0, 9.5], [52.0, 10.5]]
-        result = downsample_coordinates(coords, 1)
-        assert result == coords
-
-    def test_downsample_factor_2(self):
-        """Test downsampling with factor 2."""
-        coords = [[50.0, 8.5], [51.0, 9.5], [52.0, 10.5], [53.0, 11.5]]
-        result = downsample_coordinates(coords, 2)
-        assert result == [[50.0, 8.5], [52.0, 10.5]]
-
-    def test_downsample_factor_3(self):
-        """Test downsampling with factor 3."""
-        coords = [[50.0, 8.5], [51.0, 9.5], [52.0, 10.5], [53.0, 11.5], [54.0, 12.5]]
-        result = downsample_coordinates(coords, 3)
-        assert result == [[50.0, 8.5], [53.0, 11.5]]
-
-    def test_downsample_empty_list(self):
-        """Test downsampling empty list."""
-        result = downsample_coordinates([], 2)
-        assert result == []
-
-    def test_downsample_single_coordinate(self):
-        """Test downsampling single coordinate."""
-        coords = [[50.0, 8.5]]
-        result = downsample_coordinates(coords, 2)
-        assert result == [[50.0, 8.5]]
-
-    def test_downsample_factor_0(self):
-        """Test downsampling with factor 0 returns original."""
-        coords = [[50.0, 8.5], [51.0, 9.5]]
-        result = downsample_coordinates(coords, 0)
-        assert result == coords
-
-    def test_downsample_large_factor(self):
-        """Test downsampling with factor larger than list length."""
-        coords = [[50.0, 8.5], [51.0, 9.5], [52.0, 10.5]]
-        result = downsample_coordinates(coords, 10)
-        assert result == [[50.0, 8.5]]
 
 
 class TestExportResolutionData:
@@ -69,7 +23,7 @@ class TestExportResolutionData:
             resolution_config = {"description": "Test resolution"}
 
             output_file, file_size = export_resolution_data(
-                "z0_4", resolution_config, coords, segments, path_info, tmpdir
+                "data", resolution_config, coords, segments, path_info, tmpdir
             )
 
             assert os.path.exists(output_file)
@@ -81,7 +35,7 @@ class TestExportResolutionData:
                 assert data["coordinates"] == coords
                 assert data["path_segments"] == segments
                 assert data["path_info"] == path_info
-                assert data["resolution"] == "z0_4"
+                assert data["resolution"] == "data"
                 assert data["original_points"] == 2
 
     def test_export_resolution_creates_file(self):
@@ -89,7 +43,7 @@ class TestExportResolutionData:
         with tempfile.TemporaryDirectory() as tmpdir:
             coords = [[50.0, 8.5]]
             output_file, _ = export_resolution_data(
-                "z14_plus",
+                "data",
                 {"description": "Full resolution"},
                 coords,
                 [],
@@ -97,7 +51,7 @@ class TestExportResolutionData:
                 tmpdir,
             )
 
-            expected_file = os.path.join(tmpdir, "data_z14_plus.json")
+            expected_file = os.path.join(tmpdir, "data_data.json")
             assert output_file == expected_file
             assert os.path.exists(expected_file)
 

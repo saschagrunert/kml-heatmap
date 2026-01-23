@@ -28,6 +28,7 @@ describe("DataManager", () => {
     // Mock heatLayer
     mockHeatLayer = {
       addTo: vi.fn(),
+      remove: vi.fn(),
       _canvas: {
         style: {},
       },
@@ -38,12 +39,6 @@ describe("DataManager", () => {
       DataLoader: function () {
         return mockDataLoader as DataLoader;
       },
-      getResolutionForZoom: vi.fn((zoom: number) => {
-        if (zoom < 5) return "z0-4";
-        if (zoom < 11) return "z5-10";
-        if (zoom < 14) return "z11-13";
-        return "z14_plus";
-      }),
     } as typeof window.KMLHeatmap;
 
     // Mock L.heatLayer
@@ -152,16 +147,14 @@ describe("DataManager", () => {
         coordinates: [[50.0, 8.0]],
         path_segments: [],
         path_info: [],
-        resolution: "z14_plus",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
-      const result = await dataManager.loadData("z14_plus", "2025");
+      const result = await dataManager.loadData("data", "2025");
 
-      expect(mockDataLoader.loadData).toHaveBeenCalledWith("z14_plus", "2025");
+      expect(mockDataLoader.loadData).toHaveBeenCalledWith("data", "2025");
       expect(result).toBe(mockData);
     });
   });
@@ -206,29 +199,19 @@ describe("DataManager", () => {
       expect(mockDataLoader.loadData).not.toHaveBeenCalled();
     });
 
-    it("does nothing if resolution has not changed", async () => {
-      mockApp.currentResolution = "z5-10";
-
-      await dataManager.updateLayers();
-
-      expect(mockDataLoader.loadData).not.toHaveBeenCalled();
-    });
-
-    it("loads data for new resolution", async () => {
+    it("loads data at full resolution", async () => {
       const mockData = {
         coordinates: [[50.0, 8.0]],
         path_segments: [],
         path_info: [],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
       await dataManager.updateLayers();
 
-      expect(mockDataLoader.loadData).toHaveBeenCalledWith("z5-10", "all");
+      expect(mockDataLoader.loadData).toHaveBeenCalledWith("data", "all");
       expect(dataManager.currentData).toBe(mockData);
       expect(mockApp.currentData).toBe(mockData);
     });
@@ -241,10 +224,8 @@ describe("DataManager", () => {
         ],
         path_segments: [],
         path_info: [],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
@@ -262,23 +243,21 @@ describe("DataManager", () => {
     });
 
     it("removes existing heatmap layer before creating new one", async () => {
-      const oldLayer = { addTo: vi.fn() };
+      const oldLayer = { addTo: vi.fn(), remove: vi.fn() };
       mockApp.heatmapLayer = oldLayer;
 
       const mockData = {
         coordinates: [[50.0, 8.0]],
         path_segments: [],
         path_info: [],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
       await dataManager.updateLayers();
 
-      expect(mockApp.map.removeLayer).toHaveBeenCalledWith(oldLayer);
+      expect(oldLayer.remove).toHaveBeenCalled();
     });
 
     it("adds heatmap to map if heatmap visible and not in replay mode", async () => {
@@ -289,10 +268,8 @@ describe("DataManager", () => {
         coordinates: [[50.0, 8.0]],
         path_segments: [],
         path_info: [],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
@@ -308,10 +285,8 @@ describe("DataManager", () => {
         coordinates: [[50.0, 8.0]],
         path_segments: [],
         path_info: [],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
@@ -328,10 +303,8 @@ describe("DataManager", () => {
         coordinates: [[50.0, 8.0]],
         path_segments: [],
         path_info: [],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
@@ -356,10 +329,8 @@ describe("DataManager", () => {
             end_airport: "EDDF",
           },
         ],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
@@ -389,10 +360,8 @@ describe("DataManager", () => {
           { path_id: 1, altitude_ft: 3000 },
         ],
         path_info: [],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
@@ -430,10 +399,8 @@ describe("DataManager", () => {
           { id: 1, year: 2025, aircraft_registration: "D-ABCD" },
           { id: 2, year: 2024, aircraft_registration: "D-EFGH" },
         ],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
@@ -473,10 +440,8 @@ describe("DataManager", () => {
           { id: 1, year: 2025, aircraft_registration: "D-ABCD" },
           { id: 2, year: 2025, aircraft_registration: "D-EFGH" },
         ],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
@@ -493,10 +458,8 @@ describe("DataManager", () => {
         coordinates: [[50.0, 8.0]],
         path_segments: [],
         path_info: [],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
@@ -512,10 +475,8 @@ describe("DataManager", () => {
         coordinates: [[50.0, 8.0]],
         path_segments: [],
         path_info: [],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 
@@ -531,10 +492,8 @@ describe("DataManager", () => {
         coordinates: [[50.0, 8.0]],
         path_segments: [],
         path_info: [],
-        resolution: "z5-10",
+        resolution: "data",
         original_points: 1000,
-        downsampled_points: 100,
-        compression_ratio: 10,
       };
       mockDataLoader.loadData.mockResolvedValue(mockData);
 

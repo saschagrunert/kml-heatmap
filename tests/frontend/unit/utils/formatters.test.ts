@@ -4,7 +4,6 @@ import {
   formatDistance,
   formatAltitude,
   formatSpeed,
-  getResolutionForZoom,
 } from "../../../../kml_heatmap/frontend/utils/formatters";
 
 describe("formatter utilities", () => {
@@ -108,57 +107,6 @@ describe("formatter utilities", () => {
 
     it("rounds down decimal values", () => {
       expect(formatSpeed(120.4)).toBe("120 kt");
-    });
-  });
-
-  describe("getResolutionForZoom", () => {
-    it("returns z0_4 for zoom 0", () => {
-      expect(getResolutionForZoom(0)).toBe("z0_4");
-    });
-
-    it("returns z0_4 for zoom 4", () => {
-      expect(getResolutionForZoom(4)).toBe("z0_4");
-    });
-
-    it("returns z5_7 for zoom 5", () => {
-      expect(getResolutionForZoom(5)).toBe("z5_7");
-    });
-
-    it("returns z5_7 for zoom 7", () => {
-      expect(getResolutionForZoom(7)).toBe("z5_7");
-    });
-
-    it("returns z8_10 for zoom 8", () => {
-      expect(getResolutionForZoom(8)).toBe("z8_10");
-    });
-
-    it("returns z8_10 for zoom 10", () => {
-      expect(getResolutionForZoom(10)).toBe("z8_10");
-    });
-
-    it("returns z11_13 for zoom 11", () => {
-      expect(getResolutionForZoom(11)).toBe("z11_13");
-    });
-
-    it("returns z11_13 for zoom 13", () => {
-      expect(getResolutionForZoom(13)).toBe("z11_13");
-    });
-
-    it("returns z14_plus for zoom 14", () => {
-      expect(getResolutionForZoom(14)).toBe("z14_plus");
-    });
-
-    it("returns z14_plus for high zoom levels", () => {
-      expect(getResolutionForZoom(18)).toBe("z14_plus");
-    });
-
-    it("handles boundary conditions correctly", () => {
-      expect(getResolutionForZoom(4.0)).toBe("z0_4"); // At boundary
-      expect(getResolutionForZoom(4.9)).toBe("z5_7"); // Just above boundary
-      expect(getResolutionForZoom(5.0)).toBe("z5_7");
-      expect(getResolutionForZoom(7.0)).toBe("z5_7"); // At boundary
-      expect(getResolutionForZoom(7.9)).toBe("z8_10"); // Just above boundary
-      expect(getResolutionForZoom(8.0)).toBe("z8_10");
     });
   });
 });

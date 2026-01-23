@@ -1,37 +1,24 @@
-"""Data export functionality for progressive loading heatmaps.
+"""Data export functionality for full resolution flight heatmaps.
 
-This module handles the export of flight data to JSON files optimized for
-progressive loading in web browsers. The export system creates multiple
-resolution levels to balance detail with file size.
-
-Multi-Resolution Strategy:
-The system exports data at 5 different resolution levels:
-1. z0-4 (continent): Highly simplified for initial map load
-2. z5-7 (country): Medium simplification for country-level view
-3. z8-10 (regional): Lower simplification for regional detail
-4. z11-13 (city): Minimal simplification for city-level detail
-5. z14+ (full): Complete data for maximum zoom
-
-Each level uses:
-- Ramer-Douglas-Peucker (RDP) algorithm for path simplification
-- Different epsilon values for varying detail levels
-- Separate JSON files loaded on-demand based on zoom level
+This module handles the export of flight data to JSON files for web browsers.
+All data is exported at full resolution without downsampling.
 
 File Structure:
-- data_z0_4.json through data_z14_plus.json: Path and segment data
-- airports.json: Deduplicated airport locations
-- metadata.json: Statistics and configuration
+- {year}/data.js: Full resolution path and segment data per year
+- airports.js: Deduplicated airport locations
+- metadata.js: Statistics and configuration
 
 Performance Optimizations:
 - JSON files use compact separators (no whitespace)
 - Sorted keys for better compression
 - Coordinates rounded to appropriate precision
 - Privacy mode strips timestamps when requested
+- Year-based file splitting for efficient loading
 
-This progressive loading approach dramatically improves:
-- Initial page load time (loads only coarse data first)
-- Mobile performance (less data transferred)
-- User experience (map renders immediately)
+This approach ensures:
+- Maximum data fidelity (no information loss)
+- Simplified architecture (no zoom-based switching)
+- Per-year filtering capabilities
 """
 
 import os
@@ -49,33 +36,12 @@ from .constants import (
     MAX_GROUNDSPEED_KNOTS,
     CRUISE_ALTITUDE_THRESHOLD_FT,
     ALTITUDE_BIN_SIZE_FT,
-    TARGET_POINTS_PER_RESOLUTION,
 )
 from .geometry import (
     haversine_distance,
-    downsample_path_rdp,
     get_altitude_color,
-    calculate_adaptive_epsilon,
 )
 from .helpers import parse_iso_timestamp, calculate_duration_seconds
-
-
-def downsample_coordinates(
-    coordinates: List[List[float]], factor: int
-) -> List[List[float]]:
-    """
-    Simple downsampling by keeping every Nth point.
-
-    Args:
-        coordinates: List of [lat, lon] coordinates
-        factor: Keep every Nth point
-
-    Returns:
-        Downsampled coordinates
-    """
-    if factor <= 1:
-        return coordinates
-    return [coordinates[i] for i in range(0, len(coordinates), factor)]
 
 
 def export_resolution_data(
@@ -90,7 +56,7 @@ def export_resolution_data(
     Export data for a single resolution level.
 
     Args:
-        resolution_name: Name of the resolution (e.g., 'z14_plus')
+        resolution_name: Name of the resolution (e.g., 'data')
         resolution_config: Resolution configuration dict
         all_coordinates: Original coordinates
         path_segments: Calculated path segments
@@ -299,66 +265,31 @@ def process_year_data(
     year_max_path_distance = 0
     year_cruise_altitude_histogram = {}
     year_file_structure = []
-    year_z14_segments = None
-    year_z14_path_info = None
+    year_full_res_segments = None
+    year_full_res_path_info = None
 
-    # Calculate total points for this year (for adaptive downsampling)
+    # Calculate total points for this year
     year_total_points = sum(
         len(all_path_groups[path_idx]) for path_idx in year_path_indices
     )
     if not quiet:
         logger.info(f"    Total points for {year}: {year_total_points:,}")
 
+    # Process single full resolution export (no downsampling)
     for res_name in resolution_order:
         res_config = resolutions[res_name]
 
-        # Calculate adaptive epsilon based on dataset size
-        base_epsilon = res_config["epsilon"]
-        target_points = TARGET_POINTS_PER_RESOLUTION[res_name]
-        adaptive_epsilon = calculate_adaptive_epsilon(
-            year_total_points, target_points, base_epsilon
-        )
-
-        # Log adaptive behavior if epsilon was adjusted
-        if adaptive_epsilon != base_epsilon and not quiet:
-            logger.info(
-                f"    {res_name}: Adaptive downsampling "
-                f"(ε={adaptive_epsilon:.6f}, target={target_points:,} points)"
-            )
-
-        # OPTIMIZATION: Downsample paths once (with altitude), then extract 2D coords
-        downsampled_paths = []
+        # Use full resolution paths without any downsampling
+        full_paths = []
         for path_idx in year_path_indices:
             path = all_path_groups[path_idx]
-            if adaptive_epsilon > 0:
-                simplified = downsample_path_rdp(path, adaptive_epsilon)
-                downsampled_paths.append(simplified)
-            else:
-                downsampled_paths.append(path)
+            full_paths.append(path)
 
-        # Extract 2D coordinates from already-downsampled paths
-        if adaptive_epsilon > 0:
-            downsampled_coords = [
-                [p[0], p[1]] for path in downsampled_paths for p in path
-            ]
-            if not downsampled_coords:
-                downsampled_coords = downsample_coordinates(
-                    all_coordinates, res_config["factor"]
-                )
-        else:
-            downsampled_coords = all_coordinates
-
-        # ADDITIONAL: Uniform sampling if RDP didn't get us under target
-        if len(downsampled_coords) > target_points:
-            # Sample every Nth point to stay under target
-            step = len(downsampled_coords) // target_points
-            if step > 1:
-                downsampled_coords = downsampled_coords[::step]
-                if not quiet:
-                    logger.info(
-                        f"    {res_name}: Uniform sampling applied "
-                        f"({len(downsampled_coords):,} points, step={step})"
-                    )
+        # Extract 2D coordinates from year's paths only
+        full_coords = []
+        for path in full_paths:
+            for point in path:
+                full_coords.append([point[0], point[1]])
 
         # Prepare path segments with colors and track relationships
         path_segments = []
@@ -366,7 +297,7 @@ def process_year_data(
 
         # Iterate using original path indices to access metadata correctly
         for local_idx, (orig_path_idx, path) in enumerate(
-            zip(year_path_indices, downsampled_paths)
+            zip(year_path_indices, full_paths)
         ):
             if len(path) <= 1:
                 continue
@@ -416,11 +347,10 @@ def process_year_data(
                 lat2, lon2 = path[i + 1][0], path[i + 1][1]
                 path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
 
-            # Track longest single flight distance (only for z14_plus to avoid duplication)
-            if res_name == "z14_plus":
-                path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
-                if path_distance_nm > year_max_path_distance:
-                    year_max_path_distance = path_distance_nm
+            # Track longest single flight distance
+            path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
+            if path_distance_nm > year_max_path_distance:
+                year_max_path_distance = path_distance_nm
 
             # Store path info with airport relationships and aircraft info
             info = {
@@ -575,8 +505,8 @@ def process_year_data(
                         if 0 < calculated_speed <= MAX_GROUNDSPEED_KNOTS:
                             groundspeed_knots = calculated_speed
 
-                # Track maximum and minimum groundspeed (only for z14_plus)
-                if res_name == "z14_plus" and groundspeed_knots > 0:
+                # Track maximum and minimum groundspeed
+                if groundspeed_knots > 0:
                     if groundspeed_knots > year_max_groundspeed:
                         year_max_groundspeed = groundspeed_knots
                     if groundspeed_knots < year_min_groundspeed:
@@ -602,14 +532,6 @@ def process_year_data(
                                 window_time
                             )
 
-                # For downsampled resolutions, clamp to the max from z14_plus
-                if (
-                    res_name != "z14_plus"
-                    and year_max_groundspeed > 0
-                    and groundspeed_knots > year_max_groundspeed
-                ):
-                    groundspeed_knots = year_max_groundspeed
-
                 # Skip zero-length segments
                 if lat1 != lat2 or lon1 != lon2:
                     segment_data = {
@@ -624,40 +546,13 @@ def process_year_data(
                         segment_data["time"] = round(current_relative_time, 1)
                     path_segments.append(segment_data)
 
-        # ADDITIONAL: Uniform sampling of path_segments if over target
-        if len(path_segments) > target_points:
-            step = len(path_segments) // target_points
-            if step > 1:
-                path_segments = path_segments[::step]
-                if not quiet:
-                    logger.info(
-                        f"    {res_name}: Uniform sampling of segments "
-                        f"({len(path_segments):,} segments, step={step})"
-                    )
-
-        # ADDITIONAL: Filter path_info to only include paths present in downsampled segments
-        # This dramatically reduces file size by removing metadata for unused paths
-        if len(path_segments) < len(path_info):
-            used_path_ids = set(seg["path_id"] for seg in path_segments)
-            filtered_path_info = [p for p in path_info if p["id"] in used_path_ids]
-            if not quiet and len(filtered_path_info) < len(path_info):
-                logger.info(
-                    f"    {res_name}: Filtered path_info "
-                    f"({len(filtered_path_info):,} paths, was {len(path_info):,})"
-                )
-            path_info = filtered_path_info
-
-        # Export data
+        # Export data (no downsampling or filtering)
         data = {
-            "coordinates": downsampled_coords,
+            "coordinates": full_coords,
             "path_segments": path_segments,
             "path_info": path_info,
             "resolution": res_name,
-            "original_points": len(all_coordinates),
-            "downsampled_points": len(downsampled_coords),
-            "compression_ratio": round(
-                len(downsampled_coords) / max(len(all_coordinates), 1) * 100, 1
-            ),
+            "original_points": len(full_coords),
         }
 
         # Create year directory if it doesn't exist
@@ -675,14 +570,13 @@ def process_year_data(
         file_size = os.path.getsize(output_file)
         year_file_structure.append(res_name)
 
-        # Store z14_plus data
-        if res_name == "z14_plus":
-            year_z14_segments = path_segments
-            year_z14_path_info = path_info
+        # Store data for return
+        year_full_res_segments = path_segments
+        year_full_res_path_info = path_info
 
         if not quiet:
             logger.info(
-                f"    ✓ {res_config['description']}: {len(downsampled_coords):,} points ({file_size / 1024:.1f} KB)"
+                f"    ✓ {res_config['description']}: {len(full_coords):,} points ({file_size / 1024:.1f} KB)"
             )
 
     return {
@@ -694,6 +588,6 @@ def process_year_data(
         "max_path_distance": year_max_path_distance,
         "cruise_altitude_histogram": year_cruise_altitude_histogram,
         "file_structure": year_file_structure,
-        "z14_segments": year_z14_segments,
-        "z14_path_info": year_z14_path_info,
+        "full_res_segments": year_full_res_segments,
+        "full_res_path_info": year_full_res_path_info,
     }

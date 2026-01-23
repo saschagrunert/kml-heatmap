@@ -59,7 +59,7 @@ describe("FilterManager", () => {
         },
       ],
       fullPathSegments: [],
-      currentResolution: null,
+      _unused_currentResolution: null,
       selectedPathIds: new Set<number>(),
       pathSegments: {},
       altitudeLayer: {
@@ -225,14 +225,6 @@ describe("FilterManager", () => {
       expect(mockApp.dataManager.loadedData).toEqual({});
     });
 
-    it("clears current resolution to force reload", async () => {
-      mockApp.currentResolution = "z14_plus";
-
-      await filterManager.filterByYear();
-
-      expect(mockApp.currentResolution).toBeNull();
-    });
-
     it("clears altitude layer", async () => {
       await filterManager.filterByYear();
 
@@ -283,10 +275,7 @@ describe("FilterManager", () => {
 
       await filterManager.filterByYear();
 
-      expect(mockApp.dataManager.loadData).toHaveBeenCalledWith(
-        "z14_plus",
-        "2025"
-      );
+      expect(mockApp.dataManager.loadData).toHaveBeenCalledWith("data", "2025");
     });
 
     it("updates fullPathInfo from loaded data", async () => {
@@ -405,14 +394,6 @@ describe("FilterManager", () => {
       await filterManager.filterByAircraft();
 
       expect(mockApp.selectedPathIds.size).toBe(1);
-    });
-
-    it("forces reload by clearing current resolution", async () => {
-      mockApp.currentResolution = "z14_plus";
-
-      await filterManager.filterByAircraft();
-
-      expect(mockApp.currentResolution).toBeNull();
     });
 
     it("reloads current resolution data", async () => {

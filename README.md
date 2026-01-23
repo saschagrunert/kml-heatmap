@@ -26,7 +26,6 @@
   - [Shareable URLs](#shareable-urls)
   - [Smart Features](#smart-features)
 - [Technical Details](#technical-details)
-  - [Adaptive Downsampling](#adaptive-downsampling)
 - [Development](#development)
   - [Frontend (TypeScript)](#frontend-typescript)
   - [Backend (Python)](#backend-python)
@@ -43,7 +42,7 @@
 - Year-in-review "Wrapped" summary
 - Shareable URLs - Copy URL to share exact map state
 - Automatic privacy protection (individual timestamps removed)
-- Mobile-friendly with zoom-based data loading
+- Mobile-friendly with year-based data organization
 - Export map as JPG image
 
 ## Usage
@@ -101,7 +100,7 @@ Where:
 - `REGISTRATION` - Aircraft registration with hyphen (e.g., `OE-AKI`, `D-EXYZ`)
 - `ROUTE` - Route in DEPARTURE-ARRIVAL format (e.g., `LOAV-LOAV`, `EDDF-EDDM`)
 
-**Note:** Charterware KML files use a 2-second logging interval. The tool automatically generates synthetic timestamps for each coordinate point, enabling speed calculations, flight duration tracking, and time-based statistics even though Charterware files don't include per-point timestamps in the KML data.
+**Note:** Charterware KML files do not include per-point timestamps in the KML data. As coordinates are not at fixed intervals, the tool does not attempt to infer timing or speed data for Charterware files. The airspeed visualization layer and flight time statistics will be unavailable when viewing Charterware-only data. Altitude visualization, path selection, and all other features remain fully functional.
 
 **Why these formats?**
 
@@ -227,18 +226,14 @@ output-dir/
 ├── index.html
 └── data/
     ├── 2025/
-    │   ├── z0_4.js       # Low zoom data
-    │   ├── z5_7.js       # Medium zoom data
-    │   ├── z8_10.js      # Regional data
-    │   ├── z11_13.js     # City-level data
-    │   └── z14_plus.js   # Full detail data
+    │   └── data.js       # Full resolution data
     ├── 2026/
-    │   └── (same structure)
+    │   └── data.js       # Full resolution data
     ├── airports.js       # Airport markers
     └── metadata.js       # Statistics and available years
 ```
 
-Data is exported as JavaScript files (instead of JSON) for compatibility with the `file://` protocol (opening index.html directly in browser). Data is loaded progressively based on zoom level and filtered by year for better performance on mobile devices.
+Data is exported as JavaScript files (instead of JSON) for compatibility with the `file://` protocol (opening index.html directly in browser). Data is organized by year and loaded on-demand for better performance.
 
 ## Map Features
 
@@ -297,30 +292,23 @@ URL parameters take precedence over localStorage, allowing shared links to overr
 
 ## Technical Details
 
-### Adaptive Downsampling
+### Data Export
 
-The tool automatically scales output file sizes based on dataset size:
+The tool exports all flight data at full resolution without downsampling:
 
-- **Small datasets** (< target): Uses standard epsilon values, preserves all detail
-- **Large datasets** (> target): Applies logarithmic scaling to stay under size limits
+- **Full fidelity**: All coordinate points are preserved
+- **Year-based splitting**: Data is organized by year for efficient filtering
+- **On-demand loading**: Only requested years are loaded into the browser
 
-Target limits per resolution (per year):
+**Example**: 100,000 KML files (5M points)
 
-- z14_plus: 100k points (~8.3MB max) - Full resolution detail
-- z11_13: 50k points (~4.1MB max) - High detail for city level
-- z8_10: 30k points (~2.5MB max) - Enhanced regional detail
-- z5_7: 15k points (~1.2MB max) - Improved country level
-- z0_4: 10k points (~830KB max) - Better continent view
+- Processing time: ~11 minutes (parallel processing)
+- Output per year: Varies by flight count
+- All original detail preserved
 
-**Example scaling**: 100,000 KML files (5M points)
+Data is organized by year and loaded dynamically based on the selected year filter. This approach ensures maximum data accuracy while maintaining good performance through year-based filtering.
 
-- Processing time: ~11 minutes
-- Total output: ~100MB (all zoom levels)
-- Compression ratio: 50:1 (5M points → 100k in browser)
-
-Uses Ramer-Douglas-Peucker algorithm to generate 5 resolution levels. With adaptive downsampling, output size is predictable regardless of input size.
-
-Supports KML files from Google Earth, Google Maps, SkyDemon, and other aviation apps.
+Supports KML files from Google Earth, Google Maps, SkyDemon, Charterware, and other aviation apps.
 
 ## Development
 

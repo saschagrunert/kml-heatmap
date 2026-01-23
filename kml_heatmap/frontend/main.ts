@@ -10,7 +10,6 @@ import {
   formatDistance,
   formatAltitude,
   formatSpeed,
-  getResolutionForZoom,
 } from "./utils/formatters";
 import { getColorForAltitude, getColorForAirspeed } from "./utils/colors";
 
@@ -92,7 +91,6 @@ export {
   formatDistance,
   formatAltitude,
   formatSpeed,
-  getResolutionForZoom,
   getColorForAltitude,
   getColorForAirspeed,
 
@@ -167,7 +165,6 @@ if (typeof window !== "undefined") {
     formatDistance,
     formatAltitude,
     formatSpeed,
-    getResolutionForZoom,
     getColorForAltitude,
     getColorForAirspeed,
 

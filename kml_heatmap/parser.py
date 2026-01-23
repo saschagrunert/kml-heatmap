@@ -740,46 +740,9 @@ def process_standard_coordinates(
 
         # Add this path group to the list if it has coordinates
         if current_path:
-            # Generate synthetic timestamps for Charterware files (2-second logging interval)
-            # Charterware files have a start timestamp but no per-point timestamps
-            if timestamp and end_timestamp is None:
-                from datetime import datetime, timedelta
-
-                try:
-                    # Parse the start timestamp
-                    start_dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                    # Charterware logging interval: 2 seconds
-                    CHARTERWARE_INTERVAL_SECONDS = 2
-
-                    # Add synthetic timestamps to coordinates
-                    path_with_timestamps = []
-                    for i, coord in enumerate(current_path):
-                        # Calculate timestamp for this point
-                        point_time = start_dt + timedelta(
-                            seconds=i * CHARTERWARE_INTERVAL_SECONDS
-                        )
-                        timestamp_str = point_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-                        # Append timestamp as 4th element
-                        path_with_timestamps.append(coord + [timestamp_str])
-
-                    # Replace current_path with timestamped version
-                    current_path = path_with_timestamps  # type: ignore[assignment]
-
-                    # Calculate end timestamp
-                    if current_path:
-                        last_point_time = start_dt + timedelta(
-                            seconds=(len(current_path) - 1)
-                            * CHARTERWARE_INTERVAL_SECONDS
-                        )
-                        end_timestamp = last_point_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-                    logger.debug(
-                        f"Generated {len(current_path)} synthetic timestamps "
-                        f"for {Path(kml_file).name} (2s interval)"
-                    )
-                except Exception as e:
-                    logger.debug(f"Could not generate synthetic timestamps: {e}")
+            # Do NOT generate synthetic timestamps for Charterware files
+            # As per https://github.com/saschagrunert/kml-heatmap/issues/16
+            # Charterware coordinates are not at fixed intervals, making time/speed inference inaccurate
 
             path_groups.append(current_path)
             meta = _build_path_metadata_dict(

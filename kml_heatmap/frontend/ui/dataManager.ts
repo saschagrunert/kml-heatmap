@@ -55,15 +55,8 @@ export class DataManager {
   async updateLayers(): Promise<void> {
     if (!this.app.map) return;
 
-    const zoom = this.app.map.getZoom();
-    const resolution = window.KMLHeatmap.getResolutionForZoom(zoom);
-
-    if (resolution === this.app.currentResolution) {
-      return;
-    }
-
-    this.app.currentResolution = resolution;
-    const data = await this.loadData(resolution, this.app.selectedYear);
+    // Always use full resolution data
+    const data = await this.loadData("data", this.app.selectedYear);
 
     if (!data) return;
 
@@ -113,9 +106,10 @@ export class DataManager {
 
     // Update heatmap - only add if visible
     if (this.app.heatmapLayer) {
-      this.app.map.removeLayer(this.app.heatmapLayer);
+      this.app.heatmapLayer.remove();
     }
 
+    // Create heatmap using leaflet.heat directly
     this.app.heatmapLayer = L.heatLayer(filteredCoordinates, {
       radius: 10,
       blur: 15,
@@ -193,7 +187,5 @@ export class DataManager {
     if (this.app.airspeedVisible) {
       this.app.layerManager!.redrawAirspeedPaths();
     }
-
-    console.log("Updated to " + resolution + " resolution");
   }
 }
