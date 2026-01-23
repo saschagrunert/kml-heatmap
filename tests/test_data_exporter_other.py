@@ -8,48 +8,10 @@ import shutil
 import pytest
 
 from kml_heatmap.data_exporter import (
-    downsample_coordinates,
     export_metadata,
     export_airports_data,
     collect_unique_years,
 )
-
-
-class TestDownsampleCoordinates:
-    """Test suite for downsample_coordinates function."""
-
-    def test_downsample_by_factor_2(self):
-        """Test downsampling by factor of 2."""
-        coords = [[0, 0], [1, 1], [2, 2], [3, 3], [4, 4]]
-        result = downsample_coordinates(coords, 2)
-        # Should keep every 2nd point
-        assert len(result) == 3
-        assert result == [[0, 0], [2, 2], [4, 4]]
-
-    def test_downsample_by_factor_3(self):
-        """Test downsampling by factor of 3."""
-        coords = [[i, i] for i in range(10)]
-        result = downsample_coordinates(coords, 3)
-        # Should keep every 3rd point
-        assert len(result) == 4
-        assert result == [[0, 0], [3, 3], [6, 6], [9, 9]]
-
-    def test_downsample_empty_list(self):
-        """Test downsampling empty list."""
-        result = downsample_coordinates([], 2)
-        assert result == []
-
-    def test_downsample_single_point(self):
-        """Test downsampling list with single point."""
-        coords = [[50.0, 8.0]]
-        result = downsample_coordinates(coords, 5)
-        assert result == [[50.0, 8.0]]
-
-    def test_downsample_factor_1(self):
-        """Test downsampling with factor 1 (no downsampling)."""
-        coords = [[0, 0], [1, 1], [2, 2]]
-        result = downsample_coordinates(coords, 1)
-        assert result == coords
 
 
 class TestExportMetadata:

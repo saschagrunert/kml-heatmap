@@ -2,6 +2,7 @@
  * Layer Manager - Handles altitude/airspeed path rendering and legend updates
  */
 import * as L from "leaflet";
+import { logWarn } from "../utils/logger";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
 
@@ -149,7 +150,7 @@ export class LayerManager {
 
   redrawAirspeedPaths(): void {
     if (!this.app.currentData) {
-      console.warn("redrawAirspeedPaths: No current data available");
+      logWarn("redrawAirspeedPaths: No current data available");
       return;
     }
 

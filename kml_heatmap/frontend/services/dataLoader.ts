@@ -3,6 +3,7 @@
  * Handles loading KML data files, airports, and metadata
  */
 
+import { logDebug, logError } from "../utils/logger";
 import type {
   KMLDataset,
   Airport,
@@ -11,13 +12,7 @@ import type {
 } from "../types";
 
 // Valid resolutions for data loading (security: whitelist)
-const VALID_RESOLUTIONS = [
-  "z0_4",
-  "z5_7",
-  "z8_10",
-  "z11_13",
-  "z14_plus",
-] as const;
+const VALID_RESOLUTIONS = ["data"] as const;
 
 /**
  * Validate year parameter to prevent path traversal attacks
@@ -73,8 +68,6 @@ export function combineYearData(
     path_info: [],
     resolution: resolution,
     original_points: 0,
-    downsampled_points: 0,
-    compression_ratio: 100,
   };
 
   yearDatasets.forEach((data) => {
@@ -92,13 +85,7 @@ export function combineYearData(
       combined.path_info = combined.path_info.concat(data.path_info);
     }
     combined.original_points += data.original_points || 0;
-    combined.downsampled_points += data.downsampled_points || 0;
   });
-
-  combined.compression_ratio =
-    combined.original_points > 0
-      ? (combined.downsampled_points / combined.original_points) * 100
-      : 100;
 
   return combined;
 }
@@ -145,7 +132,7 @@ export class DataLoader {
 
   /**
    * Load data for a specific resolution and year
-   * @param resolution - Resolution identifier (e.g., 'z14_plus')
+   * @param resolution - Resolution identifier (always 'data')
    * @param year - Year string or 'all'
    * @returns Data object or null on error
    */
@@ -155,11 +142,11 @@ export class DataLoader {
   ): Promise<KMLDataset | null> {
     // Security: Validate inputs to prevent path traversal and arbitrary file loading
     if (!isValidYear(year)) {
-      console.error(`Invalid year parameter: ${year}`);
+      logError(`Invalid year parameter: ${year}`);
       return null;
     }
     if (!isValidResolution(resolution)) {
-      console.error(`Invalid resolution parameter: ${resolution}`);
+      logError(`Invalid resolution parameter: ${resolution}`);
       return null;
     }
 
@@ -181,26 +168,20 @@ export class DataLoader {
       const win = this.getWindow();
 
       if (!win[globalVarName as keyof Window]) {
-        console.log(
-          "Loading " +
-            resolution +
-            " (" +
-            year +
-            ")... (this may take a moment for large datasets)"
-        );
+        logDebug("Loading " + resolution + " (" + year + ")...");
         const filename = this.dataDir + "/" + year + "/" + resolution + ".js";
         await this.scriptLoader(filename);
       }
 
       const data = win[globalVarName as keyof Window] as KMLDataset;
       this.cache[cacheKey] = data;
-      console.log(
+      logDebug(
         "✓ Loaded " + resolution + " (" + year + "):",
-        data.downsampled_points + " points"
+        data.original_points + " points"
       );
       return data;
     } catch (error) {
-      console.error("Error loading data for year " + year + ":", error);
+      logError("Error loading data for year " + year + ":", error);
       return null;
     } finally {
       this.hideLoading();
@@ -225,11 +206,11 @@ export class DataLoader {
       // Get available years from metadata
       const metadata = await this.loadMetadata();
       if (!metadata || !metadata.available_years) {
-        console.error("No metadata or available years found");
+        logError("No metadata or available years found");
         return null;
       }
 
-      console.log(
+      logDebug(
         "Loading all years for " + resolution + ":",
         metadata.available_years
       );
@@ -244,13 +225,13 @@ export class DataLoader {
       const combined = combineYearData(yearDatasets, resolution);
 
       this.cache[cacheKey] = combined;
-      console.log(
+      logDebug(
         "Combined all years for " + resolution + ":",
-        combined.downsampled_points + " points"
+        combined.original_points + " points"
       );
       return combined;
     } catch (error) {
-      console.error("Error loading and combining all years:", error);
+      logError("Error loading and combining all years:", error);
       return null;
     } finally {
       this.hideLoading();
@@ -269,7 +250,7 @@ export class DataLoader {
       }
       return win.KML_AIRPORTS?.airports || [];
     } catch (error) {
-      console.error("Error loading airports:", error);
+      logError("Error loading airports:", error);
       return [];
     }
   }
@@ -286,7 +267,7 @@ export class DataLoader {
       }
       return win.KML_METADATA || null;
     } catch (error) {
-      console.error("Error loading metadata:", error);
+      logError("Error loading metadata:", error);
       return null;
     }
   }

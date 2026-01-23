@@ -171,14 +171,24 @@ export class ReplayManager {
   }
 
   updateReplayButtonState(): void {
-    // Enable replay button only when exactly one path is selected
-    const btn = domCache.get("replay-btn");
+    // Enable replay button only when exactly one path is selected AND timing data is available
+    const btn = domCache.get("replay-btn") as HTMLButtonElement | null;
     if (!btn) return;
 
-    if (this.app.selectedPathIds.size === 1) {
+    // Check if timing data is available (use fullStats which has groundspeed data)
+    const hasTimingData =
+      this.app.fullStats &&
+      this.app.fullStats.max_groundspeed_knots !== undefined &&
+      this.app.fullStats.max_groundspeed_knots > 0;
+
+    if (this.app.selectedPathIds.size === 1 && hasTimingData) {
       btn.style.opacity = "1.0";
+      btn.disabled = false;
+      btn.setAttribute("aria-disabled", "false");
     } else {
       btn.style.opacity = "0.5";
+      btn.disabled = true;
+      btn.setAttribute("aria-disabled", "true");
     }
   }
 
@@ -324,9 +334,7 @@ export class ReplayManager {
     });
 
     if (this.replaySegments.length === 0) {
-      alert(
-        "No timestamp data available for this path. The flight may not have timing information."
-      );
+      // Button should be disabled when there's no timing data, but check just in case
       return false;
     }
 

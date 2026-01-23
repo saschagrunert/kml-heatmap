@@ -71,7 +71,13 @@ export class WrappedManager {
       if (yearEl) yearEl.textContent = year;
     }
 
-    // Build stats grid (6 cards: changed Max Speed to Max Groundspeed, added Max Altitude)
+    // Check if we have timing data (flight time and groundspeed)
+    const hasTimingData =
+      this.app.fullStats &&
+      this.app.fullStats.max_groundspeed_knots !== undefined &&
+      this.app.fullStats.max_groundspeed_knots > 0;
+
+    // Build stats grid (conditionally include flight time and max groundspeed)
     const statsHtml = `
             <div class="stat-card">
                 <div class="stat-value">${yearStats.total_flights}</div>
@@ -85,6 +91,9 @@ export class WrappedManager {
                 <div class="stat-value">${yearStats.total_distance_nm.toFixed(0)}</div>
                 <div class="stat-label">Nautical Miles</div>
             </div>
+            ${
+              hasTimingData
+                ? `
             <div class="stat-card">
                 <div class="stat-value">${yearStats.flight_time}</div>
                 <div class="stat-label">Flight Time</div>
@@ -93,6 +102,9 @@ export class WrappedManager {
                 <div class="stat-value">${(this.app.fullStats?.max_groundspeed_knots || 0).toFixed(0)} kt</div>
                 <div class="stat-label">Max Groundspeed</div>
             </div>
+            `
+                : ""
+            }
             <div class="stat-card">
                 <div class="stat-value">${Math.round((this.app.fullStats?.max_altitude_m || 0) / 0.3048).toLocaleString()} ft</div>
                 <div class="stat-label">Max Altitude (MSL)</div>

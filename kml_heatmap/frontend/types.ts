@@ -125,8 +125,6 @@ export interface KMLDataset {
   path_info: PathInfo[];
   resolution: string;
   original_points: number;
-  downsampled_points: number;
-  compression_ratio: number;
 }
 
 /**

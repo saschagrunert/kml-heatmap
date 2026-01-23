@@ -40,6 +40,7 @@ export interface MockMap {
   fitBounds?: Mock;
   getZoom?: Mock<[], number>;
   getCenter?: Mock;
+  invalidateSize?: Mock<[], void>;
 }
 
 /**
@@ -53,6 +54,10 @@ export interface MockManager {
   updateLayers?: Mock<[], Promise<void>>;
   loadData?: Mock;
   clearLayers?: Mock;
+  redrawAltitudePaths?: Mock;
+  redrawAirspeedPaths?: Mock;
+  updateReplayButtonState?: Mock;
+  replayActive?: boolean;
 }
 
 /**
@@ -67,6 +72,7 @@ export type MockMapApp = Partial<MapApp> & {
   airportMarkers?: Record<string, MockMarker>;
   airportLayer?: MockLayer;
   pathToAirports?: Record<number, { start: string; end: string }>;
+  airportToPaths?: Record<string, Set<number>>;
   fullPathSegments?: unknown[];
   currentResolution?: string | null;
   pathSegments?: Record<string, unknown>;
@@ -75,5 +81,10 @@ export type MockMapApp = Partial<MapApp> & {
   statsManager?: MockManager;
   airportManager?: MockManager;
   stateManager?: MockManager;
+  replayManager?: MockManager;
+  layerManager?: MockManager;
   altitudeLayer?: MockLayer;
+  altitudeVisible?: boolean;
+  airspeedVisible?: boolean;
+  map?: MockMap;
 };

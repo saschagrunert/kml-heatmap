@@ -23,6 +23,7 @@ export class StatsManager {
         segments: this.app.fullPathSegments || [],
         year: this.app.selectedYear,
         aircraft: this.app.selectedAircraft,
+        coordinateCount: this.app.currentData?.original_points,
       });
       if (statsToShow) {
         this.updateStatsPanel(statsToShow, false);
@@ -44,12 +45,25 @@ export class StatsManager {
 
     if (selectedSegments.length === 0) return;
 
+    // Calculate unique coordinate count from selected segments
+    // Note: This counts only points that have altitude data (i.e., points in segments)
+    // Some coordinates in the raw data may not have altitude and won't be counted here
+    const coordSet = new Set<string>();
+    for (const segment of selectedSegments) {
+      if (segment.coords && segment.coords.length === 2) {
+        coordSet.add(JSON.stringify(segment.coords[0]));
+        coordSet.add(JSON.stringify(segment.coords[1]));
+      }
+    }
+    const selectedCoordCount = coordSet.size;
+
     // Use KMLHeatmap library to calculate stats for selected paths
     const selectedStats = window.KMLHeatmap.calculateFilteredStatistics({
       pathInfo: selectedPathInfo,
       segments: selectedSegments,
       year: "all", // Don't filter by year for selection
       aircraft: "all", // Don't filter by aircraft for selection
+      coordinateCount: selectedCoordCount,
     });
 
     this.updateStatsPanel(selectedStats, true);

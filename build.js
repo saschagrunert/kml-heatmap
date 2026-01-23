@@ -39,8 +39,8 @@ const libraryBuildOptions = {
   // Tree shaking
   treeShaking: true,
 
-  // Drop console logs and debugger in production
-  drop: isDevelopment ? [] : ["console", "debugger"],
+  // Don't drop console statements - they are guarded by debug flags in code
+  drop: isDevelopment ? [] : ["debugger"],
 
   // Enable mangling for smaller identifiers
   mangleProps: isDevelopment ? undefined : /^_/,
@@ -84,8 +84,8 @@ const appBuildOptions = {
   // Tree shaking
   treeShaking: true,
 
-  // Drop console logs and debugger in production
-  drop: isDevelopment ? [] : ["console", "debugger"],
+  // Don't drop console statements - they are guarded by debug flags in code
+  drop: isDevelopment ? [] : ["debugger"],
 
   // Enable mangling for smaller identifiers
   mangleProps: isDevelopment ? undefined : /^_/,

@@ -6,6 +6,14 @@ import {
   DataLoader,
 } from "../../../../kml_heatmap/frontend/services/dataLoader";
 
+// Mock logger
+vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
+  logDebug: vi.fn(),
+  logError: vi.fn(),
+  logInfo: vi.fn(),
+  logWarn: vi.fn(),
+}));
+
 describe("dataLoader service", () => {
   describe("combineYearData", () => {
     it("combines multiple year datasets", () => {
@@ -18,55 +26,22 @@ describe("dataLoader service", () => {
           path_segments: [{ path_id: 1 }],
           path_info: [{ id: 1, year: 2024 }],
           original_points: 1000,
-          downsampled_points: 100,
         },
         {
           coordinates: [[52.0, 10.0]],
           path_segments: [{ path_id: 2 }],
           path_info: [{ id: 2, year: 2025 }],
           original_points: 2000,
-          downsampled_points: 200,
         },
       ];
 
-      const result = combineYearData(datasets, "z14_plus");
+      const result = combineYearData(datasets, "data");
 
       expect(result.coordinates).toHaveLength(3);
       expect(result.path_segments).toHaveLength(2);
       expect(result.path_info).toHaveLength(2);
       expect(result.original_points).toBe(3000);
-      expect(result.downsampled_points).toBe(300);
-      expect(result.resolution).toBe("z14_plus");
-    });
-
-    it("calculates compression ratio", () => {
-      const datasets = [
-        {
-          coordinates: [],
-          path_segments: [],
-          path_info: [],
-          original_points: 1000,
-          downsampled_points: 100,
-        },
-      ];
-
-      const result = combineYearData(datasets, "z14_plus");
-      expect(result.compression_ratio).toBe(10); // 100/1000 * 100
-    });
-
-    it("handles zero original points", () => {
-      const datasets = [
-        {
-          coordinates: [],
-          path_segments: [],
-          path_info: [],
-          original_points: 0,
-          downsampled_points: 0,
-        },
-      ];
-
-      const result = combineYearData(datasets, "z14_plus");
-      expect(result.compression_ratio).toBe(100);
+      expect(result.resolution).toBe("data");
     });
 
     it("skips null or undefined datasets", () => {
@@ -76,18 +51,17 @@ describe("dataLoader service", () => {
           path_segments: [],
           path_info: [],
           original_points: 100,
-          downsampled_points: 10,
         },
         null,
         undefined,
       ];
 
-      const result = combineYearData(datasets, "z14_plus");
+      const result = combineYearData(datasets, "data");
       expect(result.coordinates).toHaveLength(1);
       expect(result.original_points).toBe(100);
     });
 
-    it("handles missing original_points and downsampled_points", () => {
+    it("handles missing original_points", () => {
       const datasets = [
         {
           coordinates: [],
@@ -96,17 +70,14 @@ describe("dataLoader service", () => {
         },
       ];
 
-      const result = combineYearData(datasets, "z14_plus");
+      const result = combineYearData(datasets, "data");
       expect(result.original_points).toBe(0);
-      expect(result.downsampled_points).toBe(0);
     });
   });
 
   describe("getGlobalVarName", () => {
     it("generates correct global variable name", () => {
-      expect(getGlobalVarName("2025", "z14_plus")).toBe(
-        "KML_DATA_2025_Z14_PLUS"
-      );
+      expect(getGlobalVarName("2025", "data")).toBe("KML_DATA_2025_DATA");
     });
 
     it("replaces hyphens with underscores", () => {
@@ -120,11 +91,66 @@ describe("dataLoader service", () => {
 
   describe("getCacheKey", () => {
     it("generates cache key", () => {
-      expect(getCacheKey("z14_plus", "2025")).toBe("z14_plus_2025");
+      expect(getCacheKey("data", "2025")).toBe("data_2025");
     });
 
     it('handles "all" year', () => {
-      expect(getCacheKey("z14_plus", "all")).toBe("z14_plus_all");
+      expect(getCacheKey("data", "all")).toBe("data_all");
+    });
+  });
+
+  describe("input validation", () => {
+    let loader: DataLoader;
+    let mockWindow: Window & typeof globalThis;
+
+    beforeEach(() => {
+      mockWindow = {} as Window & typeof globalThis;
+      loader = new DataLoader({
+        dataDir: "test-data",
+        getWindow: () => mockWindow,
+      });
+    });
+
+    describe("year validation", () => {
+      it("rejects invalid year format", async () => {
+        const result = await loader.loadData("data", "abc");
+        expect(result).toBeNull();
+      });
+
+      it("rejects year before 2000", async () => {
+        const result = await loader.loadData("data", "1999");
+        expect(result).toBeNull();
+      });
+
+      it("rejects year after 2099", async () => {
+        const result = await loader.loadData("data", "2100");
+        expect(result).toBeNull();
+      });
+
+      it("accepts valid year", async () => {
+        mockWindow.KML_DATA_2025_DATA = { original_points: 100 };
+        const result = await loader.loadData("data", "2025");
+        expect(result).not.toBeNull();
+      });
+
+      it('accepts "all" as valid year', async () => {
+        mockWindow.KML_METADATA = { available_years: [] };
+        await loader.loadData("data", "all");
+        // Should not return null due to invalid year
+      });
+    });
+
+    describe("resolution validation", () => {
+      it("rejects invalid resolution", async () => {
+        const result = await loader.loadData("invalid-res", "2025");
+        expect(result).toBeNull();
+      });
+
+      it("accepts valid resolution", async () => {
+        mockWindow.KML_DATA_2025_DATA = { original_points: 100 };
+        const result = await loader.loadData("data", "2025");
+        expect(result).not.toBeNull();
+      });
     });
   });
 
@@ -156,47 +182,45 @@ describe("dataLoader service", () => {
       it("loads data for a specific year", async () => {
         const mockData = {
           coordinates: [[50.0, 8.0]],
-          downsampled_points: 100,
+          original_points: 100,
         };
 
         // Set after scriptLoader is called
         mockScriptLoader.mockImplementationOnce(() => {
-          mockWindow.KML_DATA_2025_Z14_PLUS = mockData;
+          mockWindow.KML_DATA_2025_DATA = mockData;
           return Promise.resolve();
         });
 
-        const result = await loader.loadData("z14_plus", "2025");
+        const result = await loader.loadData("data", "2025");
 
-        expect(mockScriptLoader).toHaveBeenCalledWith(
-          "test-data/2025/z14_plus.js"
-        );
+        expect(mockScriptLoader).toHaveBeenCalledWith("test-data/2025/data.js");
         expect(result).toBe(mockData);
         expect(mockShowLoading).toHaveBeenCalled();
         expect(mockHideLoading).toHaveBeenCalled();
       });
 
       it("uses cached data on second call", async () => {
-        const mockData = { downsampled_points: 100 };
+        const mockData = { original_points: 100 };
 
         // First call loads the script
         mockScriptLoader.mockImplementationOnce(() => {
-          mockWindow.KML_DATA_2025_Z14_PLUS = mockData;
+          mockWindow.KML_DATA_2025_DATA = mockData;
           return Promise.resolve();
         });
 
-        await loader.loadData("z14_plus", "2025");
-        const result = await loader.loadData("z14_plus", "2025");
+        await loader.loadData("data", "2025");
+        const result = await loader.loadData("data", "2025");
 
         expect(mockScriptLoader).toHaveBeenCalledTimes(1);
         expect(result).toBe(mockData);
       });
 
       it("skips loading if global variable already exists", async () => {
-        const mockData = { downsampled_points: 100 };
-        mockWindow.KML_DATA_2025_Z14_PLUS = mockData;
+        const mockData = { original_points: 100 };
+        mockWindow.KML_DATA_2025_DATA = mockData;
 
         // Pre-set the global variable
-        const result = await loader.loadData("z14_plus", "2025");
+        const result = await loader.loadData("data", "2025");
 
         expect(mockScriptLoader).not.toHaveBeenCalled();
         expect(result).toBe(mockData);
@@ -205,7 +229,7 @@ describe("dataLoader service", () => {
       it("returns null on error", async () => {
         mockScriptLoader.mockRejectedValueOnce(new Error("Failed to load"));
 
-        const result = await loader.loadData("z14_plus", "2025");
+        const result = await loader.loadData("data", "2025");
 
         expect(result).toBeNull();
         expect(mockHideLoading).toHaveBeenCalled();
@@ -215,9 +239,9 @@ describe("dataLoader service", () => {
         mockWindow.KML_METADATA = {
           available_years: [2025],
         };
-        mockWindow.KML_DATA_2025_Z14_PLUS = { downsampled_points: 100 };
+        mockWindow.KML_DATA_2025_DATA = { original_points: 100 };
 
-        const result = await loader.loadData("z14_plus");
+        const result = await loader.loadData("data");
 
         expect(result).toBeDefined();
       });
@@ -232,15 +256,13 @@ describe("dataLoader service", () => {
           coordinates: [[50.0, 8.0]],
           path_segments: [],
           path_info: [],
-          original_points: 1000,
-          downsampled_points: 100,
+          original_points: 100,
         };
         const mockData2025 = {
           coordinates: [[51.0, 9.0]],
           path_segments: [],
           path_info: [],
-          original_points: 2000,
-          downsampled_points: 200,
+          original_points: 200,
         };
 
         // Mock loadMetadata call
@@ -251,21 +273,20 @@ describe("dataLoader service", () => {
 
         // Mock loading 2024 data
         mockScriptLoader.mockImplementationOnce(() => {
-          mockWindow.KML_DATA_2024_Z14_PLUS = mockData2024;
+          mockWindow.KML_DATA_2024_DATA = mockData2024;
           return Promise.resolve();
         });
 
         // Mock loading 2025 data
         mockScriptLoader.mockImplementationOnce(() => {
-          mockWindow.KML_DATA_2025_Z14_PLUS = mockData2025;
+          mockWindow.KML_DATA_2025_DATA = mockData2025;
           return Promise.resolve();
         });
 
-        const result = await loader.loadAndCombineAllYears("z14_plus");
+        const result = await loader.loadAndCombineAllYears("data");
 
         expect(result.coordinates).toHaveLength(2);
-        expect(result.original_points).toBe(3000);
-        expect(result.downsampled_points).toBe(300);
+        expect(result.original_points).toBe(300);
       });
 
       it("uses cached combined data", async () => {
@@ -274,7 +295,7 @@ describe("dataLoader service", () => {
           coordinates: [],
           path_segments: [],
           path_info: [],
-          downsampled_points: 100,
+          original_points: 100,
         };
 
         // First call: load metadata
@@ -285,12 +306,12 @@ describe("dataLoader service", () => {
 
         // First call: load 2025 data
         mockScriptLoader.mockImplementationOnce(() => {
-          mockWindow.KML_DATA_2025_Z14_PLUS = mockData;
+          mockWindow.KML_DATA_2025_DATA = mockData;
           return Promise.resolve();
         });
 
-        await loader.loadAndCombineAllYears("z14_plus");
-        const result = await loader.loadAndCombineAllYears("z14_plus");
+        await loader.loadAndCombineAllYears("data");
+        const result = await loader.loadAndCombineAllYears("data");
 
         expect(result).toBeDefined();
         // Should only call scriptLoader twice (once for metadata, once for data)
@@ -298,7 +319,7 @@ describe("dataLoader service", () => {
       });
 
       it("returns null if metadata missing", async () => {
-        const result = await loader.loadAndCombineAllYears("z14_plus");
+        const result = await loader.loadAndCombineAllYears("data");
 
         expect(result).toBeNull();
         expect(mockHideLoading).toHaveBeenCalled();
@@ -307,7 +328,7 @@ describe("dataLoader service", () => {
       it("returns null if available_years missing", async () => {
         mockWindow.KML_METADATA = {};
 
-        const result = await loader.loadAndCombineAllYears("z14_plus");
+        const result = await loader.loadAndCombineAllYears("data");
 
         expect(result).toBeNull();
       });
@@ -315,7 +336,7 @@ describe("dataLoader service", () => {
       it("handles errors gracefully", async () => {
         mockScriptLoader.mockRejectedValueOnce(new Error("Network error"));
 
-        const result = await loader.loadAndCombineAllYears("z14_plus");
+        const result = await loader.loadAndCombineAllYears("data");
 
         expect(result).toBeNull();
         expect(mockHideLoading).toHaveBeenCalled();
@@ -400,29 +421,29 @@ describe("dataLoader service", () => {
 
     describe("cache management", () => {
       it("clearCache removes all cached data", async () => {
-        const mockData = { downsampled_points: 100 };
-        mockWindow.KML_DATA_2025_Z14_PLUS = mockData;
+        const mockData = { original_points: 100 };
+        mockWindow.KML_DATA_2025_DATA = mockData;
 
-        await loader.loadData("z14_plus", "2025");
-        expect(loader.isCached("z14_plus", "2025")).toBe(true);
+        await loader.loadData("data", "2025");
+        expect(loader.isCached("data", "2025")).toBe(true);
 
         loader.clearCache();
-        expect(loader.isCached("z14_plus", "2025")).toBe(false);
+        expect(loader.isCached("data", "2025")).toBe(false);
       });
 
       it("isCached returns true for cached data", async () => {
-        const mockData = { downsampled_points: 100 };
-        mockWindow.KML_DATA_2025_Z14_PLUS = mockData;
+        const mockData = { original_points: 100 };
+        mockWindow.KML_DATA_2025_DATA = mockData;
 
-        expect(loader.isCached("z14_plus", "2025")).toBe(false);
+        expect(loader.isCached("data", "2025")).toBe(false);
 
-        await loader.loadData("z14_plus", "2025");
+        await loader.loadData("data", "2025");
 
-        expect(loader.isCached("z14_plus", "2025")).toBe(true);
+        expect(loader.isCached("data", "2025")).toBe(true);
       });
 
       it("isCached returns false for non-cached data", () => {
-        expect(loader.isCached("z14_plus", "2025")).toBe(false);
+        expect(loader.isCached("data", "2025")).toBe(false);
       });
     });
 
