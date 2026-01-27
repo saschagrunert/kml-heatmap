@@ -6,7 +6,8 @@ import numpy as np
 from datetime import datetime
 from bisect import bisect_left, bisect_right
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
+from numpy.typing import NDArray
 from .geometry import haversine_distance, get_altitude_color
 from .airports import extract_airport_name
 from .logger import logger
@@ -25,7 +26,7 @@ from .constants import (
 class SegmentSpeedCalculator:
     """Calculate ground speeds for flight path segments using NumPy optimization."""
 
-    def __init__(self, path, ground_level_m):
+    def __init__(self, path: List[List[Any]], ground_level_m: float) -> None:
         """
         Initialize speed calculator for a flight path.
 
@@ -33,12 +34,12 @@ class SegmentSpeedCalculator:
             path: List of coordinates [[lat, lon, alt, timestamp], ...]
             ground_level_m: Ground level altitude in meters
         """
-        self.path = path
-        self.ground_level_m = ground_level_m
-        self.path_start_time = self._find_path_start_time()
-        self.segment_speeds = []
+        self.path: List[List[Any]] = path
+        self.ground_level_m: float = ground_level_m
+        self.path_start_time: Optional[datetime] = self._find_path_start_time()
+        self.segment_speeds: List[Dict[str, Any]] = []
 
-    def _find_path_start_time(self):
+    def _find_path_start_time(self) -> Optional[datetime]:
         """Find the first valid timestamp in the path."""
         for coord in self.path:
             if len(coord) >= 4:
@@ -49,7 +50,7 @@ class SegmentSpeedCalculator:
                     continue
         return None
 
-    def calculate_instantaneous_speeds(self):
+    def calculate_instantaneous_speeds(self) -> List[Dict[str, Any]]:
         """
         Calculate instantaneous speeds for all segments using NumPy.
 
@@ -121,7 +122,9 @@ class SegmentSpeedCalculator:
 
         return self.segment_speeds
 
-    def calculate_rolling_average_speeds(self):
+    def calculate_rolling_average_speeds(
+        self,
+    ) -> Tuple[NDArray[np.float64], List[Optional[float]]]:
         """
         Calculate rolling average speeds using time window.
 
@@ -148,9 +151,8 @@ class SegmentSpeedCalculator:
             sorted_pairs = sorted(
                 zip(timestamp_list, time_indexed_segments), key=lambda x: x[0]
             )
-            timestamp_list, time_indexed_segments = zip(*sorted_pairs)
-            timestamp_list = list(timestamp_list)
-            time_indexed_segments = list(time_indexed_segments)
+            timestamp_list = [ts for ts, _ in sorted_pairs]
+            time_indexed_segments = [seg for _, seg in sorted_pairs]
 
         # Calculate rolling averages
         half_window = SPEED_WINDOW_SECONDS / 2
@@ -391,8 +393,9 @@ def process_path_segments_full_resolution(
         }
 
         # Add relative time for replay
-        if relative_times[i] is not None:
-            segment_data["time"] = round(relative_times[i], 1)
+        rel_time = relative_times[i]
+        if rel_time is not None:
+            segment_data["time"] = round(rel_time, 1)
 
         segments.append(segment_data)
 

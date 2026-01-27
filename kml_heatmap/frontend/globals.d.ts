@@ -19,6 +19,9 @@ export type KMLHeatmapModule = {
   formatSpeed: typeof KMLHeatmapLib.formatSpeed;
   getColorForAltitude: typeof KMLHeatmapLib.getColorForAltitude;
   getColorForAirspeed: typeof KMLHeatmapLib.getColorForAirspeed;
+  findMin: typeof KMLHeatmapLib.findMin;
+  findMax: typeof KMLHeatmapLib.findMax;
+  findMinMax: typeof KMLHeatmapLib.findMinMax;
 
   // State management
   parseUrlParams: typeof KMLHeatmapLib.parseUrlParams;

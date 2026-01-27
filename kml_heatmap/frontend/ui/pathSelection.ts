@@ -2,6 +2,7 @@
  * Path Selection - Handles path selection logic
  */
 import type { MapApp } from "../mapApp";
+import { invalidateMapWithDelay } from "../utils/mapHelpers";
 
 export class PathSelection {
   private app: MapApp;
@@ -20,15 +21,11 @@ export class PathSelection {
     // Redraw paths with delay for mobile Safari
     if (this.app.altitudeVisible) {
       this.app.layerManager!.redrawAltitudePaths();
-      setTimeout(() => {
-        this.app.map!.invalidateSize();
-      }, 50);
+      invalidateMapWithDelay(this.app.map);
     }
     if (this.app.airspeedVisible) {
       this.app.layerManager!.redrawAirspeedPaths();
-      setTimeout(() => {
-        this.app.map!.invalidateSize();
-      }, 50);
+      invalidateMapWithDelay(this.app.map);
     }
 
     this.app.replayManager!.updateReplayButtonState();
@@ -46,15 +43,11 @@ export class PathSelection {
     // Redraw paths with delay for mobile Safari
     if (this.app.altitudeVisible) {
       this.app.layerManager!.redrawAltitudePaths();
-      setTimeout(() => {
-        this.app.map!.invalidateSize();
-      }, 50);
+      invalidateMapWithDelay(this.app.map);
     }
     if (this.app.airspeedVisible) {
       this.app.layerManager!.redrawAirspeedPaths();
-      setTimeout(() => {
-        this.app.map!.invalidateSize();
-      }, 50);
+      invalidateMapWithDelay(this.app.map);
     }
 
     this.app.replayManager!.updateReplayButtonState();
@@ -67,17 +60,11 @@ export class PathSelection {
     // Redraw paths with a small delay for mobile Safari touch event handling
     if (this.app.altitudeVisible) {
       this.app.layerManager!.redrawAltitudePaths();
-      // Force map to recognize new interactive elements on mobile Safari
-      setTimeout(() => {
-        this.app.map!.invalidateSize();
-      }, 50);
+      invalidateMapWithDelay(this.app.map);
     }
     if (this.app.airspeedVisible) {
       this.app.layerManager!.redrawAirspeedPaths();
-      // Force map to recognize new interactive elements on mobile Safari
-      setTimeout(() => {
-        this.app.map!.invalidateSize();
-      }, 50);
+      invalidateMapWithDelay(this.app.map);
     }
 
     this.app.replayManager!.updateReplayButtonState();

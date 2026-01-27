@@ -1,5 +1,7 @@
 """Custom exceptions for KML Heatmap Generator."""
 
+from typing import Optional
+
 __all__ = [
     "KMLHeatmapError",
     "KMLParseError",
@@ -20,7 +22,12 @@ class KMLHeatmapError(Exception):
 class KMLParseError(KMLHeatmapError):
     """Raised when KML parsing fails."""
 
-    def __init__(self, message: str, file_path: str = None, line_number: int = None):
+    def __init__(
+        self,
+        message: str,
+        file_path: Optional[str] = None,
+        line_number: Optional[int] = None,
+    ):
         """Initialize KML parse error with optional file context.
 
         Args:
@@ -45,7 +52,7 @@ class KMLParseError(KMLHeatmapError):
 class AircraftLookupError(KMLHeatmapError):
     """Raised when aircraft lookup fails."""
 
-    def __init__(self, message: str, registration: str = None):
+    def __init__(self, message: str, registration: Optional[str] = None):
         """Initialize aircraft lookup error with optional registration.
 
         Args:
@@ -61,7 +68,12 @@ class AircraftLookupError(KMLHeatmapError):
 class InvalidCoordinateError(KMLHeatmapError):
     """Raised when coordinate data is invalid."""
 
-    def __init__(self, message: str, latitude: float = None, longitude: float = None):
+    def __init__(
+        self,
+        message: str,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+    ):
         """Initialize coordinate error with optional lat/lon context.
 
         Args:
@@ -83,7 +95,7 @@ class InvalidCoordinateError(KMLHeatmapError):
 class DataExportError(KMLHeatmapError):
     """Raised when data export fails."""
 
-    def __init__(self, message: str, output_path: str = None):
+    def __init__(self, message: str, output_path: Optional[str] = None):
         """Initialize data export error with optional output path.
 
         Args:
@@ -99,7 +111,7 @@ class DataExportError(KMLHeatmapError):
 class InvalidAltitudeError(KMLHeatmapError):
     """Raised when altitude data is invalid."""
 
-    def __init__(self, message: str, altitude: float = None):
+    def __init__(self, message: str, altitude: Optional[float] = None):
         """Initialize altitude error with optional altitude value.
 
         Args:
@@ -115,7 +127,7 @@ class InvalidAltitudeError(KMLHeatmapError):
 class ConfigurationError(KMLHeatmapError):
     """Raised when configuration is invalid."""
 
-    def __init__(self, message: str, config_key: str = None):
+    def __init__(self, message: str, config_key: Optional[str] = None):
         """Initialize configuration error with optional config key.
 
         Args:

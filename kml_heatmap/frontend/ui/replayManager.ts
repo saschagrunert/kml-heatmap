@@ -357,16 +357,9 @@ export class ReplayManager {
         const altitudes = currentResSegments.map((s) => {
           return s.altitude_ft || 0;
         });
-        // Use iterative approach to avoid stack overflow with large arrays
-        let min = altitudes[0] ?? 0;
-        let max = altitudes[0] ?? 0;
-        for (let i = 1; i < altitudes.length; i++) {
-          const alt = altitudes[i] ?? 0;
-          if (alt < min) min = alt;
-          if (alt > max) max = alt;
-        }
-        this.replayColorMinAlt = min;
-        this.replayColorMaxAlt = max;
+        const altRange = window.KMLHeatmap.findMinMax(altitudes);
+        this.replayColorMinAlt = altRange.min;
+        this.replayColorMaxAlt = altRange.max;
 
         // Use current resolution groundspeed range
         const groundspeeds = currentResSegments
@@ -377,16 +370,9 @@ export class ReplayManager {
             return s > 0;
           });
         if (groundspeeds.length > 0) {
-          // Use iterative approach to avoid stack overflow with large arrays
-          let min = groundspeeds[0] ?? 0;
-          let max = groundspeeds[0] ?? 0;
-          for (let i = 1; i < groundspeeds.length; i++) {
-            const speed = groundspeeds[i] ?? 0;
-            if (speed < min) min = speed;
-            if (speed > max) max = speed;
-          }
-          this.replayColorMinSpeed = min;
-          this.replayColorMaxSpeed = max;
+          const speedRange = window.KMLHeatmap.findMinMax(groundspeeds);
+          this.replayColorMinSpeed = speedRange.min;
+          this.replayColorMaxSpeed = speedRange.max;
         } else {
           this.replayColorMinSpeed = this.app.airspeedRange.min;
           this.replayColorMaxSpeed = this.app.airspeedRange.max;
@@ -396,16 +382,9 @@ export class ReplayManager {
         const altitudes = this.replaySegments.map((s) => {
           return s.altitude_ft || 0;
         });
-        // Use iterative approach to avoid stack overflow with large arrays
-        let min = altitudes[0] ?? 0;
-        let max = altitudes[0] ?? 0;
-        for (let i = 1; i < altitudes.length; i++) {
-          const alt = altitudes[i] ?? 0;
-          if (alt < min) min = alt;
-          if (alt > max) max = alt;
-        }
-        this.replayColorMinAlt = min;
-        this.replayColorMaxAlt = max;
+        const altRange = window.KMLHeatmap.findMinMax(altitudes);
+        this.replayColorMinAlt = altRange.min;
+        this.replayColorMaxAlt = altRange.max;
 
         const groundspeeds = this.replaySegments
           .map((s) => {
@@ -415,16 +394,9 @@ export class ReplayManager {
             return s > 0;
           });
         if (groundspeeds.length > 0) {
-          // Use iterative approach to avoid stack overflow with large arrays
-          let min = groundspeeds[0] ?? 0;
-          let max = groundspeeds[0] ?? 0;
-          for (let i = 1; i < groundspeeds.length; i++) {
-            const speed = groundspeeds[i] ?? 0;
-            if (speed < min) min = speed;
-            if (speed > max) max = speed;
-          }
-          this.replayColorMinSpeed = min;
-          this.replayColorMaxSpeed = max;
+          const speedRange = window.KMLHeatmap.findMinMax(groundspeeds);
+          this.replayColorMinSpeed = speedRange.min;
+          this.replayColorMaxSpeed = speedRange.max;
         } else {
           this.replayColorMinSpeed = this.app.airspeedRange.min;
           this.replayColorMaxSpeed = this.app.airspeedRange.max;
