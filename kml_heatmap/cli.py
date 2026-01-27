@@ -5,7 +5,7 @@ import os
 from .logger import logger, set_debug_mode
 
 
-def print_help():
+def print_help() -> None:
     """Print comprehensive help message."""
     help_text = """
 KML Heatmap Generator
@@ -77,7 +77,7 @@ For more information, see README.md
     print(help_text)
 
 
-def main():
+def main() -> None:
     """Main CLI entry point."""
     # Check for help flag first
     if len(sys.argv) < 2 or "--help" in sys.argv or "-h" in sys.argv:

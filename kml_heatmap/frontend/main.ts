@@ -12,6 +12,7 @@ import {
   formatSpeed,
 } from "./utils/formatters";
 import { getColorForAltitude, getColorForAirspeed } from "./utils/colors";
+import { findMin, findMax, findMinMax } from "./utils/arrayHelpers";
 
 // Import state management
 import {
@@ -93,6 +94,9 @@ export {
   formatSpeed,
   getColorForAltitude,
   getColorForAirspeed,
+  findMin,
+  findMax,
+  findMinMax,
 
   // State management
   parseUrlParams,
@@ -167,6 +171,9 @@ if (typeof window !== "undefined") {
     formatSpeed,
     getColorForAltitude,
     getColorForAirspeed,
+    findMin,
+    findMax,
+    findMinMax,
 
     // State management
     parseUrlParams,

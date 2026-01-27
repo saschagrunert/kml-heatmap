@@ -3,8 +3,14 @@
  */
 import DOMPurify from "dompurify";
 import type { MapApp } from "../mapApp";
-import type { FunFact } from "../types";
 import { domCache } from "../utils/domCache";
+import {
+  generateStatsHtml,
+  generateFunFactsHtml,
+  generateAircraftFleetHtml,
+  generateHomeBaseHtml,
+  generateDestinationsHtml,
+} from "../utils/htmlGenerators";
 
 export class WrappedManager {
   private app: MapApp;
@@ -73,43 +79,16 @@ export class WrappedManager {
 
     // Check if we have timing data (flight time and groundspeed)
     const hasTimingData =
-      this.app.fullStats &&
+      this.app.fullStats !== null &&
       this.app.fullStats.max_groundspeed_knots !== undefined &&
       this.app.fullStats.max_groundspeed_knots > 0;
 
     // Build stats grid (conditionally include flight time and max groundspeed)
-    const statsHtml = `
-            <div class="stat-card">
-                <div class="stat-value">${yearStats.total_flights}</div>
-                <div class="stat-label">Flights</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${yearStats.num_airports}</div>
-                <div class="stat-label">Airports</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${yearStats.total_distance_nm.toFixed(0)}</div>
-                <div class="stat-label">Nautical Miles</div>
-            </div>
-            ${
-              hasTimingData
-                ? `
-            <div class="stat-card">
-                <div class="stat-value">${yearStats.flight_time}</div>
-                <div class="stat-label">Flight Time</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${(this.app.fullStats?.max_groundspeed_knots || 0).toFixed(0)} kt</div>
-                <div class="stat-label">Max Groundspeed</div>
-            </div>
-            `
-                : ""
-            }
-            <div class="stat-card">
-                <div class="stat-value">${Math.round((this.app.fullStats?.max_altitude_m || 0) / 0.3048).toLocaleString()} ft</div>
-                <div class="stat-label">Max Altitude (MSL)</div>
-            </div>
-        `;
+    const statsHtml = generateStatsHtml(
+      yearStats,
+      this.app.fullStats ?? null,
+      hasTimingData
+    );
 
     const statsEl = domCache.get("wrapped-stats");
     if (statsEl) statsEl.innerHTML = DOMPurify.sanitize(statsHtml);
@@ -120,60 +99,14 @@ export class WrappedManager {
       this.app.fullStats
     );
 
-    let funFactsHtml = '<div class="fun-facts-title">✨ Facts</div>';
-    funFacts.forEach((fact: FunFact) => {
-      funFactsHtml += `<div class="fun-fact" data-category="${fact.category}"><span class="fun-fact-icon">${fact.icon}</span><span class="fun-fact-text">${fact.text}</span></div>`;
-    });
+    const funFactsHtml = generateFunFactsHtml(funFacts);
 
     const funFactsEl = domCache.get("wrapped-fun-facts");
     if (funFactsEl) funFactsEl.innerHTML = DOMPurify.sanitize(funFactsHtml);
 
     // Build aircraft fleet section using year-filtered data
     if (yearStats.aircraft_list && yearStats.aircraft_list.length > 0) {
-      let fleetHtml = '<div class="aircraft-fleet-title">✈️ Fleet</div>';
-
-      // Show all aircraft sorted by flight count with color coding based on flights
-      const maxFlights = yearStats.aircraft_list[0]?.flights ?? 0;
-      const minFlights =
-        yearStats.aircraft_list[yearStats.aircraft_list.length - 1]?.flights ??
-        0;
-      const flightRange = maxFlights - minFlights;
-
-      yearStats.aircraft_list.forEach((aircraft) => {
-        // Use full model if available, otherwise fall back to type
-        const modelStr = aircraft.model || aircraft.type || "";
-
-        // Calculate color based on flight count (normalized 0-1)
-        const normalized =
-          flightRange > 0 ? (aircraft.flights - minFlights) / flightRange : 1;
-
-        // Determine color class based on normalized value
-        let colorClass: string;
-        if (normalized >= 0.75) {
-          colorClass = "fleet-aircraft-high"; // Most flights - warm color
-        } else if (normalized >= 0.5) {
-          colorClass = "fleet-aircraft-medium-high";
-        } else if (normalized >= 0.25) {
-          colorClass = "fleet-aircraft-medium-low";
-        } else {
-          colorClass = "fleet-aircraft-low"; // Least flights - cool color
-        }
-
-        const flightTimeStr = aircraft.flight_time_str || "---";
-        fleetHtml += `
-                    <div class="fleet-aircraft ${colorClass}">
-                        <div class="fleet-aircraft-info">
-                            <div class="fleet-aircraft-model">${modelStr}</div>
-                            <div class="fleet-aircraft-registration">${aircraft.registration}</div>
-                        </div>
-                        <div class="fleet-aircraft-stats">
-                            <div class="fleet-aircraft-flights">${aircraft.flights} flights</div>
-                            <div class="fleet-aircraft-time">${flightTimeStr}</div>
-                        </div>
-                    </div>
-                `;
-      });
-
+      const fleetHtml = generateAircraftFleetHtml(yearStats);
       const fleetEl = domCache.get("wrapped-aircraft-fleet");
       if (fleetEl) fleetEl.innerHTML = DOMPurify.sanitize(fleetHtml);
     }
@@ -219,13 +152,7 @@ export class WrappedManager {
       const homeBase = yearAirports[0];
 
       if (homeBase) {
-        let homeBaseHtml = '<div class="top-airports-title">🏠 Home Base</div>';
-        homeBaseHtml += `
-                <div class="top-airport">
-                    <div class="top-airport-name">${homeBase.name}</div>
-                    <div class="top-airport-count">${homeBase.flight_count} flights</div>
-                </div>
-            `;
+        const homeBaseHtml = generateHomeBaseHtml(homeBase);
         const topAirportsEl = domCache.get("wrapped-top-airports");
         if (topAirportsEl)
           topAirportsEl.innerHTML = DOMPurify.sanitize(homeBaseHtml);
@@ -235,21 +162,9 @@ export class WrappedManager {
           (name) => name !== homeBase.name
         );
 
-        // Only show destinations section if there are destinations other than home base
-        if (destinations.length > 0) {
-          let airportBadgesHtml =
-            '<div class="airports-grid-title">🗺️ Destinations</div><div class="airport-badges">';
-          destinations.forEach((airportName) => {
-            airportBadgesHtml += `<div class="airport-badge">${airportName}</div>`;
-          });
-          airportBadgesHtml += "</div>";
-          const gridEl = domCache.get("wrapped-airports-grid");
-          if (gridEl) gridEl.innerHTML = DOMPurify.sanitize(airportBadgesHtml);
-        } else {
-          // Clear the destinations section if no destinations
-          const gridEl = domCache.get("wrapped-airports-grid");
-          if (gridEl) gridEl.innerHTML = "";
-        }
+        const destinationsHtml = generateDestinationsHtml(destinations);
+        const gridEl = domCache.get("wrapped-airports-grid");
+        if (gridEl) gridEl.innerHTML = DOMPurify.sanitize(destinationsHtml);
       }
     }
 
