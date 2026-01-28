@@ -203,7 +203,7 @@ describe("StatsManager", () => {
       statsManager.updateStatsPanel(mockStats, false);
 
       expect(statsPanel.innerHTML).toContain("Data Points:");
-      expect(statsPanel.innerHTML).toContain("10,000"); // toLocaleString
+      expect(statsPanel.innerHTML).toContain("10000");
     });
 
     it("displays number of flights", () => {
@@ -315,8 +315,8 @@ describe("StatsManager", () => {
       statsManager.updateStatsPanel(mockStats, false);
 
       expect(statsPanel.innerHTML).toContain("Most Common Cruise Altitude");
-      expect(statsPanel.innerHTML).toContain("5,500 ft");
-      expect(statsPanel.innerHTML).toContain("1,676 m");
+      expect(statsPanel.innerHTML).toContain("5500 ft");
+      expect(statsPanel.innerHTML).toContain("1676 m");
     });
 
     it("handles missing optional fields gracefully", () => {

@@ -60,7 +60,7 @@ export function generateStatsHtml(
                 : ""
             }
             <div class="stat-card">
-                <div class="stat-value">${Math.round((fullStats?.max_altitude_m || 0) / 0.3048).toLocaleString()} ft</div>
+                <div class="stat-value">${Math.round((fullStats?.max_altitude_m || 0) / 0.3048)} ft</div>
                 <div class="stat-label">Max Altitude (MSL)</div>
             </div>
         `;

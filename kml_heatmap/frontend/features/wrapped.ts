@@ -311,7 +311,7 @@ export function generateFunFacts(
       const totalGainFt = Math.round(fullStats.total_altitude_gain_ft);
       facts.push({
         icon: "⬆️",
-        text: `Total elevation gain: <strong>${totalGainFt.toLocaleString()} ft</strong>`,
+        text: `Total elevation gain: <strong>${totalGainFt} ft</strong>`,
         category: "altitude",
         priority: 8,
       });
@@ -337,7 +337,7 @@ export function generateFunFacts(
       const cruiseAltM = Math.round(fullStats.most_common_cruise_altitude_m);
       facts.push({
         icon: "⬆️",
-        text: `Most common cruise: <strong>${cruiseAltFt.toLocaleString()} ft</strong> AGL (<strong>${cruiseAltM.toLocaleString()} m</strong>)`,
+        text: `Most common cruise: <strong>${cruiseAltFt} ft</strong> AGL (<strong>${cruiseAltM} m</strong>)`,
         category: "altitude",
         priority: 7,
       });

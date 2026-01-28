@@ -250,11 +250,11 @@ export class ReplayManager {
       '<span style="font-size: 16px; font-weight: bold; color: ' +
       altColor +
       ';">' +
-      altFtRounded.toLocaleString() +
+      altFtRounded +
       " ft</span>";
     popupContent +=
       '<span style="font-size: 12px; color: #ccc; margin-left: 6px;">(' +
-      altMRounded.toLocaleString() +
+      altMRounded +
       " m)</span>";
     popupContent += "</div>";
     popupContent += "</div>";
@@ -288,11 +288,11 @@ export class ReplayManager {
       '<span style="font-size: 16px; font-weight: bold; color: ' +
       speedColor +
       ';">' +
-      speedKtRounded.toLocaleString() +
+      speedKtRounded +
       " kt</span>";
     popupContent +=
       '<span style="font-size: 12px; color: #ccc; margin-left: 6px;">(' +
-      speedKmhRounded.toLocaleString() +
+      speedKmhRounded +
       " km/h)</span>";
     popupContent += "</div>";
     popupContent += "</div>";

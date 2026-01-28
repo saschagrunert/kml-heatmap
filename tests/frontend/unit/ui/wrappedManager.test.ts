@@ -145,7 +145,7 @@ describe("WrappedManager", () => {
 
       const statsHtml = mockStatsEl.innerHTML;
       expect(statsHtml).toContain("Max Altitude");
-      expect(statsHtml).toContain("10,000 ft");
+      expect(statsHtml).toContain("10000 ft");
     });
 
     it("always includes flights, airports, and distance stats", () => {
