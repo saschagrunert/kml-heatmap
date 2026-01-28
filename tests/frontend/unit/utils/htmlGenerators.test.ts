@@ -49,7 +49,7 @@ describe("htmlGenerators", () => {
       expect(html).toContain('<div class="stat-label">Airports</div>');
       expect(html).toContain('<div class="stat-value">12346</div>');
       expect(html).toContain('<div class="stat-label">Nautical Miles</div>');
-      expect(html).toContain("36,089 ft"); // Math.round(11000 / 0.3048)
+      expect(html).toContain("36089 ft"); // Math.round(11000 / 0.3048)
       expect(html).toContain(
         '<div class="stat-label">Max Altitude (MSL)</div>'
       );

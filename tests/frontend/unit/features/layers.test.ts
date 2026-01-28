@@ -248,18 +248,18 @@ describe("layers feature", () => {
   });
 
   describe("formatAltitudeLegendLabels", () => {
-    it("formats altitude labels with commas", () => {
+    it("formats altitude labels", () => {
       const labels = formatAltitudeLegendLabels(1000, 15000);
 
-      expect(labels.min).toBe("1,000 ft");
-      expect(labels.max).toBe("15,000 ft");
+      expect(labels.min).toBe("1000 ft");
+      expect(labels.max).toBe("15000 ft");
     });
 
     it("rounds altitudes", () => {
       const labels = formatAltitudeLegendLabels(1234.5, 5678.9);
 
-      expect(labels.min).toBe("1,235 ft");
-      expect(labels.max).toBe("5,679 ft");
+      expect(labels.min).toBe("1235 ft");
+      expect(labels.max).toBe("5679 ft");
     });
 
     it("handles zero altitude", () => {

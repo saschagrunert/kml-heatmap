@@ -43,11 +43,11 @@ describe("formatter utilities", () => {
 
   describe("formatDistance", () => {
     it("formats distance with default 0 decimals", () => {
-      expect(formatDistance(1234)).toBe("1,234 km");
+      expect(formatDistance(1234)).toBe("1234 km");
     });
 
     it("formats distance with specified decimals", () => {
-      expect(formatDistance(1234.567, 2)).toBe("1,234.57 km");
+      expect(formatDistance(1234.567, 2)).toBe("1234.57 km");
     });
 
     it("handles small distances", () => {
@@ -58,8 +58,8 @@ describe("formatter utilities", () => {
       expect(formatDistance(0)).toBe("0 km");
     });
 
-    it("formats large distances with commas", () => {
-      expect(formatDistance(1234567)).toBe("1,234,567 km");
+    it("formats large distances", () => {
+      expect(formatDistance(1234567)).toBe("1234567 km");
     });
 
     it("rounds to specified decimals", () => {
@@ -70,21 +70,21 @@ describe("formatter utilities", () => {
   describe("formatAltitude", () => {
     it("converts meters to feet", () => {
       // 1000m ≈ 3281 feet
-      expect(formatAltitude(1000)).toBe("3,281 ft");
+      expect(formatAltitude(1000)).toBe("3281 ft");
     });
 
     it("handles zero altitude", () => {
       expect(formatAltitude(0)).toBe("0 ft");
     });
 
-    it("formats high altitudes with commas", () => {
+    it("formats high altitudes", () => {
       // 10000m ≈ 32808 feet
-      expect(formatAltitude(10000)).toBe("32,808 ft");
+      expect(formatAltitude(10000)).toBe("32808 ft");
     });
 
     it("rounds to nearest foot", () => {
       const result = formatAltitude(100);
-      expect(result).toMatch(/^\d+,?\d* ft$/);
+      expect(result).toMatch(/^\d+ ft$/);
     });
   });
 
@@ -101,8 +101,8 @@ describe("formatter utilities", () => {
       expect(formatSpeed(0)).toBe("0 kt");
     });
 
-    it("formats high speeds with commas", () => {
-      expect(formatSpeed(1234)).toBe("1,234 kt");
+    it("formats high speeds", () => {
+      expect(formatSpeed(1234)).toBe("1234 kt");
     });
 
     it("rounds down decimal values", () => {

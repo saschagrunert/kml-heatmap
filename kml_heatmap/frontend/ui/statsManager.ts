@@ -87,7 +87,7 @@ export class StatsManager {
 
     html +=
       '<div style="margin-bottom: 8px;"><strong>Data Points:</strong> ' +
-      stats.total_points.toLocaleString() +
+      stats.total_points +
       "</div>";
     html +=
       '<div style="margin-bottom: 8px;"><strong>Flights:</strong> ' +
@@ -235,9 +235,9 @@ export class StatsManager {
       const cruiseAltM = Math.round(stats.most_common_cruise_altitude_m || 0);
       html +=
         '<div style="margin-bottom: 8px;"><strong>Most Common Cruise Altitude (AGL):</strong> ' +
-        stats.most_common_cruise_altitude_ft.toLocaleString() +
+        stats.most_common_cruise_altitude_ft +
         " ft (" +
-        cruiseAltM.toLocaleString() +
+        cruiseAltM +
         " m)</div>";
     }
 

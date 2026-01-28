@@ -289,12 +289,10 @@ export class LayerManager {
     const maxEl = domCache.get("legend-max");
 
     if (minEl) {
-      minEl.textContent =
-        minFt.toLocaleString() + " ft (" + minM.toLocaleString() + " m)";
+      minEl.textContent = minFt + " ft (" + minM + " m)";
     }
     if (maxEl) {
-      maxEl.textContent =
-        maxFt.toLocaleString() + " ft (" + maxM.toLocaleString() + " m)";
+      maxEl.textContent = maxFt + " ft (" + maxM + " m)";
     }
   }
 
@@ -308,18 +306,10 @@ export class LayerManager {
     const maxEl = domCache.get("airspeed-legend-max");
 
     if (minEl) {
-      minEl.textContent =
-        minKnots.toLocaleString() +
-        " kt (" +
-        minKmh.toLocaleString() +
-        " km/h)";
+      minEl.textContent = minKnots + " kt (" + minKmh + " km/h)";
     }
     if (maxEl) {
-      maxEl.textContent =
-        maxKnots.toLocaleString() +
-        " kt (" +
-        maxKmh.toLocaleString() +
-        " km/h)";
+      maxEl.textContent = maxKnots + " kt (" + maxKmh + " km/h)";
     }
   }
 }

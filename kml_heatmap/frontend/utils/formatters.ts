@@ -29,25 +29,20 @@ export function formatTime(seconds: number): string {
  * Format distance in kilometers to human-readable string
  * @param km - Distance in kilometers
  * @param decimals - Number of decimal places (default: 0)
- * @returns Formatted distance (e.g., "1,234 km")
+ * @returns Formatted distance (e.g., "1234 km")
  */
 export function formatDistance(km: number, decimals = 0): string {
-  return (
-    km.toLocaleString("en-US", {
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals,
-    }) + " km"
-  );
+  return km.toFixed(decimals) + " km";
 }
 
 /**
  * Format altitude in meters to feet string
  * @param meters - Altitude in meters
- * @returns Formatted altitude (e.g., "10,000 ft")
+ * @returns Formatted altitude (e.g., "10000 ft")
  */
 export function formatAltitude(meters: number): string {
   const feet = Math.round(meters * 3.28084);
-  return feet.toLocaleString("en-US") + " ft";
+  return feet + " ft";
 }
 
 /**
@@ -56,5 +51,5 @@ export function formatAltitude(meters: number): string {
  * @returns Formatted speed (e.g., "120 kt")
  */
 export function formatSpeed(knots: number): string {
-  return Math.round(knots).toLocaleString("en-US") + " kt";
+  return Math.round(knots) + " kt";
 }

@@ -203,8 +203,8 @@ export function formatAltitudeLegendLabels(
   max: number
 ): LegendLabels {
   return {
-    min: Math.round(min).toLocaleString() + " ft",
-    max: Math.round(max).toLocaleString() + " ft",
+    min: Math.round(min) + " ft",
+    max: Math.round(max) + " ft",
   };
 }
 
