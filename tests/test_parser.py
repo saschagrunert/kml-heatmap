@@ -1253,7 +1253,9 @@ class TestAirportExtractionFromRoute:
             coords, paths, metadata = parse_kml_coordinates(temp_path)
 
             # Should extract route and format as "DEPARTURE - ARRIVAL" with full names from OurAirports
-            assert metadata[0].get("airport_name") == "EDDF Frankfurt - EDDM Munich"
+            assert (
+                metadata[0].get("airport_name") == "EDDF Frankfurt Main - EDDM Munich"
+            )
             assert metadata[0].get("route") == "EDDF-EDDM"
 
         finally:
