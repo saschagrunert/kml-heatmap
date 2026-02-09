@@ -874,7 +874,7 @@ export class ReplayManager {
       // If we have a lastSegment, use it for positioning
       if (lastSegment) {
         let currentPos: [number, number];
-        let bearing = 0;
+        let bearing: number;
 
         if (nextSegment && (lastSegment.time || 0) < this.replayCurrentTime) {
           // Interpolate between last and next segment
