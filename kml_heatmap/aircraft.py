@@ -25,11 +25,11 @@ AIRCRAFT_CACHE_FILE = CACHE_DIR / "aircraft.json"
 class AircraftDataParser(HTMLParser):
     """HTML parser to extract aircraft model from airport-data.com"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the parser with default state."""
         super().__init__()
         self.in_title = False
-        self.model = None
+        self.model: Optional[str] = None
 
     def handle_starttag(self, tag: str, attrs: List[tuple]) -> None:
         """Handle opening HTML tags.
