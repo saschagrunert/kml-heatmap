@@ -61,31 +61,6 @@ class SegmentData:
         self.max_path_distance_nm: float = 0.0
 
 
-def calculate_path_duration(
-    start_timestamp: Optional[str], end_timestamp: Optional[str]
-) -> float:
-    """
-    Calculate path duration from timestamps.
-
-    Args:
-        start_timestamp: ISO format start timestamp
-        end_timestamp: ISO format end timestamp
-
-    Returns:
-        Duration in seconds, or 0 if parsing fails
-    """
-    if not start_timestamp or not end_timestamp:
-        return 0.0
-
-    start_dt = parse_iso_timestamp(start_timestamp)
-    end_dt = parse_iso_timestamp(end_timestamp)
-
-    if start_dt and end_dt:
-        return (end_dt - start_dt).total_seconds()
-
-    return 0.0
-
-
 def calculate_path_distance(path: List[List[float]]) -> float:
     """
     Calculate total distance along a path in kilometers.

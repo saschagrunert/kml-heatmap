@@ -1,16 +1,31 @@
 # Test Docker Image for KML Heatmap
+
+# Stage 1: Node.js environment for JS tests
+FROM node:lts-slim AS js-env
+
+WORKDIR /app
+
+# Copy JavaScript/TypeScript build configuration
+COPY package.json package-lock.json build.js vitest.config.js tsconfig.json tsconfig.eslint.json eslint.config.js ./
+COPY kml_heatmap/frontend/ ./kml_heatmap/frontend/
+
+# Install Node.js dependencies
+RUN npm ci
+
+# Copy JS tests
+COPY tests/frontend/ ./tests/frontend/
+
+# Stage 2: Final test image
 FROM python:3.14-slim
+
+# Install Node.js from official image instead of curl|bash
+COPY --from=node:lts-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:lts-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 # Set working directory
 WORKDIR /app
-
-# Install Node.js (latest LTS version)
-RUN apt-get update && \
-    apt-get install -y curl && \
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-    apt-get install -y nodejs && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
 COPY requirements.txt requirements-test.txt ./
@@ -25,11 +40,9 @@ COPY kml_heatmap/ ./kml_heatmap/
 COPY scripts/ ./scripts/
 COPY pytest.ini mypy.ini .
 
-# Copy JavaScript/TypeScript build configuration
+# Copy JavaScript/TypeScript build configuration and node_modules from js-env
 COPY package.json build.js vitest.config.js tsconfig.json tsconfig.eslint.json eslint.config.js ./
-
-# Install Node.js dependencies
-RUN npm install
+COPY --from=js-env /app/node_modules ./node_modules
 
 # Copy tests
 COPY tests/ ./tests/

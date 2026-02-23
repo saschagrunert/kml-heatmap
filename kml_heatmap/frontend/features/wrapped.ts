@@ -4,6 +4,7 @@
  */
 
 import { calculateDistance } from "../utils/geometry";
+import { formatFlightTime } from "../utils/formatters";
 import {
   calculateFlightTime,
   collectAirports,
@@ -69,15 +70,6 @@ interface FullStats {
 interface HomeBase {
   name: string;
   flight_count: number;
-}
-
-/**
- * Format seconds to hours and minutes string
- */
-function formatFlightTime(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return `${hours}h ${minutes}m`;
 }
 
 /**

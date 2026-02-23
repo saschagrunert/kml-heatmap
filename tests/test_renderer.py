@@ -3,8 +3,8 @@
 from kml_heatmap.renderer import (
     load_template,
     minify_html,
-    HEATMAP_GRADIENT,
 )
+from kml_heatmap.constants import HEATMAP_GRADIENT
 
 
 class TestLoadTemplate:

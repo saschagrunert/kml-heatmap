@@ -343,21 +343,12 @@ export class ReplayRenderer {
 
           // Auto-zoom based on map recenter frequency
           if (replayManager.replayAutoZoom) {
-            // Clean up old timestamps from sliding window
-            const now = Date.now();
-            const cutoffTime = now - 30000;
-            replayManager.replayRecenterTimestamps =
-              replayManager.replayRecenterTimestamps.filter((ts) => {
-                return ts > cutoffTime;
-              });
-
             const recenterCount = replayManager.replayRecenterTimestamps.length;
 
             // Trigger zoom-out when more than 2 recenters happen within 5 seconds
             if (recenterCount > 2) {
               // Check if we have more than 2 recenters within the last 5 seconds
-              const now = Date.now();
-              const fiveSecondsAgo = now - 5000;
+              const fiveSecondsAgo = Date.now() - 5000;
               const recentRecenters =
                 replayManager.replayRecenterTimestamps.filter((ts) => {
                   return ts >= fiveSecondsAgo;

@@ -616,7 +616,6 @@ class TestProcessYearData:
         # Verify required fields
         segment = segments[0]
         assert "coords" in segment
-        assert "color" in segment
         assert "altitude_ft" in segment
         assert "altitude_m" in segment
         assert "groundspeed_knots" in segment

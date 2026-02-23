@@ -408,11 +408,9 @@ def parse_with_error_handling(kml_file):
     """
     try:
         return kml_file, parse_kml_coordinates(kml_file)
-    except Exception as e:
+    except (OSError, ValueError, TypeError, AttributeError) as e:
         logger.error(f"✗ Error processing {kml_file}: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.debug("Stack trace:", exc_info=True)
         return kml_file, ([], [], [])
 
 

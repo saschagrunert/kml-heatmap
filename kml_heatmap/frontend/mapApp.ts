@@ -20,7 +20,6 @@ import type {
   PathInfo,
   PathSegment,
   Airport,
-  Metadata,
   FilteredStatistics,
   AppState,
   KMLDataset,
@@ -42,15 +41,6 @@ export interface MapConfig {
  */
 export interface AirportWithFlightCount extends Airport {
   flight_count: number;
-}
-
-/**
- * Extended Metadata interface with groundspeed fields
- */
-export interface MetadataWithGroundspeed extends Metadata {
-  stats?: FilteredStatistics;
-  min_groundspeed_knots?: number;
-  max_groundspeed_knots?: number;
 }
 
 /**

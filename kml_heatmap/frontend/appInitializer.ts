@@ -6,11 +6,7 @@
 import * as L from "leaflet";
 import { logError } from "./utils/logger";
 import { domCache } from "./utils/domCache";
-import type {
-  MapApp,
-  AirportWithFlightCount,
-  MetadataWithGroundspeed,
-} from "./mapApp";
+import type { MapApp, AirportWithFlightCount } from "./mapApp";
 import type { Airport } from "./types";
 
 /**
@@ -23,8 +19,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   app.allAirportsData = airports;
 
   // Load metadata
-  const metadata =
-    (await app.dataManager!.loadMetadata()) as MetadataWithGroundspeed | null;
+  const metadata = await app.dataManager!.loadMetadata();
 
   // Populate year filter dropdown
   if (metadata && metadata.available_years) {

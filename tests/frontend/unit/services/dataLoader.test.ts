@@ -3,6 +3,7 @@ import {
   combineYearData,
   getGlobalVarName,
   getCacheKey,
+  loadScript,
   DataLoader,
 } from "../../../../kml_heatmap/frontend/services/dataLoader";
 
@@ -13,6 +14,41 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
   logInfo: vi.fn(),
   logWarn: vi.fn(),
 }));
+
+describe("loadScript", () => {
+  it("appends script to document.head and resolves on load", async () => {
+    const appendChildSpy = vi
+      .spyOn(document.head, "appendChild")
+      .mockImplementation((node: Node) => {
+        (node as HTMLScriptElement).onload?.(new Event("load"));
+        return node;
+      });
+
+    await loadScript("test.js");
+
+    expect(appendChildSpy).toHaveBeenCalled();
+    const script = appendChildSpy.mock.calls[0]![0] as HTMLScriptElement;
+    expect(script.src).toContain("test.js");
+    expect(script.tagName).toBe("SCRIPT");
+
+    appendChildSpy.mockRestore();
+  });
+
+  it("rejects on script load error", async () => {
+    const appendChildSpy = vi
+      .spyOn(document.head, "appendChild")
+      .mockImplementation((node: Node) => {
+        (node as HTMLScriptElement).onerror?.(new Event("error"));
+        return node;
+      });
+
+    await expect(loadScript("bad.js")).rejects.toThrow(
+      "Failed to load script: bad.js"
+    );
+
+    appendChildSpy.mockRestore();
+  });
+});
 
 describe("dataLoader service", () => {
   describe("combineYearData", () => {

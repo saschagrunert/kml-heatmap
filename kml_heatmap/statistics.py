@@ -1,6 +1,6 @@
 """Statistics calculation for flight data."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Any, Tuple
 from .geometry import haversine_distance
 from .aircraft import lookup_aircraft_model
@@ -122,7 +122,7 @@ def calculate_flight_time(valid_paths: List[List[List[float]]]) -> Dict[str, Any
         Dict with total_seconds and paths_with_timestamps count
     """
     total_seconds = 0.0
-    paths_with_timestamps = 0.0
+    paths_with_timestamps = 0
 
     for path in valid_paths:
         timestamps = extract_timestamps_from_path(path)
@@ -134,7 +134,7 @@ def calculate_flight_time(valid_paths: List[List[List[float]]]) -> Dict[str, Any
             duration = max_time - min_time
             if duration > 0:
                 total_seconds += duration
-                paths_with_timestamps += 1.0
+                paths_with_timestamps += 1
 
     return {
         "total_seconds": total_seconds,
@@ -235,7 +235,7 @@ def _calculate_aircraft_flight_times(
                     aircraft_flights[reg]["years"] = set()
 
                 # Extract year from timestamp
-                dt = datetime.fromtimestamp(min_time)
+                dt = datetime.fromtimestamp(min_time, tz=timezone.utc)
                 aircraft_flights[reg]["years"].add(str(dt.year))
 
 

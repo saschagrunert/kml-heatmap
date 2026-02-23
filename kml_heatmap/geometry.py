@@ -7,10 +7,7 @@ __all__ = [
     "EARTH_RADIUS_KM",
     "Coordinate2D",
     "Coordinate3D",
-    "Coordinate4D",
-    "PathCoordinate",
     "haversine_distance",
-    "downsample_path_rdp",
     "downsample_coordinates",
     "get_altitude_color",
 ]
@@ -21,8 +18,6 @@ EARTH_RADIUS_KM = 6371
 # Type aliases
 Coordinate2D = List[float]  # [lat, lon]
 Coordinate3D = List[float]  # [lat, lon, alt]
-Coordinate4D = List[Union[float, str]]  # [lat, lon, alt, timestamp]
-PathCoordinate = Union[Coordinate3D, Coordinate4D]
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -56,94 +51,6 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return EARTH_RADIUS_KM * c
-
-
-def downsample_path_rdp(
-    path: List[PathCoordinate], epsilon: float = 0.0001
-) -> List[PathCoordinate]:
-    """
-    Downsample a path using Ramer-Douglas-Peucker algorithm (iterative).
-
-    The RDP algorithm simplifies a path by removing points that don't
-    significantly affect the path's shape. It works by recursively finding
-    the point furthest from a line segment and keeping it if the distance
-    exceeds epsilon.
-
-    Args:
-        path: List of [lat, lon] or [lat, lon, alt] or [lat, lon, alt, timestamp]
-        epsilon: Tolerance for simplification in degrees (smaller = more detail)
-                Default 0.0001 ≈ 11 meters at equator
-
-    Returns:
-        Simplified path with same coordinate format as input
-
-    Example:
-        >>> path = [[0, 0, 100], [0, 0.0001, 100], [0, 0.001, 100]]
-        >>> simplified = downsample_path_rdp(path, epsilon=0.0002)
-        >>> len(simplified)  # Middle point removed as it's within tolerance
-        2
-
-    Complexity:
-        Best case: O(n) when path is already simplified
-        Worst case: O(n²) for complex paths
-        Average: O(n log n) for typical GPS tracks
-
-    Note:
-        This implementation uses an iterative approach with a stack instead
-        of recursion to avoid stack overflow on very long paths.
-    """
-    if len(path) <= 2:
-        return path
-
-    def perpendicular_distance(
-        point: PathCoordinate, line_start: PathCoordinate, line_end: PathCoordinate
-    ) -> float:
-        """Calculate perpendicular distance from point to line."""
-        # Coordinates are always floats at indices 0 and 1 (lat, lon)
-        p0 = float(point[0])
-        p1 = float(point[1])
-        s0 = float(line_start[0])
-        s1 = float(line_start[1])
-        e0 = float(line_end[0])
-        e1 = float(line_end[1])
-
-        # For circular paths where start == end, use haversine distance from start
-        if s0 == e0 and s1 == e1:
-            return haversine_distance(p0, p1, s0, s1)
-
-        # Using simple Euclidean approximation for small distances
-        num = abs((e1 - s1) * p0 - (e0 - s0) * p1 + e0 * s1 - e1 * s0)
-        den = sqrt((e1 - s1) ** 2 + (e0 - s0) ** 2)
-
-        if den == 0:
-            return haversine_distance(p0, p1, s0, s1)
-        return num / den
-
-    # Iterative RDP using stack (avoids recursion overhead and stack limits)
-    stack = [(0, len(path) - 1)]
-    keep_indices = {0, len(path) - 1}  # Use set for O(1) lookups
-
-    while stack:
-        start_idx, end_idx = stack.pop()
-
-        # Find point with maximum distance from line
-        dmax = 0.0
-        max_idx = 0
-
-        for i in range(start_idx + 1, end_idx):
-            d = perpendicular_distance(path[i], path[start_idx], path[end_idx])
-            if d > dmax:
-                max_idx = i
-                dmax = d
-
-        # If max distance exceeds epsilon, keep the point and subdivide
-        if dmax > epsilon:
-            keep_indices.add(max_idx)
-            stack.append((start_idx, max_idx))
-            stack.append((max_idx, end_idx))
-
-    # Build result from kept indices in order
-    return [path[i] for i in sorted(keep_indices)]
 
 
 def downsample_coordinates(
@@ -201,8 +108,8 @@ def get_altitude_color(altitude: float, min_alt: float, max_alt: float) -> str:
     if max_alt == min_alt:
         return "#00AA88"  # Teal if all altitudes are the same
 
-    # Normalize altitude to 0-1 range
-    normalized = (altitude - min_alt) / (max_alt - min_alt)
+    # Normalize altitude to 0-1 range, clamped to valid bounds
+    normalized = max(0.0, min(1.0, (altitude - min_alt) / (max_alt - min_alt)))
 
     # Color gradient: blue -> cyan -> green -> yellow -> orange -> red
     if normalized < 0.2:
