@@ -30,8 +30,10 @@ Example:
     Loaded 1234 points from 3 paths
 """
 
+import os
 import re
 import json
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional, Any
@@ -124,10 +126,11 @@ def get_cache_key(kml_file: str) -> Tuple[Optional[Path], bool]:
 
     # Clean up old cache files for this KML file (different mtime)
     for old_cache in KML_CACHE_DIR.glob(f"{kml_path.stem}_*.json"):
-        try:
-            old_cache.unlink()
-        except OSError:
-            pass
+        if old_cache != cache_path:  # Don't delete the one we're about to write
+            try:
+                old_cache.unlink()
+            except OSError:
+                pass
 
     return cache_path, False
 
@@ -166,17 +169,28 @@ def save_to_cache(
         path_metadata: List of path metadata dicts
     """
     try:
-        with open(cache_path, "w") as f:
+        # Atomic write: write to temp file, then rename to avoid corruption
+        # from concurrent processes parsing the same file
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=KML_CACHE_DIR, suffix=".tmp", delete=False
+        ) as tmp:
             json.dump(
                 {
                     "coordinates": coordinates,
                     "path_groups": path_groups,
                     "path_metadata": path_metadata,
                 },
-                f,
+                tmp,
             )
+            tmp_path = tmp.name
+        os.replace(tmp_path, str(cache_path))
     except OSError as e:
         logger.debug(f"Failed to save cache: {e}")
+        # Clean up temp file if rename failed
+        try:
+            os.unlink(tmp_path)
+        except (OSError, UnboundLocalError):
+            pass
 
 
 def extract_year_from_timestamp(timestamp: Optional[str]) -> Optional[int]:
