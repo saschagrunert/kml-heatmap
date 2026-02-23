@@ -13,6 +13,8 @@ export default tseslint.config(
       "docs/**",
       "kml_heatmap/static/**",
       "kml_heatmap/templates/**",
+      "playwright.config.ts",
+      "tests/e2e/**",
       ".git/**",
     ],
   },
