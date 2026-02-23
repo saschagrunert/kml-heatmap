@@ -2,22 +2,7 @@
  * HTML generation utilities for wrapped feature
  * Pure functions that generate HTML strings for various UI components
  */
-import type { FilteredStatistics, FunFact } from "../types";
-
-export interface YearStats {
-  total_flights: number;
-  num_airports: number;
-  total_distance_nm: number;
-  flight_time: string;
-  airport_names: string[];
-  aircraft_list?: Array<{
-    registration: string;
-    type?: string;
-    model?: string;
-    flights: number;
-    flight_time_str?: string;
-  }>;
-}
+import type { FilteredStatistics, FunFact, YearStats } from "../types";
 
 export interface AirportCount {
   name: string;

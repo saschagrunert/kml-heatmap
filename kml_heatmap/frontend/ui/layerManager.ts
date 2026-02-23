@@ -59,13 +59,16 @@ export class LayerManager {
       colorMaxAlt = this.app.altitudeRange.max;
     }
 
+    // Build path info lookup map for O(1) access
+    const pathInfoMap = new Map(
+      this.app.currentData.path_info.map((p) => [p.id, p])
+    );
+
     // Create path segments with interactivity and rescaled colors
     this.app.currentData.path_segments.forEach((segment) => {
       const pathId = segment.path_id;
 
-      const pathInfo = this.app.currentData!.path_info.find(
-        (p) => p.id === pathId
-      );
+      const pathInfo = pathInfoMap.get(pathId);
 
       // Filter by year if selected
       if (this.app.selectedYear !== "all") {
@@ -193,13 +196,16 @@ export class LayerManager {
       colorMaxSpeed = this.app.airspeedRange.max;
     }
 
+    // Build path info lookup map for O(1) access
+    const pathInfoMap = new Map(
+      this.app.currentData.path_info.map((p) => [p.id, p])
+    );
+
     // Create path segments with groundspeed colors and rescaled colors
     this.app.currentData.path_segments.forEach((segment) => {
       const pathId = segment.path_id;
 
-      const pathInfo = this.app.currentData!.path_info.find(
-        (p) => p.id === pathId
-      );
+      const pathInfo = pathInfoMap.get(pathId);
 
       // Filter by year if selected
       if (this.app.selectedYear !== "all") {

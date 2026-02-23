@@ -3,8 +3,6 @@
 import pytest
 from kml_heatmap.geometry import (
     haversine_distance,
-    downsample_path_rdp,
-    downsample_coordinates,
     get_altitude_color,
     EARTH_RADIUS_KM,
 )
@@ -42,96 +40,6 @@ class TestHaversineDistance:
             -33.8688, 151.2093, -34.6037, -58.3816
         )  # Sydney to Buenos Aires
         assert dist > 0
-
-
-class TestDownsamplePathRdp:
-    """Tests for downsample_path_rdp function."""
-
-    def test_empty_path(self):
-        """Test with empty path."""
-        result = downsample_path_rdp([])
-        assert result == []
-
-    def test_single_point(self):
-        """Test with single point."""
-        path = [[0, 0, 100]]
-        result = downsample_path_rdp(path)
-        assert result == path
-
-    def test_two_points(self):
-        """Test with two points (minimum for a line)."""
-        path = [[0, 0, 100], [1, 1, 200]]
-        result = downsample_path_rdp(path)
-        assert result == path
-
-    def test_straight_line_simplification(self):
-        """Test simplification of straight line removes middle points."""
-        # Perfectly straight line - middle points should be removed
-        path = [[0, 0, 100], [1, 1, 100], [2, 2, 100], [3, 3, 100]]
-        result = downsample_path_rdp(path, epsilon=0.0001)
-        # Should keep only start and end points
-        assert len(result) == 2
-        assert result[0] == [0, 0, 100]
-        assert result[-1] == [3, 3, 100]
-
-    def test_zigzag_preservation(self):
-        """Test that significant deviations are preserved."""
-        # Zigzag pattern
-        path = [[0, 0, 100], [1, 0, 100], [1, 1, 100], [2, 1, 100]]
-        result = downsample_path_rdp(path, epsilon=0.0001)
-        # All points should be kept due to direction changes
-        assert len(result) >= 3
-
-    def test_four_element_coordinates(self):
-        """Test with 4-element coordinates (lat, lon, alt, timestamp)."""
-        path = [
-            [0, 0, 100, "2025-01-01T00:00:00Z"],
-            [1, 1, 200, "2025-01-01T01:00:00Z"],
-        ]
-        result = downsample_path_rdp(path)
-        assert len(result) == 2
-        assert len(result[0]) == 4
-
-    def test_circular_path(self):
-        """Test with circular path (start == end)."""
-        # Create a circular path
-        path = [[0, 0, 100], [1, 0, 100], [1, 1, 100], [0, 1, 100], [0, 0, 100]]
-        result = downsample_path_rdp(path, epsilon=0.001)
-        # Should preserve shape
-        assert len(result) >= 2
-
-
-class TestDownsampleCoordinates:
-    """Tests for downsample_coordinates function."""
-
-    def test_factor_one(self):
-        """Test with factor=1 returns all points."""
-        coords = [[0, 0], [1, 1], [2, 2], [3, 3]]
-        result = downsample_coordinates(coords, factor=1)
-        assert result == coords
-
-    def test_factor_two(self):
-        """Test with factor=2 keeps every other point."""
-        coords = [[0, 0], [1, 1], [2, 2], [3, 3], [4, 4]]
-        result = downsample_coordinates(coords, factor=2)
-        assert result == [[0, 0], [2, 2], [4, 4]]
-
-    def test_factor_larger_than_list(self):
-        """Test with factor larger than list length."""
-        coords = [[0, 0], [1, 1]]
-        result = downsample_coordinates(coords, factor=10)
-        assert result == [[0, 0]]
-
-    def test_empty_coordinates(self):
-        """Test with empty list."""
-        result = downsample_coordinates([], factor=5)
-        assert result == []
-
-    def test_three_element_coordinates(self):
-        """Test with 3-element coordinates (lat, lon, alt)."""
-        coords = [[0, 0, 100], [1, 1, 200], [2, 2, 300]]
-        result = downsample_coordinates(coords, factor=2)
-        assert result == [[0, 0, 100], [2, 2, 300]]
 
 
 class TestGetAltitudeColor:

@@ -170,14 +170,11 @@ export class StatsManager {
         " km)</div>";
     }
 
-    if (
-      stats.average_groundspeed_knots &&
-      stats.average_groundspeed_knots > 0
-    ) {
-      const kmh = Math.round(stats.average_groundspeed_knots * 1.852);
+    if (stats.avg_groundspeed_knots && stats.avg_groundspeed_knots > 0) {
+      const kmh = Math.round(stats.avg_groundspeed_knots * 1.852);
       html +=
         '<div style="margin-bottom: 8px;"><strong>Average Groundspeed:</strong> ' +
-        Math.round(stats.average_groundspeed_knots) +
+        Math.round(stats.avg_groundspeed_knots) +
         " kt (" +
         kmh +
         " km/h)</div>";

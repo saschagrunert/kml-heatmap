@@ -4,6 +4,7 @@
  */
 
 import { calculateDistance } from "../utils/geometry";
+import { formatFlightTime } from "../utils/formatters";
 import type {
   PathInfo,
   PathSegment,
@@ -239,19 +240,29 @@ export function calculateFlightTime(
   let totalSeconds = 0;
   const pathIds = new Set(pathInfo.map((p) => p.id));
 
-  pathIds.forEach(function (pathId) {
-    const pathSegments = segments.filter(
-      (seg) =>
-        seg.path_id === pathId && seg.time !== undefined && seg.time !== null
-    );
+  // Pre-group timed segments by path_id in a single pass
+  const segmentsByPath = new Map<number, number[]>();
+  for (const seg of segments) {
+    if (
+      pathIds.has(seg.path_id) &&
+      seg.time !== undefined &&
+      seg.time !== null
+    ) {
+      let times = segmentsByPath.get(seg.path_id);
+      if (!times) {
+        times = [];
+        segmentsByPath.set(seg.path_id, times);
+      }
+      times.push(seg.time);
+    }
+  }
 
-    if (pathSegments.length > 0) {
-      const times = pathSegments.map((seg) => seg.time!);
-      // Use loop to avoid stack overflow with large arrays
-      let minTime = times[0] ?? 0;
-      let maxTime = times[0] ?? 0;
+  segmentsByPath.forEach(function (times) {
+    if (times.length > 0) {
+      let minTime = times[0]!;
+      let maxTime = times[0]!;
       for (let i = 1; i < times.length; i++) {
-        const time = times[i] ?? 0;
+        const time = times[i]!;
         if (time < minTime) minTime = time;
         if (time > maxTime) maxTime = time;
       }
@@ -334,12 +345,8 @@ export function calculateFilteredStatistics(options: {
     longestFlight !== undefined ? longestFlight * 0.539957 : undefined;
 
   // Format flight time
-  const formatTime = (seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${hours}h ${minutes}m`;
-  };
-  const flightTimeStr = flightTime > 0 ? formatTime(flightTime) : undefined;
+  const flightTimeStr =
+    flightTime > 0 ? formatFlightTime(flightTime) : undefined;
 
   // Calculate cruise speed (segments above 1000ft AGL)
   // Note: We don't have terrain elevation data, so we approximate using altitude MSL
@@ -425,7 +432,6 @@ export function calculateFilteredStatistics(options: {
     total_altitude_gain_ft: totalAltitudeGainFt,
     max_groundspeed_knots: speedStats.max,
     avg_groundspeed_knots: speedStats.avg,
-    average_groundspeed_knots: speedStats.avg, // Alias
     cruise_speed_knots: cruiseSpeed,
     longest_flight_km: longestFlight,
     longest_flight_nm: longestFlightNm,

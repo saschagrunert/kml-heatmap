@@ -1,6 +1,5 @@
 """HTML generation, rendering, and pipeline orchestration."""
 
-import json
 import os
 import re
 import shutil
@@ -15,17 +14,14 @@ import rjsmin
 import minify_html as mh
 
 from .airports import deduplicate_airports, extract_airport_name
-from .data_exporter import export_all_data
+from .data_exporter import export_all_data, export_metadata
 from .geometry import haversine_distance
 from .helpers import format_flight_time
 from .logger import logger
 from .parser import parse_kml_coordinates, is_mid_flight_start, is_valid_landing
+from .constants import METERS_TO_FEET
 from .statistics import calculate_statistics
 from .validation import validate_kml_file
-
-
-# Heatmap configuration
-HEATMAP_GRADIENT = {0.0: "blue", 0.3: "cyan", 0.5: "lime", 0.7: "yellow", 1.0: "red"}
 
 
 def load_template() -> str:
@@ -90,7 +86,7 @@ def _parse_with_error_handling(kml_file):
     """
     try:
         return kml_file, parse_kml_coordinates(kml_file)
-    except Exception as e:
+    except (OSError, ValueError, TypeError, AttributeError) as e:
         logger.error(f"Error processing {kml_file}: {e}")
         return kml_file, ([], [], [])
 
@@ -145,7 +141,7 @@ def _build_javascript_bundle() -> bool:
     except subprocess.TimeoutExpired:
         logger.error("JavaScript build timed out")
         return False
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError) as e:
         logger.error(f"JavaScript build error: {e}")
         return False
 
@@ -169,50 +165,69 @@ def _recalculate_stats_from_segments(
     # 1. Total Points (segments x 2)
     stats["total_points"] = len(segments) * 2
 
-    # 2. Altitude statistics
-    altitudes_m = [seg["altitude_m"] for seg in segments]
-    stats["min_altitude_m"] = min(altitudes_m) if altitudes_m else 0
-    stats["max_altitude_m"] = max(altitudes_m) if altitudes_m else 0
-    stats["min_altitude_ft"] = stats["min_altitude_m"] * 3.28084
-    stats["max_altitude_ft"] = stats["max_altitude_m"] * 3.28084
+    if not segments:
+        return
 
-    # 3. Total altitude gain
-    total_gain_m = 0
+    # Pass 1: Compute altitude range for cruise threshold
+    altitudes_m = [seg.get("altitude_m", 0) for seg in segments]
+    min_alt_m = min(altitudes_m)
+    max_alt_m = max(altitudes_m)
+    stats["min_altitude_m"] = min_alt_m
+    stats["max_altitude_m"] = max_alt_m
+    stats["min_altitude_ft"] = min_alt_m * METERS_TO_FEET
+    stats["max_altitude_ft"] = max_alt_m * METERS_TO_FEET
+
+    cruise_threshold = min_alt_m * METERS_TO_FEET + 1000
+
+    # Pass 2: Compute all remaining stats in a single loop
+    total_gain_m = 0.0
     prev_alt = None
-    for seg in segments:
-        alt = seg["altitude_m"]
-        if prev_alt is not None and alt > prev_alt:
-            total_gain_m += alt - prev_alt
-        prev_alt = alt
-    stats["total_altitude_gain_m"] = total_gain_m
-    stats["total_altitude_gain_ft"] = total_gain_m * 3.28084
-
-    # 4. Average groundspeed
-    groundspeeds = [
-        seg["groundspeed_knots"] for seg in segments if seg["groundspeed_knots"] > 0
-    ]
-    stats["average_groundspeed_knots"] = (
-        sum(groundspeeds) / len(groundspeeds) if groundspeeds else 0
-    )
-
-    # 5. Cruise speed (segments > 1000ft AGL)
-    min_alt_m = stats["min_altitude_m"]
-    cruise_segs = [
-        seg for seg in segments if seg["altitude_ft"] > (min_alt_m * 3.28084 + 1000)
-    ]
-    cruise_speeds = [
-        seg["groundspeed_knots"] for seg in cruise_segs if seg["groundspeed_knots"] > 0
-    ]
-    stats["cruise_speed_knots"] = (
-        sum(cruise_speeds) / len(cruise_speeds) if cruise_speeds else 0
-    )
-
-    # 6. Most common cruise altitude (time-weighted)
+    groundspeed_sum = 0.0
+    groundspeed_count = 0
+    cruise_speed_sum = 0.0
+    cruise_speed_count = 0
     altitude_bins: Dict[int, int] = {}
-    for seg in cruise_segs:
-        if "time" in seg:
-            bin_alt = round(seg["altitude_ft"] / 100) * 100
-            altitude_bins[bin_alt] = altitude_bins.get(bin_alt, 0) + 1
+    path_durations: Dict[int, List[float]] = {}
+
+    for seg in segments:
+        alt_m = seg.get("altitude_m", 0)
+        alt_ft = seg.get("altitude_ft", 0)
+        gs = seg.get("groundspeed_knots", 0)
+
+        # Altitude gain
+        if prev_alt is not None and alt_m > prev_alt:
+            total_gain_m += alt_m - prev_alt
+        prev_alt = alt_m
+
+        # Groundspeed average
+        if gs > 0:
+            groundspeed_sum += gs
+            groundspeed_count += 1
+
+        # Cruise stats (segments > 1000ft AGL)
+        if alt_ft > cruise_threshold:
+            if gs > 0:
+                cruise_speed_sum += gs
+                cruise_speed_count += 1
+            if "time" in seg:
+                bin_alt = round(alt_ft / 100) * 100
+                altitude_bins[bin_alt] = altitude_bins.get(bin_alt, 0) + 1
+
+        # Flight time
+        if "time" in seg and "path_id" in seg:
+            path_id = seg["path_id"]
+            if path_id not in path_durations:
+                path_durations[path_id] = []
+            path_durations[path_id].append(seg["time"])
+
+    stats["total_altitude_gain_m"] = total_gain_m
+    stats["total_altitude_gain_ft"] = total_gain_m * METERS_TO_FEET
+    stats["average_groundspeed_knots"] = (
+        groundspeed_sum / groundspeed_count if groundspeed_count > 0 else 0
+    )
+    stats["cruise_speed_knots"] = (
+        cruise_speed_sum / cruise_speed_count if cruise_speed_count > 0 else 0
+    )
 
     if altitude_bins:
         stats["most_common_cruise_altitude_ft"] = max(
@@ -222,21 +237,10 @@ def _recalculate_stats_from_segments(
             stats["most_common_cruise_altitude_ft"] * 0.3048
         )
 
-    # 7. Flight time from segments
     total_flight_time = 0.0
-    path_durations: Dict[int, List[float]] = {}
-    for segment in segments:
-        if "time" in segment and "path_id" in segment:
-            path_id = segment["path_id"]
-            if path_id not in path_durations:
-                path_durations[path_id] = []
-            path_durations[path_id].append(segment["time"])
-
     for times in path_durations.values():
         if len(times) >= 2:
-            duration = max(times) - min(times)
-            total_flight_time += duration
-
+            total_flight_time += max(times) - min(times)
     stats["total_flight_time_seconds"] = total_flight_time
 
     # 8. Per-aircraft flight times and distances
@@ -408,7 +412,7 @@ def create_progressive_heatmap(
     stats["airport_names"] = sorted(valid_airport_names)
 
     # Export data (strip timestamps by default for privacy)
-    files, full_res_segments, full_res_path_info = export_all_data(
+    files, full_res_segments, full_res_path_info, metadata_params = export_all_data(
         all_coordinates,
         all_path_groups,
         all_path_metadata,
@@ -423,30 +427,17 @@ def create_progressive_heatmap(
         logger.info("\nRecalculating statistics from segment data...")
         _recalculate_stats_from_segments(stats, full_res_segments, full_res_path_info)
 
-        # Read existing metadata to preserve file_structure, available_years, gradient
-        meta_file = os.path.join(data_dir, "metadata.js")
-        existing_meta: Dict[str, Any] = {}
-        if os.path.exists(meta_file):
-            with open(meta_file, "r") as f:
-                content = f.read()
-                json_str = content.replace("window.KML_METADATA = ", "").rstrip(";")
-                existing_meta = json.loads(json_str)
-
         # Re-export metadata with recalculated statistics
-        meta_data = {
-            "available_years": existing_meta.get("available_years", []),
-            "gradient": existing_meta.get("gradient", {}),
-            "file_structure": existing_meta.get("file_structure", {}),
-            "max_alt_m": stats["max_altitude_m"],
-            "max_groundspeed_knots": stats.get("max_groundspeed_knots", 0),
-            "min_alt_m": stats["min_altitude_m"],
-            "min_groundspeed_knots": stats.get("min_groundspeed_knots", 0),
-            "stats": stats,
-        }
-        with open(meta_file, "w") as f:
-            f.write("window.KML_METADATA = ")
-            json.dump(meta_data, f, separators=(",", ":"), sort_keys=True)
-            f.write(";")
+        export_metadata(
+            stats,
+            metadata_params["min_alt_m"],
+            metadata_params["max_alt_m"],
+            metadata_params["min_groundspeed_knots"],
+            metadata_params["max_groundspeed_knots"],
+            metadata_params["available_years"],
+            data_dir,
+            metadata_params["file_structure"],
+        )
         logger.info("  Updated metadata with segment-based statistics")
 
     # Generate HTML

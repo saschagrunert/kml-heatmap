@@ -158,7 +158,7 @@ declare global {
     pauseReplay?: () => void;
     stopReplay?: () => void;
     seekReplay?: (value: string) => void;
-    changeReplaySpeed?: (multiplier: number) => void;
+    changeReplaySpeed?: () => void;
     toggleAutoZoom?: () => void;
   }
 }

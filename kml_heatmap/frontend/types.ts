@@ -84,7 +84,6 @@ export interface FilteredStatistics {
   total_altitude_gain_ft?: number;
   max_groundspeed_knots?: number;
   avg_groundspeed_knots?: number;
-  average_groundspeed_knots?: number; // Alias for avg_groundspeed_knots
   cruise_speed_knots?: number;
   longest_flight_km?: number;
   longest_flight_nm?: number;
@@ -107,13 +106,17 @@ export interface Airport {
 }
 
 /**
- * Metadata about available data
+ * Metadata exported by the backend (metadata.js)
  */
 export interface Metadata {
+  stats: FilteredStatistics;
+  min_alt_m: number;
+  max_alt_m: number;
+  min_groundspeed_knots: number;
+  max_groundspeed_knots: number;
+  gradient: Record<string, string>;
   available_years: number[];
-  available_aircraft: string[];
-  total_paths: number;
-  total_points: number;
+  file_structure?: Record<string, string[]>;
 }
 
 /**
@@ -125,30 +128,6 @@ export interface KMLDataset {
   path_info: PathInfo[];
   resolution: string;
   original_points: number;
-}
-
-/**
- * Flight statistics
- */
-export interface FlightStats {
-  totalDistance: number;
-  totalTime: number;
-  maxAltitude: number;
-  maxSpeed: number;
-  avgAltitude: number;
-  avgSpeed: number;
-  numFlights: number;
-}
-
-/**
- * Airport flight counts
- */
-export interface AirportFlightCounts {
-  [icao: string]: {
-    departures: number;
-    arrivals: number;
-    total: number;
-  };
 }
 
 /**
@@ -196,7 +175,7 @@ export interface YearStats {
   total_distance_nm: number;
   flight_time: string;
   airport_names: string[];
-  aircraft_list: AircraftAggregate[];
+  aircraft_list?: AircraftAggregate[];
 }
 
 /**

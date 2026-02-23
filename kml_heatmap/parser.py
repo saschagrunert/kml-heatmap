@@ -514,9 +514,6 @@ def extract_charterware_timestamp(description: str) -> Optional[str]:
     Returns:
         ISO-format timestamp or None if extraction fails
     """
-    import re
-    from datetime import datetime
-
     if not description:
         return None
 

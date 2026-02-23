@@ -4,7 +4,6 @@ import pytest
 from datetime import datetime
 from kml_heatmap.segment_calculator import (
     SegmentData,
-    calculate_path_duration,
     calculate_path_distance,
     extract_segment_speeds,
 )
@@ -23,55 +22,6 @@ class TestSegmentData:
         assert data.cruise_speed_total_time == 0.0
         assert data.cruise_altitude_histogram == {}
         assert data.max_path_distance_nm == 0.0
-
-
-class TestCalculatePathDuration:
-    """Tests for calculate_path_duration function."""
-
-    def test_valid_timestamps(self):
-        """Test duration calculation with valid timestamps."""
-        start = "2025-03-15T10:00:00Z"
-        end = "2025-03-15T11:00:00Z"
-        duration = calculate_path_duration(start, end)
-        assert duration == 3600.0  # 1 hour
-
-    def test_no_start_timestamp(self):
-        """Test with missing start timestamp."""
-        duration = calculate_path_duration(None, "2025-03-15T11:00:00Z")
-        assert duration == 0.0
-
-    def test_no_end_timestamp(self):
-        """Test with missing end timestamp."""
-        duration = calculate_path_duration("2025-03-15T10:00:00Z", None)
-        assert duration == 0.0
-
-    def test_both_timestamps_none(self):
-        """Test with both timestamps None."""
-        duration = calculate_path_duration(None, None)
-        assert duration == 0.0
-
-    def test_empty_timestamps(self):
-        """Test with empty string timestamps."""
-        duration = calculate_path_duration("", "")
-        assert duration == 0.0
-
-    def test_invalid_timestamp_format(self):
-        """Test with invalid timestamp format."""
-        duration = calculate_path_duration("invalid", "2025-03-15T11:00:00Z")
-        assert duration == 0.0
-
-    def test_same_timestamps(self):
-        """Test with same start and end timestamp."""
-        timestamp = "2025-03-15T10:00:00Z"
-        duration = calculate_path_duration(timestamp, timestamp)
-        assert duration == 0.0
-
-    def test_negative_duration(self):
-        """Test when end is before start."""
-        start = "2025-03-15T11:00:00Z"
-        end = "2025-03-15T10:00:00Z"
-        duration = calculate_path_duration(start, end)
-        assert duration == -3600.0  # Negative duration
 
 
 class TestCalculatePathDistance:

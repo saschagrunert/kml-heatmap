@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from typing import Tuple, Optional, Dict
 
+from .logger import logger
+
 __all__ = [
     "validate_coordinates",
     "validate_kml_file",
@@ -91,16 +93,16 @@ def validate_api_keys(
 
     if verbose:
         if not stadia_key:
-            print(
-                "⚠️  Warning: STADIA_API_KEY not set - map tiles will use fallback (CartoDB)"
+            logger.warning(
+                "STADIA_API_KEY not set - map tiles will use fallback (CartoDB). "
+                "Get a free key at: https://client.stadiamaps.com/"
             )
-            print("   Get a free key at: https://client.stadiamaps.com/")
 
         if not openaip_key:
-            print(
-                "⚠️  Warning: OPENAIP_API_KEY not set - aviation data layer will be disabled"
+            logger.warning(
+                "OPENAIP_API_KEY not set - aviation data layer will be disabled. "
+                "Get a free key at: https://www.openaip.net/"
             )
-            print("   Get a free key at: https://www.openaip.net/")
 
     return status
 

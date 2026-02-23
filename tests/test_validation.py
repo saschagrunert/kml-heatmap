@@ -40,8 +40,10 @@ class TestValidateKmlFile:
             temp_path = f.name
 
         try:
-            validate_kml_file(temp_path)
-            # May pass or fail depending on implementation
+            is_valid, error_msg = validate_kml_file(temp_path)
+            assert is_valid is False
+            assert error_msg is not None
+            assert ".kml" in error_msg
         finally:
             os.unlink(temp_path)
 
@@ -51,8 +53,10 @@ class TestValidateKmlFile:
             temp_path = f.name
 
         try:
-            validate_kml_file(temp_path)
-            # Should handle empty file gracefully
+            is_valid, error_msg = validate_kml_file(temp_path)
+            assert is_valid is False
+            assert error_msg is not None
+            assert "empty" in error_msg.lower()
         finally:
             os.unlink(temp_path)
 
@@ -96,26 +100,26 @@ class TestValidateApiKeys:
         result = validate_api_keys(None, None, verbose=False)
         assert isinstance(result, dict)
 
-    def test_verbose_warnings_no_stadia(self, capsys):
+    def test_verbose_warnings_no_stadia(self, caplog):
         """Test verbose warnings when Stadia key is missing."""
-        validate_api_keys("", "openaip_key", verbose=True)
-        captured = capsys.readouterr()
-        assert "STADIA_API_KEY" in captured.out
-        assert "stadiamaps.com" in captured.out
+        with caplog.at_level("WARNING"):
+            validate_api_keys("", "openaip_key", verbose=True)
+        assert "STADIA_API_KEY" in caplog.text
+        assert "stadiamaps.com" in caplog.text
 
-    def test_verbose_warnings_no_openaip(self, capsys):
+    def test_verbose_warnings_no_openaip(self, caplog):
         """Test verbose warnings when OpenAIP key is missing."""
-        validate_api_keys("stadia_key", "", verbose=True)
-        captured = capsys.readouterr()
-        assert "OPENAIP_API_KEY" in captured.out
-        assert "openaip.net" in captured.out
+        with caplog.at_level("WARNING"):
+            validate_api_keys("stadia_key", "", verbose=True)
+        assert "OPENAIP_API_KEY" in caplog.text
+        assert "openaip.net" in caplog.text
 
-    def test_verbose_warnings_both_missing(self, capsys):
+    def test_verbose_warnings_both_missing(self, caplog):
         """Test verbose warnings when both keys are missing."""
-        validate_api_keys("", "", verbose=True)
-        captured = capsys.readouterr()
-        assert "STADIA_API_KEY" in captured.out
-        assert "OPENAIP_API_KEY" in captured.out
+        with caplog.at_level("WARNING"):
+            validate_api_keys("", "", verbose=True)
+        assert "STADIA_API_KEY" in caplog.text
+        assert "OPENAIP_API_KEY" in caplog.text
 
 
 class TestValidateCoordinates:
