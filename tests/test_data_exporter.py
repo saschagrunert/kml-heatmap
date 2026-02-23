@@ -11,6 +11,16 @@ from kml_heatmap.data_exporter import (
 )
 
 
+def _parse_js_data(filepath):
+    """Parse a JS file with 'window.VAR = {...};' format and return the JSON data."""
+    with open(filepath, "r") as f:
+        content = f.read()
+    # Remove the 'window.XXX = ' prefix and trailing ';'
+    json_start = content.index("{")
+    json_str = content[json_start:].rstrip(";")
+    return json.loads(json_str)
+
+
 class TestExportResolutionData:
     """Tests for export_resolution_data function."""
 
@@ -77,13 +87,32 @@ class TestExportAirportsData:
             assert os.path.exists(output_file)
             assert file_size > 0
 
-            # Verify JSON content
+            data = _parse_js_data(output_file)
+            assert len(data["airports"]) == 1
+            assert data["airports"][0]["name"] == "EDDF Frankfurt"
+            assert data["airports"][0]["lat"] == 50.0
+            assert data["airports"][0]["flight_count"] == 1
+
+    def test_export_airports_js_format(self):
+        """Test that airports are exported in JS format."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            airports = [
+                {
+                    "lat": 50.0,
+                    "lon": 8.5,
+                    "name": "EDDF Frankfurt",
+                    "timestamps": ["2025-01-01T10:00:00Z"],
+                    "is_at_path_end": True,
+                }
+            ]
+
+            output_file, _ = export_airports_data(airports, tmpdir)
+
+            assert output_file.endswith(".js")
             with open(output_file, "r") as f:
-                data = json.load(f)
-                assert len(data["airports"]) == 1
-                assert data["airports"][0]["name"] == "EDDF Frankfurt"
-                assert data["airports"][0]["lat"] == 50.0
-                assert data["airports"][0]["flight_count"] == 1
+                content = f.read()
+            assert content.startswith("window.KML_AIRPORTS = ")
+            assert content.endswith(";")
 
     def test_export_airports_strip_timestamps(self):
         """Test airport export with timestamp stripping."""
@@ -102,9 +131,8 @@ class TestExportAirportsData:
                 airports, tmpdir, strip_timestamps=True
             )
 
-            with open(output_file, "r") as f:
-                data = json.load(f)
-                assert "timestamps" not in data["airports"][0]
+            data = _parse_js_data(output_file)
+            assert "timestamps" not in data["airports"][0]
 
     def test_export_airports_deduplicates_locations(self):
         """Test that duplicate locations are deduplicated."""
@@ -128,10 +156,9 @@ class TestExportAirportsData:
 
             output_file, _ = export_airports_data(airports, tmpdir)
 
-            with open(output_file, "r") as f:
-                data = json.load(f)
-                # Close locations should be deduplicated
-                assert len(data["airports"]) >= 1
+            data = _parse_js_data(output_file)
+            # Close locations should be deduplicated
+            assert len(data["airports"]) >= 1
 
     def test_export_airports_skips_invalid_names(self):
         """Test that airports with invalid names are skipped."""
@@ -148,9 +175,8 @@ class TestExportAirportsData:
 
             output_file, _ = export_airports_data(airports, tmpdir)
 
-            with open(output_file, "r") as f:
-                data = json.load(f)
-                assert len(data["airports"]) == 0
+            data = _parse_js_data(output_file)
+            assert len(data["airports"]) == 0
 
     def test_export_airports_empty_list(self):
         """Test exporting empty airport list."""
@@ -158,9 +184,8 @@ class TestExportAirportsData:
             output_file, file_size = export_airports_data([], tmpdir)
 
             assert os.path.exists(output_file)
-            with open(output_file, "r") as f:
-                data = json.load(f)
-                assert data["airports"] == []
+            data = _parse_js_data(output_file)
+            assert data["airports"] == []
 
 
 class TestExportMetadata:
@@ -187,15 +212,52 @@ class TestExportMetadata:
             assert os.path.exists(output_file)
             assert file_size > 0
 
+            data = _parse_js_data(output_file)
+            assert data["stats"] == stats
+            assert data["min_alt_m"] == 0
+            assert data["max_alt_m"] == 5000
+            assert data["min_groundspeed_knots"] == 50
+            assert data["max_groundspeed_knots"] == 150
+            assert data["available_years"] == [2024, 2025]
+            assert "gradient" in data
+
+    def test_export_metadata_js_format(self):
+        """Test that metadata is exported in JS format."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file, _ = export_metadata(
+                {},
+                min_alt_m=0,
+                max_alt_m=5000,
+                min_groundspeed_knots=50,
+                max_groundspeed_knots=150,
+                available_years=[],
+                output_dir=tmpdir,
+            )
+
+            assert output_file.endswith(".js")
             with open(output_file, "r") as f:
-                data = json.load(f)
-                assert data["stats"] == stats
-                assert data["min_alt_m"] == 0
-                assert data["max_alt_m"] == 5000
-                assert data["min_groundspeed_knots"] == 50
-                assert data["max_groundspeed_knots"] == 150
-                assert data["available_years"] == [2024, 2025]
-                assert "gradient" in data
+                content = f.read()
+            assert content.startswith("window.KML_METADATA = ")
+            assert content.endswith(";")
+
+    def test_export_metadata_with_file_structure(self):
+        """Test metadata export with file structure."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_structure = {"2024": ["data"], "2025": ["data"]}
+
+            output_file, _ = export_metadata(
+                {},
+                min_alt_m=0,
+                max_alt_m=5000,
+                min_groundspeed_knots=50,
+                max_groundspeed_knots=150,
+                available_years=[2024, 2025],
+                output_dir=tmpdir,
+                file_structure=file_structure,
+            )
+
+            data = _parse_js_data(output_file)
+            assert data["file_structure"] == file_structure
 
     def test_export_metadata_infinity_speed(self):
         """Test metadata export with infinity min groundspeed."""
@@ -210,10 +272,9 @@ class TestExportMetadata:
                 output_dir=tmpdir,
             )
 
-            with open(output_file, "r") as f:
-                data = json.load(f)
-                # Infinity should be converted to 0.0
-                assert data["min_groundspeed_knots"] == 0.0
+            data = _parse_js_data(output_file)
+            # Infinity should be converted to 0.0
+            assert data["min_groundspeed_knots"] == 0.0
 
     def test_export_metadata_rounds_speeds(self):
         """Test that groundspeeds are rounded."""
@@ -228,10 +289,9 @@ class TestExportMetadata:
                 output_dir=tmpdir,
             )
 
-            with open(output_file, "r") as f:
-                data = json.load(f)
-                assert data["min_groundspeed_knots"] == 50.1
-                assert data["max_groundspeed_knots"] == 151.0
+            data = _parse_js_data(output_file)
+            assert data["min_groundspeed_knots"] == 50.1
+            assert data["max_groundspeed_knots"] == 151.0
 
 
 class TestCollectUniqueYears:

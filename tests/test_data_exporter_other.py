@@ -14,6 +14,15 @@ from kml_heatmap.data_exporter import (
 )
 
 
+def _parse_js_data(filepath):
+    """Parse a JS file with 'window.VAR = {...};' format and return the JSON data."""
+    with open(filepath, "r") as f:
+        content = f.read()
+    json_start = content.index("{")
+    json_str = content[json_start:].rstrip(";")
+    return json.loads(json_str)
+
+
 class TestExportMetadata:
     """Test suite for export_metadata function."""
 
@@ -45,12 +54,11 @@ class TestExportMetadata:
 
         # Verify file was created
         assert os.path.exists(meta_file)
-        assert meta_file == os.path.join(temp_output_dir, "metadata.json")
+        assert meta_file == os.path.join(temp_output_dir, "metadata.js")
         assert file_size > 0
 
-        # Verify content is valid JSON
-        with open(meta_file, "r") as f:
-            data = json.load(f)
+        # Verify content is valid JS-wrapped JSON
+        data = _parse_js_data(meta_file)
 
         assert "stats" in data
         assert data["stats"] == stats
@@ -108,12 +116,11 @@ class TestExportAirportsData:
 
         # Verify file was created
         assert os.path.exists(airports_file)
-        assert airports_file == os.path.join(temp_output_dir, "airports.json")
+        assert airports_file == os.path.join(temp_output_dir, "airports.js")
         assert file_size > 0
 
-        # Verify content is valid JSON
-        with open(airports_file, "r") as f:
-            data = json.load(f)
+        # Verify content is valid JS-wrapped JSON
+        data = _parse_js_data(airports_file)
 
         airports_list = data["airports"]
         assert len(airports_list) == 2
