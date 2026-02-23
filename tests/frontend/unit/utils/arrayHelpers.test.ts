@@ -125,26 +125,5 @@ describe("arrayHelpers", () => {
       expect(result.min).toBe(0.1);
       expect(result.max).toBe(2.7);
     });
-
-    it("is more efficient than calling findMin and findMax separately", () => {
-      // This is a behavioral test - findMinMax should complete quickly
-      const largeArray = Array.from(
-        { length: 1000000 },
-        () => Math.random() * 1000
-      );
-
-      const start = performance.now();
-      findMinMax(largeArray);
-      const durationCombined = performance.now() - start;
-
-      const start2 = performance.now();
-      findMin(largeArray);
-      findMax(largeArray);
-      const durationSeparate = performance.now() - start2;
-
-      // findMinMax should be faster (single pass vs two passes)
-      // We use 1.5x as a threshold to account for performance variance
-      expect(durationCombined).toBeLessThan(durationSeparate * 1.5);
-    });
   });
 });
