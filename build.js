@@ -159,8 +159,14 @@ function analyzeBundleComposition(metafile, bundleName) {
   }
 }
 
+// Bundle size budgets in bytes
+const BUDGET_LIBRARY = 50 * 1024;
+const BUDGET_APP = 100 * 1024;
+const BUDGET_TOTAL = 150 * 1024;
+
 /**
- * Print bundle size analysis
+ * Print bundle size analysis and enforce budgets in CI
+ * Returns true if all budgets pass, false if any are exceeded
  */
 function analyzeBundleSizes() {
   console.log("\n📦 Bundle Size Analysis:");
@@ -185,23 +191,34 @@ function analyzeBundleSizes() {
       `  📊 Total:              ${formatBytes(totalSize).padStart(10)}`
     );
 
-    // Size warnings
-    if (bundleSize > 50 * 1024) {
-      console.log(`  ⚠️  Library bundle is large (>${formatBytes(50 * 1024)})`);
-    }
-    if (appBundleSize > 100 * 1024) {
-      console.log(`  ⚠️  MapApp bundle is large (>${formatBytes(100 * 1024)})`);
-    }
-    if (totalSize > 150 * 1024) {
+    let budgetExceeded = false;
+
+    if (bundleSize > BUDGET_LIBRARY) {
       console.log(
-        `  ⚠️  Total bundle size is large (>${formatBytes(150 * 1024)})`
+        `  ⚠️  Library bundle exceeds budget (${formatBytes(bundleSize)} > ${formatBytes(BUDGET_LIBRARY)})`
       );
+      budgetExceeded = true;
     }
+    if (appBundleSize > BUDGET_APP) {
+      console.log(
+        `  ⚠️  MapApp bundle exceeds budget (${formatBytes(appBundleSize)} > ${formatBytes(BUDGET_APP)})`
+      );
+      budgetExceeded = true;
+    }
+    if (totalSize > BUDGET_TOTAL) {
+      console.log(
+        `  ⚠️  Total bundle size exceeds budget (${formatBytes(totalSize)} > ${formatBytes(BUDGET_TOTAL)})`
+      );
+      budgetExceeded = true;
+    }
+
+    console.log("─".repeat(60));
+    return !budgetExceeded;
   } catch (error) {
     console.error("  ❌ Could not analyze bundle sizes:", error.message);
+    console.log("─".repeat(60));
+    return true; // Don't fail on missing files
   }
-
-  console.log("─".repeat(60));
 }
 
 async function build() {
@@ -224,7 +241,7 @@ async function build() {
       console.log("✅ Build complete!");
 
       // Analyze bundle sizes and composition
-      analyzeBundleSizes();
+      const withinBudget = analyzeBundleSizes();
 
       if (libraryResult.metafile) {
         analyzeBundleComposition(libraryResult.metafile, "KMLHeatmap Library");
@@ -232,6 +249,12 @@ async function build() {
 
       if (appResult.metafile) {
         analyzeBundleComposition(appResult.metafile, "MapApp Bundle");
+      }
+
+      // Fail build in CI when bundle size budget is exceeded
+      if (!withinBudget && process.env.CI) {
+        console.error("\n❌ Bundle size budget exceeded!");
+        process.exit(1);
       }
     }
   } catch (error) {
