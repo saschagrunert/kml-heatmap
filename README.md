@@ -328,10 +328,12 @@ npm install
 npm run build          # Build production bundles (minified)
 npm run build:dev      # Build development bundles (with sourcemaps)
 npm run build:watch    # Watch mode for development
-npm test               # Run tests
+npm run test           # Run unit tests
 npm run test:watch     # Watch mode for tests
 npm run test:ui        # Run tests with UI
 npm run test:coverage  # Generate coverage report
+npm run test:e2e       # Run E2E tests (Playwright)
+npm run test:e2e:ui    # Run E2E tests with interactive UI
 npm run typecheck      # Type checking
 npm run lint           # Lint TypeScript code
 npm run lint:fix       # Auto-fix linting issues
@@ -339,6 +341,23 @@ npm run format         # Format code with Prettier
 npm run format:check   # Check code formatting
 npm run update-deps    # Update dependencies to latest versions
 ```
+
+**E2E Tests:**
+
+End-to-end tests use [Playwright](https://playwright.dev/) with Chromium. They verify the full map rendering pipeline including map initialization, layer toggles, filters, statistics panel, wrapped modal, and airport markers.
+
+```bash
+# Install Playwright browsers (first time only)
+npx playwright install --with-deps chromium
+
+# Run E2E tests
+npm run test:e2e
+
+# On NixOS, use the system Chromium
+nix-shell -p chromium python3 --run 'CHROMIUM_PATH=$(which chromium) npm run test:e2e'
+```
+
+Tests are located in `tests/e2e/` and configured via `playwright.config.ts`. The test server automatically starts `python3 -m http.server` serving `docs/`.
 
 **Build Output:**
 
@@ -358,6 +377,7 @@ npm run update-deps    # Update dependencies to latest versions
   - `utils/` - Formatters, colors, geometry helpers
 - **Tests**
   - Unit tests: `tests/frontend/unit/` (Vitest)
+  - E2E tests: `tests/e2e/` (Playwright)
 - **Build output** in `kml_heatmap/static/` (bundle.js, mapApp.bundle.js)
 
 ### Backend (Python)
@@ -372,8 +392,19 @@ pip install -r requirements-test.txt
 **Testing:**
 
 ```bash
-pytest --cov=kml_heatmap --cov-report=term
+pytest                                          # Run all tests
+pytest tests/test_parser.py                     # Run specific test file
+pytest -x                                       # Stop on first failure
+pytest --cov=kml_heatmap --cov-report=term      # With coverage report
+pytest --cov=kml_heatmap --cov-report=html      # HTML coverage report (htmlcov/)
 ```
+
+**Dependencies:**
+
+- `lxml` - Fast XML parsing for KML files
+- `numpy` - Coordinate distance calculations
+- `folium` - Map rendering helpers
+- `rcssmin`, `rjsmin`, `minify-html` - Output minification (HTML/CSS/JS)
 
 ### Test Data Generation
 

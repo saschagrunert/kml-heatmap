@@ -266,6 +266,48 @@ describe("LayerManager", () => {
       expect(mockApp.pathSegments![1]).toBeDefined();
       expect(mockApp.pathSegments![1].length).toBe(1);
     });
+
+    it("hides unselected paths completely when buttons are hidden", () => {
+      // Add a second path segment so we have selected and unselected
+      mockApp.currentData!.path_segments.push({
+        path_id: 2,
+        altitude_ft: 2000,
+        altitude_m: 610,
+        groundspeed_knots: 80,
+        coords: [
+          [47, 15],
+          [47.5, 15.5],
+        ],
+      });
+      mockApp.currentData!.path_info.push({
+        id: 2,
+        year: 2025,
+        aircraft_registration: "D-ABCD",
+      });
+      mockApp.selectedPathIds.add(1);
+      mockApp.buttonsHidden = true;
+
+      layerManager.redrawAltitudePaths();
+
+      // Only path 1 (selected) should have been rendered
+      // Path 2 (unselected + buttonsHidden) should be hidden completely
+      expect(mockApp.pathSegments![1]).toBeDefined();
+      expect(mockApp.pathSegments![2]).toBeUndefined();
+    });
+
+    it("falls back to full altitude range when selected segments empty", () => {
+      // Select path that has no segments
+      mockApp.selectedPathIds.add(999);
+
+      layerManager.redrawAltitudePaths();
+
+      // Should use altitudeRange fallback (0, 5000)
+      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
+        3000,
+        0,
+        5000
+      );
+    });
   });
 
   describe("redrawAirspeedPaths", () => {
@@ -364,6 +406,51 @@ describe("LayerManager", () => {
       layerManager.redrawAirspeedPaths();
 
       expect(window.KMLHeatmap.getColorForAirspeed).not.toHaveBeenCalled();
+    });
+
+    it("hides unselected paths completely when buttons are hidden", () => {
+      mockApp.currentData!.path_segments.push({
+        path_id: 2,
+        altitude_ft: 2000,
+        altitude_m: 610,
+        groundspeed_knots: 80,
+        coords: [
+          [47, 15],
+          [47.5, 15.5],
+        ],
+      });
+      mockApp.currentData!.path_info.push({
+        id: 2,
+        year: 2025,
+        aircraft_registration: "D-ABCD",
+      });
+      mockApp.selectedPathIds.add(1);
+      mockApp.buttonsHidden = true;
+
+      layerManager.redrawAirspeedPaths();
+
+      // Only path 1 (selected) should have been rendered
+      // getColorForAirspeed should only be called for path 1's segment
+      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledTimes(1);
+      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
+        100,
+        100,
+        100
+      );
+    });
+
+    it("falls back to full airspeed range when selected segments empty", () => {
+      // Select path that has no segments with groundspeed
+      mockApp.selectedPathIds.add(999);
+
+      layerManager.redrawAirspeedPaths();
+
+      // Should use airspeedRange fallback (0, 200) for color calculation
+      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
+        100,
+        0,
+        200
+      );
     });
   });
 });
