@@ -95,23 +95,28 @@ def downsample_path_rdp(
     if len(path) <= 2:
         return path
 
-    def perpendicular_distance(point, line_start, line_end):
+    def perpendicular_distance(
+        point: PathCoordinate, line_start: PathCoordinate, line_end: PathCoordinate
+    ) -> float:
         """Calculate perpendicular distance from point to line."""
+        # Coordinates are always floats at indices 0 and 1 (lat, lon)
+        p0 = float(point[0])
+        p1 = float(point[1])
+        s0 = float(line_start[0])
+        s1 = float(line_start[1])
+        e0 = float(line_end[0])
+        e1 = float(line_end[1])
+
         # For circular paths where start == end, use haversine distance from start
-        if line_start[:2] == line_end[:2]:
-            return haversine_distance(point[0], point[1], line_start[0], line_start[1])
+        if s0 == e0 and s1 == e1:
+            return haversine_distance(p0, p1, s0, s1)
 
         # Using simple Euclidean approximation for small distances
-        x0, y0 = point[0], point[1]
-        x1, y1 = line_start[0], line_start[1]
-        x2, y2 = line_end[0], line_end[1]
-
-        num = abs((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1)
-        den = sqrt((y2 - y1) ** 2 + (x2 - x1) ** 2)
+        num = abs((e1 - s1) * p0 - (e0 - s0) * p1 + e0 * s1 - e1 * s0)
+        den = sqrt((e1 - s1) ** 2 + (e0 - s0) ** 2)
 
         if den == 0:
-            # Shouldn't happen if we checked line_start == line_end above, but safety fallback
-            return haversine_distance(point[0], point[1], line_start[0], line_start[1])
+            return haversine_distance(p0, p1, s0, s1)
         return num / den
 
     # Iterative RDP using stack (avoids recursion overhead and stack limits)
@@ -122,7 +127,7 @@ def downsample_path_rdp(
         start_idx, end_idx = stack.pop()
 
         # Find point with maximum distance from line
-        dmax = 0
+        dmax = 0.0
         max_idx = 0
 
         for i in range(start_idx + 1, end_idx):
