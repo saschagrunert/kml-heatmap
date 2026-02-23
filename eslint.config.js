@@ -30,18 +30,18 @@ export default tseslint.config(
       },
     },
     rules: {
-      // Gradually enable strict rules - these are now warnings to track progress
-      "@typescript-eslint/no-explicit-any": "warn", // Upgraded from "off"
-      "@typescript-eslint/no-unsafe-assignment": "warn", // Upgraded from "off"
-      "@typescript-eslint/no-unsafe-call": "warn", // Upgraded from "off"
-      "@typescript-eslint/no-unsafe-member-access": "warn", // Upgraded from "off"
-      "@typescript-eslint/no-unsafe-argument": "warn", // Upgraded from "off"
-      "@typescript-eslint/no-unsafe-return": "warn", // Upgraded from "off"
+      // Strict type safety rules
+      "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/no-unsafe-assignment": "error",
+      "@typescript-eslint/no-unsafe-call": "error",
+      "@typescript-eslint/no-unsafe-member-access": "error",
+      "@typescript-eslint/no-unsafe-argument": "error",
+      "@typescript-eslint/no-unsafe-return": "error",
 
-      // Enable important rules that prevent bugs
-      "@typescript-eslint/no-floating-promises": "error", // Catch unhandled promises
-      "@typescript-eslint/require-await": "warn", // Flag unnecessary async
-      "@typescript-eslint/no-unnecessary-type-assertion": "warn", // Clean up redundant assertions
+      // Rules that prevent bugs
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/require-await": "error",
+      "@typescript-eslint/no-unnecessary-type-assertion": "error",
 
       // Keep disabled for legitimate use cases
       "@typescript-eslint/no-unused-expressions": "off", // Allow standalone expressions
