@@ -74,14 +74,11 @@ class TestMainCLI:
             test_kml = Path(tmpdir) / "test.kml"
             test_kml.write_text("<?xml version='1.0'?><kml></kml>")
 
-            mock_create = MagicMock(return_value=True)
-            mock_module = MagicMock()
-            mock_module.create_progressive_heatmap = mock_create
-
             with patch("sys.argv", ["kml-heatmap.py", "--debug", str(test_kml)]):
                 with patch("kml_heatmap.cli.set_debug_mode") as mock_set_debug:
-                    with patch.dict(
-                        "sys.modules", {"kml_heatmap_original": mock_module}
+                    with patch(
+                        "kml_heatmap.renderer.create_progressive_heatmap",
+                        return_value=True,
                     ):
                         main()
 
@@ -97,14 +94,14 @@ class TestMainCLI:
             output_dir = Path(tmpdir) / "output"
 
             mock_create = MagicMock(return_value=True)
-            mock_module = MagicMock()
-            mock_module.create_progressive_heatmap = mock_create
 
             with patch(
                 "sys.argv",
                 ["kml-heatmap.py", str(test_kml), "--output-dir", str(output_dir)],
             ):
-                with patch.dict("sys.modules", {"kml_heatmap_original": mock_module}):
+                with patch(
+                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
+                ):
                     main()
 
                 assert mock_create.called
@@ -142,11 +139,11 @@ class TestMainCLI:
             test_kml.write_text("<?xml version='1.0'?><kml></kml>")
 
             mock_create = MagicMock(return_value=True)
-            mock_module = MagicMock()
-            mock_module.create_progressive_heatmap = mock_create
 
             with patch("sys.argv", ["kml-heatmap.py", str(test_kml)]):
-                with patch.dict("sys.modules", {"kml_heatmap_original": mock_module}):
+                with patch(
+                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
+                ):
                     main()
 
                 assert mock_create.called
@@ -164,11 +161,11 @@ class TestMainCLI:
             test_kml2.write_text("<?xml version='1.0'?><kml></kml>")
 
             mock_create = MagicMock(return_value=True)
-            mock_module = MagicMock()
-            mock_module.create_progressive_heatmap = mock_create
 
             with patch("sys.argv", ["kml-heatmap.py", str(test_kml1), str(test_kml2)]):
-                with patch.dict("sys.modules", {"kml_heatmap_original": mock_module}):
+                with patch(
+                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
+                ):
                     main()
 
                 assert mock_create.called
@@ -190,11 +187,11 @@ class TestMainCLI:
             (kml_dir / "readme.txt").write_text("Not a KML file")
 
             mock_create = MagicMock(return_value=True)
-            mock_module = MagicMock()
-            mock_module.create_progressive_heatmap = mock_create
 
             with patch("sys.argv", ["kml-heatmap.py", str(kml_dir)]):
-                with patch.dict("sys.modules", {"kml_heatmap_original": mock_module}):
+                with patch(
+                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
+                ):
                     main()
 
                 assert mock_create.called
@@ -228,11 +225,11 @@ class TestMainCLI:
             nonexistent = Path(tmpdir) / "nonexistent.kml"
 
             mock_create = MagicMock(return_value=True)
-            mock_module = MagicMock()
-            mock_module.create_progressive_heatmap = mock_create
 
             with patch("sys.argv", ["kml-heatmap.py", str(nonexistent), str(test_kml)]):
-                with patch.dict("sys.modules", {"kml_heatmap_original": mock_module}):
+                with patch(
+                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
+                ):
                     main()
 
                 assert mock_create.called
@@ -264,11 +261,11 @@ class TestMainCLI:
             test_kml.write_text("<?xml version='1.0'?><kml></kml>")
 
             mock_create = MagicMock(return_value=False)
-            mock_module = MagicMock()
-            mock_module.create_progressive_heatmap = mock_create
 
             with patch("sys.argv", ["kml-heatmap.py", str(test_kml)]):
-                with patch.dict("sys.modules", {"kml_heatmap_original": mock_module}):
+                with patch(
+                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
+                ):
                     with pytest.raises(SystemExit) as exc_info:
                         main()
 
@@ -285,14 +282,14 @@ class TestMainCLI:
             assert not output_dir.exists()
 
             mock_create = MagicMock(return_value=True)
-            mock_module = MagicMock()
-            mock_module.create_progressive_heatmap = mock_create
 
             with patch(
                 "sys.argv",
                 ["kml-heatmap.py", str(test_kml), "--output-dir", str(output_dir)],
             ):
-                with patch.dict("sys.modules", {"kml_heatmap_original": mock_module}):
+                with patch(
+                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
+                ):
                     main()
 
             assert output_dir.exists()
@@ -312,11 +309,11 @@ class TestMainCLI:
             (kml_dir / "dir_file2.kml").write_text("<?xml version='1.0'?><kml></kml>")
 
             mock_create = MagicMock(return_value=True)
-            mock_module = MagicMock()
-            mock_module.create_progressive_heatmap = mock_create
 
             with patch("sys.argv", ["kml-heatmap.py", str(file1), str(kml_dir)]):
-                with patch.dict("sys.modules", {"kml_heatmap_original": mock_module}):
+                with patch(
+                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
+                ):
                     main()
 
                 assert mock_create.called

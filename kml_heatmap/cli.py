@@ -144,13 +144,9 @@ def main() -> None:
     output_file = os.path.join(output_dir, "index.html")
     data_dir = os.path.join(output_dir, "data")
 
-    # For now, call the original create_progressive_heatmap from the monolithic script
-    # This will be replaced once renderer is fully implemented
-    # Import the original function
-    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-    from kml_heatmap_original import create_progressive_heatmap as original_create
+    from .renderer import create_progressive_heatmap
 
-    success = original_create(kml_files, output_file, data_dir)
+    success = create_progressive_heatmap(kml_files, output_file, data_dir)
 
     if not success:
         sys.exit(1)
