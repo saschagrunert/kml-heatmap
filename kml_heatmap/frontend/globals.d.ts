@@ -133,6 +133,7 @@ declare global {
 
     // UI toggle functions
     toggleHeatmap?: () => void;
+    toggleStats?: () => void;
     toggleAltitude?: () => void;
     toggleAirspeed?: () => void;
     toggleAirports?: () => void;

@@ -224,6 +224,66 @@ describe("UIToggles", () => {
       expect(mockApp.airspeedVisible).toBe(false);
       expect(mockApp.altitudeVisible).toBe(true);
     });
+
+    it("during replay updates airplane popup if open", () => {
+      mockApp.altitudeVisible = false;
+      (mockApp.replayManager as any).replayActive = true;
+      (mockApp.replayManager as any).replayCurrentTime = 0;
+      (mockApp.replayManager as any).replayLastDrawnIndex = -1;
+      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).replaySegments = [];
+      (mockApp.replayManager as any).replayAirplaneMarker = {
+        isPopupOpen: vi.fn(() => true),
+      };
+      (mockApp.replayManager as any).updateReplayAirplanePopup = vi.fn();
+
+      uiToggles.toggleAltitude();
+
+      expect(
+        (mockApp.replayManager as any).updateReplayAirplanePopup
+      ).toHaveBeenCalled();
+    });
+
+    it("during replay redraws altitude path from replay segments", () => {
+      mockApp.altitudeVisible = false;
+      (mockApp.replayManager as any).replayActive = true;
+      (mockApp.replayManager as any).replayCurrentTime = 60;
+      (mockApp.replayManager as any).replayLastDrawnIndex = 1;
+      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).replayColorMinAlt = 1000;
+      (mockApp.replayManager as any).replayColorMaxAlt = 5000;
+      (mockApp.replayManager as any).replaySegments = [
+        {
+          path_id: 1,
+          altitude_ft: 3000,
+          time: 0,
+          coords: [
+            [48, 16],
+            [48.1, 16.1],
+          ],
+        },
+        {
+          path_id: 1,
+          altitude_ft: 4000,
+          time: 30,
+          coords: [
+            [48.1, 16.1],
+            [48.2, 16.2],
+          ],
+        },
+      ];
+      (mockApp.replayManager as any).replayAirplaneMarker = null;
+
+      // Mock window.KMLHeatmap.getColorForAltitude
+      window.KMLHeatmap = {
+        getColorForAltitude: vi.fn(() => "#ff0000"),
+      } as typeof window.KMLHeatmap;
+
+      uiToggles.toggleAltitude();
+
+      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalled();
+      expect((mockApp.replayManager as any).replayLastDrawnIndex).toBe(1);
+    });
   });
 
   describe("toggleAirspeed", () => {
@@ -312,6 +372,68 @@ describe("UIToggles", () => {
       expect(mockApp.airspeedVisible).toBe(true);
       expect(mockDomElements["airspeed-legend"].style.display).toBe("block");
       expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
+    });
+
+    it("during replay updates airplane popup if open", () => {
+      mockApp.airspeedVisible = false;
+      mockApp.altitudeVisible = false;
+      (mockApp.replayManager as any).replayActive = true;
+      (mockApp.replayManager as any).replayCurrentTime = 0;
+      (mockApp.replayManager as any).replayLastDrawnIndex = -1;
+      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).replaySegments = [];
+      (mockApp.replayManager as any).replayAirplaneMarker = {
+        isPopupOpen: vi.fn(() => true),
+      };
+      (mockApp.replayManager as any).updateReplayAirplanePopup = vi.fn();
+
+      uiToggles.toggleAirspeed();
+
+      expect(
+        (mockApp.replayManager as any).updateReplayAirplanePopup
+      ).toHaveBeenCalled();
+    });
+
+    it("during replay redraws airspeed path from replay segments", () => {
+      mockApp.airspeedVisible = false;
+      mockApp.altitudeVisible = false;
+      (mockApp.replayManager as any).replayActive = true;
+      (mockApp.replayManager as any).replayCurrentTime = 60;
+      (mockApp.replayManager as any).replayLastDrawnIndex = 1;
+      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).replayColorMinSpeed = 50;
+      (mockApp.replayManager as any).replayColorMaxSpeed = 200;
+      (mockApp.replayManager as any).replaySegments = [
+        {
+          path_id: 1,
+          groundspeed_knots: 100,
+          time: 0,
+          coords: [
+            [48, 16],
+            [48.1, 16.1],
+          ],
+        },
+        {
+          path_id: 1,
+          groundspeed_knots: 120,
+          time: 30,
+          coords: [
+            [48.1, 16.1],
+            [48.2, 16.2],
+          ],
+        },
+      ];
+      (mockApp.replayManager as any).replayAirplaneMarker = null;
+
+      // Mock window.KMLHeatmap.getColorForAltitude (used for airspeed coloring too)
+      window.KMLHeatmap = {
+        getColorForAltitude: vi.fn(() => "#0000ff"),
+      } as typeof window.KMLHeatmap;
+
+      uiToggles.toggleAirspeed();
+
+      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalled();
+      expect((mockApp.replayManager as any).replayLastDrawnIndex).toBe(1);
     });
   });
 
@@ -485,6 +607,69 @@ describe("UIToggles", () => {
 
       // Restore
       mockDomElements["export-btn"] = original;
+    });
+
+    it("returns early if map container is not found", () => {
+      const originalMap = mockDomElements["map"];
+      delete mockDomElements["map"];
+
+      const btn = mockDomElements["export-btn"] as HTMLButtonElement;
+      uiToggles.exportMap();
+
+      // Button is set to disabled but nothing else happens
+      expect(btn.disabled).toBe(true);
+
+      mockDomElements["map"] = originalMap;
+    });
+
+    it("hides controls, calls domtoimage.toJpeg and downloads on success", async () => {
+      vi.useFakeTimers();
+      const btn = mockDomElements["export-btn"] as HTMLButtonElement;
+      const mockLink = { download: "", href: "", click: vi.fn() };
+      vi.spyOn(document, "createElement").mockReturnValue(mockLink as any);
+
+      const toJpegMock = vi
+        .fn()
+        .mockResolvedValue("data:image/jpeg;base64,abc");
+      window.domtoimage = { toJpeg: toJpegMock } as any;
+
+      uiToggles.exportMap();
+
+      // Advance past the setTimeout(200ms)
+      vi.advanceTimersByTime(200);
+      await vi.runAllTimersAsync();
+
+      expect(toJpegMock).toHaveBeenCalled();
+      expect(btn.disabled).toBe(false);
+      expect(btn.textContent).toContain("Export");
+      expect(mockLink.click).toHaveBeenCalled();
+      expect(mockLink.download).toContain("heatmap_");
+
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    it("restores controls and shows alert on domtoimage failure", async () => {
+      vi.useFakeTimers();
+      const btn = mockDomElements["export-btn"] as HTMLButtonElement;
+      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+
+      const toJpegMock = vi.fn().mockRejectedValue(new Error("Export failed"));
+      window.domtoimage = { toJpeg: toJpegMock } as any;
+
+      uiToggles.exportMap();
+
+      vi.advanceTimersByTime(200);
+      await vi.runAllTimersAsync();
+
+      expect(alertSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Export failed")
+      );
+      expect(btn.disabled).toBe(false);
+      expect(btn.textContent).toContain("Export");
+
+      vi.useRealTimers();
+      vi.restoreAllMocks();
     });
   });
 });

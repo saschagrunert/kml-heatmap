@@ -4,8 +4,6 @@
  */
 
 import * as L from "leaflet";
-import { logError } from "./utils/logger";
-import { domCache } from "./utils/domCache";
 import { DataManager } from "./ui/dataManager";
 import { StateManager } from "./ui/stateManager";
 import { LayerManager } from "./ui/layerManager";
@@ -16,6 +14,7 @@ import { AirportManager } from "./ui/airportManager";
 import { ReplayManager } from "./ui/replayManager";
 import { WrappedManager } from "./ui/wrappedManager";
 import { UIToggles } from "./ui/uiToggles";
+import { loadInitialData, createAirportMarkers } from "./appInitializer";
 import type { HeatmapLayer } from "./globals";
 import type {
   PathInfo,
@@ -390,272 +389,11 @@ export class MapApp {
   }
 
   async loadInitialData(): Promise<void> {
-    // Load airports
-    const airports = await this.dataManager!.loadAirports();
-    this.allAirportsData = airports;
-
-    // Load metadata
-    const metadata =
-      (await this.dataManager!.loadMetadata()) as MetadataWithGroundspeed | null;
-
-    // Populate year filter dropdown
-    if (metadata && metadata.available_years) {
-      const yearSelect = document.getElementById(
-        "year-select"
-      ) as HTMLSelectElement;
-      metadata.available_years.forEach((year) => {
-        const option = document.createElement("option");
-        option.value = year.toString();
-        option.textContent = "📅 " + year;
-        yearSelect.appendChild(option);
-      });
-
-      // Default to current year only if no saved state exists
-      if (this.selectedYear === "all" && !this.restoredYearFromState) {
-        const currentYear =
-          metadata.available_years[metadata.available_years.length - 1];
-        if (currentYear !== undefined) {
-          this.selectedYear = currentYear.toString();
-        }
-      }
-
-      // Sync dropdown with the selected year
-      if (this.selectedYear && this.selectedYear !== "all") {
-        yearSelect.value = this.selectedYear;
-      }
-    }
-
-    // Add airport markers
-    this.createAirportMarkers(airports);
-
-    // Load and store full statistics
-    if (metadata && metadata.stats) {
-      this.fullStats = metadata.stats;
-    }
-
-    // Load full resolution path_info and path_segments
-    try {
-      const fullResData = await this.dataManager!.loadData(
-        "data",
-        this.selectedYear
-      );
-      if (fullResData && fullResData.path_info) {
-        this.fullPathInfo = fullResData.path_info;
-      }
-      if (fullResData && fullResData.path_segments) {
-        this.fullPathSegments = fullResData.path_segments;
-      }
-    } catch (error) {
-      logError("Failed to load full path data:", error);
-    }
-
-    // Populate aircraft dropdown
-    this.filterManager!.updateAircraftDropdown();
-
-    // Update airport popups with initial filter counts
-    this.airportManager!.updateAirportPopups();
-
-    // Initialize stats panel
-    if (this.fullStats) {
-      const initialStats = window.KMLHeatmap.calculateFilteredStatistics({
-        pathInfo: this.fullPathInfo ?? [],
-        segments: this.fullPathSegments ?? [],
-        year: this.selectedYear,
-        aircraft: this.selectedAircraft,
-        coordinateCount: this.currentData?.original_points,
-      });
-      this.statsManager!.updateStatsPanel(initialStats, false);
-    }
-
-    // Update airport opacity based on restored filters
-    this.airportManager!.updateAirportOpacity();
-
-    // Load groundspeed range from metadata
-    const hasTimingData =
-      metadata &&
-      metadata.max_groundspeed_knots !== undefined &&
-      metadata.max_groundspeed_knots > 0;
-
-    if (hasTimingData) {
-      this.airspeedRange.min = metadata.min_groundspeed_knots!;
-      this.airspeedRange.max = metadata.max_groundspeed_knots!;
-      this.layerManager!.updateAirspeedLegend(
-        this.airspeedRange.min,
-        this.airspeedRange.max
-      );
-    }
-
-    // Enable/disable airspeed button based on timing data availability
-    // (e.g., Charterware files without per-point timestamps won't have speed data)
-    // Note: Altitude visualization still works (altitude data is in coordinates)
-    const airspeedBtn = domCache.get(
-      "airspeed-btn"
-    ) as HTMLButtonElement | null;
-    if (airspeedBtn) {
-      if (!hasTimingData) {
-        airspeedBtn.disabled = true;
-        airspeedBtn.style.opacity = "0.3";
-      } else {
-        airspeedBtn.disabled = false;
-        // Set opacity based on visibility state (0.5 = off, 1.0 = on)
-        airspeedBtn.style.opacity = this.airspeedVisible ? "1.0" : "0.5";
-      }
-    }
-
-    // Initial data load
-    await this.dataManager!.updateLayers();
-
-    // Set initial airport marker sizes
-    this.airportManager!.updateAirportMarkerSizes();
-
-    // Restore layer visibility
-    if (this.altitudeVisible) {
-      this.map!.addLayer(this.altitudeLayer);
-      (
-        document.getElementById("altitude-legend") as HTMLElement
-      ).style.display = "block";
-    }
-    if (this.airspeedVisible) {
-      this.map!.addLayer(this.airspeedLayer);
-      (
-        document.getElementById("airspeed-legend") as HTMLElement
-      ).style.display = "block";
-    }
-    if (
-      this.aviationVisible &&
-      this.config.openaipApiKey &&
-      this.openaipLayers["Aviation Data"]
-    ) {
-      this.map!.addLayer(this.openaipLayers["Aviation Data"]);
-    }
-
-    // Update replay button state if paths were restored
-    if (this.selectedPathIds.size > 0) {
-      this.replayManager!.updateReplayButtonState();
-    }
-
-    // Restore stats panel visibility
-    if (this.savedState && this.savedState.statsPanelVisible) {
-      const panel = document.getElementById("stats-panel") as HTMLElement;
-      panel.style.display = "block";
-      panel.offsetHeight;
-      panel.classList.add("visible");
-    }
+    await loadInitialData(this);
   }
 
   createAirportMarkers(airports: Airport[]): void {
-    // Find home base
-    let homeBaseAirport: Airport | null = null;
-    if (airports.length > 0) {
-      homeBaseAirport = airports.reduce((max, airport) => {
-        const airportExt = airport as AirportWithFlightCount;
-        const maxExt = max as AirportWithFlightCount;
-        const airportCount = airportExt.flight_count ?? 0;
-        const maxCount = maxExt?.flight_count ?? 0;
-        return airportCount > maxCount ? airport : max;
-      });
-    }
-
-    // Create markers for each airport
-    airports.forEach((airport) => {
-      const icaoMatch = airport.name
-        ? airport.name.match(/\b([A-Z]{4})\b/)
-        : null;
-      const icao = icaoMatch ? icaoMatch[1] : "APT";
-      const isHomeBase =
-        homeBaseAirport && airport.name === homeBaseAirport.name;
-      const homeClass = isHomeBase ? " airport-marker-home" : "";
-      const homeLabelClass = isHomeBase ? " airport-label-home" : "";
-
-      const markerHtml =
-        '<div class="airport-marker-container"><div class="airport-marker' +
-        homeClass +
-        '"></div><div class="airport-label' +
-        homeLabelClass +
-        '">' +
-        icao +
-        "</div></div>";
-
-      const latDms = window.KMLHeatmap.ddToDms(airport.lat, true);
-      const lonDms = window.KMLHeatmap.ddToDms(airport.lon, false);
-      const googleMapsLink = `https://www.google.com/maps?q=${airport.lat},${airport.lon}`;
-
-      const popup = `
-            <div style="
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-                min-width: 220px;
-                padding: 8px 4px;
-                background-color: #2b2b2b;
-                color: #ffffff;
-            ">
-                <div style="
-                    font-size: 15px;
-                    font-weight: bold;
-                    color: #28a745;
-                    margin-bottom: 10px;
-                    padding-bottom: 8px;
-                    border-bottom: 2px solid #28a745;
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                ">
-                    <span style="font-size: 18px;">🛫</span>
-                    <span>${airport.name || "Unknown"}</span>
-                    ${isHomeBase ? '<span style="font-size: 12px; background: #007bff; color: white; padding: 2px 6px; border-radius: 3px; margin-left: 4px;">HOME</span>' : ""}
-                </div>
-                <div style="margin-bottom: 8px;">
-                    <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Coordinates</div>
-                    <a href="${googleMapsLink}"
-                       target="_blank"
-                       style="
-                           color: #4facfe;
-                           text-decoration: none;
-                           font-size: 12px;
-                           font-family: monospace;
-                           display: flex;
-                           align-items: center;
-                           gap: 4px;
-                       "
-                       onmouseover="this.style.textDecoration='underline'"
-                       onmouseout="this.style.textDecoration='none'">
-                        <span>📍</span>
-                        <span>${latDms}<br>${lonDms}</span>
-                    </a>
-                </div>
-                <div style="
-                    background: linear-gradient(135deg, rgba(79, 172, 254, 0.15) 0%, rgba(0, 242, 254, 0.15) 100%);
-                    padding: 8px 10px;
-                    border-radius: 6px;
-                    border-left: 3px solid #4facfe;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                ">
-                    <span style="font-size: 12px; color: #ccc; font-weight: 500;">Total Flights</span>
-                    <span style="font-size: 16px; font-weight: bold; color: #4facfe;">${(airport as AirportWithFlightCount).flight_count || 0}</span>
-                </div>
-            </div>`;
-
-      const marker = L.marker([airport.lat, airport.lon], {
-        icon: L.divIcon({
-          html: markerHtml,
-          iconSize: [12, 12],
-          iconAnchor: [6, 6],
-          popupAnchor: [0, -6],
-          className: "",
-        }),
-      }).bindPopup(popup, { autoPanPadding: [50, 50] });
-
-      // Add click handler to select paths connected to this airport
-      marker.on("click", (_e: L.LeafletMouseEvent) => {
-        if (!this.replayManager!.replayActive) {
-          this.pathSelection!.selectPathsByAirport(airport.name);
-        }
-      });
-
-      marker.addTo(this.airportLayer);
-      this.airportMarkers[airport.name] = marker;
-    });
+    createAirportMarkers(this, airports);
   }
 
   setupEventHandlers(): void {
@@ -747,38 +485,9 @@ export class MapApp {
   }
 }
 
-// Extend window interface for global functions
-declare global {
-  interface Window {
-    initMapApp?: (config: MapConfig) => Promise<void>;
-    mapApp?: MapApp;
-    MAP_CONFIG?: MapConfig;
-    toggleHeatmap?: () => void;
-    toggleStats?: () => void;
-    toggleAltitude?: () => void;
-    toggleAirspeed?: () => void;
-    toggleAirports?: () => void;
-    toggleAviation?: () => void;
-    toggleReplay?: () => void;
-    filterByYear?: () => void;
-    filterByAircraft?: () => void;
-    togglePathSelection?: (id: string) => void;
-    exportMap?: () => void;
-    showWrapped?: () => void;
-    closeWrapped?: (e: Event) => void;
-    toggleButtonsVisibility?: () => void;
-    playReplay?: () => void;
-    pauseReplay?: () => void;
-    stopReplay?: () => void;
-    seekReplay?: (v: number) => void;
-    changeReplaySpeed?: () => void;
-    toggleAutoZoom?: () => void;
-  }
-}
-
 // Make globally available for onclick handlers
 if (typeof window !== "undefined") {
-  window.initMapApp = async (config: MapConfig): Promise<void> => {
+  window.initMapApp = async (config: MapConfig): Promise<MapApp> => {
     const app = new MapApp(config);
     window.mapApp = app;
     await app.initialize();
@@ -797,14 +506,16 @@ if (typeof window !== "undefined") {
       app.togglePathSelection(id);
     window.exportMap = (): void => app.exportMap();
     window.showWrapped = (): void => app.showWrapped();
-    window.closeWrapped = (e?: Event) => app.closeWrapped(e as MouseEvent);
+    window.closeWrapped = (e?: MouseEvent): void => app.closeWrapped(e);
     window.toggleButtonsVisibility = (): void => app.toggleButtonsVisibility();
     window.playReplay = (): void => app.playReplay();
     window.pauseReplay = (): void => app.pauseReplay();
     window.stopReplay = (): void => app.stopReplay();
-    window.seekReplay = (v: number) => app.seekReplay(String(v));
+    window.seekReplay = (value: string): void => app.seekReplay(value);
     window.changeReplaySpeed = (): void => app.changeReplaySpeed();
     window.toggleAutoZoom = (): void => app.toggleAutoZoom();
+
+    return app;
   };
 }
 
