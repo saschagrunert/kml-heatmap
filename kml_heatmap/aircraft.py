@@ -1,7 +1,9 @@
 """Aircraft registration and model lookup functionality."""
 
 import json
+import os
 import re
+import tempfile
 import urllib.request
 import urllib.error
 from html.parser import HTMLParser
@@ -183,10 +185,21 @@ def lookup_aircraft_model(registration: str) -> Optional[str]:
     # Update cache with result (including null for 404s)
     cache[registration] = model
     try:
-        with open(cache_file, "w") as f:
-            json.dump(cache, f, indent=2)
-    except IOError as e:
+        # Atomic write: write to temp file, then rename to avoid corruption
+        # from concurrent processes writing simultaneously
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=CACHE_DIR, suffix=".tmp", delete=False
+        ) as tmp:
+            json.dump(cache, tmp, indent=2)
+            tmp_path = tmp.name
+        os.replace(tmp_path, str(cache_file))
+    except (IOError, OSError) as e:
         logger.warning(f"Could not update aircraft cache: {e}")
+        # Clean up temp file if rename failed
+        try:
+            os.unlink(tmp_path)
+        except (OSError, UnboundLocalError):
+            pass
 
     return model
 
