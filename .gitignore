@@ -12,6 +12,9 @@ node_modules
 coverage
 htmlcov
 
+# Playwright test results
+test-results
+
 # Test data
 kml_test_*
 
