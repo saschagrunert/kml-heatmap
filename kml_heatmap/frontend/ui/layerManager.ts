@@ -131,7 +131,7 @@ export class LayerManager {
       // Make path clickable
       polyline.on("click", (e: L.LeafletMouseEvent) => {
         L.DomEvent.stopPropagation(e);
-        this.app.pathSelection!.togglePathSelection(pathId);
+        this.app.pathSelection.togglePathSelection(pathId);
       });
 
       // Store reference to polyline by path_id
@@ -145,10 +145,10 @@ export class LayerManager {
     this.updateAltitudeLegend(colorMinAlt, colorMaxAlt);
 
     // Update airport marker opacity based on selection
-    this.app.airportManager!.updateAirportOpacity();
+    this.app.airportManager.updateAirportOpacity();
 
     // Update statistics panel based on selection
-    this.app.statsManager!.updateStatsForSelection();
+    this.app.statsManager.updateStatsForSelection();
   }
 
   redrawAirspeedPaths(): void {
@@ -270,7 +270,7 @@ export class LayerManager {
         // Make path clickable
         polyline.on("click", (e: L.LeafletMouseEvent) => {
           L.DomEvent.stopPropagation(e);
-          this.app.pathSelection!.togglePathSelection(pathId);
+          this.app.pathSelection.togglePathSelection(pathId);
         });
       }
     });
@@ -279,10 +279,10 @@ export class LayerManager {
     this.updateAirspeedLegend(colorMinSpeed, colorMaxSpeed);
 
     // Update airport marker opacity based on selection
-    this.app.airportManager!.updateAirportOpacity();
+    this.app.airportManager.updateAirportOpacity();
 
     // Update statistics panel based on selection
-    this.app.statsManager!.updateStatsForSelection();
+    this.app.statsManager.updateStatsForSelection();
   }
 
   updateAltitudeLegend(minAlt: number, maxAlt: number): void {

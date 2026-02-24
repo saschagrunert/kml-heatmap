@@ -720,7 +720,7 @@ def process_standard_coordinates(
 
             lat, lon, alt = parsed
 
-            # Swap to [lat, lon] for folium
+            # Swap to [lat, lon] for leaflet
             coordinates.append([lat, lon])
 
             # Add to current path group with altitude

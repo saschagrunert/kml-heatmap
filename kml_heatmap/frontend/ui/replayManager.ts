@@ -125,9 +125,9 @@ export class ReplayManager {
       // This is necessary even if the layer was already visible before replay
       setTimeout(() => {
         if (this.app.altitudeVisible) {
-          this.app.layerManager!.redrawAltitudePaths();
+          this.app.layerManager.redrawAltitudePaths();
         } else if (this.app.airspeedVisible) {
-          this.app.layerManager!.redrawAirspeedPaths();
+          this.app.layerManager.redrawAirspeedPaths();
         }
         // Force map to recognize the interactive elements
         if (this.app.map) this.app.map.invalidateSize();
@@ -135,7 +135,7 @@ export class ReplayManager {
 
       // Update button opacity based on selection
       this.updateReplayButtonState();
-      this.app.stateManager!.saveMapState();
+      this.app.stateManager.saveMapState();
     } else {
       // Check if exactly one path is selected
       if (this.app.selectedPathIds.size !== 1) {
@@ -168,7 +168,7 @@ export class ReplayManager {
 
         // Hide other layers during replay
         this.hideOtherLayersDuringReplay();
-        this.app.stateManager!.saveMapState();
+        this.app.stateManager.saveMapState();
       }
     }
   }
@@ -306,11 +306,11 @@ export class ReplayManager {
     }
 
     // Update legends to show selected path's color ranges
-    this.app.layerManager!.updateAltitudeLegend(
+    this.app.layerManager.updateAltitudeLegend(
       this.replayColorMinAlt,
       this.replayColorMaxAlt
     );
-    this.app.layerManager!.updateAirspeedLegend(
+    this.app.layerManager.updateAirspeedLegend(
       this.replayColorMinSpeed,
       this.replayColorMaxSpeed
     );
@@ -450,7 +450,7 @@ export class ReplayManager {
       this.app.map.addLayer(this.app.altitudeLayer);
       setTimeout(() => {
         // Redraw altitude paths to ensure click handlers work on mobile Safari
-        this.app.layerManager!.redrawAltitudePaths();
+        this.app.layerManager.redrawAltitudePaths();
         if (this.app.map) this.app.map.invalidateSize();
       }, 50);
       // Legend stays visible, no need to re-show
@@ -462,7 +462,7 @@ export class ReplayManager {
       this.app.map.addLayer(this.app.airspeedLayer);
       setTimeout(() => {
         // Redraw airspeed paths to ensure click handlers work on mobile Safari
-        this.app.layerManager!.redrawAirspeedPaths();
+        this.app.layerManager.redrawAirspeedPaths();
         if (this.app.map) this.app.map.invalidateSize();
       }, 50);
       // Legend stays visible, no need to re-show
@@ -583,7 +583,7 @@ export class ReplayManager {
 
     // Start the animation
     this.replayAnimationFrameId = requestAnimationFrame(animateReplay);
-    this.app.stateManager!.saveMapState();
+    this.app.stateManager.saveMapState();
   }
 
   pauseReplay(): void {
@@ -601,7 +601,7 @@ export class ReplayManager {
 
     // Reset frame time
     this.replayLastFrameTime = null;
-    this.app.stateManager!.saveMapState();
+    this.app.stateManager.saveMapState();
   }
 
   stopReplay(): void {
@@ -635,7 +635,7 @@ export class ReplayManager {
 
     this.replayCurrentTime = newTime;
     this.updateReplayDisplay(true); // Pass true to indicate this is a manual seek
-    this.app.stateManager!.saveMapState();
+    this.app.stateManager.saveMapState();
   }
 
   changeReplaySpeed(): void {
@@ -643,7 +643,7 @@ export class ReplayManager {
     if (!select) return;
 
     this.replaySpeed = parseFloat(select.value);
-    this.app.stateManager!.saveMapState();
+    this.app.stateManager.saveMapState();
   }
 
   toggleAutoZoom(): void {
@@ -655,7 +655,7 @@ export class ReplayManager {
         ? "Auto-zoom enabled"
         : "Auto-zoom disabled";
     }
-    this.app.stateManager!.saveMapState();
+    this.app.stateManager.saveMapState();
   }
 
   updateReplayDisplay(isManualSeek: boolean = false): void {

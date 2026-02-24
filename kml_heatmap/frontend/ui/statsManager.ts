@@ -252,7 +252,7 @@ export class StatsManager {
       // Wait for animation to complete before hiding
       setTimeout(() => {
         panel.style.display = "none";
-        this.app.stateManager!.saveMapState();
+        this.app.stateManager.saveMapState();
       }, 300);
     } else {
       // Show with animation
@@ -260,7 +260,7 @@ export class StatsManager {
       // Trigger reflow to ensure transition works
       panel.offsetHeight;
       panel.classList.add("visible");
-      this.app.stateManager!.saveMapState();
+      this.app.stateManager.saveMapState();
     }
   }
 }

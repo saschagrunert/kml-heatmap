@@ -43,11 +43,11 @@ describe("MapApp", () => {
       expect(app.aviationVisible).toBe(false);
       expect(app.buttonsHidden).toBe(false);
       expect(app.selectedPathIds).toEqual(new Set());
-      expect(app.stateManager).toBeNull();
-      expect(app.dataManager).toBeNull();
-      expect(app.layerManager).toBeNull();
-      expect(app.replayManager).toBeNull();
-      expect(app.uiToggles).toBeNull();
+      expect(app.stateManager).toBeUndefined();
+      expect(app.dataManager).toBeUndefined();
+      expect(app.layerManager).toBeUndefined();
+      expect(app.replayManager).toBeUndefined();
+      expect(app.uiToggles).toBeUndefined();
     });
   });
 
@@ -106,103 +106,103 @@ describe("MapApp", () => {
 
     it("toggleHeatmap delegates to uiToggles", () => {
       app.toggleHeatmap();
-      expect(app.uiToggles!.toggleHeatmap).toHaveBeenCalled();
+      expect(app.uiToggles.toggleHeatmap).toHaveBeenCalled();
     });
 
     it("toggleAltitude delegates to uiToggles", () => {
       app.toggleAltitude();
-      expect(app.uiToggles!.toggleAltitude).toHaveBeenCalled();
+      expect(app.uiToggles.toggleAltitude).toHaveBeenCalled();
     });
 
     it("toggleAirspeed delegates to uiToggles", () => {
       app.toggleAirspeed();
-      expect(app.uiToggles!.toggleAirspeed).toHaveBeenCalled();
+      expect(app.uiToggles.toggleAirspeed).toHaveBeenCalled();
     });
 
     it("toggleAirports delegates to uiToggles", () => {
       app.toggleAirports();
-      expect(app.uiToggles!.toggleAirports).toHaveBeenCalled();
+      expect(app.uiToggles.toggleAirports).toHaveBeenCalled();
     });
 
     it("toggleAviation delegates to uiToggles", () => {
       app.toggleAviation();
-      expect(app.uiToggles!.toggleAviation).toHaveBeenCalled();
+      expect(app.uiToggles.toggleAviation).toHaveBeenCalled();
     });
 
     it("toggleButtonsVisibility delegates to uiToggles", () => {
       app.toggleButtonsVisibility();
-      expect(app.uiToggles!.toggleButtonsVisibility).toHaveBeenCalled();
+      expect(app.uiToggles.toggleButtonsVisibility).toHaveBeenCalled();
     });
 
     it("exportMap delegates to uiToggles", () => {
       app.exportMap();
-      expect(app.uiToggles!.exportMap).toHaveBeenCalled();
+      expect(app.uiToggles.exportMap).toHaveBeenCalled();
     });
 
     it("toggleStats delegates to statsManager", () => {
       app.toggleStats();
-      expect(app.statsManager!.toggleStats).toHaveBeenCalled();
+      expect(app.statsManager.toggleStats).toHaveBeenCalled();
     });
 
     it("toggleReplay delegates to replayManager", () => {
       app.toggleReplay();
-      expect(app.replayManager!.toggleReplay).toHaveBeenCalled();
+      expect(app.replayManager.toggleReplay).toHaveBeenCalled();
     });
 
     it("playReplay delegates to replayManager", () => {
       app.playReplay();
-      expect(app.replayManager!.playReplay).toHaveBeenCalled();
+      expect(app.replayManager.playReplay).toHaveBeenCalled();
     });
 
     it("pauseReplay delegates to replayManager", () => {
       app.pauseReplay();
-      expect(app.replayManager!.pauseReplay).toHaveBeenCalled();
+      expect(app.replayManager.pauseReplay).toHaveBeenCalled();
     });
 
     it("stopReplay delegates to replayManager", () => {
       app.stopReplay();
-      expect(app.replayManager!.stopReplay).toHaveBeenCalled();
+      expect(app.replayManager.stopReplay).toHaveBeenCalled();
     });
 
     it("seekReplay delegates to replayManager with string value", () => {
       app.seekReplay("42");
-      expect(app.replayManager!.seekReplay).toHaveBeenCalledWith("42");
+      expect(app.replayManager.seekReplay).toHaveBeenCalledWith("42");
     });
 
     it("changeReplaySpeed delegates to replayManager", () => {
       app.changeReplaySpeed();
-      expect(app.replayManager!.changeReplaySpeed).toHaveBeenCalled();
+      expect(app.replayManager.changeReplaySpeed).toHaveBeenCalled();
     });
 
     it("toggleAutoZoom delegates to replayManager", () => {
       app.toggleAutoZoom();
-      expect(app.replayManager!.toggleAutoZoom).toHaveBeenCalled();
+      expect(app.replayManager.toggleAutoZoom).toHaveBeenCalled();
     });
 
     it("filterByYear delegates to filterManager", () => {
       app.filterByYear();
-      expect(app.filterManager!.filterByYear).toHaveBeenCalled();
+      expect(app.filterManager.filterByYear).toHaveBeenCalled();
     });
 
     it("filterByAircraft delegates to filterManager", () => {
       app.filterByAircraft();
-      expect(app.filterManager!.filterByAircraft).toHaveBeenCalled();
+      expect(app.filterManager.filterByAircraft).toHaveBeenCalled();
     });
 
     it("togglePathSelection delegates to pathSelection with numeric id", () => {
       app.togglePathSelection("42");
-      expect(app.pathSelection!.togglePathSelection).toHaveBeenCalledWith(42);
+      expect(app.pathSelection.togglePathSelection).toHaveBeenCalledWith(42);
     });
 
     it("showWrapped delegates to wrappedManager", () => {
       app.showWrapped();
-      expect(app.wrappedManager!.showWrapped).toHaveBeenCalled();
+      expect(app.wrappedManager.showWrapped).toHaveBeenCalled();
     });
 
     it("closeWrapped delegates to wrappedManager", () => {
       const event = new MouseEvent("click");
       app.closeWrapped(event);
-      expect(app.wrappedManager!.closeWrapped).toHaveBeenCalledWith(event);
+      expect(app.wrappedManager.closeWrapped).toHaveBeenCalledWith(event);
     });
   });
 
@@ -267,66 +267,64 @@ describe("MapApp", () => {
 
       // Call each window function to cover the arrow function bodies
       window.toggleHeatmap!();
-      expect(result.uiToggles!.toggleHeatmap).toHaveBeenCalled();
+      expect(result.uiToggles.toggleHeatmap).toHaveBeenCalled();
 
       window.toggleStats!();
-      expect(result.statsManager!.toggleStats).toHaveBeenCalled();
+      expect(result.statsManager.toggleStats).toHaveBeenCalled();
 
       window.toggleAltitude!();
-      expect(result.uiToggles!.toggleAltitude).toHaveBeenCalled();
+      expect(result.uiToggles.toggleAltitude).toHaveBeenCalled();
 
       window.toggleAirspeed!();
-      expect(result.uiToggles!.toggleAirspeed).toHaveBeenCalled();
+      expect(result.uiToggles.toggleAirspeed).toHaveBeenCalled();
 
       window.toggleAirports!();
-      expect(result.uiToggles!.toggleAirports).toHaveBeenCalled();
+      expect(result.uiToggles.toggleAirports).toHaveBeenCalled();
 
       window.toggleAviation!();
-      expect(result.uiToggles!.toggleAviation).toHaveBeenCalled();
+      expect(result.uiToggles.toggleAviation).toHaveBeenCalled();
 
       window.toggleReplay!();
-      expect(result.replayManager!.toggleReplay).toHaveBeenCalled();
+      expect(result.replayManager.toggleReplay).toHaveBeenCalled();
 
       window.filterByYear!();
-      expect(result.filterManager!.filterByYear).toHaveBeenCalled();
+      expect(result.filterManager.filterByYear).toHaveBeenCalled();
 
       window.filterByAircraft!();
-      expect(result.filterManager!.filterByAircraft).toHaveBeenCalled();
+      expect(result.filterManager.filterByAircraft).toHaveBeenCalled();
 
       window.togglePathSelection!("42");
-      expect(result.pathSelection!.togglePathSelection).toHaveBeenCalledWith(
-        42
-      );
+      expect(result.pathSelection.togglePathSelection).toHaveBeenCalledWith(42);
 
       window.exportMap!();
-      expect(result.uiToggles!.exportMap).toHaveBeenCalled();
+      expect(result.uiToggles.exportMap).toHaveBeenCalled();
 
       window.showWrapped!();
-      expect(result.wrappedManager!.showWrapped).toHaveBeenCalled();
+      expect(result.wrappedManager.showWrapped).toHaveBeenCalled();
 
       window.closeWrapped!();
-      expect(result.wrappedManager!.closeWrapped).toHaveBeenCalled();
+      expect(result.wrappedManager.closeWrapped).toHaveBeenCalled();
 
       window.toggleButtonsVisibility!();
-      expect(result.uiToggles!.toggleButtonsVisibility).toHaveBeenCalled();
+      expect(result.uiToggles.toggleButtonsVisibility).toHaveBeenCalled();
 
       window.playReplay!();
-      expect(result.replayManager!.playReplay).toHaveBeenCalled();
+      expect(result.replayManager.playReplay).toHaveBeenCalled();
 
       window.pauseReplay!();
-      expect(result.replayManager!.pauseReplay).toHaveBeenCalled();
+      expect(result.replayManager.pauseReplay).toHaveBeenCalled();
 
       window.stopReplay!();
-      expect(result.replayManager!.stopReplay).toHaveBeenCalled();
+      expect(result.replayManager.stopReplay).toHaveBeenCalled();
 
       window.seekReplay!("50");
-      expect(result.replayManager!.seekReplay).toHaveBeenCalledWith("50");
+      expect(result.replayManager.seekReplay).toHaveBeenCalledWith("50");
 
       window.changeReplaySpeed!();
-      expect(result.replayManager!.changeReplaySpeed).toHaveBeenCalled();
+      expect(result.replayManager.changeReplaySpeed).toHaveBeenCalled();
 
       window.toggleAutoZoom!();
-      expect(result.replayManager!.toggleAutoZoom).toHaveBeenCalled();
+      expect(result.replayManager.toggleAutoZoom).toHaveBeenCalled();
 
       initSpy.mockRestore();
     });

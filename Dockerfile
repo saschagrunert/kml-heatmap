@@ -24,7 +24,6 @@ COPY requirements.lock .
 RUN pip install --no-cache-dir -r requirements.lock
 
 # Copy the application
-COPY kml-heatmap.py .
 COPY kml_heatmap/ ./kml_heatmap/
 
 # Copy built JavaScript bundles from builder stage
@@ -41,7 +40,7 @@ RUN mkdir -p /data
 WORKDIR /data
 
 # Set the script as entrypoint (can be overridden)
-ENTRYPOINT ["python", "/app/kml-heatmap.py"]
+ENTRYPOINT ["python", "-m", "kml_heatmap"]
 
 # Default command (show help if no arguments)
 CMD []

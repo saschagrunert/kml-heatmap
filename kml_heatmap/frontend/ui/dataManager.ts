@@ -131,7 +131,7 @@ export class DataManager {
     }
 
     // Only add to map if heatmap is visible AND not in replay mode
-    if (this.app.heatmapVisible && !this.app.replayManager!.replayActive) {
+    if (this.app.heatmapVisible && !this.app.replayManager.replayActive) {
       this.app.heatmapLayer.addTo(this.app.map);
     }
 
@@ -181,11 +181,11 @@ export class DataManager {
     }
 
     // Create altitude layer paths (this will also update the legend)
-    this.app.layerManager!.redrawAltitudePaths();
+    this.app.layerManager.redrawAltitudePaths();
 
     // Redraw airspeed paths if airspeed is visible
     if (this.app.airspeedVisible) {
-      this.app.layerManager!.redrawAirspeedPaths();
+      this.app.layerManager.redrawAirspeedPaths();
     }
   }
 }

@@ -27,11 +27,10 @@ OPTIONS:
     --debug              Enable debug output to diagnose parsing issues
     --help, -h           Show this help message
 
-PROGRESSIVE LOADING:
-    The generator uses progressive loading by default, which:
+DATA EXPORT:
+    The generator exports full resolution data by default, which:
     • Creates a lightweight HTML file (10-20 KB)
-    • Stores data in external JSON files at 5 resolution levels
-    • Loads appropriate data based on zoom level
+    • Stores data in external JS files split by year
     • Reduces initial load time and memory usage on mobile devices
     • Requires a local web server to view (see Docker usage below)
 

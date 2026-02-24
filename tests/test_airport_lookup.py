@@ -1,6 +1,9 @@
 """Tests for airport_lookup module."""
 
+import csv
 import os
+from pathlib import Path
+
 import pytest
 from unittest.mock import patch
 
@@ -100,7 +103,7 @@ class TestDownloadAndCaching:
         """Test that empty database is returned when download fails."""
         with patch(
             "kml_heatmap.airport_lookup.urlretrieve",
-            side_effect=Exception("Network error"),
+            side_effect=OSError("Network error"),
         ):
             with patch("kml_heatmap.airport_lookup.CACHE_FILE") as mock_cache:
                 # Make cache file not exist
@@ -246,7 +249,7 @@ YYYY,50.0,not_a_number,Test Airport 2
         from kml_heatmap.airport_lookup import _download_airport_database
 
         with patch("kml_heatmap.airport_lookup.urlretrieve") as mock_retrieve:
-            mock_retrieve.side_effect = Exception("Network error")
+            mock_retrieve.side_effect = OSError("Network error")
 
             # Should return False and not raise
             result = _download_airport_database()
@@ -258,7 +261,7 @@ YYYY,50.0,not_a_number,Test Airport 2
         import tempfile
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as f:
-            temp_path = f.name
+            temp_path = Path(f.name)
 
         try:
             with patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path):
@@ -322,7 +325,7 @@ YYYY,50.0,not_a_number,Test Airport 2
                     lookup_module._airport_cache = None
 
                     # Mock csv.DictReader to raise exception
-                    with patch("csv.DictReader", side_effect=Exception("CSV error")):
+                    with patch("csv.DictReader", side_effect=csv.Error("CSV error")):
                         db = _load_airport_database()
                         # Should return empty dict on error
                         assert db == {}

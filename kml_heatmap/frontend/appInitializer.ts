@@ -15,11 +15,11 @@ import type { Airport } from "./types";
  */
 export async function loadInitialData(app: MapApp): Promise<void> {
   // Load airports
-  const airports = await app.dataManager!.loadAirports();
+  const airports = await app.dataManager.loadAirports();
   app.allAirportsData = airports;
 
   // Load metadata
-  const metadata = await app.dataManager!.loadMetadata();
+  const metadata = await app.dataManager.loadMetadata();
 
   // Populate year filter dropdown
   if (metadata && metadata.available_years) {
@@ -58,7 +58,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
 
   // Load full resolution path_info and path_segments
   try {
-    const fullResData = await app.dataManager!.loadData(
+    const fullResData = await app.dataManager.loadData(
       "data",
       app.selectedYear
     );
@@ -73,10 +73,10 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   }
 
   // Populate aircraft dropdown
-  app.filterManager!.updateAircraftDropdown();
+  app.filterManager.updateAircraftDropdown();
 
   // Update airport popups with initial filter counts
-  app.airportManager!.updateAirportPopups();
+  app.airportManager.updateAirportPopups();
 
   // Initialize stats panel
   if (app.fullStats) {
@@ -87,11 +87,11 @@ export async function loadInitialData(app: MapApp): Promise<void> {
       aircraft: app.selectedAircraft,
       coordinateCount: app.currentData?.original_points,
     });
-    app.statsManager!.updateStatsPanel(initialStats, false);
+    app.statsManager.updateStatsPanel(initialStats, false);
   }
 
   // Update airport opacity based on restored filters
-  app.airportManager!.updateAirportOpacity();
+  app.airportManager.updateAirportOpacity();
 
   // Load groundspeed range from metadata
   const hasTimingData =
@@ -102,7 +102,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   if (hasTimingData) {
     app.airspeedRange.min = metadata.min_groundspeed_knots!;
     app.airspeedRange.max = metadata.max_groundspeed_knots!;
-    app.layerManager!.updateAirspeedLegend(
+    app.layerManager.updateAirspeedLegend(
       app.airspeedRange.min,
       app.airspeedRange.max
     );
@@ -124,10 +124,10 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   }
 
   // Initial data load
-  await app.dataManager!.updateLayers();
+  await app.dataManager.updateLayers();
 
   // Set initial airport marker sizes
-  app.airportManager!.updateAirportMarkerSizes();
+  app.airportManager.updateAirportMarkerSizes();
 
   // Restore layer visibility
   if (app.altitudeVisible) {
@@ -150,7 +150,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
 
   // Update replay button state if paths were restored
   if (app.selectedPathIds.size > 0) {
-    app.replayManager!.updateReplayButtonState();
+    app.replayManager.updateReplayButtonState();
   }
 
   // Restore stats panel visibility
@@ -271,8 +271,8 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
 
     // Add click handler to select paths connected to this airport
     marker.on("click", (_e: L.LeafletMouseEvent) => {
-      if (!app.replayManager!.replayActive) {
-        app.pathSelection!.selectPathsByAirport(airport.name);
+      if (!app.replayManager.replayActive) {
+        app.pathSelection.selectPathsByAirport(airport.name);
       }
     });
 

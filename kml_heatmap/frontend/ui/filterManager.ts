@@ -96,7 +96,7 @@ export class FilterManager {
     this.app.selectedYear = yearSelect.value;
 
     // Clear data cache to force reload for new year
-    this.app.dataManager!.loadedData = {};
+    this.app.dataManager.loadedData = {};
 
     // Clear current paths (but preserve selectedPathIds during initialization)
     this.app.altitudeLayer.clearLayers();
@@ -106,10 +106,10 @@ export class FilterManager {
     }
 
     // Reload current resolution data for new year
-    await this.app.dataManager!.updateLayers();
+    await this.app.dataManager.updateLayers();
 
     // Reload full resolution data for filtering/stats
-    const fullResData = await this.app.dataManager!.loadData(
+    const fullResData = await this.app.dataManager.loadData(
       "data",
       this.app.selectedYear
     );
@@ -129,17 +129,17 @@ export class FilterManager {
       aircraft: this.app.selectedAircraft,
       coordinateCount: this.app.currentData?.original_points,
     });
-    this.app.statsManager!.updateStatsPanel(filteredStats, false);
+    this.app.statsManager.updateStatsPanel(filteredStats, false);
 
     // Update airport visibility based on filter
-    this.app.airportManager!.updateAirportOpacity();
+    this.app.airportManager.updateAirportOpacity();
 
     // Update airport popups with current filter counts
-    this.app.airportManager!.updateAirportPopups();
+    this.app.airportManager.updateAirportPopups();
 
     // Don't save state during initialization (will be saved after path restoration)
     if (!this.app.isInitializing) {
-      this.app.stateManager!.saveMapState();
+      this.app.stateManager.saveMapState();
     }
   }
 
@@ -157,7 +157,7 @@ export class FilterManager {
     }
 
     // Reload data to apply filter
-    await this.app.dataManager!.updateLayers();
+    await this.app.dataManager.updateLayers();
 
     // Update stats based on filter
     const filteredStats = window.KMLHeatmap.calculateFilteredStatistics({
@@ -167,17 +167,17 @@ export class FilterManager {
       aircraft: this.app.selectedAircraft,
       coordinateCount: this.app.currentData?.original_points,
     });
-    this.app.statsManager!.updateStatsPanel(filteredStats, false);
+    this.app.statsManager.updateStatsPanel(filteredStats, false);
 
     // Update airport visibility based on filter
-    this.app.airportManager!.updateAirportOpacity();
+    this.app.airportManager.updateAirportOpacity();
 
     // Update airport popups with current filter counts
-    this.app.airportManager!.updateAirportPopups();
+    this.app.airportManager.updateAirportPopups();
 
     // Don't save state during initialization (will be saved after path restoration)
     if (!this.app.isInitializing) {
-      this.app.stateManager!.saveMapState();
+      this.app.stateManager.saveMapState();
     }
   }
 }

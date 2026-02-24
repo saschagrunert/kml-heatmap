@@ -190,6 +190,188 @@ def collect_unique_years(all_path_metadata: List[Dict[str, Any]]) -> List[int]:
     return sorted(list(unique_years))
 
 
+def _build_path_info(
+    path: List[List[Any]],
+    metadata: Dict[str, Any],
+    local_idx: int,
+    path_year: Any,
+) -> Tuple[Dict[str, Any], float, float, float]:
+    """Build path info entry and compute path metrics.
+
+    Args:
+        path: Path coordinate list
+        metadata: Path metadata dictionary
+        local_idx: Local path index within the year
+        path_year: Year from metadata
+
+    Returns:
+        Tuple of (info_dict, path_duration_seconds, path_distance_km, path_distance_nm)
+    """
+    airport_name = metadata.get("airport_name", "")
+    start_airport = None
+    end_airport = None
+
+    if airport_name and " - " in airport_name:
+        parts = airport_name.split(" - ")
+        if len(parts) == 2:
+            start_airport = parts[0].strip()
+            end_airport = parts[1].strip()
+
+    path_duration_seconds = 0.0
+    start_ts = metadata.get("timestamp")
+    end_ts = metadata.get("end_timestamp")
+
+    if start_ts and end_ts:
+        path_duration_seconds = calculate_duration_seconds(start_ts, end_ts)
+        if path_duration_seconds == 0:
+            logger.debug(f"  Could not parse timestamps '{start_ts}' -> '{end_ts}'")
+
+    path_distance_km = calculate_path_distance(path)
+    path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
+
+    info: Dict[str, Any] = {
+        "id": local_idx,
+        "start_airport": start_airport,
+        "end_airport": end_airport,
+        "start_coords": [path[0][0], path[0][1]],
+        "end_coords": [path[-1][0], path[-1][1]],
+        "segment_count": len(path) - 1,
+        "year": path_year,
+    }
+    if "aircraft_registration" in metadata:
+        info["aircraft_registration"] = metadata["aircraft_registration"]
+    if "aircraft_type" in metadata:
+        info["aircraft_type"] = metadata["aircraft_type"]
+
+    return info, path_duration_seconds, path_distance_km, path_distance_nm
+
+
+def _process_path_segments(
+    path: List[List[Any]],
+    local_idx: int,
+    path_distance_km: float,
+    path_duration_seconds: float,
+) -> Tuple[List[Dict[str, Any]], float, float, float, float, Dict[int, float]]:
+    """Process path segments calculating groundspeed and cruise statistics.
+
+    Args:
+        path: Path coordinate list
+        local_idx: Local path index
+        path_distance_km: Total path distance in km
+        path_duration_seconds: Total path duration in seconds
+
+    Returns:
+        Tuple of (segments, max_groundspeed, min_groundspeed,
+                  cruise_distance, cruise_time, cruise_altitude_histogram)
+    """
+    segments: List[Dict[str, Any]] = []
+    max_groundspeed = 0.0
+    min_groundspeed = float("inf")
+    cruise_distance = 0.0
+    cruise_time = 0.0
+    cruise_altitude_histogram: Dict[int, float] = {}
+
+    ground_level_m = min(coord[2] for coord in path) if path else 0
+
+    path_start_time = None
+    for coord in path:
+        if len(coord) >= 4:
+            path_start_time = parse_iso_timestamp(coord[3])
+            if path_start_time:
+                break
+
+    segment_speeds = extract_segment_speeds(path, path_start_time)
+    timestamp_list, time_indexed_segments = build_time_indexed_segments(segment_speeds)
+
+    for i in range(len(path) - 1):
+        coord1 = path[i]
+        coord2 = path[i + 1]
+        lat1, lon1, alt1_m = coord1[0], coord1[1], coord1[2]
+        lat2, lon2, alt2_m = coord2[0], coord2[1], coord2[2]
+
+        avg_alt_m = (alt1_m + alt2_m) / 2
+        avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+
+        groundspeed_knots = 0.0
+        current_segment = segment_speeds[i]
+        current_timestamp = current_segment["timestamp"]
+        current_relative_time = current_segment["relative_time"]
+
+        if current_timestamp is not None and timestamp_list:
+            groundspeed_knots = calculate_windowed_groundspeed(
+                current_timestamp, timestamp_list, time_indexed_segments
+            )
+
+        if groundspeed_knots == 0:
+            segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
+            groundspeed_knots = calculate_fallback_groundspeed(
+                segment_distance_km, path_distance_km, path_duration_seconds
+            )
+
+        if groundspeed_knots > 0:
+            if groundspeed_knots > max_groundspeed:
+                max_groundspeed = groundspeed_knots
+            if groundspeed_knots < min_groundspeed:
+                min_groundspeed = groundspeed_knots
+
+            altitude_agl_m = avg_alt_m - ground_level_m
+            altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
+            if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
+                if current_timestamp is not None and timestamp_list:
+                    current_ts = current_timestamp.timestamp()
+                    half_window = SPEED_WINDOW_SECONDS / 2
+                    w_start = bisect_left(timestamp_list, current_ts - half_window)
+                    w_end = bisect_right(timestamp_list, current_ts + half_window)
+                    w_distance = sum(
+                        time_indexed_segments[j]["distance"]
+                        for j in range(w_start, w_end)
+                    )
+                    w_time = sum(
+                        time_indexed_segments[j]["time_delta"]
+                        for j in range(w_start, w_end)
+                    )
+                else:
+                    w_distance = 0.0
+                    w_time = 0.0
+
+                cruise_stats: Dict[str, Any] = {
+                    "total_distance": 0.0,
+                    "total_time": 0.0,
+                    "altitude_histogram": {},
+                }
+                update_cruise_statistics(
+                    altitude_agl_ft, w_time, w_distance, cruise_stats
+                )
+                cruise_distance += float(cruise_stats["total_distance"])
+                cruise_time += float(cruise_stats["total_time"])
+                hist: Dict[int, float] = cruise_stats["altitude_histogram"]
+                for alt_bin, time_spent in hist.items():
+                    if alt_bin not in cruise_altitude_histogram:
+                        cruise_altitude_histogram[alt_bin] = 0.0
+                    cruise_altitude_histogram[alt_bin] += time_spent
+
+        if lat1 != lat2 or lon1 != lon2:
+            segment_data: Dict[str, Any] = {
+                "coords": [[lat1, lon1], [lat2, lon2]],
+                "altitude_ft": avg_alt_ft,
+                "altitude_m": round(avg_alt_m, 0),
+                "groundspeed_knots": round(groundspeed_knots, 1),
+                "path_id": local_idx,
+            }
+            if current_relative_time is not None:
+                segment_data["time"] = round(current_relative_time, 1)
+            segments.append(segment_data)
+
+    return (
+        segments,
+        max_groundspeed,
+        min_groundspeed,
+        cruise_distance,
+        cruise_time,
+        cruise_altitude_histogram,
+    )
+
+
 def process_year_data(
     year: str,
     year_path_indices: List[int],
@@ -260,8 +442,8 @@ def process_year_data(
                 full_coords.append([point[0], point[1]])
 
         # Prepare path segments with colors and track relationships
-        path_segments = []
-        path_info = []
+        path_segments: List[Dict[str, Any]] = []
+        path_info: List[Dict[str, Any]] = []
 
         # Iterate using original path indices to access metadata correctly
         for local_idx, (orig_path_idx, path) in enumerate(
@@ -270,177 +452,47 @@ def process_year_data(
             if len(path) <= 1:
                 continue
 
-            # Get original path metadata if available
             metadata = (
                 all_path_metadata[orig_path_idx]
                 if orig_path_idx < len(all_path_metadata)
                 else {}
             )
-
-            # Extract airport information from metadata
-            airport_name = metadata.get("airport_name", "")
-            start_airport = None
-            end_airport = None
-
-            if airport_name and " - " in airport_name:
-                parts = airport_name.split(" - ")
-                if len(parts) == 2:
-                    start_airport = parts[0].strip()
-                    end_airport = parts[1].strip()
-
-            # Get year from metadata
             path_year = (
                 all_path_metadata[orig_path_idx].get("year")
                 if orig_path_idx < len(all_path_metadata)
                 else None
             )
 
-            # Calculate path duration and distance
-            path_duration_seconds = 0.0
-            path_distance_km = 0.0
+            info, path_duration_seconds, path_distance_km, path_distance_nm = (
+                _build_path_info(path, metadata, local_idx, path_year)
+            )
+            path_info.append(info)
 
-            start_ts = metadata.get("timestamp")
-            end_ts = metadata.get("end_timestamp")
-
-            if start_ts and end_ts:
-                path_duration_seconds = calculate_duration_seconds(start_ts, end_ts)
-                if path_duration_seconds == 0:
-                    logger.debug(
-                        f"  Could not parse timestamps '{start_ts}' -> '{end_ts}'"
-                    )
-
-            # Calculate total path distance
-            path_distance_km = calculate_path_distance(path)
-
-            # Track longest single flight distance
-            path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
             if path_distance_nm > year_max_path_distance:
                 year_max_path_distance = path_distance_nm
 
-            # Store path info with airport relationships and aircraft info
-            info = {
-                "id": local_idx,
-                "start_airport": start_airport,
-                "end_airport": end_airport,
-                "start_coords": [path[0][0], path[0][1]],
-                "end_coords": [path[-1][0], path[-1][1]],
-                "segment_count": len(path) - 1,
-                "year": path_year,
-            }
-            if "aircraft_registration" in metadata:
-                info["aircraft_registration"] = metadata["aircraft_registration"]
-            if "aircraft_type" in metadata:
-                info["aircraft_type"] = metadata["aircraft_type"]
-            path_info.append(info)
-
-            # Calculate ground level for this path
-            ground_level_m = min([coord[2] for coord in path]) if path else 0
-
-            # Find path start time for relative time calculation
-            path_start_time = None
-            for coord in path:
-                if len(coord) >= 4:
-                    path_start_time = parse_iso_timestamp(coord[3])
-                    if path_start_time:
-                        break
-
-            # First pass: calculate instantaneous speeds and timestamps
-            segment_speeds = extract_segment_speeds(path, path_start_time)
-
-            # Build time-sorted list for efficient window queries
-            timestamp_list, time_indexed_segments = build_time_indexed_segments(
-                segment_speeds
+            (
+                segments,
+                seg_max_gs,
+                seg_min_gs,
+                seg_cruise_dist,
+                seg_cruise_time,
+                seg_cruise_hist,
+            ) = _process_path_segments(
+                path, local_idx, path_distance_km, path_duration_seconds
             )
+            path_segments.extend(segments)
 
-            # Second pass: calculate rolling average speeds using time window
-            for i in range(len(path) - 1):
-                coord1 = path[i]
-                coord2 = path[i + 1]
-                lat1, lon1, alt1_m = coord1[0], coord1[1], coord1[2]
-                lat2, lon2, alt2_m = coord2[0], coord2[1], coord2[2]
-
-                avg_alt_m = (alt1_m + alt2_m) / 2
-                avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
-
-                # Calculate windowed average groundspeed
-                groundspeed_knots = 0.0
-                current_segment = segment_speeds[i]
-                current_timestamp = current_segment["timestamp"]
-                current_relative_time = current_segment["relative_time"]
-
-                if current_timestamp is not None and timestamp_list:
-                    groundspeed_knots = calculate_windowed_groundspeed(
-                        current_timestamp, timestamp_list, time_indexed_segments
-                    )
-
-                # Fall back to path average if no timestamp-based calculation
-                if groundspeed_knots == 0:
-                    segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
-                    groundspeed_knots = calculate_fallback_groundspeed(
-                        segment_distance_km, path_distance_km, path_duration_seconds
-                    )
-
-                # Track maximum and minimum groundspeed
-                if groundspeed_knots > 0:
-                    if groundspeed_knots > year_max_groundspeed:
-                        year_max_groundspeed = groundspeed_knots
-                    if groundspeed_knots < year_min_groundspeed:
-                        year_min_groundspeed = groundspeed_knots
-
-                    # Track cruise speed (only segments >1000ft AGL)
-                    altitude_agl_m = avg_alt_m - ground_level_m
-                    altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
-                    if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
-                        # Compute window distance/time for cruise stats
-                        if current_timestamp is not None and timestamp_list:
-                            current_ts = current_timestamp.timestamp()
-                            half_window = SPEED_WINDOW_SECONDS / 2
-                            w_start = bisect_left(
-                                timestamp_list, current_ts - half_window
-                            )
-                            w_end = bisect_right(
-                                timestamp_list, current_ts + half_window
-                            )
-                            w_distance = sum(
-                                time_indexed_segments[j]["distance"]
-                                for j in range(w_start, w_end)
-                            )
-                            w_time = sum(
-                                time_indexed_segments[j]["time_delta"]
-                                for j in range(w_start, w_end)
-                            )
-                        else:
-                            w_distance = 0.0
-                            w_time = 0.0
-
-                        cruise_stats: Dict[str, Any] = {
-                            "total_distance": 0.0,
-                            "total_time": 0.0,
-                            "altitude_histogram": {},
-                        }
-                        update_cruise_statistics(
-                            altitude_agl_ft, w_time, w_distance, cruise_stats
-                        )
-                        year_cruise_distance += float(cruise_stats["total_distance"])
-                        year_cruise_time += float(cruise_stats["total_time"])
-                        hist: Dict[int, float] = cruise_stats["altitude_histogram"]
-                        for alt_bin, time_spent in hist.items():
-                            if alt_bin not in year_cruise_altitude_histogram:
-                                year_cruise_altitude_histogram[alt_bin] = 0.0
-                            year_cruise_altitude_histogram[alt_bin] += time_spent
-
-                # Skip zero-length segments
-                if lat1 != lat2 or lon1 != lon2:
-                    segment_data = {
-                        "coords": [[lat1, lon1], [lat2, lon2]],
-                        "altitude_ft": avg_alt_ft,
-                        "altitude_m": round(avg_alt_m, 0),
-                        "groundspeed_knots": round(groundspeed_knots, 1),
-                        "path_id": local_idx,
-                    }
-                    if current_relative_time is not None:
-                        segment_data["time"] = round(current_relative_time, 1)
-                    path_segments.append(segment_data)
+            if seg_max_gs > year_max_groundspeed:
+                year_max_groundspeed = seg_max_gs
+            if seg_min_gs < year_min_groundspeed:
+                year_min_groundspeed = seg_min_gs
+            year_cruise_distance += seg_cruise_dist
+            year_cruise_time += seg_cruise_time
+            for alt_bin, time_spent in seg_cruise_hist.items():
+                if alt_bin not in year_cruise_altitude_histogram:
+                    year_cruise_altitude_histogram[alt_bin] = 0.0
+                year_cruise_altitude_histogram[alt_bin] += time_spent
 
         # Export data (no downsampling or filtering)
         data = {

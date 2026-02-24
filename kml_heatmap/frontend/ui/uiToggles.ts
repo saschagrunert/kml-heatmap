@@ -55,7 +55,7 @@ export class UIToggles {
       const btn = domCache.get("heatmap-btn");
       if (btn) btn.style.opacity = "1.0";
     }
-    this.app.stateManager!.saveMapState();
+    this.app.stateManager.saveMapState();
   }
 
   toggleAltitude(): void {
@@ -63,7 +63,7 @@ export class UIToggles {
 
     if (this.app.altitudeVisible) {
       // Don't allow hiding altitude during replay if airspeed is also hidden
-      if (this.app.replayManager!.replayActive && !this.app.airspeedVisible) {
+      if (this.app.replayManager.replayActive && !this.app.airspeedVisible) {
         return;
       }
       this.app.map.removeLayer(this.app.altitudeLayer);
@@ -75,7 +75,7 @@ export class UIToggles {
     } else {
       // Hide airspeed if it's visible
       if (this.app.airspeedVisible) {
-        if (!this.app.replayManager!.replayActive) {
+        if (!this.app.replayManager.replayActive) {
           this.app.map.removeLayer(this.app.airspeedLayer);
         }
         this.app.airspeedVisible = false;
@@ -86,39 +86,39 @@ export class UIToggles {
       }
 
       // During replay, don't add layer to map - just update state and legend
-      if (!this.app.replayManager!.replayActive) {
+      if (!this.app.replayManager.replayActive) {
         this.app.map.addLayer(this.app.altitudeLayer);
-        this.app.layerManager!.redrawAltitudePaths(); // Draw altitude paths when enabled
+        this.app.layerManager.redrawAltitudePaths(); // Draw altitude paths when enabled
       } else {
         // During replay: redraw the replay path with new altitude colors
-        const savedTime = this.app.replayManager!.replayCurrentTime;
-        const savedIndex = this.app.replayManager!.replayLastDrawnIndex;
-        if (this.app.replayManager!.replayLayer) {
-          this.app.replayManager!.replayLayer.clearLayers();
+        const savedTime = this.app.replayManager.replayCurrentTime;
+        const savedIndex = this.app.replayManager.replayLastDrawnIndex;
+        if (this.app.replayManager.replayLayer) {
+          this.app.replayManager.replayLayer.clearLayers();
         }
-        this.app.replayManager!.replayLastDrawnIndex = -1;
+        this.app.replayManager.replayLastDrawnIndex = -1;
 
         // Redraw all segments up to current position with altitude colors
         for (
           let i = 0;
-          i <= savedIndex && i < this.app.replayManager!.replaySegments.length;
+          i <= savedIndex && i < this.app.replayManager.replaySegments.length;
           i++
         ) {
-          const seg = this.app.replayManager!.replaySegments[i];
+          const seg = this.app.replayManager.replaySegments[i];
           if (seg && (seg.time || 0) <= savedTime) {
             const segmentColor = window.KMLHeatmap.getColorForAltitude(
               seg.altitude_ft || 0,
-              this.app.replayManager!.replayColorMinAlt,
-              this.app.replayManager!.replayColorMaxAlt
+              this.app.replayManager.replayColorMinAlt,
+              this.app.replayManager.replayColorMaxAlt
             );
 
             L.polyline(seg.coords || [], {
               color: segmentColor,
               weight: 3,
               opacity: 0.8,
-            }).addTo(this.app.replayManager!.replayLayer!);
+            }).addTo(this.app.replayManager.replayLayer!);
 
-            this.app.replayManager!.replayLastDrawnIndex = i;
+            this.app.replayManager.replayLastDrawnIndex = i;
           }
         }
       }
@@ -132,14 +132,14 @@ export class UIToggles {
 
     // Update airplane popup if it's open during replay
     if (
-      this.app.replayManager!.replayActive &&
-      this.app.replayManager!.replayAirplaneMarker &&
-      this.app.replayManager!.replayAirplaneMarker.isPopupOpen()
+      this.app.replayManager.replayActive &&
+      this.app.replayManager.replayAirplaneMarker &&
+      this.app.replayManager.replayAirplaneMarker.isPopupOpen()
     ) {
-      this.app.replayManager!.updateReplayAirplanePopup();
+      this.app.replayManager.updateReplayAirplanePopup();
     }
 
-    this.app.stateManager!.saveMapState();
+    this.app.stateManager.saveMapState();
   }
 
   toggleAirspeed(): void {
@@ -147,7 +147,7 @@ export class UIToggles {
 
     if (this.app.airspeedVisible) {
       // Don't allow hiding airspeed during replay if altitude is also hidden
-      if (this.app.replayManager!.replayActive && !this.app.altitudeVisible) {
+      if (this.app.replayManager.replayActive && !this.app.altitudeVisible) {
         return;
       }
       this.app.map.removeLayer(this.app.airspeedLayer);
@@ -159,7 +159,7 @@ export class UIToggles {
     } else {
       // Hide altitude if it's visible
       if (this.app.altitudeVisible) {
-        if (!this.app.replayManager!.replayActive) {
+        if (!this.app.replayManager.replayActive) {
           this.app.map.removeLayer(this.app.altitudeLayer);
         }
         this.app.altitudeVisible = false;
@@ -170,25 +170,25 @@ export class UIToggles {
       }
 
       // During replay, don't add layer to map - just update state and legend
-      if (!this.app.replayManager!.replayActive) {
+      if (!this.app.replayManager.replayActive) {
         this.app.map.addLayer(this.app.airspeedLayer);
-        this.app.layerManager!.redrawAirspeedPaths(); // Draw airspeed paths when enabled
+        this.app.layerManager.redrawAirspeedPaths(); // Draw airspeed paths when enabled
       } else {
         // During replay: redraw the replay path with new airspeed colors
-        const savedTime = this.app.replayManager!.replayCurrentTime;
-        const savedIndex = this.app.replayManager!.replayLastDrawnIndex;
-        if (this.app.replayManager!.replayLayer) {
-          this.app.replayManager!.replayLayer.clearLayers();
+        const savedTime = this.app.replayManager.replayCurrentTime;
+        const savedIndex = this.app.replayManager.replayLastDrawnIndex;
+        if (this.app.replayManager.replayLayer) {
+          this.app.replayManager.replayLayer.clearLayers();
         }
-        this.app.replayManager!.replayLastDrawnIndex = -1;
+        this.app.replayManager.replayLastDrawnIndex = -1;
 
         // Redraw all segments up to current position with airspeed colors
         for (
           let i = 0;
-          i <= savedIndex && i < this.app.replayManager!.replaySegments.length;
+          i <= savedIndex && i < this.app.replayManager.replaySegments.length;
           i++
         ) {
-          const seg = this.app.replayManager!.replaySegments[i];
+          const seg = this.app.replayManager.replaySegments[i];
           if (
             seg &&
             (seg.time || 0) <= savedTime &&
@@ -196,17 +196,17 @@ export class UIToggles {
           ) {
             const segmentColor = window.KMLHeatmap.getColorForAltitude(
               seg.groundspeed_knots || 0,
-              this.app.replayManager!.replayColorMinSpeed,
-              this.app.replayManager!.replayColorMaxSpeed
+              this.app.replayManager.replayColorMinSpeed,
+              this.app.replayManager.replayColorMaxSpeed
             );
 
             L.polyline(seg.coords || [], {
               color: segmentColor,
               weight: 3,
               opacity: 0.8,
-            }).addTo(this.app.replayManager!.replayLayer!);
+            }).addTo(this.app.replayManager.replayLayer!);
 
-            this.app.replayManager!.replayLastDrawnIndex = i;
+            this.app.replayManager.replayLastDrawnIndex = i;
           }
         }
       }
@@ -220,14 +220,14 @@ export class UIToggles {
 
     // Update airplane popup if it's open during replay
     if (
-      this.app.replayManager!.replayActive &&
-      this.app.replayManager!.replayAirplaneMarker &&
-      this.app.replayManager!.replayAirplaneMarker.isPopupOpen()
+      this.app.replayManager.replayActive &&
+      this.app.replayManager.replayAirplaneMarker &&
+      this.app.replayManager.replayAirplaneMarker.isPopupOpen()
     ) {
-      this.app.replayManager!.updateReplayAirplanePopup();
+      this.app.replayManager.updateReplayAirplanePopup();
     }
 
-    this.app.stateManager!.saveMapState();
+    this.app.stateManager.saveMapState();
   }
 
   toggleAirports(): void {
@@ -244,7 +244,7 @@ export class UIToggles {
       const btn = domCache.get("airports-btn");
       if (btn) btn.style.opacity = "1.0";
     }
-    this.app.stateManager!.saveMapState();
+    this.app.stateManager.saveMapState();
   }
 
   toggleAviation(): void {
@@ -265,7 +265,7 @@ export class UIToggles {
         const btn = domCache.get("aviation-btn");
         if (btn) btn.style.opacity = "1.0";
       }
-      this.app.stateManager!.saveMapState();
+      this.app.stateManager.saveMapState();
     }
   }
 
@@ -291,14 +291,14 @@ export class UIToggles {
 
     // Redraw paths to apply hide/dim behavior based on button state
     if (this.app.altitudeVisible) {
-      this.app.layerManager!.redrawAltitudePaths();
+      this.app.layerManager.redrawAltitudePaths();
     }
     if (this.app.airspeedVisible) {
-      this.app.layerManager!.redrawAirspeedPaths();
+      this.app.layerManager.redrawAirspeedPaths();
     }
 
     // Save state after toggling button visibility
-    this.app.stateManager!.saveMapState();
+    this.app.stateManager.saveMapState();
   }
 
   exportMap(): void {
