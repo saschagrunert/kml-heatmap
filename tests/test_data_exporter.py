@@ -4,6 +4,7 @@ import os
 import json
 import tempfile
 from kml_heatmap.data_exporter import (
+    _recalculate_stats_from_segments,
     export_airports_data,
     export_metadata,
     collect_unique_years,
@@ -498,7 +499,7 @@ class TestExportAllData:
                 "max_groundspeed_knots": 0,
             }
 
-            files, segments, path_info, meta_params = export_all_data(
+            files = export_all_data(
                 all_coordinates,
                 all_path_groups,
                 all_path_metadata,
@@ -531,9 +532,7 @@ class TestExportAllData:
                 "max_groundspeed_knots": 0,
             }
 
-            files, _, _, _ = export_all_data(
-                coords, paths, metadata, [], stats, output_dir=tmpdir
-            )
+            export_all_data(coords, paths, metadata, [], stats, output_dir=tmpdir)
 
             # Both year directories should exist
             assert os.path.isdir(os.path.join(tmpdir, "2023"))
@@ -585,3 +584,245 @@ class TestExportAllData:
             )
 
             assert not os.path.exists(stale_file)
+
+
+class TestRecalculateStatsFromSegments:
+    """Tests for _recalculate_stats_from_segments function."""
+
+    def test_empty_segments(self):
+        """Test with empty segments list."""
+        stats = {}
+        _recalculate_stats_from_segments(stats, [], [])
+        assert stats["total_points"] == 0
+
+    def test_altitude_calculations(self):
+        """Test altitude min/max/gain calculations."""
+        stats = {}
+        segments = [
+            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 0},
+            {"altitude_m": 200, "altitude_ft": 656, "groundspeed_knots": 0},
+            {"altitude_m": 150, "altitude_ft": 492, "groundspeed_knots": 0},
+            {"altitude_m": 300, "altitude_ft": 984, "groundspeed_knots": 0},
+        ]
+
+        _recalculate_stats_from_segments(stats, segments, [])
+
+        assert stats["min_altitude_m"] == 100
+        assert stats["max_altitude_m"] == 300
+        assert stats["total_points"] == 8
+        # Gain: 100->200 (+100), 200->150 (no gain), 150->300 (+150) = 250
+        assert stats["total_altitude_gain_m"] == 250
+
+    def test_groundspeed_averaging(self):
+        """Test average groundspeed calculation."""
+        stats = {}
+        segments = [
+            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 80},
+            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 120},
+            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 0},
+        ]
+
+        _recalculate_stats_from_segments(stats, segments, [])
+
+        assert stats["average_groundspeed_knots"] == 100.0
+
+    def test_cruise_speed_above_threshold(self):
+        """Test cruise speed uses only segments above altitude threshold."""
+        stats = {}
+        # min_alt_m=100 -> threshold = 100*3.28084 + 1000 = 1328 ft
+        # Only segments with altitude_ft > 1328 count as cruise
+        segments = [
+            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 50},
+            {"altitude_m": 500, "altitude_ft": 1640, "groundspeed_knots": 120},
+            {"altitude_m": 600, "altitude_ft": 1968, "groundspeed_knots": 140},
+        ]
+
+        _recalculate_stats_from_segments(stats, segments, [])
+
+        # Cruise segments: altitude_ft > 1328 -> second (1640) and third (1968)
+        # Cruise speed: (120 + 140) / 2 = 130
+        assert stats["cruise_speed_knots"] == 130.0
+
+    def test_cruise_altitude_histogram(self):
+        """Test most common cruise altitude calculation."""
+        stats = {}
+        # min_alt_m = min of all altitudes = 100
+        # threshold = 100 * 3.28084 + 1000 = ~1328 ft
+        # So altitude_ft > 1328 counts as cruise
+        segments = [
+            {
+                "altitude_m": 100,
+                "altitude_ft": 328,
+                "groundspeed_knots": 50,
+                "time": 0,
+            },
+            {
+                "altitude_m": 1000,
+                "altitude_ft": 3280,
+                "groundspeed_knots": 100,
+                "time": 10,
+            },
+            {
+                "altitude_m": 1000,
+                "altitude_ft": 3280,
+                "groundspeed_knots": 100,
+                "time": 20,
+            },
+            {
+                "altitude_m": 1500,
+                "altitude_ft": 4920,
+                "groundspeed_knots": 100,
+                "time": 30,
+            },
+        ]
+
+        _recalculate_stats_from_segments(stats, segments, [])
+
+        # Cruise segments (altitude_ft > 1328): 3280 (2x), 4920 (1x)
+        # Rounded to nearest 100: 3300 (2x), 4900 (1x)
+        assert stats["most_common_cruise_altitude_ft"] == 3300
+
+    def test_flight_time_from_path_durations(self):
+        """Test total flight time calculation from segment times."""
+        stats = {}
+        segments = [
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 100,
+                "time": 0,
+                "path_id": 0,
+            },
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 100,
+                "time": 3600,
+                "path_id": 0,
+            },
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 100,
+                "time": 0,
+                "path_id": 1,
+            },
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 100,
+                "time": 1800,
+                "path_id": 1,
+            },
+        ]
+
+        _recalculate_stats_from_segments(stats, segments, [])
+
+        # Path 0: 3600-0 = 3600s, Path 1: 1800-0 = 1800s
+        assert stats["total_flight_time_seconds"] == 5400
+
+    def test_aircraft_specific_stats(self):
+        """Test per-aircraft flight time and distance calculation."""
+        stats = {
+            "aircraft_list": [
+                {"registration": "D-EAGJ"},
+                {"registration": "D-EHYL"},
+            ]
+        }
+        segments = [
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 100,
+                "time": 0,
+                "path_id": 0,
+                "coords": [[50.0, 8.0], [50.1, 8.1]],
+            },
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 100,
+                "time": 3600,
+                "path_id": 0,
+                "coords": [[50.1, 8.1], [50.2, 8.2]],
+            },
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 100,
+                "time": 0,
+                "path_id": 1,
+                "coords": [[51.0, 9.0], [51.1, 9.1]],
+            },
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 100,
+                "time": 1800,
+                "path_id": 1,
+                "coords": [[51.1, 9.1], [51.2, 9.2]],
+            },
+        ]
+        path_info = [
+            {"id": 0, "aircraft_registration": "D-EAGJ"},
+            {"id": 1, "aircraft_registration": "D-EHYL"},
+        ]
+
+        _recalculate_stats_from_segments(stats, segments, path_info)
+
+        eagj = next(a for a in stats["aircraft_list"] if a["registration"] == "D-EAGJ")
+        ehyl = next(a for a in stats["aircraft_list"] if a["registration"] == "D-EHYL")
+
+        assert eagj["flight_time_seconds"] == 3600
+        assert ehyl["flight_time_seconds"] == 1800
+        assert eagj["flight_distance_km"] > 0
+        assert ehyl["flight_distance_km"] > 0
+        assert "flight_time_str" in eagj
+
+    def test_no_cruise_segments(self):
+        """Test when no segments are above cruise threshold."""
+        stats = {}
+        segments = [
+            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 50},
+            {"altitude_m": 200, "altitude_ft": 656, "groundspeed_knots": 60},
+        ]
+
+        _recalculate_stats_from_segments(stats, segments, [])
+
+        assert stats["cruise_speed_knots"] == 0
+        assert "most_common_cruise_altitude_ft" not in stats
+
+    def test_single_point_path_no_flight_time(self):
+        """Test that paths with a single time point have no flight time."""
+        stats = {}
+        segments = [
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 100,
+                "time": 100,
+                "path_id": 0,
+            },
+        ]
+
+        _recalculate_stats_from_segments(stats, segments, [])
+
+        assert stats["total_flight_time_seconds"] == 0
+
+    def test_no_aircraft_list_skips_aircraft_stats(self):
+        """Test that missing aircraft_list skips per-aircraft calculations."""
+        stats = {}
+        segments = [
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 100,
+                "time": 0,
+                "path_id": 0,
+            },
+        ]
+
+        _recalculate_stats_from_segments(stats, segments, [])
+
+        # Should not crash, no aircraft keys added
+        assert "aircraft_list" not in stats

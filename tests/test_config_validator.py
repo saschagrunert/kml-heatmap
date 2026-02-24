@@ -402,8 +402,8 @@ class TestDependencyValidation:
             finally:
                 os.unlink(input_path)
 
-    def test_validate_dependencies_optional_missing(self):
-        """Test validation when optional dependency is missing."""
+    def test_validate_dependencies_required_missing(self):
+        """Test validation when required dependency (lxml) is missing."""
         from kml_heatmap.config_validator import ConfigValidator
         from unittest.mock import patch
         import builtins
@@ -428,8 +428,9 @@ class TestDependencyValidation:
                     is_valid, errors, warnings = validator.validate_all(
                         input_path, output_dir
                     )
-                    # Should have warning about missing lxml
-                    assert any("lxml" in warn.lower() for warn in warnings)
+                    # lxml is a required dependency, should cause an error
+                    assert is_valid is False
+                    assert any("lxml" in err.lower() for err in errors)
             finally:
                 os.unlink(input_path)
 

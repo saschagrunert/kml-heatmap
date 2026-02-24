@@ -13,6 +13,7 @@ import sys
 import os
 import json
 import shutil
+import string
 import subprocess
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -785,16 +786,8 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
     data_dir_name = os.path.basename(data_dir)
 
     # Load template and substitute variables
-    template = load_template()
-    html_content = template.replace("{STADIA_API_KEY}", STADIA_API_KEY)
-    html_content = html_content.replace("{OPENAIP_API_KEY}", OPENAIP_API_KEY)
-    html_content = html_content.replace("{data_dir_name}", data_dir_name)
-    html_content = html_content.replace("{center_lat}", str(center_lat))
-    html_content = html_content.replace("{center_lon}", str(center_lon))
-    html_content = html_content.replace("{min_lat}", str(min_lat))
-    html_content = html_content.replace("{max_lat}", str(max_lat))
-    html_content = html_content.replace("{min_lon}", str(min_lon))
-    html_content = html_content.replace("{max_lon}", str(max_lon))
+    tmpl = string.Template(load_template())
+    html_content = tmpl.substitute(data_dir_name=data_dir_name)
 
     # Minify and write HTML file
     logger.info("\n💾 Generating and minifying HTML...")
@@ -838,22 +831,20 @@ def create_progressive_heatmap(kml_files, output_file="index.html", data_dir="da
 
     # Process map_config template with variable substitution
     with open(map_config_template, "r") as f:
-        map_config_content = f.read()
+        map_config_raw = f.read()
 
-    # Replace template variables in map_config.js
-    map_config_content = map_config_content.replace(
-        "{{STADIA_API_KEY}}", STADIA_API_KEY
-    )
-    map_config_content = map_config_content.replace(
-        "{{OPENAIP_API_KEY}}", OPENAIP_API_KEY
-    )
-    map_config_content = map_config_content.replace("{{data_dir_name}}", data_dir_name)
-    map_config_content = map_config_content.replace("{{center_lat}}", str(center_lat))
-    map_config_content = map_config_content.replace("{{center_lon}}", str(center_lon))
-    map_config_content = map_config_content.replace("{{min_lat}}", str(min_lat))
-    map_config_content = map_config_content.replace("{{max_lat}}", str(max_lat))
-    map_config_content = map_config_content.replace("{{min_lon}}", str(min_lon))
-    map_config_content = map_config_content.replace("{{max_lon}}", str(max_lon))
+    config_vars = {
+        "stadia_api_key": STADIA_API_KEY,
+        "openaip_api_key": OPENAIP_API_KEY,
+        "data_dir_name": data_dir_name,
+        "center_lat": str(center_lat),
+        "center_lon": str(center_lon),
+        "min_lat": str(min_lat),
+        "max_lat": str(max_lat),
+        "min_lon": str(min_lon),
+        "max_lon": str(max_lon),
+    }
+    map_config_content = string.Template(map_config_raw).substitute(config_vars)
 
     # Minify JavaScript
     import rjsmin

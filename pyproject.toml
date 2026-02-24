@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kml-heatmap"
+version = "1.0.0"
+description = "Interactive heatmap visualizations from KML flight data"
+requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+dependencies = [
+    "folium>=0.20.0",
+    "rcssmin>=1.2.2",
+    "rjsmin>=1.2.5",
+    "minify-html>=0.18.1",
+    "lxml>=6.0.2",
+    "numpy>=2.4.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "pytest-mock>=3.15.1",
+    "pytest-xdist>=3.8.0",
+    "coverage[toml]>=7.13.1",
+    "ruff>=0.14.12",
+    "mypy>=1.18.1",
+]
+
+[tool.setuptools.packages.find]
+include = ["kml_heatmap*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = [
+    "--verbose",
+    "--tb=short",
+    "--strict-markers",
+    "--cov=kml_heatmap",
+    "--cov-report=term-missing",
+    "--cov-branch",
+    "-n", "auto",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow running tests",
+]
+
+[tool.mypy]
+python_version = "3.14"
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+ignore_missing_imports = true
+exclude = [
+    "^kml-heatmap\\.py$",
+    "^serve\\.py$",
+    "^scripts/",
+]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+check_untyped_defs = false
+
+[tool.ruff]
+target-version = "py312"
