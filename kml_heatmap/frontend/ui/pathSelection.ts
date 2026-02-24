@@ -20,16 +20,16 @@ export class PathSelection {
 
     // Redraw paths with delay for mobile Safari
     if (this.app.altitudeVisible) {
-      this.app.layerManager!.redrawAltitudePaths();
+      this.app.layerManager.redrawAltitudePaths();
       invalidateMapWithDelay(this.app.map);
     }
     if (this.app.airspeedVisible) {
-      this.app.layerManager!.redrawAirspeedPaths();
+      this.app.layerManager.redrawAirspeedPaths();
       invalidateMapWithDelay(this.app.map);
     }
 
-    this.app.replayManager!.updateReplayButtonState();
-    this.app.stateManager!.saveMapState();
+    this.app.replayManager.updateReplayButtonState();
+    this.app.stateManager.saveMapState();
   }
 
   selectPathsByAirport(airportName: string): void {
@@ -42,16 +42,16 @@ export class PathSelection {
 
     // Redraw paths with delay for mobile Safari
     if (this.app.altitudeVisible) {
-      this.app.layerManager!.redrawAltitudePaths();
+      this.app.layerManager.redrawAltitudePaths();
       invalidateMapWithDelay(this.app.map);
     }
     if (this.app.airspeedVisible) {
-      this.app.layerManager!.redrawAirspeedPaths();
+      this.app.layerManager.redrawAirspeedPaths();
       invalidateMapWithDelay(this.app.map);
     }
 
-    this.app.replayManager!.updateReplayButtonState();
-    this.app.stateManager!.saveMapState();
+    this.app.replayManager.updateReplayButtonState();
+    this.app.stateManager.saveMapState();
   }
 
   clearSelection(): void {
@@ -59,15 +59,15 @@ export class PathSelection {
 
     // Redraw paths with a small delay for mobile Safari touch event handling
     if (this.app.altitudeVisible) {
-      this.app.layerManager!.redrawAltitudePaths();
+      this.app.layerManager.redrawAltitudePaths();
       invalidateMapWithDelay(this.app.map);
     }
     if (this.app.airspeedVisible) {
-      this.app.layerManager!.redrawAirspeedPaths();
+      this.app.layerManager.redrawAirspeedPaths();
       invalidateMapWithDelay(this.app.map);
     }
 
-    this.app.replayManager!.updateReplayButtonState();
-    this.app.stateManager!.saveMapState();
+    this.app.replayManager.updateReplayButtonState();
+    this.app.stateManager.saveMapState();
   }
 }

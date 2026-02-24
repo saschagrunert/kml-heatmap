@@ -840,7 +840,7 @@ describe("MapApp - createAirportMarkers", () => {
     const clickHandler = markerInstance.on.mock.calls[0][1];
 
     // Set replay active
-    app.replayManager!.replayActive = true;
+    app.replayManager.replayActive = true;
 
     clickHandler({});
 

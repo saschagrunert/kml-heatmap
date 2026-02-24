@@ -371,37 +371,6 @@ class TestDiskSpaceValidation:
 class TestDependencyValidation:
     """Tests for dependency validation."""
 
-    def test_validate_dependencies_folium_missing(self):
-        """Test validation when folium is missing."""
-        from kml_heatmap.config_validator import ConfigValidator
-        from unittest.mock import patch
-        import builtins
-
-        # Save reference to original __import__
-        original_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "folium":
-                raise ImportError("No module named 'folium'")
-            return original_import(name, *args, **kwargs)
-
-        validator = ConfigValidator()
-
-        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
-            f.write(b"<kml></kml>")
-            input_path = f.name
-
-        with tempfile.TemporaryDirectory() as output_dir:
-            try:
-                with patch("builtins.__import__", side_effect=mock_import):
-                    is_valid, errors, warnings = validator.validate_all(
-                        input_path, output_dir
-                    )
-                    # Should have error about missing folium
-                    assert any("folium" in err.lower() for err in errors)
-            finally:
-                os.unlink(input_path)
-
     def test_validate_dependencies_required_missing(self):
         """Test validation when required dependency (lxml) is missing."""
         from kml_heatmap.config_validator import ConfigValidator

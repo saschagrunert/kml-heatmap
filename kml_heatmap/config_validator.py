@@ -151,7 +151,6 @@ class ConfigValidator:
     def _validate_dependencies(self) -> None:
         """Check required Python packages are installed."""
         required_packages = {
-            "folium": "Map generation",
             "numpy": "Numerical operations",
             "lxml": "XML/KML parsing",
         }

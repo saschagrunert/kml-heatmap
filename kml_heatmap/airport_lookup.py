@@ -7,6 +7,7 @@ ICAO codes using the OurAirports database with local caching.
 import csv
 import time
 import threading
+import urllib.error
 from typing import Any, Dict, Optional, Tuple
 from urllib.request import urlretrieve
 
@@ -78,7 +79,7 @@ def _download_airport_database() -> bool:
             logger.warning("✗ Downloaded file is empty")
             return False
 
-    except Exception as e:
+    except (OSError, urllib.error.URLError, ValueError) as e:
         logger.warning(f"✗ Failed to download airport database: {e}")
         return False
 
@@ -146,7 +147,7 @@ def _load_airport_database() -> Dict[str, Tuple[float, float, str]]:
                     logger.debug(f"Loaded {len(airports):,} airports from cache")
                     return airports
 
-                except Exception as e:
+                except (OSError, csv.Error, ValueError, UnicodeDecodeError) as e:
                     logger.warning(f"Failed to load airport cache: {e}")
 
             # Return empty dict if cache loading failed

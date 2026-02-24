@@ -131,17 +131,17 @@ export class MapApp {
   savedState: AppState | null;
   restoredYearFromState: boolean;
 
-  // Managers (initialized in initialize())
-  stateManager: StateManager | null;
-  dataManager: DataManager | null;
-  layerManager: LayerManager | null;
-  filterManager: FilterManager | null;
-  statsManager: StatsManager | null;
-  pathSelection: PathSelection | null;
-  airportManager: AirportManager | null;
-  replayManager: ReplayManager | null;
-  wrappedManager: WrappedManager | null;
-  uiToggles: UIToggles | null;
+  // Managers (initialized in initialize(), always available after construction)
+  stateManager!: StateManager;
+  dataManager!: DataManager;
+  layerManager!: LayerManager;
+  filterManager!: FilterManager;
+  statsManager!: StatsManager;
+  pathSelection!: PathSelection;
+  airportManager!: AirportManager;
+  replayManager!: ReplayManager;
+  wrappedManager!: WrappedManager;
+  uiToggles!: UIToggles;
 
   constructor(config: MapConfig) {
     this.config = config;
@@ -190,159 +190,12 @@ export class MapApp {
     // Saved state
     this.savedState = null;
     this.restoredYearFromState = false;
-
-    // Managers (initialized in initialize())
-    this.stateManager = null;
-    this.dataManager = null;
-    this.layerManager = null;
-    this.filterManager = null;
-    this.statsManager = null;
-    this.pathSelection = null;
-    this.airportManager = null;
-    this.replayManager = null;
-    this.wrappedManager = null;
-    this.uiToggles = null;
   }
 
   async initialize(): Promise<void> {
-    // Initialize state manager first
-    this.stateManager = new StateManager(this);
-
-    // Load saved state
-    this.savedState = this.stateManager.loadState();
-
-    // Restore filter state immediately to prevent it being overwritten
-    if (this.savedState) {
-      if (this.savedState.selectedYear !== undefined) {
-        this.selectedYear = this.savedState.selectedYear;
-        this.restoredYearFromState = true;
-      }
-      if (this.savedState.selectedAircraft) {
-        this.selectedAircraft = this.savedState.selectedAircraft;
-      }
-
-      // Restore selected paths BEFORE updateLayers() so paths are drawn with correct selection
-      if (
-        this.savedState.selectedPathIds &&
-        this.savedState.selectedPathIds.length > 0
-      ) {
-        this.savedState.selectedPathIds.forEach((pathId) => {
-          // Parse as number since URL params are strings
-          const pathIdNum =
-            typeof pathId === "string" ? parseInt(pathId, 10) : pathId;
-          this.selectedPathIds.add(pathIdNum);
-        });
-      }
-
-      // Restore layer visibility
-      if (this.savedState.heatmapVisible !== undefined) {
-        this.heatmapVisible = this.savedState.heatmapVisible;
-      }
-      if (this.savedState.altitudeVisible !== undefined) {
-        this.altitudeVisible = this.savedState.altitudeVisible;
-      }
-      if (this.savedState.airspeedVisible !== undefined) {
-        this.airspeedVisible = this.savedState.airspeedVisible;
-      }
-      if (this.savedState.airportsVisible !== undefined) {
-        this.airportsVisible = this.savedState.airportsVisible;
-      }
-      if (this.savedState.aviationVisible !== undefined) {
-        this.aviationVisible = this.savedState.aviationVisible;
-      }
-      if (this.savedState.buttonsHidden !== undefined) {
-        this.buttonsHidden = this.savedState.buttonsHidden;
-      }
-    }
-
-    // Initialize Leaflet map
-    this.map = L.map("map", {
-      center: this.config.center,
-      zoom: 10,
-      zoomSnap: 0.25,
-      zoomDelta: 0.25,
-      wheelPxPerZoomLevel: 120,
-      preferCanvas: true,
-    });
-
-    // Add tile layer
-    if (this.config.stadiaApiKey) {
-      L.tileLayer(
-        "https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png?api_key=" +
-          this.config.stadiaApiKey,
-        {
-          attribution:
-            '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>',
-        }
-      ).addTo(this.map);
-    } else {
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-        {
-          attribution: "&copy; OpenStreetMap contributors, &copy; CARTO",
-        }
-      ).addTo(this.map);
-    }
-
-    // Restore map view or fit bounds
-    if (this.savedState && this.savedState.center && this.savedState.zoom) {
-      this.map.setView(
-        [this.savedState.center.lat, this.savedState.center.lng],
-        this.savedState.zoom
-      );
-    } else {
-      this.map.fitBounds(this.config.bounds, { padding: [30, 30] });
-    }
-
-    // Setup OpenAIP layer if API key is provided
-    if (this.config.openaipApiKey) {
-      this.openaipLayers["Aviation Data"] = L.tileLayer(
-        "https://{s}.api.tiles.openaip.net/api/data/openaip/{z}/{x}/{y}.png?apiKey=" +
-          this.config.openaipApiKey,
-        {
-          attribution: '&copy; <a href="https://www.openaip.net">OpenAIP</a>',
-          maxZoom: 18,
-          minZoom: 7,
-          subdomains: ["a", "b", "c"],
-        }
-      );
-    }
-
-    // Add airports layer based on saved state
-    if (this.airportsVisible) {
-      this.airportLayer.addTo(this.map);
-    }
-
-    // Set initial button states
-    (document.getElementById("heatmap-btn") as HTMLElement).style.opacity = this
-      .heatmapVisible
-      ? "1.0"
-      : "0.5";
-    (document.getElementById("altitude-btn") as HTMLElement).style.opacity =
-      this.altitudeVisible ? "1.0" : "0.5";
-    (document.getElementById("airspeed-btn") as HTMLElement).style.opacity =
-      this.airspeedVisible ? "1.0" : "0.5";
-    (document.getElementById("airports-btn") as HTMLElement).style.opacity =
-      this.airportsVisible ? "1.0" : "0.5";
-    (document.getElementById("aviation-btn") as HTMLElement).style.opacity =
-      this.aviationVisible ? "1.0" : "0.5";
-
-    // Show aviation button if API key is available
-    if (this.config.openaipApiKey) {
-      (document.getElementById("aviation-btn") as HTMLElement).style.display =
-        "block";
-    }
-
-    // Initialize all managers
-    this.dataManager = new DataManager(this);
-    this.layerManager = new LayerManager(this);
-    this.filterManager = new FilterManager(this);
-    this.statsManager = new StatsManager(this);
-    this.pathSelection = new PathSelection(this);
-    this.airportManager = new AirportManager(this);
-    this.replayManager = new ReplayManager(this);
-    this.wrappedManager = new WrappedManager(this);
-    this.uiToggles = new UIToggles(this);
+    this.restoreState();
+    this.setupMap();
+    this.initializeManagers();
 
     // Load airports and metadata
     await this.loadInitialData();
@@ -366,16 +219,146 @@ export class MapApp {
 
     // Restore wrapped panel state if it was open
     if (this.savedState && this.savedState.wrappedVisible) {
-      // Show wrapped panel after a delay to ensure everything is loaded
       void setTimeout(() => {
-        if (this.wrappedManager) {
-          void this.wrappedManager.showWrapped();
-        }
+        void this.wrappedManager.showWrapped();
       }, 500);
     }
 
     // Save state after initialization
     this.stateManager.saveMapState();
+  }
+
+  private restoreState(): void {
+    this.stateManager = new StateManager(this);
+    this.savedState = this.stateManager.loadState();
+
+    if (!this.savedState) return;
+
+    if (this.savedState.selectedYear !== undefined) {
+      this.selectedYear = this.savedState.selectedYear;
+      this.restoredYearFromState = true;
+    }
+    if (this.savedState.selectedAircraft) {
+      this.selectedAircraft = this.savedState.selectedAircraft;
+    }
+
+    // Restore selected paths BEFORE updateLayers() so paths are drawn with correct selection
+    if (
+      this.savedState.selectedPathIds &&
+      this.savedState.selectedPathIds.length > 0
+    ) {
+      this.savedState.selectedPathIds.forEach((pathId) => {
+        const pathIdNum =
+          typeof pathId === "string" ? parseInt(pathId, 10) : pathId;
+        this.selectedPathIds.add(pathIdNum);
+      });
+    }
+
+    // Restore layer visibility
+    if (this.savedState.heatmapVisible !== undefined) {
+      this.heatmapVisible = this.savedState.heatmapVisible;
+    }
+    if (this.savedState.altitudeVisible !== undefined) {
+      this.altitudeVisible = this.savedState.altitudeVisible;
+    }
+    if (this.savedState.airspeedVisible !== undefined) {
+      this.airspeedVisible = this.savedState.airspeedVisible;
+    }
+    if (this.savedState.airportsVisible !== undefined) {
+      this.airportsVisible = this.savedState.airportsVisible;
+    }
+    if (this.savedState.aviationVisible !== undefined) {
+      this.aviationVisible = this.savedState.aviationVisible;
+    }
+    if (this.savedState.buttonsHidden !== undefined) {
+      this.buttonsHidden = this.savedState.buttonsHidden;
+    }
+  }
+
+  private setupMap(): void {
+    this.map = L.map("map", {
+      center: this.config.center,
+      zoom: 10,
+      zoomSnap: 0.25,
+      zoomDelta: 0.25,
+      wheelPxPerZoomLevel: 120,
+      preferCanvas: true,
+    });
+
+    if (this.config.stadiaApiKey) {
+      L.tileLayer(
+        "https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png?api_key=" +
+          this.config.stadiaApiKey,
+        {
+          attribution:
+            '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>',
+        }
+      ).addTo(this.map);
+    } else {
+      L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        {
+          attribution: "&copy; OpenStreetMap contributors, &copy; CARTO",
+        }
+      ).addTo(this.map);
+    }
+
+    if (this.savedState && this.savedState.center && this.savedState.zoom) {
+      this.map.setView(
+        [this.savedState.center.lat, this.savedState.center.lng],
+        this.savedState.zoom
+      );
+    } else {
+      this.map.fitBounds(this.config.bounds, { padding: [30, 30] });
+    }
+
+    if (this.config.openaipApiKey) {
+      this.openaipLayers["Aviation Data"] = L.tileLayer(
+        "https://{s}.api.tiles.openaip.net/api/data/openaip/{z}/{x}/{y}.png?apiKey=" +
+          this.config.openaipApiKey,
+        {
+          attribution: '&copy; <a href="https://www.openaip.net">OpenAIP</a>',
+          maxZoom: 18,
+          minZoom: 7,
+          subdomains: ["a", "b", "c"],
+        }
+      );
+    }
+
+    if (this.airportsVisible) {
+      this.airportLayer.addTo(this.map);
+    }
+
+    // Set initial button states
+    (document.getElementById("heatmap-btn") as HTMLElement).style.opacity = this
+      .heatmapVisible
+      ? "1.0"
+      : "0.5";
+    (document.getElementById("altitude-btn") as HTMLElement).style.opacity =
+      this.altitudeVisible ? "1.0" : "0.5";
+    (document.getElementById("airspeed-btn") as HTMLElement).style.opacity =
+      this.airspeedVisible ? "1.0" : "0.5";
+    (document.getElementById("airports-btn") as HTMLElement).style.opacity =
+      this.airportsVisible ? "1.0" : "0.5";
+    (document.getElementById("aviation-btn") as HTMLElement).style.opacity =
+      this.aviationVisible ? "1.0" : "0.5";
+
+    if (this.config.openaipApiKey) {
+      (document.getElementById("aviation-btn") as HTMLElement).style.display =
+        "block";
+    }
+  }
+
+  private initializeManagers(): void {
+    this.dataManager = new DataManager(this);
+    this.layerManager = new LayerManager(this);
+    this.filterManager = new FilterManager(this);
+    this.statsManager = new StatsManager(this);
+    this.pathSelection = new PathSelection(this);
+    this.airportManager = new AirportManager(this);
+    this.replayManager = new ReplayManager(this);
+    this.wrappedManager = new WrappedManager(this);
+    this.uiToggles = new UIToggles(this);
   }
 
   async loadInitialData(): Promise<void> {
@@ -386,92 +369,87 @@ export class MapApp {
     createAirportMarkers(this, airports);
   }
 
-  setupEventHandlers(): void {
-    // Register map event handlers for state persistence
-    this.map!.on("moveend", () => this.stateManager!.saveMapState());
+  private setupEventHandlers(): void {
+    this.map!.on("moveend", () => this.stateManager.saveMapState());
     this.map!.on("zoomend", () => {
-      this.stateManager!.saveMapState();
-      // No need to reload data on zoom - we always use full resolution
-      this.airportManager!.updateAirportMarkerSizes();
+      this.stateManager.saveMapState();
+      this.airportManager.updateAirportMarkerSizes();
     });
 
-    // Clear selection when clicking on map background
     this.map!.on("click", (_e: L.LeafletMouseEvent) => {
-      // Close replay airplane popup if open
       if (
-        this.replayManager!.replayActive &&
-        this.replayManager!.replayAirplaneMarker &&
-        this.replayManager!.replayAirplaneMarker.isPopupOpen()
+        this.replayManager.replayActive &&
+        this.replayManager.replayAirplaneMarker &&
+        this.replayManager.replayAirplaneMarker.isPopupOpen()
       ) {
-        this.replayManager!.replayAirplaneMarker.closePopup();
+        this.replayManager.replayAirplaneMarker.closePopup();
       }
-      // Don't clear selection during replay mode
-      if (!this.replayManager!.replayActive && this.selectedPathIds.size > 0) {
-        this.pathSelection!.clearSelection();
+      if (!this.replayManager.replayActive && this.selectedPathIds.size > 0) {
+        this.pathSelection.clearSelection();
       }
     });
   }
 
   // Expose methods for onclick handlers
   toggleHeatmap(): void {
-    this.uiToggles!.toggleHeatmap();
+    this.uiToggles.toggleHeatmap();
   }
   toggleStats(): void {
-    this.statsManager!.toggleStats();
+    this.statsManager.toggleStats();
   }
   toggleAltitude(): void {
-    this.uiToggles!.toggleAltitude();
+    this.uiToggles.toggleAltitude();
   }
   toggleAirspeed(): void {
-    this.uiToggles!.toggleAirspeed();
+    this.uiToggles.toggleAirspeed();
   }
   toggleAirports(): void {
-    this.uiToggles!.toggleAirports();
+    this.uiToggles.toggleAirports();
   }
   toggleAviation(): void {
-    this.uiToggles!.toggleAviation();
+    this.uiToggles.toggleAviation();
   }
   toggleReplay(): void {
-    this.replayManager!.toggleReplay();
+    this.replayManager.toggleReplay();
   }
   filterByYear(): void {
-    void this.filterManager!.filterByYear();
+    void this.filterManager.filterByYear();
   }
   filterByAircraft(): void {
-    void this.filterManager!.filterByAircraft();
+    void this.filterManager.filterByAircraft();
   }
   togglePathSelection(id: string): void {
-    void this.pathSelection!.togglePathSelection(Number(id));
+    void this.pathSelection.togglePathSelection(Number(id));
   }
   exportMap(): void {
-    this.uiToggles!.exportMap();
+    this.uiToggles.exportMap();
   }
   showWrapped(): void {
-    void this.wrappedManager!.showWrapped();
+    void this.wrappedManager.showWrapped();
   }
   closeWrapped(e?: MouseEvent): void {
-    this.wrappedManager!.closeWrapped(e);
+    this.wrappedManager.closeWrapped(e);
   }
   toggleButtonsVisibility(): void {
-    this.uiToggles!.toggleButtonsVisibility();
+    this.uiToggles.toggleButtonsVisibility();
   }
   playReplay(): void {
-    this.replayManager!.playReplay();
+    this.replayManager.playReplay();
   }
   pauseReplay(): void {
-    this.replayManager!.pauseReplay();
+    this.replayManager.pauseReplay();
   }
   stopReplay(): void {
-    this.replayManager!.stopReplay();
+    this.replayManager.stopReplay();
   }
   seekReplay(v: string): void {
-    this.replayManager!.seekReplay(v);
+    this.replayManager.seekReplay(v);
   }
   changeReplaySpeed(): void {
-    this.replayManager!.changeReplaySpeed();
+    this.replayManager.changeReplaySpeed();
   }
   toggleAutoZoom(): void {
-    this.replayManager!.toggleAutoZoom();
+    this.replayManager.toggleAutoZoom();
   }
 }
 
