@@ -153,11 +153,10 @@ class ConfigValidator:
         required_packages = {
             "folium": "Map generation",
             "numpy": "Numerical operations",
+            "lxml": "XML/KML parsing",
         }
 
-        optional_packages = {
-            "lxml": "Faster XML parsing (falls back to standard library)",
-        }
+        optional_packages: dict[str, str] = {}
 
         for package, purpose in required_packages.items():
             try:

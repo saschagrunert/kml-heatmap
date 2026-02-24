@@ -1,16 +1,19 @@
 """Aircraft registration and model lookup functionality."""
 
-import json
 import os
 import re
-import tempfile
-import urllib.request
+import time
 import urllib.error
+import urllib.request
 from html.parser import HTMLParser
-from typing import Optional, Dict, List
+from typing import Dict, List, Optional
 
-from .cache import CACHE_DIR
+from .cache import CACHE_DIR, locked_json_read_write
 from .logger import logger
+
+# Minimum delay between HTTP requests to avoid overloading the server
+_REQUEST_DELAY_SECONDS = 1.0
+_last_request_time = 0.0
 
 __all__ = [
     "AircraftDataParser",
@@ -108,46 +111,35 @@ class AircraftDataParser(HTMLParser):
             self.in_title = False
 
 
-def lookup_aircraft_model(registration: str) -> Optional[str]:
-    """
-    Look up aircraft model from airport-data.com
+def _fetch_aircraft_model(registration: str) -> Optional[str]:
+    """Fetch aircraft model from airport-data.com with rate limiting.
 
     Args:
         registration: Aircraft registration (e.g., 'D-EAGJ')
 
     Returns:
-        Full aircraft model name or None if not found
+        Aircraft model string, or None if not found or on error.
+
+    Raises:
+        _SkipCache: When the result should not be cached (transient errors).
     """
-    # Use unified cache directory
-    cache_file = AIRCRAFT_CACHE_FILE
+    global _last_request_time
 
-    # Ensure cache directory exists
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    # Rate-limit: wait at least _REQUEST_DELAY_SECONDS between requests
+    elapsed = time.monotonic() - _last_request_time
+    if elapsed < _REQUEST_DELAY_SECONDS:
+        time.sleep(_REQUEST_DELAY_SECONDS - elapsed)
 
-    # Load cache
-    cache = {}
-    if cache_file.exists():
-        try:
-            with open(cache_file, "r") as f:
-                cache = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            # Cache file is corrupted or unreadable, start with empty cache
-            logger.warning(f"Could not load aircraft cache from {cache_file}: {e}")
-            cache = {}
-
-    # Check cache
-    if registration in cache:
-        cached_value = cache[registration]
-        # Only use cache if we have a positive result
-        # Retry if cached value is None (previous 404 or failure)
-        if cached_value is not None:
-            return cached_value
-
-    # Fetch from airport-data.com
     model = None
     try:
         url = f"https://airport-data.com/aircraft/{registration}.html"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "kml-heatmap/1.0 (aircraft model lookup)",
+            },
+        )
+        _last_request_time = time.monotonic()
 
         with urllib.request.urlopen(req, timeout=10) as response:
             html = response.read().decode("utf-8")
@@ -159,47 +151,65 @@ def lookup_aircraft_model(registration: str) -> Optional[str]:
             model = parser.model
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            # Aircraft not found in database - cache the negative result
-            pass
+            pass  # Will cache as None
         elif e.code == 429:
             logger.warning(f"Rate limited by aircraft database for {registration}")
-            # Don't cache rate limits - retry next time
-            return None
+            raise _SkipCache()
         else:
             logger.warning(f"HTTP error {e.code} looking up {registration}: {e.reason}")
     except urllib.error.URLError as e:
         logger.warning(f"Network error looking up {registration}: {e.reason}")
-        # Don't cache network errors - retry next time
-        return None
+        raise _SkipCache()
     except TimeoutError:
         logger.warning(f"Timeout looking up {registration} (server did not respond)")
-        # Don't cache timeouts - retry next time
-        return None
+        raise _SkipCache()
     except Exception as e:
         logger.warning(
             f"Unexpected error looking up {registration}: {type(e).__name__}: {e}"
         )
-        # Don't cache unexpected errors - retry next time
-        return None
+        raise _SkipCache()
 
-    # Update cache with result (including null for 404s)
-    cache[registration] = model
-    try:
-        # Atomic write: write to temp file, then rename to avoid corruption
-        # from concurrent processes writing simultaneously
-        with tempfile.NamedTemporaryFile(
-            mode="w", dir=CACHE_DIR, suffix=".tmp", delete=False
-        ) as tmp:
-            json.dump(cache, tmp, indent=2)
-            tmp_path = tmp.name
-        os.replace(tmp_path, str(cache_file))
-    except (IOError, OSError) as e:
-        logger.warning(f"Could not update aircraft cache: {e}")
-        # Clean up temp file if rename failed
+    return model
+
+
+class _SkipCache(Exception):
+    """Raised when a lookup result should not be cached (transient error)."""
+
+
+def lookup_aircraft_model(registration: str) -> Optional[str]:
+    """Look up aircraft model, using cache and optional web lookup.
+
+    Set the environment variable ``KML_HEATMAP_SKIP_AIRCRAFT_LOOKUP=1``
+    to disable web lookups entirely (cache-only mode).
+
+    Args:
+        registration: Aircraft registration (e.g., 'D-EAGJ')
+
+    Returns:
+        Full aircraft model name or None if not found
+    """
+    cache_file = AIRCRAFT_CACHE_FILE
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    skip_lookup = os.environ.get("KML_HEATMAP_SKIP_AIRCRAFT_LOOKUP", "") == "1"
+
+    with locked_json_read_write(cache_file) as (cache, _existed):
+        # Check cache
+        if registration in cache:
+            cached_value: Optional[str] = cache[registration]
+            if cached_value is not None:
+                return cached_value
+
+        if skip_lookup:
+            return None
+
         try:
-            os.unlink(tmp_path)
-        except (OSError, UnboundLocalError):
-            pass
+            model = _fetch_aircraft_model(registration)
+        except _SkipCache:
+            return None
+
+        # Update cache with result (including None for 404s)
+        cache[registration] = model
 
     return model
 

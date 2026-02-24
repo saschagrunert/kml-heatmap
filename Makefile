@@ -1,4 +1,5 @@
 .PHONY: all build serve test-image test lint format clean
+.PHONY: lint-local format-local test-local
 
 STADIA_API_KEY ?=
 OPENAIP_API_KEY ?=
@@ -34,6 +35,20 @@ lint: test-image
 format: test-image
 	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test ruff format
 	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test npm run format
+
+lint-local:
+	ruff check .
+	mypy .
+	npm run typecheck
+	npm run lint
+
+format-local:
+	ruff format .
+	npx prettier --write .
+
+test-local:
+	npm run test:coverage
+	pytest --cov=kml_heatmap --cov-report=term
 
 clean:
 	$(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) $(IMAGE_NAME)-test 2>/dev/null || true

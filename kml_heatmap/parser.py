@@ -30,24 +30,18 @@ Example:
     Loaded 1234 points from 3 paths
 """
 
-import os
-import re
 import json
-import tempfile
-from pathlib import Path
+import re
 from datetime import datetime
-from typing import List, Dict, Tuple, Optional, Any
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-# Try to use lxml for better performance, fall back to standard library
-try:
-    from lxml import etree as ET
-except ImportError:
-    from xml.etree import ElementTree as ET
+from lxml import etree as ET
 
 from .aircraft import parse_aircraft_from_filename
-from .logger import logger
+from .cache import CACHE_DIR, atomic_json_write
 from .kml_parsers import validate_and_normalize_coordinate
-from .cache import CACHE_DIR
+from .logger import logger
 from .constants import (
     MID_FLIGHT_MIN_ALTITUDE_M,
     MID_FLIGHT_MAX_VARIATION_M,
@@ -168,29 +162,15 @@ def save_to_cache(
         path_groups: List of path groups
         path_metadata: List of path metadata dicts
     """
-    try:
-        # Atomic write: write to temp file, then rename to avoid corruption
-        # from concurrent processes parsing the same file
-        with tempfile.NamedTemporaryFile(
-            mode="w", dir=KML_CACHE_DIR, suffix=".tmp", delete=False
-        ) as tmp:
-            json.dump(
-                {
-                    "coordinates": coordinates,
-                    "path_groups": path_groups,
-                    "path_metadata": path_metadata,
-                },
-                tmp,
-            )
-            tmp_path = tmp.name
-        os.replace(tmp_path, str(cache_path))
-    except OSError as e:
-        logger.debug(f"Failed to save cache: {e}")
-        # Clean up temp file if rename failed
-        try:
-            os.unlink(tmp_path)
-        except (OSError, UnboundLocalError):
-            pass
+    atomic_json_write(
+        cache_path,
+        {
+            "coordinates": coordinates,
+            "path_groups": path_groups,
+            "path_metadata": path_metadata,
+        },
+        KML_CACHE_DIR,
+    )
 
 
 def extract_year_from_timestamp(timestamp: Optional[str]) -> Optional[int]:
@@ -495,7 +475,7 @@ def find_xml_elements(
     Returns:
         List of found XML elements (empty list if none found)
     """
-    elems = parent.findall(namespaced_path, namespaces)
+    elems: List[Any] = parent.findall(namespaced_path, namespaces)
     if not elems:
         elems = parent.findall(fallback_path)
     return elems

@@ -3,6 +3,7 @@
 import os
 import re
 import shutil
+import string
 import subprocess
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -14,12 +15,9 @@ import rjsmin
 import minify_html as mh
 
 from .airports import deduplicate_airports, extract_airport_name
-from .data_exporter import export_all_data, export_metadata
-from .geometry import haversine_distance
-from .helpers import format_flight_time
+from .data_exporter import export_all_data
 from .logger import logger
 from .parser import parse_kml_coordinates, is_mid_flight_start, is_valid_landing
-from .constants import METERS_TO_FEET
 from .statistics import calculate_statistics
 from .validation import validate_kml_file
 
@@ -47,16 +45,16 @@ def minify_html(html: str) -> str:
     """
 
     # First, minify inline CSS and JavaScript
-    def minify_css_tags(match):
+    def minify_css_tags(match: re.Match[str]) -> str:
         """Minify CSS content within style tags using rcssmin."""
         css_content = match.group(1)
-        minified_css = rcssmin.cssmin(css_content)
+        minified_css: str = rcssmin.cssmin(css_content)
         return f"<style>{minified_css}</style>"
 
-    def minify_js_tags(match):
+    def minify_js_tags(match: re.Match[str]) -> str:
         """Minify JavaScript content within script tags using rjsmin."""
         js_content = match.group(1)
-        minified_js = rjsmin.jsmin(js_content)
+        minified_js: str = rjsmin.jsmin(js_content)
         # rjsmin preserves some newlines for ASI (Automatic Semicolon Insertion) safety.
         # Since our generated code uses explicit semicolons, we can safely remove
         # remaining newlines. Replace with space to maintain token separation where needed.
@@ -70,12 +68,16 @@ def minify_html(html: str) -> str:
     html = re.sub(r"<script>(.*?)</script>", minify_js_tags, html, flags=re.DOTALL)
 
     # Use minify-html for HTML minification
-    minified = mh.minify(html)
+    minified: str = mh.minify(html)
 
     return minified
 
 
-def _parse_with_error_handling(kml_file):
+def _parse_with_error_handling(
+    kml_file: str,
+) -> tuple[
+    str, tuple[list[list[float]], list[list[list[float]]], list[Dict[str, Any]]]
+]:
     """Parse a KML file with error handling.
 
     Args:
@@ -146,204 +148,33 @@ def _build_javascript_bundle() -> bool:
         return False
 
 
-def _recalculate_stats_from_segments(
-    stats: Dict[str, Any],
-    segments: List[Dict[str, Any]],
-    path_info_list: List[Dict[str, Any]],
-) -> None:
-    """
-    Recalculate statistics from exported segment data to match JavaScript.
-
-    This ensures the statistics panel and filtered stats show consistent values
-    with the frontend JavaScript calculations.
+def _parse_kml_files(
+    valid_files: List[str],
+) -> tuple[List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]:
+    """Parse KML files in parallel and merge results.
 
     Args:
-        stats: Statistics dictionary (modified in place)
-        segments: Full resolution path segments
-        path_info_list: Full resolution path info entries
-    """
-    # 1. Total Points (segments x 2)
-    stats["total_points"] = len(segments) * 2
-
-    if not segments:
-        return
-
-    # Pass 1: Compute altitude range for cruise threshold
-    altitudes_m = [seg.get("altitude_m", 0) for seg in segments]
-    min_alt_m = min(altitudes_m)
-    max_alt_m = max(altitudes_m)
-    stats["min_altitude_m"] = min_alt_m
-    stats["max_altitude_m"] = max_alt_m
-    stats["min_altitude_ft"] = min_alt_m * METERS_TO_FEET
-    stats["max_altitude_ft"] = max_alt_m * METERS_TO_FEET
-
-    cruise_threshold = min_alt_m * METERS_TO_FEET + 1000
-
-    # Pass 2: Compute all remaining stats in a single loop
-    total_gain_m = 0.0
-    prev_alt = None
-    groundspeed_sum = 0.0
-    groundspeed_count = 0
-    cruise_speed_sum = 0.0
-    cruise_speed_count = 0
-    altitude_bins: Dict[int, int] = {}
-    path_durations: Dict[int, List[float]] = {}
-
-    for seg in segments:
-        alt_m = seg.get("altitude_m", 0)
-        alt_ft = seg.get("altitude_ft", 0)
-        gs = seg.get("groundspeed_knots", 0)
-
-        # Altitude gain
-        if prev_alt is not None and alt_m > prev_alt:
-            total_gain_m += alt_m - prev_alt
-        prev_alt = alt_m
-
-        # Groundspeed average
-        if gs > 0:
-            groundspeed_sum += gs
-            groundspeed_count += 1
-
-        # Cruise stats (segments > 1000ft AGL)
-        if alt_ft > cruise_threshold:
-            if gs > 0:
-                cruise_speed_sum += gs
-                cruise_speed_count += 1
-            if "time" in seg:
-                bin_alt = round(alt_ft / 100) * 100
-                altitude_bins[bin_alt] = altitude_bins.get(bin_alt, 0) + 1
-
-        # Flight time
-        if "time" in seg and "path_id" in seg:
-            path_id = seg["path_id"]
-            if path_id not in path_durations:
-                path_durations[path_id] = []
-            path_durations[path_id].append(seg["time"])
-
-    stats["total_altitude_gain_m"] = total_gain_m
-    stats["total_altitude_gain_ft"] = total_gain_m * METERS_TO_FEET
-    stats["average_groundspeed_knots"] = (
-        groundspeed_sum / groundspeed_count if groundspeed_count > 0 else 0
-    )
-    stats["cruise_speed_knots"] = (
-        cruise_speed_sum / cruise_speed_count if cruise_speed_count > 0 else 0
-    )
-
-    if altitude_bins:
-        stats["most_common_cruise_altitude_ft"] = max(
-            altitude_bins.keys(), key=lambda k: altitude_bins[k]
-        )
-        stats["most_common_cruise_altitude_m"] = round(
-            stats["most_common_cruise_altitude_ft"] * 0.3048
-        )
-
-    total_flight_time = 0.0
-    for times in path_durations.values():
-        if len(times) >= 2:
-            total_flight_time += max(times) - min(times)
-    stats["total_flight_time_seconds"] = total_flight_time
-
-    # 8. Per-aircraft flight times and distances
-    if stats.get("aircraft_list"):
-        aircraft_times: Dict[str, float] = {}
-        aircraft_distances: Dict[str, float] = {}
-        aircraft_years: Dict[str, set] = {}
-
-        for idx, pi in enumerate(path_info_list):
-            reg = pi.get("aircraft_registration")
-            path_id = pi.get("id")
-            year = pi.get("year")
-            if reg and path_id is not None and path_id in path_durations:
-                if reg not in aircraft_times:
-                    aircraft_times[reg] = 0
-                    aircraft_distances[reg] = 0.0
-                    aircraft_years[reg] = set()
-                times = path_durations[path_id]
-                if len(times) >= 2:
-                    aircraft_times[reg] += max(times) - min(times)
-                    if year:
-                        aircraft_years[reg].add(str(year))
-
-        for segment in segments:
-            path_id = segment.get("path_id")
-            if path_id is not None and path_id < len(path_info_list):
-                pi = path_info_list[path_id]
-                reg = pi.get("aircraft_registration")
-                if reg and reg in aircraft_distances:
-                    coords = segment.get("coords", [])
-                    if len(coords) == 2:
-                        lat1, lon1 = coords[0]
-                        lat2, lon2 = coords[1]
-                        aircraft_distances[reg] += haversine_distance(
-                            lat1, lon1, lat2, lon2
-                        )
-
-        for aircraft in stats["aircraft_list"]:
-            reg = aircraft["registration"]
-            if reg in aircraft_times:
-                flight_time_seconds = aircraft_times[reg]
-                flight_distance_km = aircraft_distances.get(reg, 0.0)
-                aircraft["flight_time_seconds"] = flight_time_seconds
-                aircraft["flight_distance_km"] = flight_distance_km
-                aircraft["flight_time_str"] = format_flight_time(flight_time_seconds)
-
-
-def create_progressive_heatmap(
-    kml_files: List[str], output_file: str = "index.html", data_dir: str = "data"
-) -> bool:
-    """
-    Create a progressive-loading heatmap with external data files.
-
-    This is the main pipeline that:
-    1. Parses KML files in parallel
-    2. Deduplicates airports
-    3. Calculates statistics
-    4. Exports data files (per-year JS, airports, metadata)
-    5. Recalculates stats from segment data for JS consistency
-    6. Generates minified HTML
-    7. Generates map_config.js
-    8. Copies static assets (JS bundles, CSS, favicons)
-
-    Args:
-        kml_files: List of KML file paths
-        output_file: Output HTML file path
-        data_dir: Directory to save data files
+        valid_files: List of validated KML file paths.
 
     Returns:
-        True if successful, False otherwise
+        Tuple of (all_coordinates, all_path_groups, all_path_metadata).
+
+    Raises:
+        ValueError: If no coordinates are found in any file.
     """
-    # Get API keys
-    stadia_api_key = os.environ.get("STADIA_API_KEY", "")
-    openaip_api_key = os.environ.get("OPENAIP_API_KEY", "")
-
-    # Validate KML files
-    valid_files = []
-    for kml_file in kml_files:
-        is_valid, error_msg = validate_kml_file(kml_file)
-        if not is_valid:
-            logger.error(f"  {error_msg}")
-        else:
-            valid_files.append(kml_file)
-
-    if not valid_files:
-        logger.error("No valid KML files to process!")
-        return False
-
-    logger.info(f"Parsing {len(valid_files)} KML file(s)...")
-
-    # Pre-load airport database to avoid multiple downloads in worker processes
     from .airport_lookup import _load_airport_database
 
     _load_airport_database()
 
     parse_start = time.time()
 
-    # Parse files in parallel
     all_coordinates: List[List[float]] = []
     all_path_groups: List[List[List[float]]] = []
     all_path_metadata: List[Dict[str, Any]] = []
 
-    results = []
+    results: List[
+        tuple[str, List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]
+    ] = []
     completed_count = 0
     with ProcessPoolExecutor(
         max_workers=min(len(valid_files), os.cpu_count() or 4)
@@ -360,7 +191,6 @@ def create_progressive_heatmap(
                 f"  [{completed_count}/{len(valid_files)}] {progress_pct:.0f}% - {Path(kml_file).name}"
             )
 
-    # Sort results by filename for deterministic output
     results.sort(key=lambda x: x[0])
     for _, coords, path_groups, path_metadata in results:
         all_coordinates.extend(coords)
@@ -373,20 +203,41 @@ def create_progressive_heatmap(
     )
 
     if not all_coordinates:
-        logger.error("No coordinates found in any KML files!")
-        return False
+        raise ValueError("No coordinates found in any KML files!")
 
     logger.info(f"\nTotal points: {len(all_coordinates)}")
+    return all_coordinates, all_path_groups, all_path_metadata
 
-    # Calculate bounds
+
+def _process_data(
+    all_coordinates: List[List[float]],
+    all_path_groups: List[List[List[float]]],
+    all_path_metadata: List[Dict[str, Any]],
+    data_dir: str,
+) -> Dict[str, Any]:
+    """Process parsed data: deduplicate airports, calculate stats, export files.
+
+    Args:
+        all_coordinates: Merged coordinates from all KML files.
+        all_path_groups: Merged path groups.
+        all_path_metadata: Merged path metadata.
+        data_dir: Directory to save data files.
+
+    Returns:
+        Dict with keys: stats, unique_airports, bounds, metadata_params,
+        full_res_segments, full_res_path_info.
+    """
     lats = [coord[0] for coord in all_coordinates]
     lons = [coord[1] for coord in all_coordinates]
-    min_lat, max_lat = min(lats), max(lats)
-    min_lon, max_lon = min(lons), max(lons)
-    center_lat = (min_lat + max_lat) / 2
-    center_lon = (min_lon + max_lon) / 2
+    bounds = {
+        "min_lat": min(lats),
+        "max_lat": max(lats),
+        "min_lon": min(lons),
+        "max_lon": max(lons),
+        "center_lat": (min(lats) + max(lats)) / 2,
+        "center_lon": (min(lons) + max(lons)) / 2,
+    }
 
-    # Process airports
     unique_airports: List[Dict[str, Any]] = []
     if all_path_metadata:
         logger.info(f"\nProcessing {len(all_path_metadata)} start points...")
@@ -395,11 +246,9 @@ def create_progressive_heatmap(
         )
         logger.info(f"  Found {len(unique_airports)} unique airports")
 
-    # Calculate statistics
     logger.info("\nCalculating statistics...")
     stats = calculate_statistics(all_coordinates, all_path_groups, all_path_metadata)
 
-    # Add airport info to stats
     valid_airport_names = []
     for airport in unique_airports:
         full_name = airport.get("name", "Unknown")
@@ -411,8 +260,7 @@ def create_progressive_heatmap(
     stats["num_airports"] = len(valid_airport_names)
     stats["airport_names"] = sorted(valid_airport_names)
 
-    # Export data (strip timestamps by default for privacy)
-    files, full_res_segments, full_res_path_info, metadata_params = export_all_data(
+    export_all_data(
         all_coordinates,
         all_path_groups,
         all_path_metadata,
@@ -422,40 +270,24 @@ def create_progressive_heatmap(
         strip_timestamps=True,
     )
 
-    # Recalculate statistics from segment data to match JavaScript
-    if full_res_segments is not None and full_res_path_info is not None:
-        logger.info("\nRecalculating statistics from segment data...")
-        _recalculate_stats_from_segments(stats, full_res_segments, full_res_path_info)
+    return {
+        "stats": stats,
+        "bounds": bounds,
+    }
 
-        # Re-export metadata with recalculated statistics
-        export_metadata(
-            stats,
-            metadata_params["min_alt_m"],
-            metadata_params["max_alt_m"],
-            metadata_params["min_groundspeed_knots"],
-            metadata_params["max_groundspeed_knots"],
-            metadata_params["available_years"],
-            data_dir,
-            metadata_params["file_structure"],
-        )
-        logger.info("  Updated metadata with segment-based statistics")
 
-    # Generate HTML
+def _render_html(output_file: str, data_dir_name: str) -> None:
+    """Render and minify the HTML template.
+
+    Args:
+        output_file: Path to write the output HTML.
+        data_dir_name: Base name of the data directory.
+    """
     logger.info("\nGenerating progressive HTML...")
-    data_dir_name = os.path.basename(data_dir)
 
-    template = load_template()
-    html_content = template.replace("{STADIA_API_KEY}", stadia_api_key)
-    html_content = html_content.replace("{OPENAIP_API_KEY}", openaip_api_key)
-    html_content = html_content.replace("{data_dir_name}", data_dir_name)
-    html_content = html_content.replace("{center_lat}", str(center_lat))
-    html_content = html_content.replace("{center_lon}", str(center_lon))
-    html_content = html_content.replace("{min_lat}", str(min_lat))
-    html_content = html_content.replace("{max_lat}", str(max_lat))
-    html_content = html_content.replace("{min_lon}", str(min_lon))
-    html_content = html_content.replace("{max_lon}", str(max_lon))
+    tmpl = string.Template(load_template())
+    html_content = tmpl.substitute(data_dir_name=data_dir_name)
 
-    # Minify and write HTML
     logger.info("\nMinifying HTML...")
     minified_html = minify_html(html_content)
 
@@ -472,42 +304,55 @@ def create_progressive_heatmap(
         f"  Minification: {original_size / 1024:.1f} KB -> {minified_size / 1024:.1f} KB ({reduction:.1f}% reduction)"
     )
 
-    # Build JavaScript bundle if needed
-    output_dir = os.path.dirname(output_file) or "."
+
+def _package_assets(
+    output_dir: str,
+    bounds: Dict[str, float],
+    data_dir_name: str,
+) -> None:
+    """Build JS bundles (if needed), generate config, and copy static assets.
+
+    Args:
+        output_dir: Directory to write output files.
+        bounds: Dict with min_lat, max_lat, min_lon, max_lon, center_lat, center_lon.
+        data_dir_name: Base name of the data directory.
+    """
     static_dir = Path(__file__).parent / "static"
     templates_dir = Path(__file__).parent / "templates"
 
-    bundle_exists = (static_dir / "bundle.js").exists()
-    mapapp_exists = (static_dir / "mapApp.bundle.js").exists()
+    stadia_api_key = os.environ.get("STADIA_API_KEY", "")
+    openaip_api_key = os.environ.get("OPENAIP_API_KEY", "")
 
-    if not (bundle_exists and mapapp_exists):
+    # Build JavaScript bundles if needed
+    if not (
+        (static_dir / "bundle.js").exists()
+        and (static_dir / "mapApp.bundle.js").exists()
+    ):
         logger.info("\nBuilding JavaScript modules...")
         _build_javascript_bundle()
     else:
         logger.info("\nUsing pre-built JavaScript bundles...")
 
-    # Generate map_config.js from template
-    map_config_template = templates_dir / "map_config_template.js"
+    # Generate map_config.js
+    map_config_template_path = templates_dir / "map_config_template.js"
     map_config_dst = os.path.join(output_dir, "map_config.js")
 
-    with open(map_config_template, "r") as f:
-        map_config_content = f.read()
+    with open(map_config_template_path, "r") as f:
+        map_config_raw = f.read()
 
-    map_config_content = map_config_content.replace(
-        "{{STADIA_API_KEY}}", stadia_api_key
-    )
-    map_config_content = map_config_content.replace(
-        "{{OPENAIP_API_KEY}}", openaip_api_key
-    )
-    map_config_content = map_config_content.replace("{{data_dir_name}}", data_dir_name)
-    map_config_content = map_config_content.replace("{{center_lat}}", str(center_lat))
-    map_config_content = map_config_content.replace("{{center_lon}}", str(center_lon))
-    map_config_content = map_config_content.replace("{{min_lat}}", str(min_lat))
-    map_config_content = map_config_content.replace("{{max_lat}}", str(max_lat))
-    map_config_content = map_config_content.replace("{{min_lon}}", str(min_lon))
-    map_config_content = map_config_content.replace("{{max_lon}}", str(max_lon))
-
-    map_config_minified = rjsmin.jsmin(map_config_content)
+    config_vars = {
+        "stadia_api_key": stadia_api_key,
+        "openaip_api_key": openaip_api_key,
+        "data_dir_name": data_dir_name,
+        "center_lat": str(bounds["center_lat"]),
+        "center_lon": str(bounds["center_lon"]),
+        "min_lat": str(bounds["min_lat"]),
+        "max_lat": str(bounds["max_lat"]),
+        "min_lon": str(bounds["min_lon"]),
+        "max_lon": str(bounds["max_lon"]),
+    }
+    map_config_content = string.Template(map_config_raw).substitute(config_vars)
+    map_config_minified: str = rjsmin.jsmin(map_config_content)
 
     with open(map_config_dst, "w") as f:
         f.write(map_config_minified)
@@ -518,27 +363,15 @@ def create_progressive_heatmap(
     )
 
     # Copy JavaScript bundles
-    bundle_js_src = static_dir / "bundle.js"
-    if bundle_js_src.exists():
-        bundle_js_dst = os.path.join(output_dir, "bundle.js")
-        shutil.copy2(bundle_js_src, bundle_js_dst)
-        bundle_js_size = os.path.getsize(bundle_js_dst)
-        logger.info(
-            f"JavaScript library copied: {bundle_js_dst} ({bundle_js_size / 1024:.1f} KB)"
-        )
-    else:
-        logger.warning("bundle.js not found - run npm build to generate it")
-
-    mapapp_bundle_src = static_dir / "mapApp.bundle.js"
-    if mapapp_bundle_src.exists():
-        mapapp_bundle_dst = os.path.join(output_dir, "mapApp.bundle.js")
-        shutil.copy2(mapapp_bundle_src, mapapp_bundle_dst)
-        mapapp_bundle_size = os.path.getsize(mapapp_bundle_dst)
-        logger.info(
-            f"JavaScript application copied: {mapapp_bundle_dst} ({mapapp_bundle_size / 1024:.1f} KB)"
-        )
-    else:
-        logger.warning("mapApp.bundle.js not found - run npm build to generate it")
+    for bundle_name in ("bundle.js", "mapApp.bundle.js"):
+        src = static_dir / bundle_name
+        dst = os.path.join(output_dir, bundle_name)
+        if src.exists():
+            shutil.copy2(src, dst)
+            size = os.path.getsize(dst)
+            logger.info(f"JavaScript copied: {dst} ({size / 1024:.1f} KB)")
+        else:
+            logger.warning(f"{bundle_name} not found - run npm build to generate it")
 
     # Copy and minify CSS
     styles_css_src = static_dir / "styles.css"
@@ -547,7 +380,7 @@ def create_progressive_heatmap(
     with open(styles_css_src, "r") as f:
         styles_css_content = f.read()
 
-    styles_css_minified = rcssmin.cssmin(styles_css_content)
+    styles_css_minified: str = rcssmin.cssmin(styles_css_content)
 
     with open(styles_css_dst, "w") as f:
         f.write(styles_css_minified)
@@ -556,22 +389,77 @@ def create_progressive_heatmap(
     logger.info(f"CSS copied: {styles_css_dst} ({styles_css_size / 1024:.1f} KB)")
 
     # Copy favicon files
-    favicon_files = [
+    for favicon_file in (
         "favicon.svg",
         "favicon.ico",
         "favicon-192.png",
         "favicon-512.png",
         "apple-touch-icon.png",
         "manifest.json",
-    ]
-
-    for favicon_file in favicon_files:
-        favicon_src = static_dir / favicon_file
-        favicon_dst = os.path.join(output_dir, favicon_file)
-        if favicon_src.exists():
-            shutil.copy2(favicon_src, favicon_dst)
+    ):
+        src = static_dir / favicon_file
+        dst = os.path.join(output_dir, favicon_file)
+        if src.exists():
+            shutil.copy2(src, dst)
 
     logger.info(f"Favicon files copied to {output_dir}")
+
+
+def create_progressive_heatmap(
+    kml_files: List[str], output_file: str = "index.html", data_dir: str = "data"
+) -> bool:
+    """Create a progressive-loading heatmap with external data files.
+
+    Pipeline stages:
+    1. Validate and parse KML files in parallel
+    2. Process data: deduplicate airports, calculate stats, export files
+    3. Render minified HTML
+    4. Package static assets (JS bundles, config, CSS, favicons)
+
+    Args:
+        kml_files: List of KML file paths
+        output_file: Output HTML file path
+        data_dir: Directory to save data files
+
+    Returns:
+        True if successful, False otherwise
+    """
+    # Stage 1: Validate and parse
+    valid_files = []
+    for kml_file in kml_files:
+        is_valid, error_msg = validate_kml_file(kml_file)
+        if not is_valid:
+            logger.error(f"  {error_msg}")
+        else:
+            valid_files.append(kml_file)
+
+    if not valid_files:
+        logger.error("No valid KML files to process!")
+        return False
+
+    logger.info(f"Parsing {len(valid_files)} KML file(s)...")
+
+    try:
+        all_coordinates, all_path_groups, all_path_metadata = _parse_kml_files(
+            valid_files
+        )
+    except ValueError as e:
+        logger.error(str(e))
+        return False
+
+    # Stage 2: Process data
+    result = _process_data(
+        all_coordinates, all_path_groups, all_path_metadata, data_dir
+    )
+
+    # Stage 3: Render HTML
+    data_dir_name = os.path.basename(data_dir)
+    _render_html(output_file, data_dir_name)
+
+    # Stage 4: Package assets
+    output_dir = os.path.dirname(output_file) or "."
+    _package_assets(output_dir, result["bounds"], data_dir_name)
+
     logger.info(
         f"  Open {output_file} in a web browser (works with file:// or serve via HTTP)"
     )

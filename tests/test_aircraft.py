@@ -1,13 +1,16 @@
 """Tests for aircraft module."""
 
 import tempfile
+import time
 import os
 import json
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from pathlib import Path
 from kml_heatmap.aircraft import (
     AircraftDataParser,
+    _fetch_aircraft_model,
+    _SkipCache,
     parse_aircraft_from_filename,
     lookup_aircraft_model,
 )
@@ -448,3 +451,163 @@ class TestLookupAircraftModel:
             with open(temp_cache, "r") as f:
                 cache = json.load(f)
                 assert cache.get("D-EAGJ") == "Diamond DA-20A-1 Katana"
+
+    def test_skip_lookup_env_var(self, temp_cache):
+        """Test KML_HEATMAP_SKIP_AIRCRAFT_LOOKUP disables web lookups."""
+        with patch.dict(os.environ, {"KML_HEATMAP_SKIP_AIRCRAFT_LOOKUP": "1"}):
+            with patch("urllib.request.urlopen") as mock_urlopen:
+                result = lookup_aircraft_model("D-NONET")
+                assert result is None
+                # Should not make any HTTP requests
+                mock_urlopen.assert_not_called()
+
+    def test_skip_lookup_returns_cached(self, temp_cache):
+        """Test that skip lookup still returns cached values."""
+        with open(temp_cache, "w") as f:
+            json.dump({"D-EAGJ": "Diamond DA-20A-1 Katana"}, f)
+
+        with patch.dict(os.environ, {"KML_HEATMAP_SKIP_AIRCRAFT_LOOKUP": "1"}):
+            result = lookup_aircraft_model("D-EAGJ")
+            assert result == "Diamond DA-20A-1 Katana"
+
+
+class TestFetchAircraftModel:
+    """Tests for _fetch_aircraft_model function."""
+
+    def test_successful_fetch(self):
+        """Test successful aircraft model fetch."""
+        html_content = b"""<html>
+        <head><title>Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana</title></head>
+        </html>"""
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = html_content
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_response):
+            # Reset rate limiting
+            import kml_heatmap.aircraft as aircraft_mod
+
+            aircraft_mod._last_request_time = 0
+            result = _fetch_aircraft_model("D-EAGJ")
+            assert result == "Diamond DA-20A-1 Katana"
+
+    def test_404_returns_none(self):
+        """Test 404 returns None without raising _SkipCache."""
+        import urllib.error
+
+        with patch("urllib.request.urlopen") as mock:
+            mock.side_effect = urllib.error.HTTPError(
+                url="test", code=404, msg="Not Found", hdrs={}, fp=None
+            )
+            import kml_heatmap.aircraft as aircraft_mod
+
+            aircraft_mod._last_request_time = 0
+            result = _fetch_aircraft_model("D-NONE")
+            assert result is None
+
+    def test_429_raises_skip_cache(self):
+        """Test 429 rate limit raises _SkipCache."""
+        import urllib.error
+
+        with patch("urllib.request.urlopen") as mock:
+            mock.side_effect = urllib.error.HTTPError(
+                url="test", code=429, msg="Rate Limited", hdrs={}, fp=None
+            )
+            import kml_heatmap.aircraft as aircraft_mod
+
+            aircraft_mod._last_request_time = 0
+            with pytest.raises(_SkipCache):
+                _fetch_aircraft_model("D-RATE")
+
+    def test_network_error_raises_skip_cache(self):
+        """Test network error raises _SkipCache."""
+        import urllib.error
+
+        with patch("urllib.request.urlopen") as mock:
+            mock.side_effect = urllib.error.URLError("No network")
+            import kml_heatmap.aircraft as aircraft_mod
+
+            aircraft_mod._last_request_time = 0
+            with pytest.raises(_SkipCache):
+                _fetch_aircraft_model("D-NET")
+
+    def test_timeout_raises_skip_cache(self):
+        """Test timeout raises _SkipCache."""
+        with patch("urllib.request.urlopen") as mock:
+            mock.side_effect = TimeoutError("Timed out")
+            import kml_heatmap.aircraft as aircraft_mod
+
+            aircraft_mod._last_request_time = 0
+            with pytest.raises(_SkipCache):
+                _fetch_aircraft_model("D-TIME")
+
+    def test_unexpected_error_raises_skip_cache(self):
+        """Test unexpected error raises _SkipCache."""
+        with patch("urllib.request.urlopen") as mock:
+            mock.side_effect = RuntimeError("Unexpected")
+            import kml_heatmap.aircraft as aircraft_mod
+
+            aircraft_mod._last_request_time = 0
+            with pytest.raises(_SkipCache):
+                _fetch_aircraft_model("D-UNEX")
+
+    def test_rate_limiting_delays_request(self):
+        """Test that rate limiting adds delay between requests."""
+        import kml_heatmap.aircraft as aircraft_mod
+
+        # Set last request time to now
+        aircraft_mod._last_request_time = time.monotonic()
+
+        html_content = b"""<html>
+        <head><title>Aircraft info for D-TEST - Cessna 172</title></head>
+        </html>"""
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = html_content
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_response):
+            with patch("time.sleep") as mock_sleep:
+                _fetch_aircraft_model("D-TEST")
+                # Should have called sleep since last request was just now
+                mock_sleep.assert_called_once()
+                delay = mock_sleep.call_args[0][0]
+                assert delay > 0
+                assert delay <= aircraft_mod._REQUEST_DELAY_SECONDS
+
+    def test_sends_user_agent_header(self):
+        """Test that requests include a proper User-Agent header."""
+        html_content = b"""<html>
+        <head><title>Aircraft info for D-EAGJ - Cessna 172</title></head>
+        </html>"""
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = html_content
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        import kml_heatmap.aircraft as aircraft_mod
+
+        aircraft_mod._last_request_time = 0
+
+        with patch("urllib.request.urlopen", return_value=mock_response) as mock_open:
+            _fetch_aircraft_model("D-EAGJ")
+            # Check the Request object passed to urlopen
+            req = mock_open.call_args[0][0]
+            assert "kml-heatmap" in req.get_header("User-agent")
+
+
+class TestSkipCacheException:
+    """Tests for _SkipCache exception."""
+
+    def test_is_exception(self):
+        """Test that _SkipCache is an Exception subclass."""
+        assert issubclass(_SkipCache, Exception)
+
+    def test_can_be_raised_and_caught(self):
+        """Test raising and catching _SkipCache."""
+        with pytest.raises(_SkipCache):
+            raise _SkipCache()

@@ -27,18 +27,18 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
 # Set working directory
 WORKDIR /app
 
-# Copy requirements
-COPY requirements.txt requirements-test.txt ./
+# Copy lock files
+COPY requirements.lock requirements-test.lock ./
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir -r requirements-test.txt
+# Install pinned dependencies
+RUN pip install --no-cache-dir -r requirements.lock && \
+    pip install --no-cache-dir -r requirements-test.lock
 
 # Copy application code
 COPY kml-heatmap.py .
 COPY kml_heatmap/ ./kml_heatmap/
 COPY scripts/ ./scripts/
-COPY pytest.ini mypy.ini .
+COPY pyproject.toml .
 
 # Copy JavaScript/TypeScript build configuration and node_modules from js-env
 COPY package.json build.js vitest.config.js tsconfig.json tsconfig.eslint.json eslint.config.js ./
