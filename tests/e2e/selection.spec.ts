@@ -111,25 +111,66 @@ test.describe("Path Selection", () => {
   test("clicking a path on the map selects it", async ({ page }) => {
     await waitForPathData(page);
 
+    // Find a path coordinate far from any airport marker, then zoom in
     const clickPos = await page.evaluate(() => {
       const app = (window as any).mapApp;
       const segments = app.currentData?.path_segments;
       if (!segments || segments.length === 0) return null;
 
-      const seg = segments[Math.floor(segments.length / 2)];
-      if (!seg.coords || seg.coords.length < 2) return null;
+      // Collect all airport positions
+      const airports: { lat: number; lon: number }[] = [];
+      for (const name of Object.keys(app.airportMarkers || {})) {
+        const ll = app.airportMarkers[name].getLatLng();
+        airports.push({ lat: ll.lat, lon: ll.lng });
+      }
 
-      const coord = seg.coords[0];
+      // Find the segment+coord combo farthest from any airport
+      let best: { seg: any; coord: number[]; dist: number } | null = null;
+      for (const seg of segments) {
+        if (!seg.coords || seg.coords.length < 2) continue;
+        const midCoord = seg.coords[Math.floor(seg.coords.length / 2)];
+        const minDist = airports.reduce((min, a) => {
+          const d = Math.hypot(midCoord[0] - a.lat, midCoord[1] - a.lon);
+          return Math.min(min, d);
+        }, Infinity);
+        if (!best || minDist > best.dist) {
+          best = { seg, coord: midCoord, dist: minDist };
+        }
+      }
+      if (!best) return null;
+
+      // Zoom in to avoid airport markers intercepting clicks
+      app.map.setView(L.latLng(best.coord[0], best.coord[1]), 13, {
+        animate: false,
+      });
+
       const point = app.map.latLngToContainerPoint(
-        L.latLng(coord[0], coord[1])
+        L.latLng(best.coord[0], best.coord[1])
       );
-      return { x: point.x, y: point.y, pathId: seg.path_id };
+      return {
+        x: point.x,
+        y: point.y,
+        pathId: best.seg.path_id,
+        coord: best.coord,
+      };
     });
 
     if (!clickPos) return;
 
+    // Wait for map to settle after zoom
+    await page.waitForTimeout(500);
+
+    // Re-calculate click position after map has settled
+    const pos = await page.evaluate((cp) => {
+      const app = (window as any).mapApp;
+      const point = app.map.latLngToContainerPoint(
+        L.latLng(cp.coord[0], cp.coord[1])
+      );
+      return { x: point.x, y: point.y };
+    }, clickPos);
+
     await page.locator("#map").click({
-      position: { x: clickPos.x, y: clickPos.y },
+      position: { x: pos.x, y: pos.y },
     });
     await page.waitForTimeout(300);
 
@@ -199,27 +240,62 @@ test.describe("Path Selection", () => {
   test("path polyline popup shows altitude info on click", async ({ page }) => {
     await waitForPathData(page);
 
-    // Get coordinates of a path segment
+    // Get coordinates of a path segment far from any airport marker
     const clickPos = await page.evaluate(() => {
       const app = (window as any).mapApp;
       const segments = app.currentData?.path_segments;
       if (!segments || segments.length === 0) return null;
 
-      const seg = segments[Math.floor(segments.length / 2)];
-      if (!seg.coords || seg.coords.length < 2) return null;
+      // Collect all airport positions
+      const airports: { lat: number; lon: number }[] = [];
+      for (const name of Object.keys(app.airportMarkers || {})) {
+        const ll = app.airportMarkers[name].getLatLng();
+        airports.push({ lat: ll.lat, lon: ll.lng });
+      }
 
-      const coord = seg.coords[0];
+      // Find the segment+coord combo farthest from any airport
+      let best: { coord: number[]; dist: number } | null = null;
+      for (const seg of segments) {
+        if (!seg.coords || seg.coords.length < 2) continue;
+        const midCoord = seg.coords[Math.floor(seg.coords.length / 2)];
+        const minDist = airports.reduce((min, a) => {
+          const d = Math.hypot(midCoord[0] - a.lat, midCoord[1] - a.lon);
+          return Math.min(min, d);
+        }, Infinity);
+        if (!best || minDist > best.dist) {
+          best = { coord: midCoord, dist: minDist };
+        }
+      }
+      if (!best) return null;
+
+      // Zoom in to avoid airport markers intercepting clicks
+      app.map.setView(L.latLng(best.coord[0], best.coord[1]), 13, {
+        animate: false,
+      });
+
       const point = app.map.latLngToContainerPoint(
-        L.latLng(coord[0], coord[1])
+        L.latLng(best.coord[0], best.coord[1])
       );
-      return { x: point.x, y: point.y };
+      return { x: point.x, y: point.y, coord: best.coord };
     });
 
     if (!clickPos) return;
 
+    // Wait for map to settle after zoom
+    await page.waitForTimeout(500);
+
+    // Re-calculate click position after map has settled
+    const pos = await page.evaluate((cp) => {
+      const app = (window as any).mapApp;
+      const point = app.map.latLngToContainerPoint(
+        L.latLng(cp.coord[0], cp.coord[1])
+      );
+      return { x: point.x, y: point.y };
+    }, clickPos);
+
     // Click the path to open popup
     await page.locator("#map").click({
-      position: { x: clickPos.x, y: clickPos.y },
+      position: { x: pos.x, y: pos.y },
     });
     await page.waitForTimeout(500);
 
