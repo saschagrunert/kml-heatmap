@@ -114,6 +114,7 @@ export class AirportManager {
     const hasFilters =
       this.app.selectedYear !== "all" || this.app.selectedAircraft !== "all";
     const hasSelection = this.app.selectedPathIds.size > 0;
+    const hasIsolation = this.app.isolateSelection && hasSelection;
 
     if (!hasFilters && !hasSelection) {
       // No filters or selection - show all airports
@@ -151,7 +152,12 @@ export class AirportManager {
       });
     }
 
-    // If paths are selected, collect airports from selected paths (overrides filter)
+    // In isolate mode, only show airports from selected paths (ignore filter-only airports)
+    if (hasIsolation) {
+      visibleAirports.clear();
+    }
+
+    // If paths are selected, collect airports from selected paths
     if (hasSelection) {
       this.app.selectedPathIds.forEach((pathId) => {
         // Use fullPathInfo for reliable path-to-airport mapping (not affected by zoom level)

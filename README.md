@@ -257,6 +257,7 @@ Data is exported as JavaScript files (instead of JSON) for compatibility with th
 - **Year Filter** - View flights from specific years or all years combined
 - **Aircraft Filter** - Filter by aircraft registration to see flights per aircraft
 - **Path Selection** - Click paths to highlight and view detailed statistics
+- **Solo Mode** - Isolate selected paths, hiding all other paths and heatmap data
 
 ### Shareable URLs
 
@@ -265,8 +266,8 @@ Map state is automatically encoded in the URL for easy sharing. Copy the URL fro
 - Specific year or all years (`?y=2025` or `?y=all`)
 - Aircraft filter (`?a=D-EAGJ`)
 - Selected paths (`?p=1,5,12`)
-- Layer visibility (8 flags: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden)
-  - Example: `?v=10010000`
+- Layer visibility (9 flags: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden, isolateSelection)
+  - Example: `?v=100100000`
 - Map position (`?lat=51.5&lng=13.4&z=10`)
 
 **Example URLs:**

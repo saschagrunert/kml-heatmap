@@ -35,7 +35,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "dompurify": "^3.3.2"
+    "dompurify": "^3.3.3"
   },
   "overrides": {
     "typescript-eslint": {

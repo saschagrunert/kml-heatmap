@@ -13,6 +13,7 @@ export class UIToggles {
 
     // Pre-cache frequently accessed DOM elements
     domCache.cacheElements([
+      "isolate-btn",
       "heatmap-btn",
       "altitude-btn",
       "airspeed-btn",

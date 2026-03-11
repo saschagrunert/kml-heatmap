@@ -301,7 +301,7 @@ describe("URL state management", () => {
       expect(params.get("y")).toBe("2025");
       expect(params.get("a")).toBe("D-EAGJ");
       expect(params.get("p")).toBe("1,5");
-      expect(params.get("v")).toBe("01010100");
+      expect(params.get("v")).toBe("010101000");
       expect(params.get("lat")).toBe("51.500000");
       expect(params.get("lng")).toBe("13.400000");
       expect(params.get("z")).toBe("10.50");
@@ -361,6 +361,7 @@ describe("URL state management", () => {
         statsPanelVisible: false,
         wrappedVisible: false,
         buttonsHidden: false,
+        isolateSelection: false,
       });
     });
 

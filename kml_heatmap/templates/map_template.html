@@ -54,16 +54,28 @@
       role="application"
       aria-label="Flight map visualization"
     ></div>
-    <!-- Hide buttons toggle (top-center) -->
-    <button
-      id="hide-buttons-btn"
-      class="control-btn hide-toggle"
-      onclick="toggleButtonsVisibility()"
-      aria-label="Show or hide control buttons"
-      aria-pressed="false"
-    >
-      🔼
-    </button>
+    <!-- Top-center button group -->
+    <div id="top-center-buttons">
+      <button
+        id="isolate-btn"
+        class="control-btn toggleable-btn"
+        onclick="toggleIsolateSelection()"
+        style="opacity: 0.5"
+        aria-label="Isolate selected paths"
+        aria-pressed="false"
+      >
+        🎯
+      </button>
+      <button
+        id="hide-buttons-btn"
+        class="control-btn hide-toggle"
+        onclick="toggleButtonsVisibility()"
+        aria-label="Show or hide control buttons"
+        aria-pressed="false"
+      >
+        🔼
+      </button>
+    </div>
 
     <!-- Left side buttons -->
     <button

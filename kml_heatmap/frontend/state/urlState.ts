@@ -11,7 +11,7 @@ import type { AppState } from "../types";
  *   y - selectedYear (string: 'all' or year like '2024')
  *   a - selectedAircraft (string: 'all' or aircraft identifier)
  *   p - selectedPathIds (comma-separated integers: '1,5,12')
- *   v - layer visibility (8-char binary string: '10010000')
+ *   v - layer visibility (9-char binary string: '100100000')
  *   lat, lng - map center coordinates
  *   z - map zoom level
  * @param params - URLSearchParams object or search string
@@ -62,11 +62,17 @@ export function parseUrlParams(
     }
   }
 
-  // Layer visibility (8 flags: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden)
+  // Layer visibility (9 flags: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden, isolateSelection)
   if (urlParams.has("v")) {
     const vis = urlParams.get("v");
-    // Support old 6-char, 7-char, and new 8-char format for backwards compatibility
-    if (vis && (vis.length === 6 || vis.length === 7 || vis.length === 8)) {
+    // Support old 6-char, 7-char, 8-char, and new 9-char format for backwards compatibility
+    if (
+      vis &&
+      (vis.length === 6 ||
+        vis.length === 7 ||
+        vis.length === 8 ||
+        vis.length === 9)
+    ) {
       state.heatmapVisible = vis[0] === "1";
       state.altitudeVisible = vis[1] === "1";
       state.airspeedVisible = vis[2] === "1";
@@ -78,8 +84,12 @@ export function parseUrlParams(
         state.wrappedVisible = vis[6] === "1";
       }
       // Only parse buttonsHidden state if 8th character exists
-      if (vis.length === 8) {
+      if (vis.length >= 8) {
         state.buttonsHidden = vis[7] === "1";
+      }
+      // Only parse isolateSelection state if 9th character exists
+      if (vis.length === 9) {
+        state.isolateSelection = vis[8] === "1";
       }
     }
   }
@@ -152,7 +162,7 @@ export function encodeStateToUrl(state: AppState): string {
     params.set("p", state.selectedPathIds.join(","));
   }
 
-  // Build visibility string (8 characters: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden)
+  // Build visibility string (9 characters: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden, isolateSelection)
   // Only include if visibility properties are actually defined
   const hasVisibility =
     state.heatmapVisible !== undefined ||
@@ -162,7 +172,8 @@ export function encodeStateToUrl(state: AppState): string {
     state.aviationVisible !== undefined ||
     state.statsPanelVisible !== undefined ||
     state.wrappedVisible !== undefined ||
-    state.buttonsHidden !== undefined;
+    state.buttonsHidden !== undefined ||
+    state.isolateSelection !== undefined;
 
   if (hasVisibility) {
     const vis = [
@@ -174,10 +185,11 @@ export function encodeStateToUrl(state: AppState): string {
       state.statsPanelVisible ? "1" : "0",
       state.wrappedVisible ? "1" : "0",
       state.buttonsHidden ? "1" : "0",
+      state.isolateSelection ? "1" : "0",
     ].join("");
 
-    // Only add if not default (10010000 = heatmap+airports on, rest off, stats/wrapped/buttonsHidden hidden)
-    if (vis !== "10010000") {
+    // Only add if not default (100100000 = heatmap+airports on, rest off)
+    if (vis !== "100100000") {
       params.set("v", vis);
     }
   }
@@ -212,6 +224,7 @@ export function getDefaultState(): AppState {
     statsPanelVisible: false,
     wrappedVisible: false,
     buttonsHidden: false,
+    isolateSelection: false,
   };
 }
 
