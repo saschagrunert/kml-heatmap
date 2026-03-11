@@ -139,6 +139,7 @@ declare global {
     toggleAirports?: () => void;
     toggleAviation?: () => void;
     toggleReplay?: () => void;
+    toggleIsolateSelection?: () => void;
     toggleButtonsVisibility?: () => void;
 
     // Filter functions

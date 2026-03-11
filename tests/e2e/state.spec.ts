@@ -52,7 +52,7 @@ test.describe("State Persistence", () => {
     });
 
     test("buttons hidden state via URL parameter", async ({ page }) => {
-      await page.goto("/?v=10010001");
+      await page.goto("/?v=100100010");
       await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
 
       await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0");
@@ -128,6 +128,7 @@ test.describe("State Persistence", () => {
         "selectedPathIds",
         "statsPanelVisible",
         "buttonsHidden",
+        "isolateSelection",
       ];
 
       for (const key of expectedKeys) {
@@ -170,7 +171,7 @@ test.describe("State Persistence", () => {
         () => localStorage.getItem("kml-heatmap-state") !== null
       );
 
-      await page.goto("/?v=10010000");
+      await page.goto("/?v=100100000");
       await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
 
       await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "1");
@@ -220,7 +221,7 @@ test.describe("State Persistence", () => {
         () => localStorage.getItem("kml-heatmap-state") !== null
       );
 
-      await page.goto("/?v=01010000");
+      await page.goto("/?v=010100000");
       await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
 
       await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0.5");
@@ -228,7 +229,7 @@ test.describe("State Persistence", () => {
     });
 
     test("URL stats panel visibility is restored", async ({ page }) => {
-      await page.goto("/?v=10011100");
+      await page.goto("/?v=100111000");
       await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
 
       await expect(page.locator("#stats-panel")).toBeVisible();
@@ -303,7 +304,7 @@ test.describe("State Persistence", () => {
       const year = await options.nth(1).getAttribute("value");
       if (!year) return;
 
-      await page.goto(`/?y=${year}&v=00010000`);
+      await page.goto(`/?y=${year}&v=000100000`);
       await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
 
       await expect(yearSelect).toHaveValue(year);

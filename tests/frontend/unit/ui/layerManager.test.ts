@@ -267,7 +267,7 @@ describe("LayerManager", () => {
       expect(mockApp.pathSegments![1].length).toBe(1);
     });
 
-    it("hides unselected paths completely when buttons are hidden", () => {
+    it("hides unselected paths completely when isolate mode is active", () => {
       // Add a second path segment so we have selected and unselected
       mockApp.currentData!.path_segments.push({
         path_id: 2,
@@ -285,12 +285,12 @@ describe("LayerManager", () => {
         aircraft_registration: "D-ABCD",
       });
       mockApp.selectedPathIds.add(1);
-      mockApp.buttonsHidden = true;
+      mockApp.isolateSelection = true;
 
       layerManager.redrawAltitudePaths();
 
       // Only path 1 (selected) should have been rendered
-      // Path 2 (unselected + buttonsHidden) should be hidden completely
+      // Path 2 (unselected + isolateSelection) should be hidden completely
       expect(mockApp.pathSegments![1]).toBeDefined();
       expect(mockApp.pathSegments![2]).toBeUndefined();
     });
@@ -408,7 +408,7 @@ describe("LayerManager", () => {
       expect(window.KMLHeatmap.getColorForAirspeed).not.toHaveBeenCalled();
     });
 
-    it("hides unselected paths completely when buttons are hidden", () => {
+    it("hides unselected paths completely when isolate mode is active", () => {
       mockApp.currentData!.path_segments.push({
         path_id: 2,
         altitude_ft: 2000,
@@ -425,7 +425,7 @@ describe("LayerManager", () => {
         aircraft_registration: "D-ABCD",
       });
       mockApp.selectedPathIds.add(1);
-      mockApp.buttonsHidden = true;
+      mockApp.isolateSelection = true;
 
       layerManager.redrawAirspeedPaths();
 

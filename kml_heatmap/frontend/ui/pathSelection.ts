@@ -18,14 +18,29 @@ export class PathSelection {
       this.app.selectedPathIds.add(pathId);
     }
 
-    // Redraw paths with delay for mobile Safari
-    if (this.app.altitudeVisible) {
-      this.app.layerManager.redrawAltitudePaths();
-      invalidateMapWithDelay(this.app.map);
-    }
-    if (this.app.airspeedVisible) {
-      this.app.layerManager.redrawAirspeedPaths();
-      invalidateMapWithDelay(this.app.map);
+    // If no paths remain selected, disable isolate mode
+    if (this.app.selectedPathIds.size === 0 && this.app.isolateSelection) {
+      this.app.isolateSelection = false;
+      this.updateIsolateButton();
+      // Rebuild heatmap since isolate mode changed
+      void this.app.dataManager.updateLayers();
+    } else {
+      this.updateIsolateButton();
+
+      // Redraw paths with delay for mobile Safari
+      if (this.app.altitudeVisible) {
+        this.app.layerManager.redrawAltitudePaths();
+        invalidateMapWithDelay(this.app.map);
+      }
+      if (this.app.airspeedVisible) {
+        this.app.layerManager.redrawAirspeedPaths();
+        invalidateMapWithDelay(this.app.map);
+      }
+
+      // If isolate mode is active, rebuild heatmap for the new selection
+      if (this.app.isolateSelection) {
+        void this.app.dataManager.updateLayers();
+      }
     }
 
     this.app.replayManager.updateReplayButtonState();
@@ -40,6 +55,8 @@ export class PathSelection {
       });
     }
 
+    this.updateIsolateButton();
+
     // Redraw paths with delay for mobile Safari
     if (this.app.altitudeVisible) {
       this.app.layerManager.redrawAltitudePaths();
@@ -50,6 +67,11 @@ export class PathSelection {
       invalidateMapWithDelay(this.app.map);
     }
 
+    // If isolate mode is active, rebuild heatmap for the new selection
+    if (this.app.isolateSelection) {
+      void this.app.dataManager.updateLayers();
+    }
+
     this.app.replayManager.updateReplayButtonState();
     this.app.stateManager.saveMapState();
   }
@@ -57,17 +79,60 @@ export class PathSelection {
   clearSelection(): void {
     this.app.selectedPathIds.clear();
 
-    // Redraw paths with a small delay for mobile Safari touch event handling
-    if (this.app.altitudeVisible) {
-      this.app.layerManager.redrawAltitudePaths();
-      invalidateMapWithDelay(this.app.map);
-    }
-    if (this.app.airspeedVisible) {
-      this.app.layerManager.redrawAirspeedPaths();
-      invalidateMapWithDelay(this.app.map);
+    // Disable isolate mode when selection is cleared
+    if (this.app.isolateSelection) {
+      this.app.isolateSelection = false;
+      this.updateIsolateButton();
+      // Rebuild heatmap since isolate mode changed
+      void this.app.dataManager.updateLayers();
+    } else {
+      this.updateIsolateButton();
+
+      // Redraw paths with a small delay for mobile Safari touch event handling
+      if (this.app.altitudeVisible) {
+        this.app.layerManager.redrawAltitudePaths();
+        invalidateMapWithDelay(this.app.map);
+      }
+      if (this.app.airspeedVisible) {
+        this.app.layerManager.redrawAirspeedPaths();
+        invalidateMapWithDelay(this.app.map);
+      }
     }
 
     this.app.replayManager.updateReplayButtonState();
     this.app.stateManager.saveMapState();
+  }
+
+  toggleIsolateSelection(): void {
+    if (this.app.selectedPathIds.size === 0) return;
+
+    this.app.isolateSelection = !this.app.isolateSelection;
+    this.updateIsolateButton();
+
+    // Rebuild heatmap to filter coordinates by selection
+    void this.app.dataManager.updateLayers();
+
+    this.app.stateManager.saveMapState();
+  }
+
+  updateIsolateButton(): void {
+    const btn = document.getElementById("isolate-btn");
+    if (!btn) return;
+
+    const hasSelection = this.app.selectedPathIds.size > 0;
+
+    if (this.app.isolateSelection) {
+      btn.style.opacity = "1.0";
+      btn.style.borderColor = "#4facfe";
+      btn.style.backgroundColor = "#1a3a5c";
+    } else if (hasSelection) {
+      btn.style.opacity = "1.0";
+      btn.style.borderColor = "#555";
+      btn.style.backgroundColor = "#2b2b2b";
+    } else {
+      btn.style.opacity = "0.5";
+      btn.style.borderColor = "#555";
+      btn.style.backgroundColor = "#2b2b2b";
+    }
   }
 }

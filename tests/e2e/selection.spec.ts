@@ -1,5 +1,22 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { waitForPathData, selectPathForReplay } from "./helpers";
+
+/** Select a path and return the isolate button locator */
+async function selectPathAndGetIsolateBtn(page: Page) {
+  await waitForPathData(page);
+  const pathId = await page.evaluate(
+    () => (window as any).mapApp.fullPathInfo[0].id
+  );
+  await page.evaluate(
+    (id) => (window as any).togglePathSelection(String(id)),
+    pathId
+  );
+  await page.waitForFunction(
+    () => (window as any).mapApp.selectedPathIds.size === 1,
+    { timeout: 5000 }
+  );
+  return { pathId, isolateBtn: page.locator("#isolate-btn") };
+}
 
 test.describe("Path Selection", () => {
   test.beforeEach(async ({ page }) => {
@@ -306,5 +323,249 @@ test.describe("Path Selection", () => {
       const popupText = await popup.first().textContent();
       expect(popupText).toMatch(/Altitude:.*ft/);
     }
+  });
+});
+
+test.describe("Solo Mode", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+  });
+
+  test("solo button is always visible but dimmed when no paths are selected", async ({
+    page,
+  }) => {
+    const isolateBtn = page.locator("#isolate-btn");
+    await expect(isolateBtn).toBeVisible();
+    await expect(isolateBtn).toHaveCSS("opacity", "0.5");
+  });
+
+  test("solo button becomes active when a path is selected", async ({
+    page,
+  }) => {
+    const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
+    await expect(isolateBtn).toBeVisible();
+    await expect(isolateBtn).toHaveCSS("opacity", "1");
+  });
+
+  test("solo button is hidden by hide buttons toggle", async ({ page }) => {
+    await page.locator("#hide-buttons-btn").click();
+    await expect(page.locator("#isolate-btn")).toHaveCSS("opacity", "0");
+    await expect(page.locator("#isolate-btn")).toHaveCSS(
+      "pointer-events",
+      "none"
+    );
+  });
+
+  test("clicking solo button activates isolate mode", async ({ page }) => {
+    const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
+
+    await isolateBtn.click();
+
+    await expect(isolateBtn).toHaveCSS("opacity", "1");
+    const isIsolated = await page.evaluate(
+      () => (window as any).mapApp.isolateSelection
+    );
+    expect(isIsolated).toBe(true);
+  });
+
+  test("clicking solo button again deactivates isolate mode", async ({
+    page,
+  }) => {
+    const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
+
+    await isolateBtn.click();
+    await expect(isolateBtn).toHaveCSS("opacity", "1");
+
+    await isolateBtn.click();
+    // Paths still selected, so button stays at full opacity but without blue border
+    await expect(isolateBtn).toHaveCSS("opacity", "1");
+
+    const isIsolated = await page.evaluate(
+      () => (window as any).mapApp.isolateSelection
+    );
+    expect(isIsolated).toBe(false);
+  });
+
+  test("clearing selection disables isolate mode", async ({ page }) => {
+    const { pathId, isolateBtn } = await selectPathAndGetIsolateBtn(page);
+
+    await isolateBtn.click();
+    expect(
+      await page.evaluate(() => (window as any).mapApp.isolateSelection)
+    ).toBe(true);
+
+    // Deselect the path
+    await page.evaluate(
+      (id) => (window as any).togglePathSelection(String(id)),
+      pathId
+    );
+    await page.waitForFunction(
+      () => (window as any).mapApp.selectedPathIds.size === 0,
+      { timeout: 5000 }
+    );
+
+    expect(
+      await page.evaluate(() => (window as any).mapApp.isolateSelection)
+    ).toBe(false);
+    await expect(isolateBtn).toHaveCSS("opacity", "0.5");
+  });
+
+  test("isolate mode persists in localStorage", async ({ page }) => {
+    const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
+    await isolateBtn.click();
+
+    await page.waitForFunction(() => {
+      const state = JSON.parse(
+        localStorage.getItem("kml-heatmap-state") || "{}"
+      );
+      return state.isolateSelection === true;
+    });
+
+    await page.reload();
+    await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+
+    await page.waitForFunction(
+      () => (window as any).mapApp?.isInitializing === false,
+      { timeout: 15000 }
+    );
+
+    const isIsolated = await page.evaluate(
+      () => (window as any).mapApp.isolateSelection
+    );
+    expect(isIsolated).toBe(true);
+  });
+
+  test("isolate mode via URL parameter", async ({ page }) => {
+    await waitForPathData(page);
+    const pathId = await page.evaluate(
+      () => (window as any).mapApp.fullPathInfo[0].id
+    );
+
+    // 9th flag is isolateSelection
+    await page.goto(`/?v=100100001&p=${pathId}`);
+    await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+
+    await page.waitForFunction(
+      () => (window as any).mapApp?.isInitializing === false,
+      { timeout: 15000 }
+    );
+
+    const isIsolated = await page.evaluate(
+      () => (window as any).mapApp.isolateSelection
+    );
+    expect(isIsolated).toBe(true);
+
+    await expect(page.locator("#isolate-btn")).toBeVisible();
+    await expect(page.locator("#isolate-btn")).toHaveCSS("opacity", "1");
+  });
+
+  test("hide button does not hide unselected paths", async ({ page }) => {
+    await waitForPathData(page);
+
+    const pathId = await page.evaluate(
+      () => (window as any).mapApp.fullPathInfo[0].id
+    );
+    await page.evaluate(
+      (id) => (window as any).togglePathSelection(String(id)),
+      pathId
+    );
+    await page.waitForFunction(
+      () => (window as any).mapApp.selectedPathIds.size === 1,
+      { timeout: 5000 }
+    );
+
+    // Hide buttons
+    await page.locator("#hide-buttons-btn").click();
+    await expect(page.locator("#hide-buttons-btn")).toHaveText("🔽");
+
+    // isolateSelection should still be false
+    const isIsolated = await page.evaluate(
+      () => (window as any).mapApp.isolateSelection
+    );
+    expect(isIsolated).toBe(false);
+
+    // Altitude layer should still have unselected paths visible (not hidden)
+    const totalSegments = await page.evaluate(() => {
+      const app = (window as any).mapApp;
+      return app.currentData?.path_segments?.length ?? 0;
+    });
+    const renderedLayers = await page.evaluate(() => {
+      const app = (window as any).mapApp;
+      return app.altitudeLayer.getLayers().length;
+    });
+
+    // With hide button, all paths should still render (not just selected ones)
+    expect(renderedLayers).toBeGreaterThan(1);
+    expect(renderedLayers).toBe(totalSegments);
+  });
+
+  test("selected paths use normal weight in solo mode", async ({ page }) => {
+    const { pathId, isolateBtn } = await selectPathAndGetIsolateBtn(page);
+
+    // Before solo: selected paths have weight 6
+    const weightBefore = await page.evaluate((id) => {
+      const app = (window as any).mapApp;
+      const layers = app.altitudeLayer.getLayers();
+      for (const layer of layers) {
+        if (layer.options && layer.options.weight === 6) return 6;
+      }
+      return null;
+    }, pathId);
+    expect(weightBefore).toBe(6);
+
+    // Activate solo mode
+    await isolateBtn.click();
+    await page.waitForTimeout(300);
+
+    // In solo: all visible paths should have weight 4
+    const weightsInSolo = await page.evaluate(() => {
+      const app = (window as any).mapApp;
+      const layers = app.altitudeLayer.getLayers();
+      return layers.map((l: any) => l.options.weight);
+    });
+    expect(weightsInSolo.length).toBeGreaterThan(0);
+    for (const w of weightsInSolo) {
+      expect(w).toBe(4);
+    }
+
+    // Deactivate solo mode
+    await isolateBtn.click();
+    await page.waitForTimeout(300);
+
+    // After solo: selected paths should have weight 6 again
+    const weightAfter = await page.evaluate((id) => {
+      const app = (window as any).mapApp;
+      const layers = app.altitudeLayer.getLayers();
+      for (const layer of layers) {
+        if (layer.options && layer.options.weight === 6) return 6;
+      }
+      return null;
+    }, pathId);
+    expect(weightAfter).toBe(6);
+  });
+
+  test("solo mode hides unselected paths from altitude layer", async ({
+    page,
+  }) => {
+    const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
+
+    const totalBefore = await page.evaluate(() => {
+      const app = (window as any).mapApp;
+      return app.altitudeLayer.getLayers().length;
+    });
+
+    // Activate solo mode
+    await isolateBtn.click();
+    await page.waitForTimeout(300);
+
+    const totalAfter = await page.evaluate(() => {
+      const app = (window as any).mapApp;
+      return app.altitudeLayer.getLayers().length;
+    });
+
+    // Solo mode should show fewer paths (only the selected one)
+    expect(totalAfter).toBeLessThan(totalBefore);
+    expect(totalAfter).toBeGreaterThan(0);
   });
 });

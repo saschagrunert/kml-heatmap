@@ -63,14 +63,15 @@ export class DataManager {
     this.currentData = data;
     this.app.currentData = data; // Store for redrawing
 
-    // Filter coordinates based on active filters
+    // Filter coordinates based on active filters and isolate mode
     let filteredCoordinates = data.coordinates;
-    if (
-      (this.app.selectedYear !== "all" ||
-        this.app.selectedAircraft !== "all") &&
-      data.path_segments
-    ) {
-      // Get filtered path IDs
+    const hasFilters =
+      this.app.selectedYear !== "all" || this.app.selectedAircraft !== "all";
+    const hasIsolation =
+      this.app.isolateSelection && this.app.selectedPathIds.size > 0;
+
+    if ((hasFilters || hasIsolation) && data.path_segments) {
+      // Get filtered path IDs based on year/aircraft
       const filteredPathIds = new Set<number>();
       if (data.path_info) {
         data.path_info.forEach((pathInfo) => {
@@ -90,12 +91,17 @@ export class DataManager {
       // Extract coordinates from filtered segments
       const coordSet = new Set<string>();
       data.path_segments.forEach((segment) => {
-        if (filteredPathIds.has(segment.path_id)) {
-          const coords = segment.coords;
-          if (coords && coords.length === 2) {
-            coordSet.add(JSON.stringify(coords[0]));
-            coordSet.add(JSON.stringify(coords[1]));
-          }
+        // Must match year/aircraft filter
+        if (!filteredPathIds.has(segment.path_id)) return;
+
+        // In isolate mode, also must match selected paths
+        if (hasIsolation && !this.app.selectedPathIds.has(segment.path_id))
+          return;
+
+        const coords = segment.coords;
+        if (coords && coords.length === 2) {
+          coordSet.add(JSON.stringify(coords[0]));
+          coordSet.add(JSON.stringify(coords[1]));
         }
       });
 

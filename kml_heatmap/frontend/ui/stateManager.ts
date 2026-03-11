@@ -18,6 +18,7 @@ interface SavedState {
   statsPanelVisible: boolean;
   wrappedVisible: boolean;
   buttonsHidden: boolean;
+  isolateSelection: boolean;
 }
 
 export class StateManager {
@@ -53,6 +54,7 @@ export class StateManager {
         ? wrappedModalEl.style.display === "flex"
         : false,
       buttonsHidden: this.app.buttonsHidden,
+      isolateSelection: this.app.isolateSelection,
       // Note: replay state is NOT persisted - too complex to restore reliably
     };
     try {

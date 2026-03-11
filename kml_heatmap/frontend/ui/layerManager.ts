@@ -93,10 +93,10 @@ export class LayerManager {
 
       const isSelected = this.app.selectedPathIds.has(pathId);
 
-      // When buttons are hidden and paths are selected: hide unselected paths
-      // When buttons are visible: dim unselected paths to opacity 0.1
+      // When isolate mode is active and paths are selected: hide unselected paths
+      // Otherwise: dim unselected paths to opacity 0.1
       if (this.app.selectedPathIds.size > 0 && !isSelected) {
-        if (this.app.buttonsHidden) {
+        if (this.app.isolateSelection) {
           return; // Hide completely
         }
       }
@@ -108,14 +108,19 @@ export class LayerManager {
         colorMaxAlt
       );
 
+      const inSolo = this.app.isolateSelection && isSelected;
       const polyline = L.polyline(segment.coords || [], {
         color: color,
-        weight: isSelected ? 6 : 4,
-        opacity: isSelected
-          ? 1.0
-          : this.app.selectedPathIds.size > 0
-            ? 0.1
-            : 0.85,
+        weight: isSelected && !inSolo ? 6 : 4,
+        opacity: inSolo
+          ? 0.85
+          : isSelected
+            ? 1.0
+            : this.app.selectedPathIds.size > 0
+              ? 0.1
+              : 0.85,
+        lineCap: "round",
+        lineJoin: "round",
         renderer: this.app.altitudeRenderer,
         interactive: true,
       })
@@ -231,10 +236,10 @@ export class LayerManager {
       if ((segment.groundspeed_knots || 0) > 0) {
         const isSelected = this.app.selectedPathIds.has(pathId);
 
-        // When buttons are hidden and paths are selected: hide unselected paths
-        // When buttons are visible: dim unselected paths to opacity 0.1
+        // When isolate mode is active and paths are selected: hide unselected paths
+        // Otherwise: dim unselected paths to opacity 0.1
         if (this.app.selectedPathIds.size > 0 && !isSelected) {
-          if (this.app.buttonsHidden) {
+          if (this.app.isolateSelection) {
             return; // Hide completely
           }
         }
@@ -247,14 +252,19 @@ export class LayerManager {
         );
 
         const kmh = Math.round((segment.groundspeed_knots || 0) * 1.852);
+        const inSolo = this.app.isolateSelection && isSelected;
         const polyline = L.polyline(segment.coords || [], {
           color: color,
-          weight: isSelected ? 6 : 4,
-          opacity: isSelected
-            ? 1.0
-            : this.app.selectedPathIds.size > 0
-              ? 0.1
-              : 0.85,
+          weight: isSelected && !inSolo ? 6 : 4,
+          opacity: inSolo
+            ? 0.85
+            : isSelected
+              ? 1.0
+              : this.app.selectedPathIds.size > 0
+                ? 0.1
+                : 0.85,
+          lineCap: "round",
+          lineJoin: "round",
           renderer: this.app.airspeedRenderer,
           interactive: true,
         })

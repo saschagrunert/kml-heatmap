@@ -116,6 +116,7 @@ export class MapApp {
   airportsVisible: boolean;
   aviationVisible: boolean;
   buttonsHidden: boolean;
+  isolateSelection: boolean;
 
   // Selection state
   selectedPathIds: Set<number>;
@@ -176,6 +177,7 @@ export class MapApp {
     this.airportsVisible = true;
     this.aviationVisible = false;
     this.buttonsHidden = false;
+    this.isolateSelection = false;
 
     // Selection state
     this.selectedPathIds = new Set();
@@ -205,6 +207,9 @@ export class MapApp {
 
     // Mark initialization as complete
     this.isInitializing = false;
+
+    // Restore isolate selection button state
+    this.pathSelection.updateIsolateButton();
 
     // Restore buttonsHidden state if it was saved
     if (this.savedState && this.savedState.buttonsHidden) {
@@ -272,6 +277,9 @@ export class MapApp {
     }
     if (this.savedState.buttonsHidden !== undefined) {
       this.buttonsHidden = this.savedState.buttonsHidden;
+    }
+    if (this.savedState.isolateSelection !== undefined) {
+      this.isolateSelection = this.savedState.isolateSelection;
     }
   }
 
@@ -430,6 +438,9 @@ export class MapApp {
   closeWrapped(e?: MouseEvent): void {
     this.wrappedManager.closeWrapped(e);
   }
+  toggleIsolateSelection(): void {
+    this.pathSelection.toggleIsolateSelection();
+  }
   toggleButtonsVisibility(): void {
     this.uiToggles.toggleButtonsVisibility();
   }
@@ -475,6 +486,7 @@ if (typeof window !== "undefined") {
     window.exportMap = (): void => app.exportMap();
     window.showWrapped = (): void => app.showWrapped();
     window.closeWrapped = (e?: MouseEvent): void => app.closeWrapped(e);
+    window.toggleIsolateSelection = (): void => app.toggleIsolateSelection();
     window.toggleButtonsVisibility = (): void => app.toggleButtonsVisibility();
     window.playReplay = (): void => app.playReplay();
     window.pauseReplay = (): void => app.pauseReplay();

@@ -153,6 +153,7 @@ export interface AppState {
   statsPanelVisible?: boolean;
   wrappedVisible?: boolean;
   buttonsHidden?: boolean;
+  isolateSelection?: boolean;
   center?: MapCenter;
   zoom?: number;
 }
