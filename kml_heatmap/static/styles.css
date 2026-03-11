@@ -1339,6 +1339,11 @@ body {
   height: 12px;
 }
 
+/* Airport popup link hover */
+.airport-popup-link:hover {
+  text-decoration: underline;
+}
+
 /* Tooltip styles */
 .leaflet-tooltip {
   background-color: #2b2b2b;

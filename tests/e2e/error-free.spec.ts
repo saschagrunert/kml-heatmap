@@ -74,7 +74,7 @@ test.describe("Error-Free Interactions", () => {
       const pathId = await selectPathForReplay(page);
 
       await page.evaluate(
-        (id) => (window as any).togglePathSelection(String(id)),
+        (id) => (window as any).mapApp.togglePathSelection(String(id)),
         pathId
       );
       await page.waitForFunction(

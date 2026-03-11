@@ -59,7 +59,7 @@
       <button
         id="isolate-btn"
         class="control-btn toggleable-btn"
-        onclick="toggleIsolateSelection()"
+        data-action="toggleIsolateSelection"
         style="opacity: 0.5"
         aria-label="Isolate selected paths"
         aria-pressed="false"
@@ -69,7 +69,7 @@
       <button
         id="hide-buttons-btn"
         class="control-btn hide-toggle"
-        onclick="toggleButtonsVisibility()"
+        data-action="toggleButtonsVisibility"
         aria-label="Show or hide control buttons"
         aria-pressed="false"
       >
@@ -81,7 +81,7 @@
     <button
       id="stats-btn"
       class="control-btn left toggleable-btn"
-      onclick="toggleStats()"
+      data-action="toggleStats"
       aria-label="Toggle flight statistics panel"
       aria-pressed="false"
     >
@@ -90,7 +90,7 @@
     <button
       id="export-btn"
       class="control-btn left toggleable-btn"
-      onclick="exportMap()"
+      data-action="exportMap"
       aria-label="Export map as image"
     >
       📷 Export
@@ -98,7 +98,7 @@
     <button
       id="wrapped-btn"
       class="control-btn left toggleable-btn"
-      onclick="showWrapped()"
+      data-action="showWrapped"
       aria-label="Show year in review summary"
     >
       ✨ Wrapped
@@ -106,7 +106,7 @@
     <button
       id="replay-btn"
       class="control-btn left toggleable-btn"
-      onclick="toggleReplay()"
+      data-action="toggleReplay"
       style="opacity: 0.5"
       disabled
       aria-label="Replay selected flight path"
@@ -120,7 +120,7 @@
     <button
       id="heatmap-btn"
       class="control-btn right toggleable-btn"
-      onclick="toggleHeatmap()"
+      data-action="toggleHeatmap"
       aria-label="Toggle heatmap overlay"
       aria-pressed="true"
     >
@@ -129,7 +129,7 @@
     <button
       id="airports-btn"
       class="control-btn right toggleable-btn"
-      onclick="toggleAirports()"
+      data-action="toggleAirports"
       aria-label="Toggle airport markers"
       aria-pressed="true"
     >
@@ -138,7 +138,7 @@
     <button
       id="altitude-btn"
       class="control-btn right toggleable-btn"
-      onclick="toggleAltitude()"
+      data-action="toggleAltitude"
       aria-label="Toggle altitude color visualization"
       aria-pressed="true"
     >
@@ -147,7 +147,7 @@
     <button
       id="airspeed-btn"
       class="control-btn right toggleable-btn"
-      onclick="toggleAirspeed()"
+      data-action="toggleAirspeed"
       style="opacity: 0.3"
       disabled
       aria-label="Toggle groundspeed color visualization"
@@ -158,7 +158,7 @@
     <button
       id="aviation-btn"
       class="control-btn right toggleable-btn"
-      onclick="toggleAviation()"
+      data-action="toggleAviation"
       style="display: none"
       aria-label="Toggle aviation data overlay"
       aria-pressed="false"
@@ -168,7 +168,7 @@
     <div id="year-filter" class="control-btn right toggleable-btn">
       <select
         id="year-select"
-        onchange="filterByYear()"
+        data-action="filterByYear"
         aria-label="Filter flights by year"
       >
         <option value="all">📅 All</option>
@@ -178,7 +178,7 @@
     <div id="aircraft-filter" class="control-btn right toggleable-btn">
       <select
         id="aircraft-select"
-        onchange="filterByAircraft()"
+        data-action="filterByAircraft"
         aria-label="Filter flights by aircraft"
       >
         <option value="all">✈️ Aircraft</option>
@@ -231,7 +231,7 @@
           <button
             id="replay-play-btn"
             class="replay-btn"
-            onclick="playReplay()"
+            data-action="playReplay"
             aria-label="Play replay"
           >
             ▶️
@@ -239,7 +239,7 @@
           <button
             id="replay-pause-btn"
             class="replay-btn"
-            onclick="pauseReplay()"
+            data-action="pauseReplay"
             style="display: none"
             aria-label="Pause replay"
           >
@@ -248,7 +248,7 @@
           <button
             id="replay-stop-btn"
             class="replay-btn"
-            onclick="stopReplay()"
+            data-action="stopReplay"
             aria-label="Stop replay and reset to beginning"
           >
             ⏹️
@@ -259,7 +259,7 @@
           <select
             id="replay-speed"
             class="replay-btn"
-            onchange="changeReplaySpeed()"
+            data-action="changeReplaySpeed"
             aria-label="Replay speed multiplier"
           >
             <option value="10">10x</option>
@@ -272,7 +272,7 @@
           <button
             id="replay-autozoom-btn"
             class="replay-btn"
-            onclick="toggleAutoZoom()"
+            data-action="toggleAutoZoom"
             title="Auto-zoom based on speed/altitude"
             aria-label="Toggle automatic zoom adjustment"
             aria-pressed="false"
@@ -288,7 +288,7 @@
             min="0"
             max="100"
             value="0"
-            oninput="seekReplay(this.value)"
+            data-action="seekReplay"
             aria-label="Replay timeline position"
             aria-valuemin="0"
             aria-valuemax="100"
@@ -303,16 +303,16 @@
     <!-- Wrapped Card Modal -->
     <div
       id="wrapped-modal"
-      onclick="closeWrapped(event)"
+      data-action="closeWrappedBackdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="wrapped-title"
     >
-      <div id="wrapped-container" onclick="event.stopPropagation()">
+      <div id="wrapped-container" data-action="stopPropagation">
         <div id="wrapped-header">
           <button
             class="close-btn"
-            onclick="closeWrapped()"
+            data-action="closeWrapped"
             aria-label="Close year in review"
           >
             ✕ Close

@@ -42,6 +42,10 @@ from .aircraft import parse_aircraft_from_filename
 from .cache import CACHE_DIR, atomic_json_write
 from .kml_parsers import validate_and_normalize_coordinate
 from .logger import logger
+from .airport_lookup import (
+    extract_icao_codes_from_name,
+    standardize_airport_name,
+)
 from .constants import (
     MID_FLIGHT_MIN_ALTITUDE_M,
     MID_FLIGHT_MAX_VARIATION_M,
@@ -199,119 +203,6 @@ def extract_year_from_timestamp(timestamp: Optional[str]) -> Optional[int]:
         logger.debug(f"Could not parse timestamp '{timestamp}': {e}")
 
     return None
-
-
-def extract_icao_codes_from_name(airport_name: str) -> List[str]:
-    """Extract ICAO codes from airport name string.
-
-    Extracts 4-letter uppercase codes that look like ICAO codes.
-    Handles both single airports and route formats.
-
-    Args:
-        airport_name: Airport name (e.g., "EDAQ Halle - EDMV Vilshofen" or "EDCJ")
-
-    Returns:
-        List of ICAO codes found (e.g., ["EDAQ", "EDMV"] or ["EDCJ"])
-
-    Examples:
-        >>> extract_icao_codes_from_name("EDAQ Halle - EDMV Vilshofen")
-        ["EDAQ", "EDMV"]
-        >>> extract_icao_codes_from_name("EDCJ ChemnitzJahnsdorf")
-        ["EDCJ"]
-        >>> extract_icao_codes_from_name("Log Start: 03 Mar 2025")
-        []
-    """
-    if not airport_name:
-        return []
-
-    # Pattern: 4 uppercase letters that look like ICAO codes
-    # Must be word boundary to avoid matching parts of longer words
-    icao_pattern = re.compile(r"\b([A-Z]{4})\b")
-    matches = icao_pattern.findall(airport_name)
-
-    # Filter out common non-ICAO words (like months, etc.)
-    # ICAO codes typically start with letter indicating region (E for Europe, K for USA, etc.)
-    return [code for code in matches if code[0] in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
-
-
-def standardize_airport_name(airport_name: Optional[str]) -> Optional[str]:
-    """Standardize airport name using OurAirports database.
-
-    Extracts ICAO codes from the name, looks them up in OurAirports,
-    and reconstructs the name with standardized names.
-
-    Args:
-        airport_name: Original airport name from KML
-
-    Returns:
-        Standardized airport name, or original if lookup fails
-
-    Examples:
-        >>> standardize_airport_name("EDAQ Halle - EDMV Vilshofen")
-        "EDAQ Halle-Oppin - EDMV Vilshofen"
-        >>> standardize_airport_name("EDCJ ChemnitzJahnsdorf")
-        "EDCJ Chemnitz/Jahnsdorf"
-    """
-    if not airport_name:
-        return airport_name
-
-    # Import here to avoid circular dependency
-    from .airport_lookup import lookup_airport_coordinates
-
-    # Extract ICAO codes from the name
-    icao_codes = extract_icao_codes_from_name(airport_name)
-
-    if not icao_codes:
-        # No ICAO codes found, return original
-        return airport_name
-
-    # Handle route format "AIRPORT1 Name1 - AIRPORT2 Name2"
-    if " - " in airport_name and len(icao_codes) == 2:
-        # Look up both airports
-        coords1 = lookup_airport_coordinates(icao_codes[0])
-        coords2 = lookup_airport_coordinates(icao_codes[1])
-
-        if coords1 and coords2:
-            _, _, name1 = coords1
-            _, _, name2 = coords2
-            # Remove common airport suffixes for cleaner display
-            clean_name1 = name1.replace(" Airport", "").replace(" Airfield", "")
-            clean_name2 = name2.replace(" Airport", "").replace(" Airfield", "")
-            standardized = (
-                f"{icao_codes[0]} {clean_name1} - {icao_codes[1]} {clean_name2}"
-            )
-            logger.debug(f"Standardized route: {airport_name} -> {standardized}")
-            return standardized
-        elif coords1:
-            # Only first airport found
-            _, _, name1 = coords1
-            clean_name1 = name1.replace(" Airport", "").replace(" Airfield", "")
-            parts = airport_name.split(" - ")
-            standardized = f"{icao_codes[0]} {clean_name1} - {parts[1]}"
-            logger.debug(f"Standardized start: {airport_name} -> {standardized}")
-            return standardized
-        elif coords2:
-            # Only second airport found
-            _, _, name2 = coords2
-            clean_name2 = name2.replace(" Airport", "").replace(" Airfield", "")
-            parts = airport_name.split(" - ")
-            standardized = f"{parts[0]} - {icao_codes[1]} {clean_name2}"
-            logger.debug(f"Standardized end: {airport_name} -> {standardized}")
-            return standardized
-
-    # Single airport format
-    elif len(icao_codes) == 1:
-        coords = lookup_airport_coordinates(icao_codes[0])
-        if coords:
-            _, _, name = coords
-            # Remove common airport suffixes for cleaner display
-            clean_name = name.replace(" Airport", "").replace(" Airfield", "")
-            standardized = f"{icao_codes[0]} {clean_name}"
-            logger.debug(f"Standardized airport: {airport_name} -> {standardized}")
-            return standardized
-
-    # Fallback to original name
-    return airport_name
 
 
 def sample_path_altitudes(

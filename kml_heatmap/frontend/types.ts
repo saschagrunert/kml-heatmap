@@ -21,19 +21,16 @@ export interface PathInfo {
 }
 
 /**
- * Path segment with altitude and speed data
+ * Path segment from exported data, representing a line between two points
+ * with associated altitude, speed, and timing data.
  */
 export interface PathSegment {
   path_id: number;
   coords?: [Coordinate, Coordinate];
-  coordinates?: Coordinate;
-  altitude?: number;
   altitude_m?: number;
   altitude_ft?: number;
-  speed?: number;
   groundspeed_knots?: number;
   time?: number;
-  timestamp?: number;
 }
 
 /**

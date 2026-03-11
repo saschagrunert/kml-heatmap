@@ -8,7 +8,7 @@ async function selectPathAndGetIsolateBtn(page: Page) {
     () => (window as any).mapApp.fullPathInfo[0].id
   );
   await page.evaluate(
-    (id) => (window as any).togglePathSelection(String(id)),
+    (id) => (window as any).mapApp.togglePathSelection(String(id)),
     pathId
   );
   await page.waitForFunction(
@@ -31,7 +31,7 @@ test.describe("Path Selection", () => {
       () => (window as any).mapApp.fullPathInfo[0].id
     );
     await page.evaluate(
-      (id) => (window as any).togglePathSelection(String(id)),
+      (id) => (window as any).mapApp.togglePathSelection(String(id)),
       pathId
     );
 
@@ -58,7 +58,7 @@ test.describe("Path Selection", () => {
 
     // Select
     await page.evaluate(
-      (id) => (window as any).togglePathSelection(String(id)),
+      (id) => (window as any).mapApp.togglePathSelection(String(id)),
       pathId
     );
     await page.waitForFunction(
@@ -67,7 +67,7 @@ test.describe("Path Selection", () => {
 
     // Deselect
     await page.evaluate(
-      (id) => (window as any).togglePathSelection(String(id)),
+      (id) => (window as any).mapApp.togglePathSelection(String(id)),
       pathId
     );
 
@@ -99,7 +99,7 @@ test.describe("Path Selection", () => {
 
     for (const id of pathIds) {
       await page.evaluate(
-        (pid) => (window as any).togglePathSelection(String(pid)),
+        (pid) => (window as any).mapApp.togglePathSelection(String(pid)),
         id
       );
     }
@@ -115,7 +115,7 @@ test.describe("Path Selection", () => {
     await expect(page.locator("#replay-btn")).toBeEnabled();
 
     await page.evaluate(
-      (id) => (window as any).togglePathSelection(String(id)),
+      (id) => (window as any).mapApp.togglePathSelection(String(id)),
       pathId
     );
     await page.waitForFunction(
@@ -397,7 +397,7 @@ test.describe("Solo Mode", () => {
 
     // Deselect the path
     await page.evaluate(
-      (id) => (window as any).togglePathSelection(String(id)),
+      (id) => (window as any).mapApp.togglePathSelection(String(id)),
       pathId
     );
     await page.waitForFunction(
@@ -467,7 +467,7 @@ test.describe("Solo Mode", () => {
       () => (window as any).mapApp.fullPathInfo[0].id
     );
     await page.evaluate(
-      (id) => (window as any).togglePathSelection(String(id)),
+      (id) => (window as any).mapApp.togglePathSelection(String(id)),
       pathId
     );
     await page.waitForFunction(

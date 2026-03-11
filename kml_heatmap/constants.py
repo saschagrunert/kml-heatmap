@@ -81,6 +81,12 @@ GX_NAMESPACE = "http://www.google.com/kml/ext/2.2"
 
 KML_NAMESPACES = {"kml": KML_NAMESPACE, "gx": GX_NAMESPACE}
 
+# === ICAO Region Prefixes ===
+# Valid first letters of ICAO airport codes by region.
+# Excludes I (not assigned), J (not assigned for airports),
+# Q (reserved for non-geographic use), X (not assigned).
+ICAO_REGION_PREFIXES = "ABCDEFGHKLMNOPRSTUVWYZ"
+
 # === File Size Limits ===
 LARGE_FILE_WARNING_MB = 100  # Warn if input file exceeds this size
 MAX_KML_FILES_WARNING = 1000  # Warn if processing this many files

@@ -7,40 +7,18 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 
-class TestPrintHelp:
-    """Tests for print_help function."""
-
-    def test_print_help_output(self, capsys):
-        """Test that help text is printed."""
-        from kml_heatmap.cli import print_help
-
-        print_help()
-        captured = capsys.readouterr()
-
-        # Verify key sections are in help text
-        assert "KML Heatmap Generator" in captured.out
-        assert "USAGE:" in captured.out
-        assert "OPTIONS:" in captured.out
-        assert "EXAMPLES:" in captured.out
-        assert "--output-dir" in captured.out
-        assert "--debug" in captured.out
-        assert "--help" in captured.out
-
-
 class TestMainCLI:
     """Tests for main CLI function."""
 
-    def test_no_arguments_shows_help(self, capsys):
-        """Test that running with no arguments shows help and exits."""
+    def test_no_arguments_shows_usage(self, capsys):
+        """Test that running with no arguments shows usage and exits."""
         from kml_heatmap.cli import main
 
         with patch("sys.argv", ["kml-heatmap.py"]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
 
-            assert exc_info.value.code == 1
-            captured = capsys.readouterr()
-            assert "KML Heatmap Generator" in captured.out
+            assert exc_info.value.code == 2
 
     def test_help_flag_short(self, capsys):
         """Test -h flag shows help and exits successfully."""
@@ -52,7 +30,8 @@ class TestMainCLI:
 
             assert exc_info.value.code == 0
             captured = capsys.readouterr()
-            assert "KML Heatmap Generator" in captured.out
+            assert "--output-dir" in captured.out
+            assert "--debug" in captured.out
 
     def test_help_flag_long(self, capsys):
         """Test --help flag shows help and exits successfully."""
@@ -64,7 +43,8 @@ class TestMainCLI:
 
             assert exc_info.value.code == 0
             captured = capsys.readouterr()
-            assert "KML Heatmap Generator" in captured.out
+            assert "--output-dir" in captured.out
+            assert "--debug" in captured.out
 
     def test_debug_flag_enables_debug_mode(self):
         """Test that --debug flag enables debug mode."""
@@ -108,7 +88,7 @@ class TestMainCLI:
                 call_args = mock_create.call_args
                 assert str(output_dir / "index.html") in str(call_args)
 
-    def test_output_dir_without_argument_exits(self, capsys):
+    def test_output_dir_without_argument_exits(self):
         """Test --output-dir without directory name exits with error."""
         from kml_heatmap.cli import main
 
@@ -116,9 +96,7 @@ class TestMainCLI:
             with pytest.raises(SystemExit) as exc_info:
                 main()
 
-            assert exc_info.value.code == 1
-            captured = capsys.readouterr()
-            assert "Error: --output-dir requires a directory name" in captured.out
+            assert exc_info.value.code == 2
 
     def test_unknown_option_exits(self):
         """Test unknown option exits with error."""
@@ -128,7 +106,7 @@ class TestMainCLI:
             with pytest.raises(SystemExit) as exc_info:
                 main()
 
-            assert exc_info.value.code == 1
+            assert exc_info.value.code == 2
 
     def test_single_kml_file(self):
         """Test processing a single KML file."""
