@@ -1,7 +1,9 @@
 /**
  * Airport Manager - Handles airport markers and popups
  */
+import DOMPurify from "dompurify";
 import type { MapApp } from "../mapApp";
+import { generateAirportPopupHtml } from "../utils/htmlGenerators";
 
 export class AirportManager {
   private app: MapApp;
@@ -45,65 +47,18 @@ export class AirportManager {
       const flightCount = airportCounts[airport.name] || 0;
       const isHomeBase = airport.name === homeBaseName;
 
-      const latDms = window.KMLHeatmap.ddToDms(airport.lat, true);
-      const lonDms = window.KMLHeatmap.ddToDms(airport.lon, false);
-      const googleMapsLink = `https://www.google.com/maps?q=${airport.lat},${airport.lon}`;
-
-      const popup = `
-            <div style="
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-                min-width: 220px;
-                padding: 8px 4px;
-                background-color: #2b2b2b;
-                color: #ffffff;
-            ">
-                <div style="
-                    font-size: 15px;
-                    font-weight: bold;
-                    color: #28a745;
-                    margin-bottom: 10px;
-                    padding-bottom: 8px;
-                    border-bottom: 2px solid #28a745;
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                ">
-                    <span style="font-size: 18px;">🛫</span>
-                    <span>${airport.name || "Unknown"}</span>
-                    ${isHomeBase ? '<span style="font-size: 12px; background: #007bff; color: white; padding: 2px 6px; border-radius: 3px; margin-left: 4px;">HOME</span>' : ""}
-                </div>
-                <div style="margin-bottom: 8px;">
-                    <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Coordinates</div>
-                    <a href="${googleMapsLink}"
-                       target="_blank"
-                       style="
-                           color: #4facfe;
-                           text-decoration: none;
-                           font-size: 12px;
-                           font-family: monospace;
-                           display: flex;
-                           align-items: center;
-                           gap: 4px;
-                       "
-                       onmouseover="this.style.textDecoration='underline'"
-                       onmouseout="this.style.textDecoration='none'">
-                        <span>📍</span>
-                        <span>${latDms}<br>${lonDms}</span>
-                    </a>
-                </div>
-                <div style="
-                    background: linear-gradient(135deg, rgba(79, 172, 254, 0.15) 0%, rgba(0, 242, 254, 0.15) 100%);
-                    padding: 8px 10px;
-                    border-radius: 6px;
-                    border-left: 3px solid #4facfe;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                ">
-                    <span style="font-size: 12px; color: #ccc; font-weight: 500;">Total Flights</span>
-                    <span style="font-size: 16px; font-weight: bold; color: #4facfe;">${flightCount}</span>
-                </div>
-            </div>`;
+      const popup = DOMPurify.sanitize(
+        generateAirportPopupHtml({
+          name: airport.name,
+          lat: airport.lat,
+          lon: airport.lon,
+          latDms: window.KMLHeatmap.ddToDms(airport.lat, true),
+          lonDms: window.KMLHeatmap.ddToDms(airport.lon, false),
+          flightCount,
+          isHomeBase,
+        }),
+        { ADD_ATTR: ["target"] }
+      );
 
       marker.setPopupContent(popup);
     });

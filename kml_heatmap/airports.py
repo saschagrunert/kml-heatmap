@@ -217,8 +217,10 @@ class AirportDeduplicator:
         corrected_lon = lon
 
         if name:
-            from .parser import extract_icao_codes_from_name
-            from .airport_lookup import lookup_airport_coordinates
+            from .airport_lookup import (
+                extract_icao_codes_from_name,
+                lookup_airport_coordinates,
+            )
 
             icao_codes = extract_icao_codes_from_name(name)
 

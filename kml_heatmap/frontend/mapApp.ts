@@ -15,6 +15,7 @@ import { ReplayManager } from "./ui/replayManager";
 import { WrappedManager } from "./ui/wrappedManager";
 import { UIToggles } from "./ui/uiToggles";
 import { loadInitialData, createAirportMarkers } from "./appInitializer";
+import { logError } from "./utils/logger";
 import type { HeatmapLayer } from "./globals";
 import type {
   PathInfo,
@@ -224,8 +225,8 @@ export class MapApp {
 
     // Restore wrapped panel state if it was open
     if (this.savedState && this.savedState.wrappedVisible) {
-      void setTimeout(() => {
-        void this.wrappedManager.showWrapped();
+      setTimeout(() => {
+        this.wrappedManager.showWrapped();
       }, 500);
     }
 
@@ -421,19 +422,19 @@ export class MapApp {
     this.replayManager.toggleReplay();
   }
   filterByYear(): void {
-    void this.filterManager.filterByYear();
+    this.filterManager.filterByYear().catch(logError);
   }
   filterByAircraft(): void {
-    void this.filterManager.filterByAircraft();
+    this.filterManager.filterByAircraft().catch(logError);
   }
   togglePathSelection(id: string): void {
-    void this.pathSelection.togglePathSelection(Number(id));
+    this.pathSelection.togglePathSelection(Number(id));
   }
   exportMap(): void {
     this.uiToggles.exportMap();
   }
   showWrapped(): void {
-    void this.wrappedManager.showWrapped();
+    this.wrappedManager.showWrapped();
   }
   closeWrapped(e?: MouseEvent): void {
     this.wrappedManager.closeWrapped(e);
@@ -464,42 +465,63 @@ export class MapApp {
   }
 }
 
-// Make globally available for onclick handlers
+/**
+ * Bind data-action attributes to app methods via addEventListener.
+ * Buttons get "click", selects get "change", inputs get "input".
+ */
+function bindActions(app: MapApp): void {
+  const actions: Record<string, (e: Event) => void> = {
+    toggleHeatmap: () => app.toggleHeatmap(),
+    toggleStats: () => app.toggleStats(),
+    toggleAltitude: () => app.toggleAltitude(),
+    toggleAirspeed: () => app.toggleAirspeed(),
+    toggleAirports: () => app.toggleAirports(),
+    toggleAviation: () => app.toggleAviation(),
+    toggleReplay: () => app.toggleReplay(),
+    filterByYear: () => app.filterByYear(),
+    filterByAircraft: () => app.filterByAircraft(),
+    exportMap: () => app.exportMap(),
+    showWrapped: () => app.showWrapped(),
+    closeWrapped: () => app.closeWrapped(),
+    closeWrappedBackdrop: (e) => app.closeWrapped(e as MouseEvent),
+    toggleIsolateSelection: () => app.toggleIsolateSelection(),
+    toggleButtonsVisibility: () => app.toggleButtonsVisibility(),
+    playReplay: () => app.playReplay(),
+    pauseReplay: () => app.pauseReplay(),
+    stopReplay: () => app.stopReplay(),
+    seekReplay: (e) => app.seekReplay((e.target as HTMLInputElement).value),
+    changeReplaySpeed: () => app.changeReplaySpeed(),
+    toggleAutoZoom: () => app.toggleAutoZoom(),
+    stopPropagation: (e) => e.stopPropagation(),
+  };
+
+  document.querySelectorAll<HTMLElement>("[data-action]").forEach((el) => {
+    const action = el.dataset["action"];
+    if (!action || !actions[action]) return;
+
+    const handler = actions[action];
+    if (el.tagName === "SELECT") {
+      el.addEventListener("change", handler);
+    } else if (el.tagName === "INPUT") {
+      el.addEventListener("input", handler);
+    } else {
+      el.addEventListener("click", handler);
+    }
+  });
+}
+
+// Initialize app and bind DOM event listeners
 if (typeof window !== "undefined") {
   window.initMapApp = async (config: MapConfig): Promise<MapApp> => {
     const app = new MapApp(config);
     window.mapApp = app;
     await app.initialize();
-
-    // Expose functions for onclick handlers
-    window.toggleHeatmap = (): void => app.toggleHeatmap();
-    window.toggleStats = (): void => app.toggleStats();
-    window.toggleAltitude = (): void => app.toggleAltitude();
-    window.toggleAirspeed = (): void => app.toggleAirspeed();
-    window.toggleAirports = (): void => app.toggleAirports();
-    window.toggleAviation = (): void => app.toggleAviation();
-    window.toggleReplay = (): void => app.toggleReplay();
-    window.filterByYear = (): void => app.filterByYear();
-    window.filterByAircraft = (): void => app.filterByAircraft();
-    window.togglePathSelection = (id: string): void =>
-      app.togglePathSelection(id);
-    window.exportMap = (): void => app.exportMap();
-    window.showWrapped = (): void => app.showWrapped();
-    window.closeWrapped = (e?: MouseEvent): void => app.closeWrapped(e);
-    window.toggleIsolateSelection = (): void => app.toggleIsolateSelection();
-    window.toggleButtonsVisibility = (): void => app.toggleButtonsVisibility();
-    window.playReplay = (): void => app.playReplay();
-    window.pauseReplay = (): void => app.pauseReplay();
-    window.stopReplay = (): void => app.stopReplay();
-    window.seekReplay = (value: string): void => app.seekReplay(value);
-    window.changeReplaySpeed = (): void => app.changeReplaySpeed();
-    window.toggleAutoZoom = (): void => app.toggleAutoZoom();
-
+    bindActions(app);
     return app;
   };
 }
 
 // Auto-initialize when module loads
 if (typeof window !== "undefined" && window.MAP_CONFIG && window.initMapApp) {
-  void window.initMapApp(window.MAP_CONFIG);
+  window.initMapApp(window.MAP_CONFIG).catch(logError);
 }

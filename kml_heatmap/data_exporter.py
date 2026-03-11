@@ -546,10 +546,14 @@ def _recalculate_stats_from_segments(
     segments: List[Dict[str, Any]],
     path_info_list: List[Dict[str, Any]],
 ) -> None:
-    """Recalculate statistics from exported segment data for frontend consistency.
+    """Recalculate statistics from exported segment data (authoritative source).
 
-    This ensures the statistics panel and filtered stats show consistent values
-    with the frontend JavaScript calculations. Stats dict is modified in place.
+    The initial stats from statistics.py are computed from raw parsed data, but
+    the frontend only sees the exported segments. This function overwrites stats
+    to match the segment data exactly, ensuring the statistics panel is consistent
+    with what the frontend can independently verify. Fields overwritten:
+    total_points, altitude ranges, altitude gain, groundspeed stats, cruise
+    altitude, flight time, and per-aircraft times/distances.
 
     Args:
         stats: Statistics dictionary (modified in place)

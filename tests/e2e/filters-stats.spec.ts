@@ -132,7 +132,7 @@ test.describe("Filters and Statistics", () => {
 
     const pathId = await selectPathForReplay(page);
     await page.evaluate(
-      (id) => (window as any).togglePathSelection(String(id)),
+      (id) => (window as any).mapApp.togglePathSelection(String(id)),
       pathId
     );
     await page.waitForFunction(

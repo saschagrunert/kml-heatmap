@@ -130,37 +130,6 @@ declare global {
 
     // Map configuration
     MAP_CONFIG?: MapConfig;
-
-    // UI toggle functions
-    toggleHeatmap?: () => void;
-    toggleStats?: () => void;
-    toggleAltitude?: () => void;
-    toggleAirspeed?: () => void;
-    toggleAirports?: () => void;
-    toggleAviation?: () => void;
-    toggleReplay?: () => void;
-    toggleIsolateSelection?: () => void;
-    toggleButtonsVisibility?: () => void;
-
-    // Filter functions
-    filterByYear?: (year: string) => void;
-    filterByAircraft?: (aircraft: string) => void;
-
-    // Path selection
-    togglePathSelection?: (id: string) => void;
-
-    // Export and wrapped
-    exportMap?: () => void;
-    showWrapped?: () => void;
-    closeWrapped?: (e?: MouseEvent) => void;
-
-    // Replay controls
-    playReplay?: () => void;
-    pauseReplay?: () => void;
-    stopReplay?: () => void;
-    seekReplay?: (value: string) => void;
-    changeReplaySpeed?: () => void;
-    toggleAutoZoom?: () => void;
   }
 }
 

@@ -3,6 +3,7 @@
  */
 import type { MapApp } from "../mapApp";
 import { invalidateMapWithDelay } from "../utils/mapHelpers";
+import { logError } from "../utils/logger";
 
 export class PathSelection {
   private app: MapApp;
@@ -23,7 +24,7 @@ export class PathSelection {
       this.app.isolateSelection = false;
       this.updateIsolateButton();
       // Rebuild heatmap since isolate mode changed
-      void this.app.dataManager.updateLayers();
+      this.app.dataManager.updateLayers().catch(logError);
     } else {
       this.updateIsolateButton();
 
@@ -39,7 +40,7 @@ export class PathSelection {
 
       // If isolate mode is active, rebuild heatmap for the new selection
       if (this.app.isolateSelection) {
-        void this.app.dataManager.updateLayers();
+        this.app.dataManager.updateLayers().catch(logError);
       }
     }
 
@@ -69,7 +70,7 @@ export class PathSelection {
 
     // If isolate mode is active, rebuild heatmap for the new selection
     if (this.app.isolateSelection) {
-      void this.app.dataManager.updateLayers();
+      this.app.dataManager.updateLayers().catch(logError);
     }
 
     this.app.replayManager.updateReplayButtonState();
@@ -84,7 +85,7 @@ export class PathSelection {
       this.app.isolateSelection = false;
       this.updateIsolateButton();
       // Rebuild heatmap since isolate mode changed
-      void this.app.dataManager.updateLayers();
+      this.app.dataManager.updateLayers().catch(logError);
     } else {
       this.updateIsolateButton();
 
@@ -110,7 +111,7 @@ export class PathSelection {
     this.updateIsolateButton();
 
     // Rebuild heatmap to filter coordinates by selection
-    void this.app.dataManager.updateLayers();
+    this.app.dataManager.updateLayers().catch(logError);
 
     this.app.stateManager.saveMapState();
   }

@@ -90,7 +90,7 @@ test.describe("Replay", () => {
     const midpoint = Math.floor(maxTime / 2);
 
     await page.evaluate(
-      (val) => (window as any).seekReplay(String(val)),
+      (val) => (window as any).mapApp.seekReplay(String(val)),
       midpoint
     );
 
@@ -109,7 +109,7 @@ test.describe("Replay", () => {
     expect(defaultSpeed).toBe(50);
 
     await page.locator("#replay-speed").selectOption("100");
-    await page.evaluate(() => (window as any).changeReplaySpeed());
+    await page.evaluate(() => (window as any).mapApp.changeReplaySpeed());
 
     const newSpeed = await page.evaluate(
       () => (window as any).mapApp.replayManager.replaySpeed

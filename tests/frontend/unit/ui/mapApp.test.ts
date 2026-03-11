@@ -212,7 +212,63 @@ describe("MapApp", () => {
       expect(typeof window.initMapApp).toBe("function");
     });
 
-    it("initMapApp creates app, initializes, and sets up window functions", async () => {
+    it("initMapApp creates app, initializes, and binds data-action listeners", async () => {
+      // Create DOM elements with data-action attributes
+      const actionElements: Record<string, HTMLElement> = {};
+      const buttonActions = [
+        "toggleHeatmap",
+        "toggleStats",
+        "toggleAltitude",
+        "toggleAirspeed",
+        "toggleAirports",
+        "toggleAviation",
+        "toggleReplay",
+        "exportMap",
+        "showWrapped",
+        "closeWrapped",
+        "closeWrappedBackdrop",
+        "toggleIsolateSelection",
+        "toggleButtonsVisibility",
+        "playReplay",
+        "pauseReplay",
+        "stopReplay",
+        "toggleAutoZoom",
+      ];
+
+      buttonActions.forEach((action) => {
+        const btn = document.createElement("button");
+        btn.dataset["action"] = action;
+        document.body.appendChild(btn);
+        actionElements[action] = btn;
+      });
+
+      // Selects use "change" event
+      const yearSelect = document.createElement("select");
+      yearSelect.id = "year-select";
+      yearSelect.dataset["action"] = "filterByYear";
+      document.body.appendChild(yearSelect);
+      actionElements["filterByYear"] = yearSelect;
+
+      const aircraftSelect = document.createElement("select");
+      aircraftSelect.id = "aircraft-select";
+      aircraftSelect.dataset["action"] = "filterByAircraft";
+      document.body.appendChild(aircraftSelect);
+      actionElements["filterByAircraft"] = aircraftSelect;
+
+      // Slider uses "input" event
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.dataset["action"] = "seekReplay";
+      slider.value = "50";
+      document.body.appendChild(slider);
+      actionElements["seekReplay"] = slider;
+
+      // Speed select uses "change" event
+      const speedSelect = document.createElement("select");
+      speedSelect.dataset["action"] = "changeReplaySpeed";
+      document.body.appendChild(speedSelect);
+      actionElements["changeReplaySpeed"] = speedSelect;
+
       // Mock initialize to avoid full setup
       const initSpy = vi
         .spyOn(MapApp.prototype, "initialize")
@@ -233,7 +289,7 @@ describe("MapApp", () => {
       expect(result).toBeInstanceOf(MapApp);
       expect(window.mapApp).toBe(result);
 
-      // Set up mock managers so window functions can delegate
+      // Set up mock managers so bound listeners can delegate
       result.uiToggles = {
         toggleHeatmap: vi.fn(),
         toggleAltitude: vi.fn(),
@@ -259,73 +315,82 @@ describe("MapApp", () => {
       } as any;
       result.pathSelection = {
         togglePathSelection: vi.fn().mockResolvedValue(undefined),
+        toggleIsolateSelection: vi.fn(),
       } as any;
       result.wrappedManager = {
         showWrapped: vi.fn().mockResolvedValue(undefined),
         closeWrapped: vi.fn(),
       } as any;
 
-      // Call each window function to cover the arrow function bodies
-      window.toggleHeatmap!();
+      // Click buttons and verify delegation
+      actionElements["toggleHeatmap"]!.click();
       expect(result.uiToggles.toggleHeatmap).toHaveBeenCalled();
 
-      window.toggleStats!();
+      actionElements["toggleStats"]!.click();
       expect(result.statsManager.toggleStats).toHaveBeenCalled();
 
-      window.toggleAltitude!();
+      actionElements["toggleAltitude"]!.click();
       expect(result.uiToggles.toggleAltitude).toHaveBeenCalled();
 
-      window.toggleAirspeed!();
+      actionElements["toggleAirspeed"]!.click();
       expect(result.uiToggles.toggleAirspeed).toHaveBeenCalled();
 
-      window.toggleAirports!();
+      actionElements["toggleAirports"]!.click();
       expect(result.uiToggles.toggleAirports).toHaveBeenCalled();
 
-      window.toggleAviation!();
+      actionElements["toggleAviation"]!.click();
       expect(result.uiToggles.toggleAviation).toHaveBeenCalled();
 
-      window.toggleReplay!();
+      actionElements["toggleReplay"]!.click();
       expect(result.replayManager.toggleReplay).toHaveBeenCalled();
 
-      window.filterByYear!();
+      actionElements["filterByYear"].dispatchEvent(new Event("change"));
       expect(result.filterManager.filterByYear).toHaveBeenCalled();
 
-      window.filterByAircraft!();
+      actionElements["filterByAircraft"].dispatchEvent(new Event("change"));
       expect(result.filterManager.filterByAircraft).toHaveBeenCalled();
 
-      window.togglePathSelection!("42");
-      expect(result.pathSelection.togglePathSelection).toHaveBeenCalledWith(42);
-
-      window.exportMap!();
+      actionElements["exportMap"]!.click();
       expect(result.uiToggles.exportMap).toHaveBeenCalled();
 
-      window.showWrapped!();
+      actionElements["showWrapped"]!.click();
       expect(result.wrappedManager.showWrapped).toHaveBeenCalled();
 
-      window.closeWrapped!();
-      expect(result.wrappedManager.closeWrapped).toHaveBeenCalled();
+      actionElements["closeWrapped"]!.click();
+      expect(result.wrappedManager.closeWrapped).toHaveBeenCalledWith(
+        undefined
+      );
 
-      window.toggleButtonsVisibility!();
+      // Backdrop click passes event for target check
+      actionElements["closeWrappedBackdrop"]!.click();
+      expect(result.wrappedManager.closeWrapped).toHaveBeenCalledTimes(2);
+
+      actionElements["toggleIsolateSelection"]!.click();
+      expect(result.pathSelection.toggleIsolateSelection).toHaveBeenCalled();
+
+      actionElements["toggleButtonsVisibility"]!.click();
       expect(result.uiToggles.toggleButtonsVisibility).toHaveBeenCalled();
 
-      window.playReplay!();
+      actionElements["playReplay"]!.click();
       expect(result.replayManager.playReplay).toHaveBeenCalled();
 
-      window.pauseReplay!();
+      actionElements["pauseReplay"]!.click();
       expect(result.replayManager.pauseReplay).toHaveBeenCalled();
 
-      window.stopReplay!();
+      actionElements["stopReplay"]!.click();
       expect(result.replayManager.stopReplay).toHaveBeenCalled();
 
-      window.seekReplay!("50");
+      actionElements["seekReplay"].dispatchEvent(new Event("input"));
       expect(result.replayManager.seekReplay).toHaveBeenCalledWith("50");
 
-      window.changeReplaySpeed!();
+      actionElements["changeReplaySpeed"].dispatchEvent(new Event("change"));
       expect(result.replayManager.changeReplaySpeed).toHaveBeenCalled();
 
-      window.toggleAutoZoom!();
+      actionElements["toggleAutoZoom"]!.click();
       expect(result.replayManager.toggleAutoZoom).toHaveBeenCalled();
 
+      // Cleanup
+      Object.values(actionElements).forEach((el) => el.remove());
       initSpy.mockRestore();
     });
   });

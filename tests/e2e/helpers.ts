@@ -30,7 +30,7 @@ export async function selectPathForReplay(page: Page): Promise<number> {
   });
 
   await page.evaluate(
-    (id) => (window as any).togglePathSelection(String(id)),
+    (id) => (window as any).mapApp.togglePathSelection(String(id)),
     pathId
   );
   await page.waitForFunction(
