@@ -30,7 +30,7 @@
     "jsdom": "^29.0.1",
     "npm-check-updates": "^19.6.6",
     "prettier": "^3.8.1",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.2",
     "typescript-eslint": "^8.58.0",
     "vitest": "^4.0.18"
   },
