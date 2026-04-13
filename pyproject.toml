@@ -12,8 +12,8 @@ dependencies = [
     "rcssmin>=1.2.2",
     "rjsmin>=1.2.5",
     "minify-html>=0.18.1",
-    "lxml>=6.0.2",
-    "numpy>=2.4.1",
+    "lxml>=6.0.4",
+    "numpy>=2.4.4",
 ]
 
 [project.optional-dependencies]
