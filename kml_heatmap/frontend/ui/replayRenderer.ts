@@ -265,7 +265,7 @@ export class ReplayRenderer {
           bearing = window.KMLHeatmap.calculateBearing(lat1, lon1, lat2, lon2);
         } else {
           // Use end of last segment
-          currentPos = (lastSegment.coords?.[1] || [0, 0]) as [number, number];
+          currentPos = lastSegment.coords?.[1] || [0, 0];
 
           // Calculate bearing from this segment
           const lat1 = lastSegment.coords?.[0]?.[0] || 0;

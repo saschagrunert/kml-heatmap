@@ -67,7 +67,7 @@ describe("ReplayManager", () => {
 
     // Mock requestAnimationFrame / cancelAnimationFrame
     vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
-      return setTimeout(() => cb(performance.now()), 16) as unknown as number;
+      return setTimeout(() => cb(performance.now()), 16);
     });
     vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation((id) => {
       clearTimeout(id);
