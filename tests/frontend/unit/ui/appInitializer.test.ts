@@ -750,7 +750,7 @@ describe("MapApp - createAirportMarkers", () => {
     const L = await import("leaflet");
 
     const airportsNoIcao: Airport[] = [
-      { icao: "", name: "Small Airfield 123", lat: 50.0, lon: 8.0 } as Airport,
+      { icao: "", name: "Small Airfield 123", lat: 50.0, lon: 8.0 },
     ];
 
     app.createAirportMarkers(airportsNoIcao);

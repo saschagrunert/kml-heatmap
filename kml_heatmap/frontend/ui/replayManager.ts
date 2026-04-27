@@ -558,7 +558,7 @@ export class ReplayManager {
           this.replaySegments.forEach((seg) => {
             if (seg.coords && seg.coords.length > 0) {
               seg.coords.forEach((coord) => {
-                allCoords.push(coord as [number, number]);
+                allCoords.push(coord);
               });
             }
           });
