@@ -137,11 +137,6 @@ export class FilterManager {
 
     // Update airport popups with current filter counts
     this.app.airportManager.updateAirportPopups();
-
-    // Don't save state during initialization (will be saved after path restoration)
-    if (!this.app.isInitializing) {
-      this.app.stateManager.saveMapState();
-    }
   }
 
   async filterByAircraft(): Promise<void> {
@@ -176,10 +171,5 @@ export class FilterManager {
 
     // Update airport popups with current filter counts
     this.app.airportManager.updateAirportPopups();
-
-    // Don't save state during initialization (will be saved after path restoration)
-    if (!this.app.isInitializing) {
-      this.app.stateManager.saveMapState();
-    }
   }
 }

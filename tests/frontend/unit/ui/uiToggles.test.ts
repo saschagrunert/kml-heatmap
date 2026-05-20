@@ -47,7 +47,7 @@ describe("UIToggles", () => {
       aviationVisible: false,
       buttonsHidden: false,
       stateManager: { saveMapState: vi.fn() },
-      replayManager: { replayActive: false },
+      replayManager: { state: { active: false } },
       layerManager: {
         redrawAltitudePaths: vi.fn(),
         redrawAirspeedPaths: vi.fn(),
@@ -85,7 +85,6 @@ describe("UIToggles", () => {
       );
       expect(mockApp.heatmapVisible).toBe(false);
       expect(mockDomElements["heatmap-btn"].style.opacity).toBe("0.5");
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("shows heatmap when hidden", () => {
@@ -96,7 +95,6 @@ describe("UIToggles", () => {
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.heatmapLayer);
       expect(mockApp.heatmapVisible).toBe(true);
       expect(mockDomElements["heatmap-btn"].style.opacity).toBe("1");
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("sets pointer-events to none on canvas when showing heatmap", () => {
@@ -113,8 +111,6 @@ describe("UIToggles", () => {
       mockApp.map = undefined;
 
       uiToggles.toggleHeatmap();
-
-      expect(mockApp.stateManager!.saveMapState).not.toHaveBeenCalled();
     });
   });
 
@@ -139,7 +135,6 @@ describe("UIToggles", () => {
       expect(mockDomElements["altitude-btn"].style.opacity).toBe("1");
       expect(mockDomElements["altitude-legend"].style.display).toBe("block");
       expect(mockApp.layerManager!.redrawAltitudePaths).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("hides altitude when visible", () => {
@@ -153,7 +148,6 @@ describe("UIToggles", () => {
       expect(mockApp.altitudeVisible).toBe(false);
       expect(mockDomElements["altitude-btn"].style.opacity).toBe("0.5");
       expect(mockDomElements["altitude-legend"].style.display).toBe("none");
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("shows altitude without airspeed conflict", () => {
@@ -165,21 +159,18 @@ describe("UIToggles", () => {
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.altitudeLayer);
       expect(mockApp.altitudeVisible).toBe(true);
       expect(mockApp.layerManager!.redrawAltitudePaths).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("returns early if no map", () => {
       mockApp.map = undefined;
 
       uiToggles.toggleAltitude();
-
-      expect(mockApp.stateManager!.saveMapState).not.toHaveBeenCalled();
     });
 
     it("prevents hiding altitude during replay if airspeed is also hidden", () => {
       mockApp.altitudeVisible = true;
       mockApp.airspeedVisible = false;
-      (mockApp.replayManager as any).replayActive = true;
+      (mockApp.replayManager as any).state.active = true;
 
       uiToggles.toggleAltitude();
 
@@ -191,12 +182,12 @@ describe("UIToggles", () => {
     it("during replay does not add layer but updates state", () => {
       mockApp.altitudeVisible = false;
       mockApp.airspeedVisible = false;
-      (mockApp.replayManager as any).replayActive = true;
-      (mockApp.replayManager as any).replayCurrentTime = 0;
-      (mockApp.replayManager as any).replayLastDrawnIndex = -1;
-      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).replaySegments = [];
-      (mockApp.replayManager as any).replayAirplaneMarker = null;
+      (mockApp.replayManager as any).state.active = true;
+      (mockApp.replayManager as any).state.currentTime = 0;
+      (mockApp.replayManager as any).state.lastDrawnIndex = -1;
+      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).state.segments = [];
+      (mockApp.replayManager as any).state.airplaneMarker = null;
 
       uiToggles.toggleAltitude();
 
@@ -204,18 +195,17 @@ describe("UIToggles", () => {
       expect(mockApp.layerManager!.redrawAltitudePaths).not.toHaveBeenCalled();
       expect(mockApp.altitudeVisible).toBe(true);
       expect(mockDomElements["altitude-legend"].style.display).toBe("block");
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("during replay hides airspeed without removing layer", () => {
       mockApp.altitudeVisible = false;
       mockApp.airspeedVisible = true;
-      (mockApp.replayManager as any).replayActive = true;
-      (mockApp.replayManager as any).replayCurrentTime = 0;
-      (mockApp.replayManager as any).replayLastDrawnIndex = -1;
-      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).replaySegments = [];
-      (mockApp.replayManager as any).replayAirplaneMarker = null;
+      (mockApp.replayManager as any).state.active = true;
+      (mockApp.replayManager as any).state.currentTime = 0;
+      (mockApp.replayManager as any).state.lastDrawnIndex = -1;
+      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).state.segments = [];
+      (mockApp.replayManager as any).state.airplaneMarker = null;
 
       uiToggles.toggleAltitude();
 
@@ -227,12 +217,12 @@ describe("UIToggles", () => {
 
     it("during replay updates airplane popup if open", () => {
       mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).replayActive = true;
-      (mockApp.replayManager as any).replayCurrentTime = 0;
-      (mockApp.replayManager as any).replayLastDrawnIndex = -1;
-      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).replaySegments = [];
-      (mockApp.replayManager as any).replayAirplaneMarker = {
+      (mockApp.replayManager as any).state.active = true;
+      (mockApp.replayManager as any).state.currentTime = 0;
+      (mockApp.replayManager as any).state.lastDrawnIndex = -1;
+      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).state.segments = [];
+      (mockApp.replayManager as any).state.airplaneMarker = {
         isPopupOpen: vi.fn(() => true),
       };
       (mockApp.replayManager as any).updateReplayAirplanePopup = vi.fn();
@@ -246,13 +236,13 @@ describe("UIToggles", () => {
 
     it("during replay redraws altitude path from replay segments", () => {
       mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).replayActive = true;
-      (mockApp.replayManager as any).replayCurrentTime = 60;
-      (mockApp.replayManager as any).replayLastDrawnIndex = 1;
-      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).replayColorMinAlt = 1000;
-      (mockApp.replayManager as any).replayColorMaxAlt = 5000;
-      (mockApp.replayManager as any).replaySegments = [
+      (mockApp.replayManager as any).state.active = true;
+      (mockApp.replayManager as any).state.currentTime = 60;
+      (mockApp.replayManager as any).state.lastDrawnIndex = 1;
+      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).state.colorMinAlt = 1000;
+      (mockApp.replayManager as any).state.colorMaxAlt = 5000;
+      (mockApp.replayManager as any).state.segments = [
         {
           path_id: 1,
           altitude_ft: 3000,
@@ -272,7 +262,7 @@ describe("UIToggles", () => {
           ],
         },
       ];
-      (mockApp.replayManager as any).replayAirplaneMarker = null;
+      (mockApp.replayManager as any).state.airplaneMarker = null;
 
       // Mock window.KMLHeatmap.getColorForAltitude
       window.KMLHeatmap = {
@@ -282,7 +272,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAltitude();
 
       expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalled();
-      expect((mockApp.replayManager as any).replayLastDrawnIndex).toBe(1);
+      expect((mockApp.replayManager as any).state.lastDrawnIndex).toBe(1);
     });
   });
 
@@ -307,7 +297,6 @@ describe("UIToggles", () => {
       expect(mockDomElements["airspeed-btn"].style.opacity).toBe("1");
       expect(mockDomElements["airspeed-legend"].style.display).toBe("block");
       expect(mockApp.layerManager!.redrawAirspeedPaths).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("hides airspeed when visible", () => {
@@ -321,7 +310,6 @@ describe("UIToggles", () => {
       expect(mockApp.airspeedVisible).toBe(false);
       expect(mockDomElements["airspeed-btn"].style.opacity).toBe("0.5");
       expect(mockDomElements["airspeed-legend"].style.display).toBe("none");
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("shows airspeed without altitude conflict", () => {
@@ -333,21 +321,18 @@ describe("UIToggles", () => {
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.airspeedLayer);
       expect(mockApp.airspeedVisible).toBe(true);
       expect(mockApp.layerManager!.redrawAirspeedPaths).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("returns early if no map", () => {
       mockApp.map = undefined;
 
       uiToggles.toggleAirspeed();
-
-      expect(mockApp.stateManager!.saveMapState).not.toHaveBeenCalled();
     });
 
     it("prevents hiding airspeed during replay if altitude is also hidden", () => {
       mockApp.airspeedVisible = true;
       mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).replayActive = true;
+      (mockApp.replayManager as any).state.active = true;
 
       uiToggles.toggleAirspeed();
 
@@ -358,12 +343,12 @@ describe("UIToggles", () => {
     it("during replay does not add layer but updates state", () => {
       mockApp.airspeedVisible = false;
       mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).replayActive = true;
-      (mockApp.replayManager as any).replayCurrentTime = 0;
-      (mockApp.replayManager as any).replayLastDrawnIndex = -1;
-      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).replaySegments = [];
-      (mockApp.replayManager as any).replayAirplaneMarker = null;
+      (mockApp.replayManager as any).state.active = true;
+      (mockApp.replayManager as any).state.currentTime = 0;
+      (mockApp.replayManager as any).state.lastDrawnIndex = -1;
+      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).state.segments = [];
+      (mockApp.replayManager as any).state.airplaneMarker = null;
 
       uiToggles.toggleAirspeed();
 
@@ -371,18 +356,17 @@ describe("UIToggles", () => {
       expect(mockApp.layerManager!.redrawAirspeedPaths).not.toHaveBeenCalled();
       expect(mockApp.airspeedVisible).toBe(true);
       expect(mockDomElements["airspeed-legend"].style.display).toBe("block");
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("during replay updates airplane popup if open", () => {
       mockApp.airspeedVisible = false;
       mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).replayActive = true;
-      (mockApp.replayManager as any).replayCurrentTime = 0;
-      (mockApp.replayManager as any).replayLastDrawnIndex = -1;
-      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).replaySegments = [];
-      (mockApp.replayManager as any).replayAirplaneMarker = {
+      (mockApp.replayManager as any).state.active = true;
+      (mockApp.replayManager as any).state.currentTime = 0;
+      (mockApp.replayManager as any).state.lastDrawnIndex = -1;
+      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).state.segments = [];
+      (mockApp.replayManager as any).state.airplaneMarker = {
         isPopupOpen: vi.fn(() => true),
       };
       (mockApp.replayManager as any).updateReplayAirplanePopup = vi.fn();
@@ -397,13 +381,13 @@ describe("UIToggles", () => {
     it("during replay redraws airspeed path from replay segments", () => {
       mockApp.airspeedVisible = false;
       mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).replayActive = true;
-      (mockApp.replayManager as any).replayCurrentTime = 60;
-      (mockApp.replayManager as any).replayLastDrawnIndex = 1;
-      (mockApp.replayManager as any).replayLayer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).replayColorMinSpeed = 50;
-      (mockApp.replayManager as any).replayColorMaxSpeed = 200;
-      (mockApp.replayManager as any).replaySegments = [
+      (mockApp.replayManager as any).state.active = true;
+      (mockApp.replayManager as any).state.currentTime = 60;
+      (mockApp.replayManager as any).state.lastDrawnIndex = 1;
+      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
+      (mockApp.replayManager as any).state.colorMinSpeed = 50;
+      (mockApp.replayManager as any).state.colorMaxSpeed = 200;
+      (mockApp.replayManager as any).state.segments = [
         {
           path_id: 1,
           groundspeed_knots: 100,
@@ -423,7 +407,7 @@ describe("UIToggles", () => {
           ],
         },
       ];
-      (mockApp.replayManager as any).replayAirplaneMarker = null;
+      (mockApp.replayManager as any).state.airplaneMarker = null;
 
       // Mock window.KMLHeatmap.getColorForAltitude (used for airspeed coloring too)
       window.KMLHeatmap = {
@@ -433,7 +417,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAirspeed();
 
       expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalled();
-      expect((mockApp.replayManager as any).replayLastDrawnIndex).toBe(1);
+      expect((mockApp.replayManager as any).state.lastDrawnIndex).toBe(1);
     });
   });
 
@@ -448,7 +432,6 @@ describe("UIToggles", () => {
       );
       expect(mockApp.airportsVisible).toBe(false);
       expect(mockDomElements["airports-btn"].style.opacity).toBe("0.5");
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("shows airports when hidden", () => {
@@ -459,15 +442,12 @@ describe("UIToggles", () => {
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.airportLayer);
       expect(mockApp.airportsVisible).toBe(true);
       expect(mockDomElements["airports-btn"].style.opacity).toBe("1");
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("returns early if no map", () => {
       mockApp.map = undefined;
 
       uiToggles.toggleAirports();
-
-      expect(mockApp.stateManager!.saveMapState).not.toHaveBeenCalled();
     });
   });
 
@@ -483,7 +463,6 @@ describe("UIToggles", () => {
         (mockApp as any).openaipLayers["Aviation Data"]
       );
       expect(mockApp.aviationVisible).toBe(true);
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("hides aviation layer when visible", () => {
@@ -497,7 +476,6 @@ describe("UIToggles", () => {
         (mockApp as any).openaipLayers["Aviation Data"]
       );
       expect(mockApp.aviationVisible).toBe(false);
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("does nothing when no API key is set", () => {
@@ -507,15 +485,12 @@ describe("UIToggles", () => {
       uiToggles.toggleAviation();
 
       expect(mockApp.map!.addLayer).not.toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).not.toHaveBeenCalled();
     });
 
     it("returns early if no map", () => {
       mockApp.map = undefined;
 
       uiToggles.toggleAviation();
-
-      expect(mockApp.stateManager!.saveMapState).not.toHaveBeenCalled();
     });
   });
 
@@ -541,7 +516,6 @@ describe("UIToggles", () => {
         expect(btn.classList.contains("buttons-hidden")).toBe(true);
       });
       expect(mockApp.buttonsHidden).toBe(true);
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("shows buttons when hidden", () => {
@@ -554,7 +528,6 @@ describe("UIToggles", () => {
         expect(btn.classList.contains("buttons-hidden")).toBe(false);
       });
       expect(mockApp.buttonsHidden).toBe(false);
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("redraws altitude paths when altitude is visible", () => {

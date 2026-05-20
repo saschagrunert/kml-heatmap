@@ -59,6 +59,10 @@ describe("StateManager", () => {
 
     // Create mock app
     mockApp = {
+      store: {
+        subscribe: vi.fn(() => () => {}),
+        notifyMutation: vi.fn(),
+      },
       map: {
         getCenter: vi.fn(() => ({ lat: 50.0, lng: 8.0 })),
         getZoom: vi.fn(() => 10),
@@ -88,6 +92,62 @@ describe("StateManager", () => {
     if (statsPanel) {
       document.body.removeChild(statsPanel);
     }
+  });
+
+  describe("store subscriptions", () => {
+    it("subscribes to all store-backed keys on construction", () => {
+      const expectedKeys = [
+        "selectedYear",
+        "selectedAircraft",
+        "selectedPathIds",
+        "isolateSelection",
+        "heatmapVisible",
+        "altitudeVisible",
+        "airspeedVisible",
+        "airportsVisible",
+        "aviationVisible",
+        "buttonsHidden",
+      ];
+
+      expect(mockApp.store!.subscribe).toHaveBeenCalledTimes(
+        expectedKeys.length
+      );
+      for (const key of expectedKeys) {
+        expect(mockApp.store!.subscribe).toHaveBeenCalledWith(
+          key,
+          expect.any(Function)
+        );
+      }
+    });
+
+    it("auto-saves via microtask when a subscribed key changes", async () => {
+      const saveSpy = vi.spyOn(stateManager, "saveMapState");
+
+      const subscribeCalls = (
+        mockApp.store!.subscribe as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      const callback = subscribeCalls[0][1] as () => void;
+      callback();
+
+      expect(saveSpy).not.toHaveBeenCalled();
+      await Promise.resolve();
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("coalesces multiple key changes into one save", async () => {
+      const saveSpy = vi.spyOn(stateManager, "saveMapState");
+
+      const subscribeCalls = (
+        mockApp.store!.subscribe as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      const callback1 = subscribeCalls[0][1] as () => void;
+      const callback2 = subscribeCalls[1][1] as () => void;
+      callback1();
+      callback2();
+
+      await Promise.resolve();
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("saveMapState", () => {

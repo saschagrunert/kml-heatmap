@@ -15,22 +15,22 @@ export class ReplayRenderer {
   }
 
   updateAirplanePopup(replayManager: ReplayManager): void {
-    if (!replayManager.replayAirplaneMarker || !replayManager.replayActive)
+    if (!replayManager.state.airplaneMarker || !replayManager.state.active)
       return;
 
     // Find the current segment for data
     let currentSegment: PathSegment | null = null;
-    for (let i = 0; i < replayManager.replaySegments.length; i++) {
-      const seg = replayManager.replaySegments[i];
-      if (seg && (seg.time || 0) <= replayManager.replayCurrentTime) {
+    for (let i = 0; i < replayManager.state.segments.length; i++) {
+      const seg = replayManager.state.segments[i];
+      if (seg && (seg.time || 0) <= replayManager.state.currentTime) {
         currentSegment = seg;
       } else {
         break;
       }
     }
 
-    if (!currentSegment && replayManager.replaySegments.length > 0) {
-      currentSegment = replayManager.replaySegments[0]!;
+    if (!currentSegment && replayManager.state.segments.length > 0) {
+      currentSegment = replayManager.state.segments[0]!;
     }
 
     if (!currentSegment) return;
@@ -53,8 +53,8 @@ export class ReplayRenderer {
     // Get color based on current altitude using the same scale as the path
     const altColor = window.KMLHeatmap.getColorForAltitude(
       altFt,
-      replayManager.replayColorMinAlt,
-      replayManager.replayColorMaxAlt
+      replayManager.state.colorMinAlt,
+      replayManager.state.colorMaxAlt
     );
     // Convert rgb color to rgba with transparency for background
     const altColorBg = altColor
@@ -91,8 +91,8 @@ export class ReplayRenderer {
     // Get color based on current groundspeed using the same scale as the path
     const speedColor = window.KMLHeatmap.getColorForAirspeed(
       speedKt,
-      replayManager.replayColorMinSpeed,
-      replayManager.replayColorMaxSpeed
+      replayManager.state.colorMinSpeed,
+      replayManager.state.colorMaxSpeed
     );
     // Convert rgb color to rgba with transparency for background
     const speedColorBg = speedColor
@@ -123,16 +123,16 @@ export class ReplayRenderer {
     popupContent += "</div>";
 
     // Update or create popup
-    if (!replayManager.replayAirplaneMarker.getPopup()) {
-      replayManager.replayAirplaneMarker.bindPopup(popupContent, {
+    if (!replayManager.state.airplaneMarker.getPopup()) {
+      replayManager.state.airplaneMarker.bindPopup(popupContent, {
         autoPanPadding: [50, 50],
       });
     } else {
-      replayManager.replayAirplaneMarker.getPopup()!.setContent(popupContent);
+      replayManager.state.airplaneMarker.getPopup()!.setContent(popupContent);
     }
 
     // Open the popup
-    replayManager.replayAirplaneMarker.openPopup();
+    replayManager.state.airplaneMarker.openPopup();
   }
 
   updateDisplay(
@@ -143,19 +143,19 @@ export class ReplayRenderer {
     const timeDisplay = domCache.get("replay-time-display");
     if (timeDisplay) {
       timeDisplay.textContent =
-        window.KMLHeatmap.formatTime(replayManager.replayCurrentTime) +
+        window.KMLHeatmap.formatTime(replayManager.state.currentTime) +
         " / " +
-        window.KMLHeatmap.formatTime(replayManager.replayMaxTime);
+        window.KMLHeatmap.formatTime(replayManager.state.maxTime);
     }
 
     // Update slider position
     const slider = domCache.get("replay-slider") as HTMLInputElement | null;
-    if (slider) slider.value = replayManager.replayCurrentTime.toString();
+    if (slider) slider.value = replayManager.state.currentTime.toString();
 
     const sliderStart = domCache.get("replay-slider-start");
     if (sliderStart) {
       sliderStart.textContent = window.KMLHeatmap.formatTime(
-        replayManager.replayCurrentTime
+        replayManager.state.currentTime
       );
     }
 
@@ -165,9 +165,9 @@ export class ReplayRenderer {
     let currentIndex = -1;
 
     // Search through ALL segments to find airplane position
-    for (let i = 0; i < replayManager.replaySegments.length; i++) {
-      const seg = replayManager.replaySegments[i];
-      if (seg && (seg.time || 0) <= replayManager.replayCurrentTime) {
+    for (let i = 0; i < replayManager.state.segments.length; i++) {
+      const seg = replayManager.state.segments[i];
+      if (seg && (seg.time || 0) <= replayManager.state.currentTime) {
         lastSegment = seg;
         currentIndex = i;
       } else if (seg) {
@@ -178,37 +178,37 @@ export class ReplayRenderer {
     }
 
     // Draw path segments (separate loop for incremental rendering)
-    if (replayManager.replayLayer) {
+    if (replayManager.state.layer) {
       // Determine which color scheme to use based on visible layer
       const useAirspeedColors =
         this.app.airspeedVisible && !this.app.altitudeVisible;
 
-      for (let i = 0; i < replayManager.replaySegments.length; i++) {
-        const seg = replayManager.replaySegments[i];
+      for (let i = 0; i < replayManager.state.segments.length; i++) {
+        const seg = replayManager.state.segments[i];
         if (!seg) continue;
 
         // Don't draw any segments when at time 0 (stopped/reset state)
         if (
-          (seg.time || 0) <= replayManager.replayCurrentTime &&
-          replayManager.replayCurrentTime > 0
+          (seg.time || 0) <= replayManager.state.currentTime &&
+          replayManager.state.currentTime > 0
         ) {
           // Only draw if we haven't drawn this segment yet (incremental rendering)
-          if (i > replayManager.replayLastDrawnIndex) {
+          if (i > replayManager.state.lastDrawnIndex) {
             // Calculate color based on selected profile using replay-specific ranges
             let segmentColor: string;
             if (useAirspeedColors && (seg.groundspeed_knots || 0) > 0) {
               // Use airspeed colors with selected path's groundspeed range
               segmentColor = window.KMLHeatmap.getColorForAltitude(
                 seg.groundspeed_knots ?? 0,
-                replayManager.replayColorMinSpeed,
-                replayManager.replayColorMaxSpeed
+                replayManager.state.colorMinSpeed,
+                replayManager.state.colorMaxSpeed
               );
             } else {
               // Use altitude colors with selected path's altitude range (default)
               segmentColor = window.KMLHeatmap.getColorForAltitude(
                 seg.altitude_ft ?? 0,
-                replayManager.replayColorMinAlt,
-                replayManager.replayColorMaxAlt
+                replayManager.state.colorMinAlt,
+                replayManager.state.colorMaxAlt
               );
             }
 
@@ -216,10 +216,10 @@ export class ReplayRenderer {
               color: segmentColor,
               weight: 3,
               opacity: 0.8,
-            }).addTo(replayManager.replayLayer);
+            }).addTo(replayManager.state.layer);
 
             // Update last drawn index incrementally during the loop
-            replayManager.replayLastDrawnIndex = i;
+            replayManager.state.lastDrawnIndex = i;
           }
         } else {
           break;
@@ -230,14 +230,14 @@ export class ReplayRenderer {
     // Update airplane marker position and rotation
     // Ensure marker is on the map (in case it was removed during seeking/zooming)
     if (
-      replayManager.replayAirplaneMarker &&
+      replayManager.state.airplaneMarker &&
       this.app.map &&
-      !this.app.map.hasLayer(replayManager.replayAirplaneMarker)
+      !this.app.map.hasLayer(replayManager.state.airplaneMarker)
     ) {
-      replayManager.replayAirplaneMarker.addTo(this.app.map);
+      replayManager.state.airplaneMarker.addTo(this.app.map);
     }
 
-    if (replayManager.replayAirplaneMarker && this.app.map) {
+    if (replayManager.state.airplaneMarker && this.app.map) {
       // If we have a lastSegment, use it for positioning
       if (lastSegment) {
         let currentPos: [number, number];
@@ -245,11 +245,11 @@ export class ReplayRenderer {
 
         if (
           nextSegment &&
-          (lastSegment.time || 0) < replayManager.replayCurrentTime
+          (lastSegment.time || 0) < replayManager.state.currentTime
         ) {
           // Interpolate between last and next segment
           const timeFraction =
-            (replayManager.replayCurrentTime - (lastSegment.time || 0)) /
+            (replayManager.state.currentTime - (lastSegment.time || 0)) /
             ((nextSegment.time || 0) - (lastSegment.time || 0));
           const lat1 = lastSegment.coords?.[1]?.[0] || 0;
           const lon1 = lastSegment.coords?.[1]?.[1] || 0;
@@ -277,34 +277,29 @@ export class ReplayRenderer {
 
         // Calculate smoothed bearing by looking ahead several segments
         const smoothedBearing = window.KMLHeatmap.calculateSmoothedBearing(
-          replayManager.replaySegments,
+          replayManager.state.segments,
           currentIndex,
           5
         );
         if (smoothedBearing !== null) {
           bearing = smoothedBearing;
-          replayManager.replayLastBearing = bearing; // Store for use when stationary
-        } else if (replayManager.replayLastBearing !== null) {
-          // Plane is stationary - use last known bearing to avoid rotation jitter
-          bearing = replayManager.replayLastBearing;
+          replayManager.state.lastBearing = bearing;
+        } else if (replayManager.state.lastBearing !== null) {
+          bearing = replayManager.state.lastBearing;
         }
 
         // Update marker position
-        // The CSS transition on the marker element provides smooth movement
-        replayManager.replayAirplaneMarker.setLatLng(currentPos);
+        replayManager.state.airplaneMarker.setLatLng(currentPos);
 
         // Auto-pan map if airplane is near viewport edge (when playing or manually seeking)
-        if (replayManager.replayPlaying || isManualSeek) {
+        if (replayManager.state.playing || isManualSeek) {
           const mapSize = this.app.map.getSize();
           const airplanePoint = this.app.map.latLngToContainerPoint(currentPos);
 
-          // Define margin from edge (in pixels) before triggering pan
-          // Smaller margin allows airplane to get closer to edges before recentering
-          const marginPercent = 0.1; // 10% margin from each edge
+          const marginPercent = 0.1;
           const marginX = mapSize.x * marginPercent;
           const marginY = mapSize.y * marginPercent;
 
-          // Check if airplane is approaching edges - if so, center on airplane
           let needsRecenter = false;
           if (
             airplanePoint.x < marginX ||
@@ -315,12 +310,10 @@ export class ReplayRenderer {
             needsRecenter = true;
           }
 
-          // For manual seek, always center on airplane position
           if (isManualSeek) {
             needsRecenter = true;
           }
 
-          // Center map on airplane instead of incremental panning
           if (needsRecenter) {
             this.app.map.panTo(currentPos, {
               animate: true,
@@ -329,57 +322,47 @@ export class ReplayRenderer {
               noMoveStart: true,
             });
 
-            // Track recenter events for auto-zoom using sliding window
             const now = Date.now();
-            replayManager.replayRecenterTimestamps.push(now);
+            replayManager.state.recenterTimestamps.push(now);
 
-            // Remove timestamps older than 30 seconds (sliding window)
-            const cutoffTime = now - 30000; // 30 seconds ago
-            replayManager.replayRecenterTimestamps =
-              replayManager.replayRecenterTimestamps.filter((ts) => {
+            const cutoffTime = now - 30000;
+            replayManager.state.recenterTimestamps =
+              replayManager.state.recenterTimestamps.filter((ts) => {
                 return ts > cutoffTime;
               });
           }
 
           // Auto-zoom based on map recenter frequency
-          if (replayManager.replayAutoZoom) {
-            const recenterCount = replayManager.replayRecenterTimestamps.length;
+          if (replayManager.state.autoZoom) {
+            const recenterCount = replayManager.state.recenterTimestamps.length;
 
-            // Trigger zoom-out when more than 2 recenters happen within 5 seconds
             if (recenterCount > 2) {
-              // Check if we have more than 2 recenters within the last 5 seconds
               const fiveSecondsAgo = Date.now() - 5000;
               const recentRecenters =
-                replayManager.replayRecenterTimestamps.filter((ts) => {
+                replayManager.state.recenterTimestamps.filter((ts) => {
                   return ts >= fiveSecondsAgo;
                 });
 
               if (recentRecenters.length > 2) {
-                // More than 2 recenters in 5 seconds - zoom out aggressively
-                const zoomOutStep = 1; // Always zoom out 1 level for fine-granular control
+                const zoomOutStep = 1;
 
-                // Only zoom out, never zoom in
-                // Zoom out by 1 level, but don't go below level 9
                 if (
                   zoomOutStep > 0 &&
-                  replayManager.replayLastZoom !== null &&
-                  replayManager.replayLastZoom > 9
+                  replayManager.state.lastZoom !== null &&
+                  replayManager.state.lastZoom > 9
                 ) {
                   const newZoom = Math.max(
                     9,
-                    replayManager.replayLastZoom - zoomOutStep
+                    replayManager.state.lastZoom - zoomOutStep
                   );
 
-                  // Zoom out without recentering
                   this.app.map.setZoom(newZoom, {
                     animate: true,
                     duration: 0.5,
                   });
-                  replayManager.replayLastZoom = newZoom;
+                  replayManager.state.lastZoom = newZoom;
 
-                  // Clear ALL recenter timestamps after zoom-out to allow fresh evaluation
-                  // This prevents immediate re-triggering with the same old timestamps
-                  replayManager.replayRecenterTimestamps = [];
+                  replayManager.state.recenterTimestamps = [];
                 }
               }
             }
@@ -387,25 +370,20 @@ export class ReplayRenderer {
         }
 
         // Update rotation using hardware-accelerated transforms
-        // Airplane emoji typically points right/northeast, adjust to match bearing
-        // The offset may vary by system - adjust if airplane orientation looks wrong
-        const iconElement = replayManager.replayAirplaneMarker.getElement();
+        const iconElement = replayManager.state.airplaneMarker.getElement();
         if (iconElement) {
           const iconDiv = iconElement.querySelector(".replay-airplane-icon");
           if (iconDiv) {
-            // Most systems: emoji points at ~45° (northeast), so adjust by -45°
             const adjustedBearing = bearing - 45;
-            // Use translate3d(0,0,0) to force hardware acceleration
             (iconDiv as HTMLElement).style.transform =
               "translate3d(0,0,0) rotate(" + adjustedBearing + "deg)";
           }
         }
-      } else if (replayManager.replaySegments.length > 0) {
-        // No segment yet (at start of replay) - position at first coordinate
-        const firstSeg = replayManager.replaySegments[0];
+      } else if (replayManager.state.segments.length > 0) {
+        const firstSeg = replayManager.state.segments[0];
         const startCoords = firstSeg?.coords?.[0];
         if (startCoords) {
-          replayManager.replayAirplaneMarker.setLatLng([
+          replayManager.state.airplaneMarker.setLatLng([
             startCoords[0],
             startCoords[1],
           ]);
@@ -415,9 +393,9 @@ export class ReplayRenderer {
 
     // Update popup content if it's open
     if (
-      replayManager.replayAirplaneMarker &&
-      replayManager.replayAirplaneMarker.getPopup() &&
-      replayManager.replayAirplaneMarker.isPopupOpen()
+      replayManager.state.airplaneMarker &&
+      replayManager.state.airplaneMarker.getPopup() &&
+      replayManager.state.airplaneMarker.isPopupOpen()
     ) {
       this.updateAirplanePopup(replayManager);
     }

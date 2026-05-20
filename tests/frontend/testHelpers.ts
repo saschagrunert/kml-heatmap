@@ -58,7 +58,7 @@ export interface MockManager {
   redrawAltitudePaths?: Mock;
   redrawAirspeedPaths?: Mock;
   updateReplayButtonState?: Mock;
-  replayActive?: boolean;
+  state?: { active: boolean };
 }
 
 /**

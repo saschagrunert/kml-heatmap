@@ -73,7 +73,7 @@ describe("DataManager", () => {
         redrawAirspeedPaths: vi.fn(),
       },
       replayManager: {
-        replayActive: false,
+        state: { active: false },
       },
     };
 
@@ -262,7 +262,7 @@ describe("DataManager", () => {
 
     it("adds heatmap to map if heatmap visible and not in replay mode", async () => {
       mockApp.heatmapVisible = true;
-      mockApp.replayManager.replayActive = false;
+      mockApp.replayManager.state.active = false;
 
       const mockData = {
         coordinates: [[50.0, 8.0]],
@@ -297,7 +297,7 @@ describe("DataManager", () => {
 
     it("does not add heatmap if in replay mode", async () => {
       mockApp.heatmapVisible = true;
-      mockApp.replayManager.replayActive = true;
+      mockApp.replayManager.state.active = true;
 
       const mockData = {
         coordinates: [[50.0, 8.0]],

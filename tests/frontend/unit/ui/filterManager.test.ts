@@ -324,22 +324,6 @@ describe("FilterManager", () => {
       expect(mockApp.airportManager.updateAirportPopups).toHaveBeenCalled();
     });
 
-    it("saves map state when not initializing", async () => {
-      mockApp.isInitializing = false;
-
-      await filterManager.filterByYear();
-
-      expect(mockApp.stateManager.saveMapState).toHaveBeenCalled();
-    });
-
-    it("does not save state when initializing", async () => {
-      mockApp.isInitializing = true;
-
-      await filterManager.filterByYear();
-
-      expect(mockApp.stateManager.saveMapState).not.toHaveBeenCalled();
-    });
-
     it("does nothing if year select element doesn't exist", async () => {
       const yearSelect = document.getElementById("year-select");
       if (yearSelect) document.body.removeChild(yearSelect);
@@ -422,22 +406,6 @@ describe("FilterManager", () => {
 
       expect(mockApp.airportManager.updateAirportOpacity).toHaveBeenCalled();
       expect(mockApp.airportManager.updateAirportPopups).toHaveBeenCalled();
-    });
-
-    it("saves map state when not initializing", async () => {
-      mockApp.isInitializing = false;
-
-      await filterManager.filterByAircraft();
-
-      expect(mockApp.stateManager.saveMapState).toHaveBeenCalled();
-    });
-
-    it("does not save state when initializing", async () => {
-      mockApp.isInitializing = true;
-
-      await filterManager.filterByAircraft();
-
-      expect(mockApp.stateManager.saveMapState).not.toHaveBeenCalled();
     });
 
     it("does nothing if aircraft select element doesn't exist", async () => {

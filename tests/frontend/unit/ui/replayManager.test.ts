@@ -157,7 +157,7 @@ describe("ReplayManager", () => {
         updateAltitudeLegend: vi.fn(),
         updateAirspeedLegend: vi.fn(),
       },
-      replayManager: { replayActive: false },
+      replayManager: { state: { active: false } },
       fullStats: {
         max_groundspeed_knots: 130,
       },
@@ -179,16 +179,16 @@ describe("ReplayManager", () => {
 
   describe("constructor", () => {
     it("initializes with default replay state", () => {
-      expect(replayManager.replayActive).toBe(false);
-      expect(replayManager.replayPlaying).toBe(false);
-      expect(replayManager.replayCurrentTime).toBe(0);
-      expect(replayManager.replayMaxTime).toBe(0);
-      expect(replayManager.replaySpeed).toBe(50.0);
-      expect(replayManager.replayLayer).toBeNull();
-      expect(replayManager.replaySegments).toEqual([]);
-      expect(replayManager.replayAirplaneMarker).toBeNull();
-      expect(replayManager.replayLastDrawnIndex).toBe(-1);
-      expect(replayManager.replayAutoZoom).toBe(false);
+      expect(replayManager.state.active).toBe(false);
+      expect(replayManager.state.playing).toBe(false);
+      expect(replayManager.state.currentTime).toBe(0);
+      expect(replayManager.state.maxTime).toBe(0);
+      expect(replayManager.state.speed).toBe(50.0);
+      expect(replayManager.state.layer).toBeNull();
+      expect(replayManager.state.segments).toEqual([]);
+      expect(replayManager.state.airplaneMarker).toBeNull();
+      expect(replayManager.state.lastDrawnIndex).toBe(-1);
+      expect(replayManager.state.autoZoom).toBe(false);
     });
   });
 
@@ -206,7 +206,7 @@ describe("ReplayManager", () => {
 
       replayManager.toggleReplay();
 
-      expect(replayManager.replayActive).toBe(false);
+      expect(replayManager.state.active).toBe(false);
     });
 
     it("does nothing when activating with multiple paths selected", () => {
@@ -214,7 +214,7 @@ describe("ReplayManager", () => {
 
       replayManager.toggleReplay();
 
-      expect(replayManager.replayActive).toBe(false);
+      expect(replayManager.state.active).toBe(false);
     });
 
     it("activates replay when exactly one path is selected", () => {
@@ -222,7 +222,7 @@ describe("ReplayManager", () => {
 
       replayManager.toggleReplay();
 
-      expect(replayManager.replayActive).toBe(true);
+      expect(replayManager.state.active).toBe(true);
       expect(mockDomElements["replay-controls"].style.display).toBe("block");
       expect(document.body.classList.contains("replay-active")).toBe(true);
       expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
@@ -240,7 +240,7 @@ describe("ReplayManager", () => {
 
     it("sets auto-zoom button opacity on activation based on autoZoom state", () => {
       mockApp.selectedPathIds = new Set([1]);
-      replayManager.replayAutoZoom = true;
+      replayManager.state.autoZoom = true;
 
       replayManager.toggleReplay();
 
@@ -249,7 +249,7 @@ describe("ReplayManager", () => {
 
     it("sets auto-zoom button disabled style when auto-zoom is off", () => {
       mockApp.selectedPathIds = new Set([1]);
-      replayManager.replayAutoZoom = false;
+      replayManager.state.autoZoom = false;
 
       replayManager.toggleReplay();
 
@@ -276,12 +276,12 @@ describe("ReplayManager", () => {
       // First activate
       mockApp.selectedPathIds = new Set([1]);
       replayManager.toggleReplay();
-      expect(replayManager.replayActive).toBe(true);
+      expect(replayManager.state.active).toBe(true);
 
       // Now deactivate
       replayManager.toggleReplay();
 
-      expect(replayManager.replayActive).toBe(false);
+      expect(replayManager.state.active).toBe(false);
       expect(mockDomElements["replay-controls"].style.display).toBe("none");
       expect(document.body.classList.contains("replay-active")).toBe(false);
     });
@@ -290,19 +290,19 @@ describe("ReplayManager", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.toggleReplay();
       // Airplane marker should exist after activation
-      expect(replayManager.replayAirplaneMarker).not.toBeNull();
+      expect(replayManager.state.airplaneMarker).not.toBeNull();
 
       replayManager.toggleReplay();
 
       // Airplane marker should be removed and nulled
       expect(mockApp.map!.removeLayer).toHaveBeenCalled();
-      expect(replayManager.replayAirplaneMarker).toBeNull();
+      expect(replayManager.state.airplaneMarker).toBeNull();
     });
 
     it("removes replay layer from map on deactivation", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.toggleReplay();
-      const layer = replayManager.replayLayer;
+      const layer = replayManager.state.layer;
 
       replayManager.toggleReplay();
 
@@ -385,8 +385,8 @@ describe("ReplayManager", () => {
 
       replayManager.initializeReplay();
 
-      expect(replayManager.replaySegments.length).toBe(3);
-      expect(replayManager.replaySegments.every((s) => s.path_id === 1)).toBe(
+      expect(replayManager.state.segments.length).toBe(3);
+      expect(replayManager.state.segments.every((s) => s.path_id === 1)).toBe(
         true
       );
     });
@@ -407,7 +407,7 @@ describe("ReplayManager", () => {
       replayManager.initializeReplay();
 
       // First segment should be the one with time -10
-      expect(replayManager.replaySegments[0].time).toBe(-10);
+      expect(replayManager.state.segments[0].time).toBe(-10);
     });
 
     it("calculates color ranges from current data path_segments", () => {
@@ -417,8 +417,8 @@ describe("ReplayManager", () => {
 
       expect(window.KMLHeatmap.findMinMax).toHaveBeenCalled();
       // Should calculate from current resolution segments for path 1
-      expect(replayManager.replayColorMinAlt).toBeDefined();
-      expect(replayManager.replayColorMaxAlt).toBeDefined();
+      expect(replayManager.state.colorMinAlt).toBeDefined();
+      expect(replayManager.state.colorMaxAlt).toBeDefined();
     });
 
     it("uses fallback airspeed range when no groundspeeds > 0 in current data", () => {
@@ -430,10 +430,10 @@ describe("ReplayManager", () => {
 
       replayManager.initializeReplay();
 
-      expect(replayManager.replayColorMinSpeed).toBe(
+      expect(replayManager.state.colorMinSpeed).toBe(
         mockApp.airspeedRange!.min
       );
-      expect(replayManager.replayColorMaxSpeed).toBe(
+      expect(replayManager.state.colorMaxSpeed).toBe(
         mockApp.airspeedRange!.max
       );
     });
@@ -483,10 +483,10 @@ describe("ReplayManager", () => {
 
       replayManager.initializeReplay();
 
-      expect(replayManager.replayColorMinSpeed).toBe(
+      expect(replayManager.state.colorMinSpeed).toBe(
         mockApp.airspeedRange!.min
       );
-      expect(replayManager.replayColorMaxSpeed).toBe(
+      expect(replayManager.state.colorMaxSpeed).toBe(
         mockApp.airspeedRange!.max
       );
     });
@@ -496,7 +496,7 @@ describe("ReplayManager", () => {
 
       replayManager.initializeReplay();
 
-      expect(replayManager.replayMaxTime).toBe(120);
+      expect(replayManager.state.maxTime).toBe(120);
     });
 
     it("updates slider max value", () => {
@@ -513,9 +513,9 @@ describe("ReplayManager", () => {
 
       replayManager.initializeReplay();
 
-      expect(replayManager.replayLayer).not.toBeNull();
+      expect(replayManager.state.layer).not.toBeNull();
       // replayLayer.addTo(map) is called, not map.addLayer(replayLayer)
-      expect(replayManager.replayLayer!.addTo).toHaveBeenCalledWith(
+      expect(replayManager.state.layer!.addTo).toHaveBeenCalledWith(
         mockApp.map
       );
     });
@@ -525,27 +525,27 @@ describe("ReplayManager", () => {
 
       replayManager.initializeReplay();
 
-      expect(replayManager.replayAirplaneMarker).not.toBeNull();
+      expect(replayManager.state.airplaneMarker).not.toBeNull();
     });
 
     it("resets replay state on initialization", () => {
       mockApp.selectedPathIds = new Set([1]);
-      replayManager.replayCurrentTime = 50;
-      replayManager.replayLastDrawnIndex = 5;
-      replayManager.replayLastBearing = 180;
+      replayManager.state.currentTime = 50;
+      replayManager.state.lastDrawnIndex = 5;
+      replayManager.state.lastBearing = 180;
 
       replayManager.initializeReplay();
 
       // replayCurrentTime and replayLastDrawnIndex are reset to initial values
       // before updateReplayDisplay() is called at the end of initializeReplay()
-      expect(replayManager.replayCurrentTime).toBe(0);
+      expect(replayManager.state.currentTime).toBe(0);
       // updateReplayDisplay at time 0 does not draw segments, so lastDrawnIndex stays -1
-      expect(replayManager.replayLastDrawnIndex).toBe(-1);
+      expect(replayManager.state.lastDrawnIndex).toBe(-1);
     });
 
     it("sets initial zoom when autoZoom is enabled", () => {
       mockApp.selectedPathIds = new Set([1]);
-      replayManager.replayAutoZoom = true;
+      replayManager.state.autoZoom = true;
 
       replayManager.initializeReplay();
 
@@ -554,12 +554,12 @@ describe("ReplayManager", () => {
         16,
         expect.objectContaining({ animate: true })
       );
-      expect(replayManager.replayLastZoom).toBe(16);
+      expect(replayManager.state.lastZoom).toBe(16);
     });
 
     it("pans to start position without changing zoom when autoZoom is disabled", () => {
       mockApp.selectedPathIds = new Set([1]);
-      replayManager.replayAutoZoom = false;
+      replayManager.state.autoZoom = false;
 
       replayManager.initializeReplay();
 
@@ -583,7 +583,7 @@ describe("ReplayManager", () => {
 
       // First init
       replayManager.initializeReplay();
-      const firstMarker = replayManager.replayAirplaneMarker;
+      const firstMarker = replayManager.state.airplaneMarker;
 
       // Second init
       replayManager.initializeReplay();
@@ -765,15 +765,15 @@ describe("ReplayManager", () => {
     beforeEach(() => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.initializeReplay();
-      replayManager.replayActive = true;
+      replayManager.state.active = true;
     });
 
     it("returns early if not active", () => {
-      replayManager.replayActive = false;
+      replayManager.state.active = false;
 
       replayManager.playReplay();
 
-      expect(replayManager.replayPlaying).toBe(false);
+      expect(replayManager.state.playing).toBe(false);
     });
 
     it("returns early if no map", () => {
@@ -781,13 +781,13 @@ describe("ReplayManager", () => {
 
       replayManager.playReplay();
 
-      expect(replayManager.replayPlaying).toBe(false);
+      expect(replayManager.state.playing).toBe(false);
     });
 
     it("sets playing state and swaps play/pause buttons", () => {
       replayManager.playReplay();
 
-      expect(replayManager.replayPlaying).toBe(true);
+      expect(replayManager.state.playing).toBe(true);
       expect(mockDomElements["replay-play-btn"].style.display).toBe("none");
       expect(mockDomElements["replay-pause-btn"].style.display).toBe(
         "inline-block"
@@ -798,31 +798,31 @@ describe("ReplayManager", () => {
       replayManager.playReplay();
 
       expect(requestAnimationFrame).toHaveBeenCalled();
-      expect(replayManager.replayAnimationFrameId).not.toBeNull();
+      expect(replayManager.state.animationFrameId).not.toBeNull();
     });
 
     it("restarts from beginning when at the end", () => {
-      replayManager.replayCurrentTime = replayManager.replayMaxTime;
+      replayManager.state.currentTime = replayManager.state.maxTime;
 
       replayManager.playReplay();
 
-      expect(replayManager.replayCurrentTime).toBe(0);
-      expect(replayManager.replayLastDrawnIndex).toBe(-1);
+      expect(replayManager.state.currentTime).toBe(0);
+      expect(replayManager.state.lastDrawnIndex).toBe(-1);
     });
 
     it("resets airplane to start when restarting from end", () => {
-      replayManager.replayCurrentTime = replayManager.replayMaxTime;
+      replayManager.state.currentTime = replayManager.state.maxTime;
 
       replayManager.playReplay();
 
       expect(
-        replayManager.replayAirplaneMarker!.setLatLng
+        replayManager.state.airplaneMarker!.setLatLng
       ).toHaveBeenCalledWith([48.0, 16.0]);
     });
 
     it("resets to initial zoom when restarting with autoZoom enabled", () => {
-      replayManager.replayCurrentTime = replayManager.replayMaxTime;
-      replayManager.replayAutoZoom = true;
+      replayManager.state.currentTime = replayManager.state.maxTime;
+      replayManager.state.autoZoom = true;
 
       replayManager.playReplay();
 
@@ -840,7 +840,7 @@ describe("ReplayManager", () => {
     });
 
     it("animation callback advances time and continues loop", () => {
-      replayManager.replaySpeed = 50;
+      replayManager.state.speed = 50;
       replayManager.playReplay();
 
       // Advance timers to trigger the requestAnimationFrame callback
@@ -848,13 +848,13 @@ describe("ReplayManager", () => {
 
       // Animation should have advanced current time (deltaMs * speed / 1000)
       // and requested another frame
-      expect(replayManager.replayPlaying).toBe(true);
+      expect(replayManager.state.playing).toBe(true);
     });
 
     it("animation callback pauses when reaching max time and fits bounds", () => {
       // Set current time very close to max so animation reaches end quickly
-      replayManager.replayCurrentTime = replayManager.replayMaxTime - 0.001;
-      replayManager.replaySpeed = 1000;
+      replayManager.state.currentTime = replayManager.state.maxTime - 0.001;
+      replayManager.state.speed = 1000;
 
       replayManager.playReplay();
 
@@ -862,14 +862,14 @@ describe("ReplayManager", () => {
       vi.advanceTimersByTime(50);
 
       // Should have paused
-      expect(replayManager.replayPlaying).toBe(false);
+      expect(replayManager.state.playing).toBe(false);
       // Should fit bounds at end
       expect(mockApp.map!.fitBounds).toHaveBeenCalled();
     });
 
     it("animation callback stops when playing is set to false", () => {
       replayManager.playReplay();
-      replayManager.replayPlaying = false;
+      replayManager.state.playing = false;
 
       // Advance past the first frame
       vi.advanceTimersByTime(20);
@@ -881,11 +881,11 @@ describe("ReplayManager", () => {
 
   describe("pauseReplay", () => {
     it("sets playing to false and swaps buttons", () => {
-      replayManager.replayPlaying = true;
+      replayManager.state.playing = true;
 
       replayManager.pauseReplay();
 
-      expect(replayManager.replayPlaying).toBe(false);
+      expect(replayManager.state.playing).toBe(false);
       expect(mockDomElements["replay-play-btn"].style.display).toBe(
         "inline-block"
       );
@@ -893,20 +893,20 @@ describe("ReplayManager", () => {
     });
 
     it("cancels animation frame", () => {
-      replayManager.replayAnimationFrameId = 42;
+      replayManager.state.animationFrameId = 42;
 
       replayManager.pauseReplay();
 
       expect(cancelAnimationFrame).toHaveBeenCalledWith(42);
-      expect(replayManager.replayAnimationFrameId).toBeNull();
+      expect(replayManager.state.animationFrameId).toBeNull();
     });
 
     it("resets frame time", () => {
-      replayManager.replayLastFrameTime = 12345;
+      replayManager.state.lastFrameTime = 12345;
 
       replayManager.pauseReplay();
 
-      expect(replayManager.replayLastFrameTime).toBeNull();
+      expect(replayManager.state.lastFrameTime).toBeNull();
     });
 
     it("saves map state", () => {
@@ -920,32 +920,32 @@ describe("ReplayManager", () => {
     beforeEach(() => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.initializeReplay();
-      replayManager.replayActive = true;
+      replayManager.state.active = true;
     });
 
     it("pauses and resets time", () => {
-      replayManager.replayCurrentTime = 50;
+      replayManager.state.currentTime = 50;
 
       replayManager.stopReplay();
 
-      expect(replayManager.replayPlaying).toBe(false);
-      expect(replayManager.replayCurrentTime).toBe(0);
+      expect(replayManager.state.playing).toBe(false);
+      expect(replayManager.state.currentTime).toBe(0);
       // stopReplay calls updateReplayDisplay which may update lastDrawnIndex
       // but at time 0 it should not draw segments
-      expect(replayManager.replayLastDrawnIndex).toBe(-1);
+      expect(replayManager.state.lastDrawnIndex).toBe(-1);
     });
 
     it("clears replay layer", () => {
       replayManager.stopReplay();
 
-      expect(replayManager.replayLayer!.clearLayers).toHaveBeenCalled();
+      expect(replayManager.state.layer!.clearLayers).toHaveBeenCalled();
     });
 
     it("resets airplane to start position", () => {
       replayManager.stopReplay();
 
       expect(
-        replayManager.replayAirplaneMarker!.setLatLng
+        replayManager.state.airplaneMarker!.setLatLng
       ).toHaveBeenCalledWith([48.0, 16.0]);
     });
   });
@@ -954,29 +954,29 @@ describe("ReplayManager", () => {
     beforeEach(() => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.initializeReplay();
-      replayManager.replayActive = true;
+      replayManager.state.active = true;
     });
 
     it("sets current time from string value", () => {
       replayManager.seekReplay("60.5");
 
-      expect(replayManager.replayCurrentTime).toBe(60.5);
+      expect(replayManager.state.currentTime).toBe(60.5);
     });
 
     it("clears and redraws when seeking backward", () => {
-      replayManager.replayCurrentTime = 100;
+      replayManager.state.currentTime = 100;
 
       replayManager.seekReplay("30");
 
       // seekReplay clears layers when going backward, then calls updateReplayDisplay
-      expect(replayManager.replayLayer!.clearLayers).toHaveBeenCalled();
+      expect(replayManager.state.layer!.clearLayers).toHaveBeenCalled();
       // After clearing, updateReplayDisplay redraws segments up to t=30 (segment at t=0)
-      expect(replayManager.replayCurrentTime).toBe(30);
+      expect(replayManager.state.currentTime).toBe(30);
     });
 
     it("does not clear when seeking forward", () => {
-      replayManager.replayCurrentTime = 30;
-      const clearSpy = replayManager.replayLayer!.clearLayers as ReturnType<
+      replayManager.state.currentTime = 30;
+      const clearSpy = replayManager.state.layer!.clearLayers as ReturnType<
         typeof vi.fn
       >;
       clearSpy.mockClear();
@@ -1000,7 +1000,7 @@ describe("ReplayManager", () => {
 
       replayManager.changeReplaySpeed();
 
-      expect(replayManager.replaySpeed).toBe(100);
+      expect(replayManager.state.speed).toBe(100);
     });
 
     it("returns early if no speed select element", () => {
@@ -1009,27 +1009,27 @@ describe("ReplayManager", () => {
       replayManager.changeReplaySpeed();
 
       // Should not throw
-      expect(replayManager.replaySpeed).toBe(50.0);
+      expect(replayManager.state.speed).toBe(50.0);
     });
   });
 
   describe("toggleAutoZoom", () => {
     it("toggles autoZoom on", () => {
-      replayManager.replayAutoZoom = false;
+      replayManager.state.autoZoom = false;
 
       replayManager.toggleAutoZoom();
 
-      expect(replayManager.replayAutoZoom).toBe(true);
+      expect(replayManager.state.autoZoom).toBe(true);
       // Browser normalizes "1.0" to "1"
       expect(mockDomElements["replay-autozoom-btn"].style.opacity).toBe("1");
     });
 
     it("toggles autoZoom off", () => {
-      replayManager.replayAutoZoom = true;
+      replayManager.state.autoZoom = true;
 
       replayManager.toggleAutoZoom();
 
-      expect(replayManager.replayAutoZoom).toBe(false);
+      expect(replayManager.state.autoZoom).toBe(false);
       expect(mockDomElements["replay-autozoom-btn"].style.opacity).toBe("0.5");
     });
 
@@ -1088,11 +1088,11 @@ describe("ReplayManager", () => {
     beforeEach(() => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.initializeReplay();
-      replayManager.replayActive = true;
+      replayManager.state.active = true;
     });
 
     it("updates time display", () => {
-      replayManager.replayCurrentTime = 60;
+      replayManager.state.currentTime = 60;
 
       replayManager.updateReplayDisplay();
 
@@ -1100,7 +1100,7 @@ describe("ReplayManager", () => {
     });
 
     it("updates slider value", () => {
-      replayManager.replayCurrentTime = 60;
+      replayManager.state.currentTime = 60;
 
       replayManager.updateReplayDisplay();
 
@@ -1109,37 +1109,37 @@ describe("ReplayManager", () => {
     });
 
     it("draws path segments incrementally", () => {
-      replayManager.replayCurrentTime = 65;
+      replayManager.state.currentTime = 65;
 
       replayManager.updateReplayDisplay();
 
       // Should have drawn segments with time <= 65 (first two: t=0 and t=60)
       // but only when time > 0
-      expect(replayManager.replayLastDrawnIndex).toBeGreaterThanOrEqual(0);
+      expect(replayManager.state.lastDrawnIndex).toBeGreaterThanOrEqual(0);
     });
 
     it("does not draw segments when at time 0", () => {
-      replayManager.replayCurrentTime = 0;
-      replayManager.replayLastDrawnIndex = -1;
+      replayManager.state.currentTime = 0;
+      replayManager.state.lastDrawnIndex = -1;
 
       replayManager.updateReplayDisplay();
 
-      expect(replayManager.replayLastDrawnIndex).toBe(-1);
+      expect(replayManager.state.lastDrawnIndex).toBe(-1);
     });
 
     it("positions airplane at first segment when no lastSegment found", () => {
-      replayManager.replayCurrentTime = -1;
+      replayManager.state.currentTime = -1;
 
       replayManager.updateReplayDisplay();
 
       // Should position airplane at start of first segment
-      expect(replayManager.replayAirplaneMarker!.setLatLng).toHaveBeenCalled();
+      expect(replayManager.state.airplaneMarker!.setLatLng).toHaveBeenCalled();
     });
 
     it("uses airspeed colors when airspeed visible and altitude not visible", () => {
       mockApp.airspeedVisible = true;
       mockApp.altitudeVisible = false;
-      replayManager.replayCurrentTime = 65;
+      replayManager.state.currentTime = 65;
 
       replayManager.updateReplayDisplay();
 
@@ -1150,23 +1150,23 @@ describe("ReplayManager", () => {
       (mockApp.map!.hasLayer as ReturnType<typeof vi.fn>).mockReturnValue(
         false
       );
-      replayManager.replayCurrentTime = 30;
+      replayManager.state.currentTime = 30;
 
       replayManager.updateReplayDisplay();
 
-      expect(replayManager.replayAirplaneMarker!.addTo).toHaveBeenCalledWith(
+      expect(replayManager.state.airplaneMarker!.addTo).toHaveBeenCalledWith(
         mockApp.map
       );
     });
 
     it("updates airplane rotation via element transform", () => {
-      replayManager.replayCurrentTime = 65;
+      replayManager.state.currentTime = 65;
       const mockElement = document.createElement("div");
       const iconDiv = document.createElement("div");
       iconDiv.className = "replay-airplane-icon";
       mockElement.appendChild(iconDiv);
       (
-        replayManager.replayAirplaneMarker!.getElement as ReturnType<
+        replayManager.state.airplaneMarker!.getElement as ReturnType<
           typeof vi.fn
         >
       ).mockReturnValue(mockElement);
@@ -1177,8 +1177,8 @@ describe("ReplayManager", () => {
     });
 
     it("pans map when airplane is near edge during playing", () => {
-      replayManager.replayPlaying = true;
-      replayManager.replayCurrentTime = 65;
+      replayManager.state.playing = true;
+      replayManager.state.currentTime = 65;
       // Simulate airplane near left edge
       (
         mockApp.map!.latLngToContainerPoint as ReturnType<typeof vi.fn>
@@ -1190,8 +1190,8 @@ describe("ReplayManager", () => {
     });
 
     it("always pans on manual seek", () => {
-      replayManager.replayPlaying = false;
-      replayManager.replayCurrentTime = 65;
+      replayManager.state.playing = false;
+      replayManager.state.currentTime = 65;
       // Airplane in center
       (
         mockApp.map!.latLngToContainerPoint as ReturnType<typeof vi.fn>
@@ -1203,39 +1203,39 @@ describe("ReplayManager", () => {
     });
 
     it("interpolates position between segments", () => {
-      replayManager.replayCurrentTime = 30;
+      replayManager.state.currentTime = 30;
 
       replayManager.updateReplayDisplay();
 
       // Should interpolate between segment at t=0 and segment at t=60
-      expect(replayManager.replayAirplaneMarker!.setLatLng).toHaveBeenCalled();
+      expect(replayManager.state.airplaneMarker!.setLatLng).toHaveBeenCalled();
     });
 
     it("uses last known bearing when smoothed bearing is null", () => {
       (
         window.KMLHeatmap.calculateSmoothedBearing as ReturnType<typeof vi.fn>
       ).mockReturnValue(null);
-      replayManager.replayLastBearing = 45;
-      replayManager.replayCurrentTime = 65;
+      replayManager.state.lastBearing = 45;
+      replayManager.state.currentTime = 65;
 
       replayManager.updateReplayDisplay();
 
       // Should use last known bearing since smoothed returned null
-      expect(replayManager.replayLastBearing).toBe(45);
+      expect(replayManager.state.lastBearing).toBe(45);
     });
 
     it("auto-zooms out when too many recenters happen", () => {
-      replayManager.replayPlaying = true;
-      replayManager.replayAutoZoom = true;
-      replayManager.replayLastZoom = 14;
-      replayManager.replayCurrentTime = 65;
+      replayManager.state.playing = true;
+      replayManager.state.autoZoom = true;
+      replayManager.state.lastZoom = 14;
+      replayManager.state.currentTime = 65;
       // Simulate airplane near edge to trigger recenter
       (
         mockApp.map!.latLngToContainerPoint as ReturnType<typeof vi.fn>
       ).mockReturnValue({ x: 10, y: 300 });
       // Pre-populate with recent recenter timestamps
       const now = Date.now();
-      replayManager.replayRecenterTimestamps = [
+      replayManager.state.recenterTimestamps = [
         now - 1000,
         now - 500,
         now - 100,
@@ -1252,17 +1252,17 @@ describe("ReplayManager", () => {
     beforeEach(() => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.initializeReplay();
-      replayManager.replayActive = true;
+      replayManager.state.active = true;
     });
 
     it("updates airplane popup when popup is open during display update", () => {
-      replayManager.replayCurrentTime = 65;
+      replayManager.state.currentTime = 65;
       const mockPopup = { setContent: vi.fn() };
       (
-        replayManager.replayAirplaneMarker!.getPopup as ReturnType<typeof vi.fn>
+        replayManager.state.airplaneMarker!.getPopup as ReturnType<typeof vi.fn>
       ).mockReturnValue(mockPopup);
       (
-        replayManager.replayAirplaneMarker!.isPopupOpen as ReturnType<
+        replayManager.state.airplaneMarker!.isPopupOpen as ReturnType<
           typeof vi.fn
         >
       ).mockReturnValue(true);
@@ -1278,11 +1278,11 @@ describe("ReplayManager", () => {
     beforeEach(() => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.initializeReplay();
-      replayManager.replayActive = true;
+      replayManager.state.active = true;
     });
 
     it("returns early if no airplane marker", () => {
-      replayManager.replayAirplaneMarker = null;
+      replayManager.state.airplaneMarker = null;
 
       replayManager.updateReplayAirplanePopup();
 
@@ -1290,7 +1290,7 @@ describe("ReplayManager", () => {
     });
 
     it("returns early if replay not active", () => {
-      replayManager.replayActive = false;
+      replayManager.state.active = false;
 
       replayManager.updateReplayAirplanePopup();
 
@@ -1298,39 +1298,39 @@ describe("ReplayManager", () => {
     });
 
     it("creates popup with altitude and speed data", () => {
-      replayManager.replayCurrentTime = 30;
+      replayManager.state.currentTime = 30;
 
       replayManager.updateReplayAirplanePopup();
 
-      expect(replayManager.replayAirplaneMarker!.bindPopup).toHaveBeenCalled();
-      expect(replayManager.replayAirplaneMarker!.openPopup).toHaveBeenCalled();
+      expect(replayManager.state.airplaneMarker!.bindPopup).toHaveBeenCalled();
+      expect(replayManager.state.airplaneMarker!.openPopup).toHaveBeenCalled();
     });
 
     it("uses first segment when no segment has time <= currentTime", () => {
-      replayManager.replayCurrentTime = -10;
+      replayManager.state.currentTime = -10;
 
       replayManager.updateReplayAirplanePopup();
 
-      expect(replayManager.replayAirplaneMarker!.bindPopup).toHaveBeenCalled();
+      expect(replayManager.state.airplaneMarker!.bindPopup).toHaveBeenCalled();
     });
 
     it("returns early when replaySegments is empty", () => {
-      replayManager.replaySegments = [];
+      replayManager.state.segments = [];
 
       replayManager.updateReplayAirplanePopup();
 
       // Should not call bindPopup since there are no segments to display
       expect(
-        replayManager.replayAirplaneMarker!.bindPopup
+        replayManager.state.airplaneMarker!.bindPopup
       ).not.toHaveBeenCalled();
     });
 
     it("updates existing popup content instead of creating new one", () => {
       const mockPopup = { setContent: vi.fn() };
       (
-        replayManager.replayAirplaneMarker!.getPopup as ReturnType<typeof vi.fn>
+        replayManager.state.airplaneMarker!.getPopup as ReturnType<typeof vi.fn>
       ).mockReturnValue(mockPopup);
-      replayManager.replayCurrentTime = 30;
+      replayManager.state.currentTime = 30;
 
       replayManager.updateReplayAirplanePopup();
 
