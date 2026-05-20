@@ -362,14 +362,16 @@ describe("ReplayManager", () => {
   });
 
   describe("initializeReplay", () => {
-    it("returns false and alerts if no fullPathSegments", () => {
+    it("returns false and shows toast if no fullPathSegments", () => {
       mockApp.fullPathSegments = null;
-      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
 
       const result = replayManager.initializeReplay();
 
       expect(result).toBe(false);
-      expect(alertSpy).toHaveBeenCalled();
+      const toast = document.querySelector(".toast-notification");
+      expect(toast).not.toBeNull();
+      expect(toast!.classList.contains("toast-error")).toBe(true);
+      toast!.remove();
     });
 
     it("returns false if no segments match the selected path", () => {
@@ -1081,6 +1083,52 @@ describe("ReplayManager", () => {
       replayManager.updateReplayButtonState();
 
       // Should not throw
+    });
+  });
+
+  describe("redrawReplayPath", () => {
+    beforeEach(() => {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.initializeReplay();
+      replayManager.state.currentTime = 100;
+      replayManager.state.lastDrawnIndex = 2;
+    });
+
+    it("clears layer and redraws segments up to savedIndex with altitude colors", () => {
+      replayManager.redrawReplayPath("altitude");
+
+      expect(replayManager.state.layer!.clearLayers).toHaveBeenCalled();
+      expect(replayManager.state.lastDrawnIndex).toBeGreaterThanOrEqual(0);
+    });
+
+    it("clears layer and redraws segments with airspeed colors", () => {
+      replayManager.redrawReplayPath("airspeed");
+
+      expect(replayManager.state.layer!.clearLayers).toHaveBeenCalled();
+    });
+
+    it("skips segments with zero groundspeed in airspeed mode", () => {
+      replayManager.state.segments = [
+        {
+          path_id: 1,
+          coords: [[51, 10]],
+          altitude_ft: 1000,
+          altitude_m: 305,
+          groundspeed_knots: 0,
+          time: 50,
+        },
+      ];
+      replayManager.state.lastDrawnIndex = 0;
+
+      replayManager.redrawReplayPath("airspeed");
+
+      expect(replayManager.state.lastDrawnIndex).toBe(-1);
+    });
+
+    it("does nothing if layer is null", () => {
+      replayManager.state.layer = null;
+
+      expect(() => replayManager.redrawReplayPath("altitude")).not.toThrow();
     });
   });
 

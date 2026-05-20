@@ -25,15 +25,20 @@ export async function loadInitialData(app: MapApp): Promise<void> {
 
   // Populate year filter dropdown
   if (metadata && metadata.available_years) {
-    const yearSelect = document.getElementById(
-      "year-select"
-    ) as HTMLSelectElement;
-    metadata.available_years.forEach((year) => {
-      const option = document.createElement("option");
-      option.value = year.toString();
-      option.textContent = "📅 " + year;
-      yearSelect.appendChild(option);
-    });
+    const yearSelect = document.getElementById("year-select");
+    if (yearSelect instanceof HTMLSelectElement) {
+      metadata.available_years.forEach((year) => {
+        const option = document.createElement("option");
+        option.value = year.toString();
+        option.textContent = "📅 " + year;
+        yearSelect.appendChild(option);
+      });
+
+      // Sync dropdown with the selected year
+      if (app.selectedYear && app.selectedYear !== "all") {
+        yearSelect.value = app.selectedYear;
+      }
+    }
 
     // Default to current year only if no saved state exists
     if (app.selectedYear === "all" && !app.restoredYearFromState) {
@@ -42,11 +47,6 @@ export async function loadInitialData(app: MapApp): Promise<void> {
       if (currentYear !== undefined) {
         app.selectedYear = currentYear.toString();
       }
-    }
-
-    // Sync dropdown with the selected year
-    if (app.selectedYear && app.selectedYear !== "all") {
-      yearSelect.value = app.selectedYear;
     }
   }
 
@@ -134,13 +134,13 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // Restore layer visibility
   if (app.altitudeVisible) {
     app.map!.addLayer(app.altitudeLayer);
-    (document.getElementById("altitude-legend") as HTMLElement).style.display =
-      "block";
+    const legend = domCache.get("altitude-legend");
+    if (legend) legend.style.display = "block";
   }
   if (app.airspeedVisible) {
     app.map!.addLayer(app.airspeedLayer);
-    (document.getElementById("airspeed-legend") as HTMLElement).style.display =
-      "block";
+    const legend = domCache.get("airspeed-legend");
+    if (legend) legend.style.display = "block";
   }
   if (
     app.aviationVisible &&
@@ -157,10 +157,12 @@ export async function loadInitialData(app: MapApp): Promise<void> {
 
   // Restore stats panel visibility
   if (app.savedState && app.savedState.statsPanelVisible) {
-    const panel = document.getElementById("stats-panel") as HTMLElement;
-    panel.style.display = "block";
-    panel.offsetHeight;
-    panel.classList.add("visible");
+    const panel = domCache.get("stats-panel");
+    if (panel) {
+      panel.style.display = "block";
+      panel.offsetHeight;
+      panel.classList.add("visible");
+    }
   }
 }
 

@@ -1,9 +1,11 @@
 /**
  * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, buttons visibility, export)
  */
-import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
+import { showToast } from "../utils/toast";
+
+type ColorLayerMode = "altitude" | "airspeed";
 
 export class UIToggles {
   private app: MapApp;
@@ -59,164 +61,79 @@ export class UIToggles {
   }
 
   toggleAltitude(): void {
-    if (!this.app.map) return;
-
-    if (this.app.altitudeVisible) {
-      // Don't allow hiding altitude during replay if airspeed is also hidden
-      if (this.app.replayManager.state.active && !this.app.airspeedVisible) {
-        return;
-      }
-      this.app.map.removeLayer(this.app.altitudeLayer);
-      this.app.altitudeVisible = false;
-      const btn = domCache.get("altitude-btn");
-      if (btn) btn.style.opacity = "0.5";
-      const legend = domCache.get("altitude-legend");
-      if (legend) legend.style.display = "none";
-    } else {
-      // Hide airspeed if it's visible
-      if (this.app.airspeedVisible) {
-        if (!this.app.replayManager.state.active) {
-          this.app.map.removeLayer(this.app.airspeedLayer);
-        }
-        this.app.airspeedVisible = false;
-        const airspeedBtn = domCache.get("airspeed-btn");
-        if (airspeedBtn) airspeedBtn.style.opacity = "0.5";
-        const airspeedLegend = domCache.get("airspeed-legend");
-        if (airspeedLegend) airspeedLegend.style.display = "none";
-      }
-
-      // During replay, don't add layer to map - just update state and legend
-      if (!this.app.replayManager.state.active) {
-        this.app.map.addLayer(this.app.altitudeLayer);
-        this.app.layerManager.redrawAltitudePaths(); // Draw altitude paths when enabled
-      } else {
-        // During replay: redraw the replay path with new altitude colors
-        const savedTime = this.app.replayManager.state.currentTime;
-        const savedIndex = this.app.replayManager.state.lastDrawnIndex;
-        if (this.app.replayManager.state.layer) {
-          this.app.replayManager.state.layer.clearLayers();
-        }
-        this.app.replayManager.state.lastDrawnIndex = -1;
-
-        // Redraw all segments up to current position with altitude colors
-        for (
-          let i = 0;
-          i <= savedIndex && i < this.app.replayManager.state.segments.length;
-          i++
-        ) {
-          const seg = this.app.replayManager.state.segments[i];
-          if (seg && (seg.time || 0) <= savedTime) {
-            const segmentColor = window.KMLHeatmap.getColorForAltitude(
-              seg.altitude_ft || 0,
-              this.app.replayManager.state.colorMinAlt,
-              this.app.replayManager.state.colorMaxAlt
-            );
-
-            L.polyline(seg.coords || [], {
-              color: segmentColor,
-              weight: 3,
-              opacity: 0.8,
-            }).addTo(this.app.replayManager.state.layer!);
-
-            this.app.replayManager.state.lastDrawnIndex = i;
-          }
-        }
-      }
-
-      this.app.altitudeVisible = true;
-      const btn = domCache.get("altitude-btn");
-      if (btn) btn.style.opacity = "1.0";
-      const legend = domCache.get("altitude-legend");
-      if (legend) legend.style.display = "block";
-    }
-
-    // Update airplane popup if it's open during replay
-    if (
-      this.app.replayManager.state.active &&
-      this.app.replayManager.state.airplaneMarker &&
-      this.app.replayManager.state.airplaneMarker.isPopupOpen()
-    ) {
-      this.app.replayManager.updateReplayAirplanePopup();
-    }
+    this.toggleColorLayer("altitude");
   }
 
   toggleAirspeed(): void {
+    this.toggleColorLayer("airspeed");
+  }
+
+  private toggleColorLayer(mode: ColorLayerMode): void {
     if (!this.app.map) return;
 
-    if (this.app.airspeedVisible) {
-      // Don't allow hiding airspeed during replay if altitude is also hidden
-      if (this.app.replayManager.state.active && !this.app.altitudeVisible) {
-        return;
-      }
-      this.app.map.removeLayer(this.app.airspeedLayer);
-      this.app.airspeedVisible = false;
-      const btn = domCache.get("airspeed-btn");
+    const other: ColorLayerMode = mode === "altitude" ? "airspeed" : "altitude";
+    const isVisible =
+      mode === "altitude" ? this.app.altitudeVisible : this.app.airspeedVisible;
+    const otherVisible =
+      mode === "altitude" ? this.app.airspeedVisible : this.app.altitudeVisible;
+    const layer =
+      mode === "altitude" ? this.app.altitudeLayer : this.app.airspeedLayer;
+    const otherLayer =
+      mode === "altitude" ? this.app.airspeedLayer : this.app.altitudeLayer;
+    const btnId = mode === "altitude" ? "altitude-btn" : "airspeed-btn";
+    const otherBtnId = mode === "altitude" ? "airspeed-btn" : "altitude-btn";
+    const legendId =
+      mode === "altitude" ? "altitude-legend" : "airspeed-legend";
+    const otherLegendId =
+      mode === "altitude" ? "airspeed-legend" : "altitude-legend";
+    const redraw =
+      mode === "altitude"
+        ? () => this.app.layerManager.redrawAltitudePaths()
+        : () => this.app.layerManager.redrawAirspeedPaths();
+
+    const setVisible = (value: boolean) => {
+      if (mode === "altitude") this.app.altitudeVisible = value;
+      else this.app.airspeedVisible = value;
+    };
+    const setOtherVisible = (value: boolean) => {
+      if (other === "altitude") this.app.altitudeVisible = value;
+      else this.app.airspeedVisible = value;
+    };
+
+    if (isVisible) {
+      if (this.app.replayManager.state.active && !otherVisible) return;
+      this.app.map.removeLayer(layer);
+      setVisible(false);
+      const btn = domCache.get(btnId);
       if (btn) btn.style.opacity = "0.5";
-      const legend = domCache.get("airspeed-legend");
+      const legend = domCache.get(legendId);
       if (legend) legend.style.display = "none";
     } else {
-      // Hide altitude if it's visible
-      if (this.app.altitudeVisible) {
+      if (otherVisible) {
         if (!this.app.replayManager.state.active) {
-          this.app.map.removeLayer(this.app.altitudeLayer);
+          this.app.map.removeLayer(otherLayer);
         }
-        this.app.altitudeVisible = false;
-        const altBtn = domCache.get("altitude-btn");
-        if (altBtn) altBtn.style.opacity = "0.5";
-        const altLegend = domCache.get("altitude-legend");
-        if (altLegend) altLegend.style.display = "none";
+        setOtherVisible(false);
+        const otherBtn = domCache.get(otherBtnId);
+        if (otherBtn) otherBtn.style.opacity = "0.5";
+        const otherLegend = domCache.get(otherLegendId);
+        if (otherLegend) otherLegend.style.display = "none";
       }
 
-      // During replay, don't add layer to map - just update state and legend
       if (!this.app.replayManager.state.active) {
-        this.app.map.addLayer(this.app.airspeedLayer);
-        this.app.layerManager.redrawAirspeedPaths(); // Draw airspeed paths when enabled
+        this.app.map.addLayer(layer);
+        redraw();
       } else {
-        // During replay: redraw the replay path with new airspeed colors
-        const savedTime = this.app.replayManager.state.currentTime;
-        const savedIndex = this.app.replayManager.state.lastDrawnIndex;
-        if (this.app.replayManager.state.layer) {
-          this.app.replayManager.state.layer.clearLayers();
-        }
-        this.app.replayManager.state.lastDrawnIndex = -1;
-
-        // Redraw all segments up to current position with airspeed colors
-        for (
-          let i = 0;
-          i <= savedIndex && i < this.app.replayManager.state.segments.length;
-          i++
-        ) {
-          const seg = this.app.replayManager.state.segments[i];
-          if (
-            seg &&
-            (seg.time || 0) <= savedTime &&
-            (seg.groundspeed_knots || 0) > 0
-          ) {
-            const segmentColor = window.KMLHeatmap.getColorForAltitude(
-              seg.groundspeed_knots || 0,
-              this.app.replayManager.state.colorMinSpeed,
-              this.app.replayManager.state.colorMaxSpeed
-            );
-
-            L.polyline(seg.coords || [], {
-              color: segmentColor,
-              weight: 3,
-              opacity: 0.8,
-            }).addTo(this.app.replayManager.state.layer!);
-
-            this.app.replayManager.state.lastDrawnIndex = i;
-          }
-        }
+        this.app.replayManager.redrawReplayPath(mode);
       }
 
-      this.app.airspeedVisible = true;
-      const btn = domCache.get("airspeed-btn");
+      setVisible(true);
+      const btn = domCache.get(btnId);
       if (btn) btn.style.opacity = "1.0";
-      const legend = domCache.get("airspeed-legend");
+      const legend = domCache.get(legendId);
       if (legend) legend.style.display = "block";
     }
 
-    // Update airplane popup if it's open during replay
     if (
       this.app.replayManager.state.active &&
       this.app.replayManager.state.airplaneMarker &&
@@ -355,7 +272,7 @@ export class UIToggles {
           controls.forEach((el, i) => {
             if (el) (el as HTMLElement).style.display = displayStates[i] || "";
           });
-          alert("Export failed: " + error.message);
+          showToast("Export failed: " + error.message, "error");
           btn.disabled = false;
           btn.textContent = "📷 Export";
         });
