@@ -1330,7 +1330,7 @@ class TestExceptionHandlingPaths:
         from unittest.mock import patch
 
         # This tests lines 532-534: ValueError during datetime.strptime
-        with patch("kml_heatmap.parser.datetime") as mock_datetime:
+        with patch("kml_heatmap.parser_common.datetime") as mock_datetime:
             mock_datetime.strptime.side_effect = ValueError("Invalid date")
             result = extract_charterware_timestamp(
                 "Flight Feb 31 2025 12:00AM path of OE-AKI"
