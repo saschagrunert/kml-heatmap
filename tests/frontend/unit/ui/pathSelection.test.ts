@@ -17,6 +17,7 @@ describe("PathSelection", () => {
 
     // Create mock app with all required dependencies
     mockApp = {
+      store: { notifyMutation: vi.fn() },
       selectedPathIds: new Set<number>(),
       altitudeVisible: false,
       airspeedVisible: false,

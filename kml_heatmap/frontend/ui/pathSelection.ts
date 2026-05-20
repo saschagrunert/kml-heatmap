@@ -18,6 +18,7 @@ export class PathSelection {
     } else {
       this.app.selectedPathIds.add(pathId);
     }
+    this.app.store.notifyMutation("selectedPathIds");
 
     // If no paths remain selected, disable isolate mode
     if (this.app.selectedPathIds.size === 0 && this.app.isolateSelection) {
@@ -54,6 +55,7 @@ export class PathSelection {
       pathIds.forEach((pathId) => {
         this.app.selectedPathIds.add(pathId);
       });
+      this.app.store.notifyMutation("selectedPathIds");
     }
 
     this.updateIsolateButton();
@@ -79,6 +81,7 @@ export class PathSelection {
 
   clearSelection(): void {
     this.app.selectedPathIds.clear();
+    this.app.store.notifyMutation("selectedPathIds");
 
     // Disable isolate mode when selection is cleared
     if (this.app.isolateSelection) {

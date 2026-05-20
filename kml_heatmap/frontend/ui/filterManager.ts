@@ -103,6 +103,7 @@ export class FilterManager {
     this.app.pathSegments = {};
     if (!this.app.isInitializing) {
       this.app.selectedPathIds.clear();
+      this.app.store.notifyMutation("selectedPathIds");
     }
 
     // Reload current resolution data for new year
@@ -154,6 +155,7 @@ export class FilterManager {
     this.app.pathSegments = {};
     if (!this.app.isInitializing) {
       this.app.selectedPathIds.clear();
+      this.app.store.notifyMutation("selectedPathIds");
     }
 
     // Reload data to apply filter
