@@ -4,7 +4,7 @@
 import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import type { Range } from "../state/store";
-import type { PathSegment } from "../types";
+import type { PathInfo, PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
 
 interface LayerConfig {
@@ -23,6 +23,8 @@ interface LayerConfig {
 
 export class LayerManager {
   private app: MapApp;
+  private pathInfoMapCache: Map<number, PathInfo> | null = null;
+  private pathInfoMapSource: PathInfo[] | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -121,9 +123,7 @@ export class LayerManager {
       colorMax = config.range.max;
     }
 
-    const pathInfoMap = new Map(
-      this.app.currentData.path_info.map((p) => [p.id, p])
-    );
+    const pathInfoMap = this.getPathInfoMap();
 
     this.app.currentData.path_segments.forEach((segment) => {
       const pathId = segment.path_id;
@@ -198,6 +198,16 @@ export class LayerManager {
     this.updateLegend(colorMin, colorMax, config);
     this.app.airportManager.updateAirportOpacity();
     this.app.statsManager.updateStatsForSelection();
+  }
+
+  private getPathInfoMap(): Map<number, PathInfo> {
+    const source = this.app.currentData?.path_info;
+    if (!source) return new Map();
+    if (source !== this.pathInfoMapSource) {
+      this.pathInfoMapCache = new Map(source.map((p) => [p.id, p]));
+      this.pathInfoMapSource = source;
+    }
+    return this.pathInfoMapCache!;
   }
 
   private updateLegend(
