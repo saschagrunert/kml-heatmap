@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
+import type {
+  KMLDataset,
+  PathInfo,
+  PathSegment,
+  FilteredStatistics,
+} from "../../../../kml_heatmap/frontend/types";
 
 // Mock domCache
 vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
@@ -48,6 +54,123 @@ describe("MapApp", () => {
       expect(app.layerManager).toBeUndefined();
       expect(app.replayManager).toBeUndefined();
       expect(app.uiToggles).toBeUndefined();
+    });
+  });
+
+  describe("store-backed properties", () => {
+    let app: MapApp;
+
+    beforeEach(() => {
+      app = new MapApp({
+        center: [48.0, 16.0],
+        bounds: [
+          [47.0, 15.0],
+          [49.0, 17.0],
+        ],
+        dataDir: "data",
+      });
+    });
+
+    it("selectedYear getter/setter delegates to store", () => {
+      app.selectedYear = "2025";
+      expect(app.selectedYear).toBe("2025");
+    });
+
+    it("selectedAircraft getter/setter delegates to store", () => {
+      app.selectedAircraft = "D-EAGJ";
+      expect(app.selectedAircraft).toBe("D-EAGJ");
+    });
+
+    it("selectedPathIds getter/setter delegates to store", () => {
+      const ids = new Set([1, 2, 3]);
+      app.selectedPathIds = ids;
+      expect(app.selectedPathIds).toBe(ids);
+    });
+
+    it("isolateSelection getter/setter delegates to store", () => {
+      app.isolateSelection = true;
+      expect(app.isolateSelection).toBe(true);
+    });
+
+    it("heatmapVisible getter/setter delegates to store", () => {
+      app.heatmapVisible = false;
+      expect(app.heatmapVisible).toBe(false);
+    });
+
+    it("altitudeVisible getter/setter delegates to store", () => {
+      app.altitudeVisible = true;
+      expect(app.altitudeVisible).toBe(true);
+    });
+
+    it("airspeedVisible getter/setter delegates to store", () => {
+      app.airspeedVisible = true;
+      expect(app.airspeedVisible).toBe(true);
+    });
+
+    it("airportsVisible getter/setter delegates to store", () => {
+      app.airportsVisible = false;
+      expect(app.airportsVisible).toBe(false);
+    });
+
+    it("aviationVisible getter/setter delegates to store", () => {
+      app.aviationVisible = true;
+      expect(app.aviationVisible).toBe(true);
+    });
+
+    it("buttonsHidden getter/setter delegates to store", () => {
+      app.buttonsHidden = true;
+      expect(app.buttonsHidden).toBe(true);
+    });
+
+    it("currentData getter/setter delegates to store", () => {
+      const data: KMLDataset = {
+        coordinates: [],
+        path_segments: [],
+        path_info: [],
+        resolution: "full",
+        original_points: 0,
+      };
+      app.currentData = data;
+      expect(app.currentData).toBe(data);
+    });
+
+    it("fullPathInfo getter/setter delegates to store", () => {
+      const info: PathInfo[] = [{ id: 1 }];
+      app.fullPathInfo = info;
+      expect(app.fullPathInfo).toBe(info);
+    });
+
+    it("fullPathSegments getter/setter delegates to store", () => {
+      const segments: PathSegment[] = [{ path_id: 1 }];
+      app.fullPathSegments = segments;
+      expect(app.fullPathSegments).toBe(segments);
+    });
+
+    it("fullStats getter/setter delegates to store", () => {
+      const stats: FilteredStatistics = {
+        total_points: 100,
+        num_paths: 5,
+        num_airports: 2,
+        airport_names: [],
+        num_aircraft: 1,
+        aircraft_list: [],
+        total_distance_km: 50,
+        total_distance_nm: 27,
+      };
+      app.fullStats = stats;
+      expect(app.fullStats).toBe(stats);
+    });
+
+    it("altitudeRange getter/setter delegates to store", () => {
+      const range = { min: 100, max: 5000 };
+      app.altitudeRange = range;
+      expect(app.altitudeRange).toEqual({ min: 100, max: 5000 });
+    });
+
+    it("airspeedRange getter/setter delegates to store", () => {
+      const range = { min: 50, max: 150 };
+      app.airspeedRange = range;
+      expect(app.airspeedRange).toEqual({ min: 50, max: 150 });
     });
   });
 

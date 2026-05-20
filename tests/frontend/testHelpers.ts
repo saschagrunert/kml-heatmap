@@ -4,6 +4,7 @@
 import type { Mock } from "vitest";
 import type { MapApp } from "../../kml_heatmap/frontend/mapApp";
 import type { PathInfo, Airport } from "../../kml_heatmap/frontend/types";
+import type { AppStore } from "../../kml_heatmap/frontend/state/store";
 
 /**
  * Mock Leaflet marker for testing
@@ -64,6 +65,7 @@ export interface MockManager {
  * Partial MapApp for testing
  */
 export type MockMapApp = Partial<MapApp> & {
+  store?: Pick<AppStore, "notifyMutation">;
   selectedYear: string;
   selectedAircraft: string;
   selectedPathIds: Set<number>;

@@ -35,6 +35,7 @@ describe("FilterManager", () => {
 
     // Create mock app
     mockApp = {
+      store: { notifyMutation: vi.fn() },
       selectedYear: "all",
       selectedAircraft: "all",
       isInitializing: false,

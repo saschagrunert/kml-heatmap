@@ -16,6 +16,8 @@ import { WrappedManager } from "./ui/wrappedManager";
 import { UIToggles } from "./ui/uiToggles";
 import { loadInitialData, createAirportMarkers } from "./appInitializer";
 import { logError } from "./utils/logger";
+import { AppStore } from "./state/store";
+import type { Range } from "./state/store";
 import type { HeatmapLayer } from "./globals";
 import type {
   PathInfo,
@@ -44,13 +46,8 @@ export interface AirportWithFlightCount extends Airport {
   flight_count: number;
 }
 
-/**
- * Range with min/max values
- */
-export interface Range {
-  min: number;
-  max: number;
-}
+// Re-export Range from store for consumers that import it from mapApp
+export type { Range } from "./state/store";
 
 /**
  * Airport to paths mapping
@@ -84,12 +81,13 @@ export interface OpenAIPLayersMap {
 }
 
 export class MapApp {
+  // Observable state store
+  readonly store: AppStore;
+
   // Configuration
   config: MapConfig;
 
-  // Shared state variables
-  selectedYear: string;
-  selectedAircraft: string;
+  // Non-store state
   allAirportsData: Airport[];
   isInitializing: boolean;
 
@@ -102,25 +100,7 @@ export class MapApp {
   altitudeRenderer: L.SVG;
   airspeedRenderer: L.SVG;
 
-  // Data
-  currentData: KMLDataset | null;
-  fullStats: FilteredStatistics | null;
-  fullPathInfo: PathInfo[] | null;
-  fullPathSegments: PathSegment[] | null;
-  altitudeRange: Range;
-  airspeedRange: Range;
-
-  // Layer visibility state
-  heatmapVisible: boolean;
-  altitudeVisible: boolean;
-  airspeedVisible: boolean;
-  airportsVisible: boolean;
-  aviationVisible: boolean;
-  buttonsHidden: boolean;
-  isolateSelection: boolean;
-
-  // Selection state
-  selectedPathIds: Set<number>;
+  // Selection state (non-store)
   pathSegments: { [pathId: number]: PathSegment[] };
   pathToAirports: PathToAirportsMap;
   airportToPaths: AirportToPathsMap;
@@ -145,12 +125,129 @@ export class MapApp {
   wrappedManager!: WrappedManager;
   uiToggles!: UIToggles;
 
+  // Store-backed getters/setters for filters
+  get selectedYear(): string {
+    return this.store.get("selectedYear");
+  }
+  set selectedYear(v: string) {
+    this.store.set("selectedYear", v);
+  }
+
+  get selectedAircraft(): string {
+    return this.store.get("selectedAircraft");
+  }
+  set selectedAircraft(v: string) {
+    this.store.set("selectedAircraft", v);
+  }
+
+  // Store-backed getters/setters for selection
+  get selectedPathIds(): Set<number> {
+    return this.store.get("selectedPathIds");
+  }
+  set selectedPathIds(v: Set<number>) {
+    this.store.set("selectedPathIds", v);
+  }
+
+  get isolateSelection(): boolean {
+    return this.store.get("isolateSelection");
+  }
+  set isolateSelection(v: boolean) {
+    this.store.set("isolateSelection", v);
+  }
+
+  // Store-backed getters/setters for layer visibility
+  get heatmapVisible(): boolean {
+    return this.store.get("heatmapVisible");
+  }
+  set heatmapVisible(v: boolean) {
+    this.store.set("heatmapVisible", v);
+  }
+
+  get altitudeVisible(): boolean {
+    return this.store.get("altitudeVisible");
+  }
+  set altitudeVisible(v: boolean) {
+    this.store.set("altitudeVisible", v);
+  }
+
+  get airspeedVisible(): boolean {
+    return this.store.get("airspeedVisible");
+  }
+  set airspeedVisible(v: boolean) {
+    this.store.set("airspeedVisible", v);
+  }
+
+  get airportsVisible(): boolean {
+    return this.store.get("airportsVisible");
+  }
+  set airportsVisible(v: boolean) {
+    this.store.set("airportsVisible", v);
+  }
+
+  get aviationVisible(): boolean {
+    return this.store.get("aviationVisible");
+  }
+  set aviationVisible(v: boolean) {
+    this.store.set("aviationVisible", v);
+  }
+
+  // Store-backed getters/setters for UI state
+  get buttonsHidden(): boolean {
+    return this.store.get("buttonsHidden");
+  }
+  set buttonsHidden(v: boolean) {
+    this.store.set("buttonsHidden", v);
+  }
+
+  // Store-backed getters/setters for data
+  get currentData(): KMLDataset | null {
+    return this.store.get("currentData");
+  }
+  set currentData(v: KMLDataset | null) {
+    this.store.set("currentData", v);
+  }
+
+  get fullPathInfo(): PathInfo[] | null {
+    return this.store.get("fullPathInfo");
+  }
+  set fullPathInfo(v: PathInfo[] | null) {
+    this.store.set("fullPathInfo", v);
+  }
+
+  get fullPathSegments(): PathSegment[] | null {
+    return this.store.get("fullPathSegments");
+  }
+  set fullPathSegments(v: PathSegment[] | null) {
+    this.store.set("fullPathSegments", v);
+  }
+
+  get fullStats(): FilteredStatistics | null {
+    return this.store.get("fullStats");
+  }
+  set fullStats(v: FilteredStatistics | null) {
+    this.store.set("fullStats", v);
+  }
+
+  // Store-backed getters/setters for computed ranges
+  get altitudeRange(): Range {
+    return this.store.get("altitudeRange");
+  }
+  set altitudeRange(v: Range) {
+    this.store.set("altitudeRange", v);
+  }
+
+  get airspeedRange(): Range {
+    return this.store.get("airspeedRange");
+  }
+  set airspeedRange(v: Range) {
+    this.store.set("airspeedRange", v);
+  }
+
   constructor(config: MapConfig) {
+    this.store = new AppStore();
     this.config = config;
 
-    // Shared state variables
-    this.selectedYear = "all";
-    this.selectedAircraft = "all";
+    // Non-store state
     this.allAirportsData = [];
     this.isInitializing = true;
 
@@ -163,25 +260,7 @@ export class MapApp {
     this.altitudeRenderer = L.svg();
     this.airspeedRenderer = L.svg();
 
-    // Data
-    this.currentData = null;
-    this.fullStats = null;
-    this.fullPathInfo = null;
-    this.fullPathSegments = null;
-    this.altitudeRange = { min: 0, max: 10000 };
-    this.airspeedRange = { min: 0, max: 200 };
-
-    // Layer visibility state
-    this.heatmapVisible = true;
-    this.altitudeVisible = false;
-    this.airspeedVisible = false;
-    this.airportsVisible = true;
-    this.aviationVisible = false;
-    this.buttonsHidden = false;
-    this.isolateSelection = false;
-
-    // Selection state
-    this.selectedPathIds = new Set();
+    // Selection state (non-store)
     this.pathSegments = {};
     this.pathToAirports = {};
     this.airportToPaths = {};
@@ -240,48 +319,48 @@ export class MapApp {
 
     if (!this.savedState) return;
 
-    if (this.savedState.selectedYear !== undefined) {
-      this.selectedYear = this.savedState.selectedYear;
-      this.restoredYearFromState = true;
-    }
-    if (this.savedState.selectedAircraft) {
-      this.selectedAircraft = this.savedState.selectedAircraft;
-    }
+    const state = this.savedState;
+    this.store.batch(() => {
+      if (state.selectedYear !== undefined) {
+        this.selectedYear = state.selectedYear;
+        this.restoredYearFromState = true;
+      }
+      if (state.selectedAircraft) {
+        this.selectedAircraft = state.selectedAircraft;
+      }
 
-    // Restore selected paths BEFORE updateLayers() so paths are drawn with correct selection
-    if (
-      this.savedState.selectedPathIds &&
-      this.savedState.selectedPathIds.length > 0
-    ) {
-      this.savedState.selectedPathIds.forEach((pathId) => {
-        const pathIdNum =
-          typeof pathId === "string" ? parseInt(pathId, 10) : pathId;
-        this.selectedPathIds.add(pathIdNum);
-      });
-    }
+      // Restore selected paths BEFORE updateLayers() so paths are drawn with correct selection
+      if (state.selectedPathIds && state.selectedPathIds.length > 0) {
+        state.selectedPathIds.forEach((pathId) => {
+          const pathIdNum =
+            typeof pathId === "string" ? parseInt(pathId, 10) : pathId;
+          this.selectedPathIds.add(pathIdNum);
+        });
+      }
 
-    // Restore layer visibility
-    if (this.savedState.heatmapVisible !== undefined) {
-      this.heatmapVisible = this.savedState.heatmapVisible;
-    }
-    if (this.savedState.altitudeVisible !== undefined) {
-      this.altitudeVisible = this.savedState.altitudeVisible;
-    }
-    if (this.savedState.airspeedVisible !== undefined) {
-      this.airspeedVisible = this.savedState.airspeedVisible;
-    }
-    if (this.savedState.airportsVisible !== undefined) {
-      this.airportsVisible = this.savedState.airportsVisible;
-    }
-    if (this.savedState.aviationVisible !== undefined) {
-      this.aviationVisible = this.savedState.aviationVisible;
-    }
-    if (this.savedState.buttonsHidden !== undefined) {
-      this.buttonsHidden = this.savedState.buttonsHidden;
-    }
-    if (this.savedState.isolateSelection !== undefined) {
-      this.isolateSelection = this.savedState.isolateSelection;
-    }
+      // Restore layer visibility
+      if (state.heatmapVisible !== undefined) {
+        this.heatmapVisible = state.heatmapVisible;
+      }
+      if (state.altitudeVisible !== undefined) {
+        this.altitudeVisible = state.altitudeVisible;
+      }
+      if (state.airspeedVisible !== undefined) {
+        this.airspeedVisible = state.airspeedVisible;
+      }
+      if (state.airportsVisible !== undefined) {
+        this.airportsVisible = state.airportsVisible;
+      }
+      if (state.aviationVisible !== undefined) {
+        this.aviationVisible = state.aviationVisible;
+      }
+      if (state.buttonsHidden !== undefined) {
+        this.buttonsHidden = state.buttonsHidden;
+      }
+      if (state.isolateSelection !== undefined) {
+        this.isolateSelection = state.isolateSelection;
+      }
+    });
   }
 
   private setupMap(): void {

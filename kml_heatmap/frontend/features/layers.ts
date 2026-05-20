@@ -4,14 +4,9 @@
  */
 
 import type { PathInfo, PathSegment } from "../types";
+import type { Range } from "../state/store";
 
-/**
- * Range interface for min/max values
- */
-export interface Range {
-  min: number;
-  max: number;
-}
+export type { Range };
 
 /**
  * Segment rendering properties
