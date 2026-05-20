@@ -1,5 +1,6 @@
 """Airport and metadata export writers."""
 
+import math
 import os
 import json
 from typing import Any, Dict, List, Optional, Tuple
@@ -98,9 +99,10 @@ def export_metadata(
     Returns:
         Tuple of (output_file_path, file_size_bytes)
     """
-    # Handle infinity case
-    if min_groundspeed_knots == float("inf"):
+    if not math.isfinite(min_groundspeed_knots):
         min_groundspeed_knots = 0.0
+    if not math.isfinite(max_groundspeed_knots):
+        max_groundspeed_knots = 0.0
 
     meta_data = {
         "stats": stats,

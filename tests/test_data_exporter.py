@@ -233,6 +233,57 @@ class TestExportMetadata:
             # Infinity should be converted to 0.0
             assert data["min_groundspeed_knots"] == 0.0
 
+    def test_export_metadata_nan_speed(self):
+        """Test metadata export with NaN groundspeed values."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file, _ = export_metadata(
+                {},
+                min_alt_m=0,
+                max_alt_m=5000,
+                min_groundspeed_knots=float("nan"),
+                max_groundspeed_knots=float("nan"),
+                available_years=[],
+                output_dir=tmpdir,
+            )
+
+            data = _parse_js_data(output_file)
+            assert data["min_groundspeed_knots"] == 0.0
+            assert data["max_groundspeed_knots"] == 0.0
+
+    def test_export_metadata_neg_infinity_speed(self):
+        """Test metadata export with negative infinity groundspeed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file, _ = export_metadata(
+                {},
+                min_alt_m=0,
+                max_alt_m=5000,
+                min_groundspeed_knots=float("-inf"),
+                max_groundspeed_knots=float("-inf"),
+                available_years=[],
+                output_dir=tmpdir,
+            )
+
+            data = _parse_js_data(output_file)
+            assert data["min_groundspeed_knots"] == 0.0
+            assert data["max_groundspeed_knots"] == 0.0
+
+    def test_export_metadata_max_infinity_speed(self):
+        """Test metadata export with infinity max groundspeed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file, _ = export_metadata(
+                {},
+                min_alt_m=0,
+                max_alt_m=5000,
+                min_groundspeed_knots=50.0,
+                max_groundspeed_knots=float("inf"),
+                available_years=[],
+                output_dir=tmpdir,
+            )
+
+            data = _parse_js_data(output_file)
+            assert data["min_groundspeed_knots"] == 50.0
+            assert data["max_groundspeed_knots"] == 0.0
+
     def test_export_metadata_rounds_speeds(self):
         """Test that groundspeeds are rounded."""
         with tempfile.TemporaryDirectory() as tmpdir:

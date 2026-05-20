@@ -6,6 +6,7 @@ import type { MapApp } from "../mapApp";
 import type { ReplayManager } from "./replayManager";
 import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
+import { rgbToRgba } from "../utils/colors";
 
 export class ReplayRenderer {
   private app: MapApp;
@@ -56,10 +57,7 @@ export class ReplayRenderer {
       replayManager.state.colorMinAlt,
       replayManager.state.colorMaxAlt
     );
-    // Convert rgb color to rgba with transparency for background
-    const altColorBg = altColor
-      .replace("rgb(", "rgba(")
-      .replace(")", ", 0.15)");
+    const altColorBg = rgbToRgba(altColor, 0.15);
     popupContent += '<div style="margin-bottom: 8px;">';
     popupContent +=
       '<div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Altitude (MSL)</div>';
@@ -94,10 +92,7 @@ export class ReplayRenderer {
       replayManager.state.colorMinSpeed,
       replayManager.state.colorMaxSpeed
     );
-    // Convert rgb color to rgba with transparency for background
-    const speedColorBg = speedColor
-      .replace("rgb(", "rgba(")
-      .replace(")", ", 0.15)");
+    const speedColorBg = rgbToRgba(speedColor, 0.15);
     popupContent += '<div style="margin-bottom: 8px;">';
     popupContent +=
       '<div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Groundspeed</div>';
@@ -164,8 +159,11 @@ export class ReplayRenderer {
     let nextSegment: PathSegment | null = null;
     let currentIndex = -1;
 
-    // Search through ALL segments to find airplane position
-    for (let i = 0; i < replayManager.state.segments.length; i++) {
+    const searchStart =
+      replayManager.state.lastDrawnIndex > 0 && !isManualSeek
+        ? replayManager.state.lastDrawnIndex
+        : 0;
+    for (let i = searchStart; i < replayManager.state.segments.length; i++) {
       const seg = replayManager.state.segments[i];
       if (seg && (seg.time || 0) <= replayManager.state.currentTime) {
         lastSegment = seg;

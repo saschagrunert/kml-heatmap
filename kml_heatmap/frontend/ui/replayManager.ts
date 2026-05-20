@@ -317,21 +317,16 @@ export class ReplayManager {
       this.app.map.removeLayer(this.app.airspeedLayer);
     }
 
-    const disableElements = [
-      "heatmap-btn",
-      "airports-btn",
-      "aviation-btn",
-      "year-select",
-      "aircraft-select",
-    ];
-
-    disableElements.forEach((id) => {
-      const el = document.getElementById(id) as
-        | HTMLButtonElement
-        | HTMLSelectElement
-        | null;
-      if (el) el.disabled = true;
-    });
+    this.setElementsDisabled(
+      [
+        "heatmap-btn",
+        "airports-btn",
+        "aviation-btn",
+        "year-select",
+        "aircraft-select",
+      ],
+      true
+    );
   }
 
   restoreLayerVisibility(): void {
@@ -360,20 +355,24 @@ export class ReplayManager {
       }, 50);
     }
 
-    const enableElements = [
-      "heatmap-btn",
-      "airports-btn",
-      "aviation-btn",
-      "year-select",
-      "aircraft-select",
-    ];
+    this.setElementsDisabled(
+      [
+        "heatmap-btn",
+        "airports-btn",
+        "aviation-btn",
+        "year-select",
+        "aircraft-select",
+      ],
+      false
+    );
+  }
 
-    enableElements.forEach((id) => {
-      const el = document.getElementById(id) as
-        | HTMLButtonElement
-        | HTMLSelectElement
-        | null;
-      if (el) el.disabled = false;
+  private setElementsDisabled(ids: string[], disabled: boolean): void {
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el instanceof HTMLButtonElement || el instanceof HTMLSelectElement) {
+        el.disabled = disabled;
+      }
     });
   }
 

@@ -24,7 +24,8 @@ interface SavedState {
 
 export class StateManager {
   private app: MapApp;
-  private savePending = false;
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private unsubscribers: (() => void)[] = [];
 
   constructor(app: MapApp) {
     this.app = app;
@@ -45,17 +46,27 @@ export class StateManager {
       "buttonsHidden",
     ];
     for (const key of persistKeys) {
-      app.store.subscribe(key, () => this.scheduleSave());
+      this.unsubscribers.push(
+        app.store.subscribe(key, () => this.scheduleSave())
+      );
     }
   }
 
-  private scheduleSave(): void {
-    if (this.savePending) return;
-    this.savePending = true;
-    queueMicrotask(() => {
-      this.savePending = false;
+  destroy(): void {
+    this.unsubscribers.forEach((fn) => fn());
+    this.unsubscribers = [];
+    if (this.saveTimer !== null) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+  }
+
+  scheduleSave(): void {
+    if (this.saveTimer !== null) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
       this.saveMapState();
-    });
+    }, 300);
   }
 
   saveMapState(): void {

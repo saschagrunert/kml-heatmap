@@ -114,6 +114,13 @@ export function getColorForAirspeed(
 }
 
 /**
+ * Convert an RGB color string to RGBA with the given alpha
+ */
+export function rgbToRgba(rgb: string, alpha: number): string {
+  return rgb.replace("rgb(", "rgba(").replace(")", `, ${alpha})`);
+}
+
+/**
  * RGB color components
  */
 export interface RgbColor {

@@ -458,9 +458,9 @@ export class MapApp {
   }
 
   private setupEventHandlers(): void {
-    this.map!.on("moveend", () => this.stateManager.saveMapState());
+    this.map!.on("moveend", () => this.stateManager.scheduleSave());
     this.map!.on("zoomend", () => {
-      this.stateManager.saveMapState();
+      this.stateManager.scheduleSave();
       this.airportManager.updateAirportMarkerSizes();
     });
 

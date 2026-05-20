@@ -120,7 +120,8 @@ describe("StateManager", () => {
       }
     });
 
-    it("auto-saves via microtask when a subscribed key changes", async () => {
+    it("auto-saves via debounced setTimeout when a subscribed key changes", () => {
+      vi.useFakeTimers();
       const saveSpy = vi.spyOn(stateManager, "saveMapState");
 
       const subscribeCalls = (
@@ -130,11 +131,13 @@ describe("StateManager", () => {
       callback();
 
       expect(saveSpy).not.toHaveBeenCalled();
-      await Promise.resolve();
+      vi.advanceTimersByTime(300);
       expect(saveSpy).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
     });
 
-    it("coalesces multiple key changes into one save", async () => {
+    it("coalesces multiple key changes into one save", () => {
+      vi.useFakeTimers();
       const saveSpy = vi.spyOn(stateManager, "saveMapState");
 
       const subscribeCalls = (
@@ -145,8 +148,41 @@ describe("StateManager", () => {
       callback1();
       callback2();
 
-      await Promise.resolve();
+      vi.advanceTimersByTime(300);
       expect(saveSpy).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+    });
+  });
+
+  describe("destroy", () => {
+    it("calls all unsubscribe functions", () => {
+      const unsubSpies: ReturnType<typeof vi.fn>[] = [];
+      (mockApp.store!.subscribe as ReturnType<typeof vi.fn>).mockImplementation(
+        () => {
+          const spy = vi.fn();
+          unsubSpies.push(spy);
+          return spy;
+        }
+      );
+
+      const sm = new StateManager(mockApp);
+      sm.destroy();
+
+      expect(unsubSpies.length).toBe(10);
+      unsubSpies.forEach((fn) => {
+        expect(fn).toHaveBeenCalled();
+      });
+    });
+
+    it("clears pending save timer", () => {
+      vi.useFakeTimers();
+      stateManager.scheduleSave();
+      stateManager.destroy();
+
+      const saveSpy = vi.spyOn(stateManager, "saveMapState");
+      vi.advanceTimersByTime(500);
+      expect(saveSpy).not.toHaveBeenCalled();
+      vi.useRealTimers();
     });
   });
 

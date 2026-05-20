@@ -3,6 +3,7 @@ import {
   getColorForAltitude,
   getColorForAirspeed,
   parseRgb,
+  rgbToRgba,
 } from "../../../../kml_heatmap/frontend/utils/colors";
 
 describe("color utilities", () => {
@@ -137,6 +138,26 @@ describe("color utilities", () => {
 
       const uniqueColors = new Set(colors);
       expect(uniqueColors.size).toBeGreaterThan(5);
+    });
+  });
+
+  describe("rgbToRgba", () => {
+    it("converts rgb to rgba with given alpha", () => {
+      expect(rgbToRgba("rgb(255,128,0)", 0.5)).toBe("rgba(255,128,0, 0.5)");
+    });
+
+    it("converts rgb with spaces to rgba", () => {
+      expect(rgbToRgba("rgb(255, 128, 0)", 0.15)).toBe(
+        "rgba(255, 128, 0, 0.15)"
+      );
+    });
+
+    it("handles alpha of 0", () => {
+      expect(rgbToRgba("rgb(0,0,0)", 0)).toBe("rgba(0,0,0, 0)");
+    });
+
+    it("handles alpha of 1", () => {
+      expect(rgbToRgba("rgb(255,255,255)", 1)).toBe("rgba(255,255,255, 1)");
     });
   });
 
