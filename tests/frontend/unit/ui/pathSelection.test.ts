@@ -31,7 +31,7 @@ describe("PathSelection", () => {
       },
       replayManager: {
         updateReplayButtonState: vi.fn(),
-        replayActive: false,
+        state: { active: false },
       },
       stateManager: {
         saveMapState: vi.fn(),
@@ -54,7 +54,6 @@ describe("PathSelection", () => {
 
       expect(mockApp.selectedPathIds.has(1)).toBe(true);
       expect(mockApp.replayManager!.updateReplayButtonState).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("removes path when already selected", () => {
@@ -64,7 +63,6 @@ describe("PathSelection", () => {
 
       expect(mockApp.selectedPathIds.has(1)).toBe(false);
       expect(mockApp.replayManager!.updateReplayButtonState).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("redraws altitude paths when altitude layer is visible", () => {
@@ -106,7 +104,6 @@ describe("PathSelection", () => {
       pathSelection.selectPathsByAirport("EDDF");
 
       expect(mockApp.replayManager!.updateReplayButtonState).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("handles airport with no paths gracefully", () => {
@@ -144,7 +141,6 @@ describe("PathSelection", () => {
       pathSelection.clearSelection();
 
       expect(mockApp.replayManager!.updateReplayButtonState).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("redraws altitude paths when visible", () => {
@@ -171,7 +167,6 @@ describe("PathSelection", () => {
       expect(mockApp.isolateSelection).toBe(false);
       expect(mockApp.dataManager!.updateLayers).toHaveBeenCalled();
       expect(mockApp.replayManager!.updateReplayButtonState).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
   });
 
@@ -183,7 +178,6 @@ describe("PathSelection", () => {
 
       expect(mockApp.isolateSelection).toBe(true);
       expect(mockApp.dataManager!.updateLayers).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("disables isolate mode when toggled again", () => {
@@ -247,7 +241,6 @@ describe("PathSelection", () => {
       expect(mockApp.isolateSelection).toBe(false);
       expect(mockApp.dataManager!.updateLayers).toHaveBeenCalled();
       expect(mockApp.replayManager!.updateReplayButtonState).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("rebuilds heatmap when toggling path in isolate mode", () => {
@@ -257,7 +250,6 @@ describe("PathSelection", () => {
       pathSelection.togglePathSelection(2);
 
       expect(mockApp.dataManager!.updateLayers).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
 
     it("rebuilds heatmap when selecting airport paths in isolate mode", () => {
@@ -267,7 +259,6 @@ describe("PathSelection", () => {
       pathSelection.selectPathsByAirport("EDDM");
 
       expect(mockApp.dataManager!.updateLayers).toHaveBeenCalled();
-      expect(mockApp.stateManager!.saveMapState).toHaveBeenCalled();
     });
   });
 });

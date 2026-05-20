@@ -2,9 +2,24 @@
  * Layer Manager - Handles altitude/airspeed path rendering and legend updates
  */
 import * as L from "leaflet";
-import { logWarn } from "../utils/logger";
 import type { MapApp } from "../mapApp";
+import type { Range } from "../state/store";
+import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
+
+interface LayerConfig {
+  layer: L.LayerGroup;
+  renderer: L.SVG;
+  range: Range;
+  getValue: (seg: PathSegment) => number;
+  getColor: (value: number, min: number, max: number) => string;
+  formatPopup: (seg: PathSegment) => string;
+  filterSegment?: (seg: PathSegment) => boolean;
+  storeSegments: boolean;
+  legendMinId: string;
+  legendMaxId: string;
+  formatLegend: (value: number) => string;
+}
 
 export class LayerManager {
   private app: MapApp;
@@ -22,94 +37,134 @@ export class LayerManager {
   }
 
   redrawAltitudePaths(): void {
+    this.redrawPaths({
+      layer: this.app.altitudeLayer,
+      renderer: this.app.altitudeRenderer,
+      range: this.app.altitudeRange,
+      getValue: (seg) => seg.altitude_ft ?? 0,
+      getColor: (value, min, max) =>
+        window.KMLHeatmap.getColorForAltitude(value, min, max),
+      formatPopup: (seg) =>
+        "Altitude: " + seg.altitude_ft + " ft (" + seg.altitude_m + " m)",
+      storeSegments: true,
+      legendMinId: "legend-min",
+      legendMaxId: "legend-max",
+      formatLegend: (value) => {
+        const ft = Math.round(value);
+        const m = Math.round(value * 0.3048);
+        return ft + " ft (" + m + " m)";
+      },
+    });
+  }
+
+  redrawAirspeedPaths(): void {
+    this.redrawPaths({
+      layer: this.app.airspeedLayer,
+      renderer: this.app.airspeedRenderer,
+      range: this.app.airspeedRange,
+      getValue: (seg) => seg.groundspeed_knots ?? 0,
+      getColor: (value, min, max) =>
+        window.KMLHeatmap.getColorForAirspeed(value, min, max),
+      formatPopup: (seg) => {
+        const kmh = Math.round((seg.groundspeed_knots ?? 0) * 1.852);
+        return (
+          "Groundspeed: " + seg.groundspeed_knots + " kt (" + kmh + " km/h)"
+        );
+      },
+      filterSegment: (seg) => (seg.groundspeed_knots ?? 0) > 0,
+      storeSegments: false,
+      legendMinId: "airspeed-legend-min",
+      legendMaxId: "airspeed-legend-max",
+      formatLegend: (value) => {
+        const kt = Math.round(value);
+        const kmh = Math.round(value * 1.852);
+        return kt + " kt (" + kmh + " km/h)";
+      },
+    });
+  }
+
+  private redrawPaths(config: LayerConfig): void {
     if (!this.app.currentData) return;
 
-    // Clear altitude layer and path references
-    this.app.altitudeLayer.clearLayers();
-    this.app.pathSegments = {};
+    config.layer.clearLayers();
+    if (config.storeSegments) {
+      this.app.pathSegments = {};
+    }
 
-    // Calculate altitude range for color scaling
-    let colorMinAlt: number, colorMaxAlt: number;
+    // Calculate color range
+    let colorMin: number, colorMax: number;
     if (this.app.selectedPathIds.size > 0) {
-      // Use selected paths' altitude range
       const selectedSegments = this.app.currentData.path_segments.filter(
-        (segment) => {
-          return this.app.selectedPathIds.has(segment.path_id);
+        (seg) => {
+          if (!this.app.selectedPathIds.has(seg.path_id)) return false;
+          if (config.filterSegment && !config.filterSegment(seg)) return false;
+          return true;
         }
       );
       if (selectedSegments.length > 0) {
-        const altitudes = selectedSegments.map((s) => s.altitude_ft || 0);
-        // Use iterative approach to avoid stack overflow with large arrays
-        let min = altitudes[0] ?? 0;
-        let max = altitudes[0] ?? 0;
-        for (let i = 1; i < altitudes.length; i++) {
-          const alt = altitudes[i] ?? 0;
-          if (alt < min) min = alt;
-          if (alt > max) max = alt;
+        const values = selectedSegments.map(config.getValue);
+        let min = values[0] ?? 0;
+        let max = values[0] ?? 0;
+        for (let i = 1; i < values.length; i++) {
+          const v = values[i] ?? 0;
+          if (v < min) min = v;
+          if (v > max) max = v;
         }
-        colorMinAlt = min;
-        colorMaxAlt = max;
+        colorMin = min;
+        colorMax = max;
       } else {
-        colorMinAlt = this.app.altitudeRange.min;
-        colorMaxAlt = this.app.altitudeRange.max;
+        colorMin = config.range.min;
+        colorMax = config.range.max;
       }
     } else {
-      // Use full altitude range
-      colorMinAlt = this.app.altitudeRange.min;
-      colorMaxAlt = this.app.altitudeRange.max;
+      colorMin = config.range.min;
+      colorMax = config.range.max;
     }
 
-    // Build path info lookup map for O(1) access
     const pathInfoMap = new Map(
       this.app.currentData.path_info.map((p) => [p.id, p])
     );
 
-    // Create path segments with interactivity and rescaled colors
     this.app.currentData.path_segments.forEach((segment) => {
       const pathId = segment.path_id;
-
       const pathInfo = pathInfoMap.get(pathId);
 
-      // Filter by year if selected
       if (this.app.selectedYear !== "all") {
         if (
           pathInfo &&
           pathInfo.year &&
           pathInfo.year.toString() !== this.app.selectedYear
         ) {
-          return; // Skip this segment
+          return;
         }
       }
 
-      // Filter by aircraft if selected
       if (this.app.selectedAircraft !== "all") {
         if (
           pathInfo &&
           pathInfo.aircraft_registration !== this.app.selectedAircraft
         ) {
-          return; // Skip this segment
+          return;
         }
       }
+
+      if (config.filterSegment && !config.filterSegment(segment)) return;
 
       const isSelected = this.app.selectedPathIds.has(pathId);
 
-      // When isolate mode is active and paths are selected: hide unselected paths
-      // Otherwise: dim unselected paths to opacity 0.1
       if (this.app.selectedPathIds.size > 0 && !isSelected) {
         if (this.app.isolateSelection) {
-          return; // Hide completely
+          return;
         }
       }
 
-      // Recalculate color based on current altitude range
-      const color = window.KMLHeatmap.getColorForAltitude(
-        segment.altitude_ft ?? 0,
-        colorMinAlt,
-        colorMaxAlt
+      const color = config.getColor(
+        config.getValue(segment),
+        colorMin,
+        colorMax
       );
-
       const inSolo = this.app.isolateSelection && isSelected;
-      const polyline = L.polyline(segment.coords || [], {
+      const polyline = L.polyline(segment.coords ?? [], {
         color: color,
         weight: isSelected && !inSolo ? 6 : 4,
         opacity: inSolo
@@ -121,211 +176,64 @@ export class LayerManager {
               : 0.85,
         lineCap: "round",
         lineJoin: "round",
-        renderer: this.app.altitudeRenderer,
+        renderer: config.renderer,
         interactive: true,
       })
-        .bindPopup(
-          "Altitude: " +
-            segment.altitude_ft +
-            " ft (" +
-            segment.altitude_m +
-            " m)"
-        )
-        .addTo(this.app.altitudeLayer);
+        .bindPopup(config.formatPopup(segment))
+        .addTo(config.layer);
 
-      // Make path clickable
       polyline.on("click", (e: L.LeafletMouseEvent) => {
         L.DomEvent.stopPropagation(e);
         this.app.pathSelection.togglePathSelection(pathId);
       });
 
-      // Store reference to polyline by path_id
-      if (!this.app.pathSegments[pathId]) {
-        this.app.pathSegments[pathId] = [];
+      if (config.storeSegments) {
+        if (!this.app.pathSegments[pathId]) {
+          this.app.pathSegments[pathId] = [];
+        }
+        this.app.pathSegments[pathId].push(segment);
       }
-      this.app.pathSegments[pathId].push(segment);
     });
 
-    // Update legend to show current altitude range
-    this.updateAltitudeLegend(colorMinAlt, colorMaxAlt);
-
-    // Update airport marker opacity based on selection
+    this.updateLegend(colorMin, colorMax, config);
     this.app.airportManager.updateAirportOpacity();
-
-    // Update statistics panel based on selection
     this.app.statsManager.updateStatsForSelection();
   }
 
-  redrawAirspeedPaths(): void {
-    if (!this.app.currentData) {
-      logWarn("redrawAirspeedPaths: No current data available");
-      return;
-    }
-
-    // Clear airspeed layer
-    this.app.airspeedLayer.clearLayers();
-
-    // Calculate groundspeed range for color scaling
-    let colorMinSpeed: number, colorMaxSpeed: number;
-    if (this.app.selectedPathIds.size > 0) {
-      // Use selected paths' groundspeed range
-      const selectedSegments = this.app.currentData.path_segments.filter(
-        (segment) => {
-          return (
-            this.app.selectedPathIds.has(segment.path_id) &&
-            (segment.groundspeed_knots || 0) > 0
-          );
-        }
-      );
-      if (selectedSegments.length > 0) {
-        const groundspeeds = selectedSegments.map(
-          (s) => s.groundspeed_knots || 0
-        );
-        // Use iterative approach to avoid stack overflow with large arrays
-        let min = groundspeeds[0] ?? 0;
-        let max = groundspeeds[0] ?? 0;
-        for (let i = 1; i < groundspeeds.length; i++) {
-          const speed = groundspeeds[i] ?? 0;
-          if (speed < min) min = speed;
-          if (speed > max) max = speed;
-        }
-        colorMinSpeed = min;
-        colorMaxSpeed = max;
-      } else {
-        colorMinSpeed = this.app.airspeedRange.min;
-        colorMaxSpeed = this.app.airspeedRange.max;
-      }
-    } else {
-      // Use full groundspeed range from metadata (not from current resolution)
-      colorMinSpeed = this.app.airspeedRange.min;
-      colorMaxSpeed = this.app.airspeedRange.max;
-    }
-
-    // Build path info lookup map for O(1) access
-    const pathInfoMap = new Map(
-      this.app.currentData.path_info.map((p) => [p.id, p])
-    );
-
-    // Create path segments with groundspeed colors and rescaled colors
-    this.app.currentData.path_segments.forEach((segment) => {
-      const pathId = segment.path_id;
-
-      const pathInfo = pathInfoMap.get(pathId);
-
-      // Filter by year if selected
-      if (this.app.selectedYear !== "all") {
-        if (
-          pathInfo &&
-          pathInfo.year &&
-          pathInfo.year.toString() !== this.app.selectedYear
-        ) {
-          return; // Skip this segment
-        }
-      }
-
-      // Filter by aircraft if selected
-      if (this.app.selectedAircraft !== "all") {
-        if (
-          pathInfo &&
-          pathInfo.aircraft_registration !== this.app.selectedAircraft
-        ) {
-          return; // Skip this segment
-        }
-      }
-
-      if ((segment.groundspeed_knots || 0) > 0) {
-        const isSelected = this.app.selectedPathIds.has(pathId);
-
-        // When isolate mode is active and paths are selected: hide unselected paths
-        // Otherwise: dim unselected paths to opacity 0.1
-        if (this.app.selectedPathIds.size > 0 && !isSelected) {
-          if (this.app.isolateSelection) {
-            return; // Hide completely
-          }
-        }
-
-        // Recalculate color based on current groundspeed range
-        const color = window.KMLHeatmap.getColorForAirspeed(
-          segment.groundspeed_knots ?? 0,
-          colorMinSpeed,
-          colorMaxSpeed
-        );
-
-        const kmh = Math.round((segment.groundspeed_knots || 0) * 1.852);
-        const inSolo = this.app.isolateSelection && isSelected;
-        const polyline = L.polyline(segment.coords || [], {
-          color: color,
-          weight: isSelected && !inSolo ? 6 : 4,
-          opacity: inSolo
-            ? 0.85
-            : isSelected
-              ? 1.0
-              : this.app.selectedPathIds.size > 0
-                ? 0.1
-                : 0.85,
-          lineCap: "round",
-          lineJoin: "round",
-          renderer: this.app.airspeedRenderer,
-          interactive: true,
-        })
-          .bindPopup(
-            "Groundspeed: " +
-              segment.groundspeed_knots +
-              " kt (" +
-              kmh +
-              " km/h)"
-          )
-          .addTo(this.app.airspeedLayer);
-
-        // Make path clickable
-        polyline.on("click", (e: L.LeafletMouseEvent) => {
-          L.DomEvent.stopPropagation(e);
-          this.app.pathSelection.togglePathSelection(pathId);
-        });
-      }
-    });
-
-    // Update legend
-    this.updateAirspeedLegend(colorMinSpeed, colorMaxSpeed);
-
-    // Update airport marker opacity based on selection
-    this.app.airportManager.updateAirportOpacity();
-
-    // Update statistics panel based on selection
-    this.app.statsManager.updateStatsForSelection();
+  private updateLegend(
+    min: number,
+    max: number,
+    config: Pick<LayerConfig, "legendMinId" | "legendMaxId" | "formatLegend">
+  ): void {
+    const minEl = domCache.get(config.legendMinId);
+    const maxEl = domCache.get(config.legendMaxId);
+    if (minEl) minEl.textContent = config.formatLegend(min);
+    if (maxEl) maxEl.textContent = config.formatLegend(max);
   }
 
   updateAltitudeLegend(minAlt: number, maxAlt: number): void {
-    const minFt = Math.round(minAlt);
-    const maxFt = Math.round(maxAlt);
-    const minM = Math.round(minAlt * 0.3048);
-    const maxM = Math.round(maxAlt * 0.3048);
-
-    const minEl = domCache.get("legend-min");
-    const maxEl = domCache.get("legend-max");
-
-    if (minEl) {
-      minEl.textContent = minFt + " ft (" + minM + " m)";
-    }
-    if (maxEl) {
-      maxEl.textContent = maxFt + " ft (" + maxM + " m)";
-    }
+    const format = (value: number) => {
+      const ft = Math.round(value);
+      const m = Math.round(value * 0.3048);
+      return ft + " ft (" + m + " m)";
+    };
+    this.updateLegend(minAlt, maxAlt, {
+      legendMinId: "legend-min",
+      legendMaxId: "legend-max",
+      formatLegend: format,
+    });
   }
 
   updateAirspeedLegend(minSpeed: number, maxSpeed: number): void {
-    const minKnots = Math.round(minSpeed);
-    const maxKnots = Math.round(maxSpeed);
-    const minKmh = Math.round(minSpeed * 1.852);
-    const maxKmh = Math.round(maxSpeed * 1.852);
-
-    const minEl = domCache.get("airspeed-legend-min");
-    const maxEl = domCache.get("airspeed-legend-max");
-
-    if (minEl) {
-      minEl.textContent = minKnots + " kt (" + minKmh + " km/h)";
-    }
-    if (maxEl) {
-      maxEl.textContent = maxKnots + " kt (" + maxKmh + " km/h)";
-    }
+    const format = (value: number) => {
+      const kt = Math.round(value);
+      const kmh = Math.round(value * 1.852);
+      return kt + " kt (" + kmh + " km/h)";
+    };
+    this.updateLegend(minSpeed, maxSpeed, {
+      legendMinId: "airspeed-legend-min",
+      legendMaxId: "airspeed-legend-max",
+      formatLegend: format,
+    });
   }
 }

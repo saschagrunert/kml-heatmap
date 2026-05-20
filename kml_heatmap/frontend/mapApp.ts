@@ -466,13 +466,13 @@ export class MapApp {
 
     this.map!.on("click", (_e: L.LeafletMouseEvent) => {
       if (
-        this.replayManager.replayActive &&
-        this.replayManager.replayAirplaneMarker &&
-        this.replayManager.replayAirplaneMarker.isPopupOpen()
+        this.replayManager.state.active &&
+        this.replayManager.state.airplaneMarker &&
+        this.replayManager.state.airplaneMarker.isPopupOpen()
       ) {
-        this.replayManager.replayAirplaneMarker.closePopup();
+        this.replayManager.state.airplaneMarker.closePopup();
       }
-      if (!this.replayManager.replayActive && this.selectedPathIds.size > 0) {
+      if (!this.replayManager.state.active && this.selectedPathIds.size > 0) {
         this.pathSelection.clearSelection();
       }
     });

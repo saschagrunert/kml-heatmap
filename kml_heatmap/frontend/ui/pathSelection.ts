@@ -46,7 +46,6 @@ export class PathSelection {
     }
 
     this.app.replayManager.updateReplayButtonState();
-    this.app.stateManager.saveMapState();
   }
 
   selectPathsByAirport(airportName: string): void {
@@ -76,7 +75,6 @@ export class PathSelection {
     }
 
     this.app.replayManager.updateReplayButtonState();
-    this.app.stateManager.saveMapState();
   }
 
   clearSelection(): void {
@@ -104,7 +102,6 @@ export class PathSelection {
     }
 
     this.app.replayManager.updateReplayButtonState();
-    this.app.stateManager.saveMapState();
   }
 
   toggleIsolateSelection(): void {
@@ -115,8 +112,6 @@ export class PathSelection {
 
     // Rebuild heatmap to filter coordinates by selection
     this.app.dataManager.updateLayers().catch(logError);
-
-    this.app.stateManager.saveMapState();
   }
 
   updateIsolateButton(): void {

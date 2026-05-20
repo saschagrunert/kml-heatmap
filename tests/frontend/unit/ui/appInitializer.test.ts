@@ -92,7 +92,7 @@ vi.mock("../../../../kml_heatmap/frontend/ui/airportManager", () => ({
 }));
 
 const mockReplayManagerInstance = {
-  replayActive: false,
+  state: { active: false, airplaneMarker: null },
   updateReplayButtonState: vi.fn(),
   toggleReplay: vi.fn(),
   playReplay: vi.fn(),
@@ -101,7 +101,6 @@ const mockReplayManagerInstance = {
   seekReplay: vi.fn(),
   changeReplaySpeed: vi.fn(),
   toggleAutoZoom: vi.fn(),
-  replayAirplaneMarker: null,
 };
 
 vi.mock("../../../../kml_heatmap/frontend/ui/replayManager", () => ({
@@ -295,7 +294,7 @@ describe("MapApp - loadInitialData", () => {
     vi.clearAllMocks();
     // Reset shared mock instances to default state
     mockStateManagerInstance.loadState.mockReturnValue(null);
-    mockReplayManagerInstance.replayActive = false;
+    mockReplayManagerInstance.state.active = false;
     setupDOM();
     setupMockKMLHeatmap();
     app = createApp();
@@ -840,7 +839,7 @@ describe("MapApp - createAirportMarkers", () => {
     const clickHandler = markerInstance.on.mock.calls[0][1];
 
     // Set replay active
-    app.replayManager.replayActive = true;
+    app.replayManager.state.active = true;
 
     clickHandler({});
 

@@ -226,7 +226,7 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
 
     // Add click handler to select paths connected to this airport
     marker.on("click", (_e: L.LeafletMouseEvent) => {
-      if (!app.replayManager.replayActive) {
+      if (!app.replayManager.state.active) {
         app.pathSelection.selectPathsByAirport(airport.name);
       }
     });

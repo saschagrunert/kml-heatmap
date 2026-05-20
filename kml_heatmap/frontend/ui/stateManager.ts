@@ -2,6 +2,7 @@
  * State Manager - Handles state persistence (localStorage, URL)
  */
 import type { MapApp } from "../mapApp";
+import type { StoreState } from "../state/store";
 import { domCache } from "../utils/domCache";
 
 interface SavedState {
@@ -23,12 +24,38 @@ interface SavedState {
 
 export class StateManager {
   private app: MapApp;
+  private savePending = false;
 
   constructor(app: MapApp) {
     this.app = app;
 
     // Pre-cache state-related elements
     domCache.cacheElements(["stats-panel", "wrapped-modal"]);
+
+    const persistKeys: (keyof StoreState)[] = [
+      "selectedYear",
+      "selectedAircraft",
+      "selectedPathIds",
+      "isolateSelection",
+      "heatmapVisible",
+      "altitudeVisible",
+      "airspeedVisible",
+      "airportsVisible",
+      "aviationVisible",
+      "buttonsHidden",
+    ];
+    for (const key of persistKeys) {
+      app.store.subscribe(key, () => this.scheduleSave());
+    }
+  }
+
+  private scheduleSave(): void {
+    if (this.savePending) return;
+    this.savePending = true;
+    queueMicrotask(() => {
+      this.savePending = false;
+      this.saveMapState();
+    });
   }
 
   saveMapState(): void {
