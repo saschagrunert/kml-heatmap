@@ -16,6 +16,7 @@ import { WrappedManager } from "./ui/wrappedManager";
 import { UIToggles } from "./ui/uiToggles";
 import { loadInitialData, createAirportMarkers } from "./appInitializer";
 import { logError } from "./utils/logger";
+import { domCache } from "./utils/domCache";
 import { AppStore } from "./state/store";
 import type { Range } from "./state/store";
 import type { HeatmapLayer } from "./globals";
@@ -418,22 +419,21 @@ export class MapApp {
     }
 
     // Set initial button states
-    (document.getElementById("heatmap-btn") as HTMLElement).style.opacity = this
-      .heatmapVisible
-      ? "1.0"
-      : "0.5";
-    (document.getElementById("altitude-btn") as HTMLElement).style.opacity =
-      this.altitudeVisible ? "1.0" : "0.5";
-    (document.getElementById("airspeed-btn") as HTMLElement).style.opacity =
-      this.airspeedVisible ? "1.0" : "0.5";
-    (document.getElementById("airports-btn") as HTMLElement).style.opacity =
-      this.airportsVisible ? "1.0" : "0.5";
-    (document.getElementById("aviation-btn") as HTMLElement).style.opacity =
-      this.aviationVisible ? "1.0" : "0.5";
+    const btnStates: [string, boolean][] = [
+      ["heatmap-btn", this.heatmapVisible],
+      ["altitude-btn", this.altitudeVisible],
+      ["airspeed-btn", this.airspeedVisible],
+      ["airports-btn", this.airportsVisible],
+      ["aviation-btn", this.aviationVisible],
+    ];
+    for (const [id, visible] of btnStates) {
+      const btn = domCache.get(id);
+      if (btn) btn.style.opacity = visible ? "1.0" : "0.5";
+    }
 
     if (this.config.openaipApiKey) {
-      (document.getElementById("aviation-btn") as HTMLElement).style.display =
-        "block";
+      const aviationBtn = domCache.get("aviation-btn");
+      if (aviationBtn) aviationBtn.style.display = "block";
     }
   }
 

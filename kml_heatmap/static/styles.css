@@ -310,8 +310,8 @@ body {
   }
 }
 
-/* Year filter dropdown - styled like other buttons */
-#year-filter {
+/* Filter dropdowns */
+.filter-dropdown {
   background-color: #2b2b2b;
   color: #ffffff;
   border: 2px solid #555;
@@ -326,7 +326,7 @@ body {
   box-sizing: border-box;
   text-align: center;
 }
-#year-filter select {
+.filter-dropdown select {
   background: transparent;
   color: #ffffff;
   border: 0 !important;
@@ -340,114 +340,50 @@ body {
   width: calc(100% + 24px);
   margin: -6px -12px;
   padding: 6px 12px;
-  outline: none !important;
   box-shadow: none !important;
   text-align: center;
   text-align-last: center;
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
+  outline: none;
 }
-#year-filter select:focus {
-  outline: none !important;
+.filter-dropdown select:focus {
   border: 0 !important;
   border-style: none !important;
   box-shadow: none !important;
+  outline: none;
 }
-#year-filter select:active {
+.filter-dropdown select:focus-visible {
+  outline: 2px solid #4a9eff;
+  outline-offset: -2px;
+}
+.filter-dropdown select:active {
   border: 0 !important;
   border-style: none !important;
 }
-#year-filter select option {
+.filter-dropdown select option {
   background-color: #2b2b2b;
   color: #ffffff;
   text-align: center;
 }
-#year-filter:hover {
+.filter-dropdown:hover {
   background-color: #3b3b3b;
 }
-#year-filter:has(select:disabled) {
+.filter-dropdown:has(select:disabled) {
   opacity: 0.3;
   cursor: not-allowed;
   background-color: #1a1a1a;
 }
-#year-filter:has(select:disabled):hover {
+.filter-dropdown:has(select:disabled):hover {
   background-color: #1a1a1a;
 }
-#year-filter select:disabled {
+.filter-dropdown select:disabled {
   cursor: not-allowed;
 }
 
-/* Aircraft filter dropdown - styled like year filter */
-#aircraft-filter {
-  background-color: #2b2b2b;
-  color: #ffffff;
-  border: 2px solid #555;
-  border-radius: 4px;
-  padding: 6px 12px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: bold;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
-  touch-action: manipulation;
-  width: 120px;
-  box-sizing: border-box;
-  text-align: center;
-}
-#aircraft-filter select {
-  background: transparent;
-  color: #ffffff;
-  border: 0 !important;
-  border-style: none !important;
-  border-width: 0 !important;
-  border-color: transparent !important;
-  border-image: none !important;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: bold;
-  width: calc(100% + 24px);
-  margin: -6px -12px;
-  padding: 6px 12px;
-  outline: none !important;
-  box-shadow: none !important;
-  text-align: center;
-  text-align-last: center;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-}
-#aircraft-filter select:focus {
-  outline: none !important;
-  border: 0 !important;
-  border-style: none !important;
-  box-shadow: none !important;
-}
-#aircraft-filter select:active {
-  border: 0 !important;
-  border-style: none !important;
-}
-#aircraft-filter select option {
-  background-color: #2b2b2b;
-  color: #ffffff;
-  text-align: center;
-}
-#aircraft-filter:hover {
-  background-color: #3b3b3b;
-}
-#aircraft-filter:has(select:disabled) {
-  opacity: 0.3;
-  cursor: not-allowed;
-  background-color: #1a1a1a;
-}
-#aircraft-filter:has(select:disabled):hover {
-  background-color: #1a1a1a;
-}
-#aircraft-filter select:disabled {
-  cursor: not-allowed;
-}
-
-/* Altitude legend */
-#altitude-legend {
+/* Color legends */
+.color-legend {
   position: fixed;
   bottom: 30px;
   left: 10px;
@@ -461,12 +397,12 @@ body {
   min-width: 200px;
   display: none;
 }
-#altitude-legend .legend-title {
+.color-legend .legend-title {
   font-weight: bold;
   margin-bottom: 8px;
   font-size: 13px;
 }
-#altitude-legend .gradient-bar {
+.color-legend .gradient-bar {
   height: 20px;
   background: linear-gradient(
     to right,
@@ -480,47 +416,7 @@ body {
   border-radius: 3px;
   margin-bottom: 5px;
 }
-#altitude-legend .labels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-}
-
-/* Airspeed legend */
-#airspeed-legend {
-  position: fixed;
-  bottom: 30px;
-  left: 10px;
-  background-color: rgba(43, 43, 43, 0.9);
-  color: #ffffff;
-  border: 2px solid #555;
-  border-radius: 4px;
-  padding: 10px;
-  z-index: 1000;
-  font-size: 12px;
-  min-width: 200px;
-  display: none;
-}
-#airspeed-legend .legend-title {
-  font-weight: bold;
-  margin-bottom: 8px;
-  font-size: 13px;
-}
-#airspeed-legend .gradient-bar {
-  height: 20px;
-  background: linear-gradient(
-    to right,
-    rgb(80, 160, 255) 0%,
-    rgb(0, 255, 255) 20%,
-    rgb(0, 255, 0) 40%,
-    rgb(255, 255, 0) 60%,
-    rgb(255, 165, 0) 80%,
-    rgb(255, 66, 66) 100%
-  );
-  border-radius: 3px;
-  margin-bottom: 5px;
-}
-#airspeed-legend .labels {
+.color-legend .labels {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
@@ -1445,4 +1341,33 @@ body {
     width: 18px;
     height: 18px;
   }
+}
+
+/* Toast notifications */
+.toast-notification {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background-color: rgba(43, 43, 43, 0.95);
+  color: #ffffff;
+  border: 2px solid #555;
+  border-radius: 6px;
+  padding: 12px 20px;
+  font-size: 14px;
+  z-index: 20000;
+  opacity: 0;
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s ease;
+  pointer-events: none;
+  max-width: 400px;
+  text-align: center;
+}
+.toast-notification.toast-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.toast-notification.toast-error {
+  border-color: #ff4444;
 }

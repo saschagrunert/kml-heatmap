@@ -4,6 +4,7 @@
 import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
+import { showToast } from "../utils/toast";
 import { ReplayRenderer } from "./replayRenderer";
 import { ReplayState } from "./replayState";
 
@@ -146,8 +147,9 @@ export class ReplayManager {
 
   initializeReplay(): boolean {
     if (!this.app.fullPathSegments) {
-      alert(
-        "No flight data available for replay. Please wait for data to load or refresh the page."
+      showToast(
+        "No flight data available for replay. Please wait for data to load or refresh the page.",
+        "error"
       );
       return false;
     }
@@ -524,6 +526,38 @@ export class ReplayManager {
         : "Auto-zoom disabled";
     }
     this.app.stateManager.saveMapState();
+  }
+
+  redrawReplayPath(mode: "altitude" | "airspeed"): void {
+    if (!this.state.layer) return;
+    const savedTime = this.state.currentTime;
+    const savedIndex = this.state.lastDrawnIndex;
+    this.state.layer.clearLayers();
+    this.state.lastDrawnIndex = -1;
+
+    for (let i = 0; i <= savedIndex && i < this.state.segments.length; i++) {
+      const seg = this.state.segments[i];
+      if (!seg || (seg.time ?? 0) > savedTime) continue;
+      if (mode === "airspeed" && (seg.groundspeed_knots ?? 0) <= 0) continue;
+
+      const value =
+        mode === "altitude"
+          ? (seg.altitude_ft ?? 0)
+          : (seg.groundspeed_knots ?? 0);
+      const min =
+        mode === "altitude" ? this.state.colorMinAlt : this.state.colorMinSpeed;
+      const max =
+        mode === "altitude" ? this.state.colorMaxAlt : this.state.colorMaxSpeed;
+      const color = window.KMLHeatmap.getColorForAltitude(value, min, max);
+
+      L.polyline(seg.coords ?? [], {
+        color,
+        weight: 3,
+        opacity: 0.8,
+      }).addTo(this.state.layer);
+
+      this.state.lastDrawnIndex = i;
+    }
   }
 
   updateReplayDisplay(isManualSeek: boolean = false): void {

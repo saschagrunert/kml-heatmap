@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta
@@ -165,7 +165,10 @@
     >
       🗺️ Aviation
     </button>
-    <div id="year-filter" class="control-btn right toggleable-btn">
+    <div
+      id="year-filter"
+      class="control-btn right toggleable-btn filter-dropdown"
+    >
       <select
         id="year-select"
         data-action="filterByYear"
@@ -175,7 +178,10 @@
       </select>
     </div>
 
-    <div id="aircraft-filter" class="control-btn right toggleable-btn">
+    <div
+      id="aircraft-filter"
+      class="control-btn right toggleable-btn filter-dropdown"
+    >
       <select
         id="aircraft-select"
         data-action="filterByAircraft"
@@ -188,6 +194,7 @@
     <div id="stats-panel" role="region" aria-label="Flight statistics"></div>
     <div
       id="altitude-legend"
+      class="color-legend"
       role="region"
       aria-label="Altitude color scale legend"
     >
@@ -204,6 +211,7 @@
     </div>
     <div
       id="airspeed-legend"
+      class="color-legend"
       role="region"
       aria-label="Groundspeed color scale legend"
     >

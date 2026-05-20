@@ -47,7 +47,11 @@ describe("UIToggles", () => {
       aviationVisible: false,
       buttonsHidden: false,
       stateManager: { saveMapState: vi.fn() },
-      replayManager: { state: { active: false } },
+      replayManager: {
+        state: { active: false },
+        redrawReplayPath: vi.fn(),
+        updateReplayAirplanePopup: vi.fn(),
+      },
       layerManager: {
         redrawAltitudePaths: vi.fn(),
         redrawAirspeedPaths: vi.fn(),
@@ -234,45 +238,17 @@ describe("UIToggles", () => {
       ).toHaveBeenCalled();
     });
 
-    it("during replay redraws altitude path from replay segments", () => {
+    it("during replay delegates redraw to replayManager", () => {
       mockApp.altitudeVisible = false;
       (mockApp.replayManager as any).state.active = true;
-      (mockApp.replayManager as any).state.currentTime = 60;
-      (mockApp.replayManager as any).state.lastDrawnIndex = 1;
-      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).state.colorMinAlt = 1000;
-      (mockApp.replayManager as any).state.colorMaxAlt = 5000;
-      (mockApp.replayManager as any).state.segments = [
-        {
-          path_id: 1,
-          altitude_ft: 3000,
-          time: 0,
-          coords: [
-            [48, 16],
-            [48.1, 16.1],
-          ],
-        },
-        {
-          path_id: 1,
-          altitude_ft: 4000,
-          time: 30,
-          coords: [
-            [48.1, 16.1],
-            [48.2, 16.2],
-          ],
-        },
-      ];
       (mockApp.replayManager as any).state.airplaneMarker = null;
-
-      // Mock window.KMLHeatmap.getColorForAltitude
-      window.KMLHeatmap = {
-        getColorForAltitude: vi.fn(() => "#ff0000"),
-      } as typeof window.KMLHeatmap;
 
       uiToggles.toggleAltitude();
 
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalled();
-      expect((mockApp.replayManager as any).state.lastDrawnIndex).toBe(1);
+      expect(mockApp.replayManager.redrawReplayPath).toHaveBeenCalledWith(
+        "altitude"
+      );
+      expect(mockApp.map!.addLayer).not.toHaveBeenCalled();
     });
   });
 
@@ -378,46 +354,18 @@ describe("UIToggles", () => {
       ).toHaveBeenCalled();
     });
 
-    it("during replay redraws airspeed path from replay segments", () => {
+    it("during replay delegates redraw to replayManager", () => {
       mockApp.airspeedVisible = false;
       mockApp.altitudeVisible = false;
       (mockApp.replayManager as any).state.active = true;
-      (mockApp.replayManager as any).state.currentTime = 60;
-      (mockApp.replayManager as any).state.lastDrawnIndex = 1;
-      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).state.colorMinSpeed = 50;
-      (mockApp.replayManager as any).state.colorMaxSpeed = 200;
-      (mockApp.replayManager as any).state.segments = [
-        {
-          path_id: 1,
-          groundspeed_knots: 100,
-          time: 0,
-          coords: [
-            [48, 16],
-            [48.1, 16.1],
-          ],
-        },
-        {
-          path_id: 1,
-          groundspeed_knots: 120,
-          time: 30,
-          coords: [
-            [48.1, 16.1],
-            [48.2, 16.2],
-          ],
-        },
-      ];
       (mockApp.replayManager as any).state.airplaneMarker = null;
-
-      // Mock window.KMLHeatmap.getColorForAltitude (used for airspeed coloring too)
-      window.KMLHeatmap = {
-        getColorForAltitude: vi.fn(() => "#0000ff"),
-      } as typeof window.KMLHeatmap;
 
       uiToggles.toggleAirspeed();
 
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalled();
-      expect((mockApp.replayManager as any).state.lastDrawnIndex).toBe(1);
+      expect(mockApp.replayManager.redrawReplayPath).toHaveBeenCalledWith(
+        "airspeed"
+      );
+      expect(mockApp.map!.addLayer).not.toHaveBeenCalled();
     });
   });
 
@@ -601,6 +549,15 @@ describe("UIToggles", () => {
       const mockLink = { download: "", href: "", click: vi.fn() };
       vi.spyOn(document, "createElement").mockReturnValue(mockLink as any);
 
+      Object.defineProperty(mockDomElements["map"], "offsetWidth", {
+        value: 800,
+        configurable: true,
+      });
+      Object.defineProperty(mockDomElements["map"], "offsetHeight", {
+        value: 600,
+        configurable: true,
+      });
+
       const toJpegMock = vi
         .fn()
         .mockResolvedValue("data:image/jpeg;base64,abc");
@@ -612,7 +569,10 @@ describe("UIToggles", () => {
       vi.advanceTimersByTime(200);
       await vi.runAllTimersAsync();
 
-      expect(toJpegMock).toHaveBeenCalled();
+      expect(toJpegMock).toHaveBeenCalledWith(
+        mockDomElements["map"],
+        expect.objectContaining({ width: 1600, height: 1200 })
+      );
       expect(btn.disabled).toBe(false);
       expect(btn.textContent).toContain("Export");
       expect(mockLink.click).toHaveBeenCalled();
@@ -622,10 +582,9 @@ describe("UIToggles", () => {
       vi.restoreAllMocks();
     });
 
-    it("restores controls and shows alert on domtoimage failure", async () => {
+    it("restores controls and shows toast on domtoimage failure", async () => {
       vi.useFakeTimers();
       const btn = mockDomElements["export-btn"] as HTMLButtonElement;
-      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
 
       const toJpegMock = vi.fn().mockRejectedValue(new Error("Export failed"));
       window.domtoimage = { toJpeg: toJpegMock } as any;
@@ -635,12 +594,14 @@ describe("UIToggles", () => {
       vi.advanceTimersByTime(200);
       await vi.runAllTimersAsync();
 
-      expect(alertSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Export failed")
-      );
+      const toast = document.querySelector(".toast-notification");
+      expect(toast).not.toBeNull();
+      expect(toast!.textContent).toContain("Export failed");
+      expect(toast!.classList.contains("toast-error")).toBe(true);
       expect(btn.disabled).toBe(false);
       expect(btn.textContent).toContain("Export");
 
+      toast!.remove();
       vi.useRealTimers();
       vi.restoreAllMocks();
     });
