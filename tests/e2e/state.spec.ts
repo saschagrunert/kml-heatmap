@@ -95,9 +95,12 @@ test.describe("State Persistence", () => {
     test("state is restored on reload", async ({ page }) => {
       await page.locator("#heatmap-btn").click();
       await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0.5");
-      await page.waitForFunction(
-        () => localStorage.getItem("kml-heatmap-state") !== null
-      );
+      await page.waitForFunction(() => {
+        const state = JSON.parse(
+          localStorage.getItem("kml-heatmap-state") || "{}"
+        );
+        return state.heatmapVisible === false;
+      });
 
       await page.reload();
       await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
@@ -277,9 +280,12 @@ test.describe("State Persistence", () => {
       page,
     }) => {
       await page.locator("#heatmap-btn").click();
-      await page.waitForFunction(
-        () => localStorage.getItem("kml-heatmap-state") !== null
-      );
+      await page.waitForFunction(() => {
+        const state = JSON.parse(
+          localStorage.getItem("kml-heatmap-state") || "{}"
+        );
+        return state.heatmapVisible === false;
+      });
 
       await page.goto("/");
       await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
