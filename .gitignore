@@ -7,6 +7,7 @@ __pycache__
 kml
 node_modules
 .mypy_cache
+.playwright-mcp
 
 # Test coverage reports
 coverage

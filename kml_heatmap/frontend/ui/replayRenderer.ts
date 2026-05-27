@@ -6,7 +6,7 @@ import type { MapApp } from "../mapApp";
 import type { ReplayManager } from "./replayManager";
 import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
-import { rgbToRgba } from "../utils/colors";
+import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 
 export class ReplayRenderer {
   private app: MapApp;
@@ -36,86 +36,15 @@ export class ReplayRenderer {
 
     if (!currentSegment) return;
 
-    // Build popup content
-    let popupContent =
-      "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; min-width: 180px; padding: 8px 4px; background-color: #2b2b2b; color: #ffffff;\">";
-
-    popupContent +=
-      '<div style="font-size: 14px; font-weight: bold; color: #4facfe; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 2px solid #4facfe; display: flex; align-items: center; gap: 6px;">';
-    popupContent += '<span style="font-size: 16px;">✈️</span>';
-    popupContent += "<span>Current Position</span>";
-    popupContent += "</div>";
-
-    // Altitude
-    const altFt = currentSegment.altitude_ft || 0;
-    // Round altitude to nearest 50ft
-    const altFtRounded = Math.round(altFt / 50) * 50;
-    const altMRounded = Math.round(altFtRounded * 0.3048);
-    // Get color based on current altitude using the same scale as the path
-    const altColor = window.KMLHeatmap.getColorForAltitude(
-      altFt,
-      replayManager.state.colorMinAlt,
-      replayManager.state.colorMaxAlt
-    );
-    const altColorBg = rgbToRgba(altColor, 0.15);
-    popupContent += '<div style="margin-bottom: 8px;">';
-    popupContent +=
-      '<div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Altitude (MSL)</div>';
-    popupContent +=
-      '<div style="background: ' +
-      altColorBg +
-      "; padding: 6px 8px; border-radius: 6px; border-left: 3px solid " +
-      altColor +
-      ';">';
-    popupContent +=
-      '<span style="font-size: 16px; font-weight: bold; color: ' +
-      altColor +
-      ';">' +
-      altFtRounded +
-      " ft</span>";
-    popupContent +=
-      '<span style="font-size: 12px; color: #ccc; margin-left: 6px;">(' +
-      altMRounded +
-      " m)</span>";
-    popupContent += "</div>";
-    popupContent += "</div>";
-
-    // Groundspeed
-    const speedKt = currentSegment.groundspeed_knots || 0;
-    const speedKmh = speedKt * 1.852;
-    // Round groundspeed to whole numbers
-    const speedKtRounded = Math.round(speedKt);
-    const speedKmhRounded = Math.round(speedKmh);
-    // Get color based on current groundspeed using the same scale as the path
-    const speedColor = window.KMLHeatmap.getColorForAirspeed(
-      speedKt,
-      replayManager.state.colorMinSpeed,
-      replayManager.state.colorMaxSpeed
-    );
-    const speedColorBg = rgbToRgba(speedColor, 0.15);
-    popupContent += '<div style="margin-bottom: 8px;">';
-    popupContent +=
-      '<div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Groundspeed</div>';
-    popupContent +=
-      '<div style="background: ' +
-      speedColorBg +
-      "; padding: 6px 8px; border-radius: 6px; border-left: 3px solid " +
-      speedColor +
-      ';">';
-    popupContent +=
-      '<span style="font-size: 16px; font-weight: bold; color: ' +
-      speedColor +
-      ';">' +
-      speedKtRounded +
-      " kt</span>";
-    popupContent +=
-      '<span style="font-size: 12px; color: #ccc; margin-left: 6px;">(' +
-      speedKmhRounded +
-      " km/h)</span>";
-    popupContent += "</div>";
-    popupContent += "</div>";
-
-    popupContent += "</div>";
+    const popupContent = generateSegmentPopupHtml({
+      segment: currentSegment,
+      altMin: replayManager.state.colorMinAlt,
+      altMax: replayManager.state.colorMaxAlt,
+      speedMin: replayManager.state.colorMinSpeed,
+      speedMax: replayManager.state.colorMaxSpeed,
+      title: "Current Position",
+      icon: "✈️",
+    });
 
     // Update or create popup
     if (!replayManager.state.airplaneMarker.getPopup()) {
