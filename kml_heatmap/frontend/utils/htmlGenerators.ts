@@ -2,7 +2,14 @@
  * HTML generation utilities for UI components
  * Pure functions that generate HTML strings
  */
-import type { FilteredStatistics, FunFact, YearStats } from "../types";
+import type {
+  FilteredStatistics,
+  FunFact,
+  PathSegment,
+  YearStats,
+} from "../types";
+import { rgbToRgba } from "./colors";
+import { ddToDms } from "./geometry";
 
 export interface AirportCount {
   name: string;
@@ -206,6 +213,93 @@ export function generateHomeBaseHtml(homeBase: AirportCount): string {
                 </div>
             `;
   return html;
+}
+
+export interface SegmentPopupParams {
+  segment: PathSegment;
+  altMin: number;
+  altMax: number;
+  speedMin: number;
+  speedMax: number;
+  title?: string;
+  icon?: string;
+}
+
+/**
+ * Generate path segment popup HTML with position, altitude, and groundspeed
+ */
+export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
+  const { segment } = params;
+  const title = params.title || "Segment Data";
+  const icon = params.icon || "📍";
+
+  const altFt = segment.altitude_ft || 0;
+  const altFtRounded = Math.round(altFt / 50) * 50;
+  const altMRounded = Math.round(altFtRounded * 0.3048);
+  const altColor = window.KMLHeatmap.getColorForAltitude(
+    altFt,
+    params.altMin,
+    params.altMax
+  );
+  const altColorBg = rgbToRgba(altColor, 0.15);
+
+  const speedKt = segment.groundspeed_knots || 0;
+  const speedKtRounded = Math.round(speedKt);
+  const speedKmhRounded = Math.round(speedKt * 1.852);
+  const speedColor = window.KMLHeatmap.getColorForAirspeed(
+    speedKt,
+    params.speedMin,
+    params.speedMax
+  );
+  const speedColorBg = rgbToRgba(speedColor, 0.15);
+
+  const endCoord = segment.coords?.[1];
+  const lat = endCoord?.[0] != null ? ddToDms(endCoord[0], true) : "N/A";
+  const lon = endCoord?.[1] != null ? ddToDms(endCoord[1], false) : "N/A";
+
+  return `
+    <div style="
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+        min-width: 180px;
+        padding: 8px 4px;
+        background-color: #2b2b2b;
+        color: #ffffff;
+    ">
+        <div style="
+            font-size: 14px;
+            font-weight: bold;
+            color: #4facfe;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #4facfe;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        ">
+            <span style="font-size: 16px;">${icon}</span>
+            <span>${title}</span>
+        </div>
+        <div style="margin-bottom: 8px;">
+            <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Position</div>
+            <div style="font-size: 12px; font-family: monospace; color: #ccc; padding: 4px 8px;">
+                ${lat}<br>${lon}
+            </div>
+        </div>
+        <div style="margin-bottom: 8px;">
+            <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Altitude (MSL)</div>
+            <div style="background: ${altColorBg}; padding: 6px 8px; border-radius: 6px; border-left: 3px solid ${altColor};">
+                <span style="font-size: 16px; font-weight: bold; color: ${altColor};">${altFtRounded} ft</span>
+                <span style="font-size: 12px; color: #ccc; margin-left: 6px;">(${altMRounded} m)</span>
+            </div>
+        </div>
+        <div style="margin-bottom: 8px;">
+            <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Groundspeed</div>
+            <div style="background: ${speedColorBg}; padding: 6px 8px; border-radius: 6px; border-left: 3px solid ${speedColor};">
+                <span style="font-size: 16px; font-weight: bold; color: ${speedColor};">${speedKtRounded} kt</span>
+                <span style="font-size: 12px; color: #ccc; margin-left: 6px;">(${speedKmhRounded} km/h)</span>
+            </div>
+        </div>
+    </div>`;
 }
 
 /**

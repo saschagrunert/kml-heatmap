@@ -430,8 +430,8 @@ describe("LayerManager", () => {
       layerManager.redrawAirspeedPaths();
 
       // Only path 1 (selected) should have been rendered
-      // getColorForAirspeed should only be called for path 1's segment
-      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledTimes(1);
+      // getColorForAirspeed is called once for polyline color and once for popup
+      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledTimes(2);
       expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
         100,
         100,

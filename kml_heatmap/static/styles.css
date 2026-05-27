@@ -1241,6 +1241,10 @@ body {
 }
 
 /* Tooltip styles */
+.leaflet-interactive:focus {
+  outline: none;
+}
+
 .leaflet-tooltip {
   background-color: #2b2b2b;
   border: 2px solid #28a745;
@@ -1263,6 +1267,16 @@ body {
 }
 .leaflet-tooltip-right:before {
   border-right-color: #28a745;
+}
+
+.segment-tooltip {
+  border: 2px solid #555;
+  border-radius: 6px;
+  padding: 0;
+  opacity: 1;
+}
+.segment-tooltip::before {
+  border-top-color: #555;
 }
 
 /* Popup styles - dark theme */

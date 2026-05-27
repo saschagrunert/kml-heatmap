@@ -6,6 +6,7 @@ import type { MapApp } from "../mapApp";
 import type { Range } from "../state/store";
 import type { PathInfo, PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
+import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 
 interface LayerConfig {
   layer: L.LayerGroup;
@@ -13,7 +14,6 @@ interface LayerConfig {
   range: Range;
   getValue: (seg: PathSegment) => number;
   getColor: (value: number, min: number, max: number) => string;
-  formatPopup: (seg: PathSegment) => string;
   filterSegment?: (seg: PathSegment) => boolean;
   storeSegments: boolean;
   legendMinId: string;
@@ -46,8 +46,6 @@ export class LayerManager {
       getValue: (seg) => seg.altitude_ft ?? 0,
       getColor: (value, min, max) =>
         window.KMLHeatmap.getColorForAltitude(value, min, max),
-      formatPopup: (seg) =>
-        "Altitude: " + seg.altitude_ft + " ft (" + seg.altitude_m + " m)",
       storeSegments: true,
       legendMinId: "legend-min",
       legendMaxId: "legend-max",
@@ -67,12 +65,6 @@ export class LayerManager {
       getValue: (seg) => seg.groundspeed_knots ?? 0,
       getColor: (value, min, max) =>
         window.KMLHeatmap.getColorForAirspeed(value, min, max),
-      formatPopup: (seg) => {
-        const kmh = Math.round((seg.groundspeed_knots ?? 0) * 1.852);
-        return (
-          "Groundspeed: " + seg.groundspeed_knots + " kt (" + kmh + " km/h)"
-        );
-      },
       filterSegment: (seg) => (seg.groundspeed_knots ?? 0) > 0,
       storeSegments: false,
       legendMinId: "airspeed-legend-min",
@@ -179,7 +171,12 @@ export class LayerManager {
         renderer: config.renderer,
         interactive: true,
       })
-        .bindPopup(config.formatPopup(segment))
+        .bindTooltip(this.formatSegmentTooltip(segment), {
+          sticky: true,
+          direction: "top",
+          offset: [0, -10],
+          className: "segment-tooltip",
+        })
         .addTo(config.layer);
 
       polyline.on("click", (e: L.LeafletMouseEvent) => {
@@ -198,6 +195,16 @@ export class LayerManager {
     this.updateLegend(colorMin, colorMax, config);
     this.app.airportManager.updateAirportOpacity();
     this.app.statsManager.updateStatsForSelection();
+  }
+
+  private formatSegmentTooltip(segment: PathSegment): string {
+    return generateSegmentPopupHtml({
+      segment,
+      altMin: this.app.altitudeRange.min,
+      altMax: this.app.altitudeRange.max,
+      speedMin: this.app.airspeedRange.min,
+      speedMax: this.app.airspeedRange.max,
+    });
   }
 
   private getPathInfoMap(): Map<number, PathInfo> {

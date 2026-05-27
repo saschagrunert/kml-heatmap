@@ -9,9 +9,11 @@ export const polyline = vi.fn(() => {
     remove: vi.fn(),
     setStyle: vi.fn(),
     bindPopup: vi.fn(),
+    bindTooltip: vi.fn(),
     on: vi.fn(),
   };
   obj.bindPopup.mockReturnValue(obj);
+  obj.bindTooltip.mockReturnValue(obj);
   obj.addTo.mockReturnValue(obj);
   return obj;
 });
