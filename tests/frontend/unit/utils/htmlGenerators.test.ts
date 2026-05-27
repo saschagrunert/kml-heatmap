@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   generateStatsHtml,
   generateFunFactsHtml,
@@ -6,8 +6,10 @@ import {
   generateAircraftFleetHtml,
   generateHomeBaseHtml,
   generateDestinationsHtml,
+  generateSegmentPopupHtml,
   type YearStats,
   type AirportCount,
+  type SegmentPopupParams,
 } from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
 import type {
   FilteredStatistics,
@@ -433,6 +435,127 @@ describe("htmlGenerators", () => {
 
       expect(zuluIndex).toBeLessThan(alphaIndex);
       expect(alphaIndex).toBeLessThan(mikeIndex);
+    });
+  });
+
+  describe("generateSegmentPopupHtml", () => {
+    beforeEach(() => {
+      window.KMLHeatmap = {
+        getColorForAltitude: vi.fn(() => "rgb(255, 0, 0)"),
+        getColorForAirspeed: vi.fn(() => "rgb(0, 0, 255)"),
+      } as typeof window.KMLHeatmap;
+    });
+
+    const fullParams: SegmentPopupParams = {
+      segment: {
+        path_id: 1,
+        altitude_ft: 3000,
+        groundspeed_knots: 120,
+        coords: [
+          [48.0, 11.0],
+          [49.0, 12.0],
+        ],
+      },
+      altMin: 0,
+      altMax: 5000,
+      speedMin: 0,
+      speedMax: 200,
+    };
+
+    it("renders altitude and groundspeed with color coding", () => {
+      const html = generateSegmentPopupHtml(fullParams);
+
+      expect(html).toContain("3000 ft");
+      expect(html).toContain("120 kt");
+      expect(html).toContain("222 km/h");
+      expect(html).toContain("Altitude (MSL)");
+      expect(html).toContain("Groundspeed");
+      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
+        3000,
+        0,
+        5000
+      );
+      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
+        120,
+        0,
+        200
+      );
+    });
+
+    it("uses default title and icon", () => {
+      const html = generateSegmentPopupHtml(fullParams);
+
+      expect(html).toContain("Segment Data");
+      expect(html).toContain("📍");
+    });
+
+    it("uses custom title and icon when provided", () => {
+      const html = generateSegmentPopupHtml({
+        ...fullParams,
+        title: "Current Position",
+        icon: "✈️",
+      });
+
+      expect(html).toContain("Current Position");
+      expect(html).toContain("✈️");
+      expect(html).not.toContain("Segment Data");
+      expect(html).not.toContain("📍");
+    });
+
+    it("defaults altitude to 0 when missing", () => {
+      const html = generateSegmentPopupHtml({
+        ...fullParams,
+        segment: { ...fullParams.segment, altitude_ft: undefined },
+      });
+
+      expect(html).toContain("0 ft");
+      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
+        0,
+        0,
+        5000
+      );
+    });
+
+    it("defaults groundspeed to 0 when missing", () => {
+      const html = generateSegmentPopupHtml({
+        ...fullParams,
+        segment: { ...fullParams.segment, groundspeed_knots: undefined },
+      });
+
+      expect(html).toContain("0 kt");
+      expect(html).toContain("0 km/h");
+      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
+        0,
+        0,
+        200
+      );
+    });
+
+    it("computes track from segment coordinates", () => {
+      const html = generateSegmentPopupHtml(fullParams);
+
+      expect(html).toContain("Track:");
+      expect(html).toMatch(/\d{3}°/);
+      expect(html).not.toContain("N/A");
+    });
+
+    it("shows N/A for track and position when coords are missing", () => {
+      const html = generateSegmentPopupHtml({
+        ...fullParams,
+        segment: { path_id: 1 },
+      });
+
+      expect(html).toContain("Track: N/A");
+      expect(html).toMatch(/N\/A N\/A/);
+    });
+
+    it("formats position in DMS", () => {
+      const html = generateSegmentPopupHtml(fullParams);
+
+      expect(html).toContain("N");
+      expect(html).toContain("E");
+      expect(html).toContain("°");
+      expect(html).toContain("'");
     });
   });
 });

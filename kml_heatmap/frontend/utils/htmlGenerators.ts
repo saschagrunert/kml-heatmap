@@ -9,7 +9,7 @@ import type {
   YearStats,
 } from "../types";
 import { rgbToRgba } from "./colors";
-import { ddToDms } from "./geometry";
+import { calculateBearing, ddToDms } from "./geometry";
 
 export interface AirportCount {
   name: string;
@@ -253,9 +253,18 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   );
   const speedColorBg = rgbToRgba(speedColor, 0.15);
 
+  const startCoord = segment.coords?.[0];
   const endCoord = segment.coords?.[1];
   const lat = endCoord?.[0] != null ? ddToDms(endCoord[0], true) : "N/A";
   const lon = endCoord?.[1] != null ? ddToDms(endCoord[1], false) : "N/A";
+
+  let trackStr = "N/A";
+  if (startCoord && endCoord) {
+    const trk = Math.round(
+      calculateBearing(startCoord[0], startCoord[1], endCoord[0], endCoord[1])
+    );
+    trackStr = String(trk).padStart(3, "0") + "°";
+  }
 
   return `
     <div style="
@@ -279,11 +288,8 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
             <span style="font-size: 16px;">${icon}</span>
             <span>${title}</span>
         </div>
-        <div style="margin-bottom: 8px;">
-            <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Position</div>
-            <div style="font-size: 12px; font-family: monospace; color: #ccc; padding: 4px 8px;">
-                ${lat}<br>${lon}
-            </div>
+        <div style="margin-bottom: 8px; font-size: 12px; font-family: monospace; color: #ccc; padding: 4px 8px;">
+            ${lat} ${lon}<br><span style="display: inline-block; margin-top: 4px;">Track: ${trackStr}</span>
         </div>
         <div style="margin-bottom: 8px;">
             <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Altitude (MSL)</div>
