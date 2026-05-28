@@ -21,6 +21,10 @@ interface LayerConfig {
   formatLegend: (value: number) => string;
 }
 
+export function isTouchDevice(): boolean {
+  return "ontouchstart" in window || navigator.maxTouchPoints > 0;
+}
+
 export class LayerManager {
   private app: MapApp;
   private pathInfoMapCache: Map<number, PathInfo> | null = null;
@@ -170,17 +174,32 @@ export class LayerManager {
         lineJoin: "round",
         renderer: config.renderer,
         interactive: true,
-      })
-        .bindTooltip(this.formatSegmentTooltip(segment), {
+      });
+
+      const tooltipHtml = this.formatSegmentTooltip(segment);
+      if (!isTouchDevice()) {
+        polyline.bindTooltip(tooltipHtml, {
           sticky: true,
           direction: "top",
           offset: [0, -10],
+          opacity: 1,
           className: "segment-tooltip",
-        })
-        .addTo(config.layer);
+        });
+      }
+
+      polyline.addTo(config.layer);
 
       polyline.on("click", (e: L.LeafletMouseEvent) => {
         L.DomEvent.stopPropagation(e);
+        if (e.originalEvent) {
+          e.originalEvent.stopPropagation();
+        }
+        if (isTouchDevice() && this.app.map) {
+          L.popup({ className: "segment-tooltip" })
+            .setLatLng(e.latlng)
+            .setContent(tooltipHtml)
+            .openOn(this.app.map);
+        }
         this.app.pathSelection.togglePathSelection(pathId);
       });
 

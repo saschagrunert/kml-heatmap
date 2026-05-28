@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { waitForPathData } from "./helpers";
 
 test.describe("Layers", () => {
   test.beforeEach(async ({ page }) => {
@@ -199,6 +200,72 @@ test.describe("Layers", () => {
           ?.classList.contains("airport-marker-container-small") ?? false,
       { timeout: 5000 }
     );
+  });
+
+  test("hovering over path segment shows tooltip with flight data", async ({
+    page,
+  }) => {
+    await waitForPathData(page);
+
+    const hoverPos = await page.evaluate(() => {
+      const app = (window as any).mapApp;
+      const segments = app.currentData?.path_segments;
+      if (!segments || segments.length === 0) return null;
+
+      const airports: { lat: number; lon: number }[] = [];
+      for (const name of Object.keys(app.airportMarkers || {})) {
+        const ll = app.airportMarkers[name].getLatLng();
+        airports.push({ lat: ll.lat, lon: ll.lng });
+      }
+
+      let best: { coord: number[]; dist: number } | null = null;
+      for (const seg of segments) {
+        if (!seg.coords || seg.coords.length < 2) continue;
+        const midCoord = seg.coords[Math.floor(seg.coords.length / 2)];
+        const minDist = airports.reduce((min, a) => {
+          const d = Math.hypot(midCoord[0] - a.lat, midCoord[1] - a.lon);
+          return Math.min(min, d);
+        }, Infinity);
+        if (!best || minDist > best.dist) {
+          best = { coord: midCoord, dist: minDist };
+        }
+      }
+      if (!best) return null;
+
+      app.map.setView(L.latLng(best.coord[0], best.coord[1]), 13, {
+        animate: false,
+      });
+
+      const point = app.map.latLngToContainerPoint(
+        L.latLng(best.coord[0], best.coord[1])
+      );
+      return { x: point.x, y: point.y, coord: best.coord };
+    });
+
+    if (!hoverPos) return;
+
+    await page.waitForTimeout(500);
+
+    const pos = await page.evaluate((hp) => {
+      const app = (window as any).mapApp;
+      const point = app.map.latLngToContainerPoint(
+        L.latLng(hp.coord[0], hp.coord[1])
+      );
+      return { x: point.x, y: point.y };
+    }, hoverPos);
+
+    await page.mouse.move(pos.x, pos.y);
+    await page.waitForTimeout(500);
+
+    const tooltip = page.locator(".segment-tooltip");
+    const tooltipCount = await tooltip.count();
+    if (tooltipCount > 0) {
+      const tooltipText = await tooltip.first().textContent();
+      expect(tooltipText).toMatch(/Altitude/);
+      expect(tooltipText).toMatch(/ft/);
+      expect(tooltipText).toMatch(/Groundspeed/);
+      expect(tooltipText).toMatch(/kt/);
+    }
   });
 
   test("airport labels hidden at low zoom", async ({ page }) => {

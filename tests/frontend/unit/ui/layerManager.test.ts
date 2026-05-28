@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { LayerManager } from "../../../../kml_heatmap/frontend/ui/layerManager";
+import * as L from "leaflet";
+import {
+  LayerManager,
+  isTouchDevice,
+} from "../../../../kml_heatmap/frontend/ui/layerManager";
 import type { MockMapApp } from "../../testHelpers";
 
 // Mock domCache
@@ -451,6 +455,133 @@ describe("LayerManager", () => {
         0,
         200
       );
+    });
+  });
+
+  describe("isTouchDevice", () => {
+    let hadOntouchstart: boolean;
+
+    beforeEach(() => {
+      hadOntouchstart = "ontouchstart" in window;
+      if (hadOntouchstart) delete (window as any).ontouchstart;
+    });
+
+    afterEach(() => {
+      if (hadOntouchstart) (window as any).ontouchstart = null;
+      else delete (window as any).ontouchstart;
+    });
+
+    it("returns false when no touch support", () => {
+      expect(isTouchDevice()).toBe(false);
+    });
+
+    it("returns true when ontouchstart exists", () => {
+      (window as any).ontouchstart = null;
+      expect(isTouchDevice()).toBe(true);
+    });
+
+    it("returns true when maxTouchPoints > 0", () => {
+      const original = navigator.maxTouchPoints;
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        value: 1,
+        configurable: true,
+      });
+      try {
+        expect(isTouchDevice()).toBe(true);
+      } finally {
+        Object.defineProperty(navigator, "maxTouchPoints", {
+          value: original,
+          configurable: true,
+        });
+      }
+    });
+  });
+
+  describe("touch vs non-touch segment interaction", () => {
+    let hadOntouchstart: boolean;
+
+    beforeEach(() => {
+      hadOntouchstart = "ontouchstart" in window;
+      if (hadOntouchstart) delete (window as any).ontouchstart;
+      vi.mocked(L.polyline).mockClear();
+      vi.mocked(L.popup).mockClear();
+    });
+
+    afterEach(() => {
+      if (hadOntouchstart) (window as any).ontouchstart = null;
+      else delete (window as any).ontouchstart;
+    });
+
+    it("uses bindTooltip on non-touch devices", () => {
+      layerManager.redrawAltitudePaths();
+
+      const polylineInstance = (L.polyline as any).mock.results[0]?.value;
+      expect(polylineInstance).toBeDefined();
+      expect(polylineInstance.bindTooltip).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ sticky: true })
+      );
+    });
+
+    it("skips bindTooltip on touch devices", () => {
+      (window as any).ontouchstart = null;
+
+      layerManager.redrawAltitudePaths();
+
+      const polylineInstance = (L.polyline as any).mock.results[0]?.value;
+      expect(polylineInstance).toBeDefined();
+      expect(polylineInstance.bindTooltip).not.toHaveBeenCalled();
+    });
+
+    it("opens standalone popup on touch device click", () => {
+      (window as any).ontouchstart = null;
+      mockApp.map = {
+        invalidateSize: vi.fn(),
+      } as any;
+
+      layerManager.redrawAltitudePaths();
+
+      const polylineInstance = (L.polyline as any).mock.results[0]?.value;
+      const clickHandler = polylineInstance.on.mock.calls.find(
+        (c: any[]) => c[0] === "click"
+      )?.[1];
+      expect(clickHandler).toBeDefined();
+
+      const mockEvent = {
+        latlng: { lat: 48, lng: 16 },
+        originalEvent: { stopPropagation: vi.fn() },
+      };
+      clickHandler(mockEvent);
+
+      expect(mockEvent.originalEvent.stopPropagation).toHaveBeenCalled();
+      expect(L.popup).toHaveBeenCalled();
+      const popupInstance = (L.popup as any).mock.results[0]?.value;
+      expect(popupInstance.setLatLng).toHaveBeenCalledWith(mockEvent.latlng);
+      expect(popupInstance.setContent).toHaveBeenCalledWith(expect.any(String));
+      expect(popupInstance.openOn).toHaveBeenCalledWith(mockApp.map);
+    });
+
+    it("does not open standalone popup on non-touch device click", () => {
+      mockApp.map = {
+        invalidateSize: vi.fn(),
+      } as any;
+
+      layerManager.redrawAltitudePaths();
+
+      const polylineInstance = (L.polyline as any).mock.results[0]?.value;
+      const clickHandler = polylineInstance.on.mock.calls.find(
+        (c: any[]) => c[0] === "click"
+      )?.[1];
+      expect(clickHandler).toBeDefined();
+
+      const mockEvent = {
+        latlng: { lat: 48, lng: 16 },
+        originalEvent: { stopPropagation: vi.fn() },
+      };
+      clickHandler(mockEvent);
+
+      expect(mockEvent.originalEvent.stopPropagation).toHaveBeenCalled();
+      expect(L.popup).not.toHaveBeenCalled();
     });
   });
 });
