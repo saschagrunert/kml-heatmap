@@ -3,7 +3,14 @@
 import os
 import json
 import tempfile
+from unittest.mock import patch
+
 from kml_heatmap.data_exporter import (
+    _aggregate_year_results,
+    _calculate_altitude_range,
+    _finalize_stats,
+    _group_paths_by_year,
+    _process_years_parallel,
     _recalculate_stats_from_segments,
     export_airports_data,
     export_metadata,
@@ -877,3 +884,156 @@ class TestRecalculateStatsFromSegments:
 
         # Should not crash, no aircraft keys added
         assert "aircraft_list" not in stats
+
+
+class TestCalculateAltitudeRange:
+    def test_with_paths(self):
+        paths = [[[50.0, 8.5, 100.0], [50.1, 8.6, 500.0]]]
+        min_alt, max_alt = _calculate_altitude_range(paths)
+        assert min_alt == 100.0
+        assert max_alt == 500.0
+
+    def test_empty_paths(self):
+        min_alt, max_alt = _calculate_altitude_range([])
+        assert min_alt == 0.0
+        assert max_alt == 1000.0
+
+
+class TestGroupPathsByYear:
+    def test_groups_by_year(self):
+        metadata = [
+            {"year": 2025},
+            {"year": 2026},
+            {"year": 2025},
+        ]
+        result = _group_paths_by_year(metadata)
+        assert result == {"2025": [0, 2], "2026": [1]}
+
+    def test_none_year_becomes_unknown(self):
+        metadata = [{"year": None}, {"other": "data"}]
+        result = _group_paths_by_year(metadata)
+        assert result == {"unknown": [0, 1]}
+
+
+class TestAggregateYearResults:
+    def test_aggregates_groundspeed(self):
+        results = [
+            {
+                "year": "2025",
+                "max_groundspeed": 150.0,
+                "min_groundspeed": 50.0,
+                "cruise_distance": 100.0,
+                "cruise_time": 60.0,
+                "max_path_distance": 80.0,
+                "cruise_altitude_histogram": {3000: 10.0},
+                "file_structure": ["data"],
+                "full_res_segments": None,
+                "full_res_path_info": None,
+            }
+        ]
+        (
+            file_structure,
+            max_gs,
+            min_gs,
+            cruise_dist,
+            cruise_time,
+            max_path_dist,
+            cruise_hist,
+            segments,
+            path_info,
+        ) = _aggregate_year_results(results)
+        assert max_gs == 150.0
+        assert min_gs == 50.0
+        assert cruise_dist == 100.0
+        assert cruise_time == 60.0
+        assert max_path_dist == 80.0
+        assert cruise_hist == {3000: 10.0}
+        assert file_structure == {"2025": ["data"]}
+
+    def test_remaps_path_ids_across_years(self):
+        results = [
+            {
+                "year": "2025",
+                "max_groundspeed": 0,
+                "min_groundspeed": float("inf"),
+                "cruise_distance": 0,
+                "cruise_time": 0,
+                "max_path_distance": 0,
+                "cruise_altitude_histogram": {},
+                "file_structure": [],
+                "full_res_segments": [{"path_id": 0, "data": "seg1"}],
+                "full_res_path_info": [{"id": 0, "data": "info1"}],
+            },
+            {
+                "year": "2026",
+                "max_groundspeed": 0,
+                "min_groundspeed": float("inf"),
+                "cruise_distance": 0,
+                "cruise_time": 0,
+                "max_path_distance": 0,
+                "cruise_altitude_histogram": {},
+                "file_structure": [],
+                "full_res_segments": [{"path_id": 0, "data": "seg2"}],
+                "full_res_path_info": [{"id": 0, "data": "info2"}],
+            },
+        ]
+        *_, segments, path_info = _aggregate_year_results(results)
+        assert segments[0]["path_id"] == 0
+        assert segments[1]["path_id"] == 1
+        assert path_info[0]["id"] == 0
+        assert path_info[1]["id"] == 1
+
+
+class TestFinalizeStats:
+    def test_cruise_speed_calculation(self):
+        stats: dict = {}
+        _finalize_stats(stats, 180.0, 50.0, 1000.0, 100.0, 200.0, {})
+        assert stats["max_groundspeed_knots"] == 180.0
+        assert stats["cruise_speed_knots"] == 36000.0
+        assert stats["longest_flight_nm"] == 200.0
+
+    def test_no_cruise_time(self):
+        stats: dict = {}
+        _finalize_stats(stats, 100.0, 50.0, 0.0, 0.0, 100.0, {})
+        assert stats["cruise_speed_knots"] == 0
+
+    def test_cruise_altitude_histogram(self):
+        stats: dict = {}
+        _finalize_stats(stats, 100.0, 50.0, 0.0, 0.0, 0.0, {5000: 30.0, 3000: 10.0})
+        assert stats["most_common_cruise_altitude_ft"] == 5000
+
+    def test_empty_cruise_histogram(self):
+        stats: dict = {}
+        _finalize_stats(stats, 100.0, 50.0, 0.0, 0.0, 0.0, {})
+        assert stats["most_common_cruise_altitude_ft"] == 0
+        assert stats["most_common_cruise_altitude_m"] == 0
+
+
+class TestProcessYearsParallel:
+    def test_handles_processing_error(self):
+        paths_by_year = {"2025": [0]}
+        with patch(
+            "kml_heatmap.data_exporter.process_year_data",
+            side_effect=RuntimeError("boom"),
+        ):
+            results = _process_years_parallel(
+                paths_by_year, [], [[]], [{}], 0, 1000, "/tmp", {}, []
+            )
+        assert results == []
+
+
+class TestExportAllDataPrivacyMode:
+    def test_strip_timestamps_log(self, tmp_path):
+        output_dir = str(tmp_path / "out")
+        paths = [[[50.0, 8.5, 100.0], [50.1, 8.6, 200.0]]]
+        metadata = [{"year": 2025, "airport_name": "EDDS"}]
+        stats: dict = {}
+        export_all_data(
+            [[50.0, 8.5]],
+            paths,
+            metadata,
+            [],
+            stats,
+            output_dir,
+            strip_timestamps=True,
+        )

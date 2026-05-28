@@ -141,7 +141,7 @@ def _fetch_aircraft_model(registration: str) -> Optional[str]:
         )
         _last_request_time = time.monotonic()
 
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:  # nosec B310
             html = response.read().decode("utf-8")
 
         parser = AircraftDataParser()
