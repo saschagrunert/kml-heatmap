@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import patch
 
 from kml_heatmap.airport_lookup import (
+    _load_airport_database,
     get_cache_info,
     lookup_airport_coordinates,
     standardize_airport_name,
@@ -447,3 +448,27 @@ class TestStandardizeAirportNamePartialRoute:
 
             result = standardize_airport_name("ZZZZ SomePlace - EDMV Vilsh")
             assert result == "ZZZZ SomePlace - EDMV Vilshofen"
+
+
+class TestLoadAirportDatabaseLockCleanup:
+    def test_lock_release_failure_is_handled(self):
+        import kml_heatmap.airport_lookup as mod
+
+        original_cache = mod._airport_cache
+        mod._airport_cache = None
+        try:
+            original_flock = mod.fcntl.flock
+            call_count = 0
+
+            def flock_side_effect(fd, op):
+                nonlocal call_count
+                call_count += 1
+                if op == mod.fcntl.LOCK_UN:
+                    raise OSError("mock unlock failure")
+                return original_flock(fd, op)
+
+            with patch.object(mod.fcntl, "flock", side_effect=flock_side_effect):
+                result = _load_airport_database()
+            assert isinstance(result, dict)
+        finally:
+            mod._airport_cache = original_cache

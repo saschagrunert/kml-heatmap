@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Any, Tuple
-from .geometry import haversine_distance
+from .geometry import haversine_distance, extract_altitudes
 from .aircraft import lookup_aircraft_model
 from .airports import is_point_marker
 from .constants import METERS_TO_FEET, KM_TO_NAUTICAL_MILES, SECONDS_PER_HOUR
@@ -90,7 +90,7 @@ def calculate_altitude_stats(
         Dict with min/max altitude in meters and feet
     """
     # Collect all altitudes
-    all_altitudes = [coord[2] for path in valid_paths for coord in path]
+    all_altitudes = extract_altitudes(valid_paths)
 
     if not all_altitudes:
         return {

@@ -79,7 +79,7 @@ def _download_airport_database() -> bool:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
         logger.info("📥 Downloading OurAirports database...")
-        urlretrieve(OURAIRPORTS_URL, CACHE_FILE)
+        urlretrieve(OURAIRPORTS_URL, CACHE_FILE)  # nosec B310
 
         # Verify downloaded file
         if CACHE_FILE.exists() and CACHE_FILE.stat().st_size > 0:
@@ -173,12 +173,12 @@ def _load_airport_database() -> Dict[str, Tuple[float, float, str]]:
                 try:
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
                     lock_file.close()
-                except Exception:
+                except OSError:
                     pass
             elif lock_file:
                 try:
                     lock_file.close()
-                except Exception:
+                except OSError:
                     pass
 
 

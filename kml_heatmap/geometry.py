@@ -10,6 +10,7 @@ __all__ = [
     "haversine_distance",
     "downsample_coordinates",
     "get_altitude_color",
+    "extract_altitudes",
 ]
 
 # Constants
@@ -18,6 +19,11 @@ EARTH_RADIUS_KM = 6371
 # Type aliases
 Coordinate2D = List[float]  # [lat, lon]
 Coordinate3D = List[float]  # [lat, lon, alt]
+
+
+def extract_altitudes(paths: List[List[List[float]]]) -> List[float]:
+    """Extract all altitude values from a list of paths."""
+    return [coord[2] for path in paths for coord in path]
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

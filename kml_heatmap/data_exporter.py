@@ -25,8 +25,9 @@ import os
 import json
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
+from .geometry import extract_altitudes
 from .logger import logger
 from .constants import DATA_RESOLUTION
 from .export_writers import export_airports_data, export_metadata, collect_unique_years
@@ -203,60 +204,20 @@ def process_year_data(
     }
 
 
-def export_all_data(
-    all_coordinates: List[List[float]],
+def _calculate_altitude_range(
     all_path_groups: List[List[List[float]]],
-    all_path_metadata: List[Dict[str, Any]],
-    unique_airports: List[Dict[str, Any]],
-    stats: Dict[str, Any],
-    output_dir: str = "data",
-    strip_timestamps: bool = False,
-) -> Dict[str, str]:
-    """
-    Orchestrate the full data export pipeline.
-
-    Cleans the output directory, groups paths by year, processes each year
-    in parallel, exports airports and metadata, and aggregates statistics.
-
-    Args:
-        all_coordinates: List of [lat, lon] pairs
-        all_path_groups: List of path groups with altitude data
-        all_path_metadata: List of metadata dicts for each path
-        unique_airports: List of airport dicts
-        stats: Statistics dictionary (modified in place with aggregated data)
-        output_dir: Directory to save data files
-        strip_timestamps: If True, remove timestamps for privacy
-
-    Returns:
-        Dict mapping file types to output paths (e.g., {"airports": "...", "metadata": "..."}).
-    """
-    # Clean up existing output directory
-    if os.path.exists(output_dir):
-        logger.info(f"\n  Cleaning up output directory: {output_dir}")
-        shutil.rmtree(output_dir)
-
-    os.makedirs(output_dir, exist_ok=True)
-
-    logger.info("\n  Exporting data to JS files...")
-    if strip_timestamps:
-        logger.info("  Privacy mode: Stripping all date/time information")
-
-    # Calculate min/max altitude for color mapping
+) -> Tuple[float, float]:
+    """Calculate min/max altitude across all path groups."""
     if all_path_groups:
-        all_altitudes = [coord[2] for path in all_path_groups for coord in path]
-        min_alt_m = min(all_altitudes)
-        max_alt_m = max(all_altitudes)
-    else:
-        min_alt_m = 0
-        max_alt_m = 1000
+        all_altitudes = extract_altitudes(all_path_groups)
+        return min(all_altitudes), max(all_altitudes)
+    return 0.0, 1000.0
 
-    # Single full resolution
-    resolutions = {
-        DATA_RESOLUTION: {"factor": 1, "epsilon": 0, "description": "Full resolution"}
-    }
-    resolution_order = [DATA_RESOLUTION]
 
-    # Group paths by year
+def _group_paths_by_year(
+    all_path_metadata: List[Dict[str, Any]],
+) -> Dict[str, List[int]]:
+    """Group path indices by year from metadata."""
     paths_by_year: Dict[str, List[int]] = {}
     for path_idx, metadata in enumerate(all_path_metadata):
         year = metadata.get("year")
@@ -267,25 +228,23 @@ def export_all_data(
         if year not in paths_by_year:
             paths_by_year[year] = []
         paths_by_year[year].append(path_idx)
+    return paths_by_year
 
-    logger.info(f"\n  Splitting data by year: {sorted(paths_by_year.keys())}")
 
-    # Aggregate tracking
-    files: Dict[str, str] = {}
-    file_structure: Dict[str, Any] = {}
-    max_groundspeed_knots = 0.0
-    min_groundspeed_knots = float("inf")
-    cruise_speed_total_distance = 0.0
-    cruise_speed_total_time = 0.0
-    max_path_distance_nm = 0.0
-    cruise_altitude_histogram: Dict[int, float] = {}
-    all_full_res_segments: List[Dict[str, Any]] = []
-    all_full_res_path_info: List[Dict[str, Any]] = []
+def _process_years_parallel(
+    paths_by_year: Dict[str, List[int]],
+    all_coordinates: List[List[float]],
+    all_path_groups: List[List[List[float]]],
+    all_path_metadata: List[Dict[str, Any]],
+    min_alt_m: float,
+    max_alt_m: float,
+    output_dir: str,
+    resolutions: Dict[str, Dict[str, Any]],
+    resolution_order: List[str],
+) -> List[Dict[str, Any]]:
+    """Process all years in parallel and return results."""
+    year_results: List[Dict[str, Any]] = []
 
-    # Process years in parallel
-    logger.info(f"\n  Processing {len(paths_by_year)} year(s) in parallel...")
-
-    year_results = []
     with ThreadPoolExecutor(
         max_workers=min(len(paths_by_year), os.cpu_count() or 4)
     ) as executor:
@@ -304,7 +263,7 @@ def export_all_data(
                 output_dir,
                 resolutions,
                 resolution_order,
-                True,  # quiet=True for parallel execution
+                True,
             )
             futures[future] = year
 
@@ -323,10 +282,42 @@ def export_all_data(
                 logger.info(
                     f"  [{completed_count}/{total_years}] Year {year}: {year_points:,} points"
                 )
-            except Exception as e:
-                logger.error(f"  Error processing year {year}: {e}")
+            except Exception:
+                logger.exception(f"  Error processing year {year}")
 
-    # Aggregate results from all years
+    return year_results
+
+
+def _aggregate_year_results(
+    year_results: List[Dict[str, Any]],
+) -> Tuple[
+    Dict[str, Any],
+    float,
+    float,
+    float,
+    float,
+    float,
+    Dict[int, float],
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+]:
+    """Aggregate statistics from all year results.
+
+    Returns:
+        Tuple of (file_structure, max_groundspeed, min_groundspeed,
+                  cruise_distance, cruise_time, max_path_distance,
+                  cruise_altitude_histogram, all_segments, all_path_info)
+    """
+    file_structure: Dict[str, Any] = {}
+    max_groundspeed_knots = 0.0
+    min_groundspeed_knots = float("inf")
+    cruise_speed_total_distance = 0.0
+    cruise_speed_total_time = 0.0
+    max_path_distance_nm = 0.0
+    cruise_altitude_histogram: Dict[int, float] = {}
+    all_full_res_segments: List[Dict[str, Any]] = []
+    all_full_res_path_info: List[Dict[str, Any]] = []
+
     for result in year_results:
         year = result["year"]
         file_structure[year] = result["file_structure"]
@@ -347,7 +338,6 @@ def export_all_data(
                 cruise_altitude_histogram[altitude_bin] = 0
             cruise_altitude_histogram[altitude_bin] += time_spent
 
-        # Collect full resolution data from all years with remapped path_ids
         year_segments = result["full_res_segments"]
         year_path_info = result["full_res_path_info"]
         if year_segments and year_path_info:
@@ -361,20 +351,30 @@ def export_all_data(
                 remapped["id"] = pi["id"] + path_id_offset
                 all_full_res_path_info.append(remapped)
 
-    # Export airports
-    airports_file, _ = export_airports_data(
-        unique_airports, output_dir, strip_timestamps
+    return (
+        file_structure,
+        max_groundspeed_knots,
+        min_groundspeed_knots,
+        cruise_speed_total_distance,
+        cruise_speed_total_time,
+        max_path_distance_nm,
+        cruise_altitude_histogram,
+        all_full_res_segments,
+        all_full_res_path_info,
     )
-    files["airports"] = airports_file
 
-    # Collect unique years
-    available_years = collect_unique_years(all_path_metadata)
 
-    # Update stats with aggregated data
+def _finalize_stats(
+    stats: Dict[str, Any],
+    max_groundspeed_knots: float,
+    min_groundspeed_knots: float,
+    cruise_speed_total_distance: float,
+    cruise_speed_total_time: float,
+    max_path_distance_nm: float,
+    cruise_altitude_histogram: Dict[int, float],
+) -> None:
+    """Update stats dict with aggregated cruise/groundspeed/altitude data."""
     stats["max_groundspeed_knots"] = round(max_groundspeed_knots, 1)
-
-    if min_groundspeed_knots == float("inf"):
-        min_groundspeed_knots = 0.0
 
     if cruise_speed_total_time > 0:
         cruise_speed_knots = (
@@ -399,14 +399,106 @@ def export_all_data(
     stats["longest_flight_nm"] = round(max_path_distance_nm, 1)
     stats["longest_flight_km"] = round(max_path_distance_nm * 1.852, 1)
 
-    # Recalculate stats from segment data for frontend consistency
+
+def export_all_data(
+    all_coordinates: List[List[float]],
+    all_path_groups: List[List[List[float]]],
+    all_path_metadata: List[Dict[str, Any]],
+    unique_airports: List[Dict[str, Any]],
+    stats: Dict[str, Any],
+    output_dir: str = "data",
+    strip_timestamps: bool = False,
+) -> Dict[str, str]:
+    """Orchestrate the full data export pipeline.
+
+    Cleans the output directory, groups paths by year, processes each year
+    in parallel, exports airports and metadata, and aggregates statistics.
+
+    Args:
+        all_coordinates: List of [lat, lon] pairs
+        all_path_groups: List of path groups with altitude data
+        all_path_metadata: List of metadata dicts for each path
+        unique_airports: List of airport dicts
+        stats: Statistics dictionary (modified in place with aggregated data)
+        output_dir: Directory to save data files
+        strip_timestamps: If True, remove timestamps for privacy
+
+    Returns:
+        Dict mapping file types to output paths.
+    """
+    if os.path.exists(output_dir):
+        logger.info(f"\n  Cleaning up output directory: {output_dir}")
+        shutil.rmtree(output_dir)
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    logger.info("\n  Exporting data to JS files...")
+    if strip_timestamps:
+        logger.info("  Privacy mode: Stripping all date/time information")
+
+    min_alt_m, max_alt_m = _calculate_altitude_range(all_path_groups)
+
+    resolutions = {
+        DATA_RESOLUTION: {"factor": 1, "epsilon": 0, "description": "Full resolution"}
+    }
+    resolution_order = [DATA_RESOLUTION]
+
+    paths_by_year = _group_paths_by_year(all_path_metadata)
+    logger.info(f"\n  Splitting data by year: {sorted(paths_by_year.keys())}")
+
+    logger.info(f"\n  Processing {len(paths_by_year)} year(s) in parallel...")
+    year_results = _process_years_parallel(
+        paths_by_year,
+        all_coordinates,
+        all_path_groups,
+        all_path_metadata,
+        min_alt_m,
+        max_alt_m,
+        output_dir,
+        resolutions,
+        resolution_order,
+    )
+
+    (
+        file_structure,
+        max_groundspeed_knots,
+        min_groundspeed_knots,
+        cruise_speed_total_distance,
+        cruise_speed_total_time,
+        max_path_distance_nm,
+        cruise_altitude_histogram,
+        all_full_res_segments,
+        all_full_res_path_info,
+    ) = _aggregate_year_results(year_results)
+
+    if min_groundspeed_knots == float("inf"):
+        min_groundspeed_knots = 0.0
+
+    _finalize_stats(
+        stats,
+        max_groundspeed_knots,
+        min_groundspeed_knots,
+        cruise_speed_total_distance,
+        cruise_speed_total_time,
+        max_path_distance_nm,
+        cruise_altitude_histogram,
+    )
+
     if all_full_res_segments and all_full_res_path_info:
         logger.info("\n  Reconciling statistics from segment data...")
         _recalculate_stats_from_segments(
             stats, all_full_res_segments, all_full_res_path_info
         )
 
-    # Export metadata (final, consistent values)
+    files: Dict[str, str] = {}
+
+    airports_file, _ = export_airports_data(
+        unique_airports, output_dir, strip_timestamps
+    )
+    files["airports"] = airports_file
+
+    available_years = collect_unique_years(all_path_metadata)
+
     meta_file, _ = export_metadata(
         stats,
         min_alt_m,

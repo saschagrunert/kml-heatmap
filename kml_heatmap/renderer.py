@@ -305,35 +305,16 @@ def _render_html(output_file: str, data_dir_name: str) -> None:
     )
 
 
-def _package_assets(
+def _generate_map_config(
     output_dir: str,
+    templates_dir: Path,
     bounds: Dict[str, float],
     data_dir_name: str,
 ) -> None:
-    """Build JS bundles (if needed), generate config, and copy static assets.
-
-    Args:
-        output_dir: Directory to write output files.
-        bounds: Dict with min_lat, max_lat, min_lon, max_lon, center_lat, center_lon.
-        data_dir_name: Base name of the data directory.
-    """
-    static_dir = Path(__file__).parent / "static"
-    templates_dir = Path(__file__).parent / "templates"
-
+    """Generate minified map_config.js from template."""
     stadia_api_key = os.environ.get("STADIA_API_KEY", "")
     openaip_api_key = os.environ.get("OPENAIP_API_KEY", "")
 
-    # Build JavaScript bundles if needed
-    if not (
-        (static_dir / "bundle.js").exists()
-        and (static_dir / "mapApp.bundle.js").exists()
-    ):
-        logger.info("\nBuilding JavaScript modules...")
-        _build_javascript_bundle()
-    else:
-        logger.info("\nUsing pre-built JavaScript bundles...")
-
-    # Generate map_config.js
     map_config_template_path = templates_dir / "map_config_template.js"
     map_config_dst = os.path.join(output_dir, "map_config.js")
 
@@ -362,7 +343,9 @@ def _package_assets(
         f"Configuration generated: {map_config_dst} ({map_config_size / 1024:.1f} KB)"
     )
 
-    # Copy JavaScript bundles
+
+def _copy_javascript_bundles(output_dir: str, static_dir: Path) -> None:
+    """Copy JavaScript bundle files to output directory."""
     for bundle_name in ("bundle.js", "mapApp.bundle.js"):
         src = static_dir / bundle_name
         dst = os.path.join(output_dir, bundle_name)
@@ -373,7 +356,9 @@ def _package_assets(
         else:
             logger.warning(f"{bundle_name} not found - run npm build to generate it")
 
-    # Copy and minify CSS
+
+def _copy_and_minify_css(output_dir: str, static_dir: Path) -> None:
+    """Copy and minify CSS to output directory."""
     styles_css_src = static_dir / "styles.css"
     styles_css_dst = os.path.join(output_dir, "styles.css")
 
@@ -388,7 +373,9 @@ def _package_assets(
     styles_css_size = os.path.getsize(styles_css_dst)
     logger.info(f"CSS copied: {styles_css_dst} ({styles_css_size / 1024:.1f} KB)")
 
-    # Copy favicon files
+
+def _copy_favicon_files(output_dir: str, static_dir: Path) -> None:
+    """Copy favicon and manifest files to output directory."""
     for favicon_file in (
         "favicon.svg",
         "favicon.ico",
@@ -403,6 +390,30 @@ def _package_assets(
             shutil.copy2(src, dst)
 
     logger.info(f"Favicon files copied to {output_dir}")
+
+
+def _package_assets(
+    output_dir: str,
+    bounds: Dict[str, float],
+    data_dir_name: str,
+) -> None:
+    """Build JS bundles (if needed), generate config, and copy static assets."""
+    static_dir = Path(__file__).parent / "static"
+    templates_dir = Path(__file__).parent / "templates"
+
+    if not (
+        (static_dir / "bundle.js").exists()
+        and (static_dir / "mapApp.bundle.js").exists()
+    ):
+        logger.info("\nBuilding JavaScript modules...")
+        _build_javascript_bundle()
+    else:
+        logger.info("\nUsing pre-built JavaScript bundles...")
+
+    _generate_map_config(output_dir, templates_dir, bounds, data_dir_name)
+    _copy_javascript_bundles(output_dir, static_dir)
+    _copy_and_minify_css(output_dir, static_dir)
+    _copy_favicon_files(output_dir, static_dir)
 
 
 def create_progressive_heatmap(
