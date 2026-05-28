@@ -114,6 +114,41 @@ class TestAtomicJsonWrite:
             # Original file should not exist
             assert not path.exists()
 
+    def test_write_cleans_up_temp_file_on_replace_failure(self):
+        """Test that the temp file is removed when os.replace fails."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "test.json"
+
+            with (
+                patch(
+                    "kml_heatmap.cache.os.replace",
+                    side_effect=OSError("replace failed"),
+                ) as mock_replace,
+                patch("kml_heatmap.cache.os.unlink") as mock_unlink,
+            ):
+                atomic_json_write(path, {"key": "value"}, Path(tmpdir))
+
+                mock_replace.assert_called_once()
+                # The temp file path should have been passed to unlink
+                mock_unlink.assert_called_once()
+
+    def test_write_handles_temp_cleanup_failure(self):
+        """Test graceful handling when both os.replace and os.unlink fail."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "test.json"
+
+            with (
+                patch(
+                    "kml_heatmap.cache.os.replace",
+                    side_effect=OSError("replace failed"),
+                ),
+                patch(
+                    "kml_heatmap.cache.os.unlink", side_effect=OSError("unlink failed")
+                ),
+            ):
+                # Should not raise despite both operations failing
+                atomic_json_write(path, {"key": "value"}, Path(tmpdir))
+
 
 class TestLockedJsonReadWrite:
     """Tests for locked_json_read_write context manager."""
@@ -227,3 +262,25 @@ class TestLockedJsonReadWrite:
             with open(path) as f:
                 loaded = json.load(f)
             assert loaded == {}
+
+    def test_lock_file_cleanup_failure_is_ignored(self):
+        """Test that failure to remove the lock file is silently ignored."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cache.json"
+            lock_path = path.with_suffix(".json.lock")
+
+            original_unlink = Path.unlink
+
+            def patched_unlink(self, *args, **kwargs):
+                if self == lock_path:
+                    raise OSError("permission denied")
+                return original_unlink(self, *args, **kwargs)
+
+            with patch.object(Path, "unlink", patched_unlink):
+                with locked_json_read_write(path) as (data, _):
+                    data["key"] = "value"
+
+            # Data should still be written successfully despite lock cleanup failure
+            with open(path) as f:
+                loaded = json.load(f)
+            assert loaded == {"key": "value"}
