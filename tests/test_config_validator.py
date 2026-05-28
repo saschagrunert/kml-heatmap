@@ -3,6 +3,8 @@
 import pytest
 import tempfile
 import os
+from pathlib import Path
+from unittest.mock import patch, MagicMock
 from kml_heatmap.config_validator import (
     ConfigValidator,
     validate_environment,
@@ -435,3 +437,60 @@ class TestInputPathValidation:
                 os.chmod(temp_path, 0o644)
         finally:
             os.unlink(temp_path)
+
+    def test_validate_directory_many_kml_files_mocked(self):
+        """Test validation warns when directory has more than 1000 KML files."""
+        validator = ConfigValidator()
+
+        with tempfile.TemporaryDirectory() as input_dir:
+            # Mock glob to return more than 1000 fake paths
+            fake_files = [f"file{i}.kml" for i in range(1500)]
+            with patch("pathlib.Path.glob", return_value=fake_files):
+                with tempfile.TemporaryDirectory() as output_dir:
+                    is_valid, errors, warnings = validator.validate_all(
+                        input_dir, output_dir
+                    )
+                    assert any("Large number of KML files" in w for w in warnings)
+
+
+class TestOutputDirValidation:
+    """Tests for output directory validation edge cases."""
+
+    def test_validate_output_dir_creation_fails(self):
+        """Test validation when output directory creation raises OSError."""
+        validator = ConfigValidator()
+
+        with (
+            patch.object(Path, "exists", return_value=False),
+            patch.object(Path, "mkdir", side_effect=OSError("Permission denied")),
+        ):
+            validator._validate_output_dir("/fake/output/dir")
+
+        assert any("Cannot create output directory" in err for err in validator.errors)
+
+    def test_validate_output_dir_no_write_permission(self):
+        """Test validation when output directory is not writable."""
+        validator = ConfigValidator()
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            with patch("os.access", return_value=False):
+                validator._validate_output_dir(output_dir)
+                assert any("No write permission" in err for err in validator.errors)
+
+
+class TestDiskSpaceLowWarning:
+    """Tests for low disk space warning."""
+
+    def test_validate_disk_space_low(self):
+        """Test validation warns when disk space is low."""
+        validator = ConfigValidator()
+
+        mock_stat = MagicMock()
+        # Simulate 50 MB available (below 100 MB threshold)
+        mock_stat.f_bavail = 50
+        mock_stat.f_frsize = 1024 * 1024  # 1 MB blocks
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            with patch("os.statvfs", return_value=mock_stat):
+                validator._validate_disk_space(output_dir)
+                assert any("Low disk space" in w for w in validator.warnings)

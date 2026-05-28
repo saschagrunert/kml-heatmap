@@ -10,6 +10,7 @@ from unittest.mock import patch
 from kml_heatmap.airport_lookup import (
     get_cache_info,
     lookup_airport_coordinates,
+    standardize_airport_name,
 )
 
 
@@ -410,3 +411,39 @@ class TestAdditionalCoverage:
             assert info["airport_count"] == 2
         finally:
             lookup_module._airport_cache = original_cache
+
+
+class TestStandardizeAirportNamePartialRoute:
+    """Tests for standardize_airport_name with partial route lookups."""
+
+    def test_only_first_airport_found(self):
+        """Test route where only the departure airport is in the database."""
+        with patch(
+            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
+        ) as mock_lookup:
+
+            def side_effect(icao):
+                if icao == "EDAQ":
+                    return (51.5528, 12.1022, "Halle-Oppin Airport")
+                return None
+
+            mock_lookup.side_effect = side_effect
+
+            result = standardize_airport_name("EDAQ Halle - ZZZZ SomePlace")
+            assert result == "EDAQ Halle-Oppin - ZZZZ SomePlace"
+
+    def test_only_second_airport_found(self):
+        """Test route where only the arrival airport is in the database."""
+        with patch(
+            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
+        ) as mock_lookup:
+
+            def side_effect(icao):
+                if icao == "EDMV":
+                    return (48.6353, 13.1953, "Vilshofen Airfield")
+                return None
+
+            mock_lookup.side_effect = side_effect
+
+            result = standardize_airport_name("ZZZZ SomePlace - EDMV Vilsh")
+            assert result == "ZZZZ SomePlace - EDMV Vilshofen"
