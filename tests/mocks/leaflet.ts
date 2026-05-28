@@ -77,6 +77,18 @@ export const latLngBounds = vi.fn(() => ({
   getCenter: vi.fn(() => ({ lat: 50.0, lng: 8.0 })),
 }));
 
+export const popup = vi.fn(() => {
+  const obj: Record<string, ReturnType<typeof vi.fn>> = {
+    setLatLng: vi.fn(),
+    setContent: vi.fn(),
+    openOn: vi.fn(),
+  };
+  obj.setLatLng.mockReturnValue(obj);
+  obj.setContent.mockReturnValue(obj);
+  obj.openOn.mockReturnValue(obj);
+  return obj;
+});
+
 export const DomEvent = {
   stopPropagation: vi.fn(),
 };
@@ -90,5 +102,6 @@ export default {
   svg,
   divIcon,
   latLngBounds,
+  popup,
   DomEvent,
 };
