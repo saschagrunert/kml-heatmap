@@ -1,176 +1,31 @@
 """Tests for aircraft module."""
 
-import tempfile
-import time
-import os
 import json
+import tempfile
+
 import pytest
-from unittest.mock import patch, MagicMock
 from pathlib import Path
 from kml_heatmap.aircraft import (
-    AircraftDataParser,
-    _fetch_aircraft_model,
-    _SkipCache,
     parse_aircraft_from_filename,
     lookup_aircraft_model,
 )
-
-
-class TestAircraftDataParser:
-    """Tests for AircraftDataParser class."""
-
-    def test_parse_aircraft_title(self):
-        """Test parsing aircraft info from HTML title."""
-        parser = AircraftDataParser()
-        html = "<html><head><title>Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana</title></head></html>"
-        parser.feed(html)
-        assert parser.model == "Diamond DA-20A-1 Katana"
-
-    def test_parse_without_year(self):
-        """Test parsing aircraft info without year prefix."""
-        parser = AircraftDataParser()
-        html = "<html><head><title>Aircraft info for D-EAGJ - Cessna 172</title></head></html>"
-        parser.feed(html)
-        assert parser.model == "Cessna 172"
-
-    def test_no_aircraft_info(self):
-        """Test parsing HTML without aircraft info."""
-        parser = AircraftDataParser()
-        html = "<html><head><title>Some Other Page</title></head></html>"
-        parser.feed(html)
-        assert parser.model is None
-
-    def test_empty_html(self):
-        """Test parsing empty HTML."""
-        parser = AircraftDataParser()
-        parser.feed("")
-        assert parser.model is None
-
-    def test_multiple_titles(self):
-        """Test parsing HTML with multiple title tags."""
-        parser = AircraftDataParser()
-        html = """
-        <html>
-            <head><title>First Title</title></head>
-            <body><title>Aircraft info for D-EAGJ - 2020 Piper PA-28</title></body>
-        </html>
-        """
-        parser.feed(html)
-        # Should get the model from the second title
-        assert parser.model == "Piper PA-28"
-
-    def test_parse_new_format_with_serial(self):
-        """Test parsing new HTML format with C/N serial number."""
-        parser = AircraftDataParser()
-        html = "<html><head><title>Aircraft Data D-EAGJ, Diamond DA-20A-1 Katana C/N 10115, Diamond DA-20A-1 Katana C/N 10115</title></head></html>"
-        parser.feed(html)
-        assert parser.model == "Diamond DA-20A-1 Katana"
-
-    def test_parse_new_format_without_serial(self):
-        """Test parsing new HTML format without C/N serial number."""
-        parser = AircraftDataParser()
-        html = "<html><head><title>Aircraft Data D-EHYL, Diamond DA-40TDI Diamond Star</title></head></html>"
-        parser.feed(html)
-        assert parser.model == "Diamond DA-40TDI Diamond Star"
-
-    def test_parse_new_format_cessna(self):
-        """Test parsing new HTML format for Cessna with year."""
-        parser = AircraftDataParser()
-        html = "<html><head><title>Aircraft Data D-ESST, 1978 Cessna 172N C/N 17268953, 1978 Cessna 172N C/N 17268953</title></head></html>"
-        parser.feed(html)
-        assert parser.model == "1978 Cessna 172N"
-
-    def test_parse_multiple_aircraft_prefer_not_found(self):
-        """Test parsing multiple aircraft with 'C/N Not found' - should prefer current registration."""
-        parser = AircraftDataParser()
-        # Real case: D-ELGD has both Piper (old) and Cessna (current, C/N not found)
-        html = "<html><head><title>Aircraft Data D-ELGD, Piper PA-12 Super Cruiser C/N 12-3395, Cessna T182T Turbo Skylane C/N Not found D-ELGD</title></head></html>"
-        parser.feed(html)
-        # Should prefer Cessna (has "C/N Not found" = current registration)
-        assert parser.model == "Cessna T182T Turbo Skylane"
-
-    def test_parse_multiple_aircraft_no_not_found(self):
-        """Test parsing multiple aircraft without 'C/N Not found' - should take last one."""
-        parser = AircraftDataParser()
-        html = "<html><head><title>Aircraft Data D-TEST, Piper PA-28 C/N 1234, Cessna 172 C/N 5678</title></head></html>"
-        parser.feed(html)
-        # Should take last aircraft when none have "Not found"
-        assert parser.model == "Cessna 172"
-
-    def test_parse_multiple_aircraft_multiple_not_found(self):
-        """Test parsing multiple aircraft with multiple 'C/N Not found' entries."""
-        parser = AircraftDataParser()
-        html = "<html><head><title>Aircraft Data D-TEST, Piper PA-28 C/N Not found, Cessna 172 C/N Not found D-TEST</title></head></html>"
-        parser.feed(html)
-        # Should take last aircraft with "Not found"
-        assert parser.model == "Cessna 172"
-
-    def test_parse_three_aircraft(self):
-        """Test parsing three aircraft - should prefer one with 'Not found'."""
-        parser = AircraftDataParser()
-        html = "<html><head><title>Aircraft Data D-TEST, Boeing 737 C/N 1111, Piper PA-28 C/N 2222, Cessna 172 C/N Not found</title></head></html>"
-        parser.feed(html)
-        assert parser.model == "Cessna 172"
+import kml_heatmap.aircraft as aircraft_mod
 
 
 class TestParseAircraftFromFilename:
     """Tests for parse_aircraft_from_filename function."""
 
-    def test_full_format(self):
-        """Test parsing filename with full format."""
-        # Format: YYYYMMDD_HHMM_AIRPORT_REGISTRATION_TYPE.kml
-        result = parse_aircraft_from_filename("20250822_1013_EDAV_DEHYL_DA40.kml")
-        assert isinstance(result, dict)
-        assert result.get("registration") == "D-EHYL"
-        assert result.get("type") == "DA40"
-
-    def test_german_registration(self):
-        """Test parsing German registration (D-XXXX format)."""
-        result = parse_aircraft_from_filename("20250101_1200_EDDF_DEAGJ_DA20.kml")
-        assert isinstance(result, dict)
-        assert result.get("registration") == "D-EAGJ"
-        assert result.get("type") == "DA20"
-
-    def test_different_aircraft_type(self):
-        """Test parsing different aircraft type."""
-        result = parse_aircraft_from_filename("20250101_1200_EDDF_DEABC_C172.kml")
-        assert isinstance(result, dict)
-        assert result.get("type") == "C172"
-
     def test_incomplete_format(self):
         """Test parsing filename with incomplete format."""
         result = parse_aircraft_from_filename("flight_log.kml")
         assert isinstance(result, dict)
-        # Should return empty dict or dict without registration/type
-
-    def test_fewer_parts(self):
-        """Test parsing filename with fewer than 5 parts."""
-        result = parse_aircraft_from_filename("20250101_1200.kml")
-        assert isinstance(result, dict)
-
-    def test_without_kml_extension(self):
-        """Test parsing filename without .kml extension."""
-        result = parse_aircraft_from_filename("20250822_1013_EDAV_DEHYL_DA40")
-        assert isinstance(result, dict)
-
-    def test_with_path(self):
-        """Test parsing filename with path (should use basename)."""
-        result = parse_aircraft_from_filename(
-            "/path/to/20250822_1013_EDAV_DEHYL_DA40.kml"
-        )
-        assert isinstance(result, dict)
-        # Should still parse correctly
+        assert result == {}
 
     def test_empty_filename(self):
         """Test parsing empty filename."""
         result = parse_aircraft_from_filename("")
         assert isinstance(result, dict)
-
-    def test_numeric_type(self):
-        """Test aircraft type with numbers."""
-        result = parse_aircraft_from_filename("20250101_1200_EDDF_DEABC_PA28.kml")
-        assert isinstance(result, dict)
-        assert result.get("type") == "PA28"
+        assert result == {}
 
 
 class TestParseAircraftFromFilenameCharterware:
@@ -178,11 +33,10 @@ class TestParseAircraftFromFilenameCharterware:
 
     def test_charterware_format(self):
         """Test parsing Charterware filename."""
-        # Format: YYYY-MM-DD_HHMMh_REGISTRATION_ROUTE.kml
         result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
         assert isinstance(result, dict)
         assert result.get("registration") == "OE-AKI"
-        assert result.get("type") is None  # Charterware doesn't include type
+        assert result.get("type") is None
         assert result.get("route") == "LOAV-LOAV"
         assert result.get("format") == "charterware"
 
@@ -203,39 +57,21 @@ class TestParseAircraftFromFilenameCharterware:
 
     def test_charterware_international_registration(self):
         """Test Charterware with various international registrations."""
-        # Austrian registration
         result = parse_aircraft_from_filename("2026-02-10_0900h_OE-ABC_LOWW-LOWI.kml")
         assert result.get("registration") == "OE-ABC"
         assert result.get("format") == "charterware"
 
-        # Swiss registration
         result = parse_aircraft_from_filename("2026-03-15_1200h_HB-XYZ_LSZH-LSGG.kml")
         assert result.get("registration") == "HB-XYZ"
         assert result.get("format") == "charterware"
 
     def test_charterware_different_routes(self):
         """Test Charterware with different route combinations."""
-        # Domestic flight
         result = parse_aircraft_from_filename("2026-01-20_1400h_D-EAGJ_EDDF-EDDM.kml")
         assert result.get("route") == "EDDF-EDDM"
 
-        # International flight
         result = parse_aircraft_from_filename("2026-02-05_1100h_OE-AKI_LOWW-EDDF.kml")
         assert result.get("route") == "LOWW-EDDF"
-
-    def test_backward_compatibility_skydemon(self):
-        """Ensure SkyDemon format still works and includes format field."""
-        result = parse_aircraft_from_filename("20250822_1013_EDAV_DEHYL_DA40.kml")
-        assert isinstance(result, dict)
-        assert result.get("registration") == "D-EHYL"
-        assert result.get("type") == "DA40"
-        assert result.get("format") == "skydemon"
-        assert result.get("route") is None  # SkyDemon doesn't have route
-
-    def test_skydemon_format_field(self):
-        """Test that SkyDemon format includes format indicator."""
-        result = parse_aircraft_from_filename("20250101_1200_EDDF_DEAGJ_DA20.kml")
-        assert result.get("format") == "skydemon"
 
     def test_charterware_without_extension(self):
         """Test Charterware filename without .kml extension."""
@@ -243,371 +79,109 @@ class TestParseAircraftFromFilenameCharterware:
         assert isinstance(result, dict)
         assert result.get("registration") == "OE-AKI"
 
-    def test_format_detection_by_date(self):
-        """Test that format is detected by date pattern."""
-        # Charterware has hyphens in date
-        charterware = parse_aircraft_from_filename(
-            "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml"
-        )
-        assert charterware.get("format") == "charterware"
 
-        # SkyDemon has no hyphens in date
-        skydemon = parse_aircraft_from_filename("20260112_1513_LOAV_OEAKI_DA40.kml")
-        assert skydemon.get("format") == "skydemon"
+class TestParseAircraftFromFilenameNumbered:
+    """Tests for numbered filename format (N_REG_TYPE)."""
 
+    def test_numbered_format(self):
+        """Test parsing numbered filename."""
+        result = parse_aircraft_from_filename("1_DEHYL_DA40.kml")
+        assert result.get("registration") == "D-EHYL"
+        assert result.get("type") == "DA40"
+        assert result.get("format") == "numbered"
 
-class TestAircraftDataParserEdgeCases:
-    """Tests for AircraftDataParser edge cases."""
+    def test_numbered_format_large_number(self):
+        """Test parsing numbered filename with large number."""
+        result = parse_aircraft_from_filename("87_DESST_C172.kml")
+        assert result.get("registration") == "D-ESST"
+        assert result.get("type") == "C172"
+        assert result.get("format") == "numbered"
 
-    def test_malformed_html(self):
-        """Test parsing malformed HTML."""
-        parser = AircraftDataParser()
-        # Malformed HTML should not crash
-        parser.feed("<html><title>Unclosed tag<body></html>")
-        # Should handle gracefully
+    def test_numbered_format_without_extension(self):
+        """Test parsing numbered filename without .kml extension."""
+        result = parse_aircraft_from_filename("42_DELGD_C182")
+        assert result.get("registration") == "D-ELGD"
+        assert result.get("type") == "C182"
+        assert result.get("format") == "numbered"
+
+    def test_numbered_format_non_german_registration(self):
+        """Test numbered format with non-German registration."""
+        result = parse_aircraft_from_filename("5_OE-AKI_PA28.kml")
+        assert result.get("registration") == "OE-AKI"
+        assert result.get("type") == "PA28"
+        assert result.get("format") == "numbered"
 
 
 class TestLookupAircraftModel:
-    """Tests for lookup_aircraft_model function."""
+    """Tests for lookup_aircraft_model with aircraft.json file."""
 
-    @pytest.fixture
-    def temp_cache(self):
-        """Create a temporary cache file for testing."""
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        aircraft_mod._aircraft_cache = None
+        aircraft_mod._aircraft_cache_path = None
+
+    def test_lookup_found(self):
+        """Test looking up an existing registration."""
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump({}, f)
-            temp_path = Path(f.name)
-
-        # Patch AIRCRAFT_CACHE_FILE to use temp cache
-        with patch("kml_heatmap.aircraft.AIRCRAFT_CACHE_FILE", temp_path):
-            yield temp_path
-
-        # Cleanup
-        if temp_path.exists():
-            temp_path.unlink()
-
-    def test_lookup_from_cache(self, temp_cache):
-        """Test looking up aircraft from cache."""
-        # Pre-populate cache
-        with open(temp_cache, "w") as f:
             json.dump({"D-EAGJ": "Diamond DA-20A-1 Katana"}, f)
+            path = Path(f.name)
 
+        try:
+            result = lookup_aircraft_model("D-EAGJ", path)
+            assert result == "Diamond DA-20A-1 Katana"
+        finally:
+            path.unlink()
+
+    def test_lookup_not_found(self):
+        """Test looking up a missing registration."""
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
+            json.dump({"D-EAGJ": "Diamond DA-20A-1 Katana"}, f)
+            path = Path(f.name)
+
+        try:
+            result = lookup_aircraft_model("D-XXXX", path)
+            assert result is None
+        finally:
+            path.unlink()
+
+    def test_lookup_no_file(self):
+        """Test lookup without aircraft file returns None."""
         result = lookup_aircraft_model("D-EAGJ")
-        assert result == "Diamond DA-20A-1 Katana"
+        assert result is None
 
-    def test_lookup_nonexistent_cache(self):
-        """Test lookup when cache file doesn't exist."""
-        # Mock cache file to point to nonexistent location
-        with patch(
-            "kml_heatmap.aircraft.AIRCRAFT_CACHE_FILE", Path("/nonexistent/cache.json")
-        ):
-            result = lookup_aircraft_model("D-EAGJ")
-            # Should handle gracefully (either return None or attempt web lookup)
-            assert isinstance(result, (str, type(None)))
+    def test_lookup_nonexistent_file(self):
+        """Test lookup with nonexistent file returns None."""
+        result = lookup_aircraft_model("D-EAGJ", Path("/nonexistent/aircraft.json"))
+        assert result is None
 
-    def test_lookup_empty_registration(self, temp_cache):
-        """Test lookup with empty registration."""
-        result = lookup_aircraft_model("")
-        assert result is None or isinstance(result, str)
-
-    def test_cache_persists_new_lookup(self, temp_cache):
-        """Test that new lookups are persisted to cache."""
-        # First lookup (will try web lookup)
-        lookup_aircraft_model("D-TEST")
-
-        # Check cache was updated (if lookup succeeded)
-        if temp_cache.exists():
-            with open(temp_cache, "r") as f:
-                updated_cache = json.load(f)
-                # Cache should have been accessed
-                assert isinstance(updated_cache, dict)
-
-    def test_lookup_invalid_registration_format(self, temp_cache):
-        """Test lookup with invalid registration format."""
-        result = lookup_aircraft_model("INVALID123")
-        # Should handle gracefully
-        assert isinstance(result, (str, type(None)))
-
-    def test_corrupted_cache_file(self):
-        """Test handling of corrupted cache file."""
+    def test_lookup_corrupt_json(self):
+        """Test lookup with corrupt JSON file returns None."""
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            # Write invalid JSON
-            f.write("{invalid json content")
-            temp_path = Path(f.name)
+            f.write("{invalid json")
+            path = Path(f.name)
 
         try:
-            with patch("kml_heatmap.aircraft.AIRCRAFT_CACHE_FILE", temp_path):
-                # Should handle corrupted cache gracefully (start with empty cache)
-                result = lookup_aircraft_model("D-TEST")
-                # Will try to fetch from web (likely returns None in tests)
-                assert isinstance(result, (str, type(None)))
+            result = lookup_aircraft_model("D-EAGJ", path)
+            assert result is None
         finally:
-            temp_path.unlink()
+            path.unlink()
 
-    def test_cache_write_failure(self, temp_cache):
-        """Test handling when cache write fails."""
-        # Pre-populate cache with valid data
-        with open(temp_cache, "w") as f:
-            json.dump({"D-EAGJ": "Diamond DA-20A-1 Katana"}, f)
-
-        # Make file read-only
-        import stat
-
-        os.chmod(temp_cache, stat.S_IRUSR)
+    def test_lookup_multiple_registrations(self):
+        """Test looking up multiple registrations from same file."""
+        data = {
+            "D-EAGJ": "Diamond DA-20A-1 Katana",
+            "D-EHYL": "Diamond DA-40TDI Diamond Star",
+            "D-ESST": "1978 Cessna 172N",
+        }
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
+            json.dump(data, f)
+            path = Path(f.name)
 
         try:
-            # Lookup existing entry (from cache, no write needed)
-            result = lookup_aircraft_model("D-EAGJ")
-            assert result == "Diamond DA-20A-1 Katana"
+            assert lookup_aircraft_model("D-EAGJ", path) == "Diamond DA-20A-1 Katana"
+            assert (
+                lookup_aircraft_model("D-EHYL", path) == "Diamond DA-40TDI Diamond Star"
+            )
+            assert lookup_aircraft_model("D-ESST", path) == "1978 Cessna 172N"
         finally:
-            # Restore permissions
-            os.chmod(temp_cache, stat.S_IRUSR | stat.S_IWUSR)
-
-    def test_http_404_not_found(self, temp_cache):
-        """Test handling of 404 HTTP error (aircraft not found)."""
-        import urllib.error
-
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = urllib.error.HTTPError(
-                url="test", code=404, msg="Not Found", hdrs={}, fp=None
-            )
-            result = lookup_aircraft_model("D-NOTFOUND")
-            # Should return None for 404
-            assert result is None
-
-    def test_http_429_rate_limit(self, temp_cache):
-        """Test handling of 429 rate limit error."""
-        import urllib.error
-
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = urllib.error.HTTPError(
-                url="test", code=429, msg="Too Many Requests", hdrs={}, fp=None
-            )
-            result = lookup_aircraft_model("D-EAGJ")
-            # Should return None and log warning
-            assert result is None
-
-    def test_http_other_error(self, temp_cache):
-        """Test handling of other HTTP errors (500, etc)."""
-        import urllib.error
-
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = urllib.error.HTTPError(
-                url="test", code=500, msg="Internal Server Error", hdrs={}, fp=None
-            )
-            result = lookup_aircraft_model("D-EAGJ")
-            # Should return None and log warning
-            assert result is None
-
-    def test_network_error(self, temp_cache):
-        """Test handling of network errors."""
-        import urllib.error
-
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = urllib.error.URLError("Network unreachable")
-            result = lookup_aircraft_model("D-EAGJ")
-            # Should return None and log warning
-            assert result is None
-
-    def test_timeout_error(self, temp_cache):
-        """Test handling of timeout errors."""
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = TimeoutError("Request timed out")
-            result = lookup_aircraft_model("D-EAGJ")
-            # Should return None and log warning
-            assert result is None
-
-    def test_unexpected_exception(self, temp_cache):
-        """Test handling of unexpected exceptions."""
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = RuntimeError("Unexpected error")
-            result = lookup_aircraft_model("D-EAGJ")
-            # Should return None and log warning
-            assert result is None
-
-    def test_successful_lookup_with_cache_update(self, temp_cache):
-        """Test successful lookup updates cache."""
-        from unittest.mock import MagicMock
-
-        # Mock successful HTTP response with aircraft data
-        html_content = b"""<html>
-        <head><title>Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana</title></head>
-        <body></body>
-        </html>"""
-
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            # Create a mock response that behaves like a file object
-            mock_response = MagicMock()
-            mock_response.read.return_value = html_content
-            mock_response.__enter__.return_value = mock_response
-            mock_response.__exit__.return_value = None
-            mock_urlopen.return_value = mock_response
-
-            result = lookup_aircraft_model("D-EAGJ")
-
-            # Should return the model
-            assert result == "Diamond DA-20A-1 Katana"
-
-            # Verify cache was updated
-            with open(temp_cache, "r") as f:
-                cache = json.load(f)
-                assert cache.get("D-EAGJ") == "Diamond DA-20A-1 Katana"
-
-    def test_skip_lookup_env_var(self, temp_cache):
-        """Test KML_HEATMAP_SKIP_AIRCRAFT_LOOKUP disables web lookups."""
-        with patch.dict(os.environ, {"KML_HEATMAP_SKIP_AIRCRAFT_LOOKUP": "1"}):
-            with patch("urllib.request.urlopen") as mock_urlopen:
-                result = lookup_aircraft_model("D-NONET")
-                assert result is None
-                # Should not make any HTTP requests
-                mock_urlopen.assert_not_called()
-
-    def test_skip_lookup_returns_cached(self, temp_cache):
-        """Test that skip lookup still returns cached values."""
-        with open(temp_cache, "w") as f:
-            json.dump({"D-EAGJ": "Diamond DA-20A-1 Katana"}, f)
-
-        with patch.dict(os.environ, {"KML_HEATMAP_SKIP_AIRCRAFT_LOOKUP": "1"}):
-            result = lookup_aircraft_model("D-EAGJ")
-            assert result == "Diamond DA-20A-1 Katana"
-
-
-class TestFetchAircraftModel:
-    """Tests for _fetch_aircraft_model function."""
-
-    def test_successful_fetch(self):
-        """Test successful aircraft model fetch."""
-        html_content = b"""<html>
-        <head><title>Aircraft info for D-EAGJ - 2001 Diamond DA-20A-1 Katana</title></head>
-        </html>"""
-
-        mock_response = MagicMock()
-        mock_response.read.return_value = html_content
-        mock_response.__enter__ = lambda s: s
-        mock_response.__exit__ = MagicMock(return_value=False)
-
-        with patch("urllib.request.urlopen", return_value=mock_response):
-            # Reset rate limiting
-            import kml_heatmap.aircraft as aircraft_mod
-
-            aircraft_mod._last_request_time = 0
-            result = _fetch_aircraft_model("D-EAGJ")
-            assert result == "Diamond DA-20A-1 Katana"
-
-    def test_404_returns_none(self):
-        """Test 404 returns None without raising _SkipCache."""
-        import urllib.error
-
-        with patch("urllib.request.urlopen") as mock:
-            mock.side_effect = urllib.error.HTTPError(
-                url="test", code=404, msg="Not Found", hdrs={}, fp=None
-            )
-            import kml_heatmap.aircraft as aircraft_mod
-
-            aircraft_mod._last_request_time = 0
-            result = _fetch_aircraft_model("D-NONE")
-            assert result is None
-
-    def test_429_raises_skip_cache(self):
-        """Test 429 rate limit raises _SkipCache."""
-        import urllib.error
-
-        with patch("urllib.request.urlopen") as mock:
-            mock.side_effect = urllib.error.HTTPError(
-                url="test", code=429, msg="Rate Limited", hdrs={}, fp=None
-            )
-            import kml_heatmap.aircraft as aircraft_mod
-
-            aircraft_mod._last_request_time = 0
-            with pytest.raises(_SkipCache):
-                _fetch_aircraft_model("D-RATE")
-
-    def test_network_error_raises_skip_cache(self):
-        """Test network error raises _SkipCache."""
-        import urllib.error
-
-        with patch("urllib.request.urlopen") as mock:
-            mock.side_effect = urllib.error.URLError("No network")
-            import kml_heatmap.aircraft as aircraft_mod
-
-            aircraft_mod._last_request_time = 0
-            with pytest.raises(_SkipCache):
-                _fetch_aircraft_model("D-NET")
-
-    def test_timeout_raises_skip_cache(self):
-        """Test timeout raises _SkipCache."""
-        with patch("urllib.request.urlopen") as mock:
-            mock.side_effect = TimeoutError("Timed out")
-            import kml_heatmap.aircraft as aircraft_mod
-
-            aircraft_mod._last_request_time = 0
-            with pytest.raises(_SkipCache):
-                _fetch_aircraft_model("D-TIME")
-
-    def test_unexpected_error_raises_skip_cache(self):
-        """Test unexpected error raises _SkipCache."""
-        with patch("urllib.request.urlopen") as mock:
-            mock.side_effect = RuntimeError("Unexpected")
-            import kml_heatmap.aircraft as aircraft_mod
-
-            aircraft_mod._last_request_time = 0
-            with pytest.raises(_SkipCache):
-                _fetch_aircraft_model("D-UNEX")
-
-    def test_rate_limiting_delays_request(self):
-        """Test that rate limiting adds delay between requests."""
-        import kml_heatmap.aircraft as aircraft_mod
-
-        # Set last request time to now
-        aircraft_mod._last_request_time = time.monotonic()
-
-        html_content = b"""<html>
-        <head><title>Aircraft info for D-TEST - Cessna 172</title></head>
-        </html>"""
-
-        mock_response = MagicMock()
-        mock_response.read.return_value = html_content
-        mock_response.__enter__ = lambda s: s
-        mock_response.__exit__ = MagicMock(return_value=False)
-
-        with patch("urllib.request.urlopen", return_value=mock_response):
-            with patch("time.sleep") as mock_sleep:
-                _fetch_aircraft_model("D-TEST")
-                # Should have called sleep since last request was just now
-                mock_sleep.assert_called_once()
-                delay = mock_sleep.call_args[0][0]
-                assert delay > 0
-                assert delay <= aircraft_mod._REQUEST_DELAY_SECONDS
-
-    def test_sends_user_agent_header(self):
-        """Test that requests include a proper User-Agent header."""
-        html_content = b"""<html>
-        <head><title>Aircraft info for D-EAGJ - Cessna 172</title></head>
-        </html>"""
-
-        mock_response = MagicMock()
-        mock_response.read.return_value = html_content
-        mock_response.__enter__ = lambda s: s
-        mock_response.__exit__ = MagicMock(return_value=False)
-
-        import kml_heatmap.aircraft as aircraft_mod
-
-        aircraft_mod._last_request_time = 0
-
-        with patch("urllib.request.urlopen", return_value=mock_response) as mock_open:
-            _fetch_aircraft_model("D-EAGJ")
-            # Check the Request object passed to urlopen
-            req = mock_open.call_args[0][0]
-            assert "kml-heatmap" in req.get_header("User-agent")
-
-
-class TestSkipCacheException:
-    """Tests for _SkipCache exception."""
-
-    def test_is_exception(self):
-        """Test that _SkipCache is an Exception subclass."""
-        assert issubclass(_SkipCache, Exception)
-
-    def test_can_be_raised_and_caught(self):
-        """Test raising and catching _SkipCache."""
-        with pytest.raises(_SkipCache):
-            raise _SkipCache()
+            path.unlink()

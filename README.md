@@ -49,7 +49,7 @@
 
 ### Quick Start
 
-Place your KML files in a `kml/` directory, then:
+Place your KML files in a `data/` directory, then:
 
 ```bash
 # Build and generate heatmap
@@ -72,18 +72,18 @@ The tool automatically detects and supports **two KML filename formats**:
 #### SkyDemon Format
 
 ```
-YYYYMMDD_HHMM_AIRPORT_REGISTRATION_TYPE.kml
+N_REGISTRATION_TYPE.kml
 ```
 
-**Example:** `20250822_1013_EDAV_DEHYL_DA40.kml`
+**Example:** `1_DEHYL_DA40.kml`
 
 Where:
 
-- `YYYYMMDD` - Flight date (e.g., `20250822`)
-- `HHMM` - Flight time (e.g., `1013`)
-- `AIRPORT` - Airport ICAO code (e.g., `EDAV`)
+- `N` - Sequential flight number (e.g., `1`, `42`, `87`)
 - `REGISTRATION` - Aircraft registration without hyphen (e.g., `DEHYL` becomes `D-EHYL`)
 - `TYPE` - Aircraft type (e.g., `DA40`, `C172`)
+
+Flight dates are not included in filenames for privacy. Files are numbered sequentially in chronological order.
 
 #### Charterware Format
 
@@ -102,13 +102,26 @@ Where:
 
 **Note:** Charterware KML files do not include per-point timestamps in the KML data. As coordinates are not at fixed intervals, the tool does not attempt to infer timing or speed data for Charterware files. The airspeed visualization layer and flight time statistics will be unavailable when viewing Charterware-only data. Altitude visualization, path selection, and all other features remain fully functional.
 
+### Aircraft Model Data
+
+Aircraft model names are resolved from `data/aircraft.json`, a manually maintained mapping of registrations to full model names:
+
+```json
+{
+  "D-EAGJ": "Diamond DA-20A-1 Katana",
+  "D-EHYL": "Diamond DA-40TDI Diamond Star"
+}
+```
+
+When adding a new aircraft, add its registration and model to this file.
+
 **Why these formats?**
 
 The filename formats enable:
 
 - **Aircraft filtering** - Filter map by specific aircraft registration
 - **Per-aircraft statistics** - View distance and flight time per aircraft
-- **Aircraft model lookup** - Automatic lookup of aircraft make/model from registration (SkyDemon only; Charterware files don't include aircraft type in filename)
+- **Aircraft model lookup** - Full model names from `data/aircraft.json`
 - **Route information** - Charterware files include departure and arrival airports
 
 **Without these formats:**
@@ -117,16 +130,16 @@ Files will still be processed and paths will be displayed, but:
 
 - Aircraft filtering will not be available
 - Per-aircraft statistics will be grouped under "Unknown"
-- Aircraft model information will not be fetched
+- Aircraft model information will not be available
 
-If you have KML files with different naming conventions, they will work fine for basic visualization - you just won't get aircraft-specific features.
+If you have KML files with different naming conventions, they will work fine for basic visualization, you just won't get aircraft-specific features.
 
 ### Multiple Directories
 
 You can process KML files from multiple directories at once:
 
 ```bash
-python kml-heatmap.py kml/ kml-new/ --output-dir combined_output
+python kml-heatmap.py data/ data-new/ --output-dir combined_output
 ```
 
 The tool will automatically detect the format of each file and process them accordingly.
@@ -289,7 +302,7 @@ URL parameters take precedence over localStorage, allowing shared links to overr
 - State persistence - Saves to localStorage and syncs with URL for shareable links
 - Year-based organization - Automatically extracts and organizes flights by year
 - Per-aircraft statistics - Tracks flight time and distance per aircraft registration
-- Aircraft model lookup - Automatically fetches aircraft make/model from airport-data.com, with smart handling of re-registered callsigns (prefers current registration)
+- Aircraft model lookup - Resolves full aircraft model names from `data/aircraft.json`
 
 ## Technical Details
 

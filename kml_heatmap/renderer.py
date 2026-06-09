@@ -8,7 +8,7 @@ import subprocess
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 
 import rcssmin
 import rjsmin
@@ -16,6 +16,7 @@ import minify_html as mh
 
 from .airports import deduplicate_airports, extract_airport_name
 from .data_exporter import export_all_data
+from .helpers import numeric_filename_key
 from .logger import logger
 from .parser import parse_kml_coordinates, is_mid_flight_start, is_valid_landing
 from .statistics import calculate_statistics
@@ -191,7 +192,7 @@ def _parse_kml_files(
                 f"  [{completed_count}/{len(valid_files)}] {progress_pct:.0f}% - {Path(kml_file).name}"
             )
 
-    results.sort(key=lambda x: x[0])
+    results.sort(key=lambda r: numeric_filename_key(r[0]))
     for _, coords, path_groups, path_metadata in results:
         all_coordinates.extend(coords)
         all_path_groups.extend(path_groups)
@@ -214,6 +215,7 @@ def _process_data(
     all_path_groups: List[List[List[float]]],
     all_path_metadata: List[Dict[str, Any]],
     data_dir: str,
+    aircraft_file: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Process parsed data: deduplicate airports, calculate stats, export files.
 
@@ -222,6 +224,7 @@ def _process_data(
         all_path_groups: Merged path groups.
         all_path_metadata: Merged path metadata.
         data_dir: Directory to save data files.
+        aircraft_file: Path to aircraft.json for model lookups.
 
     Returns:
         Dict with keys: stats, unique_airports, bounds, metadata_params,
@@ -247,7 +250,9 @@ def _process_data(
         logger.info(f"  Found {len(unique_airports)} unique airports")
 
     logger.info("\nCalculating statistics...")
-    stats = calculate_statistics(all_coordinates, all_path_groups, all_path_metadata)
+    stats = calculate_statistics(
+        all_coordinates, all_path_groups, all_path_metadata, aircraft_file=aircraft_file
+    )
 
     valid_airport_names = []
     for airport in unique_airports:
@@ -417,7 +422,10 @@ def _package_assets(
 
 
 def create_progressive_heatmap(
-    kml_files: List[str], output_file: str = "index.html", data_dir: str = "data"
+    kml_files: List[str],
+    output_file: str = "index.html",
+    data_dir: str = "data",
+    aircraft_file: Optional[Path] = None,
 ) -> bool:
     """Create a progressive-loading heatmap with external data files.
 
@@ -431,6 +439,7 @@ def create_progressive_heatmap(
         kml_files: List of KML file paths
         output_file: Output HTML file path
         data_dir: Directory to save data files
+        aircraft_file: Path to aircraft.json for model lookups
 
     Returns:
         True if successful, False otherwise
@@ -460,7 +469,11 @@ def create_progressive_heatmap(
 
     # Stage 2: Process data
     result = _process_data(
-        all_coordinates, all_path_groups, all_path_metadata, data_dir
+        all_coordinates,
+        all_path_groups,
+        all_path_metadata,
+        data_dir,
+        aircraft_file=aircraft_file,
     )
 
     # Stage 3: Render HTML

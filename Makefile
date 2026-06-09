@@ -1,10 +1,10 @@
 .PHONY: all build serve test-image test lint format clean
-.PHONY: lint-local format-local test-local
+.PHONY: lint-local format-local test-local verify
 
 STADIA_API_KEY ?=
 OPENAIP_API_KEY ?=
 CONTAINER_RUNTIME ?= docker
-INPUT_DIR ?= kml
+INPUT_DIR ?= data
 
 OUTPUT_DIR ?= docs
 IMAGE_NAME := kml-heatmap
@@ -49,6 +49,9 @@ format-local:
 test-local:
 	npm run test:coverage
 	pytest --cov=kml_heatmap --cov-report=term
+
+verify: build
+	git diff --exit-code $(OUTPUT_DIR)/
 
 clean:
 	$(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) $(IMAGE_NAME)-test 2>/dev/null || true

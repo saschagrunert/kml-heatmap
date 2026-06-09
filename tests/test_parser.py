@@ -1098,13 +1098,13 @@ class TestParseCharterwareKML:
                 cache_path.unlink()
 
     def test_mixed_formats(self):
-        """Test that parser handles both SkyDemon and Charterware formats correctly."""
+        """Test that parser handles both numbered and Charterware formats correctly."""
         import tempfile
         import os
         from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
 
-        # Create SkyDemon format KML
-        skydemon_kml = """<?xml version="1.0" encoding="UTF-8"?>
+        # Create numbered format KML
+        numbered_kml = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
     <Document>
         <Placemark>
@@ -1131,31 +1131,30 @@ class TestParseCharterwareKML:
     </Document>
 </kml>"""
 
-        # Create temp files with exact filenames (unique for this test)
         temp_dir = tempfile.gettempdir()
-        skydemon_path = os.path.join(temp_dir, "20250822_1013_EDAV_DEHYL_DA40.kml")
+        numbered_path = os.path.join(temp_dir, "1_DEHYL_DA40.kml")
         charterware_path = os.path.join(
             temp_dir, "2026-01-15_1513h_OE-AKI_EDDF-EDDM.kml"
         )
 
         # Clear any existing caches before test
-        for path in [skydemon_path, charterware_path]:
+        for path in [numbered_path, charterware_path]:
             cache_path, _ = get_cache_key(path)
             if cache_path and cache_path.exists():
                 cache_path.unlink()
 
-        with open(skydemon_path, "w") as f:
-            f.write(skydemon_kml)
+        with open(numbered_path, "w") as f:
+            f.write(numbered_kml)
 
         with open(charterware_path, "w") as f:
             f.write(charterware_kml)
 
         try:
-            # Parse SkyDemon
-            coords_sd, paths_sd, metadata_sd = parse_kml_coordinates(skydemon_path)
-            assert len(metadata_sd) > 0
-            assert metadata_sd[0].get("aircraft_registration") == "D-EHYL"
-            assert metadata_sd[0].get("aircraft_type") == "DA40"
+            # Parse numbered format
+            coords_n, paths_n, metadata_n = parse_kml_coordinates(numbered_path)
+            assert len(metadata_n) > 0
+            assert metadata_n[0].get("aircraft_registration") == "D-EHYL"
+            assert metadata_n[0].get("aircraft_type") == "DA40"
 
             # Parse Charterware
             coords_cw, paths_cw, metadata_cw = parse_kml_coordinates(charterware_path)
@@ -1165,12 +1164,12 @@ class TestParseCharterwareKML:
             assert metadata_cw[0].get("aircraft_type") is None
 
         finally:
-            if os.path.exists(skydemon_path):
-                os.unlink(skydemon_path)
+            if os.path.exists(numbered_path):
+                os.unlink(numbered_path)
             if os.path.exists(charterware_path):
                 os.unlink(charterware_path)
             # Clean up caches
-            for path in [skydemon_path, charterware_path]:
+            for path in [numbered_path, charterware_path]:
                 cache_path, _ = get_cache_key(path)
                 if cache_path and cache_path.exists():
                     cache_path.unlink()

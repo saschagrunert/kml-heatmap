@@ -1,0 +1,32 @@
+---
+name: build
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "data/**"
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Build
+        run: make build OPENAIP_API_KEY=${{ secrets.OPENAIP_API_KEY }}
+      - name: Commit updated docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          if git diff --cached --quiet; then
+            echo "No changes to docs/"
+          else
+            git commit -s -m "Update docs"
+            git push
+          fi

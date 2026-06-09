@@ -22,7 +22,6 @@ from .validation import (
 from .exceptions import (
     KMLHeatmapError,
     KMLParseError,
-    AircraftLookupError,
     InvalidCoordinateError,
 )
 
@@ -53,6 +52,5 @@ __all__ = [
     # Exceptions
     "KMLHeatmapError",
     "KMLParseError",
-    "AircraftLookupError",
     "InvalidCoordinateError",
 ]

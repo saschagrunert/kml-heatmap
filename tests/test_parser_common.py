@@ -316,7 +316,7 @@ class TestBuildPathMetadataDict:
 
     def test_with_aircraft_in_filename(self):
         result = _build_path_metadata_dict(
-            kml_file="20250303_0800_EDDS_DEAGJ_C172.kml",
+            kml_file="1_DEAGJ_DA20.kml",
             path_start=[50.0, 8.5, 100.0],
             airport_name="EDDS",
             timestamp="2025-03-03T08:58:01Z",
