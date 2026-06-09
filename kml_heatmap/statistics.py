@@ -1,6 +1,7 @@
 """Statistics calculation for flight data."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
 from .geometry import haversine_distance, extract_altitudes
 from .aircraft import lookup_aircraft_model
@@ -241,12 +242,14 @@ def _calculate_aircraft_flight_times(
 
 def _create_aircraft_list_with_models(
     aircraft_flights: Dict[str, Dict[str, Any]],
+    aircraft_file: Optional[Path] = None,
 ) -> List[Dict[str, Any]]:
     """
     Create sorted aircraft list with model lookups.
 
     Args:
         aircraft_flights: Dict of aircraft flight information
+        aircraft_file: Path to aircraft.json for model lookups
 
     Returns:
         List of aircraft with their stats
@@ -257,8 +260,7 @@ def _create_aircraft_list_with_models(
     for reg, info in sorted(
         aircraft_flights.items(), key=lambda x: x[1]["count"], reverse=True
     ):
-        # Try to lookup full aircraft model
-        full_model = lookup_aircraft_model(reg)
+        full_model = lookup_aircraft_model(reg, aircraft_file)
         if full_model:
             logger.info(f"  ✓ {reg}: {full_model}")
         else:
@@ -284,7 +286,9 @@ def _create_aircraft_list_with_models(
 
 
 def aggregate_aircraft_stats(
-    all_path_metadata: List[Dict[str, Any]], all_path_groups: List[List[List[float]]]
+    all_path_metadata: List[Dict[str, Any]],
+    all_path_groups: List[List[List[float]]],
+    aircraft_file: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Aggregate aircraft statistics from metadata and paths.
@@ -292,6 +296,7 @@ def aggregate_aircraft_stats(
     Args:
         all_path_metadata: List of metadata dicts for each path
         all_path_groups: List of all path groups
+        aircraft_file: Path to aircraft.json for model lookups
 
     Returns:
         Stats dict containing: num_aircraft, aircraft_types, and aircraft_list
@@ -307,7 +312,7 @@ def aggregate_aircraft_stats(
     )
 
     # Create aircraft list with model lookups
-    aircraft_list = _create_aircraft_list_with_models(aircraft_flights)
+    aircraft_list = _create_aircraft_list_with_models(aircraft_flights, aircraft_file)
 
     return {
         "num_aircraft": len(aircraft_registrations),
@@ -320,27 +325,19 @@ def calculate_statistics(
     all_coordinates: List[List[float]],
     all_path_groups: List[List[List[float]]],
     all_path_metadata: Optional[List[Dict[str, Any]]] = None,
+    aircraft_file: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Calculate statistics from coordinate and path data.
 
-    This function orchestrates multiple specialized statistics calculators
-    to produce a comprehensive statistics dictionary.
-
     Args:
         all_coordinates: List of [lat, lon] pairs
-        all_path_groups: List of path groups with altitude data (can be [lat,lon,alt] or [lat,lon,alt,timestamp])
+        all_path_groups: List of path groups with altitude data
         all_path_metadata: List of metadata dicts for each path (optional)
+        aircraft_file: Path to aircraft.json for model lookups
 
     Returns:
-        Dictionary of statistics with keys:
-        - total_points, num_paths
-        - total_distance_km, total_distance_nm
-        - total_altitude_gain_m, total_altitude_gain_ft
-        - min/max_altitude_m, min/max_altitude_ft
-        - total_flight_time_seconds, total_flight_time_str
-        - average_groundspeed_knots, max_groundspeed_knots
-        - num_aircraft, aircraft_types, aircraft_list (if metadata provided)
+        Dictionary of statistics
     """
     # Count only actual flight paths, not point markers
     num_flight_paths = 0
@@ -408,7 +405,9 @@ def calculate_statistics(
 
     # Aggregate aircraft statistics
     if all_path_metadata:
-        aircraft_stats = aggregate_aircraft_stats(all_path_metadata, all_path_groups)
+        aircraft_stats = aggregate_aircraft_stats(
+            all_path_metadata, all_path_groups, aircraft_file
+        )
         stats.update(aircraft_stats)
 
     # Calculate average groundspeed

@@ -4,7 +4,6 @@ import pytest
 from kml_heatmap.exceptions import (
     KMLHeatmapError,
     KMLParseError,
-    AircraftLookupError,
     InvalidCoordinateError,
     DataExportError,
     InvalidAltitudeError,
@@ -64,27 +63,6 @@ class TestKMLParseError:
         """Test parse error can be caught."""
         with pytest.raises(KMLParseError):
             raise KMLParseError("Test error")
-
-
-class TestAircraftLookupError:
-    """Tests for AircraftLookupError exception."""
-
-    def test_simple_aircraft_error(self):
-        """Test aircraft error with just message."""
-        error = AircraftLookupError("Lookup failed")
-        assert "Lookup failed" in str(error)
-
-    def test_aircraft_error_with_registration(self):
-        """Test aircraft error with registration."""
-        error = AircraftLookupError("Lookup failed", registration="D-EAGJ")
-        assert "Lookup failed" in str(error)
-        assert "D-EAGJ" in str(error)
-        assert error.registration == "D-EAGJ"
-
-    def test_aircraft_error_inheritance(self):
-        """Test aircraft error inherits from base."""
-        error = AircraftLookupError("Test")
-        assert isinstance(error, KMLHeatmapError)
 
 
 class TestInvalidCoordinateError:
@@ -196,7 +174,6 @@ class TestExceptionHierarchy:
         """Test all custom exceptions inherit from base."""
         exceptions = [
             KMLParseError("test"),
-            AircraftLookupError("test"),
             InvalidCoordinateError("test"),
             DataExportError("test"),
             InvalidAltitudeError("test"),

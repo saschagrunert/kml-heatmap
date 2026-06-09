@@ -3,6 +3,9 @@
 import argparse
 import os
 import sys
+from pathlib import Path
+
+from .helpers import numeric_filename_key
 from .logger import logger, set_debug_mode
 
 
@@ -47,9 +50,12 @@ examples:
     for path in args.paths:
         if os.path.isdir(path):
             dir_kml_files = sorted(
-                os.path.join(path, f)
-                for f in os.listdir(path)
-                if f.lower().endswith(".kml")
+                (
+                    os.path.join(path, f)
+                    for f in os.listdir(path)
+                    if f.lower().endswith(".kml")
+                ),
+                key=numeric_filename_key,
             )
             if dir_kml_files:
                 kml_files.extend(dir_kml_files)
@@ -77,9 +83,20 @@ examples:
     output_file = os.path.join(args.output_dir, "index.html")
     data_dir = os.path.join(args.output_dir, "data")
 
+    # Detect aircraft.json in the input directory
+    aircraft_file = None
+    if kml_files:
+        input_dir = Path(os.path.dirname(kml_files[0]))
+        candidate = input_dir / "aircraft.json"
+        if candidate.exists():
+            aircraft_file = candidate
+            logger.info(f"Using aircraft data from {aircraft_file}")
+
     from .renderer import create_progressive_heatmap
 
-    success = create_progressive_heatmap(kml_files, output_file, data_dir)
+    success = create_progressive_heatmap(
+        kml_files, output_file, data_dir, aircraft_file=aircraft_file
+    )
 
     if not success:
         sys.exit(1)

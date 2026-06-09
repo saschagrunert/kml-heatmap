@@ -54,6 +54,8 @@ Design Principles:
 - Consistent naming and parameter order
 """
 
+import os
+import re
 from datetime import datetime
 from typing import Optional, Tuple
 from .constants import SECONDS_PER_HOUR
@@ -63,6 +65,7 @@ __all__ = [
     "calculate_duration_seconds",
     "format_flight_time",
     "parse_coordinates_from_string",
+    "numeric_filename_key",
 ]
 
 
@@ -129,6 +132,15 @@ def format_flight_time(seconds: float) -> str:
     if hours > 0:
         return f"{hours}h {minutes}m"
     return f"{minutes}m"
+
+
+def numeric_filename_key(path: str) -> tuple[int, int, str]:
+    """Sort key that orders files numerically by leading digits in the filename."""
+    name = os.path.basename(path)
+    match = re.match(r"(\d+)", name)
+    if match:
+        return (0, int(match.group(1)), name)
+    return (1, 0, name)
 
 
 def parse_coordinates_from_string(

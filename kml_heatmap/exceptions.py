@@ -5,7 +5,6 @@ from typing import Optional
 __all__ = [
     "KMLHeatmapError",
     "KMLParseError",
-    "AircraftLookupError",
     "InvalidCoordinateError",
     "DataExportError",
     "InvalidAltitudeError",
@@ -47,22 +46,6 @@ class KMLParseError(KMLHeatmapError):
         if self.line_number:
             parts.append(f"Line: {self.line_number}")
         return " | ".join(parts)
-
-
-class AircraftLookupError(KMLHeatmapError):
-    """Raised when aircraft lookup fails."""
-
-    def __init__(self, message: str, registration: Optional[str] = None):
-        """Initialize aircraft lookup error with optional registration.
-
-        Args:
-            message: Error description
-            registration: Optional aircraft registration
-        """
-        self.registration = registration
-        if registration:
-            message = f"{message} (Registration: {registration})"
-        super().__init__(message)
 
 
 class InvalidCoordinateError(KMLHeatmapError):
