@@ -1,1 +1,1 @@
-window.MAP_CONFIG={center:[49.9722765,12.1855462],bounds:[[45.473186,7.0704584],[54.471367,17.300634]],stadiaApiKey:'',openaipApiKey:'8c48c5bab93ab7426e33c63e0f2da961',dataDir:'data'};
+window.MAP_CONFIG={center:[49.9695935,12.1855462],bounds:[[45.46782,7.0704584],[54.471367,17.300634]],stadiaApiKey:'',openaipApiKey:'8c48c5bab93ab7426e33c63e0f2da961',dataDir:'data'};
