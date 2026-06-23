@@ -108,6 +108,75 @@ test.describe("Wrapped and Export", () => {
     await expect(mapEl).toHaveClass(/leaflet-container/);
   });
 
+  test("wrapped panel updates when year filter changes", async ({ page }) => {
+    const yearSelect = page.locator("#year-select");
+    const options = yearSelect.locator("option");
+    const count = await options.count();
+    if (count < 2) return;
+
+    const yearOption = await options.nth(1).getAttribute("value");
+    if (!yearOption) return;
+    await yearSelect.selectOption(yearOption);
+    await page.waitForTimeout(500);
+
+    await page.locator("#wrapped-btn").click();
+    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+
+    const yearEl = page.locator("#wrapped-year");
+    await expect(yearEl).toHaveText(yearOption);
+    await expect(page.locator("#wrapped-title")).toHaveText(
+      "✨ Your Year in Flight"
+    );
+  });
+
+  test("wrapped panel updates when aircraft filter changes", async ({
+    page,
+  }) => {
+    const aircraftSelect = page.locator("#aircraft-select");
+    const options = aircraftSelect.locator("option");
+    const count = await options.count();
+    if (count < 2) return;
+
+    const aircraftOption = await options.nth(1).getAttribute("value");
+    if (!aircraftOption) return;
+
+    await page.locator("#wrapped-btn").click();
+    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+
+    const allStatsText = await page.locator("#wrapped-stats").textContent();
+    await page.locator("#wrapped-modal .close-btn").click();
+    await expect(page.locator("#wrapped-modal")).toBeHidden();
+
+    await aircraftSelect.selectOption(aircraftOption);
+    await page.waitForTimeout(1000);
+
+    const wrappedBtn = page.locator("#wrapped-btn");
+    await expect(wrappedBtn).toBeVisible({ timeout: 5000 });
+    await wrappedBtn.click();
+    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+
+    const filteredStatsText = await page
+      .locator("#wrapped-stats")
+      .textContent();
+    expect(filteredStatsText).not.toBe(allStatsText);
+  });
+
+  test("wrapped panel shows all years when year filter set to all", async ({
+    page,
+  }) => {
+    const yearSelect = page.locator("#year-select");
+    await yearSelect.selectOption("all");
+    await page.waitForTimeout(500);
+
+    await page.locator("#wrapped-btn").click();
+    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+
+    await expect(page.locator("#wrapped-year")).toHaveText("All Years");
+    await expect(page.locator("#wrapped-title")).toHaveText(
+      "✨ Your Flight History"
+    );
+  });
+
   test("export button triggers download", async ({ page }) => {
     // Mock dom-to-image for reliable headless testing
     await page.evaluate(() => {

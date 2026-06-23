@@ -201,6 +201,46 @@ describe("wrapped feature", () => {
       expect(aircraft.model).toBe("Diamond DA40 NG");
     });
 
+    it("filters by aircraft when aircraft parameter is provided", () => {
+      const stats = calculateYearStats(
+        mockPathInfo,
+        mockSegments,
+        "all",
+        null,
+        "D-EAGJ"
+      );
+
+      expect(stats.total_flights).toBe(2);
+      expect(stats.aircraft_list).toHaveLength(1);
+      expect(stats.aircraft_list[0].registration).toBe("D-EAGJ");
+    });
+
+    it("filters by both year and aircraft", () => {
+      const stats = calculateYearStats(
+        mockPathInfo,
+        mockSegments,
+        2025,
+        null,
+        "D-EAGJ"
+      );
+
+      expect(stats.total_flights).toBe(2);
+      expect(stats.aircraft_list).toHaveLength(1);
+    });
+
+    it("returns empty stats when aircraft filter matches nothing", () => {
+      const stats = calculateYearStats(
+        mockPathInfo,
+        mockSegments,
+        2025,
+        null,
+        "D-NONE"
+      );
+
+      expect(stats.total_flights).toBe(0);
+      expect(stats.aircraft_list).toHaveLength(0);
+    });
+
     it("handles segments without time data", () => {
       const segmentsNoTime = [
         {

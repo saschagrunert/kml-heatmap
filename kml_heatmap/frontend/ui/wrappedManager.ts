@@ -57,12 +57,24 @@ export class WrappedManager {
     // Use the currently selected year (including 'all')
     const year = this.app.selectedYear;
 
-    // Calculate stats for selected year
+    const aircraft = this.app.selectedAircraft;
+
+    // Calculate year-filtered statistics for wrapped panel display
+    const filteredStats = window.KMLHeatmap.calculateFilteredStatistics({
+      pathInfo: this.app.fullPathInfo || [],
+      segments: this.app.fullPathSegments || [],
+      year: year,
+      aircraft: aircraft,
+      coordinateCount: this.app.currentData?.original_points,
+    });
+
+    // Calculate stats for selected year and aircraft (fullStats used only for aircraft model enrichment)
     const yearStats = window.KMLHeatmap.calculateYearStats(
       this.app.fullPathInfo || [],
       this.app.fullPathSegments || [],
       year,
-      this.app.fullStats
+      this.app.fullStats,
+      aircraft
     );
 
     // Update title and year display based on selection
@@ -79,14 +91,13 @@ export class WrappedManager {
 
     // Check if we have timing data (flight time and groundspeed)
     const hasTimingData =
-      this.app.fullStats !== null &&
-      this.app.fullStats.max_groundspeed_knots !== undefined &&
-      this.app.fullStats.max_groundspeed_knots > 0;
+      filteredStats.max_groundspeed_knots !== undefined &&
+      filteredStats.max_groundspeed_knots > 0;
 
     // Build stats grid (conditionally include flight time and max groundspeed)
     const statsHtml = generateStatsHtml(
       yearStats,
-      this.app.fullStats ?? null,
+      filteredStats,
       hasTimingData
     );
 
@@ -96,7 +107,7 @@ export class WrappedManager {
     // Build fun facts section with dynamic, varied facts
     const funFacts = window.KMLHeatmap.generateFunFacts(
       yearStats,
-      this.app.fullStats
+      filteredStats
     );
 
     const funFactsHtml = generateFunFactsHtml(funFacts);
@@ -113,16 +124,19 @@ export class WrappedManager {
 
     // Build home base section using year-filtered airport data
     if (yearStats.airport_names && yearStats.airport_names.length > 0) {
-      // Filter path info by selected year to count airport visits
-      let filteredPathInfo;
-      if (year === "all") {
-        filteredPathInfo = this.app.fullPathInfo || [];
-      } else {
-        const yearStr = year.toString();
-        filteredPathInfo = (this.app.fullPathInfo || []).filter((pathInfo) => {
-          return pathInfo.year && pathInfo.year.toString() === yearStr;
-        });
-      }
+      // Filter path info by selected year and aircraft to count airport visits
+      const filteredPathInfo = (this.app.fullPathInfo || []).filter(
+        (pathInfo) => {
+          if (year !== "all") {
+            if (!pathInfo.year || pathInfo.year.toString() !== year)
+              return false;
+          }
+          if (aircraft !== "all") {
+            if (pathInfo.aircraft_registration !== aircraft) return false;
+          }
+          return true;
+        }
+      );
 
       // Filter airports to only those in this year and count flights
       const yearAirportCounts: { [name: string]: number } = {};
