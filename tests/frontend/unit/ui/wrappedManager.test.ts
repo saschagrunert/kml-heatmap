@@ -79,6 +79,15 @@ const defaultFilteredStats: FilteredStatistics = {
     generateFunFacts: vi.fn(() => [
       { category: "distance", icon: "📏", text: "You flew far!" },
     ]),
+    filterPaths: vi.fn((pathInfo: any[], year: string, aircraft: string) =>
+      pathInfo.filter((p: any) => {
+        if (year !== "all" && (!p.year || p.year.toString() !== year))
+          return false;
+        if (aircraft !== "all" && p.aircraft_registration !== aircraft)
+          return false;
+        return true;
+      })
+    ),
   },
 };
 

@@ -124,18 +124,10 @@ export class WrappedManager {
 
     // Build home base section using year-filtered airport data
     if (yearStats.airport_names && yearStats.airport_names.length > 0) {
-      // Filter path info by selected year and aircraft to count airport visits
-      const filteredPathInfo = (this.app.fullPathInfo || []).filter(
-        (pathInfo) => {
-          if (year !== "all") {
-            if (!pathInfo.year || pathInfo.year.toString() !== year)
-              return false;
-          }
-          if (aircraft !== "all") {
-            if (pathInfo.aircraft_registration !== aircraft) return false;
-          }
-          return true;
-        }
+      const filteredPathInfo = window.KMLHeatmap.filterPaths(
+        this.app.fullPathInfo || [],
+        year,
+        aircraft
       );
 
       // Filter airports to only those in this year and count flights

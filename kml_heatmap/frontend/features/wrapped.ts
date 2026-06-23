@@ -8,6 +8,7 @@ import { formatFlightTime } from "../utils/formatters";
 import {
   calculateFlightTime,
   collectAirports,
+  filterPaths,
   filterSegmentsByPaths,
 } from "../calculations/statistics";
 import type { PathInfo, PathSegment } from "../types";
@@ -94,14 +95,7 @@ export function calculateYearStats(
     };
   }
 
-  // Filter paths by year and aircraft
-  const yearNum = year === "all" ? "all" : Number(year);
-  const filteredPaths = pathInfo.filter((path) => {
-    if (yearNum !== "all" && path.year !== yearNum) return false;
-    if (aircraft !== "all" && path.aircraft_registration !== aircraft)
-      return false;
-    return true;
-  });
+  const filteredPaths = filterPaths(pathInfo, String(year), aircraft);
 
   // Handle no matching paths
   if (filteredPaths.length === 0) {

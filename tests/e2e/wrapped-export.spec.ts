@@ -117,7 +117,11 @@ test.describe("Wrapped and Export", () => {
     const yearOption = await options.nth(1).getAttribute("value");
     if (!yearOption) return;
     await yearSelect.selectOption(yearOption);
-    await page.waitForTimeout(500);
+    await page.waitForFunction(
+      (y) => (window as any).mapApp?.selectedYear === y,
+      yearOption,
+      { timeout: 10000 }
+    );
 
     await page.locator("#wrapped-btn").click();
     await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
@@ -148,11 +152,13 @@ test.describe("Wrapped and Export", () => {
     await expect(page.locator("#wrapped-modal")).toBeHidden();
 
     await aircraftSelect.selectOption(aircraftOption);
-    await page.waitForTimeout(1000);
+    await page.waitForFunction(
+      (a) => (window as any).mapApp?.selectedAircraft === a,
+      aircraftOption,
+      { timeout: 10000 }
+    );
 
-    const wrappedBtn = page.locator("#wrapped-btn");
-    await expect(wrappedBtn).toBeVisible({ timeout: 5000 });
-    await wrappedBtn.click();
+    await page.locator("#wrapped-btn").click();
     await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
 
     const filteredStatsText = await page
@@ -166,7 +172,10 @@ test.describe("Wrapped and Export", () => {
   }) => {
     const yearSelect = page.locator("#year-select");
     await yearSelect.selectOption("all");
-    await page.waitForTimeout(500);
+    await page.waitForFunction(
+      () => (window as any).mapApp?.selectedYear === "all",
+      { timeout: 10000 }
+    );
 
     await page.locator("#wrapped-btn").click();
     await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
