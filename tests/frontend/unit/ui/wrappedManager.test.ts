@@ -50,9 +50,24 @@ import {
   generateDestinationsHtml,
 } from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
 
+// Default filtered stats returned by calculateFilteredStatistics mock
+const defaultFilteredStats: FilteredStatistics = {
+  total_points: 100,
+  num_paths: 10,
+  num_airports: 5,
+  airport_names: [],
+  num_aircraft: 1,
+  aircraft_list: [],
+  total_distance_km: 1000,
+  total_distance_nm: 540,
+  max_groundspeed_knots: 150,
+  max_altitude_m: 3000,
+};
+
 // Mock window.KMLHeatmap
 (global as any).window = {
   KMLHeatmap: {
+    calculateFilteredStatistics: vi.fn(() => ({ ...defaultFilteredStats })),
     calculateYearStats: vi.fn(() => ({
       total_flights: 10,
       num_airports: 5,
@@ -136,6 +151,10 @@ describe("WrappedManager", () => {
     vi.mocked(generateAircraftFleetHtml).mockClear();
     vi.mocked(generateHomeBaseHtml).mockClear();
     vi.mocked(generateDestinationsHtml).mockClear();
+    (window.KMLHeatmap.calculateFilteredStatistics as any).mockClear();
+    (window.KMLHeatmap.calculateFilteredStatistics as any).mockReturnValue({
+      ...defaultFilteredStats,
+    });
     (window.KMLHeatmap.calculateYearStats as any).mockClear();
     (window.KMLHeatmap.generateFunFacts as any).mockClear();
 
@@ -164,7 +183,8 @@ describe("WrappedManager", () => {
         mockApp.fullPathInfo,
         mockApp.fullPathSegments,
         "2023",
-        mockApp.fullStats
+        mockApp.fullStats,
+        "all"
       );
     });
 
@@ -177,7 +197,72 @@ describe("WrappedManager", () => {
         mockApp.fullPathInfo,
         mockApp.fullPathSegments,
         "all",
-        mockApp.fullStats
+        mockApp.fullStats,
+        "all"
+      );
+    });
+
+    it("passes selectedAircraft to calculateYearStats and calculateFilteredStatistics", () => {
+      mockApp.selectedYear = "2024";
+      mockApp.selectedAircraft = "D-ABCD";
+
+      wrappedManager.showWrapped();
+
+      expect(window.KMLHeatmap.calculateYearStats).toHaveBeenCalledWith(
+        mockApp.fullPathInfo,
+        mockApp.fullPathSegments,
+        "2024",
+        mockApp.fullStats,
+        "D-ABCD"
+      );
+      expect(
+        window.KMLHeatmap.calculateFilteredStatistics
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          aircraft: "D-ABCD",
+        })
+      );
+    });
+
+    it("filters airport pathInfo by aircraft when aircraft is selected", () => {
+      mockApp.selectedYear = "all";
+      mockApp.selectedAircraft = "D-ABCD";
+      mockApp.fullPathInfo = [
+        {
+          id: 1,
+          year: 2024,
+          aircraft_registration: "D-ABCD",
+          start_airport: "EDDF",
+          end_airport: "EDDM",
+        },
+        {
+          id: 2,
+          year: 2024,
+          aircraft_registration: "D-EFGH",
+          start_airport: "EDDF",
+          end_airport: "EDDL",
+        },
+      ];
+
+      const mockYearStats = {
+        total_flights: 1,
+        num_airports: 2,
+        total_distance_nm: 500,
+        flight_time: "2:00",
+        aircraft_list: [{ registration: "D-ABCD", type: "C172", flights: 1 }],
+        airport_names: ["EDDF", "EDDM"],
+      };
+      (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
+        mockYearStats
+      );
+
+      wrappedManager.showWrapped();
+
+      expect(generateHomeBaseHtml).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: expect.any(String),
+          flight_count: 1,
+        })
       );
     });
 
@@ -218,58 +303,72 @@ describe("WrappedManager", () => {
     });
 
     it("calls generateStatsHtml with hasTimingData=true when timing data available", () => {
-      mockApp.fullStats = {
+      const stats = {
+        ...defaultFilteredStats,
         max_groundspeed_knots: 150,
-        max_altitude_m: 3000,
-      } as FilteredStatistics;
+      };
+      (window.KMLHeatmap.calculateFilteredStatistics as any).mockReturnValue(
+        stats
+      );
 
       wrappedManager.showWrapped();
 
       expect(generateStatsHtml).toHaveBeenCalledWith(
         expect.anything(),
-        mockApp.fullStats,
+        stats,
         true
       );
     });
 
     it("calls generateStatsHtml with hasTimingData=false when max_groundspeed_knots is 0", () => {
-      mockApp.fullStats = {
+      const stats = {
+        ...defaultFilteredStats,
         max_groundspeed_knots: 0,
-        max_altitude_m: 3000,
-      } as FilteredStatistics;
+      };
+      (window.KMLHeatmap.calculateFilteredStatistics as any).mockReturnValue(
+        stats
+      );
 
       wrappedManager.showWrapped();
 
       expect(generateStatsHtml).toHaveBeenCalledWith(
         expect.anything(),
-        mockApp.fullStats,
+        stats,
         false
       );
     });
 
     it("calls generateStatsHtml with hasTimingData=false when max_groundspeed_knots is undefined", () => {
-      mockApp.fullStats = {
-        max_altitude_m: 3000,
-      } as FilteredStatistics;
+      const stats = {
+        ...defaultFilteredStats,
+        max_groundspeed_knots: undefined,
+      };
+      (window.KMLHeatmap.calculateFilteredStatistics as any).mockReturnValue(
+        stats
+      );
 
       wrappedManager.showWrapped();
 
       expect(generateStatsHtml).toHaveBeenCalledWith(
         expect.anything(),
-        mockApp.fullStats,
+        stats,
         false
       );
     });
 
-    it("calls generateStatsHtml with hasTimingData=false when fullStats is null", () => {
+    it("calls generateStatsHtml with filtered stats even when fullStats is null", () => {
       mockApp.fullStats = null;
+      const stats = { ...defaultFilteredStats };
+      (window.KMLHeatmap.calculateFilteredStatistics as any).mockReturnValue(
+        stats
+      );
 
       wrappedManager.showWrapped();
 
       expect(generateStatsHtml).toHaveBeenCalledWith(
         expect.anything(),
-        null,
-        false
+        stats,
+        true
       );
     });
 

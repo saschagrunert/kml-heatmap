@@ -79,7 +79,8 @@ export function calculateYearStats(
   pathInfo: PathInfo[] | null,
   segments: PathSegment[],
   year: number | string,
-  fullStats: FullStats | null = null
+  fullStats: FullStats | null = null,
+  aircraft: string = "all"
 ): YearStats {
   // Handle null or empty pathInfo
   if (!pathInfo || pathInfo.length === 0) {
@@ -93,13 +94,14 @@ export function calculateYearStats(
     };
   }
 
-  // Filter paths by year
-  // Convert year to number for comparison since path.year is a number
+  // Filter paths by year and aircraft
   const yearNum = year === "all" ? "all" : Number(year);
-  const filteredPaths =
-    yearNum === "all"
-      ? pathInfo
-      : pathInfo.filter((path) => path.year === yearNum);
+  const filteredPaths = pathInfo.filter((path) => {
+    if (yearNum !== "all" && path.year !== yearNum) return false;
+    if (aircraft !== "all" && path.aircraft_registration !== aircraft)
+      return false;
+    return true;
+  });
 
   // Handle no matching paths
   if (filteredPaths.length === 0) {
