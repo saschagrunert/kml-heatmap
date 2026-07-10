@@ -92,7 +92,11 @@ examples:
             aircraft_file = candidate
             logger.info(f"Using aircraft data from {aircraft_file}")
 
+    from .obfuscate import obfuscate_kml_file
     from .renderer import create_progressive_heatmap
+
+    for f in kml_files:
+        obfuscate_kml_file(Path(f))
 
     success = create_progressive_heatmap(
         kml_files, output_file, data_dir, aircraft_file=aircraft_file
