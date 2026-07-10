@@ -1,5 +1,6 @@
 .PHONY: all build serve test-image test lint format clean
 .PHONY: lint-local format-local test-local verify
+.PHONY: check-obfuscation
 
 STADIA_API_KEY ?=
 OPENAIP_API_KEY ?=
@@ -52,6 +53,9 @@ test-local:
 
 verify: build
 	git diff --exit-code $(OUTPUT_DIR)/
+
+check-obfuscation:
+	python -m kml_heatmap.obfuscate $(INPUT_DIR) --check
 
 clean:
 	$(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) $(IMAGE_NAME)-test 2>/dev/null || true
