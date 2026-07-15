@@ -17,19 +17,16 @@ const isWatch = process.argv.includes("--watch");
 const isDevelopment = process.env.NODE_ENV === "development" || isWatch;
 const minify = !isDevelopment;
 
-// Build KMLHeatmap library - IIFE format for file:// protocol compatibility
-const libraryBuildOptions = {
-  entryPoints: [join(__dirname, "kml_heatmap/frontend/main.ts")],
+// Shared build options for IIFE format bundles (file:// protocol compatible)
+const sharedBuildOptions = {
   bundle: true,
   format: "iife",
-  globalName: "KMLHeatmapModules",
-  outfile: join(__dirname, "kml_heatmap/static/bundle.js"),
   sourcemap: isDevelopment,
   target: ["es2020"],
   platform: "browser",
   logLevel: "info",
   minify,
-  metafile: true, // Enable metafile for analysis
+  metafile: true,
 
   // Advanced minification options
   minifyWhitespace: !isDevelopment,
@@ -44,6 +41,14 @@ const libraryBuildOptions = {
 
   // Enable mangling for smaller identifiers
   mangleProps: isDevelopment ? undefined : /^_/,
+};
+
+// Build KMLHeatmap library
+const libraryBuildOptions = {
+  ...sharedBuildOptions,
+  entryPoints: [join(__dirname, "kml_heatmap/frontend/main.ts")],
+  globalName: "KMLHeatmapModules",
+  outfile: join(__dirname, "kml_heatmap/static/bundle.js"),
 };
 
 // Plugin to replace Leaflet import with global L variable
@@ -61,34 +66,13 @@ const leafletGlobalPlugin = {
   },
 };
 
-// Build MapApp - IIFE format for file:// protocol compatibility
+// Build MapApp
 const appBuildOptions = {
+  ...sharedBuildOptions,
   entryPoints: [join(__dirname, "kml_heatmap/frontend/mapApp.ts")],
-  bundle: true,
-  format: "iife",
   globalName: "MapAppModule",
   outfile: join(__dirname, "kml_heatmap/static/mapApp.bundle.js"),
-  sourcemap: isDevelopment,
-  target: ["es2020"],
-  platform: "browser",
-  logLevel: "info",
-  minify,
   plugins: [leafletGlobalPlugin],
-  metafile: true, // Enable metafile for analysis
-
-  // Advanced minification options
-  minifyWhitespace: !isDevelopment,
-  minifyIdentifiers: !isDevelopment,
-  minifySyntax: !isDevelopment,
-
-  // Tree shaking
-  treeShaking: true,
-
-  // Don't drop console statements - they are guarded by debug flags in code
-  drop: isDevelopment ? [] : ["debugger"],
-
-  // Enable mangling for smaller identifiers
-  mangleProps: isDevelopment ? undefined : /^_/,
 };
 
 /**

@@ -3,12 +3,13 @@
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .aircraft import parse_aircraft_from_filename
 from .airport_lookup import standardize_airport_name
 from .kml_parsers import validate_and_normalize_coordinate
 from .logger import logger
+from .types import PathMetadata
 from .constants import (
     MID_FLIGHT_MIN_ALTITUDE_M,
     MID_FLIGHT_MAX_VARIATION_M,
@@ -24,16 +25,8 @@ DATE_PATTERN = re.compile(r"(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
 YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
 
 
-def extract_year_from_timestamp(timestamp: Optional[str]) -> Optional[int]:
-    """Extract year from timestamp string.
-
-    Args:
-        timestamp: Timestamp string in ISO format (e.g., "2025-03-03T08:58:01Z")
-                   or other date formats
-
-    Returns:
-        Year as integer, or None if extraction fails
-    """
+def extract_year_from_timestamp(timestamp: str | None) -> int | None:
+    """Extract year from a timestamp string."""
     if not timestamp:
         return None
 
@@ -53,18 +46,9 @@ def extract_year_from_timestamp(timestamp: Optional[str]) -> Optional[int]:
 
 
 def sample_path_altitudes(
-    path: List[List[float]], from_end: bool = False
-) -> Optional[Dict[str, float]]:
-    """
-    Extract altitude statistics from a path sample.
-
-    Args:
-        path: List of [lat, lon, alt] coordinates
-        from_end: If True, sample from end of path; otherwise from start
-
-    Returns:
-        Dict with 'min', 'max', 'variation' keys, or None if sample too small
-    """
+    path: list[list[float]], from_end: bool = False
+) -> dict[str, float] | None:
+    """Extract altitude statistics from a path sample."""
     if len(path) <= 10:
         return None
 
@@ -78,23 +62,9 @@ def sample_path_altitudes(
 
 
 def is_mid_flight_start(
-    path: List[List[float]], start_alt: float, debug: bool = False
+    path: list[list[float]], start_alt: float, debug: bool = False
 ) -> bool:
-    """
-    Detect if a path started mid-flight by analyzing altitude patterns.
-
-    A mid-flight start is characterized by:
-    1. Starting at altitude (> MID_FLIGHT_MIN_ALTITUDE) AND
-    2. NOT descending/ascending significantly in the first part of the path
-
-    Args:
-        path: List of [lat, lon, alt] coordinates
-        start_alt: Starting altitude in meters
-        debug: Enable debug output
-
-    Returns:
-        bool: True if this is a mid-flight start
-    """
+    """Detect if a path started mid-flight by analyzing altitude patterns."""
     sample = sample_path_altitudes(path, from_end=False)
     if not sample:
         return False
@@ -116,21 +86,9 @@ def is_mid_flight_start(
 
 
 def is_valid_landing(
-    path: List[List[float]], end_alt: float, debug: bool = False
+    path: list[list[float]], end_alt: float, debug: bool = False
 ) -> bool:
-    """
-    Check if a path ends with a valid landing.
-
-    A valid landing shows descent or stable low altitude at the end.
-
-    Args:
-        path: List of [lat, lon, alt] coordinates
-        end_alt: Ending altitude in meters
-        debug: Enable debug output
-
-    Returns:
-        bool: True if this is a valid landing
-    """
+    """Check if a path ends with a valid landing."""
     sample = sample_path_altitudes(path, from_end=True)
     if not sample:
         # Short path, just accept if altitude seems reasonable
@@ -146,17 +104,8 @@ def is_valid_landing(
 
 def parse_coordinate_point(
     point: str, kml_file: str
-) -> Optional[Tuple[float, float, Optional[float]]]:
-    """
-    Parse a single coordinate point from KML format.
-
-    Args:
-        point: Coordinate string in format "lon,lat,alt" or "lon,lat"
-        kml_file: Path to KML file (for error messages)
-
-    Returns:
-        Tuple of (lat, lon, alt) or None if invalid
-    """
+) -> tuple[float, float, float | None] | None:
+    """Parse a single coordinate point from KML format."""
     point = point.strip()
     if not point:
         return None
@@ -178,20 +127,9 @@ def parse_coordinate_point(
 
 
 def find_xml_element(
-    parent: Any, namespaced_path: str, fallback_path: str, namespaces: Dict[str, str]
-) -> Optional[Any]:
-    """
-    Find XML element trying namespaced path first, then fallback without namespace.
-
-    Args:
-        parent: Parent XML element to search within
-        namespaced_path: XPath with namespace prefix (e.g., './/kml:name')
-        fallback_path: XPath without namespace (e.g., './/name')
-        namespaces: XML namespace dict
-
-    Returns:
-        Found XML element or None
-    """
+    parent: Any, namespaced_path: str, fallback_path: str, namespaces: dict[str, str]
+) -> Any | None:
+    """Find XML element trying namespaced path first, then fallback."""
     elem = parent.find(namespaced_path, namespaces)
     if elem is None:
         elem = parent.find(fallback_path)
@@ -199,39 +137,17 @@ def find_xml_element(
 
 
 def find_xml_elements(
-    parent: Any, namespaced_path: str, fallback_path: str, namespaces: Dict[str, str]
-) -> List[Any]:
-    """
-    Find XML elements trying namespaced path first, then fallback without namespace.
-
-    Args:
-        parent: Parent XML element to search within
-        namespaced_path: XPath with namespace prefix (e.g., './/kml:when')
-        fallback_path: XPath without namespace (e.g., './/when')
-        namespaces: XML namespace dict
-
-    Returns:
-        List of found XML elements (empty list if none found)
-    """
-    elems: List[Any] = parent.findall(namespaced_path, namespaces)
+    parent: Any, namespaced_path: str, fallback_path: str, namespaces: dict[str, str]
+) -> list[Any]:
+    """Find XML elements trying namespaced path first, then fallback."""
+    elems: list[Any] = parent.findall(namespaced_path, namespaces)
     if not elems:
         elems = parent.findall(fallback_path)
     return elems
 
 
-def extract_charterware_timestamp(description: str) -> Optional[str]:
-    """
-    Extract timestamp from Charterware description field.
-
-    Example: "Flight Jan 12 2026 03:01PM path of OE-AKI"
-    Returns ISO-format timestamp like "2026-01-12T15:01:00Z"
-
-    Args:
-        description: Description text from Charterware KML
-
-    Returns:
-        ISO-format timestamp or None if extraction fails
-    """
+def extract_charterware_timestamp(description: str) -> str | None:
+    """Extract timestamp from Charterware description field."""
     if not description:
         return None
 
@@ -269,19 +185,9 @@ def extract_charterware_timestamp(description: str) -> Optional[str]:
 
 
 def extract_placemark_metadata(
-    placemark: Any, namespaces: Dict[str, str], kml_file: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Extract metadata from a KML Placemark element.
-
-    Args:
-        placemark: XML element representing a Placemark
-        namespaces: XML namespace dict
-        kml_file: Optional KML filename (unused, kept for backward compatibility)
-
-    Returns:
-        Dict with 'airport_name', 'timestamp', 'end_timestamp', 'year' keys
-    """
+    placemark: Any, namespaces: dict[str, str], kml_file: str | None = None
+) -> dict[str, Any]:
+    """Extract metadata from a KML Placemark element."""
     # Extract name from KML
     name_elem = find_xml_element(placemark, ".//kml:name", ".//name", namespaces)
     kml_name = (
@@ -338,24 +244,12 @@ def extract_placemark_metadata(
 
 def _build_path_metadata_dict(
     kml_file: str,
-    path_start: List[float],
-    airport_name: Optional[str],
-    timestamp: Optional[str],
-    end_timestamp: Optional[str],
-) -> Dict[str, Any]:
-    """
-    Build path metadata dictionary.
-
-    Args:
-        kml_file: Path to KML file
-        path_start: First coordinate of path [lat, lon, alt]
-        airport_name: Airport name from metadata
-        timestamp: Start timestamp
-        end_timestamp: End timestamp
-
-    Returns:
-        Dict with path metadata
-    """
+    path_start: list[float],
+    airport_name: str | None,
+    timestamp: str | None,
+    end_timestamp: str | None,
+) -> PathMetadata:
+    """Build path metadata dictionary."""
     year = extract_year_from_timestamp(timestamp)
     aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
 
@@ -382,14 +276,14 @@ def _build_path_metadata_dict(
                 # Look up full airport names from ICAO codes
                 airport_name = standardize_airport_name(airport_name)
 
-    meta = {
-        "timestamp": timestamp,
-        "end_timestamp": end_timestamp,
-        "filename": Path(kml_file).name,
-        "start_point": path_start,
-        "airport_name": airport_name,
-        "year": year,
-    }
+    meta: PathMetadata = PathMetadata(
+        start_point=path_start,
+        airport_name=airport_name or "",
+        timestamp=timestamp,
+        end_timestamp=end_timestamp,
+        filename=Path(kml_file).name,
+        year=year,
+    )
 
     # Add aircraft info if available
     if aircraft_info:

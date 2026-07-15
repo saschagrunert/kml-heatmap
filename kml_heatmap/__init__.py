@@ -8,7 +8,8 @@ __version__ = "1.0.0"
 
 # Export key functions
 from .geometry import haversine_distance, get_altitude_color
-from .parser import parse_kml_coordinates, is_mid_flight_start, is_valid_landing
+from .parser import parse_kml_coordinates
+from .parser_common import is_mid_flight_start, is_valid_landing
 from .aircraft import lookup_aircraft_model, parse_aircraft_from_filename
 from .airports import deduplicate_airports, extract_airport_name
 from .statistics import calculate_statistics

@@ -1,24 +1,22 @@
-"""Unified cache directory management for kml-heatmap.
+"""Unified cache directory management for kml-heatmap."""
 
-This module provides a centralized cache directory configuration
-for all caching needs (airports, aircraft, KML parsing, etc.),
-and a file-lock helper for safe concurrent cache access.
-"""
-
-import fcntl
 import json
 import os
 import tempfile
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None  # type: ignore[assignment]
 
 from .logger import logger
 
 __all__ = ["CACHE_DIR", "atomic_json_write", "locked_json_read_write"]
 
-# Unified cache directory for all kml-heatmap data
-# Use environment variable during testing to avoid writing to user's actual cache
 if "KML_HEATMAP_TEST_CACHE" in os.environ:
     CACHE_DIR = Path(os.environ["KML_HEATMAP_TEST_CACHE"])
 else:
@@ -26,13 +24,7 @@ else:
 
 
 def atomic_json_write(path: Path, data: Any, directory: Path) -> None:
-    """Write JSON data to a file atomically using temp-file + rename.
-
-    Args:
-        path: Destination file path.
-        data: JSON-serializable data.
-        directory: Directory for the temporary file (should be same filesystem).
-    """
+    """Write JSON data to a file atomically using temp-file + rename."""
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -58,29 +50,37 @@ def locked_json_read_write(
 
     Yields a tuple of (data_dict, existed) where data_dict is the current
     contents (empty dict if file doesn't exist) and existed indicates whether
-    the file was present. The caller mutates data_dict in place; on exit the
-    updated dict is written back atomically.
-
-    Args:
-        path: Path to the JSON cache file.
-
-    Yields:
-        Tuple of (dict, bool) — the cache data and whether the file existed.
+    the file was present.
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
-        # Can't create cache directory — yield empty data and skip writing
         yield {}, False
         return
 
     lock_path = path.with_suffix(path.suffix + ".lock")
 
+    if fcntl is None:  # pragma: no cover
+        # Windows fallback: no file locking, concurrent processes may corrupt the cache
+        data: dict = {}
+        existed = False
+        if path.exists():
+            try:
+                with open(path, "r") as f:
+                    data = json.load(f)
+                existed = True
+            except (json.JSONDecodeError, OSError):
+                data = {}
+
+        yield data, existed
+        atomic_json_write(path, data, path.parent)
+        return
+
     lock_fd = open(lock_path, "w")
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
-        data: dict = {}
+        data = {}
         existed = False
         if path.exists():
             try:

@@ -11,7 +11,6 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
 
 WHEN_PATTERN = re.compile(r"(<when>)([^<]+)(</when>)")
 
@@ -23,7 +22,7 @@ CHECK_NAME_DATE_PATTERN = re.compile(
 )
 
 
-def _parse_timestamp(ts_str: str) -> Optional[datetime]:
+def _parse_timestamp(ts_str: str) -> datetime | None:
     """Parse an ISO 8601 timestamp, handling Z suffix and high precision."""
     ts_str = ts_str.strip()
     if not ts_str or "T" not in ts_str:
@@ -58,7 +57,7 @@ def _is_already_obfuscated(first_dt: datetime, content: str) -> bool:
     return True
 
 
-def obfuscate_kml_content(content: str) -> Optional[str]:
+def obfuscate_kml_content(content: str) -> str | None:
     """Obfuscate timestamps in KML content string.
 
     Returns the obfuscated content, or None if already obfuscated or no
@@ -125,12 +124,12 @@ def obfuscate_kml_directory(directory: Path) -> int:
     return modified
 
 
-def check_kml_obfuscated(filepath: Path) -> List[str]:
+def check_kml_obfuscated(filepath: Path) -> list[str]:
     """Check if a KML file is properly obfuscated.
 
     Returns a list of violation descriptions (empty means the file is clean).
     """
-    violations: List[str] = []
+    violations: list[str] = []
     content = filepath.read_text(encoding="utf-8")
 
     for match in CHECK_NAME_DATE_PATTERN.finditer(content):
@@ -147,13 +146,13 @@ def check_kml_obfuscated(filepath: Path) -> List[str]:
     return violations
 
 
-def check_directory_obfuscated(directory: Path) -> Dict[str, List[str]]:
+def check_directory_obfuscated(directory: Path) -> dict[str, list[str]]:
     """Check all KML files in a directory for obfuscation violations.
 
     Returns a dict mapping filenames to their violations (only files
     with violations are included).
     """
-    results: Dict[str, List[str]] = {}
+    results: dict[str, list[str]] = {}
     for kml_file in sorted(directory.glob("*.kml")):
         violations = check_kml_obfuscated(kml_file)
         if violations:

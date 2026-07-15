@@ -1,63 +1,9 @@
-"""Helper functions for common operations.
+"""Helper functions for common operations."""
 
-This module provides reusable utility functions that are used across
-multiple modules to reduce code duplication and maintain consistency.
-
-Functions Overview:
--------------------
-
-parse_iso_timestamp(timestamp_str)
-    Parse ISO 8601 timestamp strings into datetime objects.
-    Handles various formats including Zulu time (Z suffix) and timezone offsets.
-
-    Example:
-        >>> dt = parse_iso_timestamp("2025-03-15T14:30:00Z")
-        >>> dt.year, dt.month, dt.day
-        (2025, 3, 15)
-
-calculate_duration_seconds(start_timestamp, end_timestamp)
-    Calculate duration in seconds between two ISO timestamps.
-    Returns None if either timestamp is invalid.
-
-    Example:
-        >>> duration = calculate_duration_seconds(
-        ...     "2025-03-15T14:00:00Z",
-        ...     "2025-03-15T16:30:00Z"
-        ... )
-        >>> duration  # 2.5 hours = 9000 seconds
-        9000
-
-format_flight_time(total_seconds)
-    Format duration as human-readable string (e.g., "2h 30m").
-
-    Example:
-        >>> format_flight_time(9000)
-        '2h 30m'
-        >>> format_flight_time(45)
-        '45s'
-
-parse_coordinates_from_string(coord_str)
-    Parse coordinate string in KML format (lon,lat,alt or lon,lat).
-    Returns tuple of (lat, lon, alt) with altitude optional.
-
-    Example:
-        >>> lat, lon, alt = parse_coordinates_from_string("8.5,50.0,300")
-        >>> lat, lon, alt
-        (50.0, 8.5, 300.0)
-
-Design Principles:
-------------------
-- Type-safe with comprehensive type hints
-- Robust error handling (returns None on failure)
-- Pure functions without side effects
-- No external dependencies beyond stdlib
-- Consistent naming and parameter order
-"""
-
-import os
 import re
 from datetime import datetime
-from typing import Optional, Tuple
+from pathlib import Path
+
 from .constants import SECONDS_PER_HOUR
 
 __all__ = [
@@ -69,16 +15,8 @@ __all__ = [
 ]
 
 
-def parse_iso_timestamp(timestamp_str: str) -> Optional[datetime]:
-    """
-    Parse ISO format timestamp string to datetime object.
-
-    Args:
-        timestamp_str: Timestamp string in ISO format (e.g., "2025-03-03T08:58:01Z")
-
-    Returns:
-        datetime object or None if parsing fails
-    """
+def parse_iso_timestamp(timestamp_str: str) -> datetime | None:
+    """Parse ISO format timestamp string to datetime object."""
     if not timestamp_str or "T" not in timestamp_str:
         return None
 
@@ -89,18 +27,9 @@ def parse_iso_timestamp(timestamp_str: str) -> Optional[datetime]:
 
 
 def calculate_duration_seconds(
-    start_timestamp: Optional[str], end_timestamp: Optional[str]
+    start_timestamp: str | None, end_timestamp: str | None
 ) -> float:
-    """
-    Calculate duration in seconds between two ISO timestamp strings.
-
-    Args:
-        start_timestamp: Start time in ISO format
-        end_timestamp: End time in ISO format
-
-    Returns:
-        Duration in seconds, or 0 if parsing fails
-    """
+    """Calculate duration in seconds between two ISO timestamp strings."""
     if not start_timestamp or not end_timestamp:
         return 0.0
 
@@ -114,15 +43,7 @@ def calculate_duration_seconds(
 
 
 def format_flight_time(seconds: float) -> str:
-    """
-    Format flight time in seconds to human-readable string.
-
-    Args:
-        seconds: Time in seconds
-
-    Returns:
-        Formatted string like "2h 15m" or "45m"
-    """
+    """Format flight time in seconds to human-readable string."""
     if seconds <= 0:
         return "---"
 
@@ -136,7 +57,7 @@ def format_flight_time(seconds: float) -> str:
 
 def numeric_filename_key(path: str) -> tuple[int, int, str]:
     """Sort key that orders files numerically by leading digits in the filename."""
-    name = os.path.basename(path)
+    name = Path(path).name
     match = re.match(r"(\d+)", name)
     if match:
         return (0, int(match.group(1)), name)
@@ -145,16 +66,8 @@ def numeric_filename_key(path: str) -> tuple[int, int, str]:
 
 def parse_coordinates_from_string(
     coord_str: str,
-) -> Optional[Tuple[float, float, Optional[float]]]:
-    """
-    Parse coordinate string in KML format.
-
-    Args:
-        coord_str: Coordinate string like "lon,lat,alt" or "lon,lat"
-
-    Returns:
-        Tuple of (lat, lon, alt) where alt may be None, or None if parsing fails
-    """
+) -> tuple[float, float, float | None] | None:
+    """Parse coordinate string in KML format (lon,lat,alt or lon,lat)."""
     if not coord_str:
         return None
 

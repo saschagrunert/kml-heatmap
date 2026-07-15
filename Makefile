@@ -4,7 +4,7 @@
 
 STADIA_API_KEY ?=
 OPENAIP_API_KEY ?=
-CONTAINER_RUNTIME ?= docker
+CONTAINER_RUNTIME ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
 INPUT_DIR ?= data
 
 OUTPUT_DIR ?= docs

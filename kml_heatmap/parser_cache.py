@@ -2,26 +2,18 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
 from .cache import CACHE_DIR, atomic_json_write
+from .types import PathMetadata
 
 # KML parse cache subdirectory
 KML_CACHE_DIR = CACHE_DIR / "kml"
 
 
 def get_cache_key(
-    kml_file: str, cache_dir: Optional[Path] = None
-) -> Tuple[Optional[Path], bool]:
-    """Generate cache key based on file path and modification time.
-
-    Args:
-        kml_file: Path to KML file
-        cache_dir: Cache directory override (defaults to KML_CACHE_DIR)
-
-    Returns:
-        Tuple of (cache_path, is_valid) where is_valid indicates if cached data can be used
-    """
+    kml_file: str, cache_dir: Path | None = None
+) -> tuple[Path | None, bool]:
+    """Generate cache key based on file path and modification time."""
     if cache_dir is None:
         cache_dir = KML_CACHE_DIR
 
@@ -57,15 +49,8 @@ def get_cache_key(
 
 def load_cached_parse(
     cache_path: Path,
-) -> Optional[Tuple[List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]]:
-    """Load cached parse results.
-
-    Args:
-        cache_path: Path to cache file
-
-    Returns:
-        Tuple of (coordinates, path_groups, path_metadata) or None if cache invalid
-    """
+) -> tuple[list[list[float]], list[list[list[float]]], list[PathMetadata]] | None:
+    """Load cached parse results, or None if cache is invalid."""
     try:
         with open(cache_path, "r") as f:
             cached = json.load(f)
@@ -76,20 +61,12 @@ def load_cached_parse(
 
 def save_to_cache(
     cache_path: Path,
-    coordinates: List[List[float]],
-    path_groups: List[List[List[float]]],
-    path_metadata: List[Dict[str, Any]],
-    cache_dir: Optional[Path] = None,
+    coordinates: list[list[float]],
+    path_groups: list[list[list[float]]],
+    path_metadata: list[PathMetadata],
+    cache_dir: Path | None = None,
 ) -> None:
-    """Save parse results to cache.
-
-    Args:
-        cache_path: Path to cache file
-        coordinates: List of coordinates
-        path_groups: List of path groups
-        path_metadata: List of path metadata dicts
-        cache_dir: Cache directory override (defaults to KML_CACHE_DIR)
-    """
+    """Save parse results to cache."""
     if cache_dir is None:
         cache_dir = KML_CACHE_DIR
 

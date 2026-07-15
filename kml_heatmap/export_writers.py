@@ -1,36 +1,27 @@
 """Airport and metadata export writers."""
 
-import math
-import os
 import json
-from typing import Any, Dict, List, Optional, Tuple
+import math
+from pathlib import Path
+from typing import Any
 
 from .airports import extract_airport_name
-from .logger import logger
 from .constants import HEATMAP_GRADIENT
+from .logger import logger
+from .types import AirportData, PathMetadata, Statistics
 
 
 def export_airports_data(
-    unique_airports: List[Dict[str, Any]],
+    unique_airports: list[AirportData],
     output_dir: str,
     strip_timestamps: bool = False,
-) -> Tuple[str, int]:
-    """
-    Export airport data to JSON file.
-
-    Args:
-        unique_airports: List of airport dictionaries
-        output_dir: Output directory
-        strip_timestamps: Whether to strip timestamps for privacy
-
-    Returns:
-        Tuple of (output_file_path, file_size_bytes)
-    """
+) -> tuple[str, int]:
+    """Export airport data to JSON file."""
     valid_airports = []
-    seen_locations = set()
+    seen_locations: set[str] = set()
 
     for apt in unique_airports:
-        full_name = apt.get("name", "Unknown")
+        full_name = apt.get("name") or "Unknown"
         is_at_path_end = apt.get("is_at_path_end", False)
         airport_name = extract_airport_name(full_name, is_at_path_end)
 
@@ -44,27 +35,27 @@ def export_airports_data(
 
         seen_locations.add(location_key)
 
-        airport_data = {
+        airport_data: dict[str, Any] = {
             "lat": apt["lat"],
             "lon": apt["lon"],
             "name": airport_name,
-            "flight_count": len(apt["timestamps"]) if apt["timestamps"] else 1,
+            "flight_count": len(apt["timestamps"]) if apt.get("timestamps") else 1,
         }
 
         if not strip_timestamps:
-            airport_data["timestamps"] = apt["timestamps"]
+            airport_data["timestamps"] = apt.get("timestamps", [])
 
         valid_airports.append(airport_data)
 
     airports_data = {"airports": valid_airports}
-    airports_file = os.path.join(output_dir, "airports.js")
+    airports_file = str(Path(output_dir) / "airports.js")
 
     with open(airports_file, "w") as f:
         f.write("window.KML_AIRPORTS = ")
         json.dump(airports_data, f, separators=(",", ":"), sort_keys=True)
         f.write(";")
 
-    file_size = os.path.getsize(airports_file)
+    file_size = Path(airports_file).stat().st_size
 
     logger.info(
         f"  ✓ Airports: {len(valid_airports)} locations ({file_size / 1024:.1f} KB)"
@@ -74,37 +65,22 @@ def export_airports_data(
 
 
 def export_metadata(
-    stats: Dict[str, Any],
+    stats: Statistics,
     min_alt_m: float,
     max_alt_m: float,
     min_groundspeed_knots: float,
     max_groundspeed_knots: float,
-    available_years: List[int],
+    available_years: list[int],
     output_dir: str,
-    file_structure: Optional[Dict[str, Any]] = None,
-) -> Tuple[str, int]:
-    """
-    Export metadata including statistics and ranges.
-
-    Args:
-        stats: Statistics dictionary
-        min_alt_m: Minimum altitude in meters
-        max_alt_m: Maximum altitude in meters
-        min_groundspeed_knots: Minimum groundspeed
-        max_groundspeed_knots: Maximum groundspeed
-        available_years: List of available years
-        output_dir: Output directory
-        file_structure: File structure mapping (year -> resolution list)
-
-    Returns:
-        Tuple of (output_file_path, file_size_bytes)
-    """
+    file_structure: dict[str, Any] | None = None,
+) -> tuple[str, int]:
+    """Export metadata including statistics and ranges."""
     if not math.isfinite(min_groundspeed_knots):
         min_groundspeed_knots = 0.0
     if not math.isfinite(max_groundspeed_knots):
         max_groundspeed_knots = 0.0
 
-    meta_data = {
+    meta_data: dict[str, Any] = {
         "stats": stats,
         "min_alt_m": min_alt_m,
         "max_alt_m": max_alt_m,
@@ -117,31 +93,23 @@ def export_metadata(
     if file_structure is not None:
         meta_data["file_structure"] = file_structure
 
-    meta_file = os.path.join(output_dir, "metadata.js")
+    meta_file = str(Path(output_dir) / "metadata.js")
 
     with open(meta_file, "w") as f:
         f.write("window.KML_METADATA = ")
         json.dump(meta_data, f, separators=(",", ":"), sort_keys=True)
         f.write(";")
 
-    file_size = os.path.getsize(meta_file)
+    file_size = Path(meta_file).stat().st_size
 
     logger.info(f"  ✓ Metadata: {file_size / 1024:.1f} KB")
 
     return meta_file, file_size
 
 
-def collect_unique_years(all_path_metadata: List[Dict[str, Any]]) -> List[int]:
-    """
-    Collect unique years from path metadata.
-
-    Args:
-        all_path_metadata: List of path metadata dictionaries
-
-    Returns:
-        Sorted list of unique years
-    """
-    unique_years = set()
+def collect_unique_years(all_path_metadata: list[PathMetadata]) -> list[int]:
+    """Collect unique years from path metadata."""
+    unique_years: set[int] = set()
 
     for meta in all_path_metadata:
         year = meta.get("year")

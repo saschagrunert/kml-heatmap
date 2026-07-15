@@ -5,14 +5,16 @@ import tempfile
 import os
 from pathlib import Path
 from kml_heatmap.parser import (
+    get_cache_key,
+    save_to_cache,
+)
+from kml_heatmap.parser_cache import load_cached_parse
+from kml_heatmap.parser_common import (
     extract_year_from_timestamp,
     sample_path_altitudes,
     is_mid_flight_start,
     is_valid_landing,
     parse_coordinate_point,
-    get_cache_key,
-    load_cached_parse,
-    save_to_cache,
     extract_charterware_timestamp,
 )
 
@@ -349,7 +351,7 @@ class TestFindXmlElement:
 
     def test_find_with_namespace(self):
         """Test finding element with namespace."""
-        from kml_heatmap.parser import find_xml_element
+        from kml_heatmap.parser_common import find_xml_element
         from xml.etree import ElementTree as ET
 
         xml = """<root xmlns:kml="http://test.com"><kml:name>Test</kml:name></root>"""
@@ -362,7 +364,7 @@ class TestFindXmlElement:
 
     def test_find_with_fallback(self):
         """Test finding element using fallback path."""
-        from kml_heatmap.parser import find_xml_element
+        from kml_heatmap.parser_common import find_xml_element
         from xml.etree import ElementTree as ET
 
         xml = """<root><name>Test</name></root>"""
@@ -375,7 +377,7 @@ class TestFindXmlElement:
 
     def test_find_element_not_found(self):
         """Test when element is not found."""
-        from kml_heatmap.parser import find_xml_element
+        from kml_heatmap.parser_common import find_xml_element
         from xml.etree import ElementTree as ET
 
         xml = """<root><other>Test</other></root>"""
@@ -391,7 +393,7 @@ class TestFindXmlElements:
 
     def test_find_multiple_with_namespace(self):
         """Test finding multiple elements with namespace."""
-        from kml_heatmap.parser import find_xml_elements
+        from kml_heatmap.parser_common import find_xml_elements
         from xml.etree import ElementTree as ET
 
         xml = """<root xmlns:kml="http://test.com">
@@ -408,7 +410,7 @@ class TestFindXmlElements:
 
     def test_find_multiple_with_fallback(self):
         """Test finding multiple elements using fallback."""
-        from kml_heatmap.parser import find_xml_elements
+        from kml_heatmap.parser_common import find_xml_elements
         from xml.etree import ElementTree as ET
 
         xml = """<root><when>2025-01-01</when><when>2025-01-02</when></root>"""
@@ -420,7 +422,7 @@ class TestFindXmlElements:
 
     def test_find_elements_not_found(self):
         """Test when no elements are found."""
-        from kml_heatmap.parser import find_xml_elements
+        from kml_heatmap.parser_common import find_xml_elements
         from xml.etree import ElementTree as ET
 
         xml = """<root><other>Test</other></root>"""
@@ -436,7 +438,7 @@ class TestExtractPlacemarkMetadata:
 
     def test_extract_with_name_and_timestamp(self):
         """Test extracting metadata with name and timestamp."""
-        from kml_heatmap.parser import extract_placemark_metadata
+        from kml_heatmap.parser_common import extract_placemark_metadata
         from xml.etree import ElementTree as ET
 
         xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2">
@@ -453,7 +455,7 @@ class TestExtractPlacemarkMetadata:
 
     def test_extract_with_multiple_timestamps(self):
         """Test extracting metadata with multiple timestamps."""
-        from kml_heatmap.parser import extract_placemark_metadata
+        from kml_heatmap.parser_common import extract_placemark_metadata
         from xml.etree import ElementTree as ET
 
         xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2">
@@ -469,7 +471,7 @@ class TestExtractPlacemarkMetadata:
 
     def test_extract_timestamp_from_name(self):
         """Test extracting timestamp from name when when element missing."""
-        from kml_heatmap.parser import extract_placemark_metadata
+        from kml_heatmap.parser_common import extract_placemark_metadata
         from xml.etree import ElementTree as ET
 
         xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2">
@@ -485,7 +487,7 @@ class TestExtractPlacemarkMetadata:
 
     def test_extract_no_metadata(self):
         """Test extracting metadata when none exists."""
-        from kml_heatmap.parser import extract_placemark_metadata
+        from kml_heatmap.parser_common import extract_placemark_metadata
         from xml.etree import ElementTree as ET
 
         xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2"></Placemark>"""
@@ -504,7 +506,7 @@ class TestProcessStandardCoordinates:
 
     def test_process_valid_coordinates(self):
         """Test processing valid coordinate elements."""
-        from kml_heatmap.parser import process_standard_coordinates
+        from kml_heatmap.parser_standard import process_standard_coordinates
         from xml.etree import ElementTree as ET
 
         # Create mock coordinate element
@@ -539,7 +541,7 @@ class TestProcessStandardCoordinates:
 
     def test_process_empty_coordinate_element(self):
         """Test processing empty coordinate element."""
-        from kml_heatmap.parser import process_standard_coordinates
+        from kml_heatmap.parser_standard import process_standard_coordinates
         from xml.etree import ElementTree as ET
 
         coord_elem = ET.Element("coordinates")
@@ -564,7 +566,7 @@ class TestProcessStandardCoordinates:
 
     def test_process_none_text_coordinate(self):
         """Test processing coordinate element with None text."""
-        from kml_heatmap.parser import process_standard_coordinates
+        from kml_heatmap.parser_standard import process_standard_coordinates
         from xml.etree import ElementTree as ET
 
         coord_elem = ET.Element("coordinates")
@@ -758,35 +760,35 @@ class TestExtractIcaoCodesFromName:
 
     def test_single_icao_code(self):
         """Test extracting single ICAO code."""
-        from kml_heatmap.parser import extract_icao_codes_from_name
+        from kml_heatmap.airport_lookup import extract_icao_codes_from_name
 
         codes = extract_icao_codes_from_name("EDDF Frankfurt")
         assert codes == ["EDDF"]
 
     def test_multiple_icao_codes(self):
         """Test extracting multiple ICAO codes from route."""
-        from kml_heatmap.parser import extract_icao_codes_from_name
+        from kml_heatmap.airport_lookup import extract_icao_codes_from_name
 
         codes = extract_icao_codes_from_name("EDDF Frankfurt - EDDM Munich")
         assert codes == ["EDDF", "EDDM"]
 
     def test_no_icao_codes(self):
         """Test extracting from text without ICAO codes."""
-        from kml_heatmap.parser import extract_icao_codes_from_name
+        from kml_heatmap.airport_lookup import extract_icao_codes_from_name
 
         codes = extract_icao_codes_from_name("Log Start: 03 Mar 2025")
         assert codes == []
 
     def test_empty_string(self):
         """Test extracting from empty string."""
-        from kml_heatmap.parser import extract_icao_codes_from_name
+        from kml_heatmap.airport_lookup import extract_icao_codes_from_name
 
         codes = extract_icao_codes_from_name("")
         assert codes == []
 
     def test_none_input(self):
         """Test extracting from None."""
-        from kml_heatmap.parser import extract_icao_codes_from_name
+        from kml_heatmap.airport_lookup import extract_icao_codes_from_name
 
         codes = extract_icao_codes_from_name(None)
         assert codes == []
@@ -797,7 +799,7 @@ class TestStandardizeAirportName:
 
     def test_standardize_with_valid_icao(self):
         """Test standardizing airport name with valid ICAO code."""
-        from kml_heatmap.parser import standardize_airport_name
+        from kml_heatmap.airport_lookup import standardize_airport_name
         from unittest.mock import patch
 
         # Mock the airport lookup at the actual import location
@@ -813,7 +815,7 @@ class TestStandardizeAirportName:
 
     def test_standardize_route_format(self):
         """Test standardizing route with two airports."""
-        from kml_heatmap.parser import standardize_airport_name
+        from kml_heatmap.airport_lookup import standardize_airport_name
         from unittest.mock import patch
 
         # Mock the airport lookup at the actual import location
@@ -837,28 +839,28 @@ class TestStandardizeAirportName:
 
     def test_standardize_no_icao_codes(self):
         """Test standardizing name without ICAO codes."""
-        from kml_heatmap.parser import standardize_airport_name
+        from kml_heatmap.airport_lookup import standardize_airport_name
 
         result = standardize_airport_name("Some Airport")
         assert result == "Some Airport"  # Returns original
 
     def test_standardize_none(self):
         """Test standardizing None input."""
-        from kml_heatmap.parser import standardize_airport_name
+        from kml_heatmap.airport_lookup import standardize_airport_name
 
         result = standardize_airport_name(None)
         assert result is None
 
     def test_standardize_empty_string(self):
         """Test standardizing empty string."""
-        from kml_heatmap.parser import standardize_airport_name
+        from kml_heatmap.airport_lookup import standardize_airport_name
 
         result = standardize_airport_name("")
         assert result == ""
 
     def test_standardize_route_only_first_airport_found(self):
         """Test route where only first airport is in database."""
-        from kml_heatmap.parser import standardize_airport_name
+        from kml_heatmap.airport_lookup import standardize_airport_name
         from unittest.mock import patch
 
         with patch(
@@ -878,7 +880,7 @@ class TestStandardizeAirportName:
 
     def test_standardize_route_only_second_airport_found(self):
         """Test route where only second airport is in database."""
-        from kml_heatmap.parser import standardize_airport_name
+        from kml_heatmap.airport_lookup import standardize_airport_name
         from unittest.mock import patch
 
         with patch(
@@ -898,7 +900,7 @@ class TestStandardizeAirportName:
 
     def test_standardize_single_airport(self):
         """Test standardizing single airport name."""
-        from kml_heatmap.parser import standardize_airport_name
+        from kml_heatmap.airport_lookup import standardize_airport_name
         from unittest.mock import patch
 
         with patch(

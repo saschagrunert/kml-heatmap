@@ -1,7 +1,6 @@
 """Command-line interface."""
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -48,13 +47,10 @@ examples:
     # Resolve KML files from paths
     kml_files = []
     for path in args.paths:
-        if os.path.isdir(path):
+        p = Path(path)
+        if p.is_dir():
             dir_kml_files = sorted(
-                (
-                    os.path.join(path, f)
-                    for f in os.listdir(path)
-                    if f.lower().endswith(".kml")
-                ),
+                (str(p / f.name) for f in p.iterdir() if f.suffix.lower() == ".kml"),
                 key=numeric_filename_key,
             )
             if dir_kml_files:
@@ -64,7 +60,7 @@ examples:
                 )
             else:
                 logger.warning(f"No KML files found in directory: {path}")
-        elif os.path.isfile(path):
+        elif p.is_file():
             kml_files.append(path)
         else:
             logger.warning(f"File or directory not found: {path}")
@@ -77,16 +73,17 @@ examples:
     print(f"{'=' * 50}\n")
 
     # Ensure output directory exists
-    os.makedirs(args.output_dir, exist_ok=True)
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
     # Create paths for output files
-    output_file = os.path.join(args.output_dir, "index.html")
-    data_dir = os.path.join(args.output_dir, "data")
+    output_dir = Path(args.output_dir)
+    output_file = str(output_dir / "index.html")
+    data_dir = str(output_dir / "data")
 
     # Detect aircraft.json in the input directory
     aircraft_file = None
     if kml_files:
-        input_dir = Path(os.path.dirname(kml_files[0]))
+        input_dir = Path(kml_files[0]).parent
         candidate = input_dir / "aircraft.json"
         if candidate.exists():
             aircraft_file = candidate

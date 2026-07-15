@@ -1,7 +1,7 @@
 """Google Earth Track (gx:coord) processing."""
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .kml_parsers import validate_and_normalize_coordinate
 from .logger import logger
@@ -10,22 +10,13 @@ from .parser_common import (
     find_xml_elements,
     _build_path_metadata_dict,
 )
+from .types import PathMetadata
 
 
 def _extract_gx_track_metadata(
-    placemarks: List[Any], namespaces: Dict[str, str], kml_file: str
-) -> Dict[str, Optional[str]]:
-    """
-    Extract metadata from gx:Track placemarks.
-
-    Args:
-        placemarks: List of Placemark XML elements
-        namespaces: XML namespace dict
-        kml_file: KML filename for ICAO extraction
-
-    Returns:
-        Dict with 'airport_name', 'timestamp', 'end_timestamp' keys
-    """
+    placemarks: list[Any], namespaces: dict[str, str], kml_file: str
+) -> dict[str, str | None]:
+    """Extract metadata from gx:Track placemarks."""
     for placemark in placemarks:
         # Check if this placemark contains gx:coord elements
         placemark_gx_coords = find_xml_elements(
@@ -55,19 +46,9 @@ def _extract_gx_track_metadata(
 
 
 def _extract_gx_when_elements(
-    placemarks: List[Any], gx_coords: List[Any], namespaces: Dict[str, str]
-) -> List[Any]:
-    """
-    Extract <when> elements that correspond to gx:coord elements.
-
-    Args:
-        placemarks: List of Placemark XML elements
-        gx_coords: List of gx:coord elements
-        namespaces: XML namespace dict
-
-    Returns:
-        List of <when> elements matching gx:coord count
-    """
+    placemarks: list[Any], gx_coords: list[Any], namespaces: dict[str, str]
+) -> list[Any]:
+    """Extract <when> elements that correspond to gx:coord elements."""
     for placemark in placemarks:
         when_elems = find_xml_elements(placemark, ".//kml:when", ".//when", namespaces)
         if when_elems and len(when_elems) == len(gx_coords):
@@ -76,23 +57,12 @@ def _extract_gx_when_elements(
 
 
 def _parse_gx_coordinates(
-    gx_coords: List[Any],
-    when_elems: List[Any],
+    gx_coords: list[Any],
+    when_elems: list[Any],
     kml_file: str,
-    coordinates: List[List[float]],
-) -> List[List[Any]]:
-    """
-    Parse gx:coord elements into path coordinates.
-
-    Args:
-        gx_coords: List of gx:coord XML elements
-        when_elems: List of corresponding <when> timestamp elements
-        kml_file: Path to KML file (for error messages)
-        coordinates: Output list for [lat, lon] pairs
-
-    Returns:
-        List of parsed coordinates with altitude and timestamps
-    """
+    coordinates: list[list[float]],
+) -> list[list[Any]]:
+    """Parse gx:coord elements into path coordinates."""
     gx_path = []
 
     for idx, gx_coord in enumerate(gx_coords):
@@ -142,26 +112,15 @@ def _parse_gx_coordinates(
 
 
 def process_gx_track(
-    gx_coords: List[Any],
-    placemarks: List[Any],
-    namespaces: Dict[str, str],
+    gx_coords: list[Any],
+    placemarks: list[Any],
+    namespaces: dict[str, str],
     kml_file: str,
-    coordinates: List[List[float]],
-    path_groups: List[List[List[float]]],
-    path_metadata: List[Dict[str, Any]],
+    coordinates: list[list[float]],
+    path_groups: list[list[list[float]]],
+    path_metadata: list[PathMetadata],
 ) -> None:
-    """
-    Process Google Earth Track (gx:coord) elements.
-
-    Args:
-        gx_coords: List of gx:coord XML elements
-        placemarks: List of Placemark XML elements
-        namespaces: XML namespace dict
-        kml_file: Path to KML file
-        coordinates: Output list for all [lat, lon] pairs
-        path_groups: Output list for path groups with altitude
-        path_metadata: Output list for path metadata
-    """
+    """Process Google Earth Track (gx:coord) elements."""
     if not gx_coords:
         return
 

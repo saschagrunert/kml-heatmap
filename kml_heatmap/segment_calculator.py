@@ -1,37 +1,11 @@
 """Segment calculation for path data with groundspeed and altitude analysis.
 
-This module handles the complex calculations required for analyzing flight paths:
-
-Key Responsibilities:
-1. Groundspeed Calculation:
-   - Instantaneous speeds from GPS timestamps
-   - Rolling window averages to smooth out GPS noise
-   - Fallback calculations when timestamps are missing
-
-2. Altitude Analysis:
-   - Cruise altitude detection (>1000ft AGL)
-   - Altitude histogram generation
-   - Ground level determination
-
-3. Time-Based Windowing:
-   - Efficient binary search for time windows
-   - Configurable window sizes (default: 2 minutes)
-   - Handles sparse and dense GPS data
-
-Algorithm Overview:
-The groundspeed calculation uses a two-pass approach:
-1. First pass: Calculate instantaneous speeds for all segments
-2. Second pass: Apply rolling window average for smoothing
-
-This approach balances accuracy with performance, handling both:
-- High-frequency GPS data (1 second intervals)
-- Low-frequency data (30+ second intervals)
-
-The windowing system uses binary search on sorted timestamps for O(log n)
-lookups, making it efficient even for paths with thousands of points.
+Groundspeed uses a two-pass approach: instantaneous speeds for all segments,
+then rolling window averages for smoothing. The windowing system uses binary
+search on sorted timestamps for O(log n) lookups.
 """
 
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any
 from datetime import datetime
 from bisect import bisect_left, bisect_right
 
@@ -52,25 +26,17 @@ class SegmentData:
 
     def __init__(self) -> None:
         """Initialize segment data with default values."""
-        self.segments: List[Dict[str, Any]] = []
+        self.segments: list[dict[str, Any]] = []
         self.max_groundspeed_knots: float = 0.0
         self.min_groundspeed_knots: float = float("inf")
         self.cruise_speed_total_distance: float = 0.0
         self.cruise_speed_total_time: float = 0.0
-        self.cruise_altitude_histogram: Dict[int, float] = {}
+        self.cruise_altitude_histogram: dict[int, float] = {}
         self.max_path_distance_nm: float = 0.0
 
 
-def calculate_path_distance(path: List[List[float]]) -> float:
-    """
-    Calculate total distance along a path in kilometers.
-
-    Args:
-        path: List of [lat, lon, alt] or [lat, lon, alt, timestamp] coordinates
-
-    Returns:
-        Total distance in kilometers
-    """
+def calculate_path_distance(path: list[list[float]]) -> float:
+    """Calculate total distance along a path in kilometers."""
     if len(path) < 2:
         return 0.0
 
@@ -84,18 +50,9 @@ def calculate_path_distance(path: List[List[float]]) -> float:
 
 
 def extract_segment_speeds(
-    path: List[List[float | str]], path_start_time: Optional[datetime]
-) -> List[Dict[str, Any]]:
-    """
-    Calculate instantaneous speeds for all segments in a path.
-
-    Args:
-        path: Path coordinates with optional timestamps
-        path_start_time: Start time of the path for relative time calculation
-
-    Returns:
-        List of segment speed data dictionaries
-    """
+    path: list[list[float | str]], path_start_time: datetime | None
+) -> list[dict[str, Any]]:
+    """Calculate instantaneous speeds for all segments in a path."""
     segment_speeds = []
 
     for i in range(len(path) - 1):
@@ -150,17 +107,9 @@ def extract_segment_speeds(
 
 
 def build_time_indexed_segments(
-    segment_speeds: List[Dict[str, Any]],
-) -> Tuple[List[float], List[Dict[str, Any]]]:
-    """
-    Build time-sorted lists for efficient window queries.
-
-    Args:
-        segment_speeds: List of segment speed dictionaries
-
-    Returns:
-        Tuple of (timestamp_list, time_indexed_segments)
-    """
+    segment_speeds: list[dict[str, Any]],
+) -> tuple[list[float], list[dict[str, Any]]]:
+    """Build time-sorted lists for efficient window queries."""
     time_indexed_segments = []
     timestamp_list = []
 
@@ -183,20 +132,10 @@ def build_time_indexed_segments(
 
 def calculate_windowed_groundspeed(
     current_timestamp: datetime,
-    timestamp_list: List[float],
-    time_indexed_segments: List[Dict[str, Any]],
+    timestamp_list: list[float],
+    time_indexed_segments: list[dict[str, Any]],
 ) -> float:
-    """
-    Calculate rolling average groundspeed using a time window.
-
-    Args:
-        current_timestamp: Current segment timestamp
-        timestamp_list: Sorted list of timestamps
-        time_indexed_segments: Corresponding segment data
-
-    Returns:
-        Windowed average groundspeed in knots
-    """
+    """Calculate rolling average groundspeed using a time window."""
     if not timestamp_list:
         return 0.0
 
@@ -228,17 +167,7 @@ def calculate_windowed_groundspeed(
 def calculate_fallback_groundspeed(
     segment_distance_km: float, path_distance_km: float, path_duration_seconds: float
 ) -> float:
-    """
-    Calculate groundspeed from path averages when timestamps are unavailable.
-
-    Args:
-        segment_distance_km: Distance of current segment
-        path_distance_km: Total path distance
-        path_duration_seconds: Total path duration
-
-    Returns:
-        Estimated groundspeed in knots, or 0 if calculation fails
-    """
+    """Calculate groundspeed from path averages when timestamps are unavailable."""
     if path_duration_seconds <= 0 or path_distance_km <= 0:
         return 0.0
 
@@ -262,17 +191,9 @@ def update_cruise_statistics(
     altitude_agl_ft: float,
     window_time: float,
     window_distance: float,
-    cruise_stats: Dict[str, Any],
+    cruise_stats: dict[str, Any],
 ) -> None:
-    """
-    Update cruise speed and altitude statistics.
-
-    Args:
-        altitude_agl_ft: Altitude above ground level in feet
-        window_time: Time window in seconds
-        window_distance: Distance in kilometers
-        cruise_stats: Dictionary to update with cruise statistics
-    """
+    """Update cruise speed and altitude statistics."""
     if altitude_agl_ft <= CRUISE_ALTITUDE_THRESHOLD_FT:
         return
 

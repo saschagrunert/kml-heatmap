@@ -113,7 +113,7 @@ export class StatsManager {
       stats.aircraft_list.length > 0
     ) {
       html +=
-        '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Aircrafts (' +
+        '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Aircraft (' +
         stats.num_aircraft +
         "):</strong><br>";
       stats.aircraft_list.forEach((aircraft) => {
