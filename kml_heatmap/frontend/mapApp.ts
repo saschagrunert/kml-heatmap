@@ -477,71 +477,6 @@ export class MapApp {
       }
     });
   }
-
-  // Expose methods for onclick handlers
-  toggleHeatmap(): void {
-    this.uiToggles.toggleHeatmap();
-  }
-  toggleStats(): void {
-    this.statsManager.toggleStats();
-  }
-  toggleAltitude(): void {
-    this.uiToggles.toggleAltitude();
-  }
-  toggleAirspeed(): void {
-    this.uiToggles.toggleAirspeed();
-  }
-  toggleAirports(): void {
-    this.uiToggles.toggleAirports();
-  }
-  toggleAviation(): void {
-    this.uiToggles.toggleAviation();
-  }
-  toggleReplay(): void {
-    this.replayManager.toggleReplay();
-  }
-  filterByYear(): void {
-    this.filterManager.filterByYear().catch(logError);
-  }
-  filterByAircraft(): void {
-    this.filterManager.filterByAircraft().catch(logError);
-  }
-  togglePathSelection(id: string): void {
-    this.pathSelection.togglePathSelection(Number(id));
-  }
-  exportMap(): void {
-    this.uiToggles.exportMap();
-  }
-  showWrapped(): void {
-    this.wrappedManager.showWrapped();
-  }
-  closeWrapped(e?: MouseEvent): void {
-    this.wrappedManager.closeWrapped(e);
-  }
-  toggleIsolateSelection(): void {
-    this.pathSelection.toggleIsolateSelection();
-  }
-  toggleButtonsVisibility(): void {
-    this.uiToggles.toggleButtonsVisibility();
-  }
-  playReplay(): void {
-    this.replayManager.playReplay();
-  }
-  pauseReplay(): void {
-    this.replayManager.pauseReplay();
-  }
-  stopReplay(): void {
-    this.replayManager.stopReplay();
-  }
-  seekReplay(v: string): void {
-    this.replayManager.seekReplay(v);
-  }
-  changeReplaySpeed(): void {
-    this.replayManager.changeReplaySpeed();
-  }
-  toggleAutoZoom(): void {
-    this.replayManager.toggleAutoZoom();
-  }
 }
 
 /**
@@ -550,27 +485,33 @@ export class MapApp {
  */
 function bindActions(app: MapApp): void {
   const actions: Record<string, (e: Event) => void> = {
-    toggleHeatmap: () => app.toggleHeatmap(),
-    toggleStats: () => app.toggleStats(),
-    toggleAltitude: () => app.toggleAltitude(),
-    toggleAirspeed: () => app.toggleAirspeed(),
-    toggleAirports: () => app.toggleAirports(),
-    toggleAviation: () => app.toggleAviation(),
-    toggleReplay: () => app.toggleReplay(),
-    filterByYear: () => app.filterByYear(),
-    filterByAircraft: () => app.filterByAircraft(),
-    exportMap: () => app.exportMap(),
-    showWrapped: () => app.showWrapped(),
-    closeWrapped: () => app.closeWrapped(),
-    closeWrappedBackdrop: (e) => app.closeWrapped(e as MouseEvent),
-    toggleIsolateSelection: () => app.toggleIsolateSelection(),
-    toggleButtonsVisibility: () => app.toggleButtonsVisibility(),
-    playReplay: () => app.playReplay(),
-    pauseReplay: () => app.pauseReplay(),
-    stopReplay: () => app.stopReplay(),
-    seekReplay: (e) => app.seekReplay((e.target as HTMLInputElement).value),
-    changeReplaySpeed: () => app.changeReplaySpeed(),
-    toggleAutoZoom: () => app.toggleAutoZoom(),
+    toggleHeatmap: () => app.uiToggles.toggleHeatmap(),
+    toggleStats: () => app.statsManager.toggleStats(),
+    toggleAltitude: () => app.uiToggles.toggleAltitude(),
+    toggleAirspeed: () => app.uiToggles.toggleAirspeed(),
+    toggleAirports: () => app.uiToggles.toggleAirports(),
+    toggleAviation: () => app.uiToggles.toggleAviation(),
+    toggleReplay: () => app.replayManager.toggleReplay(),
+    filterByYear: () => {
+      app.filterManager.filterByYear().catch(logError);
+    },
+    filterByAircraft: () => {
+      app.filterManager.filterByAircraft().catch(logError);
+    },
+    exportMap: () => app.uiToggles.exportMap(),
+    showWrapped: () => app.wrappedManager.showWrapped(),
+    closeWrapped: () => app.wrappedManager.closeWrapped(),
+    closeWrappedBackdrop: (e) =>
+      app.wrappedManager.closeWrapped(e as MouseEvent),
+    toggleIsolateSelection: () => app.pathSelection.toggleIsolateSelection(),
+    toggleButtonsVisibility: () => app.uiToggles.toggleButtonsVisibility(),
+    playReplay: () => app.replayManager.playReplay(),
+    pauseReplay: () => app.replayManager.pauseReplay(),
+    stopReplay: () => app.replayManager.stopReplay(),
+    seekReplay: (e) =>
+      app.replayManager.seekReplay((e.target as HTMLInputElement).value),
+    changeReplaySpeed: () => app.replayManager.changeReplaySpeed(),
+    toggleAutoZoom: () => app.replayManager.toggleAutoZoom(),
     stopPropagation: (e) => e.stopPropagation(),
   };
 

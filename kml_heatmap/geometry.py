@@ -20,7 +20,7 @@ Coordinate3D = list[float]  # [lat, lon, alt]
 
 def extract_altitudes(paths: list[list[list[float]]]) -> list[float]:
     """Extract all altitude values from a list of paths."""
-    return [coord[2] for path in paths for coord in path]
+    return [coord[2] for path in paths for coord in path if len(coord) >= 3]
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

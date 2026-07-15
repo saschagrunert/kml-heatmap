@@ -3,6 +3,7 @@
  * Generate year-end statistics and fun facts from flight data
  */
 
+import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
 import { calculateDistance } from "../utils/geometry";
 import { formatFlightTime } from "../utils/formatters";
 import {
@@ -124,7 +125,7 @@ export function calculateYearStats(
       totalDistanceKm += distance;
     }
   });
-  const totalDistanceNm = totalDistanceKm * 0.539957;
+  const totalDistanceNm = totalDistanceKm * KM_TO_NAUTICAL_MILES;
 
   // Calculate flight time
   const totalSeconds = calculateFlightTime(filteredSegments, filteredPaths);

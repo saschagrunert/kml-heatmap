@@ -5,6 +5,7 @@ import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import type { Range } from "../state/store";
 import type { PathInfo, PathSegment } from "../types";
+import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 
@@ -55,7 +56,7 @@ export class LayerManager {
       legendMaxId: "legend-max",
       formatLegend: (value) => {
         const ft = Math.round(value);
-        const m = Math.round(value * 0.3048);
+        const m = Math.round(value * FEET_TO_METERS);
         return ft + " ft (" + m + " m)";
       },
     });
@@ -75,7 +76,7 @@ export class LayerManager {
       legendMaxId: "airspeed-legend-max",
       formatLegend: (value) => {
         const kt = Math.round(value);
-        const kmh = Math.round(value * 1.852);
+        const kmh = Math.round(value * NAUTICAL_MILES_TO_KM);
         return kt + " kt (" + kmh + " km/h)";
       },
     });
@@ -250,7 +251,7 @@ export class LayerManager {
   updateAltitudeLegend(minAlt: number, maxAlt: number): void {
     const format = (value: number) => {
       const ft = Math.round(value);
-      const m = Math.round(value * 0.3048);
+      const m = Math.round(value * FEET_TO_METERS);
       return ft + " ft (" + m + " m)";
     };
     this.updateLegend(minAlt, maxAlt, {
@@ -263,7 +264,7 @@ export class LayerManager {
   updateAirspeedLegend(minSpeed: number, maxSpeed: number): void {
     const format = (value: number) => {
       const kt = Math.round(value);
-      const kmh = Math.round(value * 1.852);
+      const kmh = Math.round(value * NAUTICAL_MILES_TO_KM);
       return kt + " kt (" + kmh + " km/h)";
     };
     this.updateLegend(minSpeed, maxSpeed, {

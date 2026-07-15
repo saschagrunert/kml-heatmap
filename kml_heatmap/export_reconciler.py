@@ -1,6 +1,6 @@
 """Statistics reconciliation from exported segment data."""
 
-from .constants import METERS_TO_FEET
+from .constants import FEET_TO_METERS, METERS_TO_FEET
 from .geometry import haversine_distance
 from .helpers import format_flight_time
 from .types import PathInfo, PathSegment, Statistics
@@ -85,7 +85,7 @@ def _recalculate_stats_from_segments(
             altitude_bins.keys(), key=lambda k: altitude_bins[k]
         )
         stats["most_common_cruise_altitude_m"] = round(
-            stats["most_common_cruise_altitude_ft"] * 0.3048
+            stats["most_common_cruise_altitude_ft"] * FEET_TO_METERS
         )
 
     total_flight_time = 0.0

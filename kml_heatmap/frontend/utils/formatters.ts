@@ -1,6 +1,7 @@
 /**
  * Formatting utility functions
  */
+import { METERS_TO_FEET } from "./constants";
 
 /**
  * Format seconds into human-readable time string
@@ -41,7 +42,7 @@ export function formatDistance(km: number, decimals = 0): string {
  * @returns Formatted altitude (e.g., "10000 ft")
  */
 export function formatAltitude(meters: number): string {
-  const feet = Math.round(meters * 3.28084);
+  const feet = Math.round(meters * METERS_TO_FEET);
   return feet + " ft";
 }
 

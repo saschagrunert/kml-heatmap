@@ -16,7 +16,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, cast
 
-from .constants import DATA_RESOLUTION
+from .constants import (
+    DATA_RESOLUTION,
+    FEET_TO_METERS,
+    NAUTICAL_MILES_TO_KM,
+    SECONDS_PER_HOUR,
+)
 from .export_pipeline import _build_path_info, _process_path_segments
 from .export_reconciler import _recalculate_stats_from_segments
 from .export_writers import export_airports_data, export_metadata, collect_unique_years
@@ -341,7 +346,7 @@ def _finalize_stats(
     if cruise_speed_total_time > 0:
         cruise_speed_knots = (
             cruise_speed_total_distance / cruise_speed_total_time
-        ) * 3600
+        ) * SECONDS_PER_HOUR
         stats["cruise_speed_knots"] = round(cruise_speed_knots, 1)
     else:
         stats["cruise_speed_knots"] = 0
@@ -352,14 +357,14 @@ def _finalize_stats(
         )[0]
         stats["most_common_cruise_altitude_ft"] = most_common_altitude_ft
         stats["most_common_cruise_altitude_m"] = round(
-            most_common_altitude_ft * 0.3048, 1
+            most_common_altitude_ft * FEET_TO_METERS, 1
         )
     else:
         stats["most_common_cruise_altitude_ft"] = 0
         stats["most_common_cruise_altitude_m"] = 0
 
     stats["longest_flight_nm"] = round(max_path_distance_nm, 1)
-    stats["longest_flight_km"] = round(max_path_distance_nm * 1.852, 1)
+    stats["longest_flight_km"] = round(max_path_distance_nm * NAUTICAL_MILES_TO_KM, 1)
 
 
 def export_all_data(

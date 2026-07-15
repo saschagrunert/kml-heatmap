@@ -15,6 +15,7 @@ from .constants import (
     KM_TO_NAUTICAL_MILES,
     MAX_GROUNDSPEED_KNOTS,
     MIN_SEGMENT_TIME_SECONDS,
+    SECONDS_PER_HOUR,
     SPEED_WINDOW_SECONDS,
     CRUISE_ALTITUDE_THRESHOLD_FT,
     ALTITUDE_BIN_SIZE_FT,
@@ -87,7 +88,9 @@ def extract_segment_speeds(
 
                 if time_delta >= MIN_SEGMENT_TIME_SECONDS:
                     segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
-                    instant_speed = (segment_distance_nm / time_delta) * 3600
+                    instant_speed = (
+                        segment_distance_nm / time_delta
+                    ) * SECONDS_PER_HOUR
 
                     if instant_speed > MAX_GROUNDSPEED_KNOTS:
                         instant_speed = 0.0  # Ignore unrealistic speeds
@@ -154,7 +157,7 @@ def calculate_windowed_groundspeed(
 
     if window_time >= MIN_SEGMENT_TIME_SECONDS:
         window_distance_nm = window_distance * KM_TO_NAUTICAL_MILES
-        groundspeed_knots = (window_distance_nm / window_time) * 3600
+        groundspeed_knots = (window_distance_nm / window_time) * SECONDS_PER_HOUR
 
         if groundspeed_knots > MAX_GROUNDSPEED_KNOTS:
             return 0.0
@@ -179,7 +182,7 @@ def calculate_fallback_groundspeed(
         return 0.0
 
     segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
-    calculated_speed = (segment_distance_nm / segment_time_seconds) * 3600
+    calculated_speed = (segment_distance_nm / segment_time_seconds) * SECONDS_PER_HOUR
 
     if 0 < calculated_speed <= MAX_GROUNDSPEED_KNOTS:
         return calculated_speed
