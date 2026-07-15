@@ -1,32 +1,7 @@
-"""Configuration validation for KML Heatmap Generator.
-
-This module validates the runtime environment and configuration to ensure
-the application can run successfully. It checks:
-
-1. File System:
-   - Input directories exist and are readable
-   - Output directories are writable
-   - Required files are present
-
-2. Dependencies:
-   - Required Python packages are installed
-   - Correct versions if version-sensitive
-
-3. API Keys:
-   - Optional keys are validated if provided
-   - Warnings for missing optional keys
-
-4. System Resources:
-   - Sufficient disk space for output
-   - Memory availability for large datasets
-
-The validation happens early at startup to fail fast with clear error
-messages rather than cryptic failures deep in processing.
-"""
+"""Configuration validation for KML Heatmap Generator."""
 
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 from .exceptions import ConfigurationError
 from .logger import logger
@@ -37,28 +12,17 @@ class ConfigValidator:
 
     def __init__(self) -> None:
         """Initialize the validator with empty error and warning lists."""
-        self.errors: List[str] = []
-        self.warnings: List[str] = []
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
 
     def validate_all(
         self,
         input_path: str,
         output_dir: str,
-        stadia_key: Optional[str] = None,
-        openaip_key: Optional[str] = None,
-    ) -> Tuple[bool, List[str], List[str]]:
-        """
-        Run all validation checks.
-
-        Args:
-            input_path: Path to input KML file or directory
-            output_dir: Path to output directory
-            stadia_key: Optional Stadia Maps API key
-            openaip_key: Optional OpenAIP API key
-
-        Returns:
-            Tuple of (is_valid, errors, warnings)
-        """
+        stadia_key: str | None = None,
+        openaip_key: str | None = None,
+    ) -> tuple[bool, list[str], list[str]]:
+        """Run all validation checks."""
         self.errors = []
         self.warnings = []
 
@@ -127,7 +91,7 @@ class ConfigValidator:
             self.errors.append(f"No write permission for: {output_dir}")
 
     def _validate_api_keys(
-        self, stadia_key: Optional[str], openaip_key: Optional[str]
+        self, stadia_key: str | None, openaip_key: str | None
     ) -> None:
         """Validate API keys if provided."""
         if stadia_key:
@@ -151,7 +115,6 @@ class ConfigValidator:
     def _validate_dependencies(self) -> None:
         """Check required Python packages are installed."""
         required_packages = {
-            "numpy": "Numerical operations",
             "lxml": "XML/KML parsing",
         }
 
@@ -195,30 +158,11 @@ class ConfigValidator:
 def validate_environment(
     input_path: str,
     output_dir: str,
-    stadia_key: Optional[str] = None,
-    openaip_key: Optional[str] = None,
+    stadia_key: str | None = None,
+    openaip_key: str | None = None,
     fail_on_warnings: bool = False,
 ) -> None:
-    """
-    Validate environment and raise exception if invalid.
-
-    Args:
-        input_path: Input KML file or directory path
-        output_dir: Output directory path
-        stadia_key: Optional Stadia Maps API key
-        openaip_key: Optional OpenAIP API key
-        fail_on_warnings: If True, treat warnings as errors
-
-    Raises:
-        ConfigurationError: If validation fails
-
-    Example:
-        >>> try:
-        ...     validate_environment('/path/to/kml', 'output')
-        ... except ConfigurationError as e:
-        ...     print(f"Configuration error: {e}")
-        ...     sys.exit(1)
-    """
+    """Validate environment and raise ConfigurationError if invalid."""
     validator = ConfigValidator()
     is_valid, errors, warnings = validator.validate_all(
         input_path, output_dir, stadia_key, openaip_key

@@ -1,30 +1,21 @@
 """Standard KML coordinate processing."""
 
-from typing import Any, Dict, List
+from typing import Any
 
 from .logger import logger
 from .parser_common import parse_coordinate_point, _build_path_metadata_dict
+from .types import PathMetadata
 
 
 def process_standard_coordinates(
-    coord_elements: List[Any],
-    coord_to_metadata: Dict[int, Dict[str, Any]],
+    coord_elements: list[Any],
+    coord_to_metadata: dict[int, dict[str, Any]],
     kml_file: str,
-    coordinates: List[List[float]],
-    path_groups: List[List[List[float]]],
-    path_metadata: List[Dict[str, Any]],
+    coordinates: list[list[float]],
+    path_groups: list[list[list[float]]],
+    path_metadata: list[PathMetadata],
 ) -> None:
-    """
-    Process standard KML <coordinates> elements.
-
-    Args:
-        coord_elements: List of XML coordinate elements
-        coord_to_metadata: Mapping from element ID to metadata dict
-        kml_file: Path to KML file
-        coordinates: Output list for all [lat, lon] pairs
-        path_groups: Output list for path groups with altitude
-        path_metadata: Output list for path metadata
-    """
+    """Process standard KML <coordinates> elements."""
     for idx, coord_elem in enumerate(coord_elements):
         # Handle None text
         if coord_elem.text is None:

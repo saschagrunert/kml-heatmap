@@ -42,7 +42,6 @@ import { DataLoader } from "./services/dataLoader";
 import {
   calculateAirportFlightCounts,
   findHomeBase,
-  generateAirportPopup,
   calculateAirportOpacity,
   calculateAirportMarkerSize,
   calculateAirportVisibility,
@@ -121,7 +120,6 @@ export {
   // Airport features
   calculateAirportFlightCounts,
   findHomeBase,
-  generateAirportPopup,
   calculateAirportOpacity,
   calculateAirportMarkerSize,
   calculateAirportVisibility,
@@ -198,7 +196,6 @@ if (typeof window !== "undefined") {
     // Airport features
     calculateAirportFlightCounts,
     findHomeBase,
-    generateAirportPopup,
     calculateAirportOpacity,
     calculateAirportMarkerSize,
     calculateAirportVisibility,

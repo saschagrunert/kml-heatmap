@@ -46,7 +46,6 @@ export type KMLHeatmapModule = {
   // Airport features
   calculateAirportFlightCounts: typeof KMLHeatmapLib.calculateAirportFlightCounts;
   findHomeBase: typeof KMLHeatmapLib.findHomeBase;
-  generateAirportPopup: typeof KMLHeatmapLib.generateAirportPopup;
   calculateAirportOpacity: typeof KMLHeatmapLib.calculateAirportOpacity;
   calculateAirportMarkerSize: typeof KMLHeatmapLib.calculateAirportMarkerSize;
   calculateAirportVisibility: typeof KMLHeatmapLib.calculateAirportVisibility;

@@ -1,67 +1,59 @@
-"""Type definitions for KML Heatmap.
+"""Type definitions for KML Heatmap."""
 
-This module provides TypedDict definitions for complex data structures
-used throughout the application. Using TypedDict provides better type
-checking and IDE autocomplete support compared to plain dictionaries.
-
-Example:
-    >>> from kml_heatmap.types import PathMetadata
-    >>> metadata: PathMetadata = {
-    ...     "start_point": [50.0, 8.0, 100.0],
-    ...     "airport_name": "EDDF",
-    ...     "year": 2025,
-    ... }
-"""
-
-from typing import TypedDict, List, Optional, Any
-from typing_extensions import NotRequired
+from typing import Any, NotRequired, TypedDict
 
 
 class PathMetadata(TypedDict):
     """Metadata for a flight path."""
 
-    start_point: List[float]  # [lat, lon, alt]
+    start_point: list[float]
     airport_name: str
-    year: NotRequired[Optional[int]]
-    aircraft_registration: NotRequired[Optional[str]]
-    aircraft_type: NotRequired[Optional[str]]
-    start_airport: NotRequired[Optional[str]]
-    end_airport: NotRequired[Optional[str]]
-    route: NotRequired[Optional[str]]
-    timestamp: NotRequired[Optional[str]]
+    year: NotRequired[int | None]
+    aircraft_registration: NotRequired[str | None]
+    aircraft_type: NotRequired[str | None]
+    start_airport: NotRequired[str | None]
+    end_airport: NotRequired[str | None]
+    route: NotRequired[str | None]
+    timestamp: NotRequired[str | None]
+    end_timestamp: NotRequired[str | None]
+    filename: NotRequired[str | None]
 
 
 class PathSegment(TypedDict):
     """Represents a segment of a flight path with computed properties."""
 
     path_id: int
-    coords: List[List[float]]  # [[lat, lon], [lat, lon]]
-    altitude_ft: NotRequired[Optional[float]]
-    altitude_m: NotRequired[Optional[float]]
-    groundspeed_knots: NotRequired[Optional[float]]
-    time: NotRequired[Optional[float]]  # Unix timestamp
+    coords: list[list[float]]
+    altitude_ft: NotRequired[float | None]
+    altitude_m: NotRequired[float | None]
+    groundspeed_knots: NotRequired[float | None]
+    time: NotRequired[float | None]
 
 
 class PathInfo(TypedDict):
     """Information about a complete flight path."""
 
     id: int
-    year: NotRequired[Optional[int]]
-    aircraft_registration: NotRequired[Optional[str]]
-    aircraft_type: NotRequired[Optional[str]]
-    start_airport: NotRequired[Optional[str]]
-    end_airport: NotRequired[Optional[str]]
-    route: NotRequired[Optional[str]]
+    year: NotRequired[int | None]
+    aircraft_registration: NotRequired[str | None]
+    aircraft_type: NotRequired[str | None]
+    start_airport: NotRequired[str | None]
+    end_airport: NotRequired[str | None]
+    route: NotRequired[str | None]
+    start_coords: NotRequired[list[float]]
+    end_coords: NotRequired[list[float]]
+    segment_count: NotRequired[int]
 
 
 class AirportData(TypedDict):
     """Airport location and metadata."""
 
-    name: str
+    name: str | None
     lat: float
     lon: float
     flight_count: NotRequired[int]
-    timestamps: NotRequired[List[str]]
+    path_index: NotRequired[int]
+    timestamps: NotRequired[list[str]]
     is_at_path_end: NotRequired[bool]
 
 
@@ -72,13 +64,14 @@ class Statistics(TypedDict):
     total_distance_nm: float
     total_points: int
     num_paths: int
-    min_altitude_m: float
-    max_altitude_m: float
-    min_altitude_ft: float
-    max_altitude_ft: float
+    min_altitude_m: float | None
+    max_altitude_m: float | None
+    min_altitude_ft: float | None
+    max_altitude_ft: float | None
     total_altitude_gain_m: NotRequired[float]
     total_altitude_gain_ft: NotRequired[float]
     total_flight_time_seconds: NotRequired[float]
+    total_flight_time_str: NotRequired[str | None]
     average_groundspeed_knots: NotRequired[float]
     max_groundspeed_knots: NotRequired[float]
     cruise_speed_knots: NotRequired[float]
@@ -87,8 +80,10 @@ class Statistics(TypedDict):
     longest_flight_nm: NotRequired[float]
     longest_flight_km: NotRequired[float]
     num_airports: NotRequired[int]
-    airport_names: NotRequired[List[str]]
-    aircraft_list: NotRequired[List[Any]]
+    airport_names: NotRequired[list[str]]
+    num_aircraft: NotRequired[int]
+    aircraft_types: NotRequired[list[str]]
+    aircraft_list: NotRequired[list[Any]]
 
 
 class ResolutionConfig(TypedDict):
@@ -102,9 +97,9 @@ class ResolutionConfig(TypedDict):
 class CacheEntry(TypedDict):
     """Cache entry for parsed KML data."""
 
-    coordinates: List[List[float]]
-    path_groups: List[List[List[float]]]
-    path_metadata: List[PathMetadata]
+    coordinates: list[list[float]]
+    path_groups: list[list[list[float]]]
+    path_metadata: list[PathMetadata]
     mtime: float
     version: str
 

@@ -8,7 +8,7 @@ import subprocess
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import rcssmin
 import rjsmin
@@ -18,32 +18,22 @@ from .airports import deduplicate_airports, extract_airport_name
 from .data_exporter import export_all_data
 from .helpers import numeric_filename_key
 from .logger import logger
-from .parser import parse_kml_coordinates, is_mid_flight_start, is_valid_landing
+from .parser import parse_kml_coordinates
+from .parser_common import is_mid_flight_start, is_valid_landing
 from .statistics import calculate_statistics
+from .types import AirportData, PathMetadata
 from .validation import validate_kml_file
 
 
 def load_template() -> str:
-    """Load the HTML template from file.
-
-    Returns:
-        HTML template content as string
-    """
+    """Load the HTML template from file."""
     template_path = Path(__file__).parent / "templates" / "map_template.html"
     with open(template_path, "r") as f:
         return f.read()
 
 
 def minify_html(html: str) -> str:
-    """
-    Minify HTML, CSS, and JavaScript using specialized minification libraries.
-
-    Args:
-        html: HTML string to minify
-
-    Returns:
-        Minified HTML string
-    """
+    """Minify HTML, CSS, and JavaScript using specialized minification libraries."""
 
     # First, minify inline CSS and JavaScript
     def minify_css_tags(match: re.Match[str]) -> str:
@@ -76,17 +66,8 @@ def minify_html(html: str) -> str:
 
 def _parse_with_error_handling(
     kml_file: str,
-) -> tuple[
-    str, tuple[list[list[float]], list[list[list[float]]], list[Dict[str, Any]]]
-]:
-    """Parse a KML file with error handling.
-
-    Args:
-        kml_file: Path to KML file
-
-    Returns:
-        Tuple of (kml_file, (coordinates, path_groups, path_metadata))
-    """
+) -> tuple[str, tuple[list[list[float]], list[list[list[float]]], list[PathMetadata]]]:
+    """Parse a KML file with error handling."""
     try:
         return kml_file, parse_kml_coordinates(kml_file)
     except (OSError, ValueError, TypeError, AttributeError) as e:
@@ -95,12 +76,7 @@ def _parse_with_error_handling(
 
 
 def _build_javascript_bundle() -> bool:
-    """
-    Build the JavaScript bundle using npm.
-
-    Returns:
-        True if build succeeded, False otherwise
-    """
+    """Build the JavaScript bundle using npm."""
     try:
         project_root = Path(__file__).parent.parent
         package_json = project_root / "package.json"
@@ -150,31 +126,21 @@ def _build_javascript_bundle() -> bool:
 
 
 def _parse_kml_files(
-    valid_files: List[str],
-) -> tuple[List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]:
-    """Parse KML files in parallel and merge results.
-
-    Args:
-        valid_files: List of validated KML file paths.
-
-    Returns:
-        Tuple of (all_coordinates, all_path_groups, all_path_metadata).
-
-    Raises:
-        ValueError: If no coordinates are found in any file.
-    """
+    valid_files: list[str],
+) -> tuple[list[list[float]], list[list[list[float]]], list[PathMetadata]]:
+    """Parse KML files in parallel and merge results."""
     from .airport_lookup import _load_airport_database
 
     _load_airport_database()
 
     parse_start = time.time()
 
-    all_coordinates: List[List[float]] = []
-    all_path_groups: List[List[List[float]]] = []
-    all_path_metadata: List[Dict[str, Any]] = []
+    all_coordinates: list[list[float]] = []
+    all_path_groups: list[list[list[float]]] = []
+    all_path_metadata: list[PathMetadata] = []
 
-    results: List[
-        tuple[str, List[List[float]], List[List[List[float]]], List[Dict[str, Any]]]
+    results: list[
+        tuple[str, list[list[float]], list[list[list[float]]], list[PathMetadata]]
     ] = []
     completed_count = 0
     with ProcessPoolExecutor(
@@ -211,25 +177,13 @@ def _parse_kml_files(
 
 
 def _process_data(
-    all_coordinates: List[List[float]],
-    all_path_groups: List[List[List[float]]],
-    all_path_metadata: List[Dict[str, Any]],
+    all_coordinates: list[list[float]],
+    all_path_groups: list[list[list[float]]],
+    all_path_metadata: list[PathMetadata],
     data_dir: str,
-    aircraft_file: Optional[Path] = None,
-) -> Dict[str, Any]:
-    """Process parsed data: deduplicate airports, calculate stats, export files.
-
-    Args:
-        all_coordinates: Merged coordinates from all KML files.
-        all_path_groups: Merged path groups.
-        all_path_metadata: Merged path metadata.
-        data_dir: Directory to save data files.
-        aircraft_file: Path to aircraft.json for model lookups.
-
-    Returns:
-        Dict with keys: stats, unique_airports, bounds, metadata_params,
-        full_res_segments, full_res_path_info.
-    """
+    aircraft_file: Path | None = None,
+) -> dict[str, Any]:
+    """Process parsed data: deduplicate airports, calculate stats, export files."""
     lats = [coord[0] for coord in all_coordinates]
     lons = [coord[1] for coord in all_coordinates]
     bounds = {
@@ -241,7 +195,7 @@ def _process_data(
         "center_lon": (min(lons) + max(lons)) / 2,
     }
 
-    unique_airports: List[Dict[str, Any]] = []
+    unique_airports: list[AirportData] = []
     if all_path_metadata:
         logger.info(f"\nProcessing {len(all_path_metadata)} start points...")
         unique_airports = deduplicate_airports(
@@ -256,7 +210,7 @@ def _process_data(
 
     valid_airport_names = []
     for airport in unique_airports:
-        full_name = airport.get("name", "Unknown")
+        full_name = airport.get("name") or "Unknown"
         is_at_path_end = airport.get("is_at_path_end", False)
         airport_name = extract_airport_name(full_name, is_at_path_end)
         if airport_name:
@@ -282,12 +236,7 @@ def _process_data(
 
 
 def _render_html(output_file: str, data_dir_name: str) -> None:
-    """Render and minify the HTML template.
-
-    Args:
-        output_file: Path to write the output HTML.
-        data_dir_name: Base name of the data directory.
-    """
+    """Render and minify the HTML template."""
     logger.info("\nGenerating progressive HTML...")
 
     tmpl = string.Template(load_template())
@@ -299,7 +248,7 @@ def _render_html(output_file: str, data_dir_name: str) -> None:
     with open(output_file, "w") as f:
         f.write(minified_html)
 
-    file_size = os.path.getsize(output_file)
+    file_size = Path(output_file).stat().st_size
     original_size = len(html_content)
     minified_size = len(minified_html)
     reduction = (1 - minified_size / original_size) * 100
@@ -313,7 +262,7 @@ def _render_html(output_file: str, data_dir_name: str) -> None:
 def _generate_map_config(
     output_dir: str,
     templates_dir: Path,
-    bounds: Dict[str, float],
+    bounds: dict[str, float],
     data_dir_name: str,
 ) -> None:
     """Generate minified map_config.js from template."""
@@ -321,7 +270,7 @@ def _generate_map_config(
     openaip_api_key = os.environ.get("OPENAIP_API_KEY", "")
 
     map_config_template_path = templates_dir / "map_config_template.js"
-    map_config_dst = os.path.join(output_dir, "map_config.js")
+    map_config_dst = Path(output_dir) / "map_config.js"
 
     with open(map_config_template_path, "r") as f:
         map_config_raw = f.read()
@@ -343,7 +292,7 @@ def _generate_map_config(
     with open(map_config_dst, "w") as f:
         f.write(map_config_minified)
 
-    map_config_size = os.path.getsize(map_config_dst)
+    map_config_size = map_config_dst.stat().st_size
     logger.info(
         f"Configuration generated: {map_config_dst} ({map_config_size / 1024:.1f} KB)"
     )
@@ -353,10 +302,10 @@ def _copy_javascript_bundles(output_dir: str, static_dir: Path) -> None:
     """Copy JavaScript bundle files to output directory."""
     for bundle_name in ("bundle.js", "mapApp.bundle.js"):
         src = static_dir / bundle_name
-        dst = os.path.join(output_dir, bundle_name)
+        dst = Path(output_dir) / bundle_name
         if src.exists():
             shutil.copy2(src, dst)
-            size = os.path.getsize(dst)
+            size = dst.stat().st_size
             logger.info(f"JavaScript copied: {dst} ({size / 1024:.1f} KB)")
         else:
             logger.warning(f"{bundle_name} not found - run npm build to generate it")
@@ -365,7 +314,7 @@ def _copy_javascript_bundles(output_dir: str, static_dir: Path) -> None:
 def _copy_and_minify_css(output_dir: str, static_dir: Path) -> None:
     """Copy and minify CSS to output directory."""
     styles_css_src = static_dir / "styles.css"
-    styles_css_dst = os.path.join(output_dir, "styles.css")
+    styles_css_dst = Path(output_dir) / "styles.css"
 
     with open(styles_css_src, "r") as f:
         styles_css_content = f.read()
@@ -375,7 +324,7 @@ def _copy_and_minify_css(output_dir: str, static_dir: Path) -> None:
     with open(styles_css_dst, "w") as f:
         f.write(styles_css_minified)
 
-    styles_css_size = os.path.getsize(styles_css_dst)
+    styles_css_size = styles_css_dst.stat().st_size
     logger.info(f"CSS copied: {styles_css_dst} ({styles_css_size / 1024:.1f} KB)")
 
 
@@ -390,7 +339,7 @@ def _copy_favicon_files(output_dir: str, static_dir: Path) -> None:
         "manifest.json",
     ):
         src = static_dir / favicon_file
-        dst = os.path.join(output_dir, favicon_file)
+        dst = Path(output_dir) / favicon_file
         if src.exists():
             shutil.copy2(src, dst)
 
@@ -399,7 +348,7 @@ def _copy_favicon_files(output_dir: str, static_dir: Path) -> None:
 
 def _package_assets(
     output_dir: str,
-    bounds: Dict[str, float],
+    bounds: dict[str, float],
     data_dir_name: str,
 ) -> None:
     """Build JS bundles (if needed), generate config, and copy static assets."""
@@ -422,28 +371,12 @@ def _package_assets(
 
 
 def create_progressive_heatmap(
-    kml_files: List[str],
+    kml_files: list[str],
     output_file: str = "index.html",
     data_dir: str = "data",
-    aircraft_file: Optional[Path] = None,
+    aircraft_file: Path | None = None,
 ) -> bool:
-    """Create a progressive-loading heatmap with external data files.
-
-    Pipeline stages:
-    1. Validate and parse KML files in parallel
-    2. Process data: deduplicate airports, calculate stats, export files
-    3. Render minified HTML
-    4. Package static assets (JS bundles, config, CSS, favicons)
-
-    Args:
-        kml_files: List of KML file paths
-        output_file: Output HTML file path
-        data_dir: Directory to save data files
-        aircraft_file: Path to aircraft.json for model lookups
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Create a progressive-loading heatmap with external data files."""
     # Stage 1: Validate and parse
     valid_files = []
     for kml_file in kml_files:
@@ -477,11 +410,11 @@ def create_progressive_heatmap(
     )
 
     # Stage 3: Render HTML
-    data_dir_name = os.path.basename(data_dir)
+    data_dir_name = Path(data_dir).name
     _render_html(output_file, data_dir_name)
 
     # Stage 4: Package assets
-    output_dir = os.path.dirname(output_file) or "."
+    output_dir = str(Path(output_file).parent)
     _package_assets(output_dir, result["bounds"], data_dir_name)
 
     logger.info(

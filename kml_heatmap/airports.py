@@ -1,41 +1,17 @@
 """Airport deduplication and name extraction.
 
-This module handles the complex task of identifying unique airports from
-flight path data and extracting clean airport names from various naming
-formats.
-
-Key Challenges:
-1. Multiple flights to the same airport create duplicate entries
-2. GPS coordinates have slight variations even for the same airport
-3. Route names contain both departure and arrival airports
-4. Point markers (takeoff/landing events) need filtering
-5. Mid-flight starts don't have valid departure airports
-
-Deduplication Strategy:
-Uses a spatial grid approach for O(1) proximity lookups:
-- Divides map into ~2km grid cells
-- Checks cell + 8 neighbors for nearby airports
-- Only compares airports within potentially overlapping cells
-- Much faster than naive O(n²) distance checks
-
-Name Extraction Logic:
-- Handles route format: "EDAQ Halle - EDMV Vilshofen"
-- Extracts departure or arrival based on position in path
-- Validates ICAO codes (4-letter airport identifiers)
-- Filters out single-word names without ICAO codes
-- Removes point marker prefixes (Log Start, Takeoff, etc.)
-
-Performance:
-- Grid-based spatial indexing: O(1) average case lookups
-- Processes thousands of flights in milliseconds
-- Memory efficient with set-based deduplication
+Uses a spatial grid approach for O(1) proximity lookups: divides the map into
+~2km grid cells and checks the cell plus 8 neighbors for nearby airports,
+avoiding O(n^2) pairwise distance checks.
 """
 
 import re
-from typing import List, Dict, Optional, Any, Callable
+from collections.abc import Callable
+
 from .geometry import haversine_distance
 from .logger import logger
 from .constants import AIRPORT_DISTANCE_THRESHOLD_KM, AIRPORT_GRID_SIZE_DEGREES
+from .types import AirportData, PathMetadata
 
 __all__ = [
     "POINT_MARKERS",
@@ -49,58 +25,15 @@ __all__ = [
 POINT_MARKERS = ["Log Start", "Log Stop", "Takeoff", "Landing"]
 
 
-def is_point_marker(name: Optional[str]) -> bool:
-    """Check if a name represents a point marker (not a flight path).
-
-    Point markers are GPS events like "Log Start", "Takeoff", "Landing"
-    that mark specific points but aren't flight paths between airports.
-
-    Args:
-        name: Name to check (can be None)
-
-    Returns:
-        True if this is a point marker, False if it's a flight path
-
-    Example:
-        >>> is_point_marker("Log Start: EDAQ")
-        True
-        >>> is_point_marker("EDAQ Halle - EDMV Vilshofen")
-        False
-    """
+def is_point_marker(name: str | None) -> bool:
+    """Check if a name represents a point marker (not a flight path)."""
     if not name:
         return True
     return any(marker in name for marker in POINT_MARKERS)
 
 
-def extract_airport_name(full_name: str, is_at_path_end: bool = False) -> Optional[str]:
-    """
-    Extract clean airport name from route name.
-
-    Handles multiple naming formats:
-    - Route format: "EDAQ Halle - EDMV Vilshofen"
-    - Single airport: "EDAQ Halle"
-    - ICAO only: "EDAQ"
-    - City names: "Halle Airport"
-
-    Args:
-        full_name: Full airport/route name (e.g., "EDAQ Halle - EDMV Vilshofen")
-        is_at_path_end: If True, extract arrival airport; else departure
-
-    Returns:
-        Cleaned airport name or None if invalid
-
-    Example:
-        >>> extract_airport_name("EDAQ Halle - EDMV Vilshofen", is_at_path_end=False)
-        'EDAQ Halle'
-        >>> extract_airport_name("EDAQ Halle - EDMV Vilshofen", is_at_path_end=True)
-        'EDMV Vilshofen'
-        >>> extract_airport_name("Unknown")
-        None
-
-    Note:
-        Filters out single-word names without ICAO codes to avoid
-        false positives like "Unknown" or arbitrary marker names.
-    """
+def extract_airport_name(full_name: str, is_at_path_end: bool = False) -> str | None:
+    """Extract clean airport name from route name."""
     if not full_name or full_name in ["Airport", "Unknown", ""]:
         return None
 
@@ -128,44 +61,20 @@ def extract_airport_name(full_name: str, is_at_path_end: bool = False) -> Option
 
 
 class AirportDeduplicator:
-    """
-    Efficiently deduplicate airports using spatial grid indexing.
-
-    This class provides O(1) average-case airport proximity lookups using
-    a spatial grid approach, much faster than naive O(n²) distance checks.
-
-    Attributes:
-        grid_size: Size of spatial grid cells (~2km at equator)
-        unique_airports: List of deduplicated airport dicts
-        spatial_grid: Dict mapping grid cells to airport indices
-    """
+    """Efficiently deduplicate airports using spatial grid indexing."""
 
     def __init__(self, grid_size: float = AIRPORT_GRID_SIZE_DEGREES):
-        """
-        Initialize the airport deduplicator.
-
-        Args:
-            grid_size: Grid cell size in degrees (~2km at equator)
-        """
+        """Initialize the airport deduplicator."""
         self.grid_size = grid_size
-        self.unique_airports: List[Dict[str, Any]] = []
-        self.spatial_grid: Dict[tuple, List[int]] = {}
+        self.unique_airports: list[AirportData] = []
+        self.spatial_grid: dict[tuple, list[int]] = {}
 
     def _get_grid_key(self, lat: float, lon: float) -> tuple:
         """Get grid cell key for a coordinate."""
         return (int(lat / self.grid_size), int(lon / self.grid_size))
 
-    def _find_nearby_airport(self, lat: float, lon: float) -> Optional[int]:
-        """
-        Find airport within threshold using spatial grid.
-
-        Args:
-            lat: Latitude
-            lon: Longitude
-
-        Returns:
-            Index of nearby airport or None if not found
-        """
+    def _find_nearby_airport(self, lat: float, lon: float) -> int | None:
+        """Find airport within threshold using spatial grid."""
         grid_key = self._get_grid_key(lat, lon)
         # Check current cell and 8 neighbors
         for dlat in [-1, 0, 1]:
@@ -192,25 +101,12 @@ class AirportDeduplicator:
         self,
         lat: float,
         lon: float,
-        name: Optional[str],
-        timestamp: Optional[str],
+        name: str | None,
+        timestamp: str | None,
         path_index: int,
         is_at_path_end: bool,
     ) -> int:
-        """
-        Add new airport or update existing one.
-
-        Args:
-            lat: Latitude (from KML - may be corrected using OurAirports)
-            lon: Longitude (from KML - may be corrected using OurAirports)
-            name: Airport name
-            timestamp: Timestamp string
-            path_index: Index of the path
-            is_at_path_end: Whether this is at the end of a path
-
-        Returns:
-            Index of the airport (new or existing)
-        """
+        """Add new airport or update existing one."""
         # If name contains ICAO code, use OurAirports coordinates for deduplication
         # This ensures all references to the same ICAO code are merged at the correct location
         corrected_lat = lat
@@ -286,31 +182,18 @@ class AirportDeduplicator:
             self._add_to_grid(corrected_lat, corrected_lon, new_idx)
             return new_idx
 
-    def get_unique_airports(self) -> List[Dict[str, Any]]:
+    def get_unique_airports(self) -> list[AirportData]:
         """Get the list of deduplicated airports."""
         return self.unique_airports
 
 
 def deduplicate_airports(
-    all_path_metadata: List[Dict[str, Any]],
-    all_path_groups: List[List[List[float]]],
-    is_mid_flight_start_func: Callable[[List[List[float]], float], bool],
-    is_valid_landing_func: Callable[[List[List[float]], float], bool],
-) -> List[Dict[str, Any]]:
-    """
-    Deduplicate airports by location and extract valid airport information.
-
-    This function uses AirportDeduplicator class for efficient spatial indexing.
-
-    Args:
-        all_path_metadata: List of metadata dicts for each path
-        all_path_groups: List of path groups with altitude data
-        is_mid_flight_start_func: Function to detect mid-flight starts
-        is_valid_landing_func: Function to validate landings
-
-    Returns:
-        List of unique airport dicts with lat, lon, timestamps, name, etc.
-    """
+    all_path_metadata: list[PathMetadata],
+    all_path_groups: list[list[list[float]]],
+    is_mid_flight_start_func: Callable[[list[list[float]], float], bool],
+    is_valid_landing_func: Callable[[list[list[float]], float], bool],
+) -> list[AirportData]:
+    """Deduplicate airports by location using spatial grid indexing."""
     deduplicator = AirportDeduplicator()
 
     # Process start points from metadata

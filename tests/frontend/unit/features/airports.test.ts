@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   calculateAirportFlightCounts,
   findHomeBase,
-  generateAirportPopup,
   calculateAirportOpacity,
   calculateAirportMarkerSize,
   calculateAirportVisibility,
@@ -139,58 +138,6 @@ describe("airports feature", () => {
       // JavaScript object iteration order - will return one of them
       const homeBase = findHomeBase(counts);
       expect(["EDAV", "EDDF"]).toContain(homeBase);
-    });
-  });
-
-  describe("generateAirportPopup", () => {
-    const airport = {
-      name: "Frankfurt (EDDF)",
-      lat: 50.0379,
-      lon: 8.5622,
-    };
-
-    it("generates popup HTML for regular airport", () => {
-      const html = generateAirportPopup(airport, 5, false);
-
-      expect(html).toContain("Frankfurt (EDDF)");
-      expect(html).toContain("Total Flights");
-      expect(html).toContain("5");
-      expect(html).not.toContain("HOME");
-    });
-
-    it("generates popup HTML for home base", () => {
-      const html = generateAirportPopup(airport, 10, true);
-
-      expect(html).toContain("Frankfurt (EDDF)");
-      expect(html).toContain("HOME");
-      expect(html).toContain("10");
-    });
-
-    it("includes Google Maps link", () => {
-      const html = generateAirportPopup(airport, 5, false);
-
-      expect(html).toContain("https://www.google.com/maps?q=50.0379,8.5622");
-    });
-
-    it("includes coordinates in DMS format", () => {
-      const html = generateAirportPopup(airport, 5, false);
-
-      expect(html).toContain("°"); // DMS format marker
-      expect(html).toMatch(/\d+°\d+'\d+\.\d+"[NSEW]/);
-    });
-
-    it("handles airport without name", () => {
-      const airport = { lat: 50.0, lon: 8.0 };
-      const html = generateAirportPopup(airport, 1, false);
-
-      expect(html).toContain("Unknown");
-    });
-
-    it("handles missing ICAO code", () => {
-      const airport = { name: "Some Airport", lat: 50.0, lon: 8.0 };
-      const html = generateAirportPopup(airport, 1, false);
-
-      expect(html).toBeDefined();
     });
   });
 

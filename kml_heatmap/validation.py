@@ -2,7 +2,6 @@
 
 import os
 from pathlib import Path
-from typing import Tuple, Optional, Dict
 
 from .logger import logger
 
@@ -16,18 +15,8 @@ __all__ = [
 
 def validate_coordinates(
     lat: float, lon: float, context: str = ""
-) -> Tuple[bool, Optional[str]]:
-    """
-    Validate latitude and longitude values.
-
-    Args:
-        lat: Latitude value
-        lon: Longitude value
-        context: Optional context string for error messages
-
-    Returns:
-        tuple: (is_valid, error_message)
-    """
+) -> tuple[bool, str | None]:
+    """Validate latitude and longitude values."""
     if not isinstance(lat, (int, float)):
         return False, f"Latitude must be a number{context}"
 
@@ -43,16 +32,8 @@ def validate_coordinates(
     return True, None
 
 
-def validate_kml_file(file_path: str) -> Tuple[bool, Optional[str]]:
-    """
-    Validate KML file exists and is readable.
-
-    Args:
-        file_path: Path to KML file
-
-    Returns:
-        tuple: (is_valid, error_message)
-    """
+def validate_kml_file(file_path: str) -> tuple[bool, str | None]:
+    """Validate KML file exists and is readable."""
     path = Path(file_path)
 
     if not path.exists():
@@ -64,11 +45,9 @@ def validate_kml_file(file_path: str) -> Tuple[bool, Optional[str]]:
     if not os.access(path, os.R_OK):
         return False, f"File not readable: {file_path}"
 
-    # Check if it looks like a KML file
     if not str(path).lower().endswith(".kml"):
         return False, f"File does not have .kml extension: {file_path}"
 
-    # Check file is not empty
     if path.stat().st_size == 0:
         return False, f"File is empty: {file_path}"
 
@@ -77,18 +56,8 @@ def validate_kml_file(file_path: str) -> Tuple[bool, Optional[str]]:
 
 def validate_api_keys(
     stadia_key: str, openaip_key: str, verbose: bool = True
-) -> Dict[str, bool]:
-    """
-    Validate API keys and warn if missing.
-
-    Args:
-        stadia_key: Stadia Maps API key
-        openaip_key: OpenAIP API key
-        verbose: Whether to print warnings
-
-    Returns:
-        dict: Status of each key
-    """
+) -> dict[str, bool]:
+    """Validate API keys and warn if missing."""
     status = {"stadia": bool(stadia_key), "openaip": bool(openaip_key)}
 
     if verbose:
@@ -107,29 +76,19 @@ def validate_api_keys(
     return status
 
 
-def validate_altitude(altitude: float, context: str = "") -> Tuple[bool, Optional[str]]:
-    """
-    Validate altitude value.
-
-    Args:
-        altitude: Altitude in meters
-        context: Optional context string for error messages
-
-    Returns:
-        tuple: (is_valid, error_message)
-    """
+def validate_altitude(altitude: float, context: str = "") -> tuple[bool, str | None]:
+    """Validate altitude value."""
     if not isinstance(altitude, (int, float)):
         return False, f"Altitude must be a number{context}"
 
-    # Reasonable altitude limits (in meters)
-    # Dead Sea is ~-430m, commercial aviation max is ~13,000m
-    MIN_ALTITUDE = -500
-    MAX_ALTITUDE = 15000
+    # Tighter bounds than coordinate clamping: Dead Sea (~-430m) to commercial aviation max (~13,000m)
+    min_altitude = -500
+    max_altitude = 15000
 
-    if altitude < MIN_ALTITUDE or altitude > MAX_ALTITUDE:
+    if altitude < min_altitude or altitude > max_altitude:
         return (
             False,
-            f"Altitude {altitude}m seems unrealistic (expected {MIN_ALTITUDE} to {MAX_ALTITUDE}m){context}",
+            f"Altitude {altitude}m seems unrealistic (expected {min_altitude} to {max_altitude}m){context}",
         )
 
     return True, None

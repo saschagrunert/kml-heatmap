@@ -104,7 +104,7 @@ test.describe("Filters and Statistics", () => {
 
     const text = await panel.textContent();
     expect(text).toContain("Airports");
-    expect(text).toContain("Aircrafts");
+    expect(text).toContain("Aircraft");
     expect(text).toContain("flight(s)");
   });
 

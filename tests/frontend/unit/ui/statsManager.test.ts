@@ -225,7 +225,7 @@ describe("StatsManager", () => {
     it("displays aircraft list with flight counts", () => {
       statsManager.updateStatsPanel(mockStats, false);
 
-      expect(statsPanel.innerHTML).toContain("Aircrafts (2)");
+      expect(statsPanel.innerHTML).toContain("Aircraft (2)");
       expect(statsPanel.innerHTML).toContain("D-ABCD");
       expect(statsPanel.innerHTML).toContain("DA40");
       expect(statsPanel.innerHTML).toContain("30 flight(s)");

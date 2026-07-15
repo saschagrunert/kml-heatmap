@@ -1,45 +1,37 @@
 """Statistics reconciliation from exported segment data."""
 
-from typing import Any, Dict, List
-
 from .constants import METERS_TO_FEET
 from .geometry import haversine_distance
 from .helpers import format_flight_time
+from .types import PathInfo, PathSegment, Statistics
 
 
 def _recalculate_stats_from_segments(
-    stats: Dict[str, Any],
-    segments: List[Dict[str, Any]],
-    path_info_list: List[Dict[str, Any]],
+    stats: Statistics,
+    segments: list[PathSegment],
+    path_info_list: list[PathInfo],
 ) -> None:
     """Recalculate statistics from exported segment data (authoritative source).
 
     The initial stats from statistics.py are computed from raw parsed data, but
     the frontend only sees the exported segments. This function overwrites stats
     to match the segment data exactly, ensuring the statistics panel is consistent
-    with what the frontend can independently verify. Fields overwritten:
-    total_points, altitude ranges, altitude gain, groundspeed stats, cruise
-    altitude, flight time, and per-aircraft times/distances.
-
-    Args:
-        stats: Statistics dictionary (modified in place)
-        segments: Full resolution path segments
-        path_info_list: Full resolution path info entries
+    with what the frontend can independently verify.
     """
     stats["total_points"] = len(segments) * 2
 
     if not segments:
         return
 
-    altitudes_m = [seg.get("altitude_m", 0) for seg in segments]
+    altitudes_m = [seg.get("altitude_m") or 0.0 for seg in segments]
     min_alt_m = min(altitudes_m)
     max_alt_m = max(altitudes_m)
-    stats["min_altitude_m"] = min_alt_m
-    stats["max_altitude_m"] = max_alt_m
-    stats["min_altitude_ft"] = min_alt_m * METERS_TO_FEET
-    stats["max_altitude_ft"] = max_alt_m * METERS_TO_FEET
+    stats["min_altitude_m"] = float(min_alt_m)
+    stats["max_altitude_m"] = float(max_alt_m)
+    stats["min_altitude_ft"] = float(min_alt_m) * METERS_TO_FEET
+    stats["max_altitude_ft"] = float(max_alt_m) * METERS_TO_FEET
 
-    cruise_threshold = min_alt_m * METERS_TO_FEET + 1000
+    cruise_threshold = float(min_alt_m) * METERS_TO_FEET + 1000
 
     total_gain_m = 0.0
     prev_alt = None
@@ -47,13 +39,13 @@ def _recalculate_stats_from_segments(
     groundspeed_count = 0
     cruise_speed_sum = 0.0
     cruise_speed_count = 0
-    altitude_bins: Dict[int, int] = {}
-    path_durations: Dict[int, List[float]] = {}
+    altitude_bins: dict[int, int] = {}
+    path_durations: dict[int, list[float]] = {}
 
     for seg in segments:
-        alt_m = seg.get("altitude_m", 0)
-        alt_ft = seg.get("altitude_ft", 0)
-        gs = seg.get("groundspeed_knots", 0)
+        alt_m = float(seg.get("altitude_m") or 0)
+        alt_ft = float(seg.get("altitude_ft") or 0)
+        gs = float(seg.get("groundspeed_knots") or 0)
 
         if prev_alt is not None and alt_m > prev_alt:
             total_gain_m += alt_m - prev_alt
@@ -67,15 +59,17 @@ def _recalculate_stats_from_segments(
             if gs > 0:
                 cruise_speed_sum += gs
                 cruise_speed_count += 1
-            if "time" in seg:
+            seg_time = seg.get("time")
+            if seg_time is not None:
                 bin_alt = round(alt_ft / 100) * 100
                 altitude_bins[bin_alt] = altitude_bins.get(bin_alt, 0) + 1
 
-        if "time" in seg and "path_id" in seg:
+        seg_time = seg.get("time")
+        if seg_time is not None and "path_id" in seg:
             path_id = seg["path_id"]
             if path_id not in path_durations:
                 path_durations[path_id] = []
-            path_durations[path_id].append(seg["time"])
+            path_durations[path_id].append(seg_time)
 
     stats["total_altitude_gain_m"] = total_gain_m
     stats["total_altitude_gain_ft"] = total_gain_m * METERS_TO_FEET
@@ -101,8 +95,8 @@ def _recalculate_stats_from_segments(
     stats["total_flight_time_seconds"] = total_flight_time
 
     if stats.get("aircraft_list"):
-        aircraft_times: Dict[str, float] = {}
-        aircraft_distances: Dict[str, float] = {}
+        aircraft_times: dict[str, float] = {}
+        aircraft_distances: dict[str, float] = {}
 
         for pi in path_info_list:
             reg = pi.get("aircraft_registration")
