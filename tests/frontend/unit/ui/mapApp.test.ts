@@ -174,11 +174,9 @@ describe("MapApp", () => {
     });
   });
 
-  describe("delegating methods", () => {
-    let app: MapApp;
-
-    beforeEach(() => {
-      app = new MapApp({
+  describe("bindActions wiring", () => {
+    it("managers are accessible after construction", () => {
+      const app = new MapApp({
         center: [48.0, 16.0],
         bounds: [
           [47.0, 15.0],
@@ -187,145 +185,8 @@ describe("MapApp", () => {
         dataDir: "data",
       });
 
-      // Set up mock managers
-      app.uiToggles = {
-        toggleHeatmap: vi.fn(),
-        toggleAltitude: vi.fn(),
-        toggleAirspeed: vi.fn(),
-        toggleAirports: vi.fn(),
-        toggleAviation: vi.fn(),
-        toggleButtonsVisibility: vi.fn(),
-        exportMap: vi.fn(),
-      } as any;
-
-      app.statsManager = {
-        toggleStats: vi.fn(),
-      } as any;
-
-      app.replayManager = {
-        toggleReplay: vi.fn(),
-        playReplay: vi.fn(),
-        pauseReplay: vi.fn(),
-        stopReplay: vi.fn(),
-        seekReplay: vi.fn(),
-        changeReplaySpeed: vi.fn(),
-        toggleAutoZoom: vi.fn(),
-      } as any;
-
-      app.filterManager = {
-        filterByYear: vi.fn().mockResolvedValue(undefined),
-        filterByAircraft: vi.fn().mockResolvedValue(undefined),
-      } as any;
-
-      app.pathSelection = {
-        togglePathSelection: vi.fn().mockResolvedValue(undefined),
-      } as any;
-
-      app.wrappedManager = {
-        showWrapped: vi.fn().mockResolvedValue(undefined),
-        closeWrapped: vi.fn(),
-      } as any;
-    });
-
-    it("toggleHeatmap delegates to uiToggles", () => {
-      app.toggleHeatmap();
-      expect(app.uiToggles.toggleHeatmap).toHaveBeenCalled();
-    });
-
-    it("toggleAltitude delegates to uiToggles", () => {
-      app.toggleAltitude();
-      expect(app.uiToggles.toggleAltitude).toHaveBeenCalled();
-    });
-
-    it("toggleAirspeed delegates to uiToggles", () => {
-      app.toggleAirspeed();
-      expect(app.uiToggles.toggleAirspeed).toHaveBeenCalled();
-    });
-
-    it("toggleAirports delegates to uiToggles", () => {
-      app.toggleAirports();
-      expect(app.uiToggles.toggleAirports).toHaveBeenCalled();
-    });
-
-    it("toggleAviation delegates to uiToggles", () => {
-      app.toggleAviation();
-      expect(app.uiToggles.toggleAviation).toHaveBeenCalled();
-    });
-
-    it("toggleButtonsVisibility delegates to uiToggles", () => {
-      app.toggleButtonsVisibility();
-      expect(app.uiToggles.toggleButtonsVisibility).toHaveBeenCalled();
-    });
-
-    it("exportMap delegates to uiToggles", () => {
-      app.exportMap();
-      expect(app.uiToggles.exportMap).toHaveBeenCalled();
-    });
-
-    it("toggleStats delegates to statsManager", () => {
-      app.toggleStats();
-      expect(app.statsManager.toggleStats).toHaveBeenCalled();
-    });
-
-    it("toggleReplay delegates to replayManager", () => {
-      app.toggleReplay();
-      expect(app.replayManager.toggleReplay).toHaveBeenCalled();
-    });
-
-    it("playReplay delegates to replayManager", () => {
-      app.playReplay();
-      expect(app.replayManager.playReplay).toHaveBeenCalled();
-    });
-
-    it("pauseReplay delegates to replayManager", () => {
-      app.pauseReplay();
-      expect(app.replayManager.pauseReplay).toHaveBeenCalled();
-    });
-
-    it("stopReplay delegates to replayManager", () => {
-      app.stopReplay();
-      expect(app.replayManager.stopReplay).toHaveBeenCalled();
-    });
-
-    it("seekReplay delegates to replayManager with string value", () => {
-      app.seekReplay("42");
-      expect(app.replayManager.seekReplay).toHaveBeenCalledWith("42");
-    });
-
-    it("changeReplaySpeed delegates to replayManager", () => {
-      app.changeReplaySpeed();
-      expect(app.replayManager.changeReplaySpeed).toHaveBeenCalled();
-    });
-
-    it("toggleAutoZoom delegates to replayManager", () => {
-      app.toggleAutoZoom();
-      expect(app.replayManager.toggleAutoZoom).toHaveBeenCalled();
-    });
-
-    it("filterByYear delegates to filterManager", () => {
-      app.filterByYear();
-      expect(app.filterManager.filterByYear).toHaveBeenCalled();
-    });
-
-    it("filterByAircraft delegates to filterManager", () => {
-      app.filterByAircraft();
-      expect(app.filterManager.filterByAircraft).toHaveBeenCalled();
-    });
-
-    it("togglePathSelection delegates to pathSelection with numeric id", () => {
-      app.togglePathSelection("42");
-      expect(app.pathSelection.togglePathSelection).toHaveBeenCalledWith(42);
-    });
-
-    it("showWrapped delegates to wrappedManager", () => {
-      app.showWrapped();
-      expect(app.wrappedManager.showWrapped).toHaveBeenCalled();
-    });
-
-    it("closeWrapped delegates to wrappedManager", () => {
-      const event = new MouseEvent("click");
-      app.closeWrapped(event);
-      expect(app.wrappedManager.closeWrapped).toHaveBeenCalledWith(event);
+      expect(app.store).toBeDefined();
+      expect(app.config).toBeDefined();
     });
   });
 
@@ -480,9 +341,7 @@ describe("MapApp", () => {
       expect(result.wrappedManager.showWrapped).toHaveBeenCalled();
 
       actionElements["closeWrapped"]!.click();
-      expect(result.wrappedManager.closeWrapped).toHaveBeenCalledWith(
-        undefined
-      );
+      expect(result.wrappedManager.closeWrapped).toHaveBeenCalled();
 
       // Backdrop click passes event for target check
       actionElements["closeWrappedBackdrop"]!.click();

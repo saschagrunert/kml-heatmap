@@ -9,6 +9,11 @@ import type {
   YearStats,
 } from "../types";
 import { rgbToRgba } from "./colors";
+import {
+  FEET_TO_METERS,
+  METERS_TO_FEET,
+  NAUTICAL_MILES_TO_KM,
+} from "./constants";
 import { calculateBearing, ddToDms } from "./geometry";
 
 export interface AirportCount {
@@ -128,7 +133,7 @@ export function generateStatsHtml(
                 : ""
             }
             <div class="stat-card">
-                <div class="stat-value">${Math.round((fullStats?.max_altitude_m || 0) / 0.3048)} ft</div>
+                <div class="stat-value">${Math.round((fullStats?.max_altitude_m || 0) * METERS_TO_FEET)} ft</div>
                 <div class="stat-label">Max Altitude (MSL)</div>
             </div>
         `;
@@ -235,7 +240,7 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
 
   const altFt = segment.altitude_ft || 0;
   const altFtRounded = Math.round(altFt / 50) * 50;
-  const altMRounded = Math.round(altFtRounded * 0.3048);
+  const altMRounded = Math.round(altFtRounded * FEET_TO_METERS);
   const altColor = window.KMLHeatmap.getColorForAltitude(
     altFt,
     params.altMin,
@@ -245,7 +250,7 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
 
   const speedKt = segment.groundspeed_knots || 0;
   const speedKtRounded = Math.round(speedKt);
-  const speedKmhRounded = Math.round(speedKt * 1.852);
+  const speedKmhRounded = Math.round(speedKt * NAUTICAL_MILES_TO_KM);
   const speedColor = window.KMLHeatmap.getColorForAirspeed(
     speedKt,
     params.speedMin,

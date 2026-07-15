@@ -4,6 +4,7 @@
 import DOMPurify from "dompurify";
 import type { MapApp } from "../mapApp";
 import type { FilteredStatistics } from "../types";
+import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 
 export class StatsManager {
@@ -137,7 +138,9 @@ export class StatsManager {
     }
 
     // Distance with km conversion
-    const distanceKm = (stats.total_distance_nm * 1.852).toFixed(1);
+    const distanceKm = (stats.total_distance_nm * NAUTICAL_MILES_TO_KM).toFixed(
+      1
+    );
     html +=
       '<div style="margin-bottom: 8px;"><strong>Distance:</strong> ' +
       stats.total_distance_nm.toFixed(1) +
@@ -150,7 +153,9 @@ export class StatsManager {
       const avgDistanceNm = (stats.total_distance_nm / stats.num_paths).toFixed(
         1
       );
-      const avgDistanceKm = (parseFloat(avgDistanceNm) * 1.852).toFixed(1);
+      const avgDistanceKm = (
+        parseFloat(avgDistanceNm) * NAUTICAL_MILES_TO_KM
+      ).toFixed(1);
       html +=
         '<div style="margin-bottom: 8px;"><strong>Average Distance per Trip:</strong> ' +
         avgDistanceNm +
@@ -171,7 +176,9 @@ export class StatsManager {
     }
 
     if (stats.avg_groundspeed_knots && stats.avg_groundspeed_knots > 0) {
-      const kmh = Math.round(stats.avg_groundspeed_knots * 1.852);
+      const kmh = Math.round(
+        stats.avg_groundspeed_knots * NAUTICAL_MILES_TO_KM
+      );
       html +=
         '<div style="margin-bottom: 8px;"><strong>Average Groundspeed:</strong> ' +
         Math.round(stats.avg_groundspeed_knots) +
@@ -181,7 +188,9 @@ export class StatsManager {
     }
 
     if (stats.cruise_speed_knots && stats.cruise_speed_knots > 0) {
-      const kmh_cruise = Math.round(stats.cruise_speed_knots * 1.852);
+      const kmh_cruise = Math.round(
+        stats.cruise_speed_knots * NAUTICAL_MILES_TO_KM
+      );
       html +=
         '<div style="margin-bottom: 8px;"><strong>Cruise Speed (>1000ft AGL):</strong> ' +
         Math.round(stats.cruise_speed_knots) +
@@ -191,7 +200,9 @@ export class StatsManager {
     }
 
     if (stats.max_groundspeed_knots && stats.max_groundspeed_knots > 0) {
-      const kmh_max = Math.round(stats.max_groundspeed_knots * 1.852);
+      const kmh_max = Math.round(
+        stats.max_groundspeed_knots * NAUTICAL_MILES_TO_KM
+      );
       html +=
         '<div style="margin-bottom: 8px;"><strong>Max Groundspeed:</strong> ' +
         Math.round(stats.max_groundspeed_knots) +
@@ -202,7 +213,7 @@ export class StatsManager {
 
     if (stats.max_altitude_ft) {
       // Altitude with meter conversion
-      const maxAltitudeM = Math.round(stats.max_altitude_ft * 0.3048);
+      const maxAltitudeM = Math.round(stats.max_altitude_ft * FEET_TO_METERS);
       html +=
         '<div style="margin-bottom: 8px;"><strong>Max Altitude (MSL):</strong> ' +
         Math.round(stats.max_altitude_ft) +
@@ -213,7 +224,7 @@ export class StatsManager {
       // Elevation gain with meter conversion
       if (stats.total_altitude_gain_ft) {
         const elevationGainM = Math.round(
-          stats.total_altitude_gain_ft * 0.3048
+          stats.total_altitude_gain_ft * FEET_TO_METERS
         );
         html +=
           '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' +

@@ -3,6 +3,12 @@
  * Pure functions for calculating flight statistics from path data
  */
 
+import {
+  CRUISE_ALTITUDE_THRESHOLD_M,
+  FEET_TO_METERS,
+  KM_TO_NAUTICAL_MILES,
+  METERS_TO_FEET,
+} from "../utils/constants";
 import { calculateDistance } from "../utils/geometry";
 import { formatFlightTime } from "../utils/formatters";
 import type {
@@ -335,14 +341,10 @@ export function calculateFilteredStatistics(options: {
   const flightTime = calculateFlightTime(filteredSegments, filteredPaths);
 
   // Unit conversions
-  const maxAltitudeFt =
-    altitudeStats.max !== undefined ? altitudeStats.max * 3.28084 : undefined;
-  const minAltitudeFt =
-    altitudeStats.min !== undefined ? altitudeStats.min * 3.28084 : undefined;
-  const totalAltitudeGainFt =
-    altitudeStats.gain !== undefined ? altitudeStats.gain * 3.28084 : undefined;
-  const longestFlightNm =
-    longestFlight !== undefined ? longestFlight * 0.539957 : undefined;
+  const maxAltitudeFt = altitudeStats.max * METERS_TO_FEET;
+  const minAltitudeFt = altitudeStats.min * METERS_TO_FEET;
+  const totalAltitudeGainFt = altitudeStats.gain * METERS_TO_FEET;
+  const longestFlightNm = longestFlight * KM_TO_NAUTICAL_MILES;
 
   // Format flight time
   const flightTimeStr =
@@ -353,7 +355,7 @@ export function calculateFilteredStatistics(options: {
   const cruiseSegments = filteredSegments.filter(
     (seg) =>
       seg.altitude_m &&
-      seg.altitude_m > 304.8 && // >1000ft in meters
+      seg.altitude_m > CRUISE_ALTITUDE_THRESHOLD_M &&
       seg.groundspeed_knots &&
       seg.groundspeed_knots > 0
   );
@@ -374,7 +376,7 @@ export function calculateFilteredStatistics(options: {
       ) {
         // Calculate segment distance
         const distanceKm = calculateDistance(seg.coords[0], seg.coords[1]);
-        const distanceNm = distanceKm * 0.539957;
+        const distanceNm = distanceKm * KM_TO_NAUTICAL_MILES;
 
         // Derive time from distance and speed: time = distance / speed
         const timeHours = distanceNm / seg.groundspeed_knots;
@@ -397,7 +399,7 @@ export function calculateFilteredStatistics(options: {
     cruiseSegments.forEach((seg) => {
       if (seg.altitude_m) {
         // Convert to feet and round to nearest 100ft for bucketing
-        const altFt = seg.altitude_m * 3.28084;
+        const altFt = seg.altitude_m * METERS_TO_FEET;
         const bucketFt = Math.round(altFt / 100) * 100;
         altitudeBuckets[bucketFt] = (altitudeBuckets[bucketFt] || 0) + 1;
       }
@@ -407,7 +409,7 @@ export function calculateFilteredStatistics(options: {
     )[0];
     if (mostCommonBucket) {
       mostCommonCruiseAltitudeFt = Number(mostCommonBucket[0]);
-      mostCommonCruiseAltitudeM = mostCommonCruiseAltitudeFt / 3.28084;
+      mostCommonCruiseAltitudeM = mostCommonCruiseAltitudeFt * FEET_TO_METERS;
     }
   }
 
@@ -423,7 +425,7 @@ export function calculateFilteredStatistics(options: {
     num_aircraft: aircraftList.length,
     aircraft_list: aircraftList,
     total_distance_km: totalDistanceKm,
-    total_distance_nm: totalDistanceKm * 0.539957,
+    total_distance_nm: totalDistanceKm * KM_TO_NAUTICAL_MILES,
     max_altitude_m: altitudeStats.max,
     min_altitude_m: altitudeStats.min,
     total_altitude_gain_m: altitudeStats.gain,

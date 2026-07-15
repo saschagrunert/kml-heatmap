@@ -5,6 +5,7 @@ Uses a spatial grid approach for O(1) proximity lookups: divides the map into
 avoiding O(n^2) pairwise distance checks.
 """
 
+import math
 import re
 from collections.abc import Callable
 
@@ -69,9 +70,9 @@ class AirportDeduplicator:
         self.unique_airports: list[AirportData] = []
         self.spatial_grid: dict[tuple, list[int]] = {}
 
-    def _get_grid_key(self, lat: float, lon: float) -> tuple:
+    def _get_grid_key(self, lat: float, lon: float) -> tuple[int, int]:
         """Get grid cell key for a coordinate."""
-        return (int(lat / self.grid_size), int(lon / self.grid_size))
+        return (math.floor(lat / self.grid_size), math.floor(lon / self.grid_size))
 
     def _find_nearby_airport(self, lat: float, lon: float) -> int | None:
         """Find airport within threshold using spatial grid."""
