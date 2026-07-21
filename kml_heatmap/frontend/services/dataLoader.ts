@@ -167,13 +167,14 @@ export class DataLoader {
       const globalVarName = getGlobalVarName(year, resolution);
       const win = this.getWindow();
 
-      if (!win[globalVarName as keyof Window]) {
+      const globals = win as unknown as Record<string, unknown>;
+      if (!globals[globalVarName]) {
         logDebug("Loading " + resolution + " (" + year + ")...");
         const filename = this.dataDir + "/" + year + "/" + resolution + ".js";
         await this.scriptLoader(filename);
       }
 
-      const data = win[globalVarName as keyof Window] as KMLDataset;
+      const data = globals[globalVarName] as KMLDataset;
       this.cache[cacheKey] = data;
       logDebug(
         "✓ Loaded " + resolution + " (" + year + "):",
