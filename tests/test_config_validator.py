@@ -1,15 +1,10 @@
 """Tests for config_validator module."""
 
-import pytest
 import tempfile
 import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from kml_heatmap.config_validator import (
-    ConfigValidator,
-    validate_environment,
-)
-from kml_heatmap.exceptions import ConfigurationError
+from kml_heatmap.config_validator import ConfigValidator
 
 
 class TestConfigValidator:
@@ -241,61 +236,6 @@ class TestConfigValidator:
                 )
                 # Should not have "too short" warnings
                 assert not any("too short" in warn for warn in warnings)
-            finally:
-                os.unlink(input_path)
-
-
-class TestValidateEnvironment:
-    """Tests for validate_environment function."""
-
-    def test_validate_environment_success(self):
-        """Test validate_environment with valid configuration."""
-        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
-            f.write(b"<kml></kml>")
-            input_path = f.name
-
-        with tempfile.TemporaryDirectory() as output_dir:
-            try:
-                # Should not raise exception
-                validate_environment(input_path, output_dir)
-            finally:
-                os.unlink(input_path)
-
-    def test_validate_environment_failure(self):
-        """Test validate_environment with invalid configuration."""
-        with tempfile.TemporaryDirectory() as output_dir:
-            with pytest.raises(ConfigurationError):
-                validate_environment("/nonexistent/file.kml", output_dir)
-
-    def test_validate_environment_fail_on_warnings(self):
-        """Test validate_environment fails when fail_on_warnings=True."""
-        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
-            f.write(b"<kml></kml>")
-            input_path = f.name
-
-        with tempfile.TemporaryDirectory() as output_dir:
-            try:
-                # Should raise because of missing API key warnings
-                with pytest.raises(ConfigurationError):
-                    validate_environment(input_path, output_dir, fail_on_warnings=True)
-            finally:
-                os.unlink(input_path)
-
-    def test_validate_environment_with_api_keys(self):
-        """Test validate_environment with valid API keys."""
-        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
-            f.write(b"<kml></kml>")
-            input_path = f.name
-
-        with tempfile.TemporaryDirectory() as output_dir:
-            try:
-                # Should not raise
-                validate_environment(
-                    input_path,
-                    output_dir,
-                    stadia_key="x" * 30,
-                    openaip_key="y" * 30,
-                )
             finally:
                 os.unlink(input_path)
 

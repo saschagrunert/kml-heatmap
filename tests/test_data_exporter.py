@@ -651,7 +651,7 @@ class TestRecalculateStatsFromSegments:
 
         _recalculate_stats_from_segments(stats, segments, [])
 
-        assert stats["average_groundspeed_knots"] == 100.0
+        assert stats["avg_groundspeed_knots"] == 100.0
 
     def test_cruise_speed_above_threshold(self):
         """Test cruise speed uses only segments above altitude threshold."""

@@ -281,7 +281,7 @@ def calculate_statistics(
         "max_altitude_ft": None,
         "total_flight_time_seconds": 0,
         "total_flight_time_str": None,
-        "average_groundspeed_knots": 0,
+        "avg_groundspeed_knots": 0,
         "max_groundspeed_knots": 0,
     }
 
@@ -337,6 +337,6 @@ def calculate_statistics(
     if isinstance(flight_time, (int, float)) and isinstance(distance_nm, (int, float)):
         if flight_time > 0 and distance_nm > 0:
             hours = flight_time / SECONDS_PER_HOUR
-            stats["average_groundspeed_knots"] = distance_nm / hours
+            stats["avg_groundspeed_knots"] = distance_nm / hours
 
     return stats

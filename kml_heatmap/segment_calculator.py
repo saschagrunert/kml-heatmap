@@ -22,20 +22,6 @@ from .constants import (
 )
 
 
-class SegmentData:
-    """Container for segment calculation results."""
-
-    def __init__(self) -> None:
-        """Initialize segment data with default values."""
-        self.segments: list[dict[str, Any]] = []
-        self.max_groundspeed_knots: float = 0.0
-        self.min_groundspeed_knots: float = float("inf")
-        self.cruise_speed_total_distance: float = 0.0
-        self.cruise_speed_total_time: float = 0.0
-        self.cruise_altitude_histogram: dict[int, float] = {}
-        self.max_path_distance_nm: float = 0.0
-
-
 def calculate_path_distance(path: list[list[float]]) -> float:
     """Calculate total distance along a path in kilometers."""
     if len(path) < 2:

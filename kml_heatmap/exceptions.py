@@ -4,8 +4,6 @@ __all__ = [
     "KMLHeatmapError",
     "KMLParseError",
     "InvalidCoordinateError",
-    "DataExportError",
-    "InvalidAltitudeError",
     "ConfigurationError",
 ]
 
@@ -55,26 +53,6 @@ class InvalidCoordinateError(KMLHeatmapError):
         if self.latitude is not None and self.longitude is not None:
             return f"{message} (lat: {self.latitude}, lon: {self.longitude})"
         return message
-
-
-class DataExportError(KMLHeatmapError):
-    """Raised when data export fails."""
-
-    def __init__(self, message: str, output_path: str | None = None):
-        self.output_path = output_path
-        if output_path:
-            message = f"{message} (Output: {output_path})"
-        super().__init__(message)
-
-
-class InvalidAltitudeError(KMLHeatmapError):
-    """Raised when altitude data is invalid."""
-
-    def __init__(self, message: str, altitude: float | None = None):
-        self.altitude = altitude
-        if altitude is not None:
-            message = f"{message} (Altitude: {altitude}m)"
-        super().__init__(message)
 
 
 class ConfigurationError(KMLHeatmapError):

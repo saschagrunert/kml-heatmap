@@ -24,7 +24,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
 
   // Populate year filter dropdown
   if (metadata && metadata.available_years) {
-    const yearSelect = document.getElementById("year-select");
+    const yearSelect = domCache.get("year-select");
     if (yearSelect instanceof HTMLSelectElement) {
       metadata.available_years.forEach((year) => {
         const option = document.createElement("option");

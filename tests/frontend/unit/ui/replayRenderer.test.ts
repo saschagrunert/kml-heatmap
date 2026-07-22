@@ -267,7 +267,7 @@ describe("ReplayRenderer", () => {
       ];
 
       callUpdateDisplay();
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
+      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
         150,
         mockReplayManager.state.colorMinSpeed,
         mockReplayManager.state.colorMaxSpeed

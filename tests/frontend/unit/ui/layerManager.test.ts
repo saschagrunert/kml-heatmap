@@ -20,8 +20,6 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
 vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
   logDebug: vi.fn(),
   logError: vi.fn(),
-  logInfo: vi.fn(),
-  logWarn: vi.fn(),
 }));
 
 describe("LayerManager", () => {

@@ -13,41 +13,13 @@ import {
   filterPaths,
   filterSegmentsByPaths,
 } from "../calculations/statistics";
-import type { PathInfo, PathSegment } from "../types";
-
-/**
- * Year statistics for wrapped feature
- */
-interface YearStats {
-  total_flights: number;
-  total_distance_nm: number;
-  num_airports: number;
-  airport_names: string[];
-  flight_time: string;
-  aircraft_list: AircraftStats[];
-}
-
-/**
- * Aircraft statistics with flight time
- */
-interface AircraftStats {
-  registration: string;
-  type?: string;
-  model?: string;
-  flights: number;
-  flight_time_seconds?: number;
-  flight_time_str?: string;
-}
-
-/**
- * Fun fact for wrapped feature
- */
-interface FunFact {
-  icon: string;
-  text: string;
-  category: string;
-  priority: number;
-}
+import type {
+  AircraftAggregate,
+  FunFact,
+  PathInfo,
+  PathSegment,
+  YearStats,
+} from "../types";
 
 /**
  * Full statistics for enrichment
@@ -133,7 +105,7 @@ export function calculateYearStats(
   const flightTime = formatFlightTime(totalSeconds);
 
   // Aggregate aircraft data
-  const aircraftMap: Record<string, AircraftStats> = {};
+  const aircraftMap: Record<string, AircraftAggregate> = {};
   filteredPaths.forEach((path) => {
     if (path.aircraft_registration) {
       const reg = path.aircraft_registration;

@@ -10,7 +10,6 @@ __all__ = [
     "parse_iso_timestamp",
     "calculate_duration_seconds",
     "format_flight_time",
-    "parse_coordinates_from_string",
     "numeric_filename_key",
 ]
 
@@ -62,23 +61,3 @@ def numeric_filename_key(path: str) -> tuple[int, int, str]:
     if match:
         return (0, int(match.group(1)), name)
     return (1, 0, name)
-
-
-def parse_coordinates_from_string(
-    coord_str: str,
-) -> tuple[float, float, float | None] | None:
-    """Parse coordinate string in KML format (lon,lat,alt or lon,lat)."""
-    if not coord_str:
-        return None
-
-    parts = coord_str.strip().split(",")
-    if len(parts) < 2:
-        return None
-
-    try:
-        lon = float(parts[0])
-        lat = float(parts[1])
-        alt = float(parts[2]) if len(parts) >= 3 else None
-        return (lat, lon, alt)
-    except (ValueError, IndexError):
-        return None

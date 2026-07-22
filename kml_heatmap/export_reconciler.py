@@ -73,7 +73,7 @@ def _recalculate_stats_from_segments(
 
     stats["total_altitude_gain_m"] = total_gain_m
     stats["total_altitude_gain_ft"] = total_gain_m * METERS_TO_FEET
-    stats["average_groundspeed_knots"] = (
+    stats["avg_groundspeed_knots"] = (
         groundspeed_sum / groundspeed_count if groundspeed_count > 0 else 0
     )
     stats["cruise_speed_knots"] = (

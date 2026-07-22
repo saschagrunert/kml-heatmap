@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from .exceptions import ConfigurationError
+from .constants import LARGE_FILE_WARNING_MB, MAX_KML_FILES_WARNING
 from .logger import logger
 
 
@@ -49,7 +49,7 @@ class ConfigValidator:
                 )
             if path.stat().st_size == 0:
                 self.errors.append(f"Input file is empty: {input_path}")
-            elif path.stat().st_size > 100 * 1024 * 1024:  # 100MB
+            elif path.stat().st_size > LARGE_FILE_WARNING_MB * 1024 * 1024:
                 self.warnings.append(
                     f"Large input file ({path.stat().st_size / 1024 / 1024:.1f} MB), "
                     "processing may be slow"
@@ -59,7 +59,7 @@ class ConfigValidator:
             kml_files = list(path.glob("**/*.kml"))
             if not kml_files:
                 self.errors.append(f"No .kml files found in directory: {input_path}")
-            elif len(kml_files) > 1000:
+            elif len(kml_files) > MAX_KML_FILES_WARNING:
                 self.warnings.append(
                     f"Large number of KML files ({len(kml_files)}), "
                     "processing may take a while"
@@ -153,35 +153,3 @@ class ConfigValidator:
         except (OSError, AttributeError):
             # statvfs not available on all platforms
             pass
-
-
-def validate_environment(
-    input_path: str,
-    output_dir: str,
-    stadia_key: str | None = None,
-    openaip_key: str | None = None,
-    fail_on_warnings: bool = False,
-) -> None:
-    """Validate environment and raise ConfigurationError if invalid."""
-    validator = ConfigValidator()
-    is_valid, errors, warnings = validator.validate_all(
-        input_path, output_dir, stadia_key, openaip_key
-    )
-
-    # Display warnings
-    for warning in warnings:
-        logger.warning(warning)
-
-    # Check if we should fail
-    if not is_valid or (fail_on_warnings and warnings):
-        error_msg = "Configuration validation failed:\n"
-        if errors:
-            error_msg += "\nErrors:\n" + "\n".join(f"  • {err}" for err in errors)
-        if fail_on_warnings and warnings:
-            error_msg += "\nWarnings (treated as errors):\n" + "\n".join(
-                f"  • {warn}" for warn in warnings
-            )
-        raise ConfigurationError(error_msg)
-
-    if is_valid and not warnings:
-        logger.info("✓ Configuration validation passed")

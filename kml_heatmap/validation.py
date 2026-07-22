@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from .constants import ALT_MIN_M, ALT_MAX_M
+from .constants import ALT_MIN_M, ALT_MAX_M, LAT_MIN, LAT_MAX, LON_MIN, LON_MAX
 from .logger import logger
 
 __all__ = [
@@ -24,11 +24,11 @@ def validate_coordinates(
     if not isinstance(lon, (int, float)):
         return False, f"Longitude must be a number{context}"
 
-    if lat < -90 or lat > 90:
-        return False, f"Latitude {lat} out of bounds (-90 to 90){context}"
+    if lat < LAT_MIN or lat > LAT_MAX:
+        return False, f"Latitude {lat} out of bounds ({LAT_MIN} to {LAT_MAX}){context}"
 
-    if lon < -180 or lon > 180:
-        return False, f"Longitude {lon} out of bounds (-180 to 180){context}"
+    if lon < LON_MIN or lon > LON_MAX:
+        return False, f"Longitude {lon} out of bounds ({LON_MIN} to {LON_MAX}){context}"
 
     return True, None
 

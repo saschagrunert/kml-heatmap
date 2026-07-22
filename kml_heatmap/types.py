@@ -72,7 +72,7 @@ class Statistics(TypedDict):
     total_altitude_gain_ft: NotRequired[float]
     total_flight_time_seconds: NotRequired[float]
     total_flight_time_str: NotRequired[str | None]
-    average_groundspeed_knots: NotRequired[float]
+    avg_groundspeed_knots: NotRequired[float]
     max_groundspeed_knots: NotRequired[float]
     cruise_speed_knots: NotRequired[float]
     most_common_cruise_altitude_ft: NotRequired[float]

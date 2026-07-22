@@ -41,6 +41,7 @@ export interface AircraftAggregate {
   type?: string;
   model?: string;
   flights: number;
+  flight_time_seconds?: number;
   flight_time_str?: string;
 }
 
@@ -162,6 +163,7 @@ export interface FunFact {
   category: string;
   icon: string;
   text: string;
+  priority: number;
 }
 
 /**
@@ -173,7 +175,7 @@ export interface YearStats {
   total_distance_nm: number;
   flight_time: string;
   airport_names: string[];
-  aircraft_list?: AircraftAggregate[];
+  aircraft_list: AircraftAggregate[];
 }
 
 /**

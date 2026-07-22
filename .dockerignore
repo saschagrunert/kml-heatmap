@@ -12,6 +12,12 @@ env/
 venv/
 ENV/
 .venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+
+# Node
+node_modules
 
 # IDE
 .vscode/
@@ -19,11 +25,23 @@ ENV/
 *.swp
 *.swo
 *~
+.claude
 
 # Output files
 *.html
 *.kml
 *.kmz
+docs
+coverage
+test-results
+
+# Test and data
+tests
+data
+
+# Build
+Dockerfile
+.playwright-mcp
 
 # Documentation (already in image)
 README.md

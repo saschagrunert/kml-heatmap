@@ -18,10 +18,10 @@ jobs:
         with:
           python-version: "3.x"
           cache: "pip"
-      - name: Install ruff
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff
+          pip install -r requirements-test.lock
       - name: Run ruff format check
         run: ruff format --check .
 
@@ -44,7 +44,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.lock
           pip install -r requirements-test.lock
-          pip install ruff mypy
       - name: Install npm dependencies
         run: npm ci
       - name: Run ruff lint
@@ -162,8 +161,10 @@ jobs:
         with:
           python-version: "3.x"
           cache: "pip"
-      - name: Install Bandit
-        run: pip install bandit
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.lock
       - name: Run Bandit security scan
         run: bandit -r kml_heatmap -ll
 

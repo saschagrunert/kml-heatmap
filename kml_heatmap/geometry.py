@@ -4,17 +4,12 @@ from math import radians, sin, cos, sqrt, atan2
 
 __all__ = [
     "EARTH_RADIUS_KM",
-    "Coordinate2D",
-    "Coordinate3D",
     "haversine_distance",
     "get_altitude_color",
     "extract_altitudes",
 ]
 
 EARTH_RADIUS_KM = 6371
-
-Coordinate2D = list[float]  # [lat, lon]
-Coordinate3D = list[float]  # [lat, lon, alt]
 
 
 def extract_altitudes(paths: list[list[list[float]]]) -> list[float]:

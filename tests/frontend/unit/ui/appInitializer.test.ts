@@ -9,10 +9,7 @@ import type {
 vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
   logError: vi.fn(),
   logDebug: vi.fn(),
-  logInfo: vi.fn(),
-  logWarn: vi.fn(),
   initLogger: vi.fn(),
-  isDebugEnabled: vi.fn(() => false),
 }));
 
 // Mock domCache

@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from kml_heatmap.helpers import parse_iso_timestamp
 from kml_heatmap.obfuscate import (
     _extract_frac,
     _is_already_obfuscated,
-    _parse_timestamp,
     check_directory_obfuscated,
     check_kml_obfuscated,
     main,
@@ -77,7 +77,7 @@ class TestObfuscateContent:
             "2025-03-03T08:25:20.5858380Z",
             "2025-03-03T08:25:25.5868380Z",
         ]
-        original_dts = [_parse_timestamp(ts) for ts in original_ts]
+        original_dts = [parse_iso_timestamp(ts) for ts in original_ts]
         original_deltas = [
             (original_dts[i + 1] - original_dts[i]).total_seconds()
             for i in range(len(original_dts) - 1)
@@ -86,7 +86,7 @@ class TestObfuscateContent:
         import re
 
         shifted_ts = re.findall(r"<when>([^<]+)</when>", result)
-        shifted_dts = [_parse_timestamp(ts) for ts in shifted_ts]
+        shifted_dts = [parse_iso_timestamp(ts) for ts in shifted_ts]
         shifted_deltas = [
             (shifted_dts[i + 1] - shifted_dts[i]).total_seconds()
             for i in range(len(shifted_dts) - 1)
@@ -293,19 +293,19 @@ class TestMidnightCrossover:
 
 
 class TestParseTimestamp:
-    """Tests for _parse_timestamp edge cases."""
+    """Tests for parse_iso_timestamp edge cases."""
 
     def test_returns_none_for_empty_string(self):
-        assert _parse_timestamp("") is None
+        assert parse_iso_timestamp("") is None
 
     def test_returns_none_for_no_t_separator(self):
-        assert _parse_timestamp("2025-03-03") is None
+        assert parse_iso_timestamp("2025-03-03") is None
 
     def test_returns_none_for_invalid_iso(self):
-        assert _parse_timestamp("not-a-dateThh:mm:ss") is None
+        assert parse_iso_timestamp("not-a-dateThh:mm:ss") is None
 
     def test_parses_valid_timestamp(self):
-        dt = _parse_timestamp("2025-03-03T08:25:15.5848380Z")
+        dt = parse_iso_timestamp("2025-03-03T08:25:15.5848380Z")
         assert dt is not None
         assert dt.year == 2025
         assert dt.month == 3

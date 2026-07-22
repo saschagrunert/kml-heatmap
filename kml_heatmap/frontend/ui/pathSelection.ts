@@ -2,6 +2,7 @@
  * Path Selection - Handles path selection logic
  */
 import type { MapApp } from "../mapApp";
+import { domCache } from "../utils/domCache";
 import { invalidateMapWithDelay } from "../utils/mapHelpers";
 import { logError } from "../utils/logger";
 
@@ -115,7 +116,7 @@ export class PathSelection {
   }
 
   updateIsolateButton(): void {
-    const btn = document.getElementById("isolate-btn");
+    const btn = domCache.get("isolate-btn");
     if (!btn) return;
 
     const hasSelection = this.app.selectedPathIds.size > 0;
