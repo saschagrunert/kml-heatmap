@@ -7,7 +7,6 @@ __all__ = [
     "Coordinate2D",
     "Coordinate3D",
     "haversine_distance",
-    "downsample_coordinates",
     "get_altitude_color",
     "extract_altitudes",
 ]
@@ -31,15 +30,6 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return EARTH_RADIUS_KM * c
-
-
-def downsample_coordinates(
-    coordinates: list[Coordinate2D | Coordinate3D], factor: int = 5
-) -> list[Coordinate2D | Coordinate3D]:
-    """Simple downsampling by keeping every Nth point."""
-    if factor <= 1:
-        return coordinates
-    return [coordinates[i] for i in range(0, len(coordinates), factor)]
 
 
 def get_altitude_color(altitude: float, min_alt: float, max_alt: float) -> str:

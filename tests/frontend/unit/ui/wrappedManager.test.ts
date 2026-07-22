@@ -3,13 +3,6 @@ import { WrappedManager } from "../../../../kml_heatmap/frontend/ui/wrappedManag
 import type { MockMapApp } from "../../testHelpers";
 import type { FilteredStatistics } from "../../../../kml_heatmap/frontend/types";
 
-// Mock DOMPurify
-vi.mock("dompurify", () => ({
-  default: {
-    sanitize: (html: string) => html,
-  },
-}));
-
 // Mock domCache
 vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
   domCache: {
@@ -381,7 +374,7 @@ describe("WrappedManager", () => {
       );
     });
 
-    it("sets stats HTML via DOMPurify.sanitize", () => {
+    it("sets stats HTML", () => {
       wrappedManager.showWrapped();
 
       const statsEl = document.getElementById("wrapped-stats");

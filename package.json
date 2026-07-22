@@ -2,6 +2,9 @@
   "name": "kml-heatmap",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -34,9 +37,7 @@
     "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.8"
   },
-  "dependencies": {
-    "dompurify": "^3.4.12"
-  },
+  "dependencies": {},
   "overrides": {
     "typescript-eslint": {
       "eslint": "$eslint"

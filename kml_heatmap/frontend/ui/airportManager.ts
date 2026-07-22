@@ -1,7 +1,6 @@
 /**
  * Airport Manager - Handles airport markers and popups
  */
-import DOMPurify from "dompurify";
 import type { MapApp } from "../mapApp";
 import { generateAirportPopupHtml } from "../utils/htmlGenerators";
 
@@ -47,18 +46,15 @@ export class AirportManager {
       const flightCount = airportCounts[airport.name] || 0;
       const isHomeBase = airport.name === homeBaseName;
 
-      const popup = DOMPurify.sanitize(
-        generateAirportPopupHtml({
-          name: airport.name,
-          lat: airport.lat,
-          lon: airport.lon,
-          latDms: window.KMLHeatmap.ddToDms(airport.lat, true),
-          lonDms: window.KMLHeatmap.ddToDms(airport.lon, false),
-          flightCount,
-          isHomeBase,
-        }),
-        { ADD_ATTR: ["target"] }
-      );
+      const popup = generateAirportPopupHtml({
+        name: airport.name,
+        lat: airport.lat,
+        lon: airport.lon,
+        latDms: window.KMLHeatmap.ddToDms(airport.lat, true),
+        lonDms: window.KMLHeatmap.ddToDms(airport.lon, false),
+        flightCount,
+        isHomeBase,
+      });
 
       marker.setPopupContent(popup);
     });

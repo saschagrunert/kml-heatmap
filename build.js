@@ -22,7 +22,7 @@ const sharedBuildOptions = {
   bundle: true,
   format: "iife",
   sourcemap: isDevelopment,
-  target: ["es2020"],
+  target: ["es2022"],
   platform: "browser",
   logLevel: "info",
   minify,

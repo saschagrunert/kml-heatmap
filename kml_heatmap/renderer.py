@@ -4,7 +4,6 @@ import os
 import re
 import shutil
 import string
-import subprocess
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -16,6 +15,7 @@ import minify_html as mh
 
 from .airports import deduplicate_airports, extract_airport_name
 from .data_exporter import export_all_data
+from .exceptions import KMLParseError
 from .helpers import numeric_filename_key
 from .logger import logger
 from .parser import parse_kml_coordinates
@@ -70,59 +70,9 @@ def _parse_with_error_handling(
     """Parse a KML file with error handling."""
     try:
         return kml_file, parse_kml_coordinates(kml_file)
-    except (OSError, ValueError, TypeError, AttributeError) as e:
+    except (OSError, ValueError, TypeError, AttributeError, KMLParseError) as e:
         logger.error(f"Error processing {kml_file}: {e}")
         return kml_file, ([], [], [])
-
-
-def _build_javascript_bundle() -> bool:
-    """Build the JavaScript bundle using npm."""
-    try:
-        project_root = Path(__file__).parent.parent
-        package_json = project_root / "package.json"
-        if not package_json.exists():
-            logger.warning("package.json not found - skipping JavaScript build")
-            return False
-
-        node_modules = project_root / "node_modules"
-        if not node_modules.exists():
-            logger.info("Installing Node.js dependencies...")
-            result = subprocess.run(
-                ["npm", "install"],
-                cwd=project_root,
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-            if result.returncode != 0:
-                logger.error(f"npm install failed: {result.stderr}")
-                return False
-
-        logger.info("Building JavaScript bundle...")
-        result = subprocess.run(
-            ["npm", "run", "build"],
-            cwd=project_root,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
-        if result.returncode != 0:
-            logger.error(f"JavaScript build failed: {result.stderr}")
-            return False
-
-        logger.info("JavaScript bundle built successfully")
-        return True
-
-    except FileNotFoundError:
-        logger.warning("npm not found - skipping JavaScript build")
-        return False
-    except subprocess.TimeoutExpired:
-        logger.error("JavaScript build timed out")
-        return False
-    except (OSError, ValueError, RuntimeError) as e:
-        logger.error(f"JavaScript build error: {e}")
-        return False
 
 
 def _parse_kml_files(
@@ -359,8 +309,9 @@ def _package_assets(
         (static_dir / "bundle.js").exists()
         and (static_dir / "mapApp.bundle.js").exists()
     ):
-        logger.info("\nBuilding JavaScript modules...")
-        _build_javascript_bundle()
+        logger.warning(
+            "JavaScript bundles not found - run 'npm run build' to generate them"
+        )
     else:
         logger.info("\nUsing pre-built JavaScript bundles...")
 

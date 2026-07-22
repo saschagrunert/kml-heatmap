@@ -86,14 +86,6 @@ class Statistics(TypedDict):
     aircraft_list: NotRequired[list[Any]]
 
 
-class ResolutionConfig(TypedDict):
-    """Configuration for a data resolution level."""
-
-    factor: int
-    epsilon: float
-    description: str
-
-
 class CacheEntry(TypedDict):
     """Cache entry for parsed KML data."""
 
@@ -110,6 +102,5 @@ __all__ = [
     "PathInfo",
     "AirportData",
     "Statistics",
-    "ResolutionConfig",
     "CacheEntry",
 ]

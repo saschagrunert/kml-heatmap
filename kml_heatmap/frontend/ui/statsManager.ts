@@ -1,7 +1,6 @@
 /**
  * Stats Manager - Handles statistics panel updates
  */
-import DOMPurify from "dompurify";
 import type { MapApp } from "../mapApp";
 import type { FilteredStatistics } from "../types";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
@@ -250,7 +249,7 @@ export class StatsManager {
     }
 
     const panel = domCache.get("stats-panel");
-    if (panel) panel.innerHTML = DOMPurify.sanitize(html);
+    if (panel) panel.innerHTML = html;
   }
 
   toggleStats(): void {

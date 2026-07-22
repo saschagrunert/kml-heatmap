@@ -3,7 +3,8 @@
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from .geometry import haversine_distance, extract_altitudes
+from .geometry import extract_altitudes
+from .segment_calculator import calculate_path_distance
 from .aircraft import lookup_aircraft_model
 from .airports import is_point_marker
 from .constants import METERS_TO_FEET, KM_TO_NAUTICAL_MILES, SECONDS_PER_HOUR
@@ -44,16 +45,11 @@ def calculate_basic_stats(valid_paths: list[list[list[float]]]) -> dict[str, flo
     total_gain_m = 0.0
 
     for path in valid_paths:
+        total_distance_km += calculate_path_distance(path)
+
         for i in range(len(path) - 1):
-            # Handle both 3-element [lat,lon,alt] and 4-element [lat,lon,alt,timestamp]
-            lat1, lon1, alt1 = path[i][0], path[i][1], path[i][2]
-            lat2, lon2, alt2 = path[i + 1][0], path[i + 1][1], path[i + 1][2]
-
-            # Add to total distance
-            total_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
-
             # Calculate altitude change (only track gain)
-            alt_change = alt2 - alt1
+            alt_change = path[i + 1][2] - path[i][2]
             if alt_change > 0:
                 total_gain_m += alt_change
 
@@ -165,11 +161,7 @@ def _calculate_aircraft_flight_times(
         timestamps = extract_timestamps_from_path(path)
 
         # Calculate path distance
-        path_distance_km = 0.0
-        for i in range(len(path) - 1):
-            lat1, lon1 = path[i][0], path[i][1]
-            lat2, lon2 = path[i + 1][0], path[i + 1][1]
-            path_distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+        path_distance_km = calculate_path_distance(path)
 
         # Initialize distance tracking if needed
         if "flight_distance_km" not in aircraft_flights[reg]:

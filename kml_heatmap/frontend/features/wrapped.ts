@@ -6,6 +6,7 @@
 import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
 import { calculateDistance } from "../utils/geometry";
 import { formatFlightTime } from "../utils/formatters";
+import { calculateAircraftColorClass as calculateAircraftColorClassFromNormalized } from "../utils/htmlGenerators";
 import {
   calculateFlightTime,
   collectAirports,
@@ -422,24 +423,11 @@ export function calculateAircraftColorClass(
   maxFlights: number,
   minFlights: number
 ): string {
-  // Handle edge case where all aircraft have same flight count
   if (maxFlights === minFlights) {
     return "fleet-aircraft-high";
   }
-
-  // Normalize to 0-1 range
   const normalized = (flights - minFlights) / (maxFlights - minFlights);
-
-  // Classify into quartiles
-  if (normalized >= 0.75) {
-    return "fleet-aircraft-high";
-  } else if (normalized >= 0.5) {
-    return "fleet-aircraft-medium-high";
-  } else if (normalized >= 0.25) {
-    return "fleet-aircraft-medium-low";
-  } else {
-    return "fleet-aircraft-low";
-  }
+  return calculateAircraftColorClassFromNormalized(normalized);
 }
 
 /**

@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -32,7 +33,6 @@ from .types import (
     PathMetadata,
     PathSegment,
     PathInfo,
-    ResolutionConfig,
     Statistics,
 )
 
@@ -46,8 +46,6 @@ def process_year_data(
     min_alt_m: float,
     max_alt_m: float,
     output_dir: str,
-    resolutions: dict[str, ResolutionConfig],
-    resolution_order: list[str],
     quiet: bool = False,
 ) -> dict[str, Any]:
     """Process a single year's data and export to files."""
@@ -60,9 +58,6 @@ def process_year_data(
     year_cruise_time = 0.0
     year_max_path_distance = 0.0
     year_cruise_altitude_histogram: dict[int, float] = {}
-    year_file_structure: list[str] = []
-    year_full_res_segments: list[PathSegment] | None = None
-    year_full_res_path_info: list[PathInfo] | None = None
 
     year_total_points = sum(
         len(all_path_groups[path_idx]) for path_idx in year_path_indices
@@ -70,98 +65,91 @@ def process_year_data(
     if not quiet:
         logger.info(f"    Total points for {year}: {year_total_points:,}")
 
-    for res_name in resolution_order:
-        res_config = resolutions[res_name]
+    full_paths = []
+    for path_idx in year_path_indices:
+        path = all_path_groups[path_idx]
+        full_paths.append(path)
 
-        full_paths = []
-        for path_idx in year_path_indices:
-            path = all_path_groups[path_idx]
-            full_paths.append(path)
+    full_coords = []
+    for path in full_paths:
+        for point in path:
+            full_coords.append([point[0], point[1]])
 
-        full_coords = []
-        for path in full_paths:
-            for point in path:
-                full_coords.append([point[0], point[1]])
+    path_segments: list[PathSegment] = []
+    path_info: list[PathInfo] = []
 
-        path_segments: list[PathSegment] = []
-        path_info: list[PathInfo] = []
+    for local_idx, (orig_path_idx, path) in enumerate(
+        zip(year_path_indices, full_paths)
+    ):
+        if len(path) <= 1:
+            continue
 
-        for local_idx, (orig_path_idx, path) in enumerate(
-            zip(year_path_indices, full_paths)
-        ):
-            if len(path) <= 1:
-                continue
+        metadata = (
+            all_path_metadata[orig_path_idx]
+            if orig_path_idx < len(all_path_metadata)
+            else PathMetadata(start_point=[], airport_name="")
+        )
+        path_year = (
+            all_path_metadata[orig_path_idx].get("year")
+            if orig_path_idx < len(all_path_metadata)
+            else None
+        )
 
-            metadata = (
-                all_path_metadata[orig_path_idx]
-                if orig_path_idx < len(all_path_metadata)
-                else PathMetadata(start_point=[], airport_name="")
-            )
-            path_year = (
-                all_path_metadata[orig_path_idx].get("year")
-                if orig_path_idx < len(all_path_metadata)
-                else None
-            )
+        info, path_duration_seconds, path_distance_km, path_distance_nm = (
+            _build_path_info(path, metadata, local_idx, path_year)
+        )
+        path_info.append(info)
 
-            info, path_duration_seconds, path_distance_km, path_distance_nm = (
-                _build_path_info(path, metadata, local_idx, path_year)
-            )
-            path_info.append(info)
+        if path_distance_nm > year_max_path_distance:
+            year_max_path_distance = path_distance_nm
 
-            if path_distance_nm > year_max_path_distance:
-                year_max_path_distance = path_distance_nm
+        (
+            segments,
+            seg_max_gs,
+            seg_min_gs,
+            seg_cruise_dist,
+            seg_cruise_time,
+            seg_cruise_hist,
+        ) = _process_path_segments(
+            path, local_idx, path_distance_km, path_duration_seconds
+        )
+        path_segments.extend(segments)
 
-            (
-                segments,
-                seg_max_gs,
-                seg_min_gs,
-                seg_cruise_dist,
-                seg_cruise_time,
-                seg_cruise_hist,
-            ) = _process_path_segments(
-                path, local_idx, path_distance_km, path_duration_seconds
-            )
-            path_segments.extend(segments)
+        if seg_max_gs > year_max_groundspeed:
+            year_max_groundspeed = seg_max_gs
+        if seg_min_gs < year_min_groundspeed:
+            year_min_groundspeed = seg_min_gs
+        year_cruise_distance += seg_cruise_dist
+        year_cruise_time += seg_cruise_time
+        for alt_bin, time_spent in seg_cruise_hist.items():
+            if alt_bin not in year_cruise_altitude_histogram:
+                year_cruise_altitude_histogram[alt_bin] = 0.0
+            year_cruise_altitude_histogram[alt_bin] += time_spent
 
-            if seg_max_gs > year_max_groundspeed:
-                year_max_groundspeed = seg_max_gs
-            if seg_min_gs < year_min_groundspeed:
-                year_min_groundspeed = seg_min_gs
-            year_cruise_distance += seg_cruise_dist
-            year_cruise_time += seg_cruise_time
-            for alt_bin, time_spent in seg_cruise_hist.items():
-                if alt_bin not in year_cruise_altitude_histogram:
-                    year_cruise_altitude_histogram[alt_bin] = 0.0
-                year_cruise_altitude_histogram[alt_bin] += time_spent
+    data: dict[str, Any] = {
+        "coordinates": full_coords,
+        "path_segments": path_segments,
+        "path_info": path_info,
+        "resolution": DATA_RESOLUTION,
+        "original_points": len(full_coords),
+    }
 
-        data: dict[str, Any] = {
-            "coordinates": full_coords,
-            "path_segments": path_segments,
-            "path_info": path_info,
-            "resolution": res_name,
-            "original_points": len(full_coords),
-        }
+    year_dir = Path(output_dir) / year
+    year_dir.mkdir(parents=True, exist_ok=True)
 
-        year_dir = Path(output_dir) / year
-        year_dir.mkdir(parents=True, exist_ok=True)
+    output_file = str(year_dir / f"{DATA_RESOLUTION}.js")
+    with open(output_file, "w") as f:
+        var_name = f"KML_DATA_{year}_{DATA_RESOLUTION.upper().replace('-', '_')}"
+        f.write(f"window.{var_name} = ")
+        json.dump(data, f, separators=(",", ":"), sort_keys=True)
+        f.write(";")
 
-        output_file = str(year_dir / f"{res_name}.js")
-        with open(output_file, "w") as f:
-            var_name = f"KML_DATA_{year}_{res_name.upper().replace('-', '_')}"
-            f.write(f"window.{var_name} = ")
-            json.dump(data, f, separators=(",", ":"), sort_keys=True)
-            f.write(";")
+    file_size = Path(output_file).stat().st_size
 
-        file_size = Path(output_file).stat().st_size
-        year_file_structure.append(res_name)
-
-        year_full_res_segments = path_segments
-        year_full_res_path_info = path_info
-
-        if not quiet:
-            logger.info(
-                f"    ✓ {res_config['description']}: {len(full_coords):,} points ({file_size / 1024:.1f} KB)"
-            )
+    if not quiet:
+        logger.info(
+            f"    ✓ Full resolution: {len(full_coords):,} points ({file_size / 1024:.1f} KB)"
+        )
 
     return {
         "year": year,
@@ -171,9 +159,9 @@ def process_year_data(
         "cruise_time": year_cruise_time,
         "max_path_distance": year_max_path_distance,
         "cruise_altitude_histogram": year_cruise_altitude_histogram,
-        "file_structure": year_file_structure,
-        "full_res_segments": year_full_res_segments,
-        "full_res_path_info": year_full_res_path_info,
+        "file_structure": [DATA_RESOLUTION],
+        "full_res_segments": path_segments,
+        "full_res_path_info": path_info,
     }
 
 
@@ -212,8 +200,6 @@ def _process_years_parallel(
     min_alt_m: float,
     max_alt_m: float,
     output_dir: str,
-    resolutions: dict[str, ResolutionConfig],
-    resolution_order: list[str],
 ) -> list[dict[str, Any]]:
     """Process all years in parallel and return results."""
     year_results: list[dict[str, Any]] = []
@@ -234,8 +220,6 @@ def _process_years_parallel(
                 min_alt_m,
                 max_alt_m,
                 output_dir,
-                resolutions,
-                resolution_order,
                 True,
             )
             futures[future] = year
@@ -261,74 +245,61 @@ def _process_years_parallel(
     return year_results
 
 
+@dataclass
+class AggregatedYearResults:
+    """Aggregated statistics from all year results."""
+
+    file_structure: dict[str, Any] = field(default_factory=dict)
+    max_groundspeed_knots: float = 0.0
+    min_groundspeed_knots: float = field(default_factory=lambda: float("inf"))
+    cruise_speed_total_distance: float = 0.0
+    cruise_speed_total_time: float = 0.0
+    max_path_distance_nm: float = 0.0
+    cruise_altitude_histogram: dict[int, float] = field(default_factory=dict)
+    all_full_res_segments: list[PathSegment] = field(default_factory=list)
+    all_full_res_path_info: list[PathInfo] = field(default_factory=list)
+
+
 def _aggregate_year_results(
     year_results: list[dict[str, Any]],
-) -> tuple[
-    dict[str, Any],
-    float,
-    float,
-    float,
-    float,
-    float,
-    dict[int, float],
-    list[PathSegment],
-    list[PathInfo],
-]:
+) -> AggregatedYearResults:
     """Aggregate statistics from all year results."""
-    file_structure: dict[str, Any] = {}
-    max_groundspeed_knots = 0.0
-    min_groundspeed_knots = float("inf")
-    cruise_speed_total_distance = 0.0
-    cruise_speed_total_time = 0.0
-    max_path_distance_nm = 0.0
-    cruise_altitude_histogram: dict[int, float] = {}
-    all_full_res_segments: list[PathSegment] = []
-    all_full_res_path_info: list[PathInfo] = []
+    agg = AggregatedYearResults()
 
     for result in year_results:
         year = result["year"]
-        file_structure[year] = result["file_structure"]
+        agg.file_structure[year] = result["file_structure"]
 
-        if result["max_groundspeed"] > max_groundspeed_knots:
-            max_groundspeed_knots = result["max_groundspeed"]
-        if result["min_groundspeed"] < min_groundspeed_knots:
-            min_groundspeed_knots = result["min_groundspeed"]
+        if result["max_groundspeed"] > agg.max_groundspeed_knots:
+            agg.max_groundspeed_knots = result["max_groundspeed"]
+        if result["min_groundspeed"] < agg.min_groundspeed_knots:
+            agg.min_groundspeed_knots = result["min_groundspeed"]
 
-        cruise_speed_total_distance += result["cruise_distance"]
-        cruise_speed_total_time += result["cruise_time"]
+        agg.cruise_speed_total_distance += result["cruise_distance"]
+        agg.cruise_speed_total_time += result["cruise_time"]
 
-        if result["max_path_distance"] > max_path_distance_nm:
-            max_path_distance_nm = result["max_path_distance"]
+        if result["max_path_distance"] > agg.max_path_distance_nm:
+            agg.max_path_distance_nm = result["max_path_distance"]
 
         for altitude_bin, time_spent in result["cruise_altitude_histogram"].items():
-            if altitude_bin not in cruise_altitude_histogram:
-                cruise_altitude_histogram[altitude_bin] = 0
-            cruise_altitude_histogram[altitude_bin] += time_spent
+            if altitude_bin not in agg.cruise_altitude_histogram:
+                agg.cruise_altitude_histogram[altitude_bin] = 0
+            agg.cruise_altitude_histogram[altitude_bin] += time_spent
 
         year_segments = result["full_res_segments"]
         year_path_info = result["full_res_path_info"]
         if year_segments and year_path_info:
-            path_id_offset = len(all_full_res_path_info)
+            path_id_offset = len(agg.all_full_res_path_info)
             for seg in year_segments:
                 remapped_seg = cast(PathSegment, dict(seg))
                 remapped_seg["path_id"] = seg["path_id"] + path_id_offset
-                all_full_res_segments.append(remapped_seg)
+                agg.all_full_res_segments.append(remapped_seg)
             for pi in year_path_info:
                 remapped_pi = cast(PathInfo, dict(pi))
                 remapped_pi["id"] = pi["id"] + path_id_offset
-                all_full_res_path_info.append(remapped_pi)
+                agg.all_full_res_path_info.append(remapped_pi)
 
-    return (
-        file_structure,
-        max_groundspeed_knots,
-        min_groundspeed_knots,
-        cruise_speed_total_distance,
-        cruise_speed_total_time,
-        max_path_distance_nm,
-        cruise_altitude_histogram,
-        all_full_res_segments,
-        all_full_res_path_info,
-    )
+    return agg
 
 
 def _finalize_stats(
@@ -389,11 +360,6 @@ def export_all_data(
 
     min_alt_m, max_alt_m = _calculate_altitude_range(all_path_groups)
 
-    resolutions: dict[str, ResolutionConfig] = {
-        DATA_RESOLUTION: {"factor": 1, "epsilon": 0, "description": "Full resolution"}
-    }
-    resolution_order = [DATA_RESOLUTION]
-
     paths_by_year = _group_paths_by_year(all_path_metadata)
     logger.info(f"\n  Splitting data by year: {sorted(paths_by_year.keys())}")
 
@@ -406,39 +372,27 @@ def export_all_data(
         min_alt_m,
         max_alt_m,
         output_dir,
-        resolutions,
-        resolution_order,
     )
 
-    (
-        file_structure,
-        max_groundspeed_knots,
-        min_groundspeed_knots,
-        cruise_speed_total_distance,
-        cruise_speed_total_time,
-        max_path_distance_nm,
-        cruise_altitude_histogram,
-        all_full_res_segments,
-        all_full_res_path_info,
-    ) = _aggregate_year_results(year_results)
+    agg = _aggregate_year_results(year_results)
 
-    if min_groundspeed_knots == float("inf"):
-        min_groundspeed_knots = 0.0
+    if agg.min_groundspeed_knots == float("inf"):
+        agg.min_groundspeed_knots = 0.0
 
     _finalize_stats(
         stats,
-        max_groundspeed_knots,
-        min_groundspeed_knots,
-        cruise_speed_total_distance,
-        cruise_speed_total_time,
-        max_path_distance_nm,
-        cruise_altitude_histogram,
+        agg.max_groundspeed_knots,
+        agg.min_groundspeed_knots,
+        agg.cruise_speed_total_distance,
+        agg.cruise_speed_total_time,
+        agg.max_path_distance_nm,
+        agg.cruise_altitude_histogram,
     )
 
-    if all_full_res_segments and all_full_res_path_info:
+    if agg.all_full_res_segments and agg.all_full_res_path_info:
         logger.info("\n  Reconciling statistics from segment data...")
         _recalculate_stats_from_segments(
-            stats, all_full_res_segments, all_full_res_path_info
+            stats, agg.all_full_res_segments, agg.all_full_res_path_info
         )
 
     files: dict[str, str] = {}
@@ -454,11 +408,11 @@ def export_all_data(
         stats,
         min_alt_m,
         max_alt_m,
-        min_groundspeed_knots,
-        max_groundspeed_knots,
+        agg.min_groundspeed_knots,
+        agg.max_groundspeed_knots,
         available_years,
         output_dir,
-        file_structure,
+        agg.file_structure,
     )
     files["metadata"] = meta_file
 

@@ -151,7 +151,7 @@ describe("htmlGenerators", () => {
 
       const html = generateFunFactsHtml(funFacts);
 
-      // The HTML should contain the raw text (sanitization happens at render time via DOMPurify)
+      // The HTML contains the raw text (data comes from trusted Python-generated files)
       expect(html).toContain("Test <script>alert('xss')</script>");
     });
   });

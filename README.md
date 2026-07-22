@@ -416,8 +416,6 @@ pytest --cov=kml_heatmap --cov-report=html      # HTML coverage report (htmlcov/
 **Dependencies:**
 
 - `lxml` - Fast XML parsing for KML files
-- `numpy` - Coordinate distance calculations
-- `folium` - Map rendering helpers
 - `rcssmin`, `rjsmin`, `minify-html` - Output minification (HTML/CSS/JS)
 
 ### Test Data Generation

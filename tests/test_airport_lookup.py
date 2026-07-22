@@ -104,7 +104,7 @@ class TestDownloadAndCaching:
     def test_empty_database_on_download_failure(self):
         """Test that empty database is returned when download fails."""
         with patch(
-            "kml_heatmap.airport_lookup.urlretrieve",
+            "kml_heatmap.airport_lookup.urlopen",
             side_effect=OSError("Network error"),
         ):
             with patch("kml_heatmap.airport_lookup.CACHE_FILE") as mock_cache:
@@ -250,7 +250,7 @@ YYYY,50.0,not_a_number,Test Airport 2
         """Test handling of download failures."""
         from kml_heatmap.airport_lookup import _download_airport_database
 
-        with patch("kml_heatmap.airport_lookup.urlretrieve") as mock_retrieve:
+        with patch("kml_heatmap.airport_lookup.urlopen") as mock_retrieve:
             mock_retrieve.side_effect = OSError("Network error")
 
             # Should return False and not raise
@@ -260,6 +260,7 @@ YYYY,50.0,not_a_number,Test Airport 2
     def test_empty_cache_file_after_download(self):
         """Test handling of empty cache file after download."""
         from kml_heatmap.airport_lookup import _download_airport_database
+        from unittest.mock import MagicMock
         import tempfile
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as f:
@@ -267,11 +268,13 @@ YYYY,50.0,not_a_number,Test Airport 2
 
         try:
             with patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path):
-                with patch("kml_heatmap.airport_lookup.urlretrieve"):
-                    # Create empty file
-                    with open(temp_path, "w") as f:
-                        pass
-
+                mock_response = MagicMock()
+                mock_response.read.return_value = b""
+                mock_response.__enter__ = MagicMock(return_value=mock_response)
+                mock_response.__exit__ = MagicMock(return_value=False)
+                with patch(
+                    "kml_heatmap.airport_lookup.urlopen", return_value=mock_response
+                ):
                     result = _download_airport_database()
                     # Should detect empty file
                     assert result is False
@@ -282,6 +285,7 @@ YYYY,50.0,not_a_number,Test Airport 2
     def test_successful_download(self):
         """Test successful database download."""
         from kml_heatmap.airport_lookup import _download_airport_database
+        from unittest.mock import MagicMock
         from pathlib import Path
         import tempfile
 
@@ -289,13 +293,19 @@ YYYY,50.0,not_a_number,Test Airport 2
             temp_path = Path(f.name)
 
         try:
+            csv_content = (
+                b"ident,latitude_deg,longitude_deg,name\n"
+                b"EDDF,50.0,8.5,Frankfurt Airport\n"
+            )
+            mock_response = MagicMock()
+            mock_response.read.return_value = csv_content
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
             with patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path):
-                with patch("kml_heatmap.airport_lookup.urlretrieve"):
-                    # Create non-empty file to simulate successful download
-                    with open(temp_path, "w") as f:
-                        f.write("ident,latitude_deg,longitude_deg,name\n")
-                        f.write("EDDF,50.0,8.5,Frankfurt Airport\n")
-
+                with patch(
+                    "kml_heatmap.airport_lookup.urlopen",
+                    return_value=mock_response,
+                ):
                     result = _download_airport_database()
                     # Should succeed
                     assert result is True

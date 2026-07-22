@@ -6,7 +6,7 @@ import time
 import threading
 import urllib.error
 from typing import Any
-from urllib.request import urlretrieve
+from urllib.request import urlopen
 
 # Try to import fcntl for Unix-like systems (for process-safe file locking)
 try:
@@ -66,7 +66,9 @@ def _download_airport_database() -> bool:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
         logger.info("📥 Downloading OurAirports database...")
-        urlretrieve(OURAIRPORTS_URL, CACHE_FILE)  # nosec B310
+        with urlopen(OURAIRPORTS_URL) as response:  # nosec B310
+            with open(CACHE_FILE, "wb") as out_file:
+                out_file.write(response.read())
 
         # Verify downloaded file
         if CACHE_FILE.exists() and CACHE_FILE.stat().st_size > 0:

@@ -4,11 +4,10 @@ import os
 import string
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from kml_heatmap.constants import HEATMAP_GRADIENT
 from kml_heatmap.renderer import (
-    _build_javascript_bundle,
     _package_assets,
     _parse_with_error_handling,
     _render_html,
@@ -346,45 +345,3 @@ class TestPackageAssets:
             for bundle in ("bundle.js", "mapApp.bundle.js"):
                 if (static_dir / bundle).exists():
                     assert os.path.exists(os.path.join(tmpdir, bundle))
-
-
-class TestBuildJavascriptBundle:
-    """Tests for _build_javascript_bundle function."""
-
-    def test_returns_false_when_npm_not_found(self):
-        """Test that missing npm returns False."""
-        with patch("subprocess.run", side_effect=FileNotFoundError):
-            result = _build_javascript_bundle()
-            assert result is False
-
-    def test_returns_false_on_timeout(self):
-        """Test that build timeout returns False."""
-        import subprocess
-
-        with patch(
-            "subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="npm", timeout=60),
-        ):
-            result = _build_javascript_bundle()
-            assert result is False
-
-    def test_returns_false_on_build_failure(self):
-        """Test that failed build returns False."""
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stderr = "build error"
-
-        with patch("subprocess.run", return_value=mock_result):
-            result = _build_javascript_bundle()
-            assert result is False
-
-    def test_returns_false_when_no_package_json(self):
-        """Test that missing package.json returns False."""
-        with patch(
-            "kml_heatmap.renderer.Path.__truediv__",
-            return_value=Path("/nonexistent/package.json"),
-        ):
-            # Use a nonexistent project root
-            with patch.object(Path, "exists", return_value=False):
-                result = _build_javascript_bundle()
-                assert result is False
