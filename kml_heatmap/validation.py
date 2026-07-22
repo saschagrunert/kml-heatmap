@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 
+from .constants import ALT_MIN_M, ALT_MAX_M
 from .logger import logger
 
 __all__ = [
@@ -81,9 +82,8 @@ def validate_altitude(altitude: float, context: str = "") -> tuple[bool, str | N
     if not isinstance(altitude, (int, float)):
         return False, f"Altitude must be a number{context}"
 
-    # Tighter bounds than coordinate clamping: Dead Sea (~-430m) to commercial aviation max (~13,000m)
-    min_altitude = -500
-    max_altitude = 15000
+    min_altitude = ALT_MIN_M
+    max_altitude = ALT_MAX_M
 
     if altitude < min_altitude or altitude > max_altitude:
         return (

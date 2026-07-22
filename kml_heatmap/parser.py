@@ -5,6 +5,7 @@ from typing import Any
 
 from lxml import etree as ET
 
+from .exceptions import KMLParseError
 from .logger import logger
 from .parser_cache import KML_CACHE_DIR
 from .parser_cache import (
@@ -44,10 +45,11 @@ def save_to_cache(
     )
 
 
-def _parse_kml_tree(kml_file: str) -> Any | None:
+def _parse_kml_tree(kml_file: str) -> Any:
     """Parse KML file and return XML root element."""
     try:
-        tree = ET.parse(kml_file)
+        parser = ET.XMLParser(resolve_entities=False, no_network=True)
+        tree = ET.parse(kml_file, parser)
         root = tree.getroot()
 
         logger.debug(f"\n  Root tag: {root.tag}")
@@ -61,12 +63,9 @@ def _parse_kml_tree(kml_file: str) -> Any | None:
         return root
 
     except ET.ParseError as e:
-        logger.error(f"XML parsing error in {kml_file}: {e}")
-        logger.error("The file may be corrupted or not a valid KML file")
-        return None
+        raise KMLParseError(f"XML parsing error: {e}", file_path=kml_file) from e
     except (IOError, OSError) as e:
-        logger.error(f"File I/O error parsing {kml_file}: {e}")
-        return None
+        raise KMLParseError(f"File I/O error: {e}", file_path=kml_file) from e
 
 
 def _extract_kml_elements(
@@ -153,8 +152,6 @@ def parse_kml_coordinates(
     try:
         # Parse KML file
         root = _parse_kml_tree(kml_file)
-        if root is None:
-            return [], [], []
 
         # KML namespaces
         namespaces = {
@@ -210,7 +207,7 @@ def parse_kml_coordinates(
 
         return coordinates, path_groups, path_metadata
 
-    except (ValueError, TypeError, AttributeError) as e:
-        logger.error(f"Data parsing error in {kml_file}: {e}")
+    except KMLParseError as e:
+        logger.error(f"KML parsing error in {kml_file}: {e}")
         logger.debug("Stack trace:", exc_info=True)
         return [], [], []

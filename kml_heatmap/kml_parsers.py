@@ -22,13 +22,13 @@ def validate_and_normalize_coordinate(
     if not (
         LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]
     ):
-        logger.debug(f"Invalid coordinates [{lat}, {lon}] in {filename}")
+        logger.debug("Invalid coordinates [%s, %s] in %s", lat, lon, filename)
         return None
 
     normalized_alt = alt
     if alt is not None:
         if not (ALT_RANGE[0] <= alt <= ALT_RANGE[1]):
-            logger.debug(f"Invalid altitude {alt}m in {filename}")
+            logger.debug("Invalid altitude %sm in %s", alt, filename)
             normalized_alt = None
         elif alt < 0:
             normalized_alt = 0.0

@@ -9,12 +9,6 @@ from unittest.mock import patch
 import pytest
 
 from kml_heatmap.data_exporter import process_year_data
-from kml_heatmap.constants import DATA_RESOLUTION
-
-# Test helper constant
-RESOLUTION_LEVELS = {
-    DATA_RESOLUTION: {"factor": 1, "epsilon": 0, "description": "Full resolution"}
-}
 
 
 class TestProcessYearData:
@@ -89,8 +83,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -130,8 +122,6 @@ class TestProcessYearData:
                 min_alt_m=100.0,
                 max_alt_m=300.0,
                 output_dir=temp_output_dir,
-                resolutions=RESOLUTION_LEVELS,
-                resolution_order=["data"],
                 quiet=True,
             )
 
@@ -156,8 +146,6 @@ class TestProcessYearData:
                 min_alt_m=100.0,
                 max_alt_m=300.0,
                 output_dir=temp_output_dir,
-                resolutions=RESOLUTION_LEVELS,
-                resolution_order=["data"],
                 quiet=False,
             )
 
@@ -181,8 +169,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -207,8 +193,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -232,8 +216,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -262,8 +244,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -293,8 +273,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -321,8 +299,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -363,8 +339,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -398,8 +372,6 @@ class TestProcessYearData:
             min_alt_m=2000.0,
             max_alt_m=2000.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -425,14 +397,12 @@ class TestProcessYearData:
                 min_alt_m=100.0,
                 max_alt_m=200100.0,
                 output_dir=temp_output_dir,
-                resolutions=RESOLUTION_LEVELS,
-                resolution_order=["data", "data"],
                 quiet=False,
             )
 
         # Verify processing completed
         assert result["year"] == "2025"
-        assert len(result["file_structure"]) == 2
+        assert len(result["file_structure"]) == 1
 
     def test_path_distance_tracking(self, temp_output_dir):
         """Test that maximum path distance is tracked."""
@@ -455,8 +425,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=100.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -478,8 +446,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -511,8 +477,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -541,8 +505,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -570,8 +532,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -605,8 +565,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -643,8 +601,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -672,8 +628,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -708,8 +662,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -742,14 +694,10 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data", "data"],
             quiet=True,
         )
 
         assert result["year"] == "2025"
-        # Both files should exist
-        assert "data" in result["file_structure"]
         assert "data" in result["file_structure"]
 
     def test_relative_time_calculation(self, temp_output_dir):
@@ -773,8 +721,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -806,8 +752,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=100.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -858,8 +802,6 @@ class TestProcessYearData:
             min_alt_m=3000.0,
             max_alt_m=4000.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -888,8 +830,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -912,8 +852,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=100.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],  # Aggressive downsampling
             quiet=True,
         )
 
@@ -950,8 +888,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=100.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -980,8 +916,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -1005,8 +939,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -1030,8 +962,6 @@ class TestProcessYearData:
             min_alt_m=1000.0,
             max_alt_m=2000.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -1068,8 +998,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 
@@ -1098,8 +1026,6 @@ class TestProcessYearData:
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
-            resolutions=RESOLUTION_LEVELS,
-            resolution_order=["data"],
             quiet=True,
         )
 

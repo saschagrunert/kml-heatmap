@@ -81,9 +81,7 @@ import {
   getDestinations,
 } from "./features/wrapped";
 
-// Export all modules for use in the application
-export {
-  // Utilities
+const api = {
   calculateDistance,
   calculateBearing,
   ddToDms,
@@ -96,14 +94,10 @@ export {
   findMin,
   findMax,
   findMinMax,
-
-  // State management
   parseUrlParams,
   encodeStateToUrl,
   getDefaultState,
   mergeState,
-
-  // Calculations
   filterPaths,
   collectAirports,
   aggregateAircraft,
@@ -113,18 +107,12 @@ export {
   calculateLongestFlight,
   calculateFlightTime,
   calculateFilteredStatistics,
-
-  // Services
   DataLoader,
-
-  // Airport features
   calculateAirportFlightCounts,
   findHomeBase,
   calculateAirportOpacity,
   calculateAirportMarkerSize,
   calculateAirportVisibility,
-
-  // Layer features
   calculateAltitudeRange,
   calculateAirspeedRange,
   shouldRenderSegment,
@@ -134,8 +122,6 @@ export {
   filterSegmentsForRendering,
   groupSegmentsByPath,
   calculateLayerStats,
-
-  // Replay features
   prepareReplaySegments,
   calculateTimeRange,
   findSegmentsAtTime,
@@ -146,8 +132,6 @@ export {
   shouldRecenter,
   calculateReplayProgress,
   validateReplayData,
-
-  // Wrapped features
   calculateYearStats,
   generateFunFacts,
   selectDiverseFacts,
@@ -156,79 +140,65 @@ export {
   getDestinations,
 };
 
-// Make modules available globally for legacy code
+export {
+  calculateDistance,
+  calculateBearing,
+  ddToDms,
+  formatTime,
+  formatDistance,
+  formatAltitude,
+  formatSpeed,
+  getColorForAltitude,
+  getColorForAirspeed,
+  findMin,
+  findMax,
+  findMinMax,
+  parseUrlParams,
+  encodeStateToUrl,
+  getDefaultState,
+  mergeState,
+  filterPaths,
+  collectAirports,
+  aggregateAircraft,
+  calculateTotalDistance,
+  calculateAltitudeStats,
+  calculateSpeedStats,
+  calculateLongestFlight,
+  calculateFlightTime,
+  calculateFilteredStatistics,
+  DataLoader,
+  calculateAirportFlightCounts,
+  findHomeBase,
+  calculateAirportOpacity,
+  calculateAirportMarkerSize,
+  calculateAirportVisibility,
+  calculateAltitudeRange,
+  calculateAirspeedRange,
+  shouldRenderSegment,
+  calculateSegmentProperties,
+  formatAltitudeLegendLabels,
+  formatAirspeedLegendLabels,
+  filterSegmentsForRendering,
+  groupSegmentsByPath,
+  calculateLayerStats,
+  prepareReplaySegments,
+  calculateTimeRange,
+  findSegmentsAtTime,
+  interpolatePosition,
+  calculateSmoothedBearing,
+  replayCalculateBearing,
+  calculateAutoZoom,
+  shouldRecenter,
+  calculateReplayProgress,
+  validateReplayData,
+  calculateYearStats,
+  generateFunFacts,
+  selectDiverseFacts,
+  calculateAircraftColorClass,
+  wrappedFindHomeBase,
+  getDestinations,
+};
+
 if (typeof window !== "undefined") {
-  window.KMLHeatmap = {
-    // Utilities
-    calculateDistance,
-    calculateBearing,
-    ddToDms,
-    formatTime,
-    formatDistance,
-    formatAltitude,
-    formatSpeed,
-    getColorForAltitude,
-    getColorForAirspeed,
-    findMin,
-    findMax,
-    findMinMax,
-
-    // State management
-    parseUrlParams,
-    encodeStateToUrl,
-    getDefaultState,
-    mergeState,
-
-    // Calculations
-    filterPaths,
-    collectAirports,
-    aggregateAircraft,
-    calculateTotalDistance,
-    calculateAltitudeStats,
-    calculateSpeedStats,
-    calculateLongestFlight,
-    calculateFlightTime,
-    calculateFilteredStatistics,
-
-    // Services
-    DataLoader,
-
-    // Airport features
-    calculateAirportFlightCounts,
-    findHomeBase,
-    calculateAirportOpacity,
-    calculateAirportMarkerSize,
-    calculateAirportVisibility,
-
-    // Layer features
-    calculateAltitudeRange,
-    calculateAirspeedRange,
-    shouldRenderSegment,
-    calculateSegmentProperties,
-    formatAltitudeLegendLabels,
-    formatAirspeedLegendLabels,
-    filterSegmentsForRendering,
-    groupSegmentsByPath,
-    calculateLayerStats,
-
-    // Replay features
-    prepareReplaySegments,
-    calculateTimeRange,
-    findSegmentsAtTime,
-    interpolatePosition,
-    calculateSmoothedBearing,
-    replayCalculateBearing,
-    calculateAutoZoom,
-    shouldRecenter,
-    calculateReplayProgress,
-    validateReplayData,
-
-    // Wrapped features
-    calculateYearStats,
-    generateFunFacts,
-    selectDiverseFacts,
-    calculateAircraftColorClass,
-    wrappedFindHomeBase,
-    getDestinations,
-  };
+  window.KMLHeatmap = api;
 }

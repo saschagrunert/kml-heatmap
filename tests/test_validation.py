@@ -211,26 +211,26 @@ class TestValidateAltitude:
 
     def test_altitude_too_low(self):
         """Test altitude below minimum."""
-        is_valid, error = validate_altitude(-600.0)
+        is_valid, error = validate_altitude(-1100.0)
         assert is_valid is False
         assert "unrealistic" in error
-        assert "-500" in error
+        assert "-1000" in error
 
     def test_altitude_too_high(self):
         """Test altitude above maximum."""
-        is_valid, error = validate_altitude(20000.0)
+        is_valid, error = validate_altitude(55000.0)
         assert is_valid is False
         assert "unrealistic" in error
-        assert "15000" in error
+        assert "50000" in error
 
     def test_boundary_values(self):
         """Test boundary altitude values."""
         # Min altitude
-        is_valid, _ = validate_altitude(-500)
+        is_valid, _ = validate_altitude(-1000)
         assert is_valid is True
 
         # Max altitude
-        is_valid, _ = validate_altitude(15000)
+        is_valid, _ = validate_altitude(50000)
         assert is_valid is True
 
     def test_zero_altitude(self):
@@ -247,6 +247,6 @@ class TestValidateAltitude:
 
     def test_context_message(self):
         """Test that context is included in error message."""
-        is_valid, error = validate_altitude(99999.0, context=" at coordinate 123")
+        is_valid, error = validate_altitude(999999.0, context=" at coordinate 123")
         assert is_valid is False
         assert "at coordinate 123" in error

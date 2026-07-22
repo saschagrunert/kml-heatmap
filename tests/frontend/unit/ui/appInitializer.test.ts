@@ -24,13 +24,6 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
   },
 }));
 
-// Mock DOMPurify
-vi.mock("dompurify", () => ({
-  default: {
-    sanitize: (html: string) => html,
-  },
-}));
-
 // Mock mapHelpers
 vi.mock("../../../../kml_heatmap/frontend/utils/mapHelpers", () => ({
   invalidateMapWithDelay: vi.fn(),

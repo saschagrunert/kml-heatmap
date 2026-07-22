@@ -457,6 +457,18 @@ export class MapApp {
     createAirportMarkers(this, airports);
   }
 
+  togglePathSelection(id: string): void {
+    this.pathSelection.togglePathSelection(Number(id));
+  }
+
+  seekReplay(value: string): void {
+    this.replayManager.seekReplay(value);
+  }
+
+  changeReplaySpeed(): void {
+    this.replayManager.changeReplaySpeed();
+  }
+
   private setupEventHandlers(): void {
     this.map!.on("moveend", () => this.stateManager.scheduleSave());
     this.map!.on("zoomend", () => {

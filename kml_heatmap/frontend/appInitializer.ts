@@ -4,7 +4,6 @@
  */
 
 import * as L from "leaflet";
-import DOMPurify from "dompurify";
 import { logError } from "./utils/logger";
 import { domCache } from "./utils/domCache";
 import { generateAirportPopupHtml } from "./utils/htmlGenerators";
@@ -203,18 +202,15 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
       icao +
       "</div></div>";
 
-    const popup = DOMPurify.sanitize(
-      generateAirportPopupHtml({
-        name: airport.name,
-        lat: airport.lat,
-        lon: airport.lon,
-        latDms: window.KMLHeatmap.ddToDms(airport.lat, true),
-        lonDms: window.KMLHeatmap.ddToDms(airport.lon, false),
-        flightCount: (airport as AirportWithFlightCount).flight_count || 0,
-        isHomeBase: !!isHomeBase,
-      }),
-      { ADD_ATTR: ["target"] }
-    );
+    const popup = generateAirportPopupHtml({
+      name: airport.name,
+      lat: airport.lat,
+      lon: airport.lon,
+      latDms: window.KMLHeatmap.ddToDms(airport.lat, true),
+      lonDms: window.KMLHeatmap.ddToDms(airport.lon, false),
+      flightCount: (airport as AirportWithFlightCount).flight_count || 0,
+      isHomeBase: !!isHomeBase,
+    });
 
     const marker = L.marker([airport.lat, airport.lon], {
       icon: L.divIcon({

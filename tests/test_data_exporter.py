@@ -6,6 +6,7 @@ import tempfile
 from unittest.mock import patch
 
 from kml_heatmap.data_exporter import (
+    AggregatedYearResults,
     _aggregate_year_results,
     _calculate_altitude_range,
     _finalize_stats,
@@ -409,14 +410,6 @@ class TestProcessYearData:
                 min_alt_m=500.0,
                 max_alt_m=700.0,
                 output_dir=tmpdir,
-                resolutions={
-                    "data": {
-                        "factor": 1,
-                        "epsilon": 0,
-                        "description": "Full resolution",
-                    }
-                },
-                resolution_order=["data"],
                 quiet=True,
             )
 
@@ -452,14 +445,6 @@ class TestProcessYearData:
                 min_alt_m=500.0,
                 max_alt_m=1600.0,
                 output_dir=tmpdir,
-                resolutions={
-                    "data": {
-                        "factor": 1,
-                        "epsilon": 0,
-                        "description": "Full resolution",
-                    }
-                },
-                resolution_order=["data"],
                 quiet=True,
             )
 
@@ -481,14 +466,6 @@ class TestProcessYearData:
                 min_alt_m=500.0,
                 max_alt_m=500.0,
                 output_dir=tmpdir,
-                resolutions={
-                    "data": {
-                        "factor": 1,
-                        "epsilon": 0,
-                        "description": "Full resolution",
-                    }
-                },
-                resolution_order=["data"],
                 quiet=True,
             )
 
@@ -515,14 +492,6 @@ class TestProcessYearData:
                 min_alt_m=500.0,
                 max_alt_m=600.0,
                 output_dir=tmpdir,
-                resolutions={
-                    "data": {
-                        "factor": 1,
-                        "epsilon": 0,
-                        "description": "Full resolution",
-                    }
-                },
-                resolution_order=["data"],
                 quiet=True,
             )
 
@@ -931,24 +900,15 @@ class TestAggregateYearResults:
                 "full_res_path_info": None,
             }
         ]
-        (
-            file_structure,
-            max_gs,
-            min_gs,
-            cruise_dist,
-            cruise_time,
-            max_path_dist,
-            cruise_hist,
-            segments,
-            path_info,
-        ) = _aggregate_year_results(results)
-        assert max_gs == 150.0
-        assert min_gs == 50.0
-        assert cruise_dist == 100.0
-        assert cruise_time == 60.0
-        assert max_path_dist == 80.0
-        assert cruise_hist == {3000: 10.0}
-        assert file_structure == {"2025": ["data"]}
+        agg = _aggregate_year_results(results)
+        assert isinstance(agg, AggregatedYearResults)
+        assert agg.max_groundspeed_knots == 150.0
+        assert agg.min_groundspeed_knots == 50.0
+        assert agg.cruise_speed_total_distance == 100.0
+        assert agg.cruise_speed_total_time == 60.0
+        assert agg.max_path_distance_nm == 80.0
+        assert agg.cruise_altitude_histogram == {3000: 10.0}
+        assert agg.file_structure == {"2025": ["data"]}
 
     def test_remaps_path_ids_across_years(self):
         results = [
@@ -977,11 +937,11 @@ class TestAggregateYearResults:
                 "full_res_path_info": [{"id": 0, "data": "info2"}],
             },
         ]
-        *_, segments, path_info = _aggregate_year_results(results)
-        assert segments[0]["path_id"] == 0
-        assert segments[1]["path_id"] == 1
-        assert path_info[0]["id"] == 0
-        assert path_info[1]["id"] == 1
+        agg = _aggregate_year_results(results)
+        assert agg.all_full_res_segments[0]["path_id"] == 0
+        assert agg.all_full_res_segments[1]["path_id"] == 1
+        assert agg.all_full_res_path_info[0]["id"] == 0
+        assert agg.all_full_res_path_info[1]["id"] == 1
 
 
 class TestFinalizeStats:
@@ -1017,7 +977,7 @@ class TestProcessYearsParallel:
             side_effect=RuntimeError("boom"),
         ):
             results = _process_years_parallel(
-                paths_by_year, [], [[]], [{}], 0, 1000, "/tmp", {}, []
+                paths_by_year, [], [[]], [{}], 0, 1000, "/tmp"
             )
         assert results == []
 

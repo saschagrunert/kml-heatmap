@@ -1,7 +1,6 @@
 /**
  * Wrapped Manager - Handles year-in-review/wrapped feature
  */
-import DOMPurify from "dompurify";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
 import {
@@ -102,7 +101,7 @@ export class WrappedManager {
     );
 
     const statsEl = domCache.get("wrapped-stats");
-    if (statsEl) statsEl.innerHTML = DOMPurify.sanitize(statsHtml);
+    if (statsEl) statsEl.innerHTML = statsHtml;
 
     // Build fun facts section with dynamic, varied facts
     const funFacts = window.KMLHeatmap.generateFunFacts(
@@ -113,13 +112,13 @@ export class WrappedManager {
     const funFactsHtml = generateFunFactsHtml(funFacts);
 
     const funFactsEl = domCache.get("wrapped-fun-facts");
-    if (funFactsEl) funFactsEl.innerHTML = DOMPurify.sanitize(funFactsHtml);
+    if (funFactsEl) funFactsEl.innerHTML = funFactsHtml;
 
     // Build aircraft fleet section using year-filtered data
     if (yearStats.aircraft_list && yearStats.aircraft_list.length > 0) {
       const fleetHtml = generateAircraftFleetHtml(yearStats);
       const fleetEl = domCache.get("wrapped-aircraft-fleet");
-      if (fleetEl) fleetEl.innerHTML = DOMPurify.sanitize(fleetHtml);
+      if (fleetEl) fleetEl.innerHTML = fleetHtml;
     }
 
     // Build home base section using year-filtered airport data
@@ -160,8 +159,7 @@ export class WrappedManager {
       if (homeBase) {
         const homeBaseHtml = generateHomeBaseHtml(homeBase);
         const topAirportsEl = domCache.get("wrapped-top-airports");
-        if (topAirportsEl)
-          topAirportsEl.innerHTML = DOMPurify.sanitize(homeBaseHtml);
+        if (topAirportsEl) topAirportsEl.innerHTML = homeBaseHtml;
 
         // Build all destinations badge grid (excluding home base)
         const destinations = yearStats.airport_names.filter(
@@ -170,7 +168,7 @@ export class WrappedManager {
 
         const destinationsHtml = generateDestinationsHtml(destinations);
         const gridEl = domCache.get("wrapped-airports-grid");
-        if (gridEl) gridEl.innerHTML = DOMPurify.sanitize(destinationsHtml);
+        if (gridEl) gridEl.innerHTML = destinationsHtml;
       }
     }
 

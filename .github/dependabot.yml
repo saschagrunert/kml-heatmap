@@ -22,9 +22,7 @@ updates:
           - "ruff"
       core:
         patterns:
-          - "folium"
           - "lxml"
-          - "numpy"
 
   # JavaScript/TypeScript dependencies
   - package-ecosystem: "npm"
