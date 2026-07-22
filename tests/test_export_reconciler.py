@@ -16,7 +16,7 @@ class TestRecalculateStatsFromSegments:
             "max_altitude_ft": 0,
             "total_altitude_gain_m": 0,
             "total_altitude_gain_ft": 0,
-            "average_groundspeed_knots": 0,
+            "avg_groundspeed_knots": 0,
             "cruise_speed_knots": 0,
             "total_flight_time_seconds": 0,
         }
@@ -61,7 +61,7 @@ class TestRecalculateStatsFromSegments:
         ]
         stats = self._make_stats()
         _recalculate_stats_from_segments(stats, segments, [])
-        assert stats["average_groundspeed_knots"] == pytest.approx(125.0)
+        assert stats["avg_groundspeed_knots"] == pytest.approx(125.0)
 
     def test_cruise_speed_above_threshold(self):
         min_alt_m = 100
@@ -197,7 +197,7 @@ class TestRecalculateStatsFromSegments:
         ]
         stats = self._make_stats()
         _recalculate_stats_from_segments(stats, segments, [])
-        assert stats["average_groundspeed_knots"] == pytest.approx(120.0)
+        assert stats["avg_groundspeed_knots"] == pytest.approx(120.0)
 
     def test_no_altitude_gain_on_descent(self):
         segments = [

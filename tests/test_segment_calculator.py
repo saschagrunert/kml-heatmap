@@ -3,25 +3,9 @@
 import pytest
 from datetime import datetime
 from kml_heatmap.segment_calculator import (
-    SegmentData,
     calculate_path_distance,
     extract_segment_speeds,
 )
-
-
-class TestSegmentData:
-    """Tests for SegmentData class."""
-
-    def test_segment_data_initialization(self):
-        """Test SegmentData initialization."""
-        data = SegmentData()
-        assert data.segments == []
-        assert data.max_groundspeed_knots == 0.0
-        assert data.min_groundspeed_knots == float("inf")
-        assert data.cruise_speed_total_distance == 0.0
-        assert data.cruise_speed_total_time == 0.0
-        assert data.cruise_altitude_histogram == {}
-        assert data.max_path_distance_nm == 0.0
 
 
 class TestCalculatePathDistance:

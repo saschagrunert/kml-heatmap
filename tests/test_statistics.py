@@ -217,7 +217,7 @@ class TestCalculateStatistics:
         metadata = [{"airport_name": "EDDF - KJFK"}]
         stats = calculate_statistics(coords, paths, metadata)
         # Should have calculated average groundspeed
-        assert stats["average_groundspeed_knots"] > 0
+        assert stats["avg_groundspeed_knots"] > 0
 
     def test_with_aircraft_metadata(self):
         """Test statistics with aircraft metadata integration."""

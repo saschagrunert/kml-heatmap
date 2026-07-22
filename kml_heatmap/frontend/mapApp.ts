@@ -47,9 +47,6 @@ export interface AirportWithFlightCount extends Airport {
   flight_count: number;
 }
 
-// Re-export Range from store for consumers that import it from mapApp
-export type { Range } from "./state/store";
-
 /**
  * Airport to paths mapping
  */
@@ -295,7 +292,7 @@ export class MapApp {
     // Restore buttonsHidden state if it was saved
     if (this.savedState && this.savedState.buttonsHidden) {
       const toggleableButtons = document.querySelectorAll(".toggleable-btn");
-      const hideButton = document.getElementById("hide-buttons-btn");
+      const hideButton = domCache.get("hide-buttons-btn");
 
       toggleableButtons.forEach((btn) => {
         btn.classList.add("buttons-hidden");
@@ -337,6 +334,7 @@ export class MapApp {
             typeof pathId === "string" ? parseInt(pathId, 10) : pathId;
           this.selectedPathIds.add(pathIdNum);
         });
+        this.store.notifyMutation("selectedPathIds");
       }
 
       // Restore layer visibility

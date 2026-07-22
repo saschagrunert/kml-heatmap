@@ -5,6 +5,7 @@ from typing import Any
 
 from lxml import etree as ET
 
+from .constants import KML_NAMESPACES
 from .exceptions import KMLParseError
 from .logger import logger
 from .parser_cache import KML_CACHE_DIR
@@ -153,11 +154,7 @@ def parse_kml_coordinates(
         # Parse KML file
         root = _parse_kml_tree(kml_file)
 
-        # KML namespaces
-        namespaces = {
-            "kml": "http://www.opengis.net/kml/2.2",
-            "gx": "http://www.google.com/kml/ext/2.2",
-        }
+        namespaces = KML_NAMESPACES
 
         # Extract elements
         coord_elements, gx_coords, placemarks = _extract_kml_elements(root, namespaces)

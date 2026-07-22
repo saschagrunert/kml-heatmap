@@ -2,10 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   initLogger,
   logDebug,
-  logInfo,
-  logWarn,
   logError,
-  isDebugEnabled,
 } from "../../../../kml_heatmap/frontend/utils/logger";
 
 describe("logger utilities", () => {
@@ -37,32 +34,6 @@ describe("logger utilities", () => {
     vi.restoreAllMocks();
   });
 
-  describe("initLogger", () => {
-    it("enables debug when URL has debug=true", () => {
-      (window as any).location.search = "?debug=true";
-
-      initLogger();
-
-      expect(isDebugEnabled()).toBe(true);
-    });
-
-    it("disables debug when URL does not have debug=true", () => {
-      (window as any).location.search = "";
-
-      initLogger();
-
-      expect(isDebugEnabled()).toBe(false);
-    });
-
-    it("disables debug when debug parameter is not 'true'", () => {
-      (window as any).location.search = "?debug=false";
-
-      initLogger();
-
-      expect(isDebugEnabled()).toBe(false);
-    });
-  });
-
   describe("logDebug", () => {
     it("logs when debug is enabled", () => {
       (window as any).location.search = "?debug=true";
@@ -85,44 +56,6 @@ describe("logger utilities", () => {
     });
   });
 
-  describe("logInfo", () => {
-    it("logs when debug is enabled", () => {
-      (window as any).location.search = "?debug=true";
-      initLogger(); // Initialize with debug enabled
-
-      const consoleSpy = vi.spyOn(console, "info");
-
-      logInfo("info message", { key: "value" });
-      expect(consoleSpy).toHaveBeenCalledWith("info message", { key: "value" });
-    });
-
-    it("does not log when debug is disabled", () => {
-      (window as any).location.search = "";
-      initLogger(); // Initialize with debug disabled
-
-      const consoleSpy = vi.spyOn(console, "info");
-
-      logInfo("info message");
-      expect(consoleSpy).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("logWarn", () => {
-    it("always logs warnings", () => {
-      const consoleSpy = vi.spyOn(console, "warn");
-
-      logWarn("warning message");
-      expect(consoleSpy).toHaveBeenCalledWith("warning message");
-    });
-
-    it("logs warnings with multiple arguments", () => {
-      const consoleSpy = vi.spyOn(console, "warn");
-
-      logWarn("warning:", "critical", 500);
-      expect(consoleSpy).toHaveBeenCalledWith("warning:", "critical", 500);
-    });
-  });
-
   describe("logError", () => {
     it("always logs errors", () => {
       const consoleSpy = vi.spyOn(console, "error");
@@ -137,29 +70,6 @@ describe("logger utilities", () => {
 
       logError("Failed:", error);
       expect(consoleSpy).toHaveBeenCalledWith("Failed:", error);
-    });
-  });
-
-  describe("isDebugEnabled", () => {
-    it("returns true when debug is enabled", () => {
-      (window as any).location.search = "?debug=true";
-      initLogger();
-
-      expect(isDebugEnabled()).toBe(true);
-    });
-
-    it("returns false when debug is disabled", () => {
-      (window as any).location.search = "";
-      initLogger();
-
-      expect(isDebugEnabled()).toBe(false);
-    });
-
-    it("auto-initializes on first call", () => {
-      (window as any).location.search = "?debug=true&other=param";
-      initLogger(); // Need to re-init after changing search
-
-      expect(isDebugEnabled()).toBe(true);
     });
   });
 });

@@ -171,7 +171,8 @@ def _calculate_altitude_range(
     """Calculate min/max altitude across all path groups."""
     if all_path_groups:
         all_altitudes = extract_altitudes(all_path_groups)
-        return min(all_altitudes), max(all_altitudes)
+        if all_altitudes:
+            return min(all_altitudes), max(all_altitudes)
     return 0.0, 1000.0
 
 

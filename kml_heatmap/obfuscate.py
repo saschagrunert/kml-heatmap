@@ -12,6 +12,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .helpers import parse_iso_timestamp
+
 WHEN_PATTERN = re.compile(r"(<when>)([^<]+)(</when>)")
 
 NAME_DATE_PATTERN = re.compile(
@@ -20,17 +22,6 @@ NAME_DATE_PATTERN = re.compile(
 CHECK_NAME_DATE_PATTERN = re.compile(
     r"<name>(Log Start|Takeoff|Landing|Log Stop):\s*\d{2}\s+\w{3}\s+\d{4}\s+\d{2}:\d{2}\s+Z"
 )
-
-
-def _parse_timestamp(ts_str: str) -> datetime | None:
-    """Parse an ISO 8601 timestamp, handling Z suffix and high precision."""
-    ts_str = ts_str.strip()
-    if not ts_str or "T" not in ts_str:
-        return None
-    try:
-        return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
 
 
 def _extract_frac(ts_str: str) -> str:
@@ -68,7 +59,7 @@ def obfuscate_kml_content(content: str) -> str | None:
         return None
 
     first_ts_str = when_matches[0][1].strip()
-    first_dt = _parse_timestamp(first_ts_str)
+    first_dt = parse_iso_timestamp(first_ts_str)
     if first_dt is None:
         return None
 
@@ -89,7 +80,7 @@ def obfuscate_kml_content(content: str) -> str | None:
 
     def shift_when(match: re.Match[str]) -> str:
         ts_str = match.group(2).strip()
-        dt = _parse_timestamp(ts_str)
+        dt = parse_iso_timestamp(ts_str)
         if dt is None:
             return match.group(0)
         shifted = dt + offset
@@ -137,7 +128,7 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
 
     first_when = WHEN_PATTERN.search(content)
     if first_when:
-        dt = _parse_timestamp(first_when.group(2).strip())
+        dt = parse_iso_timestamp(first_when.group(2).strip())
         if dt and (dt.month != 1 or dt.day != 1):
             violations.append(
                 f"First timestamp not on Jan 1: {first_when.group(2).strip()}"

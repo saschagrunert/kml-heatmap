@@ -369,7 +369,7 @@ export class ReplayManager {
 
   private setElementsDisabled(ids: string[], disabled: boolean): void {
     ids.forEach((id) => {
-      const el = document.getElementById(id);
+      const el = domCache.get(id);
       if (el instanceof HTMLButtonElement || el instanceof HTMLSelectElement) {
         el.disabled = disabled;
       }
@@ -547,7 +547,10 @@ export class ReplayManager {
         mode === "altitude" ? this.state.colorMinAlt : this.state.colorMinSpeed;
       const max =
         mode === "altitude" ? this.state.colorMaxAlt : this.state.colorMaxSpeed;
-      const color = window.KMLHeatmap.getColorForAltitude(value, min, max);
+      const color =
+        mode === "altitude"
+          ? window.KMLHeatmap.getColorForAltitude(value, min, max)
+          : window.KMLHeatmap.getColorForAirspeed(value, min, max);
 
       L.polyline(seg.coords ?? [], {
         color,

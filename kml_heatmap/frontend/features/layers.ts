@@ -6,8 +6,6 @@
 import type { PathInfo, PathSegment } from "../types";
 import type { Range } from "../state/store";
 
-export type { Range };
-
 /**
  * Segment rendering properties
  */

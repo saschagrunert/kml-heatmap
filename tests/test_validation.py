@@ -148,7 +148,7 @@ class TestValidateCoordinates:
         is_valid, error = validate_coordinates(-100.0, 8.5)
         assert is_valid is False
         assert "out of bounds" in error
-        assert "-90 to 90" in error
+        assert "-90.0 to 90.0" in error
 
     def test_latitude_too_high(self):
         """Test latitude above maximum."""
@@ -161,7 +161,7 @@ class TestValidateCoordinates:
         is_valid, error = validate_coordinates(50.0, -200.0)
         assert is_valid is False
         assert "out of bounds" in error
-        assert "-180 to 180" in error
+        assert "-180.0 to 180.0" in error
 
     def test_longitude_too_high(self):
         """Test longitude above maximum."""

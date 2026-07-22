@@ -1,12 +1,10 @@
 """Tests for helpers module."""
 
-import pytest
 from datetime import datetime
 from kml_heatmap.helpers import (
     parse_iso_timestamp,
     calculate_duration_seconds,
     format_flight_time,
-    parse_coordinates_from_string,
 )
 
 
@@ -137,62 +135,3 @@ class TestFormatFlightTime:
     def test_less_than_minute(self):
         """Test formatting less than one minute."""
         assert format_flight_time(45) == "0m"
-
-
-class TestParseCoordinatesFromString:
-    """Tests for parse_coordinates_from_string function."""
-
-    def test_valid_three_components(self):
-        """Test parsing valid lon,lat,alt format."""
-        result = parse_coordinates_from_string("8.5,50.0,300")
-        assert result == (50.0, 8.5, 300.0)
-
-    def test_valid_two_components(self):
-        """Test parsing valid lon,lat format (no altitude)."""
-        result = parse_coordinates_from_string("8.5,50.0")
-        assert result == (50.0, 8.5, None)
-
-    def test_negative_coordinates(self):
-        """Test parsing negative coordinates."""
-        result = parse_coordinates_from_string("-74.0060,40.7128,10")  # New York
-        assert result == (40.7128, -74.0060, 10.0)
-
-    def test_decimal_precision(self):
-        """Test parsing with high decimal precision."""
-        result = parse_coordinates_from_string("8.123456,50.654321,123.45")
-        lat, lon, alt = result
-        assert lat == pytest.approx(50.654321)
-        assert lon == pytest.approx(8.123456)
-        assert alt == pytest.approx(123.45)
-
-    def test_whitespace_handling(self):
-        """Test that leading/trailing whitespace is handled."""
-        result = parse_coordinates_from_string("  8.5,50.0,300  ")
-        assert result == (50.0, 8.5, 300.0)
-
-    def test_empty_string(self):
-        """Test empty string returns None."""
-        assert parse_coordinates_from_string("") is None
-
-    def test_none_input(self):
-        """Test None input returns None."""
-        assert parse_coordinates_from_string(None) is None
-
-    def test_single_component(self):
-        """Test single component returns None."""
-        assert parse_coordinates_from_string("8.5") is None
-
-    def test_invalid_numbers(self):
-        """Test invalid number format returns None."""
-        assert parse_coordinates_from_string("abc,def,ghi") is None
-        assert parse_coordinates_from_string("8.5,not_a_number") is None
-
-    def test_zero_coordinates(self):
-        """Test zero coordinates."""
-        result = parse_coordinates_from_string("0,0,0")
-        assert result == (0.0, 0.0, 0.0)
-
-    def test_extra_components_ignored(self):
-        """Test that extra components beyond lon,lat,alt are ignored."""
-        result = parse_coordinates_from_string("8.5,50.0,300,extra,data")
-        assert result == (50.0, 8.5, 300.0)

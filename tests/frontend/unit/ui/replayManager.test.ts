@@ -660,9 +660,11 @@ describe("ReplayManager", () => {
       const yearSelect = document.createElement("select");
       yearSelect.id = "year-select";
       document.body.appendChild(yearSelect);
+      mockDomElements["year-select"] = yearSelect;
       const aircraftSelect = document.createElement("select");
       aircraftSelect.id = "aircraft-select";
       document.body.appendChild(aircraftSelect);
+      mockDomElements["aircraft-select"] = aircraftSelect;
 
       replayManager.hideOtherLayersDuringReplay();
 
@@ -675,7 +677,9 @@ describe("ReplayManager", () => {
       ).toBe(true);
 
       yearSelect.remove();
+      delete mockDomElements["year-select"];
       aircraftSelect.remove();
+      delete mockDomElements["aircraft-select"];
     });
   });
 
@@ -743,10 +747,12 @@ describe("ReplayManager", () => {
       yearSelect.id = "year-select";
       yearSelect.disabled = true;
       document.body.appendChild(yearSelect);
+      mockDomElements["year-select"] = yearSelect;
       const aircraftSelect = document.createElement("select");
       aircraftSelect.id = "aircraft-select";
       aircraftSelect.disabled = true;
       document.body.appendChild(aircraftSelect);
+      mockDomElements["aircraft-select"] = aircraftSelect;
 
       replayManager.restoreLayerVisibility();
 
@@ -759,7 +765,9 @@ describe("ReplayManager", () => {
       ).toBe(false);
 
       yearSelect.remove();
+      delete mockDomElements["year-select"];
       aircraftSelect.remove();
+      delete mockDomElements["aircraft-select"];
     });
   });
 
@@ -1191,7 +1199,7 @@ describe("ReplayManager", () => {
 
       replayManager.updateReplayDisplay();
 
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalled();
+      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalled();
     });
 
     it("adds airplane marker back to map if it was removed", () => {

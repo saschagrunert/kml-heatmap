@@ -125,7 +125,7 @@ export class ReplayRenderer {
             let segmentColor: string;
             if (useAirspeedColors && (seg.groundspeed_knots || 0) > 0) {
               // Use airspeed colors with selected path's groundspeed range
-              segmentColor = window.KMLHeatmap.getColorForAltitude(
+              segmentColor = window.KMLHeatmap.getColorForAirspeed(
                 seg.groundspeed_knots ?? 0,
                 replayManager.state.colorMinSpeed,
                 replayManager.state.colorMaxSpeed

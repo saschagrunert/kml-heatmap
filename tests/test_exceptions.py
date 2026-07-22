@@ -5,8 +5,6 @@ from kml_heatmap.exceptions import (
     KMLHeatmapError,
     KMLParseError,
     InvalidCoordinateError,
-    DataExportError,
-    InvalidAltitudeError,
     ConfigurationError,
 )
 
@@ -97,55 +95,6 @@ class TestInvalidCoordinateError:
         assert isinstance(error, KMLHeatmapError)
 
 
-class TestDataExportError:
-    """Tests for DataExportError exception."""
-
-    def test_simple_export_error(self):
-        """Test export error with just message."""
-        error = DataExportError("Export failed")
-        assert "Export failed" in str(error)
-
-    def test_export_error_with_path(self):
-        """Test export error with output path."""
-        error = DataExportError("Export failed", output_path="/path/to/output.html")
-        assert "Export failed" in str(error)
-        assert "/path/to/output.html" in str(error)
-        assert error.output_path == "/path/to/output.html"
-
-    def test_export_error_inheritance(self):
-        """Test export error inherits from base."""
-        error = DataExportError("Test")
-        assert isinstance(error, KMLHeatmapError)
-
-
-class TestInvalidAltitudeError:
-    """Tests for InvalidAltitudeError exception."""
-
-    def test_simple_altitude_error(self):
-        """Test altitude error with just message."""
-        error = InvalidAltitudeError("Invalid altitude")
-        assert "Invalid altitude" in str(error)
-
-    def test_altitude_error_with_value(self):
-        """Test altitude error with altitude value."""
-        error = InvalidAltitudeError("Invalid altitude", altitude=99999.0)
-        assert "Invalid altitude" in str(error)
-        assert "99999" in str(error)
-        assert error.altitude == 99999.0
-
-    def test_altitude_error_with_zero(self):
-        """Test altitude error with zero altitude."""
-        error = InvalidAltitudeError("Invalid altitude", altitude=0.0)
-        assert "Invalid altitude" in str(error)
-        # Should include altitude in message since it's not None
-        assert "0" in str(error)
-
-    def test_altitude_error_inheritance(self):
-        """Test altitude error inherits from base."""
-        error = InvalidAltitudeError("Test")
-        assert isinstance(error, KMLHeatmapError)
-
-
 class TestConfigurationError:
     """Tests for ConfigurationError exception."""
 
@@ -175,8 +124,6 @@ class TestExceptionHierarchy:
         exceptions = [
             KMLParseError("test"),
             InvalidCoordinateError("test"),
-            DataExportError("test"),
-            InvalidAltitudeError("test"),
             ConfigurationError("test"),
         ]
         for exc in exceptions:
