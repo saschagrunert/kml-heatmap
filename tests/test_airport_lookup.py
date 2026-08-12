@@ -11,6 +11,7 @@ from kml_heatmap.airport_lookup import (
     _load_airport_database,
     get_cache_info,
     lookup_airport_coordinates,
+    lookup_airport_country,
     standardize_airport_name,
 )
 
@@ -352,8 +353,8 @@ YYYY,50.0,not_a_number,Test Airport 2
 
         # Pre-populate cache with test data
         lookup_module._airport_cache = {
-            "TEST": (50.0, 8.5, "Test Airport"),
-            "EDDF": (50.0333, 8.5706, "Frankfurt Airport"),
+            "TEST": (50.0, 8.5, "Test Airport", "DE"),
+            "EDDF": (50.0333, 8.5706, "Frankfurt Airport", "DE"),
         }
 
         # Lookup should succeed
@@ -413,13 +414,57 @@ class TestAdditionalCoverage:
         original_cache = lookup_module._airport_cache
         try:
             lookup_module._airport_cache = {
-                "TEST": (50.0, 8.5, "Test Airport"),
-                "EDDF": (50.0333, 8.5706, "Frankfurt Airport"),
+                "TEST": (50.0, 8.5, "Test Airport", "DE"),
+                "EDDF": (50.0333, 8.5706, "Frankfurt Airport", "DE"),
             }
 
             info = get_cache_info()
             assert "airport_count" in info
             assert info["airport_count"] == 2
+        finally:
+            lookup_module._airport_cache = original_cache
+
+
+class TestLookupAirportCountry:
+    """Tests for lookup_airport_country function."""
+
+    def test_lookup_existing_airport_country(self):
+        """Test country lookup for a known airport."""
+        import kml_heatmap.airport_lookup as lookup_module
+
+        original_cache = lookup_module._airport_cache
+        try:
+            lookup_module._airport_cache = {
+                "EDDF": (50.0333, 8.5706, "Frankfurt Airport", "DE"),
+                "KJFK": (40.6399, -73.7787, "JFK Airport", "US"),
+            }
+
+            assert lookup_airport_country("EDDF") == "DE"
+            assert lookup_airport_country("KJFK") == "US"
+        finally:
+            lookup_module._airport_cache = original_cache
+
+    def test_lookup_nonexistent_airport(self):
+        """Test country lookup for a non-existent airport."""
+        assert lookup_airport_country("XXXX") is None
+
+    def test_lookup_invalid_icao(self):
+        """Test country lookup with invalid ICAO codes."""
+        assert lookup_airport_country("") is None
+        assert lookup_airport_country("EDD") is None
+        assert lookup_airport_country(None) is None
+
+    def test_lookup_airport_with_empty_country(self):
+        """Test country lookup when country field is empty."""
+        import kml_heatmap.airport_lookup as lookup_module
+
+        original_cache = lookup_module._airport_cache
+        try:
+            lookup_module._airport_cache = {
+                "TEST": (50.0, 8.5, "Test Airport", ""),
+            }
+
+            assert lookup_airport_country("TEST") is None
         finally:
             lookup_module._airport_cache = original_cache
 

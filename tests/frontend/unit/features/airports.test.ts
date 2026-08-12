@@ -1,13 +1,31 @@
-import { describe, it, expect } from "vitest";
-import {
-  calculateAirportFlightCounts,
-  findHomeBase,
-  calculateAirportOpacity,
-  calculateAirportMarkerSize,
-  calculateAirportVisibility,
-} from "../../../../kml_heatmap/frontend/features/airports";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 describe("airports feature", () => {
+  let calculateAirportFlightCounts: typeof import("../../../../kml_heatmap/frontend/features/airports").calculateAirportFlightCounts;
+  let countCountries: typeof import("../../../../kml_heatmap/frontend/features/airports").countCountries;
+  let countryDisplayName: typeof import("../../../../kml_heatmap/frontend/features/airports").countryDisplayName;
+  let countryFlag: typeof import("../../../../kml_heatmap/frontend/features/airports").countryFlag;
+  let findHomeBase: typeof import("../../../../kml_heatmap/frontend/features/airports").findHomeBase;
+  let groupByCountry: typeof import("../../../../kml_heatmap/frontend/features/airports").groupByCountry;
+  let calculateAirportOpacity: typeof import("../../../../kml_heatmap/frontend/features/airports").calculateAirportOpacity;
+  let calculateAirportMarkerSize: typeof import("../../../../kml_heatmap/frontend/features/airports").calculateAirportMarkerSize;
+  let calculateAirportVisibility: typeof import("../../../../kml_heatmap/frontend/features/airports").calculateAirportVisibility;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod =
+      await import("../../../../kml_heatmap/frontend/features/airports");
+    calculateAirportFlightCounts = mod.calculateAirportFlightCounts;
+    countCountries = mod.countCountries;
+    countryDisplayName = mod.countryDisplayName;
+    countryFlag = mod.countryFlag;
+    findHomeBase = mod.findHomeBase;
+    groupByCountry = mod.groupByCountry;
+    calculateAirportOpacity = mod.calculateAirportOpacity;
+    calculateAirportMarkerSize = mod.calculateAirportMarkerSize;
+    calculateAirportVisibility = mod.calculateAirportVisibility;
+  });
+
   const mockPathInfo = [
     {
       id: 1,
@@ -292,6 +310,102 @@ describe("airports feature", () => {
         expect(v.show).toBe(true);
         expect(v.opacity).toBe(1.0);
       });
+    });
+  });
+
+  describe("countryDisplayName", () => {
+    it("converts ISO code to full country name", () => {
+      expect(countryDisplayName("DE")).toBe("Germany");
+      expect(countryDisplayName("US")).toBe("United States");
+      expect(countryDisplayName("FR")).toBe("France");
+    });
+
+    it("returns a string for unknown codes", () => {
+      const result = countryDisplayName("ZZ");
+      expect(typeof result).toBe("string");
+      expect(result.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("countryFlag", () => {
+    it("converts ISO code to flag emoji", () => {
+      expect(countryFlag("DE")).toBe("🇩🇪");
+      expect(countryFlag("US")).toBe("🇺🇸");
+      expect(countryFlag("CH")).toBe("🇨🇭");
+    });
+
+    it("returns empty string for invalid codes", () => {
+      expect(countryFlag("")).toBe("");
+      expect(countryFlag("X")).toBe("");
+      expect(countryFlag("abc")).toBe("");
+    });
+  });
+
+  describe("countCountries", () => {
+    beforeEach(() => {
+      vi.stubGlobal("KML_AIRPORTS", {
+        airports: [
+          { name: "EDAV Halle-Oppin", country: "DE" },
+          { name: "EDDF Frankfurt", country: "DE" },
+          { name: "LSZH Zurich", country: "CH" },
+          { name: "LKPR Prague", country: "CZ" },
+        ],
+      });
+    });
+
+    it("returns unique country codes for given airports", () => {
+      const countries = countCountries([
+        "EDAV Halle-Oppin",
+        "EDDF Frankfurt",
+        "LSZH Zurich",
+      ]);
+      expect(countries.size).toBe(2);
+      expect(countries.has("DE")).toBe(true);
+      expect(countries.has("CH")).toBe(true);
+    });
+
+    it("returns empty set for empty input", () => {
+      expect(countCountries([]).size).toBe(0);
+    });
+
+    it("skips airports not found in KML_AIRPORTS", () => {
+      const countries = countCountries(["EDAV Halle-Oppin", "UNKNOWN Airport"]);
+      expect(countries.size).toBe(1);
+      expect(countries.has("DE")).toBe(true);
+    });
+  });
+
+  describe("groupByCountry", () => {
+    beforeEach(() => {
+      vi.stubGlobal("KML_AIRPORTS", {
+        airports: [
+          { name: "EDAV Halle-Oppin", country: "DE" },
+          { name: "EDDF Frankfurt", country: "DE" },
+          { name: "LSZH Zurich", country: "CH" },
+          { name: "LKPR Prague", country: "CZ" },
+        ],
+      });
+    });
+
+    it("groups airports by country code", () => {
+      const grouped = groupByCountry([
+        "EDAV Halle-Oppin",
+        "EDDF Frankfurt",
+        "LSZH Zurich",
+        "LKPR Prague",
+      ]);
+      expect(grouped.get("DE")).toEqual(["EDAV Halle-Oppin", "EDDF Frankfurt"]);
+      expect(grouped.get("CH")).toEqual(["LSZH Zurich"]);
+      expect(grouped.get("CZ")).toEqual(["LKPR Prague"]);
+    });
+
+    it("puts unknown airports under 'Other'", () => {
+      const grouped = groupByCountry(["UNKNOWN Airport"]);
+      expect(grouped.get("Other")).toEqual(["UNKNOWN Airport"]);
+    });
+
+    it("returns empty map for empty input", () => {
+      expect(groupByCountry([]).size).toBe(0);
     });
   });
 });

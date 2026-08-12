@@ -101,6 +101,7 @@ export interface Airport {
   lon: number;
   elevation?: number;
   type?: string;
+  country?: string;
 }
 
 /**

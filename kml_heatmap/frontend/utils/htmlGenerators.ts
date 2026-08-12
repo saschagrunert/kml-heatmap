@@ -322,20 +322,28 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
     </div>`;
 }
 
-/**
- * Generate destinations badges HTML
- */
-export function generateDestinationsHtml(destinations: string[]): string {
-  if (destinations.length === 0) {
-    return "";
-  }
+export function generateDestinationsHtml(
+  grouped: Map<string, string[]>,
+  countryName: (code: string) => string,
+  flag: (code: string) => string
+): string {
+  if (grouped.size === 0) return "";
 
-  let html =
-    '<div class="airports-grid-title">🗺️ Destinations</div><div class="airport-badges">';
-  destinations.forEach((airportName) => {
-    html += `<div class="airport-badge">${escapeHtml(airportName)}</div>`;
-  });
-  html += "</div>";
+  let html = '<div class="airports-grid-title">🗺️ Destinations</div>';
+
+  let groupIndex = 0;
+  for (const [code, airports] of grouped) {
+    const f = code !== "Other" ? flag(code) : "";
+    const label = code === "Other" ? "Other" : countryName(code);
+    const title = f ? `${escapeHtml(label)} &ensp;${f}` : escapeHtml(label);
+    const delay = (groupIndex * 0.1).toFixed(1);
+    html += `<div class="country-group" style="animation-delay: ${delay}s"><div class="country-group-title">${title}</div><div class="airport-badges">`;
+    groupIndex++;
+    for (const name of airports) {
+      html += `<div class="airport-badge">${escapeHtml(name)}</div>`;
+    }
+    html += "</div></div>";
+  }
 
   return html;
 }

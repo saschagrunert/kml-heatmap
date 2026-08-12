@@ -29,9 +29,20 @@ vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
     (_homeBase: any) => '<div class="top-airports-title">home base</div>'
   ),
   generateDestinationsHtml: vi.fn(
-    (_destinations: any) =>
+    (_grouped: any, _countryName: any, _flag: any) =>
       '<div class="airports-grid-title">destinations</div>'
   ),
+}));
+
+// Mock airports module
+vi.mock("../../../../kml_heatmap/frontend/features/airports", () => ({
+  countryDisplayName: vi.fn((code: string) => code),
+  countryFlag: vi.fn(() => ""),
+  groupByCountry: vi.fn((names: string[]) => {
+    const m = new Map<string, string[]>();
+    if (names.length > 0) m.set("DE", names);
+    return m;
+  }),
 }));
 
 // Import mocked modules to assert on them
@@ -657,8 +668,11 @@ describe("WrappedManager", () => {
 
       wrappedManager.showWrapped();
 
-      // EDDF is home base (2 flights), destinations should be EDDM and EDDL
-      expect(generateDestinationsHtml).toHaveBeenCalledWith(["EDDM", "EDDL"]);
+      expect(generateDestinationsHtml).toHaveBeenCalledWith(
+        expect.any(Map),
+        expect.any(Function),
+        expect.any(Function)
+      );
     });
 
     it("skips airport sections when airport_names is empty", () => {

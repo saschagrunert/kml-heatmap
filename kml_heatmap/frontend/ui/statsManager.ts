@@ -3,7 +3,13 @@
  */
 import type { MapApp } from "../mapApp";
 import type { FilteredStatistics } from "../types";
+import {
+  countryDisplayName,
+  countryFlag,
+  groupByCountry,
+} from "../features/airports";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
+import { escapeHtml } from "../utils/htmlGenerators";
 import { domCache } from "../utils/domCache";
 
 export class StatsManager {
@@ -95,17 +101,30 @@ export class StatsManager {
       "</div>";
 
     if (stats.airport_names && stats.airport_names.length > 0) {
+      const grouped = groupByCountry(stats.airport_names);
       html +=
-        '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Airports (' +
+        '<div style="margin-bottom: 8px; max-height: 200px; overflow-y: auto;"><strong>Airports (' +
         stats.num_airports +
-        "):</strong><br>";
-      stats.airport_names.forEach((name) => {
-        html += '<span style="margin-left: 10px;">• ' + name + "</span><br>";
-      });
+        "):</strong>";
+      for (const [code, airports] of grouped) {
+        const f = code !== "Other" ? countryFlag(code) : "";
+        const label =
+          code === "Other" ? "Other" : escapeHtml(countryDisplayName(code));
+        const title = f ? label + " &ensp;" + f : label;
+        html +=
+          '<div style="margin-top: 6px; margin-bottom: 3px; margin-left: 4px; font-size: 11px; color: #ccc; font-weight: 600;">' +
+          title +
+          "</div>";
+        for (const name of airports) {
+          html +=
+            '<span style="margin-left: 10px;">• ' +
+            escapeHtml(name) +
+            "</span><br>";
+        }
+      }
       html += "</div>";
     }
 
-    // Aircraft information (below airports)
     if (
       stats.num_aircraft &&
       stats.num_aircraft > 0 &&
