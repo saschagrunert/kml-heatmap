@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from .airport_lookup import extract_icao_codes_from_name, lookup_airport_country
 from .airports import extract_airport_name
 from .constants import HEATMAP_GRADIENT
 from .logger import logger
@@ -41,6 +42,12 @@ def export_airports_data(
             "name": airport_name,
             "flight_count": len(apt["timestamps"]) if apt.get("timestamps") else 1,
         }
+
+        icao_codes = extract_icao_codes_from_name(airport_name)
+        if icao_codes:
+            country = lookup_airport_country(icao_codes[0])
+            if country:
+                airport_data["country"] = country
 
         if not strip_timestamps:
             airport_data["timestamps"] = apt.get("timestamps", [])

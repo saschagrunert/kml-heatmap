@@ -29,6 +29,7 @@ __all__ = [
     "extract_icao_codes_from_name",
     "standardize_airport_name",
     "lookup_airport_coordinates",
+    "lookup_airport_country",
     "get_cache_info",
 ]
 
@@ -41,7 +42,7 @@ CACHE_LOCK_FILE = CACHE_DIR / "airports.lock"
 CACHE_MAX_AGE_DAYS = 30
 
 # Global cache for parsed airport data
-_airport_cache: dict[str, tuple[float, float, str]] | None = None
+_airport_cache: dict[str, tuple[float, float, str, str]] | None = None
 
 # Thread lock for database loading (prevents race conditions within a single process)
 _cache_lock = threading.Lock()
@@ -85,7 +86,7 @@ def _download_airport_database() -> bool:
         return False
 
 
-def _load_airport_database() -> dict[str, tuple[float, float, str]]:
+def _load_airport_database() -> dict[str, tuple[float, float, str, str]]:
     """Load airport database from cache or download if needed (thread-safe and process-safe)."""
     global _airport_cache
 
@@ -130,8 +131,9 @@ def _load_airport_database() -> dict[str, tuple[float, float, str]]:
                                     lat = float(row.get("latitude_deg", ""))
                                     lon = float(row.get("longitude_deg", ""))
                                     name = row.get("name", "").strip()
+                                    country = row.get("iso_country", "").strip()
                                     if name:
-                                        airports[icao] = (lat, lon, name)
+                                        airports[icao] = (lat, lon, name, country)
                                 except (ValueError, TypeError):
                                     # Skip invalid entries
                                     continue
@@ -169,17 +171,30 @@ def lookup_airport_coordinates(icao_code: str) -> tuple[float, float, str] | Non
         logger.debug(f"Invalid ICAO code: {icao_code}")
         return None
 
-    # Load database (from cache or download)
     airports = _load_airport_database()
 
-    # Look up airport
     icao_upper = icao_code.upper()
     if icao_upper in airports:
-        lat, lon, name = airports[icao_upper]
+        lat, lon, name, _ = airports[icao_upper]
         logger.debug(f"Found airport {icao_upper}: {name} at ({lat}, {lon})")
         return (lat, lon, name)
 
     logger.debug(f"Airport {icao_upper} not found in database")
+    return None
+
+
+def lookup_airport_country(icao_code: str) -> str | None:
+    """Look up airport country code from ICAO code using OurAirports."""
+    if not icao_code or len(icao_code) != 4:
+        return None
+
+    airports = _load_airport_database()
+
+    icao_upper = icao_code.upper()
+    if icao_upper in airports:
+        _, _, _, country = airports[icao_upper]
+        return country if country else None
+
     return None
 
 

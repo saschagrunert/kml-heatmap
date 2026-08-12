@@ -55,6 +55,22 @@ test.describe("Wrapped and Export", () => {
     await expect(page.locator("#wrapped-card-airports")).toBeVisible();
   });
 
+  test("wrapped destinations are grouped by country", async ({ page }) => {
+    await page.locator("#wrapped-btn").click();
+    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+
+    const airportsCard = page.locator("#wrapped-card-airports");
+    await expect(airportsCard).toBeVisible();
+
+    const countryGroups = airportsCard.locator(".country-group");
+    expect(await countryGroups.count()).toBeGreaterThanOrEqual(1);
+
+    const firstTitle = airportsCard.locator(".country-group-title").first();
+    await expect(firstTitle).toBeVisible();
+    const titleText = await firstTitle.textContent();
+    expect(titleText!.trim().length).toBeGreaterThan(0);
+  });
+
   test("wrapped stats card contains flight data", async ({ page }) => {
     await page.locator("#wrapped-btn").click();
     await expect(page.locator("#wrapped-modal")).toBeVisible({

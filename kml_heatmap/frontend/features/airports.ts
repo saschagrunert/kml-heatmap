@@ -5,6 +5,70 @@
 
 import type { PathInfo } from "../types";
 
+let _countryByAirport: Map<string, string> | null = null;
+
+function getCountryByAirportMap(): Map<string, string> {
+  if (_countryByAirport) return _countryByAirport;
+  _countryByAirport = new Map();
+  const kmlAirports = window.KML_AIRPORTS?.airports;
+  if (kmlAirports) {
+    for (const a of kmlAirports) {
+      if (a.country) _countryByAirport.set(a.name, a.country);
+    }
+  }
+  return _countryByAirport;
+}
+
+const _displayNames =
+  typeof Intl !== "undefined"
+    ? new Intl.DisplayNames(["en"], { type: "region" })
+    : null;
+
+export function countryDisplayName(code: string): string {
+  try {
+    return _displayNames?.of(code) || code;
+  } catch {
+    return code;
+  }
+}
+
+export function countryFlag(code: string): string {
+  if (code.length !== 2) return "";
+  const offset = 0x1f1e6 - 65;
+  const first = code.charCodeAt(0);
+  const second = code.charCodeAt(1);
+  if (first < 65 || first > 90 || second < 65 || second > 90) return "";
+  return String.fromCodePoint(first + offset, second + offset);
+}
+
+export function countCountries(airportNames: string[]): Set<string> {
+  const countries = new Set<string>();
+  const map = getCountryByAirportMap();
+
+  for (const name of airportNames) {
+    const country = map.get(name);
+    if (country) countries.add(country);
+  }
+  return countries;
+}
+
+export function groupByCountry(airportNames: string[]): Map<string, string[]> {
+  const map = getCountryByAirportMap();
+  const groups = new Map<string, string[]>();
+
+  for (const name of airportNames) {
+    const key = map.get(name) || "Other";
+    const list = groups.get(key);
+    if (list) {
+      list.push(name);
+    } else {
+      groups.set(key, [name]);
+    }
+  }
+
+  return groups;
+}
+
 /**
  * Airport flight counts
  */

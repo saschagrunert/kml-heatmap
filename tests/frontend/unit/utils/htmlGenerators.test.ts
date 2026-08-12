@@ -427,40 +427,62 @@ describe("htmlGenerators", () => {
   });
 
   describe("generateDestinationsHtml", () => {
-    it("generates destinations HTML", () => {
-      const destinations = ["EDDH", "EDDM", "EDDK", "EDDS"];
+    const identity = (code: string) => code;
+    const noFlag = () => "";
 
-      const html = generateDestinationsHtml(destinations);
+    it("generates grouped destinations HTML", () => {
+      const grouped = new Map([
+        ["DE", ["EDDH", "EDDM"]],
+        ["AT", ["LOWW"]],
+      ]);
+
+      const html = generateDestinationsHtml(grouped, identity, noFlag);
 
       expect(html).toContain(
         '<div class="airports-grid-title">🗺️ Destinations</div>'
       );
-      expect(html).toContain('<div class="airport-badges">');
+      expect(html).toContain("DE</div>");
       expect(html).toContain('<div class="airport-badge">EDDH</div>');
       expect(html).toContain('<div class="airport-badge">EDDM</div>');
-      expect(html).toContain('<div class="airport-badge">EDDK</div>');
-      expect(html).toContain('<div class="airport-badge">EDDS</div>');
+      expect(html).toContain("AT</div>");
+      expect(html).toContain('<div class="airport-badge">LOWW</div>');
     });
 
-    it("returns empty string for empty destinations", () => {
-      const html = generateDestinationsHtml([]);
+    it("returns empty string for empty map", () => {
+      const html = generateDestinationsHtml(new Map(), identity, noFlag);
 
       expect(html).toBe("");
     });
 
-    it("handles single destination", () => {
-      const destinations = ["EDDH"];
+    it("uses countryName and flag functions for display", () => {
+      const grouped = new Map([["DE", ["EDDF"]]]);
+      const displayName = (code: string) => (code === "DE" ? "Germany" : code);
+      const flag = (code: string) => (code === "DE" ? "🇩🇪" : "");
 
-      const html = generateDestinationsHtml(destinations);
+      const html = generateDestinationsHtml(grouped, displayName, flag);
 
-      expect(html).toContain("EDDH");
-      expect(html).toContain("Destinations");
+      expect(html).toContain("Germany &ensp;🇩🇪</div>");
+      expect(html).toContain("EDDF");
     });
 
-    it("preserves destination order", () => {
-      const destinations = ["ZULU", "ALPHA", "MIKE"];
+    it("staggers animation delays across groups", () => {
+      const grouped = new Map([
+        ["DE", ["EDDH"]],
+        ["AT", ["LOWW"]],
+        ["CH", ["LSZH"]],
+      ]);
 
-      const html = generateDestinationsHtml(destinations);
+      const html = generateDestinationsHtml(grouped, identity, noFlag);
+
+      expect(html).toContain("animation-delay: 0.0s");
+      expect(html).toContain("animation-delay: 0.1s");
+      expect(html).toContain("animation-delay: 0.2s");
+    });
+
+    it("preserves airport order within groups", () => {
+      const grouped = new Map([["DE", ["ZULU", "ALPHA", "MIKE"]]]);
+
+      const html = generateDestinationsHtml(grouped, identity, noFlag);
 
       const zuluIndex = html.indexOf("ZULU");
       const alphaIndex = html.indexOf("ALPHA");

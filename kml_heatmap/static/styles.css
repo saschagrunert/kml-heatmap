@@ -859,6 +859,40 @@ body {
   text-transform: uppercase;
   letter-spacing: 1px;
 }
+.wrapped-square-card .country-group {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: linear-gradient(
+    135deg,
+    rgba(240, 147, 251, 0.06) 0%,
+    rgba(79, 172, 254, 0.06) 100%
+  );
+  border-radius: 10px;
+  border: 1px solid rgba(240, 147, 251, 0.15);
+  opacity: 0;
+  animation: fadeInUp 0.4s ease-out forwards;
+}
+.wrapped-square-card .country-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(240, 147, 251, 0.8);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wrapped-square-card .country-group-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(240, 147, 251, 0.3) 0%,
+    transparent 100%
+  );
+}
 .wrapped-square-card .airport-badges {
   display: flex;
   flex-wrap: wrap;

@@ -312,7 +312,6 @@ export function calculateFilteredStatistics(options: {
     };
   }
 
-  // Filter paths
   const filteredPaths = filterPaths(pathInfo, year, aircraft);
 
   if (filteredPaths.length === 0) {

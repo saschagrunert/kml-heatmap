@@ -4,6 +4,11 @@
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
 import {
+  countryDisplayName,
+  countryFlag,
+  groupByCountry,
+} from "../features/airports";
+import {
   generateStatsHtml,
   generateFunFactsHtml,
   generateAircraftFleetHtml,
@@ -161,12 +166,16 @@ export class WrappedManager {
         const topAirportsEl = domCache.get("wrapped-top-airports");
         if (topAirportsEl) topAirportsEl.innerHTML = homeBaseHtml;
 
-        // Build all destinations badge grid (excluding home base)
         const destinations = yearStats.airport_names.filter(
           (name) => name !== homeBase.name
         );
+        const grouped = groupByCountry(destinations);
 
-        const destinationsHtml = generateDestinationsHtml(destinations);
+        const destinationsHtml = generateDestinationsHtml(
+          grouped,
+          countryDisplayName,
+          countryFlag
+        );
         const gridEl = domCache.get("wrapped-airports-grid");
         if (gridEl) gridEl.innerHTML = destinationsHtml;
       }

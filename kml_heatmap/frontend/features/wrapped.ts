@@ -16,7 +16,10 @@ import {
   filterPaths,
   filterSegmentsByPaths,
 } from "../calculations/statistics";
-import { findHomeBase as findHomeBaseFromCounts } from "./airports";
+import {
+  countCountries,
+  findHomeBase as findHomeBaseFromCounts,
+} from "./airports";
 import type {
   AircraftAggregate,
   FunFact,
@@ -51,9 +54,6 @@ interface HomeBase {
   flight_count: number;
 }
 
-/**
- * Calculate year statistics from path info and segments
- */
 export function calculateYearStats(
   pathInfo: PathInfo[] | null,
   segments: PathSegment[],
@@ -61,7 +61,6 @@ export function calculateYearStats(
   fullStats: FullStats | null = null,
   aircraft: string = "all"
 ): YearStats {
-  // Handle null or empty pathInfo
   if (!pathInfo || pathInfo.length === 0) {
     return {
       total_flights: 0,
@@ -75,7 +74,6 @@ export function calculateYearStats(
 
   const filteredPaths = filterPaths(pathInfo, String(year), aircraft);
 
-  // Handle no matching paths
   if (filteredPaths.length === 0) {
     return {
       total_flights: 0,
@@ -236,6 +234,26 @@ export function generateFunFacts(
       text: `Aircraft explorer! You flew <strong>${numAircraft} different aircraft</strong>.`,
       category: "aircraft",
       priority: 8,
+    });
+  }
+
+  // Country facts
+  const numCountries = yearStats.airport_names
+    ? countCountries(yearStats.airport_names).size
+    : 0;
+  if (numCountries >= 3) {
+    facts.push({
+      icon: "🌍",
+      text: `You flew to airports in <strong>${numCountries} countries</strong>.`,
+      category: "countries",
+      priority: 9,
+    });
+  } else if (numCountries === 2) {
+    facts.push({
+      icon: "🌍",
+      text: `You crossed borders, visiting <strong>2 countries</strong>.`,
+      category: "countries",
+      priority: 7,
     });
   }
 

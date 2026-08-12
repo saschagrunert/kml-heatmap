@@ -30,6 +30,10 @@ export {
 export { DataLoader } from "./services/dataLoader";
 
 export {
+  countCountries,
+  countryDisplayName,
+  countryFlag,
+  groupByCountry,
   calculateAirportFlightCounts,
   findHomeBase,
   calculateAirportOpacity,

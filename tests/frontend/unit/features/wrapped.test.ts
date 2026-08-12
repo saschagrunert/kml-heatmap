@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   calculateYearStats,
   generateFunFacts,
@@ -7,6 +7,7 @@ import {
   findHomeBase,
   getDestinations,
 } from "../../../../kml_heatmap/frontend/features/wrapped";
+import * as airports from "../../../../kml_heatmap/frontend/features/airports";
 
 describe("wrapped feature", () => {
   const mockPathInfo = [
@@ -386,6 +387,42 @@ describe("wrapped feature", () => {
       const facts = generateFunFacts(singleAircraftStats);
 
       expect(facts.some((f) => f.text.includes("Loyal"))).toBe(true);
+    });
+
+    it("generates country fact for 3+ countries", () => {
+      vi.spyOn(airports, "countCountries").mockReturnValue(
+        new Set(["DE", "CH", "CZ"])
+      );
+      const stats = { ...yearStats, airport_names: ["A", "B", "C"] };
+
+      const facts = generateFunFacts(stats);
+
+      expect(facts.some((f) => f.category === "countries")).toBe(true);
+      expect(facts.some((f) => f.text.includes("3 countries"))).toBe(true);
+      vi.restoreAllMocks();
+    });
+
+    it("generates country fact for 2 countries", () => {
+      vi.spyOn(airports, "countCountries").mockReturnValue(
+        new Set(["DE", "CH"])
+      );
+      const stats = { ...yearStats, airport_names: ["A", "B"] };
+
+      const facts = generateFunFacts(stats);
+
+      expect(facts.some((f) => f.category === "countries")).toBe(true);
+      expect(facts.some((f) => f.text.includes("2 countries"))).toBe(true);
+      vi.restoreAllMocks();
+    });
+
+    it("does not generate country fact for 1 country", () => {
+      vi.spyOn(airports, "countCountries").mockReturnValue(new Set(["DE"]));
+      const stats = { ...yearStats, airport_names: ["A"] };
+
+      const facts = generateFunFacts(stats);
+
+      expect(facts.some((f) => f.category === "countries")).toBe(false);
+      vi.restoreAllMocks();
     });
 
     it("generates explorer fact for many aircraft", () => {
