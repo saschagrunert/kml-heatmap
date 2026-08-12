@@ -73,4 +73,15 @@ describe("showToast", () => {
     toast.dispatchEvent(new Event("transitionend"));
     expect(document.querySelector(".toast-notification")).toBeNull();
   });
+
+  it("removes toast via fallback timeout when transitionend does not fire", () => {
+    showToast("Fallback removal");
+
+    const toast = document.querySelector(".toast-notification")!;
+    vi.advanceTimersByTime(4000);
+    expect(document.contains(toast)).toBe(true);
+
+    vi.advanceTimersByTime(1000);
+    expect(document.contains(toast)).toBe(false);
+  });
 });

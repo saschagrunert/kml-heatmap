@@ -1,5 +1,6 @@
 """KML file parsing for flight tracking data."""
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -53,13 +54,14 @@ def _parse_kml_tree(kml_file: str) -> Any:
         tree = ET.parse(kml_file, parser)
         root = tree.getroot()
 
-        logger.debug(f"\n  Root tag: {root.tag}")
-        logger.debug(f"Root attrib: {root.attrib}")
-        all_tags = set()
-        for elem in root.iter():
-            tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
-            all_tags.add(tag)
-        logger.debug(f"All unique tags in file: {sorted(all_tags)}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"\n  Root tag: {root.tag}")
+            logger.debug(f"Root attrib: {root.attrib}")
+            all_tags = set()
+            for elem in root.iter():
+                tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                all_tags.add(tag)
+            logger.debug(f"All unique tags in file: {sorted(all_tags)}")
 
         return root
 

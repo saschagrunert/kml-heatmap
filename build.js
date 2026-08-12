@@ -28,11 +28,6 @@ const sharedBuildOptions = {
   minify,
   metafile: true,
 
-  // Advanced minification options
-  minifyWhitespace: !isDevelopment,
-  minifyIdentifiers: !isDevelopment,
-  minifySyntax: !isDevelopment,
-
   // Tree shaking
   treeShaking: true,
 

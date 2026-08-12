@@ -27,6 +27,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to docs/"
           else
-            git commit -s -m "Update docs"
+            git commit -s -m "Update docs [skip ci]"
             git push
           fi

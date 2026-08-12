@@ -11,7 +11,6 @@ export class DataManager {
   private app: MapApp;
   private dataLoader: DataLoader;
   loadedData: { [key: string]: KMLDataset };
-  currentData: KMLDataset | null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -27,7 +26,6 @@ export class DataManager {
     });
 
     this.loadedData = {};
-    this.currentData = null;
   }
 
   showLoading(): void {
@@ -60,8 +58,7 @@ export class DataManager {
 
     if (!data) return;
 
-    this.currentData = data;
-    this.app.currentData = data; // Store for redrawing
+    this.app.currentData = data;
 
     // Filter coordinates based on active filters and isolate mode
     let filteredCoordinates = data.coordinates;
@@ -89,7 +86,7 @@ export class DataManager {
       }
 
       // Extract coordinates from filtered segments
-      const coordSet = new Set<string>();
+      const coordMap = new Map<string, Coordinate>();
       data.path_segments.forEach((segment) => {
         // Must match year/aircraft filter
         if (!filteredPathIds.has(segment.path_id)) return;
@@ -100,14 +97,14 @@ export class DataManager {
 
         const coords = segment.coords;
         if (coords && coords.length === 2) {
-          coordSet.add(JSON.stringify(coords[0]));
-          coordSet.add(JSON.stringify(coords[1]));
+          const k0 = coords[0][0] + "," + coords[0][1];
+          const k1 = coords[1][0] + "," + coords[1][1];
+          if (!coordMap.has(k0)) coordMap.set(k0, coords[0]);
+          if (!coordMap.has(k1)) coordMap.set(k1, coords[1]);
         }
       });
 
-      filteredCoordinates = Array.from(coordSet).map((str) => {
-        return JSON.parse(str) as Coordinate;
-      });
+      filteredCoordinates = Array.from(coordMap.values());
     }
 
     // Update heatmap - only add if visible

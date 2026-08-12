@@ -57,8 +57,10 @@ export class StatsManager {
     const coordSet = new Set<string>();
     for (const segment of selectedSegments) {
       if (segment.coords && segment.coords.length === 2) {
-        coordSet.add(JSON.stringify(segment.coords[0]));
-        coordSet.add(JSON.stringify(segment.coords[1]));
+        const c0 = segment.coords[0];
+        const c1 = segment.coords[1];
+        coordSet.add(c0[0] + "," + c0[1]);
+        coordSet.add(c1[0] + "," + c1[1]);
       }
     }
     const selectedCoordCount = coordSet.size;
@@ -136,10 +138,12 @@ export class StatsManager {
         stats.num_aircraft +
         "):</strong><br>";
       stats.aircraft_list.forEach((aircraft) => {
-        const typeStr = aircraft.type ? " (" + aircraft.type + ")" : "";
+        const typeStr = aircraft.type
+          ? " (" + escapeHtml(aircraft.type) + ")"
+          : "";
         html +=
           '<span style="margin-left: 10px;">• ' +
-          aircraft.registration +
+          escapeHtml(aircraft.registration) +
           typeStr +
           " - " +
           aircraft.flights +

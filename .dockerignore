@@ -35,8 +35,7 @@ docs
 coverage
 test-results
 
-# Test and data
-tests
+# Data
 data
 
 # Build

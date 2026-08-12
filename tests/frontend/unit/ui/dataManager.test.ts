@@ -89,15 +89,12 @@ describe("DataManager", () => {
 
   describe("constructor", () => {
     it("creates DataLoader instance", () => {
-      // Verify that dataManager has the expected structure
       expect(dataManager).toBeDefined();
       expect(dataManager.loadedData).toBeDefined();
-      expect(dataManager.currentData).toBeDefined();
     });
 
-    it("initializes loadedData and currentData", () => {
+    it("initializes loadedData", () => {
       expect(dataManager.loadedData).toEqual({});
-      expect(dataManager.currentData).toBeNull();
     });
   });
 
@@ -212,7 +209,6 @@ describe("DataManager", () => {
       await dataManager.updateLayers();
 
       expect(mockDataLoader.loadData).toHaveBeenCalledWith("data", "all");
-      expect(dataManager.currentData).toBe(mockData);
       expect(mockApp.currentData).toBe(mockData);
     });
 
