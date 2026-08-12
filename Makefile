@@ -15,8 +15,8 @@ all: build
 
 build:
 	$(CONTAINER_RUNTIME) build -t $(IMAGE_NAME) .
-	mkdir -p $(CACHE_DIR)
-	$(CONTAINER_RUNTIME) run -e STADIA_API_KEY=$(STADIA_API_KEY) -e OPENAIP_API_KEY=$(OPENAIP_API_KEY) --rm -v $(shell pwd):/data -v $(CACHE_DIR):/root/.cache/kml-heatmap $(IMAGE_NAME) $(INPUT_DIR) --output-dir $(OUTPUT_DIR)
+	mkdir -p $(CACHE_DIR) $(OUTPUT_DIR)
+	$(CONTAINER_RUNTIME) run -e STADIA_API_KEY=$(STADIA_API_KEY) -e OPENAIP_API_KEY=$(OPENAIP_API_KEY) --rm -v $(shell pwd)/$(INPUT_DIR):/data/$(INPUT_DIR):ro -v $(shell pwd)/$(OUTPUT_DIR):/data/$(OUTPUT_DIR) -v $(CACHE_DIR):/root/.cache/kml-heatmap $(IMAGE_NAME) $(INPUT_DIR) --output-dir $(OUTPUT_DIR)
 
 serve:
 	$(CONTAINER_RUNTIME) run -it -p 8000:8000 -v $(shell pwd)/$(OUTPUT_DIR):/data --entrypoint python $(IMAGE_NAME) /app/serve.py

@@ -23,8 +23,9 @@ COPY requirements.lock .
 # Install pinned Python dependencies
 RUN pip install --no-cache-dir -r requirements.lock
 
-# Copy the application
+# Copy the application and ensure it's importable from /data
 COPY kml_heatmap/ ./kml_heatmap/
+ENV PYTHONPATH=/app
 
 # Copy built JavaScript bundles from builder stage
 COPY --from=js-builder /build/kml_heatmap/static/bundle.js ./kml_heatmap/static/bundle.js

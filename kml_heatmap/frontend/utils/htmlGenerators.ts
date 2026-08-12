@@ -16,6 +16,15 @@ import {
 } from "./constants";
 import { calculateBearing, ddToDms } from "./geometry";
 
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export interface AirportCount {
   name: string;
   flight_count: number;
@@ -60,7 +69,7 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
             gap: 6px;
         ">
             <span style="font-size: 18px;">&#x1F6EB;</span>
-            <span>${params.name || "Unknown"}</span>
+            <span>${escapeHtml(params.name || "Unknown")}</span>
             ${homeBadge}
         </div>
         <div style="margin-bottom: 8px;">
@@ -192,8 +201,8 @@ export function generateAircraftFleetHtml(yearStats: YearStats): string {
     html += `
                     <div class="fleet-aircraft ${colorClass}">
                         <div class="fleet-aircraft-info">
-                            <div class="fleet-aircraft-model">${modelStr}</div>
-                            <div class="fleet-aircraft-registration">${aircraft.registration}</div>
+                            <div class="fleet-aircraft-model">${escapeHtml(modelStr)}</div>
+                            <div class="fleet-aircraft-registration">${escapeHtml(aircraft.registration)}</div>
                         </div>
                         <div class="fleet-aircraft-stats">
                             <div class="fleet-aircraft-flights">${aircraft.flights} flights</div>
@@ -213,7 +222,7 @@ export function generateHomeBaseHtml(homeBase: AirportCount): string {
   let html = '<div class="top-airports-title">🏠 Home Base</div>';
   html += `
                 <div class="top-airport">
-                    <div class="top-airport-name">${homeBase.name}</div>
+                    <div class="top-airport-name">${escapeHtml(homeBase.name)}</div>
                     <div class="top-airport-count">${homeBase.flight_count} flights</div>
                 </div>
             `;
@@ -324,7 +333,7 @@ export function generateDestinationsHtml(destinations: string[]): string {
   let html =
     '<div class="airports-grid-title">🗺️ Destinations</div><div class="airport-badges">';
   destinations.forEach((airportName) => {
-    html += `<div class="airport-badge">${airportName}</div>`;
+    html += `<div class="airport-badge">${escapeHtml(airportName)}</div>`;
   });
   html += "</div>";
 

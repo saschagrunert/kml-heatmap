@@ -94,22 +94,11 @@ export class FilterManager {
     if (!yearSelect) return;
 
     this.app.selectedYear = yearSelect.value;
-
-    // Clear data cache to force reload for new year
     this.app.dataManager.loadedData = {};
 
-    // Clear current paths (but preserve selectedPathIds during initialization)
-    this.app.altitudeLayer.clearLayers();
-    this.app.pathSegments = {};
-    if (!this.app.isInitializing) {
-      this.app.selectedPathIds.clear();
-      this.app.store.notifyMutation("selectedPathIds");
-    }
+    await this.applyFilter();
 
-    // Reload current resolution data for new year
-    await this.app.dataManager.updateLayers();
-
-    // Reload full resolution data for filtering/stats
+    // Reload full resolution data for the new year
     const fullResData = await this.app.dataManager.loadData(
       "data",
       this.app.selectedYear
@@ -119,24 +108,8 @@ export class FilterManager {
       this.app.fullPathSegments = fullResData.path_segments || [];
     }
 
-    // Update aircraft dropdown to show only aircraft with flights in selected year
     this.updateAircraftDropdown();
-
-    // Update stats based on filter
-    const filteredStats = window.KMLHeatmap.calculateFilteredStatistics({
-      pathInfo: this.app.fullPathInfo ?? [],
-      segments: this.app.fullPathSegments ?? [],
-      year: this.app.selectedYear,
-      aircraft: this.app.selectedAircraft,
-      coordinateCount: this.app.currentData?.original_points,
-    });
-    this.app.statsManager.updateStatsPanel(filteredStats, false);
-
-    // Update airport visibility based on filter
-    this.app.airportManager.updateAirportOpacity();
-
-    // Update airport popups with current filter counts
-    this.app.airportManager.updateAirportPopups();
+    this.updateStatsAndAirports();
   }
 
   async filterByAircraft(): Promise<void> {
@@ -145,7 +118,11 @@ export class FilterManager {
 
     this.app.selectedAircraft = aircraftSelect.value;
 
-    // Clear current paths and reload (but preserve selectedPathIds during initialization)
+    await this.applyFilter();
+    this.updateStatsAndAirports();
+  }
+
+  private async applyFilter(): Promise<void> {
     this.app.altitudeLayer.clearLayers();
     this.app.pathSegments = {};
     if (!this.app.isInitializing) {
@@ -153,10 +130,10 @@ export class FilterManager {
       this.app.store.notifyMutation("selectedPathIds");
     }
 
-    // Reload data to apply filter
     await this.app.dataManager.updateLayers();
+  }
 
-    // Update stats based on filter
+  private updateStatsAndAirports(): void {
     const filteredStats = window.KMLHeatmap.calculateFilteredStatistics({
       pathInfo: this.app.fullPathInfo ?? [],
       segments: this.app.fullPathSegments ?? [],
@@ -165,11 +142,7 @@ export class FilterManager {
       coordinateCount: this.app.currentData?.original_points,
     });
     this.app.statsManager.updateStatsPanel(filteredStats, false);
-
-    // Update airport visibility based on filter
     this.app.airportManager.updateAirportOpacity();
-
-    // Update airport popups with current filter counts
     this.app.airportManager.updateAirportPopups();
   }
 }

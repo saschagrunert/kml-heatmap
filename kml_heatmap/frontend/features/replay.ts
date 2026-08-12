@@ -3,11 +3,8 @@
  * Pure functions for flight replay calculations
  */
 
-import { calculateBearing as geometryCalculateBearing } from "../utils/geometry";
+import { calculateBearing } from "../utils/geometry";
 import type { PathSegment } from "../types";
-
-// Re-export calculateBearing for backward compatibility
-export { calculateBearing } from "../utils/geometry";
 
 /**
  * Interpolated position
@@ -193,7 +190,7 @@ export function calculateSmoothedBearing(
     // At end, use current segment's direction
     const coords = currentSeg.coords;
     if (coords && coords.length === 2) {
-      return geometryCalculateBearing(
+      return calculateBearing(
         coords[0][0],
         coords[0][1],
         coords[1][0],
@@ -208,7 +205,7 @@ export function calculateSmoothedBearing(
     return null;
   }
 
-  return geometryCalculateBearing(
+  return calculateBearing(
     currentSeg.coords[1][0],
     currentSeg.coords[1][1],
     futureSeg.coords[0][0],
