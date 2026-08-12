@@ -47,11 +47,12 @@ class ConfigValidator:
                 self.warnings.append(
                     f"Input file doesn't have .kml extension: {input_path}"
                 )
-            if path.stat().st_size == 0:
+            file_size = path.stat().st_size
+            if file_size == 0:
                 self.errors.append(f"Input file is empty: {input_path}")
-            elif path.stat().st_size > LARGE_FILE_WARNING_MB * 1024 * 1024:
+            elif file_size > LARGE_FILE_WARNING_MB * 1024 * 1024:
                 self.warnings.append(
-                    f"Large input file ({path.stat().st_size / 1024 / 1024:.1f} MB), "
+                    f"Large input file ({file_size / 1024 / 1024:.1f} MB), "
                     "processing may be slow"
                 )
 
@@ -118,8 +119,6 @@ class ConfigValidator:
             "lxml": "XML/KML parsing",
         }
 
-        optional_packages: dict[str, str] = {}
-
         for package, purpose in required_packages.items():
             try:
                 __import__(package)
@@ -127,14 +126,6 @@ class ConfigValidator:
                 self.errors.append(
                     f"Required package '{package}' not installed ({purpose}). "
                     f"Run: pip install {package}"
-                )
-
-        for package, purpose in optional_packages.items():
-            try:
-                __import__(package)
-            except ImportError:
-                self.warnings.append(
-                    f"Optional package '{package}' not installed ({purpose})"
                 )
 
     def _validate_disk_space(self, output_dir: str, min_mb: int = 100) -> None:

@@ -719,6 +719,36 @@ class TestParseKmlCoordinates:
             if cache_path and cache_path.exists():
                 cache_path.unlink()
 
+    def test_parse_kml_tree_debug_logging(self):
+        """Test that debug logging in _parse_kml_tree covers tag enumeration."""
+        import logging
+
+        from kml_heatmap.parser import _parse_kml_tree
+
+        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Test</name>
+  </Document>
+</kml>"""
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".kml", delete=False) as f:
+            f.write(kml_content)
+            temp_path = f.name
+
+        try:
+            from kml_heatmap.logger import logger as kml_logger
+
+            original_level = kml_logger.level
+            kml_logger.setLevel(logging.DEBUG)
+            try:
+                root = _parse_kml_tree(temp_path)
+                assert root is not None
+            finally:
+                kml_logger.setLevel(original_level)
+        finally:
+            os.unlink(temp_path)
+
     def test_parse_kml_with_no_valid_coordinates(self):
         """Test parsing KML file with structure but no valid coordinates."""
         from kml_heatmap.parser import parse_kml_coordinates

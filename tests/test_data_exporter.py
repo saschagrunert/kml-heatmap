@@ -5,6 +5,8 @@ import json
 import tempfile
 from unittest.mock import patch
 
+import pytest
+
 from kml_heatmap.data_exporter import (
     AggregatedYearResults,
     _aggregate_year_results,
@@ -976,10 +978,8 @@ class TestProcessYearsParallel:
             "kml_heatmap.data_exporter.process_year_data",
             side_effect=RuntimeError("boom"),
         ):
-            results = _process_years_parallel(
-                paths_by_year, [], [[]], [{}], 0, 1000, "/tmp"
-            )
-        assert results == []
+            with pytest.raises(RuntimeError, match="boom"):
+                _process_years_parallel(paths_by_year, [], [[]], [{}], 0, 1000, "/tmp")
 
 
 class TestExportAllDataPrivacyMode:

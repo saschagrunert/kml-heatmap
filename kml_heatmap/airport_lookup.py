@@ -67,7 +67,7 @@ def _download_airport_database() -> bool:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
         logger.info("📥 Downloading OurAirports database...")
-        with urlopen(OURAIRPORTS_URL) as response:  # nosec B310
+        with urlopen(OURAIRPORTS_URL, timeout=30) as response:  # nosec B310
             with open(CACHE_FILE, "wb") as out_file:
                 out_file.write(response.read())
 

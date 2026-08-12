@@ -242,6 +242,7 @@ def _process_years_parallel(
                 )
             except Exception:
                 logger.exception(f"  Error processing year {year}")
+                raise
 
     return year_results
 

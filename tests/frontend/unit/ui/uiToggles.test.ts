@@ -592,7 +592,7 @@ describe("UIToggles", () => {
       uiToggles.exportMap();
 
       vi.advanceTimersByTime(200);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(0);
 
       const toast = document.querySelector(".toast-notification");
       expect(toast).not.toBeNull();
@@ -601,6 +601,7 @@ describe("UIToggles", () => {
       expect(btn.disabled).toBe(false);
       expect(btn.textContent).toContain("Export");
 
+      vi.runAllTimers();
       toast!.remove();
       vi.useRealTimers();
       vi.restoreAllMocks();

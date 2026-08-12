@@ -9,6 +9,7 @@ import math
 import re
 from collections.abc import Callable
 
+from .airport_lookup import extract_icao_codes_from_name, lookup_airport_coordinates
 from .geometry import haversine_distance
 from .logger import logger
 from .constants import AIRPORT_DISTANCE_THRESHOLD_KM, AIRPORT_GRID_SIZE_DEGREES
@@ -114,11 +115,6 @@ class AirportDeduplicator:
         corrected_lon = lon
 
         if name:
-            from .airport_lookup import (
-                extract_icao_codes_from_name,
-                lookup_airport_coordinates,
-            )
-
             icao_codes = extract_icao_codes_from_name(name)
 
             # For routes, extract the relevant ICAO code based on position

@@ -11,5 +11,6 @@ export function showToast(
   setTimeout(() => {
     toast.classList.remove("toast-visible");
     toast.addEventListener("transitionend", () => toast.remove());
+    setTimeout(() => toast.remove(), 1000);
   }, 4000);
 }
