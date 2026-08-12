@@ -7,7 +7,7 @@ A tool for creating interactive heatmap visualizations from KML flight data.
 __version__ = "1.0.0"
 
 # Export key functions
-from .geometry import haversine_distance, get_altitude_color
+from .geometry import haversine_distance
 from .parser import parse_kml_coordinates
 from .parser_common import is_mid_flight_start, is_valid_landing
 from .aircraft import lookup_aircraft_model, parse_aircraft_from_filename
@@ -29,7 +29,6 @@ from .exceptions import (
 __all__ = [
     # Geometry
     "haversine_distance",
-    "get_altitude_color",
     # Parser
     "parse_kml_coordinates",
     "is_mid_flight_start",

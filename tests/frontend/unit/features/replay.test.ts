@@ -5,12 +5,12 @@ import {
   findSegmentsAtTime,
   interpolatePosition,
   calculateSmoothedBearing,
-  calculateBearing,
   calculateAutoZoom,
   shouldRecenter,
   calculateReplayProgress,
   validateReplayData,
 } from "../../../../kml_heatmap/frontend/features/replay";
+import { calculateBearing } from "../../../../kml_heatmap/frontend/utils/geometry";
 
 describe("replay feature", () => {
   const mockSegments = [

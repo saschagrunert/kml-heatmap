@@ -11,7 +11,12 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json", "html"],
       include: ["kml_heatmap/frontend/**/*.{js,ts}"],
-      exclude: ["**/node_modules/**", "**/tests/**"],
+      exclude: [
+        "**/node_modules/**",
+        "**/tests/**",
+        "kml_heatmap/frontend/main.ts",
+        "kml_heatmap/frontend/exports.ts",
+      ],
       clean: false,
     },
     alias: {

@@ -6,13 +6,17 @@
 import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
 import { calculateDistance } from "../utils/geometry";
 import { formatFlightTime } from "../utils/formatters";
-import { calculateAircraftColorClass as calculateAircraftColorClassFromNormalized } from "../utils/htmlGenerators";
+import {
+  calculateAircraftColorClass as calculateAircraftColorClassFromNormalized,
+  escapeHtml,
+} from "../utils/htmlGenerators";
 import {
   calculateFlightTime,
   collectAirports,
   filterPaths,
   filterSegmentsByPaths,
 } from "../calculations/statistics";
+import { findHomeBase as findHomeBaseFromCounts } from "./airports";
 import type {
   AircraftAggregate,
   FunFact,
@@ -197,10 +201,13 @@ export function generateFunFacts(
   const numAircraft = yearStats.aircraft_list.length;
   if (numAircraft === 1) {
     const aircraft = yearStats.aircraft_list[0];
-    const model =
-      aircraft?.model || aircraft?.type || aircraft?.registration || "Unknown";
+    const model = escapeHtml(
+      aircraft?.model || aircraft?.type || aircraft?.registration || "Unknown"
+    );
     const flights = yearStats.total_flights;
-    const registration = aircraft?.registration || "";
+    const registration = aircraft?.registration
+      ? escapeHtml(aircraft.registration)
+      : "";
     if (registration) {
       facts.push({
         icon: "✈️",
@@ -413,25 +420,16 @@ export function findHomeBase(
     return null;
   }
 
-  let maxCount = 0;
-  let homeBaseName = "";
-
-  airportNames.forEach((name) => {
-    const count = airportCounts[name] || 0;
-    if (count > maxCount) {
-      maxCount = count;
-      homeBaseName = name;
-    }
-  });
-
-  if (!homeBaseName) {
-    return null;
+  const filteredCounts: Record<string, number> = {};
+  for (const name of airportNames) {
+    const count = airportCounts[name];
+    if (count) filteredCounts[name] = count;
   }
 
-  return {
-    name: homeBaseName,
-    flight_count: maxCount,
-  };
+  const name = findHomeBaseFromCounts(filteredCounts);
+  if (!name) return null;
+
+  return { name, flight_count: airportCounts[name] || 0 };
 }
 
 /**

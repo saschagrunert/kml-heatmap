@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
+  escapeHtml,
   generateStatsHtml,
   generateFunFactsHtml,
   calculateAircraftColorClass,
@@ -17,6 +18,38 @@ import type {
 } from "../../../../kml_heatmap/frontend/types";
 
 describe("htmlGenerators", () => {
+  describe("escapeHtml", () => {
+    it("escapes ampersands", () => {
+      expect(escapeHtml("A&B")).toBe("A&amp;B");
+    });
+
+    it("escapes angle brackets", () => {
+      expect(escapeHtml("<div>")).toBe("&lt;div&gt;");
+    });
+
+    it("escapes double quotes", () => {
+      expect(escapeHtml('a"b')).toBe("a&quot;b");
+    });
+
+    it("escapes single quotes", () => {
+      expect(escapeHtml("a'b")).toBe("a&#39;b");
+    });
+
+    it("escapes all entities in a single string", () => {
+      expect(escapeHtml(`<img src="x" onerror='alert(1)'>&`)).toBe(
+        "&lt;img src=&quot;x&quot; onerror=&#39;alert(1)&#39;&gt;&amp;"
+      );
+    });
+
+    it("returns strings without special characters unchanged", () => {
+      expect(escapeHtml("Cessna 172")).toBe("Cessna 172");
+    });
+
+    it("handles empty string", () => {
+      expect(escapeHtml("")).toBe("");
+    });
+  });
+
   describe("generateStatsHtml", () => {
     const mockYearStats: YearStats = {
       total_flights: 42,
