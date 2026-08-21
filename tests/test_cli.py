@@ -2,7 +2,7 @@
 
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -54,15 +54,17 @@ class TestMainCLI:
             test_kml = Path(tmpdir) / "test.kml"
             test_kml.write_text("<?xml version='1.0'?><kml></kml>")
 
-            with patch("sys.argv", ["kml-heatmap.py", "--debug", str(test_kml)]):
-                with patch("kml_heatmap.cli.set_debug_mode") as mock_set_debug:
-                    with patch(
-                        "kml_heatmap.renderer.create_progressive_heatmap",
-                        return_value=True,
-                    ):
-                        main()
+            with (
+                patch("sys.argv", ["kml-heatmap.py", "--debug", str(test_kml)]),
+                patch("kml_heatmap.cli.set_debug_mode") as mock_set_debug,
+                patch(
+                    "kml_heatmap.renderer.create_progressive_heatmap",
+                    return_value=True,
+                ),
+            ):
+                main()
 
-                    mock_set_debug.assert_called_once_with(True)
+            mock_set_debug.assert_called_once_with(True)
 
     def test_output_dir_option(self):
         """Test --output-dir option."""
@@ -240,14 +242,14 @@ class TestMainCLI:
 
             mock_create = MagicMock(return_value=False)
 
-            with patch("sys.argv", ["kml-heatmap.py", str(test_kml)]):
-                with patch(
-                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
-                ):
-                    with pytest.raises(SystemExit) as exc_info:
-                        main()
+            with (
+                patch("sys.argv", ["kml-heatmap.py", str(test_kml)]),
+                patch("kml_heatmap.renderer.create_progressive_heatmap", mock_create),
+                pytest.raises(SystemExit) as exc_info,
+            ):
+                main()
 
-                    assert exc_info.value.code == 1
+            assert exc_info.value.code == 1
 
     def test_output_directory_created(self):
         """Test that output directory is created if it doesn't exist."""
@@ -261,14 +263,14 @@ class TestMainCLI:
 
             mock_create = MagicMock(return_value=True)
 
-            with patch(
-                "sys.argv",
-                ["kml-heatmap.py", str(test_kml), "--output-dir", str(output_dir)],
+            with (
+                patch(
+                    "sys.argv",
+                    ["kml-heatmap.py", str(test_kml), "--output-dir", str(output_dir)],
+                ),
+                patch("kml_heatmap.renderer.create_progressive_heatmap", mock_create),
             ):
-                with patch(
-                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
-                ):
-                    main()
+                main()
 
             assert output_dir.exists()
             assert output_dir.is_dir()

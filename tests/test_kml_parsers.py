@@ -16,7 +16,7 @@ class TestValidateAndNormalizeCoordinate:
         """Test negative altitude is clamped to zero."""
         result = validate_and_normalize_coordinate(50.0, 8.5, -100, "test.kml")
         assert result is not None
-        lat, lon, alt = result
+        _lat, _lon, alt = result
         assert alt == 0.0
 
     def test_invalid_returns_none(self):
@@ -28,7 +28,7 @@ class TestValidateAndNormalizeCoordinate:
         """Test None altitude is preserved."""
         result = validate_and_normalize_coordinate(50.0, 8.5, None, "test.kml")
         assert result is not None
-        lat, lon, alt = result
+        _lat, _lon, alt = result
         assert alt is None
 
     def test_valid_range_boundaries(self):
@@ -54,14 +54,14 @@ class TestValidateAndNormalizeCoordinate:
         # Altitude way too high (above valid range)
         result = validate_and_normalize_coordinate(50.0, 8.5, 999999, "test.kml")
         assert result is not None
-        lat, lon, alt = result
+        _lat, _lon, alt = result
         # Invalid altitude gets set to None
         assert alt is None
 
         # Altitude way too low (below valid range)
         result = validate_and_normalize_coordinate(50.0, 8.5, -99999, "test.kml")
         assert result is not None
-        lat, lon, alt = result
+        _lat, _lon, alt = result
         # Invalid altitude gets set to None
         assert alt is None
 

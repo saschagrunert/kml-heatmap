@@ -1,16 +1,16 @@
 """Unit tests for other functions in data_exporter module."""
 
-import os
 import json
-import tempfile
+import os
 import shutil
+import tempfile
 
 import pytest
 
 from kml_heatmap.data_exporter import (
-    export_metadata,
-    export_airports_data,
     collect_unique_years,
+    export_airports_data,
+    export_metadata,
 )
 
 

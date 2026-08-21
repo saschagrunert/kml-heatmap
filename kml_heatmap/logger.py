@@ -4,9 +4,9 @@ import logging
 import sys
 
 __all__ = [
-    "setup_logger",
     "logger",
     "set_debug_mode",
+    "setup_logger",
 ]
 
 
@@ -40,7 +40,6 @@ logger = setup_logger()
 
 def set_debug_mode(enabled: bool) -> None:
     """Enable or disable debug logging globally."""
-    global logger
     if enabled:
         logger.setLevel(logging.DEBUG)
         for handler in logger.handlers:

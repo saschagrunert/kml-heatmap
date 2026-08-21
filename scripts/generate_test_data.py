@@ -20,10 +20,10 @@ filename. This tests the code path where altitude and airspeed visualization
 is not available due to lack of timing data.
 """
 
+import argparse
+import datetime
 import os
 import random
-import datetime
-import argparse
 from pathlib import Path
 
 # Airport coordinates (major airports in Europe)
@@ -122,7 +122,7 @@ def generate_kml_file(
     start_coords = AIRPORTS[start_airport]
     end_coords = AIRPORTS[end_airport]
 
-    coords, altitudes, speeds = generate_flight_path(start_coords, end_coords)
+    coords, _altitudes, _speeds = generate_flight_path(start_coords, end_coords)
 
     # Generate timestamps (2026 only)
     start_time = datetime.datetime(
@@ -131,6 +131,7 @@ def generate_kml_file(
         random.randint(1, 28),
         random.randint(8, 20),
         random.randint(0, 59),
+        tzinfo=datetime.UTC,
     )
 
     # Format timestamp for KML (parser expects: "DD MMM YYYY" or "YYYY-MM-DD")

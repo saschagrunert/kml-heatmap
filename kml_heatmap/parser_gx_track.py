@@ -8,9 +8,9 @@ from lxml import etree
 from .kml_parsers import validate_and_normalize_coordinate
 from .logger import logger
 from .parser_common import (
+    _build_path_metadata_dict,
     extract_placemark_metadata,
     find_xml_elements,
-    _build_path_metadata_dict,
 )
 from .types import PathMetadata
 

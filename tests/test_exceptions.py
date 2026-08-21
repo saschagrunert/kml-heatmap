@@ -1,11 +1,12 @@
 """Tests for exceptions module."""
 
 import pytest
+
 from kml_heatmap.exceptions import (
+    ConfigurationError,
+    InvalidCoordinateError,
     KMLHeatmapError,
     KMLParseError,
-    InvalidCoordinateError,
-    ConfigurationError,
 )
 
 

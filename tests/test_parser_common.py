@@ -1,5 +1,6 @@
 """Tests for parser_common module."""
 
+from typing import ClassVar
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -128,7 +129,7 @@ class TestParseCoordinatePoint:
     def test_two_components(self):
         result = parse_coordinate_point("8.5,50.0", "test.kml")
         assert result is not None
-        lat, lon, alt = result
+        lat, lon, _alt = result
         assert lat == pytest.approx(50.0)
         assert lon == pytest.approx(8.5)
 
@@ -150,7 +151,7 @@ class TestParseCoordinatePoint:
 
 
 class TestFindXmlElement:
-    NS = {"kml": "http://www.opengis.net/kml/2.2"}
+    NS: ClassVar[dict[str, str]] = {"kml": "http://www.opengis.net/kml/2.2"}
 
     def test_namespaced_found(self):
         xml = '<root xmlns:kml="http://www.opengis.net/kml/2.2"><kml:name>Test</kml:name></root>'
@@ -174,7 +175,7 @@ class TestFindXmlElement:
 
 
 class TestFindXmlElements:
-    NS = {"kml": "http://www.opengis.net/kml/2.2"}
+    NS: ClassVar[dict[str, str]] = {"kml": "http://www.opengis.net/kml/2.2"}
 
     def test_multiple_elements(self):
         xml = "<root><when>t1</when><when>t2</when><when>t3</when></root>"
@@ -193,22 +194,22 @@ class TestExtractCharterwareTimestamp:
     def test_pm_time(self):
         desc = "Flight Jan 12 2026 03:01PM path of OE-AKI"
         result = extract_charterware_timestamp(desc)
-        assert result == "2026-01-12T15:01:00Z"
+        assert result == "2026-01-12T15:01:00+00:00"
 
     def test_am_time(self):
         desc = "Flight Mar 05 2026 08:30AM path of OE-AKI"
         result = extract_charterware_timestamp(desc)
-        assert result == "2026-03-05T08:30:00Z"
+        assert result == "2026-03-05T08:30:00+00:00"
 
     def test_12pm_noon(self):
         desc = "Flight Jun 01 2026 12:00PM path of OE-AKI"
         result = extract_charterware_timestamp(desc)
-        assert result == "2026-06-01T12:00:00Z"
+        assert result == "2026-06-01T12:00:00+00:00"
 
     def test_12am_midnight(self):
         desc = "Flight Jun 01 2026 12:00AM path of OE-AKI"
         result = extract_charterware_timestamp(desc)
-        assert result == "2026-06-01T00:00:00Z"
+        assert result == "2026-06-01T00:00:00+00:00"
 
     def test_none_input(self):
         assert extract_charterware_timestamp(None) is None
@@ -222,11 +223,11 @@ class TestExtractCharterwareTimestamp:
     def test_full_month_name(self):
         desc = "Flight January 15 2026 02:00PM path of D-EAGJ"
         result = extract_charterware_timestamp(desc)
-        assert result == "2026-01-15T14:00:00Z"
+        assert result == "2026-01-15T14:00:00+00:00"
 
 
 class TestExtractPlacemarkMetadata:
-    NS = {"kml": "http://www.opengis.net/kml/2.2"}
+    NS: ClassVar[dict[str, str]] = {"kml": "http://www.opengis.net/kml/2.2"}
 
     def test_name_and_timestamps(self):
         xml = """
@@ -274,7 +275,7 @@ class TestExtractPlacemarkMetadata:
         """
         placemark = ET.fromstring(xml)
         result = extract_placemark_metadata(placemark, self.NS)
-        assert result["timestamp"] == "2026-01-12T15:01:00Z"
+        assert result["timestamp"] == "2026-01-12T15:01:00+00:00"
         assert result["year"] == 2026
 
     def test_no_metadata(self):

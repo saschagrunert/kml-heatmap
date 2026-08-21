@@ -1,7 +1,9 @@
 """Tests for segment_calculator module."""
 
+from datetime import UTC, datetime
+
 import pytest
-from datetime import datetime
+
 from kml_heatmap.segment_calculator import (
     calculate_path_distance,
     extract_segment_speeds,
@@ -93,13 +95,12 @@ class TestExtractSegmentSpeeds:
 
     def test_segment_with_relative_time(self):
         """Test segment calculation with path start time."""
-        from datetime import timezone
 
         path = [
             [50.0, 8.5, 100, "2025-03-15T10:00:00Z"],
             [51.0, 8.5, 200, "2025-03-15T10:30:00Z"],
         ]
-        start_time = datetime(2025, 3, 15, 10, 0, 0, tzinfo=timezone.utc)
+        start_time = datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC)
         result = extract_segment_speeds(path, start_time)
         assert result[0]["relative_time"] == 0.0
 
@@ -177,8 +178,8 @@ class TestBuildTimeIndexedSegments:
         from kml_heatmap.segment_calculator import build_time_indexed_segments
 
         segments = [
-            {"timestamp": datetime(2025, 3, 15, 10, 0, 0), "speed": 100},
-            {"timestamp": datetime(2025, 3, 15, 10, 30, 0), "speed": 120},
+            {"timestamp": datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC), "speed": 100},
+            {"timestamp": datetime(2025, 3, 15, 10, 30, 0, tzinfo=UTC), "speed": 120},
         ]
 
         timestamp_list, time_indexed_segments = build_time_indexed_segments(segments)
@@ -190,12 +191,15 @@ class TestBuildTimeIndexedSegments:
         from kml_heatmap.segment_calculator import build_time_indexed_segments
 
         segments = [
-            {"timestamp": datetime(2025, 3, 15, 10, 0, 0), "speed": 100},
-            {"timestamp": datetime(2025, 3, 15, 10, 15, 0), "speed": 0},  # Filtered
-            {"timestamp": datetime(2025, 3, 15, 10, 30, 0), "speed": 120},
+            {"timestamp": datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC), "speed": 100},
+            {
+                "timestamp": datetime(2025, 3, 15, 10, 15, 0, tzinfo=UTC),
+                "speed": 0,
+            },  # Filtered
+            {"timestamp": datetime(2025, 3, 15, 10, 30, 0, tzinfo=UTC), "speed": 120},
         ]
 
-        timestamp_list, time_indexed_segments = build_time_indexed_segments(segments)
+        timestamp_list, _time_indexed_segments = build_time_indexed_segments(segments)
         assert len(timestamp_list) == 2  # Only non-zero speeds
 
     def test_segments_with_none_timestamp_filtered(self):
@@ -203,11 +207,11 @@ class TestBuildTimeIndexedSegments:
         from kml_heatmap.segment_calculator import build_time_indexed_segments
 
         segments = [
-            {"timestamp": datetime(2025, 3, 15, 10, 0, 0), "speed": 100},
+            {"timestamp": datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC), "speed": 100},
             {"timestamp": None, "speed": 120},  # Filtered
         ]
 
-        timestamp_list, time_indexed_segments = build_time_indexed_segments(segments)
+        timestamp_list, _time_indexed_segments = build_time_indexed_segments(segments)
         assert len(timestamp_list) == 1
 
 
@@ -219,7 +223,7 @@ class TestCalculateWindowedGroundspeed:
         from kml_heatmap.segment_calculator import calculate_windowed_groundspeed
 
         speed, w_dist, w_time = calculate_windowed_groundspeed(
-            datetime(2025, 3, 15, 10, 0, 0), [], []
+            datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC), [], []
         )
         assert speed == 0.0
         assert w_dist == 0.0
@@ -229,7 +233,7 @@ class TestCalculateWindowedGroundspeed:
         """Test calculation with single segment."""
         from kml_heatmap.segment_calculator import calculate_windowed_groundspeed
 
-        timestamp = datetime(2025, 3, 15, 10, 0, 0)
+        timestamp = datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC)
         timestamp_list = [timestamp.timestamp()]
         # Need enough time_delta (>1 second) and reasonable distance
         segments = [{"distance": 10.0, "time_delta": 600.0}]  # 10km in 600s

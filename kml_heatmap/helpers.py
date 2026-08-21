@@ -7,10 +7,10 @@ from pathlib import Path
 from .constants import SECONDS_PER_HOUR
 
 __all__ = [
-    "parse_iso_timestamp",
     "calculate_duration_seconds",
     "format_flight_time",
     "numeric_filename_key",
+    "parse_iso_timestamp",
 ]
 
 
@@ -20,7 +20,7 @@ def parse_iso_timestamp(timestamp_str: str) -> datetime | None:
         return None
 
     try:
-        return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+        return datetime.fromisoformat(timestamp_str)
     except (ValueError, TypeError):
         return None
 

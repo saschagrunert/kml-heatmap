@@ -1,12 +1,13 @@
 """Tests for validation module."""
 
-import tempfile
 import os
+import tempfile
+
 from kml_heatmap.validation import (
-    validate_kml_file,
+    validate_altitude,
     validate_api_keys,
     validate_coordinates,
-    validate_altitude,
+    validate_kml_file,
 )
 
 

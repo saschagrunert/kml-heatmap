@@ -66,16 +66,15 @@ def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
             "format": "numbered",
         }
 
-    if len(parts) >= 3 and "-" in parts[0]:
-        if len(parts) >= 4:
-            registration = parts[2]
-            route = parts[3] if len(parts) > 3 else None
+    if len(parts) >= 4 and "-" in parts[0]:
+        registration = parts[2]
+        route = parts[3] if len(parts) > 3 else None
 
-            return {
-                "registration": registration,
-                "type": None,
-                "route": route if route else None,
-                "format": "charterware",
-            }
+        return {
+            "registration": registration,
+            "type": None,
+            "route": route if route else None,
+            "format": "charterware",
+        }
 
     return {}

@@ -37,7 +37,7 @@ class TestGetCacheKeyWithDefaultDir:
                 old_cache = cache_dir / f"{stem}_9999999.json"
                 old_cache.write_text("{}")
 
-                cache_path, _ = get_cache_key(temp_path, cache_dir=cache_dir)
+                _cache_path, _ = get_cache_key(temp_path, cache_dir=cache_dir)
                 assert not old_cache.exists()
             finally:
                 os.unlink(temp_path)

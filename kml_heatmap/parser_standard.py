@@ -5,7 +5,7 @@ from typing import Any
 from lxml import etree
 
 from .logger import logger
-from .parser_common import parse_coordinate_point, _build_path_metadata_dict
+from .parser_common import _build_path_metadata_dict, parse_coordinate_point
 from .types import PathMetadata
 
 

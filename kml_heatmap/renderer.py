@@ -10,9 +10,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+import minify_html as mh
 import rcssmin
 import rjsmin
-import minify_html as mh
 
 from .airports import deduplicate_airports, extract_airport_name
 from .data_exporter import export_all_data

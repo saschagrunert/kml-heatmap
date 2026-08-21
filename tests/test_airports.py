@@ -1,9 +1,9 @@
 """Tests for airports module."""
 
 from kml_heatmap.airports import (
+    deduplicate_airports,
     extract_airport_name,
     is_point_marker,
-    deduplicate_airports,
 )
 
 

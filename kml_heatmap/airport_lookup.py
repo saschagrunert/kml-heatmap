@@ -2,8 +2,8 @@
 
 import csv
 import re
-import time
 import threading
+import time
 import urllib.error
 from typing import Any
 from urllib.request import urlopen
@@ -18,19 +18,18 @@ except ImportError:
     HAS_FCNTL = False
 
 from .cache import CACHE_DIR
-from .logger import logger
-
 from .constants import ICAO_REGION_PREFIXES
+from .logger import logger
 
 # Pre-compiled pattern for ICAO code extraction
 _ICAO_PATTERN = re.compile(r"\b([A-Z]{4})\b")
 
 __all__ = [
     "extract_icao_codes_from_name",
-    "standardize_airport_name",
+    "get_cache_info",
     "lookup_airport_coordinates",
     "lookup_airport_country",
-    "get_cache_info",
+    "standardize_airport_name",
 ]
 
 # OurAirports database URL
@@ -67,9 +66,11 @@ def _download_airport_database() -> bool:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
         logger.info("📥 Downloading OurAirports database...")
-        with urlopen(OURAIRPORTS_URL, timeout=30) as response:  # nosec B310
-            with open(CACHE_FILE, "wb") as out_file:
-                out_file.write(response.read())
+        with (
+            urlopen(OURAIRPORTS_URL, timeout=30) as response,  # nosec B310
+            open(CACHE_FILE, "wb") as out_file,
+        ):
+            out_file.write(response.read())
 
         # Verify downloaded file
         if CACHE_FILE.exists() and CACHE_FILE.stat().st_size > 0:
@@ -108,7 +109,7 @@ def _load_airport_database() -> dict[str, tuple[float, float, str, str]]:
         try:
             # Acquire exclusive lock if supported (works across processes on Unix)
             if HAS_FCNTL:
-                lock_file = open(CACHE_LOCK_FILE, "w")
+                lock_file = open(CACHE_LOCK_FILE, "w")  # noqa: SIM115
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 
             # Check again if cache is valid after acquiring lock

@@ -9,7 +9,7 @@ Takeoff, Landing, Log Stop) while keeping the labels and year.
 import argparse
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .helpers import parse_iso_timestamp
@@ -43,9 +43,7 @@ def _is_already_obfuscated(first_dt: datetime, content: str) -> bool:
     """Check if a file is already obfuscated."""
     if first_dt.month != 1 or first_dt.day != 1:
         return False
-    if CHECK_NAME_DATE_PATTERN.search(content):
-        return False
-    return True
+    return not CHECK_NAME_DATE_PATTERN.search(content)
 
 
 def obfuscate_kml_content(content: str) -> str | None:
@@ -74,7 +72,7 @@ def obfuscate_kml_content(content: str) -> str | None:
         first_dt.minute,
         first_dt.second,
         first_dt.microsecond,
-        tzinfo=timezone.utc,
+        tzinfo=UTC,
     )
     offset = target_start - first_dt
 

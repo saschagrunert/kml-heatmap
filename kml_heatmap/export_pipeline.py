@@ -3,19 +3,19 @@
 from typing import Any
 
 from .constants import (
+    CRUISE_ALTITUDE_THRESHOLD_FT,
     KM_TO_NAUTICAL_MILES,
     METERS_TO_FEET,
-    CRUISE_ALTITUDE_THRESHOLD_FT,
 )
 from .geometry import haversine_distance
-from .helpers import parse_iso_timestamp, calculate_duration_seconds
+from .helpers import calculate_duration_seconds, parse_iso_timestamp
 from .logger import logger
 from .segment_calculator import (
-    extract_segment_speeds,
     build_time_indexed_segments,
-    calculate_windowed_groundspeed,
     calculate_fallback_groundspeed,
     calculate_path_distance,
+    calculate_windowed_groundspeed,
+    extract_segment_speeds,
     update_cruise_statistics,
 )
 from .types import PathInfo, PathMetadata, PathSegment
@@ -195,10 +195,8 @@ def _process_path_segments(
         )
 
         if groundspeed_knots > 0:
-            if groundspeed_knots > max_groundspeed:
-                max_groundspeed = groundspeed_knots
-            if groundspeed_knots < min_groundspeed:
-                min_groundspeed = groundspeed_knots
+            max_groundspeed = max(max_groundspeed, groundspeed_knots)
+            min_groundspeed = min(min_groundspeed, groundspeed_knots)
 
             altitude_agl_m = avg_alt_m - ground_level_m
             altitude_agl_ft = altitude_agl_m * METERS_TO_FEET

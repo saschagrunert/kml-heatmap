@@ -1,9 +1,9 @@
 """Unit tests for process_year_data function."""
 
-import os
 import json
-import tempfile
+import os
 import shutil
+import tempfile
 from unittest.mock import patch
 
 import pytest

@@ -1,13 +1,14 @@
 """Tests for statistics module."""
 
 import pytest
+
 from kml_heatmap.statistics import (
-    calculate_statistics,
-    calculate_flight_time,
-    extract_timestamps_from_path,
-    calculate_basic_stats,
-    calculate_altitude_stats,
     aggregate_aircraft_stats,
+    calculate_altitude_stats,
+    calculate_basic_stats,
+    calculate_flight_time,
+    calculate_statistics,
+    extract_timestamps_from_path,
 )
 
 

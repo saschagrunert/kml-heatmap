@@ -1,23 +1,24 @@
 """Statistics calculation for flight data."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from .geometry import extract_altitudes
-from .segment_calculator import calculate_path_distance
+
 from .aircraft import lookup_aircraft_model
 from .airports import is_point_marker
-from .constants import METERS_TO_FEET, KM_TO_NAUTICAL_MILES, SECONDS_PER_HOUR
-from .helpers import parse_iso_timestamp, format_flight_time
+from .constants import KM_TO_NAUTICAL_MILES, METERS_TO_FEET, SECONDS_PER_HOUR
+from .geometry import extract_altitudes
+from .helpers import format_flight_time, parse_iso_timestamp
 from .logger import logger
+from .segment_calculator import calculate_path_distance
 from .types import PathMetadata, Statistics
 
 __all__ = [
-    "calculate_statistics",
-    "calculate_basic_stats",
-    "calculate_altitude_stats",
-    "calculate_flight_time",
     "aggregate_aircraft_stats",
+    "calculate_altitude_stats",
+    "calculate_basic_stats",
+    "calculate_flight_time",
+    "calculate_statistics",
     "extract_timestamps_from_path",
 ]
 
@@ -182,7 +183,7 @@ def _calculate_aircraft_flight_times(
                     aircraft_flights[reg]["years"] = set()
 
                 # Extract year from timestamp
-                dt = datetime.fromtimestamp(min_time, tz=timezone.utc)
+                dt = datetime.fromtimestamp(min_time, tz=UTC)
                 aircraft_flights[reg]["years"].add(str(dt.year))
 
 
@@ -334,9 +335,13 @@ def calculate_statistics(
     # Calculate average groundspeed
     flight_time = stats.get("total_flight_time_seconds", 0)
     distance_nm = stats.get("total_distance_nm", 0)
-    if isinstance(flight_time, (int, float)) and isinstance(distance_nm, (int, float)):
-        if flight_time > 0 and distance_nm > 0:
-            hours = flight_time / SECONDS_PER_HOUR
-            stats["avg_groundspeed_knots"] = distance_nm / hours
+    if (
+        isinstance(flight_time, (int, float))
+        and isinstance(distance_nm, (int, float))
+        and flight_time > 0
+        and distance_nm > 0
+    ):
+        hours = flight_time / SECONDS_PER_HOUR
+        stats["avg_groundspeed_knots"] = distance_nm / hours
 
     return stats

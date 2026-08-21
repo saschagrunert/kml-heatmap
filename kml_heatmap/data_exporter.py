@@ -25,14 +25,14 @@ from .constants import (
 )
 from .export_pipeline import _build_path_info, _process_path_segments
 from .export_reconciler import _recalculate_stats_from_segments
-from .export_writers import export_airports_data, export_metadata, collect_unique_years
+from .export_writers import collect_unique_years, export_airports_data, export_metadata
 from .geometry import extract_altitudes
 from .logger import logger
 from .types import (
     AirportData,
+    PathInfo,
     PathMetadata,
     PathSegment,
-    PathInfo,
     Statistics,
 )
 
@@ -100,8 +100,7 @@ def process_year_data(
         )
         path_info.append(info)
 
-        if path_distance_nm > year_max_path_distance:
-            year_max_path_distance = path_distance_nm
+        year_max_path_distance = max(year_max_path_distance, path_distance_nm)
 
         (
             segments,
@@ -115,10 +114,8 @@ def process_year_data(
         )
         path_segments.extend(segments)
 
-        if seg_max_gs > year_max_groundspeed:
-            year_max_groundspeed = seg_max_gs
-        if seg_min_gs < year_min_groundspeed:
-            year_min_groundspeed = seg_min_gs
+        year_max_groundspeed = max(year_max_groundspeed, seg_max_gs)
+        year_min_groundspeed = min(year_min_groundspeed, seg_min_gs)
         year_cruise_distance += seg_cruise_dist
         year_cruise_time += seg_cruise_time
         for alt_bin, time_spent in seg_cruise_hist.items():
@@ -272,16 +269,19 @@ def _aggregate_year_results(
         year = result["year"]
         agg.file_structure[year] = result["file_structure"]
 
-        if result["max_groundspeed"] > agg.max_groundspeed_knots:
-            agg.max_groundspeed_knots = result["max_groundspeed"]
-        if result["min_groundspeed"] < agg.min_groundspeed_knots:
-            agg.min_groundspeed_knots = result["min_groundspeed"]
+        agg.max_groundspeed_knots = max(
+            agg.max_groundspeed_knots, result["max_groundspeed"]
+        )
+        agg.min_groundspeed_knots = min(
+            agg.min_groundspeed_knots, result["min_groundspeed"]
+        )
 
         agg.cruise_speed_total_distance += result["cruise_distance"]
         agg.cruise_speed_total_time += result["cruise_time"]
 
-        if result["max_path_distance"] > agg.max_path_distance_nm:
-            agg.max_path_distance_nm = result["max_path_distance"]
+        agg.max_path_distance_nm = max(
+            agg.max_path_distance_nm, result["max_path_distance"]
+        )
 
         for altitude_bin, time_spent in result["cruise_altitude_histogram"].items():
             if altitude_bin not in agg.cruise_altitude_histogram:

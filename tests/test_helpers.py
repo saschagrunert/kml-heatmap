@@ -1,10 +1,11 @@
 """Tests for helpers module."""
 
 from datetime import datetime
+
 from kml_heatmap.helpers import (
-    parse_iso_timestamp,
     calculate_duration_seconds,
     format_flight_time,
+    parse_iso_timestamp,
 )
 
 

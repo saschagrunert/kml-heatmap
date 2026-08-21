@@ -7,50 +7,42 @@ A tool for creating interactive heatmap visualizations from KML flight data.
 __version__ = "1.0.0"
 
 # Export key functions
+from .aircraft import lookup_aircraft_model, parse_aircraft_from_filename
+from .airports import deduplicate_airports, extract_airport_name
+from .exceptions import (
+    InvalidCoordinateError,
+    KMLHeatmapError,
+    KMLParseError,
+)
 from .geometry import haversine_distance
 from .parser import parse_kml_coordinates
 from .parser_common import is_mid_flight_start, is_valid_landing
-from .aircraft import lookup_aircraft_model, parse_aircraft_from_filename
-from .airports import deduplicate_airports, extract_airport_name
+from .renderer import load_template, minify_html
 from .statistics import calculate_statistics
-from .renderer import minify_html, load_template
 from .validation import (
+    validate_altitude,
+    validate_api_keys,
     validate_coordinates,
     validate_kml_file,
-    validate_api_keys,
-    validate_altitude,
-)
-from .exceptions import (
-    KMLHeatmapError,
-    KMLParseError,
-    InvalidCoordinateError,
 )
 
 __all__ = [
-    # Geometry
-    "haversine_distance",
-    # Parser
-    "parse_kml_coordinates",
-    "is_mid_flight_start",
-    "is_valid_landing",
-    # Aircraft
-    "lookup_aircraft_model",
-    "parse_aircraft_from_filename",
-    # Airports
-    "deduplicate_airports",
-    "extract_airport_name",
-    # Statistics
-    "calculate_statistics",
-    # Renderer
-    "minify_html",
-    "load_template",
-    # Validation
-    "validate_coordinates",
-    "validate_kml_file",
-    "validate_api_keys",
-    "validate_altitude",
-    # Exceptions
+    "InvalidCoordinateError",
     "KMLHeatmapError",
     "KMLParseError",
-    "InvalidCoordinateError",
+    "calculate_statistics",
+    "deduplicate_airports",
+    "extract_airport_name",
+    "haversine_distance",
+    "is_mid_flight_start",
+    "is_valid_landing",
+    "load_template",
+    "lookup_aircraft_model",
+    "minify_html",
+    "parse_aircraft_from_filename",
+    "parse_kml_coordinates",
+    "validate_altitude",
+    "validate_api_keys",
+    "validate_coordinates",
+    "validate_kml_file",
 ]

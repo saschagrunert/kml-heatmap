@@ -1,6 +1,7 @@
 """Tests for parser_gx_track module."""
 
 from unittest.mock import MagicMock
+
 from lxml import etree
 
 from kml_heatmap.parser_gx_track import (
@@ -134,7 +135,7 @@ class TestExtractGxWhenElements:
 
 class TestParseGxCoordinates:
     def test_parses_valid_coordinates(self):
-        pm, gx_coords = _make_placemark_with_gx(
+        _pm, gx_coords = _make_placemark_with_gx(
             coords=["8.5 50.0 300", "9.0 51.0 400"],
         )
         coordinates = []
@@ -171,13 +172,13 @@ class TestParseGxCoordinates:
         assert len(result) == 0
 
     def test_skips_single_part_coordinates(self):
-        pm, gx_coords = _make_placemark_with_gx(coords=["8.5"])
+        _pm, gx_coords = _make_placemark_with_gx(coords=["8.5"])
         coordinates = []
         result = _parse_gx_coordinates(gx_coords, [], "test.kml", coordinates)
         assert len(result) == 0
 
     def test_handles_coordinates_without_altitude(self):
-        pm, gx_coords = _make_placemark_with_gx(coords=["8.5 50.0"])
+        _pm, gx_coords = _make_placemark_with_gx(coords=["8.5 50.0"])
         coordinates = []
         result = _parse_gx_coordinates(gx_coords, [], "test.kml", coordinates)
         assert len(coordinates) == 1
@@ -198,7 +199,7 @@ class TestParseGxCoordinates:
         assert result[0][3] == "2025-03-01T10:00:00Z"
 
     def test_handles_coordinates_without_timestamps(self):
-        pm, gx_coords = _make_placemark_with_gx(
+        _pm, gx_coords = _make_placemark_with_gx(
             coords=["8.5 50.0 300"],
         )
         coordinates = []
@@ -207,7 +208,7 @@ class TestParseGxCoordinates:
         assert len(result[0]) == 3  # No timestamp
 
     def test_handles_invalid_coordinates(self):
-        pm, gx_coords = _make_placemark_with_gx(coords=["abc def ghi"])
+        _pm, gx_coords = _make_placemark_with_gx(coords=["abc def ghi"])
         coordinates = []
         result = _parse_gx_coordinates(gx_coords, [], "test.kml", coordinates)
         assert len(result) == 0

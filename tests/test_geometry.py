@@ -1,9 +1,10 @@
 """Tests for geometry module."""
 
 import pytest
+
 from kml_heatmap.geometry import (
-    haversine_distance,
     EARTH_RADIUS_KM,
+    haversine_distance,
 )
 
 

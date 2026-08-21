@@ -1,7 +1,8 @@
 """Tests for logger module."""
 
 import logging
-from kml_heatmap.logger import setup_logger, logger, set_debug_mode
+
+from kml_heatmap.logger import logger, set_debug_mode, setup_logger
 
 
 class TestSetupLogger:

@@ -1,7 +1,7 @@
 """Tests for data_exporter module."""
 
-import os
 import json
+import os
 import tempfile
 from unittest.mock import patch
 
@@ -15,11 +15,11 @@ from kml_heatmap.data_exporter import (
     _group_paths_by_year,
     _process_years_parallel,
     _recalculate_stats_from_segments,
-    export_airports_data,
-    export_metadata,
     collect_unique_years,
-    process_year_data,
+    export_airports_data,
     export_all_data,
+    export_metadata,
+    process_year_data,
 )
 
 
@@ -148,7 +148,7 @@ class TestExportAirportsData:
     def test_export_airports_empty_list(self):
         """Test exporting empty airport list."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_file, file_size = export_airports_data([], tmpdir)
+            output_file, _file_size = export_airports_data([], tmpdir)
 
             assert os.path.exists(output_file)
             data = _parse_js_data(output_file)
@@ -974,12 +974,14 @@ class TestFinalizeStats:
 class TestProcessYearsParallel:
     def test_handles_processing_error(self):
         paths_by_year = {"2025": [0]}
-        with patch(
-            "kml_heatmap.data_exporter.process_year_data",
-            side_effect=RuntimeError("boom"),
+        with (
+            patch(
+                "kml_heatmap.data_exporter.process_year_data",
+                side_effect=RuntimeError("boom"),
+            ),
+            pytest.raises(RuntimeError, match="boom"),
         ):
-            with pytest.raises(RuntimeError, match="boom"):
-                _process_years_parallel(paths_by_year, [], [[]], [{}], 0, 1000, "/tmp")
+            _process_years_parallel(paths_by_year, [], [[]], [{}], 0, 1000, "/tmp")
 
 
 class TestExportAllDataPrivacyMode:
