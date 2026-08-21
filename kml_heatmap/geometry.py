@@ -2,6 +2,8 @@
 
 from math import atan2, cos, radians, sin, sqrt
 
+from .types import FlightPathGroup
+
 __all__ = [
     "EARTH_RADIUS_KM",
     "extract_altitudes",
@@ -11,7 +13,7 @@ __all__ = [
 EARTH_RADIUS_KM = 6371
 
 
-def extract_altitudes(paths: list[list[list[float]]]) -> list[float]:
+def extract_altitudes(paths: FlightPathGroup) -> list[float]:
     """Extract all altitude values from a list of paths."""
     return [coord[2] for path in paths for coord in path if len(coord) >= 3]
 

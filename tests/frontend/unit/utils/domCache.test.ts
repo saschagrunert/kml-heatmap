@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { DOMCache } from "../../../../kml_heatmap/frontend/utils/domCache";
+import {
+  DOMCache,
+  hideControls,
+  restoreControls,
+  getControlElements,
+} from "../../../../kml_heatmap/frontend/utils/domCache";
 
 describe("DOMCache", () => {
   let domCache: DOMCache;
@@ -264,5 +269,101 @@ describe("DOMCache", () => {
       expect(result2).toBe(result3);
       expect(result3).toBe(result4);
     });
+  });
+});
+
+describe("hideControls / restoreControls", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("hides control elements and saves their original display values", () => {
+    const el = document.createElement("div");
+    el.id = "stats-btn";
+    el.style.display = "block";
+    document.body.appendChild(el);
+
+    const saved = hideControls();
+
+    expect(el.style.display).toBe("none");
+    expect(saved.size).toBeGreaterThanOrEqual(1);
+    expect(saved.get(el)).toBe("block");
+  });
+
+  it("restoreControls restores original display values", () => {
+    const el = document.createElement("div");
+    el.id = "stats-btn";
+    el.style.display = "flex";
+    document.body.appendChild(el);
+
+    const saved = hideControls();
+    expect(el.style.display).toBe("none");
+
+    restoreControls(saved);
+    expect(el.style.display).toBe("flex");
+  });
+
+  it("restores empty string display (browser default)", () => {
+    const el = document.createElement("div");
+    el.id = "stats-btn";
+    document.body.appendChild(el);
+
+    const saved = hideControls();
+    expect(el.style.display).toBe("none");
+
+    restoreControls(saved);
+    expect(el.style.display).toBe("");
+  });
+
+  it("handles extra IDs passed to hideControls", () => {
+    const el = document.createElement("div");
+    el.id = "custom-control";
+    el.style.display = "inline";
+    document.body.appendChild(el);
+
+    const saved = hideControls(["custom-control"]);
+
+    expect(el.style.display).toBe("none");
+    expect(saved.get(el)).toBe("inline");
+  });
+
+  it("returns empty map when no elements exist", () => {
+    const saved = hideControls();
+    expect(saved.size).toBe(0);
+  });
+
+  it("restoreControls with empty map is a no-op", () => {
+    const saved = new Map<HTMLElement, string>();
+    expect(() => restoreControls(saved)).not.toThrow();
+  });
+});
+
+describe("getControlElements", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("returns null entries for missing elements", () => {
+    const elements = getControlElements();
+    elements.forEach((el) => {
+      expect(el).toBeNull();
+    });
+  });
+
+  it("includes extra IDs in result", () => {
+    const el = document.createElement("div");
+    el.id = "extra-ctrl";
+    document.body.appendChild(el);
+
+    const elements = getControlElements(["extra-ctrl"]);
+    expect(elements).toContain(el);
   });
 });

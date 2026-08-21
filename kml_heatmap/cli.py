@@ -56,14 +56,14 @@ examples:
             if dir_kml_files:
                 kml_files.extend(dir_kml_files)
                 logger.info(
-                    f"Found {len(dir_kml_files)} KML file(s) in directory: {path}"
+                    "Found %d KML file(s) in directory: %s", len(dir_kml_files), path
                 )
             else:
-                logger.warning(f"No KML files found in directory: {path}")
+                logger.warning("No KML files found in directory: %s", path)
         elif p.is_file():
             kml_files.append(path)
         else:
-            logger.warning(f"File or directory not found: {path}")
+            logger.warning("File or directory not found: %s", path)
 
     if not kml_files:
         print("Error: No KML files specified or found!")
@@ -87,7 +87,7 @@ examples:
         candidate = input_dir / "aircraft.json"
         if candidate.exists():
             aircraft_file = candidate
-            logger.info(f"Using aircraft data from {aircraft_file}")
+            logger.info("Using aircraft data from %s", aircraft_file)
 
     from .obfuscate import obfuscate_kml_file
     from .renderer import create_progressive_heatmap

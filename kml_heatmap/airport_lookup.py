@@ -75,7 +75,8 @@ def _download_airport_database() -> bool:
         # Verify downloaded file
         if CACHE_FILE.exists() and CACHE_FILE.stat().st_size > 0:
             logger.info(
-                f"✓ Downloaded {CACHE_FILE.stat().st_size / 1024 / 1024:.1f} MB airport database"
+                "✓ Downloaded %.1f MB airport database",
+                CACHE_FILE.stat().st_size / 1024 / 1024,
             )
             return True
         else:
@@ -83,7 +84,7 @@ def _download_airport_database() -> bool:
             return False
 
     except (OSError, urllib.error.URLError, ValueError) as e:
-        logger.warning(f"✗ Failed to download airport database: {e}")
+        logger.warning("✗ Failed to download airport database: %s", e)
         return False
 
 
@@ -140,11 +141,11 @@ def _load_airport_database() -> dict[str, tuple[float, float, str, str]]:
                                     continue
 
                     _airport_cache = airports
-                    logger.debug(f"Loaded {len(airports):,} airports from cache")
+                    logger.debug("Loaded %s airports from cache", f"{len(airports):,}")
                     return airports
 
                 except (OSError, csv.Error, ValueError, UnicodeDecodeError) as e:
-                    logger.warning(f"Failed to load airport cache: {e}")
+                    logger.warning("Failed to load airport cache: %s", e)
 
             # Return empty dict if cache loading failed
             logger.warning("Airport database unavailable - airport lookups will fail")
@@ -169,7 +170,7 @@ def _load_airport_database() -> dict[str, tuple[float, float, str, str]]:
 def lookup_airport_coordinates(icao_code: str) -> tuple[float, float, str] | None:
     """Look up airport coordinates from ICAO code using OurAirports."""
     if not icao_code or len(icao_code) != 4:
-        logger.debug(f"Invalid ICAO code: {icao_code}")
+        logger.debug("Invalid ICAO code: %s", icao_code)
         return None
 
     airports = _load_airport_database()
@@ -177,10 +178,10 @@ def lookup_airport_coordinates(icao_code: str) -> tuple[float, float, str] | Non
     icao_upper = icao_code.upper()
     if icao_upper in airports:
         lat, lon, name, _ = airports[icao_upper]
-        logger.debug(f"Found airport {icao_upper}: {name} at ({lat}, {lon})")
+        logger.debug("Found airport %s: %s at (%s, %s)", icao_upper, name, lat, lon)
         return (lat, lon, name)
 
-    logger.debug(f"Airport {icao_upper} not found in database")
+    logger.debug("Airport %s not found in database", icao_upper)
     return None
 
 
@@ -258,7 +259,7 @@ def standardize_airport_name(airport_name: str | None) -> str | None:
             standardized = (
                 f"{icao_codes[0]} {clean_name1} - {icao_codes[1]} {clean_name2}"
             )
-            logger.debug(f"Standardized route: {airport_name} -> {standardized}")
+            logger.debug("Standardized route: %s -> %s", airport_name, standardized)
             return standardized
         elif coords1:
             # Only first airport found
@@ -266,7 +267,7 @@ def standardize_airport_name(airport_name: str | None) -> str | None:
             clean_name1 = name1.replace(" Airport", "").replace(" Airfield", "")
             parts = airport_name.split(" - ")
             standardized = f"{icao_codes[0]} {clean_name1} - {parts[1]}"
-            logger.debug(f"Standardized start: {airport_name} -> {standardized}")
+            logger.debug("Standardized start: %s -> %s", airport_name, standardized)
             return standardized
         elif coords2:
             # Only second airport found
@@ -274,7 +275,7 @@ def standardize_airport_name(airport_name: str | None) -> str | None:
             clean_name2 = name2.replace(" Airport", "").replace(" Airfield", "")
             parts = airport_name.split(" - ")
             standardized = f"{parts[0]} - {icao_codes[1]} {clean_name2}"
-            logger.debug(f"Standardized end: {airport_name} -> {standardized}")
+            logger.debug("Standardized end: %s -> %s", airport_name, standardized)
             return standardized
 
     # Single airport format
@@ -285,7 +286,7 @@ def standardize_airport_name(airport_name: str | None) -> str | None:
             # Remove common airport suffixes for cleaner display
             clean_name = name.replace(" Airport", "").replace(" Airfield", "")
             standardized = f"{icao_codes[0]} {clean_name}"
-            logger.debug(f"Standardized airport: {airport_name} -> {standardized}")
+            logger.debug("Standardized airport: %s -> %s", airport_name, standardized)
             return standardized
 
     # Fallback to original name

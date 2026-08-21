@@ -3,9 +3,11 @@
 from typing import Any
 
 from .constants import (
+    ALTITUDE_BIN_SIZE_FT,
     CRUISE_ALTITUDE_THRESHOLD_FT,
     KM_TO_NAUTICAL_MILES,
     METERS_TO_FEET,
+    MIN_SEGMENT_TIME_SECONDS,
 )
 from .geometry import haversine_distance
 from .helpers import calculate_duration_seconds, parse_iso_timestamp
@@ -16,7 +18,6 @@ from .segment_calculator import (
     calculate_path_distance,
     calculate_windowed_groundspeed,
     extract_segment_speeds,
-    update_cruise_statistics,
 )
 from .types import PathInfo, PathMetadata, PathSegment
 
@@ -49,7 +50,7 @@ def _build_path_info(
     if start_ts and end_ts:
         path_duration_seconds = calculate_duration_seconds(start_ts, end_ts)
         if path_duration_seconds == 0:
-            logger.debug(f"  Could not parse timestamps '{start_ts}' -> '{end_ts}'")
+            logger.debug("  Could not parse timestamps '%s' -> '%s'", start_ts, end_ts)
 
     path_distance_km = calculate_path_distance(path)
     path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
@@ -114,31 +115,6 @@ def _calculate_segment_groundspeed(
     return groundspeed_knots, window_distance, window_time
 
 
-def _accumulate_cruise_stats(
-    window_distance: float,
-    window_time: float,
-    altitude_agl_ft: float,
-) -> tuple[float, float, dict[int, float]]:
-    """Accumulate cruise statistics for a single segment.
-
-    Returns:
-        Tuple of (cruise_distance, cruise_time, altitude_histogram)
-    """
-    cruise_stats: dict[str, Any] = {
-        "total_distance": 0.0,
-        "total_time": 0.0,
-        "altitude_histogram": {},
-    }
-    update_cruise_statistics(
-        altitude_agl_ft, window_time, window_distance, cruise_stats
-    )
-    return (
-        float(cruise_stats["total_distance"]),
-        float(cruise_stats["total_time"]),
-        cruise_stats["altitude_histogram"],
-    )
-
-
 def _process_path_segments(
     path: list[list[Any]],
     local_idx: int,
@@ -200,18 +176,18 @@ def _process_path_segments(
 
             altitude_agl_m = avg_alt_m - ground_level_m
             altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
-            if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
-                seg_cruise_dist, seg_cruise_time, seg_hist = _accumulate_cruise_stats(
-                    window_distance,
-                    window_time,
-                    altitude_agl_ft,
+            if (
+                altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT
+                and window_time >= MIN_SEGMENT_TIME_SECONDS
+            ):
+                cruise_distance += window_distance * KM_TO_NAUTICAL_MILES
+                cruise_time += window_time
+                alt_bin = (
+                    int(altitude_agl_ft / ALTITUDE_BIN_SIZE_FT) * ALTITUDE_BIN_SIZE_FT
                 )
-                cruise_distance += seg_cruise_dist
-                cruise_time += seg_cruise_time
-                for alt_bin, time_spent in seg_hist.items():
-                    if alt_bin not in cruise_altitude_histogram:
-                        cruise_altitude_histogram[alt_bin] = 0.0
-                    cruise_altitude_histogram[alt_bin] += time_spent
+                cruise_altitude_histogram[alt_bin] = (
+                    cruise_altitude_histogram.get(alt_bin, 0.0) + window_time
+                )
 
         if lat1 != lat2 or lon1 != lon2:
             current_segment = segment_speeds[i]

@@ -2,6 +2,10 @@
 
 from typing import NotRequired, TypedDict
 
+FlightPath = list[list[float]]
+
+FlightPathGroup = list[FlightPath]
+
 
 class PathMetadata(TypedDict):
     """Metadata for a flight path."""
@@ -23,7 +27,7 @@ class PathSegment(TypedDict):
     """Represents a segment of a flight path with computed properties."""
 
     path_id: int
-    coords: list[list[float]]
+    coords: FlightPath
     altitude_ft: NotRequired[float | None]
     altitude_m: NotRequired[float | None]
     groundspeed_knots: NotRequired[float | None]
@@ -101,8 +105,8 @@ class Statistics(TypedDict):
 class CacheEntry(TypedDict):
     """Cache entry for parsed KML data."""
 
-    coordinates: list[list[float]]
-    path_groups: list[list[list[float]]]
+    coordinates: FlightPath
+    path_groups: FlightPathGroup
     path_metadata: list[PathMetadata]
     mtime: float
     version: str
@@ -112,6 +116,8 @@ __all__ = [
     "AircraftInfo",
     "AirportData",
     "CacheEntry",
+    "FlightPath",
+    "FlightPathGroup",
     "PathInfo",
     "PathMetadata",
     "PathSegment",

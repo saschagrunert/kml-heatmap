@@ -6,27 +6,27 @@ from lxml import etree
 
 from .logger import logger
 from .parser_common import _build_path_metadata_dict, parse_coordinate_point
-from .types import PathMetadata
+from .types import FlightPath, FlightPathGroup, PathMetadata
 
 
 def process_standard_coordinates(
     coord_elements: list[etree._Element],
     coord_to_metadata: dict[int, dict[str, Any]],
     kml_file: str,
-    coordinates: list[list[float]],
-    path_groups: list[list[list[float]]],
+    coordinates: FlightPath,
+    path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
 ) -> None:
     """Process standard KML <coordinates> elements."""
     for idx, coord_elem in enumerate(coord_elements):
         # Handle None text
         if coord_elem.text is None:
-            logger.debug(f"Coordinate element {idx} has None text, skipping")
+            logger.debug("Coordinate element %d has None text, skipping", idx)
             continue
 
         coord_text = coord_elem.text.strip()
         if not coord_text:
-            logger.debug(f"Coordinate element {idx} has empty text, skipping")
+            logger.debug("Coordinate element %d has empty text, skipping", idx)
             continue
 
         # Get metadata for this coordinate element
@@ -74,4 +74,4 @@ def process_standard_coordinates(
             coord_type = (
                 "Point" if element_coords == 1 else f"Path ({element_coords} points)"
             )
-            logger.debug(f"Element {idx}: {coord_type}")
+            logger.debug("Element %d: %s", idx, coord_type)

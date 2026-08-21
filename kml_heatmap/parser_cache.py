@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from .cache import CACHE_DIR, atomic_json_write
-from .types import PathMetadata
+from .types import FlightPath, FlightPathGroup, PathMetadata
 
 # KML parse cache subdirectory
 KML_CACHE_DIR = CACHE_DIR / "kml"
@@ -49,7 +49,7 @@ def get_cache_key(
 
 def load_cached_parse(
     cache_path: Path,
-) -> tuple[list[list[float]], list[list[list[float]]], list[PathMetadata]] | None:
+) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]] | None:
     """Load cached parse results, or None if cache is invalid."""
     try:
         with open(cache_path, "r") as f:
@@ -61,8 +61,8 @@ def load_cached_parse(
 
 def save_to_cache(
     cache_path: Path,
-    coordinates: list[list[float]],
-    path_groups: list[list[list[float]]],
+    coordinates: FlightPath,
+    path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
     cache_dir: Path | None = None,
 ) -> None:

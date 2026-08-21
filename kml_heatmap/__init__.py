@@ -19,12 +19,7 @@ from .parser import parse_kml_coordinates
 from .parser_common import is_mid_flight_start, is_valid_landing
 from .renderer import load_template, minify_html
 from .statistics import calculate_statistics
-from .validation import (
-    validate_altitude,
-    validate_api_keys,
-    validate_coordinates,
-    validate_kml_file,
-)
+from .validation import validate_kml_file
 
 __all__ = [
     "InvalidCoordinateError",
@@ -41,8 +36,5 @@ __all__ = [
     "minify_html",
     "parse_aircraft_from_filename",
     "parse_kml_coordinates",
-    "validate_altitude",
-    "validate_api_keys",
-    "validate_coordinates",
     "validate_kml_file",
 ]

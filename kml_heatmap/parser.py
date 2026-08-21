@@ -24,7 +24,7 @@ from .parser_common import (
 )
 from .parser_gx_track import process_gx_track
 from .parser_standard import process_standard_coordinates
-from .types import PathMetadata
+from .types import FlightPath, FlightPathGroup, PathMetadata
 
 __all__ = [
     "get_cache_key",
@@ -40,8 +40,8 @@ def get_cache_key(kml_file: str) -> tuple[Path | None, bool]:
 
 def save_to_cache(
     cache_path: Path,
-    coordinates: list[list[float]],
-    path_groups: list[list[list[float]]],
+    coordinates: FlightPath,
+    path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
 ) -> None:
     """Save parse results using the module-level KML_CACHE_DIR."""
@@ -58,13 +58,13 @@ def _parse_kml_tree(kml_file: str) -> ET._Element:
         root = tree.getroot()
 
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"\n  Root tag: {root.tag}")
-            logger.debug(f"Root attrib: {root.attrib}")
+            logger.debug("\n  Root tag: %s", root.tag)
+            logger.debug("Root attrib: %s", root.attrib)
             all_tags = set()
             for elem in root.iter():
                 tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
                 all_tags.add(tag)
-            logger.debug(f"All unique tags in file: {sorted(all_tags)}")
+            logger.debug("All unique tags in file: %s", sorted(all_tags))
 
         return root
 
@@ -83,7 +83,7 @@ def _extract_kml_elements(
     gx_coords = root.findall(".//gx:coord", namespaces)
 
     if gx_coords:
-        logger.debug(f"Found {len(gx_coords)} gx:coord elements (Google Earth Track)")
+        logger.debug("Found %d gx:coord elements (Google Earth Track)", len(gx_coords))
 
     # If no results, try without namespace (some KML files don't use it)
     if not coord_elements and not gx_coords:
@@ -94,11 +94,13 @@ def _extract_kml_elements(
         coord_elements = root.findall(".//coordinates")
         gx_coords = root.findall(".//coord")  # gx:coord without namespace
 
-    logger.debug(f"Found {len(coord_elements)} coordinate elements")
+    logger.debug("Found %d coordinate elements", len(coord_elements))
     if coord_elements:
         for i, elem in enumerate(coord_elements[:2]):  # Show first 2
             logger.debug(
-                f"Element {i} text preview: {str(elem.text)[:100] if elem.text else 'None'}"
+                "Element %d text preview: %s",
+                i,
+                str(elem.text)[:100] if elem.text else "None",
             )
 
     # Find all Placemarks
@@ -132,7 +134,7 @@ def _build_coord_metadata_map(
 
 def parse_kml_coordinates(
     kml_file: str,
-) -> tuple[list[list[float]], list[list[list[float]]], list[PathMetadata]]:
+) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]]:
     """Extract coordinates from a KML file."""
     # Check cache first
     cache_path, cache_valid = get_cache_key(kml_file)
@@ -141,12 +143,16 @@ def parse_kml_coordinates(
         if cached_result:
             coordinates, path_groups, path_metadata = cached_result
             logger.info(
-                f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name} (cached)"
+                "✓ Loaded %d points from %s (cached)",
+                len(coordinates),
+                Path(kml_file).name,
             )
             if path_groups:
                 total_alt_points = sum(len(path) for path in path_groups)
                 logger.info(
-                    f"  ({total_alt_points} points have altitude data in {len(path_groups)} path(s))"
+                    "  (%d points have altitude data in %d path(s))",
+                    total_alt_points,
+                    len(path_groups),
                 )
             return coordinates, path_groups, path_metadata
 
@@ -190,10 +196,12 @@ def parse_kml_coordinates(
 
         # Log results
         total_alt_points = sum(len(path) for path in path_groups)
-        logger.info(f"✓ Loaded {len(coordinates)} points from {Path(kml_file).name}")
+        logger.info("✓ Loaded %d points from %s", len(coordinates), Path(kml_file).name)
         if path_groups:
             logger.info(
-                f"  ({total_alt_points} points have altitude data in {len(path_groups)} path(s))"
+                "  (%d points have altitude data in %d path(s))",
+                total_alt_points,
+                len(path_groups),
             )
 
         if len(coordinates) == 0:
@@ -210,6 +218,6 @@ def parse_kml_coordinates(
         return coordinates, path_groups, path_metadata
 
     except KMLParseError as e:
-        logger.error(f"KML parsing error in {kml_file}: {e}")
+        logger.error("KML parsing error in %s: %s", kml_file, e)
         logger.debug("Stack trace:", exc_info=True)
         return [], [], []

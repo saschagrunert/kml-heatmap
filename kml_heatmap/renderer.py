@@ -22,8 +22,14 @@ from .logger import logger
 from .parser import parse_kml_coordinates
 from .parser_common import is_mid_flight_start, is_valid_landing
 from .statistics import calculate_statistics
-from .types import AirportData, PathMetadata
+from .types import AirportData, FlightPath, FlightPathGroup, PathMetadata
 from .validation import validate_kml_file
+
+
+def _escape_js_string(value: str) -> str:
+    """Escape a value for safe embedding in a single-quoted JS string."""
+    escaped: str = json.dumps(value)
+    return escaped[1:-1].replace("'", "\\'")
 
 
 def load_template() -> str:
@@ -67,18 +73,18 @@ def minify_html(html: str) -> str:
 
 def _parse_with_error_handling(
     kml_file: str,
-) -> tuple[str, tuple[list[list[float]], list[list[list[float]]], list[PathMetadata]]]:
+) -> tuple[str, tuple[FlightPath, FlightPathGroup, list[PathMetadata]]]:
     """Parse a KML file with error handling."""
     try:
         return kml_file, parse_kml_coordinates(kml_file)
     except (OSError, ValueError, TypeError, AttributeError, KMLParseError) as e:
-        logger.error(f"Error processing {kml_file}: {e}")
+        logger.error("Error processing %s: %s", kml_file, e)
         return kml_file, ([], [], [])
 
 
 def _parse_kml_files(
     valid_files: list[str],
-) -> tuple[list[list[float]], list[list[list[float]]], list[PathMetadata]]:
+) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]]:
     """Parse KML files in parallel and merge results."""
     from .airport_lookup import _load_airport_database
 
@@ -86,13 +92,11 @@ def _parse_kml_files(
 
     parse_start = time.time()
 
-    all_coordinates: list[list[float]] = []
-    all_path_groups: list[list[list[float]]] = []
+    all_coordinates: FlightPath = []
+    all_path_groups: FlightPathGroup = []
     all_path_metadata: list[PathMetadata] = []
 
-    results: list[
-        tuple[str, list[list[float]], list[list[list[float]]], list[PathMetadata]]
-    ] = []
+    results: list[tuple[str, FlightPath, FlightPathGroup, list[PathMetadata]]] = []
     completed_count = 0
     with ProcessPoolExecutor(
         max_workers=min(len(valid_files), os.cpu_count() or 4)
@@ -106,7 +110,11 @@ def _parse_kml_files(
             completed_count += 1
             progress_pct = (completed_count / len(valid_files)) * 100
             logger.info(
-                f"  [{completed_count}/{len(valid_files)}] {progress_pct:.0f}% - {Path(kml_file).name}"
+                "  [%d/%d] %.0f%% - %s",
+                completed_count,
+                len(valid_files),
+                progress_pct,
+                Path(kml_file).name,
             )
 
     results.sort(key=lambda r: numeric_filename_key(r[0]))
@@ -125,19 +133,21 @@ def _parse_kml_files(
 
     parse_time = time.time() - parse_start
     logger.info(
-        f"  Parsing took {parse_time:.1f}s ({parse_time / len(valid_files):.2f}s per file)"
+        "  Parsing took %.1fs (%.2fs per file)",
+        parse_time,
+        parse_time / len(valid_files),
     )
 
     if not all_coordinates:
         raise ValueError("No coordinates found in any KML files!")
 
-    logger.info(f"\nTotal points: {len(all_coordinates)}")
+    logger.info("\nTotal points: %d", len(all_coordinates))
     return all_coordinates, all_path_groups, all_path_metadata
 
 
 def _process_data(
-    all_coordinates: list[list[float]],
-    all_path_groups: list[list[list[float]]],
+    all_coordinates: FlightPath,
+    all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
     data_dir: str,
     aircraft_file: Path | None = None,
@@ -156,11 +166,11 @@ def _process_data(
 
     unique_airports: list[AirportData] = []
     if all_path_metadata:
-        logger.info(f"\nProcessing {len(all_path_metadata)} start points...")
+        logger.info("\nProcessing %d start points...", len(all_path_metadata))
         unique_airports = deduplicate_airports(
             all_path_metadata, all_path_groups, is_mid_flight_start, is_valid_landing
         )
-        logger.info(f"  Found {len(unique_airports)} unique airports")
+        logger.info("  Found %d unique airports", len(unique_airports))
 
     logger.info("\nCalculating statistics...")
     stats = calculate_statistics(
@@ -212,9 +222,12 @@ def _render_html(output_file: str, data_dir_name: str) -> None:
     minified_size = len(minified_html)
     reduction = (1 - minified_size / original_size) * 100
 
-    logger.info(f"Progressive HTML saved: {output_file} ({file_size / 1024:.1f} KB)")
+    logger.info("Progressive HTML saved: %s (%.1f KB)", output_file, file_size / 1024)
     logger.info(
-        f"  Minification: {original_size / 1024:.1f} KB -> {minified_size / 1024:.1f} KB ({reduction:.1f}% reduction)"
+        "  Minification: %.1f KB -> %.1f KB (%.1f%% reduction)",
+        original_size / 1024,
+        minified_size / 1024,
+        reduction,
     )
 
 
@@ -233,11 +246,6 @@ def _generate_map_config(
 
     with open(map_config_template_path, "r") as f:
         map_config_raw = f.read()
-
-    def _escape_js_string(value: str) -> str:
-        """Escape a value for safe embedding in a single-quoted JS string."""
-        escaped: str = json.dumps(value)
-        return escaped[1:-1].replace("'", "\\'")
 
     config_vars = {
         "stadia_api_key": _escape_js_string(stadia_api_key),
@@ -258,7 +266,7 @@ def _generate_map_config(
 
     map_config_size = map_config_dst.stat().st_size
     logger.info(
-        f"Configuration generated: {map_config_dst} ({map_config_size / 1024:.1f} KB)"
+        "Configuration generated: %s (%.1f KB)", map_config_dst, map_config_size / 1024
     )
 
 
@@ -270,9 +278,9 @@ def _copy_javascript_bundles(output_dir: str, static_dir: Path) -> None:
         if src.exists():
             shutil.copy2(src, dst)
             size = dst.stat().st_size
-            logger.info(f"JavaScript copied: {dst} ({size / 1024:.1f} KB)")
+            logger.info("JavaScript copied: %s (%.1f KB)", dst, size / 1024)
         else:
-            logger.warning(f"{bundle_name} not found - run npm build to generate it")
+            logger.warning("%s not found - run npm build to generate it", bundle_name)
 
 
 def _copy_and_minify_css(output_dir: str, static_dir: Path) -> None:
@@ -289,7 +297,7 @@ def _copy_and_minify_css(output_dir: str, static_dir: Path) -> None:
         f.write(styles_css_minified)
 
     styles_css_size = styles_css_dst.stat().st_size
-    logger.info(f"CSS copied: {styles_css_dst} ({styles_css_size / 1024:.1f} KB)")
+    logger.info("CSS copied: %s (%.1f KB)", styles_css_dst, styles_css_size / 1024)
 
 
 def _copy_favicon_files(output_dir: str, static_dir: Path) -> None:
@@ -307,7 +315,7 @@ def _copy_favicon_files(output_dir: str, static_dir: Path) -> None:
         if src.exists():
             shutil.copy2(src, dst)
 
-    logger.info(f"Favicon files copied to {output_dir}")
+    logger.info("Favicon files copied to %s", output_dir)
 
 
 def _package_assets(
@@ -347,7 +355,7 @@ def create_progressive_heatmap(
     for kml_file in kml_files:
         is_valid, error_msg = validate_kml_file(kml_file)
         if not is_valid:
-            logger.error(f"  {error_msg}")
+            logger.error("  %s", error_msg)
         else:
             valid_files.append(kml_file)
 
@@ -355,7 +363,7 @@ def create_progressive_heatmap(
         logger.error("No valid KML files to process!")
         return False
 
-    logger.info(f"Parsing {len(valid_files)} KML file(s)...")
+    logger.info("Parsing %d KML file(s)...", len(valid_files))
 
     try:
         all_coordinates, all_path_groups, all_path_metadata = _parse_kml_files(
@@ -383,7 +391,7 @@ def create_progressive_heatmap(
     _package_assets(output_dir, result["bounds"], data_dir_name)
 
     logger.info(
-        f"  Open {output_file} in a web browser (works with file:// or serve via HTTP)"
+        "  Open %s in a web browser (works with file:// or serve via HTTP)", output_file
     )
 
     return True

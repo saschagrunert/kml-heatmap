@@ -20,7 +20,7 @@ from .constants import (
 )
 from .kml_parsers import validate_and_normalize_coordinate
 from .logger import logger
-from .types import PathMetadata
+from .types import FlightPath, PathMetadata
 
 # Pre-compiled regex patterns for performance
 DATE_PATTERN = re.compile(r"(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
@@ -42,13 +42,13 @@ def extract_year_from_timestamp(timestamp: str | None) -> int | None:
         if year_match:
             return int(year_match.group(1))
     except (ValueError, AttributeError, TypeError) as e:
-        logger.debug(f"Could not parse timestamp '{timestamp}': {e}")
+        logger.debug("Could not parse timestamp '%s': %s", timestamp, e)
 
     return None
 
 
 def sample_path_altitudes(
-    path: list[list[float]], from_end: bool = False
+    path: FlightPath, from_end: bool = False
 ) -> dict[str, float] | None:
     """Extract altitude statistics from a path sample."""
     if len(path) <= 10:
@@ -63,7 +63,7 @@ def sample_path_altitudes(
     return {"min": min(alts), "max": max(alts), "variation": max(alts) - min(alts)}
 
 
-def is_mid_flight_start(path: list[list[float]], start_alt: float) -> bool:
+def is_mid_flight_start(path: FlightPath, start_alt: float) -> bool:
     """Detect if a path started mid-flight by analyzing altitude patterns."""
     sample = sample_path_altitudes(path, from_end=False)
     if not sample:
@@ -79,13 +79,15 @@ def is_mid_flight_start(path: list[list[float]], start_alt: float) -> bool:
 
     if is_mid_flight:
         logger.debug(
-            f"Detected mid-flight start at {start_alt:.0f}m (variation: {sample['variation']:.0f}m)"
+            "Detected mid-flight start at %.0fm (variation: %.0fm)",
+            start_alt,
+            sample["variation"],
         )
 
     return is_mid_flight
 
 
-def is_valid_landing(path: list[list[float]], end_alt: float) -> bool:
+def is_valid_landing(path: FlightPath, end_alt: float) -> bool:
     """Check if a path ends with a valid landing."""
     sample = sample_path_altitudes(path, from_end=True)
     if not sample:
@@ -120,7 +122,7 @@ def parse_coordinate_point(
         # Use centralized validation and normalization
         return validate_and_normalize_coordinate(lat, lon, alt, Path(kml_file).name)
     except ValueError as e:
-        logger.debug(f"Failed to parse coordinate '{point}': {e}")
+        logger.debug("Failed to parse coordinate '%s': %s", point, e)
         return None
 
 
@@ -179,7 +181,7 @@ def extract_charterware_timestamp(description: str) -> str | None:
             try:
                 dt = datetime.strptime(dt_str, "%d %B %Y %H:%M").replace(tzinfo=UTC)
             except ValueError:
-                logger.debug(f"Failed to parse Charterware timestamp: {description}")
+                logger.debug("Failed to parse Charterware timestamp: %s", description)
                 return None
 
         return dt.isoformat()
