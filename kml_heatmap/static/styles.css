@@ -1226,82 +1226,87 @@ body {
   }
 }
 
+/* Hide labels when zoomed out */
+.zoom-hide-labels .airport-label {
+  display: none;
+}
+
 /* Small zoom (6-7) */
-.airport-marker-small {
+[data-zoom-size="small"] .airport-marker {
   width: 7px;
   height: 7px;
   border: 1px solid #ffffff;
 }
-.airport-label-small {
+[data-zoom-size="small"] .airport-label {
   font-size: 10px;
   padding: 1px 3px;
   bottom: 11px;
 }
-.airport-marker-container-small {
+[data-zoom-size="small"] .airport-marker-container {
   width: 7px;
   height: 7px;
 }
 
 /* Medium-small zoom (8-9) */
-.airport-marker-medium-small {
+[data-zoom-size="medium-small"] .airport-marker {
   width: 8px;
   height: 8px;
   border: 1px solid #ffffff;
 }
-.airport-label-medium-small {
+[data-zoom-size="medium-small"] .airport-label {
   font-size: 11px;
   padding: 1px 4px;
   bottom: 12px;
 }
-.airport-marker-container-medium-small {
+[data-zoom-size="medium-small"] .airport-marker-container {
   width: 8px;
   height: 8px;
 }
 
 /* Medium zoom (10-11) */
-.airport-marker-medium {
+[data-zoom-size="medium"] .airport-marker {
   width: 10px;
   height: 10px;
   border: 2px solid #ffffff;
 }
-.airport-label-medium {
+[data-zoom-size="medium"] .airport-label {
   font-size: 12px;
   padding: 2px 5px;
   bottom: 14px;
 }
-.airport-marker-container-medium {
+[data-zoom-size="medium"] .airport-marker-container {
   width: 10px;
   height: 10px;
 }
 
 /* Large zoom (12-13) */
-.airport-marker-large {
+[data-zoom-size="large"] .airport-marker {
   width: 11px;
   height: 11px;
   border: 2px solid #ffffff;
 }
-.airport-label-large {
+[data-zoom-size="large"] .airport-label {
   font-size: 12px;
   padding: 2px 5px;
   bottom: 16px;
 }
-.airport-marker-container-large {
+[data-zoom-size="large"] .airport-marker-container {
   width: 11px;
   height: 11px;
 }
 
 /* Extra large zoom (14+) */
-.airport-marker-xlarge {
+[data-zoom-size="xlarge"] .airport-marker {
   width: 12px;
   height: 12px;
   border: 2px solid #ffffff;
 }
-.airport-label-xlarge {
+[data-zoom-size="xlarge"] .airport-label {
   font-size: 13px;
   padding: 2px 6px;
   bottom: 18px;
 }
-.airport-marker-container-xlarge {
+[data-zoom-size="xlarge"] .airport-marker-container {
   width: 12px;
   height: 12px;
 }

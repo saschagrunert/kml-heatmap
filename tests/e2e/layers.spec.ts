@@ -178,10 +178,7 @@ test.describe("Layers", () => {
     });
 
     await page.waitForFunction(
-      () =>
-        document
-          .querySelector(".airport-marker-container")
-          ?.classList.contains("airport-marker-container-large") ?? false,
+      () => document.getElementById("map")?.dataset.zoomSize === "large",
       { timeout: 5000 }
     );
 
@@ -194,10 +191,7 @@ test.describe("Layers", () => {
     });
 
     await page.waitForFunction(
-      () =>
-        document
-          .querySelector(".airport-marker-container")
-          ?.classList.contains("airport-marker-container-small") ?? false,
+      () => document.getElementById("map")?.dataset.zoomSize === "small",
       { timeout: 5000 }
     );
   });
@@ -284,13 +278,8 @@ test.describe("Layers", () => {
     });
 
     await page.waitForFunction(
-      () => {
-        const labels = document.querySelectorAll(".airport-label");
-        if (labels.length === 0) return true;
-        return Array.from(labels).every(
-          (l) => (l as HTMLElement).style.display === "none"
-        );
-      },
+      () =>
+        document.getElementById("map")?.classList.contains("zoom-hide-labels"),
       { timeout: 5000 }
     );
 
@@ -303,13 +292,8 @@ test.describe("Layers", () => {
     });
 
     await page.waitForFunction(
-      () => {
-        const labels = document.querySelectorAll(".airport-label");
-        if (labels.length === 0) return false;
-        return Array.from(labels).some(
-          (l) => (l as HTMLElement).style.display !== "none"
-        );
-      },
+      () =>
+        !document.getElementById("map")?.classList.contains("zoom-hide-labels"),
       { timeout: 5000 }
     );
   });

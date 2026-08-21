@@ -154,65 +154,17 @@ export class AirportManager {
     if (!this.app.map) return;
 
     const zoom = this.app.map.getZoom();
+    const mapContainer = document.getElementById("map");
+    if (!mapContainer) return;
+
     let sizeClass = "";
+    if (zoom >= 14) sizeClass = "xlarge";
+    else if (zoom >= 12) sizeClass = "large";
+    else if (zoom >= 10) sizeClass = "medium";
+    else if (zoom >= 8) sizeClass = "medium-small";
+    else if (zoom >= 6) sizeClass = "small";
 
-    if (zoom >= 14) {
-      sizeClass = "xlarge";
-    } else if (zoom >= 12) {
-      sizeClass = "large";
-    } else if (zoom >= 10) {
-      sizeClass = "medium";
-    } else if (zoom >= 8) {
-      sizeClass = "medium-small";
-    } else if (zoom >= 6) {
-      sizeClass = "small";
-    }
-
-    // Update all airport markers
-    document
-      .querySelectorAll(".airport-marker-container")
-      .forEach((container) => {
-        const marker = container.querySelector(".airport-marker");
-        const label = container.querySelector(".airport-label");
-
-        if (!marker || !label) return;
-
-        // Hide labels when zoomed out below level 5, but keep dots visible
-        if (zoom < 5) {
-          (label as HTMLElement).style.display = "none";
-        } else {
-          (label as HTMLElement).style.display = "";
-        }
-
-        // Remove all size classes
-        container.classList.remove(
-          "airport-marker-container-small",
-          "airport-marker-container-medium-small",
-          "airport-marker-container-medium",
-          "airport-marker-container-large",
-          "airport-marker-container-xlarge"
-        );
-        marker.classList.remove(
-          "airport-marker-small",
-          "airport-marker-medium-small",
-          "airport-marker-medium",
-          "airport-marker-large",
-          "airport-marker-xlarge"
-        );
-        label.classList.remove(
-          "airport-label-small",
-          "airport-label-medium-small",
-          "airport-label-medium",
-          "airport-label-large",
-          "airport-label-xlarge"
-        );
-
-        // Add appropriate size class
-        if (sizeClass) {
-          container.classList.add("airport-marker-container-" + sizeClass);
-          marker.classList.add("airport-marker-" + sizeClass);
-          label.classList.add("airport-label-" + sizeClass);
-        }
-      });
+    mapContainer.dataset.zoomSize = sizeClass;
+    mapContainer.classList.toggle("zoom-hide-labels", zoom < 5);
   }
 }

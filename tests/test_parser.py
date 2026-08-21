@@ -128,7 +128,7 @@ class TestIsMidFlightStart:
         # High altitude but climbing rapidly
         path = [[i, i, 3000 + i * 50] for i in range(100)]
         # Should not be considered mid-flight due to variation
-        is_mid_flight_start(path, 3000, debug=False)
+        is_mid_flight_start(path, 3000)
         # Result depends on variation threshold
 
     def test_short_path(self):

@@ -1,12 +1,10 @@
 """Year-based data processing helpers."""
 
-from bisect import bisect_left, bisect_right
 from typing import Any
 
 from .constants import (
     KM_TO_NAUTICAL_MILES,
     METERS_TO_FEET,
-    SPEED_WINDOW_SECONDS,
     CRUISE_ALTITUDE_THRESHOLD_FT,
 )
 from .geometry import haversine_distance
@@ -84,15 +82,23 @@ def _calculate_segment_groundspeed(
     lon1: float,
     lat2: float,
     lon2: float,
-) -> float:
-    """Calculate groundspeed for a single segment."""
+) -> tuple[float, float, float]:
+    """Calculate groundspeed for a single segment.
+
+    Returns:
+        Tuple of (groundspeed_knots, window_distance_km, window_time_seconds)
+    """
     current_segment = segment_speeds[i]
     current_timestamp = current_segment["timestamp"]
 
     groundspeed_knots = 0.0
+    window_distance = 0.0
+    window_time = 0.0
     if current_timestamp is not None and timestamp_list:
-        groundspeed_knots = calculate_windowed_groundspeed(
-            current_timestamp, timestamp_list, time_indexed_segments
+        groundspeed_knots, window_distance, window_time = (
+            calculate_windowed_groundspeed(
+                current_timestamp, timestamp_list, time_indexed_segments
+            )
         )
 
     if groundspeed_knots == 0:
@@ -100,14 +106,17 @@ def _calculate_segment_groundspeed(
         groundspeed_knots = calculate_fallback_groundspeed(
             segment_distance_km, path_distance_km, path_duration_seconds
         )
+        # Zero cruise window data when using fallback speed, since windowed
+        # measurements are unreliable (rejected by MAX_GROUNDSPEED or missing).
+        window_distance = 0.0
+        window_time = 0.0
 
-    return groundspeed_knots
+    return groundspeed_knots, window_distance, window_time
 
 
 def _accumulate_cruise_stats(
-    current_timestamp: Any,
-    timestamp_list: list[float],
-    time_indexed_segments: list[dict[str, Any]],
+    window_distance: float,
+    window_time: float,
     altitude_agl_ft: float,
 ) -> tuple[float, float, dict[int, float]]:
     """Accumulate cruise statistics for a single segment.
@@ -115,27 +124,14 @@ def _accumulate_cruise_stats(
     Returns:
         Tuple of (cruise_distance, cruise_time, altitude_histogram)
     """
-    if current_timestamp is not None and timestamp_list:
-        current_ts = current_timestamp.timestamp()
-        half_window = SPEED_WINDOW_SECONDS / 2
-        w_start = bisect_left(timestamp_list, current_ts - half_window)
-        w_end = bisect_right(timestamp_list, current_ts + half_window)
-        w_distance = sum(
-            time_indexed_segments[j]["distance"] for j in range(w_start, w_end)
-        )
-        w_time = sum(
-            time_indexed_segments[j]["time_delta"] for j in range(w_start, w_end)
-        )
-    else:
-        w_distance = 0.0
-        w_time = 0.0
-
     cruise_stats: dict[str, Any] = {
         "total_distance": 0.0,
         "total_time": 0.0,
         "altitude_histogram": {},
     }
-    update_cruise_statistics(altitude_agl_ft, w_time, w_distance, cruise_stats)
+    update_cruise_statistics(
+        altitude_agl_ft, window_time, window_distance, cruise_stats
+    )
     return (
         float(cruise_stats["total_distance"]),
         float(cruise_stats["total_time"]),
@@ -183,17 +179,19 @@ def _process_path_segments(
         avg_alt_m = (alt1_m + alt2_m) / 2
         avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
 
-        groundspeed_knots = _calculate_segment_groundspeed(
-            i,
-            segment_speeds,
-            timestamp_list,
-            time_indexed_segments,
-            path_distance_km,
-            path_duration_seconds,
-            lat1,
-            lon1,
-            lat2,
-            lon2,
+        groundspeed_knots, window_distance, window_time = (
+            _calculate_segment_groundspeed(
+                i,
+                segment_speeds,
+                timestamp_list,
+                time_indexed_segments,
+                path_distance_km,
+                path_duration_seconds,
+                lat1,
+                lon1,
+                lat2,
+                lon2,
+            )
         )
 
         if groundspeed_knots > 0:
@@ -205,11 +203,9 @@ def _process_path_segments(
             altitude_agl_m = avg_alt_m - ground_level_m
             altitude_agl_ft = altitude_agl_m * METERS_TO_FEET
             if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
-                current_timestamp = segment_speeds[i]["timestamp"]
                 seg_cruise_dist, seg_cruise_time, seg_hist = _accumulate_cruise_stats(
-                    current_timestamp,
-                    timestamp_list,
-                    time_indexed_segments,
+                    window_distance,
+                    window_time,
                     altitude_agl_ft,
                 )
                 cruise_distance += seg_cruise_dist

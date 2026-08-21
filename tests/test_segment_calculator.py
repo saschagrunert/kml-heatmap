@@ -218,8 +218,12 @@ class TestCalculateWindowedGroundspeed:
         """Test with empty timestamp list."""
         from kml_heatmap.segment_calculator import calculate_windowed_groundspeed
 
-        speed = calculate_windowed_groundspeed(datetime(2025, 3, 15, 10, 0, 0), [], [])
+        speed, w_dist, w_time = calculate_windowed_groundspeed(
+            datetime(2025, 3, 15, 10, 0, 0), [], []
+        )
         assert speed == 0.0
+        assert w_dist == 0.0
+        assert w_time == 0.0
 
     def test_single_segment_in_window(self):
         """Test calculation with single segment."""
@@ -230,9 +234,13 @@ class TestCalculateWindowedGroundspeed:
         # Need enough time_delta (>1 second) and reasonable distance
         segments = [{"distance": 10.0, "time_delta": 600.0}]  # 10km in 600s
 
-        speed = calculate_windowed_groundspeed(timestamp, timestamp_list, segments)
+        speed, w_dist, w_time = calculate_windowed_groundspeed(
+            timestamp, timestamp_list, segments
+        )
         # Speed might be 0 if not enough time/distance, or positive if calculated
         assert speed >= 0
+        assert w_dist >= 0
+        assert w_time >= 0
 
 
 class TestCalculatePathDistanceConsistency:

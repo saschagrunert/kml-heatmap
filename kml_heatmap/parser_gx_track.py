@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Any
 
+from lxml import etree
+
 from .kml_parsers import validate_and_normalize_coordinate
 from .logger import logger
 from .parser_common import (
@@ -14,7 +16,7 @@ from .types import PathMetadata
 
 
 def _extract_gx_track_metadata(
-    placemarks: list[Any], namespaces: dict[str, str], kml_file: str
+    placemarks: list[etree._Element], namespaces: dict[str, str], kml_file: str
 ) -> dict[str, str | None]:
     """Extract metadata from gx:Track placemarks."""
     for placemark in placemarks:
@@ -46,8 +48,10 @@ def _extract_gx_track_metadata(
 
 
 def _extract_gx_when_elements(
-    placemarks: list[Any], gx_coords: list[Any], namespaces: dict[str, str]
-) -> list[Any]:
+    placemarks: list[etree._Element],
+    gx_coords: list[etree._Element],
+    namespaces: dict[str, str],
+) -> list[etree._Element]:
     """Extract <when> elements that correspond to gx:coord elements."""
     for placemark in placemarks:
         when_elems = find_xml_elements(placemark, ".//kml:when", ".//when", namespaces)
@@ -57,8 +61,8 @@ def _extract_gx_when_elements(
 
 
 def _parse_gx_coordinates(
-    gx_coords: list[Any],
-    when_elems: list[Any],
+    gx_coords: list[etree._Element],
+    when_elems: list[etree._Element],
     kml_file: str,
     coordinates: list[list[float]],
 ) -> list[list[Any]]:
@@ -93,8 +97,9 @@ def _parse_gx_coordinates(
 
             # Get corresponding timestamp
             timestamp_str = None
-            if idx < len(when_elems) and when_elems[idx].text:
-                timestamp_str = when_elems[idx].text.strip()
+            when_text = when_elems[idx].text if idx < len(when_elems) else None
+            if when_text:
+                timestamp_str = when_text.strip()
 
             coordinates.append([lat, lon])
 
@@ -112,8 +117,8 @@ def _parse_gx_coordinates(
 
 
 def process_gx_track(
-    gx_coords: list[Any],
-    placemarks: list[Any],
+    gx_coords: list[etree._Element],
+    placemarks: list[etree._Element],
     namespaces: dict[str, str],
     kml_file: str,
     coordinates: list[list[float]],

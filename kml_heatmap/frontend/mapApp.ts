@@ -426,7 +426,10 @@ export class MapApp {
     ];
     for (const [id, visible] of btnStates) {
       const btn = domCache.get(id);
-      if (btn) btn.style.opacity = visible ? "1.0" : "0.5";
+      if (btn) {
+        btn.style.opacity = visible ? "1.0" : "0.5";
+        btn.setAttribute("aria-pressed", String(visible));
+      }
     }
 
     if (this.config.openaipApiKey) {

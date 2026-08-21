@@ -2,13 +2,15 @@
 
 from typing import Any
 
+from lxml import etree
+
 from .logger import logger
 from .parser_common import parse_coordinate_point, _build_path_metadata_dict
 from .types import PathMetadata
 
 
 def process_standard_coordinates(
-    coord_elements: list[Any],
+    coord_elements: list[etree._Element],
     coord_to_metadata: dict[int, dict[str, Any]],
     kml_file: str,
     coordinates: list[list[float]],

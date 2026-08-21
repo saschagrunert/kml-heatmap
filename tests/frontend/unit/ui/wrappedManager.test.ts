@@ -11,6 +11,9 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
       return document.getElementById(id);
     }),
   },
+  hideControls: vi.fn(() => new Map()),
+  restoreControls: vi.fn(),
+  getControlElements: vi.fn(() => []),
 }));
 
 // Mock htmlGenerators - spy on actual implementations
@@ -53,6 +56,10 @@ import {
   generateHomeBaseHtml,
   generateDestinationsHtml,
 } from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
+import {
+  hideControls,
+  restoreControls,
+} from "../../../../kml_heatmap/frontend/utils/domCache";
 
 // Default filtered stats returned by calculateFilteredStatistics mock
 const defaultFilteredStats: FilteredStatistics = {
@@ -170,6 +177,8 @@ describe("WrappedManager", () => {
     });
     (window.KMLHeatmap.calculateYearStats as any).mockClear();
     (window.KMLHeatmap.generateFunFacts as any).mockClear();
+    vi.mocked(hideControls).mockClear();
+    vi.mocked(restoreControls).mockClear();
 
     wrappedManager = new WrappedManager(mockApp as any);
   });
@@ -730,37 +739,7 @@ describe("WrappedManager", () => {
 
     it("hides control elements during wrapped view", () => {
       wrappedManager.showWrapped();
-
-      const controlIds = [
-        "stats-btn",
-        "export-btn",
-        "wrapped-btn",
-        "heatmap-btn",
-        "airports-btn",
-        "altitude-btn",
-        "airspeed-btn",
-        "aviation-btn",
-        "year-filter",
-        "aircraft-filter",
-        "stats-panel",
-        "altitude-legend",
-        "airspeed-legend",
-        "loading",
-      ];
-
-      controlIds.forEach((id) => {
-        const el = document.getElementById(id);
-        expect(el?.style.display).toBe("none");
-      });
-    });
-
-    it("hides leaflet-control-zoom during wrapped view", () => {
-      wrappedManager.showWrapped();
-
-      const zoomControl = document.querySelector(
-        ".leaflet-control-zoom"
-      ) as HTMLElement;
-      expect(zoomControl?.style.display).toBe("none");
+      expect(hideControls).toHaveBeenCalled();
     });
 
     it("shows modal with display flex", () => {
@@ -890,34 +869,10 @@ describe("WrappedManager", () => {
       expect(mapEl.style.overflow).toBe("");
     });
 
-    it("shows control elements again", () => {
+    it("restores control elements via restoreControls", () => {
       openWrapped();
-
-      // Verify controls are hidden
-      expect(document.getElementById("stats-btn")?.style.display).toBe("none");
-
       wrappedManager.closeWrapped();
-
-      const controlIds = [
-        "stats-btn",
-        "export-btn",
-        "wrapped-btn",
-        "heatmap-btn",
-        "airports-btn",
-        "altitude-btn",
-        "airspeed-btn",
-        "year-filter",
-        "aircraft-filter",
-        "stats-panel",
-        "altitude-legend",
-        "airspeed-legend",
-        "loading",
-      ];
-
-      controlIds.forEach((id) => {
-        const el = document.getElementById(id);
-        expect(el?.style.display).toBe("");
-      });
+      expect(restoreControls).toHaveBeenCalled();
     });
 
     it("shows leaflet-control-zoom again", () => {

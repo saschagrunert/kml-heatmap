@@ -4,6 +4,8 @@
  * Improves performance by reducing DOM lookups
  */
 
+import { HIDEABLE_CONTROL_IDS } from "./constants";
+
 export class DOMCache {
   private cache: Map<string, HTMLElement> = new Map();
 
@@ -76,3 +78,32 @@ export class DOMCache {
 
 // Export singleton instance for global use
 export const domCache = new DOMCache();
+
+export function getControlElements(
+  extraIds: string[] = []
+): (HTMLElement | null)[] {
+  return [
+    document.querySelector<HTMLElement>(".leaflet-control-zoom"),
+    ...HIDEABLE_CONTROL_IDS.map((id) => domCache.get(id)),
+    ...extraIds.map((id) => domCache.get(id)),
+  ];
+}
+
+export function hideControls(
+  extraIds: string[] = []
+): Map<HTMLElement, string> {
+  const savedDisplays = new Map<HTMLElement, string>();
+  getControlElements(extraIds).forEach((el) => {
+    if (el) {
+      savedDisplays.set(el, el.style.display);
+      el.style.display = "none";
+    }
+  });
+  return savedDisplays;
+}
+
+export function restoreControls(savedDisplays: Map<HTMLElement, string>): void {
+  savedDisplays.forEach((display, el) => {
+    el.style.display = display;
+  });
+}

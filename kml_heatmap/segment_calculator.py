@@ -123,10 +123,14 @@ def calculate_windowed_groundspeed(
     current_timestamp: datetime,
     timestamp_list: list[float],
     time_indexed_segments: list[dict[str, Any]],
-) -> float:
-    """Calculate rolling average groundspeed using a time window."""
+) -> tuple[float, float, float]:
+    """Calculate rolling average groundspeed using a time window.
+
+    Returns:
+        Tuple of (groundspeed_knots, window_distance_km, window_time_seconds)
+    """
     if not timestamp_list:
-        return 0.0
+        return 0.0, 0.0, 0.0
 
     window_distance = 0.0
     window_time = 0.0
@@ -146,11 +150,11 @@ def calculate_windowed_groundspeed(
         groundspeed_knots = (window_distance_nm / window_time) * SECONDS_PER_HOUR
 
         if groundspeed_knots > MAX_GROUNDSPEED_KNOTS:
-            return 0.0
+            return 0.0, 0.0, 0.0
 
-        return groundspeed_knots
+        return groundspeed_knots, window_distance, window_time
 
-    return 0.0
+    return 0.0, 0.0, 0.0
 
 
 def calculate_fallback_groundspeed(

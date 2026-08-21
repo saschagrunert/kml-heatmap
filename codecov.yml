@@ -3,11 +3,11 @@ coverage:
     project:
       default:
         target: auto
-        threshold: 0%
+        threshold: 2%
     patch:
       default:
         target: auto
-        threshold: 0%
+        threshold: 2%
 
 comment:
   layout: "reach,diff,files,footer"

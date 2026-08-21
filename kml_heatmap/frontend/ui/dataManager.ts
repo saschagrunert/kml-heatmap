@@ -168,14 +168,12 @@ export class DataManager {
       });
     }
 
-    // Calculate altitude range from all segments
+    // Calculate altitude range from all segments in a single pass
     if (data.path_segments && data.path_segments.length > 0) {
-      const altitudes = data.path_segments.map((s) => s.altitude_ft || 0);
-      // Use iterative approach to avoid stack overflow with large arrays
-      let min = altitudes[0] ?? 0;
-      let max = altitudes[0] ?? 0;
-      for (let i = 1; i < altitudes.length; i++) {
-        const alt = altitudes[i] ?? 0;
+      let min = data.path_segments[0]?.altitude_ft || 0;
+      let max = min;
+      for (let i = 1; i < data.path_segments.length; i++) {
+        const alt = data.path_segments[i]?.altitude_ft || 0;
         if (alt < min) min = alt;
         if (alt > max) max = alt;
       }

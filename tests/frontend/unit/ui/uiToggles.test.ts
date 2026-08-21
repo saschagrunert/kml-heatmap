@@ -9,6 +9,9 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
     get: vi.fn((id: string) => mockDomElements[id] || null),
     cacheElements: vi.fn(),
   },
+  hideControls: vi.fn(() => new Map()),
+  restoreControls: vi.fn(),
+  getControlElements: vi.fn(() => []),
 }));
 
 describe("UIToggles", () => {

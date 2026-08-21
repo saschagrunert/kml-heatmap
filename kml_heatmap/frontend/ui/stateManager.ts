@@ -143,7 +143,48 @@ export class StateManager {
       new URLSearchParams(window.location.search)
     );
     if (urlState && Object.keys(urlState).length > 0) {
-      return urlState as SavedState;
+      const validated: Partial<SavedState> = {};
+      if (typeof urlState.selectedYear === "string")
+        validated.selectedYear = urlState.selectedYear;
+      if (typeof urlState.selectedAircraft === "string")
+        validated.selectedAircraft = urlState.selectedAircraft;
+      if (typeof urlState.zoom === "number" && isFinite(urlState.zoom))
+        validated.zoom = urlState.zoom;
+      if (
+        urlState.center &&
+        typeof urlState.center.lat === "number" &&
+        isFinite(urlState.center.lat) &&
+        typeof urlState.center.lng === "number" &&
+        isFinite(urlState.center.lng)
+      ) {
+        validated.center = urlState.center;
+      }
+      if (typeof urlState.heatmapVisible === "boolean")
+        validated.heatmapVisible = urlState.heatmapVisible;
+      if (typeof urlState.altitudeVisible === "boolean")
+        validated.altitudeVisible = urlState.altitudeVisible;
+      if (typeof urlState.airspeedVisible === "boolean")
+        validated.airspeedVisible = urlState.airspeedVisible;
+      if (typeof urlState.airportsVisible === "boolean")
+        validated.airportsVisible = urlState.airportsVisible;
+      if (typeof urlState.aviationVisible === "boolean")
+        validated.aviationVisible = urlState.aviationVisible;
+      if (typeof urlState.buttonsHidden === "boolean")
+        validated.buttonsHidden = urlState.buttonsHidden;
+      if (typeof urlState.isolateSelection === "boolean")
+        validated.isolateSelection = urlState.isolateSelection;
+      if (typeof urlState.statsPanelVisible === "boolean")
+        validated.statsPanelVisible = urlState.statsPanelVisible;
+      if (typeof urlState.wrappedVisible === "boolean")
+        validated.wrappedVisible = urlState.wrappedVisible;
+      if (Array.isArray(urlState.selectedPathIds)) {
+        validated.selectedPathIds = urlState.selectedPathIds.filter(
+          (id: unknown) => typeof id === "number" && isFinite(id)
+        );
+      }
+      if (Object.keys(validated).length > 0) {
+        return validated as SavedState;
+      }
     }
 
     // Priority 2: localStorage
