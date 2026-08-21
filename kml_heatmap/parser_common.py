@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from lxml import etree
+
 from .aircraft import parse_aircraft_from_filename
 from .airport_lookup import standardize_airport_name
 from .kml_parsers import validate_and_normalize_coordinate
@@ -61,9 +63,7 @@ def sample_path_altitudes(
     return {"min": min(alts), "max": max(alts), "variation": max(alts) - min(alts)}
 
 
-def is_mid_flight_start(
-    path: list[list[float]], start_alt: float, debug: bool = False
-) -> bool:
+def is_mid_flight_start(path: list[list[float]], start_alt: float) -> bool:
     """Detect if a path started mid-flight by analyzing altitude patterns."""
     sample = sample_path_altitudes(path, from_end=False)
     if not sample:
@@ -77,7 +77,7 @@ def is_mid_flight_start(
         and sample["variation"] < MID_FLIGHT_MAX_VARIATION_M
     )
 
-    if is_mid_flight and debug:
+    if is_mid_flight:
         logger.debug(
             f"Detected mid-flight start at {start_alt:.0f}m (variation: {sample['variation']:.0f}m)"
         )
@@ -85,9 +85,7 @@ def is_mid_flight_start(
     return is_mid_flight
 
 
-def is_valid_landing(
-    path: list[list[float]], end_alt: float, debug: bool = False
-) -> bool:
+def is_valid_landing(path: list[list[float]], end_alt: float) -> bool:
     """Check if a path ends with a valid landing."""
     sample = sample_path_altitudes(path, from_end=True)
     if not sample:
@@ -127,8 +125,11 @@ def parse_coordinate_point(
 
 
 def find_xml_element(
-    parent: Any, namespaced_path: str, fallback_path: str, namespaces: dict[str, str]
-) -> Any | None:
+    parent: etree._Element,
+    namespaced_path: str,
+    fallback_path: str,
+    namespaces: dict[str, str],
+) -> etree._Element | None:
     """Find XML element trying namespaced path first, then fallback."""
     elem = parent.find(namespaced_path, namespaces)
     if elem is None:
@@ -137,10 +138,13 @@ def find_xml_element(
 
 
 def find_xml_elements(
-    parent: Any, namespaced_path: str, fallback_path: str, namespaces: dict[str, str]
-) -> list[Any]:
+    parent: etree._Element,
+    namespaced_path: str,
+    fallback_path: str,
+    namespaces: dict[str, str],
+) -> list[etree._Element]:
     """Find XML elements trying namespaced path first, then fallback."""
-    elems: list[Any] = parent.findall(namespaced_path, namespaces)
+    elems: list[etree._Element] = parent.findall(namespaced_path, namespaces)
     if not elems:
         elems = parent.findall(fallback_path)
     return elems
@@ -185,7 +189,7 @@ def extract_charterware_timestamp(description: str) -> str | None:
 
 
 def extract_placemark_metadata(
-    placemark: Any, namespaces: dict[str, str], kml_file: str | None = None
+    placemark: etree._Element, namespaces: dict[str, str], kml_file: str | None = None
 ) -> dict[str, Any]:
     """Extract metadata from a KML Placemark element."""
     # Extract name from KML

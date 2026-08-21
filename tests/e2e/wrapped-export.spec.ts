@@ -128,7 +128,7 @@ test.describe("Wrapped and Export", () => {
     const yearSelect = page.locator("#year-select");
     const options = yearSelect.locator("option");
     const count = await options.count();
-    if (count < 2) return;
+    test.skip(count < 2, "Need >=2 year options to test wrapped panel update");
 
     const yearOption = await options.nth(1).getAttribute("value");
     if (!yearOption) return;
@@ -155,7 +155,10 @@ test.describe("Wrapped and Export", () => {
     const aircraftSelect = page.locator("#aircraft-select");
     const options = aircraftSelect.locator("option");
     const count = await options.count();
-    if (count < 2) return;
+    test.skip(
+      count < 2,
+      "Need >=2 aircraft options to test wrapped panel update"
+    );
 
     const aircraftOption = await options.nth(1).getAttribute("value");
     if (!aircraftOption) return;

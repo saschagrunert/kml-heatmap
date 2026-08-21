@@ -11,6 +11,7 @@ import { ReplayState } from "./replayState";
 export class ReplayManager {
   private app: MapApp;
   private renderer: ReplayRenderer;
+  private markerClickHandler: ((e: Event) => void) | null = null;
   state: ReplayState;
 
   constructor(app: MapApp) {
@@ -51,8 +52,15 @@ export class ReplayManager {
       document.body.classList.remove("replay-active");
 
       // Remove airplane marker when closing replay completely
-      if (this.state.airplaneMarker && this.app.map) {
-        this.app.map.removeLayer(this.state.airplaneMarker);
+      if (this.state.airplaneMarker) {
+        const el = this.state.airplaneMarker.getElement();
+        if (el && this.markerClickHandler) {
+          el.removeEventListener("click", this.markerClickHandler);
+          this.markerClickHandler = null;
+        }
+        if (this.app.map) {
+          this.app.map.removeLayer(this.state.airplaneMarker);
+        }
         this.state.airplaneMarker = null;
       }
 
@@ -270,14 +278,15 @@ export class ReplayManager {
       markerElement.style.cursor = "pointer";
       markerElement.style.pointerEvents = "auto";
 
-      markerElement.addEventListener("click", (e: Event) => {
+      this.markerClickHandler = (e: Event) => {
         e.stopPropagation();
         if (this.state.airplaneMarker!.isPopupOpen()) {
           this.state.airplaneMarker!.closePopup();
         } else {
           this.updateReplayAirplanePopup();
         }
-      });
+      };
+      markerElement.addEventListener("click", this.markerClickHandler);
     }
 
     return true;

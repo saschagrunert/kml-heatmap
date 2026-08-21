@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -12,7 +12,7 @@ export default defineConfig({
     {
       name: "chromium",
       use: {
-        browserName: "chromium",
+        ...devices["Desktop Chrome"],
         ...(process.env.CHROMIUM_PATH && {
           launchOptions: { executablePath: process.env.CHROMIUM_PATH },
         }),

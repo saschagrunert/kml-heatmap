@@ -2,7 +2,7 @@
  * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, buttons visibility, export)
  */
 import type { MapApp } from "../mapApp";
-import { domCache } from "../utils/domCache";
+import { domCache, hideControls, restoreControls } from "../utils/domCache";
 import { showToast } from "../utils/toast";
 
 type ColorLayerMode = "altitude" | "airspeed";
@@ -45,7 +45,10 @@ export class UIToggles {
       }
       this.app.heatmapVisible = false;
       const btn = domCache.get("heatmap-btn");
-      if (btn) btn.style.opacity = "0.5";
+      if (btn) {
+        btn.style.opacity = "0.5";
+        btn.setAttribute("aria-pressed", "false");
+      }
     } else {
       if (this.app.heatmapLayer) {
         this.app.map.addLayer(this.app.heatmapLayer);
@@ -56,7 +59,10 @@ export class UIToggles {
       }
       this.app.heatmapVisible = true;
       const btn = domCache.get("heatmap-btn");
-      if (btn) btn.style.opacity = "1.0";
+      if (btn) {
+        btn.style.opacity = "1.0";
+        btn.setAttribute("aria-pressed", "true");
+      }
     }
   }
 
@@ -105,7 +111,10 @@ export class UIToggles {
       this.app.map.removeLayer(layer);
       setVisible(false);
       const btn = domCache.get(btnId);
-      if (btn) btn.style.opacity = "0.5";
+      if (btn) {
+        btn.style.opacity = "0.5";
+        btn.setAttribute("aria-pressed", "false");
+      }
       const legend = domCache.get(legendId);
       if (legend) legend.style.display = "none";
     } else {
@@ -115,7 +124,10 @@ export class UIToggles {
         }
         setOtherVisible(false);
         const otherBtn = domCache.get(otherBtnId);
-        if (otherBtn) otherBtn.style.opacity = "0.5";
+        if (otherBtn) {
+          otherBtn.style.opacity = "0.5";
+          otherBtn.setAttribute("aria-pressed", "false");
+        }
         const otherLegend = domCache.get(otherLegendId);
         if (otherLegend) otherLegend.style.display = "none";
       }
@@ -129,7 +141,10 @@ export class UIToggles {
 
       setVisible(true);
       const btn = domCache.get(btnId);
-      if (btn) btn.style.opacity = "1.0";
+      if (btn) {
+        btn.style.opacity = "1.0";
+        btn.setAttribute("aria-pressed", "true");
+      }
       const legend = domCache.get(legendId);
       if (legend) legend.style.display = "block";
     }
@@ -150,12 +165,18 @@ export class UIToggles {
       this.app.map.removeLayer(this.app.airportLayer);
       this.app.airportsVisible = false;
       const btn = domCache.get("airports-btn");
-      if (btn) btn.style.opacity = "0.5";
+      if (btn) {
+        btn.style.opacity = "0.5";
+        btn.setAttribute("aria-pressed", "false");
+      }
     } else {
       this.app.map.addLayer(this.app.airportLayer);
       this.app.airportsVisible = true;
       const btn = domCache.get("airports-btn");
-      if (btn) btn.style.opacity = "1.0";
+      if (btn) {
+        btn.style.opacity = "1.0";
+        btn.setAttribute("aria-pressed", "true");
+      }
     }
   }
 
@@ -170,12 +191,18 @@ export class UIToggles {
         this.app.map.removeLayer(this.app.openaipLayers["Aviation Data"]);
         this.app.aviationVisible = false;
         const btn = domCache.get("aviation-btn");
-        if (btn) btn.style.opacity = "0.5";
+        if (btn) {
+          btn.style.opacity = "0.5";
+          btn.setAttribute("aria-pressed", "false");
+        }
       } else {
         this.app.map.addLayer(this.app.openaipLayers["Aviation Data"]);
         this.app.aviationVisible = true;
         const btn = domCache.get("aviation-btn");
-        if (btn) btn.style.opacity = "1.0";
+        if (btn) {
+          btn.style.opacity = "1.0";
+          btn.setAttribute("aria-pressed", "true");
+        }
       }
     }
   }
@@ -219,31 +246,7 @@ export class UIToggles {
     const mapContainer = domCache.get("map");
     if (!mapContainer) return;
 
-    const controls = [
-      document.querySelector(".leaflet-control-zoom"),
-      domCache.get("stats-btn"),
-      domCache.get("export-btn"),
-      domCache.get("wrapped-btn"),
-      domCache.get("replay-btn"),
-      domCache.get("year-filter"),
-      domCache.get("aircraft-filter"),
-      domCache.get("heatmap-btn"),
-      domCache.get("altitude-btn"),
-      domCache.get("airspeed-btn"),
-      domCache.get("airports-btn"),
-      domCache.get("aviation-btn"),
-      domCache.get("stats-panel"),
-      domCache.get("altitude-legend"),
-      domCache.get("airspeed-legend"),
-      domCache.get("loading"),
-    ];
-
-    const displayStates = controls.map((el) =>
-      el ? (el as HTMLElement).style.display : null
-    );
-    controls.forEach((el) => {
-      if (el) (el as HTMLElement).style.display = "none";
-    });
+    const savedDisplays = hideControls(["replay-btn"]);
 
     setTimeout(() => {
       window.domtoimage
@@ -254,9 +257,7 @@ export class UIToggles {
           quality: 0.95,
         })
         .then((dataUrl: string) => {
-          controls.forEach((el, i) => {
-            if (el) (el as HTMLElement).style.display = displayStates[i] || "";
-          });
+          restoreControls(savedDisplays);
           btn.disabled = false;
           btn.textContent = "📷 Export";
 
@@ -269,9 +270,7 @@ export class UIToggles {
           link.click();
         })
         .catch((error: Error) => {
-          controls.forEach((el, i) => {
-            if (el) (el as HTMLElement).style.display = displayStates[i] || "";
-          });
+          restoreControls(savedDisplays);
           showToast("Export failed: " + error.message, "error");
           btn.disabled = false;
           btn.textContent = "📷 Export";

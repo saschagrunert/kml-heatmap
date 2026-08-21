@@ -1,5 +1,6 @@
 """HTML generation, rendering, and pipeline orchestration."""
 
+import json
 import os
 import re
 import shutil
@@ -109,6 +110,14 @@ def _parse_kml_files(
             )
 
     results.sort(key=lambda r: numeric_filename_key(r[0]))
+    failed_count = sum(1 for _, coords, _, _ in results if not coords)
+    if failed_count > 0:
+        logger.warning(
+            "  %d of %d file(s) failed to parse",
+            failed_count,
+            len(valid_files),
+        )
+
     for _, coords, path_groups, path_metadata in results:
         all_coordinates.extend(coords)
         all_path_groups.extend(path_groups)
@@ -225,10 +234,15 @@ def _generate_map_config(
     with open(map_config_template_path, "r") as f:
         map_config_raw = f.read()
 
+    def _escape_js_string(value: str) -> str:
+        """Escape a value for safe embedding in a single-quoted JS string."""
+        escaped: str = json.dumps(value)
+        return escaped[1:-1].replace("'", "\\'")
+
     config_vars = {
-        "stadia_api_key": stadia_api_key,
-        "openaip_api_key": openaip_api_key,
-        "data_dir_name": data_dir_name,
+        "stadia_api_key": _escape_js_string(stadia_api_key),
+        "openaip_api_key": _escape_js_string(openaip_api_key),
+        "data_dir_name": _escape_js_string(data_dir_name),
         "center_lat": str(bounds["center_lat"]),
         "center_lon": str(bounds["center_lon"]),
         "min_lat": str(bounds["min_lat"]),

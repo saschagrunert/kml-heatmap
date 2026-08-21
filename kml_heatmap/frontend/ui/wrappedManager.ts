@@ -2,7 +2,7 @@
  * Wrapped Manager - Handles year-in-review/wrapped feature
  */
 import type { MapApp } from "../mapApp";
-import { domCache } from "../utils/domCache";
+import { domCache, hideControls, restoreControls } from "../utils/domCache";
 import {
   countryDisplayName,
   countryFlag,
@@ -20,6 +20,7 @@ export class WrappedManager {
   private app: MapApp;
   private originalMapParent: HTMLElement | null;
   private originalMapIndex: number | null;
+  private savedControlDisplays: Map<HTMLElement, string> = new Map();
 
   constructor(app: MapApp) {
     this.app = app;
@@ -56,7 +57,7 @@ export class WrappedManager {
   }
 
   showWrapped(): void {
-    if (!this.app.map) return;
+    if (!this.app.map || this.savedControlDisplays.size > 0) return;
 
     // Use the currently selected year (including 'all')
     const year = this.app.selectedYear;
@@ -199,26 +200,7 @@ export class WrappedManager {
     this.app.map.fitBounds(this.app.config.bounds, { padding: [80, 80] });
 
     // Hide controls in wrapped view FIRST
-    const controls = [
-      document.querySelector(".leaflet-control-zoom"),
-      domCache.get("stats-btn"),
-      domCache.get("export-btn"),
-      domCache.get("wrapped-btn"),
-      domCache.get("heatmap-btn"),
-      domCache.get("airports-btn"),
-      domCache.get("altitude-btn"),
-      domCache.get("airspeed-btn"),
-      domCache.get("aviation-btn"),
-      domCache.get("year-filter"),
-      domCache.get("aircraft-filter"),
-      domCache.get("stats-panel"),
-      domCache.get("altitude-legend"),
-      domCache.get("airspeed-legend"),
-      domCache.get("loading"),
-    ];
-    controls.forEach((el) => {
-      if (el) (el as HTMLElement).style.display = "none";
-    });
+    this.savedControlDisplays = hideControls();
 
     // Show modal first to ensure wrapped-map-container has dimensions
     const modal = domCache.get("wrapped-modal");
@@ -274,32 +256,9 @@ export class WrappedManager {
         mapContainer.style.borderRadius = "";
         mapContainer.style.overflow = "";
 
-        // Show controls again
-        const controls = [
-          document.querySelector(".leaflet-control-zoom"),
-          domCache.get("stats-btn"),
-          domCache.get("export-btn"),
-          domCache.get("wrapped-btn"),
-          domCache.get("heatmap-btn"),
-          domCache.get("airports-btn"),
-          domCache.get("altitude-btn"),
-          domCache.get("airspeed-btn"),
-          domCache.get("year-filter"),
-          domCache.get("aircraft-filter"),
-          domCache.get("stats-panel"),
-          domCache.get("altitude-legend"),
-          domCache.get("airspeed-legend"),
-          domCache.get("loading"),
-        ];
-        controls.forEach((el) => {
-          if (el) (el as HTMLElement).style.display = "";
-        });
-
-        // Only show aviation button if API key is available
-        if (this.app.config.openaipApiKey) {
-          const aviationBtn = domCache.get("aviation-btn");
-          if (aviationBtn) aviationBtn.style.display = "";
-        }
+        // Restore controls to their pre-wrapped display states
+        restoreControls(this.savedControlDisplays);
+        this.savedControlDisplays.clear();
 
         // Force map to recalculate size
         setTimeout(() => {

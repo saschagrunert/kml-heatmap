@@ -154,7 +154,7 @@ test.describe("Filters and Statistics", () => {
     const yearSelect = page.locator("#year-select");
     const options = yearSelect.locator("option");
     const count = await options.count();
-    if (count < 2) return;
+    test.skip(count < 2, "Need >=2 year options to test filtering");
 
     const yearOption = await options.nth(1).getAttribute("value");
     if (!yearOption) return;
@@ -175,7 +175,7 @@ test.describe("Filters and Statistics", () => {
     const aircraftSelect = page.locator("#aircraft-select");
     const options = aircraftSelect.locator("option");
     const count = await options.count();
-    if (count < 2) return;
+    test.skip(count < 2, "Need >=2 aircraft options to test filtering");
 
     const aircraftOption = await options.nth(1).getAttribute("value");
     if (!aircraftOption) return;
@@ -196,7 +196,10 @@ test.describe("Filters and Statistics", () => {
 
     const yearSelect = page.locator("#year-select");
     const yearOptions = yearSelect.locator("option");
-    if ((await yearOptions.count()) < 3) return;
+    test.skip(
+      (await yearOptions.count()) < 3,
+      "Need >=3 year options to test cross-filter"
+    );
 
     const yearOption = await yearOptions.nth(1).getAttribute("value");
     if (!yearOption) return;

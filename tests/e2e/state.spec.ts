@@ -184,7 +184,7 @@ test.describe("State Persistence", () => {
       const yearSelect = page.locator("#year-select");
       const options = yearSelect.locator("option");
       const count = await options.count();
-      if (count < 3) return;
+      test.skip(count < 3, "Need >=3 year options to test override");
 
       const year1 = await options.nth(1).getAttribute("value");
       const year2 = await options.nth(2).getAttribute("value");
@@ -205,7 +205,7 @@ test.describe("State Persistence", () => {
       const aircraftSelect = page.locator("#aircraft-select");
       const options = aircraftSelect.locator("option");
       const count = await options.count();
-      if (count < 2) return;
+      test.skip(count < 2, "Need >=2 aircraft options to test override");
 
       const aircraft = await options.nth(1).getAttribute("value");
       if (!aircraft) return;
@@ -305,7 +305,7 @@ test.describe("State Persistence", () => {
       const yearSelect = page.locator("#year-select");
       const options = yearSelect.locator("option");
       const count = await options.count();
-      if (count < 2) return;
+      test.skip(count < 2, "Need >=2 year options to test combined params");
 
       const year = await options.nth(1).getAttribute("value");
       if (!year) return;

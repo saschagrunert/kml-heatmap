@@ -351,26 +351,17 @@ describe("AirportManager", () => {
   });
 
   describe("updateAirportMarkerSizes", () => {
-    let container1: HTMLElement;
-    let marker1: HTMLElement;
-    let label1: HTMLElement;
+    let mapContainer: HTMLElement;
 
     beforeEach(() => {
-      // Create DOM elements
-      container1 = document.createElement("div");
-      container1.className = "airport-marker-container";
-      marker1 = document.createElement("div");
-      marker1.className = "airport-marker";
-      label1 = document.createElement("div");
-      label1.className = "airport-label";
-      container1.appendChild(marker1);
-      container1.appendChild(label1);
-      document.body.appendChild(container1);
+      mapContainer = document.createElement("div");
+      mapContainer.id = "map";
+      document.body.appendChild(mapContainer);
     });
 
     afterEach(() => {
-      if (container1.parentNode) {
-        document.body.removeChild(container1);
+      if (mapContainer.parentNode) {
+        document.body.removeChild(mapContainer);
       }
     });
 
@@ -380,123 +371,79 @@ describe("AirportManager", () => {
       expect(() => airportManager.updateAirportMarkerSizes()).not.toThrow();
     });
 
-    it("applies xlarge size at zoom 14+", () => {
+    it("sets xlarge data-zoom-size at zoom 14+", () => {
       mockApp.map.getZoom.mockReturnValue(14);
 
       airportManager.updateAirportMarkerSizes();
 
-      expect(
-        container1.classList.contains("airport-marker-container-xlarge")
-      ).toBe(true);
-      expect(marker1.classList.contains("airport-marker-xlarge")).toBe(true);
-      expect(label1.classList.contains("airport-label-xlarge")).toBe(true);
+      expect(mapContainer.dataset.zoomSize).toBe("xlarge");
     });
 
-    it("applies large size at zoom 12-13", () => {
+    it("sets large data-zoom-size at zoom 12-13", () => {
       mockApp.map.getZoom.mockReturnValue(12);
 
       airportManager.updateAirportMarkerSizes();
 
-      expect(
-        container1.classList.contains("airport-marker-container-large")
-      ).toBe(true);
-      expect(marker1.classList.contains("airport-marker-large")).toBe(true);
-      expect(label1.classList.contains("airport-label-large")).toBe(true);
+      expect(mapContainer.dataset.zoomSize).toBe("large");
     });
 
-    it("applies medium size at zoom 10-11", () => {
+    it("sets medium data-zoom-size at zoom 10-11", () => {
       mockApp.map.getZoom.mockReturnValue(10);
 
       airportManager.updateAirportMarkerSizes();
 
-      expect(
-        container1.classList.contains("airport-marker-container-medium")
-      ).toBe(true);
-      expect(marker1.classList.contains("airport-marker-medium")).toBe(true);
-      expect(label1.classList.contains("airport-label-medium")).toBe(true);
+      expect(mapContainer.dataset.zoomSize).toBe("medium");
     });
 
-    it("applies medium-small size at zoom 8-9", () => {
+    it("sets medium-small data-zoom-size at zoom 8-9", () => {
       mockApp.map.getZoom.mockReturnValue(8);
 
       airportManager.updateAirportMarkerSizes();
 
-      expect(
-        container1.classList.contains("airport-marker-container-medium-small")
-      ).toBe(true);
-      expect(marker1.classList.contains("airport-marker-medium-small")).toBe(
-        true
-      );
-      expect(label1.classList.contains("airport-label-medium-small")).toBe(
-        true
-      );
+      expect(mapContainer.dataset.zoomSize).toBe("medium-small");
     });
 
-    it("applies small size at zoom 6-7", () => {
+    it("sets small data-zoom-size at zoom 6-7", () => {
       mockApp.map.getZoom.mockReturnValue(6);
 
       airportManager.updateAirportMarkerSizes();
 
-      expect(
-        container1.classList.contains("airport-marker-container-small")
-      ).toBe(true);
-      expect(marker1.classList.contains("airport-marker-small")).toBe(true);
-      expect(label1.classList.contains("airport-label-small")).toBe(true);
+      expect(mapContainer.dataset.zoomSize).toBe("small");
     });
 
-    it("hides labels below zoom 5", () => {
+    it("adds zoom-hide-labels class below zoom 5", () => {
       mockApp.map.getZoom.mockReturnValue(4);
 
       airportManager.updateAirportMarkerSizes();
 
-      expect(label1.style.display).toBe("none");
+      expect(mapContainer.classList.contains("zoom-hide-labels")).toBe(true);
     });
 
-    it("shows labels at zoom 5+", () => {
-      label1.style.display = "none";
+    it("removes zoom-hide-labels class at zoom 5+", () => {
+      mapContainer.classList.add("zoom-hide-labels");
       mockApp.map.getZoom.mockReturnValue(5);
 
       airportManager.updateAirportMarkerSizes();
 
-      expect(label1.style.display).toBe("");
+      expect(mapContainer.classList.contains("zoom-hide-labels")).toBe(false);
     });
 
-    it("removes old size classes before applying new ones", () => {
-      container1.classList.add("airport-marker-container-small");
-      marker1.classList.add("airport-marker-small");
-      label1.classList.add("airport-label-small");
+    it("updates data-zoom-size when zoom changes", () => {
+      mockApp.map.getZoom.mockReturnValue(6);
+      airportManager.updateAirportMarkerSizes();
+      expect(mapContainer.dataset.zoomSize).toBe("small");
 
       mockApp.map.getZoom.mockReturnValue(14);
-
       airportManager.updateAirportMarkerSizes();
-
-      expect(
-        container1.classList.contains("airport-marker-container-small")
-      ).toBe(false);
-      expect(
-        container1.classList.contains("airport-marker-container-xlarge")
-      ).toBe(true);
+      expect(mapContainer.dataset.zoomSize).toBe("xlarge");
     });
 
-    it("handles missing marker or label elements", () => {
-      const container2 = document.createElement("div");
-      container2.className = "airport-marker-container";
-      document.body.appendChild(container2);
-
-      expect(() => airportManager.updateAirportMarkerSizes()).not.toThrow();
-
-      document.body.removeChild(container2);
-    });
-
-    it("applies no size class at very low zoom", () => {
+    it("sets empty data-zoom-size at very low zoom", () => {
       mockApp.map.getZoom.mockReturnValue(2);
 
       airportManager.updateAirportMarkerSizes();
 
-      // Should have no size classes
-      expect(container1.className).toBe("airport-marker-container");
-      expect(marker1.className).toBe("airport-marker");
-      expect(label1.className).toBe("airport-label");
+      expect(mapContainer.dataset.zoomSize).toBe("");
     });
   });
 });

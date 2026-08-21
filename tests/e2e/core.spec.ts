@@ -10,7 +10,7 @@ test.describe("Core", () => {
     const errors: string[] = [];
     page.on("pageerror", (err) => errors.push(err.message));
 
-    await page.reload();
+    await page.goto("/");
     await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
 
     expect(errors).toHaveLength(0);

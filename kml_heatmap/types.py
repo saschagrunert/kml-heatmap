@@ -1,6 +1,6 @@
 """Type definitions for KML Heatmap."""
 
-from typing import Any, NotRequired, TypedDict
+from typing import NotRequired, TypedDict
 
 
 class PathMetadata(TypedDict):
@@ -57,6 +57,18 @@ class AirportData(TypedDict):
     is_at_path_end: NotRequired[bool]
 
 
+class AircraftInfo(TypedDict):
+    """Aircraft statistics entry."""
+
+    registration: str
+    type: str | None
+    model: str | None
+    flights: int
+    flight_time_seconds: float
+    flight_time_str: str
+    flight_distance_km: float
+
+
 class Statistics(TypedDict):
     """Flight statistics."""
 
@@ -83,7 +95,7 @@ class Statistics(TypedDict):
     airport_names: NotRequired[list[str]]
     num_aircraft: NotRequired[int]
     aircraft_types: NotRequired[list[str]]
-    aircraft_list: NotRequired[list[Any]]
+    aircraft_list: NotRequired[list[AircraftInfo]]
 
 
 class CacheEntry(TypedDict):
@@ -101,6 +113,7 @@ __all__ = [
     "PathSegment",
     "PathInfo",
     "AirportData",
+    "AircraftInfo",
     "Statistics",
     "CacheEntry",
 ]

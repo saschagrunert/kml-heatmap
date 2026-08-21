@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from lxml import etree as ET
 
@@ -47,7 +46,7 @@ def save_to_cache(
     )
 
 
-def _parse_kml_tree(kml_file: str) -> Any:
+def _parse_kml_tree(kml_file: str) -> ET._Element:
     """Parse KML file and return XML root element."""
     try:
         parser = ET.XMLParser(resolve_entities=False, no_network=True)
@@ -72,8 +71,8 @@ def _parse_kml_tree(kml_file: str) -> Any:
 
 
 def _extract_kml_elements(
-    root: Any, namespaces: dict[str, str]
-) -> tuple[list[Any], list[Any], list[Any]]:
+    root: ET._Element, namespaces: dict[str, str]
+) -> tuple[list[ET._Element], list[ET._Element], list[ET._Element]]:
     """Extract coordinate elements and placemarks from KML root."""
     # Try with namespace
     coord_elements = root.findall(".//kml:coordinates", namespaces)
@@ -107,8 +106,8 @@ def _extract_kml_elements(
 
 
 def _build_coord_metadata_map(
-    placemarks: list[Any], namespaces: dict[str, str], kml_file: str
-) -> dict[int, dict[str, Any]]:
+    placemarks: list[ET._Element], namespaces: dict[str, str], kml_file: str
+) -> dict[int, dict[str, object]]:
     """Create mapping from coordinate elements to their metadata."""
     coord_to_metadata = {}
     for placemark in placemarks:
