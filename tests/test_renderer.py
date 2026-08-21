@@ -157,12 +157,12 @@ class TestHeatmapGradient:
 
     def test_gradient_keys_are_floats(self):
         """Test that gradient keys are float values."""
-        for key in HEATMAP_GRADIENT.keys():
+        for key in HEATMAP_GRADIENT:
             assert isinstance(key, float)
 
     def test_gradient_range(self):
         """Test that gradient keys are in valid range."""
-        for key in HEATMAP_GRADIENT.keys():
+        for key in HEATMAP_GRADIENT:
             assert 0.0 <= key <= 1.0
 
 

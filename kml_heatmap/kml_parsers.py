@@ -1,7 +1,7 @@
 """Specialized parsers for different KML coordinate formats."""
 
+from .constants import ALT_MAX_M, ALT_MIN_M, LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
 from .logger import logger
-from .constants import LAT_MIN, LAT_MAX, LON_MIN, LON_MAX, ALT_MIN_M, ALT_MAX_M
 
 __all__ = [
     "validate_and_normalize_coordinate",

@@ -3,9 +3,9 @@
 import csv
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch
 
 from kml_heatmap.airport_lookup import (
     _load_airport_database,
@@ -47,7 +47,7 @@ class TestLookupAirportCoordinates:
         """Test lookup with lowercase ICAO code."""
         result = lookup_airport_coordinates("eddp")
         assert result is not None
-        lat, lon, name = result
+        lat, lon, _name = result
         assert abs(lat - 51.42) < 0.1
         assert abs(lon - 12.23) < 0.1
 
@@ -104,28 +104,31 @@ class TestDownloadAndCaching:
 
     def test_empty_database_on_download_failure(self):
         """Test that empty database is returned when download fails."""
-        with patch(
-            "kml_heatmap.airport_lookup.urlopen",
-            side_effect=OSError("Network error"),
+        with (
+            patch(
+                "kml_heatmap.airport_lookup.urlopen",
+                side_effect=OSError("Network error"),
+            ),
+            patch("kml_heatmap.airport_lookup.CACHE_FILE") as mock_cache,
         ):
-            with patch("kml_heatmap.airport_lookup.CACHE_FILE") as mock_cache:
-                # Make cache file not exist
-                mock_cache.exists.return_value = False
+            # Make cache file not exist
+            mock_cache.exists.return_value = False
 
-                # Reset global cache to force reload
-                import kml_heatmap.airport_lookup as lookup_module
+            # Reset global cache to force reload
+            import kml_heatmap.airport_lookup as lookup_module
 
-                lookup_module._airport_cache = None
+            lookup_module._airport_cache = None
 
-                # Should return None (empty database)
-                result = lookup_airport_coordinates("EDDP")
-                assert result is None
+            # Should return None (empty database)
+            result = lookup_airport_coordinates("EDDP")
+            assert result is None
 
     def test_cache_validity_check(self):
         """Test cache validity checking."""
-        from kml_heatmap.airport_lookup import _is_cache_valid
-        from unittest.mock import patch, MagicMock
         import time
+        from unittest.mock import MagicMock, patch
+
+        from kml_heatmap.airport_lookup import _is_cache_valid
 
         # Test with non-existent cache
         with patch("kml_heatmap.airport_lookup.CACHE_FILE") as mock_cache:
@@ -152,9 +155,10 @@ class TestDownloadAndCaching:
 
     def test_load_database_with_invalid_csv(self):
         """Test loading database with invalid CSV data."""
-        from kml_heatmap.airport_lookup import _load_airport_database
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+
+        from kml_heatmap.airport_lookup import _load_airport_database
 
         # Create temporary file with invalid data
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as f:
@@ -163,28 +167,29 @@ class TestDownloadAndCaching:
             temp_path = Path(f.name)
 
         try:
-            with patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path):
-                with patch(
-                    "kml_heatmap.airport_lookup._is_cache_valid", return_value=True
-                ):
-                    # Reset global cache
-                    import kml_heatmap.airport_lookup as lookup_module
+            with (
+                patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path),
+                patch("kml_heatmap.airport_lookup._is_cache_valid", return_value=True),
+            ):
+                # Reset global cache
+                import kml_heatmap.airport_lookup as lookup_module
 
-                    lookup_module._airport_cache = None
+                lookup_module._airport_cache = None
 
-                    # Should handle invalid CSV gracefully
-                    db = _load_airport_database()
-                    # May return empty or partially loaded database
-                    assert isinstance(db, dict)
+                # Should handle invalid CSV gracefully
+                db = _load_airport_database()
+                # May return empty or partially loaded database
+                assert isinstance(db, dict)
         finally:
             if temp_path.exists():
                 temp_path.unlink()
 
     def test_load_database_with_non_numeric_coordinates(self):
         """Test loading database with non-numeric coordinates."""
-        from kml_heatmap.airport_lookup import _load_airport_database
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+
+        from kml_heatmap.airport_lookup import _load_airport_database
 
         # Create CSV with invalid coordinates
         csv_content = """ident,latitude_deg,longitude_deg,name
@@ -197,20 +202,20 @@ YYYY,50.0,not_a_number,Test Airport 2
             temp_path = Path(f.name)
 
         try:
-            with patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path):
-                with patch(
-                    "kml_heatmap.airport_lookup._is_cache_valid", return_value=True
-                ):
-                    # Reset global cache
-                    import kml_heatmap.airport_lookup as lookup_module
+            with (
+                patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path),
+                patch("kml_heatmap.airport_lookup._is_cache_valid", return_value=True),
+            ):
+                # Reset global cache
+                import kml_heatmap.airport_lookup as lookup_module
 
-                    lookup_module._airport_cache = None
+                lookup_module._airport_cache = None
 
-                    # Should skip invalid entries
-                    db = _load_airport_database()
-                    # Should not contain invalid airports
-                    assert "XXXX" not in db
-                    assert "YYYY" not in db
+                # Should skip invalid entries
+                db = _load_airport_database()
+                # Should not contain invalid airports
+                assert "XXXX" not in db
+                assert "YYYY" not in db
         finally:
             if temp_path.exists():
                 temp_path.unlink()
@@ -229,23 +234,24 @@ YYYY,50.0,not_a_number,Test Airport 2
 
     def test_file_locking_without_fcntl(self):
         """Test that code works without fcntl (Windows)."""
-        from kml_heatmap.airport_lookup import _load_airport_database
         import kml_heatmap.airport_lookup as lookup_module
+        from kml_heatmap.airport_lookup import _load_airport_database
 
         # Reset cache
         lookup_module._airport_cache = None
 
         # Temporarily disable fcntl
-        with patch("kml_heatmap.airport_lookup.HAS_FCNTL", False):
-            with patch("kml_heatmap.airport_lookup._is_cache_valid", return_value=True):
-                with patch("kml_heatmap.airport_lookup.CACHE_FILE") as mock_cache:
-                    mock_cache.exists.return_value = True
-
-                    with patch("builtins.open", create=True):
-                        with patch("csv.DictReader", return_value=[]):
-                            # Should not raise even without fcntl
-                            result = _load_airport_database()
-                            assert isinstance(result, dict)
+        with (
+            patch("kml_heatmap.airport_lookup.HAS_FCNTL", False),
+            patch("kml_heatmap.airport_lookup._is_cache_valid", return_value=True),
+            patch("kml_heatmap.airport_lookup.CACHE_FILE") as mock_cache,
+            patch("builtins.open", create=True),
+            patch("csv.DictReader", return_value=[]),
+        ):
+            mock_cache.exists.return_value = True
+            # Should not raise even without fcntl
+            result = _load_airport_database()
+            assert isinstance(result, dict)
 
     def test_download_failure_handling(self):
         """Test handling of download failures."""
@@ -260,9 +266,10 @@ YYYY,50.0,not_a_number,Test Airport 2
 
     def test_empty_cache_file_after_download(self):
         """Test handling of empty cache file after download."""
-        from kml_heatmap.airport_lookup import _download_airport_database
-        from unittest.mock import MagicMock
         import tempfile
+        from unittest.mock import MagicMock
+
+        from kml_heatmap.airport_lookup import _download_airport_database
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as f:
             temp_path = Path(f.name)
@@ -285,10 +292,11 @@ YYYY,50.0,not_a_number,Test Airport 2
 
     def test_successful_download(self):
         """Test successful database download."""
-        from kml_heatmap.airport_lookup import _download_airport_database
-        from unittest.mock import MagicMock
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
+        from kml_heatmap.airport_lookup import _download_airport_database
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as f:
             temp_path = Path(f.name)
@@ -302,54 +310,57 @@ YYYY,50.0,not_a_number,Test Airport 2
             mock_response.read.return_value = csv_content
             mock_response.__enter__ = MagicMock(return_value=mock_response)
             mock_response.__exit__ = MagicMock(return_value=False)
-            with patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path):
-                with patch(
+            with (
+                patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path),
+                patch(
                     "kml_heatmap.airport_lookup.urlopen",
                     return_value=mock_response,
-                ):
-                    result = _download_airport_database()
-                    # Should succeed
-                    assert result is True
+                ),
+            ):
+                result = _download_airport_database()
+                # Should succeed
+                assert result is True
         finally:
             if temp_path.exists():
                 temp_path.unlink()
 
     def test_load_database_csv_exception(self):
         """Test handling of CSV reading exceptions."""
-        from kml_heatmap.airport_lookup import _load_airport_database
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+
+        from kml_heatmap.airport_lookup import _load_airport_database
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as f:
             temp_path = Path(f.name)
 
         try:
-            with patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path):
-                with patch(
-                    "kml_heatmap.airport_lookup._is_cache_valid", return_value=True
-                ):
-                    # Create file that exists but will fail to read
-                    with open(temp_path, "w") as f:
-                        f.write("test")
+            with (
+                patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path),
+                patch("kml_heatmap.airport_lookup._is_cache_valid", return_value=True),
+            ):
+                # Create file that exists but will fail to read
+                with open(temp_path, "w") as f:
+                    f.write("test")
 
-                    # Reset cache
-                    import kml_heatmap.airport_lookup as lookup_module
+                # Reset cache
+                import kml_heatmap.airport_lookup as lookup_module
 
-                    lookup_module._airport_cache = None
+                lookup_module._airport_cache = None
 
-                    # Mock csv.DictReader to raise exception
-                    with patch("csv.DictReader", side_effect=csv.Error("CSV error")):
-                        db = _load_airport_database()
-                        # Should return empty dict on error
-                        assert db == {}
+                # Mock csv.DictReader to raise exception
+                with patch("csv.DictReader", side_effect=csv.Error("CSV error")):
+                    db = _load_airport_database()
+                    # Should return empty dict on error
+                    assert db == {}
         finally:
             if temp_path.exists():
                 temp_path.unlink()
 
     def test_lookup_with_valid_database(self):
         """Test lookup with a valid pre-loaded database."""
-        from kml_heatmap.airport_lookup import lookup_airport_coordinates
         import kml_heatmap.airport_lookup as lookup_module
+        from kml_heatmap.airport_lookup import lookup_airport_coordinates
 
         # Pre-populate cache with test data
         lookup_module._airport_cache = {
@@ -370,9 +381,10 @@ YYYY,50.0,not_a_number,Test Airport 2
 
     def test_file_lock_close_exception(self):
         """Test that file lock close exceptions are handled."""
-        from kml_heatmap.airport_lookup import _load_airport_database, HAS_FCNTL
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+
+        from kml_heatmap.airport_lookup import HAS_FCNTL, _load_airport_database
 
         if not HAS_FCNTL:
             # Skip on Windows
@@ -385,18 +397,18 @@ YYYY,50.0,not_a_number,Test Airport 2
             f.write(b"TEST,50.0,8.5,Test Airport\n")
 
         try:
-            with patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path):
-                with patch(
-                    "kml_heatmap.airport_lookup._is_cache_valid", return_value=True
-                ):
-                    # Reset cache
-                    import kml_heatmap.airport_lookup as lookup_module
+            with (
+                patch("kml_heatmap.airport_lookup.CACHE_FILE", temp_path),
+                patch("kml_heatmap.airport_lookup._is_cache_valid", return_value=True),
+            ):
+                # Reset cache
+                import kml_heatmap.airport_lookup as lookup_module
 
-                    lookup_module._airport_cache = None
+                lookup_module._airport_cache = None
 
-                    # Should handle any errors during cleanup
-                    db = _load_airport_database()
-                    assert isinstance(db, dict)
+                # Should handle any errors during cleanup
+                db = _load_airport_database()
+                assert isinstance(db, dict)
         finally:
             if temp_path.exists():
                 temp_path.unlink()
@@ -407,8 +419,8 @@ class TestAdditionalCoverage:
 
     def test_get_cache_info_with_loaded_database(self):
         """Test get_cache_info when database is loaded (covers line 223)."""
-        from kml_heatmap.airport_lookup import get_cache_info
         import kml_heatmap.airport_lookup as lookup_module
+        from kml_heatmap.airport_lookup import get_cache_info
 
         # Pre-populate cache to ensure line 223 is covered
         original_cache = lookup_module._airport_cache

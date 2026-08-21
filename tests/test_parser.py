@@ -1,21 +1,23 @@
 """Tests for parser module."""
 
-import pytest
-import tempfile
 import os
+import tempfile
 from pathlib import Path
+
+import pytest
+
 from kml_heatmap.parser import (
     get_cache_key,
     save_to_cache,
 )
 from kml_heatmap.parser_cache import load_cached_parse
 from kml_heatmap.parser_common import (
+    extract_charterware_timestamp,
     extract_year_from_timestamp,
-    sample_path_altitudes,
     is_mid_flight_start,
     is_valid_landing,
     parse_coordinate_point,
-    extract_charterware_timestamp,
+    sample_path_altitudes,
 )
 
 
@@ -313,7 +315,7 @@ class TestCacheFunctions:
             from unittest.mock import patch
 
             with patch("kml_heatmap.parser.KML_CACHE_DIR", cache_dir):
-                cache_path, is_valid = get_cache_key(str(kml_file))
+                _cache_path, _is_valid = get_cache_key(str(kml_file))
 
                 # Old caches should be cleaned up
                 assert not old_cache1.exists()
@@ -342,7 +344,7 @@ class TestCacheFunctions:
 
             with patch("kml_heatmap.parser.KML_CACHE_DIR", cache_dir):
                 # Should not raise even if cleanup fails
-                cache_path, is_valid = get_cache_key(str(kml_file))
+                cache_path, _is_valid = get_cache_key(str(kml_file))
                 assert cache_path is not None
 
 
@@ -351,8 +353,9 @@ class TestFindXmlElement:
 
     def test_find_with_namespace(self):
         """Test finding element with namespace."""
-        from kml_heatmap.parser_common import find_xml_element
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_common import find_xml_element
 
         xml = """<root xmlns:kml="http://test.com"><kml:name>Test</kml:name></root>"""
         root = ET.fromstring(xml)
@@ -364,8 +367,9 @@ class TestFindXmlElement:
 
     def test_find_with_fallback(self):
         """Test finding element using fallback path."""
-        from kml_heatmap.parser_common import find_xml_element
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_common import find_xml_element
 
         xml = """<root><name>Test</name></root>"""
         root = ET.fromstring(xml)
@@ -377,8 +381,9 @@ class TestFindXmlElement:
 
     def test_find_element_not_found(self):
         """Test when element is not found."""
-        from kml_heatmap.parser_common import find_xml_element
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_common import find_xml_element
 
         xml = """<root><other>Test</other></root>"""
         root = ET.fromstring(xml)
@@ -393,8 +398,9 @@ class TestFindXmlElements:
 
     def test_find_multiple_with_namespace(self):
         """Test finding multiple elements with namespace."""
-        from kml_heatmap.parser_common import find_xml_elements
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_common import find_xml_elements
 
         xml = """<root xmlns:kml="http://test.com">
             <kml:when>2025-01-01</kml:when>
@@ -410,8 +416,9 @@ class TestFindXmlElements:
 
     def test_find_multiple_with_fallback(self):
         """Test finding multiple elements using fallback."""
-        from kml_heatmap.parser_common import find_xml_elements
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_common import find_xml_elements
 
         xml = """<root><when>2025-01-01</when><when>2025-01-02</when></root>"""
         root = ET.fromstring(xml)
@@ -422,8 +429,9 @@ class TestFindXmlElements:
 
     def test_find_elements_not_found(self):
         """Test when no elements are found."""
-        from kml_heatmap.parser_common import find_xml_elements
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_common import find_xml_elements
 
         xml = """<root><other>Test</other></root>"""
         root = ET.fromstring(xml)
@@ -438,8 +446,9 @@ class TestExtractPlacemarkMetadata:
 
     def test_extract_with_name_and_timestamp(self):
         """Test extracting metadata with name and timestamp."""
-        from kml_heatmap.parser_common import extract_placemark_metadata
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_common import extract_placemark_metadata
 
         xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2">
             <name>Test Airport</name>
@@ -455,8 +464,9 @@ class TestExtractPlacemarkMetadata:
 
     def test_extract_with_multiple_timestamps(self):
         """Test extracting metadata with multiple timestamps."""
-        from kml_heatmap.parser_common import extract_placemark_metadata
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_common import extract_placemark_metadata
 
         xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2">
             <when>2025-03-15T10:00:00Z</when>
@@ -471,8 +481,9 @@ class TestExtractPlacemarkMetadata:
 
     def test_extract_timestamp_from_name(self):
         """Test extracting timestamp from name when when element missing."""
-        from kml_heatmap.parser_common import extract_placemark_metadata
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_common import extract_placemark_metadata
 
         xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2">
             <name>Log Start: 03 Mar 2025 08:58 Z</name>
@@ -487,8 +498,9 @@ class TestExtractPlacemarkMetadata:
 
     def test_extract_no_metadata(self):
         """Test extracting metadata when none exists."""
-        from kml_heatmap.parser_common import extract_placemark_metadata
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_common import extract_placemark_metadata
 
         xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2"></Placemark>"""
         placemark = ET.fromstring(xml)
@@ -506,8 +518,9 @@ class TestProcessStandardCoordinates:
 
     def test_process_valid_coordinates(self):
         """Test processing valid coordinate elements."""
-        from kml_heatmap.parser_standard import process_standard_coordinates
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_standard import process_standard_coordinates
 
         # Create mock coordinate element
         coord_elem = ET.Element("coordinates")
@@ -541,8 +554,9 @@ class TestProcessStandardCoordinates:
 
     def test_process_empty_coordinate_element(self):
         """Test processing empty coordinate element."""
-        from kml_heatmap.parser_standard import process_standard_coordinates
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_standard import process_standard_coordinates
 
         coord_elem = ET.Element("coordinates")
         coord_elem.text = ""
@@ -566,8 +580,9 @@ class TestProcessStandardCoordinates:
 
     def test_process_none_text_coordinate(self):
         """Test processing coordinate element with None text."""
-        from kml_heatmap.parser_standard import process_standard_coordinates
         from xml.etree import ElementTree as ET
+
+        from kml_heatmap.parser_standard import process_standard_coordinates
 
         coord_elem = ET.Element("coordinates")
         coord_elem.text = None
@@ -705,7 +720,7 @@ class TestParseKmlCoordinates:
             temp_path = f.name
 
         try:
-            coords, paths, metadata = parse_kml_coordinates(temp_path)
+            coords, paths, _metadata = parse_kml_coordinates(temp_path)
             assert len(coords) == 2
             assert len(paths) == 1
             # Check that timestamps are included
@@ -829,8 +844,9 @@ class TestStandardizeAirportName:
 
     def test_standardize_with_valid_icao(self):
         """Test standardizing airport name with valid ICAO code."""
-        from kml_heatmap.airport_lookup import standardize_airport_name
         from unittest.mock import patch
+
+        from kml_heatmap.airport_lookup import standardize_airport_name
 
         # Mock the airport lookup at the actual import location
         with patch(
@@ -845,8 +861,9 @@ class TestStandardizeAirportName:
 
     def test_standardize_route_format(self):
         """Test standardizing route with two airports."""
-        from kml_heatmap.airport_lookup import standardize_airport_name
         from unittest.mock import patch
+
+        from kml_heatmap.airport_lookup import standardize_airport_name
 
         # Mock the airport lookup at the actual import location
         with patch(
@@ -890,8 +907,9 @@ class TestStandardizeAirportName:
 
     def test_standardize_route_only_first_airport_found(self):
         """Test route where only first airport is in database."""
-        from kml_heatmap.airport_lookup import standardize_airport_name
         from unittest.mock import patch
+
+        from kml_heatmap.airport_lookup import standardize_airport_name
 
         with patch(
             "kml_heatmap.airport_lookup.lookup_airport_coordinates"
@@ -910,8 +928,9 @@ class TestStandardizeAirportName:
 
     def test_standardize_route_only_second_airport_found(self):
         """Test route where only second airport is in database."""
-        from kml_heatmap.airport_lookup import standardize_airport_name
         from unittest.mock import patch
+
+        from kml_heatmap.airport_lookup import standardize_airport_name
 
         with patch(
             "kml_heatmap.airport_lookup.lookup_airport_coordinates"
@@ -930,8 +949,9 @@ class TestStandardizeAirportName:
 
     def test_standardize_single_airport(self):
         """Test standardizing single airport name."""
-        from kml_heatmap.airport_lookup import standardize_airport_name
         from unittest.mock import patch
+
+        from kml_heatmap.airport_lookup import standardize_airport_name
 
         with patch(
             "kml_heatmap.airport_lookup.lookup_airport_coordinates"
@@ -950,24 +970,24 @@ class TestExtractCharterwareTimestamp:
         """Test parsing basic Charterware description format."""
         desc = "Flight Jan 12 2026 03:01PM path of OE-AKI"
         result = extract_charterware_timestamp(desc)
-        assert result == "2026-01-12T15:01:00Z"
+        assert result == "2026-01-12T15:01:00+00:00"
 
     def test_different_months(self):
         """Test parsing different months."""
         # January
         assert (
             extract_charterware_timestamp("Flight Jan 15 2026 02:30PM path of OE-AKI")
-            == "2026-01-15T14:30:00Z"
+            == "2026-01-15T14:30:00+00:00"
         )
         # December
         assert (
             extract_charterware_timestamp("Flight Dec 25 2025 11:45AM path of OE-AKI")
-            == "2025-12-25T11:45:00Z"
+            == "2025-12-25T11:45:00+00:00"
         )
         # March
         assert (
             extract_charterware_timestamp("Flight Mar 3 2025 08:15AM path of D-EAGJ")
-            == "2025-03-03T08:15:00Z"
+            == "2025-03-03T08:15:00+00:00"
         )
 
     def test_am_pm_conversion(self):
@@ -975,27 +995,27 @@ class TestExtractCharterwareTimestamp:
         # 12 AM (midnight)
         assert (
             extract_charterware_timestamp("Flight Jan 1 2026 12:00AM path of OE-AKI")
-            == "2026-01-01T00:00:00Z"
+            == "2026-01-01T00:00:00+00:00"
         )
         # 12 PM (noon)
         assert (
             extract_charterware_timestamp("Flight Jan 1 2026 12:00PM path of OE-AKI")
-            == "2026-01-01T12:00:00Z"
+            == "2026-01-01T12:00:00+00:00"
         )
         # 1 AM
         assert (
             extract_charterware_timestamp("Flight Jan 1 2026 01:30AM path of OE-AKI")
-            == "2026-01-01T01:30:00Z"
+            == "2026-01-01T01:30:00+00:00"
         )
         # 1 PM
         assert (
             extract_charterware_timestamp("Flight Jan 1 2026 01:30PM path of OE-AKI")
-            == "2026-01-01T13:30:00Z"
+            == "2026-01-01T13:30:00+00:00"
         )
         # 11 PM
         assert (
             extract_charterware_timestamp("Flight Jan 1 2026 11:59PM path of OE-AKI")
-            == "2026-01-01T23:59:00Z"
+            == "2026-01-01T23:59:00+00:00"
         )
 
     def test_invalid_format(self):
@@ -1011,7 +1031,7 @@ class TestExtractCharterwareTimestamp:
         result = extract_charterware_timestamp(
             "Flight January 12 2026 03:01PM path of OE-AKI"
         )
-        assert result == "2026-01-12T15:01:00Z"
+        assert result == "2026-01-12T15:01:00+00:00"
 
 
 class TestParseCharterwareKML:
@@ -1019,9 +1039,10 @@ class TestParseCharterwareKML:
 
     def test_parse_charterware_kml(self):
         """Test parsing actual Charterware KML format."""
-        import tempfile
         import os
-        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+        import tempfile
+
+        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
 
         kml_content = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
@@ -1083,9 +1104,10 @@ class TestParseCharterwareKML:
 
     def test_charterware_metadata_extraction(self):
         """Test that Charterware metadata is correctly extracted."""
-        import tempfile
         import os
-        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+        import tempfile
+
+        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
 
         kml_content = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -1108,7 +1130,7 @@ class TestParseCharterwareKML:
             f.write(kml_content)
 
         try:
-            coords, paths, metadata = parse_kml_coordinates(temp_path)
+            _coords, _paths, metadata = parse_kml_coordinates(temp_path)
 
             assert len(metadata) > 0
             meta = metadata[0]
@@ -1118,7 +1140,7 @@ class TestParseCharterwareKML:
             assert meta.get("route") == "EDDF-EDDM"
 
             # Check timestamp from description
-            assert meta.get("timestamp") == "2026-02-15T10:30:00Z"
+            assert meta.get("timestamp") == "2026-02-15T10:30:00+00:00"
             assert meta.get("year") == 2026
 
         finally:
@@ -1131,9 +1153,10 @@ class TestParseCharterwareKML:
 
     def test_mixed_formats(self):
         """Test that parser handles both numbered and Charterware formats correctly."""
-        import tempfile
         import os
-        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+        import tempfile
+
+        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
 
         # Create numbered format KML
         numbered_kml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1183,13 +1206,13 @@ class TestParseCharterwareKML:
 
         try:
             # Parse numbered format
-            coords_n, paths_n, metadata_n = parse_kml_coordinates(numbered_path)
+            _coords_n, _paths_n, metadata_n = parse_kml_coordinates(numbered_path)
             assert len(metadata_n) > 0
             assert metadata_n[0].get("aircraft_registration") == "D-EHYL"
             assert metadata_n[0].get("aircraft_type") == "DA40"
 
             # Parse Charterware
-            coords_cw, paths_cw, metadata_cw = parse_kml_coordinates(charterware_path)
+            _coords_cw, _paths_cw, metadata_cw = parse_kml_coordinates(charterware_path)
             assert len(metadata_cw) > 0
             assert metadata_cw[0].get("aircraft_registration") == "OE-AKI"
             assert metadata_cw[0].get("route") == "EDDF-EDDM"
@@ -1212,9 +1235,10 @@ class TestAirportExtractionFromRoute:
 
     def test_airport_from_route_charterware(self):
         """Test that airport is extracted from route for Charterware files."""
-        import tempfile
         import os
-        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+        import tempfile
+
+        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
 
         kml_content = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -1237,7 +1261,7 @@ class TestAirportExtractionFromRoute:
             f.write(kml_content)
 
         try:
-            coords, paths, metadata = parse_kml_coordinates(temp_path)
+            _coords, _paths, metadata = parse_kml_coordinates(temp_path)
 
             # Airport should be extracted from route (LOAV-LOAV)
             # Format: "DEPARTURE - ARRIVAL" with full names from OurAirports lookup
@@ -1256,9 +1280,10 @@ class TestAirportExtractionFromRoute:
 
     def test_airport_from_route_different_airports(self):
         """Test route with different departure and arrival airports."""
-        import tempfile
         import os
-        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+        import tempfile
+
+        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
 
         kml_content = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -1281,7 +1306,7 @@ class TestAirportExtractionFromRoute:
             f.write(kml_content)
 
         try:
-            coords, paths, metadata = parse_kml_coordinates(temp_path)
+            _coords, _paths, metadata = parse_kml_coordinates(temp_path)
 
             # Should extract route and format as "DEPARTURE - ARRIVAL" with full names from OurAirports
             assert (
@@ -1298,9 +1323,10 @@ class TestAirportExtractionFromRoute:
 
     def test_skydemon_airport_not_replaced(self):
         """Test that SkyDemon airport names are not replaced by route logic."""
-        import tempfile
         import os
-        from kml_heatmap.parser import parse_kml_coordinates, get_cache_key
+        import tempfile
+
+        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
 
         # SkyDemon with airport pair in name
         kml_content = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1323,7 +1349,7 @@ class TestAirportExtractionFromRoute:
             temp_path = f.name
 
         try:
-            coords, paths, metadata = parse_kml_coordinates(temp_path)
+            _coords, _paths, metadata = parse_kml_coordinates(temp_path)
 
             # Should preserve SkyDemon airport name format (with standardization)
             assert (
@@ -1397,6 +1423,7 @@ class TestCacheCleanupErrors:
     def test_old_cache_removal_with_permission_error(self):
         """Test that OSError during old cache removal is handled (covers lines 129-130)."""
         import tempfile
+
         from kml_heatmap.parser import get_cache_key
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1407,7 +1434,7 @@ class TestCacheCleanupErrors:
             kml_file.write_text("<?xml version='1.0'?><kml></kml>")
 
             # Get initial cache path
-            cache_path1, is_valid = get_cache_key(str(kml_file))
+            cache_path1, _is_valid = get_cache_key(str(kml_file))
             assert cache_path1 is not None
 
             # Create the cache file
@@ -1427,7 +1454,7 @@ class TestCacheCleanupErrors:
 
                 # This should trigger OSError when trying to delete old cache
                 # but the function should handle it gracefully
-                cache_path2, is_valid2 = get_cache_key(str(kml_file))
+                cache_path2, _is_valid2 = get_cache_key(str(kml_file))
 
                 # Should still return a valid cache path
                 assert cache_path2 is not None
@@ -1438,8 +1465,9 @@ class TestCacheCleanupErrors:
     def test_old_cache_removal_oserror_with_mock(self):
         """Test OSError during old cache file removal using mock."""
         import tempfile
-        from kml_heatmap.parser import get_cache_key
         from unittest.mock import patch
+
+        from kml_heatmap.parser import get_cache_key
 
         with tempfile.TemporaryDirectory() as tmpdir:
             test_dir = Path(tmpdir)

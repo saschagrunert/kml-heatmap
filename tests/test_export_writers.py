@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 
 from kml_heatmap.export_writers import (
     collect_unique_years,
@@ -25,7 +26,7 @@ class TestExportAirportsData:
         assert os.path.exists(filepath)
         assert size > 0
 
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         assert content.startswith("window.KML_AIRPORTS = ")
         assert content.endswith(";")
         data = json.loads(content[len("window.KML_AIRPORTS = ") : -1])
@@ -43,7 +44,7 @@ class TestExportAirportsData:
             }
         ]
         filepath, _ = export_airports_data(airports, str(tmp_path))
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         data = json.loads(content[len("window.KML_AIRPORTS = ") : -1])
         assert len(data["airports"]) == 0
 
@@ -65,7 +66,7 @@ class TestExportAirportsData:
             },
         ]
         filepath, _ = export_airports_data(airports, str(tmp_path))
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         data = json.loads(content[len("window.KML_AIRPORTS = ") : -1])
         assert len(data["airports"]) == 1
 
@@ -82,7 +83,7 @@ class TestExportAirportsData:
         filepath, _ = export_airports_data(
             airports, str(tmp_path), strip_timestamps=True
         )
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         data = json.loads(content[len("window.KML_AIRPORTS = ") : -1])
         assert "timestamps" not in data["airports"][0]
 
@@ -97,7 +98,7 @@ class TestExportAirportsData:
             }
         ]
         filepath, _ = export_airports_data(airports, str(tmp_path))
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         data = json.loads(content[len("window.KML_AIRPORTS = ") : -1])
         assert data["airports"][0]["flight_count"] == 3
 
@@ -105,11 +106,11 @@ class TestExportAirportsData:
 class TestExportMetadata:
     def test_normal_values(self, tmp_path):
         stats = {"total_flights": 10}
-        filepath, size = export_metadata(
+        filepath, _size = export_metadata(
             stats, 100.0, 5000.0, 50.0, 180.0, [2024, 2025], str(tmp_path)
         )
         assert os.path.exists(filepath)
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         assert content.startswith("window.KML_METADATA = ")
         data = json.loads(content[len("window.KML_METADATA = ") : -1])
         assert data["min_alt_m"] == 100.0
@@ -122,7 +123,7 @@ class TestExportMetadata:
         filepath, _ = export_metadata(
             {}, 0, 1000, float("inf"), float("-inf"), [], str(tmp_path)
         )
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         data = json.loads(content[len("window.KML_METADATA = ") : -1])
         assert data["min_groundspeed_knots"] == 0.0
         assert data["max_groundspeed_knots"] == 0.0
@@ -131,7 +132,7 @@ class TestExportMetadata:
         filepath, _ = export_metadata(
             {}, 0, 1000, float("nan"), float("nan"), [], str(tmp_path)
         )
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         data = json.loads(content[len("window.KML_METADATA = ") : -1])
         assert data["min_groundspeed_knots"] == 0.0
         assert data["max_groundspeed_knots"] == 0.0
@@ -141,19 +142,19 @@ class TestExportMetadata:
         filepath, _ = export_metadata(
             {}, 0, 1000, 50, 180, [2025], str(tmp_path), file_structure=structure
         )
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         data = json.loads(content[len("window.KML_METADATA = ") : -1])
         assert data["file_structure"] == structure
 
     def test_without_file_structure(self, tmp_path):
         filepath, _ = export_metadata({}, 0, 1000, 50, 180, [], str(tmp_path))
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         data = json.loads(content[len("window.KML_METADATA = ") : -1])
         assert "file_structure" not in data
 
     def test_groundspeed_rounding(self, tmp_path):
         filepath, _ = export_metadata({}, 0, 1000, 55.678, 199.123, [], str(tmp_path))
-        content = open(filepath).read()
+        content = Path(filepath).read_text()
         data = json.loads(content[len("window.KML_METADATA = ") : -1])
         assert data["min_groundspeed_knots"] == 55.7
         assert data["max_groundspeed_knots"] == 199.1

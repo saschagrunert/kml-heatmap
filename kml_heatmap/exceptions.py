@@ -1,17 +1,15 @@
 """Custom exceptions for KML Heatmap Generator."""
 
 __all__ = [
+    "ConfigurationError",
+    "InvalidCoordinateError",
     "KMLHeatmapError",
     "KMLParseError",
-    "InvalidCoordinateError",
-    "ConfigurationError",
 ]
 
 
 class KMLHeatmapError(Exception):
     """Base exception for all KML Heatmap errors."""
-
-    pass
 
 
 class KMLParseError(KMLHeatmapError):

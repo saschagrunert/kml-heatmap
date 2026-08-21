@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 # Create a session-level temp directory for the entire test session
 _TEST_CACHE_DIR = None
 
@@ -25,7 +24,6 @@ def pytest_configure(config):
 
 def pytest_unconfigure(config):
     """Clean up the temporary cache directory after all tests complete."""
-    global _TEST_CACHE_DIR
     if _TEST_CACHE_DIR and _TEST_CACHE_DIR.exists():
         shutil.rmtree(_TEST_CACHE_DIR, ignore_errors=True)
     if "KML_HEATMAP_TEST_CACHE" in os.environ:

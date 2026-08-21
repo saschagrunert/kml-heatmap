@@ -1,5 +1,6 @@
 """Tests for KML timestamp obfuscation."""
 
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -315,23 +316,23 @@ class TestIsAlreadyObfuscated:
     """Tests for _is_already_obfuscated."""
 
     def test_returns_true_when_fully_obfuscated(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        dt = datetime(2025, 1, 1, 8, 25, 0, tzinfo=timezone.utc)
+        dt = datetime(2025, 1, 1, 8, 25, 0, tzinfo=UTC)
         content = "<name>Log Start: 2025-01-01</name>"
         assert _is_already_obfuscated(dt, content) is True
 
     def test_returns_false_when_date_not_jan_1(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        dt = datetime(2025, 3, 3, 8, 25, 0, tzinfo=timezone.utc)
+        dt = datetime(2025, 3, 3, 8, 25, 0, tzinfo=UTC)
         content = "<name>Log Start: 2025-01-01</name>"
         assert _is_already_obfuscated(dt, content) is False
 
     def test_returns_false_when_names_not_obfuscated(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        dt = datetime(2025, 1, 1, 8, 25, 0, tzinfo=timezone.utc)
+        dt = datetime(2025, 1, 1, 8, 25, 0, tzinfo=UTC)
         content = "<name>Log Start: 03 Mar 2025 08:25 Z</name>"
         assert _is_already_obfuscated(dt, content) is False
 

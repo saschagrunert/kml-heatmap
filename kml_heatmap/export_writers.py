@@ -123,4 +123,4 @@ def collect_unique_years(all_path_metadata: list[PathMetadata]) -> list[int]:
         if year:
             unique_years.add(year)
 
-    return sorted(list(unique_years))
+    return sorted(unique_years)

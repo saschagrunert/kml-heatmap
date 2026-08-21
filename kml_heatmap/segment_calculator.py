@@ -5,21 +5,21 @@ then rolling window averages for smoothing. The windowing system uses binary
 search on sorted timestamps for O(log n) lookups.
 """
 
-from typing import Any
-from datetime import datetime
 from bisect import bisect_left, bisect_right
+from datetime import datetime
+from typing import Any
 
-from .geometry import haversine_distance
-from .helpers import parse_iso_timestamp
 from .constants import (
+    ALTITUDE_BIN_SIZE_FT,
+    CRUISE_ALTITUDE_THRESHOLD_FT,
     KM_TO_NAUTICAL_MILES,
     MAX_GROUNDSPEED_KNOTS,
     MIN_SEGMENT_TIME_SECONDS,
     SECONDS_PER_HOUR,
     SPEED_WINDOW_SECONDS,
-    CRUISE_ALTITUDE_THRESHOLD_FT,
-    ALTITUDE_BIN_SIZE_FT,
 )
+from .geometry import haversine_distance
+from .helpers import parse_iso_timestamp
 
 
 def calculate_path_distance(path: list[list[float]]) -> float:

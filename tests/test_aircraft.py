@@ -2,14 +2,15 @@
 
 import json
 import tempfile
+from pathlib import Path
 
 import pytest
-from pathlib import Path
-from kml_heatmap.aircraft import (
-    parse_aircraft_from_filename,
-    lookup_aircraft_model,
-)
+
 import kml_heatmap.aircraft as aircraft_mod
+from kml_heatmap.aircraft import (
+    lookup_aircraft_model,
+    parse_aircraft_from_filename,
+)
 
 
 class TestParseAircraftFromFilename:

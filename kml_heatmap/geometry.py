@@ -1,11 +1,11 @@
 """Geometric calculations and coordinate manipulations."""
 
-from math import radians, sin, cos, sqrt, atan2
+from math import atan2, cos, radians, sin, sqrt
 
 __all__ = [
     "EARTH_RADIUS_KM",
-    "haversine_distance",
     "extract_altitudes",
+    "haversine_distance",
 ]
 
 EARTH_RADIUS_KM = 6371

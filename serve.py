@@ -2,11 +2,11 @@
 """Simple HTTP server for serving the generated heatmap."""
 
 import http.server
-import socketserver
 import os
+import socketserver
 import sys
 
-PORT = int(os.environ.get("PORT", 8000))
+PORT = int(os.environ.get("PORT", "8000"))
 
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "")
 

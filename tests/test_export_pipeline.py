@@ -15,7 +15,7 @@ class TestBuildPathInfo:
             "timestamp": "2025-03-03T08:00:00Z",
             "end_timestamp": "2025-03-03T09:30:00Z",
         }
-        info, duration, dist_km, dist_nm = _build_path_info(
+        info, _duration, _dist_km, _dist_nm = _build_path_info(
             self._make_path(), metadata, 0, 2025
         )
         assert info["start_airport"] == "EDDS"
@@ -99,7 +99,7 @@ class TestProcessPathSegments:
 
     def test_generates_segments(self):
         path = self._make_path_with_timestamps()
-        segments, max_gs, min_gs, cruise_dist, cruise_time, hist = (
+        segments, _max_gs, _min_gs, _cruise_dist, _cruise_time, _hist = (
             _process_path_segments(path, 0, 10.0, 540.0)
         )
         assert len(segments) > 0

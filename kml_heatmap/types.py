@@ -109,11 +109,11 @@ class CacheEntry(TypedDict):
 
 
 __all__ = [
+    "AircraftInfo",
+    "AirportData",
+    "CacheEntry",
+    "PathInfo",
     "PathMetadata",
     "PathSegment",
-    "PathInfo",
-    "AirportData",
-    "AircraftInfo",
     "Statistics",
-    "CacheEntry",
 ]

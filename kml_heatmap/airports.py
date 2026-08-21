@@ -10,17 +10,17 @@ import re
 from collections.abc import Callable
 
 from .airport_lookup import extract_icao_codes_from_name, lookup_airport_coordinates
+from .constants import AIRPORT_DISTANCE_THRESHOLD_KM, AIRPORT_GRID_SIZE_DEGREES
 from .geometry import haversine_distance
 from .logger import logger
-from .constants import AIRPORT_DISTANCE_THRESHOLD_KM, AIRPORT_GRID_SIZE_DEGREES
 from .types import AirportData, PathMetadata
 
 __all__ = [
     "POINT_MARKERS",
-    "is_point_marker",
-    "extract_airport_name",
-    "deduplicate_airports",
     "AirportDeduplicator",
+    "deduplicate_airports",
+    "extract_airport_name",
+    "is_point_marker",
 ]
 
 # Marker types to filter out

@@ -1,7 +1,7 @@
 """Shared KML parsing utilities and helpers."""
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -9,18 +9,18 @@ from lxml import etree
 
 from .aircraft import parse_aircraft_from_filename
 from .airport_lookup import standardize_airport_name
-from .kml_parsers import validate_and_normalize_coordinate
-from .logger import logger
-from .types import PathMetadata
 from .constants import (
-    MID_FLIGHT_MIN_ALTITUDE_M,
-    MID_FLIGHT_MAX_VARIATION_M,
-    LANDING_MAX_VARIATION_M,
-    LANDING_MAX_ALTITUDE_M,
     LANDING_FALLBACK_ALTITUDE_M,
+    LANDING_MAX_ALTITUDE_M,
+    LANDING_MAX_VARIATION_M,
+    MID_FLIGHT_MAX_VARIATION_M,
+    MID_FLIGHT_MIN_ALTITUDE_M,
     PATH_SAMPLE_MAX_SIZE,
     PATH_SAMPLE_MIN_SIZE,
 )
+from .kml_parsers import validate_and_normalize_coordinate
+from .logger import logger
+from .types import PathMetadata
 
 # Pre-compiled regex patterns for performance
 DATE_PATTERN = re.compile(r"(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
@@ -35,7 +35,7 @@ def extract_year_from_timestamp(timestamp: str | None) -> int | None:
     try:
         # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z")
         if "T" in timestamp:
-            dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(timestamp)
             return dt.year
         # Try to extract year from date string (e.g., "03 Mar 2025" or "2025-03-03")
         year_match = YEAR_PATTERN.search(timestamp)
@@ -173,17 +173,16 @@ def extract_charterware_timestamp(description: str) -> str | None:
         try:
             dt_str = f"{day} {month_str} {year} {hour:02d}:{minute}"
             # Try short month name first (Jan, Feb, etc.)
-            dt = datetime.strptime(dt_str, "%d %b %Y %H:%M")
+            dt = datetime.strptime(dt_str, "%d %b %Y %H:%M").replace(tzinfo=UTC)
         except ValueError:
             # Try full month name (January, February, etc.)
             try:
-                dt = datetime.strptime(dt_str, "%d %B %Y %H:%M")
+                dt = datetime.strptime(dt_str, "%d %B %Y %H:%M").replace(tzinfo=UTC)
             except ValueError:
                 logger.debug(f"Failed to parse Charterware timestamp: {description}")
                 return None
 
-        # Return ISO format with UTC timezone
-        return dt.isoformat() + "Z"
+        return dt.isoformat()
 
     return None
 

@@ -8,24 +8,28 @@ from lxml import etree as ET
 from .constants import KML_NAMESPACES
 from .exceptions import KMLParseError
 from .logger import logger
-from .parser_cache import KML_CACHE_DIR
+from .parser_cache import (
+    KML_CACHE_DIR,
+    load_cached_parse,
+)
 from .parser_cache import (
     get_cache_key as _get_cache_key,
-    load_cached_parse,
+)
+from .parser_cache import (
     save_to_cache as _save_to_cache,
 )
 from .parser_common import (
-    find_xml_elements,
     extract_placemark_metadata,
+    find_xml_elements,
 )
-from .parser_standard import process_standard_coordinates
 from .parser_gx_track import process_gx_track
+from .parser_standard import process_standard_coordinates
 from .types import PathMetadata
 
 __all__ = [
     "get_cache_key",
-    "save_to_cache",
     "parse_kml_coordinates",
+    "save_to_cache",
 ]
 
 
@@ -66,7 +70,7 @@ def _parse_kml_tree(kml_file: str) -> ET._Element:
 
     except ET.ParseError as e:
         raise KMLParseError(f"XML parsing error: {e}", file_path=kml_file) from e
-    except (IOError, OSError) as e:
+    except OSError as e:
         raise KMLParseError(f"File I/O error: {e}", file_path=kml_file) from e
 
 
