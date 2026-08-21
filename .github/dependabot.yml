@@ -19,6 +19,8 @@ updates:
         patterns:
           - "pytest*"
           - "coverage"
+      linter:
+        patterns:
           - "ruff"
       core:
         patterns:
@@ -43,6 +45,8 @@ updates:
         update-types:
           - "minor"
           - "patch"
+        exclude-patterns:
+          - "typescript"
       testing:
         patterns:
           - "vitest*"
@@ -50,10 +54,12 @@ updates:
       build-tools:
         patterns:
           - "esbuild"
-          - "typescript"
           - "eslint*"
           - "@eslint/*"
           - "prettier"
+      typescript:
+        patterns:
+          - "typescript"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
