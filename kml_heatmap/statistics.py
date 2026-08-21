@@ -11,7 +11,7 @@ from .geometry import extract_altitudes
 from .helpers import format_flight_time, parse_iso_timestamp
 from .logger import logger
 from .segment_calculator import calculate_path_distance
-from .types import PathMetadata, Statistics
+from .types import FlightPath, FlightPathGroup, PathMetadata, Statistics
 
 __all__ = [
     "aggregate_aircraft_stats",
@@ -40,7 +40,7 @@ def extract_timestamps_from_path(path: list[list[Any]]) -> list[float]:
     return timestamps
 
 
-def calculate_basic_stats(valid_paths: list[list[list[float]]]) -> dict[str, float]:
+def calculate_basic_stats(valid_paths: FlightPathGroup) -> dict[str, float]:
     """Calculate basic distance and altitude gain statistics."""
     total_distance_km = 0.0
     total_gain_m = 0.0
@@ -61,7 +61,7 @@ def calculate_basic_stats(valid_paths: list[list[list[float]]]) -> dict[str, flo
 
 
 def calculate_altitude_stats(
-    valid_paths: list[list[list[float]]],
+    valid_paths: FlightPathGroup,
 ) -> dict[str, float | None]:
     """Calculate altitude statistics from valid paths."""
     # Collect all altitudes
@@ -86,7 +86,7 @@ def calculate_altitude_stats(
     }
 
 
-def calculate_flight_time(valid_paths: list[list[list[float]]]) -> dict[str, Any]:
+def calculate_flight_time(valid_paths: FlightPathGroup) -> dict[str, Any]:
     """Calculate total flight time from path timestamps."""
     total_seconds = 0.0
     paths_with_timestamps = 0
@@ -148,7 +148,7 @@ def _build_aircraft_flights_map(
 
 
 def _calculate_aircraft_flight_times(
-    all_path_groups: list[list[list[float]]],
+    all_path_groups: FlightPathGroup,
     path_to_aircraft: dict[int, str],
     aircraft_flights: dict[str, dict[str, Any]],
 ) -> None:
@@ -200,11 +200,13 @@ def _create_aircraft_list_with_models(
     ):
         full_model = lookup_aircraft_model(reg, aircraft_file)
         if full_model:
-            logger.info(f"  ✓ {reg}: {full_model}")
+            logger.info("  ✓ %s: %s", reg, full_model)
         else:
             full_model = info["type"]  # Fallback to basic type if lookup fails
             if full_model:
-                logger.info(f"  ⚠ {reg}: {full_model} (lookup failed, using KML type)")
+                logger.info(
+                    "  ⚠ %s: %s (lookup failed, using KML type)", reg, full_model
+                )
 
         flight_time_str = format_flight_time(info["flight_time_seconds"])
 
@@ -225,7 +227,7 @@ def _create_aircraft_list_with_models(
 
 def aggregate_aircraft_stats(
     all_path_metadata: list[PathMetadata],
-    all_path_groups: list[list[list[float]]],
+    all_path_groups: FlightPathGroup,
     aircraft_file: Path | None = None,
 ) -> dict[str, Any]:
     """Aggregate aircraft statistics from metadata and paths."""
@@ -250,8 +252,8 @@ def aggregate_aircraft_stats(
 
 
 def calculate_statistics(
-    all_coordinates: list[list[float]],
-    all_path_groups: list[list[list[float]]],
+    all_coordinates: FlightPath,
+    all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata] | None = None,
     aircraft_file: Path | None = None,
 ) -> Statistics:
@@ -319,8 +321,9 @@ def calculate_statistics(
     # Debug output
     if time_stats["paths_with_timestamps"] > 0:
         logger.debug(
-            f"Calculated flight time from {time_stats['paths_with_timestamps']}/{len(valid_paths)} "
-            f"paths with timestamps"
+            "Calculated flight time from %d/%d paths with timestamps",
+            time_stats["paths_with_timestamps"],
+            len(valid_paths),
         )
 
     # Aggregate aircraft statistics

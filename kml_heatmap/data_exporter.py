@@ -30,6 +30,8 @@ from .geometry import extract_altitudes
 from .logger import logger
 from .types import (
     AirportData,
+    FlightPath,
+    FlightPathGroup,
     PathInfo,
     PathMetadata,
     PathSegment,
@@ -40,8 +42,8 @@ from .types import (
 def process_year_data(
     year: str,
     year_path_indices: list[int],
-    all_coordinates: list[list[float]],
-    all_path_groups: list[list[list[Any]]],
+    all_coordinates: FlightPath,
+    all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
     min_alt_m: float,
     max_alt_m: float,
@@ -50,7 +52,9 @@ def process_year_data(
 ) -> dict[str, Any]:
     """Process a single year's data and export to files."""
     if not quiet:
-        logger.info(f"\n  Processing year {year} ({len(year_path_indices)} paths)...")
+        logger.info(
+            "\n  Processing year %s (%d paths)...", year, len(year_path_indices)
+        )
 
     year_max_groundspeed = 0.0
     year_min_groundspeed = float("inf")
@@ -63,7 +67,7 @@ def process_year_data(
         len(all_path_groups[path_idx]) for path_idx in year_path_indices
     )
     if not quiet:
-        logger.info(f"    Total points for {year}: {year_total_points:,}")
+        logger.info("    Total points for %s: %s", year, f"{year_total_points:,}")
 
     full_paths = []
     for path_idx in year_path_indices:
@@ -145,7 +149,9 @@ def process_year_data(
 
     if not quiet:
         logger.info(
-            f"    ✓ Full resolution: {len(full_coords):,} points ({file_size / 1024:.1f} KB)"
+            "    ✓ Full resolution: %s points (%.1f KB)",
+            f"{len(full_coords):,}",
+            file_size / 1024,
         )
 
     return {
@@ -163,7 +169,7 @@ def process_year_data(
 
 
 def _calculate_altitude_range(
-    all_path_groups: list[list[list[float]]],
+    all_path_groups: FlightPathGroup,
 ) -> tuple[float, float]:
     """Calculate min/max altitude across all path groups."""
     if all_path_groups:
@@ -192,8 +198,8 @@ def _group_paths_by_year(
 
 def _process_years_parallel(
     paths_by_year: dict[str, list[int]],
-    all_coordinates: list[list[float]],
-    all_path_groups: list[list[list[float]]],
+    all_coordinates: FlightPath,
+    all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
     min_alt_m: float,
     max_alt_m: float,
@@ -341,8 +347,8 @@ def _finalize_stats(
 
 
 def export_all_data(
-    all_coordinates: list[list[float]],
-    all_path_groups: list[list[list[float]]],
+    all_coordinates: FlightPath,
+    all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
     unique_airports: list[AirportData],
     stats: Statistics,
@@ -351,7 +357,7 @@ def export_all_data(
 ) -> dict[str, str]:
     """Orchestrate the full data export pipeline."""
     if Path(output_dir).exists():
-        logger.info(f"\n  Cleaning up output directory: {output_dir}")
+        logger.info("\n  Cleaning up output directory: %s", output_dir)
         shutil.rmtree(output_dir)
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -363,9 +369,9 @@ def export_all_data(
     min_alt_m, max_alt_m = _calculate_altitude_range(all_path_groups)
 
     paths_by_year = _group_paths_by_year(all_path_metadata)
-    logger.info(f"\n  Splitting data by year: {sorted(paths_by_year.keys())}")
+    logger.info("\n  Splitting data by year: %s", sorted(paths_by_year.keys()))
 
-    logger.info(f"\n  Processing {len(paths_by_year)} year(s) in parallel...")
+    logger.info("\n  Processing %d year(s) in parallel...", len(paths_by_year))
     year_results = _process_years_parallel(
         paths_by_year,
         all_coordinates,
@@ -419,6 +425,6 @@ def export_all_data(
     files["metadata"] = meta_file
 
     total_size = sum(Path(f).stat().st_size for f in files.values())
-    logger.info(f"  Total data size: {total_size / 1024:.1f} KB")
+    logger.info("  Total data size: %.1f KB", total_size / 1024)
 
     return files

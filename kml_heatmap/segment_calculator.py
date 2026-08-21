@@ -10,8 +10,6 @@ from datetime import datetime
 from typing import Any
 
 from .constants import (
-    ALTITUDE_BIN_SIZE_FT,
-    CRUISE_ALTITUDE_THRESHOLD_FT,
     KM_TO_NAUTICAL_MILES,
     MAX_GROUNDSPEED_KNOTS,
     MIN_SEGMENT_TIME_SECONDS,
@@ -20,9 +18,10 @@ from .constants import (
 )
 from .geometry import haversine_distance
 from .helpers import parse_iso_timestamp
+from .types import FlightPath
 
 
-def calculate_path_distance(path: list[list[float]]) -> float:
+def calculate_path_distance(path: FlightPath) -> float:
     """Calculate total distance along a path in kilometers."""
     if len(path) < 2:
         return 0.0
@@ -178,29 +177,3 @@ def calculate_fallback_groundspeed(
         return calculated_speed
 
     return 0.0
-
-
-def update_cruise_statistics(
-    altitude_agl_ft: float,
-    window_time: float,
-    window_distance: float,
-    cruise_stats: dict[str, Any],
-) -> None:
-    """Update cruise speed and altitude statistics."""
-    if altitude_agl_ft <= CRUISE_ALTITUDE_THRESHOLD_FT:
-        return
-
-    if window_time < MIN_SEGMENT_TIME_SECONDS:
-        return
-
-    # Update cruise speed totals
-    cruise_stats["total_distance"] += window_distance * KM_TO_NAUTICAL_MILES
-    cruise_stats["total_time"] += window_time
-
-    # Update altitude histogram
-    altitude_bin_ft = int(altitude_agl_ft / ALTITUDE_BIN_SIZE_FT) * ALTITUDE_BIN_SIZE_FT
-
-    if altitude_bin_ft not in cruise_stats["altitude_histogram"]:
-        cruise_stats["altitude_histogram"][altitude_bin_ft] = 0
-
-    cruise_stats["altitude_histogram"][altitude_bin_ft] += window_time

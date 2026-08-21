@@ -8,12 +8,68 @@ from unittest.mock import patch
 
 from kml_heatmap.constants import HEATMAP_GRADIENT
 from kml_heatmap.renderer import (
+    _escape_js_string,
     _package_assets,
     _parse_with_error_handling,
     _render_html,
     load_template,
     minify_html,
 )
+
+
+class TestEscapeJsString:
+    """Tests for _escape_js_string function."""
+
+    def test_plain_string_unchanged(self):
+        """Test that a plain alphanumeric string passes through."""
+        assert _escape_js_string("hello") == "hello"
+
+    def test_escapes_double_quotes(self):
+        """Test that double quotes are escaped."""
+        result = _escape_js_string('say "hi"')
+        assert '\\"' in result
+        assert result == 'say \\"hi\\"'
+
+    def test_escapes_single_quotes(self):
+        """Test that single quotes are escaped for embedding in JS single-quoted strings."""
+        result = _escape_js_string("it's")
+        assert "\\'" in result
+
+    def test_escapes_backslash(self):
+        """Test that backslashes are escaped."""
+        result = _escape_js_string("path\\to\\file")
+        assert "\\\\" in result
+
+    def test_escapes_newline(self):
+        """Test that newlines are escaped."""
+        result = _escape_js_string("line1\nline2")
+        assert "\\n" in result
+        assert "\n" not in result
+
+    def test_escapes_tab(self):
+        """Test that tabs are escaped."""
+        result = _escape_js_string("col1\tcol2")
+        assert "\\t" in result
+
+    def test_escapes_html_angle_brackets(self):
+        """Test that angle brackets are preserved (not HTML-escaped)."""
+        result = _escape_js_string("<script>alert(1)</script>")
+        assert "<script>" in result
+
+    def test_xss_payload_neutralized(self):
+        """Test that XSS payloads in API keys are safely escaped."""
+        result = _escape_js_string("'; alert('xss'); //")
+        assert "\\'" in result
+        assert "alert" in result
+
+    def test_empty_string(self):
+        """Test that empty string returns empty."""
+        assert _escape_js_string("") == ""
+
+    def test_unicode_preserved(self):
+        """Test that unicode characters are handled."""
+        result = _escape_js_string("Flughafen München")
+        assert "München" in result or "M\\u00fc" in result
 
 
 class TestLoadTemplate:

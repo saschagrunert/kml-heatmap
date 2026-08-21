@@ -13,7 +13,7 @@ from .airport_lookup import extract_icao_codes_from_name, lookup_airport_coordin
 from .constants import AIRPORT_DISTANCE_THRESHOLD_KM, AIRPORT_GRID_SIZE_DEGREES
 from .geometry import haversine_distance
 from .logger import logger
-from .types import AirportData, PathMetadata
+from .types import AirportData, FlightPath, FlightPathGroup, PathMetadata
 
 __all__ = [
     "POINT_MARKERS",
@@ -132,9 +132,13 @@ class AirportDeduplicator:
                 if coords:
                     corrected_lat, corrected_lon, _ = coords
                     logger.debug(
-                        f"Using OurAirports coordinates for {icao_code}: "
-                        f"({corrected_lat:.6f}, {corrected_lon:.6f}) "
-                        f"instead of KML ({lat:.6f}, {lon:.6f})"
+                        "Using OurAirports coordinates for %s: "
+                        "(%.6f, %.6f) instead of KML (%.6f, %.6f)",
+                        icao_code,
+                        corrected_lat,
+                        corrected_lon,
+                        lat,
+                        lon,
                     )
 
         # Check for duplicates using corrected coordinates
@@ -186,9 +190,9 @@ class AirportDeduplicator:
 
 def deduplicate_airports(
     all_path_metadata: list[PathMetadata],
-    all_path_groups: list[list[list[float]]],
-    is_mid_flight_start_func: Callable[[list[list[float]], float], bool],
-    is_valid_landing_func: Callable[[list[list[float]], float], bool],
+    all_path_groups: FlightPathGroup,
+    is_mid_flight_start_func: Callable[[FlightPath, float], bool],
+    is_valid_landing_func: Callable[[FlightPath, float], bool],
 ) -> list[AirportData]:
     """Deduplicate airports by location using spatial grid indexing."""
     deduplicator = AirportDeduplicator()
@@ -203,13 +207,13 @@ def deduplicate_airports(
 
         # Skip point markers - they don't contain airport info
         if is_point_marker(airport_name):
-            logger.debug(f"Skipping point marker '{airport_name}'")
+            logger.debug("Skipping point marker '%s'", airport_name)
             continue
 
         # Skip mid-flight starts
         path = all_path_groups[idx] if idx < len(all_path_groups) else []
         if is_mid_flight_start_func(path, start_alt):
-            logger.debug(f"Skipping mid-flight start '{airport_name}'")
+            logger.debug("Skipping mid-flight start '%s'", airport_name)
             continue
 
         # Add or update airport
@@ -239,7 +243,7 @@ def deduplicate_airports(
         # Check for mid-flight starts
         starts_at_high_altitude = is_mid_flight_start_func(path, start_alt)
         if starts_at_high_altitude:
-            logger.debug(f"Path '{route_name}' detected as mid-flight start")
+            logger.debug("Path '%s' detected as mid-flight start", route_name)
 
         # Process departure airport (if not high altitude start and is a route)
         if not starts_at_high_altitude and " - " in route_name:

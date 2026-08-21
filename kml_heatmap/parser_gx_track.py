@@ -12,7 +12,7 @@ from .parser_common import (
     extract_placemark_metadata,
     find_xml_elements,
 )
-from .types import PathMetadata
+from .types import FlightPath, FlightPathGroup, PathMetadata
 
 
 def _extract_gx_track_metadata(
@@ -29,12 +29,13 @@ def _extract_gx_track_metadata(
             meta = extract_placemark_metadata(placemark, namespaces, kml_file)
 
             if meta["timestamp"]:
-                logger.debug(f"Found gx:Track start timestamp: {meta['timestamp']}")
+                logger.debug("Found gx:Track start timestamp: %s", meta["timestamp"])
             if meta["end_timestamp"]:
-                logger.debug(f"Found gx:Track end timestamp: {meta['end_timestamp']}")
+                logger.debug("Found gx:Track end timestamp: %s", meta["end_timestamp"])
             if meta["timestamp"] is None and meta["airport_name"]:
                 logger.debug(
-                    f"No timestamp found for gx:Track with name: {meta['airport_name']}"
+                    "No timestamp found for gx:Track with name: %s",
+                    meta["airport_name"],
                 )
 
             return meta
@@ -64,7 +65,7 @@ def _parse_gx_coordinates(
     gx_coords: list[etree._Element],
     when_elems: list[etree._Element],
     kml_file: str,
-    coordinates: list[list[float]],
+    coordinates: FlightPath,
 ) -> list[list[Any]]:
     """Parse gx:coord elements into path coordinates."""
     gx_path = []
@@ -110,7 +111,7 @@ def _parse_gx_coordinates(
                 else:
                     gx_path.append([lat, lon, alt])
         except ValueError:
-            logger.debug(f"Failed to parse gx:coord: {coord_text}")
+            logger.debug("Failed to parse gx:coord: %s", coord_text)
             continue
 
     return gx_path
@@ -121,8 +122,8 @@ def process_gx_track(
     placemarks: list[etree._Element],
     namespaces: dict[str, str],
     kml_file: str,
-    coordinates: list[list[float]],
-    path_groups: list[list[list[float]]],
+    coordinates: FlightPath,
+    path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
 ) -> None:
     """Process Google Earth Track (gx:coord) elements."""
@@ -150,4 +151,4 @@ def process_gx_track(
         )
         path_metadata.append(meta)
 
-    logger.debug(f"Parsed {len(gx_coords)} gx:coord elements into 1 track")
+    logger.debug("Parsed %d gx:coord elements into 1 track", len(gx_coords))

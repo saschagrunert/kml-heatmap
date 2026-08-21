@@ -461,5 +461,89 @@ describe("StateManager", () => {
 
       expect(loaded).toBeNull();
     });
+
+    it("rejects non-finite zoom from URL", () => {
+      window.KMLHeatmap.parseUrlParams = vi.fn(() => ({
+        zoom: Infinity,
+        selectedYear: "2025",
+      }));
+
+      Object.defineProperty(window, "location", {
+        value: { pathname: "/", search: "?zoom=Infinity&year=2025" },
+        writable: true,
+      });
+
+      const loaded = stateManager.loadState();
+      expect(loaded).not.toBeNull();
+      expect(loaded).not.toHaveProperty("zoom");
+      expect(loaded!.selectedYear).toBe("2025");
+    });
+
+    it("rejects NaN center coordinates from URL", () => {
+      window.KMLHeatmap.parseUrlParams = vi.fn(() => ({
+        center: { lat: NaN, lng: 8.0 },
+        selectedYear: "2025",
+      }));
+
+      Object.defineProperty(window, "location", {
+        value: { pathname: "/", search: "?lat=NaN&lng=8&year=2025" },
+        writable: true,
+      });
+
+      const loaded = stateManager.loadState();
+      expect(loaded).not.toBeNull();
+      expect(loaded).not.toHaveProperty("center");
+    });
+
+    it("filters non-numeric path IDs from URL", () => {
+      window.KMLHeatmap.parseUrlParams = vi.fn(() => ({
+        selectedPathIds: [1, "bad", NaN, 3, Infinity],
+        selectedYear: "all",
+      }));
+
+      Object.defineProperty(window, "location", {
+        value: { pathname: "/", search: "?paths=1,bad,NaN,3,Inf" },
+        writable: true,
+      });
+
+      const loaded = stateManager.loadState();
+      expect(loaded).not.toBeNull();
+      expect(loaded!.selectedPathIds).toEqual([1, 3]);
+    });
+
+    it("validates boolean fields from URL", () => {
+      window.KMLHeatmap.parseUrlParams = vi.fn(() => ({
+        heatmapVisible: true,
+        altitudeVisible: "yes",
+        statsPanelVisible: false,
+        wrappedVisible: true,
+      }));
+
+      Object.defineProperty(window, "location", {
+        value: { pathname: "/", search: "?heatmap=1&altitude=yes" },
+        writable: true,
+      });
+
+      const loaded = stateManager.loadState();
+      expect(loaded).not.toBeNull();
+      expect(loaded!.heatmapVisible).toBe(true);
+      expect(loaded).not.toHaveProperty("altitudeVisible");
+      expect(loaded!.statsPanelVisible).toBe(false);
+      expect(loaded!.wrappedVisible).toBe(true);
+    });
+
+    it("returns null when URL state has no valid fields", () => {
+      window.KMLHeatmap.parseUrlParams = vi.fn(() => ({
+        unknownField: "value",
+      }));
+
+      Object.defineProperty(window, "location", {
+        value: { pathname: "/", search: "?unknown=value" },
+        writable: true,
+      });
+
+      const loaded = stateManager.loadState();
+      expect(loaded).toBeNull();
+    });
   });
 });

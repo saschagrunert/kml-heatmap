@@ -27,7 +27,7 @@ def load_aircraft_data(aircraft_file: Path) -> dict[str, str]:
         _aircraft_cache_path = aircraft_file
         return data
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"Failed to read aircraft data from {aircraft_file}: {e}")
+        logger.warning("Failed to read aircraft data from %s: %s", aircraft_file, e)
         return {}
 
 

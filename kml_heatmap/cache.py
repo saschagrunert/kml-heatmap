@@ -27,7 +27,7 @@ def atomic_json_write(path: Path, data: Any, directory: Path) -> None:
             tmp_path = tmp.name
         os.replace(tmp_path, str(path))
     except OSError as e:
-        logger.debug(f"Failed to write cache file {path}: {e}")
+        logger.debug("Failed to write cache file %s: %s", path, e)
         if tmp_path:
             try:
                 os.unlink(tmp_path)

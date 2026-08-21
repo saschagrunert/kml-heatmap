@@ -109,7 +109,7 @@ def export_metadata(
 
     file_size = Path(meta_file).stat().st_size
 
-    logger.info(f"  ✓ Metadata: {file_size / 1024:.1f} KB")
+    logger.info("  ✓ Metadata: %.1f KB", file_size / 1024)
 
     return meta_file, file_size
 
