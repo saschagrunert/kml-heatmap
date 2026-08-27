@@ -1,0 +1,8 @@
+[allowlist]
+  description = "Global Allowlist"
+
+  paths = [
+    # Generated output containing public client-side tile API keys (CARTO, OpenAIP)
+    '''docs/map_config\.js$''',
+    '''docs/mapApp\.bundle\.js$''',
+  ]
