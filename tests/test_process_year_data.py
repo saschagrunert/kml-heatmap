@@ -893,8 +893,7 @@ class TestProcessYearData:
 
         # Should track both max and min across paths
         assert result["max_groundspeed"] >= result["min_groundspeed"]
-        if result["min_groundspeed"] != float("inf"):
-            assert result["min_groundspeed"] > 0
+        assert result["min_groundspeed"] >= 0
 
     def test_airport_name_without_separator(self, temp_output_dir):
         """Test handling of airport names without ' - ' separator."""

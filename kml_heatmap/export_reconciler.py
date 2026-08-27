@@ -1,6 +1,6 @@
 """Statistics reconciliation from exported segment data."""
 
-from .constants import FEET_TO_METERS, METERS_TO_FEET
+from .constants import CRUISE_ALTITUDE_THRESHOLD_FT, FEET_TO_METERS, METERS_TO_FEET
 from .geometry import haversine_distance
 from .helpers import format_flight_time
 from .types import PathInfo, PathSegment, Statistics
@@ -31,7 +31,15 @@ def _recalculate_stats_from_segments(
     stats["min_altitude_ft"] = float(min_alt_m) * METERS_TO_FEET
     stats["max_altitude_ft"] = float(max_alt_m) * METERS_TO_FEET
 
-    cruise_threshold = float(min_alt_m) * METERS_TO_FEET + 1000
+    # Compute per-path minimum altitude for AGL-based cruise detection,
+    # matching the per-path ground level approach in export_pipeline.py
+    path_min_alt_m: dict[int, float] = {}
+    for seg in segments:
+        pid = seg.get("path_id")
+        if pid is not None:
+            alt = float(seg.get("altitude_m") or 0)
+            if pid not in path_min_alt_m or alt < path_min_alt_m[pid]:
+                path_min_alt_m[pid] = alt
 
     total_gain_m = 0.0
     prev_alt = None
@@ -44,7 +52,6 @@ def _recalculate_stats_from_segments(
 
     for seg in segments:
         alt_m = float(seg.get("altitude_m") or 0)
-        alt_ft = float(seg.get("altitude_ft") or 0)
         gs = float(seg.get("groundspeed_knots") or 0)
 
         if prev_alt is not None and alt_m > prev_alt:
@@ -55,13 +62,16 @@ def _recalculate_stats_from_segments(
             groundspeed_sum += gs
             groundspeed_count += 1
 
-        if alt_ft > cruise_threshold:
+        pid = seg.get("path_id")
+        ground_m = path_min_alt_m.get(pid, 0.0) if pid is not None else 0.0
+        altitude_agl_ft = (alt_m - ground_m) * METERS_TO_FEET
+        if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
             if gs > 0:
                 cruise_speed_sum += gs
                 cruise_speed_count += 1
             seg_time = seg.get("time")
             if seg_time is not None:
-                bin_alt = round(alt_ft / 100) * 100
+                bin_alt = round(altitude_agl_ft / 100) * 100
                 altitude_bins[bin_alt] = altitude_bins.get(bin_alt, 0) + 1
 
         seg_time = seg.get("time")

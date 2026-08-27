@@ -356,11 +356,15 @@ def export_all_data(
     strip_timestamps: bool = False,
 ) -> dict[str, str]:
     """Orchestrate the full data export pipeline."""
-    if Path(output_dir).exists():
-        logger.info("\n  Cleaning up output directory: %s", output_dir)
-        shutil.rmtree(output_dir)
+    output_path = Path(output_dir).resolve()
+    if output_path == Path("/") or output_path == Path.home():
+        raise ValueError(f"Refusing to use dangerous output directory: {output_dir}")
 
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        logger.info("\n  Cleaning up output directory: %s", output_dir)
+        shutil.rmtree(output_path)
+
+    output_path.mkdir(parents=True, exist_ok=True)
 
     logger.info("\n  Exporting data to JS files...")
     if strip_timestamps:

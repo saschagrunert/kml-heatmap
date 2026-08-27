@@ -211,6 +211,9 @@ def _process_path_segments(
                 segment_data["time"] = round(current_relative_time, 1)
             segments.append(segment_data)
 
+    if min_groundspeed == float("inf"):
+        min_groundspeed = 0.0
+
     return (
         segments,
         max_groundspeed,
