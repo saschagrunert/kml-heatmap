@@ -2,7 +2,9 @@
 
 from typing import NotRequired, TypedDict
 
-FlightPath = list[list[float]]
+Coordinate = list[float]
+
+FlightPath = list[Coordinate]
 
 FlightPathGroup = list[FlightPath]
 
@@ -116,6 +118,7 @@ __all__ = [
     "AircraftInfo",
     "AirportData",
     "CacheEntry",
+    "Coordinate",
     "FlightPath",
     "FlightPathGroup",
     "PathInfo",

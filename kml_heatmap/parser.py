@@ -161,63 +161,57 @@ def parse_kml_coordinates(
     path_groups = []
     path_metadata = []
 
-    try:
-        # Parse KML file
-        root = _parse_kml_tree(kml_file)
+    # Parse KML file
+    root = _parse_kml_tree(kml_file)
 
-        namespaces = KML_NAMESPACES
+    namespaces = KML_NAMESPACES
 
-        # Extract elements
-        coord_elements, gx_coords, placemarks = _extract_kml_elements(root, namespaces)
+    # Extract elements
+    coord_elements, gx_coords, placemarks = _extract_kml_elements(root, namespaces)
 
-        # Build metadata mapping
-        coord_to_metadata = _build_coord_metadata_map(placemarks, namespaces, kml_file)
+    # Build metadata mapping
+    coord_to_metadata = _build_coord_metadata_map(placemarks, namespaces, kml_file)
 
-        # Process standard KML coordinates
-        process_standard_coordinates(
-            coord_elements,
-            coord_to_metadata,
-            kml_file,
-            coordinates,
-            path_groups,
-            path_metadata,
+    # Process standard KML coordinates
+    process_standard_coordinates(
+        coord_elements,
+        coord_to_metadata,
+        kml_file,
+        coordinates,
+        path_groups,
+        path_metadata,
+    )
+
+    # Process Google Earth Track (gx:coord) elements
+    process_gx_track(
+        gx_coords,
+        placemarks,
+        namespaces,
+        kml_file,
+        coordinates,
+        path_groups,
+        path_metadata,
+    )
+
+    # Log results
+    total_alt_points = sum(len(path) for path in path_groups)
+    logger.info("✓ Loaded %d points from %s", len(coordinates), Path(kml_file).name)
+    if path_groups:
+        logger.info(
+            "  (%d points have altitude data in %d path(s))",
+            total_alt_points,
+            len(path_groups),
         )
 
-        # Process Google Earth Track (gx:coord) elements
-        process_gx_track(
-            gx_coords,
-            placemarks,
-            namespaces,
-            kml_file,
-            coordinates,
-            path_groups,
-            path_metadata,
-        )
+    if len(coordinates) == 0:
+        logger.warning("No valid coordinates found!")
+        logger.warning("This could mean:")
+        logger.warning("  - The KML file uses a different structure")
+        logger.warning("  - The coordinates are in an unexpected format")
+        logger.warning("  - Try running with --debug flag for more information")
 
-        # Log results
-        total_alt_points = sum(len(path) for path in path_groups)
-        logger.info("✓ Loaded %d points from %s", len(coordinates), Path(kml_file).name)
-        if path_groups:
-            logger.info(
-                "  (%d points have altitude data in %d path(s))",
-                total_alt_points,
-                len(path_groups),
-            )
+    # Save to cache
+    if cache_path:
+        save_to_cache(cache_path, coordinates, path_groups, path_metadata)
 
-        if len(coordinates) == 0:
-            logger.warning("No valid coordinates found!")
-            logger.warning("This could mean:")
-            logger.warning("  - The KML file uses a different structure")
-            logger.warning("  - The coordinates are in an unexpected format")
-            logger.warning("  - Try running with --debug flag for more information")
-
-        # Save to cache
-        if cache_path:
-            save_to_cache(cache_path, coordinates, path_groups, path_metadata)
-
-        return coordinates, path_groups, path_metadata
-
-    except KMLParseError as e:
-        logger.error("KML parsing error in %s: %s", kml_file, e)
-        logger.debug("Stack trace:", exc_info=True)
-        return [], [], []
+    return coordinates, path_groups, path_metadata

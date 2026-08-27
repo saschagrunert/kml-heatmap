@@ -294,6 +294,7 @@ class TestCacheFunctions:
 
     def test_get_cache_key_cleanup_old_caches(self):
         """Test that old cache files are cleaned up."""
+        import hashlib
         import tempfile
         from pathlib import Path
 
@@ -302,12 +303,15 @@ class TestCacheFunctions:
             kml_file = Path(tmpdir) / "test.kml"
             kml_file.write_text("<kml></kml>")
 
-            # Create some old cache files
+            # Create some old cache files with the correct hash prefix
             cache_dir = Path(tmpdir) / ".kml_cache"
             cache_dir.mkdir(exist_ok=True)
 
-            old_cache1 = cache_dir / "test_old1.json"
-            old_cache2 = cache_dir / "test_old2.json"
+            path_hash = hashlib.sha256(str(kml_file.resolve()).encode()).hexdigest()[
+                :12
+            ]
+            old_cache1 = cache_dir / f"test_{path_hash}_1111111.json"
+            old_cache2 = cache_dir / f"test_{path_hash}_2222222.json"
             old_cache1.write_text("{}")
             old_cache2.write_text("{}")
 
@@ -681,7 +685,8 @@ class TestParseKmlCoordinates:
                 cache_path.unlink()
 
     def test_parse_invalid_xml(self):
-        """Test parsing invalid XML file."""
+        """Test parsing invalid XML file raises KMLParseError."""
+        from kml_heatmap.exceptions import KMLParseError
         from kml_heatmap.parser import parse_kml_coordinates
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".kml", delete=False) as f:
@@ -689,10 +694,8 @@ class TestParseKmlCoordinates:
             temp_path = f.name
 
         try:
-            coords, paths, metadata = parse_kml_coordinates(temp_path)
-            assert len(coords) == 0
-            assert len(paths) == 0
-            assert len(metadata) == 0
+            with pytest.raises(KMLParseError):
+                parse_kml_coordinates(temp_path)
         finally:
             os.unlink(temp_path)
 

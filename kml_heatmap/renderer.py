@@ -238,7 +238,7 @@ def _generate_map_config(
     data_dir_name: str,
 ) -> None:
     """Generate minified map_config.js from template."""
-    stadia_api_key = os.environ.get("STADIA_API_KEY", "")
+    carto_api_key = os.environ.get("CARTO_API_KEY", "")
     openaip_api_key = os.environ.get("OPENAIP_API_KEY", "")
 
     map_config_template_path = templates_dir / "map_config_template.js"
@@ -248,7 +248,7 @@ def _generate_map_config(
         map_config_raw = f.read()
 
     config_vars = {
-        "stadia_api_key": _escape_js_string(stadia_api_key),
+        "carto_api_key": _escape_js_string(carto_api_key),
         "openaip_api_key": _escape_js_string(openaip_api_key),
         "data_dir_name": _escape_js_string(data_dir_name),
         "center_lat": str(bounds["center_lat"]),

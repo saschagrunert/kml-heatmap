@@ -34,86 +34,59 @@ export interface LayerStats {
   speedRange: Range;
 }
 
-/**
- * Calculate altitude range from segments
- * @param segments - Array of segments
- * @param selectedPathIds - Set of selected path IDs (optional)
- * @returns Altitude range in feet
- */
+function calculateRange(
+  segments: PathSegment[],
+  getValue: (seg: PathSegment) => number | undefined,
+  filterValue: (v: number) => boolean,
+  defaultRange: Range,
+  selectedPathIds: Set<number> | null = null
+): Range {
+  let segmentsToUse = segments;
+  if (selectedPathIds && selectedPathIds.size > 0) {
+    segmentsToUse = segments.filter((seg) => selectedPathIds.has(seg.path_id));
+  }
+  if (segmentsToUse.length === 0) return defaultRange;
+
+  const values = segmentsToUse
+    .map(getValue)
+    .filter((v): v is number => v !== undefined && filterValue(v));
+
+  if (values.length === 0) return defaultRange;
+
+  let min = values[0] ?? 0;
+  let max = values[0] ?? 0;
+  for (let i = 1; i < values.length; i++) {
+    const v = values[i] ?? 0;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return { min, max };
+}
+
 export function calculateAltitudeRange(
   segments: PathSegment[],
   selectedPathIds: Set<number> | null = null
 ): Range {
-  let segmentsToUse = segments;
-
-  // If paths are selected, use only selected segments
-  if (selectedPathIds && selectedPathIds.size > 0) {
-    segmentsToUse = segments.filter((seg) => selectedPathIds.has(seg.path_id));
-  }
-
-  if (segmentsToUse.length === 0) {
-    return { min: 0, max: 10000 };
-  }
-
-  const altitudes = segmentsToUse
-    .map((s) => s.altitude_ft)
-    .filter((a): a is number => a !== undefined);
-
-  if (altitudes.length === 0) {
-    return { min: 0, max: 10000 };
-  }
-
-  // Use iterative approach to avoid stack overflow with large arrays
-  let min = altitudes[0] ?? 0;
-  let max = altitudes[0] ?? 0;
-  for (let i = 1; i < altitudes.length; i++) {
-    const alt = altitudes[i] ?? 0;
-    if (alt < min) min = alt;
-    if (alt > max) max = alt;
-  }
-
-  return { min, max };
+  return calculateRange(
+    segments,
+    (s) => s.altitude_ft,
+    () => true,
+    { min: 0, max: 10000 },
+    selectedPathIds
+  );
 }
 
-/**
- * Calculate airspeed range from segments
- * @param segments - Array of segments
- * @param selectedPathIds - Set of selected path IDs (optional)
- * @returns Speed range in knots
- */
 export function calculateAirspeedRange(
   segments: PathSegment[],
   selectedPathIds: Set<number> | null = null
 ): Range {
-  let segmentsToUse = segments;
-
-  // If paths are selected, use only selected segments
-  if (selectedPathIds && selectedPathIds.size > 0) {
-    segmentsToUse = segments.filter((seg) => selectedPathIds.has(seg.path_id));
-  }
-
-  if (segmentsToUse.length === 0) {
-    return { min: 0, max: 200 };
-  }
-
-  const speeds = segmentsToUse
-    .map((s) => s.groundspeed_knots)
-    .filter((s): s is number => s !== undefined && s > 0);
-
-  if (speeds.length === 0) {
-    return { min: 0, max: 200 };
-  }
-
-  // Use iterative approach to avoid stack overflow with large arrays
-  let min = speeds[0] ?? 0;
-  let max = speeds[0] ?? 0;
-  for (let i = 1; i < speeds.length; i++) {
-    const speed = speeds[i] ?? 0;
-    if (speed < min) min = speed;
-    if (speed > max) max = speed;
-  }
-
-  return { min, max };
+  return calculateRange(
+    segments,
+    (s) => s.groundspeed_knots,
+    (v) => v > 0,
+    { min: 0, max: 200 },
+    selectedPathIds
+  );
 }
 
 /**

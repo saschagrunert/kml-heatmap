@@ -7,6 +7,7 @@ import socketserver
 import sys
 
 PORT = int(os.environ.get("PORT", "8000"))
+BIND_HOST = os.environ.get("BIND_HOST", "0.0.0.0")
 
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "")
 
@@ -25,7 +26,7 @@ print(f"Starting HTTP server on port {PORT}...")
 print(f"Serving files from: {os.getcwd()}")
 print(f"Open http://localhost:{PORT}/ in your browser")
 
-with socketserver.TCPServer(("", PORT), CORSHTTPRequestHandler) as httpd:
+with socketserver.TCPServer((BIND_HOST, PORT), CORSHTTPRequestHandler) as httpd:
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

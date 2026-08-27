@@ -35,7 +35,7 @@ import type {
 export interface MapConfig {
   center: [number, number];
   bounds: [[number, number], [number, number]];
-  stadiaApiKey?: string;
+  cartoApiKey?: string;
   openaipApiKey?: string;
   dataDir: string;
 }
@@ -372,23 +372,12 @@ export class MapApp {
       preferCanvas: true,
     });
 
-    if (this.config.stadiaApiKey) {
-      L.tileLayer(
-        "https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png?api_key=" +
-          this.config.stadiaApiKey,
-        {
-          attribution:
-            '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>',
-        }
-      ).addTo(this.map);
-    } else {
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-        {
-          attribution: "&copy; OpenStreetMap contributors, &copy; CARTO",
-        }
-      ).addTo(this.map);
-    }
+    const cartoUrl = this.config.cartoApiKey
+      ? `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${this.config.cartoApiKey}`
+      : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+    L.tileLayer(cartoUrl, {
+      attribution: "&copy; OpenStreetMap contributors, &copy; CARTO",
+    }).addTo(this.map);
 
     if (this.savedState && this.savedState.center && this.savedState.zoom) {
       this.map.setView(
@@ -471,13 +460,15 @@ export class MapApp {
   }
 
   private setupEventHandlers(): void {
-    this.map!.on("moveend", () => this.stateManager.scheduleSave());
-    this.map!.on("zoomend", () => {
+    if (!this.map) return;
+
+    this.map.on("moveend", () => this.stateManager.scheduleSave());
+    this.map.on("zoomend", () => {
       this.stateManager.scheduleSave();
       this.airportManager.updateAirportMarkerSizes();
     });
 
-    this.map!.on("click", (_e: L.LeafletMouseEvent) => {
+    this.map.on("click", (_e: L.LeafletMouseEvent) => {
       if (
         this.replayManager.state.active &&
         this.replayManager.state.airplaneMarker &&
@@ -556,5 +547,12 @@ if (typeof window !== "undefined") {
 
 // Auto-initialize when module loads
 if (typeof window !== "undefined" && window.MAP_CONFIG && window.initMapApp) {
-  window.initMapApp(window.MAP_CONFIG).catch(logError);
+  window.initMapApp(window.MAP_CONFIG).catch((err) => {
+    logError(err);
+    const mapEl = document.getElementById("map");
+    if (mapEl) {
+      mapEl.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4444;font-size:16px;padding:20px;text-align:center;">Failed to initialize map. Please reload the page.</div>';
+    }
+  });
 }

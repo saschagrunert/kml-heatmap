@@ -9,7 +9,6 @@ from .constants import (
     METERS_TO_FEET,
     MIN_SEGMENT_TIME_SECONDS,
 )
-from .geometry import haversine_distance
 from .helpers import calculate_duration_seconds, parse_iso_timestamp
 from .logger import logger
 from .segment_calculator import (
@@ -26,7 +25,7 @@ def _build_path_info(
     path: list[list[Any]],
     metadata: PathMetadata,
     local_idx: int,
-    path_year: Any,
+    path_year: int | None,
 ) -> tuple[PathInfo, float, float, float]:
     """Build path info entry and compute path metrics.
 
@@ -52,10 +51,26 @@ def _build_path_info(
         if path_duration_seconds == 0:
             logger.debug("  Could not parse timestamps '%s' -> '%s'", start_ts, end_ts)
 
+    if not path:
+        info: PathInfo = {
+            "id": local_idx,
+            "start_airport": start_airport,
+            "end_airport": end_airport,
+            "start_coords": [],
+            "end_coords": [],
+            "segment_count": 0,
+            "year": path_year,
+        }
+        if "aircraft_registration" in metadata:
+            info["aircraft_registration"] = metadata["aircraft_registration"]
+        if "aircraft_type" in metadata:
+            info["aircraft_type"] = metadata["aircraft_type"]
+        return info, 0.0, 0.0, 0.0
+
     path_distance_km = calculate_path_distance(path)
     path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
 
-    info: PathInfo = {
+    info = {
         "id": local_idx,
         "start_airport": start_airport,
         "end_airport": end_airport,
@@ -79,10 +94,7 @@ def _calculate_segment_groundspeed(
     time_indexed_segments: list[dict[str, Any]],
     path_distance_km: float,
     path_duration_seconds: float,
-    lat1: float,
-    lon1: float,
-    lat2: float,
-    lon2: float,
+    segment_distance_km: float,
 ) -> tuple[float, float, float]:
     """Calculate groundspeed for a single segment.
 
@@ -103,7 +115,6 @@ def _calculate_segment_groundspeed(
         )
 
     if groundspeed_knots == 0:
-        segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
         groundspeed_knots = calculate_fallback_groundspeed(
             segment_distance_km, path_distance_km, path_duration_seconds
         )
@@ -134,7 +145,7 @@ def _process_path_segments(
     cruise_time = 0.0
     cruise_altitude_histogram: dict[int, float] = {}
 
-    ground_level_m = min(coord[2] for coord in path) if path else 0
+    ground_level_m = min((coord[2] for coord in path), default=0)
 
     path_start_time = None
     for coord in path:
@@ -163,10 +174,7 @@ def _process_path_segments(
                 time_indexed_segments,
                 path_distance_km,
                 path_duration_seconds,
-                lat1,
-                lon1,
-                lat2,
-                lon2,
+                segment_speeds[i]["distance"],
             )
         )
 

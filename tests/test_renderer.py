@@ -373,14 +373,14 @@ class TestPackageAssets:
 
             with patch.dict(
                 os.environ,
-                {"STADIA_API_KEY": "test-stadia", "OPENAIP_API_KEY": "test-openaip"},
+                {"CARTO_API_KEY": "test-carto", "OPENAIP_API_KEY": "test-openaip"},
             ):
                 _package_assets(tmpdir, bounds, "data")
 
             config_path = os.path.join(tmpdir, "map_config.js")
             with open(config_path) as f:
                 content = f.read()
-            assert "test-stadia" in content
+            assert "test-carto" in content
             assert "test-openaip" in content
 
     def test_copies_js_bundles_when_present(self):
