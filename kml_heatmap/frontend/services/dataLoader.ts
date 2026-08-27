@@ -76,20 +76,32 @@ export function combineYearData(
     original_points: 0,
   };
 
+  let pathIdOffset = 0;
+
   yearDatasets.forEach((data) => {
     if (!data) return;
     // Use concat instead of spread operator to avoid stack overflow with large arrays
     if (data.coordinates) {
       combined.coordinates = combined.coordinates.concat(data.coordinates);
     }
+    const yearPathCount = data.path_info ? data.path_info.length : 0;
+
     if (data.path_segments) {
-      combined.path_segments = combined.path_segments.concat(
-        data.path_segments
-      );
+      // Remap path_id to avoid collisions across years
+      const remapped = data.path_segments.map((seg) => ({
+        ...seg,
+        path_id: seg.path_id + pathIdOffset,
+      }));
+      combined.path_segments = combined.path_segments.concat(remapped);
     }
     if (data.path_info) {
-      combined.path_info = combined.path_info.concat(data.path_info);
+      const remapped = data.path_info.map((pi) => ({
+        ...pi,
+        id: pi.id + pathIdOffset,
+      }));
+      combined.path_info = combined.path_info.concat(remapped);
     }
+    pathIdOffset += yearPathCount;
     combined.original_points += data.original_points || 0;
   });
 
