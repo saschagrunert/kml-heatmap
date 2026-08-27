@@ -1,5 +1,6 @@
 """KML parse result caching."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -28,8 +29,9 @@ def get_cache_key(
     except (OSError, FileNotFoundError):
         return None, False
 
-    # Create cache filename from KML filename and modification time
-    cache_name = f"{kml_path.stem}_{int(mtime)}.json"
+    # Create cache filename from KML filename, path hash, and modification time
+    path_hash = hashlib.sha256(str(kml_path.resolve()).encode()).hexdigest()[:12]
+    cache_name = f"{kml_path.stem}_{path_hash}_{int(mtime)}.json"
     cache_path = cache_dir / cache_name
 
     # Check if cache file exists
@@ -37,7 +39,7 @@ def get_cache_key(
         return cache_path, True
 
     # Clean up old cache files for this KML file (different mtime)
-    for old_cache in cache_dir.glob(f"{kml_path.stem}_*.json"):
+    for old_cache in cache_dir.glob(f"{kml_path.stem}_{path_hash}_*.json"):
         if old_cache != cache_path:  # Don't delete the one we're about to write
             try:
                 old_cache.unlink()

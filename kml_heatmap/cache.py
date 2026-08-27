@@ -12,6 +12,8 @@ __all__ = ["CACHE_DIR", "atomic_json_write"]
 
 if "KML_HEATMAP_TEST_CACHE" in os.environ:
     CACHE_DIR = Path(os.environ["KML_HEATMAP_TEST_CACHE"])
+elif "KML_HEATMAP_CACHE_DIR" in os.environ:
+    CACHE_DIR = Path(os.environ["KML_HEATMAP_CACHE_DIR"])
 else:
     CACHE_DIR = Path.home() / ".cache" / "kml-heatmap"
 

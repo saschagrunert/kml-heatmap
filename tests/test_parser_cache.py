@@ -33,8 +33,14 @@ class TestGetCacheKeyWithDefaultDir:
                 temp_path = f.name
 
             try:
-                stem = Path(temp_path).stem
-                old_cache = cache_dir / f"{stem}_9999999.json"
+                import hashlib
+
+                kml_path = Path(temp_path)
+                stem = kml_path.stem
+                path_hash = hashlib.sha256(
+                    str(kml_path.resolve()).encode()
+                ).hexdigest()[:12]
+                old_cache = cache_dir / f"{stem}_{path_hash}_9999999.json"
                 old_cache.write_text("{}")
 
                 _cache_path, _ = get_cache_key(temp_path, cache_dir=cache_dir)

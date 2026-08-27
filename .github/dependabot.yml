@@ -25,6 +25,11 @@ updates:
       core:
         patterns:
           - "lxml"
+      minifiers:
+        patterns:
+          - "rcssmin"
+          - "rjsmin"
+          - "minify-html"
 
   # JavaScript/TypeScript dependencies
   - package-ecosystem: "npm"

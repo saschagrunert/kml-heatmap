@@ -62,3 +62,21 @@ class TestValidateKmlFile:
             is_valid, error_msg = validate_kml_file(temp_dir)
             assert is_valid is False
             assert error_msg is not None
+
+    def test_file_too_large(self, monkeypatch):
+        """Test validation rejects files exceeding MAX_KML_FILE_SIZE."""
+        import kml_heatmap.validation as val_mod
+
+        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False, mode="w") as f:
+            f.write('<?xml version="1.0"?><kml/>')
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(val_mod, "MAX_KML_FILE_SIZE", 1)
+            is_valid, error_msg = validate_kml_file(temp_path)
+
+            assert is_valid is False
+            assert error_msg is not None
+            assert "too large" in error_msg.lower()
+        finally:
+            os.unlink(temp_path)

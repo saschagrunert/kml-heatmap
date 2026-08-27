@@ -290,9 +290,9 @@ def _aggregate_year_results(
         )
 
         for altitude_bin, time_spent in result["cruise_altitude_histogram"].items():
-            if altitude_bin not in agg.cruise_altitude_histogram:
-                agg.cruise_altitude_histogram[altitude_bin] = 0
-            agg.cruise_altitude_histogram[altitude_bin] += time_spent
+            agg.cruise_altitude_histogram[altitude_bin] = (
+                agg.cruise_altitude_histogram.get(altitude_bin, 0.0) + time_spent
+            )
 
         year_segments = result["full_res_segments"]
         year_path_info = result["full_res_path_info"]

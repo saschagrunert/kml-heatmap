@@ -5,6 +5,24 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+:root {
+  --color-bg-primary: #1a1a1a;
+  --color-bg-secondary: #2b2b2b;
+  --color-bg-hover: #3b3b3b;
+  --color-border: #555;
+  --color-text: #ffffff;
+  --color-text-muted: #999;
+  --color-text-dimmed: #ccc;
+  --color-accent-blue: #4facfe;
+  --color-accent-green: #28a745;
+  --color-accent-red: #f5576c;
+  --color-accent-pink: #f093fb;
+  --color-accent-cyan: #00f2fe;
+  --color-accent-gold: #ffd93d;
+  --color-accent-orange: #ffa500;
+  --color-home-blue: #007bff;
+}
+
 .skip-nav {
   position: absolute;
   left: -9999px;
@@ -87,9 +105,9 @@ body {
 /* Button styles */
 .control-btn {
   position: fixed;
-  background-color: #2b2b2b;
-  color: #ffffff;
-  border: 2px solid #555;
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text);
+  border: 2px solid var(--color-border);
   border-radius: 4px;
   padding: 6px 12px;
   cursor: pointer;
@@ -100,15 +118,15 @@ body {
   touch-action: manipulation;
 }
 .control-btn:hover {
-  background-color: #3b3b3b;
+  background-color: var(--color-bg-hover);
 }
 .control-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
-  background-color: #1a1a1a;
+  background-color: var(--color-bg-primary);
 }
 .control-btn:disabled:hover {
-  background-color: #1a1a1a;
+  background-color: var(--color-bg-primary);
 }
 
 /* Left side buttons */
@@ -333,9 +351,9 @@ body {
 
 /* Filter dropdowns */
 .filter-dropdown {
-  background-color: #2b2b2b;
-  color: #ffffff;
-  border: 2px solid #555;
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text);
+  border: 2px solid var(--color-border);
   border-radius: 4px;
   padding: 6px 12px;
   cursor: pointer;
@@ -349,7 +367,7 @@ body {
 }
 .filter-dropdown select {
   background: transparent;
-  color: #ffffff;
+  color: var(--color-text);
   border: 0 !important;
   border-style: none !important;
   border-width: 0 !important;
@@ -384,20 +402,20 @@ body {
   border-style: none !important;
 }
 .filter-dropdown select option {
-  background-color: #2b2b2b;
-  color: #ffffff;
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text);
   text-align: center;
 }
 .filter-dropdown:hover {
-  background-color: #3b3b3b;
+  background-color: var(--color-bg-hover);
 }
 .filter-dropdown:has(select:disabled) {
   opacity: 0.3;
   cursor: not-allowed;
-  background-color: #1a1a1a;
+  background-color: var(--color-bg-primary);
 }
 .filter-dropdown:has(select:disabled):hover {
-  background-color: #1a1a1a;
+  background-color: var(--color-bg-primary);
 }
 .filter-dropdown select:disabled {
   cursor: not-allowed;
@@ -409,8 +427,8 @@ body {
   bottom: 30px;
   left: 10px;
   background-color: rgba(43, 43, 43, 0.9);
-  color: #ffffff;
-  border: 2px solid #555;
+  color: var(--color-text);
+  border: 2px solid var(--color-border);
   border-radius: 4px;
   padding: 10px;
   z-index: 1000;
@@ -449,14 +467,14 @@ body {
   top: 50px; /* Positioned directly under stats button (10px + ~40px button height) */
   left: 10px;
   width: 280px;
-  background-color: #2b2b2b;
-  border: 2px solid #555;
+  background-color: var(--color-bg-secondary);
+  border: 2px solid var(--color-border);
   border-radius: 4px;
   z-index: 10001;
   font-size: 13px;
   padding: 12px;
   display: none;
-  color: #ffffff;
+  color: var(--color-text);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   max-height: calc(100vh - 70px); /* Ensure it doesn't overflow viewport */
   overflow-y: auto;
@@ -481,9 +499,9 @@ body {
   position: fixed;
   bottom: 10px;
   right: 10px;
-  background-color: #2b2b2b;
-  color: #ffffff;
-  border: 2px solid #555;
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text);
+  border: 2px solid var(--color-border);
   border-radius: 4px;
   padding: 6px 12px;
   z-index: 10000;
@@ -1441,6 +1459,56 @@ body {
     width: 18px;
     height: 18px;
   }
+}
+
+/* Popup content styles */
+.popup-container {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  min-width: 180px;
+  padding: 8px 4px;
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+.popup-header {
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.popup-header-icon {
+  font-size: 16px;
+}
+.popup-section-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.popup-metric {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border-left: 3px solid;
+}
+.popup-metric-value {
+  font-size: 16px;
+  font-weight: bold;
+}
+.popup-metric-unit {
+  font-size: 12px;
+  color: var(--color-text-dimmed);
+  margin-left: 6px;
+}
+.popup-coords {
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--color-text-dimmed);
+  padding: 4px 8px;
 }
 
 /* Toast notifications */

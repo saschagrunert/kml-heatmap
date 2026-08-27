@@ -27,6 +27,9 @@ test = [
     "lxml-stubs>=0.5.1",
 ]
 
+[project.scripts]
+kml-heatmap = "kml_heatmap.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["kml_heatmap*"]
 

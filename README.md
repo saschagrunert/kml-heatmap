@@ -146,13 +146,13 @@ The tool will automatically detect the format of each file and process them acco
 
 ### With API Keys (Optional)
 
-**Stadia Maps** - Get a free API key at [stadiamaps.com](https://stadiamaps.com/) for enhanced dark theme tiles
-
 **OpenAIP** - Get a free API key at [openaip.net](https://www.openaip.net/) for aviation data overlay (airspaces, airports, navaids). **Required** for the Aviation Data layer.
 
 ```bash
-# With one or both API keys
-make STADIA_API_KEY=your_stadia_key OPENAIP_API_KEY=your_openaip_key
+# With API keys
+make CARTO_API_KEY=your_carto_key OPENAIP_API_KEY=your_openaip_key
+
+# CARTO_API_KEY is recommended to avoid watermarked base map tiles
 
 # Then serve
 make serve
@@ -167,7 +167,7 @@ curl -I "https://a.api.tiles.openaip.net/api/data/openaip/8/136/85.png?apiKey=YO
 
 ### Makefile Variables
 
-- `STADIA_API_KEY` - Stadia Maps API key for enhanced base tiles (optional)
+- `CARTO_API_KEY` - CARTO API key for base map tiles (recommended, avoids watermark)
 - `OPENAIP_API_KEY` - OpenAIP API key for aviation data overlay (required for Aviation Data layer)
 - `OUTPUT_DIR` - Output directory (default: `docs`)
 - `CONTAINER_RUNTIME` - Container runtime to use (default: `docker`)
@@ -184,7 +184,7 @@ docker build -t kml-heatmap .
 docker run -v $(pwd):/data kml-heatmap your_track.kml
 
 # With API keys
-docker run -v $(pwd):/data -e STADIA_API_KEY=key -e OPENAIP_API_KEY=key kml-heatmap *.kml
+docker run -v $(pwd):/data -e CARTO_API_KEY=key -e OPENAIP_API_KEY=key kml-heatmap *.kml
 
 # Custom output directory
 docker run -v $(pwd):/data kml-heatmap *.kml --output-dir mymap

@@ -50,58 +50,26 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
     : "";
 
   return `
-    <div style="
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-        min-width: 220px;
-        padding: 8px 4px;
-        background-color: #2b2b2b;
-        color: #ffffff;
-    ">
-        <div style="
-            font-size: 15px;
-            font-weight: bold;
-            color: #28a745;
-            margin-bottom: 10px;
-            padding-bottom: 8px;
-            border-bottom: 2px solid #28a745;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        ">
-            <span style="font-size: 18px;">&#x1F6EB;</span>
+    <div class="popup-container" style="min-width: 220px;">
+        <div class="popup-header" style="font-size: 15px; color: #28a745; margin-bottom: 10px; padding-bottom: 8px; border-color: #28a745;">
+            <span class="popup-header-icon" style="font-size: 18px;">&#x1F6EB;</span>
             <span>${escapeHtml(params.name || "Unknown")}</span>
             ${homeBadge}
         </div>
         <div style="margin-bottom: 8px;">
-            <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Coordinates</div>
+            <div class="popup-section-label">Coordinates</div>
             <a href="${googleMapsLink}"
                target="_blank"
                rel="noopener noreferrer"
-               style="
-                   color: #4facfe;
-                   text-decoration: none;
-                   font-size: 12px;
-                   font-family: monospace;
-                   display: flex;
-                   align-items: center;
-                   gap: 4px;
-               "
+               style="color: #4facfe; text-decoration: none; font-size: 12px; font-family: monospace; display: flex; align-items: center; gap: 4px;"
                class="airport-popup-link">
                 <span>&#x1F4CD;</span>
                 <span>${params.latDms}<br>${params.lonDms}</span>
             </a>
         </div>
-        <div style="
-            background: linear-gradient(135deg, rgba(79, 172, 254, 0.15) 0%, rgba(0, 242, 254, 0.15) 100%);
-            padding: 8px 10px;
-            border-radius: 6px;
-            border-left: 3px solid #4facfe;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        ">
+        <div class="popup-metric" style="background: linear-gradient(135deg, rgba(79, 172, 254, 0.15) 0%, rgba(0, 242, 254, 0.15) 100%); border-color: #4facfe; display: flex; justify-content: space-between; align-items: center;">
             <span style="font-size: 12px; color: #ccc; font-weight: 500;">Total Flights</span>
-            <span style="font-size: 16px; font-weight: bold; color: #4facfe;">${params.flightCount}</span>
+            <span class="popup-metric-value" style="color: #4facfe;">${params.flightCount}</span>
         </div>
     </div>`;
 }
@@ -281,42 +249,26 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   }
 
   return `
-    <div style="
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-        min-width: 180px;
-        padding: 8px 4px;
-        background-color: #2b2b2b;
-        color: #ffffff;
-    ">
-        <div style="
-            font-size: 14px;
-            font-weight: bold;
-            color: #4facfe;
-            margin-bottom: 8px;
-            padding-bottom: 6px;
-            border-bottom: 2px solid #4facfe;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        ">
-            <span style="font-size: 16px;">${icon}</span>
+    <div class="popup-container">
+        <div class="popup-header" style="color: #4facfe; border-color: #4facfe;">
+            <span class="popup-header-icon">${icon}</span>
             <span>${title}</span>
         </div>
-        <div style="margin-bottom: 8px; font-size: 12px; font-family: monospace; color: #ccc; padding: 4px 8px;">
+        <div class="popup-coords" style="margin-bottom: 8px;">
             ${lat} ${lon}<br><span style="display: inline-block; margin-top: 4px;">Track: ${trackStr}</span>
         </div>
         <div style="margin-bottom: 8px;">
-            <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Altitude (MSL)</div>
-            <div style="background: ${altColorBg}; padding: 6px 8px; border-radius: 6px; border-left: 3px solid ${altColor};">
-                <span style="font-size: 16px; font-weight: bold; color: ${altColor};">${altFtRounded} ft</span>
-                <span style="font-size: 12px; color: #ccc; margin-left: 6px;">(${altMRounded} m)</span>
+            <div class="popup-section-label">Altitude (MSL)</div>
+            <div class="popup-metric" style="background: ${altColorBg}; border-color: ${altColor};">
+                <span class="popup-metric-value" style="color: ${altColor};">${altFtRounded} ft</span>
+                <span class="popup-metric-unit">(${altMRounded} m)</span>
             </div>
         </div>
         <div style="margin-bottom: 8px;">
-            <div style="font-size: 11px; color: #999; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Groundspeed</div>
-            <div style="background: ${speedColorBg}; padding: 6px 8px; border-radius: 6px; border-left: 3px solid ${speedColor};">
-                <span style="font-size: 16px; font-weight: bold; color: ${speedColor};">${speedKtRounded} kt</span>
-                <span style="font-size: 12px; color: #ccc; margin-left: 6px;">(${speedKmhRounded} km/h)</span>
+            <div class="popup-section-label">Groundspeed</div>
+            <div class="popup-metric" style="background: ${speedColorBg}; border-color: ${speedColor};">
+                <span class="popup-metric-value" style="color: ${speedColor};">${speedKtRounded} kt</span>
+                <span class="popup-metric-unit">(${speedKmhRounded} km/h)</span>
             </div>
         </div>
     </div>`;

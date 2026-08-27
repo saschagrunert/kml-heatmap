@@ -2,7 +2,7 @@
 .PHONY: lint-local format-local test-local verify
 .PHONY: check-obfuscation
 
-STADIA_API_KEY ?=
+CARTO_API_KEY ?=
 OPENAIP_API_KEY ?=
 CONTAINER_RUNTIME ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
 INPUT_DIR ?= data
@@ -16,7 +16,7 @@ all: build
 build:
 	$(CONTAINER_RUNTIME) build -t $(IMAGE_NAME) .
 	mkdir -p $(CACHE_DIR) $(OUTPUT_DIR)
-	$(CONTAINER_RUNTIME) run -e STADIA_API_KEY=$(STADIA_API_KEY) -e OPENAIP_API_KEY=$(OPENAIP_API_KEY) --rm -v $(shell pwd)/$(INPUT_DIR):/data/$(INPUT_DIR):ro -v $(shell pwd)/$(OUTPUT_DIR):/data/$(OUTPUT_DIR) -v $(CACHE_DIR):/root/.cache/kml-heatmap $(IMAGE_NAME) $(INPUT_DIR) --output-dir $(OUTPUT_DIR)
+	$(CONTAINER_RUNTIME) run -e CARTO_API_KEY=$(CARTO_API_KEY) -e OPENAIP_API_KEY=$(OPENAIP_API_KEY) --rm -v $(shell pwd)/$(INPUT_DIR):/data/$(INPUT_DIR):ro -v $(shell pwd)/$(OUTPUT_DIR):/data/$(OUTPUT_DIR) -v $(CACHE_DIR):/root/.cache/kml-heatmap $(IMAGE_NAME) $(INPUT_DIR) --output-dir $(OUTPUT_DIR)
 
 serve:
 	$(CONTAINER_RUNTIME) run -it -p 8000:8000 -v $(shell pwd)/$(OUTPUT_DIR):/data --entrypoint python $(IMAGE_NAME) /app/serve.py
@@ -28,14 +28,10 @@ test: test-image
 	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd)/htmlcov:/app/htmlcov -v $(shell pwd)/coverage:/app/coverage $(IMAGE_NAME)-test
 
 lint: test-image
-	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test ruff check
-	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test mypy .
-	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test npm run typecheck
-	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test npm run lint
+	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test sh -c "ruff check && mypy . && npm run typecheck && npm run lint"
 
 format: test-image
-	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test ruff format
-	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test npm run format
+	$(CONTAINER_RUNTIME) run --rm -v $(shell pwd):/app $(IMAGE_NAME)-test sh -c "ruff format && npm run format"
 
 lint-local:
 	ruff check .
