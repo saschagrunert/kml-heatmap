@@ -1,7 +1,7 @@
 # Test Docker Image for KML Heatmap
 
 # Stage 1: Node.js environment for JS tests
-FROM node:lts-slim AS js-env
+FROM docker.io/library/node:lts-slim AS js-env
 
 WORKDIR /app
 
@@ -16,11 +16,11 @@ RUN npm ci
 COPY tests/frontend/ ./tests/frontend/
 
 # Stage 2: Final test image
-FROM python:3.14-slim
+FROM docker.io/library/python:3.14-slim
 
 # Install Node.js from official image instead of curl|bash
-COPY --from=node:lts-slim /usr/local/bin/node /usr/local/bin/node
-COPY --from=node:lts-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=docker.io/library/node:lts-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=docker.io/library/node:lts-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
