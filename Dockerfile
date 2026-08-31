@@ -1,7 +1,7 @@
 # KML Heatmap Generator Docker Image
 
 # Stage 1: Build JavaScript bundles
-FROM node:lts-slim AS js-builder
+FROM docker.io/library/node:lts-slim AS js-builder
 
 WORKDIR /build
 
@@ -13,7 +13,7 @@ COPY kml_heatmap/frontend/ ./kml_heatmap/frontend/
 RUN npm ci && npm run build
 
 # Stage 2: Final Python image
-FROM python:3.14-slim
+FROM docker.io/library/python:3.14-slim
 
 WORKDIR /app
 
