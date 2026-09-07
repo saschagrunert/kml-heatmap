@@ -6,6 +6,10 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
+    <meta
+      name="description"
+      content="Interactive flight path heatmap visualization from KML flight logs"
+    />
     <meta name="theme-color" content="#1a1a1a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -32,12 +36,12 @@
     <link
       rel="apple-touch-icon"
       sizes="180x180"
-      href="https://saschagrunert.github.io/kml-heatmap/apple-touch-icon.png"
+      href="./apple-touch-icon.png"
     />
     <link
       rel="apple-touch-icon-precomposed"
       sizes="180x180"
-      href="https://saschagrunert.github.io/kml-heatmap/apple-touch-icon.png"
+      href="./apple-touch-icon.png"
     />
     <link rel="manifest" href="./manifest.json" />
     <link
@@ -49,19 +53,24 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <noscript>
+      <p style="color: #fff; text-align: center; margin-top: 40px">
+        JavaScript is required to display the flight map visualization.
+      </p>
+    </noscript>
     <a href="#map" class="skip-nav">Skip to map</a>
     <div
       id="map"
       role="application"
       aria-label="Flight map visualization"
+      tabindex="-1"
     ></div>
     <!-- Top-center button group -->
     <div id="top-center-buttons">
       <button
         id="isolate-btn"
-        class="control-btn toggleable-btn"
+        class="control-btn toggleable-btn initially-half-opacity"
         data-action="toggleIsolateSelection"
-        style="opacity: 0.5"
         aria-label="Isolate selected paths"
         aria-pressed="false"
       >
@@ -106,9 +115,8 @@
     </button>
     <button
       id="replay-btn"
-      class="control-btn left toggleable-btn"
+      class="control-btn left toggleable-btn initially-half-opacity"
       data-action="toggleReplay"
-      style="opacity: 0.5"
       disabled
       aria-label="Replay selected flight path"
       aria-pressed="false"
@@ -147,9 +155,8 @@
     </button>
     <button
       id="airspeed-btn"
-      class="control-btn right toggleable-btn"
+      class="control-btn right toggleable-btn initially-dimmed"
       data-action="toggleAirspeed"
-      style="opacity: 0.3"
       disabled
       aria-label="Toggle groundspeed color visualization"
       aria-pressed="false"
@@ -158,9 +165,8 @@
     </button>
     <button
       id="aviation-btn"
-      class="control-btn right toggleable-btn"
+      class="control-btn right toggleable-btn initially-hidden"
       data-action="toggleAviation"
-      style="display: none"
       aria-label="Toggle aviation data overlay"
       aria-pressed="false"
     >
@@ -247,9 +253,8 @@
           </button>
           <button
             id="replay-pause-btn"
-            class="replay-btn"
+            class="replay-btn initially-hidden"
             data-action="pauseReplay"
-            style="display: none"
             aria-label="Pause replay"
           >
             ⏸️

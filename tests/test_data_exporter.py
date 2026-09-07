@@ -226,73 +226,34 @@ class TestExportMetadata:
             data = _parse_js_data(output_file)
             assert data["file_structure"] == file_structure
 
-    def test_export_metadata_infinity_speed(self):
-        """Test metadata export with infinity min groundspeed."""
+    @pytest.mark.parametrize(
+        "min_speed,max_speed,expected_min,expected_max",
+        [
+            (float("inf"), 150, 0.0, 150),
+            (float("nan"), float("nan"), 0.0, 0.0),
+            (float("-inf"), float("-inf"), 0.0, 0.0),
+            (50.0, float("inf"), 50.0, 0.0),
+        ],
+        ids=["inf-min", "nan-both", "neg-inf-both", "inf-max"],
+    )
+    def test_export_metadata_invalid_speeds(
+        self, min_speed, max_speed, expected_min, expected_max
+    ):
+        """Test metadata export converts non-finite speeds to 0.0."""
         with tempfile.TemporaryDirectory() as tmpdir:
             output_file, _ = export_metadata(
                 {},
                 min_alt_m=0,
                 max_alt_m=5000,
-                min_groundspeed_knots=float("inf"),
-                max_groundspeed_knots=150,
+                min_groundspeed_knots=min_speed,
+                max_groundspeed_knots=max_speed,
                 available_years=[],
                 output_dir=tmpdir,
             )
 
             data = _parse_js_data(output_file)
-            # Infinity should be converted to 0.0
-            assert data["min_groundspeed_knots"] == 0.0
-
-    def test_export_metadata_nan_speed(self):
-        """Test metadata export with NaN groundspeed values."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_file, _ = export_metadata(
-                {},
-                min_alt_m=0,
-                max_alt_m=5000,
-                min_groundspeed_knots=float("nan"),
-                max_groundspeed_knots=float("nan"),
-                available_years=[],
-                output_dir=tmpdir,
-            )
-
-            data = _parse_js_data(output_file)
-            assert data["min_groundspeed_knots"] == 0.0
-            assert data["max_groundspeed_knots"] == 0.0
-
-    def test_export_metadata_neg_infinity_speed(self):
-        """Test metadata export with negative infinity groundspeed."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_file, _ = export_metadata(
-                {},
-                min_alt_m=0,
-                max_alt_m=5000,
-                min_groundspeed_knots=float("-inf"),
-                max_groundspeed_knots=float("-inf"),
-                available_years=[],
-                output_dir=tmpdir,
-            )
-
-            data = _parse_js_data(output_file)
-            assert data["min_groundspeed_knots"] == 0.0
-            assert data["max_groundspeed_knots"] == 0.0
-
-    def test_export_metadata_max_infinity_speed(self):
-        """Test metadata export with infinity max groundspeed."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_file, _ = export_metadata(
-                {},
-                min_alt_m=0,
-                max_alt_m=5000,
-                min_groundspeed_knots=50.0,
-                max_groundspeed_knots=float("inf"),
-                available_years=[],
-                output_dir=tmpdir,
-            )
-
-            data = _parse_js_data(output_file)
-            assert data["min_groundspeed_knots"] == 50.0
-            assert data["max_groundspeed_knots"] == 0.0
+            assert data["min_groundspeed_knots"] == expected_min
+            assert data["max_groundspeed_knots"] == expected_max
 
     def test_export_metadata_rounds_speeds(self):
         """Test that groundspeeds are rounded."""
@@ -979,7 +940,7 @@ class TestProcessYearsParallel:
                 "kml_heatmap.data_exporter.process_year_data",
                 side_effect=RuntimeError("boom"),
             ),
-            pytest.raises(RuntimeError, match="boom"),
+            pytest.raises(RuntimeError, match="Failed to process year 2025"),
         ):
             _process_years_parallel(paths_by_year, [], [[]], [{}], 0, 1000, "/tmp")
 

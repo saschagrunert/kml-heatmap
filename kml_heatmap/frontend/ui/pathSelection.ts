@@ -30,15 +30,7 @@ export class PathSelection {
     } else {
       this.updateIsolateButton();
 
-      // Redraw paths with delay for mobile Safari
-      if (this.app.altitudeVisible) {
-        this.app.layerManager.redrawAltitudePaths();
-        invalidateMapWithDelay(this.app.map);
-      }
-      if (this.app.airspeedVisible) {
-        this.app.layerManager.redrawAirspeedPaths();
-        invalidateMapWithDelay(this.app.map);
-      }
+      this.redrawVisiblePaths();
 
       // If isolate mode is active, rebuild heatmap for the new selection
       if (this.app.isolateSelection) {
@@ -59,16 +51,7 @@ export class PathSelection {
     }
 
     this.updateIsolateButton();
-
-    // Redraw paths with delay for mobile Safari
-    if (this.app.altitudeVisible) {
-      this.app.layerManager.redrawAltitudePaths();
-      invalidateMapWithDelay(this.app.map);
-    }
-    if (this.app.airspeedVisible) {
-      this.app.layerManager.redrawAirspeedPaths();
-      invalidateMapWithDelay(this.app.map);
-    }
+    this.redrawVisiblePaths();
 
     // If isolate mode is active, rebuild heatmap for the new selection
     if (this.app.isolateSelection) {
@@ -90,16 +73,7 @@ export class PathSelection {
       this.app.dataManager.updateLayers().catch(logError);
     } else {
       this.updateIsolateButton();
-
-      // Redraw paths with a small delay for mobile Safari touch event handling
-      if (this.app.altitudeVisible) {
-        this.app.layerManager.redrawAltitudePaths();
-        invalidateMapWithDelay(this.app.map);
-      }
-      if (this.app.airspeedVisible) {
-        this.app.layerManager.redrawAirspeedPaths();
-        invalidateMapWithDelay(this.app.map);
-      }
+      this.redrawVisiblePaths();
     }
 
     this.app.replayManager.updateReplayButtonState();
@@ -113,6 +87,17 @@ export class PathSelection {
 
     // Rebuild heatmap to filter coordinates by selection
     this.app.dataManager.updateLayers().catch(logError);
+  }
+
+  private redrawVisiblePaths(): void {
+    if (this.app.altitudeVisible) {
+      this.app.layerManager.redrawAltitudePaths();
+      invalidateMapWithDelay(this.app.map);
+    }
+    if (this.app.airspeedVisible) {
+      this.app.layerManager.redrawAirspeedPaths();
+      invalidateMapWithDelay(this.app.map);
+    }
   }
 
   updateIsolateButton(): void {

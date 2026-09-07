@@ -77,7 +77,7 @@ def _parse_with_error_handling(
     """Parse a KML file with error handling."""
     try:
         return kml_file, parse_kml_coordinates(kml_file)
-    except (OSError, ValueError, TypeError, AttributeError, KMLParseError) as e:
+    except (OSError, ValueError, TypeError, KMLParseError) as e:
         logger.error("Error processing %s: %s", kml_file, e)
         return kml_file, ([], [], [])
 

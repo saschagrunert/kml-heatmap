@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .helpers import parse_iso_timestamp
+from .logger import logger
 
 WHEN_PATTERN = re.compile(r"(<when>)([^<]+)(</when>)")
 
@@ -96,7 +97,11 @@ def obfuscate_kml_file(filepath: Path) -> bool:
 
     Returns True if the file was modified, False if already obfuscated.
     """
-    content = filepath.read_text(encoding="utf-8")
+    try:
+        content = filepath.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        logger.warning("Skipping %s: not valid UTF-8", filepath)
+        return False
     new_content = obfuscate_kml_content(content)
     if new_content is None:
         return False

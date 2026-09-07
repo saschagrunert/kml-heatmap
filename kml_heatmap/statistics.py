@@ -338,12 +338,7 @@ def calculate_statistics(
     # Calculate average groundspeed
     flight_time = stats.get("total_flight_time_seconds", 0)
     distance_nm = stats.get("total_distance_nm", 0)
-    if (
-        isinstance(flight_time, (int, float))
-        and isinstance(distance_nm, (int, float))
-        and flight_time > 0
-        and distance_nm > 0
-    ):
+    if flight_time > 0 and distance_nm > 0:
         hours = flight_time / SECONDS_PER_HOUR
         stats["avg_groundspeed_knots"] = distance_nm / hours
 

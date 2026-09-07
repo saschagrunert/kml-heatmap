@@ -35,10 +35,8 @@ test.describe("Replay", () => {
     await activateReplay(page);
 
     await page.locator("#replay-play-btn").click();
-    await page.waitForTimeout(300);
-
-    await expect(page.locator("#replay-play-btn")).toBeHidden();
     await expect(page.locator("#replay-pause-btn")).toBeVisible();
+    await expect(page.locator("#replay-play-btn")).toBeHidden();
 
     const isPlaying = await page.evaluate(
       () => (window as any).mapApp.replayManager.state.playing
@@ -52,7 +50,7 @@ test.describe("Replay", () => {
     await activateReplay(page);
 
     await page.locator("#replay-play-btn").click();
-    await page.waitForTimeout(300);
+    await expect(page.locator("#replay-pause-btn")).toBeVisible();
     await page.locator("#replay-pause-btn").click();
 
     await expect(page.locator("#replay-play-btn")).toBeVisible();
@@ -240,13 +238,13 @@ test.describe("Replay", () => {
 
     // Play briefly to get position data
     await page.locator("#replay-play-btn").click();
+    await expect(page.locator("#replay-pause-btn")).toBeVisible();
     await page.waitForTimeout(500);
     await page.locator("#replay-pause-btn").click();
 
     // Click the airplane marker to open popup
     const airplaneIcon = page.locator(".replay-airplane-icon");
     await airplaneIcon.click();
-    await page.waitForTimeout(300);
 
     // Popup should appear with position info
     const popup = page.locator(".leaflet-popup-content");
@@ -258,7 +256,6 @@ test.describe("Replay", () => {
     await page.evaluate(() => {
       (window as any).mapApp.replayManager.state.airplaneMarker.closePopup();
     });
-    await page.waitForTimeout(300);
     await expect(popup).toBeHidden();
   });
 });

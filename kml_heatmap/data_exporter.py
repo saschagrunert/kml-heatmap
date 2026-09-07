@@ -74,10 +74,7 @@ def process_year_data(
         path = all_path_groups[path_idx]
         full_paths.append(path)
 
-    full_coords = []
-    for path in full_paths:
-        for point in path:
-            full_coords.append([point[0], point[1]])
+    full_coords = [[point[0], point[1]] for path in full_paths for point in path]
 
     path_segments: list[PathSegment] = []
     path_info: list[PathInfo] = []
@@ -123,9 +120,9 @@ def process_year_data(
         year_cruise_distance += seg_cruise_dist
         year_cruise_time += seg_cruise_time
         for alt_bin, time_spent in seg_cruise_hist.items():
-            if alt_bin not in year_cruise_altitude_histogram:
-                year_cruise_altitude_histogram[alt_bin] = 0.0
-            year_cruise_altitude_histogram[alt_bin] += time_spent
+            year_cruise_altitude_histogram[alt_bin] = (
+                year_cruise_altitude_histogram.get(alt_bin, 0.0) + time_spent
+            )
 
     data: dict[str, Any] = {
         "coordinates": full_coords,
@@ -243,9 +240,9 @@ def _process_years_parallel(
                 logger.info(
                     f"  [{completed_count}/{total_years}] Year {year}: {year_points:,} points"
                 )
-            except Exception:
-                logger.exception(f"  Error processing year {year}")
-                raise
+            except Exception as exc:
+                logger.exception("  Error processing year %s", year)
+                raise RuntimeError(f"Failed to process year {year}") from exc
 
     return year_results
 

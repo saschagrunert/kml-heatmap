@@ -1,5 +1,7 @@
 """Tests for kml_parsers module."""
 
+import pytest
+
 from kml_heatmap.kml_parsers import validate_and_normalize_coordinate
 
 
@@ -31,22 +33,14 @@ class TestValidateAndNormalizeCoordinate:
         _lat, _lon, alt = result
         assert alt is None
 
-    def test_valid_range_boundaries(self):
+    @pytest.mark.parametrize(
+        "lat,lon",
+        [(-90.0, 0.0), (90.0, 0.0), (0.0, -180.0), (0.0, 180.0)],
+        ids=["min-lat", "max-lat", "min-lon", "max-lon"],
+    )
+    def test_valid_range_boundaries(self, lat, lon):
         """Test coordinates at valid range boundaries."""
-        # Min latitude
-        result = validate_and_normalize_coordinate(-90.0, 0.0, 0, "test.kml")
-        assert result is not None
-
-        # Max latitude
-        result = validate_and_normalize_coordinate(90.0, 0.0, 0, "test.kml")
-        assert result is not None
-
-        # Min longitude
-        result = validate_and_normalize_coordinate(0.0, -180.0, 0, "test.kml")
-        assert result is not None
-
-        # Max longitude
-        result = validate_and_normalize_coordinate(0.0, 180.0, 0, "test.kml")
+        result = validate_and_normalize_coordinate(lat, lon, 0, "test.kml")
         assert result is not None
 
     def test_extreme_altitude_out_of_range(self):
@@ -65,21 +59,19 @@ class TestValidateAndNormalizeCoordinate:
         # Invalid altitude gets set to None
         assert alt is None
 
-    def test_invalid_latitude_too_high(self):
-        """Test latitude above valid range."""
-        assert validate_and_normalize_coordinate(100.0, 8.5, 300, "test.kml") is None
-
-    def test_invalid_latitude_too_low(self):
-        """Test latitude below valid range."""
-        assert validate_and_normalize_coordinate(-100.0, 8.5, 300, "test.kml") is None
-
-    def test_invalid_longitude_too_high(self):
-        """Test longitude above valid range."""
-        assert validate_and_normalize_coordinate(50.0, 200.0, 300, "test.kml") is None
-
-    def test_invalid_longitude_too_low(self):
-        """Test longitude below valid range."""
-        assert validate_and_normalize_coordinate(50.0, -200.0, 300, "test.kml") is None
+    @pytest.mark.parametrize(
+        "lat,lon",
+        [
+            (100.0, 8.5),
+            (-100.0, 8.5),
+            (50.0, 200.0),
+            (50.0, -200.0),
+        ],
+        ids=["lat-too-high", "lat-too-low", "lon-too-high", "lon-too-low"],
+    )
+    def test_invalid_lat_lon_returns_none(self, lat, lon):
+        """Test out-of-range lat/lon returns None."""
+        assert validate_and_normalize_coordinate(lat, lon, 300, "test.kml") is None
 
     def test_zero_altitude(self):
         """Test zero altitude is valid."""

@@ -21,7 +21,11 @@ class CORSHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return super().end_headers()
 
 
-os.chdir("/data")
+data_dir = "/data"
+if not os.path.isdir(data_dir):
+    print(f"Error: {data_dir} does not exist. Are you running inside Docker?")
+    sys.exit(1)
+os.chdir(data_dir)
 print(f"Starting HTTP server on port {PORT}...")
 print(f"Serving files from: {os.getcwd()}")
 print(f"Open http://localhost:{PORT}/ in your browser")

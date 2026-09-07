@@ -83,11 +83,11 @@ test.describe("Error-Free Interactions", () => {
       await activateReplay(page);
 
       await page.locator("#replay-play-btn").click();
-      await page.waitForTimeout(300);
+      await expect(page.locator("#replay-pause-btn")).toBeVisible();
       await page.locator("#replay-pause-btn").click();
-      await page.waitForTimeout(200);
+      await expect(page.locator("#replay-play-btn")).toBeVisible();
       await page.locator("#replay-stop-btn").click();
-      await page.waitForTimeout(200);
+      await expect(page.locator("#replay-play-btn")).toBeVisible();
 
       await page.locator("#replay-btn").click();
       await expect(page.locator("#replay-controls")).toBeHidden();
@@ -114,7 +114,7 @@ test.describe("Error-Free Interactions", () => {
       await expect(page.locator("#stats-panel")).toBeVisible();
 
       await page.locator("#stats-btn").click();
-      await page.waitForTimeout(400);
+      await expect(page.locator("#stats-panel")).toBeHidden();
 
       expect(pageErrors).toHaveLength(0);
     });

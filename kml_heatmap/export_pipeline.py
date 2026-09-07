@@ -51,38 +51,25 @@ def _build_path_info(
         if path_duration_seconds == 0:
             logger.debug("  Could not parse timestamps '%s' -> '%s'", start_ts, end_ts)
 
-    if not path:
-        info: PathInfo = {
-            "id": local_idx,
-            "start_airport": start_airport,
-            "end_airport": end_airport,
-            "start_coords": [],
-            "end_coords": [],
-            "segment_count": 0,
-            "year": path_year,
-        }
-        if "aircraft_registration" in metadata:
-            info["aircraft_registration"] = metadata["aircraft_registration"]
-        if "aircraft_type" in metadata:
-            info["aircraft_type"] = metadata["aircraft_type"]
-        return info, 0.0, 0.0, 0.0
-
-    path_distance_km = calculate_path_distance(path)
+    path_distance_km = calculate_path_distance(path) if path else 0.0
     path_distance_nm = path_distance_km * KM_TO_NAUTICAL_MILES
 
-    info = {
+    info: PathInfo = {
         "id": local_idx,
         "start_airport": start_airport,
         "end_airport": end_airport,
-        "start_coords": [path[0][0], path[0][1]],
-        "end_coords": [path[-1][0], path[-1][1]],
-        "segment_count": len(path) - 1,
+        "start_coords": [path[0][0], path[0][1]] if path else [],
+        "end_coords": [path[-1][0], path[-1][1]] if path else [],
+        "segment_count": len(path) - 1 if path else 0,
         "year": path_year,
     }
     if "aircraft_registration" in metadata:
         info["aircraft_registration"] = metadata["aircraft_registration"]
     if "aircraft_type" in metadata:
         info["aircraft_type"] = metadata["aircraft_type"]
+
+    if not path:
+        return info, 0.0, 0.0, 0.0
 
     return info, path_duration_seconds, path_distance_km, path_distance_nm
 
@@ -145,7 +132,9 @@ def _process_path_segments(
     cruise_time = 0.0
     cruise_altitude_histogram: dict[int, float] = {}
 
-    ground_level_m = min((coord[2] for coord in path), default=0)
+    ground_level_m = min(
+        (coord[2] if len(coord) >= 3 else 0 for coord in path), default=0
+    )
 
     path_start_time = None
     for coord in path:
@@ -160,8 +149,10 @@ def _process_path_segments(
     for i in range(len(path) - 1):
         coord1 = path[i]
         coord2 = path[i + 1]
-        lat1, lon1, alt1_m = coord1[0], coord1[1], coord1[2]
-        lat2, lon2, alt2_m = coord2[0], coord2[1], coord2[2]
+        lat1, lon1 = coord1[0], coord1[1]
+        lat2, lon2 = coord2[0], coord2[1]
+        alt1_m = coord1[2] if len(coord1) >= 3 else 0
+        alt2_m = coord2[2] if len(coord2) >= 3 else 0
 
         avg_alt_m = (alt1_m + alt2_m) / 2
         avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
