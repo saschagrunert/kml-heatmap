@@ -62,10 +62,12 @@ export const map = vi.fn(() => ({
   off: vi.fn(),
 }));
 
-export const tileLayer = vi.fn(() => ({
+const tileLayerInstance = {
   addTo: vi.fn(),
   remove: vi.fn(),
-}));
+  on: vi.fn(() => tileLayerInstance),
+};
+export const tileLayer = vi.fn(() => tileLayerInstance);
 
 export const svg = vi.fn(() => ({}));
 

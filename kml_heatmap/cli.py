@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from . import __version__
 from .helpers import numeric_filename_key
 from .logger import logger, set_debug_mode
 
@@ -37,6 +38,11 @@ examples:
         "--debug",
         action="store_true",
         help="enable debug output to diagnose parsing issues",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
 
     args = parser.parse_args()

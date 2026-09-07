@@ -20,7 +20,9 @@ WORKDIR /app
 # Copy lock file first for better caching
 COPY requirements.lock .
 
-# Install pinned Python dependencies
+# Create virtual environment and install pinned Python dependencies
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.lock
 
 # Copy the application and ensure it's importable from /data

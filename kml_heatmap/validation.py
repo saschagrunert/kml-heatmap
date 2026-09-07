@@ -14,6 +14,9 @@ def validate_kml_file(file_path: str) -> tuple[bool, str | None]:
     """Validate KML file exists and is readable."""
     path = Path(file_path)
 
+    if path.is_symlink():
+        return False, f"Symlinks are not allowed: {file_path}"
+
     if not path.exists():
         return False, f"File not found: {file_path}"
 

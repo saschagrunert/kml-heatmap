@@ -153,15 +153,10 @@ def _load_airport_database() -> dict[str, tuple[float, float, str, str]]:
             return _airport_cache
 
         finally:
-            # Release file lock if we acquired one
-            if lock_file and HAS_FCNTL:
+            if lock_file:
                 try:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-                    lock_file.close()
-                except OSError:
-                    pass
-            elif lock_file:
-                try:
+                    if HAS_FCNTL:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
                     lock_file.close()
                 except OSError:
                     pass

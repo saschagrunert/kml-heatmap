@@ -1,6 +1,9 @@
 {
   "name": "kml-heatmap",
   "version": "1.0.0",
+  "private": true,
+  "description": "Interactive heatmap visualizations from KML flight data",
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -13,8 +16,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "npx prettier --write .",
-    "format:check": "npx prettier --check .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "build": "node build.js",
     "build:dev": "NODE_ENV=development node build.js",
     "build:watch": "node build.js --watch",

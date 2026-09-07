@@ -2,10 +2,13 @@
 
 import hashlib
 import json
+import logging
 from pathlib import Path
 
 from .cache import CACHE_DIR, atomic_json_write
 from .types import FlightPath, FlightPathGroup, PathMetadata
+
+logger = logging.getLogger(__name__)
 
 # KML parse cache subdirectory
 KML_CACHE_DIR = CACHE_DIR / "kml"
@@ -57,7 +60,8 @@ def load_cached_parse(
         with open(cache_path, "r") as f:
             cached = json.load(f)
         return cached["coordinates"], cached["path_groups"], cached["path_metadata"]
-    except (json.JSONDecodeError, KeyError, OSError):
+    except (json.JSONDecodeError, KeyError, OSError) as e:
+        logger.debug("Cache file %s is corrupt or unreadable: %s", cache_path, e)
         return None
 
 

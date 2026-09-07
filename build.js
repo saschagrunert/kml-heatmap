@@ -33,9 +33,6 @@ const sharedBuildOptions = {
 
   // Don't drop console statements - they are guarded by debug flags in code
   drop: isDevelopment ? [] : ["debugger"],
-
-  // Enable mangling for smaller identifiers
-  mangleProps: isDevelopment ? undefined : /^_/,
 };
 
 // Build KMLHeatmap library

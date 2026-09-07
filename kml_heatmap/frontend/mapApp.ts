@@ -377,7 +377,12 @@ export class MapApp {
       : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
     L.tileLayer(cartoUrl, {
       attribution: "&copy; OpenStreetMap contributors, &copy; CARTO",
-    }).addTo(this.map);
+      maxZoom: 20,
+    })
+      .on("tileerror", (e: L.TileErrorEvent) => {
+        logError(`Tile load error: ${e.coords.x}/${e.coords.y}/${e.coords.z}`);
+      })
+      .addTo(this.map);
 
     if (this.savedState && this.savedState.center && this.savedState.zoom) {
       this.map.setView(
