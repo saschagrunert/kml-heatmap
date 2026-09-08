@@ -10,7 +10,7 @@ describe("StateManager", () => {
   beforeEach(() => {
     // Mock localStorage
     mockLocalStorage = {};
-    global.localStorage = {
+    vi.stubGlobal("localStorage", {
       getItem: vi.fn((key: string) => mockLocalStorage[key] || null),
       setItem: vi.fn((key: string, value: string) => {
         mockLocalStorage[key] = value;
@@ -23,12 +23,12 @@ describe("StateManager", () => {
       }),
       length: 0,
       key: vi.fn(),
-    } as Storage;
+    });
 
     // Mock history API
-    global.history = {
+    vi.stubGlobal("history", {
       replaceState: vi.fn(),
-    } as Pick<History, "replaceState">;
+    });
 
     // Mock window.location
     Object.defineProperty(window, "location", {
@@ -87,7 +87,7 @@ describe("StateManager", () => {
   });
 
   afterEach(() => {
-    // Clean up DOM
+    vi.unstubAllGlobals();
     const statsPanel = document.getElementById("stats-panel");
     if (statsPanel) {
       document.body.removeChild(statsPanel);
