@@ -56,6 +56,10 @@ updates:
         patterns:
           - "vitest*"
           - "@vitest/*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
       build-tools:
         patterns:
           - "esbuild"
