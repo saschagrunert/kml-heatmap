@@ -110,12 +110,12 @@ describe("StateManager", () => {
       ];
 
       expect(mockApp.store!.subscribe).toHaveBeenCalledTimes(
-        expectedKeys.length
+        expectedKeys.length,
       );
       for (const key of expectedKeys) {
         expect(mockApp.store!.subscribe).toHaveBeenCalledWith(
           key,
-          expect.any(Function)
+          expect.any(Function),
         );
       }
     });
@@ -162,7 +162,7 @@ describe("StateManager", () => {
           const spy = vi.fn();
           unsubSpies.push(spy);
           return spy;
-        }
+        },
       );
 
       const sm = new StateManager(mockApp);
@@ -192,7 +192,7 @@ describe("StateManager", () => {
 
       expect(localStorage.setItem).toHaveBeenCalledWith(
         "kml-heatmap-state",
-        expect.any(String)
+        expect.any(String),
       );
 
       const savedData = mockLocalStorage["kml-heatmap-state"];
@@ -248,7 +248,7 @@ describe("StateManager", () => {
       expect(history.replaceState).toHaveBeenCalledWith(
         null,
         "",
-        expect.stringContaining("year=")
+        expect.stringContaining("year="),
       );
     });
 

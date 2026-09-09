@@ -25,7 +25,7 @@ from kml_heatmap.data_exporter import (
 
 def _parse_js_data(filepath):
     """Parse a JS file with 'window.VAR = {...};' format and return the JSON data."""
-    with open(filepath, "r") as f:
+    with open(filepath) as f:
         content = f.read()
     # Remove the 'window.XXX = ' prefix and trailing ';'
     json_start = content.index("{")
@@ -76,7 +76,7 @@ class TestExportAirportsData:
             output_file, _ = export_airports_data(airports, tmpdir)
 
             assert output_file.endswith(".js")
-            with open(output_file, "r") as f:
+            with open(output_file) as f:
                 content = f.read()
             assert content.startswith("window.KML_AIRPORTS = ")
             assert content.endswith(";")
@@ -202,7 +202,7 @@ class TestExportMetadata:
             )
 
             assert output_file.endswith(".js")
-            with open(output_file, "r") as f:
+            with open(output_file) as f:
                 content = f.read()
             assert content.startswith("window.KML_METADATA = ")
             assert content.endswith(";")

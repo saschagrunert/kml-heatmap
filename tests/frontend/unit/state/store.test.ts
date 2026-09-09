@@ -235,6 +235,85 @@ describe("AppStore", () => {
     });
   });
 
+  describe("reentrancy", () => {
+    it("defers set() called during notification", () => {
+      const store = new AppStore();
+      const yearFn = vi.fn();
+      const aircraftFn = vi.fn();
+      store.subscribe("selectedYear", () => {
+        store.set("selectedAircraft", "D-EXYZ");
+      });
+      store.subscribe("selectedYear", yearFn);
+      store.subscribe("selectedAircraft", aircraftFn);
+
+      store.set("selectedYear", "2024");
+      expect(yearFn).toHaveBeenCalledOnce();
+      expect(aircraftFn).toHaveBeenCalledOnce();
+      expect(store.get("selectedAircraft")).toBe("D-EXYZ");
+    });
+
+    it("does not stack overflow on mutual listeners", () => {
+      const store = new AppStore();
+      let yearCount = 0;
+      let aircraftCount = 0;
+
+      store.subscribe("selectedYear", () => {
+        yearCount++;
+        if (yearCount <= 2) {
+          store.set("selectedAircraft", `aircraft-${yearCount}`);
+        }
+      });
+      store.subscribe("selectedAircraft", () => {
+        aircraftCount++;
+        if (aircraftCount <= 2) {
+          store.set("selectedYear", `year-${aircraftCount}`);
+        }
+      });
+
+      expect(() => store.set("selectedYear", "2024")).not.toThrow();
+    });
+
+    it("defers notifyMutation during batch", () => {
+      const store = new AppStore();
+      const fn = vi.fn();
+      store.subscribe("selectedPathIds", fn);
+
+      store.batch(() => {
+        store.get("selectedPathIds").add(1);
+        store.notifyMutation("selectedPathIds");
+        expect(fn).not.toHaveBeenCalled();
+      });
+      expect(fn).toHaveBeenCalledOnce();
+    });
+
+    it("defers notifyMutation during notification", () => {
+      const store = new AppStore();
+      const pathFn = vi.fn();
+      store.subscribe("selectedYear", () => {
+        store.get("selectedPathIds").add(99);
+        store.notifyMutation("selectedPathIds");
+      });
+      store.subscribe("selectedPathIds", pathFn);
+
+      store.set("selectedYear", "2024");
+      expect(pathFn).toHaveBeenCalledOnce();
+    });
+
+    it("listener calling batch() during notification works", () => {
+      const store = new AppStore();
+      const aircraftFn = vi.fn();
+      store.subscribe("selectedYear", () => {
+        store.batch(() => {
+          store.set("selectedAircraft", "D-EXYZ");
+        });
+      });
+      store.subscribe("selectedAircraft", aircraftFn);
+
+      store.set("selectedYear", "2024");
+      expect(aircraftFn).toHaveBeenCalledWith("D-EXYZ", "all");
+    });
+  });
+
   describe("listener safety", () => {
     it("handles unsubscribe during notification", () => {
       const store = new AppStore();

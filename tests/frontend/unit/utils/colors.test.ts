@@ -148,7 +148,7 @@ describe("color utilities", () => {
 
     it("converts rgb with spaces to rgba", () => {
       expect(rgbToRgba("rgb(255, 128, 0)", 0.15)).toBe(
-        "rgba(255, 128, 0, 0.15)"
+        "rgba(255, 128, 0, 0.15)",
       );
     });
 

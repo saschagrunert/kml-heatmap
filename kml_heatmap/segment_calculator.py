@@ -109,9 +109,10 @@ def build_time_indexed_segments(
 
     if timestamp_list:
         sorted_pairs = sorted(
-            zip(timestamp_list, time_indexed_segments), key=lambda x: x[0]
+            zip(timestamp_list, time_indexed_segments, strict=True),
+            key=lambda x: x[0],
         )
-        unzipped = list(zip(*sorted_pairs))
+        unzipped = list(zip(*sorted_pairs, strict=True))
         timestamp_list = list(unzipped[0])
         time_indexed_segments = list(unzipped[1])
 

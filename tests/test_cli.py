@@ -196,7 +196,7 @@ class TestMainCLI:
                 assert exc_info.value.code == 1
 
     def test_nonexistent_file_shows_warning(self):
-        """Test that nonexistent file shows warning but continues if other files exist."""
+        """Test that nonexistent file shows warning but continues."""
         from kml_heatmap.cli import main
 
         with tempfile.TemporaryDirectory() as tmpdir:

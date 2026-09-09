@@ -1,4 +1,5 @@
 {
+  "id": "kml-heatmap",
   "name": "KML Heatmap",
   "short_name": "KML Heatmap",
   "description": "Interactive flight path heatmap visualization",

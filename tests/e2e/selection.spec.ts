@@ -9,15 +9,15 @@ import {
 async function selectPathAndGetIsolateBtn(page: Page) {
   await waitForPathData(page);
   const pathId = await page.evaluate(
-    () => (window as any).mapApp.fullPathInfo[0].id
+    () => (window as any).mapApp.fullPathInfo[0].id,
   );
   await page.evaluate(
     (id) => (window as any).mapApp.togglePathSelection(String(id)),
-    pathId
+    pathId,
   );
   await page.waitForFunction(
     () => (window as any).mapApp.selectedPathIds.size === 1,
-    { timeout: 5000 }
+    { timeout: 5000 },
   );
   return { pathId, isolateBtn: page.locator("#isolate-btn") };
 }
@@ -32,21 +32,21 @@ test.describe("Path Selection", () => {
     await waitForPathData(page);
 
     const pathId = await page.evaluate(
-      () => (window as any).mapApp.fullPathInfo[0].id
+      () => (window as any).mapApp.fullPathInfo[0].id,
     );
     await page.evaluate(
       (id) => (window as any).mapApp.togglePathSelection(String(id)),
-      pathId
+      pathId,
     );
 
     const hasPath = await page.evaluate(
       (id) => (window as any).mapApp.selectedPathIds.has(id),
-      pathId
+      pathId,
     );
     expect(hasPath).toBe(true);
 
     const size = await page.evaluate(
-      () => (window as any).mapApp.selectedPathIds.size
+      () => (window as any).mapApp.selectedPathIds.size,
     );
     expect(size).toBe(1);
   });
@@ -57,26 +57,26 @@ test.describe("Path Selection", () => {
     await waitForPathData(page);
 
     const pathId = await page.evaluate(
-      () => (window as any).mapApp.fullPathInfo[0].id
+      () => (window as any).mapApp.fullPathInfo[0].id,
     );
 
     // Select
     await page.evaluate(
       (id) => (window as any).mapApp.togglePathSelection(String(id)),
-      pathId
+      pathId,
     );
     await page.waitForFunction(
-      () => (window as any).mapApp.selectedPathIds.size === 1
+      () => (window as any).mapApp.selectedPathIds.size === 1,
     );
 
     // Deselect
     await page.evaluate(
       (id) => (window as any).mapApp.togglePathSelection(String(id)),
-      pathId
+      pathId,
     );
 
     const size = await page.evaluate(
-      () => (window as any).mapApp.selectedPathIds.size
+      () => (window as any).mapApp.selectedPathIds.size,
     );
     expect(size).toBe(0);
   });
@@ -104,12 +104,12 @@ test.describe("Path Selection", () => {
     for (const id of pathIds) {
       await page.evaluate(
         (pid) => (window as any).mapApp.togglePathSelection(String(pid)),
-        id
+        id,
       );
     }
 
     await page.waitForFunction(
-      () => (window as any).mapApp.selectedPathIds.size === 2
+      () => (window as any).mapApp.selectedPathIds.size === 2,
     );
     await expect(page.locator("#replay-btn")).toBeDisabled();
   });
@@ -120,10 +120,10 @@ test.describe("Path Selection", () => {
 
     await page.evaluate(
       (id) => (window as any).mapApp.togglePathSelection(String(id)),
-      pathId
+      pathId,
     );
     await page.waitForFunction(
-      () => (window as any).mapApp.selectedPathIds.size === 0
+      () => (window as any).mapApp.selectedPathIds.size === 0,
     );
 
     await expect(page.locator("#replay-btn")).toBeDisabled();
@@ -143,13 +143,13 @@ test.describe("Path Selection", () => {
     await page.waitForTimeout(300);
 
     const size = await page.evaluate(
-      () => (window as any).mapApp.selectedPathIds.size
+      () => (window as any).mapApp.selectedPathIds.size,
     );
     expect(size).toBe(1);
 
     const hasPath = await page.evaluate(
       (id) => (window as any).mapApp.selectedPathIds.has(id),
-      pos.pathId
+      pos.pathId,
     );
     expect(hasPath).toBe(true);
   });
@@ -157,7 +157,7 @@ test.describe("Path Selection", () => {
   test("clicking empty map area clears path selection", async ({ page }) => {
     const pathId = await selectPathForReplay(page);
     expect(
-      await page.evaluate(() => (window as any).mapApp.selectedPathIds.size)
+      await page.evaluate(() => (window as any).mapApp.selectedPathIds.size),
     ).toBe(1);
 
     // Click on an area of the map away from any paths
@@ -175,7 +175,7 @@ test.describe("Path Selection", () => {
     await page.waitForTimeout(300);
 
     const size = await page.evaluate(
-      () => (window as any).mapApp.selectedPathIds.size
+      () => (window as any).mapApp.selectedPathIds.size,
     );
     expect(size).toBe(0);
   });
@@ -200,7 +200,7 @@ test.describe("Path Selection", () => {
     await page.waitForTimeout(300);
 
     const size = await page.evaluate(
-      () => (window as any).mapApp.selectedPathIds.size
+      () => (window as any).mapApp.selectedPathIds.size,
     );
     expect(size).toBeGreaterThan(0);
   });
@@ -252,7 +252,7 @@ test.describe("Solo Mode", () => {
     await expect(page.locator("#isolate-btn")).toHaveCSS("opacity", "0");
     await expect(page.locator("#isolate-btn")).toHaveCSS(
       "pointer-events",
-      "none"
+      "none",
     );
   });
 
@@ -263,7 +263,7 @@ test.describe("Solo Mode", () => {
 
     await expect(isolateBtn).toHaveCSS("opacity", "1");
     const isIsolated = await page.evaluate(
-      () => (window as any).mapApp.isolateSelection
+      () => (window as any).mapApp.isolateSelection,
     );
     expect(isIsolated).toBe(true);
   });
@@ -281,7 +281,7 @@ test.describe("Solo Mode", () => {
     await expect(isolateBtn).toHaveCSS("opacity", "1");
 
     const isIsolated = await page.evaluate(
-      () => (window as any).mapApp.isolateSelection
+      () => (window as any).mapApp.isolateSelection,
     );
     expect(isIsolated).toBe(false);
   });
@@ -291,21 +291,21 @@ test.describe("Solo Mode", () => {
 
     await isolateBtn.click();
     expect(
-      await page.evaluate(() => (window as any).mapApp.isolateSelection)
+      await page.evaluate(() => (window as any).mapApp.isolateSelection),
     ).toBe(true);
 
     // Deselect the path
     await page.evaluate(
       (id) => (window as any).mapApp.togglePathSelection(String(id)),
-      pathId
+      pathId,
     );
     await page.waitForFunction(
       () => (window as any).mapApp.selectedPathIds.size === 0,
-      { timeout: 5000 }
+      { timeout: 5000 },
     );
 
     expect(
-      await page.evaluate(() => (window as any).mapApp.isolateSelection)
+      await page.evaluate(() => (window as any).mapApp.isolateSelection),
     ).toBe(false);
     await expect(isolateBtn).toHaveCSS("opacity", "0.5");
   });
@@ -316,7 +316,7 @@ test.describe("Solo Mode", () => {
 
     await page.waitForFunction(() => {
       const state = JSON.parse(
-        localStorage.getItem("kml-heatmap-state") || "{}"
+        localStorage.getItem("kml-heatmap-state") || "{}",
       );
       return state.isolateSelection === true;
     });
@@ -326,11 +326,11 @@ test.describe("Solo Mode", () => {
 
     await page.waitForFunction(
       () => (window as any).mapApp?.isInitializing === false,
-      { timeout: 15000 }
+      { timeout: 15000 },
     );
 
     const isIsolated = await page.evaluate(
-      () => (window as any).mapApp.isolateSelection
+      () => (window as any).mapApp.isolateSelection,
     );
     expect(isIsolated).toBe(true);
   });
@@ -338,7 +338,7 @@ test.describe("Solo Mode", () => {
   test("isolate mode via URL parameter", async ({ page }) => {
     await waitForPathData(page);
     const pathId = await page.evaluate(
-      () => (window as any).mapApp.fullPathInfo[0].id
+      () => (window as any).mapApp.fullPathInfo[0].id,
     );
 
     // 9th flag is isolateSelection
@@ -347,11 +347,11 @@ test.describe("Solo Mode", () => {
 
     await page.waitForFunction(
       () => (window as any).mapApp?.isInitializing === false,
-      { timeout: 15000 }
+      { timeout: 15000 },
     );
 
     const isIsolated = await page.evaluate(
-      () => (window as any).mapApp.isolateSelection
+      () => (window as any).mapApp.isolateSelection,
     );
     expect(isIsolated).toBe(true);
 
@@ -363,15 +363,15 @@ test.describe("Solo Mode", () => {
     await waitForPathData(page);
 
     const pathId = await page.evaluate(
-      () => (window as any).mapApp.fullPathInfo[0].id
+      () => (window as any).mapApp.fullPathInfo[0].id,
     );
     await page.evaluate(
       (id) => (window as any).mapApp.togglePathSelection(String(id)),
-      pathId
+      pathId,
     );
     await page.waitForFunction(
       () => (window as any).mapApp.selectedPathIds.size === 1,
-      { timeout: 5000 }
+      { timeout: 5000 },
     );
 
     // Hide buttons
@@ -380,7 +380,7 @@ test.describe("Solo Mode", () => {
 
     // isolateSelection should still be false
     const isIsolated = await page.evaluate(
-      () => (window as any).mapApp.isolateSelection
+      () => (window as any).mapApp.isolateSelection,
     );
     expect(isIsolated).toBe(false);
 

@@ -80,7 +80,7 @@ describe("airports feature", () => {
       const counts = calculateAirportFlightCounts(
         mockPathInfo,
         "all",
-        "D-EAGJ"
+        "D-EAGJ",
       );
 
       expect(counts.EDAV).toBe(2);
@@ -92,7 +92,7 @@ describe("airports feature", () => {
       const counts = calculateAirportFlightCounts(
         mockPathInfo,
         "2025",
-        "D-EXYZ"
+        "D-EXYZ",
       );
 
       expect(counts.EDAV).toBe(1); // Only id 4

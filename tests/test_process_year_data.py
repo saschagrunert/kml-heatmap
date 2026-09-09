@@ -304,7 +304,7 @@ class TestProcessYearData:
 
         # Read and verify file format
         file_path = os.path.join(temp_output_dir, "2025", "data.js")
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             content = f.read()
 
         # Should start with window.KML_DATA_

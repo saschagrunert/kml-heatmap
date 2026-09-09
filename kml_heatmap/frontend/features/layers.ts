@@ -39,7 +39,7 @@ function calculateRange(
   getValue: (seg: PathSegment) => number | undefined,
   filterValue: (v: number) => boolean,
   defaultRange: Range,
-  selectedPathIds: Set<number> | null = null
+  selectedPathIds: Set<number> | null = null,
 ): Range {
   let segmentsToUse = segments;
   if (selectedPathIds && selectedPathIds.size > 0) {
@@ -65,27 +65,27 @@ function calculateRange(
 
 export function calculateAltitudeRange(
   segments: PathSegment[],
-  selectedPathIds: Set<number> | null = null
+  selectedPathIds: Set<number> | null = null,
 ): Range {
   return calculateRange(
     segments,
     (s) => s.altitude_ft,
     () => true,
     { min: 0, max: 10000 },
-    selectedPathIds
+    selectedPathIds,
   );
 }
 
 export function calculateAirspeedRange(
   segments: PathSegment[],
-  selectedPathIds: Set<number> | null = null
+  selectedPathIds: Set<number> | null = null,
 ): Range {
   return calculateRange(
     segments,
     (s) => s.groundspeed_knots,
     (v) => v > 0,
     { min: 0, max: 200 },
-    selectedPathIds
+    selectedPathIds,
   );
 }
 
@@ -99,7 +99,7 @@ export function calculateAirspeedRange(
 export function shouldRenderSegment(
   _segment: PathSegment,
   pathInfo: PathInfo | undefined,
-  filters: { year?: string; aircraft?: string } = {}
+  filters: { year?: string; aircraft?: string } = {},
 ): boolean {
   const { year = "all", aircraft = "all" } = filters;
 
@@ -136,7 +136,7 @@ export function calculateSegmentProperties(
     colorMin?: number;
     colorMax?: number;
     value?: number; // altitude_ft or groundspeed_knots
-  } = { pathId: 0 }
+  } = { pathId: 0 },
 ): SegmentProperties {
   const {
     pathId,
@@ -166,7 +166,7 @@ export function calculateSegmentProperties(
  */
 export function formatAltitudeLegendLabels(
   min: number,
-  max: number
+  max: number,
 ): LegendLabels {
   return {
     min: Math.round(min) + " ft",
@@ -182,7 +182,7 @@ export function formatAltitudeLegendLabels(
  */
 export function formatAirspeedLegendLabels(
   min: number,
-  max: number
+  max: number,
 ): LegendLabels {
   return {
     min: Math.round(min) + " kt",
@@ -200,7 +200,7 @@ export function formatAirspeedLegendLabels(
 export function filterSegmentsForRendering(
   segments: PathSegment[],
   pathInfo: PathInfo[],
-  filters: { year?: string; aircraft?: string } = {}
+  filters: { year?: string; aircraft?: string } = {},
 ): PathSegment[] {
   const pathInfoMap = new Map(pathInfo.map((p) => [p.id, p]));
 
@@ -218,7 +218,7 @@ export function filterSegmentsForRendering(
  * @returns Map of path_id to array of segments
  */
 export function groupSegmentsByPath(
-  segments: PathSegment[]
+  segments: PathSegment[],
 ): Map<number, PathSegment[]> {
   const grouped = new Map<number, PathSegment[]>();
 

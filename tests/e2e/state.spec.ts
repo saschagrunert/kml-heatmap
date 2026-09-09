@@ -30,7 +30,7 @@ test.describe("State Persistence", () => {
 
       await page.locator("#heatmap-btn").click({ force: true });
       const isVisible = await page.evaluate(
-        () => (window as any).mapApp.heatmapVisible
+        () => (window as any).mapApp.heatmapVisible,
       );
       expect(isVisible).toBe(true);
     });
@@ -39,7 +39,7 @@ test.describe("State Persistence", () => {
       await page.locator("#hide-buttons-btn").click();
       await page.waitForFunction(() => {
         const state = JSON.parse(
-          localStorage.getItem("kml-heatmap-state") || "{}"
+          localStorage.getItem("kml-heatmap-state") || "{}",
         );
         return state.buttonsHidden === true;
       });
@@ -69,7 +69,7 @@ test.describe("State Persistence", () => {
       await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "1");
       await expect(page.locator("#heatmap-btn")).not.toHaveCSS(
         "pointer-events",
-        "none"
+        "none",
       );
     });
   });
@@ -83,11 +83,11 @@ test.describe("State Persistence", () => {
 
       await page.waitForFunction(
         () => localStorage.getItem("kml-heatmap-state") !== null,
-        { timeout: 5000 }
+        { timeout: 5000 },
       );
 
       const state = await page.evaluate(() =>
-        JSON.parse(localStorage.getItem("kml-heatmap-state") || "{}")
+        JSON.parse(localStorage.getItem("kml-heatmap-state") || "{}"),
       );
       expect(state.heatmapVisible).toBe(false);
     });
@@ -97,7 +97,7 @@ test.describe("State Persistence", () => {
       await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0.5");
       await page.waitForFunction(() => {
         const state = JSON.parse(
-          localStorage.getItem("kml-heatmap-state") || "{}"
+          localStorage.getItem("kml-heatmap-state") || "{}",
         );
         return state.heatmapVisible === false;
       });
@@ -112,11 +112,11 @@ test.describe("State Persistence", () => {
       await page.locator("#heatmap-btn").click();
       await page.waitForFunction(
         () => localStorage.getItem("kml-heatmap-state") !== null,
-        { timeout: 5000 }
+        { timeout: 5000 },
       );
 
       const state = await page.evaluate(() =>
-        JSON.parse(localStorage.getItem("kml-heatmap-state") || "{}")
+        JSON.parse(localStorage.getItem("kml-heatmap-state") || "{}"),
       );
 
       const expectedKeys = [
@@ -145,11 +145,11 @@ test.describe("State Persistence", () => {
       await page.waitForFunction(
         () => {
           const state = JSON.parse(
-            localStorage.getItem("kml-heatmap-state") || "{}"
+            localStorage.getItem("kml-heatmap-state") || "{}",
           );
           return state.selectedPathIds && state.selectedPathIds.length > 0;
         },
-        { timeout: 5000 }
+        { timeout: 5000 },
       );
 
       await page.reload();
@@ -157,11 +157,11 @@ test.describe("State Persistence", () => {
 
       await page.waitForFunction(
         () => (window as any).mapApp?.selectedPathIds?.size > 0,
-        { timeout: 15000 }
+        { timeout: 15000 },
       );
 
       const size = await page.evaluate(
-        () => (window as any).mapApp.selectedPathIds.size
+        () => (window as any).mapApp.selectedPathIds.size,
       );
       expect(size).toBe(1);
     });
@@ -171,7 +171,7 @@ test.describe("State Persistence", () => {
     test("URL parameters take priority over localStorage", async ({ page }) => {
       await page.locator("#heatmap-btn").click();
       await page.waitForFunction(
-        () => localStorage.getItem("kml-heatmap-state") !== null
+        () => localStorage.getItem("kml-heatmap-state") !== null,
       );
 
       await page.goto("/?v=100100000");
@@ -221,7 +221,7 @@ test.describe("State Persistence", () => {
     }) => {
       await page.locator("#heatmap-btn").click();
       await page.waitForFunction(
-        () => localStorage.getItem("kml-heatmap-state") !== null
+        () => localStorage.getItem("kml-heatmap-state") !== null,
       );
 
       await page.goto("/?v=010100000");
@@ -258,7 +258,7 @@ test.describe("State Persistence", () => {
     }) => {
       await waitForPathData(page);
       const pathId = await page.evaluate(
-        () => (window as any).mapApp.fullPathInfo[0].id
+        () => (window as any).mapApp.fullPathInfo[0].id,
       );
 
       await page.goto(`/?p=${pathId}`);
@@ -266,12 +266,12 @@ test.describe("State Persistence", () => {
 
       await page.waitForFunction(
         () => (window as any).mapApp?.selectedPathIds?.size > 0,
-        { timeout: 15000 }
+        { timeout: 15000 },
       );
 
       const hasPath = await page.evaluate(
         (id) => (window as any).mapApp.selectedPathIds.has(id),
-        pathId
+        pathId,
       );
       expect(hasPath).toBe(true);
     });
@@ -282,7 +282,7 @@ test.describe("State Persistence", () => {
       await page.locator("#heatmap-btn").click();
       await page.waitForFunction(() => {
         const state = JSON.parse(
-          localStorage.getItem("kml-heatmap-state") || "{}"
+          localStorage.getItem("kml-heatmap-state") || "{}",
         );
         return state.heatmapVisible === false;
       });

@@ -121,19 +121,19 @@ describe("layers feature", () => {
 
     it("filters by year correctly", () => {
       expect(shouldRenderSegment(segment, pathInfo, { year: "2025" })).toBe(
-        true
+        true,
       );
       expect(shouldRenderSegment(segment, pathInfo, { year: "2024" })).toBe(
-        false
+        false,
       );
     });
 
     it("filters by aircraft correctly", () => {
       expect(
-        shouldRenderSegment(segment, pathInfo, { aircraft: "D-EAGJ" })
+        shouldRenderSegment(segment, pathInfo, { aircraft: "D-EAGJ" }),
       ).toBe(true);
       expect(
-        shouldRenderSegment(segment, pathInfo, { aircraft: "D-EXYZ" })
+        shouldRenderSegment(segment, pathInfo, { aircraft: "D-EXYZ" }),
       ).toBe(false);
     });
 
@@ -142,14 +142,14 @@ describe("layers feature", () => {
         shouldRenderSegment(segment, pathInfo, {
           year: "2025",
           aircraft: "D-EAGJ",
-        })
+        }),
       ).toBe(true);
 
       expect(
         shouldRenderSegment(segment, pathInfo, {
           year: "2024",
           aircraft: "D-EAGJ",
-        })
+        }),
       ).toBe(false);
     });
 
@@ -165,7 +165,7 @@ describe("layers feature", () => {
     it("handles pathInfo without aircraft", () => {
       const info = { id: 1, year: 2025 };
       expect(shouldRenderSegment(segment, info, { aircraft: "D-EAGJ" })).toBe(
-        false
+        false,
       );
     });
   });
@@ -184,7 +184,7 @@ describe("layers feature", () => {
           colorMin: 0,
           colorMax: 100,
           value: 50,
-        }
+        },
       );
 
       expect(props.weight).toBe(6);
@@ -199,7 +199,7 @@ describe("layers feature", () => {
           pathId: 2,
           selectedPathIds: new Set([1]),
           hasSelection: true,
-        }
+        },
       );
 
       expect(props.weight).toBe(4);
@@ -214,7 +214,7 @@ describe("layers feature", () => {
           pathId: 1,
           selectedPathIds: new Set(),
           hasSelection: false,
-        }
+        },
       );
 
       expect(props.weight).toBe(4);
@@ -229,7 +229,7 @@ describe("layers feature", () => {
           pathId: 1,
           colorFunction: colorFunc,
           value: 50,
-        }
+        },
       );
 
       expect(props.color).toBe("#ff0000");
@@ -240,7 +240,7 @@ describe("layers feature", () => {
         {},
         {
           pathId: 1,
-        }
+        },
       );
 
       expect(props.color).toBe("#3388ff");

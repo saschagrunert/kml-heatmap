@@ -17,12 +17,14 @@ from .logger import logger
 
 WHEN_PATTERN = re.compile(r"(<when>)([^<]+)(</when>)")
 
+_NAME_DATE_RE = (
+    r"<name>(Log Start|Takeoff|Landing|Log Stop):"
+    r"\s*\d{2}\s+\w{3}\s+"
+)
 NAME_DATE_PATTERN = re.compile(
-    r"<name>(Log Start|Takeoff|Landing|Log Stop):\s*\d{2}\s+\w{3}\s+(\d{4})\s+\d{2}:\d{2}\s+Z</name>",
+    _NAME_DATE_RE + r"(\d{4})\s+\d{2}:\d{2}\s+Z</name>",
 )
-CHECK_NAME_DATE_PATTERN = re.compile(
-    r"<name>(Log Start|Takeoff|Landing|Log Stop):\s*\d{2}\s+\w{3}\s+\d{4}\s+\d{2}:\d{2}\s+Z"
-)
+CHECK_NAME_DATE_PATTERN = re.compile(_NAME_DATE_RE + r"\d{4}\s+\d{2}:\d{2}\s+Z")
 
 
 def _extract_frac(ts_str: str) -> str:
@@ -35,7 +37,7 @@ def _extract_frac(ts_str: str) -> str:
 
 
 def _format_timestamp(dt: datetime, frac: str = "") -> str:
-    """Format a datetime back to KML timestamp format, preserving original fractional precision."""
+    """Format a datetime back to KML timestamp format."""
     base = dt.strftime("%Y-%m-%dT%H:%M:%S")
     return f"{base}{frac}Z"
 

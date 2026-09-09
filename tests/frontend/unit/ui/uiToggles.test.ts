@@ -88,7 +88,7 @@ describe("UIToggles", () => {
       uiToggles.toggleHeatmap();
 
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.heatmapLayer
+        mockApp.heatmapLayer,
       );
       expect(mockApp.heatmapVisible).toBe(false);
       expect(mockDomElements["heatmap-btn"].style.opacity).toBe("0.5");
@@ -130,7 +130,7 @@ describe("UIToggles", () => {
 
       // Should remove airspeed layer
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.airspeedLayer
+        mockApp.airspeedLayer,
       );
       expect(mockApp.airspeedVisible).toBe(false);
       expect(mockDomElements["airspeed-btn"].style.opacity).toBe("0.5");
@@ -150,7 +150,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAltitude();
 
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.altitudeLayer
+        mockApp.altitudeLayer,
       );
       expect(mockApp.altitudeVisible).toBe(false);
       expect(mockDomElements["altitude-btn"].style.opacity).toBe("0.5");
@@ -237,7 +237,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAltitude();
 
       expect(
-        (mockApp.replayManager as any).updateReplayAirplanePopup
+        (mockApp.replayManager as any).updateReplayAirplanePopup,
       ).toHaveBeenCalled();
     });
 
@@ -249,7 +249,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAltitude();
 
       expect(mockApp.replayManager.redrawReplayPath).toHaveBeenCalledWith(
-        "altitude"
+        "altitude",
       );
       expect(mockApp.map!.addLayer).not.toHaveBeenCalled();
     });
@@ -264,7 +264,7 @@ describe("UIToggles", () => {
 
       // Should remove altitude layer
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.altitudeLayer
+        mockApp.altitudeLayer,
       );
       expect(mockApp.altitudeVisible).toBe(false);
       expect(mockDomElements["altitude-btn"].style.opacity).toBe("0.5");
@@ -284,7 +284,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAirspeed();
 
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.airspeedLayer
+        mockApp.airspeedLayer,
       );
       expect(mockApp.airspeedVisible).toBe(false);
       expect(mockDomElements["airspeed-btn"].style.opacity).toBe("0.5");
@@ -353,7 +353,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAirspeed();
 
       expect(
-        (mockApp.replayManager as any).updateReplayAirplanePopup
+        (mockApp.replayManager as any).updateReplayAirplanePopup,
       ).toHaveBeenCalled();
     });
 
@@ -366,7 +366,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAirspeed();
 
       expect(mockApp.replayManager.redrawReplayPath).toHaveBeenCalledWith(
-        "airspeed"
+        "airspeed",
       );
       expect(mockApp.map!.addLayer).not.toHaveBeenCalled();
     });
@@ -379,7 +379,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAirports();
 
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.airportLayer
+        mockApp.airportLayer,
       );
       expect(mockApp.airportsVisible).toBe(false);
       expect(mockDomElements["airports-btn"].style.opacity).toBe("0.5");
@@ -411,7 +411,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAviation();
 
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(
-        (mockApp as any).openaipLayers["Aviation Data"]
+        (mockApp as any).openaipLayers["Aviation Data"],
       );
       expect(mockApp.aviationVisible).toBe(true);
     });
@@ -424,7 +424,7 @@ describe("UIToggles", () => {
       uiToggles.toggleAviation();
 
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        (mockApp as any).openaipLayers["Aviation Data"]
+        (mockApp as any).openaipLayers["Aviation Data"],
       );
       expect(mockApp.aviationVisible).toBe(false);
     });
@@ -574,7 +574,7 @@ describe("UIToggles", () => {
 
       expect(toJpegMock).toHaveBeenCalledWith(
         mockDomElements["map"],
-        expect.objectContaining({ width: 1600, height: 1200 })
+        expect.objectContaining({ width: 1600, height: 1200 }),
       );
       expect(btn.disabled).toBe(false);
       expect(btn.textContent).toContain("Export");

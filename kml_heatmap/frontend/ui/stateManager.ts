@@ -47,7 +47,7 @@ export class StateManager {
     ];
     for (const key of persistKeys) {
       this.unsubscribers.push(
-        app.store.subscribe(key, () => this.scheduleSave())
+        app.store.subscribe(key, () => this.scheduleSave()),
       );
     }
   }
@@ -140,7 +140,7 @@ export class StateManager {
   loadState(): SavedState | null {
     // Priority 1: URL parameters
     const urlState = window.KMLHeatmap.parseUrlParams(
-      new URLSearchParams(window.location.search)
+      new URLSearchParams(window.location.search),
     );
     if (urlState && Object.keys(urlState).length > 0) {
       const validated: Partial<SavedState> = {};
@@ -179,7 +179,7 @@ export class StateManager {
         validated.wrappedVisible = urlState.wrappedVisible;
       if (Array.isArray(urlState.selectedPathIds)) {
         validated.selectedPathIds = urlState.selectedPathIds.filter(
-          (id: unknown) => typeof id === "number" && isFinite(id)
+          (id: unknown) => typeof id === "number" && isFinite(id),
         );
       }
       if (Object.keys(validated).length > 0) {

@@ -136,7 +136,7 @@ test.describe("Wrapped and Export", () => {
     await page.waitForFunction(
       (y) => (window as any).mapApp?.selectedYear === y,
       yearOption,
-      { timeout: 10000 }
+      { timeout: 10000 },
     );
 
     await page.locator("#wrapped-btn").click();
@@ -145,7 +145,7 @@ test.describe("Wrapped and Export", () => {
     const yearEl = page.locator("#wrapped-year");
     await expect(yearEl).toHaveText(yearOption);
     await expect(page.locator("#wrapped-title")).toHaveText(
-      "✨ Your Year in Flight"
+      "✨ Your Year in Flight",
     );
   });
 
@@ -157,7 +157,7 @@ test.describe("Wrapped and Export", () => {
     const count = await options.count();
     test.skip(
       count < 2,
-      "Need >=2 aircraft options to test wrapped panel update"
+      "Need >=2 aircraft options to test wrapped panel update",
     );
 
     const aircraftOption = await options.nth(1).getAttribute("value");
@@ -174,7 +174,7 @@ test.describe("Wrapped and Export", () => {
     await page.waitForFunction(
       (a) => (window as any).mapApp?.selectedAircraft === a,
       aircraftOption,
-      { timeout: 10000 }
+      { timeout: 10000 },
     );
 
     await page.locator("#wrapped-btn").click();
@@ -193,7 +193,7 @@ test.describe("Wrapped and Export", () => {
     await yearSelect.selectOption("all");
     await page.waitForFunction(
       () => (window as any).mapApp?.selectedYear === "all",
-      { timeout: 10000 }
+      { timeout: 10000 },
     );
 
     await page.locator("#wrapped-btn").click();
@@ -201,7 +201,7 @@ test.describe("Wrapped and Export", () => {
 
     await expect(page.locator("#wrapped-year")).toHaveText("All Years");
     await expect(page.locator("#wrapped-title")).toHaveText(
-      "✨ Your Flight History"
+      "✨ Your Flight History",
     );
   });
 
@@ -211,7 +211,7 @@ test.describe("Wrapped and Export", () => {
       (window as any).domtoimage = {
         toJpeg: () =>
           Promise.resolve(
-            "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA"
+            "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA",
           ),
       };
     });

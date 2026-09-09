@@ -15,7 +15,7 @@ export type Coordinate = [number, number];
  */
 export function calculateDistance(
   coords1: Coordinate,
-  coords2: Coordinate
+  coords2: Coordinate,
 ): number {
   const [lat1Deg, lon1Deg] = coords1;
   const [lat2Deg, lon2Deg] = coords2;
@@ -51,7 +51,7 @@ export function calculateBearing(
   lat1: number,
   lon1: number,
   lat2: number,
-  lon2: number
+  lon2: number,
 ): number {
   // Convert to radians
   const φ1 = (lat1 * Math.PI) / 180;

@@ -79,7 +79,7 @@ export class WrappedManager {
       this.app.fullPathSegments || [],
       year,
       this.app.fullStats,
-      aircraft
+      aircraft,
     );
 
     // Update title and year display based on selection
@@ -103,7 +103,7 @@ export class WrappedManager {
     const statsHtml = generateStatsHtml(
       yearStats,
       filteredStats,
-      hasTimingData
+      hasTimingData,
     );
 
     const statsEl = domCache.get("wrapped-stats");
@@ -112,7 +112,7 @@ export class WrappedManager {
     // Build fun facts section with dynamic, varied facts
     const funFacts = window.KMLHeatmap.generateFunFacts(
       yearStats,
-      filteredStats
+      filteredStats,
     );
 
     const funFactsHtml = generateFunFactsHtml(funFacts);
@@ -132,7 +132,7 @@ export class WrappedManager {
       const filteredPathInfo = window.KMLHeatmap.filterPaths(
         this.app.fullPathInfo || [],
         year,
-        aircraft
+        aircraft,
       );
 
       // Filter airports to only those in this year and count flights
@@ -168,14 +168,14 @@ export class WrappedManager {
         if (topAirportsEl) topAirportsEl.innerHTML = homeBaseHtml;
 
         const destinations = yearStats.airport_names.filter(
-          (name) => name !== homeBase.name
+          (name) => name !== homeBase.name,
         );
         const grouped = groupByCountry(destinations);
 
         const destinationsHtml = generateDestinationsHtml(
           grouped,
           countryDisplayName,
-          countryFlag
+          countryFlag,
         );
         const gridEl = domCache.get("wrapped-airports-grid");
         if (gridEl) gridEl.innerHTML = destinationsHtml;
@@ -192,7 +192,7 @@ export class WrappedManager {
     if (!this.originalMapParent) {
       this.originalMapParent = mapContainer.parentNode as HTMLElement;
       this.originalMapIndex = Array.from(
-        this.originalMapParent.children
+        this.originalMapParent.children,
       ).indexOf(mapContainer);
     }
 

@@ -93,7 +93,7 @@ class TestObfuscateContent:
             for i in range(len(shifted_dts) - 1)
         ]
 
-        for orig, shifted in zip(original_deltas, shifted_deltas):
+        for orig, shifted in zip(original_deltas, shifted_deltas, strict=True):
             assert abs(orig - shifted) < 0.001
 
     def test_strips_name_dates(self):

@@ -61,7 +61,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   try {
     const fullResData = await app.dataManager.loadData(
       "data",
-      app.selectedYear
+      app.selectedYear,
     );
     if (fullResData && fullResData.path_info) {
       app.fullPathInfo = fullResData.path_info;
@@ -105,7 +105,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     app.airspeedRange.max = metadata.max_groundspeed_knots!;
     app.layerManager.updateAirspeedLegend(
       app.airspeedRange.min,
-      app.airspeedRange.max
+      app.airspeedRange.max,
     );
   }
 

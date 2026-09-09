@@ -2,6 +2,63 @@
  * Color calculation utilities for altitude and speed visualization
  */
 
+interface ColorStop {
+  r: number;
+  g: number;
+  b: number;
+}
+
+function interpolateGradient(
+  normalized: number,
+  stops: [ColorStop, ColorStop, ColorStop, ColorStop, ColorStop, ColorStop],
+): string {
+  const clamped = Math.max(0, Math.min(1, normalized));
+
+  const segmentIndex = Math.min(Math.floor(clamped * 5), 4);
+  const t = clamped * 5 - segmentIndex;
+
+  const from = stops[segmentIndex as 0 | 1 | 2 | 3 | 4];
+  const to = stops[Math.min(segmentIndex + 1, 5) as 0 | 1 | 2 | 3 | 4 | 5];
+
+  const r = Math.round(from.r + (to.r - from.r) * t);
+  const g = Math.round(from.g + (to.g - from.g) * t);
+  const b = Math.round(from.b + (to.b - from.b) * t);
+
+  return "rgb(" + r + "," + g + "," + b + ")";
+}
+
+const ALTITUDE_STOPS: [
+  ColorStop,
+  ColorStop,
+  ColorStop,
+  ColorStop,
+  ColorStop,
+  ColorStop,
+] = [
+  { r: 80, g: 160, b: 255 },
+  { r: 0, g: 255, b: 255 },
+  { r: 0, g: 255, b: 0 },
+  { r: 255, g: 255, b: 0 },
+  { r: 255, g: 165, b: 0 },
+  { r: 255, g: 66, b: 66 },
+];
+
+const AIRSPEED_STOPS: [
+  ColorStop,
+  ColorStop,
+  ColorStop,
+  ColorStop,
+  ColorStop,
+  ColorStop,
+] = [
+  { r: 0, g: 128, b: 255 },
+  { r: 0, g: 255, b: 255 },
+  { r: 0, g: 255, b: 0 },
+  { r: 255, g: 255, b: 0 },
+  { r: 255, g: 128, b: 0 },
+  { r: 255, g: 0, b: 0 },
+];
+
 /**
  * Get RGB color for a given altitude using gradient mapping
  * @param altitude - Altitude value
@@ -12,54 +69,14 @@
 export function getColorForAltitude(
   altitude: number,
   minAlt: number,
-  maxAlt: number
+  maxAlt: number,
 ): string {
-  // Normalize altitude to 0-1 range
-  let normalized = (altitude - minAlt) / Math.max(maxAlt - minAlt, 1);
-  normalized = Math.max(0, Math.min(1, normalized)); // Clamp to 0-1
-
-  // Color gradient: light blue → cyan → green → yellow → orange → light red
-  // Lighter terminal colors for better visibility on dark background
-  let r: number, g: number, b: number;
-
-  if (normalized < 0.2) {
-    // Light Blue to Cyan (0.0 - 0.2)
-    const t = normalized / 0.2;
-    r = Math.round(80 * (1 - t)); // Start at 80, go to 0
-    g = Math.round(160 + 95 * t); // 160 to 255
-    b = 255;
-  } else if (normalized < 0.4) {
-    // Cyan to Green (0.2 - 0.4)
-    const t = (normalized - 0.2) / 0.2;
-    r = 0;
-    g = 255;
-    b = Math.round(255 * (1 - t));
-  } else if (normalized < 0.6) {
-    // Green to Yellow (0.4 - 0.6)
-    const t = (normalized - 0.4) / 0.2;
-    r = Math.round(255 * t);
-    g = 255;
-    b = 0;
-  } else if (normalized < 0.8) {
-    // Yellow to Orange (0.6 - 0.8)
-    const t = (normalized - 0.6) / 0.2;
-    r = 255;
-    g = Math.round(255 * (1 - t * 0.35)); // ~165 at t=1
-    b = 0;
-  } else {
-    // Orange to Light Red (0.8 - 1.0)
-    const t = (normalized - 0.8) / 0.2;
-    r = 255;
-    g = Math.round(165 * (1 - t * 0.6)); // End at ~66 instead of 0
-    b = Math.round(66 * t); // Add some blue component for lighter red
-  }
-
-  return "rgb(" + r + "," + g + "," + b + ")";
+  const normalized = (altitude - minAlt) / Math.max(maxAlt - minAlt, 1);
+  return interpolateGradient(normalized, ALTITUDE_STOPS);
 }
 
 /**
  * Get RGB color for a given airspeed using gradient mapping
- * Similar to altitude but with different color scheme optimized for speed
  * @param speed - Speed value in knots
  * @param minSpeed - Minimum speed in range
  * @param maxSpeed - Maximum speed in range
@@ -68,49 +85,10 @@ export function getColorForAltitude(
 export function getColorForAirspeed(
   speed: number,
   minSpeed: number,
-  maxSpeed: number
+  maxSpeed: number,
 ): string {
-  // Normalize speed to 0-1 range
-  let normalized = (speed - minSpeed) / Math.max(maxSpeed - minSpeed, 1);
-  normalized = Math.max(0, Math.min(1, normalized)); // Clamp to 0-1
-
-  // Color gradient: blue → cyan → green → yellow → orange → red
-  // Optimized for speed visualization (slower = cooler colors, faster = warmer colors)
-  let r: number, g: number, b: number;
-
-  if (normalized < 0.2) {
-    // Blue to Cyan (0.0 - 0.2)
-    const t = normalized / 0.2;
-    r = 0;
-    g = Math.round(128 + 127 * t); // 128 to 255
-    b = 255;
-  } else if (normalized < 0.4) {
-    // Cyan to Green (0.2 - 0.4)
-    const t = (normalized - 0.2) / 0.2;
-    r = 0;
-    g = 255;
-    b = Math.round(255 * (1 - t));
-  } else if (normalized < 0.6) {
-    // Green to Yellow (0.4 - 0.6)
-    const t = (normalized - 0.4) / 0.2;
-    r = Math.round(255 * t);
-    g = 255;
-    b = 0;
-  } else if (normalized < 0.8) {
-    // Yellow to Orange (0.6 - 0.8)
-    const t = (normalized - 0.6) / 0.2;
-    r = 255;
-    g = Math.round(255 * (1 - t * 0.5)); // 255 to ~128
-    b = 0;
-  } else {
-    // Orange to Red (0.8 - 1.0)
-    const t = (normalized - 0.8) / 0.2;
-    r = 255;
-    g = Math.round(128 * (1 - t)); // 128 to 0
-    b = 0;
-  }
-
-  return "rgb(" + r + "," + g + "," + b + ")";
+  const normalized = (speed - minSpeed) / Math.max(maxSpeed - minSpeed, 1);
+  return interpolateGradient(normalized, AIRSPEED_STOPS);
 }
 
 /**

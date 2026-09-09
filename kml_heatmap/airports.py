@@ -109,8 +109,8 @@ class AirportDeduplicator:
         is_at_path_end: bool,
     ) -> int:
         """Add new airport or update existing one."""
-        # If name contains ICAO code, use OurAirports coordinates for deduplication
-        # This ensures all references to the same ICAO code are merged at the correct location
+        # If name contains ICAO code, use OurAirports coordinates
+        # so all references to the same code merge at the right spot
         corrected_lat = lat
         corrected_lon = lon
 
@@ -256,7 +256,9 @@ def deduplicate_airports(
                 is_at_path_end=False,
             )
             logger.debug(
-                f"Processed departure airport for '{route_name}' at {start_alt:.0f}m altitude"
+                "Processed departure airport for '%s' at %.0fm altitude",
+                route_name,
+                start_alt,
             )
 
         # Process landing airport (if valid landing and is a route)
@@ -270,7 +272,9 @@ def deduplicate_airports(
                 is_at_path_end=True,
             )
             logger.debug(
-                f"Processed arrival airport for '{route_name}' at {end_alt:.0f}m altitude"
+                "Processed arrival airport for '%s' at %.0fm altitude",
+                route_name,
+                end_alt,
             )
 
     return deduplicator.get_unique_airports()

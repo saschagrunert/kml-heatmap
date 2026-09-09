@@ -253,7 +253,10 @@ export class UIToggles {
         ?.toJpeg(mapContainer, {
           width: mapContainer.offsetWidth * 2,
           height: mapContainer.offsetHeight * 2,
-          bgcolor: "#1a1a1a",
+          bgcolor:
+            getComputedStyle(document.documentElement)
+              .getPropertyValue("--color-bg-primary")
+              .trim() || "#1a1a1a",
           quality: 0.95,
         })
         .then((dataUrl: string) => {

@@ -133,10 +133,10 @@ test.describe("Filters and Statistics", () => {
     const pathId = await selectPathForReplay(page);
     await page.evaluate(
       (id) => (window as any).mapApp.togglePathSelection(String(id)),
-      pathId
+      pathId,
     );
     await page.waitForFunction(
-      () => (window as any).mapApp.selectedPathIds.size === 0
+      () => (window as any).mapApp.selectedPathIds.size === 0,
     );
 
     const revertedText = await panel.textContent();
@@ -198,7 +198,7 @@ test.describe("Filters and Statistics", () => {
     const yearOptions = yearSelect.locator("option");
     test.skip(
       (await yearOptions.count()) < 3,
-      "Need >=3 year options to test cross-filter"
+      "Need >=3 year options to test cross-filter",
     );
 
     const yearOption = await yearOptions.nth(1).getAttribute("value");

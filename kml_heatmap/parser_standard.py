@@ -62,7 +62,7 @@ def process_standard_coordinates(
         if current_path:
             # Do NOT generate synthetic timestamps for Charterware files
             # As per https://github.com/saschagrunert/kml-heatmap/issues/16
-            # Charterware coordinates are not at fixed intervals, making time/speed inference inaccurate
+            # Charterware coordinates are not at fixed intervals
 
             path_groups.append(current_path)
             meta = _build_path_metadata_dict(

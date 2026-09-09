@@ -12,7 +12,7 @@ for better compression. Privacy mode strips timestamps when requested.
 import json
 import os
 import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -80,7 +80,7 @@ def process_year_data(
     path_info: list[PathInfo] = []
 
     for local_idx, (orig_path_idx, path) in enumerate(
-        zip(year_path_indices, full_paths)
+        zip(year_path_indices, full_paths, strict=True)
     ):
         if len(path) <= 1:
             continue
@@ -136,7 +136,7 @@ def process_year_data(
     year_dir.mkdir(parents=True, exist_ok=True)
 
     output_file = str(year_dir / f"{DATA_RESOLUTION}.js")
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         var_name = f"KML_DATA_{year}_{DATA_RESOLUTION.upper().replace('-', '_')}"
         f.write(f"window.{var_name} = ")
         json.dump(data, f, separators=(",", ":"), sort_keys=True)
@@ -183,10 +183,7 @@ def _group_paths_by_year(
     paths_by_year: dict[str, list[int]] = {}
     for path_idx, metadata in enumerate(all_path_metadata):
         year = metadata.get("year")
-        if year is None:
-            year_str = "unknown"
-        else:
-            year_str = str(year)
+        year_str = "unknown" if year is None else str(year)
         if year_str not in paths_by_year:
             paths_by_year[year_str] = []
         paths_by_year[year_str].append(path_idx)
@@ -205,8 +202,8 @@ def _process_years_parallel(
     """Process all years in parallel and return results."""
     year_results: list[dict[str, Any]] = []
 
-    with ThreadPoolExecutor(
-        max_workers=min(len(paths_by_year), os.cpu_count() or 4)
+    with ProcessPoolExecutor(
+        max_workers=max(1, min(len(paths_by_year), os.cpu_count() or 4))
     ) as executor:
         futures = {}
         for year in sorted(paths_by_year.keys()):
@@ -238,7 +235,11 @@ def _process_years_parallel(
                     len(all_path_groups[idx]) for idx in paths_by_year[year]
                 )
                 logger.info(
-                    f"  [{completed_count}/{total_years}] Year {year}: {year_points:,} points"
+                    "  [%d/%d] Year %s: %s points",
+                    completed_count,
+                    total_years,
+                    year,
+                    f"{year_points:,}",
                 )
             except Exception as exc:
                 logger.exception("  Error processing year %s", year)

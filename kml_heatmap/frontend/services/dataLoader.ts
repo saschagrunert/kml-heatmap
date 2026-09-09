@@ -33,7 +33,7 @@ function isValidYear(year: string): boolean {
  */
 function isValidResolution(resolution: string): boolean {
   return VALID_RESOLUTIONS.includes(
-    resolution as (typeof VALID_RESOLUTIONS)[number]
+    resolution as (typeof VALID_RESOLUTIONS)[number],
   );
 }
 
@@ -66,7 +66,7 @@ export function loadScript(url: string): Promise<void> {
  */
 export function combineYearData(
   yearDatasets: (KMLDataset | null)[],
-  resolution: string
+  resolution: string,
 ): KMLDataset {
   const combined: KMLDataset = {
     coordinates: [],
@@ -156,7 +156,7 @@ export class DataLoader {
    */
   async loadData(
     resolution: string,
-    year: string = "all"
+    year: string = "all",
   ): Promise<KMLDataset | null> {
     // Security: Validate inputs to prevent path traversal and arbitrary file loading
     if (!isValidYear(year)) {
@@ -196,7 +196,7 @@ export class DataLoader {
       this.cache[cacheKey] = data;
       logDebug(
         "✓ Loaded " + resolution + " (" + year + "):",
-        data.original_points + " points"
+        data.original_points + " points",
       );
       return data;
     } catch (error) {
@@ -231,12 +231,12 @@ export class DataLoader {
 
       logDebug(
         "Loading all years for " + resolution + ":",
-        metadata.available_years
+        metadata.available_years,
       );
 
       // Load all year files in parallel
       const promises = metadata.available_years.map((year) =>
-        this.loadData(resolution, year.toString())
+        this.loadData(resolution, year.toString()),
       );
       const yearDatasets = await Promise.all(promises);
 
@@ -246,7 +246,7 @@ export class DataLoader {
       this.cache[cacheKey] = combined;
       logDebug(
         "Combined all years for " + resolution + ":",
-        combined.original_points + " points"
+        combined.original_points + " points",
       );
       return combined;
     } catch (error) {

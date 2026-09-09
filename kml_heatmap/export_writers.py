@@ -57,7 +57,7 @@ def export_airports_data(
     airports_data = {"airports": valid_airports}
     airports_file = str(Path(output_dir) / "airports.js")
 
-    with open(airports_file, "w") as f:
+    with open(airports_file, "w", encoding="utf-8") as f:
         f.write("window.KML_AIRPORTS = ")
         json.dump(airports_data, f, separators=(",", ":"), sort_keys=True)
         f.write(";")
@@ -65,7 +65,7 @@ def export_airports_data(
     file_size = Path(airports_file).stat().st_size
 
     logger.info(
-        f"  ✓ Airports: {len(valid_airports)} locations ({file_size / 1024:.1f} KB)"
+        "  ✓ Airports: %d locations (%.1f KB)", len(valid_airports), file_size / 1024
     )
 
     return airports_file, file_size
@@ -102,7 +102,7 @@ def export_metadata(
 
     meta_file = str(Path(output_dir) / "metadata.js")
 
-    with open(meta_file, "w") as f:
+    with open(meta_file, "w", encoding="utf-8") as f:
         f.write("window.KML_METADATA = ")
         json.dump(meta_data, f, separators=(",", ":"), sort_keys=True)
         f.write(";")

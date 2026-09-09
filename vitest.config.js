@@ -18,10 +18,16 @@ export default defineConfig({
         "kml_heatmap/frontend/exports.ts",
       ],
       clean: false,
+      thresholds: {
+        lines: 80,
+        branches: 70,
+        functions: 80,
+        statements: 80,
+      },
     },
     alias: {
       leaflet: fileURLToPath(
-        new URL("./tests/mocks/leaflet.ts", import.meta.url)
+        new URL("./tests/mocks/leaflet.ts", import.meta.url),
       ),
     },
   },

@@ -103,7 +103,7 @@ describe("FilterManager", () => {
       filterManager.updateAircraftDropdown();
 
       const aircraftSelect = document.getElementById(
-        "aircraft-select"
+        "aircraft-select",
       ) as HTMLSelectElement;
       expect(aircraftSelect.options.length).toBe(3); // All + 2 aircraft
       expect(aircraftSelect.options[1].value).toBe("D-ABCD");
@@ -116,7 +116,7 @@ describe("FilterManager", () => {
       filterManager.updateAircraftDropdown();
 
       const aircraftSelect = document.getElementById(
-        "aircraft-select"
+        "aircraft-select",
       ) as HTMLSelectElement;
       expect(aircraftSelect.options.length).toBe(2); // All + 1 aircraft
       expect(aircraftSelect.options[1].value).toBe("D-ABCD");
@@ -148,7 +148,7 @@ describe("FilterManager", () => {
       filterManager.updateAircraftDropdown();
 
       const aircraftSelect = document.getElementById(
-        "aircraft-select"
+        "aircraft-select",
       ) as HTMLSelectElement;
       expect(aircraftSelect.options[1].value).toBe("D-ABCD"); // 2 flights
       expect(aircraftSelect.options[2].value).toBe("D-EFGH"); // 1 flight
@@ -158,7 +158,7 @@ describe("FilterManager", () => {
       filterManager.updateAircraftDropdown();
 
       const aircraftSelect = document.getElementById(
-        "aircraft-select"
+        "aircraft-select",
       ) as HTMLSelectElement;
       expect(aircraftSelect.options[1].textContent).toContain("D-ABCD");
       expect(aircraftSelect.options[1].textContent).toContain("DA40");
@@ -172,7 +172,7 @@ describe("FilterManager", () => {
 
       expect(mockApp.selectedAircraft).toBe("all");
       const aircraftSelect = document.getElementById(
-        "aircraft-select"
+        "aircraft-select",
       ) as HTMLSelectElement;
       expect(aircraftSelect.value).toBe("all");
     });
@@ -183,7 +183,7 @@ describe("FilterManager", () => {
       filterManager.updateAircraftDropdown();
 
       const aircraftSelect = document.getElementById(
-        "aircraft-select"
+        "aircraft-select",
       ) as HTMLSelectElement;
       expect(aircraftSelect.value).toBe("D-ABCD");
     });
@@ -205,7 +205,7 @@ describe("FilterManager", () => {
   describe("filterByYear", () => {
     it("updates selected year from dropdown value", async () => {
       const yearSelect = document.getElementById(
-        "year-select"
+        "year-select",
       ) as HTMLSelectElement;
       // Add the option first
       const option = document.createElement("option");
@@ -266,7 +266,7 @@ describe("FilterManager", () => {
 
     it("loads full resolution data for filtering", async () => {
       const yearSelect = document.getElementById(
-        "year-select"
+        "year-select",
       ) as HTMLSelectElement;
       // Add the option first
       const option = document.createElement("option");
@@ -307,7 +307,7 @@ describe("FilterManager", () => {
       await filterManager.filterByYear();
 
       expect(
-        window.KMLHeatmap.calculateFilteredStatistics
+        window.KMLHeatmap.calculateFilteredStatistics,
       ).toHaveBeenCalledWith({
         pathInfo: mockApp.fullPathInfo,
         segments: mockApp.fullPathSegments,
@@ -337,7 +337,7 @@ describe("FilterManager", () => {
   describe("filterByAircraft", () => {
     it("updates selected aircraft from dropdown value", async () => {
       const aircraftSelect = document.getElementById(
-        "aircraft-select"
+        "aircraft-select",
       ) as HTMLSelectElement;
       const option = document.createElement("option");
       option.value = "D-ABCD";
@@ -391,7 +391,7 @@ describe("FilterManager", () => {
       await filterManager.filterByAircraft();
 
       expect(
-        window.KMLHeatmap.calculateFilteredStatistics
+        window.KMLHeatmap.calculateFilteredStatistics,
       ).toHaveBeenCalledWith({
         pathInfo: mockApp.fullPathInfo,
         segments: mockApp.fullPathSegments,

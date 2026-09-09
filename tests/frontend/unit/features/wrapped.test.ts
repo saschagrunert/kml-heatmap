@@ -172,7 +172,7 @@ describe("wrapped feature", () => {
       const stats = calculateYearStats(mockPathInfo, mockSegments, 2025);
 
       expect(stats.aircraft_list[0].flights).toBeGreaterThanOrEqual(
-        stats.aircraft_list[1].flights
+        stats.aircraft_list[1].flights,
       );
     });
 
@@ -193,11 +193,11 @@ describe("wrapped feature", () => {
         mockPathInfo,
         mockSegments,
         2025,
-        fullStats
+        fullStats,
       );
 
       const aircraft = stats.aircraft_list.find(
-        (a) => a.registration === "D-EAGJ"
+        (a) => a.registration === "D-EAGJ",
       );
       expect(aircraft.model).toBe("Diamond DA40 NG");
     });
@@ -208,7 +208,7 @@ describe("wrapped feature", () => {
         mockSegments,
         "all",
         null,
-        "D-EAGJ"
+        "D-EAGJ",
       );
 
       expect(stats.total_flights).toBe(2);
@@ -222,7 +222,7 @@ describe("wrapped feature", () => {
         mockSegments,
         2025,
         null,
-        "D-EAGJ"
+        "D-EAGJ",
       );
 
       expect(stats.total_flights).toBe(2);
@@ -235,7 +235,7 @@ describe("wrapped feature", () => {
         mockSegments,
         2025,
         null,
-        "D-NONE"
+        "D-NONE",
       );
 
       expect(stats.total_flights).toBe(0);
@@ -391,7 +391,7 @@ describe("wrapped feature", () => {
 
     it("generates country fact for 3+ countries", () => {
       vi.spyOn(airports, "countCountries").mockReturnValue(
-        new Set(["DE", "CH", "CZ"])
+        new Set(["DE", "CH", "CZ"]),
       );
       const stats = { ...yearStats, airport_names: ["A", "B", "C"] };
 
@@ -404,7 +404,7 @@ describe("wrapped feature", () => {
 
     it("generates country fact for 2 countries", () => {
       vi.spyOn(airports, "countCountries").mockReturnValue(
-        new Set(["DE", "CH"])
+        new Set(["DE", "CH"]),
       );
       const stats = { ...yearStats, airport_names: ["A", "B"] };
 
@@ -439,7 +439,7 @@ describe("wrapped feature", () => {
       const facts = generateFunFacts(manyAircraftStats);
 
       expect(facts.some((f) => f.text.includes("different aircraft"))).toBe(
-        true
+        true,
       );
     });
 
@@ -525,7 +525,7 @@ describe("wrapped feature", () => {
 
       const priorities = selected.map((f) => f.priority);
       expect(priorities[0]).toBeGreaterThanOrEqual(
-        priorities[priorities.length - 1]
+        priorities[priorities.length - 1],
       );
     });
 

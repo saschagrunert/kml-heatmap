@@ -4,6 +4,7 @@
  */
 
 import type { PathInfo } from "../types";
+import { filterPaths } from "../calculations/statistics";
 
 let _countryByAirport: Map<string, string> | null = null;
 
@@ -104,31 +105,12 @@ export interface PathToAirports {
 export function calculateAirportFlightCounts(
   pathInfo: PathInfo[],
   year: string = "all",
-  aircraft: string = "all"
+  aircraft: string = "all",
 ): AirportCounts {
   if (!pathInfo) return {};
 
   const counts: AirportCounts = {};
-  const filteredPaths = pathInfo.filter(function (path) {
-    // Apply year filter
-    if (year !== "all") {
-      if (!path.year || path.year.toString() !== year) {
-        return false;
-      }
-    }
-
-    // Apply aircraft filter
-    if (aircraft !== "all") {
-      if (
-        !path.aircraft_registration ||
-        path.aircraft_registration !== aircraft
-      ) {
-        return false;
-      }
-    }
-
-    return true;
-  });
+  const filteredPaths = filterPaths(pathInfo, year, aircraft);
 
   // Count unique airports per flight (avoid double-counting round trips)
   filteredPaths.forEach(function (path) {
@@ -175,7 +157,7 @@ export function findHomeBase(airportCounts: AirportCounts): string | null {
  */
 export function calculateAirportOpacity(
   flightCount: number,
-  maxCount: number
+  maxCount: number,
 ): number {
   if (maxCount === 0) return 1.0;
 
@@ -197,7 +179,7 @@ export function calculateAirportOpacity(
 export function calculateAirportMarkerSize(
   flightCount: number,
   maxCount: number,
-  options: { minSize?: number; maxSize?: number } = {}
+  options: { minSize?: number; maxSize?: number } = {},
 ): number {
   const minSize = options.minSize || 3;
   const maxSize = options.maxSize || 8;
