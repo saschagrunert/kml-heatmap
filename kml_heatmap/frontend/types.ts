@@ -9,15 +9,14 @@ import type { Coordinate } from "./utils/geometry";
  */
 export interface PathInfo {
   id: number;
-  aircraft?: string;
   aircraft_registration?: string;
   aircraft_type?: string;
   year?: number;
-  start_time?: number;
-  end_time?: number;
   start_airport?: string;
   end_airport?: string;
-  distance?: number;
+  start_coords?: number[];
+  end_coords?: number[];
+  segment_count?: number;
 }
 
 /**

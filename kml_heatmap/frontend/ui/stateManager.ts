@@ -109,7 +109,16 @@ export class StateManager {
     try {
       const saved = localStorage.getItem("kml-heatmap-state");
       if (saved) {
-        return JSON.parse(saved) as SavedState;
+        const parsed: unknown = JSON.parse(saved);
+        if (
+          typeof parsed === "object" &&
+          parsed !== null &&
+          "center" in parsed &&
+          "zoom" in parsed
+        ) {
+          return parsed as SavedState;
+        }
+        return null;
       }
     } catch (_e) {
       // Silently fail if localStorage is not available or data is corrupt

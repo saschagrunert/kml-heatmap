@@ -21,6 +21,7 @@ export class WrappedManager {
   private originalMapParent: HTMLElement | null;
   private originalMapIndex: number | null;
   private savedControlDisplays: Map<HTMLElement, string> = new Map();
+  private escapeHandler: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -206,6 +207,14 @@ export class WrappedManager {
     const modal = domCache.get("wrapped-modal");
     if (modal) modal.style.display = "flex";
 
+    // Add Escape key handler to close modal
+    this.escapeHandler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        this.closeWrapped();
+      }
+    };
+    document.addEventListener("keydown", this.escapeHandler);
+
     // Wait for modal to render and have dimensions
     setTimeout(() => {
       // Now move map into wrapped container (which now has dimensions)
@@ -222,8 +231,9 @@ export class WrappedManager {
 
       // Now that container has dimensions, invalidate map size
       setTimeout(() => {
-        this.app.map!.invalidateSize();
-        this.app.map!.fitBounds(this.app.config.bounds, { padding: [80, 80] });
+        if (!this.app.map) return;
+        this.app.map.invalidateSize();
+        this.app.map.fitBounds(this.app.config.bounds, { padding: [80, 80] });
 
         // Save state after wrapped panel is shown
         if (this.app.stateManager) {
@@ -273,6 +283,12 @@ export class WrappedManager {
 
       const modal = domCache.get("wrapped-modal");
       if (modal) modal.style.display = "none";
+
+      // Remove Escape key handler
+      if (this.escapeHandler) {
+        document.removeEventListener("keydown", this.escapeHandler);
+        this.escapeHandler = null;
+      }
     }
   }
 }

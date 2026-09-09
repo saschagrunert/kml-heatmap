@@ -28,7 +28,7 @@ def get_cache_key(
     # Get file modification time
     try:
         mtime = kml_path.stat().st_mtime
-    except (OSError, FileNotFoundError):
+    except OSError:
         return None, False
 
     # Create cache filename from KML filename, path hash, and modification time

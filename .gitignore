@@ -4,6 +4,11 @@
 /index.html
 AGENTS.md
 __pycache__
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
 node_modules
 .mypy_cache
 .ruff_cache

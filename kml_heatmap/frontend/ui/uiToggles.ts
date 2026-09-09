@@ -133,8 +133,8 @@ export class UIToggles {
       }
 
       if (!this.app.replayManager.state.active) {
-        this.app.map.addLayer(layer);
         redraw();
+        this.app.map.addLayer(layer);
       } else {
         this.app.replayManager.redrawReplayPath(mode);
       }

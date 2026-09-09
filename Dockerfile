@@ -36,8 +36,10 @@ COPY --from=js-builder /build/kml_heatmap/static/mapApp.bundle.js ./kml_heatmap/
 # Copy server script
 COPY serve.py /app/serve.py
 
-# Create directory for input/output files
-RUN mkdir -p /data
+# Create directory for input/output files and cache
+RUN mkdir -p /data /cache
+
+ENV KML_HEATMAP_CACHE_DIR=/cache
 
 # Set working directory to /data for file operations
 WORKDIR /data

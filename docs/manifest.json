@@ -5,6 +5,8 @@
   "description": "Interactive flight path heatmap visualization",
   "start_url": "./",
   "display": "standalone",
+  "scope": "./",
+  "orientation": "any",
   "background_color": "#1a1a1a",
   "theme_color": "#1a1a1a",
   "icons": [

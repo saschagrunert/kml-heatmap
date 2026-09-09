@@ -44,20 +44,18 @@ class TestValidateAndNormalizeCoordinate:
         assert result is not None
 
     def test_extreme_altitude_out_of_range(self):
-        """Test that extreme altitude values get normalized to None."""
+        """Test that extreme altitude values get normalized to 0."""
         # Altitude way too high (above valid range)
         result = validate_and_normalize_coordinate(50.0, 8.5, 999999, "test.kml")
         assert result is not None
         _lat, _lon, alt = result
-        # Invalid altitude gets set to None
-        assert alt is None
+        assert alt == 0.0
 
         # Altitude way too low (below valid range)
         result = validate_and_normalize_coordinate(50.0, 8.5, -99999, "test.kml")
         assert result is not None
         _lat, _lon, alt = result
-        # Invalid altitude gets set to None
-        assert alt is None
+        assert alt == 0.0
 
     @pytest.mark.parametrize(
         "lat,lon",

@@ -41,10 +41,8 @@ from .types import (
 
 def process_year_data(
     year: str,
-    year_path_indices: list[int],
-    all_coordinates: FlightPath,
-    all_path_groups: FlightPathGroup,
-    all_path_metadata: list[PathMetadata],
+    year_path_groups: FlightPathGroup,
+    year_path_metadata: list[PathMetadata],
     min_alt_m: float,
     max_alt_m: float,
     output_dir: str,
@@ -52,9 +50,7 @@ def process_year_data(
 ) -> dict[str, Any]:
     """Process a single year's data and export to files."""
     if not quiet:
-        logger.info(
-            "\n  Processing year %s (%d paths)...", year, len(year_path_indices)
-        )
+        logger.info("\n  Processing year %s (%d paths)...", year, len(year_path_groups))
 
     year_max_groundspeed = 0.0
     year_min_groundspeed = float("inf")
@@ -63,38 +59,22 @@ def process_year_data(
     year_max_path_distance = 0.0
     year_cruise_altitude_histogram: dict[int, float] = {}
 
-    year_total_points = sum(
-        len(all_path_groups[path_idx]) for path_idx in year_path_indices
-    )
+    year_total_points = sum(len(path) for path in year_path_groups)
     if not quiet:
         logger.info("    Total points for %s: %s", year, f"{year_total_points:,}")
 
-    full_paths = []
-    for path_idx in year_path_indices:
-        path = all_path_groups[path_idx]
-        full_paths.append(path)
-
-    full_coords = [[point[0], point[1]] for path in full_paths for point in path]
+    full_coords = [[point[0], point[1]] for path in year_path_groups for point in path]
 
     path_segments: list[PathSegment] = []
     path_info: list[PathInfo] = []
 
-    for local_idx, (orig_path_idx, path) in enumerate(
-        zip(year_path_indices, full_paths, strict=True)
+    for local_idx, (path, metadata) in enumerate(
+        zip(year_path_groups, year_path_metadata, strict=True)
     ):
         if len(path) <= 1:
             continue
 
-        metadata = (
-            all_path_metadata[orig_path_idx]
-            if orig_path_idx < len(all_path_metadata)
-            else PathMetadata(start_point=[], airport_name="")
-        )
-        path_year = (
-            all_path_metadata[orig_path_idx].get("year")
-            if orig_path_idx < len(all_path_metadata)
-            else None
-        )
+        path_year = metadata.get("year")
 
         info, path_duration_seconds, path_distance_km, path_distance_nm = (
             _build_path_info(path, metadata, local_idx, path_year)
@@ -192,7 +172,6 @@ def _group_paths_by_year(
 
 def _process_years_parallel(
     paths_by_year: dict[str, list[int]],
-    all_coordinates: FlightPath,
     all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
     min_alt_m: float,
@@ -202,19 +181,29 @@ def _process_years_parallel(
     """Process all years in parallel and return results."""
     year_results: list[dict[str, Any]] = []
 
+    year_slices: dict[str, tuple[FlightPathGroup, list[PathMetadata]]] = {}
+    for year in sorted(paths_by_year.keys()):
+        indices = paths_by_year[year]
+        year_slices[year] = (
+            [all_path_groups[i] for i in indices],
+            [
+                all_path_metadata[i]
+                if i < len(all_path_metadata)
+                else PathMetadata(start_point=[], airport_name="")
+                for i in indices
+            ],
+        )
+
     with ProcessPoolExecutor(
         max_workers=max(1, min(len(paths_by_year), os.cpu_count() or 4))
     ) as executor:
         futures = {}
-        for year in sorted(paths_by_year.keys()):
-            year_path_indices = paths_by_year[year]
+        for year, (year_groups, year_metadata) in year_slices.items():
             future = executor.submit(
                 process_year_data,
                 year,
-                year_path_indices,
-                all_coordinates,
-                all_path_groups,
-                all_path_metadata,
+                year_groups,
+                year_metadata,
                 min_alt_m,
                 max_alt_m,
                 output_dir,
@@ -231,9 +220,7 @@ def _process_years_parallel(
                 year_results.append(result)
                 completed_count += 1
 
-                year_points = sum(
-                    len(all_path_groups[idx]) for idx in paths_by_year[year]
-                )
+                year_points = sum(len(path) for path in year_slices[year][0])
                 logger.info(
                     "  [%d/%d] Year %s: %s points",
                     completed_count,
@@ -376,7 +363,6 @@ def export_all_data(
     logger.info("\n  Processing %d year(s) in parallel...", len(paths_by_year))
     year_results = _process_years_parallel(
         paths_by_year,
-        all_coordinates,
         all_path_groups,
         all_path_metadata,
         min_alt_m,

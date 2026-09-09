@@ -47,8 +47,15 @@ describe("showToast", () => {
     expect(toast!.classList.contains("toast-error")).toBe(true);
   });
 
-  it("sets role=alert for accessibility", () => {
+  it("sets role=status for info toasts", () => {
     showToast("Accessible message");
+
+    const toast = document.querySelector(".toast-notification");
+    expect(toast!.getAttribute("role")).toBe("status");
+  });
+
+  it("sets role=alert for error toasts", () => {
+    showToast("Error message", "error");
 
     const toast = document.querySelector(".toast-notification");
     expect(toast!.getAttribute("role")).toBe("alert");

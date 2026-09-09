@@ -306,6 +306,16 @@ describe("StateManager", () => {
       expect(loaded).toBeNull();
     });
 
+    it("returns null if saved state is valid JSON but missing required fields", () => {
+      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
+        heatmapVisible: true,
+      });
+
+      const loaded = stateManager.loadMapState();
+
+      expect(loaded).toBeNull();
+    });
+
     it("handles localStorage errors gracefully", () => {
       vi.spyOn(localStorage, "getItem").mockImplementationOnce(() => {
         throw new Error("localStorage not available");

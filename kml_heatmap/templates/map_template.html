@@ -88,114 +88,117 @@
     </div>
 
     <!-- Left side buttons -->
-    <button
-      id="stats-btn"
-      class="control-btn left toggleable-btn"
-      data-action="toggleStats"
-      aria-label="Toggle flight statistics panel"
-      aria-pressed="false"
-    >
-      📊 Stats
-    </button>
-    <button
-      id="export-btn"
-      class="control-btn left toggleable-btn"
-      data-action="exportMap"
-      aria-label="Export map as image"
-    >
-      📷 Export
-    </button>
-    <button
-      id="wrapped-btn"
-      class="control-btn left toggleable-btn"
-      data-action="showWrapped"
-      aria-label="Show year in review summary"
-    >
-      ✨ Wrapped
-    </button>
-    <button
-      id="replay-btn"
-      class="control-btn left toggleable-btn initially-half-opacity"
-      data-action="toggleReplay"
-      disabled
-      aria-label="Replay selected flight path"
-      aria-pressed="false"
-      aria-disabled="true"
-    >
-      ▶️ Replay
-    </button>
-
-    <!-- Right side buttons -->
-    <button
-      id="heatmap-btn"
-      class="control-btn right toggleable-btn"
-      data-action="toggleHeatmap"
-      aria-label="Toggle heatmap overlay"
-      aria-pressed="true"
-    >
-      🔥 Heatmap
-    </button>
-    <button
-      id="airports-btn"
-      class="control-btn right toggleable-btn"
-      data-action="toggleAirports"
-      aria-label="Toggle airport markers"
-      aria-pressed="true"
-    >
-      🏢 Airports
-    </button>
-    <button
-      id="altitude-btn"
-      class="control-btn right toggleable-btn"
-      data-action="toggleAltitude"
-      aria-label="Toggle altitude color visualization"
-      aria-pressed="true"
-    >
-      ⛰️ Altitude
-    </button>
-    <button
-      id="airspeed-btn"
-      class="control-btn right toggleable-btn initially-dimmed"
-      data-action="toggleAirspeed"
-      disabled
-      aria-label="Toggle groundspeed color visualization"
-      aria-pressed="false"
-    >
-      🚀 Speed
-    </button>
-    <button
-      id="aviation-btn"
-      class="control-btn right toggleable-btn initially-hidden"
-      data-action="toggleAviation"
-      aria-label="Toggle aviation data overlay"
-      aria-pressed="false"
-    >
-      🗺️ Aviation
-    </button>
-    <div
-      id="year-filter"
-      class="control-btn right toggleable-btn filter-dropdown"
-    >
-      <select
-        id="year-select"
-        data-action="filterByYear"
-        aria-label="Filter flights by year"
+    <div id="left-buttons">
+      <button
+        id="stats-btn"
+        class="control-btn left toggleable-btn"
+        data-action="toggleStats"
+        aria-label="Toggle flight statistics panel"
+        aria-pressed="false"
       >
-        <option value="all">📅 All</option>
-      </select>
+        📊 Stats
+      </button>
+      <button
+        id="export-btn"
+        class="control-btn left toggleable-btn"
+        data-action="exportMap"
+        aria-label="Export map as image"
+      >
+        📷 Export
+      </button>
+      <button
+        id="wrapped-btn"
+        class="control-btn left toggleable-btn"
+        data-action="showWrapped"
+        aria-label="Show year in review summary"
+      >
+        ✨ Wrapped
+      </button>
+      <button
+        id="replay-btn"
+        class="control-btn left toggleable-btn initially-half-opacity"
+        data-action="toggleReplay"
+        disabled
+        aria-label="Replay selected flight path"
+        aria-pressed="false"
+        aria-disabled="true"
+      >
+        ▶️ Replay
+      </button>
     </div>
 
-    <div
-      id="aircraft-filter"
-      class="control-btn right toggleable-btn filter-dropdown"
-    >
-      <select
-        id="aircraft-select"
-        data-action="filterByAircraft"
-        aria-label="Filter flights by aircraft"
+    <!-- Right side buttons -->
+    <div id="right-buttons">
+      <div
+        id="year-filter"
+        class="control-btn right toggleable-btn filter-dropdown"
       >
-        <option value="all">✈️ Aircraft</option>
-      </select>
+        <select
+          id="year-select"
+          data-action="filterByYear"
+          aria-label="Filter flights by year"
+        >
+          <option value="all">📅 All</option>
+        </select>
+      </div>
+      <div
+        id="aircraft-filter"
+        class="control-btn right toggleable-btn filter-dropdown"
+      >
+        <select
+          id="aircraft-select"
+          data-action="filterByAircraft"
+          aria-label="Filter flights by aircraft"
+        >
+          <option value="all">✈️ Aircraft</option>
+        </select>
+      </div>
+      <button
+        id="heatmap-btn"
+        class="control-btn right toggleable-btn"
+        data-action="toggleHeatmap"
+        aria-label="Toggle heatmap overlay"
+        aria-pressed="true"
+      >
+        🔥 Heatmap
+      </button>
+      <button
+        id="airports-btn"
+        class="control-btn right toggleable-btn"
+        data-action="toggleAirports"
+        aria-label="Toggle airport markers"
+        aria-pressed="true"
+      >
+        🏢 Airports
+      </button>
+      <button
+        id="altitude-btn"
+        class="control-btn right toggleable-btn"
+        data-action="toggleAltitude"
+        aria-label="Toggle altitude color visualization"
+        aria-pressed="true"
+      >
+        ⛰️ Altitude
+      </button>
+      <button
+        id="airspeed-btn"
+        class="control-btn right toggleable-btn initially-dimmed"
+        data-action="toggleAirspeed"
+        disabled
+        aria-label="Toggle groundspeed color visualization"
+        aria-pressed="false"
+      >
+        🚀 Speed
+      </button>
+      <button
+        id="aviation-btn"
+        class="control-btn right toggleable-btn initially-hidden"
+        data-action="toggleAviation"
+        aria-label="Toggle aviation data overlay"
+        aria-pressed="false"
+      >
+        🗺️ Aviation
+      </button>
     </div>
 
     <div id="stats-panel" role="region" aria-label="Flight statistics"></div>
@@ -388,7 +391,11 @@
           </div>
 
           <!-- Map - right side -->
-          <div id="wrapped-map-container" aria-label="Flight map overview">
+          <div
+            id="wrapped-map-container"
+            role="region"
+            aria-label="Flight map overview"
+          >
             <!-- Map will be moved here when wrapped is shown -->
           </div>
         </div>
@@ -409,6 +416,7 @@
       src="https://cdn.jsdelivr.net/npm/dom-to-image@2.6.0/dist/dom-to-image.min.js"
       integrity="sha384-zESinL+vR3OR5XGFqKjneclbVKOL8SfP+fKKO3K9BHAaPtboci56Vu3g5flevHk9"
       crossorigin="anonymous"
+      defer
     ></script>
 
     <!-- Preload essential data files (works with both file:// and https://) -->

@@ -1,24 +1,4 @@
-"""Constants used throughout the KML Heatmap Generator.
-
-This module centralizes all magic numbers and configuration constants used
-across the application. By keeping constants in one place, we ensure:
-- Consistency across the codebase
-- Easy adjustment of thresholds and limits
-- Clear documentation of what each value represents
-- Mathematical relationships between related constants
-
-Categories:
-- Unit Conversions: Standard unit conversion factors
-- Groundspeed Calculations: Thresholds for speed calculations
-- Altitude Thresholds: Limits for cruise/landing detection
-- Validation Ranges: Min/max bounds for coordinate validation
-- Airport Detection: Spatial thresholds for deduplication
-- Path Sampling: Sample sizes for altitude analysis
-- Mid-Flight Detection: Criteria for detecting non-ground starts
-- Landing Detection: Criteria for valid landing endpoints
-- Resolution Levels: Multi-resolution export configuration
-- Heatmap Configuration: Visual styling parameters
-"""
+"""Constants used throughout the KML Heatmap Generator."""
 
 # === Unit Conversions ===
 METERS_TO_FEET = 3.28084

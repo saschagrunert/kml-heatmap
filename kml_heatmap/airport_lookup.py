@@ -110,7 +110,7 @@ def _load_airport_database() -> dict[str, tuple[float, float, str, str]]:
         try:
             # Acquire exclusive lock if supported (works across processes on Unix)
             if HAS_FCNTL:
-                lock_file = open(CACHE_LOCK_FILE, "w")  # noqa: SIM115
+                lock_file = open(CACHE_LOCK_FILE, "w", encoding="utf-8")  # noqa: SIM115
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 
             # Check again if cache is valid after acquiring lock

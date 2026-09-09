@@ -104,7 +104,12 @@ def _parse_kml_files(
             executor.submit(_parse_with_error_handling, f): f for f in valid_files
         }
         for future in as_completed(future_to_file):
-            kml_file, (coords, path_groups, path_metadata) = future.result()
+            try:
+                kml_file, (coords, path_groups, path_metadata) = future.result()
+            except Exception:
+                kml_file = future_to_file[future]
+                logger.exception("Unexpected error processing %s", kml_file)
+                coords, path_groups, path_metadata = [], [], []
             results.append((kml_file, coords, path_groups, path_metadata))
             completed_count += 1
             progress_pct = (completed_count / len(valid_files)) * 100

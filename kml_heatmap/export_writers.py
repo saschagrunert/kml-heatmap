@@ -55,20 +55,20 @@ def export_airports_data(
         valid_airports.append(airport_data)
 
     airports_data = {"airports": valid_airports}
-    airports_file = str(Path(output_dir) / "airports.js")
+    airports_file = Path(output_dir) / "airports.js"
 
     with open(airports_file, "w", encoding="utf-8") as f:
         f.write("window.KML_AIRPORTS = ")
         json.dump(airports_data, f, separators=(",", ":"), sort_keys=True)
         f.write(";")
 
-    file_size = Path(airports_file).stat().st_size
+    file_size = airports_file.stat().st_size
 
     logger.info(
         "  ✓ Airports: %d locations (%.1f KB)", len(valid_airports), file_size / 1024
     )
 
-    return airports_file, file_size
+    return str(airports_file), file_size
 
 
 def export_metadata(
@@ -100,18 +100,18 @@ def export_metadata(
     if file_structure is not None:
         meta_data["file_structure"] = file_structure
 
-    meta_file = str(Path(output_dir) / "metadata.js")
+    meta_file = Path(output_dir) / "metadata.js"
 
     with open(meta_file, "w", encoding="utf-8") as f:
         f.write("window.KML_METADATA = ")
         json.dump(meta_data, f, separators=(",", ":"), sort_keys=True)
         f.write(";")
 
-    file_size = Path(meta_file).stat().st_size
+    file_size = meta_file.stat().st_size
 
     logger.info("  ✓ Metadata: %.1f KB", file_size / 1024)
 
-    return meta_file, file_size
+    return str(meta_file), file_size
 
 
 def collect_unique_years(all_path_metadata: list[PathMetadata]) -> list[int]:

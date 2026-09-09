@@ -22,7 +22,7 @@ def load_aircraft_data(aircraft_file: Path) -> dict[str, str]:
         return _aircraft_cache
 
     try:
-        data: dict[str, str] = json.loads(aircraft_file.read_text())
+        data: dict[str, str] = json.loads(aircraft_file.read_text(encoding="utf-8"))
         _aircraft_cache = data
         _aircraft_cache_path = aircraft_file
         return data

@@ -7,6 +7,7 @@ search on sorted timestamps for O(log n) lookups.
 
 from bisect import bisect_left, bisect_right
 from datetime import datetime
+from itertools import pairwise
 from typing import Any
 
 from .constants import (
@@ -27,10 +28,8 @@ def calculate_path_distance(path: FlightPath) -> float:
         return 0.0
 
     distance_km = 0.0
-    for i in range(len(path) - 1):
-        lat1, lon1 = path[i][0], path[i][1]
-        lat2, lon2 = path[i + 1][0], path[i + 1][1]
-        distance_km += haversine_distance(lat1, lon1, lat2, lon2)
+    for p1, p2 in pairwise(path):
+        distance_km += haversine_distance(p1[0], p1[1], p2[0], p2[1])
 
     return distance_km
 
@@ -41,10 +40,7 @@ def extract_segment_speeds(
     """Calculate instantaneous speeds for all segments in a path."""
     segment_speeds = []
 
-    for i in range(len(path) - 1):
-        coord1 = path[i]
-        coord2 = path[i + 1]
-
+    for i, (coord1, coord2) in enumerate(pairwise(path)):
         lat1, lon1 = float(coord1[0]), float(coord1[1])
         lat2, lon2 = float(coord2[0]), float(coord2[1])
         segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)

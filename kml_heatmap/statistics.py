@@ -1,6 +1,7 @@
 """Statistics calculation for flight data."""
 
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -48,9 +49,8 @@ def calculate_basic_stats(valid_paths: FlightPathGroup) -> dict[str, float]:
     for path in valid_paths:
         total_distance_km += calculate_path_distance(path)
 
-        for i in range(len(path) - 1):
-            # Calculate altitude change (only track gain)
-            alt_change = path[i + 1][2] - path[i][2]
+        for p1, p2 in pairwise(path):
+            alt_change = p2[2] - p1[2]
             if alt_change > 0:
                 total_gain_m += alt_change
 
