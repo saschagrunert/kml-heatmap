@@ -4,6 +4,7 @@
 import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import type { ReplayManager } from "./replayManager";
+import type { ReplayState } from "./replayState";
 import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
@@ -39,6 +40,28 @@ export function findSegmentIndexAtTime(
     }
   }
   return result;
+}
+
+/**
+ * Colour of one replay segment. Segments without a groundspeed fall back to
+ * the altitude colour, so both draw paths cover exactly the same segments.
+ */
+export function replaySegmentColor(
+  state: ReplayState,
+  segment: PathSegment,
+  useAirspeedColors: boolean,
+): string {
+  return useAirspeedColors && (segment.groundspeed_knots ?? 0) > 0
+    ? getColorForAirspeed(
+        segment.groundspeed_knots ?? 0,
+        state.colorMinSpeed,
+        state.colorMaxSpeed,
+      )
+    : getColorForAltitude(
+        segment.altitude_ft ?? 0,
+        state.colorMinAlt,
+        state.colorMaxAlt,
+      );
 }
 
 export class ReplayRenderer {
@@ -248,18 +271,7 @@ export class ReplayRenderer {
       if (!seg) continue;
       if ((seg.time ?? 0) > state.currentTime) break;
 
-      const color =
-        useAirspeedColors && (seg.groundspeed_knots ?? 0) > 0
-          ? getColorForAirspeed(
-              seg.groundspeed_knots ?? 0,
-              state.colorMinSpeed,
-              state.colorMaxSpeed,
-            )
-          : getColorForAltitude(
-              seg.altitude_ft ?? 0,
-              state.colorMinAlt,
-              state.colorMaxAlt,
-            );
+      const color = replaySegmentColor(state, seg, useAirspeedColors);
 
       const polyline = L.polyline(seg.coords ?? [], {
         color,

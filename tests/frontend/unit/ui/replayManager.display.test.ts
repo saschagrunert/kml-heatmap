@@ -72,7 +72,26 @@ describe("ReplayManager display", () => {
       expect(airspeedSpy).toHaveBeenCalledWith(100, 100, 130);
     });
 
-    it("skips segments with zero groundspeed in airspeed mode", () => {
+    it("rebuilds the trim stack so a later backward seek still works", () => {
+      replayManager.redrawReplayPath("airspeed");
+
+      // Stale references would make removeSegmentsAfter remove nothing visible
+      expect(replayManager.state.drawnLayers).toHaveLength(2);
+      const removeSpy = replayManager.state.layer!.removeLayer as AnyMock;
+      removeSpy.mockClear();
+
+      replayManager.seekReplay("0");
+
+      expect(removeSpy).toHaveBeenCalledTimes(1);
+      expect(replayManager.state.drawnLayers).toHaveLength(1);
+      expect(replayManager.state.lastDrawnIndex).toBe(0);
+    });
+
+    it("draws zero-groundspeed segments with the altitude colour", () => {
+      // Skipping them would both hide part of the trail and desync
+      // drawnLayers from lastDrawnIndex, breaking a later backward seek
+      const altitudeSpy = vi.spyOn(colors, "getColorForAltitude");
+      const airspeedSpy = vi.spyOn(colors, "getColorForAirspeed");
       replayManager.state.segments = [
         {
           path_id: 1,
@@ -89,7 +108,56 @@ describe("ReplayManager display", () => {
 
       replayManager.redrawReplayPath("airspeed");
 
-      expect(replayManager.state.lastDrawnIndex).toBe(-1);
+      expect(replayManager.state.lastDrawnIndex).toBe(0);
+      expect(replayManager.state.drawnLayers).toHaveLength(1);
+      expect(altitudeSpy).toHaveBeenCalledWith(1000, 3000, 5000);
+      expect(airspeedSpy).not.toHaveBeenCalled();
+    });
+
+    it("keeps drawnLayers aligned with lastDrawnIndex when speeds vary", () => {
+      // The trim stack is popped one entry per index, so a redraw that
+      // covered fewer segments than the index range would remove the wrong
+      // polylines on the next backward seek
+      replayManager.state.segments = [
+        {
+          path_id: 1,
+          coords: [
+            [51, 10],
+            [51.1, 10.1],
+          ],
+          altitude_ft: 1000,
+          groundspeed_knots: 100,
+          time: 0,
+        },
+        {
+          path_id: 1,
+          coords: [
+            [51.1, 10.1],
+            [51.2, 10.2],
+          ],
+          altitude_ft: 1200,
+          groundspeed_knots: 0,
+          time: 30,
+        },
+        {
+          path_id: 1,
+          coords: [
+            [51.2, 10.2],
+            [51.3, 10.3],
+          ],
+          altitude_ft: 1400,
+          groundspeed_knots: 120,
+          time: 60,
+        },
+      ];
+      replayManager.state.currentTime = 100;
+      replayManager.state.lastDrawnIndex = 2;
+
+      replayManager.redrawReplayPath("airspeed");
+
+      expect(replayManager.state.drawnLayers).toHaveLength(
+        replayManager.state.lastDrawnIndex + 1,
+      );
     });
 
     it("does nothing if layer is null", () => {
