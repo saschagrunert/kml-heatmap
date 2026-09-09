@@ -1,6 +1,11 @@
 """Statistics reconciliation from exported segment data."""
 
-from .constants import CRUISE_ALTITUDE_THRESHOLD_FT, FEET_TO_METERS, METERS_TO_FEET
+from .constants import (
+    CRUISE_ALTITUDE_THRESHOLD_FT,
+    FEET_TO_METERS,
+    KM_TO_NAUTICAL_MILES,
+    METERS_TO_FEET,
+)
 from .geometry import haversine_distance
 from .helpers import format_flight_time
 from .types import PathInfo, PathSegment, Statistics
@@ -45,8 +50,8 @@ def _recalculate_stats_from_segments(
     prev_alt = None
     groundspeed_sum = 0.0
     groundspeed_count = 0
-    cruise_speed_sum = 0.0
-    cruise_speed_count = 0
+    cruise_distance_nm = 0.0
+    cruise_time_hours = 0.0
     altitude_bins: dict[int, int] = {}
     path_durations: dict[int, list[float]] = {}
 
@@ -67,8 +72,15 @@ def _recalculate_stats_from_segments(
         altitude_agl_ft = (alt_m - ground_m) * METERS_TO_FEET
         if altitude_agl_ft > CRUISE_ALTITUDE_THRESHOLD_FT:
             if gs > 0:
-                cruise_speed_sum += gs
-                cruise_speed_count += 1
+                coords = seg.get("coords", [])
+                if len(coords) == 2:
+                    lat1, lon1 = coords[0]
+                    lat2, lon2 = coords[1]
+                    seg_dist_km = haversine_distance(lat1, lon1, lat2, lon2)
+                    seg_dist_nm = seg_dist_km * KM_TO_NAUTICAL_MILES
+                    if seg_dist_nm > 0:
+                        cruise_distance_nm += seg_dist_nm
+                        cruise_time_hours += seg_dist_nm / gs
             seg_time = seg.get("time")
             if seg_time is not None:
                 bin_alt = round(altitude_agl_ft / 100) * 100
@@ -87,7 +99,7 @@ def _recalculate_stats_from_segments(
         groundspeed_sum / groundspeed_count if groundspeed_count > 0 else 0
     )
     stats["cruise_speed_knots"] = (
-        cruise_speed_sum / cruise_speed_count if cruise_speed_count > 0 else 0
+        cruise_distance_nm / cruise_time_hours if cruise_time_hours > 0 else 0
     )
 
     if altitude_bins:
@@ -119,10 +131,11 @@ def _recalculate_stats_from_segments(
                 if len(times) >= 2:
                     aircraft_times[reg] += max(times) - min(times)
 
+        path_info_by_id: dict[int, PathInfo] = {pi["id"]: pi for pi in path_info_list}
         for segment in segments:
             path_id = segment.get("path_id")
-            if path_id is not None and path_id < len(path_info_list):
-                pi = path_info_list[path_id]
+            if path_id is not None and path_id in path_info_by_id:
+                pi = path_info_by_id[path_id]
                 reg = pi.get("aircraft_registration")
                 if reg and reg in aircraft_distances:
                     coords = segment.get("coords", [])

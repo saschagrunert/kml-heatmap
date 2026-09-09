@@ -99,6 +99,30 @@ const defaultFilteredStats: FilteredStatistics = {
         return true;
       }),
     ),
+    filterSegmentsByPaths: vi.fn((segments: any[]) => segments),
+    calculateAirportFlightCounts: vi.fn((pathInfo: any[]) => {
+      const counts: Record<string, number> = {};
+      pathInfo.forEach((p: any) => {
+        const airports = new Set<string>();
+        if (p.start_airport) airports.add(p.start_airport);
+        if (p.end_airport) airports.add(p.end_airport);
+        airports.forEach((a) => {
+          counts[a] = (counts[a] || 0) + 1;
+        });
+      });
+      return counts;
+    }),
+    findHomeBase: vi.fn((counts: Record<string, number>) => {
+      let max = 0;
+      let home: string | null = null;
+      for (const [name, count] of Object.entries(counts)) {
+        if (count > max) {
+          max = count;
+          home = name;
+        }
+      }
+      return home;
+    }),
   },
 };
 
@@ -207,6 +231,7 @@ describe("WrappedManager", () => {
         "2023",
         mockApp.fullStats,
         "all",
+        expect.objectContaining({ paths: expect.any(Array) }),
       );
     });
 
@@ -221,6 +246,7 @@ describe("WrappedManager", () => {
         "all",
         mockApp.fullStats,
         "all",
+        expect.objectContaining({ paths: expect.any(Array) }),
       );
     });
 
@@ -236,6 +262,7 @@ describe("WrappedManager", () => {
         "2024",
         mockApp.fullStats,
         "D-ABCD",
+        expect.objectContaining({ paths: expect.any(Array) }),
       );
       expect(
         window.KMLHeatmap.calculateFilteredStatistics,

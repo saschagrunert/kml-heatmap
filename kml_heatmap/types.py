@@ -103,20 +103,9 @@ class Statistics(TypedDict):
     aircraft_list: NotRequired[list[AircraftInfo]]
 
 
-class CacheEntry(TypedDict):
-    """Cache entry for parsed KML data."""
-
-    coordinates: FlightPath
-    path_groups: FlightPathGroup
-    path_metadata: list[PathMetadata]
-    mtime: float
-    version: str
-
-
 __all__ = [
     "AircraftInfo",
     "AirportData",
-    "CacheEntry",
     "Coordinate",
     "FlightPath",
     "FlightPathGroup",

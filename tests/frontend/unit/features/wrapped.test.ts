@@ -4,8 +4,6 @@ import {
   generateFunFacts,
   selectDiverseFacts,
   calculateAircraftColorClass,
-  findHomeBase,
-  getDestinations,
 } from "../../../../kml_heatmap/frontend/features/wrapped";
 import * as airports from "../../../../kml_heatmap/frontend/features/airports";
 
@@ -616,109 +614,6 @@ describe("wrapped feature", () => {
       expect(colorClass1).toBe("fleet-aircraft-medium-high");
       expect(colorClass2).toBe("fleet-aircraft-medium-high");
       expect(colorClass3).toBe("fleet-aircraft-high");
-    });
-  });
-
-  describe("findHomeBase", () => {
-    it("finds airport with most flights", () => {
-      const airportNames = ["EDAV", "EDDF", "EDDM"];
-      const airportCounts = { EDAV: 10, EDDF: 5, EDDM: 3 };
-
-      const homeBase = findHomeBase(airportNames, airportCounts);
-
-      expect(homeBase.name).toBe("EDAV");
-      expect(homeBase.flight_count).toBe(10);
-    });
-
-    it("returns null for empty airport list", () => {
-      const homeBase = findHomeBase([], {});
-
-      expect(homeBase).toBeNull();
-    });
-
-    it("returns null for null airport list", () => {
-      const homeBase = findHomeBase(null, {});
-
-      expect(homeBase).toBeNull();
-    });
-
-    it("handles single airport", () => {
-      const airportNames = ["EDAV"];
-      const airportCounts = { EDAV: 5 };
-
-      const homeBase = findHomeBase(airportNames, airportCounts);
-
-      expect(homeBase.name).toBe("EDAV");
-      expect(homeBase.flight_count).toBe(5);
-    });
-
-    it("handles airports with zero counts", () => {
-      const airportNames = ["EDAV", "EDDF"];
-      const airportCounts = { EDAV: 10 };
-
-      const homeBase = findHomeBase(airportNames, airportCounts);
-
-      expect(homeBase.name).toBe("EDAV");
-      expect(homeBase.flight_count).toBe(10);
-    });
-
-    it("handles tied counts", () => {
-      const airportNames = ["EDAV", "EDDF"];
-      const airportCounts = { EDAV: 5, EDDF: 5 };
-
-      const homeBase = findHomeBase(airportNames, airportCounts);
-
-      expect(["EDAV", "EDDF"]).toContain(homeBase.name);
-      expect(homeBase.flight_count).toBe(5);
-    });
-  });
-
-  describe("getDestinations", () => {
-    it("filters out home base from airport list", () => {
-      const airportNames = ["EDAV", "EDDF", "EDDM", "EDDK"];
-      const homeBaseName = "EDAV";
-
-      const destinations = getDestinations(airportNames, homeBaseName);
-
-      expect(destinations).toEqual(["EDDF", "EDDM", "EDDK"]);
-      expect(destinations).not.toContain("EDAV");
-    });
-
-    it("returns empty array if all airports are home base", () => {
-      const airportNames = ["EDAV"];
-      const homeBaseName = "EDAV";
-
-      const destinations = getDestinations(airportNames, homeBaseName);
-
-      expect(destinations).toEqual([]);
-    });
-
-    it("returns all airports if home base not in list", () => {
-      const airportNames = ["EDDF", "EDDM"];
-      const homeBaseName = "EDAV";
-
-      const destinations = getDestinations(airportNames, homeBaseName);
-
-      expect(destinations).toEqual(["EDDF", "EDDM"]);
-    });
-
-    it("handles null airport names", () => {
-      const destinations = getDestinations(null, "EDAV");
-
-      expect(destinations).toEqual([]);
-    });
-
-    it("handles null home base", () => {
-      const airportNames = ["EDAV", "EDDF"];
-      const destinations = getDestinations(airportNames, null);
-
-      expect(destinations).toEqual(["EDAV", "EDDF"]);
-    });
-
-    it("handles empty airport names", () => {
-      const destinations = getDestinations([], "EDAV");
-
-      expect(destinations).toEqual([]);
     });
   });
 });
