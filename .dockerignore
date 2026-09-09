@@ -40,7 +40,12 @@ data
 
 # Build
 Dockerfile
+Dockerfile.test
+Makefile
 .playwright-mcp
+
+# CI/CD
+.github/
 
 # Documentation (already in image)
 README.md

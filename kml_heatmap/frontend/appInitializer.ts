@@ -101,12 +101,10 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     metadata.max_groundspeed_knots > 0;
 
   if (hasTimingData) {
-    app.airspeedRange.min = metadata.min_groundspeed_knots!;
-    app.airspeedRange.max = metadata.max_groundspeed_knots!;
-    app.layerManager.updateAirspeedLegend(
-      app.airspeedRange.min,
-      app.airspeedRange.max,
-    );
+    const minSpeed = metadata.min_groundspeed_knots ?? 0;
+    const maxSpeed = metadata.max_groundspeed_knots ?? 0;
+    app.airspeedRange = { min: minSpeed, max: maxSpeed };
+    app.layerManager.updateAirspeedLegend(minSpeed, maxSpeed);
   }
 
   // Enable/disable airspeed button based on timing data availability
@@ -131,22 +129,24 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   app.airportManager.updateAirportMarkerSizes();
 
   // Restore layer visibility
-  if (app.altitudeVisible) {
-    app.map!.addLayer(app.altitudeLayer);
-    const legend = domCache.get("altitude-legend");
-    if (legend) legend.style.display = "block";
-  }
-  if (app.airspeedVisible) {
-    app.map!.addLayer(app.airspeedLayer);
-    const legend = domCache.get("airspeed-legend");
-    if (legend) legend.style.display = "block";
-  }
-  if (
-    app.aviationVisible &&
-    app.config.openaipApiKey &&
-    app.openaipLayers["Aviation Data"]
-  ) {
-    app.map!.addLayer(app.openaipLayers["Aviation Data"]);
+  if (app.map) {
+    if (app.altitudeVisible) {
+      app.map.addLayer(app.altitudeLayer);
+      const legend = domCache.get("altitude-legend");
+      if (legend) legend.style.display = "block";
+    }
+    if (app.airspeedVisible) {
+      app.map.addLayer(app.airspeedLayer);
+      const legend = domCache.get("airspeed-legend");
+      if (legend) legend.style.display = "block";
+    }
+    if (
+      app.aviationVisible &&
+      app.config.openaipApiKey &&
+      app.openaipLayers["Aviation Data"]
+    ) {
+      app.map.addLayer(app.openaipLayers["Aviation Data"]);
+    }
   }
 
   // Update replay button state if paths were restored

@@ -325,6 +325,22 @@ describe("ReplayRenderer", () => {
       expect(mockMap.panTo).toHaveBeenCalled();
     });
 
+    it("uses binary search on manual seek with multiple segments", () => {
+      const markerObj = L.marker([0, 0]);
+      mockReplayManager.state.airplaneMarker = markerObj;
+      mockReplayManager.state.lastDrawnIndex = 5;
+      mockReplayManager.state.currentTime = 15;
+      mockReplayManager.state.segments = [
+        makeSegment({ time: 0 }),
+        makeSegment({ time: 10 }),
+        makeSegment({ time: 20 }),
+        makeSegment({ time: 30 }),
+      ];
+
+      callUpdateDisplay(true);
+      expect(markerObj.setLatLng).toHaveBeenCalled();
+    });
+
     it("always recenters on manual seek", () => {
       const mockMap = mockApp.map as Record<string, ReturnType<typeof vi.fn>>;
       mockMap.latLngToContainerPoint.mockReturnValue({ x: 400, y: 300 });

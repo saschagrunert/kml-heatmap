@@ -107,7 +107,11 @@ def obfuscate_kml_file(filepath: Path) -> bool:
     new_content = obfuscate_kml_content(content)
     if new_content is None:
         return False
-    filepath.write_text(new_content, encoding="utf-8")
+    try:
+        filepath.write_text(new_content, encoding="utf-8")
+    except OSError:
+        logger.warning("Skipping %s: failed to write", filepath)
+        return False
     return True
 
 
@@ -126,7 +130,11 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
     Returns a list of violation descriptions (empty means the file is clean).
     """
     violations: list[str] = []
-    content = filepath.read_text(encoding="utf-8")
+    try:
+        content = filepath.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        logger.warning("Skipping %s: cannot read file", filepath)
+        return violations
 
     for match in CHECK_NAME_DATE_PATTERN.finditer(content):
         violations.append(f"Name element contains date: {match.group(0)}")

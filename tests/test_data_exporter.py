@@ -356,7 +356,6 @@ class TestProcessYearData:
                 [50.2, 8.2, 700.0],
             ]
             all_path_groups = [path]
-            all_coordinates = [[50.0, 8.0], [50.1, 8.1], [50.2, 8.2]]
             all_path_metadata = [
                 {
                     "airport_name": "EDDF - EDDL",
@@ -366,10 +365,8 @@ class TestProcessYearData:
 
             result = process_year_data(
                 year="2024",
-                year_path_indices=[0],
-                all_coordinates=all_coordinates,
-                all_path_groups=all_path_groups,
-                all_path_metadata=all_path_metadata,
+                year_path_groups=[all_path_groups[0]],
+                year_path_metadata=[all_path_metadata[0]],
                 min_alt_m=500.0,
                 max_alt_m=700.0,
                 output_dir=tmpdir,
@@ -401,10 +398,8 @@ class TestProcessYearData:
 
             result = process_year_data(
                 year="2024",
-                year_path_indices=[0],
-                all_coordinates=[[50.0, 8.0], [50.1, 8.1], [50.2, 8.2]],
-                all_path_groups=[path],
-                all_path_metadata=[{"year": 2024, "airport_name": "EDDF - EDDL"}],
+                year_path_groups=[path],
+                year_path_metadata=[{"year": 2024, "airport_name": "EDDF - EDDL"}],
                 min_alt_m=500.0,
                 max_alt_m=1600.0,
                 output_dir=tmpdir,
@@ -422,10 +417,8 @@ class TestProcessYearData:
 
             result = process_year_data(
                 year="2024",
-                year_path_indices=[0],
-                all_coordinates=[[50.0, 8.0]],
-                all_path_groups=[path],
-                all_path_metadata=[{"year": 2024}],
+                year_path_groups=[path],
+                year_path_metadata=[{"year": 2024}],
                 min_alt_m=500.0,
                 max_alt_m=500.0,
                 output_dir=tmpdir,
@@ -442,10 +435,8 @@ class TestProcessYearData:
 
             result = process_year_data(
                 year="2024",
-                year_path_indices=[0],
-                all_coordinates=[[50.0, 8.0], [50.1, 8.1]],
-                all_path_groups=[path],
-                all_path_metadata=[
+                year_path_groups=[path],
+                year_path_metadata=[
                     {
                         "year": 2024,
                         "aircraft_registration": "D-ABCD",
@@ -942,7 +933,7 @@ class TestProcessYearsParallel:
             ),
             pytest.raises(RuntimeError, match="Failed to process year 2025"),
         ):
-            _process_years_parallel(paths_by_year, [], [[]], [{}], 0, 1000, "/tmp")
+            _process_years_parallel(paths_by_year, [[]], [{}], 0, 1000, "/tmp")
 
 
 class TestExportAllDataPrivacyMode:

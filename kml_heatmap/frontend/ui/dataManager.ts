@@ -154,16 +154,17 @@ export class DataManager {
 
         // Build reverse mapping: airport to paths
         if (pathInfo.start_airport) {
-          if (!this.app.airportToPaths[pathInfo.start_airport]) {
-            this.app.airportToPaths[pathInfo.start_airport] = new Set<number>();
-          }
-          this.app.airportToPaths[pathInfo.start_airport]!.add(pathId);
+          const startSet =
+            this.app.airportToPaths[pathInfo.start_airport] ??
+            new Set<number>();
+          startSet.add(pathId);
+          this.app.airportToPaths[pathInfo.start_airport] = startSet;
         }
         if (pathInfo.end_airport) {
-          if (!this.app.airportToPaths[pathInfo.end_airport]) {
-            this.app.airportToPaths[pathInfo.end_airport] = new Set<number>();
-          }
-          this.app.airportToPaths[pathInfo.end_airport]!.add(pathId);
+          const endSet =
+            this.app.airportToPaths[pathInfo.end_airport] ?? new Set<number>();
+          endSet.add(pathId);
+          this.app.airportToPaths[pathInfo.end_airport] = endSet;
         }
       });
     }
@@ -177,8 +178,7 @@ export class DataManager {
         if (alt < min) min = alt;
         if (alt > max) max = alt;
       }
-      this.app.altitudeRange.min = min;
-      this.app.altitudeRange.max = max;
+      this.app.altitudeRange = { min, max };
     }
 
     // Create altitude layer paths (this will also update the legend)

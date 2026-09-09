@@ -11,6 +11,7 @@ import {
 } from "../utils/constants";
 import { calculateDistance } from "../utils/geometry";
 import { formatFlightTime } from "../utils/formatters";
+import { findMax, findMinMax } from "../utils/arrayHelpers";
 import type {
   PathInfo,
   PathSegment,
@@ -19,6 +20,14 @@ import type {
   SpeedStats,
   FilteredStatistics,
 } from "../types";
+
+function segmentDistance(segment: PathSegment): number {
+  const coords = segment.coords;
+  if (coords && coords.length === 2) {
+    return calculateDistance(coords[0], coords[1]);
+  }
+  return 0;
+}
 
 /**
  * Filter path info by year and aircraft
@@ -119,15 +128,9 @@ export function filterSegmentsByPaths(
  */
 export function calculateTotalDistance(segments: PathSegment[]): number {
   let total = 0;
-
-  segments.forEach(function (segment) {
-    const coords = segment.coords;
-    if (coords && coords.length === 2) {
-      const distance = calculateDistance(coords[0], coords[1]);
-      total += distance;
-    }
-  });
-
+  for (const segment of segments) {
+    total += segmentDistance(segment);
+  }
   return total;
 }
 
@@ -145,14 +148,7 @@ export function calculateAltitudeStats(segments: PathSegment[]): AltitudeStats {
     return { min: 0, max: 0, gain: 0 };
   }
 
-  // Use reduce to avoid stack overflow with large arrays
-  let min = altitudes[0] ?? 0;
-  let max = altitudes[0] ?? 0;
-  for (let i = 1; i < altitudes.length; i++) {
-    const alt = altitudes[i] ?? 0;
-    if (alt < min) min = alt;
-    if (alt > max) max = alt;
-  }
+  const { min, max } = findMinMax(altitudes);
 
   // Calculate total altitude gain
   let gain = 0;
@@ -188,12 +184,9 @@ export function calculateSpeedStats(segments: PathSegment[]): SpeedStats {
     return { max: 0, avg: 0 };
   }
 
-  // Use loop to avoid stack overflow with large arrays
-  let max = speeds[0] ?? 0;
+  const max = findMax(speeds);
   let sum = 0;
-  for (let i = 0; i < speeds.length; i++) {
-    const speed = speeds[i] ?? 0;
-    if (speed > max) max = speed;
+  for (const speed of speeds) {
     sum += speed;
   }
   const avg = sum / speeds.length;
@@ -209,28 +202,20 @@ export function calculateSpeedStats(segments: PathSegment[]): SpeedStats {
 export function calculateLongestFlight(segments: PathSegment[]): number {
   const pathDistances: Record<number, number> = {};
 
-  segments.forEach(function (segment) {
-    const coords = segment.coords;
-    if (coords && coords.length === 2) {
-      const distance = calculateDistance(coords[0], coords[1]);
-
+  for (const segment of segments) {
+    const distance = segmentDistance(segment);
+    if (distance > 0) {
       if (!pathDistances[segment.path_id]) {
         pathDistances[segment.path_id] = 0;
       }
       pathDistances[segment.path_id]! += distance;
     }
-  });
+  }
 
   const distances = Object.values(pathDistances);
   if (distances.length === 0) return 0;
 
-  // Use loop to avoid stack overflow with large arrays
-  let max = distances[0] ?? 0;
-  for (let i = 1; i < distances.length; i++) {
-    const dist = distances[i] ?? 0;
-    if (dist > max) max = dist;
-  }
-  return max;
+  return findMax(distances);
 }
 
 /**
@@ -265,13 +250,7 @@ export function calculateFlightTime(
 
   segmentsByPath.forEach(function (times) {
     if (times.length > 0) {
-      let minTime = times[0]!;
-      let maxTime = times[0]!;
-      for (let i = 1; i < times.length; i++) {
-        const time = times[i]!;
-        if (time < minTime) minTime = time;
-        if (time > maxTime) maxTime = time;
-      }
+      const { min: minTime, max: maxTime } = findMinMax(times);
       totalSeconds += maxTime - minTime;
     }
   });
@@ -367,14 +346,12 @@ export function calculateFilteredStatistics(options: {
     let totalTimeHours = 0;
 
     cruiseSegments.forEach((seg) => {
+      const distanceKm = segmentDistance(seg);
       if (
-        seg.coords &&
-        seg.coords.length === 2 &&
+        distanceKm > 0 &&
         seg.groundspeed_knots &&
         seg.groundspeed_knots > 0
       ) {
-        // Calculate segment distance
-        const distanceKm = calculateDistance(seg.coords[0], seg.coords[1]);
         const distanceNm = distanceKm * KM_TO_NAUTICAL_MILES;
 
         // Derive time from distance and speed: time = distance / speed

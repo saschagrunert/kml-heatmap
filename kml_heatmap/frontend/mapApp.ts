@@ -399,7 +399,8 @@ export class MapApp {
           this.config.openaipApiKey,
         {
           attribution: '&copy; <a href="https://www.openaip.net">OpenAIP</a>',
-          maxZoom: 18,
+          maxNativeZoom: 18,
+          maxZoom: 20,
           minZoom: 7,
           subdomains: ["a", "b", "c"],
         },

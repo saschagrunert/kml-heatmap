@@ -31,8 +31,7 @@ WORKDIR /app
 COPY requirements.lock requirements-test.lock ./
 
 # Install pinned dependencies
-RUN pip install --no-cache-dir -r requirements.lock && \
-    pip install --no-cache-dir -r requirements-test.lock
+RUN pip install --no-cache-dir -r requirements.lock -r requirements-test.lock
 
 # Copy application code
 COPY kml-heatmap.py .

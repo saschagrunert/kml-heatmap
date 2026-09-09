@@ -179,7 +179,8 @@ export class ReplayManager {
   }
 
   private filterAndSortSegments(pathId: number): boolean {
-    this.state.segments = this.app.fullPathSegments!.filter((seg) => {
+    if (!this.app.fullPathSegments) return false;
+    this.state.segments = this.app.fullPathSegments.filter((seg) => {
       return (
         seg.path_id === pathId && seg.time !== undefined && seg.time !== null
       );
@@ -280,8 +281,9 @@ export class ReplayManager {
 
       this.markerClickHandler = (e: Event) => {
         e.stopPropagation();
-        if (this.state.airplaneMarker!.isPopupOpen()) {
-          this.state.airplaneMarker!.closePopup();
+        if (!this.state.airplaneMarker) return;
+        if (this.state.airplaneMarker.isPopupOpen()) {
+          this.state.airplaneMarker.closePopup();
         } else {
           this.updateReplayAirplanePopup();
         }

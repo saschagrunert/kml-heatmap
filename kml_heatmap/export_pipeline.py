@@ -1,5 +1,6 @@
 """Year-based data processing helpers."""
 
+from itertools import pairwise
 from typing import Any
 
 from .constants import (
@@ -133,7 +134,8 @@ def _process_path_segments(
     cruise_altitude_histogram: dict[int, float] = {}
 
     ground_level_m = min(
-        (coord[2] if len(coord) >= 3 else 0 for coord in path), default=0
+        (coord[2] for coord in path if len(coord) >= 3 and coord[2] is not None),
+        default=0,
     )
 
     path_start_time = None
@@ -146,13 +148,11 @@ def _process_path_segments(
     segment_speeds = extract_segment_speeds(path, path_start_time)
     timestamp_list, time_indexed_segments = build_time_indexed_segments(segment_speeds)
 
-    for i in range(len(path) - 1):
-        coord1 = path[i]
-        coord2 = path[i + 1]
+    for i, (coord1, coord2) in enumerate(pairwise(path)):
         lat1, lon1 = coord1[0], coord1[1]
         lat2, lon2 = coord2[0], coord2[1]
-        alt1_m = coord1[2] if len(coord1) >= 3 else 0
-        alt2_m = coord2[2] if len(coord2) >= 3 else 0
+        alt1_m = coord1[2] if len(coord1) >= 3 and coord1[2] is not None else 0
+        alt2_m = coord2[2] if len(coord2) >= 3 and coord2[2] is not None else 0
 
         avg_alt_m = (alt1_m + alt2_m) / 2
         avg_alt_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100

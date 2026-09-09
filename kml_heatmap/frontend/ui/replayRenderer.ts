@@ -88,19 +88,43 @@ export class ReplayRenderer {
     let nextSegment: PathSegment | null = null;
     let currentIndex = -1;
 
-    const searchStart =
-      replayManager.state.lastDrawnIndex > 0 && !isManualSeek
-        ? replayManager.state.lastDrawnIndex
-        : 0;
-    for (let i = searchStart; i < replayManager.state.segments.length; i++) {
-      const seg = replayManager.state.segments[i];
-      if (seg && (seg.time || 0) <= replayManager.state.currentTime) {
-        lastSegment = seg;
-        currentIndex = i;
-      } else if (seg) {
-        // Found the next segment beyond current time
-        nextSegment = seg;
-        break;
+    const segments = replayManager.state.segments;
+    const currentTime = replayManager.state.currentTime;
+
+    if (replayManager.state.lastDrawnIndex > 0 && !isManualSeek) {
+      // Incremental forward scan from last known position
+      for (
+        let i = replayManager.state.lastDrawnIndex;
+        i < segments.length;
+        i++
+      ) {
+        const seg = segments[i];
+        if (seg && (seg.time ?? 0) <= currentTime) {
+          lastSegment = seg;
+          currentIndex = i;
+        } else if (seg) {
+          nextSegment = seg;
+          break;
+        }
+      }
+    } else {
+      // Binary search for the last segment at or before currentTime
+      let lo = 0;
+      let hi = segments.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        const midTime = segments[mid]?.time ?? 0;
+        if (midTime <= currentTime) {
+          currentIndex = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      if (currentIndex >= 0) {
+        lastSegment = segments[currentIndex] ?? null;
+        const nextSeg = segments[currentIndex + 1];
+        if (nextSeg) nextSegment = nextSeg;
       }
     }
 

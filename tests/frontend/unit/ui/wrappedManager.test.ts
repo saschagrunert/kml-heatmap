@@ -1052,5 +1052,36 @@ describe("WrappedManager", () => {
       // Should not throw when timeout fires
       vi.advanceTimersByTime(100);
     });
+
+    it("removes Escape key handler on close", () => {
+      const removeSpy = vi.spyOn(document, "removeEventListener");
+
+      openWrapped();
+      wrappedManager.closeWrapped();
+
+      expect(removeSpy).toHaveBeenCalledWith("keydown", expect.any(Function));
+    });
+
+    it("closes modal when Escape key is pressed", () => {
+      openWrapped();
+
+      const modal = document.getElementById("wrapped-modal");
+      expect(modal?.style.display).toBe("flex");
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+      expect(modal?.style.display).toBe("none");
+    });
+
+    it("does not close modal on non-Escape key press", () => {
+      openWrapped();
+
+      const modal = document.getElementById("wrapped-modal");
+      expect(modal?.style.display).toBe("flex");
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+
+      expect(modal?.style.display).toBe("flex");
+    });
   });
 });

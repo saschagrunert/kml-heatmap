@@ -5,7 +5,7 @@ export function showToast(
   const toast = document.createElement("div");
   toast.className = `toast-notification toast-${type}`;
   toast.textContent = message;
-  toast.setAttribute("role", "alert");
+  toast.setAttribute("role", type === "error" ? "alert" : "status");
   document.body.appendChild(toast);
   requestAnimationFrame(() => toast.classList.add("toast-visible"));
   setTimeout(() => {

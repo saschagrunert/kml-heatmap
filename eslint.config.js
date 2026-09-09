@@ -45,6 +45,12 @@ export default tseslint.config(
       "@typescript-eslint/require-await": "error",
       "@typescript-eslint/no-unnecessary-type-assertion": "error",
 
+      // Enforce consistent type-only imports
+      "@typescript-eslint/consistent-type-imports": [
+        "error",
+        { disallowTypeAnnotations: false },
+      ],
+
       // Keep disabled for legitimate use cases
       "@typescript-eslint/no-unused-expressions": "off", // Allow standalone expressions
 

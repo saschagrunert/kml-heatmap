@@ -29,7 +29,7 @@ def validate_and_normalize_coordinate(
     if alt is not None:
         if not (ALT_RANGE[0] <= alt <= ALT_RANGE[1]):
             logger.debug("Invalid altitude %sm in %s", alt, filename)
-            normalized_alt = None
+            normalized_alt = 0.0
         elif alt < 0:
             normalized_alt = 0.0
 

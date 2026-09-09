@@ -72,7 +72,6 @@ html {
   overflow: hidden;
   background: var(--color-bg-primary);
   overscroll-behavior: none;
-  -webkit-overflow-scrolling: touch;
 }
 body {
   margin: 0;
@@ -84,7 +83,6 @@ body {
   background: var(--color-bg-primary);
   position: relative;
   overscroll-behavior: none;
-  -webkit-overflow-scrolling: touch;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -133,49 +131,33 @@ body {
   background-color: var(--color-bg-primary);
 }
 
-/* Left side buttons */
-.control-btn.left {
+/* Button group containers */
+#left-buttons,
+#right-buttons {
+  position: fixed;
+  top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 10000;
+}
+#left-buttons {
   left: 10px;
 }
-#stats-btn {
-  top: 10px;
+#right-buttons {
+  right: 10px;
 }
-#export-btn {
-  top: 50px;
-}
-#wrapped-btn {
-  top: 90px;
-}
-#replay-btn {
-  top: 130px;
+
+/* Left side buttons */
+#left-buttons .control-btn {
+  position: static;
 }
 
 /* Right side buttons */
-.control-btn.right {
-  right: 10px;
+#right-buttons .control-btn {
+  position: static;
   min-width: 120px;
   text-align: center;
-}
-#year-filter {
-  top: 10px;
-}
-#aircraft-filter {
-  top: 50px;
-}
-#heatmap-btn {
-  top: 90px;
-}
-#airports-btn {
-  top: 130px;
-}
-#altitude-btn {
-  top: 170px;
-}
-#airspeed-btn {
-  top: 210px;
-}
-#aviation-btn {
-  top: 250px;
 }
 
 /* Top-center button group */
@@ -293,7 +275,7 @@ body {
     "Noto Color Emoji", sans-serif;
 }
 .replay-btn:hover {
-  background-color: var(--color-bg-hover);
+  background-color: #4b4b4b;
 }
 .replay-btn:disabled {
   opacity: 0.5;
@@ -640,7 +622,7 @@ body {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  text-fill-color: transparent;
+
   animation: shimmer 4s ease-in-out infinite;
 }
 .wrapped-square-card .year {
@@ -653,7 +635,7 @@ body {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  text-fill-color: transparent;
+
   letter-spacing: 8px;
   text-shadow: 0 0 30px rgba(79, 172, 254, 0.5);
   animation: shimmer 3s ease-in-out infinite;
@@ -688,15 +670,7 @@ body {
     transform: scale(1);
   }
 }
-@keyframes pulse {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.05);
-  }
-}
+
 .wrapped-square-card .stat-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1021,12 +995,6 @@ body {
   font-size: 12px;
   opacity: 0.8;
 }
-#wrapped-card-content {
-  flex: 1;
-  margin: 0 -40px;
-  padding: 0 40px;
-}
-
 /* Responsive styles for mobile portrait mode */
 @media (max-width: 768px) {
   #wrapped-modal {
@@ -1464,8 +1432,6 @@ body {
 
 /* Popup content styles */
 .popup-container {
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
   min-width: 180px;
   padding: 8px 4px;
   background-color: var(--color-bg-secondary);

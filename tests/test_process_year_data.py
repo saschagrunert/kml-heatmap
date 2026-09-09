@@ -76,10 +76,8 @@ class TestProcessYearData:
         """Test basic year data processing."""
         result = process_year_data(
             year="2025",
-            year_path_indices=[0, 1],
-            all_coordinates=sample_coordinates,
-            all_path_groups=sample_path_groups,
-            all_path_metadata=sample_path_metadata,
+            year_path_groups=sample_path_groups,
+            year_path_metadata=sample_path_metadata,
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -115,10 +113,8 @@ class TestProcessYearData:
         with patch("kml_heatmap.data_exporter.logger") as mock_logger:
             process_year_data(
                 year="2025",
-                year_path_indices=[0],
-                all_coordinates=sample_coordinates,
-                all_path_groups=sample_path_groups,
-                all_path_metadata=sample_path_metadata,
+                year_path_groups=[sample_path_groups[0]],
+                year_path_metadata=[sample_path_metadata[0]],
                 min_alt_m=100.0,
                 max_alt_m=300.0,
                 output_dir=temp_output_dir,
@@ -139,10 +135,8 @@ class TestProcessYearData:
         with patch("kml_heatmap.data_exporter.logger") as mock_logger:
             process_year_data(
                 year="2025",
-                year_path_indices=[0],
-                all_coordinates=sample_coordinates,
-                all_path_groups=sample_path_groups,
-                all_path_metadata=sample_path_metadata,
+                year_path_groups=[sample_path_groups[0]],
+                year_path_metadata=[sample_path_metadata[0]],
                 min_alt_m=100.0,
                 max_alt_m=300.0,
                 output_dir=temp_output_dir,
@@ -162,10 +156,8 @@ class TestProcessYearData:
         """Test processing data with unknown year."""
         result = process_year_data(
             year="unknown",
-            year_path_indices=[0],
-            all_coordinates=sample_coordinates,
-            all_path_groups=sample_path_groups,
-            all_path_metadata=sample_path_metadata,
+            year_path_groups=[sample_path_groups[0]],
+            year_path_metadata=[sample_path_metadata[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -186,10 +178,8 @@ class TestProcessYearData:
         """Test processing with empty path indices."""
         result = process_year_data(
             year="2025",
-            year_path_indices=[],
-            all_coordinates=sample_coordinates,
-            all_path_groups=sample_path_groups,
-            all_path_metadata=sample_path_metadata,
+            year_path_groups=[],
+            year_path_metadata=[],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -203,16 +193,13 @@ class TestProcessYearData:
 
     def test_single_point_paths(self, temp_output_dir):
         """Test processing paths with single points (should be skipped)."""
-        single_point_coords = [[50.0, 8.0]]
         single_point_groups = [[[50.0, 8.0, 100.0]]]
         single_point_metadata = [{"year": 2025}]
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=single_point_coords,
-            all_path_groups=single_point_groups,
-            all_path_metadata=single_point_metadata,
+            year_path_groups=[single_point_groups[0]],
+            year_path_metadata=[single_point_metadata[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -237,10 +224,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=sample_coordinates,
-            all_path_groups=sample_path_groups,
-            all_path_metadata=metadata_with_aircraft,
+            year_path_groups=[sample_path_groups[0]],
+            year_path_metadata=[metadata_with_aircraft[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -266,10 +251,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=sample_coordinates,
-            all_path_groups=sample_path_groups,
-            all_path_metadata=metadata_with_airports,
+            year_path_groups=[sample_path_groups[0]],
+            year_path_metadata=[metadata_with_airports[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -292,10 +275,8 @@ class TestProcessYearData:
         """Test that exported files have correct format."""
         process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=sample_coordinates,
-            all_path_groups=sample_path_groups,
-            all_path_metadata=sample_path_metadata,
+            year_path_groups=[sample_path_groups[0]],
+            year_path_metadata=[sample_path_metadata[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -332,10 +313,8 @@ class TestProcessYearData:
         """Test that groundspeed is correctly tracked."""
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=sample_coordinates,
-            all_path_groups=sample_path_groups,
-            all_path_metadata=sample_path_metadata,
+            year_path_groups=[sample_path_groups[0]],
+            year_path_metadata=[sample_path_metadata[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -365,10 +344,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=[[50.0, 8.0], [50.1, 8.1], [50.2, 8.2]],
-            all_path_groups=high_alt_groups,
-            all_path_metadata=metadata,
+            year_path_groups=[high_alt_groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=2000.0,
             max_alt_m=2000.0,
             output_dir=temp_output_dir,
@@ -381,7 +358,6 @@ class TestProcessYearData:
     def test_adaptive_downsampling(self, temp_output_dir):
         """Test that adaptive downsampling is applied for large datasets."""
         # Create a large dataset that should trigger adaptive downsampling
-        large_coords = [[50.0 + i * 0.001, 8.0 + i * 0.001] for i in range(200000)]
         large_groups = [
             [[50.0 + i * 0.001, 8.0 + i * 0.001, 100.0 + i] for i in range(200000)]
         ]
@@ -390,10 +366,8 @@ class TestProcessYearData:
         with patch("kml_heatmap.data_exporter.logger"):
             result = process_year_data(
                 year="2025",
-                year_path_indices=[0],
-                all_coordinates=large_coords,
-                all_path_groups=large_groups,
-                all_path_metadata=metadata,
+                year_path_groups=[large_groups[0]],
+                year_path_metadata=[metadata[0]],
                 min_alt_m=100.0,
                 max_alt_m=200100.0,
                 output_dir=temp_output_dir,
@@ -418,10 +392,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=[[50.0, 8.0], [51.0, 9.0], [52.0, 10.0]],
-            all_path_groups=long_path_groups,
-            all_path_metadata=metadata,
+            year_path_groups=[long_path_groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=100.0,
             output_dir=temp_output_dir,
@@ -433,16 +405,13 @@ class TestProcessYearData:
 
     def test_missing_metadata(self, temp_output_dir):
         """Test handling of missing metadata."""
-        coords = [[50.0, 8.0], [50.1, 8.1]]
         groups = [[[50.0, 8.0, 100.0], [50.1, 8.1, 200.0]]]
         metadata = [{}]  # Empty metadata
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
@@ -470,10 +439,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=[[50.0, 8.0], [50.0, 8.0], [50.1, 8.1]],
-            all_path_groups=dup_groups,
-            all_path_metadata=metadata,
+            year_path_groups=[dup_groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
@@ -498,10 +465,8 @@ class TestProcessYearData:
         """Test processing single resolution level."""
         result = process_year_data(
             year="2025",
-            year_path_indices=[0, 1],
-            all_coordinates=sample_coordinates,
-            all_path_groups=sample_path_groups,
-            all_path_metadata=sample_path_metadata,
+            year_path_groups=sample_path_groups,
+            year_path_metadata=sample_path_metadata,
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -525,10 +490,8 @@ class TestProcessYearData:
         """Test that path_info has correct structure."""
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=sample_coordinates,
-            all_path_groups=sample_path_groups,
-            all_path_metadata=sample_path_metadata,
+            year_path_groups=[sample_path_groups[0]],
+            year_path_metadata=[sample_path_metadata[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -558,10 +521,8 @@ class TestProcessYearData:
         """Test that segment data has correct structure."""
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=sample_coordinates,
-            all_path_groups=sample_path_groups,
-            all_path_metadata=sample_path_metadata,
+            year_path_groups=[sample_path_groups[0]],
+            year_path_metadata=[sample_path_metadata[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -582,7 +543,6 @@ class TestProcessYearData:
 
     def test_paths_without_timestamps(self, temp_output_dir):
         """Test processing paths without timestamp data."""
-        coords = [[50.0, 8.0], [50.1, 8.1], [50.2, 8.2]]
         groups = [
             [
                 [50.0, 8.0, 100.0],  # No timestamp
@@ -594,10 +554,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -610,7 +568,6 @@ class TestProcessYearData:
 
     def test_invalid_timestamp_parsing(self, temp_output_dir):
         """Test handling of invalid timestamps."""
-        coords = [[50.0, 8.0], [50.1, 8.1]]
         groups = [
             [
                 [50.0, 8.0, 100.0, "invalid-timestamp"],
@@ -621,10 +578,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
@@ -636,7 +591,6 @@ class TestProcessYearData:
 
     def test_path_with_duration_metadata(self, temp_output_dir):
         """Test paths with duration metadata but no segment timestamps."""
-        coords = [[50.0, 8.0], [50.1, 8.1], [50.2, 8.2]]
         groups = [
             [
                 [50.0, 8.0, 100.0],
@@ -655,10 +609,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -674,7 +626,6 @@ class TestProcessYearData:
 
     def test_groundspeed_clamping_lower_resolutions(self, temp_output_dir):
         """Test that groundspeed is clamped for lower resolutions."""
-        coords = [[50.0, 8.0], [50.1, 8.1], [50.2, 8.2]]
         groups = [
             [
                 [50.0, 8.0, 100.0, "2025-01-01T10:00:00Z"],
@@ -687,10 +638,8 @@ class TestProcessYearData:
         # Process both full resolution and downsampled
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -702,7 +651,6 @@ class TestProcessYearData:
 
     def test_relative_time_calculation(self, temp_output_dir):
         """Test that relative time from path start is calculated."""
-        coords = [[50.0, 8.0], [50.1, 8.1], [50.2, 8.2]]
         groups = [
             [
                 [50.0, 8.0, 100.0, "2025-01-01T10:00:00Z"],
@@ -714,10 +662,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=300.0,
             output_dir=temp_output_dir,
@@ -733,7 +679,6 @@ class TestProcessYearData:
 
     def test_unrealistic_groundspeed_filtered(self, temp_output_dir):
         """Test that unrealistic groundspeeds are filtered out."""
-        coords = [[50.0, 8.0], [51.0, 9.0]]
         # Create path with very short time delta => unrealistic speed
         groups = [
             [
@@ -745,10 +690,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=100.0,
             output_dir=temp_output_dir,
@@ -762,12 +705,6 @@ class TestProcessYearData:
     def test_altitude_bins_at_different_levels(self, temp_output_dir):
         """Test cruise altitude histogram with different altitude levels."""
         # Create paths at different cruise altitudes
-        coords = [
-            [50.0, 8.0],
-            [50.1, 8.1],
-            [50.2, 8.2],
-            [50.3, 8.3],
-        ]
         groups = [
             # Path 1: ~3000m altitude (cruise)
             [
@@ -795,10 +732,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0, 1],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=groups,
+            year_path_metadata=metadata,
             min_alt_m=3000.0,
             max_alt_m=4000.0,
             output_dir=temp_output_dir,
@@ -811,7 +746,6 @@ class TestProcessYearData:
 
     def test_min_segment_time_threshold(self, temp_output_dir):
         """Test that segments below minimum time threshold are handled."""
-        coords = [[50.0, 8.0], [50.1, 8.1]]
         # Very short time segment
         groups = [
             [
@@ -823,10 +757,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
@@ -839,16 +771,13 @@ class TestProcessYearData:
     def test_downsampling_fallback(self, temp_output_dir):
         """Test fallback to coordinate downsampling when RDP returns empty."""
         # This can happen with extreme epsilon values
-        coords = [[50.0, 8.0], [50.0001, 8.0001]]  # Very close points
         groups = [[[50.0, 8.0, 100.0], [50.0001, 8.0001, 100.0]]]
         metadata = [{"year": 2025}]
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=100.0,
             output_dir=temp_output_dir,
@@ -859,12 +788,6 @@ class TestProcessYearData:
 
     def test_multiple_paths_statistics_aggregation(self, temp_output_dir):
         """Test that statistics are correctly aggregated across multiple paths."""
-        coords = [
-            [50.0, 8.0],
-            [50.1, 8.1],
-            [50.2, 8.2],
-            [50.3, 8.3],
-        ]
         groups = [
             # Fast path
             [
@@ -881,10 +804,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0, 1],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=groups,
+            year_path_metadata=metadata,
             min_alt_m=100.0,
             max_alt_m=100.0,
             output_dir=temp_output_dir,
@@ -897,7 +818,6 @@ class TestProcessYearData:
 
     def test_airport_name_without_separator(self, temp_output_dir):
         """Test handling of airport names without ' - ' separator."""
-        coords = [[50.0, 8.0], [50.1, 8.1]]
         groups = [[[50.0, 8.0, 100.0], [50.1, 8.1, 200.0]]]
         metadata = [
             {
@@ -908,10 +828,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
@@ -924,40 +842,34 @@ class TestProcessYearData:
         assert path_info[0]["end_airport"] is None
 
     def test_metadata_index_out_of_range(self, temp_output_dir):
-        """Test handling when path index exceeds metadata length."""
-        coords = [[50.0, 8.0], [50.1, 8.1]]
+        """Test handling when metadata is minimal."""
         groups = [[[50.0, 8.0, 100.0], [50.1, 8.1, 200.0]]]
-        metadata = []  # Empty metadata
+        metadata = [{"start_point": [], "airport_name": ""}]
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=metadata,
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
             quiet=True,
         )
 
-        # Should handle gracefully with empty metadata
+        # Should handle gracefully with minimal metadata
         assert result["year"] == "2025"
         path_info = result["full_res_path_info"]
         assert len(path_info) > 0
 
     def test_segment_altitude_metadata(self, temp_output_dir):
         """Test that segment altitude metadata is correctly set."""
-        coords = [[50.0, 8.0], [50.1, 8.1]]
         groups = [[[50.0, 8.0, 1000.0], [50.1, 8.1, 2000.0]]]
         metadata = [{"year": 2025}]
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=1000.0,
             max_alt_m=2000.0,
             output_dir=temp_output_dir,
@@ -977,7 +889,6 @@ class TestProcessYearData:
 
     def test_airport_name_parsing_edge_cases(self, temp_output_dir):
         """Test various edge cases in airport name parsing."""
-        coords = [[50.0, 8.0], [50.1, 8.1]]
         groups = [[[50.0, 8.0, 100.0], [50.1, 8.1, 200.0]]]
 
         # Test with multiple separators
@@ -990,10 +901,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,
@@ -1006,7 +915,6 @@ class TestProcessYearData:
 
     def test_invalid_duration_parsing(self, temp_output_dir):
         """Test handling of invalid duration that returns 0."""
-        coords = [[50.0, 8.0], [50.1, 8.1]]
         groups = [[[50.0, 8.0, 100.0], [50.1, 8.1, 200.0]]]
         metadata = [
             {
@@ -1018,10 +926,8 @@ class TestProcessYearData:
 
         result = process_year_data(
             year="2025",
-            year_path_indices=[0],
-            all_coordinates=coords,
-            all_path_groups=groups,
-            all_path_metadata=metadata,
+            year_path_groups=[groups[0]],
+            year_path_metadata=[metadata[0]],
             min_alt_m=100.0,
             max_alt_m=200.0,
             output_dir=temp_output_dir,

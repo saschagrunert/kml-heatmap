@@ -45,7 +45,6 @@ class PathInfo(TypedDict):
     aircraft_type: NotRequired[str | None]
     start_airport: NotRequired[str | None]
     end_airport: NotRequired[str | None]
-    route: NotRequired[str | None]
     start_coords: NotRequired[list[float]]
     end_coords: NotRequired[list[float]]
     segment_count: NotRequired[int]
