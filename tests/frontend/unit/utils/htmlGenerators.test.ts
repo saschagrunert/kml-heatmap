@@ -9,6 +9,9 @@ import {
   generateHomeBaseHtml,
   generateDestinationsHtml,
   generateSegmentPopupHtml,
+  pluralFlights,
+  pluralize,
+  splitAirportName,
   type YearStats,
   type AirportCount,
   type SegmentPopupParams,
@@ -56,6 +59,58 @@ describe("htmlGenerators", () => {
     });
   });
 
+  describe("splitAirportName", () => {
+    it("splits an ICAO code from the airport name", () => {
+      expect(splitAirportName("EDAQ Halle-Oppin")).toEqual({
+        code: "EDAQ",
+        name: "Halle-Oppin",
+      });
+    });
+
+    it("keeps multi-word names intact", () => {
+      expect(splitAirportName("LFGA Colmar Houssen airport")).toEqual({
+        code: "LFGA",
+        name: "Colmar Houssen airport",
+      });
+    });
+
+    it("keeps the whole label when there is no code", () => {
+      expect(splitAirportName("Halle Oppin")).toEqual({
+        code: "",
+        name: "Halle Oppin",
+      });
+      expect(splitAirportName("EDAQ")).toEqual({ code: "", name: "EDAQ" });
+      expect(splitAirportName("")).toEqual({ code: "", name: "" });
+    });
+  });
+
+  describe("pluralize", () => {
+    it("uses the singular for one", () => {
+      expect(pluralize(1, "data point")).toBe("1 data point");
+    });
+
+    it("uses the plural otherwise", () => {
+      expect(pluralize(0, "data point")).toBe("0 data points");
+      expect(pluralize(2, "selected path")).toBe("2 selected paths");
+    });
+
+    it("takes an irregular plural", () => {
+      expect(pluralize(1, "country", "countries")).toBe("1 country");
+      expect(pluralize(3, "country", "countries")).toBe("3 countries");
+    });
+  });
+
+  describe("pluralFlights", () => {
+    it("uses the singular for one flight", () => {
+      expect(pluralFlights(1)).toBe("1 flight");
+    });
+
+    it("uses the plural otherwise", () => {
+      expect(pluralFlights(0)).toBe("0 flights");
+      expect(pluralFlights(12)).toBe("12 flights");
+    });
+  });
+
   describe("generateStatsHtml", () => {
     const mockYearStats: YearStats = {
       total_flights: 42,
@@ -92,7 +147,10 @@ describe("htmlGenerators", () => {
       expect(html).toContain('<div class="stat-label">Airports</div>');
       expect(html).toContain('<div class="stat-value">12346</div>');
       expect(html).toContain('<div class="stat-label">Nautical Miles</div>');
-      expect(html).toContain("36089 ft"); // Math.round(11000 / 0.3048)
+      // Math.round(11000 / 0.3048), with the unit in its own element
+      expect(html).toContain(
+        '<div class="stat-value">36089 <span class="stat-unit">ft</span></div>',
+      );
       expect(html).toContain(
         '<div class="stat-label">Max Altitude (MSL)</div>',
       );
@@ -107,7 +165,9 @@ describe("htmlGenerators", () => {
 
       expect(html).toContain("123h 45m");
       expect(html).toContain('<div class="stat-label">Flight Time</div>');
-      expect(html).toContain("450 kt");
+      expect(html).toContain(
+        '<div class="stat-value">450 <span class="stat-unit">kt</span></div>',
+      );
       expect(html).toContain('<div class="stat-label">Max Groundspeed</div>');
     });
 
@@ -115,7 +175,7 @@ describe("htmlGenerators", () => {
       const html = generateStatsHtml(mockYearStats, null, false);
 
       expect(html).toContain("42");
-      expect(html).toContain("0 ft");
+      expect(html).toContain('0 <span class="stat-unit">ft</span>');
     });
 
     it("handles missing max_groundspeed_knots", () => {
@@ -130,7 +190,7 @@ describe("htmlGenerators", () => {
         true,
       );
 
-      expect(html).toContain("0 kt");
+      expect(html).toContain('0 <span class="stat-unit">kt</span>');
     });
 
     it("formats distance with proper precision", () => {
@@ -164,14 +224,21 @@ describe("htmlGenerators", () => {
 
       const html = generateFunFactsHtml(funFacts);
 
-      expect(html).toContain('<h3 class="fun-facts-title">✨ Facts</h3>');
+      expect(html).toContain('<h3 class="fun-facts-title">');
+      expect(html).toContain(
+        '<span class="section-title-text">Facts</span></h3>',
+      );
       expect(html).toContain('<div class="fun-fact" data-category="distance">');
-      expect(html).toContain('<span class="fun-fact-icon">✈️</span>');
+      expect(html).toContain(
+        '<span class="fun-fact-icon" aria-hidden="true">✈️</span>',
+      );
       expect(html).toContain(
         '<span class="fun-fact-text">You flew 10,000 miles!</span>',
       );
       expect(html).toContain('data-category="altitude"');
-      expect(html).toContain('<span class="fun-fact-icon">⬆️</span>');
+      expect(html).toContain(
+        '<span class="fun-fact-icon" aria-hidden="true">⬆️</span>',
+      );
       expect(html).toContain(
         '<span class="fun-fact-text">Reached 35,000 feet</span>',
       );
@@ -180,7 +247,11 @@ describe("htmlGenerators", () => {
     it("handles empty fun facts array", () => {
       const html = generateFunFactsHtml([]);
 
-      expect(html).toBe('<h3 class="fun-facts-title">✨ Facts</h3>');
+      expect(html).toContain('<h3 class="fun-facts-title">');
+      expect(html).toContain(
+        '<span class="section-title-text">Facts</span></h3>',
+      );
+      expect(html).not.toContain("fun-fact-text");
     });
 
     it("escapes HTML in fact text", () => {
@@ -266,7 +337,10 @@ describe("htmlGenerators", () => {
 
       const html = generateAircraftFleetHtml(yearStats);
 
-      expect(html).toContain('<h3 class="aircraft-fleet-title">✈️ Fleet</h3>');
+      expect(html).toContain('<h3 class="aircraft-fleet-title">');
+      expect(html).toContain(
+        '<span class="section-title-text">Fleet</span></h3>',
+      );
       expect(html).toContain('class="fleet-aircraft fleet-aircraft-high"');
       expect(html).toContain("D-EABC");
       expect(html).toContain("Cessna 172");
@@ -298,6 +372,38 @@ describe("htmlGenerators", () => {
 
       expect(html).toContain("C172");
       expect(html).not.toContain("undefined");
+    });
+
+    it("shows the flight time the aircraft data carries", () => {
+      const yearStats: YearStats = {
+        total_flights: 30,
+        num_airports: 2,
+        total_distance_nm: 1000,
+        flight_time: "100h 0m",
+        airport_names: [],
+        aircraft_list: [
+          {
+            registration: "D-EABC",
+            type: "C172",
+            flights: 20,
+            flight_time_str: "25h 34m",
+          },
+          {
+            registration: "D-EXYZ",
+            type: "PA28",
+            flights: 10,
+            flight_time_str: "8h 35m",
+          },
+        ],
+      };
+
+      const html = generateAircraftFleetHtml(yearStats);
+
+      expect(html).toContain('<div class="fleet-aircraft-time">25h 34m</div>');
+      expect(html).toContain('<div class="fleet-aircraft-time">8h 35m</div>');
+      // Not the total divided by the flights or any other derived value
+      expect(html).not.toContain("100h 0m");
+      expect(html).not.toContain("5h 0m");
     });
 
     it("shows --- for missing flight time", () => {
@@ -406,10 +512,13 @@ describe("htmlGenerators", () => {
 
       const html = generateHomeBaseHtml(homeBase);
 
+      expect(html).toContain('<h3 class="top-airports-title">');
       expect(html).toContain(
-        '<h3 class="top-airports-title">🏠 Home Base</h3>',
+        '<span class="section-title-text">Home Base</span></h3>',
       );
-      expect(html).toContain('<div class="top-airport-name">EDDF</div>');
+      expect(html).toContain(
+        '<div class="top-airport-name"><span class="top-airport-place">EDDF</span></div>',
+      );
       expect(html).toContain('<div class="top-airport-count">25 flights</div>');
     });
 
@@ -421,7 +530,31 @@ describe("htmlGenerators", () => {
 
       const html = generateHomeBaseHtml(homeBase);
 
-      expect(html).toContain("1 flights"); // Current implementation doesn't pluralize
+      expect(html).toContain("1 flight");
+      expect(html).not.toContain("1 flights");
+    });
+
+    it("splits the ICAO code from the home base name", () => {
+      const html = generateHomeBaseHtml({
+        name: "EDAQ Halle-Oppin",
+        flight_count: 25,
+      });
+
+      expect(html).toContain(
+        '<span class="top-airport-code">EDAQ</span>' +
+          '<span class="top-airport-place">Halle-Oppin</span>',
+      );
+      expect(html).toContain("25 flights");
+    });
+
+    it("escapes the home base name", () => {
+      const html = generateHomeBaseHtml({
+        name: "<b>x</b>",
+        flight_count: 2,
+      });
+
+      expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
+      expect(html).not.toContain("<b>");
     });
 
     it("handles zero flights", () => {
@@ -439,51 +572,170 @@ describe("htmlGenerators", () => {
   describe("generateDestinationsHtml", () => {
     const identity = (code: string) => code;
     const noFlag = () => "";
+    const plain = { countryName: identity, flag: noFlag };
 
     it("generates grouped destinations HTML", () => {
       const grouped = new Map([
-        ["DE", ["EDDH", "EDDM"]],
-        ["AT", ["LOWW"]],
+        ["DE", ["EDDH Hamburg", "EDDM Munich"]],
+        ["AT", ["LOWW Vienna"]],
       ]);
 
-      const html = generateDestinationsHtml(grouped, identity, noFlag);
+      const html = generateDestinationsHtml(grouped, plain);
 
+      expect(html).toContain('<h3 class="airports-grid-title">');
       expect(html).toContain(
-        '<h3 class="airports-grid-title">🗺️ Destinations</h3>',
+        '<span class="section-title-text">Destinations</span></h3>',
       );
       expect(html).toContain('<div class="country-group"');
-      expect(html).toContain("DE</div>");
-      expect(html).toContain('<div class="airport-badge">EDDH</div>');
-      expect(html).toContain('<div class="airport-badge">EDDM</div>');
-      expect(html).toContain("AT</div>");
-      expect(html).toContain('<div class="airport-badge">LOWW</div>');
+      expect(html).toContain('<span class="country-name">DE</span>');
+      expect(html).toContain('<span class="country-count">2</span>');
+      expect(html).toContain('<span class="country-name">AT</span>');
+      expect(html).toContain('<span class="country-count">1</span>');
+    });
+
+    it("renders one row per airport with code and full name", () => {
+      const grouped = new Map([["DE", ["EDDH Hamburg Helmut Schmidt"]]]);
+
+      const html = generateDestinationsHtml(grouped, plain);
+
+      expect(html).toContain('<ul class="country-airports">');
+      expect(html).toContain(
+        '<li class="destination"><span class="destination-code">EDDH</span>' +
+          '<span class="destination-name">Hamburg Helmut Schmidt</span></li>',
+      );
+    });
+
+    it("keeps the whole label as the name when there is no code", () => {
+      const grouped = new Map([["Other", ["Some Field"]]]);
+
+      const html = generateDestinationsHtml(grouped, plain);
+
+      expect(html).toContain(
+        '<span class="destination-name">Some Field</span>',
+      );
+      expect(html).not.toContain("destination-code");
+      expect(html).toContain('<span class="country-name">Other</span>');
+    });
+
+    it("accents the home base and the furthest destination", () => {
+      const grouped = new Map([
+        ["DE", ["EDAQ Home", "EDDM Munich", "EDDH Ham"]],
+      ]);
+
+      const html = generateDestinationsHtml(grouped, {
+        ...plain,
+        homeBase: "EDAQ Home",
+        furthest: "EDDM Munich",
+      });
+
+      expect(html).toContain(
+        '<li class="destination is-home"><span class="destination-code">EDAQ</span>' +
+          '<span class="destination-name">Home</span>' +
+          '<span class="destination-tag">Home</span></li>',
+      );
+      expect(html).toContain(
+        '<li class="destination is-furthest"><span class="destination-code">EDDM</span>' +
+          '<span class="destination-name">Munich</span>' +
+          '<span class="destination-tag">Furthest</span></li>',
+      );
+      // Only those two accents, nothing else is marked
+      expect(html.match(/destination-tag/g)).toHaveLength(2);
+      expect(html).toContain(
+        '<li class="destination"><span class="destination-code">EDDH</span>',
+      );
+    });
+
+    it("never marks the home base as the furthest destination", () => {
+      const grouped = new Map([["DE", ["EDAQ Home"]]]);
+
+      const html = generateDestinationsHtml(grouped, {
+        ...plain,
+        homeBase: "EDAQ Home",
+        furthest: "EDAQ Home",
+      });
+
+      expect(html).toContain('class="destination is-home"');
+      expect(html).not.toContain("is-furthest");
+    });
+
+    it("gives every destination a code, a name and nothing else", () => {
+      const grouped = new Map([
+        ["DE", ["EDDH Hamburg", "EDDM Munich", "Grass strip"]],
+      ]);
+
+      const container = document.createElement("div");
+      container.innerHTML = generateDestinationsHtml(grouped, {
+        ...plain,
+        homeBase: "EDDH Hamburg",
+      });
+
+      const rows = [...container.querySelectorAll("li.destination")].map(
+        (row) =>
+          [...row.children].map((child) => [
+            child.className,
+            child.textContent,
+          ]),
+      );
+      expect(rows).toEqual([
+        // The home base carries the one extra element, its tag
+        [
+          ["destination-code", "EDDH"],
+          ["destination-name", "Hamburg"],
+          ["destination-tag", "Home"],
+        ],
+        [
+          ["destination-code", "EDDM"],
+          ["destination-name", "Munich"],
+        ],
+        // A label without a code keeps its full text as the name
+        [["destination-name", "Grass strip"]],
+      ]);
     });
 
     it("returns empty string for empty map", () => {
-      const html = generateDestinationsHtml(new Map(), identity, noFlag);
+      const html = generateDestinationsHtml(new Map(), plain);
 
       expect(html).toBe("");
     });
 
     it("uses countryName and flag functions for display", () => {
-      const grouped = new Map([["DE", ["EDDF"]]]);
+      const grouped = new Map([["DE", ["EDDF Frankfurt"]]]);
       const displayName = (code: string) => (code === "DE" ? "Germany" : code);
       const flag = (code: string) => (code === "DE" ? "🇩🇪" : "");
 
-      const html = generateDestinationsHtml(grouped, displayName, flag);
+      const html = generateDestinationsHtml(grouped, {
+        countryName: displayName,
+        flag,
+      });
 
-      expect(html).toContain("Germany &ensp;🇩🇪</div>");
+      expect(html).toContain(
+        '<span class="country-flag" aria-hidden="true">🇩🇪</span>',
+      );
+      expect(html).toContain('<span class="country-name">Germany</span>');
       expect(html).toContain("EDDF");
+    });
+
+    it("escapes country and airport names", () => {
+      const grouped = new Map([["XX", ["<img src=x>"]]]);
+
+      const html = generateDestinationsHtml(grouped, {
+        countryName: () => "<b>Country</b>",
+        flag: noFlag,
+      });
+
+      expect(html).toContain("&lt;b&gt;Country&lt;/b&gt;");
+      expect(html).toContain("&lt;img src=x&gt;");
+      expect(html).not.toContain("<img");
     });
 
     it("staggers animation delays across groups", () => {
       const grouped = new Map([
-        ["DE", ["EDDH"]],
-        ["AT", ["LOWW"]],
-        ["CH", ["LSZH"]],
+        ["DE", ["EDDH Hamburg"]],
+        ["AT", ["LOWW Vienna"]],
+        ["CH", ["LSZH Zurich"]],
       ]);
 
-      const html = generateDestinationsHtml(grouped, identity, noFlag);
+      const html = generateDestinationsHtml(grouped, plain);
 
       expect(html).toContain("animation-delay: 0.0s");
       expect(html).toContain("animation-delay: 0.1s");
@@ -493,7 +745,7 @@ describe("htmlGenerators", () => {
     it("preserves airport order within groups", () => {
       const grouped = new Map([["DE", ["ZULU", "ALPHA", "MIKE"]]]);
 
-      const html = generateDestinationsHtml(grouped, identity, noFlag);
+      const html = generateDestinationsHtml(grouped, plain);
 
       const zuluIndex = html.indexOf("ZULU");
       const alphaIndex = html.indexOf("ALPHA");

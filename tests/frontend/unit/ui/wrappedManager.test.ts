@@ -136,7 +136,6 @@ describe("WrappedManager", () => {
       <div id="altitude-legend"></div>
       <div id="airspeed-legend"></div>
       <div id="loading"></div>
-      <div class="leaflet-control-zoom"></div>
       <div id="wrapped-modal">
         <button class="close-btn">Close</button>
         <div id="wrapped-title"></div>
@@ -469,6 +468,39 @@ describe("WrappedManager", () => {
       expect(el("wrapped-aircraft-fleet").innerHTML).toBe("");
     });
 
+    it("clears the conditional sections of the previous year", () => {
+      mockApp.selectedYear = "2024";
+      mockApp.fullPathInfo = [
+        { id: 1, year: 2024, start_airport: "EDDF", end_airport: "EDDM" },
+      ];
+      calculateYearStatsSpy.mockReturnValue({
+        ...defaultYearStats,
+        aircraft_list: [{ registration: "D-ABCD", type: "C172", flights: 5 }],
+        airport_names: ["EDDF", "EDDM"],
+      });
+
+      wrappedManager.showWrapped();
+
+      expect(el("wrapped-aircraft-fleet").innerHTML).not.toBe("");
+      expect(el("wrapped-top-airports").innerHTML).not.toBe("");
+      expect(el("wrapped-airports-grid").innerHTML).not.toBe("");
+
+      // A year without aircraft or airports must not keep showing them
+      wrappedManager.closeWrapped();
+      calculateYearStatsSpy.mockReturnValue({
+        ...defaultYearStats,
+        aircraft_list: [],
+        airport_names: [],
+      });
+      mockApp.selectedYear = "2023";
+
+      wrappedManager.showWrapped();
+
+      expect(el("wrapped-aircraft-fleet").innerHTML).toBe("");
+      expect(el("wrapped-top-airports").innerHTML).toBe("");
+      expect(el("wrapped-airports-grid").innerHTML).toBe("");
+    });
+
     it("filters pathInfo by year for airport counts when year is not 'all'", () => {
       mockApp.selectedYear = "2024";
       mockApp.fullPathInfo = [
@@ -537,7 +569,7 @@ describe("WrappedManager", () => {
       );
     });
 
-    it("generates destinations grouped by country excluding the home base", () => {
+    it("groups every destination by country and marks the home base", () => {
       mockApp.selectedYear = "all";
       mockApp.fullPathInfo = [
         { id: 1, year: 2024, start_airport: "EDDF", end_airport: "LOWW" },
@@ -553,14 +585,67 @@ describe("WrappedManager", () => {
 
       wrappedManager.showWrapped();
 
-      expect(groupSpy).toHaveBeenCalledWith(["LOWW", "LSZH"]);
+      // The home base stays in the list so the country groups are complete
+      expect(groupSpy).toHaveBeenCalledWith(["EDDF", "LOWW", "LSZH"]);
       expect(generateDestinationsHtml).toHaveBeenCalledWith(
         expect.any(Map),
-        airports.countryDisplayName,
-        airports.countryFlag,
+        expect.objectContaining({
+          countryName: airports.countryDisplayName,
+          flag: airports.countryFlag,
+          homeBase: "EDDF",
+        }),
       );
       expect(el("wrapped-airports-grid").innerHTML).toBe(
         '<div class="airports-grid-title">destinations</div>',
+      );
+    });
+
+    it("marks the destination furthest from the home base", () => {
+      mockApp.selectedYear = "all";
+      mockApp.fullPathInfo = [
+        { id: 1, year: 2024, start_airport: "EDDF", end_airport: "LOWW" },
+        { id: 2, year: 2024, start_airport: "EDDF", end_airport: "EDDM" },
+      ];
+      calculateYearStatsSpy.mockReturnValue({
+        ...defaultYearStats,
+        total_flights: 2,
+        num_airports: 3,
+        airport_names: ["EDDF", "EDDM", "LOWW"],
+      });
+      window.KML_AIRPORTS = {
+        airports: [
+          { name: "EDDF", lat: 50.03, lon: 8.57 },
+          { name: "EDDM", lat: 48.35, lon: 11.79 },
+          { name: "LOWW", lat: 48.11, lon: 16.57 },
+        ],
+      };
+
+      wrappedManager.showWrapped();
+
+      expect(generateDestinationsHtml).toHaveBeenCalledWith(
+        expect.any(Map),
+        expect.objectContaining({ homeBase: "EDDF", furthest: "LOWW" }),
+      );
+      delete window.KML_AIRPORTS;
+    });
+
+    it("marks no destination as furthest without airport coordinates", () => {
+      mockApp.selectedYear = "all";
+      mockApp.fullPathInfo = [
+        { id: 1, year: 2024, start_airport: "EDDF", end_airport: "LOWW" },
+      ];
+      calculateYearStatsSpy.mockReturnValue({
+        ...defaultYearStats,
+        total_flights: 1,
+        num_airports: 2,
+        airport_names: ["EDDF", "LOWW"],
+      });
+
+      wrappedManager.showWrapped();
+
+      expect(generateDestinationsHtml).toHaveBeenCalledWith(
+        expect.any(Map),
+        expect.objectContaining({ furthest: null }),
       );
     });
 
@@ -617,10 +702,8 @@ describe("WrappedManager", () => {
       expect(hideControls).toHaveBeenCalledWith();
       expect(el("stats-btn").style.display).toBe("none");
       expect(el("share-btn").style.display).toBe("none");
-      expect(
-        document.querySelector<HTMLElement>(".leaflet-control-zoom")?.style
-          .display,
-      ).toBe("none");
+      expect(el("left-buttons").style.display).toBe("none");
+      expect(el("right-buttons").style.display).toBe("none");
     });
 
     it("does not open twice while already open", () => {
@@ -653,6 +736,45 @@ describe("WrappedManager", () => {
       expect(el("github-footer").hasAttribute("inert")).toBe(true);
       expect(el("app-container").hasAttribute("inert")).toBe(true);
       expect(el("wrapped-modal").hasAttribute("inert")).toBe(false);
+    });
+
+    it("makes an element added to the page while it is open inert too", async () => {
+      // Crossing the breakpoint with the dialog open mounts the mobile bar
+      // onto the body. A one-time snapshot missed it, and its tabs joined the
+      // dialog's tab cycle and stayed operable.
+      wrappedManager.showWrapped();
+
+      const bar = document.createElement("div");
+      bar.className = "mobile-bar";
+      bar.innerHTML = '<button id="mobile-tab-stats">Stats</button>';
+      document.body.appendChild(bar);
+      await Promise.resolve();
+
+      expect(bar.hasAttribute("inert")).toBe(true);
+    });
+
+    it("releases an element that arrived while it was open", async () => {
+      wrappedManager.showWrapped();
+      const bar = document.createElement("div");
+      bar.className = "mobile-bar";
+      document.body.appendChild(bar);
+      await Promise.resolve();
+      expect(bar.hasAttribute("inert")).toBe(true);
+
+      wrappedManager.closeWrapped();
+
+      expect(bar.hasAttribute("inert")).toBe(false);
+    });
+
+    it("stops watching the page once it closes", async () => {
+      wrappedManager.showWrapped();
+      wrappedManager.closeWrapped();
+
+      const late = document.createElement("div");
+      document.body.appendChild(late);
+      await Promise.resolve();
+
+      expect(late.hasAttribute("inert")).toBe(false);
     });
 
     it("keeps the map interactive because it moves into the dialog", () => {
@@ -775,10 +897,8 @@ describe("WrappedManager", () => {
 
       expect(restoreControls).toHaveBeenCalled();
       expect(el("stats-btn").style.display).toBe("");
-      expect(
-        document.querySelector<HTMLElement>(".leaflet-control-zoom")?.style
-          .display,
-      ).toBe("");
+      expect(el("left-buttons").style.display).toBe("");
+      expect(el("right-buttons").style.display).toBe("");
     });
 
     it("restores the aviation button to its previous visible state", () => {

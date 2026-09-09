@@ -8,7 +8,8 @@ import type { ReplayState } from "./replayState";
 import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
-import { formatTime } from "../utils/formatters";
+import { formatSpeed, formatTime } from "../utils/formatters";
+import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
 import { calculateSmoothedBearing } from "../features/replay";
@@ -18,6 +19,29 @@ export const SEEK_PAN_THROTTLE_MS = 250;
 
 /** Fraction of the viewport used as the "near edge" margin for auto-panning */
 const EDGE_MARGIN_FRACTION = 0.1;
+
+/** Shown in the readout while no segment has been reached */
+const READOUT_PLACEHOLDER = "—";
+
+/** Cells of the readout strip, in display order */
+const READOUT_CELLS: [id: string, label: string][] = [
+  ["replay-readout-altitude", "Altitude"],
+  ["replay-readout-speed", "Groundspeed"],
+  ["replay-readout-track", "Track"],
+];
+
+/** Metric counterpart of each readout cell; the track has no second unit */
+const READOUT_ALT_CELLS: (string | null)[] = [
+  "replay-readout-altitude-alt",
+  "replay-readout-speed-alt",
+  null,
+];
+
+/** Compass track for a bearing, normalised and zero padded ("072°") */
+export function formatTrack(bearing: number): string {
+  const normalised = ((Math.round(bearing) % 360) + 360) % 360;
+  return String(normalised).padStart(3, "0") + "°";
+}
 
 /**
  * Find the index of the last segment whose time is at or before currentTime.
@@ -69,6 +93,85 @@ export class ReplayRenderer {
 
   constructor(app: MapApp) {
     this.app = app;
+  }
+
+  /**
+   * Create the readout strip inside the replay panel once. It reports the
+   * values of the current position, so it must never be a live region: the
+   * frame loop writes it many times a second.
+   */
+  ensureReadout(panel: HTMLElement): HTMLElement {
+    const existing = panel.querySelector<HTMLElement>(".replay-readout");
+    if (existing) return existing;
+
+    const strip = document.createElement("div");
+    strip.className = "replay-readout";
+    strip.id = "replay-readout";
+
+    READOUT_CELLS.forEach(([id, label], index) => {
+      const cell = document.createElement("div");
+      cell.className = "replay-readout-cell";
+
+      const name = document.createElement("span");
+      name.className = "replay-readout-label";
+      name.textContent = label;
+
+      const value = document.createElement("span");
+      value.className = "replay-readout-value";
+      value.id = id;
+      value.textContent = READOUT_PLACEHOLDER;
+
+      cell.append(name, value);
+
+      const altId = READOUT_ALT_CELLS[index];
+      if (altId) {
+        const alt = document.createElement("span");
+        alt.className = "replay-readout-alt";
+        alt.id = altId;
+        alt.textContent = "";
+        cell.append(alt);
+      }
+      strip.append(cell);
+    });
+
+    const inner = panel.querySelector("#replay-controls-inner");
+    (inner ?? panel).append(strip);
+    return strip;
+  }
+
+  /**
+   * Write the values of the current position. Only changed cells are
+   * touched, so a paused replay does not keep dirtying the DOM.
+   */
+  private updateReadout(segment: PathSegment | null, bearing: number): void {
+    const feet = Math.round(segment?.altitude_ft ?? 0);
+    const knots = segment?.groundspeed_knots ?? 0;
+    // No thousands separator, so the numbers read like the legends, the
+    // statistics panel and the segment tooltip rather than a fourth style
+    const values: string[] = segment
+      ? [feet + " ft", formatSpeed(knots), formatTrack(bearing)]
+      : [READOUT_PLACEHOLDER, READOUT_PLACEHOLDER, READOUT_PLACEHOLDER];
+    // Every other surface pairs both unit systems, so this one does too
+    const alts: string[] = segment
+      ? [
+          Math.round(feet * FEET_TO_METERS) + " m",
+          Math.round(knots * NAUTICAL_MILES_TO_KM) + " km/h",
+        ]
+      : ["", ""];
+
+    READOUT_CELLS.forEach(([id], index) => {
+      const cell = domCache.get(id);
+      const text = values[index] ?? READOUT_PLACEHOLDER;
+      if (cell && cell.textContent !== text) cell.textContent = text;
+
+      const altId = READOUT_ALT_CELLS[index];
+      if (!altId) return;
+      const altCell = domCache.get(altId);
+      const altText = alts[index] ?? "";
+      if (altCell && altCell.textContent !== altText) {
+        altCell.textContent = altText;
+      }
+    });
   }
 
   /**
@@ -163,6 +266,7 @@ export class ReplayRenderer {
     if (!lastSegment) {
       const startCoords = segments[0]?.coords?.[0];
       if (startCoords) marker.setLatLng([startCoords[0], startCoords[1]]);
+      this.updateReadout(null, 0);
       return;
     }
 
@@ -202,6 +306,8 @@ export class ReplayRenderer {
     } else if (state.lastBearing !== null) {
       bearing = state.lastBearing;
     }
+
+    this.updateReadout(lastSegment, bearing);
 
     marker.setLatLng(currentPos);
 

@@ -15,6 +15,7 @@ import {
   NAUTICAL_MILES_TO_KM,
 } from "./constants";
 import { calculateBearing, ddToDms } from "./geometry";
+import { icon } from "./icons";
 
 export type { YearStats } from "../types";
 
@@ -25,6 +26,70 @@ export function escapeHtml(str: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/**
+ * A count with its noun, pluralised: `pluralize(1, "flight")` is "1 flight",
+ * `pluralize(2, "flight")` is "2 flights".
+ *
+ * @param count - The number to render
+ * @param singular - Noun in its singular form
+ * @param plural - Plural form when appending an "s" does not produce it
+ */
+export function pluralize(
+  count: number,
+  singular: string,
+  plural: string = singular + "s",
+): string {
+  return count + " " + (count === 1 ? singular : plural);
+}
+
+/** "1 flight" or "12 flights" for a count */
+export function pluralFlights(count: number): string {
+  return pluralize(count, "flight");
+}
+
+/** An airport label split into its ICAO code and its name */
+export interface AirportLabel {
+  /** ICAO/IATA style code, empty when the label carries none */
+  code: string;
+  /** Airport name without the leading code */
+  name: string;
+}
+
+/**
+ * Split a label such as "EDAQ Halle-Oppin" into its code and its name so the
+ * two can be typeset differently. Labels without a leading code keep their
+ * full text as the name.
+ */
+export function splitAirportName(label: string): AirportLabel {
+  const trimmed = label.trim();
+  const spaceIndex = trimmed.indexOf(" ");
+  if (spaceIndex > 0) {
+    const code = trimmed.slice(0, spaceIndex);
+    const name = trimmed.slice(spaceIndex + 1).trim();
+    if (name && /^[A-Z0-9]{3,4}$/.test(code)) {
+      return { code, name };
+    }
+  }
+  return { code: "", name: trimmed };
+}
+
+/** Section heading for a Wrapped card: line icon plus label */
+function wrappedSectionTitle(
+  className: string,
+  iconName: Parameters<typeof icon>[0],
+  label: string,
+): string {
+  return (
+    '<h3 class="' +
+    className +
+    '">' +
+    icon(iconName, 20) +
+    '<span class="section-title-text">' +
+    label +
+    "</span></h3>"
+  );
 }
 
 export interface AirportCount {
@@ -76,6 +141,27 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
 }
 
 /**
+ * One tile of the Wrapped stat grid. The unit is a separate element so it can
+ * be typeset smaller than the display figure it belongs to.
+ */
+function statCard(value: string, unit: string, label: string): string {
+  const unitHtml = unit
+    ? ' <span class="stat-unit">' + escapeHtml(unit) + "</span>"
+    : "";
+  return (
+    '<div class="stat-card">' +
+    '<div class="stat-value">' +
+    escapeHtml(value) +
+    unitHtml +
+    "</div>" +
+    '<div class="stat-label">' +
+    label +
+    "</div>" +
+    "</div>"
+  );
+}
+
+/**
  * Generate stats grid HTML
  */
 export function generateStatsHtml(
@@ -83,49 +169,33 @@ export function generateStatsHtml(
   fullStats: FilteredStatistics | null,
   hasTimingData: boolean,
 ): string {
-  const statsHtml = `
-            <div class="stat-card">
-                <div class="stat-value">${yearStats.total_flights}</div>
-                <div class="stat-label">Flights</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${yearStats.num_airports}</div>
-                <div class="stat-label">Airports</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${yearStats.total_distance_nm.toFixed(0)}</div>
-                <div class="stat-label">Nautical Miles</div>
-            </div>
-            ${
-              hasTimingData
-                ? `
-            <div class="stat-card">
-                <div class="stat-value">${yearStats.flight_time}</div>
-                <div class="stat-label">Flight Time</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${(fullStats?.max_groundspeed_knots || 0).toFixed(0)} kt</div>
-                <div class="stat-label">Max Groundspeed</div>
-            </div>
-            `
-                : ""
-            }
-            <div class="stat-card">
-                <div class="stat-value">${Math.round((fullStats?.max_altitude_m || 0) * METERS_TO_FEET)} ft</div>
-                <div class="stat-label">Max Altitude (MSL)</div>
-            </div>
-        `;
+  const maxAltitudeFt = Math.round(
+    (fullStats?.max_altitude_m || 0) * METERS_TO_FEET,
+  );
 
-  return statsHtml;
+  return (
+    statCard(String(yearStats.total_flights), "", "Flights") +
+    statCard(String(yearStats.num_airports), "", "Airports") +
+    statCard(yearStats.total_distance_nm.toFixed(0), "", "Nautical Miles") +
+    (hasTimingData
+      ? statCard(yearStats.flight_time, "", "Flight Time") +
+        statCard(
+          (fullStats?.max_groundspeed_knots || 0).toFixed(0),
+          "kt",
+          "Max Groundspeed",
+        )
+      : "") +
+    statCard(String(maxAltitudeFt), "ft", "Max Altitude (MSL)")
+  );
 }
 
 /**
  * Generate fun facts HTML
  */
 export function generateFunFactsHtml(funFacts: FunFact[]): string {
-  let html = '<h3 class="fun-facts-title">✨ Facts</h3>';
+  let html = wrappedSectionTitle("fun-facts-title", "wrapped", "Facts");
   funFacts.forEach((fact: FunFact) => {
-    html += `<div class="fun-fact" data-category="${fact.category}"><span class="fun-fact-icon">${fact.icon}</span><span class="fun-fact-text">${fact.text}</span></div>`;
+    html += `<div class="fun-fact" data-category="${escapeHtml(fact.category)}"><span class="fun-fact-icon" aria-hidden="true">${fact.icon}</span><span class="fun-fact-text">${fact.text}</span></div>`;
   });
   return html;
 }
@@ -153,7 +223,7 @@ export function generateAircraftFleetHtml(yearStats: YearStats): string {
     return "";
   }
 
-  let html = '<h3 class="aircraft-fleet-title">✈️ Fleet</h3>';
+  let html = wrappedSectionTitle("aircraft-fleet-title", "aircraft", "Fleet");
 
   const maxFlights = yearStats.aircraft_list[0]?.flights ?? 0;
   const minFlights =
@@ -165,20 +235,30 @@ export function generateAircraftFleetHtml(yearStats: YearStats): string {
     const normalized =
       flightRange > 0 ? (aircraft.flights - minFlights) / flightRange : 1;
     const colorClass = calculateAircraftColorClass(normalized);
+    // The per-aircraft flight time is the one the data carries; never derived
     const flightTimeStr = aircraft.flight_time_str || "---";
 
-    html += `
-                    <div class="fleet-aircraft ${colorClass}">
-                        <div class="fleet-aircraft-info">
-                            <div class="fleet-aircraft-model">${escapeHtml(modelStr)}</div>
-                            <div class="fleet-aircraft-registration">${escapeHtml(aircraft.registration)}</div>
-                        </div>
-                        <div class="fleet-aircraft-stats">
-                            <div class="fleet-aircraft-flights">${aircraft.flights} flights</div>
-                            <div class="fleet-aircraft-time">${flightTimeStr}</div>
-                        </div>
-                    </div>
-                `;
+    html +=
+      '<div class="fleet-aircraft ' +
+      colorClass +
+      '">' +
+      '<div class="fleet-aircraft-info">' +
+      '<div class="fleet-aircraft-model">' +
+      escapeHtml(modelStr) +
+      "</div>" +
+      '<div class="fleet-aircraft-registration">' +
+      escapeHtml(aircraft.registration) +
+      "</div>" +
+      "</div>" +
+      '<div class="fleet-aircraft-stats">' +
+      '<div class="fleet-aircraft-flights">' +
+      pluralFlights(aircraft.flights) +
+      "</div>" +
+      '<div class="fleet-aircraft-time">' +
+      escapeHtml(flightTimeStr) +
+      "</div>" +
+      "</div>" +
+      "</div>";
   });
 
   return html;
@@ -188,14 +268,25 @@ export function generateAircraftFleetHtml(yearStats: YearStats): string {
  * Generate home base HTML
  */
 export function generateHomeBaseHtml(homeBase: AirportCount): string {
-  let html = '<h3 class="top-airports-title">🏠 Home Base</h3>';
-  html += `
-                <div class="top-airport">
-                    <div class="top-airport-name">${escapeHtml(homeBase.name)}</div>
-                    <div class="top-airport-count">${homeBase.flight_count} flights</div>
-                </div>
-            `;
-  return html;
+  const { code, name } = splitAirportName(homeBase.name);
+  const codeHtml = code
+    ? '<span class="top-airport-code">' + escapeHtml(code) + "</span>"
+    : "";
+
+  return (
+    wrappedSectionTitle("top-airports-title", "airport", "Home Base") +
+    '<div class="top-airport">' +
+    '<div class="top-airport-name">' +
+    codeHtml +
+    '<span class="top-airport-place">' +
+    escapeHtml(name) +
+    "</span>" +
+    "</div>" +
+    '<div class="top-airport-count">' +
+    pluralFlights(homeBase.flight_count) +
+    "</div>" +
+    "</div>"
+  );
 }
 
 export interface SegmentPopupParams {
@@ -273,27 +364,88 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
     </div>`;
 }
 
+export interface DestinationsOptions {
+  /** Resolve a country code to its display name */
+  countryName: (code: string) => string;
+  /** Resolve a country code to its flag */
+  flag: (code: string) => string;
+  /** Airport that carries the home base accent */
+  homeBase?: string | null;
+  /** Airport furthest from the home base; carries the second accent */
+  furthest?: string | null;
+}
+
+/** One airport row: code, name and at most one accent tag */
+function destinationRow(
+  name: string,
+  isHome: boolean,
+  isFurthest: boolean,
+): string {
+  const { code, name: place } = splitAirportName(name);
+  const stateClass = isHome ? " is-home" : isFurthest ? " is-furthest" : "";
+  const codeHtml = code
+    ? '<span class="destination-code">' + escapeHtml(code) + "</span>"
+    : "";
+  const tag = isHome ? "Home" : isFurthest ? "Furthest" : "";
+  const tagHtml = tag ? '<span class="destination-tag">' + tag + "</span>" : "";
+
+  return (
+    '<li class="destination' +
+    stateClass +
+    '">' +
+    codeHtml +
+    '<span class="destination-name">' +
+    escapeHtml(place) +
+    "</span>" +
+    tagHtml +
+    "</li>"
+  );
+}
+
 export function generateDestinationsHtml(
   grouped: Map<string, string[]>,
-  countryName: (code: string) => string,
-  flag: (code: string) => string,
+  options: DestinationsOptions,
 ): string {
   if (grouped.size === 0) return "";
 
-  let html = '<h3 class="airports-grid-title">🗺️ Destinations</h3>';
+  const { countryName, flag, homeBase, furthest } = options;
+  let html = wrappedSectionTitle(
+    "airports-grid-title",
+    "airport",
+    "Destinations",
+  );
 
   let groupIndex = 0;
   for (const [code, airports] of grouped) {
     const f = code !== "Other" ? flag(code) : "";
     const label = code === "Other" ? "Other" : countryName(code);
-    const title = f ? `${escapeHtml(label)} &ensp;${f}` : escapeHtml(label);
+    const flagHtml = f
+      ? '<span class="country-flag" aria-hidden="true">' +
+        escapeHtml(f) +
+        "</span>"
+      : "";
     const delay = (groupIndex * 0.1).toFixed(1);
-    html += `<div class="country-group" style="animation-delay: ${delay}s"><div class="country-group-title">${title}</div><div class="airport-badges">`;
+    html +=
+      '<div class="country-group" style="animation-delay: ' +
+      delay +
+      's">' +
+      '<div class="country-group-title">' +
+      flagHtml +
+      '<span class="country-name">' +
+      escapeHtml(label) +
+      "</span>" +
+      '<span class="country-count">' +
+      airports.length +
+      "</span>" +
+      "</div>" +
+      '<ul class="country-airports">';
     groupIndex++;
     for (const name of airports) {
-      html += `<div class="airport-badge">${escapeHtml(name)}</div>`;
+      const isHome = !!homeBase && name === homeBase;
+      const isFurthest = !isHome && !!furthest && name === furthest;
+      html += destinationRow(name, isHome, isFurthest);
     }
-    html += "</div></div>";
+    html += "</ul></div>";
   }
 
   return html;

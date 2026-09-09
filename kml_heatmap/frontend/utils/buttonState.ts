@@ -40,3 +40,24 @@ export function syncToggleButton(
   apply(store.get(key));
   return store.subscribe(key, (value) => apply(value));
 }
+
+/**
+ * Set the text of a control button without touching its icon.
+ * A button that carries no label span gets one: assigning `textContent`
+ * would drop every child, the injected `svg.icon` included.
+ */
+export function setControlLabel(button: HTMLElement, text: string): void {
+  const existing = button.querySelector<HTMLElement>(".control-label");
+  if (existing) {
+    existing.textContent = text;
+    return;
+  }
+  // Only the bare text the span replaces goes; elements stay
+  for (const node of Array.from(button.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) node.remove();
+  }
+  const label = document.createElement("span");
+  label.className = "control-label";
+  label.textContent = text;
+  button.appendChild(label);
+}

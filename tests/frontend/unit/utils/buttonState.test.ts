@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   applyToggleButtonState,
+  setControlLabel,
   syncToggleButton,
 } from "../../../../kml_heatmap/frontend/utils/buttonState";
 import { AppStore } from "../../../../kml_heatmap/frontend/state/store";
@@ -83,6 +84,42 @@ describe("buttonState", () => {
         syncToggleButton(store, "altitudeVisible", "missing-btn"),
       ).not.toThrow();
       expect(() => store.set("altitudeVisible", true)).not.toThrow();
+    });
+  });
+
+  describe("setControlLabel", () => {
+    it("writes into the label span and leaves the icon alone", () => {
+      button.innerHTML =
+        '<svg class="icon"></svg><span class="control-label">Export image</span>';
+
+      setControlLabel(button, "Exporting…");
+
+      expect(button.querySelector(".control-label")!.textContent).toBe(
+        "Exporting…",
+      );
+      expect(button.querySelector("svg.icon")).not.toBeNull();
+    });
+
+    it("creates the missing label span instead of the bare text", () => {
+      button.textContent = "Export image";
+
+      setControlLabel(button, "Exporting…");
+
+      expect(button.querySelector(".control-label")!.textContent).toBe(
+        "Exporting…",
+      );
+      expect(button.textContent).toBe("Exporting…");
+    });
+
+    it("keeps the icon when it has to create the label span", () => {
+      button.innerHTML = '<svg class="icon"></svg>Export image';
+
+      setControlLabel(button, "Exporting…");
+
+      expect(button.querySelector("svg.icon")).not.toBeNull();
+      expect(button.textContent).toBe("Exporting…");
+      // The icon still precedes the label it belongs to
+      expect(button.lastElementChild!.className).toBe("control-label");
     });
   });
 });

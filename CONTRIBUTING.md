@@ -5,8 +5,8 @@ setup, the checks that run in CI and the conventions used in this repository.
 
 ## Setup
 
-- Python 3.14 (`.python-version`) and Node.js 24 (`.nvmrc`)
-- podman or docker for the container based `make` targets (optional)
+- Python 3.14 (`.python-version`) and Node.js 26 (`.nvmrc`)
+- podman or docker for `make build`, `make serve` and `make verify` (optional)
 
 ```bash
 git clone https://github.com/saschagrunert/kml-heatmap.git
@@ -25,18 +25,17 @@ the whitespace fixers on every commit.
 
 ## Checks
 
-Run the same checks as CI before opening a pull request. Each container target
-has a `*-local` variant that uses the tools from your virtual environment and
-`node_modules`:
+Run the same checks as CI before opening a pull request. They use the tools
+from your virtual environment and `node_modules`, the same way CI does, so no
+container is involved except for `make verify`:
 
 ```bash
 make lint            # ruff, mypy, bandit, tsc (frontend and tests), eslint
 make format          # ruff format, prettier
-make test            # vitest and pytest with coverage
-make test-local      # same with local tools; pytest flags are listed in README.md
+make test            # vitest and pytest with coverage; pytest flags are in README.md
 npm run test:e2e     # Playwright (see README.md for the prerequisites)
 make check-obfuscation
-make verify          # regenerates docs/ and fails if it differs from git
+make verify          # regenerates docs/ in a container and fails if it differs from git
 make lock            # regenerates the Python lock files after editing requirements*.txt
 ```
 
@@ -57,7 +56,7 @@ parentheses back is undone on the next `make format`.
   verify that every committed file is obfuscated.
 - The frontend bundles in `kml_heatmap/static/` (`bundle.js`,
   `mapApp.bundle.js` and their `.map` files) are gitignored. They are built by
-  `npm run build` and, for the images, inside the Dockerfiles.
+  `npm run build` and, for the images, inside the Dockerfile.
 - `requirements.lock` and `requirements-test.lock` are generated with
   `make lock` (pip-compile with hashes). Edit `requirements*.txt` or
   `pyproject.toml`, then regenerate the locks; the weekly `lock` workflow does

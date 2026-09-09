@@ -10,7 +10,12 @@ import {
   findHomeBase,
   groupByCountry,
 } from "../features/airports";
-import { calculateYearStats, generateFunFacts } from "../features/wrapped";
+import {
+  calculateYearStats,
+  findFurthestAirport,
+  generateFunFacts,
+} from "../features/wrapped";
+import type { Coordinate } from "../utils/geometry";
 import {
   calculateFilteredStatistics,
   filterPaths,
@@ -27,6 +32,17 @@ import {
 /** Elements that stay interactive while the dialog is open */
 const NON_INERT_IDS = new Set(["map"]);
 
+/** Airport coordinates exported by the backend, keyed by airport name */
+function airportCoordinates(): Map<string, Coordinate> {
+  const coordinates = new Map<string, Coordinate>();
+  for (const airport of window.KML_AIRPORTS?.airports ?? []) {
+    if (typeof airport.lat === "number" && typeof airport.lon === "number") {
+      coordinates.set(airport.name, [airport.lat, airport.lon]);
+    }
+  }
+  return coordinates;
+}
+
 export class WrappedManager {
   private app: MapApp;
   private originalMapParent: HTMLElement | null;
@@ -35,6 +51,7 @@ export class WrappedManager {
   private escapeHandler: ((e: KeyboardEvent) => void) | null = null;
   private previouslyFocused: HTMLElement | null = null;
   private inertElements: Element[] = [];
+  private inertObserver: MutationObserver | null = null;
   private mapMoveTimer: ReturnType<typeof setTimeout> | null = null;
   private mapResizeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -146,10 +163,18 @@ export class WrappedManager {
     const funFactsEl = domCache.get("wrapped-fun-facts");
     if (funFactsEl) funFactsEl.innerHTML = funFactsHtml;
 
+    // The sections below are conditional, so clear them first: a year
+    // without aircraft or airports must not show the previous year's content
+    const fleetEl = domCache.get("wrapped-aircraft-fleet");
+    const topAirportsEl = domCache.get("wrapped-top-airports");
+    const gridEl = domCache.get("wrapped-airports-grid");
+    if (fleetEl) fleetEl.innerHTML = "";
+    if (topAirportsEl) topAirportsEl.innerHTML = "";
+    if (gridEl) gridEl.innerHTML = "";
+
     // Build aircraft fleet section using year-filtered data
     if (yearStats.aircraft_list && yearStats.aircraft_list.length > 0) {
       const fleetHtml = generateAircraftFleetHtml(yearStats);
-      const fleetEl = domCache.get("wrapped-aircraft-fleet");
       if (fleetEl) fleetEl.innerHTML = fleetHtml;
     }
 
@@ -168,20 +193,23 @@ export class WrappedManager {
           name: homeBase,
           flight_count: homeBaseCount,
         });
-        const topAirportsEl = domCache.get("wrapped-top-airports");
         if (topAirportsEl) topAirportsEl.innerHTML = homeBaseHtml;
 
-        const destinations = yearStats.airport_names.filter(
-          (name) => name !== homeBase,
+        // Every airport is listed, the home base included, so the country
+        // groups are complete; home base and furthest airport are accented
+        const grouped = groupByCountry(yearStats.airport_names);
+        const furthest = findFurthestAirport(
+          homeBase,
+          yearStats.airport_names,
+          airportCoordinates(),
         );
-        const grouped = groupByCountry(destinations);
 
-        const destinationsHtml = generateDestinationsHtml(
-          grouped,
-          countryDisplayName,
-          countryFlag,
-        );
-        const gridEl = domCache.get("wrapped-airports-grid");
+        const destinationsHtml = generateDestinationsHtml(grouped, {
+          countryName: countryDisplayName,
+          flag: countryFlag,
+          homeBase,
+          furthest,
+        });
         if (gridEl) gridEl.innerHTML = destinationsHtml;
       }
     }
@@ -258,22 +286,47 @@ export class WrappedManager {
    * Keep keyboard and screen reader focus inside the dialog: remember the
    * opener, make everything outside the dialog inert and focus the close
    * button. The map is excluded because it is moved into the dialog.
+   *
+   * A snapshot of the children is not enough. Crossing the breakpoint while
+   * the dialog is open mounts the mobile bar onto the body, and without the
+   * observer its five tabs joined the dialog's tab cycle and stayed operable,
+   * so a keyboard user could open a sheet behind the modal.
    */
   private trapFocus(modal: HTMLElement): void {
     const active = document.activeElement;
     this.previouslyFocused = active instanceof HTMLElement ? active : null;
 
-    this.inertElements = Array.from(document.body.children).filter(
-      (el) =>
-        el !== modal && !NON_INERT_IDS.has(el.id) && !el.hasAttribute("inert"),
-    );
-    this.inertElements.forEach((el) => el.setAttribute("inert", ""));
+    const makeInert = (el: Element): void => {
+      if (
+        el === modal ||
+        NON_INERT_IDS.has(el.id) ||
+        el.hasAttribute("inert")
+      ) {
+        return;
+      }
+      el.setAttribute("inert", "");
+      this.inertElements.push(el);
+    };
+
+    this.inertElements = [];
+    Array.from(document.body.children).forEach(makeInert);
+
+    this.inertObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node instanceof Element) makeInert(node);
+        }
+      }
+    });
+    this.inertObserver.observe(document.body, { childList: true });
 
     const closeBtn = modal.querySelector<HTMLElement>(".close-btn");
     if (closeBtn) closeBtn.focus();
   }
 
   private releaseFocus(): void {
+    this.inertObserver?.disconnect();
+    this.inertObserver = null;
     this.inertElements.forEach((el) => el.removeAttribute("inert"));
     this.inertElements = [];
 

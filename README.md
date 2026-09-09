@@ -52,8 +52,8 @@
 
 ### Requirements
 
-- Python 3.14 (see `.python-version`) and Node.js 24 (see `.nvmrc`)
-- podman or docker for the `make` targets (auto-detected, podman first)
+- Python 3.14 (see `.python-version`) and Node.js 26 (see `.nvmrc`)
+- podman or docker for `make build`/`serve`/`verify` (auto-detected, podman first)
 
 ### Quick Start
 
@@ -216,22 +216,20 @@ Targets (`make help` prints this list with the current variable values):
 - `build` - Build the image and generate `OUTPUT_DIR` from `INPUT_DIR` (obfuscates the input KML files in place)
 - `serve` - Serve `OUTPUT_DIR` on `http://HOST_BIND:PORT` (run `make build` first)
 - `serve-build` - Run `build`, then `serve`
-- `test-image` - Build the test image (Python and Node toolchain)
-- `test` - Run the JavaScript and Python test suites in the test image
-- `lint` - Run linters and type checkers in the test image
-- `format` - Run formatters in the test image
-- `lock` - Regenerate `requirements.lock` and `requirements-test.lock` with pip-compile in the test image
-- `check-obfuscation` - Check that the KML files in `INPUT_DIR` are obfuscated (in the test image)
-- `check-obfuscation-local` - Same check with the local Python
-- `lint-local`, `format-local`, `test-local` - Same as above with local tools
+- `test` - Run the JavaScript and Python test suites with coverage
+- `lint` - Run linters and type checkers
+- `format` - Run formatters
+- `lock` - Regenerate `requirements.lock` and `requirements-test.lock` with pip-compile
+- `check-obfuscation` - Check that the KML files in `INPUT_DIR` are obfuscated
 - `verify` - Rebuild `OUTPUT_DIR` and fail if it differs from git (modified or untracked files)
-- `clean` - Remove container images (when a runtime is available) and local build artifacts
+- `clean` - Remove the container image (when a runtime is available) and local build artifacts
 - `help` - Show available targets and variables
 
-Only the container based targets need podman or docker; `help` and the `*-local`
-targets work without one. With docker the containers run as your user id so
-that generated files are not owned by root; with rootless podman the Makefile
-adds `--userns=keep-id` so that the same user id works inside the container.
+Only `build`, `serve`, `verify` and `clean` need podman or docker. The rest
+(`test`, `lint`, `format`, `lock`, `help`) run locally. With docker the
+containers run as your user id so that generated files are not owned by root;
+with rootless podman the Makefile adds `--userns=keep-id` so that the same user
+id works inside the container.
 
 ### Docker Usage
 
@@ -398,12 +396,11 @@ the `file://` protocol. It is organized by year and loaded on demand.
 
 - **Stats** - View statistics (distance, altitude, airports, flight time)
 - **Export** - Save the current map view as a JPG image
-- **Share** - Share the current URL (native share dialog where available, otherwise copied to the clipboard)
+- **Copy link** - Share the current URL (native share dialog where available, otherwise copied to the clipboard)
 - **Wrapped** - View the year-in-review summary; Escape closes it
 - **Replay** - Animate one flight with adjustable speed (default 50x) and an auto-zoom button that follows the airplane. Replay needs exactly one selected flight with timing data; a toast explains why it is unavailable otherwise
-- **Hide buttons** - Hide the control buttons for an unobstructed map
-- **Zoom control** and a visible map attribution
-- Below 768 px the layout switches to a mobile arrangement of the panels and buttons
+- A visible map attribution. There are no zoom buttons: use the scroll wheel, pinch, double click, or the keyboard once the map has focus
+- Below 768 px the two control columns are replaced by a bottom bar with five tabs. Layers, Filter and More open a sheet; Stats and Wrapped open their panel directly. Escape closes an open sheet, and Tab stays inside it. Replay takes over the bottom edge and the bar steps aside until it ends
 
 ### Filtering
 
@@ -416,12 +413,12 @@ the `file://` protocol. It is organized by year and loaded on demand.
 ### Shareable URLs
 
 Map state is encoded in the URL for easy sharing. Copy the URL from your
-browser's address bar or use the Share button:
+browser's address bar or use the copy-link button:
 
 - Specific year or all years (`?y=2025` or `?y=all`)
 - Aircraft filter (`?a=D-EAGJ`)
 - Selected paths (`?p=1,5,12`)
-- Layer visibility (9 flags: heatmap, altitude, speed, airports, aviation, stats, wrapped, buttonsHidden, isolateSelection)
+- Layer visibility (9 flags: heatmap, altitude, speed, airports, aviation, stats, wrapped, an unused legacy slot, isolateSelection). The 8th slot belonged to a control-visibility toggle that no longer exists; it is always written as `0` and kept so older shared links still read their isolate flag from the 9th
   - Example: `?v=100100000`
 - Map position (`?lat=51.5&lng=13.4&z=10`)
 - Debug logging in the browser console (`?debug=true`)
@@ -480,11 +477,10 @@ other aviation apps.
 
 ## Development
 
-`make help` lists all targets. The container based targets (`make test`,
-`make lint`, `make format`, `make lock`) run inside the test image and need no
-local toolchain; the `*-local` variants use your local Python and Node
-installation. `make verify` rebuilds `docs/` and fails if the result differs
-from git, and `make lock` regenerates the hashed Python lock files.
+`make help` lists all targets. `make test`, `make lint`, `make format` and
+`make lock` run locally (Python and Node required). `make verify` rebuilds
+`docs/` inside the container and fails if the result differs from git, and
+`make lock` regenerates the hashed Python lock files.
 
 Install the pre-commit hooks (ruff, prettier, typos, gitleaks, whitespace
 fixers) with `pip install pre-commit && pre-commit install`. See
@@ -592,7 +588,7 @@ The CI and the container images install the hashed lock files
 **Testing:**
 
 pytest no longer forces coverage or parallel execution, so a plain `pytest` run
-is fast and readable. The flags used by CI and `make test-local` are:
+is fast and readable. The flags used by CI and `make test` are:
 
 ```bash
 pytest                                          # Run all tests
@@ -613,7 +609,7 @@ mypy .                                  # Type checking
 bandit -r kml_heatmap -ll               # Security scan
 typos                                   # Spell check (config in _typos.toml)
 gitleaks dir .                          # Secret scan (config in .gitleaks.toml)
-make check-obfuscation-local            # KML files in data/ are obfuscated
+make check-obfuscation                  # KML files in data/ are obfuscated
 ```
 
 **Dependencies:**

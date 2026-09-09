@@ -18,7 +18,42 @@ import {
   filterSegmentsByPaths,
 } from "../calculations/statistics";
 import { countCountries } from "./airports";
+import { calculateDistance, type Coordinate } from "../utils/geometry";
 import type { FunFact, PathInfo, PathSegment, YearStats } from "../types";
+
+/**
+ * Find the airport furthest from the home base. Airports without known
+ * coordinates are skipped; ties keep the first airport in the list.
+ *
+ * @param homeBase - Name of the home base airport
+ * @param airportNames - Airports to consider
+ * @param coordinates - Airport name to [lat, lon]
+ * @returns Name of the furthest airport, or null when it cannot be determined
+ */
+export function findFurthestAirport(
+  homeBase: string | null,
+  airportNames: string[],
+  coordinates: Map<string, Coordinate>,
+): string | null {
+  if (!homeBase) return null;
+  const home = coordinates.get(homeBase);
+  if (!home) return null;
+
+  let furthest: string | null = null;
+  let maxDistanceKm = 0;
+  for (const name of airportNames) {
+    if (name === homeBase) continue;
+    const coords = coordinates.get(name);
+    if (!coords) continue;
+    const distanceKm = calculateDistance(home, coords);
+    if (distanceKm > maxDistanceKm) {
+      maxDistanceKm = distanceKm;
+      furthest = name;
+    }
+  }
+
+  return furthest;
+}
 
 /**
  * Full statistics for enrichment
@@ -127,17 +162,7 @@ export function calculateYearStats(
   const totalSeconds = calculateFlightTime(filteredSegments, filteredPaths);
   const flightTime = formatFlightTime(totalSeconds);
 
-  // Reuse shared aircraft aggregation and enrich with per-aircraft flight time
-  const aircraftList = aggregateAircraft(filteredPaths);
-  for (const ac of aircraftList) {
-    const acPaths = filteredPaths.filter(
-      (p) => p.aircraft_registration === ac.registration,
-    );
-    const acSegments = filterSegmentsByPaths(segments, acPaths);
-    const acSeconds = calculateFlightTime(acSegments, acPaths);
-    ac.flight_time_seconds = acSeconds;
-    ac.flight_time_str = formatFlightTime(acSeconds);
-  }
+  const aircraftList = aggregateAircraft(filteredPaths, filteredSegments);
 
   // Enrich with model from fullStats
   if (fullStats?.aircraft_list) {

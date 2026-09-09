@@ -5,6 +5,10 @@ import {
   waitForPathData,
 } from "./helpers";
 
+/** The Layers group of the right column, addressed by its own heading */
+const LAYERS_GROUP =
+  '#right-buttons .control-group[aria-labelledby="layers-group-title"]';
+
 /** Set the zoom level and refresh marker sizes, then wait for the class */
 async function zoomAndWaitForMarkerSize(
   page: Page,
@@ -29,8 +33,15 @@ test.describe("Layers", () => {
     await gotoApp(page);
   });
 
-  test("heatmap button toggles heatmap layer", async ({ page }) => {
-    const btn = page.locator("#heatmap-btn");
+  test("heatmap button toggles heatmap layer", async ({ page, isMobile }) => {
+    test.skip(
+      isMobile,
+      "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
+    );
+    // Addressed through the named group rather than a position: the button
+    // has to be the one under the Layers heading, carrying its own icon
+    const btn = page.locator(`${LAYERS_GROUP} #heatmap-btn`);
+    await expect(btn.locator("svg.icon")).toHaveCount(1);
 
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "0.5");
@@ -41,9 +52,24 @@ test.describe("Layers", () => {
     await expect(btn).toHaveAttribute("aria-pressed", "true");
   });
 
-  test("altitude toggle shows altitude layer and legend", async ({ page }) => {
-    const altBtn = page.locator("#altitude-btn");
+  test("altitude toggle shows altitude layer and legend", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(
+      isMobile,
+      "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
+    );
+    const altBtn = page.locator(`${LAYERS_GROUP} #altitude-btn`);
     const altLegend = page.locator("#altitude-legend");
+
+    // The row shows the ramp the layer colours by, next to its button
+    await expect(altBtn.locator("svg.icon")).toHaveCount(1);
+    await expect(
+      page
+        .locator(`${LAYERS_GROUP} .control-row:has(#altitude-btn)`)
+        .locator(".ramp-chip-altitude"),
+    ).toHaveCount(1);
 
     await expect(altBtn).toHaveCSS("opacity", "0.5");
     await expect(altLegend).toBeHidden();
@@ -60,9 +86,23 @@ test.describe("Layers", () => {
     await expect(altLegend).toBeHidden();
   });
 
-  test("airspeed toggle shows airspeed layer and legend", async ({ page }) => {
-    const airspeedBtn = page.locator("#airspeed-btn");
+  test("airspeed toggle shows airspeed layer and legend", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(
+      isMobile,
+      "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
+    );
+    const airspeedBtn = page.locator(`${LAYERS_GROUP} #airspeed-btn`);
     const airspeedLegend = page.locator("#airspeed-legend");
+
+    await expect(airspeedBtn.locator("svg.icon")).toHaveCount(1);
+    await expect(
+      page
+        .locator(`${LAYERS_GROUP} .control-row:has(#airspeed-btn)`)
+        .locator(".ramp-chip-speed"),
+    ).toHaveCount(1);
 
     await expect(airspeedBtn).toHaveCSS("opacity", "0.5");
     await expect(airspeedLegend).toBeHidden();
@@ -79,7 +119,14 @@ test.describe("Layers", () => {
     await expect(airspeedLegend).toBeHidden();
   });
 
-  test("altitude and airspeed are mutually exclusive", async ({ page }) => {
+  test("altitude and airspeed are mutually exclusive", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(
+      isMobile,
+      "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
+    );
     const altBtn = page.locator("#altitude-btn");
     const airspeedBtn = page.locator("#airspeed-btn");
 
@@ -92,8 +139,19 @@ test.describe("Layers", () => {
     await expect(altBtn).toHaveCSS("opacity", "0.5");
   });
 
-  test("airports button toggles airport markers", async ({ page }) => {
-    const btn = page.locator("#airports-btn");
+  test("airports button toggles airport markers", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(
+      isMobile,
+      "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
+    );
+    const btn = page.locator(`${LAYERS_GROUP} #airports-btn`);
+    await expect(btn.locator("svg.icon")).toHaveCount(1);
+    // The separator splits the on/off overlays from the colour layers
+    await expect(page.locator(`${LAYERS_GROUP} .control-sep`)).toHaveCount(1);
+    await expect(page.locator("#layers-group-title")).toHaveText("Layers");
 
     await expect(btn).toHaveCSS("opacity", "1");
 
@@ -106,37 +164,14 @@ test.describe("Layers", () => {
     await expect(page.locator(".airport-marker").first()).toBeAttached();
   });
 
-  test("hide buttons toggle collapses controls", async ({ page }) => {
-    const hideBtn = page.locator("#hide-buttons-btn");
-    const toggleableButtons = page.locator(".toggleable-btn");
-
-    const firstBtn = toggleableButtons.first();
-    await expect(firstBtn).toBeVisible();
-    await expect(firstBtn).not.toHaveClass(/buttons-hidden/);
-    await expect(hideBtn).toHaveAttribute("aria-pressed", "false");
-
-    await hideBtn.click();
-
-    const count = await toggleableButtons.count();
-    for (let i = 0; i < count; i++) {
-      await expect(toggleableButtons.nth(i)).toHaveClass(/buttons-hidden/);
-    }
-    await expect(hideBtn).toHaveText("🔽");
-    await expect(hideBtn).toHaveAttribute("aria-pressed", "true");
-    await expect(hideBtn).toHaveAttribute("aria-label", "Show control buttons");
-
-    await hideBtn.click();
-    for (let i = 0; i < count; i++) {
-      await expect(toggleableButtons.nth(i)).not.toHaveClass(/buttons-hidden/);
-    }
-    await expect(hideBtn).toHaveText("🔼");
-    await expect(hideBtn).toHaveAttribute("aria-pressed", "false");
-    await expect(hideBtn).toHaveAttribute("aria-label", "Hide control buttons");
-  });
-
   test("aviation button follows the API key configuration", async ({
     page,
+    isMobile,
   }) => {
+    test.skip(
+      isMobile,
+      "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
+    );
     const hasApiKey = await page.evaluate(
       () => !!window.MAP_CONFIG?.openaipApiKey,
     );

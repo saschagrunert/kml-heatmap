@@ -43,14 +43,14 @@ test.describe("Replay", () => {
     const replayBtn = page.locator("#replay-btn");
     await activateReplay(page);
 
-    await expect(replayBtn).toContainText("⏹️");
+    await expect(replayBtn).toHaveAttribute("data-icon", "stop");
     await expect(replayBtn).toHaveAttribute("aria-pressed", "true");
     await expect(replayBtn).toHaveAttribute("aria-label", "Stop replay");
 
     await replayBtn.click();
     await expect(page.locator("#replay-controls")).toBeHidden();
 
-    await expect(replayBtn).toContainText("▶️");
+    await expect(replayBtn).toHaveAttribute("data-icon", "play");
     await expect(replayBtn).toHaveAttribute("aria-pressed", "false");
     await expect(replayBtn).toHaveAttribute(
       "aria-label",
@@ -253,6 +253,113 @@ test.describe("Replay", () => {
       .evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value));
 
     expect(values).toEqual(["10", "25", "50", "100", "200", "500"]);
+  });
+
+  test("the readout follows the current position", async ({ page }) => {
+    await activateReplay(page);
+
+    const altitude = page.locator("#replay-readout-altitude");
+    const speed = page.locator("#replay-readout-speed");
+    const track = page.locator("#replay-readout-track");
+
+    // Built by the renderer, not the template, so it has to be on screen
+    // above the breakpoint as well as below it
+    for (const cell of [altitude, speed, track]) {
+      await expect(cell).toBeVisible();
+    }
+    await expect(page.locator(".replay-readout-label")).toHaveText([
+      "Altitude",
+      "Groundspeed",
+      "Track",
+    ]);
+    // It reports the position many times a second, so it must never be a
+    // live region
+    await expect(page.locator("#replay-readout")).not.toHaveAttribute(
+      "aria-live",
+      /.*/,
+    );
+
+    await playUntilProgress(page);
+    await page.locator("#replay-pause-btn").click();
+
+    await expect(altitude).toHaveText(/^\d+ ft$/);
+    await expect(speed).toHaveText(/^\d+ kt$/);
+    await expect(track).toHaveText(/^\d{3}°$/);
+  });
+
+  test("the exit control and readout are laid out on desktop too", async ({
+    page,
+  }) => {
+    // Both are built at every viewport, but their rules used to live only
+    // inside the mobile media query, so on desktop the exit rendered as an
+    // unstyled button in normal flow that pushed the transport row down
+    await activateReplay(page);
+
+    const layout = await page.evaluate(() => {
+      const box = (sel: string) => {
+        const el = document.querySelector(sel);
+        return el ? el.getBoundingClientRect() : null;
+      };
+      const exit = document.querySelector("#replay-exit-btn")!;
+      const exitBox = exit.getBoundingClientRect();
+      const panel = box("#replay-controls")!;
+      const overlapping = [
+        ...document.querySelectorAll("#replay-buttons button"),
+      ].filter((btn) => {
+        const b = btn.getBoundingClientRect();
+        return !(
+          exitBox.right <= b.left ||
+          b.right <= exitBox.left ||
+          exitBox.bottom <= b.top ||
+          b.bottom <= exitBox.top
+        );
+      }).length;
+      return {
+        position: getComputedStyle(exit).position,
+        width: exitBox.width,
+        height: exitBox.height,
+        insetRight: panel.right - exitBox.right,
+        insetTop: exitBox.top - panel.top,
+        overlapping,
+        readoutDisplay: getComputedStyle(
+          document.querySelector(".replay-readout")!,
+        ).display,
+        readoutCells: document.querySelectorAll(".replay-readout-cell").length,
+      };
+    });
+
+    // Taken out of flow into the panel's top-right corner
+    expect(layout.position).toBe("absolute");
+    expect(layout.insetRight).toBeGreaterThanOrEqual(0);
+    expect(layout.insetRight).toBeLessThan(24);
+    expect(layout.insetTop).toBeLessThan(24);
+    // A real target, and clear of every transport control
+    expect(layout.width).toBeGreaterThanOrEqual(36);
+    expect(layout.height).toBeGreaterThanOrEqual(36);
+    expect(layout.overlapping).toBe(0);
+    // The readout is one styled row, not three stacked unstyled pairs
+    expect(layout.readoutDisplay).toBe("flex");
+    expect(layout.readoutCells).toBe(3);
+  });
+
+  test("the exit control leaves replay", async ({ page }) => {
+    await activateReplay(page);
+
+    const exit = page.locator("#replay-exit-btn");
+    await expect(exit).toBeVisible();
+    await expect(exit).toHaveAttribute("aria-label", "Close replay");
+    await expect(exit).toHaveAttribute("title", "Close replay");
+    await expect(exit.locator("svg.icon")).toHaveCount(1);
+
+    await exit.click();
+
+    await expect(page.locator("#replay-controls")).toBeHidden();
+    await expect(page.locator("body")).not.toHaveClass(/replay-active/);
+    await expect(page.locator("#replay-btn")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    await expect(page.locator(".replay-airplane-icon")).toHaveCount(0);
   });
 
   test("airplane marker popup toggles on click", async ({ page }) => {

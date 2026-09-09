@@ -1,7 +1,8 @@
 /**
- * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, buttons visibility, export, share)
+ * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, export, share)
  */
 import type { MapApp } from "../mapApp";
+import { setControlLabel } from "../utils/buttonState";
 import { domCache, hideControls, restoreControls } from "../utils/domCache";
 import { showToast } from "../utils/toast";
 
@@ -14,7 +15,8 @@ export const DOM_TO_IMAGE_INTEGRITY =
   "sha384-zESinL+vR3OR5XGFqKjneclbVKOL8SfP+fKKO3K9BHAaPtboci56Vu3g5flevHk9";
 
 const MOBILE_BREAKPOINT_PX = 768;
-const EXPORT_BUTTON_LABEL = "📷 Export";
+const EXPORT_BUTTON_LABEL = "Export image";
+const EXPORT_BUTTON_BUSY_LABEL = "Exporting…";
 
 let domToImagePromise: Promise<DomToImage | null> | null = null;
 
@@ -152,13 +154,15 @@ export class UIToggles {
       "airspeed-legend",
       "export-btn",
       "share-btn",
-      "hide-buttons-btn",
       "map",
       "stats-btn",
       "wrapped-btn",
       "replay-btn",
       "year-filter",
       "aircraft-filter",
+      "left-buttons",
+      "right-buttons",
+      "stats-rail",
       "stats-panel",
       "loading",
     ]);
@@ -344,11 +348,6 @@ export class UIToggles {
     }
   }
 
-  toggleButtonsVisibility(): void {
-    // The store subscriber installed by MapApp applies the DOM changes
-    this.app.buttonsHidden = !this.app.buttonsHidden;
-  }
-
   exportMap(): void {
     const btn = domCache.get("export-btn") as HTMLButtonElement | null;
     const mapContainer = domCache.get("map");
@@ -357,13 +356,14 @@ export class UIToggles {
     if (btn.disabled) return;
 
     btn.disabled = true;
-    btn.textContent = "⏳ Exporting...";
+    // Only the label changes so the button keeps its icon
+    setControlLabel(btn, EXPORT_BUTTON_BUSY_LABEL);
     const savedDisplays = hideControls(["replay-btn", "share-btn"]);
 
     const restore = () => {
       restoreControls(savedDisplays);
       btn.disabled = false;
-      btn.textContent = EXPORT_BUTTON_LABEL;
+      setControlLabel(btn, EXPORT_BUTTON_LABEL);
     };
 
     void this.runExport(mapContainer)

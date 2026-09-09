@@ -15,7 +15,7 @@
       content="Interactive flight path heatmap visualization from KML flight logs"
     />
     <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#1a1a1a" />
+    <meta name="theme-color" content="#141414" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta
@@ -75,164 +75,260 @@
       aria-label="Flight map visualization"
       tabindex="-1"
     ></div>
-    <!-- Top-center button group -->
-    <div id="top-center-buttons">
-      <button
-        id="isolate-btn"
-        class="btn-surface control-btn toggleable-btn initially-half-opacity"
-        data-action="toggleIsolateSelection"
-        title="Isolate selected paths"
-        aria-label="Isolate selected paths"
-        aria-pressed="false"
-      >
-        🎯
-      </button>
-      <button
-        id="hide-buttons-btn"
-        class="btn-surface control-btn hide-toggle"
-        data-action="toggleButtonsVisibility"
-        title="Hide control buttons"
-        aria-label="Hide control buttons"
-        aria-pressed="false"
-      >
-        🔼
-      </button>
-    </div>
-
-    <!-- Left side buttons -->
-    <div id="left-buttons">
-      <button
-        id="stats-btn"
-        class="btn-surface control-btn left toggleable-btn"
-        data-action="toggleStats"
-        aria-label="Toggle flight statistics panel"
-        aria-pressed="false"
-      >
-        📊 Stats
-      </button>
-      <button
-        id="export-btn"
-        class="btn-surface control-btn left toggleable-btn"
-        data-action="exportMap"
-        aria-label="Export map as image"
-      >
-        📷 Export
-      </button>
-      <button
-        id="share-btn"
-        class="btn-surface control-btn left toggleable-btn"
-        aria-label="Share a link to this map view"
-      >
-        🔗 Share
-      </button>
-      <button
-        id="wrapped-btn"
-        class="btn-surface control-btn left toggleable-btn"
-        data-action="showWrapped"
-        aria-label="Show year in review summary"
-      >
-        ✨ Wrapped
-      </button>
-      <button
-        id="replay-btn"
-        class="btn-surface control-btn left toggleable-btn initially-half-opacity"
-        data-action="toggleReplay"
-        title="Select exactly one flight with timing data to replay"
-        aria-label="Replay selected flight path"
-        aria-pressed="false"
-      >
-        ▶️ Replay
-      </button>
-    </div>
-
-    <!-- Right side buttons -->
-    <div id="right-buttons">
+    <!-- Left control column: what the map shows you and how to pass it on.
+         Icons are injected from utils/icons.ts into every [data-icon]. -->
+    <div id="left-buttons" class="control-column">
       <div
-        id="year-filter"
-        class="btn-surface control-btn right toggleable-btn filter-dropdown"
+        class="control-group"
+        role="group"
+        aria-labelledby="view-group-title"
       >
-        <select
-          id="year-select"
-          data-action="filterByYear"
-          aria-label="Filter flights by year"
-        >
-          <option value="all">📅 All</option>
-        </select>
+        <h2 class="control-group-title" id="view-group-title">View</h2>
+        <div class="control-row">
+          <button
+            id="stats-btn"
+            class="btn-surface control-btn"
+            data-action="toggleStats"
+            data-icon="stats"
+            title="Toggle flight statistics panel"
+            aria-label="Toggle flight statistics panel"
+            aria-controls="stats-rail"
+            aria-expanded="false"
+          >
+            <span class="control-label">Statistics</span>
+          </button>
+        </div>
+        <div class="control-row">
+          <button
+            id="wrapped-btn"
+            class="btn-surface control-btn"
+            data-action="showWrapped"
+            data-icon="wrapped"
+            title="Show year in review summary"
+            aria-label="Show year in review summary"
+          >
+            <span class="control-label">Wrapped</span>
+          </button>
+        </div>
+        <div class="control-sep" role="separator"></div>
+        <div class="control-row">
+          <button
+            id="replay-btn"
+            class="btn-surface control-btn initially-half-opacity"
+            data-action="toggleReplay"
+            data-icon="play"
+            title="Select exactly one flight with timing data to replay"
+            aria-label="Replay selected flight path"
+            aria-pressed="false"
+          >
+            <span class="control-label">Replay</span>
+          </button>
+        </div>
+        <div class="control-row">
+          <button
+            id="isolate-btn"
+            class="btn-surface control-btn initially-half-opacity"
+            data-action="toggleIsolateSelection"
+            data-icon="isolate"
+            title="Isolate selected paths"
+            aria-label="Isolate selected paths"
+            aria-pressed="false"
+          >
+            <span class="control-label">Isolate</span>
+          </button>
+        </div>
       </div>
+
       <div
-        id="aircraft-filter"
-        class="btn-surface control-btn right toggleable-btn filter-dropdown"
+        class="control-group"
+        role="group"
+        aria-labelledby="share-group-title"
       >
-        <select
-          id="aircraft-select"
-          data-action="filterByAircraft"
-          aria-label="Filter flights by aircraft"
-        >
-          <option value="all">✈️ Aircraft</option>
-        </select>
+        <h2 class="control-group-title" id="share-group-title">Share</h2>
+        <div class="control-row">
+          <button
+            id="share-btn"
+            class="btn-surface control-btn"
+            data-icon="share"
+            title="Copy link to this map view"
+            aria-label="Copy link to this map view"
+          >
+            <span class="control-label">Copy link</span>
+          </button>
+        </div>
+        <div class="control-row">
+          <button
+            id="export-btn"
+            class="btn-surface control-btn"
+            data-action="exportMap"
+            data-icon="export"
+            title="Export image of the map"
+            aria-label="Export image of the map"
+          >
+            <span class="control-label">Export image</span>
+          </button>
+        </div>
       </div>
-      <button
-        id="heatmap-btn"
-        class="btn-surface control-btn right toggleable-btn"
-        data-action="toggleHeatmap"
-        aria-label="Toggle heatmap overlay"
-        aria-pressed="true"
-      >
-        🔥 Heatmap
-      </button>
-      <button
-        id="airports-btn"
-        class="btn-surface control-btn right toggleable-btn"
-        data-action="toggleAirports"
-        aria-label="Toggle airport markers"
-        aria-pressed="true"
-      >
-        🏢 Airports
-      </button>
-      <button
-        id="altitude-btn"
-        class="btn-surface control-btn right toggleable-btn"
-        data-action="toggleAltitude"
-        aria-label="Toggle altitude color visualization"
-        aria-pressed="true"
-      >
-        ⛰️ Altitude
-      </button>
-      <button
-        id="airspeed-btn"
-        class="btn-surface control-btn right toggleable-btn initially-dimmed"
-        data-action="toggleAirspeed"
-        disabled
-        aria-label="Toggle groundspeed color visualization"
-        aria-pressed="false"
-      >
-        🚀 Speed
-      </button>
-      <button
-        id="aviation-btn"
-        class="btn-surface control-btn right toggleable-btn initially-hidden"
-        data-action="toggleAviation"
-        aria-label="Toggle aviation data overlay"
-        aria-pressed="false"
-      >
-        🗺️ Aviation
-      </button>
     </div>
 
-    <!-- Focusable: the panel scrolls (bottom sheet on small screens) -->
-    <div
-      id="stats-panel"
-      role="region"
-      aria-label="Flight statistics"
-      tabindex="0"
-    ></div>
+    <!-- Right control column: which flights are drawn and which layers -->
+    <div id="right-buttons" class="control-column">
+      <div
+        class="control-group"
+        role="group"
+        aria-labelledby="filter-group-title"
+      >
+        <h2 class="control-group-title" id="filter-group-title">Filter</h2>
+        <div class="control-row">
+          <div
+            id="year-filter"
+            class="btn-surface control-btn filter-dropdown"
+            data-icon="calendar"
+          >
+            <select
+              id="year-select"
+              data-action="filterByYear"
+              aria-label="Filter flights by year"
+            >
+              <option value="all">All years</option>
+            </select>
+          </div>
+        </div>
+        <div class="control-row">
+          <div
+            id="aircraft-filter"
+            class="btn-surface control-btn filter-dropdown"
+            data-icon="aircraft"
+          >
+            <select
+              id="aircraft-select"
+              data-action="filterByAircraft"
+              aria-label="Filter flights by aircraft"
+            >
+              <option value="all">All aircraft</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="control-group"
+        role="group"
+        aria-labelledby="layers-group-title"
+      >
+        <h2 class="control-group-title" id="layers-group-title">Layers</h2>
+        <div class="control-row">
+          <button
+            id="heatmap-btn"
+            class="btn-surface control-btn"
+            data-action="toggleHeatmap"
+            data-icon="heatmap"
+            title="Toggle heatmap overlay"
+            aria-label="Toggle heatmap overlay"
+            aria-pressed="true"
+          >
+            <span class="control-label">Heatmap</span>
+          </button>
+        </div>
+        <div class="control-row">
+          <button
+            id="airports-btn"
+            class="btn-surface control-btn"
+            data-action="toggleAirports"
+            data-icon="airport"
+            title="Toggle airport markers"
+            aria-label="Toggle airport markers"
+            aria-pressed="true"
+          >
+            <span class="control-label">Airports</span>
+          </button>
+        </div>
+        <div class="control-sep" role="separator"></div>
+        <div class="control-row">
+          <button
+            id="altitude-btn"
+            class="btn-surface control-btn"
+            data-action="toggleAltitude"
+            data-icon="altitude"
+            title="Toggle altitude color visualization"
+            aria-label="Toggle altitude color visualization"
+            aria-pressed="true"
+          >
+            <span class="control-label">Altitude</span>
+          </button>
+          <span class="ramp-chip ramp-chip-altitude" aria-hidden="true"></span>
+        </div>
+        <div class="control-row">
+          <button
+            id="airspeed-btn"
+            class="btn-surface control-btn initially-dimmed"
+            data-action="toggleAirspeed"
+            data-icon="speed"
+            disabled
+            title="Toggle groundspeed color visualization"
+            aria-label="Toggle groundspeed color visualization"
+            aria-pressed="false"
+          >
+            <span class="control-label">Speed</span>
+          </button>
+          <span class="ramp-chip ramp-chip-speed" aria-hidden="true"></span>
+        </div>
+        <div class="control-row initially-hidden">
+          <button
+            id="aviation-btn"
+            class="btn-surface control-btn initially-hidden"
+            data-action="toggleAviation"
+            data-icon="aviation"
+            title="Toggle aviation data overlay"
+            aria-label="Toggle aviation data overlay"
+            aria-pressed="false"
+          >
+            <span class="control-label">Aviation</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Statistics rail: a collapse control plus the panel the stats manager
+         fills. Hidden until the statistics are opened; the map is sized
+         beside the rail rather than underneath it. -->
+    <div id="stats-rail" hidden>
+      <div id="stats-rail-header">
+        <h2 id="stats-rail-title" class="kh-stats-title">
+          <span
+            class="kh-stats-title-icon"
+            data-icon="stats"
+            data-icon-size="20"
+          ></span>
+          <span class="kh-stats-title-text">Flight Statistics</span>
+        </h2>
+        <button
+          id="stats-collapse-btn"
+          class="btn-surface control-btn"
+          data-action="toggleStats"
+          data-icon="collapse"
+          data-icon-size="20"
+          title="Collapse statistics"
+          aria-label="Collapse statistics"
+          aria-controls="stats-rail"
+          aria-expanded="false"
+        ></button>
+      </div>
+      <!-- Focusable: the panel scrolls (bottom sheet on small screens) -->
+      <div
+        id="stats-panel"
+        role="region"
+        aria-label="Flight statistics"
+        tabindex="0"
+      ></div>
+    </div>
     <div
       id="altitude-legend"
       class="color-legend"
       role="region"
       aria-label="Altitude color scale legend"
     >
-      <div class="legend-title">⛰️ Altitude</div>
+      <div class="legend-title" data-icon="altitude">Altitude</div>
       <div
         class="gradient-bar"
         role="img"
@@ -249,7 +345,7 @@
       role="region"
       aria-label="Groundspeed color scale legend"
     >
-      <div class="legend-title">🚀 Groundspeed</div>
+      <div class="legend-title" data-icon="speed">Groundspeed</div>
       <div
         class="gradient-bar"
         role="img"
@@ -279,29 +375,29 @@
             id="replay-play-btn"
             class="replay-btn"
             data-action="playReplay"
+            data-icon="play"
+            data-icon-size="20"
             title="Play replay"
             aria-label="Play replay"
-          >
-            ▶️
-          </button>
+          ></button>
           <button
             id="replay-pause-btn"
             class="replay-btn initially-hidden"
             data-action="pauseReplay"
+            data-icon="pause"
+            data-icon-size="20"
             title="Pause replay"
             aria-label="Pause replay"
-          >
-            ⏸️
-          </button>
+          ></button>
           <button
             id="replay-stop-btn"
             class="replay-btn"
             data-action="stopReplay"
+            data-icon="stop"
+            data-icon-size="20"
             title="Stop replay and reset to beginning"
             aria-label="Stop replay and reset to beginning"
-          >
-            ⏹️
-          </button>
+          ></button>
           <div id="replay-time-display">00:00 / 00:00</div>
           <select
             id="replay-speed"
@@ -320,12 +416,12 @@
             id="replay-autozoom-btn"
             class="replay-btn"
             data-action="toggleAutoZoom"
+            data-icon="autoZoom"
+            data-icon-size="20"
             title="Auto-zoom disabled"
             aria-label="Toggle automatic zoom adjustment"
             aria-pressed="false"
-          >
-            🔍
-          </button>
+          ></button>
         </div>
         <div id="replay-slider-container">
           <span id="replay-slider-start" aria-hidden="true">0:00</span>
@@ -364,9 +460,12 @@
           <button
             class="close-btn"
             data-action="closeWrapped"
+            data-icon="close"
+            data-icon-size="20"
+            title="Close year in review"
             aria-label="Close year in review"
           >
-            ✕ Close
+            <span class="control-label">Close</span>
           </button>
         </div>
         <div id="wrapped-content">
@@ -378,7 +477,7 @@
               class="wrapped-square-card"
               aria-labelledby="wrapped-title"
             >
-              <h1 id="wrapped-title">✨ Your Year in Flight</h1>
+              <h1 id="wrapped-title">Your Year in Flight</h1>
               <p class="year" id="wrapped-year">2025</p>
               <div class="stat-grid" id="wrapped-stats"></div>
             </section>

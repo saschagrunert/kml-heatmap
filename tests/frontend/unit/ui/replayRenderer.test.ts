@@ -3,6 +3,7 @@ import {
   ReplayRenderer,
   SEEK_PAN_THROTTLE_MS,
   findSegmentIndexAtTime,
+  formatTrack,
 } from "../../../../kml_heatmap/frontend/ui/replayRenderer";
 import { ReplayState } from "../../../../kml_heatmap/frontend/ui/replayState";
 import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
@@ -56,6 +57,20 @@ describe("findSegmentIndexAtTime", () => {
   it("returns -1 before the first segment or for empty input", () => {
     expect(findSegmentIndexAtTime(segments, -1)).toBe(-1);
     expect(findSegmentIndexAtTime([], 5)).toBe(-1);
+  });
+});
+
+describe("formatTrack", () => {
+  it("pads to three digits", () => {
+    expect(formatTrack(7)).toBe("007°");
+    expect(formatTrack(72.4)).toBe("072°");
+    expect(formatTrack(359.6)).toBe("000°");
+  });
+
+  it("normalises into 0-359", () => {
+    expect(formatTrack(-45)).toBe("315°");
+    expect(formatTrack(400)).toBe("040°");
+    expect(formatTrack(360)).toBe("000°");
   });
 });
 
@@ -209,6 +224,32 @@ describe("ReplayRenderer", () => {
 
       expect(mockPopup.setContent).toHaveBeenCalledWith("<div>popup</div>");
       expect(markerObj.bindPopup).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("ensureReadout", () => {
+    it("builds the three cells once", () => {
+      const panel = document.createElement("div");
+
+      const first = renderer.ensureReadout(panel);
+      const second = renderer.ensureReadout(panel);
+
+      expect(second).toBe(first);
+      expect(panel.querySelectorAll(".replay-readout-cell")).toHaveLength(3);
+      expect(first.querySelector(".replay-readout-value")!.textContent).toBe(
+        "—",
+      );
+    });
+
+    it("places the strip inside the panel's inner wrapper when present", () => {
+      const panel = document.createElement("div");
+      const inner = document.createElement("div");
+      inner.id = "replay-controls-inner";
+      panel.append(inner);
+
+      const strip = renderer.ensureReadout(panel);
+
+      expect(strip.parentElement).toBe(inner);
     });
   });
 

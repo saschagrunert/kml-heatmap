@@ -23,7 +23,6 @@ interface ToggleMockApp {
   airspeedVisible: boolean;
   airportsVisible: boolean;
   aviationVisible: boolean;
-  buttonsHidden: boolean;
   stateManager: { saveMapState: AnyMock };
   replayManager: {
     state: {
@@ -46,7 +45,6 @@ const DOM: Record<string, string> = {
   "aviation-btn": "button",
   "altitude-legend": "div",
   "airspeed-legend": "div",
-  "hide-buttons-btn": "button",
   "export-btn": "button",
   "share-btn": "button",
   "replay-btn": "button",
@@ -116,7 +114,6 @@ describe("UIToggles", () => {
       airspeedVisible: false,
       airportsVisible: true,
       aviationVisible: false,
-      buttonsHidden: false,
       stateManager: { saveMapState: vi.fn() },
       replayManager: {
         state: { active: false, airplaneMarker: null },
@@ -136,7 +133,6 @@ describe("UIToggles", () => {
 
   afterEach(() => {
     for (const id of Object.keys(DOM)) document.getElementById(id)?.remove();
-    document.querySelectorAll(".toggleable-btn").forEach((e) => e.remove());
     document.querySelectorAll(".toast-notification").forEach((e) => e.remove());
     delete window.domtoimage;
     resetDomToImageLoader();
@@ -490,57 +486,6 @@ describe("UIToggles", () => {
     });
   });
 
-  describe("toggleButtonsVisibility", () => {
-    let toggleableButtons: HTMLElement[];
-
-    beforeEach(() => {
-      toggleableButtons = [];
-      for (let i = 0; i < 3; i++) {
-        const btn = document.createElement("button");
-        btn.classList.add("toggleable-btn");
-        document.body.appendChild(btn);
-        toggleableButtons.push(btn);
-      }
-    });
-
-    // The DOM is updated by the store subscriber that MapApp installs; see
-    // "restores hidden buttons from the store" in mapApp.initialize.test.ts
-    it("hides buttons when they are visible", () => {
-      mockApp.buttonsHidden = false;
-
-      uiToggles.toggleButtonsVisibility();
-
-      expect(mockApp.buttonsHidden).toBe(true);
-    });
-
-    it("shows buttons when they are hidden", () => {
-      mockApp.buttonsHidden = true;
-      toggleableButtons.forEach((btn) => btn.classList.add("buttons-hidden"));
-
-      uiToggles.toggleButtonsVisibility();
-
-      expect(mockApp.buttonsHidden).toBe(false);
-    });
-
-    it("does not redraw paths (button visibility does not affect rendering)", () => {
-      mockApp.altitudeVisible = true;
-      mockApp.airspeedVisible = true;
-
-      uiToggles.toggleButtonsVisibility();
-
-      expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
-      expect(mockApp.layerManager.redrawAirspeedPaths).not.toHaveBeenCalled();
-    });
-
-    it("works without the hide button element", () => {
-      el("hide-buttons-btn").remove();
-
-      uiToggles.toggleButtonsVisibility();
-
-      expect(mockApp.buttonsHidden).toBe(true);
-    });
-  });
-
   describe("loadDomToImage", () => {
     it("resolves immediately when dom-to-image is already loaded", async () => {
       const lib = { toJpeg: vi.fn() } as unknown as DomToImage;
@@ -724,10 +669,27 @@ describe("UIToggles", () => {
       uiToggles.exportMap();
 
       expect(btn.disabled).toBe(true);
-      expect(btn.textContent).toBe("⏳ Exporting...");
+      expect(btn.textContent).toBe("Exporting…");
       expect(el("replay-btn").style.display).toBe("none");
       expect(el("share-btn").style.display).toBe("none");
       expect(el("stats-btn").style.display).toBe("none");
+    });
+
+    it("changes only the label so the button keeps its icon", async () => {
+      installDomToImage();
+      const btn = el("export-btn") as HTMLButtonElement;
+      btn.innerHTML =
+        '<svg class="icon"></svg><span class="control-label">Export image</span>';
+
+      uiToggles.exportMap();
+      const label = btn.querySelector(".control-label");
+      expect(label?.textContent).toBe("Exporting…");
+      expect(btn.querySelector("svg.icon")).not.toBeNull();
+
+      await finishExport();
+
+      expect(label?.textContent).toBe("Export image");
+      expect(btn.querySelector("svg.icon")).not.toBeNull();
     });
 
     it("ignores a second click while an export is running", async () => {
@@ -762,7 +724,7 @@ describe("UIToggles", () => {
       vi.advanceTimersByTime(10000);
       expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url");
       expect(btn.disabled).toBe(false);
-      expect(btn.textContent).toBe("📷 Export");
+      expect(btn.textContent).toBe("Export image");
       expect(el("replay-btn").style.display).toBe("");
       expect(el("share-btn").style.display).toBe("");
     });
@@ -906,7 +868,7 @@ describe("UIToggles", () => {
       expect(toast()?.textContent).toBe("Export unavailable");
       expect(toast()?.classList.contains("toast-error")).toBe(true);
       expect(btn.disabled).toBe(false);
-      expect(btn.textContent).toBe("📷 Export");
+      expect(btn.textContent).toBe("Export image");
       expect(el("replay-btn").style.display).toBe("");
       expect(el("share-btn").style.display).toBe("");
       expect(clickSpy).not.toHaveBeenCalled();
@@ -922,7 +884,7 @@ describe("UIToggles", () => {
       expect(toast()?.textContent).toBe("Export failed: Export failed");
       expect(toast()?.classList.contains("toast-error")).toBe(true);
       expect(btn.disabled).toBe(false);
-      expect(btn.textContent).toBe("📷 Export");
+      expect(btn.textContent).toBe("Export image");
       expect(el("replay-btn").style.display).toBe("");
     });
   });

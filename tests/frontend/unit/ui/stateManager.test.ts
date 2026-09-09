@@ -113,7 +113,6 @@ describe("StateManager", () => {
         "airspeedVisible",
         "airportsVisible",
         "aviationVisible",
-        "buttonsHidden",
         "statsPanelVisible",
         "wrappedVisible",
       ]);
@@ -165,7 +164,6 @@ describe("StateManager", () => {
         selectedPathIds: [1, 2],
         statsPanelVisible: false,
         wrappedVisible: false,
-        buttonsHidden: false,
         isolateSelection: false,
       });
       expect(history.replaceState).toHaveBeenCalledWith(
@@ -359,7 +357,7 @@ describe("StateManager", () => {
         aviationVisible: true,
         statsPanelVisible: false,
         wrappedVisible: true,
-        buttonsHidden: true,
+        // The legacy control-visibility flag is parsed and then dropped
         isolateSelection: true,
         center: { lat: 50.5, lng: 8.5 },
         zoom: 12.25,

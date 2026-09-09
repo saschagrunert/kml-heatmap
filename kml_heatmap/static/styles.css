@@ -5,14 +5,18 @@
   color-scheme: dark;
 
   /* Colors */
-  --color-bg-primary: #1a1a1a;
-  --color-bg-secondary: #2b2b2b;
-  --color-bg-hover: #3b3b3b;
-  --color-bg-active: #4b4b4b;
-  --color-border: #555;
-  --color-text: #ffffff;
-  --color-text-muted: #999;
-  --color-text-dimmed: #ccc;
+  /* Neutral roles. Nothing outside this list may be used for chrome. */
+  --color-bg-primary: #141414;
+  --color-bg-secondary: #1c1c1c;
+  --color-bg-raised: #262626;
+  --color-bg-hover: #262626;
+  --color-bg-active: #2e2e2e;
+  --color-border: #2e2e2e;
+  --color-divider: #232323;
+  --color-text: #f2f2f2;
+  --color-text-secondary: #c8c8c8;
+  --color-text-muted: #8a8a8a;
+  --color-text-dim: #6f6f6f;
   --color-accent-blue: #4facfe;
   --color-accent-green: #28a745;
   --color-accent-red: #f5576c;
@@ -26,8 +30,8 @@
   --color-error: #ff4444;
 
   /* RGB triplets for translucent variants: rgba(var(--x-rgb), alpha) */
-  --color-bg-secondary-rgb: 43, 43, 43;
-  --color-text-rgb: 255, 255, 255;
+  --color-bg-secondary-rgb: 28, 28, 28;
+  --color-text-rgb: 242, 242, 242;
   --color-accent-blue-rgb: 79, 172, 254;
   --color-accent-cyan-rgb: 0, 242, 254;
   --color-accent-pink-rgb: 240, 147, 251;
@@ -37,6 +41,9 @@
   --color-accent-mint-rgb: 102, 205, 170;
   --shadow-color: rgba(0, 0, 0, 0.4);
   --shadow-color-strong: rgba(0, 0, 0, 0.6);
+  /* One soft elevation per surface class */
+  --shadow-panel: 0 4px 16px var(--shadow-color);
+  --shadow-control: 0 1px 2px var(--shadow-color);
 
   /* Typography */
   --font-ui:
@@ -50,16 +57,38 @@
   --text-sm: 12px;
   --text-md: 13px;
   --text-base: 14px;
+  --text-lg: 20px;
+  --text-display: 26px;
 
   /* Spacing and sizes */
   --space-xs: 4px;
   --space-sm: 8px;
-  --space-md: 10px;
-  --space-lg: 20px;
+  --space-md: 12px;
+  --space-base: 16px;
+  --space-lg: 24px;
+
+  /* Radius. Six named steps; nothing else is allowed. */
+  --radius-bar: 3px;
+  --radius-control: 4px;
+  --radius-panel: 8px;
+  --radius-sheet: 14px;
+  --radius-card: 20px;
+  --radius-pill: 999px;
+
+  /* Icons: three sizes, each with the stroke weight it is drawn at */
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 24px;
   --edge-gap: 10px;
   /* Height reserved for the Leaflet attribution bar on small screens */
   --attribution-h: 20px;
-  --btn-min-height: 34px;
+  --btn-min-height: 36px;
+  /* Icon-only target in a compacted control column */
+  /* Statistics rail: the map is inset by exactly this much beside it */
+  --stats-rail-w: 316px;
+  /* Mobile chrome: the bottom bar and the rows inside the sheet */
+  --mobile-bar-h: 56px;
+  --sheet-row-h: 56px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -87,6 +116,14 @@
   --duration-base: 0.3s;
 }
 
+/* A coarse pointer gets the larger target whatever the viewport is: the
+   control height is a touch question, not a width one. */
+@media (pointer: coarse) {
+  :root {
+    --btn-min-height: 44px;
+  }
+}
+
 /* ==========================================================================
    Base
    ========================================================================== */
@@ -99,20 +136,20 @@
 
 /* Custom scrollbar styling */
 *::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+  width: var(--space-md);
+  height: var(--space-md);
 }
 *::-webkit-scrollbar-track {
   background: var(--color-bg-primary);
-  border-radius: 6px;
+  border-radius: var(--radius-bar);
 }
 *::-webkit-scrollbar-thumb {
   background: var(--color-bg-hover);
-  border-radius: 6px;
+  border-radius: var(--radius-bar);
   border: 2px solid var(--color-bg-primary);
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--color-border);
+  background: var(--color-bg-active);
 }
 
 html {
@@ -132,6 +169,10 @@ body {
   min-height: 100dvh;
   overflow: hidden;
   background: var(--color-bg-primary);
+  /* Anything inheriting its colour picks up the token, not the user agent's
+     pure white: the control labels do exactly that, and rendered #ffffff
+     where the same label in the mobile sheet rendered the token. */
+  color: var(--color-text);
   position: relative;
   overscroll-behavior: none;
   -webkit-user-select: none;
@@ -143,12 +184,13 @@ body {
   inset: 0;
   background: var(--color-bg-primary);
   overscroll-behavior: none;
+  transition: left var(--duration-base) ease;
 }
 
 .noscript-message {
   color: var(--color-text);
   text-align: center;
-  margin-top: 40px;
+  margin-top: calc(var(--space-lg) + var(--space-base));
 }
 
 /* Screen reader only content */
@@ -172,170 +214,184 @@ body {
   z-index: var(--z-panel);
   background: var(--color-bg-primary);
   color: var(--color-text);
-  padding: 8px 16px;
+  padding: var(--space-sm) var(--space-base);
   font-size: var(--text-base);
   text-decoration: none;
 }
 .skip-nav:focus {
-  left: 8px;
-  top: 8px;
-  border-radius: 4px;
+  left: var(--space-sm);
+  top: var(--space-sm);
+  border-radius: var(--radius-control);
+}
+.skip-nav:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Icons (inline SVG from utils/icons.ts)
+   ========================================================================== */
+.icon {
+  flex-shrink: 0;
+  display: block;
 }
 
 /* ==========================================================================
    Buttons and filter dropdowns
    ========================================================================== */
-/* Shared surface for buttons and dropdown wrappers */
+/* Shared surface for buttons and dropdown wrappers.
+   One control surface: 36px tall (44px on touch), a single hairline border
+   and the raised neutral. Saturated colour belongs to the data, so the
+   accent enters the chrome only on the pressed and focused states. */
 .btn-surface {
-  background-color: var(--color-bg-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  background-color: var(--color-bg-raised);
   color: var(--color-text);
-  border: 2px solid var(--color-border);
-  border-radius: 4px;
-  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  padding: var(--space-xs) var(--space-md);
   min-height: var(--btn-min-height);
-  font-size: var(--text-base);
-  font-weight: bold;
-  box-shadow: 0 1px 5px var(--shadow-color);
+  font-size: var(--text-md);
+  font-weight: 500;
+  box-shadow: var(--shadow-control);
   box-sizing: border-box;
   touch-action: manipulation;
   transition:
     background-color var(--duration-fast) ease,
-    border-color var(--duration-base) ease;
+    border-color var(--duration-base) ease,
+    box-shadow var(--duration-fast) ease;
 }
-.btn-surface:hover {
-  background-color: var(--color-bg-hover);
+@media (hover: hover) {
+  .btn-surface:hover {
+    background-color: var(--color-bg-active);
+  }
+}
+.btn-surface:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
 }
 
+/* Pressed / selected: the one place the accent enters the chrome */
+.btn-surface.active,
+.btn-surface[aria-pressed="true"],
+.control-btn.active,
+.control-btn[aria-pressed="true"] {
+  background-color: rgba(var(--color-accent-blue-rgb), 0.14);
+  border-color: var(--color-accent-blue);
+  color: var(--color-text);
+  box-shadow: inset 2px 0 0 0 var(--color-accent-blue);
+}
+@media (hover: hover) {
+  .btn-surface.active:hover,
+  .btn-surface[aria-pressed="true"]:hover,
+  .control-btn.active:hover,
+  .control-btn[aria-pressed="true"]:hover {
+    background-color: rgba(var(--color-accent-blue-rgb), 0.2);
+  }
+}
+
+/* Every control now flows inside a group or the rail header, so nothing
+   here is positioned against the viewport. */
 .control-btn {
-  position: fixed;
   cursor: pointer;
-  z-index: var(--z-controls);
 }
 .control-btn:focus-visible {
   outline: 2px solid var(--color-accent-blue);
   outline-offset: 2px;
 }
 .control-btn:disabled {
-  opacity: 0.3;
+  opacity: 0.5;
   cursor: not-allowed;
-  background-color: var(--color-bg-primary);
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  border-color: var(--color-divider);
+  box-shadow: none;
 }
 .control-btn:disabled:hover {
-  background-color: var(--color-bg-primary);
+  background-color: var(--color-bg-secondary);
 }
 
-/* Button group containers */
-#left-buttons,
-#right-buttons {
+/* The two fixed columns of grouped panels */
+.control-column {
   position: fixed;
   top: calc(var(--edge-gap) + var(--safe-top));
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: var(--space-sm);
+  width: 172px;
   z-index: var(--z-controls);
+  /* A landscape phone is above the breakpoint but only ~360px tall, which is
+     shorter than the two columns. The page itself does not scroll, so without
+     this the last group is stranded below the fold. */
+  max-height: calc(
+    100vh - var(--edge-gap) * 2 - var(--safe-top) - var(--safe-bottom)
+  );
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 #left-buttons {
   left: calc(var(--edge-gap) + var(--safe-left));
+  transition: left var(--duration-base) ease;
 }
 #right-buttons {
   right: calc(var(--edge-gap) + var(--safe-right));
 }
-
-/* Buttons inside the groups flow with the group */
-#left-buttons .control-btn,
-#right-buttons .control-btn {
-  position: static;
+/* The mobile bar stands in for the two columns and sets `hidden` on them.
+   `.control-column` would otherwise win on source order, and keying off the
+   attribute rather than `body:has(.mobile-bar)` keeps them hidden while
+   replay has taken the bar out of the document. */
+#left-buttons[hidden],
+#right-buttons[hidden] {
+  display: none;
 }
-#left-buttons .control-btn {
-  min-width: 110px;
-  text-align: left;
-}
-#right-buttons .control-btn {
-  min-width: 120px;
-  text-align: center;
-}
-
-/* Top-center button group */
-#top-center-buttons {
-  position: fixed;
-  top: calc(var(--edge-gap) + var(--safe-top));
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 6px;
-  z-index: var(--z-panel);
-}
-#top-center-buttons .control-btn {
-  position: static;
-  min-width: 44px;
-  width: 44px;
-  padding: 6px;
-  text-align: center;
-  font-size: 20px;
+/* Same reason: `.replay-btn` sets a display of its own, so the play and
+   pause controls need the attribute to outrank it. */
+.replay-btn[hidden] {
+  display: none;
 }
 
-#isolate-btn {
-  transition:
-    opacity var(--duration-base) ease,
-    border-color var(--duration-base) ease,
-    background-color var(--duration-base) ease,
-    filter var(--duration-base) ease,
-    visibility 0s linear 0s;
-}
-#isolate-btn.buttons-hidden {
-  transition:
-    filter var(--duration-base) ease,
-    visibility 0s linear var(--duration-base);
-}
-
-/* Initial state classes */
+/* Initial state classes. `.initially-hidden` is defined at the end of the
+   file so it beats the component rules that set a display of their own. */
 .initially-half-opacity {
   opacity: 0.5;
 }
 .initially-dimmed {
-  opacity: 0.3;
-}
-.initially-hidden {
-  display: none;
+  opacity: 0.5;
 }
 
-/* Show toggleable buttons by default with a fade */
-.toggleable-btn {
-  transition:
-    filter var(--duration-base) ease,
-    visibility 0s linear 0s;
-}
-/* Hidden state: filter composes with the inline opacity set by scripts,
-   visibility removes the buttons from the tab order once the fade ends */
-.toggleable-btn.buttons-hidden {
-  filter: opacity(0);
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    filter var(--duration-base) ease,
-    visibility 0s linear var(--duration-base);
-}
-
-/* Filter dropdowns */
+/* Filter dropdowns: an icon plus a bare select, flat inside a control row */
 .filter-dropdown {
   cursor: pointer;
-  width: 120px;
-  text-align: center;
+}
+.filter-dropdown::after {
+  content: "";
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  background: currentColor;
+  opacity: 0.4;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
 }
 .filter-dropdown select {
+  flex: 1;
+  min-width: 0;
   background: transparent;
   color: var(--color-text);
   border: none;
   cursor: pointer;
-  font-size: var(--text-base);
-  font-weight: bold;
-  width: calc(100% + 24px);
-  min-height: calc(var(--btn-min-height) - 4px);
-  margin: -6px -12px;
-  padding: 6px 12px;
+  font-size: var(--text-md);
+  font-weight: 500;
+  min-height: var(--btn-min-height);
+  padding: 0;
+  margin: 0;
   box-shadow: none;
-  text-align: center;
-  text-align-last: center;
+  text-align: left;
+  text-align-last: left;
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
@@ -348,18 +404,169 @@ body {
 .filter-dropdown select option {
   background-color: var(--color-bg-secondary);
   color: var(--color-text);
-  text-align: center;
+  text-align: left;
+}
+.control-row:has(select:focus-visible) {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: -2px;
+}
+.control-row:has(select:disabled) {
+  color: var(--color-text-muted);
 }
 .filter-dropdown:has(select:disabled) {
-  opacity: 0.3;
+  opacity: 0.5;
   cursor: not-allowed;
-  background-color: var(--color-bg-primary);
-}
-.filter-dropdown:has(select:disabled):hover {
-  background-color: var(--color-bg-primary);
 }
 .filter-dropdown select:disabled {
   cursor: not-allowed;
+}
+
+/* ==========================================================================
+   Grouped control panels
+
+   A run of control rows behind one hairline. `.control-group` is the
+   container, `.control-group-title` labels it, `.control-row` is a row and
+   `.control-sep` is the rule between two runs of rows.
+   ========================================================================== */
+.control-group {
+  display: flex;
+  flex-direction: column;
+  background-color: rgba(var(--color-bg-secondary-rgb), 0.92);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+  box-shadow: var(--shadow-panel);
+  box-sizing: border-box;
+}
+.control-group-title {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md) var(--space-xs);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+/* A row is the surface; the control inside it is drawn flat so the group
+   reads as one stack rather than as a stack of separate buttons. */
+.control-row {
+  display: flex;
+  align-items: center;
+  /* Deliberately off the 4px step: the rows read as one stack rather than
+     as separately padded controls */
+  gap: 9px;
+  min-height: var(--btn-min-height);
+  padding: 0 var(--space-md);
+  box-sizing: border-box;
+  width: 100%;
+  background: transparent;
+  transition:
+    background-color var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+.control-row > .btn-surface,
+.control-row > .control-btn {
+  position: static;
+  flex: 1;
+  min-width: 0;
+  gap: 9px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  /* Follows the row, which is square inside the group's clipped corners */
+  border-radius: inherit;
+  box-shadow: none;
+  color: inherit;
+  text-align: left;
+}
+/* The row, not the control, carries hover, selection and focus */
+@media (hover: hover) {
+  .control-row:hover:not(:has(> .control-btn:disabled)) {
+    background-color: var(--color-bg-hover);
+  }
+}
+.control-row:has(> .control-btn:focus-visible) {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: -2px;
+}
+.control-row > .control-btn:focus-visible,
+.control-row > .control-btn select:focus-visible {
+  outline: none;
+}
+.control-row:has(> .control-btn.active),
+.control-row:has(> .control-btn[aria-pressed="true"]) {
+  background-color: rgba(var(--color-accent-blue-rgb), 0.14);
+  box-shadow: inset 2px 0 0 0 var(--color-accent-blue);
+}
+@media (hover: hover) {
+  .control-row:hover:has(> .control-btn.active),
+  .control-row:hover:has(> .control-btn[aria-pressed="true"]) {
+    background-color: rgba(var(--color-accent-blue-rgb), 0.14);
+  }
+}
+.control-row:has(> .control-btn:disabled) {
+  color: var(--color-text-muted);
+}
+/* The text of a control inside a row */
+.control-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Ramp chips: a miniature of the data gradient the row switches on. These
+   carry the app's real stops, so they are spelled out rather than tokenised.
+   `.ramp-chip` is the desktop row chip, `.gradient-chip` the sheet-row one;
+   both share a single definition of each ramp. */
+.ramp-chip {
+  flex-shrink: 0;
+  width: var(--space-lg);
+  height: var(--space-sm);
+  border-radius: var(--radius-bar);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.gradient-chip {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 40px;
+  height: var(--space-sm);
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.ramp-chip-altitude,
+.gradient-chip-altitude {
+  background: linear-gradient(
+    to right,
+    rgb(80, 160, 255) 0%,
+    rgb(0, 255, 255) 20%,
+    rgb(0, 255, 0) 40%,
+    rgb(255, 255, 0) 60%,
+    rgb(255, 165, 0) 80%,
+    rgb(255, 66, 66) 100%
+  );
+}
+.ramp-chip-speed,
+.gradient-chip-speed {
+  background: linear-gradient(
+    to right,
+    rgb(0, 128, 255) 0%,
+    rgb(0, 255, 255) 20%,
+    rgb(0, 255, 0) 40%,
+    rgb(255, 255, 0) 60%,
+    rgb(255, 128, 0) 80%,
+    rgb(255, 0, 0) 100%
+  );
+}
+
+.control-sep {
+  height: 1px;
+  margin: 0;
+  border: 0;
+  background-color: var(--color-divider);
+  flex-shrink: 0;
 }
 
 /* ==========================================================================
@@ -371,22 +578,24 @@ body {
   left: 50%;
   transform: translateX(-50%);
   background-color: rgba(var(--color-bg-secondary-rgb), 0.95);
-  border: 2px solid var(--color-border);
-  border-radius: 8px;
-  padding: 12px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  padding: var(--space-md) var(--space-lg);
   z-index: var(--z-controls);
   display: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-panel);
   min-width: 400px;
   box-sizing: border-box;
 }
 .replay-airplane-icon {
-  width: 32px;
-  height: 32px;
-  font-size: 32px;
-  line-height: 32px;
+  /* One step above the largest chrome icon */
+  --replay-icon-size: calc(var(--icon-lg) + var(--space-sm));
+  width: var(--replay-icon-size);
+  height: var(--replay-icon-size);
+  font-size: var(--replay-icon-size);
+  line-height: var(--replay-icon-size);
   text-align: center;
-  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.7));
+  filter: drop-shadow(0 3px 6px var(--shadow-color-strong));
   /* Rotation is animated here; the marker root is positioned by Leaflet */
   transform-origin: center center;
   will-change: transform;
@@ -404,33 +613,50 @@ body {
   gap: var(--space-sm);
   align-items: center;
   justify-content: center;
+  /* Keep the transport row clear of the exit control in the corner */
+  padding-right: 48px;
 }
 .replay-btn {
-  background-color: var(--color-bg-hover);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  background-color: var(--color-bg-raised);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
-  padding: 6px 12px;
+  border-radius: var(--radius-control);
+  padding: var(--space-xs) var(--space-md);
   min-height: var(--btn-min-height);
   cursor: pointer;
   font-size: var(--text-md);
-  font-weight: bold;
-  transition: background-color var(--duration-fast);
+  font-weight: 500;
+  box-sizing: border-box;
+  touch-action: manipulation;
+  transition:
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-base) ease,
+    box-shadow var(--duration-fast) ease;
 }
-/* Icon-only buttons (play/pause/stop) - smaller to match speed dropdown */
+/* Icon-only buttons (play/pause/stop): square, sized off the icon scale */
 #replay-play-btn,
 #replay-pause-btn,
 #replay-stop-btn,
 #replay-autozoom-btn {
-  font-size: 16px;
-  padding: 6px 12px;
+  font-size: var(--icon-sm);
+  padding: 0;
   min-width: 44px;
   line-height: 1;
-  /* Ensure emojis render properly */
-  font-family: var(--font-emoji);
 }
-.replay-btn:hover {
-  background-color: var(--color-bg-active);
+@media (hover: hover) {
+  .replay-btn:hover {
+    background-color: var(--color-bg-active);
+  }
+}
+.replay-btn.active,
+.replay-btn[aria-pressed="true"] {
+  background-color: rgba(var(--color-accent-blue-rgb), 0.14);
+  border-color: var(--color-accent-blue);
+  box-shadow: inset 2px 0 0 0 var(--color-accent-blue);
 }
 .replay-btn:focus-visible {
   outline: 2px solid var(--color-accent-blue);
@@ -439,7 +665,7 @@ body {
 #replay-time-display {
   color: var(--color-text);
   font-size: var(--text-base);
-  font-weight: bold;
+  font-weight: 600;
   font-family: var(--font-mono);
   text-align: center;
   min-width: 120px;
@@ -452,8 +678,8 @@ body {
 #replay-slider {
   flex: 1;
   height: 6px;
-  border-radius: 3px;
-  background: var(--color-border);
+  border-radius: var(--radius-bar);
+  background: var(--color-bg-active);
   outline: none;
   -webkit-appearance: none;
   appearance: none;
@@ -466,20 +692,20 @@ body {
 #replay-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  border-radius: var(--radius-pill);
   background: var(--color-accent-blue);
   cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-control);
 }
 #replay-slider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  border-radius: var(--radius-pill);
   background: var(--color-accent-blue);
   cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-control);
   border: none;
 }
 #replay-slider-start,
@@ -491,30 +717,93 @@ body {
   text-align: center;
 }
 
+/* Exit sits in the corner, away from the transport controls. It and the
+   readout below are appended by the replay manager at every viewport, so
+   both are styled here rather than under the mobile breakpoint. */
+.replay-exit {
+  position: absolute;
+  top: var(--space-xs);
+  right: var(--space-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  z-index: 1;
+}
+.replay-exit:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: -2px;
+}
+/* Readout strip for the current position */
+.replay-readout {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-divider);
+}
+.replay-readout-cell {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.replay-readout-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+.replay-readout-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  color: var(--color-text);
+}
+/* The metric counterpart, the way every other surface pairs its units */
+.replay-readout-alt {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 /* ==========================================================================
    Color legends
    ========================================================================== */
 .color-legend {
   position: fixed;
-  bottom: calc(30px + var(--safe-bottom));
+  bottom: calc(var(--attribution-h) + var(--space-sm) + var(--safe-bottom));
   left: calc(var(--edge-gap) + var(--safe-left));
-  background-color: rgba(var(--color-bg-secondary-rgb), 0.9);
+  background-color: rgba(var(--color-bg-secondary-rgb), 0.92);
   color: var(--color-text);
-  border: 2px solid var(--color-border);
-  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
   padding: var(--space-md);
   z-index: var(--z-legend);
   font-size: var(--text-sm);
   min-width: 200px;
+  box-shadow: var(--shadow-panel);
+  box-sizing: border-box;
   display: none;
+  transition: left var(--duration-base) ease;
 }
 .color-legend .legend-title {
-  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-weight: 600;
   margin-bottom: var(--space-sm);
-  font-size: var(--text-md);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
 }
 .color-legend .gradient-bar {
-  height: 20px;
+  height: var(--icon-md);
   background: linear-gradient(
     to right,
     rgb(80, 160, 255) 0%,
@@ -524,50 +813,112 @@ body {
     rgb(255, 165, 0) 80%,
     rgb(255, 66, 66) 100%
   );
-  border-radius: 3px;
-  margin-bottom: 5px;
+  border-radius: var(--radius-bar);
+  margin-bottom: var(--space-xs);
 }
 .color-legend .labels {
   display: flex;
   justify-content: space-between;
   font-size: var(--text-xs);
+  color: var(--color-text-secondary);
 }
 
 /* ==========================================================================
    Statistics panel
    ========================================================================== */
-#stats-panel {
+/* The rail is a left-edge column that the map is inset beside. It opens and
+   closes through the `hidden` attribute, so the display rule is scoped with
+   :not([hidden]) rather than being undone by a second rule. */
+/* The rail fades rather than appearing outright. `display` is part of the
+   transition so the exit runs before `hidden` takes the element out of the
+   layout, and @starting-style gives the entry something to animate from. */
+#stats-rail {
   position: fixed;
-  /* Beside the left button column so no button is covered */
-  top: calc(var(--edge-gap) + var(--safe-top));
-  left: calc(130px + var(--safe-left));
-  width: 280px;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--stats-rail-w);
   background-color: var(--color-bg-secondary);
-  border: 2px solid var(--color-border);
-  border-radius: 4px;
-  z-index: var(--z-panel);
-  font-size: var(--text-md);
-  padding: 12px;
-  display: none;
-  color: var(--color-text);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-  max-height: calc(100vh - 70px);
-  max-height: calc(100dvh - 70px);
-  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  box-shadow: var(--shadow-panel);
+  z-index: var(--z-controls);
   box-sizing: border-box;
+  padding-top: var(--safe-top);
+  padding-left: var(--safe-left);
   opacity: 0;
-  transform: translateY(-10px);
   transition:
     opacity var(--duration-base) ease,
-    transform var(--duration-base) ease;
-  pointer-events: none;
+    display var(--duration-base) allow-discrete;
+}
+#stats-rail:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  opacity: 1;
+}
+@starting-style {
+  #stats-rail:not([hidden]) {
+    opacity: 0;
+  }
+}
+#stats-rail-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+}
+#stats-rail-header .kh-stats-title {
+  flex: 1;
+  min-width: 0;
+}
+#stats-collapse-btn {
+  width: var(--btn-min-height);
+  min-width: var(--btn-min-height);
+  padding: 0;
+  justify-content: center;
+}
+
+/* The panel fills the rail rather than being positioned against the
+   viewport. The rail's `hidden` attribute is what opens and closes the
+   surface, so the panel itself does not fade: a half-transparent panel
+   would put its text over the map at an unreadable contrast for the
+   length of the transition. */
+#stats-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: var(--text-md);
+  padding: var(--space-md) var(--space-base)
+    calc(var(--space-lg) + var(--safe-bottom));
+  display: none;
+  color: var(--color-text);
+  box-sizing: border-box;
 }
 #stats-panel.visible {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
   -webkit-user-select: text;
   user-select: text;
+}
+#stats-panel:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: -2px;
+}
+
+/* The map is sized beside the rail, not underneath it */
+body.stats-open #map {
+  left: var(--stats-rail-w);
+}
+/* The rail spans the full height at a higher layer than the legend, so the
+   legend has to move with the map or it is covered outright and the colour
+   ramp becomes unreadable while the statistics are open. */
+body.stats-open .color-legend,
+body.stats-open #left-buttons {
+  left: calc(var(--stats-rail-w) + var(--edge-gap) + var(--safe-left));
+}
+/* Wrapped re-parents #map into its own container, where the rail inset
+   would leave an empty band on the left and clip the map on the right. */
+#wrapped-map-container #map {
+  left: 0;
 }
 
 /* ==========================================================================
@@ -580,25 +931,25 @@ body {
   transform: translate(-50%, -50%);
   background-color: rgba(var(--color-bg-secondary-rgb), 0.95);
   color: var(--color-text);
-  border: 2px solid var(--color-border);
-  border-radius: 8px;
-  padding: 12px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  padding: var(--space-md) var(--space-base);
   z-index: var(--z-controls);
   font-size: var(--text-md);
   font-weight: 600;
   white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-panel);
   display: none;
 }
 .loading-spinner {
   display: inline-block;
-  width: 14px;
-  height: 14px;
+  width: var(--space-base);
+  height: var(--space-base);
   margin-right: var(--space-sm);
   vertical-align: -2px;
   border: 2px solid rgba(var(--color-accent-blue-rgb), 0.3);
   border-top-color: var(--color-accent-blue);
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin {
@@ -609,8 +960,17 @@ body {
 
 /* ==========================================================================
    Wrapped (year in review) modal
+
+   Wrapped keeps its own voice: the navy card gradient, the gradient display
+   type and the glow all stay. Only its structure sits on the token scale,
+   and its display sizes are ratios of --text-display.
    ========================================================================== */
 #wrapped-modal {
+  --wrapped-gutter: calc(var(--space-base) + var(--space-lg));
+  --wrapped-title: calc(var(--text-display) * 1.4);
+  --wrapped-year: calc(var(--text-display) * 3);
+  --wrapped-stat: calc(var(--text-display) * 1.25);
+  --wrapped-section: var(--text-base);
   position: fixed;
   inset: 0;
   width: 100%;
@@ -639,17 +999,19 @@ body {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  padding: calc(12px + var(--safe-top)) 40px 12px;
+  padding: calc(var(--space-md) + var(--safe-top)) var(--wrapped-gutter)
+    var(--space-md);
   background: transparent;
   flex-shrink: 0;
 }
 #wrapped-content {
   display: flex;
-  gap: 30px;
+  gap: var(--space-lg);
   flex: 1;
   overflow-y: auto;
   align-items: stretch;
-  padding: 0 40px calc(40px + var(--safe-bottom)) 40px;
+  padding: 0 var(--wrapped-gutter)
+    calc(var(--wrapped-gutter) + var(--safe-bottom));
   -webkit-user-select: text;
   user-select: text;
 }
@@ -658,9 +1020,9 @@ body {
 #wrapped-map-container {
   flex: 1;
   background-color: var(--color-bg-primary);
-  border-radius: 20px;
+  border-radius: var(--radius-card);
   overflow: hidden;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 10px 40px var(--shadow-color-strong);
   position: relative;
   display: flex;
   align-items: center;
@@ -682,10 +1044,10 @@ body {
 /* Square card base styles */
 .wrapped-square-card {
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  border-radius: 20px;
-  padding: 30px;
+  border-radius: var(--radius-card);
+  padding: var(--space-lg);
   flex-shrink: 0;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 10px 40px var(--shadow-color-strong);
   color: var(--color-text);
   position: relative;
   display: flex;
@@ -708,8 +1070,8 @@ body {
 
 /* Shared card styles */
 .wrapped-square-card h1 {
-  font-size: 36px;
-  margin: 0 0 10px 0;
+  font-size: var(--wrapped-title);
+  margin: 0 0 var(--space-sm) 0;
   text-align: center;
   background: linear-gradient(
     135deg,
@@ -729,10 +1091,10 @@ body {
   margin: 0;
 }
 .wrapped-square-card .year {
-  font-size: 80px;
+  font-size: var(--wrapped-year);
   font-weight: 900;
   text-align: center;
-  margin: 25px 0;
+  margin: var(--space-lg) 0;
   background: linear-gradient(
     135deg,
     var(--color-accent-blue) 0%,
@@ -743,7 +1105,7 @@ body {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  letter-spacing: 8px;
+  letter-spacing: var(--space-sm);
   text-shadow: 0 0 30px rgba(var(--color-accent-blue-rgb), 0.5);
   animation: shimmer 3s ease-in-out infinite;
   position: relative;
@@ -782,11 +1144,11 @@ body {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--space-lg);
-  margin: 30px 0;
+  margin: var(--space-lg) 0;
 }
 .wrapped-square-card .stat-card {
   background: rgba(var(--color-text-rgb), 0.08);
-  border-radius: 12px;
+  border-radius: var(--radius-sheet);
   padding: var(--space-lg);
   text-align: center;
   transition:
@@ -805,11 +1167,30 @@ body {
   }
 }
 .wrapped-square-card .stat-value {
-  font-size: 32px;
+  font-size: var(--wrapped-stat);
   font-weight: bold;
   color: var(--color-accent-blue);
-  margin-bottom: 5px;
+  margin-bottom: var(--space-xs);
   animation: countUp 0.8s ease-out;
+}
+/* The unit rides small and quiet beside its figure */
+.wrapped-square-card .stat-unit {
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: rgba(var(--color-accent-blue-rgb), 0.7);
+}
+
+/* The four card headings share one shape: icon, then label */
+.wrapped-square-card .fun-facts-title,
+.wrapped-square-card .top-airports-title,
+.wrapped-square-card .airports-grid-title,
+.wrapped-square-card .aircraft-fleet-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.wrapped-square-card .section-title-text {
+  min-width: 0;
 }
 .wrapped-square-card .stat-label {
   font-size: var(--text-sm);
@@ -821,18 +1202,18 @@ body {
   background: transparent;
   border: none;
   color: rgba(var(--color-text-rgb), 0.6);
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   cursor: pointer;
-  padding: 6px 12px;
+  padding: var(--space-xs) var(--space-md);
   min-height: var(--btn-min-height);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   transition:
     background-color var(--duration-fast) ease,
     color var(--duration-fast) ease;
   font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-sm);
   letter-spacing: 0.5px;
 }
 #wrapped-header .close-btn:hover {
@@ -845,20 +1226,20 @@ body {
   color: var(--color-text);
 }
 .wrapped-square-card .fun-facts {
-  margin: 25px 0;
+  margin: var(--space-lg) 0;
   padding: var(--space-lg);
   background: linear-gradient(
     135deg,
     rgba(var(--color-accent-blue-rgb), 0.15) 0%,
     rgba(var(--color-accent-cyan-rgb), 0.15) 100%
   );
-  border-radius: 12px;
+  border-radius: var(--radius-sheet);
   border: 1px solid rgba(var(--color-accent-blue-rgb), 0.3);
 }
 .wrapped-square-card .fun-facts-title {
-  font-size: 16px;
+  font-size: var(--wrapped-section);
   font-weight: bold;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-md);
   color: var(--color-accent-blue);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -866,10 +1247,10 @@ body {
 .wrapped-square-card .fun-fact {
   font-size: var(--text-base);
   margin: var(--space-md) 0;
-  padding: 10px 12px;
+  padding: var(--space-sm) var(--space-md);
   opacity: 0;
   line-height: 1.6;
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: rgba(var(--color-text-rgb), 0.05);
   border-left: 3px solid;
   transition:
@@ -924,11 +1305,14 @@ body {
 .wrapped-square-card .fun-fact[data-category="time"] {
   border-left-color: var(--color-accent-gold);
 }
-.wrapped-square-card .fun-fact[data-category="airports"] {
+.wrapped-square-card .fun-fact[data-category="countries"] {
   border-left-color: var(--color-accent-mint);
 }
-.wrapped-square-card .fun-fact[data-category="frequency"] {
+.wrapped-square-card .fun-fact[data-category="aircraft"] {
   border-left-color: var(--color-accent-rose);
+}
+.wrapped-square-card .fun-fact[data-category="speed"] {
+  border-left-color: var(--color-accent-cyan);
 }
 .wrapped-square-card .fun-fact[data-category="achievement"] {
   border-left-color: var(--color-accent-orange);
@@ -939,12 +1323,12 @@ body {
   );
 }
 .wrapped-square-card .top-airports {
-  margin: 25px 0;
+  margin: var(--space-lg) 0;
 }
 .wrapped-square-card .top-airports-title {
-  font-size: 16px;
+  font-size: var(--wrapped-section);
   font-weight: bold;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-md);
   color: var(--color-accent-red);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -953,41 +1337,61 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 15px;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
   margin: var(--space-sm) 0;
   background-color: rgba(var(--color-accent-red-rgb), 0.15);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   border-left: 3px solid var(--color-accent-red);
 }
 .wrapped-square-card .top-airport-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
   font-size: var(--text-base);
   font-weight: 500;
 }
+.wrapped-square-card .top-airport-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--color-accent-red);
+}
+.wrapped-square-card .top-airport-place {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .wrapped-square-card .top-airport-count {
+  flex-shrink: 0;
   font-size: var(--text-base);
   font-weight: bold;
   color: var(--color-accent-red);
 }
 .wrapped-square-card .airports-grid {
-  margin: 25px 0;
+  margin: var(--space-lg) 0;
 }
 .wrapped-square-card .airports-grid-title {
-  font-size: 16px;
+  font-size: var(--wrapped-section);
   font-weight: bold;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-md);
   color: var(--color-accent-pink);
   text-transform: uppercase;
   letter-spacing: 1px;
 }
 .wrapped-square-card .country-group {
-  margin-bottom: 14px;
-  padding: 12px 14px;
+  margin-bottom: var(--space-md);
+  padding: var(--space-md);
   background: linear-gradient(
     135deg,
     rgba(var(--color-accent-pink-rgb), 0.06) 0%,
     rgba(var(--color-accent-blue-rgb), 0.06) 100%
   );
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   border: 1px solid rgba(var(--color-accent-pink-rgb), 0.15);
   opacity: 0;
   animation: fadeInUp 0.4s ease-out forwards;
@@ -1001,8 +1405,31 @@ body {
   letter-spacing: 1px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-sm);
 }
+.wrapped-square-card .country-flag {
+  font-family: var(--font-emoji);
+  font-size: var(--text-base);
+  letter-spacing: 0;
+  line-height: 1;
+}
+.wrapped-square-card .country-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wrapped-square-card .country-count {
+  flex-shrink: 0;
+  order: 1;
+  padding: 0 var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--color-accent-pink-rgb), 0.18);
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  color: var(--color-accent-pink);
+}
+/* The hairline fills the gap; the count is ordered after it */
 .wrapped-square-card .country-group-title::after {
   content: "";
   flex: 1;
@@ -1013,20 +1440,27 @@ body {
     transparent 100%
   );
 }
-.wrapped-square-card .airport-badges {
+/* Destinations: one airport per row inside its country group */
+.wrapped-square-card .country-airports {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
 }
-.wrapped-square-card .airport-badge {
+.wrapped-square-card .destination {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  padding: 6px 12px;
+  border-radius: 20px;
   background: linear-gradient(
     135deg,
     rgba(var(--color-accent-pink-rgb), 0.2) 0%,
     rgba(var(--color-accent-red-rgb), 0.2) 100%
   );
   border: 1px solid rgba(var(--color-accent-pink-rgb), 0.4);
-  padding: 6px 12px;
-  border-radius: 20px;
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-text);
@@ -1035,23 +1469,59 @@ body {
     transform var(--duration-base) ease,
     box-shadow var(--duration-base) ease,
     border-color var(--duration-base) ease;
-  opacity: 0;
-  animation: fadeInUp 0.4s ease-out forwards;
 }
 @media (hover: hover) {
-  .wrapped-square-card .airport-badge:hover {
+  .wrapped-square-card .destination:hover {
     transform: scale(1.1);
     box-shadow: 0 5px 15px rgba(var(--color-accent-pink-rgb), 0.4);
     border-color: rgba(var(--color-accent-pink-rgb), 0.8);
   }
 }
+.wrapped-square-card .destination-code {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-text);
+}
+.wrapped-square-card .destination-name {
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+.wrapped-square-card .destination-tag {
+  flex-shrink: 0;
+  padding: 2px var(--space-sm);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+/* The home base glows cyan, the furthest reach pink */
+.wrapped-square-card .destination.is-home {
+  background: rgba(var(--color-accent-cyan-rgb), 0.15);
+  border-color: rgba(var(--color-accent-cyan-rgb), 0.4);
+}
+.wrapped-square-card .destination.is-home .destination-code {
+  color: var(--color-accent-cyan);
+}
+.wrapped-square-card .destination.is-home .destination-tag {
+  background: rgba(var(--color-accent-cyan-rgb), 0.2);
+  color: var(--color-accent-cyan);
+}
+.wrapped-square-card .destination.is-furthest {
+  background: rgba(var(--color-accent-pink-rgb), 0.25);
+  border-color: rgba(var(--color-accent-pink-rgb), 0.6);
+}
+.wrapped-square-card .destination.is-furthest .destination-tag {
+  background: rgba(var(--color-accent-pink-rgb), 0.2);
+  color: var(--color-accent-pink);
+}
 .wrapped-square-card .aircraft-fleet {
-  margin: 25px 0;
+  margin: var(--space-lg) 0;
 }
 .wrapped-square-card .aircraft-fleet-title {
-  font-size: 16px;
+  font-size: var(--wrapped-section);
   font-weight: bold;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-md);
   color: var(--color-accent-blue);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -1060,9 +1530,9 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 15px;
+  padding: var(--space-sm) var(--space-md);
   margin: var(--space-sm) 0;
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
 }
 .wrapped-square-card .fleet-aircraft-high {
   background-color: rgba(var(--color-accent-red-rgb), 0.15);
@@ -1123,68 +1593,35 @@ body {
 /* ==========================================================================
    Leaflet overrides (the only place where !important is used)
    ========================================================================== */
-/* Attribution: dark and compact in the bottom-right corner */
+/* Attribution: dark and compact in the bottom-right corner. Tile
+   attribution is a licensing requirement, so its corner keeps
+   --z-attribution, which sits above every panel. */
 .leaflet-container .leaflet-control-attribution {
   background: rgba(var(--color-bg-secondary-rgb), 0.85);
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--text-xs);
   line-height: 1.5;
-  padding: 1px 6px;
+  padding: 1px var(--space-xs);
   margin: 0;
-  border-radius: 4px 0 0 0;
-  max-width: calc(100vw - 20px);
+  border-radius: var(--radius-control) 0 0 0;
+  max-width: calc(100vw - var(--space-lg));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.leaflet-container .leaflet-bottom.leaflet-right {
+  z-index: var(--z-attribution);
+}
 .leaflet-container .leaflet-control-attribution a {
-  color: var(--color-text-dimmed);
+  color: var(--color-text-secondary);
 }
-.leaflet-container .leaflet-control-attribution a:hover {
+.leaflet-container .leaflet-control-attribution a:hover,
+.leaflet-container .leaflet-control-attribution a:focus-visible {
   color: var(--color-text);
 }
-
-/* Zoom control: dark, stacked above the GitHub footer in the bottom-right
-   corner so it does not collide with the button columns */
-.leaflet-container .leaflet-top.leaflet-left {
-  top: auto;
-  left: auto;
-  right: 0;
-  bottom: 0;
-}
-.leaflet-container .leaflet-control-zoom {
-  margin: 0 calc(var(--edge-gap) + var(--safe-right))
-    calc(74px + var(--safe-bottom)) 0;
-}
-.leaflet-container .leaflet-bar {
-  border: 2px solid var(--color-border);
-  border-radius: 4px;
-  box-shadow: 0 1px 5px var(--shadow-color);
-  background-clip: padding-box;
-}
-.leaflet-container .leaflet-bar a {
-  background-color: var(--color-bg-secondary);
-  color: var(--color-text);
-  border-bottom: 1px solid var(--color-border);
-  width: 36px;
-  height: 36px;
-  line-height: 36px;
-}
-.leaflet-container .leaflet-bar a:last-child {
-  border-bottom: none;
-}
-.leaflet-container .leaflet-bar a:hover,
-.leaflet-container .leaflet-bar a:focus {
-  background-color: var(--color-bg-hover);
-  color: var(--color-text);
-}
-.leaflet-container .leaflet-bar a:focus-visible {
+.leaflet-container .leaflet-control-attribution a:focus-visible {
   outline: 2px solid var(--color-accent-blue);
-  outline-offset: -2px;
-}
-.leaflet-container .leaflet-bar a.leaflet-disabled {
-  background-color: var(--color-bg-primary);
-  color: var(--color-border);
+  outline-offset: 1px;
 }
 
 /* Focus rings on interactive vector layers */
@@ -1199,14 +1636,14 @@ body {
 /* Tooltip styles */
 .leaflet-tooltip {
   background-color: var(--color-bg-secondary);
-  border: 2px solid var(--color-accent-green);
+  border: 1px solid var(--color-accent-green);
   color: var(--color-text);
   font-family: var(--font-mono);
-  font-weight: bold;
+  font-weight: 600;
   font-size: var(--text-sm);
-  padding: 4px 8px;
-  border-radius: 4px;
-  box-shadow: 0 2px 6px var(--shadow-color);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-panel);
 }
 .leaflet-tooltip-top:before {
   border-top-color: var(--color-accent-green);
@@ -1222,8 +1659,8 @@ body {
 }
 
 .segment-tooltip {
-  border: 2px solid var(--color-border);
-  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
   padding: 0;
   -webkit-user-select: text;
   user-select: text;
@@ -1243,9 +1680,9 @@ body {
 .leaflet-popup-content-wrapper {
   background-color: var(--color-bg-secondary);
   color: var(--color-text);
-  border: 2px solid var(--color-border);
-  border-radius: 6px;
-  box-shadow: 0 3px 14px var(--shadow-color-strong);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
   padding: 0;
   -webkit-user-select: text;
   user-select: text;
@@ -1256,19 +1693,21 @@ body {
 }
 .leaflet-popup-tip {
   background-color: var(--color-bg-secondary);
-  border: 2px solid var(--color-border);
+  border: 1px solid var(--color-border);
   border-top: none;
   border-right: none;
 }
 .leaflet-popup-close-button {
-  color: var(--color-text) !important;
-  font-size: 20px;
-  font-weight: bold;
-  opacity: 0.7;
+  color: var(--color-text-muted) !important;
+  font-size: var(--text-lg);
+  font-weight: 500;
 }
 .leaflet-popup-close-button:hover {
   color: var(--color-text) !important;
-  opacity: 1;
+}
+.leaflet-popup-close-button:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: -2px;
 }
 
 /* ==========================================================================
@@ -1315,7 +1754,7 @@ body {
   height: var(--marker-size);
   background-color: var(--color-accent-green);
   border: var(--marker-border) solid var(--color-text);
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   box-shadow: 0 2px 6px var(--shadow-color);
   cursor: pointer;
   transition:
@@ -1334,10 +1773,10 @@ body {
   border: 1px solid var(--color-accent-green);
   color: var(--color-text);
   font-family: var(--font-mono);
-  font-weight: bold;
+  font-weight: 600;
   font-size: var(--label-font);
   padding: var(--label-padding);
-  border-radius: 3px;
+  border-radius: var(--radius-bar);
   white-space: nowrap;
   pointer-events: auto; /* Make labels clickable */
   cursor: pointer;
@@ -1396,22 +1835,22 @@ body {
    ========================================================================== */
 .popup-container {
   min-width: 180px;
-  padding: 8px 4px;
+  padding: var(--space-sm) var(--space-xs);
   background-color: var(--color-bg-secondary);
   color: var(--color-text);
 }
 .popup-header {
   font-size: var(--text-base);
-  font-weight: bold;
+  font-weight: 600;
   margin-bottom: var(--space-sm);
-  padding-bottom: 6px;
-  border-bottom: 2px solid;
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-sm);
 }
 .popup-header-icon {
-  font-size: 16px;
+  font-size: var(--icon-sm);
 }
 .popup-section-label {
   font-size: var(--text-xs);
@@ -1421,24 +1860,24 @@ body {
   letter-spacing: 0.5px;
 }
 .popup-metric {
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-control);
   border-left: 3px solid;
 }
 .popup-metric-value {
-  font-size: 16px;
-  font-weight: bold;
+  font-size: var(--text-base);
+  font-weight: 600;
 }
 .popup-metric-unit {
   font-size: var(--text-sm);
-  color: var(--color-text-dimmed);
-  margin-left: 6px;
+  color: var(--color-text-secondary);
+  margin-left: var(--space-xs);
 }
 .popup-coords {
   font-size: var(--text-sm);
   font-family: var(--font-mono);
-  color: var(--color-text-dimmed);
-  padding: 4px 8px;
+  color: var(--color-text-secondary);
+  padding: var(--space-xs) var(--space-sm);
 }
 
 /* ==========================================================================
@@ -1446,17 +1885,17 @@ body {
    ========================================================================== */
 #github-footer {
   position: fixed;
-  bottom: calc(28px + var(--safe-bottom));
+  bottom: calc(var(--attribution-h) + var(--space-sm) + var(--safe-bottom));
   right: calc(var(--edge-gap) + var(--safe-right));
   display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--space-sm);
-  background-color: rgba(var(--color-bg-secondary-rgb), 0.9);
+  background-color: rgba(var(--color-bg-secondary-rgb), 0.92);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   z-index: var(--z-footer);
-  box-shadow: 0 1px 4px var(--shadow-color);
+  box-shadow: var(--shadow-control);
 }
 #github-footer a {
   color: var(--color-text-muted);
@@ -1493,17 +1932,18 @@ body {
   transform: translateX(-50%) translateY(20px);
   background-color: rgba(var(--color-bg-secondary-rgb), 0.95);
   color: var(--color-text);
-  border: 2px solid var(--color-border);
-  border-radius: 6px;
-  padding: 12px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  padding: var(--space-md) var(--space-lg);
   font-size: var(--text-base);
   z-index: var(--z-toast);
   opacity: 0;
+  box-shadow: var(--shadow-panel);
   transition:
     opacity var(--duration-base) ease,
     transform var(--duration-base) ease;
   pointer-events: none;
-  max-width: min(400px, calc(100vw - 32px));
+  max-width: min(400px, calc(100vw - var(--space-lg) * 2));
   box-sizing: border-box;
   text-align: center;
 }
@@ -1520,78 +1960,365 @@ body {
 }
 
 /* ==========================================================================
+   Mobile bottom bar and sheet
+
+   The wrapped rows of buttons are replaced by a bar of tabs plus a sheet
+   that holds the rest. Both stay out of the way until the mobile
+   breakpoint applies.
+   ========================================================================== */
+.mobile-bar,
+.mobile-sheet,
+.sheet-scrim {
+  display: none;
+}
+
+/* ==========================================================================
    Mobile layout (narrow viewports)
    ========================================================================== */
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   :root {
     --btn-min-height: 44px;
     --edge-gap: 8px;
+    /* The scale bottoms out at 12px here; nothing reads smaller on mobile */
+    --text-xs: 12px;
   }
 
-  /* Buttons wrap into rows below the top-center group */
-  #left-buttons,
-  #right-buttons {
-    flex-direction: row;
+  /* Bottom bar */
+  .mobile-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: stretch;
+    background-color: rgba(var(--color-bg-secondary-rgb), 0.97);
+    border-top: 1px solid var(--color-border);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    z-index: var(--z-controls);
+    box-sizing: border-box;
+  }
+  .mobile-tab {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-xs);
+    min-height: var(--mobile-bar-h);
+    min-width: 44px;
+    padding: var(--space-sm) var(--space-xs);
+    background: transparent;
+    border: none;
+    -webkit-appearance: none;
+    appearance: none;
+    box-shadow: none;
+    color: var(--color-text-muted);
+    /* The scale bottoms out at 12px; nothing in the UI reads smaller */
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    box-sizing: border-box;
+    transition: color var(--duration-fast) ease;
+  }
+  .mobile-tab .icon {
+    width: var(--icon-lg);
+    height: var(--icon-lg);
+  }
+  .mobile-tab:focus-visible {
+    outline: 2px solid var(--color-accent-blue);
+    outline-offset: -2px;
+  }
+  .mobile-tab.active,
+  .mobile-tab[aria-pressed="true"] {
+    color: var(--color-accent-blue);
+  }
+  .mobile-tab:disabled {
+    opacity: 0.5;
+    color: var(--color-text-dim);
+  }
+
+  /* Scrim behind the sheet */
+  .sheet-scrim {
+    position: fixed;
+    inset: 0;
+    display: block;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: var(--z-panel);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-base) ease;
+  }
+  .sheet-scrim.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Sheet */
+  .mobile-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    max-height: 80vh;
+    max-height: 80dvh;
+    background-color: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-bottom: none;
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    box-shadow: var(--shadow-panel);
+    z-index: var(--z-panel);
+    box-sizing: border-box;
+    /* The sheet covers the bar; this clears the bar's height plus the
+       attribution, which stays above everything */
+    padding-bottom: calc(
+      var(--mobile-bar-h) + var(--attribution-h) + var(--safe-bottom)
+    );
+    transform: translateY(100%);
+    visibility: hidden;
+    transition:
+      transform var(--duration-base) ease,
+      visibility 0s linear var(--duration-base);
+  }
+  .mobile-sheet.is-open {
+    transform: translateY(0);
+    visibility: visible;
+    transition:
+      transform var(--duration-base) ease,
+      visibility 0s linear 0s;
+  }
+  .sheet-handle {
+    width: 36px;
+    height: var(--space-xs);
+    margin: var(--space-sm) auto var(--space-xs);
+    border-radius: var(--radius-pill);
+    background-color: var(--color-bg-active);
+    flex-shrink: 0;
+  }
+  .sheet-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin: 0;
+    padding: var(--space-sm) var(--space-base) var(--space-md);
+    /* 17px: one step above --text-base, short of --text-lg */
+    font-size: calc(var(--text-md) + var(--space-xs));
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--color-text);
+  }
+  .sheet-body {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sheet-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    width: 100%;
+    min-height: var(--sheet-row-h);
+    padding: 0 var(--space-base);
+    background: transparent;
+    border: none;
+    -webkit-appearance: none;
+    appearance: none;
+    box-shadow: none;
+    color: var(--color-text);
+    font-size: var(--text-base);
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    touch-action: manipulation;
+    box-sizing: border-box;
+    transition:
+      background-color var(--duration-fast) ease,
+      box-shadow var(--duration-fast) ease;
+  }
+  .sheet-row .icon {
+    width: var(--icon-lg);
+    height: var(--icon-lg);
+    color: var(--color-text-secondary);
+  }
+  /* The chevron is drawn at 20, whose paired stroke is 1.8. Scaling it to 24
+     here left it optically heavier than the 24/1.7 icon beside it. */
+  .sheet-row .sheet-row-chevron .icon {
+    width: var(--icon-md);
+    height: var(--icon-md);
+  }
+  .sheet-row:focus-visible {
+    outline: 2px solid var(--color-accent-blue);
+    outline-offset: -2px;
+  }
+  .sheet-row.active,
+  .sheet-row[aria-pressed="true"] {
+    background-color: rgba(var(--color-accent-blue-rgb), 0.14);
+    box-shadow: inset 2px 0 0 0 var(--color-accent-blue);
+  }
+  .sheet-row.active .icon,
+  .sheet-row[aria-pressed="true"] .icon {
+    color: var(--color-accent-blue);
+  }
+  .sheet-row:disabled,
+  .sheet-row:has(select:disabled) {
+    opacity: 0.5;
+    color: var(--color-text-muted);
+    cursor: not-allowed;
+  }
+  .sheet-row:has(select:focus-visible) {
+    outline: 2px solid var(--color-accent-blue);
+    outline-offset: -2px;
+  }
+  /* Right-aligned control at the end of a row */
+  .sheet-row-control {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    font-weight: 400;
+  }
+  /* Label column: the label, its colour chip, and a hint on its own line */
+  .sheet-row-text {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
-    left: calc(var(--edge-gap) + var(--safe-left));
-    right: calc(var(--edge-gap) + var(--safe-right));
+    gap: var(--space-sm);
+    min-width: 0;
+    padding: var(--space-sm) 0;
+  }
+  .sheet-row-label {
+    min-width: 0;
+  }
+  .sheet-row-hint {
+    flex-basis: 100%;
+    font-size: var(--text-sm);
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+  .sheet-row-value {
+    color: var(--color-text-secondary);
+  }
+  .sheet-row-chevron {
+    display: flex;
+    line-height: 0;
+  }
+  /* Filter rows stretch the native picker over the whole row so the entire
+     row is the tap target. (position: relative is on the main .sheet-row rule) */
+  .sheet-row-select {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    -webkit-appearance: none;
+    appearance: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  /* Layer rows carry a switch */
+  .sheet-switch {
+    display: block;
+    width: 44px;
+    height: 26px;
+    padding: 2px;
+    box-sizing: border-box;
+    border-radius: var(--radius-pill);
+    background-color: var(--color-bg-active);
+    transition: background-color var(--duration-fast) ease;
+  }
+  .sheet-switch-thumb {
+    display: block;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-pill);
+    background-color: var(--color-text-muted);
+    transition: transform var(--duration-fast) ease;
+  }
+  .sheet-row.active .sheet-switch {
+    background-color: var(--color-accent-blue);
+  }
+  .sheet-row.active .sheet-switch-thumb {
+    background-color: var(--color-text);
+    transform: translateX(18px);
+  }
+
+  /* Close control in the sheet title row */
+  .sheet-title-text {
+    min-width: 0;
+  }
+  .sheet-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    min-width: 44px;
+    min-height: 44px;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
+  .sheet-close:focus-visible {
+    outline: 2px solid var(--color-accent-blue);
+    outline-offset: -2px;
+  }
+
+  .mobile-tab-label {
+    line-height: 1;
+  }
+
+  /* The two columns sit side by side across the top */
+  .control-column {
+    width: calc(50% - var(--edge-gap) - var(--space-xs));
   }
   #left-buttons {
-    top: calc(58px + var(--safe-top));
+    left: calc(var(--edge-gap) + var(--safe-left));
   }
   #right-buttons {
-    /* Below two rows of left buttons (2 x 44px + gap) */
-    top: calc(158px + var(--safe-top));
-  }
-  #left-buttons .control-btn,
-  #right-buttons .control-btn {
-    flex: 1 1 calc(33.333% - 4px);
-    min-width: 0;
-    padding: 6px 4px;
-    font-size: var(--text-md);
-    text-align: center;
-  }
-  .filter-dropdown {
-    width: auto;
+    right: calc(var(--edge-gap) + var(--safe-right));
   }
   .filter-dropdown select {
     font-size: var(--text-md);
-    margin: -6px -4px;
-    padding: 6px 4px;
-    width: calc(100% + 8px);
   }
   .control-btn,
-  .replay-btn {
+  .replay-btn,
+  .control-row {
     min-height: var(--btn-min-height);
   }
-  #top-center-buttons .control-btn {
-    height: 44px;
-  }
 
-  /* Tile attribution is required to stay visible, so lift the bottom-right
-     Leaflet corner above the bottom sheet and the replay panel */
-  .leaflet-container .leaflet-bottom.leaflet-right {
-    z-index: var(--z-attribution);
-  }
-
-  /* Statistics as a bottom sheet so the button rows stay reachable */
-  #stats-panel {
+  /* The rail becomes a bottom sheet; the map keeps the whole viewport */
+  #stats-rail:not([hidden]) {
     top: auto;
     left: 0;
     right: 0;
     bottom: 0;
     width: auto;
-    max-height: 60vh;
-    max-height: 60dvh;
-    border-radius: 12px 12px 0 0;
-    border-bottom: none;
-    /* Leave room for the attribution bar that sits above the sheet */
-    padding: 12px 16px calc(12px + var(--safe-bottom) + var(--attribution-h));
-    transform: translateY(10px);
+    max-height: 70vh;
+    max-height: 70dvh;
+    border-right: none;
+    border-top: 1px solid var(--color-border);
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    padding-top: 0;
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
   }
-  #stats-panel.visible {
-    transform: translateY(0);
+  body.stats-open #map {
+    left: 0;
+  }
+  #stats-panel {
+    /* Leave room for the attribution bar that sits above the sheet */
+    padding: var(--space-md) var(--space-base)
+      calc(var(--space-md) + var(--safe-bottom) + var(--attribution-h));
   }
 
   /* Replay controls span the viewport width */
@@ -1602,7 +2329,7 @@ body {
     transform: none;
     min-width: 0;
     width: auto;
-    padding: 10px 12px;
+    padding: var(--space-sm) var(--space-md);
   }
   #replay-buttons {
     flex-wrap: wrap;
@@ -1612,19 +2339,36 @@ body {
     flex-basis: 100%;
     order: -1;
   }
+  #replay-slider {
+    /* A 44px touch target with the track still painted thin inside it */
+    height: 44px;
+    background-color: transparent;
+    background-image: linear-gradient(
+      var(--color-bg-active),
+      var(--color-bg-active)
+    );
+    background-size: 100% 6px;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
   #replay-slider-start,
   #replay-slider-end {
     font-size: var(--text-sm);
     min-width: 40px;
   }
   /* The bottom-right stack would overlap the replay panel */
-  body.replay-active #github-footer,
-  body.replay-active .leaflet-control-zoom {
+  body.replay-active #github-footer {
     visibility: hidden;
   }
   /* Legends are covered by the replay panel on small screens */
   body.replay-active #altitude-legend,
   body.replay-active #airspeed-legend {
+    visibility: hidden;
+  }
+  /* So is the statistics sheet. Its offsets below are keyed on the bar, which
+     replay removes from the document, so without this the opaque replay panel
+     covers the lower third of the panel and the collapse control reappears. */
+  body.replay-active #stats-rail {
     visibility: hidden;
   }
 
@@ -1638,54 +2382,82 @@ body {
     font-size: var(--text-sm);
   }
 
-  /* Smallest text is raised to 12px */
+  /* The two sizes drawn outside the type scale: Leaflet's attribution and
+     the map labels. The scale itself is raised by --text-xs above. */
   .airport-label {
     font-size: max(var(--text-sm), var(--label-font));
   }
-  .popup-section-label,
-  .popup-metric-unit,
-  .popup-coords {
+  .leaflet-container .leaflet-control-attribution {
     font-size: var(--text-sm);
   }
 
-  .leaflet-container .leaflet-bar a {
-    width: 44px;
-    height: 44px;
-    line-height: 44px;
-  }
-  .leaflet-container .leaflet-control-zoom {
-    margin-bottom: calc(70px + var(--safe-bottom));
-  }
   #github-footer {
-    bottom: calc(26px + var(--safe-bottom));
-    padding: 6px;
+    padding: var(--space-xs);
   }
   #github-footer .github-icon {
     width: 18px;
     height: 18px;
   }
 
+  /* Once the bottom bar exists, the attribution and the bottom-right stack
+     ride above it. Attribution is a licensing requirement and must never be
+     covered. */
+  body:has(.mobile-bar) .leaflet-container .leaflet-bottom.leaflet-right {
+    bottom: calc(var(--mobile-bar-h) + var(--safe-bottom));
+  }
+  body:has(.mobile-bar) #github-footer,
+  body:has(.mobile-bar) .color-legend,
+  body:has(.mobile-bar) #replay-controls,
+  body:has(.mobile-bar) .toast-notification {
+    bottom: calc(
+      var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
+        var(--safe-bottom)
+    );
+  }
+  /* The statistics sheet stops above the bar rather than painting over it:
+     the Stats tab is what closes it again. */
+  body:has(.mobile-bar) #stats-rail:not([hidden]) {
+    bottom: calc(
+      var(--mobile-bar-h) + var(--attribution-h) + var(--safe-bottom)
+    );
+  }
+  body:has(.mobile-bar) #stats-panel {
+    padding-bottom: var(--space-md);
+  }
+  /* The collapse control is redundant once the Stats tab toggles the sheet */
+  body:has(.mobile-bar) #stats-rail-header {
+    display: none;
+  }
+
   /* Wrapped modal */
+  #wrapped-modal {
+    --wrapped-gutter: var(--space-base);
+    --wrapped-title: calc(var(--text-display) * 0.92);
+    --wrapped-year: calc(var(--text-display) * 2.15);
+    --wrapped-stat: var(--text-display);
+  }
   #wrapped-header {
-    padding: calc(10px + var(--safe-top)) 20px 10px;
+    padding: calc(var(--space-sm) + var(--safe-top)) var(--wrapped-gutter)
+      var(--space-sm);
   }
   #wrapped-header .close-btn {
     font-size: var(--text-md);
-    padding: 5px 10px;
+    padding: var(--space-xs) var(--space-sm);
   }
   #wrapped-content {
     flex-direction: column;
     gap: var(--space-lg);
-    padding: 0 20px calc(20px + var(--safe-bottom)) 20px;
+    padding: 0 var(--wrapped-gutter)
+      calc(var(--wrapped-gutter) + var(--safe-bottom));
   }
   #wrapped-cards-column {
     width: 100%;
-    gap: 15px;
+    gap: var(--space-base);
   }
   .wrapped-square-card {
     width: 100%;
     height: auto;
-    padding: var(--space-lg);
+    padding: var(--space-base);
     box-sizing: border-box;
   }
   #wrapped-map-container {
@@ -1703,28 +2475,23 @@ body {
     height: 100%;
   }
   .wrapped-square-card h1 {
-    font-size: 24px;
     word-wrap: break-word;
     line-height: 1.2;
   }
   .wrapped-square-card .year {
-    font-size: 56px;
     margin: var(--space-lg) 0;
-    letter-spacing: 4px;
+    letter-spacing: var(--space-xs);
   }
   .wrapped-square-card .stat-grid {
-    gap: 12px;
+    gap: var(--space-md);
     margin: var(--space-lg) 0;
   }
   .wrapped-square-card .stat-card {
-    padding: 15px 10px;
-  }
-  .wrapped-square-card .stat-value {
-    font-size: 28px;
+    padding: var(--space-md) var(--space-sm);
   }
   .wrapped-square-card .fun-facts {
-    margin: 15px 0;
-    padding: 15px;
+    margin: var(--space-base) 0;
+    padding: var(--space-base);
   }
   .wrapped-square-card .fun-facts-title,
   .wrapped-square-card .top-airports-title,
@@ -1734,7 +2501,7 @@ body {
   }
   .wrapped-square-card .fun-fact {
     font-size: var(--text-sm);
-    padding: 8px 10px;
+    padding: var(--space-sm);
     margin: var(--space-sm) 0;
   }
   @media (hover: hover) {
@@ -1745,11 +2512,11 @@ body {
   .wrapped-square-card .top-airports,
   .wrapped-square-card .airports-grid,
   .wrapped-square-card .aircraft-fleet {
-    margin: 15px 0;
+    margin: var(--space-base) 0;
   }
   .wrapped-square-card .top-airport,
   .wrapped-square-card .fleet-aircraft {
-    padding: 8px 12px;
+    padding: var(--space-sm) var(--space-md);
   }
   .wrapped-square-card .top-airport-name,
   .wrapped-square-card .top-airport-count,
@@ -1757,51 +2524,16 @@ body {
   .wrapped-square-card .fleet-aircraft-flights {
     font-size: var(--text-sm);
   }
-  .wrapped-square-card .airport-badge {
-    padding: 5px 10px;
+  .wrapped-square-card .destination {
+    padding: var(--space-xs);
     font-size: var(--text-sm);
+  }
+  .wrapped-square-card .destination-code {
+    min-width: 44px;
   }
   .wrapped-square-card .fleet-aircraft-registration,
   .wrapped-square-card .fleet-aircraft-time {
     font-size: var(--text-sm);
-  }
-}
-
-/* ==========================================================================
-   Reduced motion
-   ========================================================================== */
-@media (prefers-reduced-motion: reduce) {
-  .wrapped-square-card,
-  .wrapped-square-card h1,
-  .wrapped-square-card .year,
-  .wrapped-square-card .stat-value,
-  .wrapped-square-card .fun-fact,
-  .wrapped-square-card .country-group,
-  .wrapped-square-card .airport-badge,
-  #wrapped-map-container,
-  .loading-spinner {
-    animation: none;
-    animation-delay: 0s;
-    opacity: 1;
-  }
-  .btn-surface,
-  .control-btn,
-  .toggleable-btn,
-  .toggleable-btn.buttons-hidden,
-  #isolate-btn,
-  .replay-btn,
-  .replay-airplane-icon,
-  #stats-panel,
-  #wrapped-header .close-btn,
-  .wrapped-square-card .stat-card,
-  .wrapped-square-card .fun-fact,
-  .wrapped-square-card .airport-badge,
-  .airport-marker,
-  .airport-label,
-  #github-footer a,
-  #github-footer .github-icon,
-  .toast-notification {
-    transition: none;
   }
 }
 
@@ -1810,40 +2542,44 @@ body {
   min-width: 220px;
 }
 .kh-popup-header-airport {
-  font-size: 15px;
+  font-size: var(--text-base);
   color: var(--color-accent-green);
-  margin-bottom: 10px;
-  padding-bottom: 8px;
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-sm);
   border-color: var(--color-accent-green);
 }
 .kh-popup-icon-lg {
-  font-size: 18px;
+  font-size: var(--icon-md);
 }
 .kh-popup-home-badge {
-  font-size: 12px;
-  background: #007bff;
-  color: white;
-  padding: 2px 6px;
-  border-radius: 3px;
-  margin-left: 4px;
+  font-size: var(--text-sm);
+  background: var(--color-home-blue);
+  color: var(--color-text);
+  padding: 2px var(--space-xs);
+  border-radius: var(--radius-bar);
+  margin-left: var(--space-xs);
 }
 .kh-popup-block {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-sm);
 }
 .kh-popup-link {
   color: var(--color-accent-blue);
   text-decoration: none;
-  font-size: 12px;
-  font-family: monospace;
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xs);
+}
+.kh-popup-link:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
 }
 .kh-popup-metric-flights {
   background: linear-gradient(
     135deg,
-    rgba(79, 172, 254, 0.15) 0%,
-    rgba(0, 242, 254, 0.15) 100%
+    rgba(var(--color-accent-blue-rgb), 0.15) 0%,
+    rgba(var(--color-accent-cyan-rgb), 0.15) 100%
   );
   border-color: var(--color-accent-blue);
   display: flex;
@@ -1851,8 +2587,8 @@ body {
   align-items: center;
 }
 .kh-popup-metric-label {
-  font-size: 12px;
-  color: var(--color-text-dimmed);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 .kh-popup-accent {
@@ -1864,7 +2600,7 @@ body {
 }
 .kh-popup-track {
   display: inline-block;
-  margin-top: 4px;
+  margin-top: var(--space-xs);
 }
 .kh-popup-metric-colored {
   background: var(--kh-metric-bg);
@@ -1873,62 +2609,332 @@ body {
 .kh-popup-metric-colored .popup-metric-value {
   color: var(--kh-metric-color);
 }
+/* --------------------------------------------------------------------------
+   Statistics content (inside #stats-panel)
+
+   An instrument readout: a lead block of the four headline figures, then
+   labelled sections of label/value rows. Numbers carry the emphasis; the
+   labels stay quiet.
+   -------------------------------------------------------------------------- */
+.kh-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
 .kh-stats-title {
-  margin: 0 0 10px 0;
-  font-weight: bold;
-  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text);
+}
+.kh-stats-title-text {
+  min-width: 0;
 }
 .kh-stats-note {
-  background-color: var(--color-bg-hover);
-  padding: 4px 8px;
-  margin-bottom: 8px;
-  border-radius: 3px;
-  font-size: 12px;
-  color: var(--color-accent-blue);
+  margin: 0 0 calc(var(--space-lg) * -1 + var(--space-sm));
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-control);
+  background-color: rgba(var(--color-accent-blue-rgb), 0.12);
+  border-left: 2px solid var(--color-accent-blue);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
 }
-.kh-stats-row {
-  margin-bottom: 8px;
+
+/* Lead figures: two per row. The dividers are borders on the items, not
+   gaps over a coloured container: a dataset without timing data renders
+   three figures, and the empty fourth cell has to read as the panel. */
+.kh-stats-lead {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  overflow: hidden;
 }
-.kh-stats-scroll {
-  overflow-y: auto;
+.kh-stats-lead-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-md);
+  background-color: var(--color-bg-primary);
+  border-top: 1px solid var(--color-divider);
+  border-left: 1px solid var(--color-divider);
+  min-width: 0;
 }
-.kh-stats-scroll:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
-  outline-offset: 2px;
+.kh-stats-lead-item:nth-child(-n + 2) {
+  border-top: 0;
 }
-.kh-stats-scroll-airports {
-  max-height: 200px;
+.kh-stats-lead-item:nth-child(odd) {
+  border-left: 0;
 }
-.kh-stats-scroll-aircraft {
-  max-height: 150px;
-}
-.kh-stats-subtitle {
-  display: inline;
-  margin: 0;
-  font-size: inherit;
-  font-weight: bold;
-}
-.kh-stats-group {
-  margin: 6px 0 3px 4px;
-  font-size: 12px;
-  color: var(--color-text-dimmed);
+.kh-stats-lead-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
   font-weight: 600;
+  line-height: 1.1;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
 }
+.kh-stats-lead-unit {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+.kh-stats-lead-alt {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.kh-stats-lead-label {
+  /* Bottom-aligned: a figure with an alt line must not push its label
+     below the one beside it */
+  margin-top: auto;
+  padding-top: var(--space-xs);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+/* Sections */
+.kh-stats-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.kh-stats-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0;
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+.kh-stats-section-title .icon {
+  color: var(--color-text-dim);
+}
+.kh-stats-section-label {
+  min-width: 0;
+}
+.kh-stats-section-count {
+  margin-left: auto;
+  padding: 0 var(--space-xs);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-bg-raised);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0;
+  color: var(--color-text-secondary);
+}
+
 .kh-stats-list {
   list-style: none;
   margin: 0;
-  padding: 0 0 0 10px;
+  padding: 0;
 }
-.kh-stats-list li::before {
-  content: "• ";
+/* Metric rows: label left, value stack right */
+.kh-stats-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-xs) 0;
+  font-size: var(--text-sm);
+}
+.kh-stats-metric + .kh-stats-metric {
+  border-top: 1px solid var(--color-divider);
+}
+.kh-stats-metric-label {
+  min-width: 0;
+  color: var(--color-text-secondary);
+}
+.kh-stats-metric-values {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  text-align: right;
+}
+.kh-stats-metric-value {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+.kh-stats-metric-alt {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* Aircraft rows put a registration over its type */
+.kh-stats-aircraft .kh-stats-metric-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kh-stats-aircraft-type {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.kh-stats-code {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Airports: a count line above the list, which flows with the panel rather
+   than becoming a second scroller inside it */
+.kh-stats-airports-summary {
+  margin: 0 0 var(--space-sm);
+  padding: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+.kh-stats-groups {
+  min-width: 0;
+}
+.kh-stats-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: var(--space-md) 0 var(--space-xs);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+.kh-stats-group:first-child {
+  padding-top: var(--space-sm);
+}
+.kh-stats-group-flag {
+  font-family: var(--font-emoji);
+  font-size: var(--text-sm);
+  letter-spacing: 0;
+}
+.kh-stats-group-name {
+  min-width: 0;
+}
+.kh-stats-group-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  color: var(--color-text-muted);
+}
+.kh-stats-airport {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  padding: var(--space-xs) 0;
+  font-size: var(--text-sm);
+}
+.kh-stats-airport .kh-stats-code {
+  flex-shrink: 0;
+  min-width: 44px;
+  font-size: var(--text-xs);
+}
+.kh-stats-airport-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+.kh-stats-footer {
+  margin: 0;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-divider);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 .kh-init-error {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #ff4444;
-  font-size: 16px;
-  padding: 20px;
+  color: var(--color-error);
+  font-size: var(--text-base);
+  padding: var(--space-base);
   text-align: center;
+}
+
+/* ==========================================================================
+   Initial hidden state
+
+   Last in the file on purpose: `.initially-hidden` has to beat the display
+   of `.control-row`, `.btn-surface` and `.replay-btn`, which it ties with
+   on specificity.
+   ========================================================================== */
+.initially-hidden {
+  display: none;
+}
+
+/* ==========================================================================
+   Reduced motion
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .wrapped-square-card,
+  .wrapped-square-card:nth-child(1),
+  .wrapped-square-card:nth-child(2),
+  .wrapped-square-card:nth-child(3),
+  .wrapped-square-card:nth-child(4),
+  .wrapped-square-card h1,
+  .wrapped-square-card .year,
+  .wrapped-square-card .stat-value,
+  .wrapped-square-card .fun-fact,
+  .wrapped-square-card .fun-fact:nth-child(2),
+  .wrapped-square-card .fun-fact:nth-child(3),
+  .wrapped-square-card .fun-fact:nth-child(4),
+  .wrapped-square-card .fun-fact:nth-child(5),
+  .wrapped-square-card .fun-fact:nth-child(6),
+  .wrapped-square-card .fun-fact:nth-child(7),
+  .wrapped-square-card .country-group,
+  .wrapped-square-card .destination,
+  #wrapped-map-container,
+  .loading-spinner {
+    animation: none;
+    /* Also neutralises the inline animation-delay on each country group */
+    animation-delay: 0s;
+    opacity: 1;
+  }
+  #map,
+  #left-buttons,
+  .color-legend,
+  .btn-surface,
+  .control-btn,
+  .control-row,
+  .replay-btn,
+  .replay-airplane-icon,
+  #wrapped-header .close-btn,
+  .wrapped-square-card .stat-card,
+  .wrapped-square-card .fun-fact,
+  .wrapped-square-card .destination,
+  .airport-marker,
+  .airport-label,
+  #github-footer a,
+  #github-footer .github-icon,
+  .toast-notification,
+  .mobile-tab,
+  .sheet-scrim,
+  .sheet-row,
+  .sheet-switch,
+  .sheet-switch-thumb,
+  .mobile-sheet,
+  .mobile-sheet.is-open,
+  #stats-rail {
+    transition: none;
+  }
 }

@@ -1,11 +1,11 @@
 # KML Heatmap Generator runtime image
 #
-# Base images are pinned by the digest of the multi-arch index so that
-# Dependabot can bump them; the tag comment is kept for readability.
+# Base images carry both the tag and the digest of the multi-arch index, so
+# Dependabot bumps the two together and the version stays readable in the FROM
+# line itself. Do not restate the tag in a comment: it drifts silently.
 
 # Stage 1: build the JavaScript bundles
 FROM docker.io/library/node:26-slim@sha256:c0753125a3789977aefe869cbebccf70e3cfd7ea84ca48547458f02e4f1d7146 AS js-builder
-# 24-slim
 
 WORKDIR /build
 
@@ -20,7 +20,6 @@ RUN npm run build
 
 # Stage 2: Python runtime
 FROM docker.io/library/python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
-# 3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

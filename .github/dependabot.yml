@@ -93,8 +93,9 @@ updates:
     commit-message:
       prefix: "ci"
 
-  # Docker base images: covers Dockerfile and Dockerfile.test in the root
-  # directory (digest pins are bumped together with the tag comment)
+  # Docker base images: covers Dockerfile in the root directory. It carries a
+  # tag and a digest, which Dependabot bumps together. The verify job builds
+  # the image on every pull request, so a bump that breaks it turns red.
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
