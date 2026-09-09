@@ -107,16 +107,16 @@ class TestFormatFlightTime:
 
     def test_zero_seconds(self):
         """Test formatting zero seconds."""
-        assert format_flight_time(0) == "---"
+        assert format_flight_time(0) == "0h 0m"
 
     def test_negative_seconds(self):
         """Test formatting negative seconds."""
-        assert format_flight_time(-100) == "---"
+        assert format_flight_time(-100) == "0h 0m"
 
     def test_only_minutes(self):
         """Test formatting time with only minutes."""
-        assert format_flight_time(1800) == "30m"  # 30 minutes
-        assert format_flight_time(60) == "1m"  # 1 minute
+        assert format_flight_time(1800) == "0h 30m"  # 30 minutes
+        assert format_flight_time(60) == "0h 1m"  # 1 minute
 
     def test_hours_and_minutes(self):
         """Test formatting time with hours and minutes."""
@@ -127,7 +127,7 @@ class TestFormatFlightTime:
     def test_seconds_truncated(self):
         """Test that seconds are truncated, not rounded."""
         assert format_flight_time(3665) == "1h 1m"  # 1h 1m 5s -> 1h 1m
-        assert format_flight_time(125) == "2m"  # 2m 5s -> 2m
+        assert format_flight_time(125) == "0h 2m"  # 2m 5s -> 0h 2m
 
     def test_large_hours(self):
         """Test formatting large number of hours."""
@@ -135,4 +135,4 @@ class TestFormatFlightTime:
 
     def test_less_than_minute(self):
         """Test formatting less than one minute."""
-        assert format_flight_time(45) == "0m"
+        assert format_flight_time(45) == "0h 0m"

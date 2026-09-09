@@ -614,15 +614,25 @@ class TestRecalculateStatsFromSegments:
         # Only segments with altitude_ft > 1328 count as cruise
         segments = [
             {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 50},
-            {"altitude_m": 500, "altitude_ft": 1640, "groundspeed_knots": 120},
-            {"altitude_m": 600, "altitude_ft": 1968, "groundspeed_knots": 140},
+            {
+                "altitude_m": 500,
+                "altitude_ft": 1640,
+                "groundspeed_knots": 130,
+                "coords": [[50.0, 8.0], [50.01, 8.0]],
+            },
+            {
+                "altitude_m": 600,
+                "altitude_ft": 1968,
+                "groundspeed_knots": 130,
+                "coords": [[50.01, 8.0], [50.02, 8.0]],
+            },
         ]
 
         _recalculate_stats_from_segments(stats, segments, [])
 
         # Cruise segments: altitude_ft > 1328 -> second (1640) and third (1968)
-        # Cruise speed: (120 + 140) / 2 = 130
-        assert stats["cruise_speed_knots"] == 130.0
+        # Weighted average with equal distances = 130
+        assert stats["cruise_speed_knots"] == pytest.approx(130.0)
 
     def test_cruise_altitude_histogram(self):
         """Test most common cruise altitude calculation."""

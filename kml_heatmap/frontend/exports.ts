@@ -17,6 +17,7 @@ export {
 
 export {
   filterPaths,
+  filterSegmentsByPaths,
   collectAirports,
   aggregateAircraft,
   calculateTotalDistance,
@@ -70,6 +71,4 @@ export {
   generateFunFacts,
   selectDiverseFacts,
   calculateAircraftColorClass,
-  findHomeBase as wrappedFindHomeBase,
-  getDestinations,
 } from "./features/wrapped";

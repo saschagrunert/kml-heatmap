@@ -65,22 +65,37 @@ export class WrappedManager {
 
     const aircraft = this.app.selectedAircraft;
 
-    // Calculate year-filtered statistics for wrapped panel display
+    const allPathInfo = this.app.fullPathInfo || [];
+    const allSegments = this.app.fullPathSegments || [];
+
+    // Filter once and share between both stat calculations
+    const filteredPaths = window.KMLHeatmap.filterPaths(
+      allPathInfo,
+      year,
+      aircraft,
+    );
+    const filteredSegments = window.KMLHeatmap.filterSegmentsByPaths(
+      allSegments,
+      filteredPaths,
+    );
+    const preFiltered = { paths: filteredPaths, segments: filteredSegments };
+
     const filteredStats = window.KMLHeatmap.calculateFilteredStatistics({
-      pathInfo: this.app.fullPathInfo || [],
-      segments: this.app.fullPathSegments || [],
+      pathInfo: allPathInfo,
+      segments: allSegments,
       year: year,
       aircraft: aircraft,
       coordinateCount: this.app.currentData?.original_points,
+      preFiltered,
     });
 
-    // Calculate stats for selected year and aircraft (fullStats used only for aircraft model enrichment)
     const yearStats = window.KMLHeatmap.calculateYearStats(
-      this.app.fullPathInfo || [],
-      this.app.fullPathSegments || [],
+      allPathInfo,
+      allSegments,
       year,
       this.app.fullStats,
       aircraft,
+      preFiltered,
     );
 
     // Update title and year display based on selection
@@ -130,46 +145,24 @@ export class WrappedManager {
 
     // Build home base section using year-filtered airport data
     if (yearStats.airport_names && yearStats.airport_names.length > 0) {
-      const filteredPathInfo = window.KMLHeatmap.filterPaths(
-        this.app.fullPathInfo || [],
-        year,
-        aircraft,
+      const airportCounts = window.KMLHeatmap.calculateAirportFlightCounts(
+        filteredPaths,
+        "all",
+        "all",
       );
-
-      // Filter airports to only those in this year and count flights
-      const yearAirportCounts: { [name: string]: number } = {};
-
-      // Count how many times each airport appears in filtered paths
-      filteredPathInfo.forEach((pathInfo) => {
-        if (pathInfo.start_airport) {
-          yearAirportCounts[pathInfo.start_airport] =
-            (yearAirportCounts[pathInfo.start_airport] || 0) + 1;
-        }
-        if (pathInfo.end_airport) {
-          yearAirportCounts[pathInfo.end_airport] =
-            (yearAirportCounts[pathInfo.end_airport] || 0) + 1;
-        }
-      });
-
-      // Create airport objects with year-specific counts
-      const yearAirports = yearStats.airport_names.map((name: string) => {
-        return {
-          name: name,
-          flight_count: yearAirportCounts[name] || 0,
-        };
-      });
-
-      // Sort by flight count to find home base
-      yearAirports.sort((a, b) => b.flight_count - a.flight_count);
-      const homeBase = yearAirports[0];
+      const homeBase = window.KMLHeatmap.findHomeBase(airportCounts);
+      const homeBaseCount = homeBase ? (airportCounts[homeBase] ?? 0) : 0;
 
       if (homeBase) {
-        const homeBaseHtml = generateHomeBaseHtml(homeBase);
+        const homeBaseHtml = generateHomeBaseHtml({
+          name: homeBase,
+          flight_count: homeBaseCount,
+        });
         const topAirportsEl = domCache.get("wrapped-top-airports");
         if (topAirportsEl) topAirportsEl.innerHTML = homeBaseHtml;
 
         const destinations = yearStats.airport_names.filter(
-          (name) => name !== homeBase.name,
+          (name) => name !== homeBase,
         );
         const grouped = groupByCountry(destinations);
 

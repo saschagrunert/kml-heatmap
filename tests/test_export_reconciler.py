@@ -71,12 +71,14 @@ class TestRecalculateStatsFromSegments:
             {
                 "altitude_m": 2000,
                 "altitude_ft": cruise_threshold + 500,
-                "groundspeed_knots": 140,
+                "groundspeed_knots": 150,
+                "coords": [[50.0, 8.0], [50.01, 8.0]],
             },
             {
                 "altitude_m": 2000,
                 "altitude_ft": cruise_threshold + 500,
-                "groundspeed_knots": 160,
+                "groundspeed_knots": 150,
+                "coords": [[50.01, 8.0], [50.02, 8.0]],
             },
         ]
         stats = self._make_stats()

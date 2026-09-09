@@ -10,23 +10,15 @@ import {
   escapeHtml,
 } from "../utils/htmlGenerators";
 import {
+  aggregateAircraft,
   calculateFlightTime,
   calculateTotalDistance,
   collectAirports,
   filterPaths,
   filterSegmentsByPaths,
 } from "../calculations/statistics";
-import {
-  countCountries,
-  findHomeBase as findHomeBaseFromCounts,
-} from "./airports";
-import type {
-  AircraftAggregate,
-  FunFact,
-  PathInfo,
-  PathSegment,
-  YearStats,
-} from "../types";
+import { countCountries } from "./airports";
+import type { FunFact, PathInfo, PathSegment, YearStats } from "../types";
 
 /**
  * Full statistics for enrichment
@@ -46,51 +38,40 @@ interface FullStats {
   most_common_cruise_altitude_m?: number;
 }
 
-/**
- * Home base information
- */
-interface HomeBase {
-  name: string;
-  flight_count: number;
-}
-
 export function calculateYearStats(
   pathInfo: PathInfo[] | null,
   segments: PathSegment[],
   year: number | string,
   fullStats: FullStats | null = null,
   aircraft: string = "all",
+  preFiltered?: { paths: PathInfo[]; segments: PathSegment[] },
 ): YearStats {
+  const emptyResult: YearStats = {
+    total_flights: 0,
+    total_distance_nm: 0,
+    num_airports: 0,
+    airport_names: [],
+    flight_time: "0h 0m",
+    aircraft_list: [],
+  };
+
   if (!pathInfo || pathInfo.length === 0) {
-    return {
-      total_flights: 0,
-      total_distance_nm: 0,
-      num_airports: 0,
-      airport_names: [],
-      flight_time: "0h 0m",
-      aircraft_list: [],
-    };
+    return emptyResult;
   }
 
-  const filteredPaths = filterPaths(pathInfo, String(year), aircraft);
+  const filteredPaths =
+    preFiltered?.paths ?? filterPaths(pathInfo, String(year), aircraft);
 
   if (filteredPaths.length === 0) {
-    return {
-      total_flights: 0,
-      total_distance_nm: 0,
-      num_airports: 0,
-      airport_names: [],
-      flight_time: "0h 0m",
-      aircraft_list: [],
-    };
+    return emptyResult;
   }
+
+  const filteredSegments =
+    preFiltered?.segments ?? filterSegmentsByPaths(segments, filteredPaths);
 
   // Collect airports
   const airports = collectAirports(filteredPaths);
   const airportNames = Array.from(airports);
-
-  // Filter segments
-  const filteredSegments = filterSegmentsByPaths(segments, filteredPaths);
 
   // Calculate total distance
   const totalDistanceKm = calculateTotalDistance(filteredSegments);
@@ -100,54 +81,28 @@ export function calculateYearStats(
   const totalSeconds = calculateFlightTime(filteredSegments, filteredPaths);
   const flightTime = formatFlightTime(totalSeconds);
 
-  // Aggregate aircraft data
-  const aircraftMap: Record<string, AircraftAggregate> = {};
-  filteredPaths.forEach((path) => {
-    if (path.aircraft_registration) {
-      const reg = path.aircraft_registration;
-      if (!aircraftMap[reg]) {
-        aircraftMap[reg] = {
-          registration: reg,
-          type: path.aircraft_type,
-          flights: 0,
-          flight_time_seconds: 0,
-        };
-      }
-      aircraftMap[reg].flights += 1;
-    }
-  });
-
-  // Calculate flight time per aircraft
-  Object.keys(aircraftMap).forEach((reg) => {
-    const aircraftPaths = filteredPaths.filter(
-      (p) => p.aircraft_registration === reg,
+  // Reuse shared aircraft aggregation and enrich with per-aircraft flight time
+  const aircraftList = aggregateAircraft(filteredPaths);
+  for (const ac of aircraftList) {
+    const acPaths = filteredPaths.filter(
+      (p) => p.aircraft_registration === ac.registration,
     );
-    const aircraftSegments = filterSegmentsByPaths(segments, aircraftPaths);
-    const aircraftSeconds = calculateFlightTime(
-      aircraftSegments,
-      aircraftPaths,
-    );
-    const aircraft = aircraftMap[reg];
-    if (aircraft) {
-      aircraft.flight_time_seconds = aircraftSeconds;
-      aircraft.flight_time_str = formatFlightTime(aircraftSeconds);
-    }
-  });
-
-  // Enrich with model from fullStats
-  if (fullStats && fullStats.aircraft_list) {
-    fullStats.aircraft_list.forEach((fullAircraft) => {
-      const aircraft = aircraftMap[fullAircraft.registration];
-      if (aircraft) {
-        aircraft.model = fullAircraft.model;
-      }
-    });
+    const acSegments = filterSegmentsByPaths(segments, acPaths);
+    const acSeconds = calculateFlightTime(acSegments, acPaths);
+    ac.flight_time_seconds = acSeconds;
+    ac.flight_time_str = formatFlightTime(acSeconds);
   }
 
-  // Sort aircraft by flight count descending
-  const aircraftList = Object.values(aircraftMap).sort(
-    (a, b) => b.flights - a.flights,
-  );
+  // Enrich with model from fullStats
+  if (fullStats?.aircraft_list) {
+    const modelMap = new Map(
+      fullStats.aircraft_list.map((a) => [a.registration, a.model]),
+    );
+    for (const ac of aircraftList) {
+      const model = modelMap.get(ac.registration);
+      if (model) ac.model = model;
+    }
+  }
 
   return {
     total_flights: filteredPaths.length,
@@ -419,45 +374,4 @@ export function calculateAircraftColorClass(
   }
   const normalized = (flights - minFlights) / (maxFlights - minFlights);
   return calculateAircraftColorClassFromNormalized(normalized);
-}
-
-/**
- * Find home base (most visited airport)
- */
-export function findHomeBase(
-  airportNames: string[] | null,
-  airportCounts: Record<string, number>,
-): HomeBase | null {
-  if (!airportNames || airportNames.length === 0) {
-    return null;
-  }
-
-  const filteredCounts: Record<string, number> = {};
-  for (const name of airportNames) {
-    const count = airportCounts[name];
-    if (count) filteredCounts[name] = count;
-  }
-
-  const name = findHomeBaseFromCounts(filteredCounts);
-  if (!name) return null;
-
-  return { name, flight_count: airportCounts[name] || 0 };
-}
-
-/**
- * Get destinations excluding home base
- */
-export function getDestinations(
-  airportNames: string[] | null,
-  homeBaseName: string | null,
-): string[] {
-  if (!airportNames) {
-    return [];
-  }
-
-  if (!homeBaseName) {
-    return airportNames;
-  }
-
-  return airportNames.filter((name) => name !== homeBaseName);
 }

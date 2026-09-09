@@ -269,6 +269,7 @@ export function calculateFilteredStatistics(options: {
   year?: string;
   aircraft?: string;
   coordinateCount?: number;
+  preFiltered?: { paths: PathInfo[]; segments: PathSegment[] };
 }): FilteredStatistics {
   const {
     pathInfo,
@@ -276,6 +277,7 @@ export function calculateFilteredStatistics(options: {
     year = "all",
     aircraft = "all",
     coordinateCount,
+    preFiltered,
   } = options;
 
   if (!pathInfo || !segments) {
@@ -291,7 +293,8 @@ export function calculateFilteredStatistics(options: {
     };
   }
 
-  const filteredPaths = filterPaths(pathInfo, year, aircraft);
+  const filteredPaths =
+    preFiltered?.paths ?? filterPaths(pathInfo, year, aircraft);
 
   if (filteredPaths.length === 0) {
     return {
@@ -309,7 +312,8 @@ export function calculateFilteredStatistics(options: {
   // Collect data
   const airports = collectAirports(filteredPaths);
   const aircraftList = aggregateAircraft(filteredPaths);
-  const filteredSegments = filterSegmentsByPaths(segments, filteredPaths);
+  const filteredSegments =
+    preFiltered?.segments ?? filterSegmentsByPaths(segments, filteredPaths);
 
   // Calculate metrics
   const totalDistanceKm = calculateTotalDistance(filteredSegments);
@@ -328,15 +332,25 @@ export function calculateFilteredStatistics(options: {
   const flightTimeStr =
     flightTime > 0 ? formatFlightTime(flightTime) : undefined;
 
+  // Compute per-path minimum altitude for AGL-based cruise detection
+  const pathMinAlt = new Map<number, number>();
+  for (const seg of filteredSegments) {
+    if (seg.altitude_m !== undefined) {
+      const current = pathMinAlt.get(seg.path_id);
+      if (current === undefined || seg.altitude_m < current) {
+        pathMinAlt.set(seg.path_id, seg.altitude_m);
+      }
+    }
+  }
+
   // Calculate cruise speed (segments above 1000ft AGL)
-  // Note: We don't have terrain elevation data, so we approximate using altitude MSL
-  const cruiseSegments = filteredSegments.filter(
-    (seg) =>
-      seg.altitude_m &&
-      seg.altitude_m > CRUISE_ALTITUDE_THRESHOLD_M &&
-      seg.groundspeed_knots &&
-      seg.groundspeed_knots > 0,
-  );
+  const cruiseSegments = filteredSegments.filter((seg) => {
+    if (!seg.altitude_m || !seg.groundspeed_knots || seg.groundspeed_knots <= 0)
+      return false;
+    const groundLevel = pathMinAlt.get(seg.path_id) ?? 0;
+    const altitudeAglM = seg.altitude_m - groundLevel;
+    return altitudeAglM > CRUISE_ALTITUDE_THRESHOLD_M;
+  });
 
   // Calculate weighted average speed (distance/time) instead of simple average
   // This matches the Python backend calculation
@@ -374,9 +388,9 @@ export function calculateFilteredStatistics(options: {
     const altitudeBuckets: { [key: number]: number } = {};
     cruiseSegments.forEach((seg) => {
       if (seg.altitude_m) {
-        // Convert to feet and round to nearest 100ft for bucketing
-        const altFt = seg.altitude_m * METERS_TO_FEET;
-        const bucketFt = Math.round(altFt / 100) * 100;
+        const groundLevel = pathMinAlt.get(seg.path_id) ?? 0;
+        const altAglFt = (seg.altitude_m - groundLevel) * METERS_TO_FEET;
+        const bucketFt = Math.round(altAglFt / 100) * 100;
         altitudeBuckets[bucketFt] = (altitudeBuckets[bucketFt] || 0) + 1;
       }
     });

@@ -44,14 +44,12 @@ def calculate_duration_seconds(
 def format_flight_time(seconds: float) -> str:
     """Format flight time in seconds to human-readable string."""
     if seconds <= 0:
-        return "---"
+        return "0h 0m"
 
     hours = int(seconds // SECONDS_PER_HOUR)
     minutes = int((seconds % SECONDS_PER_HOUR) // 60)
 
-    if hours > 0:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m"
+    return f"{hours}h {minutes}m"
 
 
 def numeric_filename_key(path: str) -> tuple[int, int, str]:
