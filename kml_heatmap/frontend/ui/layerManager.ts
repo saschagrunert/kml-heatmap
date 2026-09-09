@@ -1,25 +1,60 @@
 /**
  * Layer Manager - Handles altitude/airspeed path rendering and legend updates
+ *
+ * Rendering strategy:
+ * - Paths are drawn on the shared canvas renderer (`app.pathRenderer`).
+ * - Consecutive, contiguous segments of the same path whose value rounds to
+ *   the same whole foot/knot are merged into ONE polyline. The merged
+ *   polyline keeps its segment list so the tooltip can show the data of the
+ *   segment nearest to the cursor (`findNearestSegment`).
+ * - Polylines are tracked per path id; selection changes only restyle them
+ *   (`updateSelectionStyles`) instead of rebuilding the layer.
+ * - Tooltip HTML is generated lazily when the tooltip opens.
  */
 import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import type { Range } from "../state/store";
 import type { PathInfo, PathSegment } from "../types";
-import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
+import type { Coordinate } from "../utils/geometry";
+import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
+import {
+  calculateAirspeedRange,
+  calculateAltitudeRange,
+  calculateSegmentProperties,
+  findNearestSegment,
+  formatAirspeedLabel,
+  formatAltitudeLabel,
+  shouldRenderSegment,
+} from "../features/layers";
+
+export type LayerMode = "altitude" | "airspeed";
 
 interface LayerConfig {
+  mode: LayerMode;
   layer: L.LayerGroup;
-  renderer: L.SVG;
   range: Range;
   getValue: (seg: PathSegment) => number;
   getColor: (value: number, min: number, max: number) => string;
+  computeRange: (
+    segments: PathSegment[],
+    selectedPathIds: Set<number>,
+    fallback: Range,
+  ) => Range;
   filterSegment?: (seg: PathSegment) => boolean;
-  storeSegments: boolean;
   legendMinId: string;
   legendMaxId: string;
   formatLegend: (value: number) => string;
+}
+
+interface PolylineEntry {
+  polyline: L.Polyline;
+  pathId: number;
+  /** Representative value (first segment of the run) used for colouring */
+  value: number;
+  /** Segments merged into this polyline, in drawing order */
+  segments: PathSegment[];
 }
 
 export function isTouchDevice(): boolean {
@@ -30,6 +65,10 @@ export class LayerManager {
   private app: MapApp;
   private pathInfoMapCache: Map<number, PathInfo> | null = null;
   private pathInfoMapSource: PathInfo[] | null = null;
+  private polylinesByPath: Record<LayerMode, Map<number, PolylineEntry[]>> = {
+    altitude: new Map(),
+    airspeed: new Map(),
+  };
 
   constructor(app: MapApp) {
     this.app = app;
@@ -43,178 +82,275 @@ export class LayerManager {
     ]);
   }
 
+  private getConfig(mode: LayerMode): LayerConfig {
+    if (mode === "altitude") {
+      return {
+        mode,
+        layer: this.app.altitudeLayer,
+        range: this.app.altitudeRange,
+        getValue: (seg) => seg.altitude_ft ?? 0,
+        getColor: getColorForAltitude,
+        computeRange: (segments, selected, fallback) =>
+          calculateAltitudeRange(segments, selected, fallback),
+        legendMinId: "legend-min",
+        legendMaxId: "legend-max",
+        formatLegend: formatAltitudeLabel,
+      };
+    }
+    return {
+      mode,
+      layer: this.app.airspeedLayer,
+      range: this.app.airspeedRange,
+      getValue: (seg) => seg.groundspeed_knots ?? 0,
+      getColor: getColorForAirspeed,
+      computeRange: (segments, selected, fallback) =>
+        calculateAirspeedRange(segments, selected, fallback),
+      filterSegment: (seg) => (seg.groundspeed_knots ?? 0) > 0,
+      legendMinId: "airspeed-legend-min",
+      legendMaxId: "airspeed-legend-max",
+      formatLegend: formatAirspeedLabel,
+    };
+  }
+
   redrawAltitudePaths(): void {
-    this.redrawPaths({
-      layer: this.app.altitudeLayer,
-      renderer: this.app.altitudeRenderer,
-      range: this.app.altitudeRange,
-      getValue: (seg) => seg.altitude_ft ?? 0,
-      getColor: (value, min, max) =>
-        window.KMLHeatmap.getColorForAltitude(value, min, max),
-      storeSegments: true,
-      legendMinId: "legend-min",
-      legendMaxId: "legend-max",
-      formatLegend: (value) => {
-        const ft = Math.round(value);
-        const m = Math.round(value * FEET_TO_METERS);
-        return ft + " ft (" + m + " m)";
-      },
-    });
+    this.redrawPaths(this.getConfig("altitude"));
   }
 
   redrawAirspeedPaths(): void {
-    this.redrawPaths({
-      layer: this.app.airspeedLayer,
-      renderer: this.app.airspeedRenderer,
-      range: this.app.airspeedRange,
-      getValue: (seg) => seg.groundspeed_knots ?? 0,
-      getColor: (value, min, max) =>
-        window.KMLHeatmap.getColorForAirspeed(value, min, max),
-      filterSegment: (seg) => (seg.groundspeed_knots ?? 0) > 0,
-      storeSegments: false,
-      legendMinId: "airspeed-legend-min",
-      legendMaxId: "airspeed-legend-max",
-      formatLegend: (value) => {
-        const kt = Math.round(value);
-        const kmh = Math.round(value * NAUTICAL_MILES_TO_KM);
-        return kt + " kt (" + kmh + " km/h)";
-      },
-    });
+    this.redrawPaths(this.getConfig("airspeed"));
+  }
+
+  /**
+   * Remove all polylines of a layer (used for hidden layers so they do not
+   * keep stale geometry around)
+   */
+  clearLayer(mode: LayerMode): void {
+    const config = this.getConfig(mode);
+    config.layer.clearLayers();
+    this.polylinesByPath[mode] = new Map();
+  }
+
+  /**
+   * Number of polylines currently drawn for a layer (merged runs)
+   */
+  getPolylineCount(mode: LayerMode): number {
+    let count = 0;
+    for (const entries of this.polylinesByPath[mode].values()) {
+      count += entries.length;
+    }
+    return count;
+  }
+
+  /**
+   * Colour range used for the layer: the selected paths' range when a
+   * selection exists, the layer's full range otherwise.
+   */
+  private resolveColorRange(config: LayerConfig): Range {
+    const selected = this.app.selectedPathIds;
+    if (selected.size === 0 || !this.app.currentData) {
+      return config.range;
+    }
+    return config.computeRange(
+      this.app.currentData.path_segments,
+      selected,
+      config.range,
+    );
   }
 
   private redrawPaths(config: LayerConfig): void {
-    if (!this.app.currentData) return;
+    const data = this.app.currentData;
+    if (!data) return;
 
     config.layer.clearLayers();
-    if (config.storeSegments) {
-      this.app.pathSegments = {};
-    }
+    const byPath = new Map<number, PolylineEntry[]>();
+    this.polylinesByPath[config.mode] = byPath;
 
-    // Calculate color range
-    let colorMin: number, colorMax: number;
-    if (this.app.selectedPathIds.size > 0) {
-      const selectedSegments = this.app.currentData.path_segments.filter(
-        (seg) => {
-          if (!this.app.selectedPathIds.has(seg.path_id)) return false;
-          if (config.filterSegment && !config.filterSegment(seg)) return false;
-          return true;
-        },
-      );
-      if (selectedSegments.length > 0) {
-        const values = selectedSegments.map(config.getValue);
-        let min = values[0] ?? 0;
-        let max = values[0] ?? 0;
-        for (let i = 1; i < values.length; i++) {
-          const v = values[i] ?? 0;
-          if (v < min) min = v;
-          if (v > max) max = v;
-        }
-        colorMin = min;
-        colorMax = max;
-      } else {
-        colorMin = config.range.min;
-        colorMax = config.range.max;
-      }
-    } else {
-      colorMin = config.range.min;
-      colorMax = config.range.max;
-    }
-
+    const { min: colorMin, max: colorMax } = this.resolveColorRange(config);
     const pathInfoMap = this.getPathInfoMap();
+    const filters = {
+      year: this.app.selectedYear,
+      aircraft: this.app.selectedAircraft,
+    };
+    const selectedPathIds = this.app.selectedPathIds;
+    const hasSelection = selectedPathIds.size > 0;
+    const isolate = this.app.isolateSelection;
 
-    this.app.currentData.path_segments.forEach((segment) => {
-      const pathId = segment.path_id;
-      const pathInfo = pathInfoMap.get(pathId);
+    // Current merge run
+    let run: PathSegment[] = [];
+    let runLatLngs: Coordinate[] = [];
+    let runPathId = -1;
+    let runKey = NaN;
+    let runEnd: Coordinate | null = null;
 
-      if (this.app.selectedYear !== "all") {
-        if (
-          pathInfo &&
-          pathInfo.year &&
-          pathInfo.year.toString() !== this.app.selectedYear
-        ) {
-          return;
-        }
-      }
-
-      if (this.app.selectedAircraft !== "all") {
-        if (
-          pathInfo &&
-          pathInfo.aircraft_registration !== this.app.selectedAircraft
-        ) {
-          return;
-        }
-      }
-
-      if (config.filterSegment && !config.filterSegment(segment)) return;
-
-      const isSelected = this.app.selectedPathIds.has(pathId);
-
-      if (this.app.selectedPathIds.size > 0 && !isSelected) {
-        if (this.app.isolateSelection) {
-          return;
-        }
-      }
-
-      const color = config.getColor(
-        config.getValue(segment),
+    const flush = (): void => {
+      if (run.length === 0) return;
+      const first = run[0]!;
+      const value = config.getValue(first);
+      const props = calculateSegmentProperties({
+        pathId: runPathId,
+        selectedPathIds,
+        isolateSelection: isolate,
+        colorFunction: config.getColor,
         colorMin,
         colorMax,
-      );
-      const inSolo = this.app.isolateSelection && isSelected;
-      const polyline = L.polyline(segment.coords ?? [], {
-        color: color,
-        weight: isSelected && !inSolo ? 6 : 4,
-        opacity: inSolo
-          ? 0.85
-          : isSelected
-            ? 1.0
-            : this.app.selectedPathIds.size > 0
-              ? 0.1
-              : 0.85,
+        value,
+      });
+      const polyline = L.polyline(runLatLngs, {
+        color: props.color,
+        weight: props.weight,
+        opacity: props.opacity,
         lineCap: "round",
         lineJoin: "round",
-        renderer: config.renderer,
+        renderer: this.app.pathRenderer,
         interactive: true,
+        bubblingMouseEvents: false,
       });
-
-      const tooltipHtml = this.formatSegmentTooltip(segment);
-      if (!isTouchDevice()) {
-        polyline.bindTooltip(tooltipHtml, {
-          sticky: true,
-          direction: "top",
-          offset: [0, -10],
-          opacity: 1,
-          className: "segment-tooltip",
-        });
-      }
-
+      const entry: PolylineEntry = {
+        polyline,
+        pathId: runPathId,
+        value,
+        segments: run,
+      };
+      this.bindSegmentInteractions(entry);
       polyline.addTo(config.layer);
 
-      polyline.on("click", (e: L.LeafletMouseEvent) => {
-        L.DomEvent.stopPropagation(e);
-        if (e.originalEvent) {
-          e.originalEvent.stopPropagation();
-        }
-        if (isTouchDevice() && this.app.map) {
-          L.popup({ className: "segment-tooltip" })
-            .setLatLng(e.latlng)
-            .setContent(tooltipHtml)
-            .openOn(this.app.map);
-        }
-        this.app.pathSelection.togglePathSelection(pathId);
-      });
+      const list = byPath.get(runPathId);
+      if (list) list.push(entry);
+      else byPath.set(runPathId, [entry]);
 
-      if (config.storeSegments) {
-        if (!this.app.pathSegments[pathId]) {
-          this.app.pathSegments[pathId] = [];
-        }
-        this.app.pathSegments[pathId].push(segment);
+      run = [];
+      runLatLngs = [];
+      runEnd = null;
+    };
+
+    for (const segment of data.path_segments) {
+      const pathId = segment.path_id;
+      const coords = segment.coords;
+
+      if (
+        !coords ||
+        !shouldRenderSegment(segment, pathInfoMap.get(pathId), filters) ||
+        (config.filterSegment && !config.filterSegment(segment)) ||
+        (hasSelection && isolate && !selectedPathIds.has(pathId))
+      ) {
+        flush();
+        continue;
       }
-    });
+
+      const key = Math.round(config.getValue(segment));
+      const contiguous =
+        runEnd !== null &&
+        pathId === runPathId &&
+        key === runKey &&
+        runEnd[0] === coords[0][0] &&
+        runEnd[1] === coords[0][1];
+
+      if (!contiguous) {
+        flush();
+        runPathId = pathId;
+        runKey = key;
+        runLatLngs = [coords[0]];
+      }
+      runLatLngs.push(coords[1]);
+      runEnd = coords[1];
+      run.push(segment);
+    }
+    flush();
 
     this.updateLegend(colorMin, colorMax, config);
-    this.app.airportManager.updateAirportOpacity();
-    this.app.statsManager.updateStatsForSelection();
+  }
+
+  /**
+   * Restyle the drawn polylines of the visible layers for the current
+   * selection (weight/opacity/colour range) without rebuilding them.
+   * Isolate mode changes which paths are drawn and therefore needs a redraw
+   * (see DataManager.updateLayers).
+   */
+  updateSelectionStyles(): void {
+    const modes: LayerMode[] = ["altitude", "airspeed"];
+    for (const mode of modes) {
+      const visible =
+        mode === "altitude"
+          ? this.app.altitudeVisible
+          : this.app.airspeedVisible;
+      if (!visible) continue;
+
+      const config = this.getConfig(mode);
+      const { min, max } = this.resolveColorRange(config);
+      const selectedPathIds = this.app.selectedPathIds;
+
+      for (const [pathId, entries] of this.polylinesByPath[mode]) {
+        for (const entry of entries) {
+          const props = calculateSegmentProperties({
+            pathId,
+            selectedPathIds,
+            isolateSelection: this.app.isolateSelection,
+            colorFunction: config.getColor,
+            colorMin: min,
+            colorMax: max,
+            value: entry.value,
+          });
+          entry.polyline.setStyle({
+            color: props.color,
+            weight: props.weight,
+            opacity: props.opacity,
+          });
+        }
+      }
+
+      this.updateLegend(min, max, config);
+    }
+  }
+
+  private bindSegmentInteractions(entry: PolylineEntry): void {
+    const { polyline, segments, pathId } = entry;
+    let current: PathSegment = segments[0]!;
+    const touch = isTouchDevice();
+
+    const pick = (latlng: L.LatLng): void => {
+      if (segments.length > 1) {
+        current =
+          findNearestSegment(segments, latlng.lat, latlng.lng) ?? current;
+      }
+    };
+    const tooltipHtml = (): string => this.formatSegmentTooltip(current);
+
+    if (!touch) {
+      // Registered before bindTooltip so the nearest segment is known when
+      // Leaflet's own mouseover handler opens the (lazy) tooltip
+      polyline.on("mouseover", (e: L.LeafletMouseEvent) => pick(e.latlng));
+      polyline.bindTooltip(tooltipHtml, {
+        sticky: true,
+        direction: "top",
+        offset: [0, -10],
+        opacity: 1,
+        className: "segment-tooltip",
+      });
+      if (segments.length > 1) {
+        polyline.on("mousemove", (e: L.LeafletMouseEvent) => {
+          const previous = current;
+          pick(e.latlng);
+          if (current !== previous) {
+            polyline.setTooltipContent(tooltipHtml());
+          }
+        });
+      }
+    }
+
+    polyline.on("click", (e: L.LeafletMouseEvent) => {
+      L.DomEvent.stopPropagation(e);
+      if (e.originalEvent) {
+        e.originalEvent.stopPropagation();
+      }
+      if (touch && this.app.map) {
+        pick(e.latlng);
+        L.popup({ className: "segment-tooltip" })
+          .setLatLng(e.latlng)
+          .setContent(tooltipHtml())
+          .openOn(this.app.map);
+      }
+      this.app.pathSelection.togglePathSelection(pathId);
+    });
   }
 
   private formatSegmentTooltip(segment: PathSegment): string {
@@ -227,7 +363,10 @@ export class LayerManager {
     });
   }
 
-  private getPathInfoMap(): Map<number, PathInfo> {
+  /**
+   * Path info indexed by id (cached per currentData.path_info instance)
+   */
+  getPathInfoMap(): Map<number, PathInfo> {
     const source = this.app.currentData?.path_info;
     if (!source) return new Map();
     if (source !== this.pathInfoMapSource) {
@@ -249,28 +388,18 @@ export class LayerManager {
   }
 
   updateAltitudeLegend(minAlt: number, maxAlt: number): void {
-    const format = (value: number) => {
-      const ft = Math.round(value);
-      const m = Math.round(value * FEET_TO_METERS);
-      return ft + " ft (" + m + " m)";
-    };
     this.updateLegend(minAlt, maxAlt, {
       legendMinId: "legend-min",
       legendMaxId: "legend-max",
-      formatLegend: format,
+      formatLegend: formatAltitudeLabel,
     });
   }
 
   updateAirspeedLegend(minSpeed: number, maxSpeed: number): void {
-    const format = (value: number) => {
-      const kt = Math.round(value);
-      const kmh = Math.round(value * NAUTICAL_MILES_TO_KM);
-      return kt + " kt (" + kmh + " km/h)";
-    };
     this.updateLegend(minSpeed, maxSpeed, {
       legendMinId: "airspeed-legend-min",
       legendMaxId: "airspeed-legend-max",
-      formatLegend: format,
+      formatLegend: formatAirspeedLabel,
     });
   }
 }

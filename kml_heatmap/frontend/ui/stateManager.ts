@@ -3,29 +3,83 @@
  */
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
+import type { SavedState } from "../types";
+import {
+  STATE_SCHEMA_VERSION,
+  encodeStateToUrl,
+  parseUrlParams,
+} from "../state/urlState";
 import { domCache } from "../utils/domCache";
 
-interface SavedState {
-  center: { lat: number; lng: number };
-  zoom: number;
-  heatmapVisible: boolean;
-  altitudeVisible: boolean;
-  airspeedVisible: boolean;
-  airportsVisible: boolean;
-  aviationVisible: boolean;
-  selectedYear: string;
-  selectedAircraft: string;
-  selectedPathIds: number[];
-  statsPanelVisible: boolean;
-  wrappedVisible: boolean;
-  buttonsHidden: boolean;
-  isolateSelection: boolean;
+const STORAGE_KEY = "kml-heatmap-state";
+
+const BOOLEAN_KEYS = [
+  "heatmapVisible",
+  "altitudeVisible",
+  "airspeedVisible",
+  "airportsVisible",
+  "aviationVisible",
+  "buttonsHidden",
+  "isolateSelection",
+  "statsPanelVisible",
+  "wrappedVisible",
+] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Pick the known, correctly typed fields of a candidate state object.
+ * Unknown keys and values of the wrong type are dropped.
+ */
+export function sanitizeSavedState(candidate: unknown): SavedState {
+  const result: SavedState = {};
+  if (!isRecord(candidate)) return result;
+
+  if (typeof candidate["selectedYear"] === "string") {
+    result.selectedYear = candidate["selectedYear"];
+  }
+  if (typeof candidate["selectedAircraft"] === "string") {
+    result.selectedAircraft = candidate["selectedAircraft"];
+  }
+  const zoom = candidate["zoom"];
+  if (typeof zoom === "number" && isFinite(zoom)) {
+    result.zoom = zoom;
+  }
+  const center = candidate["center"];
+  if (
+    isRecord(center) &&
+    typeof center["lat"] === "number" &&
+    isFinite(center["lat"]) &&
+    typeof center["lng"] === "number" &&
+    isFinite(center["lng"])
+  ) {
+    result.center = { lat: center["lat"], lng: center["lng"] };
+  }
+  for (const key of BOOLEAN_KEYS) {
+    const value = candidate[key];
+    if (typeof value === "boolean") {
+      result[key] = value;
+    }
+  }
+  // Path ids are only meaningful when they were written with the current
+  // id scheme; older payloads refer to different flights (see urlState)
+  const pathIds = candidate["selectedPathIds"];
+  if (
+    Array.isArray(pathIds) &&
+    candidate["schemaVersion"] === STATE_SCHEMA_VERSION
+  ) {
+    result.selectedPathIds = pathIds.filter(
+      (id: unknown): id is number => typeof id === "number" && isFinite(id),
+    );
+  }
+  return result;
 }
 
 export class StateManager {
   private app: MapApp;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
-  private unsubscribers: (() => void)[] = [];
 
   constructor(app: MapApp) {
     this.app = app;
@@ -44,20 +98,11 @@ export class StateManager {
       "airportsVisible",
       "aviationVisible",
       "buttonsHidden",
+      "statsPanelVisible",
+      "wrappedVisible",
     ];
     for (const key of persistKeys) {
-      this.unsubscribers.push(
-        app.store.subscribe(key, () => this.scheduleSave()),
-      );
-    }
-  }
-
-  destroy(): void {
-    this.unsubscribers.forEach((fn) => fn());
-    this.unsubscribers = [];
-    if (this.saveTimer !== null) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
+      app.store.subscribe(key, () => this.scheduleSave());
     }
   }
 
@@ -69,12 +114,22 @@ export class StateManager {
     }, 300);
   }
 
+  /**
+   * Wrapped visibility from the store; falls back to the DOM while the
+   * wrapped manager does not yet publish its state to the store.
+   */
+  private isWrappedVisible(): boolean {
+    const fromStore = this.app.store.get("wrappedVisible");
+    if (fromStore !== undefined) return fromStore;
+    const wrappedModalEl = domCache.get("wrapped-modal");
+    return wrappedModalEl ? wrappedModalEl.style.display === "flex" : false;
+  }
+
   saveMapState(): void {
     if (!this.app.map) return;
 
-    const statsPanelEl = domCache.get("stats-panel");
-    const wrappedModalEl = domCache.get("wrapped-modal");
     const state: SavedState = {
+      schemaVersion: STATE_SCHEMA_VERSION,
       center: this.app.map.getCenter(),
       zoom: this.app.map.getZoom(),
       heatmapVisible: this.app.heatmapVisible,
@@ -85,18 +140,14 @@ export class StateManager {
       selectedYear: this.app.selectedYear,
       selectedAircraft: this.app.selectedAircraft,
       selectedPathIds: Array.from(this.app.selectedPathIds),
-      statsPanelVisible: statsPanelEl
-        ? statsPanelEl.classList.contains("visible")
-        : false,
-      wrappedVisible: wrappedModalEl
-        ? wrappedModalEl.style.display === "flex"
-        : false,
+      statsPanelVisible: this.app.store.get("statsPanelVisible"),
+      wrappedVisible: this.isWrappedVisible(),
       buttonsHidden: this.app.buttonsHidden,
       isolateSelection: this.app.isolateSelection,
       // Note: replay state is NOT persisted - too complex to restore reliably
     };
     try {
-      localStorage.setItem("kml-heatmap-state", JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (_e) {
       // Silently fail if localStorage is not available
     }
@@ -107,16 +158,14 @@ export class StateManager {
 
   loadMapState(): SavedState | null {
     try {
-      const saved = localStorage.getItem("kml-heatmap-state");
+      const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed: unknown = JSON.parse(saved);
-        if (
-          typeof parsed === "object" &&
-          parsed !== null &&
-          "center" in parsed &&
-          "zoom" in parsed
-        ) {
-          return parsed as SavedState;
+        const state = sanitizeSavedState(parsed);
+        // A persisted map state always carries a view; treat anything else
+        // as corrupt
+        if (state.center && state.zoom !== undefined) {
+          return state;
         }
         return null;
       }
@@ -128,10 +177,10 @@ export class StateManager {
 
   /**
    * Update browser URL without reloading page
-   * @param {Object} state - Current state object
+   * @param state - Current state object
    */
   updateUrl(state: SavedState): void {
-    const urlParams = window.KMLHeatmap.encodeStateToUrl(state);
+    const urlParams = encodeStateToUrl(state);
     const newUrl = urlParams ? "?" + urlParams : window.location.pathname;
 
     // Use replaceState to avoid adding to browser history on every change
@@ -144,55 +193,21 @@ export class StateManager {
 
   /**
    * Load state with priority: URL params > localStorage > defaults
-   * @returns {Object|null} State object to restore
+   * @returns State object to restore, or null
    */
   loadState(): SavedState | null {
     // Priority 1: URL parameters
-    const urlState = window.KMLHeatmap.parseUrlParams(
+    const urlState = parseUrlParams(
       new URLSearchParams(window.location.search),
     );
     if (urlState && Object.keys(urlState).length > 0) {
-      const validated: Partial<SavedState> = {};
-      if (typeof urlState.selectedYear === "string")
-        validated.selectedYear = urlState.selectedYear;
-      if (typeof urlState.selectedAircraft === "string")
-        validated.selectedAircraft = urlState.selectedAircraft;
-      if (typeof urlState.zoom === "number" && isFinite(urlState.zoom))
-        validated.zoom = urlState.zoom;
-      if (
-        urlState.center &&
-        typeof urlState.center.lat === "number" &&
-        isFinite(urlState.center.lat) &&
-        typeof urlState.center.lng === "number" &&
-        isFinite(urlState.center.lng)
-      ) {
-        validated.center = urlState.center;
-      }
-      if (typeof urlState.heatmapVisible === "boolean")
-        validated.heatmapVisible = urlState.heatmapVisible;
-      if (typeof urlState.altitudeVisible === "boolean")
-        validated.altitudeVisible = urlState.altitudeVisible;
-      if (typeof urlState.airspeedVisible === "boolean")
-        validated.airspeedVisible = urlState.airspeedVisible;
-      if (typeof urlState.airportsVisible === "boolean")
-        validated.airportsVisible = urlState.airportsVisible;
-      if (typeof urlState.aviationVisible === "boolean")
-        validated.aviationVisible = urlState.aviationVisible;
-      if (typeof urlState.buttonsHidden === "boolean")
-        validated.buttonsHidden = urlState.buttonsHidden;
-      if (typeof urlState.isolateSelection === "boolean")
-        validated.isolateSelection = urlState.isolateSelection;
-      if (typeof urlState.statsPanelVisible === "boolean")
-        validated.statsPanelVisible = urlState.statsPanelVisible;
-      if (typeof urlState.wrappedVisible === "boolean")
-        validated.wrappedVisible = urlState.wrappedVisible;
-      if (Array.isArray(urlState.selectedPathIds)) {
-        validated.selectedPathIds = urlState.selectedPathIds.filter(
-          (id: unknown) => typeof id === "number" && isFinite(id),
-        );
-      }
+      const validated = sanitizeSavedState({
+        ...urlState,
+        // parseUrlParams only returns path ids that carried a current sv
+        schemaVersion: STATE_SCHEMA_VERSION,
+      });
       if (Object.keys(validated).length > 0) {
-        return validated as SavedState;
+        return validated;
       }
     }
 

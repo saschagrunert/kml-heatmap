@@ -1,0 +1,41 @@
+---
+# Install with: pip install pre-commit && pre-commit install
+# Generated files (docs/) and input data (data/) are excluded from the fixers.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+        exclude: ^(docs|data)/
+      - id: trailing-whitespace
+        exclude: ^(docs|data)/
+        args: [--markdown-linebreak-ext=md]
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Keep in sync with the ruff version in requirements-test.lock
+    rev: v0.16.4
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/rbubley/mirrors-prettier
+    # Keep in sync with the prettier version in package.json
+    rev: v3.9.6
+    hooks:
+      - id: prettier
+
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.50.1
+    hooks:
+      - id: typos
+        # Default args also carry --write-changes, which must not run in a hook
+        args: [--force-exclude]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

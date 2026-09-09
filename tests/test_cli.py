@@ -1,301 +1,291 @@
 """Tests for CLI module."""
 
-import tempfile
+import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from kml_heatmap.cli import main
 
-class TestMainCLI:
-    """Tests for main CLI function."""
+MINIMAL_KML = "<?xml version='1.0'?><kml></kml>"
 
-    def test_no_arguments_shows_usage(self, capsys):
-        """Test that running with no arguments shows usage and exits."""
-        from kml_heatmap.cli import main
 
-        with patch("sys.argv", ["kml-heatmap.py"]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
+@pytest.fixture
+def workspace(tmp_path):
+    """Input directory with a KML file and a separate output directory."""
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    kml = input_dir / "test.kml"
+    kml.write_text(MINIMAL_KML)
+    return input_dir, kml, tmp_path / "out"
 
-            assert exc_info.value.code == 2
 
-    def test_help_flag_short(self, capsys):
-        """Test -h flag shows help and exits successfully."""
-        from kml_heatmap.cli import main
+def _run(argv, create_return=True):
+    mock_create = MagicMock(return_value=create_return)
+    with (
+        patch("sys.argv", ["kml-heatmap", *argv]),
+        patch("kml_heatmap.renderer.create_progressive_heatmap", mock_create),
+    ):
+        main()
+    return mock_create
 
-        with patch("sys.argv", ["kml-heatmap.py", "-h"]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
 
-            assert exc_info.value.code == 0
-            captured = capsys.readouterr()
-            assert "--output-dir" in captured.out
-            assert "--debug" in captured.out
+class TestArgumentParsing:
+    def test_no_arguments_shows_usage(self):
+        with patch("sys.argv", ["kml-heatmap"]), pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 2
 
-    def test_help_flag_long(self, capsys):
-        """Test --help flag shows help and exits successfully."""
-        from kml_heatmap.cli import main
+    @pytest.mark.parametrize("flag", ["-h", "--help"])
+    def test_help(self, capsys, flag):
+        with patch("sys.argv", ["kml-heatmap", flag]), pytest.raises(SystemExit) as e:
+            main()
+        assert e.value.code == 0
+        out = capsys.readouterr().out
+        assert "--output-dir" in out
+        assert "--debug" in out
+        assert "IN PLACE" in out
 
-        with patch("sys.argv", ["kml-heatmap.py", "--help"]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-
-            assert exc_info.value.code == 0
-            captured = capsys.readouterr()
-            assert "--output-dir" in captured.out
-            assert "--debug" in captured.out
-
-    def test_debug_flag_enables_debug_mode(self):
-        """Test that --debug flag enables debug mode."""
-        from kml_heatmap.cli import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_kml = Path(tmpdir) / "test.kml"
-            test_kml.write_text("<?xml version='1.0'?><kml></kml>")
-
-            with (
-                patch("sys.argv", ["kml-heatmap.py", "--debug", str(test_kml)]),
-                patch("kml_heatmap.cli.set_debug_mode") as mock_set_debug,
-                patch(
-                    "kml_heatmap.renderer.create_progressive_heatmap",
-                    return_value=True,
-                ),
-            ):
-                main()
-
-            mock_set_debug.assert_called_once_with(True)
-
-    def test_output_dir_option(self):
-        """Test --output-dir option."""
-        from kml_heatmap.cli import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_kml = Path(tmpdir) / "test.kml"
-            test_kml.write_text("<?xml version='1.0'?><kml></kml>")
-            output_dir = Path(tmpdir) / "output"
-
-            mock_create = MagicMock(return_value=True)
-
-            with patch(
-                "sys.argv",
-                ["kml-heatmap.py", str(test_kml), "--output-dir", str(output_dir)],
-            ):
-                with patch(
-                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
-                ):
-                    main()
-
-                assert mock_create.called
-                call_args = mock_create.call_args
-                assert str(output_dir / "index.html") in str(call_args)
+    def test_version(self, capsys):
+        with (
+            patch("sys.argv", ["kml-heatmap", "--version"]),
+            pytest.raises(SystemExit) as e,
+        ):
+            main()
+        assert e.value.code == 0
+        assert "kml-heatmap 1.0.0" in capsys.readouterr().out
 
     def test_output_dir_without_argument_exits(self):
-        """Test --output-dir without directory name exits with error."""
-        from kml_heatmap.cli import main
-
-        with patch("sys.argv", ["kml-heatmap.py", "file.kml", "--output-dir"]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-
-            assert exc_info.value.code == 2
+        with (
+            patch("sys.argv", ["kml-heatmap", "file.kml", "--output-dir"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+        assert exc_info.value.code == 2
 
     def test_unknown_option_exits(self):
-        """Test unknown option exits with error."""
-        from kml_heatmap.cli import main
+        with (
+            patch("sys.argv", ["kml-heatmap", "--unknown-option"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+        assert exc_info.value.code == 2
 
-        with patch("sys.argv", ["kml-heatmap.py", "--unknown-option"]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
 
-            assert exc_info.value.code == 2
+class TestFileCollection:
+    def test_single_kml_file(self, workspace):
+        _, kml, out = workspace
+        mock_create = _run([str(kml), "--output-dir", str(out)])
+        assert mock_create.call_args[0][0] == [str(kml)]
 
-    def test_single_kml_file(self):
-        """Test processing a single KML file."""
-        from kml_heatmap.cli import main
+    def test_multiple_kml_files(self, workspace):
+        input_dir, kml, out = workspace
+        kml2 = input_dir / "test2.kml"
+        kml2.write_text(MINIMAL_KML)
+        mock_create = _run([str(kml), str(kml2), "--output-dir", str(out)])
+        assert mock_create.call_args[0][0] == [str(kml), str(kml2)]
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_kml = Path(tmpdir) / "test.kml"
-            test_kml.write_text("<?xml version='1.0'?><kml></kml>")
+    def test_directory_with_kml_files_sorted_numerically(self, tmp_path):
+        kml_dir = tmp_path / "kml_files"
+        kml_dir.mkdir()
+        for name in ("10_a_b.kml", "2_a_b.kml", "flight3.KML", "readme.txt"):
+            (kml_dir / name).write_text(MINIMAL_KML)
 
-            mock_create = MagicMock(return_value=True)
+        mock_create = _run([str(kml_dir), "--output-dir", str(tmp_path / "out")])
 
-            with patch("sys.argv", ["kml-heatmap.py", str(test_kml)]):
-                with patch(
-                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
-                ):
-                    main()
+        names = [Path(f).name for f in mock_create.call_args[0][0]]
+        assert names == ["2_a_b.kml", "10_a_b.kml", "flight3.KML"]
 
-                assert mock_create.called
-                kml_files = mock_create.call_args[0][0]
-                assert str(test_kml) in str(kml_files)
+    def test_directory_without_kml_files_exits(self, tmp_path, capsys):
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        with (
+            patch("sys.argv", ["kml-heatmap", str(empty_dir)]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+        assert exc_info.value.code == 1
+        assert "No KML files specified or found" in capsys.readouterr().err
 
-    def test_multiple_kml_files(self):
-        """Test processing multiple KML files."""
-        from kml_heatmap.cli import main
+    def test_nonexistent_file_is_skipped(self, workspace):
+        input_dir, kml, out = workspace
+        missing = input_dir / "nonexistent.kml"
+        mock_create = _run([str(missing), str(kml), "--output-dir", str(out)])
+        assert mock_create.call_args[0][0] == [str(kml)]
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_kml1 = Path(tmpdir) / "test1.kml"
-            test_kml2 = Path(tmpdir) / "test2.kml"
-            test_kml1.write_text("<?xml version='1.0'?><kml></kml>")
-            test_kml2.write_text("<?xml version='1.0'?><kml></kml>")
+    def test_no_valid_files_exits_with_stderr_message(self, tmp_path, capsys):
+        with (
+            patch("sys.argv", ["kml-heatmap", str(tmp_path / "nonexistent.kml")]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "No KML files specified or found" in captured.err
+        assert "No KML files" not in captured.out
 
-            mock_create = MagicMock(return_value=True)
+    def test_mixed_files_and_directories(self, tmp_path):
+        standalone = tmp_path / "one" / "standalone.kml"
+        standalone.parent.mkdir()
+        standalone.write_text(MINIMAL_KML)
+        kml_dir = tmp_path / "many"
+        kml_dir.mkdir()
+        (kml_dir / "a.kml").write_text(MINIMAL_KML)
+        (kml_dir / "b.kml").write_text(MINIMAL_KML)
 
-            with patch("sys.argv", ["kml-heatmap.py", str(test_kml1), str(test_kml2)]):
-                with patch(
-                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
-                ):
-                    main()
+        mock_create = _run(
+            [str(standalone), str(kml_dir), "--output-dir", str(tmp_path / "out")]
+        )
+        assert len(mock_create.call_args[0][0]) == 3
 
-                assert mock_create.called
-                kml_files = mock_create.call_args[0][0]
-                assert len(kml_files) == 2
-                assert str(test_kml1) in kml_files
-                assert str(test_kml2) in kml_files
 
-    def test_directory_with_kml_files(self):
-        """Test processing a directory containing KML files."""
-        from kml_heatmap.cli import main
+class TestOutputHandling:
+    def test_output_dir_option_and_creation(self, workspace):
+        _, kml, out = workspace
+        assert not out.exists()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            kml_dir = Path(tmpdir) / "kml_files"
-            kml_dir.mkdir()
-            (kml_dir / "flight1.kml").write_text("<?xml version='1.0'?><kml></kml>")
-            (kml_dir / "flight2.kml").write_text("<?xml version='1.0'?><kml></kml>")
-            (kml_dir / "flight3.KML").write_text("<?xml version='1.0'?><kml></kml>")
-            (kml_dir / "readme.txt").write_text("Not a KML file")
+        mock_create = _run([str(kml), "--output-dir", str(out)])
 
-            mock_create = MagicMock(return_value=True)
+        assert out.is_dir()
+        args = mock_create.call_args[0]
+        assert args[1] == str(out / "index.html")
+        assert args[2] == str(out / "data")
 
-            with patch("sys.argv", ["kml-heatmap.py", str(kml_dir)]):
-                with patch(
-                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
-                ):
-                    main()
+    def test_processing_failure_exits_with_stderr_message(self, workspace, capsys):
+        _, kml, out = workspace
+        with pytest.raises(SystemExit) as exc_info:
+            _run([str(kml), "--output-dir", str(out)], create_return=False)
+        assert exc_info.value.code == 1
+        assert "failed" in capsys.readouterr().err.lower()
 
-                assert mock_create.called
-                kml_files = mock_create.call_args[0][0]
-                assert len(kml_files) == 3
-                assert "flight1.kml" in kml_files[0]
-                assert "flight2.kml" in kml_files[1]
-                assert "flight3.KML" in kml_files[2]
+    def test_overlapping_output_dir_refused_before_processing(self, workspace, capsys):
+        input_dir, kml, _ = workspace
+        with pytest.raises(SystemExit) as exc_info:
+            _run([str(kml), "--output-dir", str(input_dir)])
+        assert exc_info.value.code == 1
+        assert "Refusing" in capsys.readouterr().err
 
-    def test_directory_without_kml_files_exits(self):
-        """Test directory without KML files exits with error."""
-        from kml_heatmap.cli import main
+    def test_default_output_dir_refused_when_input_is_in_cwd(
+        self, workspace, capsys, monkeypatch
+    ):
+        input_dir, kml, _ = workspace
+        monkeypatch.chdir(input_dir)
+        with pytest.raises(SystemExit) as exc_info:
+            _run([kml.name])
+        assert exc_info.value.code == 1
+        assert "Refusing" in capsys.readouterr().err
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            empty_dir = Path(tmpdir) / "empty"
-            empty_dir.mkdir()
 
-            with patch("sys.argv", ["kml-heatmap.py", str(empty_dir)]):
-                with pytest.raises(SystemExit) as exc_info:
-                    main()
+class TestDebugFlag:
+    def test_debug_flag_enables_debug_mode(self, workspace):
+        _, kml, out = workspace
+        with patch("kml_heatmap.cli.set_debug_mode") as mock_set_debug:
+            _run(["--debug", str(kml), "--output-dir", str(out)])
+        mock_set_debug.assert_called_once_with(True)
 
-                assert exc_info.value.code == 1
 
-    def test_nonexistent_file_shows_warning(self):
-        """Test that nonexistent file shows warning but continues."""
-        from kml_heatmap.cli import main
+class TestAircraftFiles:
+    def test_aircraft_json_from_every_input_directory(self, tmp_path):
+        dir_a = tmp_path / "a"
+        dir_b = tmp_path / "b"
+        dir_c = tmp_path / "c"
+        for d in (dir_a, dir_b, dir_c):
+            d.mkdir()
+            (d / "flight.kml").write_text(MINIMAL_KML)
+        (dir_a / "aircraft.json").write_text(json.dumps({"D-EAGJ": "A"}))
+        (dir_b / "aircraft.json").write_text(json.dumps({"D-EHYL": "B"}))
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_kml = Path(tmpdir) / "exists.kml"
-            test_kml.write_text("<?xml version='1.0'?><kml></kml>")
-            nonexistent = Path(tmpdir) / "nonexistent.kml"
+        mock_create = _run(
+            [
+                str(dir_a / "flight.kml"),
+                str(dir_b / "flight.kml"),
+                str(dir_c / "flight.kml"),
+                str(dir_a / "flight.kml"),
+                "--output-dir",
+                str(tmp_path / "out"),
+            ]
+        )
 
-            mock_create = MagicMock(return_value=True)
+        aircraft_files = mock_create.call_args.kwargs["aircraft_files"]
+        assert aircraft_files == [dir_a / "aircraft.json", dir_b / "aircraft.json"]
 
-            with patch("sys.argv", ["kml-heatmap.py", str(nonexistent), str(test_kml)]):
-                with patch(
-                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
-                ):
-                    main()
+    def test_no_aircraft_json(self, workspace):
+        _, kml, out = workspace
+        mock_create = _run([str(kml), "--output-dir", str(out)])
+        assert mock_create.call_args.kwargs["aircraft_files"] == []
 
-                assert mock_create.called
-                kml_files = mock_create.call_args[0][0]
-                assert len(kml_files) == 1
-                assert str(test_kml) in kml_files
 
-    def test_no_valid_files_exits(self, capsys):
-        """Test that no valid files exits with error."""
-        from kml_heatmap.cli import main
+class TestObfuscateFlag:
+    def test_obfuscate_runs_before_processing(self, workspace):
+        _, kml, out = workspace
+        calls = []
+        mock_create = MagicMock(
+            side_effect=lambda *a, **k: calls.append("create") or True
+        )
+        with (
+            patch(
+                "sys.argv",
+                ["kml-heatmap", str(kml), "--output-dir", str(out)],
+            ),
+            patch("kml_heatmap.renderer.create_progressive_heatmap", mock_create),
+            patch(
+                "kml_heatmap.obfuscate.obfuscate_kml_files",
+                side_effect=lambda paths: calls.append(("obfuscate", list(paths))) or 1,
+            ),
+        ):
+            main()
+        assert calls == [("obfuscate", [kml]), "create"]
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            nonexistent = Path(tmpdir) / "nonexistent.kml"
+    def test_obfuscate_skips_files_failing_validation(self, workspace):
+        input_dir, kml, out = workspace
+        link = input_dir / "link.kml"
+        os.symlink(kml, link)
+        empty = input_dir / "empty.kml"
+        empty.write_text("")
 
-            with patch("sys.argv", ["kml-heatmap.py", str(nonexistent)]):
-                with pytest.raises(SystemExit) as exc_info:
-                    main()
+        with patch("kml_heatmap.obfuscate.obfuscate_kml_files") as mock_obfuscate:
+            _run(
+                [
+                    str(link),
+                    str(empty),
+                    str(kml),
+                    "--output-dir",
+                    str(out),
+                ]
+            )
 
-                assert exc_info.value.code == 1
-                captured = capsys.readouterr()
-                assert "No KML files specified or found" in captured.out
+        mock_obfuscate.assert_called_once_with([kml])
 
-    def test_processing_failure_exits(self):
-        """Test that processing failure exits with code 1."""
-        from kml_heatmap.cli import main
+    def test_obfuscate_rewrites_input_in_place(self, tmp_path):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        kml = input_dir / "flight.kml"
+        kml.write_text(
+            "<kml><Placemark><gx:Track>"
+            "<when>2025-03-03T08:25:15Z</when><gx:coord>12.0 51.5 100</gx:coord>"
+            "</gx:Track></Placemark></kml>"
+        )
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_kml = Path(tmpdir) / "test.kml"
-            test_kml.write_text("<?xml version='1.0'?><kml></kml>")
+        _run([str(kml), "--output-dir", str(tmp_path / "out")])
 
-            mock_create = MagicMock(return_value=False)
+        assert "2025-01-01T08:25:15Z" in kml.read_text()
 
-            with (
-                patch("sys.argv", ["kml-heatmap.py", str(test_kml)]),
-                patch("kml_heatmap.renderer.create_progressive_heatmap", mock_create),
-                pytest.raises(SystemExit) as exc_info,
-            ):
-                main()
 
-            assert exc_info.value.code == 1
+class TestObfuscationFailsClosed:
+    def test_exits_when_a_file_still_contains_dates(self, tmp_path, monkeypatch):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        kml = input_dir / "1_DEAGJ_DA20.kml"
+        kml.write_text(
+            '<?xml version="1.0"?><kml><when>2024-03-14T10:00:00Z</when></kml>',
+            encoding="utf-8",
+        )
 
-    def test_output_directory_created(self):
-        """Test that output directory is created if it doesn't exist."""
-        from kml_heatmap.cli import main
+        # Simulate a rewrite that leaves the real date in place
+        monkeypatch.setattr("kml_heatmap.obfuscate.obfuscate_kml_files", lambda _: 0)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_kml = Path(tmpdir) / "test.kml"
-            test_kml.write_text("<?xml version='1.0'?><kml></kml>")
-            output_dir = Path(tmpdir) / "new_output_dir"
-            assert not output_dir.exists()
-
-            mock_create = MagicMock(return_value=True)
-
-            with (
-                patch(
-                    "sys.argv",
-                    ["kml-heatmap.py", str(test_kml), "--output-dir", str(output_dir)],
-                ),
-                patch("kml_heatmap.renderer.create_progressive_heatmap", mock_create),
-            ):
-                main()
-
-            assert output_dir.exists()
-            assert output_dir.is_dir()
-
-    def test_mixed_files_and_directories(self):
-        """Test processing mix of files and directories."""
-        from kml_heatmap.cli import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            file1 = Path(tmpdir) / "standalone.kml"
-            file1.write_text("<?xml version='1.0'?><kml></kml>")
-
-            kml_dir = Path(tmpdir) / "kml_files"
-            kml_dir.mkdir()
-            (kml_dir / "dir_file1.kml").write_text("<?xml version='1.0'?><kml></kml>")
-            (kml_dir / "dir_file2.kml").write_text("<?xml version='1.0'?><kml></kml>")
-
-            mock_create = MagicMock(return_value=True)
-
-            with patch("sys.argv", ["kml-heatmap.py", str(file1), str(kml_dir)]):
-                with patch(
-                    "kml_heatmap.renderer.create_progressive_heatmap", mock_create
-                ):
-                    main()
-
-                assert mock_create.called
-                kml_files = mock_create.call_args[0][0]
-                assert len(kml_files) == 3
+        with pytest.raises(SystemExit) as excinfo:
+            _run([str(kml), "--output-dir", str(tmp_path / "out")])
+        assert excinfo.value.code == 1

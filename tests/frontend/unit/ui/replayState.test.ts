@@ -15,6 +15,7 @@ describe("ReplayState", () => {
       expect(state.segments).toEqual([]);
       expect(state.airplaneMarker).toBeNull();
       expect(state.lastDrawnIndex).toBe(-1);
+      expect(state.currentIndex).toBe(-1);
       expect(state.lastBearing).toBeNull();
       expect(state.animationFrameId).toBeNull();
       expect(state.lastFrameTime).toBeNull();
@@ -25,6 +26,7 @@ describe("ReplayState", () => {
       expect(state.autoZoom).toBe(false);
       expect(state.lastZoom).toBeNull();
       expect(state.recenterTimestamps).toEqual([]);
+      expect(state.lastSeekPanTime).toBe(0);
     });
   });
 
@@ -33,15 +35,19 @@ describe("ReplayState", () => {
       const state = new ReplayState();
       state.currentTime = 120;
       state.lastDrawnIndex = 50;
+      state.currentIndex = 50;
       state.lastBearing = 180;
       state.recenterTimestamps = [1000, 2000, 3000];
+      state.lastSeekPanTime = 4000;
 
       state.resetDrawState();
 
       expect(state.currentTime).toBe(0);
       expect(state.lastDrawnIndex).toBe(-1);
+      expect(state.currentIndex).toBe(-1);
       expect(state.lastBearing).toBeNull();
       expect(state.recenterTimestamps).toEqual([]);
+      expect(state.lastSeekPanTime).toBe(0);
     });
 
     it("preserves non-drawing properties", () => {
@@ -53,6 +59,7 @@ describe("ReplayState", () => {
       state.colorMinAlt = 200;
       state.colorMaxAlt = 8000;
       state.autoZoom = true;
+      state.lastZoom = 12;
 
       state.resetDrawState();
 
@@ -63,6 +70,7 @@ describe("ReplayState", () => {
       expect(state.colorMinAlt).toBe(200);
       expect(state.colorMaxAlt).toBe(8000);
       expect(state.autoZoom).toBe(true);
+      expect(state.lastZoom).toBe(12);
     });
 
     it("can be called multiple times", () => {

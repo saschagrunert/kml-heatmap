@@ -11,9 +11,19 @@ import {
   calculateFlightTime,
   calculateFilteredStatistics,
 } from "../../../../kml_heatmap/frontend/calculations/statistics";
+import {
+  FEET_TO_METERS,
+  METERS_TO_FEET,
+} from "../../../../kml_heatmap/frontend/utils/constants";
+import type {
+  PathInfo,
+  PathSegment,
+} from "../../../../kml_heatmap/frontend/types";
+
+const FT = (meters: number): number => meters * METERS_TO_FEET;
 
 describe("statistics calculations", () => {
-  const mockPathInfo = [
+  const mockPathInfo: PathInfo[] = [
     {
       id: 1,
       year: 2025,
@@ -48,14 +58,14 @@ describe("statistics calculations", () => {
     },
   ];
 
-  const mockSegments = [
+  const mockSegments: PathSegment[] = [
     {
       path_id: 1,
       coords: [
         [52.5, 13.4],
         [50.0, 8.5],
       ],
-      altitude_m: 1000,
+      altitude_ft: FT(1000),
       groundspeed_knots: 120,
       time: 1000,
     },
@@ -65,7 +75,7 @@ describe("statistics calculations", () => {
         [50.0, 8.5],
         [50.1, 8.6],
       ],
-      altitude_m: 1500,
+      altitude_ft: FT(1500),
       groundspeed_knots: 130,
       time: 1100,
     },
@@ -75,7 +85,7 @@ describe("statistics calculations", () => {
         [50.1, 8.6],
         [52.5, 13.4],
       ],
-      altitude_m: 1200,
+      altitude_ft: FT(1200),
       groundspeed_knots: 125,
       time: 2000,
     },
@@ -85,7 +95,7 @@ describe("statistics calculations", () => {
         [48.3, 11.7],
         [50.9, 6.9],
       ],
-      altitude_m: 2000,
+      altitude_ft: FT(2000),
       groundspeed_knots: 140,
       time: 3000,
     },
@@ -95,7 +105,7 @@ describe("statistics calculations", () => {
         [50.9, 6.9],
         [48.3, 11.7],
       ],
-      altitude_m: 1800,
+      altitude_ft: FT(1800),
       groundspeed_knots: 135,
       time: 4000,
     },
@@ -103,8 +113,7 @@ describe("statistics calculations", () => {
 
   describe("filterPaths", () => {
     it("returns all paths when no filters applied", () => {
-      const result = filterPaths(mockPathInfo, "all", "all");
-      expect(result).toHaveLength(4);
+      expect(filterPaths(mockPathInfo, "all", "all")).toHaveLength(4);
     });
 
     it("filters by year", () => {
@@ -123,76 +132,50 @@ describe("statistics calculations", () => {
 
     it("filters by both year and aircraft", () => {
       const result = filterPaths(mockPathInfo, "2025", "D-EXYZ");
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe(4);
+      expect(result.map((p) => p.id)).toEqual([4]);
     });
 
     it("returns empty array when no matches", () => {
-      const result = filterPaths(mockPathInfo, "2023", "all");
-      expect(result).toHaveLength(0);
+      expect(filterPaths(mockPathInfo, "2023", "all")).toHaveLength(0);
     });
 
-    it("handles missing year in path data", () => {
-      const pathsWithMissingYear = [
+    it("excludes paths with missing year or aircraft when filtering on them", () => {
+      const paths: PathInfo[] = [
         { id: 1, aircraft_registration: "D-EAGJ" },
-        { id: 2, year: 2025, aircraft_registration: "D-EAGJ" },
+        { id: 2, year: 2025 },
+        { id: 3, year: 2025, aircraft_registration: "D-EAGJ" },
       ];
-      const result = filterPaths(pathsWithMissingYear, "2025", "all");
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe(2);
-    });
-
-    it("handles missing aircraft in path data", () => {
-      const pathsWithMissingAircraft = [
-        { id: 1, year: 2025 },
-        { id: 2, year: 2025, aircraft_registration: "D-EAGJ" },
-      ];
-      const result = filterPaths(pathsWithMissingAircraft, "all", "D-EAGJ");
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe(2);
+      expect(filterPaths(paths, "2025", "all").map((p) => p.id)).toEqual([
+        2, 3,
+      ]);
+      expect(filterPaths(paths, "all", "D-EAGJ").map((p) => p.id)).toEqual([
+        1, 3,
+      ]);
     });
   });
 
   describe("collectAirports", () => {
     it("collects unique airports", () => {
       const airports = collectAirports(mockPathInfo);
-      expect(airports.size).toBe(4);
-      expect(airports.has("EDAV")).toBe(true);
-      expect(airports.has("EDDF")).toBe(true);
-      expect(airports.has("EDDM")).toBe(true);
-      expect(airports.has("EDDK")).toBe(true);
+      expect([...airports].sort()).toEqual(["EDAV", "EDDF", "EDDK", "EDDM"]);
     });
 
-    it("handles paths without airports", () => {
-      const pathsWithoutAirports = [
-        { id: 1, year: 2025 },
-        { id: 2, year: 2025 },
-      ];
-      const airports = collectAirports(pathsWithoutAirports);
-      expect(airports.size).toBe(0);
+    it("handles paths without airports and partial airports", () => {
+      expect(collectAirports([{ id: 1 }, { id: 2 }]).size).toBe(0);
+      expect([...collectAirports([{ id: 1, start_airport: "EDAV" }])]).toEqual([
+        "EDAV",
+      ]);
+      expect([...collectAirports([{ id: 1, end_airport: "EDDF" }])]).toEqual([
+        "EDDF",
+      ]);
     });
 
     it("deduplicates airports", () => {
-      const duplicatePaths = [
+      const airports = collectAirports([
         { id: 1, start_airport: "EDAV", end_airport: "EDDF" },
         { id: 2, start_airport: "EDAV", end_airport: "EDDF" },
-      ];
-      const airports = collectAirports(duplicatePaths);
+      ]);
       expect(airports.size).toBe(2);
-    });
-
-    it("handles only start airports", () => {
-      const paths = [{ id: 1, start_airport: "EDAV" }];
-      const airports = collectAirports(paths);
-      expect(airports.size).toBe(1);
-      expect(airports.has("EDAV")).toBe(true);
-    });
-
-    it("handles only end airports", () => {
-      const paths = [{ id: 1, end_airport: "EDDF" }];
-      const airports = collectAirports(paths);
-      expect(airports.size).toBe(1);
-      expect(airports.has("EDDF")).toBe(true);
     });
   });
 
@@ -201,41 +184,32 @@ describe("statistics calculations", () => {
       const aircraft = aggregateAircraft(mockPathInfo);
       expect(aircraft).toHaveLength(2);
 
-      const eagj = aircraft.find((a) => a.registration === "D-EAGJ");
-      expect(eagj).toBeDefined();
+      const eagj = aircraft.find((a) => a.registration === "D-EAGJ")!;
       expect(eagj.flights).toBe(2);
       expect(eagj.type).toBe("DA40");
 
-      const exyz = aircraft.find((a) => a.registration === "D-EXYZ");
-      expect(exyz).toBeDefined();
+      const exyz = aircraft.find((a) => a.registration === "D-EXYZ")!;
       expect(exyz.flights).toBe(2);
       expect(exyz.type).toBe("C172");
     });
 
     it("sorts by flight count descending", () => {
-      const paths = [
+      const aircraft = aggregateAircraft([
         { id: 1, aircraft_registration: "A", aircraft_type: "T1" },
         { id: 2, aircraft_registration: "B", aircraft_type: "T2" },
         { id: 3, aircraft_registration: "B", aircraft_type: "T2" },
         { id: 4, aircraft_registration: "B", aircraft_type: "T2" },
-      ];
-      const aircraft = aggregateAircraft(paths);
+      ]);
 
-      expect(aircraft[0].registration).toBe("B");
-      expect(aircraft[0].flights).toBe(3);
-      expect(aircraft[1].registration).toBe("A");
-      expect(aircraft[1].flights).toBe(1);
+      expect(aircraft.map((a) => [a.registration, a.flights])).toEqual([
+        ["B", 3],
+        ["A", 1],
+      ]);
     });
 
-    it("handles paths without aircraft", () => {
-      const paths = [{ id: 1 }, { id: 2 }];
-      const aircraft = aggregateAircraft(paths);
-      expect(aircraft).toHaveLength(0);
-    });
-
-    it("handles empty array", () => {
-      const aircraft = aggregateAircraft([]);
-      expect(aircraft).toHaveLength(0);
+    it("handles paths without aircraft and empty input", () => {
+      expect(aggregateAircraft([{ id: 1 }, { id: 2 }])).toHaveLength(0);
+      expect(aggregateAircraft([])).toHaveLength(0);
     });
   });
 
@@ -249,95 +223,101 @@ describe("statistics calculations", () => {
     });
 
     it("returns empty array when no paths match", () => {
-      const result = filterSegmentsByPaths(mockSegments, []);
-      expect(result).toHaveLength(0);
+      expect(filterSegmentsByPaths(mockSegments, [])).toHaveLength(0);
     });
 
     it("returns all segments when all paths match", () => {
-      const result = filterSegmentsByPaths(mockSegments, mockPathInfo);
-      expect(result).toHaveLength(5);
+      expect(filterSegmentsByPaths(mockSegments, mockPathInfo)).toHaveLength(5);
     });
   });
 
   describe("calculateTotalDistance", () => {
     it("calculates total distance from segments", () => {
       const distance = calculateTotalDistance(mockSegments);
-      expect(distance).toBeGreaterThan(0);
-      expect(typeof distance).toBe("number");
+      // Berlin-Frankfurt (~427 km) x2 plus Munich-Cologne (~455 km) x2 plus ~13 km
+      expect(distance).toBeGreaterThan(1700);
+      expect(distance).toBeLessThan(1800);
     });
 
     it("returns 0 for empty segments", () => {
-      const distance = calculateTotalDistance([]);
-      expect(distance).toBe(0);
+      expect(calculateTotalDistance([])).toBe(0);
     });
 
-    it("handles segments without coords", () => {
-      const segments = [
-        { path_id: 1, altitude_m: 1000 },
+    it("ignores segments without or with malformed coords", () => {
+      const good: PathSegment = {
+        path_id: 2,
+        coords: [
+          [50.0, 8.0],
+          [51.0, 9.0],
+        ],
+      };
+      const expected = calculateTotalDistance([good]);
+      const segments: PathSegment[] = [
+        { path_id: 1, altitude_ft: 1000 },
         {
-          path_id: 2,
-          coords: [
-            [50.0, 8.0],
-            [51.0, 9.0],
-          ],
-          altitude_m: 1500,
+          path_id: 1,
+          coords: [[50.0, 8.0]] as unknown as PathSegment["coords"],
         },
+        good,
       ];
-      const distance = calculateTotalDistance(segments);
-      expect(distance).toBeGreaterThan(0);
-    });
-
-    it("handles malformed coords", () => {
-      const segments = [
-        { path_id: 1, coords: [[50.0, 8.0]], altitude_m: 1000 }, // Only 1 point
-        {
-          path_id: 2,
-          coords: [
-            [50.0, 8.0],
-            [51.0, 9.0],
-          ],
-          altitude_m: 1500,
-        },
-      ];
-      const distance = calculateTotalDistance(segments);
-      expect(distance).toBeGreaterThan(0);
+      expect(calculateTotalDistance(segments)).toBe(expected);
+      expect(expected).toBeGreaterThan(0);
     });
   });
 
   describe("calculateAltitudeStats", () => {
-    it("calculates altitude statistics", () => {
+    it("calculates altitude statistics in meters from altitude_ft", () => {
       const stats = calculateAltitudeStats(mockSegments);
 
-      expect(stats.min).toBe(1000);
-      expect(stats.max).toBe(2000);
+      expect(stats.min).toBeCloseTo(1000, 6);
+      expect(stats.max).toBeCloseTo(2000, 6);
       expect(stats.gain).toBeGreaterThan(0);
     });
 
     it("returns zeros for empty segments", () => {
-      const stats = calculateAltitudeStats([]);
-      expect(stats).toEqual({ min: 0, max: 0, gain: 0 });
+      expect(calculateAltitudeStats([])).toEqual({ min: 0, max: 0, gain: 0 });
     });
 
     it("calculates altitude gain correctly", () => {
-      const segments = [
-        { altitude_m: 1000 },
-        { altitude_m: 1500 }, // +500
-        { altitude_m: 1200 }, // descent, no gain
-        { altitude_m: 2000 }, // +800
+      const segments: PathSegment[] = [
+        { path_id: 1, altitude_ft: FT(1000) },
+        { path_id: 1, altitude_ft: FT(1500) }, // +500
+        { path_id: 1, altitude_ft: FT(1200) }, // descent, no gain
+        { path_id: 1, altitude_ft: FT(2000) }, // +800
       ];
-      const stats = calculateAltitudeStats(segments);
-      expect(stats.gain).toBe(1300); // 500 + 800
+      expect(calculateAltitudeStats(segments).gain).toBeCloseTo(1300, 6);
     });
 
-    it("handles segments with undefined altitude", () => {
-      const segments = [
-        { altitude_m: 1000 },
-        { altitude_m: undefined },
-        { altitude_m: 1500 },
+    it("skips segments with undefined altitude", () => {
+      const segments: PathSegment[] = [
+        { path_id: 1, altitude_ft: FT(1000) },
+        { path_id: 1 },
+        { path_id: 1, altitude_ft: FT(1500) },
       ];
       const stats = calculateAltitudeStats(segments);
-      expect(stats.min).toBe(1000);
-      expect(stats.max).toBe(1500);
+      expect(stats.min).toBeCloseTo(1000, 6);
+      expect(stats.max).toBeCloseTo(1500, 6);
+      expect(stats.gain).toBeCloseTo(500, 6);
+    });
+
+    it("resets the altitude gain at path boundaries (backend parity)", () => {
+      const segments: PathSegment[] = [
+        { path_id: 1, altitude_ft: FT(1000) },
+        { path_id: 1, altitude_ft: FT(1200) }, // +200
+        { path_id: 2, altitude_ft: FT(1500) }, // new path: no carry-over
+        { path_id: 2, altitude_ft: FT(1600) }, // +100
+      ];
+      expect(calculateAltitudeStats(segments).gain).toBeCloseTo(300, 6);
+    });
+
+    it("keeps negative altitudes", () => {
+      const segments: PathSegment[] = [
+        { path_id: 1, altitude_ft: FT(-420) },
+        { path_id: 1, altitude_ft: FT(100) },
+      ];
+      const stats = calculateAltitudeStats(segments);
+      expect(stats.min).toBeCloseTo(-420, 6);
+      expect(stats.gain).toBeCloseTo(520, 6);
     });
   });
 
@@ -346,104 +326,92 @@ describe("statistics calculations", () => {
       const stats = calculateSpeedStats(mockSegments);
 
       expect(stats.max).toBe(140);
-      expect(stats.avg).toBeCloseTo(130, 0); // (120+130+125+140+135)/5 = 130
+      expect(stats.avg).toBe(130); // (120+130+125+140+135)/5
     });
 
     it("returns zeros for empty segments", () => {
-      const stats = calculateSpeedStats([]);
-      expect(stats).toEqual({ max: 0, avg: 0 });
+      expect(calculateSpeedStats([])).toEqual({ max: 0, avg: 0 });
     });
 
-    it("filters out zero and negative speeds", () => {
-      const segments = [
-        { groundspeed_knots: 0 },
-        { groundspeed_knots: -10 },
-        { groundspeed_knots: 100 },
-        { groundspeed_knots: 200 },
+    it("filters out zero, negative and undefined speeds", () => {
+      const segments: PathSegment[] = [
+        { path_id: 1, groundspeed_knots: 0 },
+        { path_id: 1, groundspeed_knots: -10 },
+        { path_id: 1 },
+        { path_id: 1, groundspeed_knots: 100 },
+        { path_id: 1, groundspeed_knots: 200 },
       ];
-      const stats = calculateSpeedStats(segments);
-      expect(stats.max).toBe(200);
-      expect(stats.avg).toBe(150);
-    });
-
-    it("handles segments with undefined speed", () => {
-      const segments = [
-        { groundspeed_knots: 100 },
-        { groundspeed_knots: undefined },
-        { groundspeed_knots: 200 },
-      ];
-      const stats = calculateSpeedStats(segments);
-      expect(stats.max).toBe(200);
-      expect(stats.avg).toBe(150);
+      expect(calculateSpeedStats(segments)).toEqual({ max: 200, avg: 150 });
     });
   });
 
   describe("calculateLongestFlight", () => {
-    it("calculates longest flight distance", () => {
-      const longest = calculateLongestFlight(mockSegments);
-      expect(longest).toBeGreaterThan(0);
-      expect(typeof longest).toBe("number");
-    });
-
     it("returns 0 for empty segments", () => {
-      const longest = calculateLongestFlight([]);
-      expect(longest).toBe(0);
+      expect(calculateLongestFlight([])).toBe(0);
     });
 
-    it("identifies correct longest flight", () => {
-      const segments = [
+    it("identifies the longest flight by summing its segments", () => {
+      const segments: PathSegment[] = [
         {
           path_id: 1,
           coords: [
             [50.0, 8.0],
             [50.1, 8.1],
           ],
-        }, // Short
+        },
         {
           path_id: 2,
           coords: [
             [50.0, 8.0],
             [55.0, 13.0],
           ],
-        }, // Long
+        },
+        {
+          path_id: 2,
+          coords: [
+            [55.0, 13.0],
+            [55.5, 13.5],
+          ],
+        },
       ];
-      const longest = calculateLongestFlight(segments);
-      expect(longest).toBeGreaterThan(100); // Significantly longer than path 1
+      const path2 = calculateTotalDistance(segments.slice(1));
+      expect(calculateLongestFlight(segments)).toBeCloseTo(path2, 6);
+      expect(path2).toBeGreaterThan(100);
     });
   });
 
   describe("calculateFlightTime", () => {
-    it("calculates total flight time", () => {
-      const time = calculateFlightTime(mockSegments, mockPathInfo);
-      expect(time).toBeGreaterThan(0);
-    });
-
-    it("returns 0 for empty segments", () => {
-      const time = calculateFlightTime([], mockPathInfo);
-      expect(time).toBe(0);
-    });
-
-    it("calculates time for each path separately", () => {
-      const segments = [
+    it("sums the time span of each path", () => {
+      const segments: PathSegment[] = [
         { path_id: 1, time: 1000 },
         { path_id: 1, time: 1500 }, // Path 1: 500 seconds
         { path_id: 2, time: 2000 },
         { path_id: 2, time: 2800 }, // Path 2: 800 seconds
       ];
-      const pathInfo = [{ id: 1 }, { id: 2 }];
-      const time = calculateFlightTime(segments, pathInfo);
-      expect(time).toBe(1300); // 500 + 800
+      expect(calculateFlightTime(segments, [{ id: 1 }, { id: 2 }])).toBe(1300);
     });
 
-    it("handles segments without time", () => {
-      const segments = [
+    it("only counts paths in pathInfo", () => {
+      const segments: PathSegment[] = [
+        { path_id: 1, time: 0 },
+        { path_id: 1, time: 100 },
+        { path_id: 2, time: 0 },
+        { path_id: 2, time: 500 },
+      ];
+      expect(calculateFlightTime(segments, [{ id: 2 }])).toBe(500);
+    });
+
+    it("returns 0 for empty segments", () => {
+      expect(calculateFlightTime([], mockPathInfo)).toBe(0);
+    });
+
+    it("ignores segments without time", () => {
+      const segments: PathSegment[] = [
         { path_id: 1, time: 1000 },
-        { path_id: 1, time: undefined },
+        { path_id: 1 },
         { path_id: 1, time: 1500 },
       ];
-      const pathInfo = [{ id: 1 }];
-      const time = calculateFlightTime(segments, pathInfo);
-      expect(time).toBe(500); // Still calculates from min to max
+      expect(calculateFlightTime(segments, [{ id: 1 }])).toBe(500);
     });
   });
 
@@ -460,9 +428,27 @@ describe("statistics calculations", () => {
       expect(stats.num_airports).toBe(4);
       expect(stats.num_aircraft).toBe(2);
       expect(stats.total_distance_km).toBeGreaterThan(0);
-      expect(stats.total_distance_nm).toBeGreaterThan(0);
-      expect(stats.max_altitude_m).toBe(2000);
+      expect(stats.total_distance_nm).toBeCloseTo(
+        stats.total_distance_km * 0.539957,
+        2,
+      );
+      expect(stats.max_altitude_m).toBeCloseTo(2000, 6);
+      expect(stats.min_altitude_m).toBeCloseTo(1000, 6);
+      expect(stats.max_altitude_ft).toBeCloseTo(FT(2000), 6);
       expect(stats.max_groundspeed_knots).toBe(140);
+      expect(stats.avg_groundspeed_knots).toBe(130);
+      expect(stats.total_flight_time_seconds).toBe(100);
+      expect(stats.total_flight_time_str).toBe("0h 1m");
+      expect(stats.total_points).toBe(10); // 5 segments x 2 endpoints
+    });
+
+    it("uses the provided coordinate count for total_points", () => {
+      const stats = calculateFilteredStatistics({
+        pathInfo: mockPathInfo,
+        segments: mockSegments,
+        coordinateCount: 42,
+      });
+      expect(stats.total_points).toBe(42);
     });
 
     it("applies year filter", () => {
@@ -487,7 +473,7 @@ describe("statistics calculations", () => {
 
       expect(stats.num_paths).toBe(2);
       expect(stats.num_aircraft).toBe(1);
-      expect(stats.aircraft_list[0].registration).toBe("D-EAGJ");
+      expect(stats.aircraft_list[0]!.registration).toBe("D-EAGJ");
     });
 
     it("applies both filters", () => {
@@ -500,6 +486,21 @@ describe("statistics calculations", () => {
 
       expect(stats.num_paths).toBe(1);
       expect(stats.num_aircraft).toBe(1);
+    });
+
+    it("uses pre-filtered paths and segments when provided", () => {
+      const stats = calculateFilteredStatistics({
+        pathInfo: mockPathInfo,
+        segments: mockSegments,
+        year: "2023", // would match nothing
+        preFiltered: {
+          paths: [mockPathInfo[2]!],
+          segments: [mockSegments[3]!],
+        },
+      });
+
+      expect(stats.num_paths).toBe(1);
+      expect(stats.max_groundspeed_knots).toBe(140);
     });
 
     it("returns empty stats when no paths match", () => {
@@ -522,59 +523,127 @@ describe("statistics calculations", () => {
       });
     });
 
-    it("handles missing pathInfo", () => {
-      const stats = calculateFilteredStatistics({
-        pathInfo: null,
+    it("handles missing pathInfo or segments", () => {
+      const noPaths = calculateFilteredStatistics({
+        pathInfo: null as unknown as PathInfo[],
         segments: mockSegments,
       });
+      expect(noPaths.num_paths).toBe(0);
 
-      expect(stats.num_paths).toBe(0);
-      expect(stats.total_distance_km).toBe(0);
+      const noSegments = calculateFilteredStatistics({
+        pathInfo: mockPathInfo,
+        segments: null as unknown as PathSegment[],
+      });
+      expect(noSegments.total_distance_km).toBe(0);
     });
 
-    it("handles missing segments", () => {
+    it("computes cruise speed and most common cruise altitude above 1000 ft AGL", () => {
+      const segments: PathSegment[] = [
+        // ground level 500 ft
+        {
+          path_id: 1,
+          coords: [
+            [50.0, 8.0],
+            [50.01, 8.0],
+          ],
+          altitude_ft: 500,
+          groundspeed_knots: 30,
+          time: 0,
+        },
+        // 1400 ft AGL -> cruise
+        {
+          path_id: 1,
+          coords: [
+            [50.01, 8.0],
+            [50.1, 8.0],
+          ],
+          altitude_ft: 1900,
+          groundspeed_knots: 100,
+          time: 100,
+        },
+        // 1450 ft AGL -> cruise, same 100 ft bucket
+        {
+          path_id: 1,
+          coords: [
+            [50.1, 8.0],
+            [50.2, 8.0],
+          ],
+          altitude_ft: 1950,
+          groundspeed_knots: 100,
+          time: 200,
+        },
+      ];
       const stats = calculateFilteredStatistics({
-        pathInfo: mockPathInfo,
-        segments: null,
+        pathInfo: [{ id: 1 }],
+        segments,
       });
 
-      expect(stats.num_paths).toBe(0);
-      expect(stats.total_distance_km).toBe(0);
+      expect(stats.cruise_speed_knots).toBeCloseTo(100, 6);
+      expect(stats.most_common_cruise_altitude_ft).toBe(1400);
+      expect(stats.most_common_cruise_altitude_m).toBeCloseTo(
+        1400 * FEET_TO_METERS,
+        6,
+      );
     });
 
-    it("converts km to nautical miles correctly", () => {
+    it("resolves ties for the most common cruise altitude to the lowest bin", () => {
+      const seg = (altitudeFt: number, lat: number): PathSegment => ({
+        path_id: 1,
+        coords: [
+          [lat, 8.0],
+          [lat + 0.1, 8.0],
+        ],
+        altitude_ft: altitudeFt,
+        groundspeed_knots: 100,
+      });
       const stats = calculateFilteredStatistics({
-        pathInfo: mockPathInfo,
-        segments: mockSegments,
-        year: "all",
-        aircraft: "all",
+        pathInfo: [{ id: 1 }],
+        segments: [seg(0, 50), seg(3000, 50.1), seg(2000, 50.2)],
       });
 
-      // 1 km = 0.539957 nautical miles
-      const expectedNm = stats.total_distance_km * 0.539957;
-      expect(stats.total_distance_nm).toBeCloseTo(expectedNm, 2);
+      expect(stats.most_common_cruise_altitude_ft).toBe(2000);
+    });
+
+    it("leaves cruise fields undefined without cruise segments", () => {
+      const stats = calculateFilteredStatistics({
+        pathInfo: [{ id: 1 }],
+        segments: [
+          {
+            path_id: 1,
+            coords: [
+              [50.0, 8.0],
+              [50.1, 8.0],
+            ],
+            altitude_ft: 500,
+            groundspeed_knots: 100,
+          },
+        ],
+      });
+
+      expect(stats.cruise_speed_knots).toBeUndefined();
+      expect(stats.most_common_cruise_altitude_ft).toBeUndefined();
+      expect(stats.total_flight_time_str).toBeUndefined();
     });
 
     it("handles large datasets without stack overflow (10k segments)", () => {
-      // Generate 10k segments to simulate processing many KML files
-      const largeSegments = [];
-      const largePathInfo = [];
+      const largeSegments: PathSegment[] = [];
+      const largePathInfo: PathInfo[] = [];
 
       for (let i = 0; i < 10000; i++) {
         largeSegments.push({
-          path_id: `path${i}`,
+          path_id: Math.floor(i / 10),
           coords: [
             [50.0 + i * 0.001, 8.0 + i * 0.001],
             [50.1 + i * 0.001, 8.1 + i * 0.001],
           ],
-          altitude_m: 1000 + i,
+          altitude_ft: 1000 + i,
           groundspeed_knots: 100 + (i % 50),
           time: 1000 + i * 10,
         });
 
         if (i % 10 === 0) {
           largePathInfo.push({
-            id: `path${i}`,
+            id: Math.floor(i / 10),
             year: 2026,
             aircraft_registration: `D-TEST${i}`,
             start_airport: "EDDF",
@@ -583,90 +652,17 @@ describe("statistics calculations", () => {
         }
       }
 
-      // This should not throw a stack overflow error
-      expect(() => {
-        const stats = calculateFilteredStatistics({
-          pathInfo: largePathInfo,
-          segments: largeSegments,
-          year: "all",
-          aircraft: "all",
-        });
-        expect(stats.num_paths).toBe(1000);
-        expect(stats.total_distance_km).toBeGreaterThan(0);
-      }).not.toThrow();
-    });
-
-    it("handles calculateAltitudeStats with large arrays without stack overflow", () => {
-      // Generate 10k segments
-      const largeSegments = [];
-      for (let i = 0; i < 10000; i++) {
-        largeSegments.push({
-          path_id: `path${i}`,
-          altitude_m: 1000 + i,
-        });
-      }
-
-      expect(() => {
-        const stats = calculateAltitudeStats(largeSegments);
-        expect(stats.min).toBe(1000);
-        expect(stats.max).toBe(10999);
-      }).not.toThrow();
-    });
-
-    it("handles calculateSpeedStats with large arrays without stack overflow", () => {
-      // Generate 10k segments
-      const largeSegments = [];
-      for (let i = 0; i < 10000; i++) {
-        largeSegments.push({
-          path_id: `path${i}`,
-          groundspeed_knots: 100 + (i % 100),
-        });
-      }
-
-      expect(() => {
-        const stats = calculateSpeedStats(largeSegments);
-        expect(stats.max).toBe(199);
-        expect(stats.avg).toBeGreaterThan(0);
-      }).not.toThrow();
-    });
-
-    it("handles calculateLongestFlight with large arrays without stack overflow", () => {
-      // Generate 10k segments across many paths
-      const largeSegments = [];
-      for (let i = 0; i < 10000; i++) {
-        largeSegments.push({
-          path_id: `path${Math.floor(i / 10)}`,
-          coords: [
-            [50.0 + i * 0.01, 8.0],
-            [50.0 + i * 0.01 + 0.1, 8.1],
-          ],
-        });
-      }
-
-      expect(() => {
-        const longest = calculateLongestFlight(largeSegments);
-        expect(longest).toBeGreaterThan(0);
-      }).not.toThrow();
-    });
-
-    it("handles calculateFlightTime with large arrays without stack overflow", () => {
-      // Generate 10k segments
-      const largeSegments = [];
-      const largePathInfo = [];
-      for (let i = 0; i < 10000; i++) {
-        largeSegments.push({
-          path_id: `path${Math.floor(i / 100)}`,
-          time: 1000 + i * 10,
-        });
-        if (i % 100 === 0) {
-          largePathInfo.push({ id: `path${Math.floor(i / 100)}` });
-        }
-      }
-
-      expect(() => {
-        const time = calculateFlightTime(largeSegments, largePathInfo);
-        expect(time).toBeGreaterThan(0);
-      }).not.toThrow();
+      const stats = calculateFilteredStatistics({
+        pathInfo: largePathInfo,
+        segments: largeSegments,
+        year: "all",
+        aircraft: "all",
+      });
+      expect(stats.num_paths).toBe(1000);
+      expect(stats.total_distance_km).toBeGreaterThan(0);
+      expect(stats.max_altitude_ft).toBeCloseTo(10999, 6);
+      expect(stats.max_groundspeed_knots).toBe(149);
+      expect(stats.total_flight_time_seconds).toBe(1000 * 90);
     });
   });
 });

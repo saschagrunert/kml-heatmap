@@ -4,37 +4,27 @@
  */
 
 import { logDebug, logError } from "../utils/logger";
+import type { Coordinate } from "../utils/geometry";
 import type {
   KMLDataset,
   Airport,
   Metadata,
   DataLoaderOptions,
+  LoadingInfo,
+  PathSegment,
+  RawYearData,
 } from "../types";
-
-// Valid resolutions for data loading (security: whitelist)
-const VALID_RESOLUTIONS = ["data"] as const;
 
 /**
  * Validate year parameter to prevent path traversal attacks
  * @param year - Year string to validate
  * @returns true if valid
  */
-function isValidYear(year: string): boolean {
+export function isValidYear(year: string): boolean {
   // Must be 'all' or a 4-digit year between 2000-2099
   if (year === "all") return true;
   const yearNum = parseInt(year, 10);
   return /^\d{4}$/.test(year) && yearNum >= 2000 && yearNum <= 2099;
-}
-
-/**
- * Validate resolution parameter to prevent arbitrary file loading
- * @param resolution - Resolution string to validate
- * @returns true if valid
- */
-function isValidResolution(resolution: string): boolean {
-  return VALID_RESOLUTIONS.includes(
-    resolution as (typeof VALID_RESOLUTIONS)[number],
-  );
 }
 
 /**
@@ -59,143 +49,257 @@ export function loadScript(url: string): Promise<void> {
 }
 
 /**
- * Combine multiple year datasets into one
- * @param yearDatasets - Array of year data objects
- * @param resolution - Resolution identifier
+ * Generate global variable name for a per-year data file
+ * @param year - Year string
+ * @returns Global variable name (window.KML_DATA_<YEAR>)
+ */
+export function getGlobalVarName(year: string): string {
+  return "KML_DATA_" + year;
+}
+
+/**
+ * Expand the compact per-year file format into the in-memory dataset shape.
+ *
+ * The file stores segments as tuples keyed by path id:
+ * `[lat1, lon1, lat2, lon2, altitude_ft, groundspeed_knots, time?]`.
+ * Heatmap coordinates are derived as every segment's start point plus the
+ * last segment's end point of each path. Arrays are preallocated and each
+ * segment creates exactly one object.
+ * @param raw - Contents of window.KML_DATA_<YEAR>
+ * @returns Expanded dataset
+ */
+export function expandYearData(raw: RawYearData): KMLDataset {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error("Invalid year data: expected an object");
+  }
+  const segmentsByPath = raw.segments;
+  if (typeof segmentsByPath !== "object" || segmentsByPath === null) {
+    throw new Error("Invalid year data: missing 'segments' map");
+  }
+
+  // Integer-like object keys are iterated in ascending numeric order, so
+  // segments end up sorted by path id and, within a path, in file order.
+  const pathIds = Object.keys(segmentsByPath);
+
+  let totalSegments = 0;
+  let pathsWithSegments = 0;
+  for (const id of pathIds) {
+    const count = segmentsByPath[id]?.length ?? 0;
+    totalSegments += count;
+    if (count > 0) pathsWithSegments++;
+  }
+
+  const path_segments: PathSegment[] = new Array<PathSegment>(totalSegments);
+  const coordinates: Coordinate[] = new Array<Coordinate>(
+    totalSegments + pathsWithSegments,
+  );
+
+  let segmentIndex = 0;
+  let coordinateIndex = 0;
+  for (const id of pathIds) {
+    const tuples = segmentsByPath[id];
+    if (!tuples || tuples.length === 0) continue;
+    const pathId = Number(id);
+
+    for (let i = 0; i < tuples.length; i++) {
+      const t = tuples[i]!;
+      const start: Coordinate = [t[0], t[1]];
+      const end: Coordinate = [t[2], t[3]];
+      const segment: PathSegment = {
+        path_id: pathId,
+        coords: [start, end],
+        altitude_ft: t[4],
+        groundspeed_knots: t[5],
+      };
+      if (t.length > 6) {
+        segment.time = t[6];
+      }
+      path_segments[segmentIndex++] = segment;
+      coordinates[coordinateIndex++] = start;
+    }
+
+    const last = tuples[tuples.length - 1]!;
+    coordinates[coordinateIndex++] = [last[2], last[3]];
+  }
+
+  return {
+    coordinates,
+    path_segments,
+    path_info: Array.isArray(raw.path_info) ? raw.path_info : [],
+    original_points:
+      typeof raw.original_points === "number" ? raw.original_points : 0,
+  };
+}
+
+/**
+ * Combine multiple year datasets into one.
+ * Path ids are globally unique across years, so this is a plain
+ * concatenation: segment and path info objects are shared, not copied.
+ * @param yearDatasets - Array of year datasets (null entries are skipped)
  * @returns Combined dataset
  */
 export function combineYearData(
-  yearDatasets: (KMLDataset | null)[],
-  resolution: string,
+  yearDatasets: (KMLDataset | null | undefined)[],
 ): KMLDataset {
+  let coordinateCount = 0;
+  let segmentCount = 0;
+  let pathInfoCount = 0;
+  let originalPoints = 0;
+
+  for (const data of yearDatasets) {
+    if (!data) continue;
+    coordinateCount += data.coordinates.length;
+    segmentCount += data.path_segments.length;
+    pathInfoCount += data.path_info.length;
+    originalPoints += data.original_points || 0;
+  }
+
   const combined: KMLDataset = {
-    coordinates: [],
-    path_segments: [],
-    path_info: [],
-    resolution: resolution,
-    original_points: 0,
+    coordinates: new Array<Coordinate>(coordinateCount),
+    path_segments: new Array<PathSegment>(segmentCount),
+    path_info: new Array<KMLDataset["path_info"][number]>(pathInfoCount),
+    original_points: originalPoints,
   };
 
-  let pathIdOffset = 0;
-
-  yearDatasets.forEach((data) => {
-    if (!data) return;
-    // Use concat instead of spread operator to avoid stack overflow with large arrays
-    if (data.coordinates) {
-      combined.coordinates = combined.coordinates.concat(data.coordinates);
+  let ci = 0;
+  let si = 0;
+  let pi = 0;
+  for (const data of yearDatasets) {
+    if (!data) continue;
+    const coords = data.coordinates;
+    for (let i = 0; i < coords.length; i++) {
+      combined.coordinates[ci++] = coords[i]!;
     }
-    const yearPathCount = data.path_info ? data.path_info.length : 0;
-
-    if (data.path_segments) {
-      // Remap path_id to avoid collisions across years
-      const remapped = data.path_segments.map((seg) => ({
-        ...seg,
-        path_id: seg.path_id + pathIdOffset,
-      }));
-      combined.path_segments = combined.path_segments.concat(remapped);
+    const segments = data.path_segments;
+    for (let i = 0; i < segments.length; i++) {
+      combined.path_segments[si++] = segments[i]!;
     }
-    if (data.path_info) {
-      const remapped = data.path_info.map((pi) => ({
-        ...pi,
-        id: pi.id + pathIdOffset,
-      }));
-      combined.path_info = combined.path_info.concat(remapped);
+    const infos = data.path_info;
+    for (let i = 0; i < infos.length; i++) {
+      combined.path_info[pi++] = infos[i]!;
     }
-    pathIdOffset += yearPathCount;
-    combined.original_points += data.original_points || 0;
-  });
+  }
 
   return combined;
 }
 
 /**
- * Generate global variable name for data file
- * @param year - Year string
- * @param resolution - Resolution identifier
- * @returns Global variable name
- */
-export function getGlobalVarName(year: string, resolution: string): string {
-  return "KML_DATA_" + year + "_" + resolution.toUpperCase().replace(/-/g, "_");
-}
-
-/**
- * Generate cache key for data
- * @param resolution - Resolution identifier
- * @param year - Year string
- * @returns Cache key
- */
-export function getCacheKey(resolution: string, year: string): string {
-  return resolution + "_" + year;
-}
-
-/**
- * Data loader class with caching
+ * Data loader class with caching, in-flight request deduplication and a
+ * reference-counted loading indicator.
  */
 export class DataLoader {
   private dataDir: string;
-  private cache: Record<string, KMLDataset>;
+  private cache: Map<string, KMLDataset>;
+  private inflight: Map<string, Promise<KMLDataset | null>>;
+  private loadingDepth: number;
   private scriptLoader: (url: string) => Promise<void>;
-  private showLoading: () => void;
+  private showLoading: (info: LoadingInfo) => void;
   private hideLoading: () => void;
   private getWindow: () => Window & typeof globalThis;
+  private onLoadError: (failedYears: string[]) => void;
 
   constructor(options: DataLoaderOptions = {}) {
     this.dataDir = options.dataDir || "data";
-    this.cache = {};
+    this.cache = new Map();
+    this.inflight = new Map();
+    this.loadingDepth = 0;
     this.scriptLoader = options.scriptLoader || loadScript;
     this.showLoading = options.showLoading || (() => {});
     this.hideLoading = options.hideLoading || (() => {});
     this.getWindow = options.getWindow || (() => window);
+    this.onLoadError = options.onLoadError || (() => {});
   }
 
   /**
-   * Load data for a specific resolution and year
-   * @param resolution - Resolution identifier (always 'data')
+   * File size(s) from metadata.year_file_bytes when metadata is available
+   */
+  private knownBytes(year: string): number | undefined {
+    const sizes = this.getWindow().KML_METADATA?.year_file_bytes;
+    if (!sizes) return undefined;
+    if (year !== "all") return sizes[year];
+    let total = 0;
+    for (const size of Object.values(sizes)) total += size;
+    return total;
+  }
+
+  private beginLoading(year: string): void {
+    if (this.loadingDepth === 0) {
+      this.showLoading({ year, bytes: this.knownBytes(year) });
+    }
+    this.loadingDepth++;
+  }
+
+  private endLoading(): void {
+    this.loadingDepth--;
+    if (this.loadingDepth <= 0) {
+      this.loadingDepth = 0;
+      this.hideLoading();
+    }
+  }
+
+  /**
+   * Load data for a year or all years ('all')
    * @param year - Year string or 'all'
    * @returns Data object or null on error
    */
-  async loadData(
-    resolution: string,
-    year: string = "all",
-  ): Promise<KMLDataset | null> {
-    // Security: Validate inputs to prevent path traversal and arbitrary file loading
+  async loadData(year: string = "all"): Promise<KMLDataset | null> {
+    // Security: Validate input to prevent path traversal and arbitrary file loading
     if (!isValidYear(year)) {
       logError(`Invalid year parameter: ${year}`);
       return null;
     }
-    if (!isValidResolution(resolution)) {
-      logError(`Invalid resolution parameter: ${resolution}`);
-      return null;
-    }
 
-    const cacheKey = getCacheKey(resolution, year);
-
-    // Check cache
-    if (this.cache[cacheKey]) {
-      return this.cache[cacheKey];
-    }
-
-    // Handle 'all' years by combining
     if (year === "all") {
-      return await this.loadAndCombineAllYears(resolution);
+      return this.loadAndCombineAllYears();
     }
 
-    this.showLoading();
-    try {
-      const globalVarName = getGlobalVarName(year, resolution);
-      const win = this.getWindow();
+    const data = await this.getYear(year);
+    if (!data) {
+      this.onLoadError([year]);
+    }
+    return data;
+  }
 
-      const globals = win as unknown as Record<string, unknown>;
+  /**
+   * Cached and de-duplicated single-year load
+   */
+  private getYear(year: string): Promise<KMLDataset | null> {
+    const cached = this.cache.get(year);
+    if (cached) return Promise.resolve(cached);
+
+    const pending = this.inflight.get(year);
+    if (pending) return pending;
+
+    const promise = this.loadYear(year).finally(() => {
+      this.inflight.delete(year);
+    });
+    this.inflight.set(year, promise);
+    return promise;
+  }
+
+  private async loadYear(year: string): Promise<KMLDataset | null> {
+    this.beginLoading(year);
+    try {
+      const globalVarName = getGlobalVarName(year);
+      const globals = this.getWindow() as unknown as Record<string, unknown>;
+
       if (!globals[globalVarName]) {
-        logDebug("Loading " + resolution + " (" + year + ")...");
-        const filename = this.dataDir + "/" + year + "/" + resolution + ".js";
-        await this.scriptLoader(filename);
+        logDebug("Loading data (" + year + ")...");
+        await this.scriptLoader(this.dataDir + "/" + year + "/data.js");
       }
 
-      const data = globals[globalVarName] as KMLDataset;
-      this.cache[cacheKey] = data;
+      const raw = globals[globalVarName] as RawYearData | undefined;
+      if (!raw) {
+        throw new Error("Global " + globalVarName + " was not defined");
+      }
+
+      const data = expandYearData(raw);
+      // Drop the raw global so the data is not held twice in memory
+      delete globals[globalVarName];
+
+      this.cache.set(year, data);
       logDebug(
-        "✓ Loaded " + resolution + " (" + year + "):",
+        "✓ Loaded data (" + year + "):",
         data.original_points + " points",
       );
       return data;
@@ -203,57 +307,68 @@ export class DataLoader {
       logError("Error loading data for year " + year + ":", error);
       return null;
     } finally {
-      this.hideLoading();
+      this.endLoading();
     }
   }
 
   /**
-   * Load and combine data from all available years
-   * @param resolution - Resolution identifier
+   * Load and combine data from all available years.
+   * Years that fail to load are reported through onLoadError; the remaining
+   * years are still combined. Returns null only when nothing could be loaded.
    * @returns Combined data object or null on error
    */
-  async loadAndCombineAllYears(resolution: string): Promise<KMLDataset | null> {
-    const cacheKey = getCacheKey(resolution, "all");
+  loadAndCombineAllYears(): Promise<KMLDataset | null> {
+    const cached = this.cache.get("all");
+    if (cached) return Promise.resolve(cached);
 
-    // Check cache
-    if (this.cache[cacheKey]) {
-      return this.cache[cacheKey];
-    }
+    const pending = this.inflight.get("all");
+    if (pending) return pending;
 
-    this.showLoading();
+    const promise = this.loadAllYears().finally(() => {
+      this.inflight.delete("all");
+    });
+    this.inflight.set("all", promise);
+    return promise;
+  }
+
+  private async loadAllYears(): Promise<KMLDataset | null> {
+    this.beginLoading("all");
     try {
-      // Get available years from metadata
       const metadata = await this.loadMetadata();
       if (!metadata || !metadata.available_years) {
         logError("No metadata or available years found");
         return null;
       }
 
-      logDebug(
-        "Loading all years for " + resolution + ":",
-        metadata.available_years,
+      const years = metadata.available_years.map((y) => String(y));
+      logDebug("Loading all years:", years);
+
+      // Load all year files in parallel (deduplicated per year)
+      const yearDatasets = await Promise.all(
+        years.map((year) => this.getYear(year)),
       );
 
-      // Load all year files in parallel
-      const promises = metadata.available_years.map((year) =>
-        this.loadData(resolution, year.toString()),
-      );
-      const yearDatasets = await Promise.all(promises);
+      const failedYears = years.filter((_, i) => !yearDatasets[i]);
+      if (failedYears.length > 0) {
+        this.onLoadError(failedYears);
+      }
+      if (years.length > 0 && failedYears.length === years.length) {
+        return null;
+      }
 
-      // Combine datasets
-      const combined = combineYearData(yearDatasets, resolution);
-
-      this.cache[cacheKey] = combined;
-      logDebug(
-        "Combined all years for " + resolution + ":",
-        combined.original_points + " points",
-      );
+      const combined = combineYearData(yearDatasets);
+      // Caching a partial combination would make the gap permanent for the
+      // rest of the session; retry the missing years on the next call
+      if (failedYears.length === 0) {
+        this.cache.set("all", combined);
+      }
+      logDebug("Combined all years:", combined.original_points + " points");
       return combined;
     } catch (error) {
       logError("Error loading and combining all years:", error);
       return null;
     } finally {
-      this.hideLoading();
+      this.endLoading();
     }
   }
 
@@ -295,17 +410,15 @@ export class DataLoader {
    * Clear all cached data
    */
   clearCache(): void {
-    this.cache = {};
+    this.cache.clear();
   }
 
   /**
    * Check if data is cached
-   * @param resolution - Resolution identifier
-   * @param year - Year string
+   * @param year - Year string or 'all'
    * @returns True if cached
    */
-  isCached(resolution: string, year: string): boolean {
-    const cacheKey = getCacheKey(resolution, year);
-    return cacheKey in this.cache;
+  isCached(year: string): boolean {
+    return this.cache.has(year);
   }
 }

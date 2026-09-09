@@ -1,10 +1,15 @@
 """Airport coordinate lookup from ICAO codes using OurAirports with local caching."""
 
+import contextlib
 import csv
+import os
 import re
+import ssl
+import tempfile
 import threading
 import time
 import urllib.error
+from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
@@ -39,56 +44,124 @@ OURAIRPORTS_URL = "https://davidmegginson.github.io/ourairports-data/airports.cs
 CACHE_FILE = CACHE_DIR / "airports.csv"
 CACHE_LOCK_FILE = CACHE_DIR / "airports.lock"
 CACHE_MAX_AGE_DAYS = 30
+DOWNLOAD_TIMEOUT_SECONDS = 30
+MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
+REQUIRED_COLUMNS = ("ident", "name", "latitude_deg", "longitude_deg")
+
+AirportRecord = tuple[float, float, str, str]
 
 # Global cache for parsed airport data
-_airport_cache: dict[str, tuple[float, float, str, str]] | None = None
+_airport_cache: dict[str, AirportRecord] | None = None
 
 # Thread lock for database loading (prevents race conditions within a single process)
 _cache_lock = threading.Lock()
 
 
+def _is_valid_csv_file(path: Path) -> bool:
+    """Check that a CSV file is non-empty, complete and has the required header."""
+    try:
+        if path.stat().st_size == 0:
+            return False
+        with open(path, "rb") as f:
+            header_line = f.readline()
+            f.seek(-1, os.SEEK_END)
+            last_byte = f.read(1)
+        if last_byte != b"\n":
+            return False  # truncated download
+        header = header_line.decode("utf-8", errors="replace").strip()
+        columns = next(csv.reader([header]))
+    except OSError, csv.Error, StopIteration, UnicodeDecodeError:
+        return False
+
+    return all(column in columns for column in REQUIRED_COLUMNS)
+
+
 def _is_cache_valid() -> bool:
-    """Check if cached airport data is still valid."""
+    """Check if cached airport data is present, recent and well-formed."""
     if not CACHE_FILE.exists():
         return False
 
-    # Check file age
     file_age_seconds = time.time() - CACHE_FILE.stat().st_mtime
     file_age_days = file_age_seconds / (24 * 3600)
+    if file_age_days >= CACHE_MAX_AGE_DAYS:
+        return False
 
-    return file_age_days < CACHE_MAX_AGE_DAYS
+    return _is_valid_csv_file(CACHE_FILE)
 
 
 def _download_airport_database() -> bool:
-    """Download OurAirports database to cache."""
+    """Download the OurAirports database into the cache atomically."""
+    tmp_path: Path | None = None
     try:
-        # Create cache directory if it doesn't exist
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_dir = CACHE_FILE.parent
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info("📥 Downloading OurAirports database...")
-        with (
-            urlopen(OURAIRPORTS_URL, timeout=30) as response,  # nosec B310
-            open(CACHE_FILE, "wb") as out_file,
-        ):
-            out_file.write(response.read())
+        context = ssl.create_default_context()
+        with urlopen(  # nosec B310
+            OURAIRPORTS_URL, timeout=DOWNLOAD_TIMEOUT_SECONDS, context=context
+        ) as response:
+            data = response.read(MAX_DOWNLOAD_BYTES + 1)
 
-        # Verify downloaded file
-        if CACHE_FILE.exists() and CACHE_FILE.stat().st_size > 0:
-            logger.info(
-                "✓ Downloaded %.1f MB airport database",
-                CACHE_FILE.stat().st_size / 1024 / 1024,
+        if len(data) > MAX_DOWNLOAD_BYTES:
+            logger.warning(
+                "✗ Airport database exceeds %d MB, refusing to cache it",
+                MAX_DOWNLOAD_BYTES // (1024 * 1024),
             )
-            return True
-        else:
-            logger.warning("✗ Downloaded file is empty")
             return False
+
+        # Fail before downloading ~12 MB when the cache cannot be written
+        if not os.access(cache_dir, os.W_OK):
+            logger.warning("✗ Airport cache directory is not writable: %s", cache_dir)
+            return False
+
+        with tempfile.NamedTemporaryFile(
+            dir=cache_dir, prefix="airports.", suffix=".tmp", delete=False
+        ) as tmp:
+            tmp.write(data)
+            tmp_path = Path(tmp.name)
+
+        if not _is_valid_csv_file(tmp_path):
+            logger.warning("✗ Downloaded airport database is empty or invalid")
+            return False
+
+        os.replace(tmp_path, CACHE_FILE)
+        tmp_path = None
+        logger.info("✓ Downloaded %.1f MB airport database", len(data) / 1024 / 1024)
+        return True
 
     except (OSError, urllib.error.URLError, ValueError) as e:
         logger.warning("✗ Failed to download airport database: %s", e)
         return False
+    finally:
+        if tmp_path is not None:
+            with contextlib.suppress(OSError):
+                tmp_path.unlink()
 
 
-def _load_airport_database() -> dict[str, tuple[float, float, str, str]]:
+def _read_airport_csv(path: Path) -> dict[str, AirportRecord]:
+    """Parse the airports CSV into a mapping of ICAO code to record."""
+    airports: dict[str, AirportRecord] = {}
+    with open(path, encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            icao = (row.get("ident") or "").strip().upper()
+            # Only include airports with valid ICAO codes (4 characters)
+            if not icao or len(icao) != 4:
+                continue
+            try:
+                lat = float(row.get("latitude_deg") or "")
+                lon = float(row.get("longitude_deg") or "")
+            except ValueError:
+                continue
+            name = (row.get("name") or "").strip()
+            country = (row.get("iso_country") or "").strip()
+            if name:
+                airports[icao] = (lat, lon, name, country)
+    return airports
+
+
+def _load_airport_database() -> dict[str, AirportRecord]:
     """Load airport database from cache or download if needed."""
     global _airport_cache
 
@@ -102,52 +175,41 @@ def _load_airport_database() -> dict[str, tuple[float, float, str, str]]:
         if _airport_cache is not None:
             return _airport_cache
 
-        # Use file-based lock to coordinate across processes (Unix only)
-        # Create cache directory if it doesn't exist
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        # Use file-based lock to coordinate across processes (Unix only). A cache
+        # directory that cannot be written (read-only mount, foreign owner) only
+        # disables the lock; loading continues.
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.debug("Cannot create cache directory %s: %s", CACHE_DIR, e)
 
         lock_file = None
         try:
-            # Acquire exclusive lock if supported (works across processes on Unix)
             if HAS_FCNTL:
-                lock_file = open(CACHE_LOCK_FILE, "w", encoding="utf-8")  # noqa: SIM115
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    lock_file = open(CACHE_LOCK_FILE, "w", encoding="utf-8")  # noqa: SIM115
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                except OSError as e:
+                    logger.debug(
+                        "Cannot lock %s, continuing without: %s", CACHE_LOCK_FILE, e
+                    )
+                    lock_file = None
 
             # Check again if cache is valid after acquiring lock
             # (another process might have downloaded it while we waited)
             if not _is_cache_valid():
-                logger.debug("Airport database cache is stale or missing")
+                logger.debug("Airport database cache is stale, missing or invalid")
                 _download_airport_database()
 
-            # Try to load from cache
             if CACHE_FILE.exists():
                 try:
-                    airports = {}
-                    with open(CACHE_FILE, encoding="utf-8") as f:
-                        reader = csv.DictReader(f)
-                        for row in reader:
-                            icao = row.get("ident", "").strip().upper()
-                            # Only include airports with valid ICAO codes (4 characters)
-                            if icao and len(icao) == 4:
-                                try:
-                                    lat = float(row.get("latitude_deg", ""))
-                                    lon = float(row.get("longitude_deg", ""))
-                                    name = row.get("name", "").strip()
-                                    country = row.get("iso_country", "").strip()
-                                    if name:
-                                        airports[icao] = (lat, lon, name, country)
-                                except (ValueError, TypeError):
-                                    # Skip invalid entries
-                                    continue
-
+                    airports = _read_airport_csv(CACHE_FILE)
                     _airport_cache = airports
                     logger.debug("Loaded %s airports from cache", f"{len(airports):,}")
                     return airports
-
                 except (OSError, csv.Error, ValueError, UnicodeDecodeError) as e:
                     logger.warning("Failed to load airport cache: %s", e)
 
-            # Return empty dict if cache loading failed
             logger.warning("Airport database unavailable - airport lookups will fail")
             _airport_cache = {}
             return _airport_cache
@@ -197,7 +259,7 @@ def lookup_airport_country(icao_code: str) -> str | None:
 
 def get_cache_info() -> dict[str, Any]:
     """Get information about the airport database cache."""
-    info = {
+    info: dict[str, Any] = {
         "cache_file": str(CACHE_FILE),
         "cache_exists": CACHE_FILE.exists(),
         "cache_valid": _is_cache_valid(),
@@ -237,43 +299,32 @@ def standardize_airport_name(airport_name: str | None) -> str | None:
     if not airport_name:
         return airport_name
 
-    # Extract ICAO codes from the name
     icao_codes = extract_icao_codes_from_name(airport_name)
 
     if not icao_codes:
-        # No ICAO codes found, return original
         return airport_name
 
     # Handle route format "AIRPORT1 Name1 - AIRPORT2 Name2"
     if " - " in airport_name and len(icao_codes) == 2:
-        # Look up both airports
         coords1 = lookup_airport_coordinates(icao_codes[0])
         coords2 = lookup_airport_coordinates(icao_codes[1])
+        parts = airport_name.split(" - ")
 
         if coords1 and coords2:
-            _, _, name1 = coords1
-            _, _, name2 = coords2
-            # Remove common airport suffixes for cleaner display
-            clean_name1 = _strip_airport_suffix(name1)
-            clean_name2 = _strip_airport_suffix(name2)
+            clean_name1 = _strip_airport_suffix(coords1[2])
+            clean_name2 = _strip_airport_suffix(coords2[2])
             standardized = (
                 f"{icao_codes[0]} {clean_name1} - {icao_codes[1]} {clean_name2}"
             )
             logger.debug("Standardized route: %s -> %s", airport_name, standardized)
             return standardized
-        elif coords1:
-            # Only first airport found
-            _, _, name1 = coords1
-            clean_name1 = _strip_airport_suffix(name1)
-            parts = airport_name.split(" - ")
+        if coords1:
+            clean_name1 = _strip_airport_suffix(coords1[2])
             standardized = f"{icao_codes[0]} {clean_name1} - {parts[1]}"
             logger.debug("Standardized start: %s -> %s", airport_name, standardized)
             return standardized
-        elif coords2:
-            # Only second airport found
-            _, _, name2 = coords2
-            clean_name2 = _strip_airport_suffix(name2)
-            parts = airport_name.split(" - ")
+        if coords2:
+            clean_name2 = _strip_airport_suffix(coords2[2])
             standardized = f"{parts[0]} - {icao_codes[1]} {clean_name2}"
             logger.debug("Standardized end: %s -> %s", airport_name, standardized)
             return standardized
@@ -282,12 +333,9 @@ def standardize_airport_name(airport_name: str | None) -> str | None:
     elif len(icao_codes) == 1:
         coords = lookup_airport_coordinates(icao_codes[0])
         if coords:
-            _, _, name = coords
-            # Remove common airport suffixes for cleaner display
-            clean_name = _strip_airport_suffix(name)
+            clean_name = _strip_airport_suffix(coords[2])
             standardized = f"{icao_codes[0]} {clean_name}"
             logger.debug("Standardized airport: %s -> %s", airport_name, standardized)
             return standardized
 
-    # Fallback to original name
     return airport_name

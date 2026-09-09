@@ -3,9 +3,7 @@
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
-
-from lxml import etree
+from typing import TYPE_CHECKING
 
 from .aircraft import parse_aircraft_from_filename
 from .airport_lookup import standardize_airport_name
@@ -20,11 +18,29 @@ from .constants import (
 )
 from .kml_parsers import validate_and_normalize_coordinate
 from .logger import logger
-from .types import FlightPath, PathMetadata
+
+if TYPE_CHECKING:
+    from lxml import etree
+
+    from .types import FlightPath, PathMetadata, PlacemarkMetadata, TrackPoint
 
 # Pre-compiled regex patterns for performance
 DATE_PATTERN = re.compile(r"(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
 YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
+# Charterware description: "Flight Jan 12 2026 03:01PM" or "Flight January 12 ..."
+CHARTERWARE_PATTERN = re.compile(
+    r"Flight\s+(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}):(\d{2})(AM|PM)"
+)
+
+
+def empty_placemark_metadata() -> PlacemarkMetadata:
+    """Return placemark metadata with no information."""
+    return {
+        "airport_name": None,
+        "timestamp": None,
+        "end_timestamp": None,
+        "year": None,
+    }
 
 
 def extract_year_from_timestamp(timestamp: str | None) -> int | None:
@@ -35,8 +51,7 @@ def extract_year_from_timestamp(timestamp: str | None) -> int | None:
     try:
         # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z")
         if "T" in timestamp:
-            dt = datetime.fromisoformat(timestamp)
-            return dt.year
+            return datetime.fromisoformat(timestamp).year
         # Try to extract year from date string (e.g., "03 Mar 2025" or "2025-03-03")
         year_match = YEAR_PATTERN.search(timestamp)
         if year_match:
@@ -59,12 +74,17 @@ def sample_path_altitudes(
         return None
 
     sample = path[-sample_size:] if from_end else path[:sample_size]
-    alts = [coord[2] for coord in sample]
+    alts = [point.alt for point in sample if point.alt is not None]
+    if not alts:
+        return None
     return {"min": min(alts), "max": max(alts), "variation": max(alts) - min(alts)}
 
 
-def is_mid_flight_start(path: FlightPath, start_alt: float) -> bool:
+def is_mid_flight_start(path: FlightPath, start_alt: float | None) -> bool:
     """Detect if a path started mid-flight by analyzing altitude patterns."""
+    if start_alt is None:
+        return False
+
     sample = sample_path_altitudes(path, from_end=False)
     if not sample:
         return False
@@ -87,25 +107,24 @@ def is_mid_flight_start(path: FlightPath, start_alt: float) -> bool:
     return is_mid_flight
 
 
-def is_valid_landing(path: FlightPath, end_alt: float) -> bool:
+def is_valid_landing(path: FlightPath, end_alt: float | None) -> bool:
     """Check if a path ends with a valid landing."""
     sample = sample_path_altitudes(path, from_end=True)
     if not sample:
         # Short path, just accept if altitude seems reasonable
-        return end_alt < LANDING_FALLBACK_ALTITUDE_M
+        return end_alt is not None and end_alt < LANDING_FALLBACK_ALTITUDE_M
 
     # Valid landing: either descending significantly OR stable at low variation
     # Also accept any endpoint if variation at end is small - indicates stable landing
-    return (
-        sample["variation"] < LANDING_MAX_VARIATION_M
-        or end_alt < LANDING_MAX_ALTITUDE_M
+    return sample["variation"] < LANDING_MAX_VARIATION_M or (
+        end_alt is not None and end_alt < LANDING_MAX_ALTITUDE_M
     )
 
 
 def parse_coordinate_point(
     point: str, kml_file: str
 ) -> tuple[float, float, float | None] | None:
-    """Parse a single coordinate point from KML format."""
+    """Parse a single coordinate point from KML format (lon,lat[,alt])."""
     point = point.strip()
     if not point:
         return None
@@ -118,12 +137,11 @@ def parse_coordinate_point(
         lon = float(parts[0])
         lat = float(parts[1])
         alt = float(parts[2]) if len(parts) >= 3 else None
-
-        # Use centralized validation and normalization
-        return validate_and_normalize_coordinate(lat, lon, alt, Path(kml_file).name)
     except ValueError as e:
         logger.debug("Failed to parse coordinate '%s': %s", point, e)
         return None
+
+    return validate_and_normalize_coordinate(lat, lon, alt, Path(kml_file).name)
 
 
 def find_xml_element(
@@ -152,48 +170,40 @@ def find_xml_elements(
     return elems
 
 
-def extract_charterware_timestamp(description: str) -> str | None:
-    """Extract timestamp from Charterware description field."""
+def extract_charterware_timestamp(description: str | None) -> str | None:
+    """Extract an ISO timestamp from a Charterware description field."""
     if not description:
         return None
 
-    # Pattern: "Flight Jan 12 2026 03:01PM" or "Flight January 12 2026 03:01PM"
-    pattern = r"Flight\s+(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}):(\d{2})(AM|PM)"
-    match = re.search(pattern, description)
+    match = CHARTERWARE_PATTERN.search(description)
+    if not match:
+        return None
 
-    if match:
-        month_str, day, year, hour, minute, meridiem = match.groups()
+    month_str, day, year, hour_str, minute, meridiem = match.groups()
 
-        # Convert 12-hour to 24-hour
-        hour = int(hour)
-        if meridiem == "PM" and hour != 12:
-            hour += 12
-        elif meridiem == "AM" and hour == 12:
-            hour = 0
+    # Convert 12-hour to 24-hour
+    hour = int(hour_str)
+    if meridiem == "PM" and hour != 12:
+        hour += 12
+    elif meridiem == "AM" and hour == 12:
+        hour = 0
 
-        # Parse month name (supports both short and full month names)
+    dt_str = f"{day} {month_str} {year} {hour:02d}:{minute}"
+    # Short month name first (Jan), then full month name (January)
+    for fmt in ("%d %b %Y %H:%M", "%d %B %Y %H:%M"):
         try:
-            dt_str = f"{day} {month_str} {year} {hour:02d}:{minute}"
-            # Try short month name first (Jan, Feb, etc.)
-            dt = datetime.strptime(dt_str, "%d %b %Y %H:%M").replace(tzinfo=UTC)
+            return datetime.strptime(dt_str, fmt).replace(tzinfo=UTC).isoformat()
         except ValueError:
-            # Try full month name (January, February, etc.)
-            try:
-                dt = datetime.strptime(dt_str, "%d %B %Y %H:%M").replace(tzinfo=UTC)
-            except ValueError:
-                logger.debug("Failed to parse Charterware timestamp: %s", description)
-                return None
+            continue
 
-        return dt.isoformat()
-
+    logger.debug("Failed to parse Charterware timestamp: %s", description)
     return None
 
 
 def extract_placemark_metadata(
-    placemark: etree._Element, namespaces: dict[str, str], kml_file: str | None = None
-) -> dict[str, Any]:
+    placemark: etree._Element, namespaces: dict[str, str]
+) -> PlacemarkMetadata:
     """Extract metadata from a KML Placemark element."""
-    # Extract name from KML
     name_elem = find_xml_element(placemark, ".//kml:name", ".//name", namespaces)
     kml_name = (
         name_elem.text.strip() if name_elem is not None and name_elem.text else None
@@ -202,23 +212,14 @@ def extract_placemark_metadata(
     # Standardize airport name using ICAO codes from the name itself
     airport_name = standardize_airport_name(kml_name)
 
-    # Extract timestamps - both start and end for tracks with multiple when elements
+    # Timestamps: <when> elements of gx:Track and TimeStamp/TimeSpan alike
     time_elems = find_xml_elements(placemark, ".//kml:when", ".//when", namespaces)
-
-    # Also try TimeStamp element (single timestamp)
-    if not time_elems:
-        time_elem = find_xml_element(
-            placemark, ".//kml:TimeStamp/kml:when", ".//TimeStamp/when", namespaces
-        )
-        if time_elem is not None:
-            time_elems = [time_elem]
 
     timestamp = None
     end_timestamp = None
-    if time_elems and len(time_elems) > 0:
+    if time_elems:
         if time_elems[0].text:
             timestamp = time_elems[0].text.strip()
-        # Get last timestamp if multiple exist
         if len(time_elems) > 1 and time_elems[-1].text:
             end_timestamp = time_elems[-1].text.strip()
     elif kml_name:
@@ -234,73 +235,58 @@ def extract_placemark_metadata(
             placemark, ".//kml:description", ".//description", namespaces
         )
         if desc_elem is not None and desc_elem.text:
-            # Try Charterware format: "Flight Jan 12 2026 03:01PM path of OE-AKI"
             timestamp = extract_charterware_timestamp(desc_elem.text.strip())
-
-    year = extract_year_from_timestamp(timestamp)
 
     return {
         "airport_name": airport_name,
         "timestamp": timestamp,
         "end_timestamp": end_timestamp,
-        "year": year,
+        "year": extract_year_from_timestamp(timestamp),
     }
 
 
 def _build_path_metadata_dict(
     kml_file: str,
-    path_start: list[float],
-    airport_name: str | None,
-    timestamp: str | None,
-    end_timestamp: str | None,
+    path_start: TrackPoint,
+    placemark_meta: PlacemarkMetadata,
 ) -> PathMetadata:
     """Build path metadata dictionary."""
-    year = extract_year_from_timestamp(timestamp)
     aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
+    airport_name = placemark_meta["airport_name"]
 
     # For Charterware files, use route information for airport name
     # Route format: DEPARTURE-ARRIVAL (e.g., LOAV-LOAV or EDDF-EDDM)
     # Convert to exporter format: "DEPARTURE - ARRIVAL" (with spaces around hyphen)
-    if (
-        aircraft_info
-        and aircraft_info.get("route")
-        and aircraft_info.get("format") == "charterware"
-    ):
-        route = aircraft_info.get("route")
-        # Extract airports from route and format for exporter
-        if route and "-" in route:
-            route_parts = route.split("-")
-            departure_airport = route_parts[0]
-            arrival_airport = route_parts[1]
-            # Use route as airport_name if name is empty or not ICAO
-            # ICAO codes are exactly 4 uppercase letters (e.g., LOAV, EDDF, EDDM)
-            # Aircraft registrations contain hyphens (e.g., OE-AKI, D-EXYZ)
-            # Format: "DEPARTURE - ARRIVAL" (with spaces) for exporter compatibility
-            if not airport_name or len(airport_name) != 4:
-                airport_name = f"{departure_airport} - {arrival_airport}"
-                # Look up full airport names from ICAO codes
-                airport_name = standardize_airport_name(airport_name)
+    route = aircraft_info.get("route")
+    if aircraft_info.get("format") == "charterware" and route and "-" in route:
+        departure_airport, arrival_airport = route.split("-", 1)
+        # Use route as airport_name if name is empty or not an ICAO code
+        # (ICAO codes are exactly 4 uppercase letters, registrations have hyphens)
+        if not airport_name or len(airport_name) != 4:
+            airport_name = standardize_airport_name(
+                f"{departure_airport} - {arrival_airport}"
+            )
 
-    meta: PathMetadata = PathMetadata(
-        start_point=path_start,
-        airport_name=airport_name or "",
-        timestamp=timestamp,
-        end_timestamp=end_timestamp,
-        filename=Path(kml_file).name,
-        year=year,
-    )
+    start_point = [path_start.lat, path_start.lon]
+    if path_start.alt is not None:
+        start_point.append(path_start.alt)
 
-    # Add aircraft info if available
+    meta: PathMetadata = {
+        "start_point": start_point,
+        "airport_name": airport_name or "",
+        "timestamp": placemark_meta["timestamp"],
+        "end_timestamp": placemark_meta["end_timestamp"],
+        "filename": Path(kml_file).name,
+        "year": placemark_meta["year"],
+    }
+
     if aircraft_info:
         meta["aircraft_registration"] = aircraft_info.get("registration")
 
-        # Handle optional aircraft type (may be None for Charterware)
         aircraft_type = aircraft_info.get("type")
         if aircraft_type is not None:
             meta["aircraft_type"] = aircraft_type
 
-        # Handle optional route (Charterware specific)
-        route = aircraft_info.get("route")
         if route is not None:
             meta["route"] = route
 

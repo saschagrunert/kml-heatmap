@@ -1,312 +1,166 @@
 """Tests for segment_calculator module."""
 
-from datetime import UTC, datetime
-
 import pytest
 
+from kml_heatmap.constants import MAX_GROUNDSPEED_KNOTS
+from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.segment_calculator import (
+    SegmentSpeed,
+    build_time_indexed_segments,
+    calculate_fallback_groundspeed,
     calculate_path_distance,
+    calculate_windowed_groundspeed,
     extract_segment_speeds,
 )
+from kml_heatmap.types import TrackPoint
+
+
+def _pt(lat, lon, alt=100.0, ts=None):
+    return TrackPoint(lat, lon, alt, parse_timestamp_epoch(ts) if ts else None)
 
 
 class TestCalculatePathDistance:
-    """Tests for calculate_path_distance function."""
-
-    def test_empty_path(self):
-        """Test distance with empty path."""
+    def test_empty_and_single_point(self):
         assert calculate_path_distance([]) == 0.0
-
-    def test_single_point_path(self):
-        """Test distance with single point."""
-        path = [[50.0, 8.5, 100]]
-        assert calculate_path_distance(path) == 0.0
+        assert calculate_path_distance([_pt(50.0, 8.5)]) == 0.0
 
     def test_two_point_path(self):
-        """Test distance with two points."""
-        # Approximately 111 km for 1 degree latitude difference
-        path = [[50.0, 8.5, 100], [51.0, 8.5, 200]]
-        distance = calculate_path_distance(path)
-        assert 100 < distance < 120  # Rough check
+        assert calculate_path_distance(
+            [_pt(50.0, 8.5), _pt(51.0, 8.5)]
+        ) == pytest.approx(111.2, abs=0.5)
 
-    def test_multi_point_path(self):
-        """Test distance with multiple points."""
-        path = [
-            [50.0, 8.5, 100],
-            [50.5, 9.0, 150],
-            [51.0, 9.5, 200],
-        ]
-        distance = calculate_path_distance(path)
-        assert distance > 0
-
-    def test_path_with_timestamps(self):
-        """Test distance calculation ignores timestamps."""
-        path = [
-            [50.0, 8.5, 100, "2025-03-15T10:00:00Z"],
-            [51.0, 8.5, 200, "2025-03-15T11:00:00Z"],
-        ]
-        distance = calculate_path_distance(path)
-        assert 100 < distance < 120
+    def test_multi_point_path_sums_segments(self):
+        path = [_pt(50.0, 8.5), _pt(50.5, 9.0), _pt(51.0, 9.5)]
+        expected = calculate_path_distance(path[:2]) + calculate_path_distance(path[1:])
+        assert calculate_path_distance(path) == pytest.approx(expected)
 
     def test_zero_distance_path(self):
-        """Test path where all points are the same location."""
-        path = [
-            [50.0, 8.5, 100],
-            [50.0, 8.5, 200],
-            [50.0, 8.5, 300],
-        ]
-        distance = calculate_path_distance(path)
-        assert distance == pytest.approx(0.0, abs=0.01)
+        path = [_pt(50.0, 8.5, 100), _pt(50.0, 8.5, 200), _pt(50.0, 8.5, 300)]
+        assert calculate_path_distance(path) == pytest.approx(0.0, abs=0.01)
 
 
 class TestExtractSegmentSpeeds:
-    """Tests for extract_segment_speeds function."""
-
-    def test_empty_path(self):
-        """Test with empty path."""
-        result = extract_segment_speeds([], None)
-        assert result == []
-
-    def test_single_point_path(self):
-        """Test with single point."""
-        path = [[50.0, 8.5, 100]]
-        result = extract_segment_speeds(path, None)
-        assert result == []
+    def test_empty_and_single_point(self):
+        assert extract_segment_speeds([], None) == []
+        assert extract_segment_speeds([_pt(50.0, 8.5)], None) == []
 
     def test_path_without_timestamps(self):
-        """Test path without timestamp data."""
-        path = [[50.0, 8.5, 100], [51.0, 9.5, 200]]
-        result = extract_segment_speeds(path, None)
+        result = extract_segment_speeds([_pt(50.0, 8.5), _pt(51.0, 9.5)], None)
         assert len(result) == 1
-        assert result[0]["speed"] == 0.0
-        assert result[0]["timestamp"] is None
+        seg = result[0]
+        assert seg.index == 0
+        assert seg.speed == 0.0
+        assert seg.timestamp is None
+        assert seg.relative_time is None
+        assert seg.time_delta == 0.0
+        assert seg.distance > 0
 
     def test_path_with_timestamps(self):
-        """Test path with timestamp data."""
         path = [
-            [50.0, 8.5, 100, "2025-03-15T10:00:00Z"],
-            [51.0, 8.5, 200, "2025-03-15T10:30:00Z"],
+            _pt(50.0, 8.5, ts="2025-03-15T10:00:00Z"),
+            _pt(51.0, 8.5, ts="2025-03-15T10:30:00Z"),
         ]
-        result = extract_segment_speeds(path, None)
-        assert len(result) == 1
-        assert result[0]["speed"] > 0  # Should calculate speed
-        assert result[0]["timestamp"] is not None
-        assert result[0]["time_delta"] == 1800.0  # 30 minutes
+        seg = extract_segment_speeds(path, None)[0]
+        assert seg.timestamp == path[0].ts
+        assert seg.time_delta == 1800.0
+        assert seg.speed == pytest.approx(seg.distance / 1.852 / 1800 * 3600, rel=1e-6)
 
-    def test_segment_with_relative_time(self):
-        """Test segment calculation with path start time."""
-
+    def test_relative_time_from_path_start(self):
         path = [
-            [50.0, 8.5, 100, "2025-03-15T10:00:00Z"],
-            [51.0, 8.5, 200, "2025-03-15T10:30:00Z"],
+            _pt(50.0, 8.5, ts="2025-03-15T10:00:00Z"),
+            _pt(51.0, 8.5, ts="2025-03-15T10:30:00Z"),
         ]
-        start_time = datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC)
-        result = extract_segment_speeds(path, start_time)
-        assert result[0]["relative_time"] == 0.0
+        start = parse_timestamp_epoch("2025-03-15T09:59:00Z")
+        assert extract_segment_speeds(path, start)[0].relative_time == 60.0
 
-    def test_multiple_segments(self):
-        """Test path with multiple segments."""
+    def test_multiple_segments_indexed(self):
         path = [
-            [50.0, 8.5, 100, "2025-03-15T10:00:00Z"],
-            [50.5, 9.0, 150, "2025-03-15T10:15:00Z"],
-            [51.0, 9.5, 200, "2025-03-15T10:30:00Z"],
+            _pt(50.0, 8.5, ts="2025-03-15T10:00:00Z"),
+            _pt(50.5, 9.0, ts="2025-03-15T10:15:00Z"),
+            _pt(51.0, 9.5, ts="2025-03-15T10:30:00Z"),
         ]
-        result = extract_segment_speeds(path, None)
-        assert len(result) == 2
-        assert result[0]["index"] == 0
-        assert result[1]["index"] == 1
+        assert [s.index for s in extract_segment_speeds(path, None)] == [0, 1]
 
     def test_unrealistic_speed_filtered(self):
-        """Test that unrealistic speeds are filtered out."""
-        # Very short time for long distance = unrealistic speed
         path = [
-            [50.0, 8.5, 100, "2025-03-15T10:00:00Z"],
-            [60.0, 18.5, 200, "2025-03-15T10:00:01Z"],  # 1 second for huge distance
+            _pt(50.0, 8.5, ts="2025-03-15T10:00:00Z"),
+            _pt(60.0, 18.5, ts="2025-03-15T10:00:01Z"),
         ]
-        result = extract_segment_speeds(path, None)
-        assert len(result) == 1
-        # Speed should be filtered to 0 if unrealistic
-        assert result[0]["speed"] == 0.0
-
-    def test_segment_distance_calculation(self):
-        """Test that segment distance is calculated."""
-        path = [[50.0, 8.5, 100], [51.0, 8.5, 200]]
-        result = extract_segment_speeds(path, None)
-        assert result[0]["distance"] > 0
+        assert extract_segment_speeds(path, None)[0].speed == 0.0
 
     def test_very_short_time_delta_ignored(self):
-        """Test that very short time deltas are handled."""
-        # Less than minimum segment time
         path = [
-            [50.0, 8.5, 100, "2025-03-15T10:00:00.000Z"],
-            [50.0, 8.5, 200, "2025-03-15T10:00:00.001Z"],  # 1 millisecond
+            _pt(50.0, 8.5, ts="2025-03-15T10:00:00.000Z"),
+            _pt(50.0, 8.5, ts="2025-03-15T10:00:00.001Z"),
         ]
-        result = extract_segment_speeds(path, None)
-        assert len(result) == 1
-        # Speed should be 0 for too-short time delta
-        assert result[0]["speed"] == 0.0
+        assert extract_segment_speeds(path, None)[0].speed == 0.0
 
     def test_partial_timestamp_data(self):
-        """Test path with some coordinates having timestamps."""
         path = [
-            [50.0, 8.5, 100, "2025-03-15T10:00:00Z"],
-            [50.5, 9.0, 150],  # No timestamp
-            [51.0, 9.5, 200, "2025-03-15T10:30:00Z"],
+            _pt(50.0, 8.5, ts="2025-03-15T10:00:00Z"),
+            _pt(50.5, 9.0),
+            _pt(51.0, 9.5, ts="2025-03-15T10:30:00Z"),
         ]
         result = extract_segment_speeds(path, None)
-        assert len(result) == 2
-        # First segment requires both coordinates to have timestamps
-        # Since second coordinate has no timestamp, first segment has no timestamp
-        assert result[0]["timestamp"] is None
-        # Second segment also has no timestamp (first coord has none)
-        assert result[1]["timestamp"] is None
+        assert [s.timestamp for s in result] == [None, None]
 
 
 class TestBuildTimeIndexedSegments:
-    """Tests for build_time_indexed_segments function."""
+    def test_empty(self):
+        assert build_time_indexed_segments([]) == ([], [])
 
-    def test_empty_segments(self):
-        """Test with empty segment list."""
-        from kml_heatmap.segment_calculator import build_time_indexed_segments
-
-        timestamp_list, time_indexed_segments = build_time_indexed_segments([])
-        assert timestamp_list == []
-        assert time_indexed_segments == []
-
-    def test_segments_with_timestamps(self):
-        """Test building time index from segments with timestamps."""
-        from kml_heatmap.segment_calculator import build_time_indexed_segments
-
+    def test_sorted_and_filtered(self):
         segments = [
-            {"timestamp": datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC), "speed": 100},
-            {"timestamp": datetime(2025, 3, 15, 10, 30, 0, tzinfo=UTC), "speed": 120},
+            SegmentSpeed(0, 200.0, None, 100.0, 1.0, 10.0),
+            SegmentSpeed(1, 100.0, None, 0.0, 1.0, 10.0),  # zero speed filtered
+            SegmentSpeed(2, None, None, 120.0, 1.0, 10.0),  # no timestamp filtered
+            SegmentSpeed(3, 50.0, None, 120.0, 1.0, 10.0),
         ]
-
-        timestamp_list, time_indexed_segments = build_time_indexed_segments(segments)
-        assert len(timestamp_list) == 2
-        assert len(time_indexed_segments) == 2
-
-    def test_segments_with_zero_speed_filtered(self):
-        """Test that segments with zero speed are filtered out."""
-        from kml_heatmap.segment_calculator import build_time_indexed_segments
-
-        segments = [
-            {"timestamp": datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC), "speed": 100},
-            {
-                "timestamp": datetime(2025, 3, 15, 10, 15, 0, tzinfo=UTC),
-                "speed": 0,
-            },  # Filtered
-            {"timestamp": datetime(2025, 3, 15, 10, 30, 0, tzinfo=UTC), "speed": 120},
-        ]
-
-        timestamp_list, _time_indexed_segments = build_time_indexed_segments(segments)
-        assert len(timestamp_list) == 2  # Only non-zero speeds
-
-    def test_segments_with_none_timestamp_filtered(self):
-        """Test that segments with None timestamp are filtered out."""
-        from kml_heatmap.segment_calculator import build_time_indexed_segments
-
-        segments = [
-            {"timestamp": datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC), "speed": 100},
-            {"timestamp": None, "speed": 120},  # Filtered
-        ]
-
-        timestamp_list, _time_indexed_segments = build_time_indexed_segments(segments)
-        assert len(timestamp_list) == 1
+        timestamps, indexed = build_time_indexed_segments(segments)
+        assert timestamps == [50.0, 200.0]
+        assert [s.index for s in indexed] == [3, 0]
 
 
 class TestCalculateWindowedGroundspeed:
-    """Tests for calculate_windowed_groundspeed function."""
-
     def test_empty_timestamp_list(self):
-        """Test with empty timestamp list."""
-        from kml_heatmap.segment_calculator import calculate_windowed_groundspeed
+        assert calculate_windowed_groundspeed(1000.0, [], []) == (0.0, 0.0, 0.0)
 
-        speed, w_dist, w_time = calculate_windowed_groundspeed(
-            datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC), [], []
+    def test_window_average(self):
+        segments = [
+            SegmentSpeed(0, 1000.0, None, 0.0, 1.0, 30.0),
+            SegmentSpeed(1, 1030.0, None, 0.0, 2.0, 30.0),
+            SegmentSpeed(2, 5000.0, None, 0.0, 100.0, 1.0),  # outside window
+        ]
+        speed, dist, secs = calculate_windowed_groundspeed(
+            1010.0, [1000.0, 1030.0, 5000.0], segments
         )
-        assert speed == 0.0
-        assert w_dist == 0.0
-        assert w_time == 0.0
+        assert dist == 3.0
+        assert secs == 60.0
+        assert speed == pytest.approx(3.0 / 1.852 / 60.0 * 3600)
 
-    def test_single_segment_in_window(self):
-        """Test calculation with single segment."""
-        from kml_heatmap.segment_calculator import calculate_windowed_groundspeed
-
-        timestamp = datetime(2025, 3, 15, 10, 0, 0, tzinfo=UTC)
-        timestamp_list = [timestamp.timestamp()]
-        # Need enough time_delta (>1 second) and reasonable distance
-        segments = [{"distance": 10.0, "time_delta": 600.0}]  # 10km in 600s
-
-        speed, w_dist, w_time = calculate_windowed_groundspeed(
-            timestamp, timestamp_list, segments
+    def test_unrealistic_window_speed_rejected(self):
+        segments = [SegmentSpeed(0, 1000.0, None, 0.0, 100.0, 1.0)]
+        assert calculate_windowed_groundspeed(1000.0, [1000.0], segments) == (
+            0.0,
+            0.0,
+            0.0,
         )
-        # Speed might be 0 if not enough time/distance, or positive if calculated
-        assert speed >= 0
-        assert w_dist >= 0
-        assert w_time >= 0
-
-
-class TestCalculatePathDistanceConsistency:
-    """Additional tests for calculate_path_distance function."""
-
-    def test_path_distance_consistency(self):
-        """Test that distance calculation is consistent."""
-        # Same path should give same distance
-        path = [[50.0, 8.5, 100], [51.0, 9.5, 200]]
-        dist1 = calculate_path_distance(path)
-        dist2 = calculate_path_distance(path)
-        assert dist1 == dist2
 
 
 class TestCalculateFallbackGroundspeed:
-    """Tests for calculate_fallback_groundspeed function."""
-
-    def test_fallback_with_valid_data(self):
-        """Test fallback calculation with valid data."""
-        from kml_heatmap.segment_calculator import calculate_fallback_groundspeed
-
-        # 10km segment, 100km path, 3600 seconds (1 hour)
+    def test_valid_data(self):
         speed = calculate_fallback_groundspeed(10.0, 100.0, 3600.0)
-        # Should calculate based on path average
-        assert speed >= 0
+        assert speed == pytest.approx(100.0 / 1.852)
 
-    def test_fallback_zero_duration(self):
-        """Test fallback with zero duration."""
-        from kml_heatmap.segment_calculator import calculate_fallback_groundspeed
+    @pytest.mark.parametrize(
+        "args", [(10.0, 100.0, 0.0), (10.0, 0.0, 3600.0), (10.0, 100.0, -100.0)]
+    )
+    def test_invalid_inputs(self, args):
+        assert calculate_fallback_groundspeed(*args) == 0.0
 
-        speed = calculate_fallback_groundspeed(10.0, 100.0, 0.0)
-        assert speed == 0.0
+    def test_unrealistic_speed_rejected(self):
+        assert calculate_fallback_groundspeed(1000.0, 1000.0, 1.0) == 0.0
 
-    def test_fallback_zero_path_distance(self):
-        """Test fallback with zero path distance."""
-        from kml_heatmap.segment_calculator import calculate_fallback_groundspeed
-
-        speed = calculate_fallback_groundspeed(10.0, 0.0, 3600.0)
-        assert speed == 0.0
-
-    def test_fallback_negative_duration(self):
-        """Test fallback with negative duration."""
-        from kml_heatmap.segment_calculator import calculate_fallback_groundspeed
-
-        speed = calculate_fallback_groundspeed(10.0, 100.0, -100.0)
-        assert speed == 0.0
-
-    def test_fallback_unrealistic_speed(self):
-        """Test fallback filters unrealistic speeds."""
-        from kml_heatmap.segment_calculator import calculate_fallback_groundspeed
-
-        # Very short duration for long distance = unrealistic
-        speed = calculate_fallback_groundspeed(1000.0, 1000.0, 1.0)
-        # Should be capped to 0 if unrealistic
-        assert speed == 0.0
-
-    def test_fallback_realistic_aircraft_speed(self):
-        """Test fallback with realistic aircraft speeds."""
-        from kml_heatmap.segment_calculator import calculate_fallback_groundspeed
-
-        # 100km path in 1800 seconds (30 min) = ~200 km/h typical
+    def test_realistic_speed(self):
         speed = calculate_fallback_groundspeed(10.0, 100.0, 1800.0)
-        # Should be non-zero and reasonable
-        assert speed > 0
-        assert speed < 1000  # Less than supersonic
+        assert 0 < speed <= MAX_GROUNDSPEED_KNOTS

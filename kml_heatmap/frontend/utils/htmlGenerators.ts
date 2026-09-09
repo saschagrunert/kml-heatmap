@@ -8,13 +8,15 @@ import type {
   PathSegment,
   YearStats,
 } from "../types";
-import { rgbToRgba } from "./colors";
+import { getColorForAirspeed, getColorForAltitude, rgbToRgba } from "./colors";
 import {
   FEET_TO_METERS,
   METERS_TO_FEET,
   NAUTICAL_MILES_TO_KM,
 } from "./constants";
 import { calculateBearing, ddToDms } from "./geometry";
+
+export type { YearStats } from "../types";
 
 export function escapeHtml(str: string): string {
   return str
@@ -46,30 +48,29 @@ export interface AirportPopupParams {
 export function generateAirportPopupHtml(params: AirportPopupParams): string {
   const googleMapsLink = `https://www.google.com/maps?q=${params.lat},${params.lon}`;
   const homeBadge = params.isHomeBase
-    ? '<span style="font-size: 12px; background: #007bff; color: white; padding: 2px 6px; border-radius: 3px; margin-left: 4px;">HOME</span>'
+    ? '<span class="kh-popup-home-badge">HOME</span>'
     : "";
 
   return `
-    <div class="popup-container" style="min-width: 220px;">
-        <div class="popup-header" style="font-size: 15px; color: #28a745; margin-bottom: 10px; padding-bottom: 8px; border-color: #28a745;">
-            <span class="popup-header-icon" style="font-size: 18px;">&#x1F6EB;</span>
+    <div class="popup-container kh-popup-airport">
+        <div class="popup-header kh-popup-header-airport">
+            <span class="popup-header-icon kh-popup-icon-lg">&#x1F6EB;</span>
             <span>${escapeHtml(params.name || "Unknown")}</span>
             ${homeBadge}
         </div>
-        <div style="margin-bottom: 8px;">
+        <div class="kh-popup-block">
             <div class="popup-section-label">Coordinates</div>
             <a href="${googleMapsLink}"
                target="_blank"
                rel="noopener noreferrer"
-               style="color: #4facfe; text-decoration: none; font-size: 12px; font-family: monospace; display: flex; align-items: center; gap: 4px;"
-               class="airport-popup-link">
+               class="airport-popup-link kh-popup-link">
                 <span>&#x1F4CD;</span>
                 <span>${params.latDms}<br>${params.lonDms}</span>
             </a>
         </div>
-        <div class="popup-metric" style="background: linear-gradient(135deg, rgba(79, 172, 254, 0.15) 0%, rgba(0, 242, 254, 0.15) 100%); border-color: #4facfe; display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 12px; color: #ccc; font-weight: 500;">Total Flights</span>
-            <span class="popup-metric-value" style="color: #4facfe;">${params.flightCount}</span>
+        <div class="popup-metric kh-popup-metric-flights">
+            <span class="kh-popup-metric-label">Total Flights</span>
+            <span class="popup-metric-value kh-popup-accent">${params.flightCount}</span>
         </div>
     </div>`;
 }
@@ -122,7 +123,7 @@ export function generateStatsHtml(
  * Generate fun facts HTML
  */
 export function generateFunFactsHtml(funFacts: FunFact[]): string {
-  let html = '<div class="fun-facts-title">✨ Facts</div>';
+  let html = '<h3 class="fun-facts-title">✨ Facts</h3>';
   funFacts.forEach((fact: FunFact) => {
     html += `<div class="fun-fact" data-category="${fact.category}"><span class="fun-fact-icon">${fact.icon}</span><span class="fun-fact-text">${fact.text}</span></div>`;
   });
@@ -152,7 +153,7 @@ export function generateAircraftFleetHtml(yearStats: YearStats): string {
     return "";
   }
 
-  let html = '<div class="aircraft-fleet-title">✈️ Fleet</div>';
+  let html = '<h3 class="aircraft-fleet-title">✈️ Fleet</h3>';
 
   const maxFlights = yearStats.aircraft_list[0]?.flights ?? 0;
   const minFlights =
@@ -187,7 +188,7 @@ export function generateAircraftFleetHtml(yearStats: YearStats): string {
  * Generate home base HTML
  */
 export function generateHomeBaseHtml(homeBase: AirportCount): string {
-  let html = '<div class="top-airports-title">🏠 Home Base</div>';
+  let html = '<h3 class="top-airports-title">🏠 Home Base</h3>';
   html += `
                 <div class="top-airport">
                     <div class="top-airport-name">${escapeHtml(homeBase.name)}</div>
@@ -208,7 +209,9 @@ export interface SegmentPopupParams {
 }
 
 /**
- * Generate path segment popup HTML with position, altitude, and groundspeed
+ * Generate path segment popup HTML with position, altitude, and groundspeed.
+ * The data-driven altitude/speed colours are passed as CSS custom properties
+ * (`--kh-metric-color`, `--kh-metric-bg`) consumed by `.kh-popup-metric-colored`.
  */
 export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   const { segment } = params;
@@ -218,17 +221,13 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   const altFt = segment.altitude_ft || 0;
   const altFtRounded = Math.round(altFt / 50) * 50;
   const altMRounded = Math.round(altFtRounded * FEET_TO_METERS);
-  const altColor = window.KMLHeatmap.getColorForAltitude(
-    altFt,
-    params.altMin,
-    params.altMax,
-  );
+  const altColor = getColorForAltitude(altFt, params.altMin, params.altMax);
   const altColorBg = rgbToRgba(altColor, 0.15);
 
   const speedKt = segment.groundspeed_knots || 0;
   const speedKtRounded = Math.round(speedKt);
   const speedKmhRounded = Math.round(speedKt * NAUTICAL_MILES_TO_KM);
-  const speedColor = window.KMLHeatmap.getColorForAirspeed(
+  const speedColor = getColorForAirspeed(
     speedKt,
     params.speedMin,
     params.speedMax,
@@ -250,24 +249,24 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
 
   return `
     <div class="popup-container">
-        <div class="popup-header" style="color: #4facfe; border-color: #4facfe;">
+        <div class="popup-header kh-popup-header-segment">
             <span class="popup-header-icon">${icon}</span>
             <span>${title}</span>
         </div>
-        <div class="popup-coords" style="margin-bottom: 8px;">
-            ${lat} ${lon}<br><span style="display: inline-block; margin-top: 4px;">Track: ${trackStr}</span>
+        <div class="popup-coords kh-popup-block">
+            ${lat} ${lon}<br><span class="kh-popup-track">Track: ${trackStr}</span>
         </div>
-        <div style="margin-bottom: 8px;">
+        <div class="kh-popup-block">
             <div class="popup-section-label">Altitude (MSL)</div>
-            <div class="popup-metric" style="background: ${altColorBg}; border-color: ${altColor};">
-                <span class="popup-metric-value" style="color: ${altColor};">${altFtRounded} ft</span>
+            <div class="popup-metric kh-popup-metric-colored" style="--kh-metric-color: ${altColor}; --kh-metric-bg: ${altColorBg};">
+                <span class="popup-metric-value">${altFtRounded} ft</span>
                 <span class="popup-metric-unit">(${altMRounded} m)</span>
             </div>
         </div>
-        <div style="margin-bottom: 8px;">
+        <div class="kh-popup-block">
             <div class="popup-section-label">Groundspeed</div>
-            <div class="popup-metric" style="background: ${speedColorBg}; border-color: ${speedColor};">
-                <span class="popup-metric-value" style="color: ${speedColor};">${speedKtRounded} kt</span>
+            <div class="popup-metric kh-popup-metric-colored" style="--kh-metric-color: ${speedColor}; --kh-metric-bg: ${speedColorBg};">
+                <span class="popup-metric-value">${speedKtRounded} kt</span>
                 <span class="popup-metric-unit">(${speedKmhRounded} km/h)</span>
             </div>
         </div>
@@ -281,7 +280,7 @@ export function generateDestinationsHtml(
 ): string {
   if (grouped.size === 0) return "";
 
-  let html = '<div class="airports-grid-title">🗺️ Destinations</div>';
+  let html = '<h3 class="airports-grid-title">🗺️ Destinations</h3>';
 
   let groupIndex = 0;
   for (const [code, airports] of grouped) {

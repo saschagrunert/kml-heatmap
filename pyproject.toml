@@ -7,14 +7,13 @@ name = "kml-heatmap"
 dynamic = ["version"]
 description = "Interactive heatmap visualizations from KML flight data"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = "Apache-2.0"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: GIS",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
@@ -32,6 +31,8 @@ test = [
     "pytest-mock>=3.15.1",
     "pytest-xdist>=3.8.0",
     "coverage[toml]>=7.13.1",
+    "hypothesis>=6.140.0",
+    "bandit>=1.9.4",
     "lxml-stubs>=0.5.1",
 ]
 dev = [
@@ -52,33 +53,46 @@ kml-heatmap = "kml_heatmap.cli:main"
 [tool.setuptools.packages.find]
 include = ["kml_heatmap*"]
 
+[tool.setuptools.package-data]
+kml_heatmap = [
+    "templates/*",
+    "static/*.js",
+    "static/*.css",
+    "static/*.png",
+    "static/*.svg",
+    "static/*.ico",
+    "static/*.json",
+    "py.typed",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 addopts = [
-    "--verbose",
     "--tb=short",
     "--strict-markers",
-    "--cov=kml_heatmap",
-    "--cov-report=term-missing",
-    "--cov-branch",
-    "-n", "auto",
 ]
 markers = [
-    "unit: Unit tests",
-    "integration: Integration tests",
     "slow: Slow running tests",
 ]
 
+[tool.coverage.run]
+branch = true
+source = ["kml_heatmap"]
+
+[tool.coverage.report]
+fail_under = 90
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
 [tool.mypy]
-python_version = "3.12"
-warn_return_any = true
+python_version = "3.14"
+strict = true
 warn_unused_configs = true
-check_untyped_defs = true
-disallow_untyped_defs = true
-no_implicit_optional = true
 mypy_path = "stubs"
 exclude = [
     "^serve\\.py$",
@@ -88,13 +102,19 @@ exclude = [
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_untyped_decorators = false
 check_untyped_defs = false
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "UP", "B", "SIM", "I", "PLR", "S", "PT", "RUF"]
+select = [
+    "E", "F", "W", "UP", "B", "SIM", "I", "PLR", "S", "PT", "RUF",
+    "C4", "PERF", "ISC", "PIE", "TC", "RET", "ERA", "N",
+]
 ignore = [
     "PLR2004",
     "PLR0911",
@@ -102,11 +122,9 @@ ignore = [
     "PLR0913",
     "PLR0915",
     "PLR0917",
-    "S314",
     "PT006",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S108"]
+"tests/**" = ["S101", "S314"]
 "scripts/**" = ["S311"]
-"serve.py" = ["S104"]

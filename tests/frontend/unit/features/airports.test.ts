@@ -1,32 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
+
+type AirportsModule =
+  typeof import("../../../../kml_heatmap/frontend/features/airports");
 
 describe("airports feature", () => {
-  let calculateAirportFlightCounts: typeof import("../../../../kml_heatmap/frontend/features/airports").calculateAirportFlightCounts;
-  let countCountries: typeof import("../../../../kml_heatmap/frontend/features/airports").countCountries;
-  let countryDisplayName: typeof import("../../../../kml_heatmap/frontend/features/airports").countryDisplayName;
-  let countryFlag: typeof import("../../../../kml_heatmap/frontend/features/airports").countryFlag;
-  let findHomeBase: typeof import("../../../../kml_heatmap/frontend/features/airports").findHomeBase;
-  let groupByCountry: typeof import("../../../../kml_heatmap/frontend/features/airports").groupByCountry;
-  let calculateAirportOpacity: typeof import("../../../../kml_heatmap/frontend/features/airports").calculateAirportOpacity;
-  let calculateAirportMarkerSize: typeof import("../../../../kml_heatmap/frontend/features/airports").calculateAirportMarkerSize;
-  let calculateAirportVisibility: typeof import("../../../../kml_heatmap/frontend/features/airports").calculateAirportVisibility;
+  let mod: AirportsModule;
 
   beforeEach(async () => {
     vi.resetModules();
-    const mod =
-      await import("../../../../kml_heatmap/frontend/features/airports");
-    calculateAirportFlightCounts = mod.calculateAirportFlightCounts;
-    countCountries = mod.countCountries;
-    countryDisplayName = mod.countryDisplayName;
-    countryFlag = mod.countryFlag;
-    findHomeBase = mod.findHomeBase;
-    groupByCountry = mod.groupByCountry;
-    calculateAirportOpacity = mod.calculateAirportOpacity;
-    calculateAirportMarkerSize = mod.calculateAirportMarkerSize;
-    calculateAirportVisibility = mod.calculateAirportVisibility;
+    mod = await import("../../../../kml_heatmap/frontend/features/airports");
   });
 
-  const mockPathInfo = [
+  const mockPathInfo: PathInfo[] = [
     {
       id: 1,
       year: 2025,
@@ -59,353 +45,230 @@ describe("airports feature", () => {
 
   describe("calculateAirportFlightCounts", () => {
     it("counts flights to all airports with no filters", () => {
-      const counts = calculateAirportFlightCounts(mockPathInfo, "all", "all");
-
-      expect(counts.EDAV).toBe(3); // id 1, 2, 4
-      expect(counts.EDDF).toBe(2); // id 1, 2
-      expect(counts.EDDM).toBe(1); // id 3
-      expect(counts.EDDK).toBe(1); // id 3
+      expect(
+        mod.calculateAirportFlightCounts(mockPathInfo, "all", "all"),
+      ).toEqual({ EDAV: 3, EDDF: 2, EDDM: 1, EDDK: 1 });
     });
 
     it("filters by year", () => {
-      const counts = calculateAirportFlightCounts(mockPathInfo, "2025", "all");
-
-      expect(counts.EDAV).toBe(3);
-      expect(counts.EDDF).toBe(2);
-      expect(counts.EDDM).toBeUndefined();
-      expect(counts.EDDK).toBeUndefined();
+      expect(
+        mod.calculateAirportFlightCounts(mockPathInfo, "2025", "all"),
+      ).toEqual({ EDAV: 3, EDDF: 2 });
     });
 
     it("filters by aircraft", () => {
-      const counts = calculateAirportFlightCounts(
-        mockPathInfo,
-        "all",
-        "D-EAGJ",
-      );
-
-      expect(counts.EDAV).toBe(2);
-      expect(counts.EDDF).toBe(2);
-      expect(counts.EDDM).toBeUndefined();
+      expect(
+        mod.calculateAirportFlightCounts(mockPathInfo, "all", "D-EAGJ"),
+      ).toEqual({ EDAV: 2, EDDF: 2 });
     });
 
     it("filters by both year and aircraft", () => {
-      const counts = calculateAirportFlightCounts(
-        mockPathInfo,
-        "2025",
-        "D-EXYZ",
-      );
-
-      expect(counts.EDAV).toBe(1); // Only id 4
-      expect(counts.EDDF).toBeUndefined();
+      expect(
+        mod.calculateAirportFlightCounts(mockPathInfo, "2025", "D-EXYZ"),
+      ).toEqual({ EDAV: 1 });
     });
 
     it("counts round trips only once per airport", () => {
-      const pathInfo = [{ id: 1, start_airport: "EDAV", end_airport: "EDAV" }];
-      const counts = calculateAirportFlightCounts(pathInfo, "all", "all");
-
-      expect(counts.EDAV).toBe(1); // Not 2, even though start and end are same
+      expect(
+        mod.calculateAirportFlightCounts([
+          { id: 1, start_airport: "EDAV", end_airport: "EDAV" },
+        ]),
+      ).toEqual({ EDAV: 1 });
     });
 
     it("handles paths without airports", () => {
-      const pathInfo = [
-        { id: 1, year: 2025 },
-        { id: 2, year: 2025, start_airport: "EDAV" },
-      ];
-      const counts = calculateAirportFlightCounts(pathInfo, "all", "all");
-
-      expect(counts.EDAV).toBe(1);
-      expect(Object.keys(counts)).toHaveLength(1);
-    });
-
-    it("returns empty object for null pathInfo", () => {
-      const counts = calculateAirportFlightCounts(null, "all", "all");
-      expect(counts).toEqual({});
+      expect(
+        mod.calculateAirportFlightCounts([
+          { id: 1, year: 2025 },
+          { id: 2, year: 2025, start_airport: "EDAV" },
+        ]),
+      ).toEqual({ EDAV: 1 });
     });
 
     it("returns empty object when no paths match filters", () => {
-      const counts = calculateAirportFlightCounts(mockPathInfo, "2023", "all");
-      expect(counts).toEqual({});
+      expect(
+        mod.calculateAirportFlightCounts(mockPathInfo, "2023", "all"),
+      ).toEqual({});
     });
   });
 
   describe("findHomeBase", () => {
     it("finds airport with most flights", () => {
-      const counts = {
-        EDAV: 10,
-        EDDF: 5,
-        EDDM: 3,
-      };
-
-      expect(findHomeBase(counts)).toBe("EDAV");
+      expect(mod.findHomeBase({ EDAV: 10, EDDF: 5, EDDM: 3 })).toBe("EDAV");
     });
 
     it("returns null for empty counts", () => {
-      expect(findHomeBase({})).toBeNull();
+      expect(mod.findHomeBase({})).toBeNull();
     });
 
-    it("handles single airport", () => {
-      const counts = { EDAV: 1 };
-      expect(findHomeBase(counts)).toBe("EDAV");
-    });
-
-    it("returns first airport when counts are tied", () => {
-      const counts = {
-        EDAV: 5,
-        EDDF: 5,
-      };
-      // JavaScript object iteration order - will return one of them
-      const homeBase = findHomeBase(counts);
-      expect(["EDAV", "EDDF"]).toContain(homeBase);
+    it("returns the first airport when counts are tied", () => {
+      expect(mod.findHomeBase({ EDAV: 5, EDDF: 5 })).toBe("EDAV");
     });
   });
 
-  describe("calculateAirportOpacity", () => {
-    it("returns 1.0 for maximum count", () => {
-      expect(calculateAirportOpacity(10, 10)).toBe(1.0);
+  describe("calculateVisibleAirports", () => {
+    it("returns null (all visible) without filters or selection", () => {
+      expect(
+        mod.calculateVisibleAirports({ pathInfo: mockPathInfo }),
+      ).toBeNull();
     });
 
-    it("returns 0.3 for zero count", () => {
-      expect(calculateAirportOpacity(0, 10)).toBe(0.3);
-    });
-
-    it("returns intermediate value for mid-range count", () => {
-      const opacity = calculateAirportOpacity(5, 10);
-      expect(opacity).toBeGreaterThan(0.3);
-      expect(opacity).toBeLessThan(1.0);
-      expect(opacity).toBeCloseTo(0.65, 2); // 0.3 + 0.5 * (1.0 - 0.3)
-    });
-
-    it("handles zero maxCount", () => {
-      expect(calculateAirportOpacity(0, 0)).toBe(1.0);
-    });
-
-    it("scales linearly", () => {
-      const opacity1 = calculateAirportOpacity(2, 10);
-      const opacity2 = calculateAirportOpacity(5, 10);
-      const opacity3 = calculateAirportOpacity(8, 10);
-
-      expect(opacity2).toBeGreaterThan(opacity1);
-      expect(opacity3).toBeGreaterThan(opacity2);
-    });
-  });
-
-  describe("calculateAirportMarkerSize", () => {
-    it("returns maxSize for maximum count", () => {
-      expect(calculateAirportMarkerSize(10, 10)).toBe(8);
-    });
-
-    it("returns minSize for zero count", () => {
-      expect(calculateAirportMarkerSize(0, 10)).toBe(3);
-    });
-
-    it("returns intermediate value for mid-range count", () => {
-      const size = calculateAirportMarkerSize(5, 10);
-      expect(size).toBeGreaterThan(3);
-      expect(size).toBeLessThan(8);
-      expect(size).toBeCloseTo(5.5, 2); // 3 + 0.5 * (8 - 3)
-    });
-
-    it("accepts custom size options", () => {
-      const size = calculateAirportMarkerSize(5, 10, {
-        minSize: 5,
-        maxSize: 15,
+    it("returns airports of paths matching the year filter", () => {
+      const visible = mod.calculateVisibleAirports({
+        pathInfo: mockPathInfo,
+        selectedYear: "2024",
       });
-      expect(size).toBeCloseTo(10, 2); // 5 + 0.5 * (15 - 5)
+      expect([...visible!].sort()).toEqual(["EDDK", "EDDM"]);
     });
 
-    it("handles zero maxCount", () => {
-      expect(calculateAirportMarkerSize(0, 0)).toBe(3);
-    });
-  });
-
-  describe("calculateAirportVisibility", () => {
-    const airportCounts = {
-      EDAV: 10,
-      EDDF: 5,
-      EDDM: 0,
-    };
-
-    const pathToAirports = {
-      1: { start: "EDAV", end: "EDDF" },
-      2: { start: "EDDF", end: "EDAV" },
-    };
-
-    it("shows all airports with no filters or selection", () => {
-      const visibility = calculateAirportVisibility({
-        airportCounts,
-        selectedYear: "all",
-        selectedAircraft: "all",
-        selectedPathIds: new Set(),
-        pathToAirports,
-      });
-
-      expect(visibility.EDAV).toEqual({ show: true, opacity: 1.0 });
-      expect(visibility.EDDF).toEqual({ show: true, opacity: 1.0 });
-      expect(visibility.EDDM).toEqual({ show: true, opacity: 1.0 });
-    });
-
-    it("hides airports with zero count when filters active", () => {
-      const visibility = calculateAirportVisibility({
-        airportCounts,
-        selectedYear: "2025",
-        selectedAircraft: "all",
-        selectedPathIds: new Set(),
-        pathToAirports,
-      });
-
-      expect(visibility.EDAV.show).toBe(true);
-      expect(visibility.EDDF.show).toBe(true);
-      expect(visibility.EDDM.show).toBe(false);
-    });
-
-    it("highlights selected airports during path selection", () => {
-      const visibility = calculateAirportVisibility({
-        airportCounts,
-        selectedYear: "all",
-        selectedAircraft: "all",
-        selectedPathIds: new Set([1]),
-        pathToAirports,
-      });
-
-      expect(visibility.EDAV.opacity).toBe(1.0); // Selected
-      expect(visibility.EDDF.opacity).toBe(1.0); // Selected
-      expect(visibility.EDDM.opacity).toBe(0.2); // Not selected
-    });
-
-    it("shows all airports during selection even with zero count", () => {
-      const visibility = calculateAirportVisibility({
-        airportCounts,
-        selectedYear: "all",
-        selectedAircraft: "all",
-        selectedPathIds: new Set([1]),
-        pathToAirports,
-      });
-
-      expect(visibility.EDAV.show).toBe(true);
-      expect(visibility.EDDF.show).toBe(true);
-      expect(visibility.EDDM.show).toBe(true);
-    });
-
-    it("handles aircraft filter", () => {
-      const visibility = calculateAirportVisibility({
-        airportCounts: { EDAV: 5, EDDF: 0 },
-        selectedYear: "all",
+    it("returns airports of paths matching the aircraft filter", () => {
+      const visible = mod.calculateVisibleAirports({
+        pathInfo: mockPathInfo,
         selectedAircraft: "D-EAGJ",
-        selectedPathIds: new Set(),
-        pathToAirports,
       });
-
-      expect(visibility.EDAV.show).toBe(true);
-      expect(visibility.EDDF.show).toBe(false);
+      expect([...visible!].sort()).toEqual(["EDAV", "EDDF"]);
     });
 
-    it("handles empty selection", () => {
-      const visibility = calculateAirportVisibility({
-        airportCounts,
-        selectedPathIds: new Set(),
-        pathToAirports,
+    it("adds airports of selected paths to the filtered set", () => {
+      const visible = mod.calculateVisibleAirports({
+        pathInfo: mockPathInfo,
+        selectedYear: "2025",
+        selectedPathIds: new Set([3]),
       });
+      expect([...visible!].sort()).toEqual(["EDAV", "EDDF", "EDDK", "EDDM"]);
+    });
 
-      Object.values(visibility).forEach((v) => {
-        expect(v.show).toBe(true);
-        expect(v.opacity).toBe(1.0);
+    it("only returns airports of selected paths in isolate mode", () => {
+      const visible = mod.calculateVisibleAirports({
+        pathInfo: mockPathInfo,
+        selectedYear: "2025",
+        selectedPathIds: new Set([3]),
+        isolateSelection: true,
       });
+      expect([...visible!].sort()).toEqual(["EDDK", "EDDM"]);
+    });
+
+    it("ignores isolate mode without a selection", () => {
+      const visible = mod.calculateVisibleAirports({
+        pathInfo: mockPathInfo,
+        selectedYear: "2024",
+        isolateSelection: true,
+      });
+      expect([...visible!].sort()).toEqual(["EDDK", "EDDM"]);
+    });
+
+    it("uses the provided path info map for selected paths", () => {
+      const byId = new Map<number, PathInfo>([
+        [99, { id: 99, start_airport: "LOWW" }],
+      ]);
+      const visible = mod.calculateVisibleAirports({
+        pathInfo: mockPathInfo,
+        selectedPathIds: new Set([99, 1]),
+        pathInfoById: byId,
+      });
+      // path 1 is unknown to the map, so only LOWW is visible
+      expect([...visible!]).toEqual(["LOWW"]);
+    });
+
+    it("ignores unknown selected path ids", () => {
+      const visible = mod.calculateVisibleAirports({
+        pathInfo: mockPathInfo,
+        selectedPathIds: new Set([999]),
+      });
+      expect(visible!.size).toBe(0);
     });
   });
 
   describe("countryDisplayName", () => {
     it("converts ISO code to full country name", () => {
-      expect(countryDisplayName("DE")).toBe("Germany");
-      expect(countryDisplayName("US")).toBe("United States");
-      expect(countryDisplayName("FR")).toBe("France");
+      expect(mod.countryDisplayName("DE")).toBe("Germany");
+      expect(mod.countryDisplayName("US")).toBe("United States");
+      expect(mod.countryDisplayName("FR")).toBe("France");
     });
 
-    it("returns a string for unknown codes", () => {
-      const result = countryDisplayName("ZZ");
-      expect(typeof result).toBe("string");
-      expect(result.length).toBeGreaterThan(0);
+    it("returns a non-empty string for unknown codes and the input for invalid ones", () => {
+      const unknown = mod.countryDisplayName("ZZ");
+      expect(typeof unknown).toBe("string");
+      expect(unknown.length).toBeGreaterThan(0);
+      // Intl throws on malformed region codes; the input is returned as is
+      expect(mod.countryDisplayName("not a code")).toBe("not a code");
     });
   });
 
   describe("countryFlag", () => {
     it("converts ISO code to flag emoji", () => {
-      expect(countryFlag("DE")).toBe("🇩🇪");
-      expect(countryFlag("US")).toBe("🇺🇸");
-      expect(countryFlag("CH")).toBe("🇨🇭");
+      expect(mod.countryFlag("DE")).toBe("🇩🇪");
+      expect(mod.countryFlag("US")).toBe("🇺🇸");
+      expect(mod.countryFlag("CH")).toBe("🇨🇭");
     });
 
     it("returns empty string for invalid codes", () => {
-      expect(countryFlag("")).toBe("");
-      expect(countryFlag("X")).toBe("");
-      expect(countryFlag("abc")).toBe("");
+      expect(mod.countryFlag("")).toBe("");
+      expect(mod.countryFlag("X")).toBe("");
+      expect(mod.countryFlag("abc")).toBe("");
+      expect(mod.countryFlag("d1")).toBe("");
     });
   });
 
-  describe("countCountries", () => {
+  describe("country lookups", () => {
     beforeEach(() => {
-      vi.stubGlobal("KML_AIRPORTS", {
+      window.KML_AIRPORTS = {
         airports: [
-          { name: "EDAV Halle-Oppin", country: "DE" },
-          { name: "EDDF Frankfurt", country: "DE" },
-          { name: "LSZH Zurich", country: "CH" },
-          { name: "LKPR Prague", country: "CZ" },
+          { name: "EDAV Halle-Oppin", lat: 51, lon: 12, country: "DE" },
+          { name: "EDDF Frankfurt", lat: 50, lon: 8, country: "DE" },
+          { name: "LSZH Zurich", lat: 47, lon: 8, country: "CH" },
+          { name: "LKPR Prague", lat: 50, lon: 14, country: "CZ" },
+          { name: "NOCOUNTRY", lat: 0, lon: 0 },
         ],
-      });
+      };
     });
 
-    it("returns unique country codes for given airports", () => {
-      const countries = countCountries([
+    it("countCountries returns unique country codes for given airports", () => {
+      const countries = mod.countCountries([
         "EDAV Halle-Oppin",
         "EDDF Frankfurt",
         "LSZH Zurich",
       ]);
-      expect(countries.size).toBe(2);
-      expect(countries.has("DE")).toBe(true);
-      expect(countries.has("CH")).toBe(true);
+      expect([...countries].sort()).toEqual(["CH", "DE"]);
     });
 
-    it("returns empty set for empty input", () => {
-      expect(countCountries([]).size).toBe(0);
+    it("countCountries skips unknown airports and airports without country", () => {
+      expect(mod.countCountries([]).size).toBe(0);
+      expect([
+        ...mod.countCountries(["EDAV Halle-Oppin", "UNKNOWN", "NOCOUNTRY"]),
+      ]).toEqual(["DE"]);
     });
 
-    it("skips airports not found in KML_AIRPORTS", () => {
-      const countries = countCountries(["EDAV Halle-Oppin", "UNKNOWN Airport"]);
-      expect(countries.size).toBe(1);
-      expect(countries.has("DE")).toBe(true);
-    });
-  });
-
-  describe("groupByCountry", () => {
-    beforeEach(() => {
-      vi.stubGlobal("KML_AIRPORTS", {
-        airports: [
-          { name: "EDAV Halle-Oppin", country: "DE" },
-          { name: "EDDF Frankfurt", country: "DE" },
-          { name: "LSZH Zurich", country: "CH" },
-          { name: "LKPR Prague", country: "CZ" },
-        ],
-      });
-    });
-
-    it("groups airports by country code", () => {
-      const grouped = groupByCountry([
+    it("groupByCountry groups airports by country code in first-seen order", () => {
+      const grouped = mod.groupByCountry([
+        "LSZH Zurich",
         "EDAV Halle-Oppin",
         "EDDF Frankfurt",
-        "LSZH Zurich",
         "LKPR Prague",
       ]);
-      expect(grouped.get("DE")).toEqual(["EDAV Halle-Oppin", "EDDF Frankfurt"]);
-      expect(grouped.get("CH")).toEqual(["LSZH Zurich"]);
-      expect(grouped.get("CZ")).toEqual(["LKPR Prague"]);
+      expect([...grouped.entries()]).toEqual([
+        ["CH", ["LSZH Zurich"]],
+        ["DE", ["EDAV Halle-Oppin", "EDDF Frankfurt"]],
+        ["CZ", ["LKPR Prague"]],
+      ]);
     });
 
-    it("puts unknown airports under 'Other'", () => {
-      const grouped = groupByCountry(["UNKNOWN Airport"]);
-      expect(grouped.get("Other")).toEqual(["UNKNOWN Airport"]);
+    it("groupByCountry puts unknown airports under 'Other'", () => {
+      expect(mod.groupByCountry(["UNKNOWN Airport"]).get("Other")).toEqual([
+        "UNKNOWN Airport",
+      ]);
+      expect(mod.groupByCountry([]).size).toBe(0);
     });
 
-    it("returns empty map for empty input", () => {
-      expect(groupByCountry([]).size).toBe(0);
+    it("caches the country map per module instance", () => {
+      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
+      window.KML_AIRPORTS = { airports: [] };
+      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
+    });
+
+    it("handles missing KML_AIRPORTS", () => {
+      delete window.KML_AIRPORTS;
+      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
     });
   });
 });

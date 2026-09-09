@@ -6,6 +6,8 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   {
     ignores: [
+      ".claude/**",
+      "build/**",
       "node_modules/**",
       "dist/**",
       "coverage/**",
@@ -13,8 +15,6 @@ export default tseslint.config(
       "docs/**",
       "kml_heatmap/static/**",
       "kml_heatmap/templates/**",
-      "playwright.config.ts",
-      "tests/e2e/**",
       ".git/**",
     ],
   },

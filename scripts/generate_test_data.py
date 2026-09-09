@@ -3,26 +3,24 @@
 Generate test KML files with random flight data.
 
 Creates realistic test KML files with curved flight paths between major
-European airports. Useful for testing performance, stack overflow fixes,
-and visualization quality with large datasets.
+European airports. Useful for testing performance and visualization quality
+with large datasets.
 
 Features:
 - Curved flight paths using Bezier curves (not straight lines)
 - Random deviations to spread data across Germany
 - Realistic altitude profiles (climb, cruise, descend)
 - Configurable number of files
-- Charterware-format KML (LineString without per-point timestamps)
-- SkyDemon-compatible filename format for metadata extraction
+- LineString coordinates without per-point timestamps (Charterware style)
+- Documented N_REGISTRATION_TYPE.kml filenames (no dates in the filename or
+  the placemark name); the flight date is carried by a <TimeStamp> element
 
-Note: Uses Charterware KML format (LineString with flat coordinates) without
-per-point timing information. Only the flight start date is included in the
-filename. This tests the code path where altitude and airspeed visualization
-is not available due to lack of timing data.
+Note: Without per-point timing information the groundspeed visualization
+falls back to path averages. This exercises that code path deliberately.
 """
 
 import argparse
 import datetime
-import os
 import random
 from pathlib import Path
 
@@ -50,81 +48,55 @@ AIRCRAFT = [
 
 
 def generate_flight_path(start_coords, end_coords, num_points=50):
-    """Generate a flight path between two coordinates with altitude and speed.
-
-    Adds realistic variations including:
-    - Curved paths (not straight lines)
-    - Random deviations to spread data across Germany
-    - Realistic altitude and speed profiles
-    """
+    """Generate a curved flight path between two coordinates with altitude."""
     lat1, lon1 = start_coords
     lat2, lon2 = end_coords
 
     coords = []
-    altitudes = []
-    speeds = []
 
-    # Generate cruise altitude (1000-10000 ft)
+    # Generate cruise altitude (2000-10000 ft)
     cruise_alt = random.randint(2000, 10000)
 
-    # Add some randomness to create curved paths
-    # Generate control points for a bezier-like curve
+    # Offset the midpoint perpendicular to the flight path to create curves
     mid_lat = (lat1 + lat2) / 2
     mid_lon = (lon1 + lon2) / 2
-
-    # Offset the midpoint perpendicular to the flight path to create curves
     dx = lat2 - lat1
     dy = lon2 - lon1
-
-    # Create perpendicular offset (20-40% of distance)
     offset_factor = random.uniform(0.2, 0.4) * random.choice([-1, 1])
-    offset_lat = -dy * offset_factor
-    offset_lon = dx * offset_factor
-
-    mid_lat += offset_lat
-    mid_lon += offset_lon
+    mid_lat += -dy * offset_factor
+    mid_lon += dx * offset_factor
 
     for i in range(num_points):
-        progress = i / (num_points - 1)
+        t = i / (num_points - 1)
 
         # Quadratic bezier curve interpolation for more realistic paths
-        # B(t) = (1-t)^2 * P0 + 2(1-t)t * P1 + t^2 * P2
-        t = progress
         lat = (1 - t) ** 2 * lat1 + 2 * (1 - t) * t * mid_lat + t**2 * lat2
         lon = (1 - t) ** 2 * lon1 + 2 * (1 - t) * t * mid_lon + t**2 * lon2
 
-        # Add small random variations to spread the data more
+        # Small random variations to spread the data
         lat += random.uniform(-0.02, 0.02)
         lon += random.uniform(-0.02, 0.02)
 
-        # Generate altitude profile (climb, cruise, descend)
-        if progress < 0.2:  # Climb
-            alt = int(cruise_alt * (progress / 0.2))
-        elif progress > 0.8:  # Descend
-            alt = int(cruise_alt * ((1 - progress) / 0.2))
-        else:  # Cruise
+        # Altitude profile (climb, cruise, descend)
+        if t < 0.2:
+            alt = int(cruise_alt * (t / 0.2))
+        elif t > 0.8:
+            alt = int(cruise_alt * ((1 - t) / 0.2))
+        else:
             alt = cruise_alt + random.randint(-200, 200)
 
-        # Generate speed (80-150 knots)
-        speed = random.randint(80, 150)
-
         coords.append((lat, lon, alt))
-        altitudes.append(alt)
-        speeds.append(speed)
 
-    return coords, altitudes, speeds
+    return coords
 
 
 def generate_kml_file(
     flight_id, start_airport, end_airport, aircraft_reg, aircraft_type, output_dir
 ):
     """Generate a single KML file for a flight."""
-    start_coords = AIRPORTS[start_airport]
-    end_coords = AIRPORTS[end_airport]
+    coords = generate_flight_path(AIRPORTS[start_airport], AIRPORTS[end_airport])
 
-    coords, _altitudes, _speeds = generate_flight_path(start_coords, end_coords)
-
-    # Generate timestamps (2026 only)
+    # Flight date (2026 only), carried by a TimeStamp element
     start_time = datetime.datetime(
         2026,
         random.randint(1, 12),
@@ -133,57 +105,37 @@ def generate_kml_file(
         random.randint(0, 59),
         tzinfo=datetime.UTC,
     )
+    timestamp = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Format timestamp for KML (parser expects: "DD MMM YYYY" or "YYYY-MM-DD")
-    timestamp_str = start_time.strftime("%d %b %Y")
+    coordinate_lines = "\n".join(
+        f"          {lon},{lat},{alt * 0.3048}" for lat, lon, alt in coords
+    )
 
     kml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
     <name>Flight {flight_id}</name>
     <Placemark>
-      <name>{start_airport} to {end_airport} - {timestamp_str}</name>
-      <description>Aircraft: {aircraft_reg} ({aircraft_type})</description>
-      <ExtendedData>
-        <Data name="aircraft_registration">
-          <value>{aircraft_reg}</value>
-        </Data>
-        <Data name="aircraft_type">
-          <value>{aircraft_type}</value>
-        </Data>
-        <Data name="start_airport">
-          <value>{start_airport}</value>
-        </Data>
-        <Data name="end_airport">
-          <value>{end_airport}</value>
-        </Data>
-      </ExtendedData>
+      <name>{start_airport} - {end_airport}</name>
+      <TimeStamp>
+        <when>{timestamp}</when>
+      </TimeStamp>
       <LineString>
         <extrude>1</extrude>
         <tessellate>1</tessellate>
         <altitudeMode>absolute</altitudeMode>
         <coordinates>
-"""
-
-    for _i, (lat, lon, alt) in enumerate(coords):
-        # Convert altitude from feet to meters
-        alt_meters = alt * 0.3048
-        kml_content += f"          {lon},{lat},{alt_meters}\n"
-
-    kml_content += """        </coordinates>
+{coordinate_lines}
+        </coordinates>
       </LineString>
     </Placemark>
   </Document>
 </kml>
 """
 
-    # Create output file (SkyDemon format: YYYYMMDD_HHMM_START_END_AIRCRAFT.kml)
-    timestamp = start_time.strftime("%Y%m%d_%H%M")
-    filename = f"{timestamp}_{start_airport}_{end_airport}_{aircraft_type}.kml"
-    filepath = os.path.join(output_dir, filename)
-
-    with open(filepath, "w") as f:
-        f.write(kml_content)
+    # Documented filename format: N_REGISTRATION_TYPE.kml (registration without hyphen)
+    filename = f"{flight_id}_{aircraft_reg.replace('-', '')}_{aircraft_type}.kml"
+    (Path(output_dir) / filename).write_text(kml_content, encoding="utf-8")
 
     return filename
 
@@ -233,8 +185,7 @@ Examples:
 
     airport_list = list(AIRPORTS.keys())
 
-    for i in range(num_files):
-        # Random flight parameters
+    for i in range(1, num_files + 1):
         start_airport = random.choice(airport_list)
         end_airport = random.choice([a for a in airport_list if a != start_airport])
         aircraft_reg, aircraft_type = random.choice(AIRCRAFT)
@@ -243,8 +194,8 @@ Examples:
             i, start_airport, end_airport, aircraft_reg, aircraft_type, output_dir
         )
 
-        if (i + 1) % 1000 == 0:
-            print(f"Generated {i + 1:,} files...")
+        if i % 1000 == 0:
+            print(f"Generated {i:,} files...")
 
     print(f"\n✓ Successfully generated {num_files:,} KML files in {output_dir}/")
     print("\nTo test with this data, run:")

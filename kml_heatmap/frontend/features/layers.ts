@@ -1,10 +1,12 @@
 /**
  * Layer rendering helpers
- * Pure functions for calculating layer properties
+ * Pure functions used by the LayerManager for colour ranges, filtering,
+ * segment styling and legend labels.
  */
 
 import type { PathInfo, PathSegment } from "../types";
 import type { Range } from "../state/store";
+import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 
 /**
  * Segment rendering properties
@@ -24,74 +26,78 @@ export interface LegendLabels {
   max: string;
 }
 
-/**
- * Layer statistics
- */
-export interface LayerStats {
-  totalSegments: number;
-  uniquePaths: number;
-  altitudeRange: Range;
-  speedRange: Range;
-}
+export const DEFAULT_ALTITUDE_RANGE: Range = { min: 0, max: 10000 };
+export const DEFAULT_AIRSPEED_RANGE: Range = { min: 0, max: 200 };
 
 function calculateRange(
   segments: PathSegment[],
   getValue: (seg: PathSegment) => number | undefined,
   filterValue: (v: number) => boolean,
   defaultRange: Range,
-  selectedPathIds: Set<number> | null = null,
+  selectedPathIds: Set<number> | null,
 ): Range {
-  let segmentsToUse = segments;
-  if (selectedPathIds && selectedPathIds.size > 0) {
-    segmentsToUse = segments.filter((seg) => selectedPathIds.has(seg.path_id));
-  }
-  if (segmentsToUse.length === 0) return defaultRange;
+  const useSelection = selectedPathIds !== null && selectedPathIds.size > 0;
+  let min = Infinity;
+  let max = -Infinity;
 
-  const values = segmentsToUse
-    .map(getValue)
-    .filter((v): v is number => v !== undefined && filterValue(v));
-
-  if (values.length === 0) return defaultRange;
-
-  let min = values[0] ?? 0;
-  let max = values[0] ?? 0;
-  for (let i = 1; i < values.length; i++) {
-    const v = values[i] ?? 0;
+  for (const seg of segments) {
+    if (useSelection && !selectedPathIds.has(seg.path_id)) continue;
+    const v = getValue(seg);
+    if (v === undefined || !filterValue(v)) continue;
     if (v < min) min = v;
     if (v > max) max = v;
   }
+
+  if (min === Infinity) return defaultRange;
   return { min, max };
 }
 
+/**
+ * Altitude colour range (feet) of the given segments, optionally restricted
+ * to the selected paths. Falls back to `defaultRange` when nothing matches.
+ * Negative altitudes (below the MSL reference) are kept in the data but drawn
+ * with the lowest colour: the scale's lower bound is clamped at 0 ft so the
+ * legend and colours match the previous (clamped) exports.
+ */
 export function calculateAltitudeRange(
   segments: PathSegment[],
   selectedPathIds: Set<number> | null = null,
+  defaultRange: Range = DEFAULT_ALTITUDE_RANGE,
 ): Range {
-  return calculateRange(
+  const range = calculateRange(
     segments,
     (s) => s.altitude_ft,
     () => true,
-    { min: 0, max: 10000 },
+    defaultRange,
     selectedPathIds,
   );
+  if (range.min < 0) {
+    return { min: 0, max: Math.max(range.max, 0) };
+  }
+  return range;
 }
 
+/**
+ * Groundspeed range (knots) of the given segments, ignoring segments without
+ * a positive speed. Optionally restricted to the selected paths.
+ */
 export function calculateAirspeedRange(
   segments: PathSegment[],
   selectedPathIds: Set<number> | null = null,
+  defaultRange: Range = DEFAULT_AIRSPEED_RANGE,
 ): Range {
   return calculateRange(
     segments,
     (s) => s.groundspeed_knots,
     (v) => v > 0,
-    { min: 0, max: 200 },
+    defaultRange,
     selectedPathIds,
   );
 }
 
 /**
  * Determine if a segment should be rendered based on filters
- * @param segment - Segment object
+ * @param _segment - Segment object
  * @param pathInfo - Path info object
  * @param filters - Filter object {year, aircraft}
  * @returns True if segment should be rendered
@@ -121,41 +127,61 @@ export function shouldRenderSegment(
 }
 
 /**
- * Calculate segment rendering properties
- * @param _segment - Segment object
- * @param options - Rendering options
- * @returns Rendering properties {weight, opacity, color}
+ * Calculate segment rendering properties (weight, opacity, colour) from the
+ * selection state.
+ *
+ * - no selection: normal weight, 0.85 opacity
+ * - selected path: heavier line, full opacity
+ * - unselected path while a selection exists: dimmed
+ * - isolate mode: only selected paths are drawn, at normal weight
  */
-export function calculateSegmentProperties(
-  _segment: PathSegment,
-  options: {
-    pathId: number;
-    selectedPathIds?: Set<number>;
-    hasSelection?: boolean;
-    colorFunction?: (value: number, min: number, max: number) => string;
-    colorMin?: number;
-    colorMax?: number;
-    value?: number; // altitude_ft or groundspeed_knots
-  } = { pathId: 0 },
-): SegmentProperties {
+export function calculateSegmentProperties(options: {
+  pathId: number;
+  selectedPathIds?: Set<number>;
+  isolateSelection?: boolean;
+  colorFunction?: (value: number, min: number, max: number) => string;
+  colorMin?: number;
+  colorMax?: number;
+  value?: number; // altitude_ft or groundspeed_knots
+}): SegmentProperties {
   const {
     pathId,
-    selectedPathIds = new Set(),
-    hasSelection = false,
+    selectedPathIds = new Set<number>(),
+    isolateSelection = false,
     colorFunction,
     colorMin = 0,
     colorMax = 0,
     value = 0,
   } = options;
 
+  const hasSelection = selectedPathIds.size > 0;
   const isSelected = selectedPathIds.has(pathId);
+  const inSolo = isolateSelection && isSelected;
 
   return {
-    weight: isSelected ? 6 : 4,
-    opacity: isSelected ? 1.0 : hasSelection ? 0.1 : 0.85,
+    weight: isSelected && !inSolo ? 6 : 4,
+    opacity: inSolo ? 0.85 : isSelected ? 1.0 : hasSelection ? 0.1 : 0.85,
     color: colorFunction ? colorFunction(value, colorMin, colorMax) : "#3388ff",
     isSelected,
   };
+}
+
+/**
+ * Format an altitude legend label, e.g. "1000 ft (305 m)"
+ */
+export function formatAltitudeLabel(valueFt: number): string {
+  const ft = Math.round(valueFt);
+  const m = Math.round(valueFt * FEET_TO_METERS);
+  return ft + " ft (" + m + " m)";
+}
+
+/**
+ * Format a groundspeed legend label, e.g. "100 kt (185 km/h)"
+ */
+export function formatAirspeedLabel(valueKt: number): string {
+  const kt = Math.round(valueKt);
+  const kmh = Math.round(valueKt * NAUTICAL_MILES_TO_KM);
+  return kt + " kt (" + kmh + " km/h)";
 }
 
 /**
@@ -169,8 +195,8 @@ export function formatAltitudeLegendLabels(
   max: number,
 ): LegendLabels {
   return {
-    min: Math.round(min) + " ft",
-    max: Math.round(max) + " ft",
+    min: formatAltitudeLabel(min),
+    max: formatAltitudeLabel(max),
   };
 }
 
@@ -185,64 +211,65 @@ export function formatAirspeedLegendLabels(
   max: number,
 ): LegendLabels {
   return {
-    min: Math.round(min) + " kt",
-    max: Math.round(max) + " kt",
+    min: formatAirspeedLabel(min),
+    max: formatAirspeedLabel(max),
   };
 }
 
 /**
- * Filter segments by criteria
- * @param segments - All segments
- * @param pathInfo - All path info
- * @param filters - Filter criteria
- * @returns Filtered segments
+ * Squared planar distance (in degrees, longitude scaled by cos(lat)) from a
+ * point to a line segment.
  */
-export function filterSegmentsForRendering(
-  segments: PathSegment[],
-  pathInfo: PathInfo[],
-  filters: { year?: string; aircraft?: string } = {},
-): PathSegment[] {
-  const pathInfoMap = new Map(pathInfo.map((p) => [p.id, p]));
+function distanceToSegmentSquared(
+  lat: number,
+  lng: number,
+  a: [number, number],
+  b: [number, number],
+): number {
+  const scale = Math.cos((lat * Math.PI) / 180);
+  const ax = a[1] * scale;
+  const ay = a[0];
+  const bx = b[1] * scale;
+  const by = b[0];
+  const px = lng * scale;
+  const py = lat;
 
-  return segments.filter((segment) => {
-    const info = pathInfoMap.get(segment.path_id);
-    // If no pathInfo found for this segment, don't render it
-    if (!info) return false;
-    return shouldRenderSegment(segment, info, filters);
-  });
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lengthSquared = dx * dx + dy * dy;
+  let t = 0;
+  if (lengthSquared > 0) {
+    t = ((px - ax) * dx + (py - ay) * dy) / lengthSquared;
+    t = Math.max(0, Math.min(1, t));
+  }
+  const cx = ax + t * dx;
+  const cy = ay + t * dy;
+  return (px - cx) * (px - cx) + (py - cy) * (py - cy);
 }
 
 /**
- * Group segments by path ID
- * @param segments - Array of segments
- * @returns Map of path_id to array of segments
+ * Find the segment closest to a geographic point. Used to show per-segment
+ * tooltip data on polylines that were merged from several segments.
+ * @param segments - Candidate segments (must have coords)
+ * @param lat - Latitude of the point
+ * @param lng - Longitude of the point
+ * @returns Nearest segment or undefined for an empty list
  */
-export function groupSegmentsByPath(
+export function findNearestSegment(
   segments: PathSegment[],
-): Map<number, PathSegment[]> {
-  const grouped = new Map<number, PathSegment[]>();
-
-  segments.forEach((segment) => {
-    const pathId = segment.path_id;
-    if (!grouped.has(pathId)) {
-      grouped.set(pathId, []);
+  lat: number,
+  lng: number,
+): PathSegment | undefined {
+  let best: PathSegment | undefined;
+  let bestDistance = Infinity;
+  for (const segment of segments) {
+    const coords = segment.coords;
+    if (!coords) continue;
+    const d = distanceToSegmentSquared(lat, lng, coords[0], coords[1]);
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = segment;
     }
-    grouped.get(pathId)!.push(segment);
-  });
-
-  return grouped;
-}
-
-/**
- * Calculate layer statistics
- * @param segments - Segments being rendered
- * @returns Layer statistics
- */
-export function calculateLayerStats(segments: PathSegment[]): LayerStats {
-  return {
-    totalSegments: segments.length,
-    uniquePaths: new Set(segments.map((s) => s.path_id)).size,
-    altitudeRange: calculateAltitudeRange(segments),
-    speedRange: calculateAirspeedRange(segments),
-  };
+  }
+  return best;
 }

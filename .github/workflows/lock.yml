@@ -1,0 +1,42 @@
+---
+# Regenerates the Python lock files with `make lock` and opens a pull request.
+# Requires "Allow GitHub Actions to create and approve pull requests" under
+# Settings > Actions > General; without it the create-pull-request step fails
+# with a 403. Pull requests created with the default GITHUB_TOKEN also do not
+# trigger the test workflow; close and reopen the PR to run CI on it.
+name: lock
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Regenerate the lock files
+        run: make lock
+      - name: Open a pull request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          commit-message: "chore: regenerate Python lock files"
+          signoff: true
+          branch: chore/regenerate-lock-files
+          delete-branch: true
+          title: "chore: regenerate Python lock files"
+          body: "Automated `make lock` run (pip-compile with `--upgrade`)."
+          labels: |
+            dependencies
+            python
+          add-paths: |
+            requirements.lock
+            requirements-test.lock

@@ -19,7 +19,6 @@ export interface HeatmapOptions {
 }
 
 export interface HeatmapLayer extends L.Layer {
-  setLatLngs(latlngs: [number, number][] | [number, number, number][]): this;
   _canvas?: HTMLCanvasElement; // Private Leaflet property for canvas access
 }
 
@@ -38,6 +37,7 @@ declare global {
     height?: number;
     quality?: number;
     bgcolor?: string;
+    style?: Record<string, string>;
   }
 
   interface DomToImage {
@@ -48,7 +48,6 @@ declare global {
 
   interface Window {
     KMLHeatmap: KMLHeatmapModule;
-    MapAppInstance?: MapApp;
     initMapApp?: (config: MapConfig) => Promise<MapApp>;
     mapApp?: MapApp;
     domtoimage?: DomToImage;

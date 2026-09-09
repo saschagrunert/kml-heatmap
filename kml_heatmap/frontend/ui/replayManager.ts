@@ -5,8 +5,25 @@ import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
 import { showToast } from "../utils/toast";
+import { findMinMax } from "../utils/arrayHelpers";
+import { formatTime } from "../utils/formatters";
+import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { ReplayRenderer } from "./replayRenderer";
 import { ReplayState } from "./replayState";
+
+export const REPLAY_PRECONDITION_MESSAGE =
+  "Select exactly one flight with timing data to replay";
+
+const REPLAY_BUTTON_LABEL = "Replay selected flight path";
+const REPLAY_BUTTON_ACTIVE_LABEL = "Stop replay";
+
+const REPLAY_DISABLED_CONTROL_IDS = [
+  "heatmap-btn",
+  "airports-btn",
+  "aviation-btn",
+  "year-select",
+  "aircraft-select",
+];
 
 export class ReplayManager {
   private app: MapApp;
@@ -29,11 +46,28 @@ export class ReplayManager {
       "replay-slider-start",
       "replay-slider-end",
       "replay-time-display",
+      "replay-live",
       "replay-speed",
       "replay-autozoom-btn",
       "altitude-btn",
       "altitude-legend",
     ]);
+
+    // Announce the final position once a slider drag ends (not per frame)
+    const slider = domCache.get("replay-slider");
+    if (slider) {
+      slider.addEventListener("change", () => {
+        this.announce("Moved to " + formatTime(this.state.currentTime));
+      });
+    }
+  }
+
+  /** Whether the current selection can be replayed */
+  canReplay(): boolean {
+    const hasTimingData =
+      this.app.fullStats?.max_groundspeed_knots !== undefined &&
+      this.app.fullStats.max_groundspeed_knots > 0;
+    return this.app.selectedPathIds.size === 1 && hasTimingData;
   }
 
   toggleReplay(): void {
@@ -41,112 +75,120 @@ export class ReplayManager {
     if (!panel) return;
 
     if (this.state.active) {
-      // Stop replay and hide panel
-      this.stopReplay();
-      panel.style.display = "none";
-      this.state.active = false;
-      const replayBtn = domCache.get("replay-btn");
-      if (replayBtn) replayBtn.textContent = "▶️ Replay";
-
-      // Remove replay-active class from body
-      document.body.classList.remove("replay-active");
-
-      // Remove airplane marker when closing replay completely
-      if (this.state.airplaneMarker) {
-        const el = this.state.airplaneMarker.getElement();
-        if (el && this.markerClickHandler) {
-          el.removeEventListener("click", this.markerClickHandler);
-          this.markerClickHandler = null;
-        }
-        if (this.app.map) {
-          this.app.map.removeLayer(this.state.airplaneMarker);
-        }
-        this.state.airplaneMarker = null;
-      }
-
-      // Remove replay layer from map (important for mobile Safari touch events)
-      if (this.state.layer && this.app.map) {
-        this.app.map.removeLayer(this.state.layer);
-      }
-
-      // Restore visibility of other layers
-      this.restoreLayerVisibility();
-
-      // Ensure altitude layer is visible for path selection after replay
-      if (
-        !this.app.altitudeVisible &&
-        !this.app.airspeedVisible &&
-        this.app.map
-      ) {
-        this.app.altitudeVisible = true;
-        const altBtn = domCache.get("altitude-btn");
-        if (altBtn) altBtn.style.opacity = "1.0";
-        const altLegend = domCache.get("altitude-legend");
-        if (altLegend) altLegend.style.display = "block";
-        this.app.map.addLayer(this.app.altitudeLayer);
-      }
-
-      // Force a redraw on mobile Safari to ensure click handlers work
-      setTimeout(() => {
-        if (this.app.altitudeVisible) {
-          this.app.layerManager.redrawAltitudePaths();
-        } else if (this.app.airspeedVisible) {
-          this.app.layerManager.redrawAirspeedPaths();
-        }
-        if (this.app.map) this.app.map.invalidateSize();
-      }, 100);
-
-      this.updateReplayButtonState();
-      this.app.stateManager.saveMapState();
-    } else {
-      if (this.app.selectedPathIds.size !== 1) {
-        return;
-      }
-
-      if (this.initializeReplay()) {
-        panel.style.display = "block";
-        this.state.active = true;
-        const replayBtn = domCache.get("replay-btn");
-        if (replayBtn) {
-          replayBtn.textContent = "⏹️ Replay";
-          replayBtn.style.opacity = "1.0";
-        }
-
-        const autoZoomBtn = domCache.get(
-          "replay-autozoom-btn",
-        ) as HTMLButtonElement | null;
-        if (autoZoomBtn) {
-          autoZoomBtn.style.opacity = this.state.autoZoom ? "1.0" : "0.5";
-          autoZoomBtn.title = this.state.autoZoom
-            ? "Auto-zoom enabled"
-            : "Auto-zoom disabled";
-        }
-
-        document.body.classList.add("replay-active");
-        this.hideOtherLayersDuringReplay();
-        this.app.stateManager.saveMapState();
-      }
+      this.deactivateReplay(panel);
+      return;
     }
+
+    if (!this.canReplay()) {
+      showToast(REPLAY_PRECONDITION_MESSAGE, "info");
+      return;
+    }
+
+    if (!this.initializeReplay()) return;
+
+    panel.style.display = "block";
+    this.state.active = true;
+
+    const replayBtn = domCache.get("replay-btn");
+    if (replayBtn) {
+      replayBtn.textContent = "⏹️ Replay";
+      replayBtn.style.opacity = "1.0";
+      replayBtn.setAttribute("aria-pressed", "true");
+      replayBtn.setAttribute("aria-label", REPLAY_BUTTON_ACTIVE_LABEL);
+      replayBtn.title = REPLAY_BUTTON_ACTIVE_LABEL;
+    }
+
+    this.updateAutoZoomButton();
+
+    document.body.classList.add("replay-active");
+    this.hideOtherLayersDuringReplay();
+    this.app.stateManager.saveMapState();
+  }
+
+  private deactivateReplay(panel: HTMLElement): void {
+    // The closing announcement below replaces the "stopped" one
+    this.stopReplay(false);
+    panel.style.display = "none";
+    this.state.active = false;
+
+    const replayBtn = domCache.get("replay-btn");
+    if (replayBtn) {
+      replayBtn.textContent = "▶️ Replay";
+      replayBtn.setAttribute("aria-pressed", "false");
+      replayBtn.setAttribute("aria-label", REPLAY_BUTTON_LABEL);
+      replayBtn.title = REPLAY_BUTTON_LABEL;
+    }
+
+    document.body.classList.remove("replay-active");
+
+    // Remove airplane marker when closing replay completely
+    if (this.state.airplaneMarker) {
+      const el = this.state.airplaneMarker.getElement();
+      if (el && this.markerClickHandler) {
+        el.removeEventListener("click", this.markerClickHandler);
+        this.markerClickHandler = null;
+      }
+      if (this.app.map) {
+        this.app.map.removeLayer(this.state.airplaneMarker);
+      }
+      this.state.airplaneMarker = null;
+    }
+
+    // Remove replay layer from map (important for mobile Safari touch events)
+    if (this.state.layer && this.app.map) {
+      this.app.map.removeLayer(this.state.layer);
+    }
+
+    // Ensure a colored path layer is visible for path selection after replay.
+    // restoreLayerVisibility() adds the layer and redraws it once.
+    if (!this.app.altitudeVisible && !this.app.airspeedVisible) {
+      this.app.altitudeVisible = true;
+      const altBtn = domCache.get("altitude-btn");
+      if (altBtn) {
+        altBtn.style.opacity = "1.0";
+        altBtn.setAttribute("aria-pressed", "true");
+      }
+      const altLegend = domCache.get("altitude-legend");
+      if (altLegend) altLegend.style.display = "block";
+    }
+
+    this.restoreLayerVisibility();
+    this.updateReplayButtonState();
+    this.app.stateManager.saveMapState();
+    this.announce("Replay closed");
   }
 
   updateReplayButtonState(): void {
     const btn = domCache.get("replay-btn") as HTMLButtonElement | null;
     if (!btn) return;
 
-    const hasTimingData =
-      this.app.fullStats &&
-      this.app.fullStats.max_groundspeed_knots !== undefined &&
-      this.app.fullStats.max_groundspeed_knots > 0;
+    // The button stays enabled so it can explain why replay is unavailable
+    const ready = this.canReplay();
+    btn.style.opacity = ready ? "1.0" : "0.5";
+    // No aria-disabled: assistive tech would skip the button, and clicking it
+    // is how the user learns why replay is unavailable
+    btn.title = ready
+      ? "Replay selected flight path"
+      : "Select exactly one flight with timing data to replay";
+  }
 
-    if (this.app.selectedPathIds.size === 1 && hasTimingData) {
-      btn.style.opacity = "1.0";
-      btn.disabled = false;
-      btn.setAttribute("aria-disabled", "false");
-    } else {
-      btn.style.opacity = "0.5";
-      btn.disabled = true;
-      btn.setAttribute("aria-disabled", "true");
-    }
+  private updateAutoZoomButton(): void {
+    const autoZoomBtn = domCache.get("replay-autozoom-btn");
+    if (!autoZoomBtn) return;
+    autoZoomBtn.style.opacity = this.state.autoZoom ? "1.0" : "0.5";
+    autoZoomBtn.title = this.state.autoZoom
+      ? "Auto-zoom enabled"
+      : "Auto-zoom disabled";
+    autoZoomBtn.setAttribute("aria-pressed", String(this.state.autoZoom));
+  }
+
+  /** Write to the polite live region (play/pause/seek end announcements) */
+  private announce(message: string): void {
+    const live = domCache.get("replay-live");
+    if (!live) return;
+    // Clear first so repeated identical messages are announced again
+    live.textContent = "";
+    live.textContent = message;
   }
 
   updateReplayAirplanePopup(): void {
@@ -164,7 +206,10 @@ export class ReplayManager {
 
     const selectedPathId = Array.from(this.app.selectedPathIds)[0];
     if (selectedPathId === undefined) return false;
-    if (!this.filterAndSortSegments(selectedPathId)) return false;
+    if (!this.filterAndSortSegments(selectedPathId)) {
+      showToast(REPLAY_PRECONDITION_MESSAGE, "info");
+      return false;
+    }
 
     this.calculateColorRanges(selectedPathId);
     this.setupReplayUI();
@@ -203,7 +248,7 @@ export class ReplayManager {
       currentResSegments.length > 0 ? currentResSegments : this.state.segments;
 
     const altitudes = sourceSegments.map((s) => s.altitude_ft ?? 0);
-    const altRange = window.KMLHeatmap.findMinMax(altitudes);
+    const altRange = findMinMax(altitudes);
     this.state.colorMinAlt = altRange.min;
     this.state.colorMaxAlt = altRange.max;
 
@@ -211,7 +256,7 @@ export class ReplayManager {
       .map((s) => s.groundspeed_knots ?? 0)
       .filter((s) => s > 0);
     if (groundspeeds.length > 0) {
-      const speedRange = window.KMLHeatmap.findMinMax(groundspeeds);
+      const speedRange = findMinMax(groundspeeds);
       this.state.colorMinSpeed = speedRange.min;
       this.state.colorMaxSpeed = speedRange.max;
     } else {
@@ -229,7 +274,7 @@ export class ReplayManager {
 
     const sliderEnd = domCache.get("replay-slider-end");
     if (sliderEnd) {
-      sliderEnd.textContent = window.KMLHeatmap.formatTime(this.state.maxTime);
+      sliderEnd.textContent = formatTime(this.state.maxTime);
     }
 
     this.app.layerManager.updateAltitudeLegend(
@@ -270,12 +315,15 @@ export class ReplayManager {
     this.state.airplaneMarker = L.marker([startCoords[0], startCoords[1]], {
       icon: airplaneIcon,
       zIndexOffset: 1000,
+      title: "Aircraft position",
+      alt: "Aircraft position",
     });
     this.state.airplaneMarker.addTo(this.app.map);
 
+    // The rotation transition lives on the inner icon (see styles.css);
+    // Leaflet positions the marker root with transforms, which must not animate.
     const markerElement = this.state.airplaneMarker.getElement();
     if (markerElement) {
-      markerElement.style.transition = "transform 0.08s linear";
       markerElement.style.cursor = "pointer";
       markerElement.style.pointerEvents = "auto";
 
@@ -328,16 +376,7 @@ export class ReplayManager {
       this.app.map.removeLayer(this.app.airspeedLayer);
     }
 
-    this.setElementsDisabled(
-      [
-        "heatmap-btn",
-        "airports-btn",
-        "aviation-btn",
-        "year-select",
-        "aircraft-select",
-      ],
-      true,
-    );
+    this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, true);
   }
 
   restoreLayerVisibility(): void {
@@ -350,6 +389,8 @@ export class ReplayManager {
       }
     }
 
+    // Redraw once after the layer is back on the map so click handlers work
+    // on mobile Safari.
     if (this.app.altitudeVisible) {
       this.app.map.addLayer(this.app.altitudeLayer);
       setTimeout(() => {
@@ -366,16 +407,7 @@ export class ReplayManager {
       }, 50);
     }
 
-    this.setElementsDisabled(
-      [
-        "heatmap-btn",
-        "airports-btn",
-        "aviation-btn",
-        "year-select",
-        "aircraft-select",
-      ],
-      false,
-    );
+    this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, false);
   }
 
   private setElementsDisabled(ids: string[], disabled: boolean): void {
@@ -389,17 +421,14 @@ export class ReplayManager {
 
   playReplay(): void {
     if (!this.state.active || !this.app.map) return;
+    // Never start a second animation loop
+    if (this.state.playing) return;
 
     if (this.state.currentTime >= this.state.maxTime) {
-      this.state.currentTime = 0;
-      this.state.lastDrawnIndex = -1;
+      this.state.resetDrawState();
       if (this.state.layer) this.state.layer.clearLayers();
 
-      if (
-        this.state.airplaneMarker &&
-        this.state.segments.length > 0 &&
-        this.app.map
-      ) {
+      if (this.state.airplaneMarker && this.state.segments.length > 0) {
         const firstSeg = this.state.segments[0];
         const startCoords = firstSeg?.coords?.[0];
         if (startCoords) {
@@ -414,9 +443,6 @@ export class ReplayManager {
           }
         }
       }
-
-      this.state.recenterTimestamps = [];
-      this.state.lastBearing = null;
     }
 
     this.state.playing = true;
@@ -424,6 +450,7 @@ export class ReplayManager {
     const pauseBtn = domCache.get("replay-pause-btn");
     if (playBtn) playBtn.style.display = "none";
     if (pauseBtn) pauseBtn.style.display = "inline-block";
+    this.announce("Replay playing");
 
     this.state.lastFrameTime = null;
 
@@ -441,27 +468,9 @@ export class ReplayManager {
 
       if (this.state.currentTime >= this.state.maxTime) {
         this.state.currentTime = this.state.maxTime;
-        this.pauseReplay();
-
-        if (this.state.segments.length > 0 && this.app.map) {
-          const allCoords: [number, number][] = [];
-          this.state.segments.forEach((seg) => {
-            if (seg.coords && seg.coords.length > 0) {
-              seg.coords.forEach((coord) => {
-                allCoords.push(coord);
-              });
-            }
-          });
-
-          if (allCoords.length > 0) {
-            const bounds = L.latLngBounds(allCoords);
-            this.app.map.fitBounds(bounds, {
-              padding: [50, 50],
-              animate: true,
-              duration: 1.0,
-            });
-          }
-        }
+        this.pauseReplay(false);
+        this.announce("Replay finished");
+        this.fitReplayBounds();
       } else {
         this.state.animationFrameId = requestAnimationFrame(animateReplay);
       }
@@ -470,10 +479,27 @@ export class ReplayManager {
     };
 
     this.state.animationFrameId = requestAnimationFrame(animateReplay);
-    this.app.stateManager.saveMapState();
   }
 
-  pauseReplay(): void {
+  private fitReplayBounds(): void {
+    if (this.state.segments.length === 0 || !this.app.map) return;
+
+    const allCoords: [number, number][] = [];
+    this.state.segments.forEach((seg) => {
+      seg.coords?.forEach((coord) => allCoords.push(coord));
+    });
+
+    if (allCoords.length > 0) {
+      this.app.map.fitBounds(L.latLngBounds(allCoords), {
+        padding: [50, 50],
+        animate: true,
+        duration: 1.0,
+      });
+    }
+  }
+
+  pauseReplay(announce: boolean = true): void {
+    const wasPlaying = this.state.playing;
     this.state.playing = false;
     const playBtn = domCache.get("replay-play-btn");
     const pauseBtn = domCache.get("replay-pause-btn");
@@ -486,11 +512,14 @@ export class ReplayManager {
     }
 
     this.state.lastFrameTime = null;
-    this.app.stateManager.saveMapState();
+
+    if (wasPlaying && announce) {
+      this.announce("Replay paused at " + formatTime(this.state.currentTime));
+    }
   }
 
-  stopReplay(): void {
-    this.pauseReplay();
+  stopReplay(announce = true): void {
+    this.pauseReplay(false);
     this.state.resetDrawState();
     if (this.state.layer) {
       this.state.layer.clearLayers();
@@ -503,19 +532,20 @@ export class ReplayManager {
       }
     }
     this.updateReplayDisplay();
+    if (this.state.active && announce) this.announce("Replay stopped");
   }
 
   seekReplay(value: string): void {
     const newTime = parseFloat(value);
 
     if (newTime < this.state.currentTime) {
-      if (this.state.layer) this.state.layer.clearLayers();
-      this.state.lastDrawnIndex = -1;
+      // Drop only the segments after the new position; clearing the whole
+      // layer would redraw the entire flight on every drag event
+      this.renderer.removeSegmentsAfter(this, newTime);
     }
 
     this.state.currentTime = newTime;
     this.updateReplayDisplay(true);
-    this.app.stateManager.saveMapState();
   }
 
   changeReplaySpeed(): void {
@@ -523,19 +553,11 @@ export class ReplayManager {
     if (!select) return;
 
     this.state.speed = parseFloat(select.value);
-    this.app.stateManager.saveMapState();
   }
 
   toggleAutoZoom(): void {
     this.state.autoZoom = !this.state.autoZoom;
-    const autoZoomBtn = domCache.get("replay-autozoom-btn");
-    if (autoZoomBtn) {
-      autoZoomBtn.style.opacity = this.state.autoZoom ? "1.0" : "0.5";
-      autoZoomBtn.title = this.state.autoZoom
-        ? "Auto-zoom enabled"
-        : "Auto-zoom disabled";
-    }
-    this.app.stateManager.saveMapState();
+    this.updateAutoZoomButton();
   }
 
   redrawReplayPath(mode: "altitude" | "airspeed"): void {
@@ -550,18 +572,18 @@ export class ReplayManager {
       if (!seg || (seg.time ?? 0) > savedTime) continue;
       if (mode === "airspeed" && (seg.groundspeed_knots ?? 0) <= 0) continue;
 
-      const value =
-        mode === "altitude"
-          ? (seg.altitude_ft ?? 0)
-          : (seg.groundspeed_knots ?? 0);
-      const min =
-        mode === "altitude" ? this.state.colorMinAlt : this.state.colorMinSpeed;
-      const max =
-        mode === "altitude" ? this.state.colorMaxAlt : this.state.colorMaxSpeed;
       const color =
         mode === "altitude"
-          ? window.KMLHeatmap.getColorForAltitude(value, min, max)
-          : window.KMLHeatmap.getColorForAirspeed(value, min, max);
+          ? getColorForAltitude(
+              seg.altitude_ft ?? 0,
+              this.state.colorMinAlt,
+              this.state.colorMaxAlt,
+            )
+          : getColorForAirspeed(
+              seg.groundspeed_knots ?? 0,
+              this.state.colorMinSpeed,
+              this.state.colorMaxSpeed,
+            );
 
       L.polyline(seg.coords ?? [], {
         color,

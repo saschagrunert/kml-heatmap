@@ -2,101 +2,101 @@
 
 from unittest.mock import MagicMock
 
+from kml_heatmap.parser_common import empty_placemark_metadata
 from kml_heatmap.parser_standard import process_standard_coordinates
+from kml_heatmap.types import TrackPoint
+
+
+def _elem(text):
+    elem = MagicMock()
+    elem.text = text
+    return elem
+
+
+def _run(elements, metadata=None, kml_file="test.kml"):
+    coordinates, path_groups, path_metadata = [], [], []
+    process_standard_coordinates(
+        elements, metadata or {}, kml_file, coordinates, path_groups, path_metadata
+    )
+    return coordinates, path_groups, path_metadata
 
 
 class TestProcessStandardCoordinates:
-    def _make_coord_element(self, text):
-        elem = MagicMock()
-        elem.text = text
-        return elem
-
     def test_none_text_skipped(self):
-        elem = self._make_coord_element(None)
-        coordinates, path_groups, path_metadata = [], [], []
-        process_standard_coordinates(
-            [elem], {}, "test.kml", coordinates, path_groups, path_metadata
-        )
-        assert coordinates == []
-        assert path_groups == []
+        assert _run([_elem(None)]) == ([], [], [])
 
     def test_empty_text_skipped(self):
-        elem = self._make_coord_element("   ")
-        coordinates, path_groups, path_metadata = [], [], []
-        process_standard_coordinates(
-            [elem], {}, "test.kml", coordinates, path_groups, path_metadata
-        )
-        assert coordinates == []
-        assert path_groups == []
+        assert _run([_elem("   ")]) == ([], [], [])
 
     def test_single_point(self):
-        elem = self._make_coord_element("8.5,50.0,100.0")
-        coordinates, path_groups, path_metadata = [], [], []
-        process_standard_coordinates(
-            [elem], {}, "test.kml", coordinates, path_groups, path_metadata
-        )
-        assert len(coordinates) == 1
-        assert len(path_groups) == 1
-        assert len(path_groups[0]) == 1
+        coordinates, path_groups, path_metadata = _run([_elem("8.5,50.0,100.0")])
+        assert coordinates == [TrackPoint(50.0, 8.5, 100.0, None)]
+        assert path_groups == [[TrackPoint(50.0, 8.5, 100.0, None)]]
+        assert path_metadata[0]["start_point"] == [50.0, 8.5, 100.0]
+        assert path_metadata[0]["filename"] == "test.kml"
 
     def test_multi_point_path(self):
-        elem = self._make_coord_element("8.5,50.0,100.0 8.6,50.1,150.0 8.7,50.2,200.0")
-        coordinates, path_groups, path_metadata = [], [], []
-        process_standard_coordinates(
-            [elem], {}, "test.kml", coordinates, path_groups, path_metadata
+        coordinates, path_groups, _ = _run(
+            [_elem("8.5,50.0,100.0 8.6,50.1,150.0 8.7,50.2,200.0")]
         )
         assert len(coordinates) == 3
-        assert len(path_groups) == 1
-        assert len(path_groups[0]) == 3
+        assert path_groups == [coordinates]
 
     def test_invalid_coordinates_skipped(self):
-        elem = self._make_coord_element("invalid 8.5,50.0,100.0 also-invalid")
-        coordinates, path_groups, path_metadata = [], [], []
-        process_standard_coordinates(
-            [elem], {}, "test.kml", coordinates, path_groups, path_metadata
+        coordinates, path_groups, _ = _run(
+            [_elem("invalid 8.5,50.0,100.0 also-invalid")]
         )
-        assert len(coordinates) == 1
+        assert coordinates == [TrackPoint(50.0, 8.5, 100.0, None)]
+        assert len(path_groups) == 1
 
     def test_metadata_lookup(self):
-        elem = self._make_coord_element("8.5,50.0,100.0")
+        elem = _elem("8.5,50.0,100.0")
         metadata = {
             id(elem): {
                 "airport_name": "EDDS",
                 "timestamp": "2025-03-03T08:58:01Z",
                 "end_timestamp": None,
+                "year": 2025,
             }
         }
-        coordinates, path_groups, path_metadata = [], [], []
-        process_standard_coordinates(
-            [elem], metadata, "test.kml", coordinates, path_groups, path_metadata
-        )
-        assert len(path_metadata) == 1
+        _, _, path_metadata = _run([elem], metadata)
         assert path_metadata[0]["airport_name"] == "EDDS"
+        assert path_metadata[0]["timestamp"] == "2025-03-03T08:58:01Z"
+        assert path_metadata[0]["year"] == 2025
+
+    def test_missing_metadata_uses_empty_defaults(self):
+        _, _, path_metadata = _run([_elem("8.5,50.0,100.0")])
+        empty = empty_placemark_metadata()
+        assert path_metadata[0]["airport_name"] == ""
+        assert path_metadata[0]["timestamp"] == empty["timestamp"]
+        assert path_metadata[0]["year"] is None
 
     def test_newline_separated_coordinates(self):
-        elem = self._make_coord_element("8.5,50.0,100.0\n8.6,50.1,150.0")
-        coordinates, path_groups, path_metadata = [], [], []
-        process_standard_coordinates(
-            [elem], {}, "test.kml", coordinates, path_groups, path_metadata
-        )
+        coordinates, _, _ = _run([_elem("8.5,50.0,100.0\n8.6,50.1,150.0")])
         assert len(coordinates) == 2
 
     def test_multiple_elements(self):
-        elem1 = self._make_coord_element("8.5,50.0,100.0")
-        elem2 = self._make_coord_element("9.0,51.0,200.0")
-        coordinates, path_groups, path_metadata = [], [], []
-        process_standard_coordinates(
-            [elem1, elem2], {}, "test.kml", coordinates, path_groups, path_metadata
+        _, path_groups, path_metadata = _run(
+            [_elem("8.5,50.0,100.0"), _elem("9.0,51.0,200.0")]
         )
         assert len(path_groups) == 2
         assert len(path_metadata) == 2
 
-    def test_coordinates_without_altitude(self):
-        elem = self._make_coord_element("8.5,50.0 8.6,50.1")
-        coordinates, path_groups, path_metadata = [], [], []
-        process_standard_coordinates(
-            [elem], {}, "test.kml", coordinates, path_groups, path_metadata
-        )
+    def test_coordinates_without_altitude_are_not_paths(self):
+        coordinates, path_groups, path_metadata = _run([_elem("8.5,50.0 8.6,50.1")])
+        assert coordinates == [
+            TrackPoint(50.0, 8.5, None, None),
+            TrackPoint(50.1, 8.6, None, None),
+        ]
+        assert path_groups == []
+        assert path_metadata == []
+
+    def test_invalid_altitude_point_excluded_from_path(self):
+        coordinates, path_groups, _ = _run([_elem("8.5,50.0,999999 8.6,50.1,150.0")])
         assert len(coordinates) == 2
-        # No altitude, so no path group entries
-        assert len(path_groups) == 0
+        assert coordinates[0].alt is None
+        assert path_groups == [[TrackPoint(50.1, 8.6, 150.0, None)]]
+
+    def test_negative_altitude_kept(self):
+        _, path_groups, _ = _run([_elem("8.5,50.0,-50 8.6,50.1,150.0")])
+        assert path_groups[0][0].alt == -50.0

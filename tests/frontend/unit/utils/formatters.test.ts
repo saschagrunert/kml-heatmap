@@ -4,9 +4,28 @@ import {
   formatDistance,
   formatAltitude,
   formatSpeed,
+  formatFileSize,
 } from "../../../../kml_heatmap/frontend/utils/formatters";
 
 describe("formatter utilities", () => {
+  describe("formatFileSize", () => {
+    it("formats bytes, KB, MB and GB", () => {
+      expect(formatFileSize(0)).toBe("0 B");
+      expect(formatFileSize(512)).toBe("512 B");
+      expect(formatFileSize(1024)).toBe("1.0 KB");
+      expect(formatFileSize(15 * 1024)).toBe("15 KB");
+      expect(formatFileSize(1.1 * 1024 * 1024)).toBe("1.1 MB");
+      expect(formatFileSize(24 * 1024 * 1024)).toBe("24 MB");
+      expect(formatFileSize(2.5 * 1024 * 1024 * 1024)).toBe("2.5 GB");
+    });
+
+    it("handles invalid input", () => {
+      expect(formatFileSize(-1)).toBe("0 B");
+      expect(formatFileSize(NaN)).toBe("0 B");
+      expect(formatFileSize(Infinity)).toBe("0 B");
+    });
+  });
+
   describe("formatTime", () => {
     it("formats time with hours, minutes, and seconds", () => {
       expect(formatTime(3661)).toBe("1:01:01");

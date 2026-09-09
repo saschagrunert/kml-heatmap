@@ -1,12 +1,14 @@
 """HTML generation, rendering, and pipeline orchestration."""
 
 import json
+import logging
 import os
 import re
 import shutil
 import string
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any
 
@@ -14,16 +16,20 @@ import minify_html as mh
 import rcssmin
 import rjsmin
 
+from .aircraft import merge_aircraft_data
 from .airports import deduplicate_airports, extract_airport_name
 from .data_exporter import export_all_data
-from .exceptions import KMLParseError
+from .exceptions import KMLHeatmapError, KMLParseError
 from .helpers import numeric_filename_key
 from .logger import logger
 from .parser import parse_kml_coordinates
 from .parser_common import is_mid_flight_start, is_valid_landing
 from .statistics import calculate_statistics
 from .types import AirportData, FlightPath, FlightPathGroup, PathMetadata
-from .validation import validate_kml_file
+from .validation import validate_kml_file, validate_output_dir
+from .workers import init_worker
+
+ParseResult = tuple[FlightPath, FlightPathGroup, list[PathMetadata]]
 
 
 def _escape_js_string(value: str) -> str:
@@ -42,37 +48,27 @@ def load_template() -> str:
 def minify_html(html: str) -> str:
     """Minify HTML, CSS, and JavaScript using specialized minification libraries."""
 
-    # First, minify inline CSS and JavaScript
     def minify_css_tags(match: re.Match[str]) -> str:
         """Minify CSS content within style tags using rcssmin."""
-        css_content = match.group(1)
-        minified_css: str = rcssmin.cssmin(css_content)
+        minified_css: str = rcssmin.cssmin(match.group(1))
         return f"<style>{minified_css}</style>"
 
     def minify_js_tags(match: re.Match[str]) -> str:
         """Minify JavaScript content within script tags using rjsmin."""
-        js_content = match.group(1)
-        minified_js: str = rjsmin.jsmin(js_content)
+        minified_js: str = rjsmin.jsmin(match.group(1))
         # rjsmin preserves newlines for ASI safety. Our code uses explicit
         # semicolons, so we can remove remaining newlines safely.
         minified_js = re.sub(r"\s*\n\s*", "", minified_js)
         return f"<script>{minified_js}</script>"
 
-    # Minify inline CSS
     html = re.sub(r"<style>(.*?)</style>", minify_css_tags, html, flags=re.DOTALL)
-
-    # Minify inline JavaScript (not script tags with src attribute)
     html = re.sub(r"<script>(.*?)</script>", minify_js_tags, html, flags=re.DOTALL)
 
-    # Use minify-html for HTML minification
     minified: str = mh.minify(html)
-
     return minified
 
 
-def _parse_with_error_handling(
-    kml_file: str,
-) -> tuple[str, tuple[FlightPath, FlightPathGroup, list[PathMetadata]]]:
+def _parse_with_error_handling(kml_file: str) -> tuple[str, ParseResult]:
     """Parse a KML file with error handling."""
     try:
         return kml_file, parse_kml_coordinates(kml_file)
@@ -81,24 +77,17 @@ def _parse_with_error_handling(
         return kml_file, ([], [], [])
 
 
-def _parse_kml_files(
-    valid_files: list[str],
-) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]]:
+def _parse_kml_files(valid_files: list[str]) -> ParseResult:
     """Parse KML files in parallel and merge results."""
-    from .airport_lookup import _load_airport_database
-
-    _load_airport_database()
-
     parse_start = time.time()
-
-    all_coordinates: FlightPath = []
-    all_path_groups: FlightPathGroup = []
-    all_path_metadata: list[PathMetadata] = []
 
     results: list[tuple[str, FlightPath, FlightPathGroup, list[PathMetadata]]] = []
     completed_count = 0
+    debug = logger.isEnabledFor(logging.DEBUG)
     with ProcessPoolExecutor(
-        max_workers=max(1, min(len(valid_files), os.cpu_count() or 4))
+        max_workers=max(1, min(len(valid_files), os.cpu_count() or 4)),
+        initializer=init_worker,
+        initargs=(debug,),
     ) as executor:
         future_to_file = {
             executor.submit(_parse_with_error_handling, f): f for f in valid_files
@@ -106,18 +95,21 @@ def _parse_kml_files(
         for future in as_completed(future_to_file):
             try:
                 kml_file, (coords, path_groups, path_metadata) = future.result()
+            except BrokenProcessPool as e:
+                raise KMLHeatmapError(
+                    "A parser worker process crashed; run with --debug for details"
+                ) from e
             except Exception:
                 kml_file = future_to_file[future]
                 logger.exception("Unexpected error processing %s", kml_file)
                 coords, path_groups, path_metadata = [], [], []
             results.append((kml_file, coords, path_groups, path_metadata))
             completed_count += 1
-            progress_pct = (completed_count / len(valid_files)) * 100
             logger.info(
                 "  [%d/%d] %.0f%% - %s",
                 completed_count,
                 len(valid_files),
-                progress_pct,
+                (completed_count / len(valid_files)) * 100,
                 Path(kml_file).name,
             )
 
@@ -125,11 +117,12 @@ def _parse_kml_files(
     failed_count = sum(1 for _, coords, _, _ in results if not coords)
     if failed_count > 0:
         logger.warning(
-            "  %d of %d file(s) failed to parse",
-            failed_count,
-            len(valid_files),
+            "  %d of %d file(s) failed to parse", failed_count, len(valid_files)
         )
 
+    all_coordinates: FlightPath = []
+    all_path_groups: FlightPathGroup = []
+    all_path_metadata: list[PathMetadata] = []
     for _, coords, path_groups, path_metadata in results:
         all_coordinates.extend(coords)
         all_path_groups.extend(path_groups)
@@ -149,22 +142,40 @@ def _parse_kml_files(
     return all_coordinates, all_path_groups, all_path_metadata
 
 
+def _drop_paths_without_year(
+    all_path_groups: FlightPathGroup, all_path_metadata: list[PathMetadata]
+) -> tuple[FlightPathGroup, list[PathMetadata]]:
+    """Exclude paths whose year cannot be determined, with a warning each."""
+    kept_groups: FlightPathGroup = []
+    kept_metadata: list[PathMetadata] = []
+    for path, metadata in zip(all_path_groups, all_path_metadata, strict=True):
+        if metadata.get("year") is None:
+            logger.warning(
+                "Excluding path without a determinable year: %s (%s)",
+                metadata.get("filename") or "unknown file",
+                metadata.get("airport_name") or "unnamed",
+            )
+            continue
+        kept_groups.append(path)
+        kept_metadata.append(metadata)
+    return kept_groups, kept_metadata
+
+
 def _process_data(
     all_coordinates: FlightPath,
     all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
     data_dir: str,
-    aircraft_file: Path | None = None,
+    aircraft_data: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Process parsed data: deduplicate airports, calculate stats, export files."""
     min_lat = min_lon = float("inf")
     max_lat = max_lon = float("-inf")
-    for coord in all_coordinates:
-        lat, lon = coord[0], coord[1]
-        min_lat = min(min_lat, lat)
-        max_lat = max(max_lat, lat)
-        min_lon = min(min_lon, lon)
-        max_lon = max(max_lon, lon)
+    for point in all_coordinates:
+        min_lat = min(min_lat, point.lat)
+        max_lat = max(max_lat, point.lat)
+        min_lon = min(min_lon, point.lon)
+        max_lon = max(max_lon, point.lon)
     bounds = {
         "min_lat": min_lat,
         "max_lat": max_lat,
@@ -173,6 +184,10 @@ def _process_data(
         "center_lat": (min_lat + max_lat) / 2,
         "center_lon": (min_lon + max_lon) / 2,
     }
+
+    all_path_groups, all_path_metadata = _drop_paths_without_year(
+        all_path_groups, all_path_metadata
+    )
 
     unique_airports: list[AirportData] = []
     if all_path_metadata:
@@ -183,9 +198,7 @@ def _process_data(
         logger.info("  Found %d unique airports", len(unique_airports))
 
     logger.info("\nCalculating statistics...")
-    stats = calculate_statistics(
-        all_coordinates, all_path_groups, all_path_metadata, aircraft_file=aircraft_file
-    )
+    stats = calculate_statistics(all_path_metadata, aircraft_data=aircraft_data)
 
     valid_airport_names = []
     for airport in unique_airports:
@@ -199,13 +212,11 @@ def _process_data(
     stats["airport_names"] = sorted(valid_airport_names)
 
     export_all_data(
-        all_coordinates,
         all_path_groups,
         all_path_metadata,
         unique_airports,
         stats,
         data_dir,
-        strip_timestamps=True,
     )
 
     return {
@@ -289,6 +300,9 @@ def _copy_javascript_bundles(output_dir: str, static_dir: Path) -> None:
             shutil.copy2(src, dst)
             size = dst.stat().st_size
             logger.info("JavaScript copied: %s (%.1f KB)", dst, size / 1024)
+            source_map = static_dir / f"{bundle_name}.map"
+            if source_map.exists():
+                shutil.copy2(source_map, Path(output_dir) / source_map.name)
         else:
             logger.warning("%s not found - run npm build to generate it", bundle_name)
 
@@ -333,7 +347,7 @@ def _package_assets(
     bounds: dict[str, float],
     data_dir_name: str,
 ) -> None:
-    """Build JS bundles (if needed), generate config, and copy static assets."""
+    """Generate config and copy static assets (pre-built JS bundles, CSS, icons)."""
     static_dir = Path(__file__).parent / "static"
     templates_dir = Path(__file__).parent / "templates"
 
@@ -357,9 +371,17 @@ def create_progressive_heatmap(
     kml_files: list[str],
     output_file: str = "index.html",
     data_dir: str = "data",
-    aircraft_file: Path | None = None,
+    aircraft_files: list[Path] | None = None,
 ) -> bool:
     """Create a progressive-loading heatmap with external data files."""
+    aircraft_files = aircraft_files or []
+
+    # Stage 0: Refuse output directories that overlap with the inputs
+    is_safe, error_msg = validate_output_dir(data_dir, [*kml_files, *aircraft_files])
+    if not is_safe:
+        logger.error("%s", error_msg)
+        return False
+
     # Stage 1: Validate and parse
     valid_files = []
     for kml_file in kml_files:
@@ -379,17 +401,18 @@ def create_progressive_heatmap(
         all_coordinates, all_path_groups, all_path_metadata = _parse_kml_files(
             valid_files
         )
-    except ValueError as e:
+    except (ValueError, KMLHeatmapError) as e:
         logger.error(str(e))
         return False
 
     # Stage 2: Process data
+    aircraft_data = merge_aircraft_data(aircraft_files) if aircraft_files else None
     result = _process_data(
         all_coordinates,
         all_path_groups,
         all_path_metadata,
         data_dir,
-        aircraft_file=aircraft_file,
+        aircraft_data=aircraft_data,
     )
 
     # Stage 3: Render HTML

@@ -2,177 +2,158 @@
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from lxml import etree as ET
+from lxml import etree
 
 from .constants import KML_NAMESPACES
 from .exceptions import KMLParseError
 from .logger import logger
-from .parser_cache import (
-    KML_CACHE_DIR,
-    load_cached_parse,
-)
-from .parser_cache import (
-    get_cache_key as _get_cache_key,
-)
-from .parser_cache import (
-    save_to_cache as _save_to_cache,
-)
-from .parser_common import (
-    extract_placemark_metadata,
-    find_xml_elements,
-)
-from .parser_gx_track import process_gx_track
+from .parser_cache import get_cache_key, load_cached_parse, save_to_cache
+from .parser_common import extract_placemark_metadata, find_xml_elements
+from .parser_gx_track import local_name, process_gx_track
 from .parser_standard import process_standard_coordinates
-from .types import FlightPath, FlightPathGroup, PathMetadata
+
+if TYPE_CHECKING:
+    from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
 
 __all__ = [
-    "get_cache_key",
     "parse_kml_coordinates",
-    "save_to_cache",
 ]
 
 
-def get_cache_key(kml_file: str) -> tuple[Path | None, bool]:
-    """Generate cache key using the module-level KML_CACHE_DIR."""
-    return _get_cache_key(kml_file, cache_dir=KML_CACHE_DIR)
-
-
-def save_to_cache(
-    cache_path: Path,
-    coordinates: FlightPath,
-    path_groups: FlightPathGroup,
-    path_metadata: list[PathMetadata],
-) -> None:
-    """Save parse results using the module-level KML_CACHE_DIR."""
-    _save_to_cache(
-        cache_path, coordinates, path_groups, path_metadata, cache_dir=KML_CACHE_DIR
-    )
-
-
-def _parse_kml_tree(kml_file: str) -> ET._Element:
+def _parse_kml_tree(kml_file: str) -> etree._Element:
     """Parse KML file and return XML root element."""
     try:
-        parser = ET.XMLParser(resolve_entities=False, no_network=True)
-        tree = ET.parse(kml_file, parser)
+        parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        tree = etree.parse(kml_file, parser)
         root = tree.getroot()
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("\n  Root tag: %s", root.tag)
             logger.debug("Root attrib: %s", root.attrib)
-            all_tags = set()
-            for elem in root.iter():
-                tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
-                all_tags.add(tag)
+            all_tags = {local_name(elem.tag) for elem in root.iter()}
             logger.debug("All unique tags in file: %s", sorted(all_tags))
 
         return root
 
-    except ET.ParseError as e:
+    except etree.ParseError as e:
         raise KMLParseError(f"XML parsing error: {e}", file_path=kml_file) from e
     except OSError as e:
         raise KMLParseError(f"File I/O error: {e}", file_path=kml_file) from e
 
 
 def _extract_kml_elements(
-    root: ET._Element, namespaces: dict[str, str]
-) -> tuple[list[ET._Element], list[ET._Element], list[ET._Element]]:
-    """Extract coordinate elements and placemarks from KML root."""
-    # Try with namespace
+    root: etree._Element, namespaces: dict[str, str], kml_file: str
+) -> tuple[list[etree._Element], list[etree._Element], list[etree._Element]]:
+    """Extract coordinate elements, gx:Track elements and placemarks."""
     coord_elements = root.findall(".//kml:coordinates", namespaces)
-    gx_coords = root.findall(".//gx:coord", namespaces)
-
-    if gx_coords:
-        logger.debug("Found %d gx:coord elements (Google Earth Track)", len(gx_coords))
+    tracks = root.findall(".//gx:Track", namespaces)
 
     # If no results, try without namespace (some KML files don't use it)
-    if not coord_elements and not gx_coords:
-        # Remove namespace from tags
+    if not coord_elements and not tracks:
         for elem in root.iter():
-            if "}" in elem.tag:
+            if isinstance(elem.tag, str) and "}" in elem.tag:
                 elem.tag = elem.tag.split("}", 1)[1]
         coord_elements = root.findall(".//coordinates")
-        gx_coords = root.findall(".//coord")  # gx:coord without namespace
+        tracks = root.findall(".//Track")
 
     logger.debug("Found %d coordinate elements", len(coord_elements))
-    if coord_elements:
-        for i, elem in enumerate(coord_elements[:2]):  # Show first 2
-            logger.debug(
-                "Element %d text preview: %s",
-                i,
-                str(elem.text)[:100] if elem.text else "None",
-            )
+    for i, elem in enumerate(coord_elements[:2]):
+        logger.debug(
+            "Element %d text preview: %s",
+            i,
+            str(elem.text)[:100] if elem.text else "None",
+        )
 
-    # Find all Placemarks
+    total_gx_coords = sum(1 for elem in root.iter() if local_name(elem.tag) == "coord")
+    in_track = sum(
+        1
+        for track in tracks
+        for elem in track.iter()
+        if local_name(elem.tag) == "coord"
+    )
+    if tracks:
+        logger.debug(
+            "Found %d gx:Track element(s) with %d gx:coord elements",
+            len(tracks),
+            in_track,
+        )
+    if total_gx_coords > in_track:
+        logger.warning(
+            "%s: %d gx:coord element(s) outside of gx:Track were ignored",
+            Path(kml_file).name,
+            total_gx_coords - in_track,
+        )
+
     placemarks = root.findall(".//kml:Placemark", namespaces)
     if not placemarks:
-        placemarks = root.findall(".//Placemark")  # Without namespace
+        placemarks = root.findall(".//Placemark")
 
-    return coord_elements, gx_coords, placemarks
+    return coord_elements, tracks, placemarks
 
 
 def _build_coord_metadata_map(
-    placemarks: list[ET._Element], namespaces: dict[str, str], kml_file: str
-) -> dict[int, dict[str, object]]:
-    """Create mapping from coordinate elements to their metadata."""
-    coord_to_metadata = {}
+    placemarks: list[etree._Element], namespaces: dict[str, str]
+) -> dict[int, PlacemarkMetadata]:
+    """Create mapping from coordinate elements to their placemark metadata."""
+    coord_to_metadata: dict[int, PlacemarkMetadata] = {}
     for placemark in placemarks:
-        # Find coordinates within this placemark
         placemark_coords = find_xml_elements(
             placemark, ".//kml:coordinates", ".//coordinates", namespaces
         )
+        if not placemark_coords:
+            continue
 
-        # Extract metadata using helper function
-        metadata = extract_placemark_metadata(placemark, namespaces, kml_file)
-
-        # Store metadata for each coordinates element in this placemark
+        metadata = extract_placemark_metadata(placemark, namespaces)
         for coord_elem in placemark_coords:
             coord_to_metadata[id(coord_elem)] = metadata
 
     return coord_to_metadata
 
 
+def _log_parse_result(
+    kml_file: str,
+    coordinates: FlightPath,
+    path_groups: FlightPathGroup,
+    cached: bool,
+) -> None:
+    suffix = " (cached)" if cached else ""
+    logger.info(
+        "✓ Loaded %d points from %s%s", len(coordinates), Path(kml_file).name, suffix
+    )
+    if path_groups:
+        total_alt_points = sum(len(path) for path in path_groups)
+        logger.info(
+            "  (%d points have altitude data in %d path(s))",
+            total_alt_points,
+            len(path_groups),
+        )
+
+
 def parse_kml_coordinates(
     kml_file: str,
 ) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]]:
     """Extract coordinates from a KML file."""
-    # Check cache first
     cache_path, cache_valid = get_cache_key(kml_file)
     if cache_valid and cache_path:
         cached_result = load_cached_parse(cache_path)
         if cached_result:
-            coordinates, path_groups, path_metadata = cached_result
-            logger.info(
-                "✓ Loaded %d points from %s (cached)",
-                len(coordinates),
-                Path(kml_file).name,
-            )
-            if path_groups:
-                total_alt_points = sum(len(path) for path in path_groups)
-                logger.info(
-                    "  (%d points have altitude data in %d path(s))",
-                    total_alt_points,
-                    len(path_groups),
-                )
-            return coordinates, path_groups, path_metadata
+            _log_parse_result(kml_file, cached_result[0], cached_result[1], cached=True)
+            return cached_result
 
-    # Initialize output lists
-    coordinates = []
-    path_groups = []
-    path_metadata = []
+    coordinates: FlightPath = []
+    path_groups: FlightPathGroup = []
+    path_metadata: list[PathMetadata] = []
 
-    # Parse KML file
     root = _parse_kml_tree(kml_file)
-
     namespaces = KML_NAMESPACES
 
-    # Extract elements
-    coord_elements, gx_coords, placemarks = _extract_kml_elements(root, namespaces)
+    coord_elements, tracks, placemarks = _extract_kml_elements(
+        root, namespaces, kml_file
+    )
+    coord_to_metadata = _build_coord_metadata_map(placemarks, namespaces)
 
-    # Build metadata mapping
-    coord_to_metadata = _build_coord_metadata_map(placemarks, namespaces, kml_file)
-
-    # Process standard KML coordinates
     process_standard_coordinates(
         coord_elements,
         coord_to_metadata,
@@ -182,35 +163,19 @@ def parse_kml_coordinates(
         path_metadata,
     )
 
-    # Process Google Earth Track (gx:coord) elements
     process_gx_track(
-        gx_coords,
-        placemarks,
-        namespaces,
-        kml_file,
-        coordinates,
-        path_groups,
-        path_metadata,
+        tracks, namespaces, kml_file, coordinates, path_groups, path_metadata
     )
 
-    # Log results
-    total_alt_points = sum(len(path) for path in path_groups)
-    logger.info("✓ Loaded %d points from %s", len(coordinates), Path(kml_file).name)
-    if path_groups:
-        logger.info(
-            "  (%d points have altitude data in %d path(s))",
-            total_alt_points,
-            len(path_groups),
-        )
+    _log_parse_result(kml_file, coordinates, path_groups, cached=False)
 
-    if len(coordinates) == 0:
+    if not coordinates:
         logger.warning("No valid coordinates found!")
         logger.warning("This could mean:")
         logger.warning("  - The KML file uses a different structure")
         logger.warning("  - The coordinates are in an unexpected format")
         logger.warning("  - Try running with --debug flag for more information")
 
-    # Save to cache
     if cache_path:
         save_to_cache(cache_path, coordinates, path_groups, path_metadata)
 

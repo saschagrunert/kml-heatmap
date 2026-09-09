@@ -1,9 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
+import { MapApp, bindActions } from "../../../../kml_heatmap/frontend/mapApp";
 import type {
   KMLDataset,
-  PathInfo,
-  PathSegment,
   FilteredStatistics,
 } from "../../../../kml_heatmap/frontend/types";
 
@@ -21,18 +19,18 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
   logError: vi.fn(),
 }));
 
+const config = {
+  center: [48.0, 16.0] as [number, number],
+  bounds: [
+    [47.0, 15.0],
+    [49.0, 17.0],
+  ] as [[number, number], [number, number]],
+  dataDir: "data",
+};
+
 describe("MapApp", () => {
   describe("constructor", () => {
     it("initializes with default state", () => {
-      const config = {
-        center: [48.0, 16.0] as [number, number],
-        bounds: [
-          [47.0, 15.0],
-          [49.0, 17.0],
-        ] as [[number, number], [number, number]],
-        dataDir: "data",
-      };
-
       const app = new MapApp(config);
 
       expect(app.config).toBe(config);
@@ -46,7 +44,11 @@ describe("MapApp", () => {
       expect(app.airportsVisible).toBe(true);
       expect(app.aviationVisible).toBe(false);
       expect(app.buttonsHidden).toBe(false);
+      expect(app.isInitializing).toBe(true);
       expect(app.selectedPathIds).toEqual(new Set());
+      expect(app.pathRenderer).toBeDefined();
+      expect(app.airportToPaths).toEqual({});
+      expect(app.airportMarkers).toEqual({});
       expect(app.stateManager).toBeUndefined();
       expect(app.dataManager).toBeUndefined();
       expect(app.layerManager).toBeUndefined();
@@ -59,65 +61,39 @@ describe("MapApp", () => {
     let app: MapApp;
 
     beforeEach(() => {
-      app = new MapApp({
-        center: [48.0, 16.0],
-        bounds: [
-          [47.0, 15.0],
-          [49.0, 17.0],
-        ],
-        dataDir: "data",
-      });
+      app = new MapApp(config);
     });
 
     it("selectedYear getter/setter delegates to store", () => {
       app.selectedYear = "2025";
+      expect(app.store.get("selectedYear")).toBe("2025");
       expect(app.selectedYear).toBe("2025");
     });
 
     it("selectedAircraft getter/setter delegates to store", () => {
       app.selectedAircraft = "D-EAGJ";
-      expect(app.selectedAircraft).toBe("D-EAGJ");
+      expect(app.store.get("selectedAircraft")).toBe("D-EAGJ");
     });
 
     it("selectedPathIds getter/setter delegates to store", () => {
       const ids = new Set([1, 2, 3]);
       app.selectedPathIds = ids;
-      expect(app.selectedPathIds).toBe(ids);
+      expect(app.store.get("selectedPathIds")).toBe(ids);
     });
 
-    it("isolateSelection getter/setter delegates to store", () => {
-      app.isolateSelection = true;
-      expect(app.isolateSelection).toBe(true);
-    });
-
-    it("heatmapVisible getter/setter delegates to store", () => {
-      app.heatmapVisible = false;
-      expect(app.heatmapVisible).toBe(false);
-    });
-
-    it("altitudeVisible getter/setter delegates to store", () => {
-      app.altitudeVisible = true;
-      expect(app.altitudeVisible).toBe(true);
-    });
-
-    it("airspeedVisible getter/setter delegates to store", () => {
-      app.airspeedVisible = true;
-      expect(app.airspeedVisible).toBe(true);
-    });
-
-    it("airportsVisible getter/setter delegates to store", () => {
-      app.airportsVisible = false;
-      expect(app.airportsVisible).toBe(false);
-    });
-
-    it("aviationVisible getter/setter delegates to store", () => {
-      app.aviationVisible = true;
-      expect(app.aviationVisible).toBe(true);
-    });
-
-    it("buttonsHidden getter/setter delegates to store", () => {
-      app.buttonsHidden = true;
-      expect(app.buttonsHidden).toBe(true);
+    it.each([
+      "isolateSelection",
+      "heatmapVisible",
+      "altitudeVisible",
+      "airspeedVisible",
+      "airportsVisible",
+      "aviationVisible",
+      "buttonsHidden",
+    ] as const)("%s getter/setter delegates to store", (key) => {
+      const initial = app[key];
+      app[key] = !initial;
+      expect(app.store.get(key)).toBe(!initial);
+      expect(app[key]).toBe(!initial);
     });
 
     it("currentData getter/setter delegates to store", () => {
@@ -125,23 +101,26 @@ describe("MapApp", () => {
         coordinates: [],
         path_segments: [],
         path_info: [],
-        resolution: "full",
         original_points: 0,
       };
       app.currentData = data;
-      expect(app.currentData).toBe(data);
+      expect(app.store.get("currentData")).toBe(data);
     });
 
-    it("fullPathInfo getter/setter delegates to store", () => {
-      const info: PathInfo[] = [{ id: 1 }];
-      app.fullPathInfo = info;
-      expect(app.fullPathInfo).toBe(info);
-    });
+    it("fullPathInfo and fullPathSegments derive from currentData", () => {
+      expect(app.fullPathInfo).toBeNull();
+      expect(app.fullPathSegments).toBeNull();
 
-    it("fullPathSegments getter/setter delegates to store", () => {
-      const segments: PathSegment[] = [{ path_id: 1 }];
-      app.fullPathSegments = segments;
-      expect(app.fullPathSegments).toBe(segments);
+      const data: KMLDataset = {
+        coordinates: [],
+        path_segments: [{ path_id: 1 }],
+        path_info: [{ id: 1 }],
+        original_points: 0,
+      };
+      app.currentData = data;
+
+      expect(app.fullPathInfo).toBe(data.path_info);
+      expect(app.fullPathSegments).toBe(data.path_segments);
     });
 
     it("fullStats getter/setter delegates to store", () => {
@@ -156,41 +135,56 @@ describe("MapApp", () => {
         total_distance_nm: 27,
       };
       app.fullStats = stats;
-      expect(app.fullStats).toBe(stats);
+      expect(app.store.get("fullStats")).toBe(stats);
     });
 
-    it("altitudeRange getter/setter delegates to store", () => {
-      const range = { min: 100, max: 5000 };
-      app.altitudeRange = range;
-      expect(app.altitudeRange).toEqual({ min: 100, max: 5000 });
-    });
-
-    it("airspeedRange getter/setter delegates to store", () => {
-      const range = { min: 50, max: 150 };
-      app.airspeedRange = range;
-      expect(app.airspeedRange).toEqual({ min: 50, max: 150 });
+    it("altitudeRange and airspeedRange delegate to store", () => {
+      app.altitudeRange = { min: 100, max: 5000 };
+      app.airspeedRange = { min: 50, max: 150 };
+      expect(app.store.get("altitudeRange")).toEqual({ min: 100, max: 5000 });
+      expect(app.store.get("airspeedRange")).toEqual({ min: 50, max: 150 });
     });
   });
 
-  describe("bindActions wiring", () => {
-    it("managers are accessible after construction", () => {
-      const app = new MapApp({
-        center: [48.0, 16.0],
-        bounds: [
-          [47.0, 15.0],
-          [49.0, 17.0],
-        ],
-        dataDir: "data",
-      });
+  describe("delegating methods", () => {
+    it("forward to the responsible managers", () => {
+      const app = new MapApp(config);
+      app.pathSelection = { togglePathSelection: vi.fn() } as never;
+      app.replayManager = {
+        seekReplay: vi.fn(),
+        changeReplaySpeed: vi.fn(),
+      } as never;
 
-      expect(app.store).toBeDefined();
-      expect(app.config).toBeDefined();
+      app.togglePathSelection("7");
+      app.seekReplay("42");
+      app.changeReplaySpeed();
+
+      expect(
+        (
+          app.pathSelection as unknown as {
+            togglePathSelection: ReturnType<typeof vi.fn>;
+          }
+        ).togglePathSelection,
+      ).toHaveBeenCalledWith(7);
+      expect(
+        (
+          app.replayManager as unknown as {
+            seekReplay: ReturnType<typeof vi.fn>;
+          }
+        ).seekReplay,
+      ).toHaveBeenCalledWith("42");
+      expect(
+        (
+          app.replayManager as unknown as {
+            changeReplaySpeed: ReturnType<typeof vi.fn>;
+          }
+        ).changeReplaySpeed,
+      ).toHaveBeenCalled();
     });
   });
 
   describe("window bindings", () => {
     it("defines window.initMapApp", () => {
-      expect(window.initMapApp).toBeDefined();
       expect(typeof window.initMapApp).toBe("function");
     });
 
@@ -198,9 +192,11 @@ describe("MapApp", () => {
     let actionElements: Record<string, HTMLElement>;
     let result: MapApp;
     let initSpy: ReturnType<typeof vi.spyOn>;
+    let bindOrder: string[];
 
     beforeEach(async () => {
       actionElements = {};
+      bindOrder = [];
       const buttonActions = [
         "toggleHeatmap",
         "toggleStats",
@@ -219,6 +215,8 @@ describe("MapApp", () => {
         "pauseReplay",
         "stopReplay",
         "toggleAutoZoom",
+        "stopPropagation",
+        "unknownAction",
       ];
 
       buttonActions.forEach((action) => {
@@ -252,18 +250,24 @@ describe("MapApp", () => {
       document.body.appendChild(speedSelect);
       actionElements["changeReplaySpeed"] = speedSelect;
 
-      initSpy = vi.spyOn(MapApp.prototype, "initialize").mockResolvedValue();
-
-      const config = {
-        center: [48.0, 16.0] as [number, number],
-        bounds: [
-          [47.0, 15.0],
-          [49.0, 17.0],
-        ] as [[number, number], [number, number]],
-        dataDir: "data",
-      };
+      const addSpy = vi.spyOn(HTMLElement.prototype, "addEventListener");
+      initSpy = vi
+        .spyOn(MapApp.prototype, "initialize")
+        .mockImplementation(function (this: MapApp) {
+          bindOrder.push("initialize");
+          this.isInitializing = false;
+          return Promise.resolve();
+        });
+      addSpy.mockImplementation(function (
+        this: HTMLElement,
+        ...args: Parameters<HTMLElement["addEventListener"]>
+      ) {
+        if (!bindOrder.includes("bind")) bindOrder.push("bind");
+        return EventTarget.prototype.addEventListener.apply(this, args);
+      });
 
       result = await window.initMapApp!(config);
+      addSpy.mockRestore();
 
       result.uiToggles = {
         toggleHeatmap: vi.fn(),
@@ -273,8 +277,8 @@ describe("MapApp", () => {
         toggleAviation: vi.fn(),
         toggleButtonsVisibility: vi.fn(),
         exportMap: vi.fn(),
-      } as any;
-      result.statsManager = { toggleStats: vi.fn() } as any;
+      } as never;
+      result.statsManager = { toggleStats: vi.fn() } as never;
       result.replayManager = {
         toggleReplay: vi.fn(),
         playReplay: vi.fn(),
@@ -283,19 +287,19 @@ describe("MapApp", () => {
         seekReplay: vi.fn(),
         changeReplaySpeed: vi.fn(),
         toggleAutoZoom: vi.fn(),
-      } as any;
+      } as never;
       result.filterManager = {
         filterByYear: vi.fn().mockResolvedValue(undefined),
         filterByAircraft: vi.fn().mockResolvedValue(undefined),
-      } as any;
+      } as never;
       result.pathSelection = {
-        togglePathSelection: vi.fn().mockResolvedValue(undefined),
+        togglePathSelection: vi.fn(),
         toggleIsolateSelection: vi.fn(),
-      } as any;
+      } as never;
       result.wrappedManager = {
-        showWrapped: vi.fn().mockResolvedValue(undefined),
+        showWrapped: vi.fn(),
         closeWrapped: vi.fn(),
-      } as any;
+      } as never;
     });
 
     afterEach(() => {
@@ -303,85 +307,173 @@ describe("MapApp", () => {
       initSpy.mockRestore();
     });
 
-    it("initMapApp creates and initializes app", () => {
-      expect(initSpy).toHaveBeenCalled();
+    const mocks = (): Record<
+      string,
+      Record<string, ReturnType<typeof vi.fn>>
+    > =>
+      result as unknown as Record<
+        string,
+        Record<string, ReturnType<typeof vi.fn>>
+      >;
+
+    it("initMapApp creates the app, binds actions before initializing, then initializes", () => {
       expect(result).toBeInstanceOf(MapApp);
       expect(window.mapApp).toBe(result);
+      expect(bindOrder).toEqual(["bind", "initialize"]);
+      expect(initSpy).toHaveBeenCalledTimes(1);
     });
 
     it("binds UI toggle actions", () => {
       actionElements["toggleHeatmap"]!.click();
-      expect(result.uiToggles.toggleHeatmap).toHaveBeenCalled();
-
       actionElements["toggleAltitude"]!.click();
-      expect(result.uiToggles.toggleAltitude).toHaveBeenCalled();
-
       actionElements["toggleAirspeed"]!.click();
-      expect(result.uiToggles.toggleAirspeed).toHaveBeenCalled();
-
       actionElements["toggleAirports"]!.click();
-      expect(result.uiToggles.toggleAirports).toHaveBeenCalled();
-
       actionElements["toggleAviation"]!.click();
-      expect(result.uiToggles.toggleAviation).toHaveBeenCalled();
-
       actionElements["toggleButtonsVisibility"]!.click();
-      expect(result.uiToggles.toggleButtonsVisibility).toHaveBeenCalled();
-
       actionElements["exportMap"]!.click();
-      expect(result.uiToggles.exportMap).toHaveBeenCalled();
+
+      const ui = mocks()["uiToggles"]!;
+      expect(ui["toggleHeatmap"]).toHaveBeenCalledTimes(1);
+      expect(ui["toggleAltitude"]).toHaveBeenCalledTimes(1);
+      expect(ui["toggleAirspeed"]).toHaveBeenCalledTimes(1);
+      expect(ui["toggleAirports"]).toHaveBeenCalledTimes(1);
+      expect(ui["toggleAviation"]).toHaveBeenCalledTimes(1);
+      expect(ui["toggleButtonsVisibility"]).toHaveBeenCalledTimes(1);
+      expect(ui["exportMap"]).toHaveBeenCalledTimes(1);
     });
 
     it("binds stats action", () => {
       actionElements["toggleStats"]!.click();
-      expect(result.statsManager.toggleStats).toHaveBeenCalled();
+      expect(mocks()["statsManager"]!["toggleStats"]).toHaveBeenCalledTimes(1);
     });
 
     it("binds replay actions", () => {
       actionElements["toggleReplay"]!.click();
-      expect(result.replayManager.toggleReplay).toHaveBeenCalled();
-
       actionElements["playReplay"]!.click();
-      expect(result.replayManager.playReplay).toHaveBeenCalled();
-
       actionElements["pauseReplay"]!.click();
-      expect(result.replayManager.pauseReplay).toHaveBeenCalled();
-
       actionElements["stopReplay"]!.click();
-      expect(result.replayManager.stopReplay).toHaveBeenCalled();
-
       actionElements["seekReplay"]!.dispatchEvent(new Event("input"));
-      expect(result.replayManager.seekReplay).toHaveBeenCalledWith("50");
-
       actionElements["changeReplaySpeed"]!.dispatchEvent(new Event("change"));
-      expect(result.replayManager.changeReplaySpeed).toHaveBeenCalled();
-
       actionElements["toggleAutoZoom"]!.click();
-      expect(result.replayManager.toggleAutoZoom).toHaveBeenCalled();
+
+      const replay = mocks()["replayManager"]!;
+      expect(replay["toggleReplay"]).toHaveBeenCalledTimes(1);
+      expect(replay["playReplay"]).toHaveBeenCalledTimes(1);
+      expect(replay["pauseReplay"]).toHaveBeenCalledTimes(1);
+      expect(replay["stopReplay"]).toHaveBeenCalledTimes(1);
+      expect(replay["seekReplay"]).toHaveBeenCalledWith("50");
+      expect(replay["changeReplaySpeed"]).toHaveBeenCalledTimes(1);
+      expect(replay["toggleAutoZoom"]).toHaveBeenCalledTimes(1);
     });
 
     it("binds filter actions", () => {
       actionElements["filterByYear"]!.dispatchEvent(new Event("change"));
-      expect(result.filterManager.filterByYear).toHaveBeenCalled();
-
       actionElements["filterByAircraft"]!.dispatchEvent(new Event("change"));
-      expect(result.filterManager.filterByAircraft).toHaveBeenCalled();
+
+      const filter = mocks()["filterManager"]!;
+      expect(filter["filterByYear"]).toHaveBeenCalledTimes(1);
+      expect(filter["filterByAircraft"]).toHaveBeenCalledTimes(1);
     });
 
     it("binds wrapped modal actions", () => {
       actionElements["showWrapped"]!.click();
-      expect(result.wrappedManager.showWrapped).toHaveBeenCalled();
-
       actionElements["closeWrapped"]!.click();
-      expect(result.wrappedManager.closeWrapped).toHaveBeenCalled();
-
       actionElements["closeWrappedBackdrop"]!.click();
-      expect(result.wrappedManager.closeWrapped).toHaveBeenCalledTimes(2);
+
+      const wrapped = mocks()["wrappedManager"]!;
+      expect(wrapped["showWrapped"]).toHaveBeenCalledTimes(1);
+      expect(wrapped["closeWrapped"]).toHaveBeenCalledTimes(2);
+      expect(wrapped["closeWrapped"]).toHaveBeenLastCalledWith(
+        expect.any(MouseEvent),
+      );
     });
 
     it("binds path selection actions", () => {
       actionElements["toggleIsolateSelection"]!.click();
-      expect(result.pathSelection.toggleIsolateSelection).toHaveBeenCalled();
+      expect(
+        mocks()["pathSelection"]!["toggleIsolateSelection"],
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops propagation for stopPropagation actions", () => {
+      const event = new MouseEvent("click", { bubbles: true });
+      const stop = vi.spyOn(event, "stopPropagation");
+
+      actionElements["stopPropagation"]!.dispatchEvent(event);
+
+      expect(stop).toHaveBeenCalled();
+    });
+
+    it("ignores unknown actions", () => {
+      expect(() => actionElements["unknownAction"]!.click()).not.toThrow();
+    });
+
+    it("ignores data-dependent actions while initializing but keeps UI toggles", () => {
+      result.isInitializing = true;
+
+      actionElements["filterByYear"]!.dispatchEvent(new Event("change"));
+      actionElements["filterByAircraft"]!.dispatchEvent(new Event("change"));
+      actionElements["toggleReplay"]!.click();
+      actionElements["showWrapped"]!.click();
+      actionElements["exportMap"]!.click();
+      actionElements["toggleIsolateSelection"]!.click();
+      actionElements["toggleHeatmap"]!.click();
+      actionElements["toggleAltitude"]!.click();
+      actionElements["toggleStats"]!.click();
+      actionElements["toggleButtonsVisibility"]!.click();
+
+      expect(mocks()["filterManager"]!["filterByYear"]).not.toHaveBeenCalled();
+      expect(
+        mocks()["filterManager"]!["filterByAircraft"],
+      ).not.toHaveBeenCalled();
+      expect(mocks()["replayManager"]!["toggleReplay"]).not.toHaveBeenCalled();
+      expect(mocks()["wrappedManager"]!["showWrapped"]).not.toHaveBeenCalled();
+      expect(mocks()["uiToggles"]!["exportMap"]).not.toHaveBeenCalled();
+      expect(
+        mocks()["pathSelection"]!["toggleIsolateSelection"],
+      ).not.toHaveBeenCalled();
+      expect(mocks()["uiToggles"]!["toggleHeatmap"]).toHaveBeenCalledTimes(1);
+      expect(mocks()["uiToggles"]!["toggleAltitude"]).toHaveBeenCalledTimes(1);
+      expect(mocks()["statsManager"]!["toggleStats"]).toHaveBeenCalledTimes(1);
+      expect(
+        mocks()["uiToggles"]!["toggleButtonsVisibility"],
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs rejected filter promises instead of throwing", async () => {
+      const { logError } =
+        await import("../../../../kml_heatmap/frontend/utils/logger");
+      const error = new Error("filter failed");
+      mocks()["filterManager"]!["filterByYear"]!.mockRejectedValueOnce(error);
+
+      actionElements["filterByYear"]!.dispatchEvent(new Event("change"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(logError).toHaveBeenCalledWith(error);
+    });
+  });
+
+  describe("bindActions", () => {
+    it("can be called directly for an app instance", () => {
+      const app = new MapApp(config);
+      app.isInitializing = false;
+      app.statsManager = { toggleStats: vi.fn() } as never;
+      const btn = document.createElement("button");
+      btn.dataset["action"] = "toggleStats";
+      document.body.appendChild(btn);
+
+      bindActions(app);
+      btn.click();
+
+      expect(
+        (
+          app.statsManager as unknown as {
+            toggleStats: ReturnType<typeof vi.fn>;
+          }
+        ).toggleStats,
+      ).toHaveBeenCalledTimes(1);
+      btn.remove();
     });
   });
 });

@@ -1,11 +1,138 @@
 /**
- * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, buttons visibility, export)
+ * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, buttons visibility, export, share)
  */
 import type { MapApp } from "../mapApp";
 import { domCache, hideControls, restoreControls } from "../utils/domCache";
 import { showToast } from "../utils/toast";
 
 type ColorLayerMode = "altitude" | "airspeed";
+
+/** dom-to-image is only needed for export, so it is loaded on first use */
+export const DOM_TO_IMAGE_URL =
+  "https://cdn.jsdelivr.net/npm/dom-to-image@2.6.0/dist/dom-to-image.min.js";
+export const DOM_TO_IMAGE_INTEGRITY =
+  "sha384-zESinL+vR3OR5XGFqKjneclbVKOL8SfP+fKKO3K9BHAaPtboci56Vu3g5flevHk9";
+
+const MOBILE_BREAKPOINT_PX = 768;
+const EXPORT_BUTTON_LABEL = "📷 Export";
+
+let domToImagePromise: Promise<DomToImage | null> | null = null;
+
+/**
+ * Load dom-to-image on demand. Resolves with null when the script cannot be
+ * loaded (offline, blocked by CSP, integrity mismatch).
+ */
+export function loadDomToImage(): Promise<DomToImage | null> {
+  if (window.domtoimage) return Promise.resolve(window.domtoimage);
+  if (domToImagePromise) return domToImagePromise;
+
+  domToImagePromise = new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = DOM_TO_IMAGE_URL;
+    script.integrity = DOM_TO_IMAGE_INTEGRITY;
+    script.crossOrigin = "anonymous";
+    script.onload = () => resolve(window.domtoimage ?? null);
+    script.onerror = () => {
+      script.remove();
+      domToImagePromise = null;
+      resolve(null);
+    };
+    document.head.appendChild(script);
+  });
+  return domToImagePromise;
+}
+
+/** Reset the cached loader (used by tests) */
+export function resetDomToImageLoader(): void {
+  domToImagePromise = null;
+}
+
+/** Small viewport or touch device */
+export function isSmallDevice(): boolean {
+  if (window.innerWidth < MOBILE_BREAKPOINT_PX) return true;
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: coarse)").matches
+  );
+}
+
+/** Convert a data: URL into a Blob without going through fetch() */
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const commaIndex = dataUrl.indexOf(",");
+  const header = commaIndex >= 0 ? dataUrl.slice(0, commaIndex) : "";
+  const payload = commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : "";
+  const mimeMatch = /^data:([^;,]+)/.exec(header);
+  const type = mimeMatch?.[1] ?? "application/octet-stream";
+
+  if (!/;base64$/i.test(header)) {
+    return new Blob([decodeURIComponent(payload)], { type });
+  }
+
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type });
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function downloadBlob(blob: Blob, fallbackHref: string, filename: string) {
+  const hasObjectUrl = typeof URL.createObjectURL === "function";
+  const href = hasObjectUrl ? URL.createObjectURL(blob) : fallbackHref;
+
+  const link = document.createElement("a");
+  link.download = filename;
+  link.href = href;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  if (hasObjectUrl) {
+    setTimeout(() => URL.revokeObjectURL(href), 10000);
+  }
+}
+
+type DeliveryOutcome = "shared" | "downloaded" | "cancelled";
+
+/**
+ * Hand the exported image to the user: the native share sheet on mobile
+ * devices that support file sharing, a download otherwise.
+ */
+async function deliverImage(
+  dataUrl: string,
+  filename: string,
+): Promise<DeliveryOutcome> {
+  const blob = dataUrlToBlob(dataUrl);
+
+  if (
+    isSmallDevice() &&
+    typeof navigator.share === "function" &&
+    typeof navigator.canShare === "function"
+  ) {
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: document.title });
+        return "shared";
+      } catch (error) {
+        if (isAbortError(error)) return "cancelled";
+        // Sharing failed for another reason: fall back to a download
+      }
+    }
+  }
+
+  downloadBlob(blob, dataUrl, filename);
+  return "downloaded";
+}
 
 export class UIToggles {
   private app: MapApp;
@@ -24,6 +151,7 @@ export class UIToggles {
       "altitude-legend",
       "airspeed-legend",
       "export-btn",
+      "share-btn",
       "hide-buttons-btn",
       "map",
       "stats-btn",
@@ -34,6 +162,15 @@ export class UIToggles {
       "stats-panel",
       "loading",
     ]);
+
+    // The share button is bound here because the data-action map in
+    // mapApp.ts does not know this action yet.
+    const shareBtn = domCache.get("share-btn");
+    if (shareBtn) {
+      shareBtn.addEventListener("click", () => {
+        void this.shareLink();
+      });
+    }
   }
 
   toggleHeatmap(): void {
@@ -208,76 +345,97 @@ export class UIToggles {
   }
 
   toggleButtonsVisibility(): void {
-    const toggleableButtons = document.querySelectorAll(".toggleable-btn");
-    const hideButton = domCache.get("hide-buttons-btn");
-
-    if (this.app.buttonsHidden) {
-      // Show buttons
-      toggleableButtons.forEach((btn) => {
-        btn.classList.remove("buttons-hidden");
-      });
-      if (hideButton) hideButton.textContent = "🔼";
-      this.app.buttonsHidden = false;
-    } else {
-      // Hide buttons
-      toggleableButtons.forEach((btn) => {
-        btn.classList.add("buttons-hidden");
-      });
-      if (hideButton) hideButton.textContent = "🔽";
-      this.app.buttonsHidden = true;
-    }
-
-    // Redraw paths to apply hide/dim behavior based on button state
-    if (this.app.altitudeVisible) {
-      this.app.layerManager.redrawAltitudePaths();
-    }
-    if (this.app.airspeedVisible) {
-      this.app.layerManager.redrawAirspeedPaths();
-    }
+    // The store subscriber installed by MapApp applies the DOM changes
+    this.app.buttonsHidden = !this.app.buttonsHidden;
   }
 
   exportMap(): void {
     const btn = domCache.get("export-btn") as HTMLButtonElement | null;
-    if (!btn) return;
+    const mapContainer = domCache.get("map");
+    if (!btn || !mapContainer) return;
+    // An export is already running
+    if (btn.disabled) return;
 
     btn.disabled = true;
     btn.textContent = "⏳ Exporting...";
+    const savedDisplays = hideControls(["replay-btn", "share-btn"]);
 
-    const mapContainer = domCache.get("map");
-    if (!mapContainer) return;
+    const restore = () => {
+      restoreControls(savedDisplays);
+      btn.disabled = false;
+      btn.textContent = EXPORT_BUTTON_LABEL;
+    };
 
-    const savedDisplays = hideControls(["replay-btn"]);
+    void this.runExport(mapContainer)
+      .catch((error: unknown) => {
+        showToast("Export failed: " + errorMessage(error), "error");
+      })
+      .finally(restore);
+  }
 
-    setTimeout(() => {
-      window.domtoimage
-        ?.toJpeg(mapContainer, {
-          width: mapContainer.offsetWidth * 2,
-          height: mapContainer.offsetHeight * 2,
-          bgcolor:
-            getComputedStyle(document.documentElement)
-              .getPropertyValue("--color-bg-primary")
-              .trim() || "#1a1a1a",
-          quality: 0.95,
-        })
-        .then((dataUrl: string) => {
-          restoreControls(savedDisplays);
-          btn.disabled = false;
-          btn.textContent = "📷 Export";
+  private async runExport(mapContainer: HTMLElement): Promise<void> {
+    const domtoimage = await loadDomToImage();
+    if (!domtoimage) {
+      showToast("Export unavailable", "error");
+      return;
+    }
 
-          const link = document.createElement("a");
-          link.download =
-            "heatmap_" +
-            new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-") +
-            ".jpg";
-          link.href = dataUrl;
-          link.click();
-        })
-        .catch((error: Error) => {
-          restoreControls(savedDisplays);
-          showToast("Export failed: " + error.message, "error");
-          btn.disabled = false;
-          btn.textContent = "📷 Export";
-        });
-    }, 200);
+    // Give the browser a moment to repaint without the hidden controls
+    await new Promise<void>((resolve) => setTimeout(resolve, 200));
+
+    const scale = window.innerWidth < MOBILE_BREAKPOINT_PX ? 1 : 2;
+    const dataUrl = await domtoimage.toJpeg(mapContainer, {
+      width: mapContainer.offsetWidth * scale,
+      height: mapContainer.offsetHeight * scale,
+      // width/height only resize the canvas; the clone has to be scaled too
+      style: {
+        transform: "scale(" + scale + ")",
+        transformOrigin: "top left",
+      },
+      bgcolor:
+        getComputedStyle(document.documentElement)
+          .getPropertyValue("--color-bg-primary")
+          .trim() || "#1a1a1a",
+      quality: 0.95,
+    });
+
+    const filename =
+      "heatmap_" +
+      new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-") +
+      ".jpg";
+
+    const outcome = await deliverImage(dataUrl, filename);
+    if (outcome === "shared") {
+      showToast("Map shared", "info");
+    } else if (outcome === "downloaded") {
+      showToast("Map exported", "info");
+    }
+  }
+
+  /**
+   * Share the current view: the native share sheet when available, otherwise
+   * the link is copied to the clipboard.
+   */
+  async shareLink(): Promise<void> {
+    // Flush any pending state so the URL reflects the current view
+    this.app.stateManager.saveMapState();
+    const url = window.location.href;
+
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ url, title: document.title });
+        return;
+      } catch (error) {
+        if (isAbortError(error)) return;
+        // Sharing failed: fall back to the clipboard
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast("Link copied", "info");
+    } catch (_error) {
+      showToast("Could not copy link", "error");
+    }
   }
 }

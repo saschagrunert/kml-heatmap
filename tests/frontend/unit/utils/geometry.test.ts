@@ -3,13 +3,14 @@ import {
   calculateDistance,
   calculateBearing,
   ddToDms,
+  type Coordinate,
 } from "../../../../kml_heatmap/frontend/utils/geometry";
 
 describe("geometry utilities", () => {
   describe("calculateDistance", () => {
     it("calculates distance between Berlin and Paris", () => {
-      const berlin = [52.52, 13.405];
-      const paris = [48.8566, 2.3522];
+      const berlin: Coordinate = [52.52, 13.405];
+      const paris: Coordinate = [48.8566, 2.3522];
       const distance = calculateDistance(berlin, paris);
 
       // Actual distance is ~877 km
@@ -17,8 +18,8 @@ describe("geometry utilities", () => {
     });
 
     it("calculates distance between New York and London", () => {
-      const newYork = [40.7128, -74.006];
-      const london = [51.5074, -0.1278];
+      const newYork: Coordinate = [40.7128, -74.006];
+      const london: Coordinate = [51.5074, -0.1278];
       const distance = calculateDistance(newYork, london);
 
       // Actual distance is ~5570 km
@@ -26,14 +27,14 @@ describe("geometry utilities", () => {
     });
 
     it("returns 0 for same coordinates", () => {
-      const coord = [45.0, 10.0];
+      const coord: Coordinate = [45.0, 10.0];
       const distance = calculateDistance(coord, coord);
       expect(distance).toBe(0);
     });
 
     it("handles coordinates across the international date line", () => {
-      const coord1 = [0, 179];
-      const coord2 = [0, -179];
+      const coord1: Coordinate = [0, 179];
+      const coord2: Coordinate = [0, -179];
       const distance = calculateDistance(coord1, coord2);
 
       // Should be ~222 km (2 degrees at equator)
@@ -41,8 +42,8 @@ describe("geometry utilities", () => {
     });
 
     it("handles north-south poles", () => {
-      const northPole = [90, 0];
-      const southPole = [-90, 0];
+      const northPole: Coordinate = [90, 0];
+      const southPole: Coordinate = [-90, 0];
       const distance = calculateDistance(northPole, southPole);
 
       // Half circumference of Earth ~20,015 km
@@ -50,8 +51,8 @@ describe("geometry utilities", () => {
     });
 
     it("is symmetric (A to B equals B to A)", () => {
-      const coord1 = [52.52, 13.405];
-      const coord2 = [48.8566, 2.3522];
+      const coord1: Coordinate = [52.52, 13.405];
+      const coord2: Coordinate = [48.8566, 2.3522];
       const dist1 = calculateDistance(coord1, coord2);
       const dist2 = calculateDistance(coord2, coord1);
 

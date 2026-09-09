@@ -1,12 +1,42 @@
 """Type definitions for KML Heatmap."""
 
-from typing import NotRequired, TypedDict
+from typing import NamedTuple, NotRequired, TypedDict
 
-Coordinate = list[float]
 
-FlightPath = list[Coordinate]
+class TrackPoint(NamedTuple):
+    """A single parsed track point.
+
+    ``alt`` is the altitude in meters (``None`` when the source had no usable
+    altitude) and ``ts`` is the point's timestamp as Unix epoch seconds in UTC
+    (``None`` when unavailable).
+
+    Flight paths (the ``FlightPath`` entries of a ``FlightPathGroup``) only
+    contain points with a known altitude. The flat ``coordinates`` list
+    returned by the parser may also contain points without one.
+    """
+
+    lat: float
+    lon: float
+    alt: float | None = None
+    ts: float | None = None
+
+
+FlightPath = list[TrackPoint]
 
 FlightPathGroup = list[FlightPath]
+
+# Exported segment row: [lat1, lon1, lat2, lon2, altitude_ft, groundspeed_knots]
+# followed by an optional relative time in seconds (omitted when unavailable).
+SegmentRow = list[float]
+
+
+class PlacemarkMetadata(TypedDict):
+    """Metadata extracted from a KML Placemark element."""
+
+    airport_name: str | None
+    timestamp: str | None
+    end_timestamp: str | None
+    year: int | None
 
 
 class PathMetadata(TypedDict):
@@ -25,29 +55,20 @@ class PathMetadata(TypedDict):
     filename: NotRequired[str | None]
 
 
-class PathSegment(TypedDict):
-    """Represents a segment of a flight path with computed properties."""
-
-    path_id: int
-    coords: FlightPath
-    altitude_ft: NotRequired[float | None]
-    altitude_m: NotRequired[float | None]
-    groundspeed_knots: NotRequired[float | None]
-    time: NotRequired[float | None]
-
-
 class PathInfo(TypedDict):
-    """Information about a complete flight path."""
+    """Information about a complete flight path (keys with no value are omitted)."""
 
     id: int
-    year: NotRequired[int | None]
-    aircraft_registration: NotRequired[str | None]
-    aircraft_type: NotRequired[str | None]
-    start_airport: NotRequired[str | None]
-    end_airport: NotRequired[str | None]
+    year: NotRequired[int]
+    aircraft_registration: NotRequired[str]
+    aircraft_type: NotRequired[str]
+    start_airport: NotRequired[str]
+    end_airport: NotRequired[str]
     start_coords: NotRequired[list[float]]
     end_coords: NotRequired[list[float]]
     segment_count: NotRequired[int]
+    min_altitude_ft: NotRequired[float]
+    max_altitude_ft: NotRequired[float]
 
 
 class AirportData(TypedDict):
@@ -106,11 +127,12 @@ class Statistics(TypedDict):
 __all__ = [
     "AircraftInfo",
     "AirportData",
-    "Coordinate",
     "FlightPath",
     "FlightPathGroup",
     "PathInfo",
     "PathMetadata",
-    "PathSegment",
+    "PlacemarkMetadata",
+    "SegmentRow",
     "Statistics",
+    "TrackPoint",
 ]

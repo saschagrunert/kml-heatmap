@@ -1,44 +1,60 @@
-import { test, expect } from "@playwright/test";
-import { waitForPathData, findSegmentFarFromAirports } from "./helpers";
+import { test, expect, type Locator, type Page } from "@playwright/test";
+import {
+  findSegmentFarFromAirports,
+  gotoApp,
+  waitForPathData,
+} from "./helpers";
+
+/** Set the zoom level and refresh marker sizes, then wait for the class */
+async function zoomAndWaitForMarkerSize(
+  page: Page,
+  zoom: number,
+  expected: string,
+): Promise<void> {
+  await page.evaluate((z) => {
+    const app = window.mapApp!;
+    app.map!.setView(app.map!.getCenter(), z, { animate: false });
+    app.airportManager.updateAirportMarkerSizes();
+  }, zoom);
+
+  await page.waitForFunction(
+    (size) => document.getElementById("map")?.dataset["zoomSize"] === size,
+    expected,
+    { timeout: 5000 },
+  );
+}
 
 test.describe("Layers", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+    await gotoApp(page);
   });
 
   test("heatmap button toggles heatmap layer", async ({ page }) => {
     const btn = page.locator("#heatmap-btn");
 
-    // Click to hide heatmap
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "0.5");
+    await expect(btn).toHaveAttribute("aria-pressed", "false");
 
-    // Click to show heatmap
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "1");
+    await expect(btn).toHaveAttribute("aria-pressed", "true");
   });
 
   test("altitude toggle shows altitude layer and legend", async ({ page }) => {
     const altBtn = page.locator("#altitude-btn");
     const altLegend = page.locator("#altitude-legend");
 
-    // Initially off
     await expect(altBtn).toHaveCSS("opacity", "0.5");
     await expect(altLegend).toBeHidden();
 
-    // Click to show altitude
     await altBtn.click();
     await expect(altBtn).toHaveCSS("opacity", "1");
     await expect(altLegend).toBeVisible();
 
-    // Legend should show min/max altitude values
-    const legendMin = page.locator("#legend-min");
-    const legendMax = page.locator("#legend-max");
-    await expect(legendMin).toBeVisible();
-    await expect(legendMax).toBeVisible();
+    await expect(page.locator("#legend-min")).toBeVisible();
+    await expect(page.locator("#legend-max")).toBeVisible();
 
-    // Click to hide altitude
     await altBtn.click();
     await expect(altBtn).toHaveCSS("opacity", "0.5");
     await expect(altLegend).toBeHidden();
@@ -48,22 +64,16 @@ test.describe("Layers", () => {
     const airspeedBtn = page.locator("#airspeed-btn");
     const airspeedLegend = page.locator("#airspeed-legend");
 
-    // Initially off
     await expect(airspeedBtn).toHaveCSS("opacity", "0.5");
     await expect(airspeedLegend).toBeHidden();
 
-    // Click to show airspeed
     await airspeedBtn.click();
     await expect(airspeedBtn).toHaveCSS("opacity", "1");
     await expect(airspeedLegend).toBeVisible();
 
-    // Legend should show min/max speed values
-    const legendMin = page.locator("#airspeed-legend-min");
-    const legendMax = page.locator("#airspeed-legend-max");
-    await expect(legendMin).toBeVisible();
-    await expect(legendMax).toBeVisible();
+    await expect(page.locator("#airspeed-legend-min")).toBeVisible();
+    await expect(page.locator("#airspeed-legend-max")).toBeVisible();
 
-    // Click to hide airspeed
     await airspeedBtn.click();
     await expect(airspeedBtn).toHaveCSS("opacity", "0.5");
     await expect(airspeedLegend).toBeHidden();
@@ -73,12 +83,10 @@ test.describe("Layers", () => {
     const altBtn = page.locator("#altitude-btn");
     const airspeedBtn = page.locator("#airspeed-btn");
 
-    // Enable altitude
     await altBtn.click();
     await expect(altBtn).toHaveCSS("opacity", "1");
     await expect(airspeedBtn).toHaveCSS("opacity", "0.5");
 
-    // Enable airspeed should disable altitude
     await airspeedBtn.click();
     await expect(airspeedBtn).toHaveCSS("opacity", "1");
     await expect(altBtn).toHaveCSS("opacity", "0.5");
@@ -87,166 +95,151 @@ test.describe("Layers", () => {
   test("airports button toggles airport markers", async ({ page }) => {
     const btn = page.locator("#airports-btn");
 
-    // Initially visible (opacity 1)
     await expect(btn).toHaveCSS("opacity", "1");
 
-    // Click to hide
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "0.5");
+    await expect(page.locator(".airport-marker").first()).toBeHidden();
 
-    // Click to show
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "1");
+    await expect(page.locator(".airport-marker").first()).toBeAttached();
   });
 
   test("hide buttons toggle collapses controls", async ({ page }) => {
     const hideBtn = page.locator("#hide-buttons-btn");
     const toggleableButtons = page.locator(".toggleable-btn");
 
-    // Buttons should be visible initially
     const firstBtn = toggleableButtons.first();
     await expect(firstBtn).toBeVisible();
     await expect(firstBtn).not.toHaveClass(/buttons-hidden/);
+    await expect(hideBtn).toHaveAttribute("aria-pressed", "false");
 
-    // Click to hide buttons
     await hideBtn.click();
 
     const count = await toggleableButtons.count();
     for (let i = 0; i < count; i++) {
       await expect(toggleableButtons.nth(i)).toHaveClass(/buttons-hidden/);
     }
-
     await expect(hideBtn).toHaveText("🔽");
+    await expect(hideBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(hideBtn).toHaveAttribute("aria-label", "Show control buttons");
 
-    // Click to show buttons again
     await hideBtn.click();
     for (let i = 0; i < count; i++) {
       await expect(toggleableButtons.nth(i)).not.toHaveClass(/buttons-hidden/);
     }
     await expect(hideBtn).toHaveText("🔼");
+    await expect(hideBtn).toHaveAttribute("aria-pressed", "false");
+    await expect(hideBtn).toHaveAttribute("aria-label", "Hide control buttons");
   });
 
-  test("aviation button is visible when API key is configured", async ({
+  test("aviation button follows the API key configuration", async ({
     page,
   }) => {
     const hasApiKey = await page.evaluate(
-      () => !!(window as any).MAP_CONFIG?.openaipApiKey,
+      () => !!window.MAP_CONFIG?.openaipApiKey,
     );
-
-    if (hasApiKey) {
-      await expect(page.locator("#aviation-btn")).toBeVisible();
-    }
-  });
-
-  test("aviation button toggles aviation layer", async ({ page }) => {
-    const hasApiKey = await page.evaluate(
-      () => !!(window as any).MAP_CONFIG?.openaipApiKey,
-    );
-    if (!hasApiKey) return;
-
     const btn = page.locator("#aviation-btn");
 
-    // Default: off
+    if (!hasApiKey) {
+      await expect(btn).toBeHidden();
+      return;
+    }
+
+    await expect(btn).toBeVisible();
     await expect(btn).toHaveCSS("opacity", "0.5");
 
-    // Toggle on
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "1");
-    const isVisible = await page.evaluate(
-      () => (window as any).mapApp.aviationVisible,
+    expect(await page.evaluate(() => window.mapApp!.aviationVisible)).toBe(
+      true,
     );
-    expect(isVisible).toBe(true);
 
-    // Toggle off
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "0.5");
   });
 
   test("airport marker sizes change with zoom level", async ({ page }) => {
-    // Wait for markers and initial map load to settle
     await expect(
       page.locator(".airport-marker-container").first(),
     ).toBeAttached({ timeout: 15000 });
-    await page.waitForTimeout(500);
 
-    // Zoom to level 12 (large) using setView to override any initialization
-    await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      const center = app.map.getCenter();
-      app.map.setView(center, 12, { animate: false });
-      app.airportManager.updateAirportMarkerSizes();
-    });
+    await zoomAndWaitForMarkerSize(page, 12, "large");
+    const largeSize = await page
+      .locator(".airport-marker")
+      .first()
+      .evaluate((el) => el.getBoundingClientRect().width);
 
-    await page.waitForFunction(
-      () => document.getElementById("map")?.dataset.zoomSize === "large",
-      { timeout: 5000 },
-    );
+    await zoomAndWaitForMarkerSize(page, 6, "small");
+    const smallSize = await page
+      .locator(".airport-marker")
+      .first()
+      .evaluate((el) => el.getBoundingClientRect().width);
 
-    // Zoom to level 6 (small)
-    await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      const center = app.map.getCenter();
-      app.map.setView(center, 6, { animate: false });
-      app.airportManager.updateAirportMarkerSizes();
-    });
-
-    await page.waitForFunction(
-      () => document.getElementById("map")?.dataset.zoomSize === "small",
-      { timeout: 5000 },
-    );
+    expect(smallSize).toBeLessThan(largeSize);
   });
+
+  async function expectSegmentDetails(details: Locator): Promise<void> {
+    await expect(details).toBeVisible({ timeout: 5000 });
+    await expect(details).toContainText(/Altitude/);
+    await expect(details).toContainText(/ft/);
+    await expect(details).toContainText(/Groundspeed/);
+    await expect(details).toContainText(/kt/);
+  }
 
   test("hovering over path segment shows tooltip with flight data", async ({
     page,
+    isMobile,
   }) => {
+    test.skip(isMobile, "Touch devices have no hover; see the tap test");
     await waitForPathData(page);
 
     const pos = await findSegmentFarFromAirports(page);
-    if (!pos) return;
+    expect(pos).not.toBeNull();
 
-    await page.mouse.move(pos.x, pos.y);
-    await page.waitForTimeout(500);
+    await page.mouse.move(pos!.x, pos!.y);
 
-    const tooltip = page.locator(".segment-tooltip");
-    const tooltipCount = await tooltip.count();
-    if (tooltipCount > 0) {
-      const tooltipText = await tooltip.first().textContent();
-      expect(tooltipText).toMatch(/Altitude/);
-      expect(tooltipText).toMatch(/ft/);
-      expect(tooltipText).toMatch(/Groundspeed/);
-      expect(tooltipText).toMatch(/kt/);
-    }
+    await expectSegmentDetails(page.locator(".segment-tooltip").first());
+  });
+
+  test("tapping a path segment shows a popup with flight data", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, "Pointer devices show a hover tooltip instead");
+    await waitForPathData(page);
+
+    const pos = await findSegmentFarFromAirports(page);
+    expect(pos).not.toBeNull();
+
+    await page.locator("#map").click({ position: { x: pos!.x, y: pos!.y } });
+
+    await expectSegmentDetails(page.locator(".leaflet-popup-content").first());
   });
 
   test("airport labels hidden at low zoom", async ({ page }) => {
-    // Wait for markers and initial map load to settle
     await expect(
       page.locator(".airport-marker-container").first(),
     ).toBeAttached({ timeout: 15000 });
-    await page.waitForTimeout(500);
 
-    // Zoom out below level 5
     await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      const center = app.map.getCenter();
-      app.map.setView(center, 4, { animate: false });
+      const app = window.mapApp!;
+      app.map!.setView(app.map!.getCenter(), 4, { animate: false });
       app.airportManager.updateAirportMarkerSizes();
     });
-
     await page.waitForFunction(
       () =>
         document.getElementById("map")?.classList.contains("zoom-hide-labels"),
       { timeout: 5000 },
     );
+    await expect(page.locator(".airport-label").first()).toBeHidden();
 
-    // Zoom in above level 5
     await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      const center = app.map.getCenter();
-      app.map.setView(center, 8, { animate: false });
+      const app = window.mapApp!;
+      app.map!.setView(app.map!.getCenter(), 8, { animate: false });
       app.airportManager.updateAirportMarkerSizes();
     });
-
     await page.waitForFunction(
       () =>
         !document.getElementById("map")?.classList.contains("zoom-hide-labels"),

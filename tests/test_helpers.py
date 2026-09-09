@@ -1,138 +1,141 @@
 """Tests for helpers module."""
 
-from datetime import datetime
+from datetime import UTC, datetime
+
+import pytest
 
 from kml_heatmap.helpers import (
     calculate_duration_seconds,
     format_flight_time,
+    numeric_filename_key,
     parse_iso_timestamp,
+    parse_timestamp_epoch,
 )
 
 
 class TestParseIsoTimestamp:
-    """Tests for parse_iso_timestamp function."""
-
     def test_valid_zulu_time(self):
-        """Test parsing valid Zulu time format."""
         result = parse_iso_timestamp("2025-03-15T14:30:00Z")
-        assert isinstance(result, datetime)
-        assert result.year == 2025
-        assert result.month == 3
-        assert result.day == 15
-        assert result.hour == 14
-        assert result.minute == 30
-        assert result.second == 0
+        assert result == datetime(2025, 3, 15, 14, 30, tzinfo=UTC)
 
     def test_valid_timezone_offset(self):
-        """Test parsing with timezone offset."""
         result = parse_iso_timestamp("2025-03-15T14:30:00+01:00")
-        assert isinstance(result, datetime)
-        assert result.year == 2025
+        assert result is not None
+        assert result.utcoffset().total_seconds() == 3600
 
-    def test_invalid_format(self):
-        """Test parsing invalid format returns None."""
-        assert parse_iso_timestamp("not a timestamp") is None
-        assert parse_iso_timestamp("2025-03-15") is None  # No T separator
-        assert parse_iso_timestamp("") is None
-        assert parse_iso_timestamp("15/03/2025") is None
+    def test_seven_digit_fraction(self):
+        result = parse_iso_timestamp("2025-03-03T08:25:15.5848380Z")
+        assert result is not None
+        assert result.microsecond == 584838
 
-    def test_none_input(self):
-        """Test None input returns None."""
-        assert parse_iso_timestamp(None) is None
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "not a timestamp",
+            "2025-03-15",
+            "",
+            "15/03/2025",
+            None,
+            "2025-13-45T25:99:99Z",
+        ],
+    )
+    def test_invalid_returns_none(self, value):
+        assert parse_iso_timestamp(value) is None
 
-    def test_empty_string(self):
-        """Test empty string returns None."""
-        assert parse_iso_timestamp("") is None
 
-    def test_malformed_datetime(self):
-        """Test malformed datetime string."""
-        assert parse_iso_timestamp("2025-13-45T25:99:99Z") is None
+class TestParseTimestampEpoch:
+    def test_zulu(self):
+        assert parse_timestamp_epoch("1970-01-01T00:01:00Z") == 60.0
+
+    def test_offset_is_applied(self):
+        assert parse_timestamp_epoch("1970-01-01T01:00:00+01:00") == 0.0
+
+    def test_naive_is_treated_as_utc(self):
+        assert parse_timestamp_epoch("1970-01-01T00:00:10") == 10.0
+
+    @pytest.mark.parametrize("value", ["invalid", "", None])
+    def test_invalid_returns_none(self, value):
+        assert parse_timestamp_epoch(value) is None
 
 
 class TestCalculateDurationSeconds:
-    """Tests for calculate_duration_seconds function."""
-
     def test_valid_duration(self):
-        """Test calculating valid duration."""
-        duration = calculate_duration_seconds(
-            "2025-03-15T14:00:00Z", "2025-03-15T16:30:00Z"
+        assert (
+            calculate_duration_seconds("2025-03-15T14:00:00Z", "2025-03-15T16:30:00Z")
+            == 9000
         )
-        assert duration == 9000  # 2.5 hours
 
     def test_same_timestamp(self):
-        """Test same start and end timestamp."""
-        duration = calculate_duration_seconds(
-            "2025-03-15T14:00:00Z", "2025-03-15T14:00:00Z"
+        assert (
+            calculate_duration_seconds("2025-03-15T14:00:00Z", "2025-03-15T14:00:00Z")
+            == 0
         )
-        assert duration == 0
 
     def test_negative_duration(self):
-        """Test end before start (negative duration)."""
-        duration = calculate_duration_seconds(
-            "2025-03-15T16:00:00Z", "2025-03-15T14:00:00Z"
+        assert (
+            calculate_duration_seconds("2025-03-15T16:00:00Z", "2025-03-15T14:00:00Z")
+            == -7200
         )
-        assert duration == -7200  # -2 hours
 
-    def test_invalid_start(self):
-        """Test with invalid start timestamp."""
-        duration = calculate_duration_seconds("invalid", "2025-03-15T14:00:00Z")
-        assert duration == 0
+    def test_naive_and_aware_mixed(self):
+        assert (
+            calculate_duration_seconds("2025-03-15T14:00:00", "2025-03-15T15:00:00Z")
+            == 3600
+        )
 
-    def test_invalid_end(self):
-        """Test with invalid end timestamp."""
-        duration = calculate_duration_seconds("2025-03-15T14:00:00Z", "invalid")
-        assert duration == 0
-
-    def test_both_invalid(self):
-        """Test with both timestamps invalid."""
-        duration = calculate_duration_seconds("invalid", "also invalid")
-        assert duration == 0
-
-    def test_none_inputs(self):
-        """Test with None inputs."""
-        assert calculate_duration_seconds(None, None) == 0
-        assert calculate_duration_seconds("2025-03-15T14:00:00Z", None) == 0
-        assert calculate_duration_seconds(None, "2025-03-15T14:00:00Z") == 0
+    @pytest.mark.parametrize(
+        "start,end",
+        [
+            ("invalid", "2025-03-15T14:00:00Z"),
+            ("2025-03-15T14:00:00Z", "invalid"),
+            ("invalid", "also invalid"),
+            (None, None),
+            ("2025-03-15T14:00:00Z", None),
+            (None, "2025-03-15T14:00:00Z"),
+        ],
+    )
+    def test_invalid_inputs_give_zero(self, start, end):
+        assert calculate_duration_seconds(start, end) == 0
 
     def test_one_day_duration(self):
-        """Test duration of exactly one day."""
-        duration = calculate_duration_seconds(
-            "2025-03-15T00:00:00Z", "2025-03-16T00:00:00Z"
+        assert (
+            calculate_duration_seconds("2025-03-15T00:00:00Z", "2025-03-16T00:00:00Z")
+            == 86400
         )
-        assert duration == 86400  # 24 hours
 
 
 class TestFormatFlightTime:
-    """Tests for format_flight_time function."""
+    @pytest.mark.parametrize(
+        "seconds,expected",
+        [
+            (0, "0h 0m"),
+            (-100, "0h 0m"),
+            (45, "0h 0m"),
+            (60, "0h 1m"),
+            (1800, "0h 30m"),
+            (3600, "1h 0m"),
+            (3660, "1h 1m"),
+            (3665, "1h 1m"),
+            (9000, "2h 30m"),
+            (360000, "100h 0m"),
+        ],
+    )
+    def test_formatting(self, seconds, expected):
+        assert format_flight_time(seconds) == expected
 
-    def test_zero_seconds(self):
-        """Test formatting zero seconds."""
-        assert format_flight_time(0) == "0h 0m"
 
-    def test_negative_seconds(self):
-        """Test formatting negative seconds."""
-        assert format_flight_time(-100) == "0h 0m"
+class TestNumericFilenameKey:
+    def test_numeric_prefix_sorts_numerically(self):
+        names = ["10_a.kml", "2_a.kml", "1_a.kml"]
+        assert sorted(names, key=numeric_filename_key) == [
+            "1_a.kml",
+            "2_a.kml",
+            "10_a.kml",
+        ]
 
-    def test_only_minutes(self):
-        """Test formatting time with only minutes."""
-        assert format_flight_time(1800) == "0h 30m"  # 30 minutes
-        assert format_flight_time(60) == "0h 1m"  # 1 minute
+    def test_non_numeric_names_sort_after_numeric(self):
+        names = ["b.kml", "3_a.kml", "a.kml"]
+        assert sorted(names, key=numeric_filename_key) == ["3_a.kml", "a.kml", "b.kml"]
 
-    def test_hours_and_minutes(self):
-        """Test formatting time with hours and minutes."""
-        assert format_flight_time(9000) == "2h 30m"  # 2.5 hours
-        assert format_flight_time(3600) == "1h 0m"  # 1 hour exactly
-        assert format_flight_time(3660) == "1h 1m"  # 1 hour 1 minute
-
-    def test_seconds_truncated(self):
-        """Test that seconds are truncated, not rounded."""
-        assert format_flight_time(3665) == "1h 1m"  # 1h 1m 5s -> 1h 1m
-        assert format_flight_time(125) == "0h 2m"  # 2m 5s -> 0h 2m
-
-    def test_large_hours(self):
-        """Test formatting large number of hours."""
-        assert format_flight_time(360000) == "100h 0m"  # 100 hours
-
-    def test_less_than_minute(self):
-        """Test formatting less than one minute."""
-        assert format_flight_time(45) == "0h 0m"
+    def test_uses_basename(self):
+        assert numeric_filename_key("/some/dir/7_x.kml") == (0, 7, "7_x.kml")

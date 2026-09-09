@@ -7,6 +7,39 @@ import type { ReplayManager } from "./replayManager";
 import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
+import { formatTime } from "../utils/formatters";
+import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
+import { calculateBearing } from "../utils/geometry";
+import { calculateSmoothedBearing } from "../features/replay";
+
+/** Minimum interval between map pans triggered by slider drags */
+export const SEEK_PAN_THROTTLE_MS = 250;
+
+/** Fraction of the viewport used as the "near edge" margin for auto-panning */
+const EDGE_MARGIN_FRACTION = 0.1;
+
+/**
+ * Find the index of the last segment whose time is at or before currentTime.
+ * Returns -1 when no segment has started yet.
+ */
+export function findSegmentIndexAtTime(
+  segments: PathSegment[],
+  currentTime: number,
+): number {
+  let lo = 0;
+  let hi = segments.length - 1;
+  let result = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if ((segments[mid]?.time ?? 0) <= currentTime) {
+      result = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return result;
+}
 
 export class ReplayRenderer {
   private app: MapApp;
@@ -15,340 +48,311 @@ export class ReplayRenderer {
     this.app = app;
   }
 
-  updateAirplanePopup(replayManager: ReplayManager): void {
-    if (!replayManager.state.airplaneMarker || !replayManager.state.active)
-      return;
+  /**
+   * Update (or create) the airplane popup with the data of the segment at
+   * the current replay time. Pass the already known segment index to avoid
+   * a second lookup when called from the frame loop.
+   */
+  updateAirplanePopup(replayManager: ReplayManager, index?: number): void {
+    const state = replayManager.state;
+    if (!state.airplaneMarker || !state.active) return;
 
-    // Find the current segment for data
-    let currentSegment: PathSegment | null = null;
-    for (let i = 0; i < replayManager.state.segments.length; i++) {
-      const seg = replayManager.state.segments[i];
-      if (seg && (seg.time || 0) <= replayManager.state.currentTime) {
-        currentSegment = seg;
-      } else {
-        break;
-      }
-    }
+    const segments = state.segments;
+    if (segments.length === 0) return;
 
-    if (!currentSegment && replayManager.state.segments.length > 0) {
-      currentSegment = replayManager.state.segments[0]!;
-    }
-
+    const idx = index ?? findSegmentIndexAtTime(segments, state.currentTime);
+    const currentSegment = segments[idx] ?? segments[0];
     if (!currentSegment) return;
 
     const popupContent = generateSegmentPopupHtml({
       segment: currentSegment,
-      altMin: replayManager.state.colorMinAlt,
-      altMax: replayManager.state.colorMaxAlt,
-      speedMin: replayManager.state.colorMinSpeed,
-      speedMax: replayManager.state.colorMaxSpeed,
+      altMin: state.colorMinAlt,
+      altMax: state.colorMaxAlt,
+      speedMin: state.colorMinSpeed,
+      speedMax: state.colorMaxSpeed,
       title: "Current Position",
       icon: "✈️",
     });
 
-    // Update or create popup
-    if (!replayManager.state.airplaneMarker.getPopup()) {
-      replayManager.state.airplaneMarker.bindPopup(popupContent, {
+    const popup = state.airplaneMarker.getPopup();
+    if (!popup) {
+      state.airplaneMarker.bindPopup(popupContent, {
         autoPanPadding: [50, 50],
       });
     } else {
-      replayManager.state.airplaneMarker.getPopup()!.setContent(popupContent);
+      popup.setContent(popupContent);
     }
 
-    // Open the popup
-    replayManager.state.airplaneMarker.openPopup();
+    state.airplaneMarker.openPopup();
   }
 
   updateDisplay(
     replayManager: ReplayManager,
     isManualSeek: boolean = false,
   ): void {
+    const state = replayManager.state;
+    const segments = state.segments;
+    const currentTime = state.currentTime;
+    const currentLabel = formatTime(currentTime);
+    const maxLabel = formatTime(state.maxTime);
+
     // Update time display
     const timeDisplay = domCache.get("replay-time-display");
     if (timeDisplay) {
-      timeDisplay.textContent =
-        window.KMLHeatmap.formatTime(replayManager.state.currentTime) +
-        " / " +
-        window.KMLHeatmap.formatTime(replayManager.state.maxTime);
+      timeDisplay.textContent = currentLabel + " / " + maxLabel;
     }
 
-    // Update slider position
+    // Update slider position and its spoken value
     const slider = domCache.get("replay-slider") as HTMLInputElement | null;
-    if (slider) slider.value = replayManager.state.currentTime.toString();
+    if (slider) {
+      slider.value = currentTime.toString();
+      // Rewriting this every frame would make screen readers announce
+      // continuously, so only do it when the spoken value changes
+      const valueText = currentLabel + " of " + maxLabel;
+      if (slider.getAttribute("aria-valuetext") !== valueText) {
+        slider.setAttribute("aria-valuetext", valueText);
+      }
+    }
 
     const sliderStart = domCache.get("replay-slider-start");
-    if (sliderStart) {
-      sliderStart.textContent = window.KMLHeatmap.formatTime(
-        replayManager.state.currentTime,
-      );
-    }
+    if (sliderStart) sliderStart.textContent = currentLabel;
 
     // Find current position in replay timeline (for airplane positioning)
-    let lastSegment: PathSegment | null = null;
-    let nextSegment: PathSegment | null = null;
-    let currentIndex = -1;
+    const currentIndex = this.locateCurrentIndex(state, isManualSeek);
+    state.currentIndex = currentIndex;
+    const lastSegment =
+      currentIndex >= 0 ? (segments[currentIndex] ?? null) : null;
+    const nextSegment =
+      currentIndex >= 0 ? (segments[currentIndex + 1] ?? null) : null;
 
-    const segments = replayManager.state.segments;
-    const currentTime = replayManager.state.currentTime;
-
-    if (replayManager.state.lastDrawnIndex > 0 && !isManualSeek) {
-      // Incremental forward scan from last known position
-      for (
-        let i = replayManager.state.lastDrawnIndex;
-        i < segments.length;
-        i++
-      ) {
-        const seg = segments[i];
-        if (seg && (seg.time ?? 0) <= currentTime) {
-          lastSegment = seg;
-          currentIndex = i;
-        } else if (seg) {
-          nextSegment = seg;
-          break;
-        }
-      }
-    } else {
-      // Binary search for the last segment at or before currentTime
-      let lo = 0;
-      let hi = segments.length - 1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >>> 1;
-        const midTime = segments[mid]?.time ?? 0;
-        if (midTime <= currentTime) {
-          currentIndex = mid;
-          lo = mid + 1;
-        } else {
-          hi = mid - 1;
-        }
-      }
-      if (currentIndex >= 0) {
-        lastSegment = segments[currentIndex] ?? null;
-        const nextSeg = segments[currentIndex + 1];
-        if (nextSeg) nextSegment = nextSeg;
-      }
-    }
-
-    // Draw path segments (separate loop for incremental rendering)
-    if (replayManager.state.layer) {
-      // Determine which color scheme to use based on visible layer
-      const useAirspeedColors =
-        this.app.airspeedVisible && !this.app.altitudeVisible;
-
-      for (let i = 0; i < replayManager.state.segments.length; i++) {
-        const seg = replayManager.state.segments[i];
-        if (!seg) continue;
-
-        // Don't draw any segments when at time 0 (stopped/reset state)
-        if (
-          (seg.time || 0) <= replayManager.state.currentTime &&
-          replayManager.state.currentTime > 0
-        ) {
-          // Only draw if we haven't drawn this segment yet (incremental rendering)
-          if (i > replayManager.state.lastDrawnIndex) {
-            // Calculate color based on selected profile using replay-specific ranges
-            let segmentColor: string;
-            if (useAirspeedColors && (seg.groundspeed_knots || 0) > 0) {
-              // Use airspeed colors with selected path's groundspeed range
-              segmentColor = window.KMLHeatmap.getColorForAirspeed(
-                seg.groundspeed_knots ?? 0,
-                replayManager.state.colorMinSpeed,
-                replayManager.state.colorMaxSpeed,
-              );
-            } else {
-              // Use altitude colors with selected path's altitude range (default)
-              segmentColor = window.KMLHeatmap.getColorForAltitude(
-                seg.altitude_ft ?? 0,
-                replayManager.state.colorMinAlt,
-                replayManager.state.colorMaxAlt,
-              );
-            }
-
-            L.polyline(seg.coords || [], {
-              color: segmentColor,
-              weight: 3,
-              opacity: 0.8,
-            }).addTo(replayManager.state.layer);
-
-            // Update last drawn index incrementally during the loop
-            replayManager.state.lastDrawnIndex = i;
-          }
-        } else {
-          break;
-        }
-      }
-    }
+    this.drawNewSegments(replayManager);
 
     // Update airplane marker position and rotation
+    const marker = state.airplaneMarker;
+    const map = this.app.map;
+    if (!marker || !map) return;
+
     // Ensure marker is on the map (in case it was removed during seeking/zooming)
-    if (
-      replayManager.state.airplaneMarker &&
-      this.app.map &&
-      !this.app.map.hasLayer(replayManager.state.airplaneMarker)
-    ) {
-      replayManager.state.airplaneMarker.addTo(this.app.map);
+    if (!map.hasLayer(marker)) {
+      marker.addTo(map);
     }
 
-    if (replayManager.state.airplaneMarker && this.app.map) {
-      // If we have a lastSegment, use it for positioning
-      if (lastSegment) {
-        let currentPos: [number, number];
-        let bearing: number;
+    if (!lastSegment) {
+      const startCoords = segments[0]?.coords?.[0];
+      if (startCoords) marker.setLatLng([startCoords[0], startCoords[1]]);
+      return;
+    }
 
-        if (
-          nextSegment &&
-          (lastSegment.time || 0) < replayManager.state.currentTime
-        ) {
-          // Interpolate between last and next segment
-          const timeFraction =
-            (replayManager.state.currentTime - (lastSegment.time || 0)) /
-            ((nextSegment.time || 0) - (lastSegment.time || 0));
-          const lat1 = lastSegment.coords?.[1]?.[0] || 0;
-          const lon1 = lastSegment.coords?.[1]?.[1] || 0;
-          const lat2 = nextSegment.coords?.[0]?.[0] || 0;
-          const lon2 = nextSegment.coords?.[0]?.[1] || 0;
+    let currentPos: [number, number];
+    let bearing: number;
 
-          currentPos = [
-            lat1 + (lat2 - lat1) * timeFraction,
-            lon1 + (lon2 - lon1) * timeFraction,
-          ];
+    if (nextSegment && (lastSegment.time ?? 0) < currentTime) {
+      // Interpolate between last and next segment
+      const timeFraction =
+        (currentTime - (lastSegment.time ?? 0)) /
+        ((nextSegment.time ?? 0) - (lastSegment.time ?? 0));
+      const lat1 = lastSegment.coords?.[1]?.[0] ?? 0;
+      const lon1 = lastSegment.coords?.[1]?.[1] ?? 0;
+      const lat2 = nextSegment.coords?.[0]?.[0] ?? 0;
+      const lon2 = nextSegment.coords?.[0]?.[1] ?? 0;
 
-          // Calculate bearing for rotation
-          bearing = window.KMLHeatmap.calculateBearing(lat1, lon1, lat2, lon2);
-        } else {
-          // Use end of last segment
-          currentPos = lastSegment.coords?.[1] || [0, 0];
+      currentPos = [
+        lat1 + (lat2 - lat1) * timeFraction,
+        lon1 + (lon2 - lon1) * timeFraction,
+      ];
+      bearing = calculateBearing(lat1, lon1, lat2, lon2);
+    } else {
+      // Use end of last segment
+      currentPos = lastSegment.coords?.[1] ?? [0, 0];
+      const lat1 = lastSegment.coords?.[0]?.[0] ?? 0;
+      const lon1 = lastSegment.coords?.[0]?.[1] ?? 0;
+      const lat2 = lastSegment.coords?.[1]?.[0] ?? 0;
+      const lon2 = lastSegment.coords?.[1]?.[1] ?? 0;
+      bearing = calculateBearing(lat1, lon1, lat2, lon2);
+    }
 
-          // Calculate bearing from this segment
-          const lat1 = lastSegment.coords?.[0]?.[0] || 0;
-          const lon1 = lastSegment.coords?.[0]?.[1] || 0;
-          const lat2 = lastSegment.coords?.[1]?.[0] || 0;
-          const lon2 = lastSegment.coords?.[1]?.[1] || 0;
-          bearing = window.KMLHeatmap.calculateBearing(lat1, lon1, lat2, lon2);
-        }
+    // Smooth the heading by looking ahead several segments
+    const smoothedBearing = calculateSmoothedBearing(segments, currentIndex, 5);
+    if (smoothedBearing !== null) {
+      bearing = smoothedBearing;
+      state.lastBearing = bearing;
+    } else if (state.lastBearing !== null) {
+      bearing = state.lastBearing;
+    }
 
-        // Calculate smoothed bearing by looking ahead several segments
-        const smoothedBearing = window.KMLHeatmap.calculateSmoothedBearing(
-          replayManager.state.segments,
-          currentIndex,
-          5,
-        );
-        if (smoothedBearing !== null) {
-          bearing = smoothedBearing;
-          replayManager.state.lastBearing = bearing;
-        } else if (replayManager.state.lastBearing !== null) {
-          bearing = replayManager.state.lastBearing;
-        }
+    marker.setLatLng(currentPos);
 
-        // Update marker position
-        replayManager.state.airplaneMarker.setLatLng(currentPos);
+    if (state.playing || isManualSeek) {
+      this.keepAirplaneInView(replayManager, currentPos, isManualSeek);
+    }
 
-        // Auto-pan map if airplane is near viewport edge (when playing or manually seeking)
-        if (replayManager.state.playing || isManualSeek) {
-          const mapSize = this.app.map.getSize();
-          const airplanePoint = this.app.map.latLngToContainerPoint(currentPos);
+    // Update rotation using hardware-accelerated transforms
+    const iconDiv = marker.getElement()?.querySelector(".replay-airplane-icon");
+    if (iconDiv instanceof HTMLElement) {
+      iconDiv.style.transform =
+        "translate3d(0,0,0) rotate(" + (bearing - 45) + "deg)";
+    }
 
-          const marginPercent = 0.1;
-          const marginX = mapSize.x * marginPercent;
-          const marginY = mapSize.y * marginPercent;
+    // Update popup content if it is open
+    if (marker.getPopup() && marker.isPopupOpen()) {
+      this.updateAirplanePopup(replayManager, currentIndex);
+    }
+  }
 
-          let needsRecenter = false;
-          if (
-            airplanePoint.x < marginX ||
-            airplanePoint.x > mapSize.x - marginX ||
-            airplanePoint.y < marginY ||
-            airplanePoint.y > mapSize.y - marginY
-          ) {
-            needsRecenter = true;
-          }
+  /**
+   * Determine the segment index for the current time. Uses an incremental
+   * forward scan from the previous index while playing and a binary search
+   * for seeks or when the time moved backwards.
+   */
+  private locateCurrentIndex(
+    state: ReplayManager["state"],
+    isManualSeek: boolean,
+  ): number {
+    const segments = state.segments;
+    const currentTime = state.currentTime;
+    const previous = state.currentIndex;
+    const canScan =
+      !isManualSeek &&
+      previous >= 0 &&
+      previous < segments.length &&
+      (segments[previous]?.time ?? 0) <= currentTime;
 
-          if (isManualSeek) {
-            needsRecenter = true;
-          }
+    if (!canScan) return findSegmentIndexAtTime(segments, currentTime);
 
-          if (needsRecenter) {
-            this.app.map.panTo(currentPos, {
-              animate: true,
-              duration: 0.5,
-              easeLinearity: 0.25,
-              noMoveStart: true,
-            });
-
-            const now = Date.now();
-            replayManager.state.recenterTimestamps.push(now);
-
-            const cutoffTime = now - 30000;
-            replayManager.state.recenterTimestamps =
-              replayManager.state.recenterTimestamps.filter((ts) => {
-                return ts > cutoffTime;
-              });
-          }
-
-          // Auto-zoom based on map recenter frequency
-          if (replayManager.state.autoZoom) {
-            const recenterCount = replayManager.state.recenterTimestamps.length;
-
-            if (recenterCount > 2) {
-              const fiveSecondsAgo = Date.now() - 5000;
-              const recentRecenters =
-                replayManager.state.recenterTimestamps.filter((ts) => {
-                  return ts >= fiveSecondsAgo;
-                });
-
-              if (recentRecenters.length > 2) {
-                const zoomOutStep = 1;
-
-                if (
-                  zoomOutStep > 0 &&
-                  replayManager.state.lastZoom !== null &&
-                  replayManager.state.lastZoom > 9
-                ) {
-                  const newZoom = Math.max(
-                    9,
-                    replayManager.state.lastZoom - zoomOutStep,
-                  );
-
-                  this.app.map.setZoom(newZoom, {
-                    animate: true,
-                    duration: 0.5,
-                  });
-                  replayManager.state.lastZoom = newZoom;
-
-                  replayManager.state.recenterTimestamps = [];
-                }
-              }
-            }
-          }
-        }
-
-        // Update rotation using hardware-accelerated transforms
-        const iconElement = replayManager.state.airplaneMarker.getElement();
-        if (iconElement) {
-          const iconDiv = iconElement.querySelector(".replay-airplane-icon");
-          if (iconDiv) {
-            const adjustedBearing = bearing - 45;
-            (iconDiv as HTMLElement).style.transform =
-              "translate3d(0,0,0) rotate(" + adjustedBearing + "deg)";
-          }
-        }
-      } else if (replayManager.state.segments.length > 0) {
-        const firstSeg = replayManager.state.segments[0];
-        const startCoords = firstSeg?.coords?.[0];
-        if (startCoords) {
-          replayManager.state.airplaneMarker.setLatLng([
-            startCoords[0],
-            startCoords[1],
-          ]);
-        }
+    let index = previous;
+    for (let i = previous + 1; i < segments.length; i++) {
+      if ((segments[i]?.time ?? 0) <= currentTime) {
+        index = i;
+      } else {
+        break;
       }
     }
+    return index;
+  }
 
-    // Update popup content if it's open
-    if (
-      replayManager.state.airplaneMarker &&
-      replayManager.state.airplaneMarker.getPopup() &&
-      replayManager.state.airplaneMarker.isPopupOpen()
-    ) {
-      this.updateAirplanePopup(replayManager);
+  /** Draw segments that became visible since the last frame */
+  private drawNewSegments(replayManager: ReplayManager): void {
+    const state = replayManager.state;
+    const layer = state.layer;
+    if (!layer) return;
+
+    // Nothing is drawn at time 0 (stopped/reset state)
+    if (state.currentTime <= 0) return;
+
+    const useAirspeedColors =
+      this.app.airspeedVisible && !this.app.altitudeVisible;
+
+    const segments = state.segments;
+    for (let i = state.lastDrawnIndex + 1; i < segments.length; i++) {
+      const seg = segments[i];
+      if (!seg) continue;
+      if ((seg.time ?? 0) > state.currentTime) break;
+
+      const color =
+        useAirspeedColors && (seg.groundspeed_knots ?? 0) > 0
+          ? getColorForAirspeed(
+              seg.groundspeed_knots ?? 0,
+              state.colorMinSpeed,
+              state.colorMaxSpeed,
+            )
+          : getColorForAltitude(
+              seg.altitude_ft ?? 0,
+              state.colorMinAlt,
+              state.colorMaxAlt,
+            );
+
+      const polyline = L.polyline(seg.coords ?? [], {
+        color,
+        weight: 3,
+        opacity: 0.8,
+      }).addTo(layer);
+
+      state.drawnLayers.push(polyline);
+      state.lastDrawnIndex = i;
     }
+  }
+
+  /**
+   * Remove the polylines drawn past the given time. Seeking backwards this
+   * way costs one removal per undrawn segment instead of a full redraw.
+   */
+  removeSegmentsAfter(replayManager: ReplayManager, time: number): void {
+    const state = replayManager.state;
+    const layer = state.layer;
+    while (state.lastDrawnIndex >= 0) {
+      const seg = state.segments[state.lastDrawnIndex];
+      if (seg && (seg.time ?? 0) <= time) break;
+      const polyline = state.drawnLayers.pop();
+      if (polyline && layer) layer.removeLayer(polyline);
+      state.lastDrawnIndex--;
+    }
+  }
+
+  /**
+   * Pan the map when the airplane approaches the viewport edge. During
+   * slider drags pans are throttled and not animated; auto zoom-out only
+   * reacts to recenters that happen while playing.
+   */
+  private keepAirplaneInView(
+    replayManager: ReplayManager,
+    currentPos: [number, number],
+    isManualSeek: boolean,
+  ): void {
+    const state = replayManager.state;
+    const map = this.app.map;
+    if (!map) return;
+
+    const mapSize = map.getSize();
+    const point = map.latLngToContainerPoint(currentPos);
+    const marginX = mapSize.x * EDGE_MARGIN_FRACTION;
+    const marginY = mapSize.y * EDGE_MARGIN_FRACTION;
+
+    const nearEdge =
+      point.x < marginX ||
+      point.x > mapSize.x - marginX ||
+      point.y < marginY ||
+      point.y > mapSize.y - marginY;
+    if (!nearEdge) return;
+
+    const now = Date.now();
+    if (isManualSeek) {
+      const outsideViewport =
+        point.x < 0 ||
+        point.x > mapSize.x ||
+        point.y < 0 ||
+        point.y > mapSize.y;
+      const throttled = now - state.lastSeekPanTime < SEEK_PAN_THROTTLE_MS;
+      if (throttled && !outsideViewport) return;
+      state.lastSeekPanTime = now;
+      map.panTo(currentPos, { animate: false });
+      return;
+    }
+
+    map.panTo(currentPos, {
+      animate: true,
+      duration: 0.5,
+      easeLinearity: 0.25,
+      noMoveStart: true,
+    });
+
+    const cutoffTime = now - 30000;
+    state.recenterTimestamps = state.recenterTimestamps.filter(
+      (ts) => ts > cutoffTime,
+    );
+    state.recenterTimestamps.push(now);
+
+    // Zoom out when the map had to recenter frequently in a short time
+    if (!state.autoZoom || state.recenterTimestamps.length <= 2) return;
+    const fiveSecondsAgo = now - 5000;
+    const recentRecenters = state.recenterTimestamps.filter(
+      (ts) => ts >= fiveSecondsAgo,
+    );
+    if (recentRecenters.length <= 2) return;
+    if (state.lastZoom === null || state.lastZoom <= 9) return;
+
+    const newZoom = Math.max(9, state.lastZoom - 1);
+    map.setZoom(newZoom, { animate: true, duration: 0.5 });
+    state.lastZoom = newZoom;
+    state.recenterTimestamps = [];
   }
 }

@@ -10,7 +10,6 @@ KM_TO_NAUTICAL_MILES = 1.0 / NAUTICAL_MILES_TO_KM
 
 # Time conversion
 SECONDS_PER_HOUR = 3600
-BYTES_PER_KB = 1024
 
 # === Groundspeed Calculations ===
 MAX_GROUNDSPEED_KNOTS = 200  # Reasonable max for typical general aviation
@@ -48,13 +47,6 @@ LANDING_MAX_VARIATION_M = 50  # Maximum altitude variation for stable landing
 LANDING_MAX_ALTITUDE_M = 600  # Maximum altitude for valid landing endpoint
 LANDING_FALLBACK_ALTITUDE_M = 1000  # Fallback altitude threshold for short paths
 
-# === Data Export Resolution ===
-# We always export full resolution data only
-DATA_RESOLUTION = "data"
-
-# === Heatmap Configuration ===
-HEATMAP_GRADIENT = {0.0: "blue", 0.3: "cyan", 0.5: "lime", 0.7: "yellow", 1.0: "red"}
-
 # === XML/KML Namespaces ===
 KML_NAMESPACE = "http://www.opengis.net/kml/2.2"
 GX_NAMESPACE = "http://www.google.com/kml/ext/2.2"
@@ -66,7 +58,3 @@ KML_NAMESPACES = {"kml": KML_NAMESPACE, "gx": GX_NAMESPACE}
 # Excludes I (not assigned), J (not assigned for airports),
 # Q (reserved for non-geographic use), X (not assigned).
 ICAO_REGION_PREFIXES = "ABCDEFGHKLMNOPRSTUVWYZ"
-
-# === File Size Limits ===
-LARGE_FILE_WARNING_MB = 100  # Warn if input file exceeds this size
-MAX_KML_FILES_WARNING = 1000  # Warn if processing this many files

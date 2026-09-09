@@ -1,40 +1,108 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { UIToggles } from "../../../../kml_heatmap/frontend/ui/uiToggles";
-import type { MockMapApp } from "../../testHelpers";
+import {
+  DOM_TO_IMAGE_INTEGRITY,
+  DOM_TO_IMAGE_URL,
+  UIToggles,
+  dataUrlToBlob,
+  isSmallDevice,
+  loadDomToImage,
+  resetDomToImageLoader,
+} from "../../../../kml_heatmap/frontend/ui/uiToggles";
+import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
 
-// Mock domCache
-const mockDomElements: Record<string, HTMLElement> = {};
-vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
-  domCache: {
-    get: vi.fn((id: string) => mockDomElements[id] || null),
-    cacheElements: vi.fn(),
-  },
-  hideControls: vi.fn(() => new Map()),
-  restoreControls: vi.fn(),
-  getControlElements: vi.fn(() => []),
-}));
+type AnyMock = ReturnType<typeof vi.fn>;
+
+interface ToggleMockApp {
+  map: { addLayer: AnyMock; removeLayer: AnyMock } | null;
+  heatmapLayer: { _canvas: HTMLCanvasElement | null };
+  heatmapVisible: boolean;
+  altitudeLayer: object;
+  airspeedLayer: object;
+  airportLayer: object;
+  altitudeVisible: boolean;
+  airspeedVisible: boolean;
+  airportsVisible: boolean;
+  aviationVisible: boolean;
+  buttonsHidden: boolean;
+  stateManager: { saveMapState: AnyMock };
+  replayManager: {
+    state: {
+      active: boolean;
+      airplaneMarker: { isPopupOpen: AnyMock } | null;
+    };
+    redrawReplayPath: AnyMock;
+    updateReplayAirplanePopup: AnyMock;
+  };
+  layerManager: { redrawAltitudePaths: AnyMock; redrawAirspeedPaths: AnyMock };
+  config: { openaipApiKey: string };
+  openaipLayers: Record<string, object>;
+}
+
+const DOM: Record<string, string> = {
+  "heatmap-btn": "button",
+  "altitude-btn": "button",
+  "airspeed-btn": "button",
+  "airports-btn": "button",
+  "aviation-btn": "button",
+  "altitude-legend": "div",
+  "airspeed-legend": "div",
+  "hide-buttons-btn": "button",
+  "export-btn": "button",
+  "share-btn": "button",
+  "replay-btn": "button",
+  "stats-btn": "button",
+  map: "div",
+};
+
+function el(id: string): HTMLElement {
+  const element = document.getElementById(id);
+  if (!element) throw new Error(`Missing test element #${id}`);
+  return element;
+}
+
+function toast(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".toast-notification");
+}
+
+/** Let the export settle: the 200 ms repaint delay plus promise chains,
+ * without running the toast removal timer */
+async function finishExport(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(500);
+}
+
+function setInnerWidth(width: number): void {
+  Object.defineProperty(window, "innerWidth", {
+    value: width,
+    configurable: true,
+    writable: true,
+  });
+}
+
+function defineNavigatorProperty(name: string, value: unknown): void {
+  Object.defineProperty(navigator, name, { value, configurable: true });
+}
+
+function deleteNavigatorProperty(name: string): void {
+  Reflect.deleteProperty(navigator, name);
+}
 
 describe("UIToggles", () => {
   let uiToggles: UIToggles;
-  let mockApp: MockMapApp;
+  let mockApp: ToggleMockApp;
 
   beforeEach(() => {
-    // Create DOM elements and register in mockDomElements
-    [
-      "heatmap-btn",
-      "altitude-btn",
-      "airspeed-btn",
-      "airports-btn",
-      "altitude-legend",
-      "airspeed-legend",
-      "hide-buttons-btn",
-      "export-btn",
-      "map",
-    ].forEach((id) => {
-      const el = document.createElement("div");
-      el.id = id;
-      document.body.appendChild(el);
-      mockDomElements[id] = el;
+    for (const [id, tag] of Object.entries(DOM)) {
+      const element = document.createElement(tag);
+      element.id = id;
+      document.body.appendChild(element);
+    }
+    Object.defineProperty(el("map"), "offsetWidth", {
+      value: 800,
+      configurable: true,
+    });
+    Object.defineProperty(el("map"), "offsetHeight", {
+      value: 600,
+      configurable: true,
     });
 
     mockApp = {
@@ -51,7 +119,7 @@ describe("UIToggles", () => {
       buttonsHidden: false,
       stateManager: { saveMapState: vi.fn() },
       replayManager: {
-        state: { active: false },
+        state: { active: false, airplaneMarker: null },
         redrawReplayPath: vi.fn(),
         updateReplayAirplanePopup: vi.fn(),
       },
@@ -61,24 +129,23 @@ describe("UIToggles", () => {
       },
       config: { openaipApiKey: "" },
       openaipLayers: {},
-      selectedYear: "all",
-      selectedAircraft: "all",
-      selectedPathIds: new Set<number>(),
-      fullPathInfo: [],
-    } as MockMapApp;
+    };
 
-    uiToggles = new UIToggles(mockApp as any);
+    uiToggles = new UIToggles(mockApp as unknown as MapApp);
   });
 
   afterEach(() => {
-    // Clean up DOM elements
-    Object.keys(mockDomElements).forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) document.body.removeChild(el);
-      delete mockDomElements[id];
-    });
-    // Clean up any toggleable buttons
-    document.querySelectorAll(".toggleable-btn").forEach((el) => el.remove());
+    for (const id of Object.keys(DOM)) document.getElementById(id)?.remove();
+    document.querySelectorAll(".toggleable-btn").forEach((e) => e.remove());
+    document.querySelectorAll(".toast-notification").forEach((e) => e.remove());
+    delete window.domtoimage;
+    resetDomToImageLoader();
+    setInnerWidth(1024);
+    deleteNavigatorProperty("share");
+    deleteNavigatorProperty("canShare");
+    deleteNavigatorProperty("clipboard");
+    vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   describe("toggleHeatmap", () => {
@@ -91,7 +158,8 @@ describe("UIToggles", () => {
         mockApp.heatmapLayer,
       );
       expect(mockApp.heatmapVisible).toBe(false);
-      expect(mockDomElements["heatmap-btn"].style.opacity).toBe("0.5");
+      expect(el("heatmap-btn").style.opacity).toBe("0.5");
+      expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("false");
     });
 
     it("shows heatmap when hidden", () => {
@@ -101,23 +169,26 @@ describe("UIToggles", () => {
 
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.heatmapLayer);
       expect(mockApp.heatmapVisible).toBe(true);
-      expect(mockDomElements["heatmap-btn"].style.opacity).toBe("1");
+      expect(el("heatmap-btn").style.opacity).toBe("1");
+      expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("true");
     });
 
     it("sets pointer-events to none on canvas when showing heatmap", () => {
       mockApp.heatmapVisible = false;
       const canvas = document.createElement("canvas");
-      (mockApp as any).heatmapLayer._canvas = canvas;
+      mockApp.heatmapLayer._canvas = canvas;
 
       uiToggles.toggleHeatmap();
 
       expect(canvas.style.pointerEvents).toBe("none");
     });
 
-    it("returns early if no map", () => {
-      mockApp.map = undefined;
+    it("does nothing without a map", () => {
+      mockApp.map = null;
 
       uiToggles.toggleHeatmap();
+
+      expect(mockApp.heatmapVisible).toBe(true);
     });
   });
 
@@ -128,20 +199,20 @@ describe("UIToggles", () => {
 
       uiToggles.toggleAltitude();
 
-      // Should remove airspeed layer
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
         mockApp.airspeedLayer,
       );
       expect(mockApp.airspeedVisible).toBe(false);
-      expect(mockDomElements["airspeed-btn"].style.opacity).toBe("0.5");
-      expect(mockDomElements["airspeed-legend"].style.display).toBe("none");
+      expect(el("airspeed-btn").style.opacity).toBe("0.5");
+      expect(el("airspeed-btn").getAttribute("aria-pressed")).toBe("false");
+      expect(el("airspeed-legend").style.display).toBe("none");
 
-      // Should add altitude layer
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.altitudeLayer);
       expect(mockApp.altitudeVisible).toBe(true);
-      expect(mockDomElements["altitude-btn"].style.opacity).toBe("1");
-      expect(mockDomElements["altitude-legend"].style.display).toBe("block");
-      expect(mockApp.layerManager!.redrawAltitudePaths).toHaveBeenCalled();
+      expect(el("altitude-btn").style.opacity).toBe("1");
+      expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("true");
+      expect(el("altitude-legend").style.display).toBe("block");
+      expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalled();
     });
 
     it("hides altitude when visible", () => {
@@ -153,8 +224,8 @@ describe("UIToggles", () => {
         mockApp.altitudeLayer,
       );
       expect(mockApp.altitudeVisible).toBe(false);
-      expect(mockDomElements["altitude-btn"].style.opacity).toBe("0.5");
-      expect(mockDomElements["altitude-legend"].style.display).toBe("none");
+      expect(el("altitude-btn").style.opacity).toBe("0.5");
+      expect(el("altitude-legend").style.display).toBe("none");
     });
 
     it("shows altitude without airspeed conflict", () => {
@@ -165,23 +236,24 @@ describe("UIToggles", () => {
 
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.altitudeLayer);
       expect(mockApp.altitudeVisible).toBe(true);
-      expect(mockApp.layerManager!.redrawAltitudePaths).toHaveBeenCalled();
+      expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalled();
     });
 
-    it("returns early if no map", () => {
-      mockApp.map = undefined;
+    it("does nothing without a map", () => {
+      mockApp.map = null;
 
       uiToggles.toggleAltitude();
+
+      expect(mockApp.altitudeVisible).toBe(false);
     });
 
     it("prevents hiding altitude during replay if airspeed is also hidden", () => {
       mockApp.altitudeVisible = true;
       mockApp.airspeedVisible = false;
-      (mockApp.replayManager as any).state.active = true;
+      mockApp.replayManager.state.active = true;
 
       uiToggles.toggleAltitude();
 
-      // Should not hide - both would be hidden
       expect(mockApp.altitudeVisible).toBe(true);
       expect(mockApp.map!.removeLayer).not.toHaveBeenCalled();
     });
@@ -189,34 +261,23 @@ describe("UIToggles", () => {
     it("during replay does not add layer but updates state", () => {
       mockApp.altitudeVisible = false;
       mockApp.airspeedVisible = false;
-      (mockApp.replayManager as any).state.active = true;
-      (mockApp.replayManager as any).state.currentTime = 0;
-      (mockApp.replayManager as any).state.lastDrawnIndex = -1;
-      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).state.segments = [];
-      (mockApp.replayManager as any).state.airplaneMarker = null;
+      mockApp.replayManager.state.active = true;
 
       uiToggles.toggleAltitude();
 
       expect(mockApp.map!.addLayer).not.toHaveBeenCalled();
-      expect(mockApp.layerManager!.redrawAltitudePaths).not.toHaveBeenCalled();
+      expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
       expect(mockApp.altitudeVisible).toBe(true);
-      expect(mockDomElements["altitude-legend"].style.display).toBe("block");
+      expect(el("altitude-legend").style.display).toBe("block");
     });
 
     it("during replay hides airspeed without removing layer", () => {
       mockApp.altitudeVisible = false;
       mockApp.airspeedVisible = true;
-      (mockApp.replayManager as any).state.active = true;
-      (mockApp.replayManager as any).state.currentTime = 0;
-      (mockApp.replayManager as any).state.lastDrawnIndex = -1;
-      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).state.segments = [];
-      (mockApp.replayManager as any).state.airplaneMarker = null;
+      mockApp.replayManager.state.active = true;
 
       uiToggles.toggleAltitude();
 
-      // Should NOT call removeLayer for airspeed during replay
       expect(mockApp.map!.removeLayer).not.toHaveBeenCalled();
       expect(mockApp.airspeedVisible).toBe(false);
       expect(mockApp.altitudeVisible).toBe(true);
@@ -224,27 +285,21 @@ describe("UIToggles", () => {
 
     it("during replay updates airplane popup if open", () => {
       mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).state.active = true;
-      (mockApp.replayManager as any).state.currentTime = 0;
-      (mockApp.replayManager as any).state.lastDrawnIndex = -1;
-      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).state.segments = [];
-      (mockApp.replayManager as any).state.airplaneMarker = {
+      mockApp.replayManager.state.active = true;
+      mockApp.replayManager.state.airplaneMarker = {
         isPopupOpen: vi.fn(() => true),
       };
-      (mockApp.replayManager as any).updateReplayAirplanePopup = vi.fn();
 
       uiToggles.toggleAltitude();
 
       expect(
-        (mockApp.replayManager as any).updateReplayAirplanePopup,
+        mockApp.replayManager.updateReplayAirplanePopup,
       ).toHaveBeenCalled();
     });
 
     it("during replay delegates redraw to replayManager", () => {
       mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).state.active = true;
-      (mockApp.replayManager as any).state.airplaneMarker = null;
+      mockApp.replayManager.state.active = true;
 
       uiToggles.toggleAltitude();
 
@@ -262,20 +317,18 @@ describe("UIToggles", () => {
 
       uiToggles.toggleAirspeed();
 
-      // Should remove altitude layer
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
         mockApp.altitudeLayer,
       );
       expect(mockApp.altitudeVisible).toBe(false);
-      expect(mockDomElements["altitude-btn"].style.opacity).toBe("0.5");
-      expect(mockDomElements["altitude-legend"].style.display).toBe("none");
+      expect(el("altitude-btn").style.opacity).toBe("0.5");
+      expect(el("altitude-legend").style.display).toBe("none");
 
-      // Should add airspeed layer
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.airspeedLayer);
       expect(mockApp.airspeedVisible).toBe(true);
-      expect(mockDomElements["airspeed-btn"].style.opacity).toBe("1");
-      expect(mockDomElements["airspeed-legend"].style.display).toBe("block");
-      expect(mockApp.layerManager!.redrawAirspeedPaths).toHaveBeenCalled();
+      expect(el("airspeed-btn").style.opacity).toBe("1");
+      expect(el("airspeed-legend").style.display).toBe("block");
+      expect(mockApp.layerManager.redrawAirspeedPaths).toHaveBeenCalled();
     });
 
     it("hides airspeed when visible", () => {
@@ -287,31 +340,30 @@ describe("UIToggles", () => {
         mockApp.airspeedLayer,
       );
       expect(mockApp.airspeedVisible).toBe(false);
-      expect(mockDomElements["airspeed-btn"].style.opacity).toBe("0.5");
-      expect(mockDomElements["airspeed-legend"].style.display).toBe("none");
+      expect(el("airspeed-btn").style.opacity).toBe("0.5");
+      expect(el("airspeed-legend").style.display).toBe("none");
     });
 
     it("shows airspeed without altitude conflict", () => {
-      mockApp.airspeedVisible = false;
-      mockApp.altitudeVisible = false;
-
       uiToggles.toggleAirspeed();
 
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.airspeedLayer);
       expect(mockApp.airspeedVisible).toBe(true);
-      expect(mockApp.layerManager!.redrawAirspeedPaths).toHaveBeenCalled();
+      expect(mockApp.layerManager.redrawAirspeedPaths).toHaveBeenCalled();
     });
 
-    it("returns early if no map", () => {
-      mockApp.map = undefined;
+    it("does nothing without a map", () => {
+      mockApp.map = null;
 
       uiToggles.toggleAirspeed();
+
+      expect(mockApp.airspeedVisible).toBe(false);
     });
 
     it("prevents hiding airspeed during replay if altitude is also hidden", () => {
       mockApp.airspeedVisible = true;
       mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).state.active = true;
+      mockApp.replayManager.state.active = true;
 
       uiToggles.toggleAirspeed();
 
@@ -320,48 +372,31 @@ describe("UIToggles", () => {
     });
 
     it("during replay does not add layer but updates state", () => {
-      mockApp.airspeedVisible = false;
-      mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).state.active = true;
-      (mockApp.replayManager as any).state.currentTime = 0;
-      (mockApp.replayManager as any).state.lastDrawnIndex = -1;
-      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).state.segments = [];
-      (mockApp.replayManager as any).state.airplaneMarker = null;
+      mockApp.replayManager.state.active = true;
 
       uiToggles.toggleAirspeed();
 
       expect(mockApp.map!.addLayer).not.toHaveBeenCalled();
-      expect(mockApp.layerManager!.redrawAirspeedPaths).not.toHaveBeenCalled();
+      expect(mockApp.layerManager.redrawAirspeedPaths).not.toHaveBeenCalled();
       expect(mockApp.airspeedVisible).toBe(true);
-      expect(mockDomElements["airspeed-legend"].style.display).toBe("block");
+      expect(el("airspeed-legend").style.display).toBe("block");
     });
 
     it("during replay updates airplane popup if open", () => {
-      mockApp.airspeedVisible = false;
-      mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).state.active = true;
-      (mockApp.replayManager as any).state.currentTime = 0;
-      (mockApp.replayManager as any).state.lastDrawnIndex = -1;
-      (mockApp.replayManager as any).state.layer = { clearLayers: vi.fn() };
-      (mockApp.replayManager as any).state.segments = [];
-      (mockApp.replayManager as any).state.airplaneMarker = {
+      mockApp.replayManager.state.active = true;
+      mockApp.replayManager.state.airplaneMarker = {
         isPopupOpen: vi.fn(() => true),
       };
-      (mockApp.replayManager as any).updateReplayAirplanePopup = vi.fn();
 
       uiToggles.toggleAirspeed();
 
       expect(
-        (mockApp.replayManager as any).updateReplayAirplanePopup,
+        mockApp.replayManager.updateReplayAirplanePopup,
       ).toHaveBeenCalled();
     });
 
     it("during replay delegates redraw to replayManager", () => {
-      mockApp.airspeedVisible = false;
-      mockApp.altitudeVisible = false;
-      (mockApp.replayManager as any).state.active = true;
-      (mockApp.replayManager as any).state.airplaneMarker = null;
+      mockApp.replayManager.state.active = true;
 
       uiToggles.toggleAirspeed();
 
@@ -382,7 +417,8 @@ describe("UIToggles", () => {
         mockApp.airportLayer,
       );
       expect(mockApp.airportsVisible).toBe(false);
-      expect(mockDomElements["airports-btn"].style.opacity).toBe("0.5");
+      expect(el("airports-btn").style.opacity).toBe("0.5");
+      expect(el("airports-btn").getAttribute("aria-pressed")).toBe("false");
     });
 
     it("shows airports when hidden", () => {
@@ -392,56 +428,65 @@ describe("UIToggles", () => {
 
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.airportLayer);
       expect(mockApp.airportsVisible).toBe(true);
-      expect(mockDomElements["airports-btn"].style.opacity).toBe("1");
+      expect(el("airports-btn").style.opacity).toBe("1");
+      expect(el("airports-btn").getAttribute("aria-pressed")).toBe("true");
     });
 
-    it("returns early if no map", () => {
-      mockApp.map = undefined;
+    it("does nothing without a map", () => {
+      mockApp.map = null;
 
       uiToggles.toggleAirports();
+
+      expect(mockApp.airportsVisible).toBe(true);
     });
   });
 
   describe("toggleAviation", () => {
     it("shows aviation layer when hidden and API key is set", () => {
-      (mockApp as any).config.openaipApiKey = "test-key";
-      (mockApp as any).openaipLayers["Aviation Data"] = {};
+      mockApp.config.openaipApiKey = "test-key";
+      mockApp.openaipLayers["Aviation Data"] = {};
       mockApp.aviationVisible = false;
 
       uiToggles.toggleAviation();
 
       expect(mockApp.map!.addLayer).toHaveBeenCalledWith(
-        (mockApp as any).openaipLayers["Aviation Data"],
+        mockApp.openaipLayers["Aviation Data"],
       );
       expect(mockApp.aviationVisible).toBe(true);
+      expect(el("aviation-btn").getAttribute("aria-pressed")).toBe("true");
     });
 
     it("hides aviation layer when visible", () => {
-      (mockApp as any).config.openaipApiKey = "test-key";
-      (mockApp as any).openaipLayers["Aviation Data"] = {};
+      mockApp.config.openaipApiKey = "test-key";
+      mockApp.openaipLayers["Aviation Data"] = {};
       mockApp.aviationVisible = true;
 
       uiToggles.toggleAviation();
 
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        (mockApp as any).openaipLayers["Aviation Data"],
+        mockApp.openaipLayers["Aviation Data"],
       );
       expect(mockApp.aviationVisible).toBe(false);
+      expect(el("aviation-btn").getAttribute("aria-pressed")).toBe("false");
     });
 
     it("does nothing when no API key is set", () => {
-      (mockApp as any).config.openaipApiKey = "";
+      mockApp.config.openaipApiKey = "";
       mockApp.aviationVisible = false;
 
       uiToggles.toggleAviation();
 
       expect(mockApp.map!.addLayer).not.toHaveBeenCalled();
+      expect(mockApp.aviationVisible).toBe(false);
     });
 
-    it("returns early if no map", () => {
-      mockApp.map = undefined;
+    it("does nothing without a map", () => {
+      mockApp.map = null;
+      mockApp.config.openaipApiKey = "test-key";
 
       uiToggles.toggleAviation();
+
+      expect(mockApp.aviationVisible).toBe(false);
     });
   });
 
@@ -458,156 +503,499 @@ describe("UIToggles", () => {
       }
     });
 
-    it("hides buttons when visible", () => {
+    // The DOM is updated by the store subscriber that MapApp installs; see
+    // "restores hidden buttons from the store" in mapApp.initialize.test.ts
+    it("hides buttons when they are visible", () => {
       mockApp.buttonsHidden = false;
 
       uiToggles.toggleButtonsVisibility();
 
-      toggleableButtons.forEach((btn) => {
-        expect(btn.classList.contains("buttons-hidden")).toBe(true);
-      });
       expect(mockApp.buttonsHidden).toBe(true);
     });
 
-    it("shows buttons when hidden", () => {
+    it("shows buttons when they are hidden", () => {
       mockApp.buttonsHidden = true;
       toggleableButtons.forEach((btn) => btn.classList.add("buttons-hidden"));
 
       uiToggles.toggleButtonsVisibility();
 
-      toggleableButtons.forEach((btn) => {
-        expect(btn.classList.contains("buttons-hidden")).toBe(false);
-      });
       expect(mockApp.buttonsHidden).toBe(false);
     });
 
-    it("redraws altitude paths when altitude is visible", () => {
-      mockApp.buttonsHidden = false;
+    it("does not redraw paths (button visibility does not affect rendering)", () => {
       mockApp.altitudeVisible = true;
-
-      uiToggles.toggleButtonsVisibility();
-
-      expect(mockApp.layerManager!.redrawAltitudePaths).toHaveBeenCalled();
-    });
-
-    it("redraws airspeed paths when airspeed is visible", () => {
-      mockApp.buttonsHidden = false;
       mockApp.airspeedVisible = true;
 
       uiToggles.toggleButtonsVisibility();
 
-      expect(mockApp.layerManager!.redrawAirspeedPaths).toHaveBeenCalled();
+      expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
+      expect(mockApp.layerManager.redrawAirspeedPaths).not.toHaveBeenCalled();
     });
 
-    it("does not redraw paths when neither altitude nor airspeed is visible", () => {
-      mockApp.buttonsHidden = false;
-      mockApp.altitudeVisible = false;
-      mockApp.airspeedVisible = false;
+    it("works without the hide button element", () => {
+      el("hide-buttons-btn").remove();
 
       uiToggles.toggleButtonsVisibility();
 
-      expect(mockApp.layerManager!.redrawAltitudePaths).not.toHaveBeenCalled();
-      expect(mockApp.layerManager!.redrawAirspeedPaths).not.toHaveBeenCalled();
+      expect(mockApp.buttonsHidden).toBe(true);
+    });
+  });
+
+  describe("loadDomToImage", () => {
+    it("resolves immediately when dom-to-image is already loaded", async () => {
+      const lib = { toJpeg: vi.fn() } as unknown as DomToImage;
+      window.domtoimage = lib;
+      const appendSpy = vi.spyOn(document.head, "appendChild");
+
+      await expect(loadDomToImage()).resolves.toBe(lib);
+      expect(appendSpy).not.toHaveBeenCalled();
+    });
+
+    it("injects the script with SRI and resolves once it loads", async () => {
+      const lib = { toJpeg: vi.fn() } as unknown as DomToImage;
+      let script: HTMLScriptElement | null = null;
+      vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+        script = node as HTMLScriptElement;
+        window.domtoimage = lib;
+        queueMicrotask(() => script?.onload?.(new Event("load")));
+        return node;
+      });
+
+      await expect(loadDomToImage()).resolves.toBe(lib);
+      expect(script!.src).toBe(DOM_TO_IMAGE_URL);
+      expect(script!.integrity).toBe(DOM_TO_IMAGE_INTEGRITY);
+      expect(script!.crossOrigin).toBe("anonymous");
+    });
+
+    it("shares one in-flight load between callers", async () => {
+      let script: HTMLScriptElement | null = null;
+      const appendSpy = vi
+        .spyOn(document.head, "appendChild")
+        .mockImplementation((node) => {
+          script = node as HTMLScriptElement;
+          return node;
+        });
+
+      const first = loadDomToImage();
+      const second = loadDomToImage();
+      expect(first).toBe(second);
+      expect(appendSpy).toHaveBeenCalledTimes(1);
+
+      script!.onerror?.(new Event("error"));
+      await expect(first).resolves.toBeNull();
+    });
+
+    it("resolves null and allows a retry when the script fails", async () => {
+      const appendSpy = vi
+        .spyOn(document.head, "appendChild")
+        .mockImplementation((node) => {
+          queueMicrotask(() =>
+            (node as HTMLScriptElement).onerror?.(new Event("error")),
+          );
+          return node;
+        });
+
+      await expect(loadDomToImage()).resolves.toBeNull();
+      await expect(loadDomToImage()).resolves.toBeNull();
+      expect(appendSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("dataUrlToBlob", () => {
+    it("decodes base64 data URLs", async () => {
+      const blob = dataUrlToBlob("data:image/jpeg;base64,aGVsbG8=");
+
+      expect(blob.type).toBe("image/jpeg");
+      expect(blob.size).toBe(5);
+      expect(await blob.text()).toBe("hello");
+    });
+
+    it("decodes plain data URLs", async () => {
+      const blob = dataUrlToBlob("data:text/plain,hello%20world");
+
+      expect(blob.type).toBe("text/plain");
+      expect(await blob.text()).toBe("hello world");
+    });
+
+    it("falls back to a generic type without a header", () => {
+      const blob = dataUrlToBlob("no-comma");
+
+      expect(blob.type).toBe("application/octet-stream");
+    });
+  });
+
+  describe("isSmallDevice", () => {
+    it("is true for narrow viewports", () => {
+      setInnerWidth(500);
+      expect(isSmallDevice()).toBe(true);
+    });
+
+    it("is true for coarse pointers on wide viewports", () => {
+      setInnerWidth(1200);
+      Object.defineProperty(window, "matchMedia", {
+        value: vi.fn(() => ({ matches: true })),
+        configurable: true,
+        writable: true,
+      });
+      expect(isSmallDevice()).toBe(true);
+    });
+
+    it("is false for wide viewports with a fine pointer", () => {
+      setInnerWidth(1200);
+      Object.defineProperty(window, "matchMedia", {
+        value: vi.fn(() => ({ matches: false })),
+        configurable: true,
+        writable: true,
+      });
+      expect(isSmallDevice()).toBe(false);
     });
   });
 
   describe("exportMap", () => {
-    it("disables button and sets exporting text", () => {
-      const btn = mockDomElements["export-btn"] as HTMLButtonElement;
+    let clickSpy: AnyMock;
+    let createObjectURL: AnyMock;
+    let revokeObjectURL: AnyMock;
 
-      uiToggles.exportMap();
-
-      expect(btn.disabled).toBe(true);
-      expect(btn.textContent).toContain("Exporting...");
-    });
-
-    it("returns early if export button is not found", () => {
-      // Remove the export-btn from mock
-      const original = mockDomElements["export-btn"];
-      delete mockDomElements["export-btn"];
-
-      // Should not throw
-      expect(() => uiToggles.exportMap()).not.toThrow();
-
-      // Restore
-      mockDomElements["export-btn"] = original;
-    });
-
-    it("returns early if map container is not found", () => {
-      const originalMap = mockDomElements["map"];
-      delete mockDomElements["map"];
-
-      const btn = mockDomElements["export-btn"] as HTMLButtonElement;
-      uiToggles.exportMap();
-
-      // Button is set to disabled but nothing else happens
-      expect(btn.disabled).toBe(true);
-
-      mockDomElements["map"] = originalMap;
-    });
-
-    it("hides controls, calls domtoimage.toJpeg and downloads on success", async () => {
+    beforeEach(() => {
       vi.useFakeTimers();
-      const btn = mockDomElements["export-btn"] as HTMLButtonElement;
-      const mockLink = { download: "", href: "", click: vi.fn() };
-      vi.spyOn(document, "createElement").mockReturnValue(mockLink as any);
-
-      Object.defineProperty(mockDomElements["map"], "offsetWidth", {
-        value: 800,
+      clickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+      createObjectURL = vi.fn(() => "blob:mock-url");
+      revokeObjectURL = vi.fn();
+      Object.defineProperty(URL, "createObjectURL", {
+        value: createObjectURL,
         configurable: true,
+        writable: true,
       });
-      Object.defineProperty(mockDomElements["map"], "offsetHeight", {
-        value: 600,
+      Object.defineProperty(URL, "revokeObjectURL", {
+        value: revokeObjectURL,
         configurable: true,
+        writable: true,
       });
+    });
 
-      const toJpegMock = vi
+    afterEach(() => {
+      Reflect.deleteProperty(URL, "createObjectURL");
+      Reflect.deleteProperty(URL, "revokeObjectURL");
+    });
+
+    function installDomToImage(
+      toJpeg: AnyMock = vi
         .fn()
-        .mockResolvedValue("data:image/jpeg;base64,abc");
-      window.domtoimage = { toJpeg: toJpegMock } as any;
+        .mockResolvedValue("data:image/jpeg;base64,aGVsbG8="),
+    ): AnyMock {
+      window.domtoimage = { toJpeg } as unknown as DomToImage;
+      return toJpeg;
+    }
+
+    function clickedLink(): HTMLAnchorElement {
+      const link = clickSpy.mock.contexts[0] as HTMLAnchorElement | undefined;
+      if (!link) throw new Error("No download link was clicked");
+      return link;
+    }
+
+    it("does nothing if the export button is missing", async () => {
+      el("export-btn").remove();
+      const toJpeg = installDomToImage();
 
       uiToggles.exportMap();
+      await finishExport();
 
-      // Advance past the setTimeout(200ms)
-      vi.advanceTimersByTime(200);
-      await vi.runAllTimersAsync();
-
-      expect(toJpegMock).toHaveBeenCalledWith(
-        mockDomElements["map"],
-        expect.objectContaining({ width: 1600, height: 1200 }),
-      );
-      expect(btn.disabled).toBe(false);
-      expect(btn.textContent).toContain("Export");
-      expect(mockLink.click).toHaveBeenCalled();
-      expect(mockLink.download).toContain("heatmap_");
-
-      vi.useRealTimers();
-      vi.restoreAllMocks();
+      expect(toJpeg).not.toHaveBeenCalled();
     });
 
-    it("restores controls and shows toast on domtoimage failure", async () => {
-      vi.useFakeTimers();
-      const btn = mockDomElements["export-btn"] as HTMLButtonElement;
+    it("does nothing if the map container is missing", async () => {
+      el("map").remove();
+      const toJpeg = installDomToImage();
+      const btn = el("export-btn") as HTMLButtonElement;
 
-      const toJpegMock = vi.fn().mockRejectedValue(new Error("Export failed"));
-      window.domtoimage = { toJpeg: toJpegMock } as any;
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(btn.disabled).toBe(false);
+      expect(toJpeg).not.toHaveBeenCalled();
+    });
+
+    it("disables the button and hides the replay and share buttons while exporting", () => {
+      installDomToImage();
+      const btn = el("export-btn") as HTMLButtonElement;
 
       uiToggles.exportMap();
 
-      vi.advanceTimersByTime(200);
-      await vi.advanceTimersByTimeAsync(0);
+      expect(btn.disabled).toBe(true);
+      expect(btn.textContent).toBe("⏳ Exporting...");
+      expect(el("replay-btn").style.display).toBe("none");
+      expect(el("share-btn").style.display).toBe("none");
+      expect(el("stats-btn").style.display).toBe("none");
+    });
 
-      const toast = document.querySelector(".toast-notification");
-      expect(toast).not.toBeNull();
-      expect(toast!.textContent).toContain("Export failed");
-      expect(toast!.classList.contains("toast-error")).toBe(true);
+    it("ignores a second click while an export is running", async () => {
+      const toJpeg = installDomToImage();
+
+      uiToggles.exportMap();
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(toJpeg).toHaveBeenCalledTimes(1);
+    });
+
+    it("exports at 2x on desktop, downloads a blob and shows a success toast", async () => {
+      const toJpeg = installDomToImage();
+      const btn = el("export-btn") as HTMLButtonElement;
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(toJpeg).toHaveBeenCalledWith(
+        el("map"),
+        expect.objectContaining({ width: 1600, height: 1200, quality: 0.95 }),
+      );
+      expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+      const link = clickedLink();
+      expect(link.href).toBe("blob:mock-url");
+      expect(link.download).toMatch(/^heatmap_\d{4}-\d{2}-\d{2}T.*\.jpg$/);
+      expect(link.isConnected).toBe(false);
+      expect(toast()?.textContent).toBe("Map exported");
+      // The object URL is released after the download had time to start
+      expect(revokeObjectURL).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(10000);
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url");
       expect(btn.disabled).toBe(false);
-      expect(btn.textContent).toContain("Export");
+      expect(btn.textContent).toBe("📷 Export");
+      expect(el("replay-btn").style.display).toBe("");
+      expect(el("share-btn").style.display).toBe("");
+    });
 
-      vi.runAllTimers();
-      toast!.remove();
-      vi.useRealTimers();
-      vi.restoreAllMocks();
+    it("caps the scale at 1 on small devices", async () => {
+      setInnerWidth(500);
+      const toJpeg = installDomToImage();
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(toJpeg).toHaveBeenCalledWith(
+        el("map"),
+        expect.objectContaining({ width: 800, height: 600 }),
+      );
+    });
+
+    it("falls back to the data URL when object URLs are unavailable", async () => {
+      Object.defineProperty(URL, "createObjectURL", {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      });
+      installDomToImage();
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(toast()?.textContent).toBe("Map exported");
+      expect(clickedLink().href).toBe("data:image/jpeg;base64,aGVsbG8=");
+    });
+
+    it("shares the image on mobile when file sharing is supported", async () => {
+      setInnerWidth(500);
+      const share = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("share", share);
+      defineNavigatorProperty(
+        "canShare",
+        vi.fn(() => true),
+      );
+      installDomToImage();
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(share).toHaveBeenCalledWith(
+        expect.objectContaining({ files: [expect.any(File)] }),
+      );
+      const shared = (share.mock.calls[0]![0] as { files: File[] }).files[0]!;
+      expect(shared.name).toMatch(/^heatmap_.*\.jpg$/);
+      expect(shared.type).toBe("image/jpeg");
+      expect(clickSpy).not.toHaveBeenCalled();
+      expect(toast()?.textContent).toBe("Map shared");
+    });
+
+    it("downloads instead of sharing when the files cannot be shared", async () => {
+      setInnerWidth(500);
+      const share = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("share", share);
+      defineNavigatorProperty(
+        "canShare",
+        vi.fn(() => false),
+      );
+      installDomToImage();
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(share).not.toHaveBeenCalled();
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not share on desktop even when supported", async () => {
+      setInnerWidth(1200);
+      const share = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("share", share);
+      defineNavigatorProperty(
+        "canShare",
+        vi.fn(() => true),
+      );
+      installDomToImage();
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(share).not.toHaveBeenCalled();
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to a download when sharing fails", async () => {
+      setInnerWidth(500);
+      defineNavigatorProperty(
+        "share",
+        vi.fn().mockRejectedValue(new Error("boom")),
+      );
+      defineNavigatorProperty(
+        "canShare",
+        vi.fn(() => true),
+      );
+      installDomToImage();
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(toast()?.textContent).toBe("Map exported");
+    });
+
+    it("shows no toast when the user cancels sharing", async () => {
+      setInnerWidth(500);
+      const abort = new Error("cancelled");
+      abort.name = "AbortError";
+      defineNavigatorProperty("share", vi.fn().mockRejectedValue(abort));
+      defineNavigatorProperty(
+        "canShare",
+        vi.fn(() => true),
+      );
+      installDomToImage();
+      const btn = el("export-btn") as HTMLButtonElement;
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(clickSpy).not.toHaveBeenCalled();
+      expect(toast()).toBeNull();
+      expect(btn.disabled).toBe(false);
+    });
+
+    it("shows an error toast and restores the buttons when dom-to-image is unavailable", async () => {
+      vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+        queueMicrotask(() =>
+          (node as HTMLScriptElement).onerror?.(new Event("error")),
+        );
+        return node;
+      });
+      const btn = el("export-btn") as HTMLButtonElement;
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(toast()?.textContent).toBe("Export unavailable");
+      expect(toast()?.classList.contains("toast-error")).toBe(true);
+      expect(btn.disabled).toBe(false);
+      expect(btn.textContent).toBe("📷 Export");
+      expect(el("replay-btn").style.display).toBe("");
+      expect(el("share-btn").style.display).toBe("");
+      expect(clickSpy).not.toHaveBeenCalled();
+    });
+
+    it("restores controls and shows a toast on dom-to-image failure", async () => {
+      installDomToImage(vi.fn().mockRejectedValue(new Error("Export failed")));
+      const btn = el("export-btn") as HTMLButtonElement;
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(toast()?.textContent).toBe("Export failed: Export failed");
+      expect(toast()?.classList.contains("toast-error")).toBe(true);
+      expect(btn.disabled).toBe(false);
+      expect(btn.textContent).toBe("📷 Export");
+      expect(el("replay-btn").style.display).toBe("");
+    });
+  });
+
+  describe("shareLink", () => {
+    it("uses the native share sheet when available", async () => {
+      const share = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("share", share);
+
+      await uiToggles.shareLink();
+
+      expect(mockApp.stateManager.saveMapState).toHaveBeenCalled();
+      expect(share).toHaveBeenCalledWith({
+        url: window.location.href,
+        title: document.title,
+      });
+      expect(toast()).toBeNull();
+    });
+
+    it("stays silent when the user cancels the share sheet", async () => {
+      const abort = new Error("cancelled");
+      abort.name = "AbortError";
+      defineNavigatorProperty("share", vi.fn().mockRejectedValue(abort));
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("clipboard", { writeText });
+
+      await uiToggles.shareLink();
+
+      expect(writeText).not.toHaveBeenCalled();
+      expect(toast()).toBeNull();
+    });
+
+    it("falls back to the clipboard when sharing fails", async () => {
+      defineNavigatorProperty(
+        "share",
+        vi.fn().mockRejectedValue(new Error("boom")),
+      );
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("clipboard", { writeText });
+
+      await uiToggles.shareLink();
+
+      expect(writeText).toHaveBeenCalledWith(window.location.href);
+      expect(toast()?.textContent).toBe("Link copied");
+    });
+
+    it("copies the link to the clipboard without native sharing", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("clipboard", { writeText });
+
+      await uiToggles.shareLink();
+
+      expect(writeText).toHaveBeenCalledWith(window.location.href);
+      expect(toast()?.textContent).toBe("Link copied");
+      expect(toast()?.getAttribute("role")).toBe("status");
+    });
+
+    it("shows an error toast when the clipboard is unavailable", async () => {
+      await uiToggles.shareLink();
+
+      expect(toast()?.textContent).toBe("Could not copy link");
+      expect(toast()?.classList.contains("toast-error")).toBe(true);
+    });
+
+    it("is triggered by the share button", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("clipboard", { writeText });
+
+      el("share-btn").click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(writeText).toHaveBeenCalledWith(window.location.href);
     });
   });
 });

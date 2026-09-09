@@ -1,8 +1,12 @@
-[allowlist]
-  description = "Global Allowlist"
+# Gitleaks configuration, used by the CI security job and the pre-commit hook.
 
-  paths = [
-    # Generated output containing public client-side tile API keys (CARTO, OpenAIP)
-    '''docs/map_config\.js$''',
-    '''docs/mapApp\.bundle\.js$''',
-  ]
+# Extend the built-in rule set. Without this block gitleaks would only apply
+# the rules defined in this file (none) and therefore detect nothing.
+[extend]
+useDefault = true
+
+# Generated site files that embed the public client-side tile API keys
+# (CARTO, OpenAIP). They are published with the site by design.
+[[allowlists]]
+description = "Generated site files with public tile API keys"
+paths = ['''^docs/map_config\.js$''']

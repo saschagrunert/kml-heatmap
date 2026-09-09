@@ -2,13 +2,14 @@
 
 Groundspeed uses a two-pass approach: instantaneous speeds for all segments,
 then rolling window averages for smoothing. The windowing system uses binary
-search on sorted timestamps for O(log n) lookups.
+search on sorted timestamps for O(log n) lookups. Timestamps are Unix epoch
+seconds that were parsed once by the KML parser.
 """
 
 from bisect import bisect_left, bisect_right
-from datetime import datetime
+from dataclasses import dataclass
 from itertools import pairwise
-from typing import Any
+from typing import TYPE_CHECKING
 
 from .constants import (
     KM_TO_NAUTICAL_MILES,
@@ -18,8 +19,30 @@ from .constants import (
     SPEED_WINDOW_SECONDS,
 )
 from .geometry import haversine_distance
-from .helpers import parse_iso_timestamp
-from .types import FlightPath
+
+if TYPE_CHECKING:
+    from .types import FlightPath
+
+__all__ = [
+    "SegmentSpeed",
+    "build_time_indexed_segments",
+    "calculate_fallback_groundspeed",
+    "calculate_path_distance",
+    "calculate_windowed_groundspeed",
+    "extract_segment_speeds",
+]
+
+
+@dataclass(slots=True)
+class SegmentSpeed:
+    """Instantaneous speed information for one path segment."""
+
+    index: int
+    timestamp: float | None
+    relative_time: float | None
+    speed: float
+    distance: float
+    time_delta: float
 
 
 def calculate_path_distance(path: FlightPath) -> float:
@@ -27,98 +50,69 @@ def calculate_path_distance(path: FlightPath) -> float:
     if len(path) < 2:
         return 0.0
 
-    distance_km = 0.0
-    for p1, p2 in pairwise(path):
-        distance_km += haversine_distance(p1[0], p1[1], p2[0], p2[1])
-
-    return distance_km
+    return sum(
+        haversine_distance(p1.lat, p1.lon, p2.lat, p2.lon) for p1, p2 in pairwise(path)
+    )
 
 
 def extract_segment_speeds(
-    path: list[list[float | str]], path_start_time: datetime | None
-) -> list[dict[str, Any]]:
+    path: FlightPath, path_start_time: float | None
+) -> list[SegmentSpeed]:
     """Calculate instantaneous speeds for all segments in a path."""
-    segment_speeds = []
+    segment_speeds: list[SegmentSpeed] = []
 
-    for i, (coord1, coord2) in enumerate(pairwise(path)):
-        lat1, lon1 = float(coord1[0]), float(coord1[1])
-        lat2, lon2 = float(coord2[0]), float(coord2[1])
-        segment_distance_km = haversine_distance(lat1, lon1, lat2, lon2)
+    for i, (p1, p2) in enumerate(pairwise(path)):
+        segment_distance_km = haversine_distance(p1.lat, p1.lon, p2.lat, p2.lon)
 
         instant_speed = 0.0
         timestamp = None
         time_delta = 0.0
         relative_time = None
 
-        if len(coord1) >= 4 and len(coord2) >= 4:
-            ts1 = coord1[3]
-            ts2 = coord2[3]
-            if isinstance(ts1, str) and isinstance(ts2, str):
-                dt1 = parse_iso_timestamp(ts1)
-                dt2 = parse_iso_timestamp(ts2)
-            else:
-                dt1 = None
-                dt2 = None
+        if p1.ts is not None and p2.ts is not None:
+            time_delta = p2.ts - p1.ts
+            timestamp = p1.ts
 
-            if dt1 and dt2:
-                time_delta = (dt2 - dt1).total_seconds()
-                timestamp = dt1
+            if path_start_time is not None:
+                relative_time = p1.ts - path_start_time
 
-                if path_start_time:
-                    relative_time = (dt1 - path_start_time).total_seconds()
+            if time_delta >= MIN_SEGMENT_TIME_SECONDS:
+                segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
+                instant_speed = (segment_distance_nm / time_delta) * SECONDS_PER_HOUR
 
-                if time_delta >= MIN_SEGMENT_TIME_SECONDS:
-                    segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
-                    instant_speed = (
-                        segment_distance_nm / time_delta
-                    ) * SECONDS_PER_HOUR
-
-                    if instant_speed > MAX_GROUNDSPEED_KNOTS:
-                        instant_speed = 0.0  # Ignore unrealistic speeds
+                if instant_speed > MAX_GROUNDSPEED_KNOTS:
+                    instant_speed = 0.0  # Ignore unrealistic speeds
 
         segment_speeds.append(
-            {
-                "index": i,
-                "timestamp": timestamp,
-                "relative_time": relative_time,
-                "speed": instant_speed,
-                "distance": segment_distance_km,
-                "time_delta": time_delta,
-            }
+            SegmentSpeed(
+                index=i,
+                timestamp=timestamp,
+                relative_time=relative_time,
+                speed=instant_speed,
+                distance=segment_distance_km,
+                time_delta=time_delta,
+            )
         )
 
     return segment_speeds
 
 
 def build_time_indexed_segments(
-    segment_speeds: list[dict[str, Any]],
-) -> tuple[list[float], list[dict[str, Any]]]:
+    segment_speeds: list[SegmentSpeed],
+) -> tuple[list[float], list[SegmentSpeed]]:
     """Build time-sorted lists for efficient window queries."""
-    time_indexed_segments = []
-    timestamp_list = []
-
-    for seg in segment_speeds:
-        if seg["timestamp"] is not None and seg["speed"] != 0:
-            ts = seg["timestamp"].timestamp()
-            timestamp_list.append(ts)
-            time_indexed_segments.append(seg)
-
-    if timestamp_list:
-        sorted_pairs = sorted(
-            zip(timestamp_list, time_indexed_segments, strict=True),
-            key=lambda x: x[0],
-        )
-        unzipped = list(zip(*sorted_pairs, strict=True))
-        timestamp_list = list(unzipped[0])
-        time_indexed_segments = list(unzipped[1])
-
-    return timestamp_list, time_indexed_segments
+    timed = sorted(
+        (seg for seg in segment_speeds if seg.timestamp is not None and seg.speed != 0),
+        key=lambda seg: seg.timestamp or 0.0,
+    )
+    timestamp_list = [seg.timestamp for seg in timed if seg.timestamp is not None]
+    return timestamp_list, timed
 
 
 def calculate_windowed_groundspeed(
-    current_timestamp: datetime,
+    current_timestamp: float,
     timestamp_list: list[float],
-    time_indexed_segments: list[dict[str, Any]],
+    time_indexed_segments: list[SegmentSpeed],
 ) -> tuple[float, float, float]:
     """Calculate rolling average groundspeed using a time window.
 
@@ -130,16 +124,15 @@ def calculate_windowed_groundspeed(
 
     window_distance = 0.0
     window_time = 0.0
-    current_ts = current_timestamp.timestamp()
     half_window = SPEED_WINDOW_SECONDS / 2
 
-    start_idx = bisect_left(timestamp_list, current_ts - half_window)
-    end_idx = bisect_right(timestamp_list, current_ts + half_window)
+    start_idx = bisect_left(timestamp_list, current_timestamp - half_window)
+    end_idx = bisect_right(timestamp_list, current_timestamp + half_window)
 
     for j in range(start_idx, end_idx):
         seg = time_indexed_segments[j]
-        window_distance += seg["distance"]
-        window_time += seg["time_delta"]
+        window_distance += seg.distance
+        window_time += seg.time_delta
 
     if window_time >= MIN_SEGMENT_TIME_SECONDS:
         window_distance_nm = window_distance * KM_TO_NAUTICAL_MILES

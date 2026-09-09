@@ -1,10 +1,15 @@
 [files]
-# Ignore generated/minified bundle files
+# Generated or minified files and lock files are not spell checked
 extend-exclude = [
   "docs/bundle.js",
   "docs/mapApp.bundle.js",
+  "docs/*.map",
+  "docs/data/**",
   "kml_heatmap/static/bundle.js",
-  "kml_heatmap/static/bundle.esm.js",
   "kml_heatmap/static/mapApp.bundle.js",
-  "kml_heatmap/static/mapApp.bundle.esm.js",
+  "kml_heatmap/static/*.map",
+  "*.lock",
+  "package-lock.json",
+  # Vendored OurAirports rows: IATA codes such as MUC and BRE are not words
+  "tests/fixtures/*.csv",
 ]

@@ -1,6 +1,6 @@
 /**
  * Airport management functionality
- * Handles airport data, popups, markers, and flight counting
+ * Pure helpers for airport data, flight counting and visibility
  */
 
 import type { PathInfo } from "../types";
@@ -78,24 +78,6 @@ export interface AirportCounts {
 }
 
 /**
- * Airport visibility state
- */
-export interface AirportVisibility {
-  show: boolean;
-  opacity: number;
-}
-
-/**
- * Path to airports mapping
- */
-export interface PathToAirports {
-  [pathId: number]: {
-    start?: string;
-    end?: string;
-  };
-}
-
-/**
  * Calculate airport flight counts based on filtered paths
  * @param pathInfo - Array of path info objects
  * @param year - Year filter
@@ -107,8 +89,6 @@ export function calculateAirportFlightCounts(
   year: string = "all",
   aircraft: string = "all",
 ): AirportCounts {
-  if (!pathInfo) return {};
-
   const counts: AirportCounts = {};
   const filteredPaths = filterPaths(pathInfo, year, aircraft);
 
@@ -150,106 +130,58 @@ export function findHomeBase(airportCounts: AirportCounts): string | null {
 }
 
 /**
- * Calculate airport marker opacity based on flight count
- * @param flightCount - Number of flights
- * @param maxCount - Maximum flight count across all airports
- * @returns Opacity value between 0.3 and 1.0
+ * Determine which airports are visible for the current filter and selection.
+ *
+ * - no filter and no selection: every airport (returns null)
+ * - year/aircraft filter: airports touched by matching paths
+ * - selection: airports of the selected paths are added
+ * - isolate mode: only airports of the selected paths
+ * @returns Set of visible airport names, or null when all are visible
  */
-export function calculateAirportOpacity(
-  flightCount: number,
-  maxCount: number,
-): number {
-  if (maxCount === 0) return 1.0;
-
-  // Scale opacity from 0.3 (minimum) to 1.0 (maximum)
-  const minOpacity = 0.3;
-  const maxOpacity = 1.0;
-  const normalized = flightCount / maxCount;
-
-  return minOpacity + normalized * (maxOpacity - minOpacity);
-}
-
-/**
- * Calculate airport marker size based on flight count
- * @param flightCount - Number of flights
- * @param maxCount - Maximum flight count across all airports
- * @param options - Size options
- * @returns Marker radius
- */
-export function calculateAirportMarkerSize(
-  flightCount: number,
-  maxCount: number,
-  options: { minSize?: number; maxSize?: number } = {},
-): number {
-  const minSize = options.minSize || 3;
-  const maxSize = options.maxSize || 8;
-
-  if (maxCount === 0) return minSize;
-
-  const normalized = flightCount / maxCount;
-  return minSize + normalized * (maxSize - minSize);
-}
-
-/**
- * Determine if airports should be shown/hidden based on filters and selection
- * @param options - Options object
- * @returns Visibility state for each airport
- */
-export function calculateAirportVisibility(options: {
-  airportCounts: AirportCounts;
+export function calculateVisibleAirports(options: {
+  pathInfo: PathInfo[];
   selectedYear?: string;
   selectedAircraft?: string;
   selectedPathIds?: Set<number>;
-  pathToAirports?: PathToAirports;
-}): Record<string, AirportVisibility> {
+  isolateSelection?: boolean;
+  pathInfoById?: Map<number, PathInfo>;
+}): Set<string> | null {
   const {
-    airportCounts,
+    pathInfo,
     selectedYear = "all",
     selectedAircraft = "all",
-    selectedPathIds = new Set(),
-    pathToAirports = {},
+    selectedPathIds = new Set<number>(),
+    isolateSelection = false,
   } = options;
 
   const hasFilters = selectedYear !== "all" || selectedAircraft !== "all";
   const hasSelection = selectedPathIds.size > 0;
+  const hasIsolation = isolateSelection && hasSelection;
 
-  // Get airports from selected paths
-  const selectedAirports = new Set<string>();
+  if (!hasFilters && !hasSelection) {
+    return null;
+  }
+
+  const visible = new Set<string>();
+
+  // Isolate mode ignores filter-only airports
+  if (hasFilters && !hasIsolation) {
+    for (const info of filterPaths(pathInfo, selectedYear, selectedAircraft)) {
+      if (info.start_airport) visible.add(info.start_airport);
+      if (info.end_airport) visible.add(info.end_airport);
+    }
+  }
+
   if (hasSelection) {
+    const byId =
+      options.pathInfoById ?? new Map(pathInfo.map((p) => [p.id, p]));
     selectedPathIds.forEach((pathId) => {
-      const airports = pathToAirports[pathId];
-      if (airports) {
-        if (airports.start) selectedAirports.add(airports.start);
-        if (airports.end) selectedAirports.add(airports.end);
-      }
+      const info = byId.get(pathId);
+      if (!info) return;
+      if (info.start_airport) visible.add(info.start_airport);
+      if (info.end_airport) visible.add(info.end_airport);
     });
   }
 
-  const visibility: Record<string, AirportVisibility> = {};
-
-  Object.keys(airportCounts).forEach((airportName) => {
-    const flightCount = airportCounts[airportName] || 0;
-
-    if (hasSelection) {
-      // During selection: show selected airports at full opacity, dim others
-      visibility[airportName] = {
-        show: true,
-        opacity: selectedAirports.has(airportName) ? 1.0 : 0.2,
-      };
-    } else if (hasFilters) {
-      // With filters active: show only airports matching filter
-      visibility[airportName] = {
-        show: flightCount > 0,
-        opacity: 1.0,
-      };
-    } else {
-      // No filters or selection: show all airports
-      visibility[airportName] = {
-        show: true,
-        opacity: 1.0,
-      };
-    }
-  });
-
-  return visibility;
+  return visible;
 }
