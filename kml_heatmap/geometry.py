@@ -1,8 +1,10 @@
 """Geometric calculations and coordinate manipulations."""
 
 from math import atan2, cos, radians, sin, sqrt
+from typing import TYPE_CHECKING
 
-from .types import FlightPathGroup
+if TYPE_CHECKING:
+    from .types import FlightPathGroup
 
 __all__ = [
     "EARTH_RADIUS_KM",
@@ -14,8 +16,8 @@ EARTH_RADIUS_KM = 6371
 
 
 def extract_altitudes(paths: FlightPathGroup) -> list[float]:
-    """Extract all altitude values from a list of paths."""
-    return [coord[2] for path in paths for coord in path if len(coord) >= 3]
+    """Extract all known altitude values from a list of paths."""
+    return [point.alt for path in paths for point in path if point.alt is not None]
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -24,5 +26,6 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     dlat = lat2 - lat1
     dlon = lon2 - lon1
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    a = min(1.0, max(0.0, a))
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return EARTH_RADIUS_KM * c

@@ -1,51 +1,60 @@
-# KML Heatmap Generator Docker Image
+# KML Heatmap Generator runtime image
+#
+# Base images are pinned by the digest of the multi-arch index so that
+# Dependabot can bump them; the tag comment is kept for readability.
 
-# Stage 1: Build JavaScript bundles
-FROM docker.io/library/node:lts-slim AS js-builder
+# Stage 1: build the JavaScript bundles
+FROM docker.io/library/node:24-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS js-builder
+# 24-slim
 
 WORKDIR /build
 
-# Copy JavaScript/TypeScript build configuration
-COPY package.json package-lock.json build.js tsconfig.json tsconfig.eslint.json eslint.config.js ./
+# Install dependencies first so that source changes do not invalidate this layer
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Build the TypeScript sources into IIFE bundles (kml_heatmap/static/*.js)
+COPY build.js tsconfig.json ./
 COPY kml_heatmap/frontend/ ./kml_heatmap/frontend/
+RUN npm run build
 
-# Install Node.js dependencies and build TypeScript bundle
-RUN npm ci && npm run build
+# Stage 2: Python runtime
+FROM docker.io/library/python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
+# 3.14-slim
 
-# Stage 2: Final Python image
-FROM docker.io/library/python:3.14-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# Copy lock file first for better caching
-COPY requirements.lock .
-
-# Create virtual environment and install pinned Python dependencies
-RUN python -m venv /opt/venv
+# Install the pinned Python dependencies into a virtual environment
+COPY requirements.lock ./
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir -r requirements.lock
 
-# Copy the application and ensure it's importable from /data
-COPY kml_heatmap/ ./kml_heatmap/
-ENV PYTHONPATH=/app
+# Copy the Python package (no TypeScript sources), templates and static assets
+COPY kml_heatmap/*.py kml_heatmap/py.typed ./kml_heatmap/
+COPY kml_heatmap/templates/ ./kml_heatmap/templates/
+COPY kml_heatmap/static/ ./kml_heatmap/static/
+# Built bundles (and their source maps, when present) from the builder stage
+COPY --from=js-builder /build/kml_heatmap/static/ ./kml_heatmap/static/
+COPY serve.py ./
 
-# Copy built JavaScript bundles from builder stage
-COPY --from=js-builder /build/kml_heatmap/static/bundle.js ./kml_heatmap/static/bundle.js
-COPY --from=js-builder /build/kml_heatmap/static/mapApp.bundle.js ./kml_heatmap/static/mapApp.bundle.js
+# Run as an unprivileged user; /data is the work directory for input and
+# output mounts, /cache holds the OurAirports database and the parse cache.
+RUN useradd --system --uid 10001 --user-group --no-create-home \
+      --home-dir /nonexistent --shell /usr/sbin/nologin app \
+    && mkdir -p /data /cache \
+    && chown app:app /data /cache
 
-# Copy server script
-COPY serve.py /app/serve.py
+ENV PYTHONPATH=/app \
+    KML_HEATMAP_CACHE_DIR=/cache
 
-# Create directory for input/output files and cache
-RUN mkdir -p /data /cache
-
-ENV KML_HEATMAP_CACHE_DIR=/cache
-
-# Set working directory to /data for file operations
+USER app
 WORKDIR /data
 
-# Set the script as entrypoint (can be overridden)
 ENTRYPOINT ["python", "-m", "kml_heatmap"]
-
-# Default command (show help if no arguments)
-CMD []
+# Default command: show the help text
+CMD ["--help"]

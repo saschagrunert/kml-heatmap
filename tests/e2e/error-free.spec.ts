@@ -1,85 +1,94 @@
-import { test, expect } from "@playwright/test";
-import { selectPathForReplay, activateReplay } from "./helpers";
+import { test, expect, type Page } from "@playwright/test";
+import {
+  activateReplay,
+  attachErrorCollectors,
+  gotoApp,
+  readSavedState,
+  relevantConsoleErrors,
+  selectPathForReplay,
+  waitForAircraftFilter,
+  waitForAppReady,
+  waitForPathData,
+  waitForYearFilter,
+  type ErrorCollector,
+} from "./helpers";
 
-let pageErrors: string[] = [];
+/** Toggle a layer button and wait for its pressed state to flip */
+async function toggle(page: Page, selector: string): Promise<void> {
+  const button = page.locator(selector);
+  const pressed = (await button.getAttribute("aria-pressed")) === "true";
+  await button.click();
+  await expect(button).toHaveAttribute("aria-pressed", String(!pressed));
+}
+
+function expectClean(errors: ErrorCollector): void {
+  expect(errors.pageErrors).toEqual([]);
+  expect(errors.cspViolations).toEqual([]);
+  expect(relevantConsoleErrors(errors)).toEqual([]);
+}
 
 test.describe("Error-Free Interactions", () => {
+  let errors: ErrorCollector;
+
   test.beforeEach(async ({ page }) => {
-    pageErrors = [];
-    page.on("pageerror", (err) => pageErrors.push(err.message));
-    await page.goto("/");
-    await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+    errors = await attachErrorCollectors(page);
+    await gotoApp(page);
   });
 
   test.describe("Console Error-Free", () => {
-    test("no console errors during layer toggling", async ({ page }) => {
-      await page.locator("#heatmap-btn").click();
-      await page.waitForTimeout(200);
-      await page.locator("#altitude-btn").click();
-      await page.waitForTimeout(200);
-      await page.locator("#airspeed-btn").click();
-      await page.waitForTimeout(200);
-      await page.locator("#airports-btn").click();
-      await page.waitForTimeout(200);
+    test("no errors during layer toggling", async ({ page }) => {
+      const buttons = [
+        "#heatmap-btn",
+        "#altitude-btn",
+        "#airspeed-btn",
+        "#airports-btn",
+      ];
+      for (const selector of buttons) await toggle(page, selector);
+      for (const selector of buttons) await toggle(page, selector);
 
-      await page.locator("#heatmap-btn").click();
-      await page.waitForTimeout(200);
-      await page.locator("#altitude-btn").click();
-      await page.waitForTimeout(200);
-      await page.locator("#airspeed-btn").click();
-      await page.waitForTimeout(200);
-      await page.locator("#airports-btn").click();
-      await page.waitForTimeout(200);
-
-      expect(pageErrors).toHaveLength(0);
+      expectClean(errors);
     });
 
-    test("no console errors during filter changes", async ({ page }) => {
+    test("no errors during filter changes", async ({ page }) => {
       const yearSelect = page.locator("#year-select");
       const yearOptions = yearSelect.locator("option");
-      if ((await yearOptions.count()) >= 2) {
-        const yearVal = await yearOptions.nth(1).getAttribute("value");
-        if (yearVal) {
-          await yearSelect.selectOption(yearVal);
-          await page.waitForTimeout(1000);
-        }
-      }
+      expect(await yearOptions.count()).toBeGreaterThanOrEqual(3);
+      const yearVal = (await yearOptions.nth(1).getAttribute("value"))!;
+      await yearSelect.selectOption(yearVal);
+      await waitForYearFilter(page, yearVal);
 
       const aircraftSelect = page.locator("#aircraft-select");
       const aircraftOptions = aircraftSelect.locator("option");
-      if ((await aircraftOptions.count()) >= 2) {
-        const aircraftVal = await aircraftOptions.nth(1).getAttribute("value");
-        if (aircraftVal) {
-          await aircraftSelect.selectOption(aircraftVal);
-          await page.waitForTimeout(1000);
-        }
-      }
+      expect(await aircraftOptions.count()).toBeGreaterThanOrEqual(2);
+      const aircraftVal = (await aircraftOptions.nth(1).getAttribute("value"))!;
+      await aircraftSelect.selectOption(aircraftVal);
+      await waitForAircraftFilter(page, aircraftVal);
 
       await yearSelect.selectOption("all");
-      await page.waitForTimeout(500);
+      await waitForYearFilter(page, "all");
       await aircraftSelect.selectOption("all");
-      await page.waitForTimeout(500);
+      await waitForAircraftFilter(page, "all");
 
-      expect(pageErrors).toHaveLength(0);
+      expectClean(errors);
     });
 
-    test("no console errors during path selection and deselection", async ({
+    test("no errors during path selection and deselection", async ({
       page,
     }) => {
       const pathId = await selectPathForReplay(page);
 
       await page.evaluate(
-        (id) => (window as any).mapApp.togglePathSelection(String(id)),
+        (id) => window.mapApp!.togglePathSelection(String(id)),
         pathId,
       );
       await page.waitForFunction(
-        () => (window as any).mapApp.selectedPathIds.size === 0,
+        () => window.mapApp!.selectedPathIds.size === 0,
       );
 
-      expect(pageErrors).toHaveLength(0);
+      expectClean(errors);
     });
 
-    test("no console errors during replay lifecycle", async ({ page }) => {
+    test("no errors during replay lifecycle", async ({ page }) => {
       await activateReplay(page);
 
       await page.locator("#replay-play-btn").click();
@@ -92,12 +101,10 @@ test.describe("Error-Free Interactions", () => {
       await page.locator("#replay-btn").click();
       await expect(page.locator("#replay-controls")).toBeHidden();
 
-      expect(pageErrors).toHaveLength(0);
+      expectClean(errors);
     });
 
-    test("no console errors during wrapped modal lifecycle", async ({
-      page,
-    }) => {
+    test("no errors during wrapped modal lifecycle", async ({ page }) => {
       await page.locator("#wrapped-btn").click();
       await expect(page.locator("#wrapped-modal")).toBeVisible({
         timeout: 5000,
@@ -106,141 +113,116 @@ test.describe("Error-Free Interactions", () => {
       await page.locator("#wrapped-modal .close-btn").click();
       await expect(page.locator("#wrapped-modal")).toBeHidden();
 
-      expect(pageErrors).toHaveLength(0);
+      expectClean(errors);
     });
 
-    test("no console errors during stats panel toggle", async ({ page }) => {
+    test("no errors during stats panel toggle", async ({ page }) => {
       await page.locator("#stats-btn").click();
       await expect(page.locator("#stats-panel")).toBeVisible();
 
       await page.locator("#stats-btn").click();
       await expect(page.locator("#stats-panel")).toBeHidden();
 
-      expect(pageErrors).toHaveLength(0);
+      expectClean(errors);
     });
   });
 
   test.describe("Zoom Behavior", () => {
-    test("zooming in updates heatmap without errors", async ({ page }) => {
-      await page.evaluate(() => {
-        const map = (window as any).mapApp.map;
-        map.setZoom(map.getZoom() + 2, { animate: false });
-      });
-      await page.waitForTimeout(300);
+    async function setZoom(page: Page, zoom: number): Promise<void> {
+      await page.evaluate((z) => {
+        window.mapApp!.map!.setZoom(z, { animate: false });
+      }, zoom);
+      await expect
+        .poll(() => page.evaluate(() => window.mapApp!.map!.getZoom()))
+        .toBe(zoom);
+    }
 
-      const isVisible = await page.evaluate(
-        () => (window as any).mapApp.heatmapVisible,
+    test("zooming in updates heatmap without errors", async ({ page }) => {
+      const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
+      await setZoom(page, zoom + 2);
+
+      expect(await page.evaluate(() => window.mapApp!.heatmapVisible)).toBe(
+        true,
       );
-      expect(isVisible).toBe(true);
-      expect(pageErrors).toHaveLength(0);
+      expectClean(errors);
     });
 
     test("zooming out updates heatmap without errors", async ({ page }) => {
-      await page.evaluate(() => {
-        const map = (window as any).mapApp.map;
-        map.setZoom(Math.max(1, map.getZoom() - 3), { animate: false });
-      });
-      await page.waitForTimeout(300);
+      const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
+      await setZoom(page, Math.max(1, zoom - 3));
 
-      const isVisible = await page.evaluate(
-        () => (window as any).mapApp.heatmapVisible,
+      expect(await page.evaluate(() => window.mapApp!.heatmapVisible)).toBe(
+        true,
       );
-      expect(isVisible).toBe(true);
-      expect(pageErrors).toHaveLength(0);
+      expectClean(errors);
     });
 
     test("zooming preserves altitude path colors", async ({ page }) => {
-      await page.locator("#altitude-btn").click();
-      await expect(page.locator("#altitude-btn")).toHaveCSS("opacity", "1");
-      await page.waitForFunction(
-        () => (window as any).mapApp?.fullPathInfo?.length > 0,
-        { timeout: 15000 },
+      await waitForPathData(page);
+
+      const initialPathCount = await page.evaluate(
+        () => window.mapApp!.currentData?.path_segments.length ?? 0,
       );
+      expect(initialPathCount).toBeGreaterThan(0);
 
-      const initialPathCount = await page.evaluate(() => {
-        const app = (window as any).mapApp;
-        return app.currentData?.path_segments?.length || 0;
-      });
+      const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
+      await setZoom(page, zoom + 2);
 
-      await page.evaluate(() => {
-        const map = (window as any).mapApp.map;
-        map.setZoom(map.getZoom() + 2, { animate: false });
-      });
-      await page.waitForTimeout(300);
-
-      const altVisible = await page.evaluate(
-        () => (window as any).mapApp.altitudeVisible,
+      expect(await page.evaluate(() => window.mapApp!.altitudeVisible)).toBe(
+        true,
       );
-      expect(altVisible).toBe(true);
-
-      const afterPathCount = await page.evaluate(() => {
-        const app = (window as any).mapApp;
-        return app.currentData?.path_segments?.length || 0;
-      });
+      const afterPathCount = await page.evaluate(
+        () => window.mapApp!.currentData?.path_segments.length ?? 0,
+      );
       expect(afterPathCount).toBe(initialPathCount);
-      expect(pageErrors).toHaveLength(0);
+      expectClean(errors);
     });
 
     test("zooming preserves airspeed path colors", async ({ page }) => {
       await page.locator("#airspeed-btn").click();
-      await expect(page.locator("#airspeed-btn")).toHaveCSS("opacity", "1");
-      await page.waitForTimeout(300);
-
-      await page.evaluate(() => {
-        const map = (window as any).mapApp.map;
-        map.setZoom(map.getZoom() + 2, { animate: false });
-      });
-      await page.waitForTimeout(300);
-
-      const airspeedVisible = await page.evaluate(
-        () => (window as any).mapApp.airspeedVisible,
+      await expect(page.locator("#airspeed-btn")).toHaveAttribute(
+        "aria-pressed",
+        "true",
       );
-      expect(airspeedVisible).toBe(true);
-      expect(pageErrors).toHaveLength(0);
+      await page.waitForFunction(
+        () => window.mapApp!.airspeedLayer.getLayers().length > 0,
+      );
+
+      const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
+      await setZoom(page, zoom + 2);
+
+      expect(await page.evaluate(() => window.mapApp!.airspeedVisible)).toBe(
+        true,
+      );
+      expectClean(errors);
     });
 
     test("zoom level is saved to state", async ({ page }) => {
       await page.evaluate(() => localStorage.removeItem("kml-heatmap-state"));
       await page.reload();
-      await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
-      await page.waitForTimeout(500);
+      await waitForAppReady(page);
 
-      await page.evaluate(() => {
-        const map = (window as any).mapApp.map;
-        map.setZoom(12, { animate: false });
-      });
-      await page.waitForTimeout(500);
+      await setZoom(page, 12);
 
-      const afterZoom = await page.evaluate(() =>
-        (window as any).mapApp.map.getZoom(),
-      );
-      expect(afterZoom).toBe(12);
-
-      const state = await page.evaluate(() =>
-        JSON.parse(localStorage.getItem("kml-heatmap-state") || "{}"),
-      );
-      expect(state.zoom).toBe(12);
+      await expect
+        .poll(async () => (await readSavedState(page))["zoom"])
+        .toBe(12);
     });
 
     test("zoom level is restored on reload", async ({ page }) => {
       await page.evaluate(() => localStorage.removeItem("kml-heatmap-state"));
       await page.reload();
-      await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
-      await page.waitForTimeout(500);
+      await waitForAppReady(page);
 
-      await page.evaluate(() => {
-        const map = (window as any).mapApp.map;
-        map.setZoom(12, { animate: false });
-      });
-      await page.waitForTimeout(500);
+      await setZoom(page, 12);
+      await expect
+        .poll(async () => (await readSavedState(page))["zoom"])
+        .toBe(12);
 
       await page.reload();
-      await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
-      await page.waitForTimeout(500);
+      await waitForAppReady(page);
 
-      const zoom = await page.evaluate(() =>
-        (window as any).mapApp.map.getZoom(),
-      );
+      const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
       expect(zoom).toBe(12);
     });
   });

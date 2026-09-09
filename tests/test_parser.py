@@ -1,623 +1,22 @@
-"""Tests for parser module."""
+"""Tests for the parser module (end-to-end KML parsing)."""
 
-import os
-import tempfile
-from pathlib import Path
+import logging
 
 import pytest
 
-from kml_heatmap.parser import (
-    get_cache_key,
-    save_to_cache,
-)
-from kml_heatmap.parser_cache import load_cached_parse
-from kml_heatmap.parser_common import (
-    extract_charterware_timestamp,
-    extract_year_from_timestamp,
-    is_mid_flight_start,
-    is_valid_landing,
-    parse_coordinate_point,
-    sample_path_altitudes,
+from kml_heatmap.exceptions import KMLParseError
+from kml_heatmap.helpers import parse_timestamp_epoch
+from kml_heatmap.parser import _parse_kml_tree, parse_kml_coordinates
+from kml_heatmap.parser_cache import get_cache_key
+from kml_heatmap.types import TrackPoint
+
+KML_HEADER = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<kml xmlns="http://www.opengis.net/kml/2.2" '
+    'xmlns:gx="http://www.google.com/kml/ext/2.2">'
 )
 
-
-class TestExtractYearFromTimestamp:
-    """Tests for extract_year_from_timestamp function."""
-
-    def test_iso_format(self):
-        """Test extracting year from ISO format timestamp."""
-        assert extract_year_from_timestamp("2025-03-03T08:58:01Z") == 2025
-
-    def test_date_only(self):
-        """Test extracting year from date-only format."""
-        assert extract_year_from_timestamp("2025-03-03") == 2025
-
-    def test_text_format(self):
-        """Test extracting year from text format."""
-        assert extract_year_from_timestamp("03 Mar 2025") == 2025
-        assert extract_year_from_timestamp("Log Start: 03 Mar 2024 08:58 Z") == 2024
-
-    def test_invalid_format(self):
-        """Test invalid format returns None."""
-        assert extract_year_from_timestamp("invalid") is None
-        assert extract_year_from_timestamp("") is None
-        assert extract_year_from_timestamp(None) is None
-
-    def test_no_year_present(self):
-        """Test timestamp without year."""
-        assert extract_year_from_timestamp("03 Mar") is None
-
-    def test_future_year(self):
-        """Test extracting future years."""
-        assert extract_year_from_timestamp("2099-12-31T23:59:59Z") == 2099
-
-    def test_early_2000s(self):
-        """Test years in early 2000s."""
-        assert extract_year_from_timestamp("2000-01-01T00:00:00Z") == 2000
-        assert extract_year_from_timestamp("2010-06-15T12:00:00Z") == 2010
-
-
-class TestSamplePathAltitudes:
-    """Tests for sample_path_altitudes function."""
-
-    def test_short_path(self):
-        """Test path too short to sample."""
-        path = [[0, 0, 100], [1, 1, 200]]
-        assert sample_path_altitudes(path) is None
-
-    def test_start_sample(self):
-        """Test sampling from start of path."""
-        # Create path with 100 points at varying altitudes
-        path = [[i, i, 1000 + i * 10] for i in range(100)]
-        result = sample_path_altitudes(path, from_end=False)
-        assert result is not None
-        assert "min" in result
-        assert "max" in result
-        assert "variation" in result
-        assert result["min"] >= 1000
-        assert result["max"] <= 2000
-
-    def test_end_sample(self):
-        """Test sampling from end of path."""
-        # Create path with altitude increasing then decreasing
-        path = [[i, i, i * 10] for i in range(50)]
-        path += [[i, i, (100 - i) * 10] for i in range(50, 100)]
-        result = sample_path_altitudes(path, from_end=True)
-        assert result is not None
-        assert result["variation"] >= 0
-
-    def test_variation_calculation(self):
-        """Test variation is correctly calculated."""
-        # Flat path
-        flat_path = [[i, i, 1000] for i in range(100)]
-        result = sample_path_altitudes(flat_path)
-        assert result["variation"] == 0
-
-        # Varying path
-        varying_path = [[i, i, 1000 + (i % 10) * 100] for i in range(100)]
-        result = sample_path_altitudes(varying_path)
-        assert result["variation"] > 0
-
-    def test_small_sample_size_returns_none(self):
-        """Test that paths with small calculated sample size return None."""
-        # Create a path that will result in sample_size <= PATH_SAMPLE_MIN_SIZE
-        # If PATH_SAMPLE_MIN_SIZE is 10, we need len(path) // 4 <= 10
-        # So path length <= 44 (since 44 // 4 = 11, and we want it just at the edge)
-        # Use path length of 20 to be safely small: 20 // 4 = 5 <= 10
-        path = [[50.0 + i * 0.01, 10.0 + i * 0.01, 100.0 + i] for i in range(20)]
-
-        result = sample_path_altitudes(path, from_end=False)
-        # Should return None because calculated sample_size is too small
-        assert result is None
-
-
-class TestIsMidFlightStart:
-    """Tests for is_mid_flight_start function."""
-
-    def test_ground_start(self):
-        """Test path starting at ground level."""
-        path = [[i, i, 50 + i * 0.1] for i in range(100)]  # Low altitude
-        assert not is_mid_flight_start(path, 50)
-
-    def test_mid_flight_start(self):
-        """Test path starting mid-flight."""
-        # High stable altitude at start
-        path = [[i, i, 5000] for i in range(100)]
-        assert is_mid_flight_start(path, 5000)
-
-    def test_climbing_start(self):
-        """Test path starting with rapid climb."""
-        # High altitude but climbing rapidly
-        path = [[i, i, 3000 + i * 50] for i in range(100)]
-        # Should not be considered mid-flight due to variation
-        is_mid_flight_start(path, 3000)
-        # Result depends on variation threshold
-
-    def test_short_path(self):
-        """Test with path too short to analyze."""
-        path = [[0, 0, 5000], [1, 1, 5000]]
-        assert not is_mid_flight_start(path, 5000)
-
-
-class TestIsValidLanding:
-    """Tests for is_valid_landing function."""
-
-    def test_ground_level_landing(self):
-        """Test landing at ground level."""
-        path = [[i, i, 1000 - i * 10] for i in range(100)]  # Descending
-        assert is_valid_landing(path, 50)  # Low end altitude
-
-    def test_mid_air_end(self):
-        """Test path ending mid-air."""
-        path = [[i, i, 5000] for i in range(100)]  # High stable altitude
-        # Stable at high altitude - should still be valid if variation is low
-        is_valid_landing(path, 5000)
-        # Result depends on variation threshold
-
-    def test_short_path_low_altitude(self):
-        """Test short path with low end altitude."""
-        path = [[0, 0, 100], [1, 1, 50]]
-        assert is_valid_landing(path, 50)
-
-    def test_short_path_high_altitude(self):
-        """Test short path with high end altitude."""
-        path = [[0, 0, 5000], [1, 1, 5000]]
-        # Above fallback threshold
-        is_valid_landing(path, 5000)
-        # Should use fallback logic
-
-
-class TestParseCoordinatePoint:
-    """Tests for parse_coordinate_point function."""
-
-    def test_valid_three_components(self):
-        """Test parsing valid lon,lat,alt format."""
-        result = parse_coordinate_point("8.5,50.0,300", "test.kml")
-        assert result is not None
-        lat, lon, alt = result
-        assert lat == pytest.approx(50.0)
-        assert lon == pytest.approx(8.5)
-        assert alt == pytest.approx(300.0)
-
-    def test_valid_two_components(self):
-        """Test parsing lon,lat without altitude."""
-        result = parse_coordinate_point("8.5,50.0", "test.kml")
-        assert result is not None
-        lat, lon, alt = result
-        assert lat == pytest.approx(50.0)
-        assert lon == pytest.approx(8.5)
-        assert alt is None
-
-    def test_negative_altitude_clamped(self):
-        """Test negative altitude is clamped to zero."""
-        result = parse_coordinate_point("8.5,50.0,-100", "test.kml")
-        # Should be validated and potentially clamped
-        assert result is not None
-
-    def test_invalid_format(self):
-        """Test invalid coordinate format."""
-        assert parse_coordinate_point("invalid", "test.kml") is None
-        assert parse_coordinate_point("", "test.kml") is None
-        assert parse_coordinate_point("8.5", "test.kml") is None
-
-    def test_whitespace_handling(self):
-        """Test whitespace is handled."""
-        result = parse_coordinate_point("  8.5,50.0,300  ", "test.kml")
-        assert result is not None
-
-    def test_out_of_range_coordinates(self):
-        """Test coordinates out of valid range."""
-        # Invalid latitude
-        parse_coordinate_point("8.5,9999.0,300", "test.kml")
-        # Should be filtered by validation
-
-    def test_non_numeric_values(self):
-        """Test non-numeric values."""
-        assert parse_coordinate_point("abc,def,ghi", "test.kml") is None
-
-
-class TestCacheFunctions:
-    """Tests for cache-related functions."""
-
-    def test_get_cache_key_nonexistent_file(self):
-        """Test get_cache_key with nonexistent file."""
-        cache_path, is_valid = get_cache_key("/nonexistent/file.kml")
-        assert cache_path is None
-        assert is_valid is False
-
-    def test_get_cache_key_existing_file(self):
-        """Test get_cache_key with existing file."""
-        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
-            f.write(b"test content")
-            temp_path = f.name
-
-        try:
-            cache_path, is_valid = get_cache_key(temp_path)
-            assert cache_path is not None
-            assert isinstance(cache_path, Path)
-            assert str(cache_path).endswith(".json")
-            # First time should not be valid (cache doesn't exist)
-            assert is_valid is False
-        finally:
-            os.unlink(temp_path)
-
-    def test_save_and_load_cache(self):
-        """Test saving and loading cache."""
-        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
-            temp_path = f.name
-
-        try:
-            cache_path, _ = get_cache_key(temp_path)
-            if cache_path is None:
-                pytest.skip("Could not create cache path")
-
-            # Test data
-            coords = [[1.0, 2.0], [3.0, 4.0]]
-            paths = [[[1.0, 2.0, 100], [3.0, 4.0, 200]]]
-            metadata = [{"test": "data"}]
-
-            # Save
-            save_to_cache(cache_path, coords, paths, metadata)
-            assert cache_path.exists()
-
-            # Load
-            loaded = load_cached_parse(cache_path)
-            assert loaded is not None
-            loaded_coords, loaded_paths, loaded_metadata = loaded
-            assert loaded_coords == coords
-            assert loaded_paths == paths
-            assert loaded_metadata == metadata
-
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-            # Clean up cache file
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
-
-    def test_load_cache_invalid_file(self):
-        """Test loading invalid cache file."""
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-            f.write(b"invalid json")
-            temp_path = f.name
-
-        try:
-            result = load_cached_parse(Path(temp_path))
-            assert result is None
-        finally:
-            os.unlink(temp_path)
-
-    def test_load_cache_nonexistent_file(self):
-        """Test loading nonexistent cache file."""
-        result = load_cached_parse(Path("/nonexistent/cache.json"))
-        assert result is None
-
-    def test_get_cache_key_cleanup_old_caches(self):
-        """Test that old cache files are cleaned up."""
-        import hashlib
-        import tempfile
-        from pathlib import Path
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a test KML file
-            kml_file = Path(tmpdir) / "test.kml"
-            kml_file.write_text("<kml></kml>")
-
-            # Create some old cache files with the correct hash prefix
-            cache_dir = Path(tmpdir) / ".kml_cache"
-            cache_dir.mkdir(exist_ok=True)
-
-            path_hash = hashlib.sha256(str(kml_file.resolve()).encode()).hexdigest()[
-                :12
-            ]
-            old_cache1 = cache_dir / f"test_{path_hash}_1111111.json"
-            old_cache2 = cache_dir / f"test_{path_hash}_2222222.json"
-            old_cache1.write_text("{}")
-            old_cache2.write_text("{}")
-
-            # Mock KML_CACHE_DIR to use our temp directory
-            from unittest.mock import patch
-
-            with patch("kml_heatmap.parser.KML_CACHE_DIR", cache_dir):
-                _cache_path, _is_valid = get_cache_key(str(kml_file))
-
-                # Old caches should be cleaned up
-                assert not old_cache1.exists()
-                assert not old_cache2.exists()
-
-    def test_get_cache_key_cleanup_handles_errors(self):
-        """Test that cache cleanup handles errors gracefully."""
-        import tempfile
-        from pathlib import Path
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a test KML file
-            kml_file = Path(tmpdir) / "test.kml"
-            kml_file.write_text("<kml></kml>")
-
-            # Create cache directory
-            cache_dir = Path(tmpdir) / ".kml_cache"
-            cache_dir.mkdir(exist_ok=True)
-
-            # Create an old cache file and make it read-only
-            old_cache = cache_dir / "test_readonly.json"
-            old_cache.write_text("{}")
-
-            # Mock KML_CACHE_DIR
-            from unittest.mock import patch
-
-            with patch("kml_heatmap.parser.KML_CACHE_DIR", cache_dir):
-                # Should not raise even if cleanup fails
-                cache_path, _is_valid = get_cache_key(str(kml_file))
-                assert cache_path is not None
-
-
-class TestFindXmlElement:
-    """Tests for find_xml_element function."""
-
-    def test_find_with_namespace(self):
-        """Test finding element with namespace."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_common import find_xml_element
-
-        xml = """<root xmlns:kml="http://test.com"><kml:name>Test</kml:name></root>"""
-        root = ET.fromstring(xml)
-        namespaces = {"kml": "http://test.com"}
-
-        elem = find_xml_element(root, ".//kml:name", ".//name", namespaces)
-        assert elem is not None
-        assert elem.text == "Test"
-
-    def test_find_with_fallback(self):
-        """Test finding element using fallback path."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_common import find_xml_element
-
-        xml = """<root><name>Test</name></root>"""
-        root = ET.fromstring(xml)
-        namespaces = {"kml": "http://test.com"}
-
-        elem = find_xml_element(root, ".//kml:name", ".//name", namespaces)
-        assert elem is not None
-        assert elem.text == "Test"
-
-    def test_find_element_not_found(self):
-        """Test when element is not found."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_common import find_xml_element
-
-        xml = """<root><other>Test</other></root>"""
-        root = ET.fromstring(xml)
-        namespaces = {"kml": "http://test.com"}
-
-        elem = find_xml_element(root, ".//kml:name", ".//name", namespaces)
-        assert elem is None
-
-
-class TestFindXmlElements:
-    """Tests for find_xml_elements function."""
-
-    def test_find_multiple_with_namespace(self):
-        """Test finding multiple elements with namespace."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_common import find_xml_elements
-
-        xml = """<root xmlns:kml="http://test.com">
-            <kml:when>2025-01-01</kml:when>
-            <kml:when>2025-01-02</kml:when>
-        </root>"""
-        root = ET.fromstring(xml)
-        namespaces = {"kml": "http://test.com"}
-
-        elems = find_xml_elements(root, ".//kml:when", ".//when", namespaces)
-        assert len(elems) == 2
-        assert elems[0].text == "2025-01-01"
-        assert elems[1].text == "2025-01-02"
-
-    def test_find_multiple_with_fallback(self):
-        """Test finding multiple elements using fallback."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_common import find_xml_elements
-
-        xml = """<root><when>2025-01-01</when><when>2025-01-02</when></root>"""
-        root = ET.fromstring(xml)
-        namespaces = {"kml": "http://test.com"}
-
-        elems = find_xml_elements(root, ".//kml:when", ".//when", namespaces)
-        assert len(elems) == 2
-
-    def test_find_elements_not_found(self):
-        """Test when no elements are found."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_common import find_xml_elements
-
-        xml = """<root><other>Test</other></root>"""
-        root = ET.fromstring(xml)
-        namespaces = {"kml": "http://test.com"}
-
-        elems = find_xml_elements(root, ".//kml:when", ".//when", namespaces)
-        assert len(elems) == 0
-
-
-class TestExtractPlacemarkMetadata:
-    """Tests for extract_placemark_metadata function."""
-
-    def test_extract_with_name_and_timestamp(self):
-        """Test extracting metadata with name and timestamp."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_common import extract_placemark_metadata
-
-        xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2">
-            <name>Test Airport</name>
-            <when>2025-03-15T10:00:00Z</when>
-        </Placemark>"""
-        placemark = ET.fromstring(xml)
-        namespaces = {"kml": "http://www.opengis.net/kml/2.2"}
-
-        metadata = extract_placemark_metadata(placemark, namespaces)
-        assert metadata["airport_name"] == "Test Airport"
-        assert metadata["timestamp"] == "2025-03-15T10:00:00Z"
-        assert metadata["year"] == 2025
-
-    def test_extract_with_multiple_timestamps(self):
-        """Test extracting metadata with multiple timestamps."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_common import extract_placemark_metadata
-
-        xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2">
-            <when>2025-03-15T10:00:00Z</when>
-            <when>2025-03-15T11:00:00Z</when>
-        </Placemark>"""
-        placemark = ET.fromstring(xml)
-        namespaces = {"kml": "http://www.opengis.net/kml/2.2"}
-
-        metadata = extract_placemark_metadata(placemark, namespaces)
-        assert metadata["timestamp"] == "2025-03-15T10:00:00Z"
-        assert metadata["end_timestamp"] == "2025-03-15T11:00:00Z"
-
-    def test_extract_timestamp_from_name(self):
-        """Test extracting timestamp from name when when element missing."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_common import extract_placemark_metadata
-
-        xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2">
-            <name>Log Start: 03 Mar 2025 08:58 Z</name>
-        </Placemark>"""
-        placemark = ET.fromstring(xml)
-        namespaces = {"kml": "http://www.opengis.net/kml/2.2"}
-
-        metadata = extract_placemark_metadata(placemark, namespaces)
-        assert metadata["airport_name"] == "Log Start: 03 Mar 2025 08:58 Z"
-        assert "03 Mar 2025" in metadata["timestamp"]
-        assert metadata["year"] == 2025
-
-    def test_extract_no_metadata(self):
-        """Test extracting metadata when none exists."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_common import extract_placemark_metadata
-
-        xml = """<Placemark xmlns="http://www.opengis.net/kml/2.2"></Placemark>"""
-        placemark = ET.fromstring(xml)
-        namespaces = {"kml": "http://www.opengis.net/kml/2.2"}
-
-        metadata = extract_placemark_metadata(placemark, namespaces)
-        assert metadata["airport_name"] is None
-        assert metadata["timestamp"] is None
-        assert metadata["end_timestamp"] is None
-        assert metadata["year"] is None
-
-
-class TestProcessStandardCoordinates:
-    """Tests for process_standard_coordinates function."""
-
-    def test_process_valid_coordinates(self):
-        """Test processing valid coordinate elements."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_standard import process_standard_coordinates
-
-        # Create mock coordinate element
-        coord_elem = ET.Element("coordinates")
-        coord_elem.text = "8.5,50.0,300 9.0,51.0,400"
-
-        coordinates = []
-        path_groups = []
-        path_metadata = []
-        coord_to_metadata = {
-            id(coord_elem): {
-                "airport_name": "Test",
-                "timestamp": None,
-                "end_timestamp": None,
-            }
-        }
-
-        with tempfile.NamedTemporaryFile(suffix=".kml") as f:
-            process_standard_coordinates(
-                [coord_elem],
-                coord_to_metadata,
-                f.name,
-                coordinates,
-                path_groups,
-                path_metadata,
-            )
-
-        assert len(coordinates) == 2
-        assert len(path_groups) == 1
-        assert len(path_metadata) == 1
-        assert path_metadata[0]["airport_name"] == "Test"
-
-    def test_process_empty_coordinate_element(self):
-        """Test processing empty coordinate element."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_standard import process_standard_coordinates
-
-        coord_elem = ET.Element("coordinates")
-        coord_elem.text = ""
-
-        coordinates = []
-        path_groups = []
-        path_metadata = []
-
-        with tempfile.NamedTemporaryFile(suffix=".kml") as f:
-            process_standard_coordinates(
-                [coord_elem],
-                {},
-                f.name,
-                coordinates,
-                path_groups,
-                path_metadata,
-            )
-
-        assert len(coordinates) == 0
-        assert len(path_groups) == 0
-
-    def test_process_none_text_coordinate(self):
-        """Test processing coordinate element with None text."""
-        from xml.etree import ElementTree as ET
-
-        from kml_heatmap.parser_standard import process_standard_coordinates
-
-        coord_elem = ET.Element("coordinates")
-        coord_elem.text = None
-
-        coordinates = []
-        path_groups = []
-        path_metadata = []
-
-        with tempfile.NamedTemporaryFile(suffix=".kml") as f:
-            process_standard_coordinates(
-                [coord_elem],
-                {},
-                f.name,
-                coordinates,
-                path_groups,
-                path_metadata,
-            )
-
-        assert len(coordinates) == 0
-        assert len(path_groups) == 0
-
-
-class TestParseKmlCoordinates:
-    """Tests for parse_kml_coordinates function."""
-
-    def test_parse_simple_kml(self):
-        """Test parsing simple KML file."""
-        from kml_heatmap.parser import parse_kml_coordinates
-
-        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
+LINESTRING_KML = f"""{KML_HEADER}
   <Document>
     <Placemark>
       <name>Test Path</name>
@@ -628,882 +27,193 @@ class TestParseKmlCoordinates:
   </Document>
 </kml>"""
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".kml", delete=False) as f:
-            f.write(kml_content)
-            temp_path = f.name
-
-        try:
-            coords, paths, metadata = parse_kml_coordinates(temp_path)
-            assert len(coords) == 2
-            assert len(paths) == 1
-            assert len(metadata) == 1
-            assert metadata[0]["airport_name"] == "Test Path"
-        finally:
-            os.unlink(temp_path)
-            # Clean up cache
-            from kml_heatmap.parser import get_cache_key
-
-            cache_path, _ = get_cache_key(temp_path)
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
-
-    def test_parse_with_cache(self):
-        """Test parsing uses cache on second call."""
-        from kml_heatmap.parser import parse_kml_coordinates
-
-        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document>
-    <Placemark>
-      <LineString>
-        <coordinates>8.5,50.0,300</coordinates>
-      </LineString>
-    </Placemark>
-  </Document>
-</kml>"""
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".kml", delete=False) as f:
-            f.write(kml_content)
-            temp_path = f.name
-
-        try:
-            # First parse
-            coords1, paths1, metadata1 = parse_kml_coordinates(temp_path)
-            # Second parse (should use cache)
-            coords2, paths2, metadata2 = parse_kml_coordinates(temp_path)
-
-            assert coords1 == coords2
-            assert paths1 == paths2
-            assert metadata1 == metadata2
-        finally:
-            os.unlink(temp_path)
-            # Clean up cache
-            from kml_heatmap.parser import get_cache_key
-
-            cache_path, _ = get_cache_key(temp_path)
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
-
-    def test_parse_invalid_xml(self):
-        """Test parsing invalid XML file raises KMLParseError."""
-        from kml_heatmap.exceptions import KMLParseError
-        from kml_heatmap.parser import parse_kml_coordinates
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".kml", delete=False) as f:
-            f.write("not valid xml <")
-            temp_path = f.name
-
-        try:
-            with pytest.raises(KMLParseError):
-                parse_kml_coordinates(temp_path)
-        finally:
-            os.unlink(temp_path)
-
-    def test_parse_gx_track(self):
-        """Test parsing Google Earth Track format."""
-        from kml_heatmap.parser import parse_kml_coordinates
-
-        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+GX_TRACK_KML = f"""{KML_HEADER}
   <Document>
     <Placemark>
       <name>Track</name>
       <gx:Track>
         <when>2025-03-15T10:00:00Z</when>
-        <when>2025-03-15T10:01:00Z</when>
         <gx:coord>8.5 50.0 300</gx:coord>
+        <when>2025-03-15T10:01:00Z</when>
         <gx:coord>9.0 51.0 400</gx:coord>
       </gx:Track>
     </Placemark>
   </Document>
 </kml>"""
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".kml", delete=False) as f:
-            f.write(kml_content)
-            temp_path = f.name
 
-        try:
-            coords, paths, _metadata = parse_kml_coordinates(temp_path)
-            assert len(coords) == 2
-            assert len(paths) == 1
-            # Check that timestamps are included
-            assert len(paths[0][0]) == 4  # [lat, lon, alt, timestamp]
-        finally:
-            os.unlink(temp_path)
-            # Clean up cache
-            from kml_heatmap.parser import get_cache_key
+def _write(tmp_path, name, content):
+    path = tmp_path / name
+    path.write_text(content, encoding="utf-8")
+    return str(path)
 
-            cache_path, _ = get_cache_key(temp_path)
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
 
-    def test_parse_kml_tree_debug_logging(self):
-        """Test that debug logging in _parse_kml_tree covers tag enumeration."""
-        import logging
+class TestParseKmlCoordinates:
+    def test_parse_linestring(self, tmp_path):
+        coords, paths, metadata = parse_kml_coordinates(
+            _write(tmp_path, "test.kml", LINESTRING_KML)
+        )
+        assert coords == [
+            TrackPoint(50.0, 8.5, 300.0, None),
+            TrackPoint(51.0, 9.0, 400.0, None),
+        ]
+        assert paths == [coords]
+        assert len(metadata) == 1
+        assert metadata[0]["airport_name"] == "Test Path"
+        assert metadata[0]["filename"] == "test.kml"
+        assert metadata[0]["start_point"] == [50.0, 8.5, 300.0]
 
-        from kml_heatmap.parser import _parse_kml_tree
+    def test_parse_gx_track_with_epoch_timestamps(self, tmp_path):
+        coords, paths, metadata = parse_kml_coordinates(
+            _write(tmp_path, "track.kml", GX_TRACK_KML)
+        )
+        assert len(coords) == 2
+        assert len(paths) == 1
+        assert paths[0][0].ts == parse_timestamp_epoch("2025-03-15T10:00:00Z")
+        assert paths[0][1].ts == paths[0][0].ts + 60
+        assert metadata[0]["timestamp"] == "2025-03-15T10:00:00Z"
+        assert metadata[0]["end_timestamp"] == "2025-03-15T10:01:00Z"
+        assert metadata[0]["year"] == 2025
 
-        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
+    def test_second_parse_uses_cache_and_is_identical(self, tmp_path):
+        kml_file = _write(tmp_path, "cached.kml", GX_TRACK_KML)
+        first = parse_kml_coordinates(kml_file)
+        cache_path, valid = get_cache_key(kml_file)
+        assert valid is True
+        assert cache_path is not None
+        assert cache_path.exists()
+        second = parse_kml_coordinates(kml_file)
+        assert second == first
+        assert all(isinstance(p, TrackPoint) for p in second[1][0])
+
+    def test_invalid_xml_raises(self, tmp_path):
+        with pytest.raises(KMLParseError, match="XML parsing error"):
+            parse_kml_coordinates(_write(tmp_path, "bad.kml", "not valid xml <"))
+
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(KMLParseError, match="I/O error"):
+            parse_kml_coordinates(str(tmp_path / "missing.kml"))
+
+    def test_no_valid_coordinates(self, tmp_path, capsys):
+        kml = f"""{KML_HEADER}
+  <Document><Placemark><name>Empty</name><Point><coordinates></coordinates></Point>
+  </Placemark></Document></kml>"""
+        coords, paths, metadata = parse_kml_coordinates(
+            _write(tmp_path, "empty.kml", kml)
+        )
+        assert (coords, paths, metadata) == ([], [], [])
+        assert "No valid coordinates found" in capsys.readouterr().err
+
+    def test_namespace_less_kml(self, tmp_path):
+        kml = """<?xml version="1.0"?><kml><Document><Placemark><name>Plain</name>
+        <Track><when>2025-03-15T10:00:00Z</when><coord>8.5 50.0 300</coord>
+        <when>2025-03-15T10:01:00Z</when><coord>9.0 51.0 400</coord></Track>
+        </Placemark></Document></kml>"""
+        coords, paths, metadata = parse_kml_coordinates(
+            _write(tmp_path, "plain.kml", kml)
+        )
+        assert len(coords) == 2
+        assert len(paths) == 1
+        assert metadata[0]["year"] == 2025
+
+    def test_multiple_tracks_produce_multiple_paths(self, tmp_path):
+        kml = f"""{KML_HEADER}
   <Document>
-    <name>Test</name>
-  </Document>
-</kml>"""
+    <Placemark><name>First</name><gx:Track>
+      <when>2025-03-15T10:00:00Z</when><gx:coord>8.5 50.0 300</gx:coord>
+      <when>2025-03-15T10:01:00Z</when><gx:coord>8.6 50.1 300</gx:coord>
+    </gx:Track></Placemark>
+    <Placemark><name>Second</name><gx:Track>
+      <when>2026-03-15T10:00:00Z</when><gx:coord>9.0 51.0 400</gx:coord>
+      <when>2026-03-15T10:01:00Z</when><gx:coord>9.1 51.1 400</gx:coord>
+    </gx:Track></Placemark>
+  </Document></kml>"""
+        coords, paths, metadata = parse_kml_coordinates(
+            _write(tmp_path, "two.kml", kml)
+        )
+        assert len(coords) == 4
+        assert [len(p) for p in paths] == [2, 2]
+        assert [m["year"] for m in metadata] == [2025, 2026]
+        assert [m["airport_name"] for m in metadata] == ["First", "Second"]
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".kml", delete=False) as f:
-            f.write(kml_content)
-            temp_path = f.name
+    def test_gx_coord_outside_track_warns(self, tmp_path, capsys):
+        kml = f"""{KML_HEADER}<Document><Placemark>
+        <gx:coord>8.5 50.0 300</gx:coord>
+        <gx:Track><when>2025-03-15T10:00:00Z</when>
+        <gx:coord>9.0 51.0 400</gx:coord></gx:Track>
+        </Placemark></Document></kml>"""
+        coords, _, _ = parse_kml_coordinates(_write(tmp_path, "loose.kml", kml))
+        assert len(coords) == 1
+        assert "outside of gx:Track were ignored" in capsys.readouterr().err
 
+    def test_debug_logging_lists_tags(self, tmp_path, capsys):
+        from kml_heatmap.logger import set_debug_mode
+
+        set_debug_mode(True)
         try:
-            from kml_heatmap.logger import logger as kml_logger
-
-            original_level = kml_logger.level
-            kml_logger.setLevel(logging.DEBUG)
-            try:
-                root = _parse_kml_tree(temp_path)
-                assert root is not None
-            finally:
-                kml_logger.setLevel(original_level)
+            root = _parse_kml_tree(_write(tmp_path, "dbg.kml", LINESTRING_KML))
         finally:
-            os.unlink(temp_path)
-
-    def test_parse_kml_with_no_valid_coordinates(self):
-        """Test parsing KML file with structure but no valid coordinates."""
-        from kml_heatmap.parser import parse_kml_coordinates
-
-        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document>
-    <Placemark>
-      <name>Empty Placemark</name>
-      <Point>
-        <coordinates></coordinates>
-      </Point>
-    </Placemark>
-  </Document>
-</kml>"""
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".kml", delete=False) as f:
-            f.write(kml_content)
-            temp_path = f.name
-
-        try:
-            coords, paths, metadata = parse_kml_coordinates(temp_path)
-            # Should return empty results and log warning messages (lines 1166-1170)
-            assert len(coords) == 0
-            assert len(paths) == 0
-            assert len(metadata) == 0
-        finally:
-            os.unlink(temp_path)
-            # Clean up cache
-            from kml_heatmap.parser import get_cache_key
-
-            cache_path, _ = get_cache_key(temp_path)
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
+            set_debug_mode(False)
+        assert root is not None
+        assert "All unique tags in file" in capsys.readouterr().out
+        assert not logging.getLogger("kml_heatmap").isEnabledFor(logging.DEBUG)
 
 
-class TestExtractIcaoCodesFromName:
-    """Tests for extract_icao_codes_from_name function."""
-
-    def test_single_icao_code(self):
-        """Test extracting single ICAO code."""
-        from kml_heatmap.airport_lookup import extract_icao_codes_from_name
-
-        codes = extract_icao_codes_from_name("EDDF Frankfurt")
-        assert codes == ["EDDF"]
-
-    def test_multiple_icao_codes(self):
-        """Test extracting multiple ICAO codes from route."""
-        from kml_heatmap.airport_lookup import extract_icao_codes_from_name
-
-        codes = extract_icao_codes_from_name("EDDF Frankfurt - EDDM Munich")
-        assert codes == ["EDDF", "EDDM"]
-
-    def test_no_icao_codes(self):
-        """Test extracting from text without ICAO codes."""
-        from kml_heatmap.airport_lookup import extract_icao_codes_from_name
-
-        codes = extract_icao_codes_from_name("Log Start: 03 Mar 2025")
-        assert codes == []
-
-    def test_empty_string(self):
-        """Test extracting from empty string."""
-        from kml_heatmap.airport_lookup import extract_icao_codes_from_name
-
-        codes = extract_icao_codes_from_name("")
-        assert codes == []
-
-    def test_none_input(self):
-        """Test extracting from None."""
-        from kml_heatmap.airport_lookup import extract_icao_codes_from_name
-
-        codes = extract_icao_codes_from_name(None)
-        assert codes == []
-
-
-class TestStandardizeAirportName:
-    """Tests for standardize_airport_name function."""
-
-    def test_standardize_with_valid_icao(self):
-        """Test standardizing airport name with valid ICAO code."""
-        from unittest.mock import patch
-
-        from kml_heatmap.airport_lookup import standardize_airport_name
-
-        # Mock the airport lookup at the actual import location
-        with patch(
-            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
-        ) as mock_lookup:
-            mock_lookup.return_value = (51.42, 12.23, "Leipzig/Halle Airport")
-
-            result = standardize_airport_name("EDDP")
-            assert result is not None
-            assert "EDDP" in result
-            assert "Leipzig" in result
-
-    def test_standardize_route_format(self):
-        """Test standardizing route with two airports."""
-        from unittest.mock import patch
-
-        from kml_heatmap.airport_lookup import standardize_airport_name
-
-        # Mock the airport lookup at the actual import location
-        with patch(
-            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
-        ) as mock_lookup:
-
-            def lookup_side_effect(icao):
-                if icao == "EDDF":
-                    return (50.0, 8.5, "Frankfurt Airport")
-                elif icao == "EDDM":
-                    return (48.35, 11.78, "Munich Airport")
-                return None
-
-            mock_lookup.side_effect = lookup_side_effect
-
-            result = standardize_airport_name("EDDF - EDDM")
-            assert result is not None
-            assert "EDDF" in result
-            assert "EDDM" in result
-
-    def test_standardize_no_icao_codes(self):
-        """Test standardizing name without ICAO codes."""
-        from kml_heatmap.airport_lookup import standardize_airport_name
-
-        result = standardize_airport_name("Some Airport")
-        assert result == "Some Airport"  # Returns original
-
-    def test_standardize_none(self):
-        """Test standardizing None input."""
-        from kml_heatmap.airport_lookup import standardize_airport_name
-
-        result = standardize_airport_name(None)
-        assert result is None
-
-    def test_standardize_empty_string(self):
-        """Test standardizing empty string."""
-        from kml_heatmap.airport_lookup import standardize_airport_name
-
-        result = standardize_airport_name("")
-        assert result == ""
-
-    def test_standardize_route_only_first_airport_found(self):
-        """Test route where only first airport is in database."""
-        from unittest.mock import patch
-
-        from kml_heatmap.airport_lookup import standardize_airport_name
-
-        with patch(
-            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
-        ) as mock_lookup:
-
-            def lookup_side_effect(icao):
-                if icao == "EDDF":
-                    return (50.0, 8.5, "Frankfurt Airport")
-                return None  # XXXX not found
-
-            mock_lookup.side_effect = lookup_side_effect
-
-            result = standardize_airport_name("EDDF - XXXX Unknown")
-            assert result is not None
-            assert "EDDF Frankfurt" in result
-
-    def test_standardize_route_only_second_airport_found(self):
-        """Test route where only second airport is in database."""
-        from unittest.mock import patch
-
-        from kml_heatmap.airport_lookup import standardize_airport_name
-
-        with patch(
-            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
-        ) as mock_lookup:
-
-            def lookup_side_effect(icao):
-                if icao == "EDDM":
-                    return (48.35, 11.78, "Munich Airport")
-                return None  # XXXX not found
-
-            mock_lookup.side_effect = lookup_side_effect
-
-            result = standardize_airport_name("XXXX Unknown - EDDM")
-            assert result is not None
-            assert "EDDM Munich" in result
-
-    def test_standardize_single_airport(self):
-        """Test standardizing single airport name."""
-        from unittest.mock import patch
-
-        from kml_heatmap.airport_lookup import standardize_airport_name
-
-        with patch(
-            "kml_heatmap.airport_lookup.lookup_airport_coordinates"
-        ) as mock_lookup:
-            mock_lookup.return_value = (50.0, 8.5, "Frankfurt Airport")
-
-            result = standardize_airport_name("EDDF")
-            assert result is not None
-            assert "EDDF Frankfurt" in result
-
-
-class TestExtractCharterwareTimestamp:
-    """Tests for extract_charterware_timestamp function."""
-
-    def test_basic_format(self):
-        """Test parsing basic Charterware description format."""
-        desc = "Flight Jan 12 2026 03:01PM path of OE-AKI"
-        result = extract_charterware_timestamp(desc)
-        assert result == "2026-01-12T15:01:00+00:00"
-
-    def test_different_months(self):
-        """Test parsing different months."""
-        # January
-        assert (
-            extract_charterware_timestamp("Flight Jan 15 2026 02:30PM path of OE-AKI")
-            == "2026-01-15T14:30:00+00:00"
-        )
-        # December
-        assert (
-            extract_charterware_timestamp("Flight Dec 25 2025 11:45AM path of OE-AKI")
-            == "2025-12-25T11:45:00+00:00"
-        )
-        # March
-        assert (
-            extract_charterware_timestamp("Flight Mar 3 2025 08:15AM path of D-EAGJ")
-            == "2025-03-03T08:15:00+00:00"
-        )
-
-    def test_am_pm_conversion(self):
-        """Test AM/PM to 24-hour conversion."""
-        # 12 AM (midnight)
-        assert (
-            extract_charterware_timestamp("Flight Jan 1 2026 12:00AM path of OE-AKI")
-            == "2026-01-01T00:00:00+00:00"
-        )
-        # 12 PM (noon)
-        assert (
-            extract_charterware_timestamp("Flight Jan 1 2026 12:00PM path of OE-AKI")
-            == "2026-01-01T12:00:00+00:00"
-        )
-        # 1 AM
-        assert (
-            extract_charterware_timestamp("Flight Jan 1 2026 01:30AM path of OE-AKI")
-            == "2026-01-01T01:30:00+00:00"
-        )
-        # 1 PM
-        assert (
-            extract_charterware_timestamp("Flight Jan 1 2026 01:30PM path of OE-AKI")
-            == "2026-01-01T13:30:00+00:00"
-        )
-        # 11 PM
-        assert (
-            extract_charterware_timestamp("Flight Jan 1 2026 11:59PM path of OE-AKI")
-            == "2026-01-01T23:59:00+00:00"
-        )
-
-    def test_invalid_format(self):
-        """Test that invalid formats return None."""
-        assert extract_charterware_timestamp("") is None
-        assert extract_charterware_timestamp(None) is None
-        assert extract_charterware_timestamp("Invalid description") is None
-        assert extract_charterware_timestamp("Flight without timestamp") is None
-
-    def test_full_month_names(self):
-        """Test parsing with full month names (if supported)."""
-        # Should handle full month names
-        result = extract_charterware_timestamp(
-            "Flight January 12 2026 03:01PM path of OE-AKI"
-        )
-        assert result == "2026-01-12T15:01:00+00:00"
-
-
-class TestParseCharterwareKML:
-    """Integration tests for parsing Charterware KML files."""
-
-    def test_parse_charterware_kml(self):
-        """Test parsing actual Charterware KML format."""
-        import os
-        import tempfile
-
-        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
-
-        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+class TestCharterwareIntegration:
+    CHARTERWARE_KML = f"""{KML_HEADER}
     <Document id="1">
-        <Style id="4">
-            <LineStyle id="5">
-                <color>ff8c4426</color>
-                <colorMode>normal</colorMode>
-                <width>4</width>
-            </LineStyle>
-        </Style>
         <Placemark id="3">
             <name>OE-AKI</name>
             <description>Flight Jan 12 2026 03:01PM path of OE-AKI</description>
-            <styleUrl>#4</styleUrl>
             <LineString id="2">
                 <coordinates>
                     16.252537,47.96571,232.800003 16.252432,47.965717,231.800003
                     16.252419,47.96571,231.800003
                 </coordinates>
-                <extrude>1</extrude>
-                <altitudeMode>absolute</altitudeMode>
             </LineString>
         </Placemark>
     </Document>
 </kml>"""
 
-        # Create temp file with exact Charterware filename format
-        temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
-
-        with open(temp_path, "w") as f:
-            f.write(kml_content)
-
-        try:
-            coords, paths, metadata = parse_kml_coordinates(temp_path)
-
-            # Check coordinates were extracted
-            assert len(coords) > 0
-            assert len(paths) > 0
-            assert len(metadata) > 0
-
-            # Check metadata
-            meta = metadata[0]
-            assert meta.get("aircraft_registration") == "OE-AKI"
-            assert meta.get("route") == "LOAV-LOAV"
-            assert meta.get("aircraft_type") is None  # Charterware doesn't include type
-            assert (
-                meta.get("timestamp") is not None
-            )  # Should be extracted from description
-            assert meta.get("year") == 2026
-
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-            # Clean up cache
-            cache_path, _ = get_cache_key(temp_path)
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
-
-    def test_charterware_metadata_extraction(self):
-        """Test that Charterware metadata is correctly extracted."""
-        import os
-        import tempfile
-
-        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
-
-        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-    <Document>
-        <Placemark>
-            <name>D-EXYZ</name>
-            <description>Flight Feb 15 2026 10:30AM path of D-EXYZ</description>
-            <LineString>
-                <coordinates>8.5,50.0,300 9.0,51.0,400</coordinates>
-            </LineString>
-        </Placemark>
-    </Document>
-</kml>"""
-
-        # Create temp file with exact Charterware filename format
-        temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, "2026-02-15_1030h_D-EXYZ_EDDF-EDDM.kml")
-
-        with open(temp_path, "w") as f:
-            f.write(kml_content)
-
-        try:
-            _coords, _paths, metadata = parse_kml_coordinates(temp_path)
-
-            assert len(metadata) > 0
-            meta = metadata[0]
-
-            # Check aircraft info from filename
-            assert meta.get("aircraft_registration") == "D-EXYZ"
-            assert meta.get("route") == "EDDF-EDDM"
-
-            # Check timestamp from description
-            assert meta.get("timestamp") == "2026-02-15T10:30:00+00:00"
-            assert meta.get("year") == 2026
-
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-            # Clean up cache
-            cache_path, _ = get_cache_key(temp_path)
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
-
-    def test_mixed_formats(self):
-        """Test that parser handles both numbered and Charterware formats correctly."""
-        import os
-        import tempfile
-
-        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
-
-        # Create numbered format KML
-        numbered_kml = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
-    <Document>
-        <Placemark>
-            <name>EDAV - EDBH</name>
-            <gx:Track>
-                <when>2025-08-22T10:13:29Z</when>
-                <gx:coord>13.710165 52.827545 42.392002</gx:coord>
-            </gx:Track>
-        </Placemark>
-    </Document>
-</kml>"""
-
-        # Create Charterware format KML
-        charterware_kml = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-    <Document>
-        <Placemark>
-            <name>OE-AKI</name>
-            <description>Flight Jan 12 2026 03:01PM path of OE-AKI</description>
-            <LineString>
-                <coordinates>16.252537,47.96571,232.8</coordinates>
-            </LineString>
-        </Placemark>
-    </Document>
-</kml>"""
-
-        temp_dir = tempfile.gettempdir()
-        numbered_path = os.path.join(temp_dir, "1_DEHYL_DA40.kml")
-        charterware_path = os.path.join(
-            temp_dir, "2026-01-15_1513h_OE-AKI_EDDF-EDDM.kml"
+    def test_parse_charterware_kml(self, tmp_path):
+        kml_file = _write(
+            tmp_path, "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml", self.CHARTERWARE_KML
+        )
+        coords, paths, metadata = parse_kml_coordinates(kml_file)
+        assert len(coords) == 3
+        assert len(paths) == 1
+        meta = metadata[0]
+        assert meta["aircraft_registration"] == "OE-AKI"
+        assert meta["route"] == "LOAV-LOAV"
+        assert "aircraft_type" not in meta
+        assert meta["timestamp"] == "2026-01-12T15:01:00+00:00"
+        assert meta["year"] == 2026
+        assert (
+            meta["airport_name"]
+            == "LOAV Vöslau-Kottingbrunn - LOAV Vöslau-Kottingbrunn"
         )
 
-        # Clear any existing caches before test
-        for path in [numbered_path, charterware_path]:
-            cache_path, _ = get_cache_key(path)
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
-
-        with open(numbered_path, "w") as f:
-            f.write(numbered_kml)
-
-        with open(charterware_path, "w") as f:
-            f.write(charterware_kml)
-
-        try:
-            # Parse numbered format
-            _coords_n, _paths_n, metadata_n = parse_kml_coordinates(numbered_path)
-            assert len(metadata_n) > 0
-            assert metadata_n[0].get("aircraft_registration") == "D-EHYL"
-            assert metadata_n[0].get("aircraft_type") == "DA40"
-
-            # Parse Charterware
-            _coords_cw, _paths_cw, metadata_cw = parse_kml_coordinates(charterware_path)
-            assert len(metadata_cw) > 0
-            assert metadata_cw[0].get("aircraft_registration") == "OE-AKI"
-            assert metadata_cw[0].get("route") == "EDDF-EDDM"
-            assert metadata_cw[0].get("aircraft_type") is None
-
-        finally:
-            if os.path.exists(numbered_path):
-                os.unlink(numbered_path)
-            if os.path.exists(charterware_path):
-                os.unlink(charterware_path)
-            # Clean up caches
-            for path in [numbered_path, charterware_path]:
-                cache_path, _ = get_cache_key(path)
-                if cache_path and cache_path.exists():
-                    cache_path.unlink()
-
-
-class TestAirportExtractionFromRoute:
-    """Tests for airport extraction from Charterware route field."""
-
-    def test_airport_from_route_charterware(self):
-        """Test that airport is extracted from route for Charterware files."""
-        import os
-        import tempfile
-
-        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
-
-        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-    <Document>
-        <Placemark>
-            <name>OE-AKI</name>
-            <description>Flight Jan 12 2026 03:01PM path of OE-AKI</description>
-            <LineString>
-                <coordinates>16.25,47.96,232.8</coordinates>
-            </LineString>
-        </Placemark>
-    </Document>
-</kml>"""
-
-        # Create temp file with exact Charterware filename format
-        temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
-
-        with open(temp_path, "w") as f:
-            f.write(kml_content)
-
-        try:
-            _coords, _paths, metadata = parse_kml_coordinates(temp_path)
-
-            # Airport should be extracted from route (LOAV-LOAV)
-            # Format: "DEPARTURE - ARRIVAL" with full names from OurAirports lookup
-            assert (
-                metadata[0].get("airport_name")
-                == "LOAV Vöslau-Kottingbrunn - LOAV Vöslau-Kottingbrunn"
-            )
-            assert metadata[0].get("route") == "LOAV-LOAV"
-
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-            cache_path, _ = get_cache_key(temp_path)
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
-
-    def test_airport_from_route_different_airports(self):
-        """Test route with different departure and arrival airports."""
-        import os
-        import tempfile
-
-        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
-
-        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-    <Document>
-        <Placemark>
-            <name>D-EXYZ</name>
-            <description>Flight Feb 15 2026 10:30AM path of D-EXYZ</description>
-            <LineString>
-                <coordinates>8.5,50.0,300.0</coordinates>
-            </LineString>
-        </Placemark>
-    </Document>
-</kml>"""
-
-        # Create temp file with exact Charterware filename format
-        temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, "2026-02-15_1030h_D-EXYZ_EDDF-EDDM.kml")
-
-        with open(temp_path, "w") as f:
-            f.write(kml_content)
-
-        try:
-            _coords, _paths, metadata = parse_kml_coordinates(temp_path)
-
-            # Should extract route and format as "DEPARTURE - ARRIVAL"
-            assert (
-                metadata[0].get("airport_name") == "EDDF Frankfurt Main - EDDM Munich"
-            )
-            assert metadata[0].get("route") == "EDDF-EDDM"
-
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-            cache_path, _ = get_cache_key(temp_path)
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
-
-    def test_skydemon_airport_not_replaced(self):
-        """Test that SkyDemon airport names are not replaced by route logic."""
-        import os
-        import tempfile
-
-        from kml_heatmap.parser import get_cache_key, parse_kml_coordinates
-
-        # SkyDemon with airport pair in name
-        kml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
-    <Document>
-        <Placemark>
-            <name>EDAV - EDBH</name>
-            <gx:Track>
-                <when>2025-08-22T10:13:00Z</when>
-                <gx:coord>13.71 52.82 42.0</gx:coord>
-            </gx:Track>
-        </Placemark>
-    </Document>
-</kml>"""
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix="20250822_1013_EDAV_DEHYL_DA40.kml", delete=False
-        ) as f:
-            f.write(kml_content)
-            temp_path = f.name
-
-        try:
-            _coords, _paths, metadata = parse_kml_coordinates(temp_path)
-
-            # Should preserve SkyDemon airport name format (with standardization)
-            assert (
-                metadata[0].get("airport_name")
-                == "EDAV Eberswalde-Finow - EDBH Stralsund-Barth"
-            )
-            # SkyDemon files don't have route field
-            assert metadata[0].get("route") is None
-
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-            cache_path, _ = get_cache_key(temp_path)
-            if cache_path and cache_path.exists():
-                cache_path.unlink()
-
-
-class TestExceptionHandlingPaths:
-    """Tests for exception handling code paths to improve coverage."""
-
-    def test_extract_year_with_value_error(self):
-        """Test extract_year_from_timestamp with ValueError on int conversion."""
-        # This tests line 204-205: ValueError exception
-        result = extract_year_from_timestamp("2025-99-99T99:99:99Z")
-        assert result is None
-
-    def test_extract_year_with_attribute_error(self):
-        """Test extract_year_from_timestamp with None causing AttributeError."""
-        # This tests line 204-205: AttributeError exception
-        result = extract_year_from_timestamp(None)
-        assert result is None
-
-    def test_extract_charterware_timestamp_parse_failure(self):
-        """Test Charterware timestamp parsing with invalid date format."""
-        from unittest.mock import patch
-
-        # This tests lines 532-534: ValueError during datetime.strptime
-        with patch("kml_heatmap.parser_common.datetime") as mock_datetime:
-            mock_datetime.strptime.side_effect = ValueError("Invalid date")
-            result = extract_charterware_timestamp(
-                "Flight Feb 31 2025 12:00AM path of OE-AKI"
-            )
-            # The function should catch the ValueError and return None
-            assert result is None or isinstance(result, str)
-
-    def test_save_cache_oserror_handling(self):
-        """Test save_to_cache with OSError during file write."""
-        import tempfile
-
-        # This tests lines 178-179: OSError exception during cache save
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache_path = Path(tmpdir) / "cache.json"
-
-            # Make directory read-only to trigger OSError
-            cache_dir = cache_path.parent
-            original_mode = cache_dir.stat().st_mode
-            try:
-                cache_dir.chmod(0o444)  # Read-only
-
-                # Should handle OSError gracefully and not raise
-                save_to_cache(cache_path, [], [], [])
-                # If we get here without exception, the error was handled
-            finally:
-                # Restore permissions
-                cache_dir.chmod(original_mode)
-
-
-class TestCacheCleanupErrors:
-    """Tests for cache cleanup error handling."""
-
-    def test_old_cache_removal_with_permission_error(self):
-        """Test that OSError during old cache removal is handled."""
-        import tempfile
-
-        from kml_heatmap.parser import get_cache_key
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_dir = Path(tmpdir)
-            kml_file = test_dir / "test.kml"
-
-            # Create KML file
-            kml_file.write_text("<?xml version='1.0'?><kml></kml>")
-
-            # Get initial cache path
-            cache_path1, _is_valid = get_cache_key(str(kml_file))
-            assert cache_path1 is not None
-
-            # Create the cache file
-            cache_path1.write_text("{}")
-
-            # Modify the KML file to change its mtime
-            import time
-
-            time.sleep(0.1)
-            kml_file.write_text("<?xml version='1.0'?><kml>modified</kml>")
-
-            # Make the cache directory read-only to trigger OSError on unlink
-            cache_dir = cache_path1.parent
-            original_mode = cache_dir.stat().st_mode
-            try:
-                cache_dir.chmod(0o555)  # Read-only, no write
-
-                # This should trigger OSError when trying to delete old cache
-                # but the function should handle it gracefully
-                cache_path2, _is_valid2 = get_cache_key(str(kml_file))
-
-                # Should still return a valid cache path
-                assert cache_path2 is not None
-            finally:
-                # Restore permissions
-                cache_dir.chmod(original_mode)
-
-    def test_old_cache_removal_oserror_with_mock(self):
-        """Test OSError during old cache file removal using mock."""
-        import tempfile
-        from unittest.mock import patch
-
-        from kml_heatmap.parser import get_cache_key
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_dir = Path(tmpdir)
-            kml_file = test_dir / "test.kml"
-
-            # Create KML file
-            kml_file.write_text("<?xml version='1.0'?><kml></kml>")
-
-            # Get initial cache path
-            cache_path1, _ = get_cache_key(str(kml_file))
-
-            # Create the cache file
-            if cache_path1:
-                cache_path1.write_text("{}")
-
-            # Modify KML to change mtime
-            import time
-
-            time.sleep(0.1)
-            kml_file.write_text("<?xml version='1.0'?><kml>modified</kml>")
-
-            # Mock unlink to raise OSError for cache files
-            original_unlink = Path.unlink
-
-            def mock_unlink(self, *args, **kwargs):
-                # Only raise for cache files, not for the temp directory cleanup
-                if str(self).endswith(".json"):
-                    raise OSError("Permission denied")
-                # For other files, use original
-                return original_unlink(self, *args, **kwargs)
-
-            with patch.object(Path, "unlink", side_effect=mock_unlink, autospec=True):
-                # This should trigger OSError but handle it gracefully
-                cache_path2, _ = get_cache_key(str(kml_file))
-                assert cache_path2 is not None
+    def test_route_with_different_airports(self, tmp_path):
+        kml = self.CHARTERWARE_KML.replace("OE-AKI", "D-EXYZ").replace(
+            "Jan 12 2026 03:01PM", "Feb 15 2026 10:30AM"
+        )
+        kml_file = _write(tmp_path, "2026-02-15_1030h_D-EXYZ_EDDF-EDDM.kml", kml)
+        _, _, metadata = parse_kml_coordinates(kml_file)
+        assert metadata[0]["airport_name"] == "EDDF Frankfurt Main - EDDM Munich"
+        assert metadata[0]["route"] == "EDDF-EDDM"
+        assert metadata[0]["timestamp"] == "2026-02-15T10:30:00+00:00"
+
+    def test_skydemon_airport_name_not_replaced(self, tmp_path):
+        kml = f"""{KML_HEADER}<Document><Placemark><name>EDAV - EDBH</name>
+        <gx:Track><when>2025-08-22T10:13:00Z</when>
+        <gx:coord>13.71 52.82 42.0</gx:coord></gx:Track>
+        </Placemark></Document></kml>"""
+        kml_file = _write(tmp_path, "1_DEHYL_DA40.kml", kml)
+        _, _, metadata = parse_kml_coordinates(kml_file)
+        assert (
+            metadata[0]["airport_name"]
+            == "EDAV Eberswalde-Finow - EDBH Stralsund-Barth"
+        )
+        assert "route" not in metadata[0]
+        assert metadata[0]["aircraft_registration"] == "D-EHYL"
+        assert metadata[0]["aircraft_type"] == "DA40"

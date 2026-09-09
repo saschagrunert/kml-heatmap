@@ -4,6 +4,14 @@
  */
 
 import type { AppState } from "../types";
+import { MAX_ZOOM, MIN_ZOOM } from "../utils/constants";
+
+/**
+ * Schema version of the persisted selection. Path ids are assigned by the
+ * exporter and were renumbered, so ids saved by an older release refer to
+ * different flights and must be discarded rather than silently applied.
+ */
+export const STATE_SCHEMA_VERSION = 2;
 
 /**
  * Parse URL parameters into state object
@@ -11,6 +19,7 @@ import type { AppState } from "../types";
  *   y - selectedYear (string: 'all' or year like '2024')
  *   a - selectedAircraft (string: 'all' or aircraft identifier)
  *   p - selectedPathIds (comma-separated integers: '1,5,12')
+ *   sv - schema version of p (missing or older means p is ignored)
  *   v - layer visibility (9-char binary string: '100100000')
  *   lat, lng - map center coordinates
  *   z - map zoom level
@@ -50,8 +59,9 @@ export function parseUrlParams(
     }
   }
 
-  // Selected paths
-  if (urlParams.has("p")) {
+  // Selected paths, only when they were written with the current id scheme
+  const schemaVersion = parseInt(urlParams.get("sv") ?? "", 10);
+  if (urlParams.has("p") && schemaVersion === STATE_SCHEMA_VERSION) {
     const pathStr = urlParams.get("p");
     if (pathStr) {
       state.selectedPathIds = pathStr
@@ -120,8 +130,8 @@ export function parseUrlParams(
     if (zoomStr) {
       const zoom = parseFloat(zoomStr);
       if (!isNaN(zoom)) {
-        // Clamp zoom to reasonable range
-        state.zoom = Math.max(1, Math.min(18, zoom));
+        // Clamp zoom to the map's zoom range
+        state.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
       }
     }
   }
@@ -160,6 +170,7 @@ export function encodeStateToUrl(state: AppState): string {
 
   if (state.selectedPathIds && state.selectedPathIds.length > 0) {
     params.set("p", state.selectedPathIds.join(","));
+    params.set("sv", String(STATE_SCHEMA_VERSION));
   }
 
   // Build visibility string (9 characters: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden, isolateSelection)

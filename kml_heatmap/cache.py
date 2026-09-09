@@ -11,12 +11,17 @@ from .logger import logger
 
 __all__ = ["CACHE_DIR", "atomic_json_write"]
 
-if "KML_HEATMAP_TEST_CACHE" in os.environ:
-    CACHE_DIR = Path(os.environ["KML_HEATMAP_TEST_CACHE"])
-elif "KML_HEATMAP_CACHE_DIR" in os.environ:
-    CACHE_DIR = Path(os.environ["KML_HEATMAP_CACHE_DIR"])
-else:
-    CACHE_DIR = Path.home() / ".cache" / "kml-heatmap"
+
+def _default_cache_dir() -> Path:
+    """~/.cache/kml-heatmap, or a temp directory when there is no home."""
+    try:
+        return Path.home() / ".cache" / "kml-heatmap"
+    except RuntimeError:  # no HOME and no passwd entry (containers)
+        return Path(tempfile.gettempdir()) / "kml-heatmap-cache"
+
+
+_cache_dir_env = os.environ.get("KML_HEATMAP_CACHE_DIR")
+CACHE_DIR = Path(_cache_dir_env) if _cache_dir_env else _default_cache_dir()
 
 
 def atomic_json_write(path: Path, data: Any, directory: Path) -> None:

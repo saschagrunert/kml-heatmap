@@ -1,8 +1,6 @@
 """Custom exceptions for KML Heatmap Generator."""
 
 __all__ = [
-    "ConfigurationError",
-    "InvalidCoordinateError",
     "KMLHeatmapError",
     "KMLParseError",
 ]
@@ -32,32 +30,3 @@ class KMLParseError(KMLHeatmapError):
         if self.line_number:
             parts.append(f"Line: {self.line_number}")
         return " | ".join(parts)
-
-
-class InvalidCoordinateError(KMLHeatmapError):
-    """Raised when coordinate data is invalid."""
-
-    def __init__(
-        self,
-        message: str,
-        latitude: float | None = None,
-        longitude: float | None = None,
-    ):
-        self.latitude = latitude
-        self.longitude = longitude
-        super().__init__(self._format_message(message))
-
-    def _format_message(self, message: str) -> str:
-        if self.latitude is not None and self.longitude is not None:
-            return f"{message} (lat: {self.latitude}, lon: {self.longitude})"
-        return message
-
-
-class ConfigurationError(KMLHeatmapError):
-    """Raised when configuration is invalid."""
-
-    def __init__(self, message: str, config_key: str | None = None):
-        self.config_key = config_key
-        if config_key:
-            message = f"{message} (Key: {config_key})"
-        super().__init__(message)

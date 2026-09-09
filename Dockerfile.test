@@ -1,70 +1,75 @@
-# Test Docker Image for KML Heatmap
+# KML Heatmap test image: Python 3.14 plus Node 24 with every lint, type
+# check and test dependency. It runs ruff, mypy, bandit, pytest, tsc, eslint,
+# prettier and vitest, either self-contained (sources are copied in) or against
+# a checkout bind-mounted at /src (see the Makefile).
+#
+# Base images are pinned by the digest of the multi-arch index so that
+# Dependabot can bump them; the tag comment is kept for readability.
 
-# Stage 1: Node.js environment for JS tests
-FROM docker.io/library/node:lts-slim AS js-env
+# Stage 1: install the npm dependencies with the official Node image
+FROM docker.io/library/node:24-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS js-deps
+# 24-slim
 
 WORKDIR /app
-
-# Copy JavaScript/TypeScript build configuration
-COPY package.json package-lock.json build.js vitest.config.js tsconfig.json tsconfig.eslint.json eslint.config.js ./
-COPY kml_heatmap/frontend/ ./kml_heatmap/frontend/
-
-# Install Node.js dependencies
+COPY package.json package-lock.json ./
 RUN npm ci
 
-# Copy JS tests
-COPY tests/frontend/ ./tests/frontend/
+# Stage 2: Python image with the Node toolchain spliced in
+FROM docker.io/library/python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
+# 3.14-slim
 
-# Stage 2: Final test image
-FROM docker.io/library/python:3.14-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install Node.js from official image instead of curl|bash
-COPY --from=docker.io/library/node:lts-slim /usr/local/bin/node /usr/local/bin/node
-COPY --from=docker.io/library/node:lts-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
-    ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+# Node.js is copied from the pinned node:24-slim stage instead of a curl|bash
+# installer. Both images are Debian based and the node binary only depends on
+# glibc and libstdc++, which the Python image provides.
+COPY --from=js-deps /usr/local/bin/node /usr/local/bin/node
+COPY --from=js-deps /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node --version && npm --version
 
-# Set working directory
 WORKDIR /app
 
-# Copy lock files
+# Pinned Python runtime and test dependencies
 COPY requirements.lock requirements-test.lock ./
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --require-hashes \
+       -r requirements.lock -r requirements-test.lock
 
-# Install pinned dependencies
-RUN pip install --no-cache-dir -r requirements.lock -r requirements-test.lock
+# npm dependencies from stage 1. The /node_modules symlink lets Node's parent
+# directory lookup find them from any project directory, including a checkout
+# mounted at /src, and .bin is on PATH so `npm run` scripts resolve their tools.
+COPY --from=js-deps /app/node_modules ./node_modules
+RUN ln -s /app/node_modules /node_modules
+ENV PATH="/opt/venv/bin:/app/node_modules/.bin:$PATH"
 
-# Copy application code
-COPY kml-heatmap.py .
+# Project sources, so the image also works without a bind mount
+COPY pyproject.toml package.json build.js vitest.config.js playwright.config.ts \
+     tsconfig.json tsconfig.eslint.json eslint.config.js \
+     .prettierrc.json .prettierignore kml-heatmap.py serve.py ./
 COPY kml_heatmap/ ./kml_heatmap/
+COPY stubs/ ./stubs/
 COPY scripts/ ./scripts/
-COPY pyproject.toml .
-
-# Copy JavaScript/TypeScript build configuration and node_modules from js-env
-COPY package.json build.js vitest.config.js tsconfig.json tsconfig.eslint.json eslint.config.js ./
-COPY --from=js-env /app/node_modules ./node_modules
-
-# Copy tests
 COPY tests/ ./tests/
 
-# Create a script to run both test suites
-RUN cat > /app/run-tests.sh << 'EOF'
-#!/bin/bash
-set -e
+# Test runner: JavaScript and Python suites with coverage. It runs in the
+# current working directory, so it works for /app and for a mounted /src.
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      'set -eu' \
+      'echo "=== JavaScript tests with coverage ==="' \
+      'npm run test:coverage' \
+      'echo' \
+      'echo "=== Python tests with coverage ==="' \
+      'pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=html --cov-report=term' \
+      'coverage report' \
+      'echo' \
+      'echo "JavaScript coverage: coverage/coverage-final.json"' \
+      'echo "Python coverage: coverage/coverage.xml, htmlcov/"' \
+      > /app/run-tests.sh \
+    && chmod +x /app/run-tests.sh
 
-echo "=== Running JavaScript tests with coverage ==="
-npm run test:coverage
-
-echo ""
-echo "=== Running Python tests with coverage ==="
-pytest --cov=kml_heatmap --cov-report=xml:coverage/coverage.xml --cov-report=html --cov-report=term
-
-echo ""
-echo "=== Test Summary ==="
-echo "✓ JavaScript coverage: coverage/coverage-final.json"
-echo "✓ Python coverage: coverage/coverage.xml, htmlcov/"
-EOF
-
-RUN chmod +x /app/run-tests.sh
-
-# Run both test suites
 CMD ["/app/run-tests.sh"]

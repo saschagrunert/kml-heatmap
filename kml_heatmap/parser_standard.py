@@ -1,17 +1,24 @@
-"""Standard KML coordinate processing."""
+"""Standard KML <coordinates> processing."""
 
-from typing import Any
-
-from lxml import etree
+from typing import TYPE_CHECKING
 
 from .logger import logger
-from .parser_common import _build_path_metadata_dict, parse_coordinate_point
-from .types import FlightPath, FlightPathGroup, PathMetadata
+from .parser_common import (
+    _build_path_metadata_dict,
+    empty_placemark_metadata,
+    parse_coordinate_point,
+)
+from .types import TrackPoint
+
+if TYPE_CHECKING:
+    from lxml import etree
+
+    from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
 
 
 def process_standard_coordinates(
     coord_elements: list[etree._Element],
-    coord_to_metadata: dict[int, dict[str, Any]],
+    coord_to_metadata: dict[int, PlacemarkMetadata],
     kml_file: str,
     coordinates: FlightPath,
     path_groups: FlightPathGroup,
@@ -19,7 +26,6 @@ def process_standard_coordinates(
 ) -> None:
     """Process standard KML <coordinates> elements."""
     for idx, coord_elem in enumerate(coord_elements):
-        # Handle None text
         if coord_elem.text is None:
             logger.debug("Coordinate element %d has None text, skipping", idx)
             continue
@@ -29,46 +35,34 @@ def process_standard_coordinates(
             logger.debug("Coordinate element %d has empty text, skipping", idx)
             continue
 
-        # Get metadata for this coordinate element
-        metadata = coord_to_metadata.get(id(coord_elem), {})
-        airport_name = metadata.get("airport_name")
-        timestamp = metadata.get("timestamp")
-        end_timestamp = metadata.get("end_timestamp")
+        metadata = coord_to_metadata.get(id(coord_elem), empty_placemark_metadata())
 
         # Split by whitespace (spaces, tabs, newlines)
-        points = coord_text.split()
-
-        # Create a new path group for this coordinate element
-        current_path = []
+        current_path: FlightPath = []
         element_coords = 0
 
-        for point in points:
-            parsed = parse_coordinate_point(point, kml_file)
+        for point_text in coord_text.split():
+            parsed = parse_coordinate_point(point_text, kml_file)
             if parsed is None:
                 continue
 
             lat, lon, alt = parsed
+            point = TrackPoint(lat, lon, alt, None)
+            coordinates.append(point)
 
-            # Swap to [lat, lon] for leaflet
-            coordinates.append([lat, lon])
-
-            # Add to current path group with altitude
+            # Only points with a known altitude form the flight path
             if alt is not None:
-                current_path.append([lat, lon, alt])
+                current_path.append(point)
 
             element_coords += 1
 
-        # Add this path group to the list if it has coordinates
         if current_path:
-            # Do NOT generate synthetic timestamps for Charterware files
-            # As per https://github.com/saschagrunert/kml-heatmap/issues/16
-            # Charterware coordinates are not at fixed intervals
-
+            # No synthetic timestamps for Charterware files: their coordinates
+            # are not at fixed intervals.
             path_groups.append(current_path)
-            meta = _build_path_metadata_dict(
-                kml_file, current_path[0], airport_name, timestamp, end_timestamp
+            path_metadata.append(
+                _build_path_metadata_dict(kml_file, current_path[0], metadata)
             )
-            path_metadata.append(meta)
 
         if element_coords > 0:
             coord_type = (

@@ -65,3 +65,22 @@ export function formatFlightTime(seconds: number): string {
   const minutes = Math.floor((seconds % 3600) / 60);
   return `${hours}h ${minutes}m`;
 }
+
+/**
+ * Format a byte count into a human-readable file size (e.g., "1.1 MB")
+ * @param bytes - Size in bytes
+ * @returns Formatted size
+ */
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = units[0]!;
+  for (let i = 1; i < units.length && value >= 1024; i++) {
+    value /= 1024;
+    unit = units[i]!;
+  }
+  const text = value < 10 ? value.toFixed(1) : String(Math.round(value));
+  return `${text} ${unit}`;
+}

@@ -5,7 +5,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
-    include: ["tests/frontend/unit/**/*.test.ts"],
+    include: [
+      "tests/frontend/unit/**/*.test.ts",
+      "tests/frontend/contract/**/*.test.ts",
+    ],
     exclude: ["**/node_modules/**"],
     coverage: {
       provider: "v8",
@@ -17,7 +20,7 @@ export default defineConfig({
         "kml_heatmap/frontend/main.ts",
         "kml_heatmap/frontend/exports.ts",
       ],
-      clean: false,
+      clean: true,
       thresholds: {
         lines: 80,
         branches: 70,

@@ -11,9 +11,10 @@ import {
   validateReplayData,
 } from "../../../../kml_heatmap/frontend/features/replay";
 import { calculateBearing } from "../../../../kml_heatmap/frontend/utils/geometry";
+import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 
 describe("replay feature", () => {
-  const mockSegments = [
+  const mockSegments: PathSegment[] = [
     {
       path_id: 1,
       time: 1000,
@@ -65,7 +66,7 @@ describe("replay feature", () => {
     });
 
     it("sorts segments by time", () => {
-      const unsorted = [
+      const unsorted: PathSegment[] = [
         { path_id: 1, time: 1200 },
         { path_id: 1, time: 1000 },
         { path_id: 1, time: 1100 },
@@ -73,16 +74,14 @@ describe("replay feature", () => {
 
       const prepared = prepareReplaySegments(unsorted, 1);
 
-      expect(prepared[0].time).toBe(1000);
-      expect(prepared[1].time).toBe(1100);
-      expect(prepared[2].time).toBe(1200);
+      expect(prepared.map((s) => s.time)).toEqual([1000, 1100, 1200]);
     });
 
     it("filters out segments without time", () => {
-      const segments = [
+      const segments: PathSegment[] = [
         { path_id: 1, time: 1000 },
         { path_id: 1, time: undefined },
-        { path_id: 1, time: null },
+        { path_id: 1, time: null as unknown as number },
         { path_id: 1, time: 1100 },
       ];
 
@@ -100,7 +99,11 @@ describe("replay feature", () => {
 
   describe("calculateTimeRange", () => {
     it("calculates min and max time", () => {
-      const segments = [{ time: 1000 }, { time: 1500 }, { time: 1200 }];
+      const segments: PathSegment[] = [
+        { path_id: 1, time: 1000 },
+        { path_id: 1, time: 1500 },
+        { path_id: 1, time: 1200 },
+      ];
 
       const range = calculateTimeRange(segments);
 
@@ -116,7 +119,7 @@ describe("replay feature", () => {
     });
 
     it("handles single segment", () => {
-      const range = calculateTimeRange([{ time: 1000 }]);
+      const range = calculateTimeRange([{ path_id: 1, time: 1000 }]);
 
       expect(range.min).toBe(1000);
       expect(range.max).toBe(1000);
@@ -129,23 +132,23 @@ describe("replay feature", () => {
     it("finds current and next segment", () => {
       const result = findSegmentsAtTime(sorted, 1050);
 
-      expect(result.current.time).toBe(1000);
-      expect(result.next.time).toBe(1100);
+      expect(result.current?.time).toBe(1000);
+      expect(result.next?.time).toBe(1100);
       expect(result.index).toBe(0);
     });
 
     it("finds segment at exact time", () => {
       const result = findSegmentsAtTime(sorted, 1100);
 
-      expect(result.current.time).toBe(1100);
-      expect(result.next.time).toBe(1200);
+      expect(result.current?.time).toBe(1100);
+      expect(result.next?.time).toBe(1200);
       expect(result.index).toBe(1);
     });
 
     it("handles time at end of replay", () => {
       const result = findSegmentsAtTime(sorted, 1200);
 
-      expect(result.current.time).toBe(1200);
+      expect(result.current?.time).toBe(1200);
       expect(result.next).toBeNull();
       expect(result.index).toBe(2);
     });
@@ -167,7 +170,8 @@ describe("replay feature", () => {
   });
 
   describe("interpolatePosition", () => {
-    const seg1 = {
+    const seg1: PathSegment = {
+      path_id: 1,
       time: 1000,
       coords: [
         [50.0, 8.0],
@@ -177,7 +181,8 @@ describe("replay feature", () => {
       groundspeed_knots: 120,
     };
 
-    const seg2 = {
+    const seg2: PathSegment = {
+      path_id: 1,
       time: 1100,
       coords: [
         [50.1, 8.1],
@@ -190,9 +195,7 @@ describe("replay feature", () => {
     it("interpolates position halfway between segments", () => {
       const pos = interpolatePosition(seg1, seg2, 1050);
 
-      // At time 1050 (halfway between 1000 and 1100), we're halfway between:
-      // seg1.coords[1] = [50.1, 8.1] and seg2.coords[0] = [50.1, 8.1]
-      // Since they're the same, halfway is still [50.1, 8.1]
+      // seg1 end and seg2 start are the same point, so the position stays
       expect(pos.lat).toBeCloseTo(50.1, 5);
       expect(pos.lon).toBeCloseTo(8.1, 5);
       expect(pos.altitude).toBeCloseTo(5500, 0);
@@ -210,8 +213,6 @@ describe("replay feature", () => {
     it("interpolates at end time", () => {
       const pos = interpolatePosition(seg1, seg2, 1100);
 
-      // At time 1100, we're at the connection point between seg1 end and seg2 start
-      // Both are [50.1, 8.1], so progress=1.0 gives us that point
       expect(pos.lat).toBeCloseTo(50.1, 5);
       expect(pos.lon).toBeCloseTo(8.1, 5);
       expect(pos.altitude).toBe(6000);
@@ -245,36 +246,41 @@ describe("replay feature", () => {
     it("handles last segment", () => {
       const bearing = calculateSmoothedBearing(sorted, sorted.length - 1, 5);
 
-      expect(bearing).toBeDefined();
       expect(typeof bearing).toBe("number");
     });
 
     it("handles segments without enough lookahead", () => {
       const bearing = calculateSmoothedBearing(sorted, sorted.length - 1, 10);
 
-      expect(bearing).toBeDefined();
+      expect(typeof bearing).toBe("number");
+    });
+
+    it("returns null when coordinates are missing", () => {
+      const segments: PathSegment[] = [
+        { path_id: 1, time: 0 },
+        { path_id: 1, time: 10 },
+      ];
+
+      expect(calculateSmoothedBearing(segments, 0, 1)).toBeNull();
+      expect(calculateSmoothedBearing(segments, 1, 1)).toBeNull();
     });
   });
 
   describe("calculateBearing", () => {
     it("calculates bearing for due north", () => {
-      const bearing = calculateBearing(0, 0, 1, 0);
-      expect(bearing).toBeCloseTo(0, 1);
+      expect(calculateBearing(0, 0, 1, 0)).toBeCloseTo(0, 1);
     });
 
     it("calculates bearing for due east", () => {
-      const bearing = calculateBearing(0, 0, 0, 1);
-      expect(bearing).toBeCloseTo(90, 1);
+      expect(calculateBearing(0, 0, 0, 1)).toBeCloseTo(90, 1);
     });
 
     it("calculates bearing for due south", () => {
-      const bearing = calculateBearing(0, 0, -1, 0);
-      expect(bearing).toBeCloseTo(180, 1);
+      expect(calculateBearing(0, 0, -1, 0)).toBeCloseTo(180, 1);
     });
 
     it("calculates bearing for due west", () => {
-      const bearing = calculateBearing(0, 0, 0, -1);
-      expect(bearing).toBeCloseTo(270, 1);
+      expect(calculateBearing(0, 0, 0, -1)).toBeCloseTo(270, 1);
     });
 
     it("returns value between 0 and 360", () => {
@@ -286,13 +292,11 @@ describe("replay feature", () => {
 
   describe("calculateAutoZoom", () => {
     it("returns max zoom for low altitude and speed", () => {
-      const zoom = calculateAutoZoom(1000, 50);
-      expect(zoom).toBeGreaterThan(13);
+      expect(calculateAutoZoom(1000, 50)).toBeGreaterThan(13);
     });
 
     it("returns lower zoom for high altitude and speed", () => {
-      const zoom = calculateAutoZoom(10000, 200);
-      expect(zoom).toBeLessThan(13);
+      expect(calculateAutoZoom(10000, 200)).toBeLessThan(13);
     });
 
     it("respects min and max zoom bounds", () => {
@@ -313,8 +317,8 @@ describe("replay feature", () => {
         cruiseSpeed: 200,
       });
 
-      expect(zoom).toBeDefined();
-      expect(typeof zoom).toBe("number");
+      // Both factors are exactly 1: halfway between min and max zoom
+      expect(zoom).toBe(13);
     });
   });
 
@@ -327,28 +331,23 @@ describe("replay feature", () => {
     };
 
     it("returns false when position is in center", () => {
-      const position = { lat: 50.5, lon: 8.5 };
-      expect(shouldRecenter(position, bounds)).toBe(false);
+      expect(shouldRecenter({ lat: 50.5, lon: 8.5 }, bounds)).toBe(false);
     });
 
     it("returns true when position is near north edge", () => {
-      const position = { lat: 50.95, lon: 8.5 };
-      expect(shouldRecenter(position, bounds)).toBe(true);
+      expect(shouldRecenter({ lat: 50.95, lon: 8.5 }, bounds)).toBe(true);
     });
 
     it("returns true when position is near south edge", () => {
-      const position = { lat: 50.05, lon: 8.5 };
-      expect(shouldRecenter(position, bounds)).toBe(true);
+      expect(shouldRecenter({ lat: 50.05, lon: 8.5 }, bounds)).toBe(true);
     });
 
     it("returns true when position is near east edge", () => {
-      const position = { lat: 50.5, lon: 8.95 };
-      expect(shouldRecenter(position, bounds)).toBe(true);
+      expect(shouldRecenter({ lat: 50.5, lon: 8.95 }, bounds)).toBe(true);
     });
 
     it("returns true when position is near west edge", () => {
-      const position = { lat: 50.5, lon: 8.05 };
-      expect(shouldRecenter(position, bounds)).toBe(true);
+      expect(shouldRecenter({ lat: 50.5, lon: 8.05 }, bounds)).toBe(true);
     });
 
     it("respects custom margin", () => {
@@ -388,7 +387,7 @@ describe("replay feature", () => {
     });
 
     it("rejects null segments", () => {
-      const result = validateReplayData(null);
+      const result = validateReplayData(null as unknown as PathSegment[]);
 
       expect(result.valid).toBe(false);
       expect(result.message).toContain("No segments");
@@ -402,7 +401,7 @@ describe("replay feature", () => {
     });
 
     it("rejects segments without time data", () => {
-      const segments = [
+      const segments: PathSegment[] = [
         { path_id: 1, altitude_ft: 5000 },
         { path_id: 1, time: undefined },
       ];
@@ -414,14 +413,12 @@ describe("replay feature", () => {
     });
 
     it("accepts segments with partial time data", () => {
-      const segments = [
+      const segments: PathSegment[] = [
         { path_id: 1, time: 1000 },
         { path_id: 1, time: undefined },
       ];
 
-      const result = validateReplayData(segments);
-
-      expect(result.valid).toBe(true);
+      expect(validateReplayData(segments).valid).toBe(true);
     });
   });
 });

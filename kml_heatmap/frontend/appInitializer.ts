@@ -4,11 +4,61 @@
  */
 
 import * as L from "leaflet";
-import { logError } from "./utils/logger";
 import { domCache } from "./utils/domCache";
+import { ddToDms } from "./utils/geometry";
 import { generateAirportPopupHtml } from "./utils/htmlGenerators";
-import type { MapApp, AirportWithFlightCount } from "./mapApp";
+import { showToast } from "./utils/toast";
+import type { MapApp } from "./mapApp";
 import type { Airport } from "./types";
+
+/**
+ * Populate the year dropdown and make sure the selected year exists.
+ * A restored/URL year that is not available falls back to the latest year
+ * (with a toast) so the select never ends up blank.
+ * @param app - The MapApp instance to operate on
+ * @param availableYears - Years listed in the metadata
+ */
+export function resolveYearSelection(
+  app: MapApp,
+  availableYears: number[],
+): void {
+  const yearSelect = domCache.get("year-select");
+  const select = yearSelect instanceof HTMLSelectElement ? yearSelect : null;
+
+  if (select) {
+    availableYears.forEach((year) => {
+      const option = document.createElement("option");
+      option.value = year.toString();
+      option.textContent = "📅 " + year;
+      select.appendChild(option);
+    });
+  }
+
+  const latestValue =
+    availableYears.length > 0 ? Math.max(...availableYears).toString() : "all";
+
+  if (app.selectedYear === "all") {
+    // Default to the latest year only if no saved state exists
+    if (!app.restoredYearFromState) {
+      app.selectedYear = latestValue;
+    }
+  } else if (
+    !availableYears.some((year) => year.toString() === app.selectedYear)
+  ) {
+    showToast(
+      "Year " +
+        app.selectedYear +
+        " is not available, showing " +
+        (availableYears.length > 0 ? latestValue : "all years"),
+      "info",
+    );
+    app.selectedYear = latestValue;
+  }
+
+  if (select) {
+    select.value = app.selectedYear;
+  }
+}
 
 /**
  * Load initial data including airports, metadata, and path data
@@ -22,31 +72,9 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // Load metadata
   const metadata = await app.dataManager.loadMetadata();
 
-  // Populate year filter dropdown
+  // Populate year filter dropdown and validate the selected year
   if (metadata && metadata.available_years) {
-    const yearSelect = domCache.get("year-select");
-    if (yearSelect instanceof HTMLSelectElement) {
-      metadata.available_years.forEach((year) => {
-        const option = document.createElement("option");
-        option.value = year.toString();
-        option.textContent = "📅 " + year;
-        yearSelect.appendChild(option);
-      });
-
-      // Sync dropdown with the selected year
-      if (app.selectedYear && app.selectedYear !== "all") {
-        yearSelect.value = app.selectedYear;
-      }
-    }
-
-    // Default to current year only if no saved state exists
-    if (app.selectedYear === "all" && !app.restoredYearFromState) {
-      const currentYear =
-        metadata.available_years[metadata.available_years.length - 1];
-      if (currentYear !== undefined) {
-        app.selectedYear = currentYear.toString();
-      }
-    }
+    resolveYearSelection(app, metadata.available_years);
   }
 
   // Add airport markers
@@ -57,52 +85,28 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     app.fullStats = metadata.stats;
   }
 
-  // Load full resolution path_info and path_segments
-  try {
-    const fullResData = await app.dataManager.loadData(
-      "data",
-      app.selectedYear,
-    );
-    if (fullResData && fullResData.path_info) {
-      app.fullPathInfo = fullResData.path_info;
-    }
-    if (fullResData && fullResData.path_segments) {
-      app.fullPathSegments = fullResData.path_segments;
-    }
-  } catch (error) {
-    logError("Failed to load full path data:", error);
+  // Load the selected year's data; currentData is the single source of
+  // path_info and path_segments for all managers
+  const data = await app.dataManager.loadData(app.selectedYear);
+  if (data) {
+    app.currentData = data;
   }
 
   // Populate aircraft dropdown
   app.filterManager.updateAircraftDropdown();
 
-  // Update airport popups with initial filter counts
+  // Update airport popups (and home-base marker) with initial filter counts
   app.airportManager.updateAirportPopups();
-
-  // Initialize stats panel
-  if (app.fullStats) {
-    const initialStats = window.KMLHeatmap.calculateFilteredStatistics({
-      pathInfo: app.fullPathInfo ?? [],
-      segments: app.fullPathSegments ?? [],
-      year: app.selectedYear,
-      aircraft: app.selectedAircraft,
-      coordinateCount: app.currentData?.original_points,
-    });
-    app.statsManager.updateStatsPanel(initialStats, false);
-  }
-
-  // Update airport opacity based on restored filters
-  app.airportManager.updateAirportOpacity();
 
   // Load groundspeed range from metadata
   const hasTimingData =
-    metadata &&
+    metadata !== null &&
     metadata.max_groundspeed_knots !== undefined &&
     metadata.max_groundspeed_knots > 0;
 
   if (hasTimingData) {
     const minSpeed = metadata.min_groundspeed_knots ?? 0;
-    const maxSpeed = metadata.max_groundspeed_knots ?? 0;
+    const maxSpeed = metadata.max_groundspeed_knots;
     app.airspeedRange = { min: minSpeed, max: maxSpeed };
     app.layerManager.updateAirspeedLegend(minSpeed, maxSpeed);
   }
@@ -122,7 +126,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     }
   }
 
-  // Initial data load
+  // Initial layer build (heatmap, visible colour layers, stats, airports)
   await app.dataManager.updateLayers();
 
   // Set initial airport marker sizes
@@ -156,70 +160,65 @@ export async function loadInitialData(app: MapApp): Promise<void> {
 
   // Restore stats panel visibility
   if (app.savedState && app.savedState.statsPanelVisible) {
-    const panel = domCache.get("stats-panel");
-    if (panel) {
-      panel.style.display = "block";
-      panel.offsetHeight;
-      panel.classList.add("visible");
-    }
+    app.statsManager.setStatsPanelVisible(true, false);
   }
 }
 
 /**
- * Create airport markers and add them to the airport layer
+ * Build the divIcon for an airport marker
+ * @param name - Airport name (ICAO code is extracted from it)
+ * @param isHomeBase - Whether the airport is the current home base
+ */
+export function createAirportIcon(
+  name: string,
+  isHomeBase: boolean,
+): L.DivIcon {
+  const icaoMatch = name ? name.match(/\b([A-Z]{4})\b/) : null;
+  const icao = icaoMatch ? icaoMatch[1] : "APT";
+  const homeClass = isHomeBase ? " airport-marker-home" : "";
+  const homeLabelClass = isHomeBase ? " airport-label-home" : "";
+
+  const markerHtml =
+    '<div class="airport-marker-container"><div class="airport-marker' +
+    homeClass +
+    '"></div><div class="airport-label' +
+    homeLabelClass +
+    '">' +
+    icao +
+    "</div></div>";
+
+  return L.divIcon({
+    html: markerHtml,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+    popupAnchor: [0, -6],
+    className: "",
+  });
+}
+
+/**
+ * Create airport markers and add them to the airport layer.
+ * The home-base class and the popup badge are applied by
+ * AirportManager.updateAirportPopups() so both follow the current filter.
  * @param app - The MapApp instance to operate on
  * @param airports - Array of airports to create markers for
  */
 export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
-  // Find home base
-  let homeBaseAirport: Airport | null = null;
-  if (airports.length > 0) {
-    homeBaseAirport = airports.reduce((max, airport) => {
-      const airportExt = airport as AirportWithFlightCount;
-      const maxExt = max as AirportWithFlightCount;
-      const airportCount = airportExt.flight_count ?? 0;
-      const maxCount = maxExt?.flight_count ?? 0;
-      return airportCount > maxCount ? airport : max;
-    });
-  }
-
-  // Create markers for each airport
   airports.forEach((airport) => {
-    const icaoMatch = airport.name
-      ? airport.name.match(/\b([A-Z]{4})\b/)
-      : null;
-    const icao = icaoMatch ? icaoMatch[1] : "APT";
-    const isHomeBase = homeBaseAirport && airport.name === homeBaseAirport.name;
-    const homeClass = isHomeBase ? " airport-marker-home" : "";
-    const homeLabelClass = isHomeBase ? " airport-label-home" : "";
-
-    const markerHtml =
-      '<div class="airport-marker-container"><div class="airport-marker' +
-      homeClass +
-      '"></div><div class="airport-label' +
-      homeLabelClass +
-      '">' +
-      icao +
-      "</div></div>";
-
     const popup = generateAirportPopupHtml({
       name: airport.name,
       lat: airport.lat,
       lon: airport.lon,
-      latDms: window.KMLHeatmap.ddToDms(airport.lat, true),
-      lonDms: window.KMLHeatmap.ddToDms(airport.lon, false),
-      flightCount: (airport as AirportWithFlightCount).flight_count || 0,
-      isHomeBase: !!isHomeBase,
+      latDms: ddToDms(airport.lat, true),
+      lonDms: ddToDms(airport.lon, false),
+      flightCount: airport.flight_count || 0,
+      isHomeBase: false,
     });
 
     const marker = L.marker([airport.lat, airport.lon], {
-      icon: L.divIcon({
-        html: markerHtml,
-        iconSize: [12, 12],
-        iconAnchor: [6, 6],
-        popupAnchor: [0, -6],
-        className: "",
-      }),
+      icon: createAirportIcon(airport.name, false),
+      title: airport.name,
+      alt: airport.name,
     }).bindPopup(popup, { autoPanPadding: [50, 50] });
 
     // Add click handler to select paths connected to this airport

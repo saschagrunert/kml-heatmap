@@ -28,7 +28,11 @@ export {
   calculateFilteredStatistics,
 } from "./calculations/statistics";
 
-export { DataLoader } from "./services/dataLoader";
+export {
+  DataLoader,
+  combineYearData,
+  expandYearData,
+} from "./services/dataLoader";
 
 export {
   countCountries,
@@ -37,9 +41,7 @@ export {
   groupByCountry,
   calculateAirportFlightCounts,
   findHomeBase,
-  calculateAirportOpacity,
-  calculateAirportMarkerSize,
-  calculateAirportVisibility,
+  calculateVisibleAirports,
 } from "./features/airports";
 
 export {
@@ -49,9 +51,7 @@ export {
   calculateSegmentProperties,
   formatAltitudeLegendLabels,
   formatAirspeedLegendLabels,
-  filterSegmentsForRendering,
-  groupSegmentsByPath,
-  calculateLayerStats,
+  findNearestSegment,
 } from "./features/layers";
 
 export {

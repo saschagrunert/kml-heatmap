@@ -7,7 +7,7 @@ import socketserver
 import sys
 
 PORT = int(os.environ.get("PORT", "8000"))
-BIND_HOST = os.environ.get("BIND_HOST", "0.0.0.0")
+BIND_HOST = os.environ.get("BIND_HOST", "127.0.0.1")
 
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "")
 
@@ -26,7 +26,7 @@ if not os.path.isdir(data_dir):
     print(f"Error: {data_dir} does not exist. Are you running inside Docker?")
     sys.exit(1)
 os.chdir(data_dir)
-print(f"Starting HTTP server on port {PORT}...")
+print(f"Starting HTTP server on {BIND_HOST}:{PORT}...")
 print(f"Serving files from: {os.getcwd()}")
 print(f"Open http://localhost:{PORT}/ in your browser")
 

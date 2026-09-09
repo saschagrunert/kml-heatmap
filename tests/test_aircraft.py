@@ -1,188 +1,197 @@
 """Tests for aircraft module."""
 
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
-import kml_heatmap.aircraft as aircraft_mod
 from kml_heatmap.aircraft import (
+    load_aircraft_data,
     lookup_aircraft_model,
+    merge_aircraft_data,
+    normalize_registration,
     parse_aircraft_from_filename,
 )
 
 
-class TestParseAircraftFromFilename:
-    """Tests for parse_aircraft_from_filename function."""
+class TestNormalizeRegistration:
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("DEAGJ", "D-EAGJ"),
+            ("OEAKI", "OE-AKI"),
+            ("HBXYZ", "HB-XYZ"),
+            ("GABCD", "G-ABCD"),
+            ("FGXYZ", "F-GXYZ"),
+            ("IABCD", "I-ABCD"),
+            ("PHABC", "PH-ABC"),
+            ("OOABC", "OO-ABC"),
+            ("LXABC", "LX-ABC"),
+            ("SEABC", "SE-ABC"),
+            ("OYABC", "OY-ABC"),
+            ("LNABC", "LN-ABC"),
+            ("OHABC", "OH-ABC"),
+            ("EIABC", "EI-ABC"),
+            ("SPABC", "SP-ABC"),
+            ("OKABC", "OK-ABC"),
+            ("OMABC", "OM-ABC"),
+            ("HAABC", "HA-ABC"),
+            ("9AABC", "9A-ABC"),
+            ("S5ABC", "S5-ABC"),
+            ("YUABC", "YU-ABC"),
+            ("LZABC", "LZ-ABC"),
+            ("YRABC", "YR-ABC"),
+            ("SXABC", "SX-ABC"),
+            ("TCABC", "TC-ABC"),
+            ("ECABC", "EC-ABC"),
+            ("CSABC", "CS-ABC"),
+            ("ESABC", "ES-ABC"),
+            ("YLABC", "YL-ABC"),
+            ("LYABC", "LY-ABC"),
+        ],
+    )
+    def test_prefix_table(self, raw, expected):
+        assert normalize_registration(raw) == expected
 
-    def test_incomplete_format(self):
-        """Test parsing filename with incomplete format."""
-        result = parse_aircraft_from_filename("flight_log.kml")
-        assert isinstance(result, dict)
-        assert result == {}
+    def test_us_registration_has_no_hyphen(self):
+        assert normalize_registration("N12345") == "N12345"
 
-    def test_empty_filename(self):
-        """Test parsing empty filename."""
-        result = parse_aircraft_from_filename("")
-        assert isinstance(result, dict)
-        assert result == {}
+    def test_existing_hyphen_kept(self):
+        assert normalize_registration("OE-AKI") == "OE-AKI"
 
+    def test_unknown_prefix_unchanged(self):
+        assert normalize_registration("ZZ123") == "ZZ123"
 
-class TestParseAircraftFromFilenameCharterware:
-    """Tests for Charterware filename format."""
-
-    def test_charterware_format(self):
-        """Test parsing Charterware filename."""
-        result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
-        assert isinstance(result, dict)
-        assert result.get("registration") == "OE-AKI"
-        assert result.get("type") is None
-        assert result.get("route") == "LOAV-LOAV"
-        assert result.get("format") == "charterware"
-
-    def test_charterware_different_registration(self):
-        """Test Charterware with different registration."""
-        result = parse_aircraft_from_filename("2026-01-15_1000h_D-EXYZ_EDDF-EDDM.kml")
-        assert isinstance(result, dict)
-        assert result.get("registration") == "D-EXYZ"
-        assert result.get("type") is None
-        assert result.get("route") == "EDDF-EDDM"
-        assert result.get("format") == "charterware"
-
-    def test_charterware_round_trip(self):
-        """Test Charterware round trip route (same departure/arrival)."""
-        result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
-        assert isinstance(result, dict)
-        assert result.get("route") == "LOAV-LOAV"
-
-    def test_charterware_international_registration(self):
-        """Test Charterware with various international registrations."""
-        result = parse_aircraft_from_filename("2026-02-10_0900h_OE-ABC_LOWW-LOWI.kml")
-        assert result.get("registration") == "OE-ABC"
-        assert result.get("format") == "charterware"
-
-        result = parse_aircraft_from_filename("2026-03-15_1200h_HB-XYZ_LSZH-LSGG.kml")
-        assert result.get("registration") == "HB-XYZ"
-        assert result.get("format") == "charterware"
-
-    def test_charterware_different_routes(self):
-        """Test Charterware with different route combinations."""
-        result = parse_aircraft_from_filename("2026-01-20_1400h_D-EAGJ_EDDF-EDDM.kml")
-        assert result.get("route") == "EDDF-EDDM"
-
-        result = parse_aircraft_from_filename("2026-02-05_1100h_OE-AKI_LOWW-EDDF.kml")
-        assert result.get("route") == "LOWW-EDDF"
-
-    def test_charterware_without_extension(self):
-        """Test Charterware filename without .kml extension."""
-        result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV")
-        assert isinstance(result, dict)
-        assert result.get("registration") == "OE-AKI"
+    def test_prefix_only_unchanged(self):
+        assert normalize_registration("D") == "D"
+        assert normalize_registration("") == ""
 
 
 class TestParseAircraftFromFilenameNumbered:
-    """Tests for numbered filename format (N_REG_TYPE)."""
-
     def test_numbered_format(self):
-        """Test parsing numbered filename."""
         result = parse_aircraft_from_filename("1_DEHYL_DA40.kml")
-        assert result.get("registration") == "D-EHYL"
-        assert result.get("type") == "DA40"
-        assert result.get("format") == "numbered"
+        assert result == {
+            "registration": "D-EHYL",
+            "type": "DA40",
+            "format": "numbered",
+        }
 
-    def test_numbered_format_large_number(self):
-        """Test parsing numbered filename with large number."""
+    def test_uppercase_extension(self):
+        result = parse_aircraft_from_filename("23_DEHYL_DA40.KML")
+        assert result["type"] == "DA40"
+        assert result["registration"] == "D-EHYL"
+
+    def test_large_number(self):
         result = parse_aircraft_from_filename("87_DESST_C172.kml")
-        assert result.get("registration") == "D-ESST"
-        assert result.get("type") == "C172"
-        assert result.get("format") == "numbered"
+        assert result["registration"] == "D-ESST"
+        assert result["type"] == "C172"
 
-    def test_numbered_format_without_extension(self):
-        """Test parsing numbered filename without .kml extension."""
+    def test_without_extension(self):
         result = parse_aircraft_from_filename("42_DELGD_C182")
-        assert result.get("registration") == "D-ELGD"
-        assert result.get("type") == "C182"
-        assert result.get("format") == "numbered"
+        assert result["registration"] == "D-ELGD"
+        assert result["type"] == "C182"
 
-    def test_numbered_format_non_german_registration(self):
-        """Test numbered format with non-German registration."""
+    def test_non_german_registration(self):
         result = parse_aircraft_from_filename("5_OE-AKI_PA28.kml")
-        assert result.get("registration") == "OE-AKI"
-        assert result.get("type") == "PA28"
-        assert result.get("format") == "numbered"
+        assert result["registration"] == "OE-AKI"
+        assert result["type"] == "PA28"
+
+    def test_austrian_registration_without_hyphen(self):
+        result = parse_aircraft_from_filename("5_OEAKI_PA28.kml")
+        assert result["registration"] == "OE-AKI"
+
+    def test_extra_underscore_still_parses_first_three_parts(self):
+        result = parse_aircraft_from_filename("7_DEAGJ_DA20_copy.kml")
+        assert result["registration"] == "D-EAGJ"
+        assert result["type"] == "DA20"
+        assert result["format"] == "numbered"
+
+
+class TestParseAircraftFromFilenameCharterware:
+    def test_charterware_format(self):
+        result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
+        assert result == {
+            "registration": "OE-AKI",
+            "type": None,
+            "route": "LOAV-LOAV",
+            "format": "charterware",
+        }
+
+    def test_different_route(self):
+        result = parse_aircraft_from_filename("2026-01-15_1000h_D-EXYZ_EDDF-EDDM.kml")
+        assert result["registration"] == "D-EXYZ"
+        assert result["route"] == "EDDF-EDDM"
+
+    def test_without_extension(self):
+        result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV")
+        assert result["registration"] == "OE-AKI"
+
+    def test_invalid_calendar_date_rejected(self):
+        assert parse_aircraft_from_filename("2026-02-30_1513h_OE-AKI_LOAV.kml") == {}
+
+    def test_malformed_date_rejected(self):
+        assert parse_aircraft_from_filename("2026-1-2_1513h_OE-AKI_LOAV.kml") == {}
+
+    @pytest.mark.parametrize("time_part", ["1513", "2513h", "1575h", "abcdh"])
+    def test_invalid_time_rejected(self, time_part):
+        name = f"2026-01-12_{time_part}_OE-AKI_LOAV-LOAV.kml"
+        assert parse_aircraft_from_filename(name) == {}
+
+
+class TestParseAircraftFromFilenameUnrecognized:
+    @pytest.mark.parametrize("name", ["flight_log.kml", "", "track.kml", "a_b.kml"])
+    def test_unrecognized_returns_empty(self, name):
+        assert parse_aircraft_from_filename(name) == {}
+
+
+class TestLoadAircraftData:
+    def test_loads_mapping(self, tmp_path):
+        path = tmp_path / "aircraft.json"
+        path.write_text(json.dumps({"D-EAGJ": "Diamond DA-20A-1 Katana"}))
+        assert load_aircraft_data(path) == {"D-EAGJ": "Diamond DA-20A-1 Katana"}
+
+    def test_corrupt_json_returns_empty(self, tmp_path):
+        path = tmp_path / "aircraft.json"
+        path.write_text("{invalid json")
+        assert load_aircraft_data(path) == {}
+
+    def test_missing_file_returns_empty(self, tmp_path):
+        assert load_aircraft_data(tmp_path / "missing.json") == {}
+
+    def test_non_object_returns_empty(self, tmp_path):
+        path = tmp_path / "aircraft.json"
+        path.write_text(json.dumps(["D-EAGJ"]))
+        assert load_aircraft_data(path) == {}
+
+
+class TestMergeAircraftData:
+    def test_first_file_wins_on_conflict(self, tmp_path):
+        first = tmp_path / "a" / "aircraft.json"
+        second = tmp_path / "b" / "aircraft.json"
+        first.parent.mkdir()
+        second.parent.mkdir()
+        first.write_text(json.dumps({"D-EAGJ": "First", "D-EHYL": "Only first"}))
+        second.write_text(json.dumps({"D-EAGJ": "Second", "D-ESST": "Only second"}))
+
+        merged = merge_aircraft_data([first, second])
+
+        assert merged == {
+            "D-EAGJ": "First",
+            "D-EHYL": "Only first",
+            "D-ESST": "Only second",
+        }
+
+    def test_empty_input(self):
+        assert merge_aircraft_data([]) == {}
 
 
 class TestLookupAircraftModel:
-    """Tests for lookup_aircraft_model with aircraft.json file."""
-
-    @pytest.fixture(autouse=True)
-    def _clear_cache(self):
-        aircraft_mod._aircraft_cache = None
-        aircraft_mod._aircraft_cache_path = None
-
     def test_lookup_found(self):
-        """Test looking up an existing registration."""
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump({"D-EAGJ": "Diamond DA-20A-1 Katana"}, f)
-            path = Path(f.name)
-
-        try:
-            result = lookup_aircraft_model("D-EAGJ", path)
-            assert result == "Diamond DA-20A-1 Katana"
-        finally:
-            path.unlink()
+        data = {"D-EAGJ": "Diamond DA-20A-1 Katana"}
+        assert lookup_aircraft_model("D-EAGJ", data) == "Diamond DA-20A-1 Katana"
 
     def test_lookup_not_found(self):
-        """Test looking up a missing registration."""
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump({"D-EAGJ": "Diamond DA-20A-1 Katana"}, f)
-            path = Path(f.name)
+        assert lookup_aircraft_model("D-XXXX", {"D-EAGJ": "Katana"}) is None
 
-        try:
-            result = lookup_aircraft_model("D-XXXX", path)
-            assert result is None
-        finally:
-            path.unlink()
-
-    def test_lookup_no_file(self):
-        """Test lookup without aircraft file returns None."""
-        result = lookup_aircraft_model("D-EAGJ")
-        assert result is None
-
-    def test_lookup_nonexistent_file(self):
-        """Test lookup with nonexistent file returns None."""
-        result = lookup_aircraft_model("D-EAGJ", Path("/nonexistent/aircraft.json"))
-        assert result is None
-
-    def test_lookup_corrupt_json(self):
-        """Test lookup with corrupt JSON file returns None."""
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            f.write("{invalid json")
-            path = Path(f.name)
-
-        try:
-            result = lookup_aircraft_model("D-EAGJ", path)
-            assert result is None
-        finally:
-            path.unlink()
-
-    def test_lookup_multiple_registrations(self):
-        """Test looking up multiple registrations from same file."""
-        data = {
-            "D-EAGJ": "Diamond DA-20A-1 Katana",
-            "D-EHYL": "Diamond DA-40TDI Diamond Star",
-            "D-ESST": "1978 Cessna 172N",
-        }
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
-            json.dump(data, f)
-            path = Path(f.name)
-
-        try:
-            assert lookup_aircraft_model("D-EAGJ", path) == "Diamond DA-20A-1 Katana"
-            assert (
-                lookup_aircraft_model("D-EHYL", path) == "Diamond DA-40TDI Diamond Star"
-            )
-            assert lookup_aircraft_model("D-ESST", path) == "1978 Cessna 172N"
-        finally:
-            path.unlink()
+    def test_lookup_without_data(self):
+        assert lookup_aircraft_model("D-EAGJ") is None
+        assert lookup_aircraft_model("D-EAGJ", {}) is None

@@ -1,14 +1,22 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  REFERENCE_DISTANCES,
+  calculateAircraftColorClass,
   calculateYearStats,
+  findClosestReferenceDistance,
   generateFunFacts,
   selectDiverseFacts,
-  calculateAircraftColorClass,
 } from "../../../../kml_heatmap/frontend/features/wrapped";
 import * as airports from "../../../../kml_heatmap/frontend/features/airports";
+import type {
+  FunFact,
+  PathInfo,
+  PathSegment,
+  YearStats,
+} from "../../../../kml_heatmap/frontend/types";
 
 describe("wrapped feature", () => {
-  const mockPathInfo = [
+  const mockPathInfo: PathInfo[] = [
     {
       id: 1,
       year: 2025,
@@ -43,7 +51,7 @@ describe("wrapped feature", () => {
     },
   ];
 
-  const mockSegments = [
+  const mockSegments: PathSegment[] = [
     {
       path_id: 1,
       coords: [
@@ -166,19 +174,40 @@ describe("wrapped feature", () => {
       expect(stats.total_flights).toBe(0);
     });
 
+    it("uses pre-filtered paths and segments when provided", () => {
+      const preFiltered = {
+        paths: [mockPathInfo[2]!],
+        segments: mockSegments.filter((s) => s.path_id === 3),
+      };
+
+      const stats = calculateYearStats(
+        mockPathInfo,
+        mockSegments,
+        2025,
+        null,
+        "all",
+        preFiltered,
+      );
+
+      expect(stats.total_flights).toBe(1);
+      expect(stats.aircraft_list[0]?.registration).toBe("D-EXYZ");
+    });
+
     it("sorts aircraft by flight count", () => {
       const stats = calculateYearStats(mockPathInfo, mockSegments, 2025);
 
-      expect(stats.aircraft_list[0].flights).toBeGreaterThanOrEqual(
-        stats.aircraft_list[1].flights,
+      expect(stats.aircraft_list[0]!.flights).toBeGreaterThanOrEqual(
+        stats.aircraft_list[1]!.flights,
       );
     });
 
     it("includes flight time for each aircraft", () => {
       const stats = calculateYearStats(mockPathInfo, mockSegments, 2025);
 
+      expect(stats.aircraft_list.length).toBeGreaterThan(0);
       stats.aircraft_list.forEach((aircraft) => {
         expect(aircraft.flight_time_str).toMatch(/^\d+h \d+m$/);
+        expect(typeof aircraft.flight_time_seconds).toBe("number");
       });
     });
 
@@ -197,7 +226,7 @@ describe("wrapped feature", () => {
       const aircraft = stats.aircraft_list.find(
         (a) => a.registration === "D-EAGJ",
       );
-      expect(aircraft.model).toBe("Diamond DA40 NG");
+      expect(aircraft?.model).toBe("Diamond DA40 NG");
     });
 
     it("filters by aircraft when aircraft parameter is provided", () => {
@@ -211,7 +240,7 @@ describe("wrapped feature", () => {
 
       expect(stats.total_flights).toBe(2);
       expect(stats.aircraft_list).toHaveLength(1);
-      expect(stats.aircraft_list[0].registration).toBe("D-EAGJ");
+      expect(stats.aircraft_list[0]!.registration).toBe("D-EAGJ");
     });
 
     it("filters by both year and aircraft", () => {
@@ -241,7 +270,7 @@ describe("wrapped feature", () => {
     });
 
     it("handles segments without time data", () => {
-      const segmentsNoTime = [
+      const segmentsNoTime: PathSegment[] = [
         {
           path_id: 1,
           coords: [
@@ -257,7 +286,7 @@ describe("wrapped feature", () => {
     });
 
     it("handles paths without airports", () => {
-      const pathInfoNoAirports = [
+      const pathInfoNoAirports: PathInfo[] = [
         { id: 1, year: 2025, aircraft_registration: "D-EAGJ" },
       ];
 
@@ -268,7 +297,7 @@ describe("wrapped feature", () => {
     });
 
     it("handles duplicate airport names correctly", () => {
-      const pathInfoDuplicates = [
+      const pathInfoDuplicates: PathInfo[] = [
         { id: 1, year: 2025, start_airport: "EDAV", end_airport: "EDAV" },
       ];
 
@@ -279,11 +308,39 @@ describe("wrapped feature", () => {
     });
   });
 
+  describe("findClosestReferenceDistance", () => {
+    it("lists references in ascending order", () => {
+      const distances = REFERENCE_DISTANCES.map((ref) => ref.nm);
+      expect([...distances].sort((a, b) => a - b)).toEqual(distances);
+    });
+
+    it("returns the closest reference within tolerance", () => {
+      expect(findClosestReferenceDistance(280)?.label).toBe("Berlin to Munich");
+      expect(findClosestReferenceDistance(180)?.label).toBe("London to Paris");
+      expect(findClosestReferenceDistance(3200)?.label).toBe(
+        "London to New York",
+      );
+    });
+
+    it("returns null when no reference is close enough", () => {
+      expect(findClosestReferenceDistance(30)).toBeNull();
+      expect(findClosestReferenceDistance(6000)).toBeNull();
+    });
+
+    it("returns null for zero or invalid distances", () => {
+      expect(findClosestReferenceDistance(0)).toBeNull();
+      expect(findClosestReferenceDistance(-5)).toBeNull();
+      expect(findClosestReferenceDistance(Number.NaN)).toBeNull();
+    });
+  });
+
   describe("generateFunFacts", () => {
-    const yearStats = {
+    const yearStats: YearStats = {
       total_flights: 10,
-      total_distance_nm: 5000, // Increased to trigger distance comparisons
+      total_distance_nm: 5000,
       num_airports: 5,
+      flight_time: "50h 0m",
+      airport_names: [],
       aircraft_list: [
         {
           registration: "D-EAGJ",
@@ -309,41 +366,29 @@ describe("wrapped feature", () => {
     });
 
     it("generates altitude facts when provided", () => {
-      const fullStats = {
+      const facts = generateFunFacts(yearStats, {
         total_altitude_gain_ft: 50000,
-      };
-
-      const facts = generateFunFacts(yearStats, fullStats);
+      });
 
       expect(facts.some((f) => f.category === "altitude")).toBe(true);
     });
 
     it("generates time facts when provided", () => {
-      const fullStats = {
+      const facts = generateFunFacts(yearStats, {
         total_flight_time_seconds: 100000,
-      };
-
-      const facts = generateFunFacts(yearStats, fullStats);
+      });
 
       expect(facts.some((f) => f.category === "time")).toBe(true);
     });
 
     it("generates speed facts when provided", () => {
-      const fullStats = {
-        cruise_speed_knots: 120,
-      };
-
-      const facts = generateFunFacts(yearStats, fullStats);
+      const facts = generateFunFacts(yearStats, { cruise_speed_knots: 120 });
 
       expect(facts.some((f) => f.category === "speed")).toBe(true);
     });
 
     it("generates achievement facts for high altitude", () => {
-      const fullStats = {
-        max_altitude_ft: 45000,
-      };
-
-      const facts = generateFunFacts(yearStats, fullStats);
+      const facts = generateFunFacts(yearStats, { max_altitude_ft: 45000 });
 
       expect(facts.some((f) => f.category === "achievement")).toBe(true);
     });
@@ -360,24 +405,43 @@ describe("wrapped feature", () => {
     });
 
     it("generates around Earth fact for high distance", () => {
-      const highDistanceStats = { ...yearStats, total_distance_nm: 20000 };
-      const facts = generateFunFacts(highDistanceStats);
+      const facts = generateFunFacts({
+        ...yearStats,
+        total_distance_nm: 20000,
+      });
 
       expect(facts.some((f) => f.text.includes("around the Earth"))).toBe(true);
     });
 
     it("generates Everest fact for high altitude gain", () => {
-      const fullStats = {
+      const facts = generateFunFacts(yearStats, {
         total_altitude_gain_ft: 60000,
-      };
-
-      const facts = generateFunFacts(yearStats, fullStats);
+      });
 
       expect(facts.some((f) => f.text.includes("Everest"))).toBe(true);
     });
 
+    it("compares the longest journey with the closest reference distance", () => {
+      const facts = generateFunFacts(yearStats, { longest_flight_nm: 280 });
+
+      const longest = facts.find((f) => f.text.includes("longest journey"));
+      expect(longest?.text).toContain("<strong>280 nm</strong>");
+      expect(longest?.text).toContain(
+        "about the distance from Berlin to Munich!",
+      );
+    });
+
+    it("omits the comparison when no reference distance is close", () => {
+      const facts = generateFunFacts(yearStats, { longest_flight_nm: 30 });
+
+      const longest = facts.find((f) => f.text.includes("longest journey"));
+      expect(longest?.text).toBe(
+        "Your longest journey: <strong>30 nm</strong>",
+      );
+    });
+
     it("generates loyal aircraft fact for single aircraft", () => {
-      const singleAircraftStats = {
+      const singleAircraftStats: YearStats = {
         ...yearStats,
         aircraft_list: [{ registration: "D-EAGJ", type: "DA40", flights: 10 }],
       };
@@ -424,7 +488,7 @@ describe("wrapped feature", () => {
     });
 
     it("generates explorer fact for many aircraft", () => {
-      const manyAircraftStats = {
+      const manyAircraftStats: YearStats = {
         ...yearStats,
         aircraft_list: [
           { registration: "D-EAGJ", flights: 5 },
@@ -442,10 +506,12 @@ describe("wrapped feature", () => {
     });
 
     it("returns 4-6 facts with comprehensive data", () => {
-      const comprehensiveStats = {
+      const comprehensiveStats: YearStats = {
         total_flights: 50,
         total_distance_nm: 10000,
         num_airports: 10,
+        flight_time: "100h 0m",
+        airport_names: [],
         aircraft_list: [
           {
             registration: "D-EAGJ",
@@ -457,7 +523,7 @@ describe("wrapped feature", () => {
         ],
       };
 
-      const fullStats = {
+      const facts = generateFunFacts(comprehensiveStats, {
         total_altitude_gain_ft: 50000,
         total_flight_time_seconds: 100000,
         cruise_speed_knots: 120,
@@ -466,16 +532,14 @@ describe("wrapped feature", () => {
         max_altitude_ft: 5000,
         most_common_cruise_altitude_ft: 1500,
         most_common_cruise_altitude_m: 457,
-      };
-
-      const facts = generateFunFacts(comprehensiveStats, fullStats);
+      });
 
       expect(facts.length).toBeGreaterThanOrEqual(4);
       expect(facts.length).toBeLessThanOrEqual(6);
     });
 
     it("limits facts per category", () => {
-      const fullStats = {
+      const facts = generateFunFacts(yearStats, {
         total_altitude_gain_ft: 50000,
         total_flight_time_seconds: 100000,
         cruise_speed_knots: 120,
@@ -484,17 +548,13 @@ describe("wrapped feature", () => {
         max_altitude_ft: 45000,
         most_common_cruise_altitude_ft: 1500,
         most_common_cruise_altitude_m: 457,
-      };
-
-      const facts = generateFunFacts(yearStats, fullStats);
-
-      // Count facts per category
-      const categoryCount = {};
-      facts.forEach((fact) => {
-        categoryCount[fact.category] = (categoryCount[fact.category] || 0) + 1;
       });
 
-      // Each category should have at most 3 facts
+      const categoryCount: Record<string, number> = {};
+      facts.forEach((fact) => {
+        categoryCount[fact.category] = (categoryCount[fact.category] ?? 0) + 1;
+      });
+
       Object.values(categoryCount).forEach((count) => {
         expect(count).toBeLessThanOrEqual(3);
       });
@@ -502,14 +562,14 @@ describe("wrapped feature", () => {
   });
 
   describe("selectDiverseFacts", () => {
-    const allFacts = [
-      { category: "distance", priority: 10, text: "Fact 1" },
-      { category: "distance", priority: 9, text: "Fact 2" },
-      { category: "distance", priority: 8, text: "Fact 3" },
-      { category: "altitude", priority: 9, text: "Fact 4" },
-      { category: "altitude", priority: 7, text: "Fact 5" },
-      { category: "time", priority: 8, text: "Fact 6" },
-      { category: "speed", priority: 7, text: "Fact 7" },
+    const allFacts: FunFact[] = [
+      { category: "distance", priority: 10, text: "Fact 1", icon: "1" },
+      { category: "distance", priority: 9, text: "Fact 2", icon: "2" },
+      { category: "distance", priority: 8, text: "Fact 3", icon: "3" },
+      { category: "altitude", priority: 9, text: "Fact 4", icon: "4" },
+      { category: "altitude", priority: 7, text: "Fact 5", icon: "5" },
+      { category: "time", priority: 8, text: "Fact 6", icon: "6" },
+      { category: "speed", priority: 7, text: "Fact 7", icon: "7" },
     ];
 
     it("selects up to 6 facts", () => {
@@ -522,19 +582,26 @@ describe("wrapped feature", () => {
       const selected = selectDiverseFacts(allFacts);
 
       const priorities = selected.map((f) => f.priority);
-      expect(priorities[0]).toBeGreaterThanOrEqual(
-        priorities[priorities.length - 1],
+      expect(priorities[0]).toBe(10);
+      expect(priorities[0]!).toBeGreaterThanOrEqual(
+        priorities[priorities.length - 1]!,
       );
     });
 
-    it("limits facts per category to 2", () => {
-      const selected = selectDiverseFacts(allFacts);
+    it("limits facts per category to 3", () => {
+      const manyDistance: FunFact[] = [
+        ...allFacts,
+        { category: "distance", priority: 6, text: "Fact 8", icon: "8" },
+      ];
 
-      const categoryCount = {};
+      const selected = selectDiverseFacts(manyDistance);
+
+      const categoryCount: Record<string, number> = {};
       selected.forEach((fact) => {
-        categoryCount[fact.category] = (categoryCount[fact.category] || 0) + 1;
+        categoryCount[fact.category] = (categoryCount[fact.category] ?? 0) + 1;
       });
 
+      expect(categoryCount["distance"]).toBe(3);
       Object.values(categoryCount).forEach((count) => {
         expect(count).toBeLessThanOrEqual(3);
       });
@@ -547,73 +614,59 @@ describe("wrapped feature", () => {
     });
 
     it("handles fewer than 4 facts", () => {
-      const fewFacts = [
-        { category: "distance", priority: 10, text: "Fact 1" },
-        { category: "altitude", priority: 9, text: "Fact 2" },
+      const fewFacts: FunFact[] = [
+        { category: "distance", priority: 10, text: "Fact 1", icon: "1" },
+        { category: "altitude", priority: 9, text: "Fact 2", icon: "2" },
       ];
 
-      const selected = selectDiverseFacts(fewFacts);
-
-      expect(selected.length).toBe(2);
+      expect(selectDiverseFacts(fewFacts)).toHaveLength(2);
     });
 
     it("handles empty array", () => {
-      const selected = selectDiverseFacts([]);
-
-      expect(selected.length).toBe(0);
+      expect(selectDiverseFacts([])).toHaveLength(0);
     });
   });
 
   describe("calculateAircraftColorClass", () => {
     it("returns high class for most flights", () => {
-      const colorClass = calculateAircraftColorClass(10, 10, 1);
-
-      expect(colorClass).toBe("fleet-aircraft-high");
+      expect(calculateAircraftColorClass(10, 10, 1)).toBe(
+        "fleet-aircraft-high",
+      );
     });
 
     it("returns low class for least flights", () => {
-      const colorClass = calculateAircraftColorClass(1, 10, 1);
-
-      expect(colorClass).toBe("fleet-aircraft-low");
+      expect(calculateAircraftColorClass(1, 10, 1)).toBe("fleet-aircraft-low");
     });
 
-    it("returns medium-high class for 75th percentile", () => {
-      const colorClass = calculateAircraftColorClass(8, 10, 1);
-
-      expect(colorClass).toBe("fleet-aircraft-high");
+    it("returns high class for the 75th percentile", () => {
+      expect(calculateAircraftColorClass(8, 10, 1)).toBe("fleet-aircraft-high");
     });
 
     it("returns low class for below 25th percentile", () => {
-      // 3 flights out of range 1-10: normalized = (3-1)/(10-1) = 0.222 < 0.25
-      const colorClass = calculateAircraftColorClass(3, 10, 1);
-
-      expect(colorClass).toBe("fleet-aircraft-low");
+      // normalized = (3-1)/(10-1) = 0.222 < 0.25
+      expect(calculateAircraftColorClass(3, 10, 1)).toBe("fleet-aircraft-low");
     });
 
     it("returns medium-low class for 25-50th percentile", () => {
-      // 4 flights out of range 1-10: normalized = (4-1)/(10-1) = 0.333, between 0.25 and 0.5
-      const colorClass = calculateAircraftColorClass(4, 10, 1);
-
-      expect(colorClass).toBe("fleet-aircraft-medium-low");
+      // normalized = (4-1)/(10-1) = 0.333
+      expect(calculateAircraftColorClass(4, 10, 1)).toBe(
+        "fleet-aircraft-medium-low",
+      );
     });
 
     it("handles equal min and max", () => {
-      const colorClass = calculateAircraftColorClass(5, 5, 5);
-
-      expect(colorClass).toBe("fleet-aircraft-high");
+      expect(calculateAircraftColorClass(5, 5, 5)).toBe("fleet-aircraft-high");
     });
 
-    it("handles edge cases", () => {
-      // 5.5 out of 1-10: normalized = (5.5-1)/(10-1) = 0.5 (exactly at boundary)
-      const colorClass1 = calculateAircraftColorClass(5.5, 10, 1);
-      // 7.5 out of 1-10: normalized = (7.5-1)/(10-1) = 0.722 < 0.75
-      const colorClass2 = calculateAircraftColorClass(7.5, 10, 1);
-      // 8 out of 1-10: normalized = (8-1)/(10-1) = 0.777 >= 0.75
-      const colorClass3 = calculateAircraftColorClass(8, 10, 1);
-
-      expect(colorClass1).toBe("fleet-aircraft-medium-high");
-      expect(colorClass2).toBe("fleet-aircraft-medium-high");
-      expect(colorClass3).toBe("fleet-aircraft-high");
+    it("handles boundary values", () => {
+      // normalized 0.5 and 0.722 are medium-high, 0.777 is high
+      expect(calculateAircraftColorClass(5.5, 10, 1)).toBe(
+        "fleet-aircraft-medium-high",
+      );
+      expect(calculateAircraftColorClass(7.5, 10, 1)).toBe(
+        "fleet-aircraft-medium-high",
+      );
+      expect(calculateAircraftColorClass(8, 10, 1)).toBe("fleet-aircraft-high");
     });
   });
 });

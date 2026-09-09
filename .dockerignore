@@ -1,55 +1,72 @@
 # Git
 .git
 .gitignore
+.gitattributes
 
 # Python
-__pycache__
-*.py[cod]
-*$py.class
-*.so
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+**/*.so
 .Python
-env/
-venv/
-ENV/
+env
+venv
+ENV
 .venv
 .mypy_cache
 .pytest_cache
 .ruff_cache
+.hypothesis
+*.egg-info
+dist
+build
+.coverage
+.coverage.*
+coverage.xml
 
 # Node
 node_modules
+# Bundles are built inside the image; never copy stale host builds
+kml_heatmap/static/bundle.js*
+kml_heatmap/static/*.bundle.js*
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# IDE and AI assistant files
+.vscode
+.idea
+**/*.swp
+**/*.swo
+**/*~
 .claude
+.playwright-mcp
 
-# Output files
-*.html
+# Test and coverage output
+htmlcov
+coverage
+test-results
+playwright-report
+.pre-commit-cache
+
+# Generated site and input data
+/index.html
 *.kml
 *.kmz
 docs
-coverage
-test-results
-
-# Data
 data
+kml_test_*
 
-# Build
+# Build and CI files not needed inside the images
 Dockerfile
 Dockerfile.test
 Makefile
-.playwright-mcp
+.github
+.pre-commit-config.yaml
+_typos.toml
+codecov.yml
 
-# CI/CD
-.github/
-
-# Documentation (already in image)
-README.md
+# Documentation
+*.md
+LICENSE
 
 # OS
-.DS_Store
-Thumbs.db
+**/.DS_Store
+**/Thumbs.db

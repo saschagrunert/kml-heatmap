@@ -4,7 +4,8 @@ Utility scripts for testing and development.
 
 ## generate_test_data.py
 
-Generates realistic test KML files with curved flight paths between major European airports.
+Generates realistic test KML files with curved flight paths between major
+European airports.
 
 ### Features
 
@@ -32,11 +33,15 @@ python3 scripts/generate_test_data.py --help
 ### Testing Generated Data
 
 ```bash
-# Build with test data
+# Build with test data (obfuscates the generated files in place)
 make build INPUT_DIR=kml_test_10000
 
-# Or with Docker
-docker run --rm -v $(pwd):/data kml-heatmap kml_test_10000
+# Or with Docker (also obfuscates the generated files in place)
+mkdir -p out
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/kml_test_10000:/data/kml_test_10000" -v "$PWD/out:/data/out" \
+  -v ~/.cache/kml-heatmap:/cache \
+  kml-heatmap kml_test_10000 --output-dir out
 ```
 
 ### Performance Testing
@@ -45,6 +50,8 @@ Recommended test sizes:
 
 - **1k flights**: Quick test, ~50MB source data
 - **10k flights**: Standard test, ~500MB source data
-- **100k flights**: Stress test, ~5GB source data, takes ~10 minutes to process
+- **100k flights**: Stress test, ~5GB source data (about 5M points), processed
+  in about 10 minutes with parallel parsing and export
 
-The system has been tested and optimized to handle 100k+ flights smoothly.
+These numbers are the reference for the processing time mentioned in the main
+`README.md`. The system has been tested and optimized to handle 100k+ flights.

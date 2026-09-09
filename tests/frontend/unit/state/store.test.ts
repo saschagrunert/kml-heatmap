@@ -136,7 +136,7 @@ describe("AppStore", () => {
       store.get("selectedPathIds").add(42);
       store.notifyMutation("selectedPathIds");
       expect(fn).toHaveBeenCalledOnce();
-      const ids = fn.mock.calls[0][0] as Set<number>;
+      const ids = fn.mock.calls[0]![0] as Set<number>;
       expect(ids.has(42)).toBe(true);
     });
 
@@ -146,7 +146,7 @@ describe("AppStore", () => {
       store.subscribe("selectedPathIds", fn);
       store.get("selectedPathIds").add(1);
       store.notifyMutation("selectedPathIds");
-      const [newVal, oldVal] = fn.mock.calls[0];
+      const [newVal, oldVal] = fn.mock.calls[0]!;
       expect(newVal).toBe(oldVal);
     });
   });

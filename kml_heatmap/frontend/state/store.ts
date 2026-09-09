@@ -3,12 +3,7 @@
  * Provides get/set access with listener subscriptions and batched updates.
  */
 
-import type {
-  PathInfo,
-  PathSegment,
-  FilteredStatistics,
-  KMLDataset,
-} from "../types";
+import type { FilteredStatistics, KMLDataset } from "../types";
 
 export interface Range {
   min: number;
@@ -26,9 +21,13 @@ export interface StoreState {
   airportsVisible: boolean;
   aviationVisible: boolean;
   buttonsHidden: boolean;
+  statsPanelVisible: boolean;
+  /**
+   * Wrapped modal visibility. `undefined` means "not tracked by the store
+   * yet" and state persistence falls back to inspecting the DOM.
+   */
+  wrappedVisible: boolean | undefined;
   currentData: KMLDataset | null;
-  fullPathInfo: PathInfo[] | null;
-  fullPathSegments: PathSegment[] | null;
   fullStats: FilteredStatistics | null;
   altitudeRange: Range;
   airspeedRange: Range;
@@ -48,9 +47,9 @@ export function createDefaultState(): StoreState {
     airportsVisible: true,
     aviationVisible: false,
     buttonsHidden: false,
+    statsPanelVisible: false,
+    wrappedVisible: undefined,
     currentData: null,
-    fullPathInfo: null,
-    fullPathSegments: null,
     fullStats: null,
     altitudeRange: { min: 0, max: 10000 },
     airspeedRange: { min: 0, max: 200 },

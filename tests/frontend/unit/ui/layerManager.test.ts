@@ -4,157 +4,120 @@ import {
   LayerManager,
   isTouchDevice,
 } from "../../../../kml_heatmap/frontend/ui/layerManager";
-import type { MockMapApp } from "../../testHelpers";
+import {
+  getColorForAirspeed,
+  getColorForAltitude,
+} from "../../../../kml_heatmap/frontend/utils/colors";
+import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
+import {
+  createMockApp,
+  createDataset,
+  createSegment,
+  asMapApp,
+  type MockApp,
+} from "../../testHelpers";
+import type { MockPolyline } from "../../../mocks/leaflet";
 
 // Mock domCache
 vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
   domCache: {
     cacheElements: vi.fn(),
-    get: vi.fn((id: string) => {
-      return document.getElementById(id);
-    }),
+    get: vi.fn((id: string) => document.getElementById(id)),
   },
 }));
 
-// Mock logger
-vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
-  logDebug: vi.fn(),
-  logError: vi.fn(),
-}));
+function polylines(): MockPolyline[] {
+  return vi.mocked(L.polyline).mock.results.map((r) => r.value as MockPolyline);
+}
+
+function clickHandler(pl: MockPolyline): (e: unknown) => void {
+  const call = pl.on.mock.calls.find((c) => c[0] === "click");
+  return call![1] as (e: unknown) => void;
+}
 
 describe("LayerManager", () => {
   let layerManager: LayerManager;
-  let mockApp: MockMapApp;
+  let mockApp: MockApp;
+
+  const segA = (): PathSegment =>
+    createSegment({
+      path_id: 1,
+      altitude_ft: 3000,
+      groundspeed_knots: 100,
+      coords: [
+        [48, 16],
+        [49, 17],
+      ],
+    });
 
   beforeEach(() => {
-    // Mock window.KMLHeatmap
-    window.KMLHeatmap = {
-      getColorForAltitude: vi.fn(() => "#ff0000"),
-      getColorForAirspeed: vi.fn(() => "#0000ff"),
-    } as typeof window.KMLHeatmap;
+    vi.mocked(L.polyline).mockClear();
+    vi.mocked(L.popup).mockClear();
 
-    // Create DOM elements for legends
-    const legendMin = document.createElement("span");
-    legendMin.id = "legend-min";
-    document.body.appendChild(legendMin);
+    for (const id of [
+      "legend-min",
+      "legend-max",
+      "airspeed-legend-min",
+      "airspeed-legend-max",
+    ]) {
+      const el = document.createElement("span");
+      el.id = id;
+      document.body.appendChild(el);
+    }
 
-    const legendMax = document.createElement("span");
-    legendMax.id = "legend-max";
-    document.body.appendChild(legendMax);
-
-    const airspeedLegendMin = document.createElement("span");
-    airspeedLegendMin.id = "airspeed-legend-min";
-    document.body.appendChild(airspeedLegendMin);
-
-    const airspeedLegendMax = document.createElement("span");
-    airspeedLegendMax.id = "airspeed-legend-max";
-    document.body.appendChild(airspeedLegendMax);
-
-    // Create mock app
-    mockApp = {
-      selectedYear: "all",
-      selectedAircraft: "all",
-      selectedPathIds: new Set<number>(),
-      fullPathInfo: [],
-      currentData: {
-        path_info: [{ id: 1, year: 2025, aircraft_registration: "D-ABCD" }],
-        path_segments: [
-          {
-            path_id: 1,
-            altitude_ft: 3000,
-            altitude_m: 914,
-            groundspeed_knots: 100,
-            coords: [
-              [48, 16],
-              [49, 17],
-            ],
-          },
-        ],
-      },
+    mockApp = createMockApp({
+      currentData: createDataset(
+        [{ id: 1, year: 2025, aircraft_registration: "D-ABCD" }],
+        [segA()],
+      ),
       altitudeRange: { min: 0, max: 5000 },
       airspeedRange: { min: 0, max: 200 },
-      altitudeLayer: { clearLayers: vi.fn() },
-      airspeedLayer: { clearLayers: vi.fn() },
-      altitudeRenderer: {},
-      airspeedRenderer: {},
-      pathSegments: {},
-      buttonsHidden: false,
-      airportManager: { updateAirportOpacity: vi.fn() },
-      statsManager: { updateStatsForSelection: vi.fn() },
-      pathSelection: { togglePathSelection: vi.fn() },
-    } as MockMapApp;
+    });
 
-    layerManager = new LayerManager(mockApp as any);
+    layerManager = new LayerManager(asMapApp(mockApp));
   });
 
   afterEach(() => {
-    document.getElementById("legend-min")?.remove();
-    document.getElementById("legend-max")?.remove();
-    document.getElementById("airspeed-legend-min")?.remove();
-    document.getElementById("airspeed-legend-max")?.remove();
+    document.body.innerHTML = "";
+    delete (window as { ontouchstart?: unknown }).ontouchstart;
   });
 
-  describe("updateAltitudeLegend", () => {
-    it("sets correct text with ft and m conversion", () => {
+  describe("legend updates", () => {
+    it("formats altitude legend with ft and m", () => {
       layerManager.updateAltitudeLegend(1000, 5000);
 
-      const minEl = document.getElementById("legend-min");
-      const maxEl = document.getElementById("legend-max");
-
-      expect(minEl!.textContent).toBe("1000 ft (305 m)");
-      expect(maxEl!.textContent).toBe("5000 ft (1524 m)");
+      expect(document.getElementById("legend-min")!.textContent).toBe(
+        "1000 ft (305 m)",
+      );
+      expect(document.getElementById("legend-max")!.textContent).toBe(
+        "5000 ft (1524 m)",
+      );
     });
 
-    it("rounds values correctly", () => {
-      layerManager.updateAltitudeLegend(1234.6, 5678.4);
-
-      const minEl = document.getElementById("legend-min");
-      const maxEl = document.getElementById("legend-max");
-
-      expect(minEl!.textContent).toBe("1235 ft (376 m)");
-      expect(maxEl!.textContent).toBe("5678 ft (1731 m)");
-    });
-
-    it("handles zero values", () => {
-      layerManager.updateAltitudeLegend(0, 0);
-
-      const minEl = document.getElementById("legend-min");
-      const maxEl = document.getElementById("legend-max");
-
-      expect(minEl!.textContent).toBe("0 ft (0 m)");
-      expect(maxEl!.textContent).toBe("0 ft (0 m)");
-    });
-  });
-
-  describe("updateAirspeedLegend", () => {
-    it("sets correct text with knots and km/h conversion", () => {
+    it("formats airspeed legend with kt and km/h", () => {
       layerManager.updateAirspeedLegend(100, 200);
 
-      const minEl = document.getElementById("airspeed-legend-min");
-      const maxEl = document.getElementById("airspeed-legend-max");
-
-      expect(minEl!.textContent).toBe("100 kt (185 km/h)");
-      expect(maxEl!.textContent).toBe("200 kt (370 km/h)");
+      expect(document.getElementById("airspeed-legend-min")!.textContent).toBe(
+        "100 kt (185 km/h)",
+      );
+      expect(document.getElementById("airspeed-legend-max")!.textContent).toBe(
+        "200 kt (370 km/h)",
+      );
     });
 
-    it("rounds values correctly", () => {
-      layerManager.updateAirspeedLegend(123.4, 234.6);
-
-      const minEl = document.getElementById("airspeed-legend-min");
-      const maxEl = document.getElementById("airspeed-legend-max");
-
-      expect(minEl!.textContent).toBe("123 kt (229 km/h)");
-      expect(maxEl!.textContent).toBe("235 kt (434 km/h)");
+    it("rounds legend values", () => {
+      layerManager.updateAltitudeLegend(1234.6, 5678.4);
+      expect(document.getElementById("legend-min")!.textContent).toBe(
+        "1235 ft (376 m)",
+      );
+      expect(document.getElementById("legend-max")!.textContent).toBe(
+        "5678 ft (1731 m)",
+      );
     });
 
-    it("handles zero values", () => {
-      layerManager.updateAirspeedLegend(0, 0);
-
-      const minEl = document.getElementById("airspeed-legend-min");
-      const maxEl = document.getElementById("airspeed-legend-max");
-
-      expect(minEl!.textContent).toBe("0 kt (0 km/h)");
-      expect(maxEl!.textContent).toBe("0 kt (0 km/h)");
+    it("tolerates missing legend elements", () => {
+      document.getElementById("legend-min")?.remove();
+      expect(() => layerManager.updateAltitudeLegend(0, 1)).not.toThrow();
     });
   });
 
@@ -164,123 +127,204 @@ describe("LayerManager", () => {
 
       layerManager.redrawAltitudePaths();
 
-      expect(mockApp.altitudeLayer!.clearLayers).not.toHaveBeenCalled();
+      expect(mockApp.altitudeLayer.clearLayers).not.toHaveBeenCalled();
+      expect(L.polyline).not.toHaveBeenCalled();
     });
 
-    it("clears altitude layer", () => {
+    it("clears the layer and draws one polyline per run on the canvas renderer", () => {
       layerManager.redrawAltitudePaths();
 
-      expect(mockApp.altitudeLayer!.clearLayers).toHaveBeenCalled();
+      expect(mockApp.altitudeLayer.clearLayers).toHaveBeenCalled();
+      expect(L.polyline).toHaveBeenCalledTimes(1);
+      const pl = polylines()[0]!;
+      expect(pl.latlngs).toEqual([
+        [48, 16],
+        [49, 17],
+      ]);
+      expect(pl.options["renderer"]).toBe(mockApp.pathRenderer);
+      expect(pl.options["bubblingMouseEvents"]).toBe(false);
+      expect(pl.options["color"]).toBe(getColorForAltitude(3000, 0, 5000));
+      expect(pl.options["weight"]).toBe(4);
+      expect(pl.options["opacity"]).toBe(0.85);
+      expect(pl.addTo).toHaveBeenCalledWith(mockApp.altitudeLayer);
+      expect(layerManager.getPolylineCount("altitude")).toBe(1);
     });
 
-    it("resets pathSegments", () => {
-      mockApp.pathSegments = { 1: ["existing"] };
-
-      layerManager.redrawAltitudePaths();
-
-      // pathSegments is reset then rebuilt; it should not contain old data
-      expect(mockApp.pathSegments).not.toEqual({ 1: ["existing"] });
-    });
-
-    it("uses full altitude range when no paths selected", () => {
-      layerManager.redrawAltitudePaths();
-
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
-        3000,
-        0,
-        5000,
+    it("merges contiguous segments with the same rounded value into one polyline", () => {
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        [
+          createSegment({
+            path_id: 1,
+            altitude_ft: 3000,
+            coords: [
+              [48, 16],
+              [48.1, 16.1],
+            ],
+          }),
+          createSegment({
+            path_id: 1,
+            altitude_ft: 3000.2,
+            coords: [
+              [48.1, 16.1],
+              [48.2, 16.2],
+            ],
+          }),
+          // different altitude: new run
+          createSegment({
+            path_id: 1,
+            altitude_ft: 3500,
+            coords: [
+              [48.2, 16.2],
+              [48.3, 16.3],
+            ],
+          }),
+          // same altitude but not contiguous: new run
+          createSegment({
+            path_id: 1,
+            altitude_ft: 3500,
+            coords: [
+              [49, 17],
+              [49.1, 17.1],
+            ],
+          }),
+        ],
       );
+
+      layerManager.redrawAltitudePaths();
+
+      expect(L.polyline).toHaveBeenCalledTimes(3);
+      expect(polylines()[0]!.latlngs).toEqual([
+        [48, 16],
+        [48.1, 16.1],
+        [48.2, 16.2],
+      ]);
+      expect(polylines()[1]!.latlngs).toEqual([
+        [48.2, 16.2],
+        [48.3, 16.3],
+      ]);
+      expect(polylines()[2]!.latlngs).toEqual([
+        [49, 17],
+        [49.1, 17.1],
+      ]);
+      expect(layerManager.getPolylineCount("altitude")).toBe(3);
     });
 
-    it("uses selected paths altitude range when paths are selected", () => {
+    it("never merges segments of different paths", () => {
+      mockApp.currentData = createDataset(
+        [
+          { id: 1, year: 2025 },
+          { id: 2, year: 2025 },
+        ],
+        [
+          createSegment({
+            path_id: 1,
+            coords: [
+              [48, 16],
+              [48.1, 16.1],
+            ],
+          }),
+          createSegment({
+            path_id: 2,
+            coords: [
+              [48.1, 16.1],
+              [48.2, 16.2],
+            ],
+          }),
+        ],
+      );
+
+      layerManager.redrawAltitudePaths();
+
+      expect(L.polyline).toHaveBeenCalledTimes(2);
+    });
+
+    it("uses selected paths' range for colours and legend when paths are selected", () => {
       mockApp.selectedPathIds.add(1);
 
       layerManager.redrawAltitudePaths();
 
-      // With path 1 selected, altitude range should be derived from its segment (3000, 3000)
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
-        3000,
-        3000,
-        3000,
+      const pl = polylines()[0]!;
+      expect(pl.options["color"]).toBe(getColorForAltitude(3000, 3000, 3000));
+      expect(pl.options["weight"]).toBe(6);
+      expect(pl.options["opacity"]).toBe(1);
+      expect(document.getElementById("legend-min")!.textContent).toBe(
+        "3000 ft (914 m)",
       );
     });
 
-    it("filters segments by year", () => {
+    it("dims unselected paths when a selection exists", () => {
+      mockApp.currentData!.path_info.push({ id: 2, year: 2025 });
+      mockApp.currentData!.path_segments.push(
+        createSegment({ path_id: 2, altitude_ft: 2000 }),
+      );
+      mockApp.selectedPathIds.add(1);
+
+      layerManager.redrawAltitudePaths();
+
+      const [selected, unselected] = polylines();
+      expect(selected!.options["opacity"]).toBe(1);
+      expect(unselected!.options["opacity"]).toBe(0.1);
+      expect(unselected!.options["weight"]).toBe(4);
+    });
+
+    it("filters segments by year and aircraft", () => {
       mockApp.selectedYear = "2024";
-
       layerManager.redrawAltitudePaths();
+      expect(L.polyline).not.toHaveBeenCalled();
 
-      // Path info has year 2025, so filtering by 2024 should skip it
-      expect(window.KMLHeatmap.getColorForAltitude).not.toHaveBeenCalled();
-    });
-
-    it("does not filter segments when year is 'all'", () => {
       mockApp.selectedYear = "all";
-
-      layerManager.redrawAltitudePaths();
-
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalled();
-    });
-
-    it("filters segments by aircraft", () => {
       mockApp.selectedAircraft = "D-EFGH";
+      layerManager.redrawAltitudePaths();
+      expect(L.polyline).not.toHaveBeenCalled();
+
+      mockApp.selectedAircraft = "D-ABCD";
+      layerManager.redrawAltitudePaths();
+      expect(L.polyline).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips segments without path info when a filter is active", () => {
+      mockApp.currentData = createDataset([], [segA()]);
+      mockApp.selectedYear = "2025";
 
       layerManager.redrawAltitudePaths();
 
-      // Path info has aircraft D-ABCD, so filtering by D-EFGH should skip it
-      expect(window.KMLHeatmap.getColorForAltitude).not.toHaveBeenCalled();
+      expect(L.polyline).not.toHaveBeenCalled();
     });
 
-    it("does not filter segments when aircraft is 'all'", () => {
-      mockApp.selectedAircraft = "all";
-
+    it("does not compute statistics or airport visibility (callers do)", () => {
       layerManager.redrawAltitudePaths();
 
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalled();
+      expect(
+        mockApp.statsManager.updateStatsForSelection,
+      ).not.toHaveBeenCalled();
+      expect(
+        mockApp.airportManager.updateAirportOpacity,
+      ).not.toHaveBeenCalled();
     });
 
-    it("calls updateAirportOpacity", () => {
+    it("updates the altitude legend with the full range", () => {
       layerManager.redrawAltitudePaths();
 
-      expect(mockApp.airportManager!.updateAirportOpacity).toHaveBeenCalled();
+      expect(document.getElementById("legend-min")!.textContent).toBe(
+        "0 ft (0 m)",
+      );
+      expect(document.getElementById("legend-max")!.textContent).toBe(
+        "5000 ft (1524 m)",
+      );
     });
 
-    it("calls updateStatsForSelection", () => {
-      layerManager.redrawAltitudePaths();
-
-      expect(mockApp.statsManager!.updateStatsForSelection).toHaveBeenCalled();
-    });
-
-    it("updates altitude legend", () => {
-      layerManager.redrawAltitudePaths();
-
-      const minEl = document.getElementById("legend-min");
-      const maxEl = document.getElementById("legend-max");
-
-      // Full range: 0 to 5000
-      expect(minEl!.textContent).toBe("0 ft (0 m)");
-      expect(maxEl!.textContent).toBe("5000 ft (1524 m)");
-    });
-
-    it("stores path segments by path_id", () => {
-      layerManager.redrawAltitudePaths();
-
-      expect(mockApp.pathSegments![1]).toBeDefined();
-      expect(mockApp.pathSegments![1].length).toBe(1);
-    });
-
-    it("hides unselected paths completely when isolate mode is active", () => {
-      // Add a second path segment so we have selected and unselected
-      mockApp.currentData!.path_segments.push({
-        path_id: 2,
-        altitude_ft: 2000,
-        altitude_m: 610,
-        groundspeed_knots: 80,
-        coords: [
-          [47, 15],
-          [47.5, 15.5],
-        ],
-      });
+    it("hides unselected paths completely in isolate mode", () => {
+      mockApp.currentData!.path_segments.push(
+        createSegment({
+          path_id: 2,
+          altitude_ft: 2000,
+          coords: [
+            [47, 15],
+            [47.5, 15.5],
+          ],
+        }),
+      );
       mockApp.currentData!.path_info.push({
         id: 2,
         year: 2025,
@@ -291,23 +335,19 @@ describe("LayerManager", () => {
 
       layerManager.redrawAltitudePaths();
 
-      // Only path 1 (selected) should have been rendered
-      // Path 2 (unselected + isolateSelection) should be hidden completely
-      expect(mockApp.pathSegments![1]).toBeDefined();
-      expect(mockApp.pathSegments![2]).toBeUndefined();
+      expect(L.polyline).toHaveBeenCalledTimes(1);
+      const pl = polylines()[0]!;
+      expect(pl.options["weight"]).toBe(4);
+      expect(pl.options["opacity"]).toBe(0.85);
     });
 
-    it("falls back to full altitude range when selected segments empty", () => {
-      // Select path that has no segments
+    it("falls back to the full range when selected segments are empty", () => {
       mockApp.selectedPathIds.add(999);
 
       layerManager.redrawAltitudePaths();
 
-      // Should use altitudeRange fallback (0, 5000)
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
-        3000,
-        0,
-        5000,
+      expect(polylines()[0]!.options["color"]).toBe(
+        getColorForAltitude(3000, 0, 5000),
       );
     });
   });
@@ -318,163 +358,179 @@ describe("LayerManager", () => {
 
       layerManager.redrawAirspeedPaths();
 
-      expect(mockApp.airspeedLayer!.clearLayers).not.toHaveBeenCalled();
+      expect(mockApp.airspeedLayer.clearLayers).not.toHaveBeenCalled();
     });
 
-    it("clears airspeed layer", () => {
+    it("draws with airspeed colours and updates the airspeed legend", () => {
       layerManager.redrawAirspeedPaths();
 
-      expect(mockApp.airspeedLayer!.clearLayers).toHaveBeenCalled();
-    });
-
-    it("uses full airspeed range when no paths selected", () => {
-      layerManager.redrawAirspeedPaths();
-
-      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
-        100,
-        0,
-        200,
+      expect(mockApp.airspeedLayer.clearLayers).toHaveBeenCalled();
+      expect(polylines()[0]!.options["color"]).toBe(
+        getColorForAirspeed(100, 0, 200),
+      );
+      expect(document.getElementById("airspeed-legend-max")!.textContent).toBe(
+        "200 kt (370 km/h)",
       );
     });
 
-    it("uses selected paths airspeed range when paths are selected", () => {
+    it("uses selected paths' airspeed range when paths are selected", () => {
       mockApp.selectedPathIds.add(1);
 
       layerManager.redrawAirspeedPaths();
 
-      // With path 1 selected (groundspeed_knots: 100), range should be (100, 100)
-      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
-        100,
-        100,
-        100,
+      expect(polylines()[0]!.options["color"]).toBe(
+        getColorForAirspeed(100, 100, 100),
       );
     });
 
-    it("filters segments by year", () => {
-      mockApp.selectedYear = "2024";
-
-      layerManager.redrawAirspeedPaths();
-
-      // Path info has year 2025, so filtering by 2024 should skip it
-      expect(window.KMLHeatmap.getColorForAirspeed).not.toHaveBeenCalled();
-    });
-
-    it("filters segments by aircraft", () => {
-      mockApp.selectedAircraft = "D-EFGH";
-
-      layerManager.redrawAirspeedPaths();
-
-      // Path info has aircraft D-ABCD, so filtering by D-EFGH should skip it
-      expect(window.KMLHeatmap.getColorForAirspeed).not.toHaveBeenCalled();
-    });
-
-    it("calls updateAirportOpacity", () => {
-      layerManager.redrawAirspeedPaths();
-
-      expect(mockApp.airportManager!.updateAirportOpacity).toHaveBeenCalled();
-    });
-
-    it("calls updateStatsForSelection", () => {
-      layerManager.redrawAirspeedPaths();
-
-      expect(mockApp.statsManager!.updateStatsForSelection).toHaveBeenCalled();
-    });
-
-    it("updates airspeed legend", () => {
-      layerManager.redrawAirspeedPaths();
-
-      const minEl = document.getElementById("airspeed-legend-min");
-      const maxEl = document.getElementById("airspeed-legend-max");
-
-      // Full range: 0 to 200
-      expect(minEl!.textContent).toBe("0 kt (0 km/h)");
-      expect(maxEl!.textContent).toBe("200 kt (370 km/h)");
-    });
-
     it("skips segments with zero groundspeed", () => {
-      mockApp.currentData!.path_segments = [
-        {
-          path_id: 1,
-          altitude_ft: 3000,
-          altitude_m: 914,
-          groundspeed_knots: 0,
-          coords: [
-            [48, 16],
-            [49, 17],
-          ],
-        },
-      ];
+      mockApp.currentData!.path_segments[0]!.groundspeed_knots = 0;
 
       layerManager.redrawAirspeedPaths();
 
-      expect(window.KMLHeatmap.getColorForAirspeed).not.toHaveBeenCalled();
+      expect(L.polyline).not.toHaveBeenCalled();
     });
 
-    it("hides unselected paths completely when isolate mode is active", () => {
-      mockApp.currentData!.path_segments.push({
-        path_id: 2,
-        altitude_ft: 2000,
-        altitude_m: 610,
-        groundspeed_knots: 80,
-        coords: [
-          [47, 15],
-          [47.5, 15.5],
-        ],
-      });
+    it("falls back to the full airspeed range when selection has no speed data", () => {
+      mockApp.selectedPathIds.add(999);
+
+      layerManager.redrawAirspeedPaths();
+
+      expect(polylines()[0]!.options["color"]).toBe(
+        getColorForAirspeed(100, 0, 200),
+      );
+    });
+  });
+
+  describe("clearLayer", () => {
+    it("removes polylines and resets the tracking map", () => {
+      layerManager.redrawAltitudePaths();
+      expect(layerManager.getPolylineCount("altitude")).toBe(1);
+
+      layerManager.clearLayer("altitude");
+
+      expect(mockApp.altitudeLayer.clearLayers).toHaveBeenCalledTimes(2);
+      expect(layerManager.getPolylineCount("altitude")).toBe(0);
+    });
+  });
+
+  describe("updateSelectionStyles", () => {
+    beforeEach(() => {
       mockApp.currentData!.path_info.push({
         id: 2,
         year: 2025,
         aircraft_registration: "D-ABCD",
       });
-      mockApp.selectedPathIds.add(1);
-      mockApp.isolateSelection = true;
-
-      layerManager.redrawAirspeedPaths();
-
-      // Only path 1 (selected) should have been rendered
-      // getColorForAirspeed is called once for polyline color and once for popup
-      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledTimes(2);
-      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
-        100,
-        100,
-        100,
+      mockApp.currentData!.path_segments.push(
+        createSegment({
+          path_id: 2,
+          altitude_ft: 2000,
+          groundspeed_knots: 80,
+          coords: [
+            [47, 15],
+            [47.5, 15.5],
+          ],
+        }),
       );
     });
 
-    it("falls back to full airspeed range when selected segments empty", () => {
-      // Select path that has no segments with groundspeed
-      mockApp.selectedPathIds.add(999);
+    it("restyles polylines in place instead of rebuilding", () => {
+      mockApp.altitudeVisible = true;
+      layerManager.redrawAltitudePaths();
+      const [pl1, pl2] = polylines();
+      vi.mocked(L.polyline).mockClear();
 
-      layerManager.redrawAirspeedPaths();
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
 
-      // Should use airspeedRange fallback (0, 200) for color calculation
-      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
-        100,
-        0,
-        200,
+      expect(L.polyline).not.toHaveBeenCalled();
+      expect(mockApp.altitudeLayer.clearLayers).toHaveBeenCalledTimes(1);
+      expect(pl1!.setStyle).toHaveBeenCalledWith({
+        color: getColorForAltitude(3000, 3000, 3000),
+        weight: 6,
+        opacity: 1,
+      });
+      expect(pl2!.setStyle).toHaveBeenCalledWith({
+        color: getColorForAltitude(2000, 3000, 3000),
+        weight: 4,
+        opacity: 0.1,
+      });
+      expect(document.getElementById("legend-min")!.textContent).toBe(
+        "3000 ft (914 m)",
       );
+    });
+
+    it("restores normal styles when the selection is cleared", () => {
+      mockApp.altitudeVisible = true;
+      mockApp.selectedPathIds.add(1);
+      layerManager.redrawAltitudePaths();
+      const [pl1] = polylines();
+
+      mockApp.selectedPathIds.clear();
+      layerManager.updateSelectionStyles();
+
+      expect(pl1!.setStyle).toHaveBeenLastCalledWith({
+        color: getColorForAltitude(3000, 0, 5000),
+        weight: 4,
+        opacity: 0.85,
+      });
+      expect(document.getElementById("legend-max")!.textContent).toBe(
+        "5000 ft (1524 m)",
+      );
+    });
+
+    it("skips hidden layers", () => {
+      mockApp.altitudeVisible = false;
+      layerManager.redrawAltitudePaths();
+      const [pl1] = polylines();
+
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+
+      expect(pl1!.setStyle).not.toHaveBeenCalled();
+    });
+
+    it("restyles the airspeed layer when visible", () => {
+      mockApp.airspeedVisible = true;
+      layerManager.redrawAirspeedPaths();
+      const [pl1] = polylines();
+
+      mockApp.selectedPathIds.add(2);
+      layerManager.updateSelectionStyles();
+
+      expect(pl1!.setStyle).toHaveBeenCalledWith({
+        color: getColorForAirspeed(100, 80, 80),
+        weight: 4,
+        opacity: 0.1,
+      });
+    });
+  });
+
+  describe("getPathInfoMap", () => {
+    it("indexes path info by id and caches per data instance", () => {
+      const first = layerManager.getPathInfoMap();
+      expect(first.get(1)?.aircraft_registration).toBe("D-ABCD");
+      expect(layerManager.getPathInfoMap()).toBe(first);
+
+      mockApp.currentData = createDataset([{ id: 5 }]);
+      const second = layerManager.getPathInfoMap();
+      expect(second).not.toBe(first);
+      expect(second.has(5)).toBe(true);
+    });
+
+    it("returns an empty map without data", () => {
+      mockApp.currentData = null;
+      expect(layerManager.getPathInfoMap().size).toBe(0);
     });
   });
 
   describe("isTouchDevice", () => {
-    let hadOntouchstart: boolean;
-
-    beforeEach(() => {
-      hadOntouchstart = "ontouchstart" in window;
-      if (hadOntouchstart) delete (window as any).ontouchstart;
-    });
-
-    afterEach(() => {
-      if (hadOntouchstart) (window as any).ontouchstart = null;
-      else delete (window as any).ontouchstart;
-    });
-
     it("returns false when no touch support", () => {
       expect(isTouchDevice()).toBe(false);
     });
 
     it("returns true when ontouchstart exists", () => {
-      (window as any).ontouchstart = null;
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
       expect(isTouchDevice()).toBe(true);
     });
 
@@ -495,91 +551,120 @@ describe("LayerManager", () => {
     });
   });
 
-  describe("touch vs non-touch segment interaction", () => {
-    let hadOntouchstart: boolean;
-
-    beforeEach(() => {
-      hadOntouchstart = "ontouchstart" in window;
-      if (hadOntouchstart) delete (window as any).ontouchstart;
-      vi.mocked(L.polyline).mockClear();
-      vi.mocked(L.popup).mockClear();
-    });
-
-    afterEach(() => {
-      if (hadOntouchstart) (window as any).ontouchstart = null;
-      else delete (window as any).ontouchstart;
-    });
-
-    it("uses bindTooltip on non-touch devices", () => {
+  describe("segment interactions", () => {
+    it("binds a lazy tooltip function on non-touch devices", () => {
       layerManager.redrawAltitudePaths();
 
-      const polylineInstance = (L.polyline as any).mock.results[0]?.value;
-      expect(polylineInstance).toBeDefined();
-      expect(polylineInstance.bindTooltip).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({ sticky: true }),
+      const pl = polylines()[0]!;
+      expect(pl.bindTooltip).toHaveBeenCalledWith(
+        expect.any(Function),
+        expect.objectContaining({ sticky: true, className: "segment-tooltip" }),
       );
+      const contentFn = pl.bindTooltip.mock.calls[0]![0] as () => string;
+      expect(contentFn()).toContain("3000 ft");
+    });
+
+    it("registers the mouseover handler before the tooltip", () => {
+      layerManager.redrawAltitudePaths();
+
+      const pl = polylines()[0]!;
+      const mouseoverOrder = pl.on.mock.invocationCallOrder[0]!;
+      const tooltipOrder = pl.bindTooltip.mock.invocationCallOrder[0]!;
+      expect(pl.on.mock.calls[0]![0]).toBe("mouseover");
+      expect(mouseoverOrder).toBeLessThan(tooltipOrder);
+    });
+
+    it("updates tooltip content to the nearest segment on mousemove for merged polylines", () => {
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        [
+          createSegment({
+            path_id: 1,
+            altitude_ft: 3000,
+            groundspeed_knots: 90,
+            coords: [
+              [48, 16],
+              [48.1, 16.1],
+            ],
+          }),
+          createSegment({
+            path_id: 1,
+            altitude_ft: 3000,
+            groundspeed_knots: 120,
+            coords: [
+              [48.1, 16.1],
+              [48.2, 16.2],
+            ],
+          }),
+        ],
+      );
+
+      layerManager.redrawAltitudePaths();
+
+      expect(L.polyline).toHaveBeenCalledTimes(1);
+      const pl = polylines()[0]!;
+      const mousemove = pl.on.mock.calls.find(
+        (c) => c[0] === "mousemove",
+      )![1] as (e: unknown) => void;
+
+      mousemove({ latlng: { lat: 48.19, lng: 16.19 } });
+      expect(pl.setTooltipContent).toHaveBeenCalledTimes(1);
+      expect(String(pl.setTooltipContent.mock.calls[0]![0])).toContain(
+        "120 kt",
+      );
+
+      // Same nearest segment: no content update
+      mousemove({ latlng: { lat: 48.18, lng: 16.18 } });
+      expect(pl.setTooltipContent).toHaveBeenCalledTimes(1);
     });
 
     it("skips bindTooltip on touch devices", () => {
-      (window as any).ontouchstart = null;
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
 
       layerManager.redrawAltitudePaths();
 
-      const polylineInstance = (L.polyline as any).mock.results[0]?.value;
-      expect(polylineInstance).toBeDefined();
-      expect(polylineInstance.bindTooltip).not.toHaveBeenCalled();
+      expect(polylines()[0]!.bindTooltip).not.toHaveBeenCalled();
     });
 
-    it("opens standalone popup on touch device click", () => {
-      (window as any).ontouchstart = null;
-      mockApp.map = {
-        invalidateSize: vi.fn(),
-      } as any;
+    it("opens a standalone popup on touch device click and toggles selection", () => {
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
 
       layerManager.redrawAltitudePaths();
 
-      const polylineInstance = (L.polyline as any).mock.results[0]?.value;
-      const clickHandler = polylineInstance.on.mock.calls.find(
-        (c: any[]) => c[0] === "click",
-      )?.[1];
-      expect(clickHandler).toBeDefined();
-
-      const mockEvent = {
+      const pl = polylines()[0]!;
+      const event = {
         latlng: { lat: 48, lng: 16 },
         originalEvent: { stopPropagation: vi.fn() },
       };
-      clickHandler(mockEvent);
+      clickHandler(pl)(event);
 
-      expect(mockEvent.originalEvent.stopPropagation).toHaveBeenCalled();
+      expect(event.originalEvent.stopPropagation).toHaveBeenCalled();
+      expect(L.DomEvent.stopPropagation).toHaveBeenCalledWith(event);
       expect(L.popup).toHaveBeenCalled();
-      const popupInstance = (L.popup as any).mock.results[0]?.value;
-      expect(popupInstance.setLatLng).toHaveBeenCalledWith(mockEvent.latlng);
-      expect(popupInstance.setContent).toHaveBeenCalledWith(expect.any(String));
+      const popupInstance = vi.mocked(L.popup).mock.results[0]!.value as {
+        setLatLng: ReturnType<typeof vi.fn>;
+        setContent: ReturnType<typeof vi.fn>;
+        openOn: ReturnType<typeof vi.fn>;
+      };
+      expect(popupInstance.setLatLng).toHaveBeenCalledWith(event.latlng);
+      expect(String(popupInstance.setContent.mock.calls[0]![0])).toContain(
+        "3000 ft",
+      );
       expect(popupInstance.openOn).toHaveBeenCalledWith(mockApp.map);
+      expect(mockApp.pathSelection.togglePathSelection).toHaveBeenCalledWith(1);
     });
 
-    it("does not open standalone popup on non-touch device click", () => {
-      mockApp.map = {
-        invalidateSize: vi.fn(),
-      } as any;
-
+    it("does not open a popup on non-touch click but toggles selection", () => {
       layerManager.redrawAltitudePaths();
 
-      const polylineInstance = (L.polyline as any).mock.results[0]?.value;
-      const clickHandler = polylineInstance.on.mock.calls.find(
-        (c: any[]) => c[0] === "click",
-      )?.[1];
-      expect(clickHandler).toBeDefined();
-
-      const mockEvent = {
+      const pl = polylines()[0]!;
+      clickHandler(pl)({
         latlng: { lat: 48, lng: 16 },
         originalEvent: { stopPropagation: vi.fn() },
-      };
-      clickHandler(mockEvent);
+      });
 
-      expect(mockEvent.originalEvent.stopPropagation).toHaveBeenCalled();
       expect(L.popup).not.toHaveBeenCalled();
+      expect(mockApp.pathSelection.togglePathSelection).toHaveBeenCalledWith(1);
     });
   });
 });

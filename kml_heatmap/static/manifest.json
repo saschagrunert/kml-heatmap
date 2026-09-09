@@ -4,7 +4,7 @@
   "short_name": "KML Heatmap",
   "description": "Interactive flight path heatmap visualization",
   "start_url": "./",
-  "display": "standalone",
+  "display": "minimal-ui",
   "scope": "./",
   "orientation": "any",
   "background_color": "#1a1a1a",
@@ -27,12 +27,6 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
-    },
-    {
-      "src": "./apple-touch-icon.png",
-      "sizes": "180x180",
-      "type": "image/png",
-      "purpose": "maskable"
     }
   ]
 }

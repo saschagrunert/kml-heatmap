@@ -7,16 +7,27 @@ on:
     paths:
       - "data/**"
   workflow_dispatch:
+permissions:
+  contents: read
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compute the weekly cache key
+        id: week
+        run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Cache the OurAirports database
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kml-heatmap
+          key: airports-${{ steps.week.outputs.week }}
       - name: Build
         run: make build
         env:
@@ -31,5 +42,6 @@ jobs:
             echo "No changes to docs/"
           else
             git commit -s -m "Update docs [skip ci]"
+            git pull --rebase origin main
             git push
           fi

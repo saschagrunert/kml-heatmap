@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   escapeHtml,
   generateStatsHtml,
   generateFunFactsHtml,
   calculateAircraftColorClass,
   generateAircraftFleetHtml,
+  generateAirportPopupHtml,
   generateHomeBaseHtml,
   generateDestinationsHtml,
   generateSegmentPopupHtml,
@@ -12,6 +13,11 @@ import {
   type AirportCount,
   type SegmentPopupParams,
 } from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
+import {
+  getColorForAirspeed,
+  getColorForAltitude,
+  rgbToRgba,
+} from "../../../../kml_heatmap/frontend/utils/colors";
 import type {
   FilteredStatistics,
   FunFact,
@@ -57,6 +63,7 @@ describe("htmlGenerators", () => {
       total_distance_nm: 12345.67,
       flight_time: "123h 45m",
       airport_names: ["EDDF", "EDDH"],
+      aircraft_list: [],
     };
 
     const mockFullStats: FilteredStatistics = {
@@ -78,6 +85,7 @@ describe("htmlGenerators", () => {
     it("generates stats HTML without timing data", () => {
       const html = generateStatsHtml(mockYearStats, mockFullStats, false);
 
+      expect(html).toContain('<div class="stat-card">');
       expect(html).toContain('<div class="stat-value">42</div>');
       expect(html).toContain('<div class="stat-label">Flights</div>');
       expect(html).toContain('<div class="stat-value">10</div>');
@@ -144,18 +152,20 @@ describe("htmlGenerators", () => {
           category: "distance",
           icon: "✈️",
           text: "You flew 10,000 miles!",
+          priority: 1,
         },
         {
           category: "altitude",
           icon: "⬆️",
           text: "Reached 35,000 feet",
+          priority: 2,
         },
       ];
 
       const html = generateFunFactsHtml(funFacts);
 
-      expect(html).toContain('<div class="fun-facts-title">✨ Facts</div>');
-      expect(html).toContain('data-category="distance"');
+      expect(html).toContain('<h3 class="fun-facts-title">✨ Facts</h3>');
+      expect(html).toContain('<div class="fun-fact" data-category="distance">');
       expect(html).toContain('<span class="fun-fact-icon">✈️</span>');
       expect(html).toContain(
         '<span class="fun-fact-text">You flew 10,000 miles!</span>',
@@ -170,7 +180,7 @@ describe("htmlGenerators", () => {
     it("handles empty fun facts array", () => {
       const html = generateFunFactsHtml([]);
 
-      expect(html).toBe('<div class="fun-facts-title">✨ Facts</div>');
+      expect(html).toBe('<h3 class="fun-facts-title">✨ Facts</h3>');
     });
 
     it("escapes HTML in fact text", () => {
@@ -179,6 +189,7 @@ describe("htmlGenerators", () => {
           category: "test",
           icon: "🔥",
           text: "Test <script>alert('xss')</script>",
+          priority: 1,
         },
       ];
 
@@ -255,9 +266,8 @@ describe("htmlGenerators", () => {
 
       const html = generateAircraftFleetHtml(yearStats);
 
-      expect(html).toContain(
-        '<div class="aircraft-fleet-title">✈️ Fleet</div>',
-      );
+      expect(html).toContain('<h3 class="aircraft-fleet-title">✈️ Fleet</h3>');
+      expect(html).toContain('class="fleet-aircraft fleet-aircraft-high"');
       expect(html).toContain("D-EABC");
       expect(html).toContain("Cessna 172");
       expect(html).toContain("20 flights");
@@ -351,7 +361,7 @@ describe("htmlGenerators", () => {
     });
 
     it("returns empty string for undefined aircraft list", () => {
-      const yearStats: YearStats = {
+      const yearStats = {
         total_flights: 0,
         num_airports: 0,
         total_distance_nm: 0,
@@ -359,7 +369,7 @@ describe("htmlGenerators", () => {
         airport_names: [],
       };
 
-      const html = generateAircraftFleetHtml(yearStats);
+      const html = generateAircraftFleetHtml(yearStats as unknown as YearStats);
 
       expect(html).toBe("");
     });
@@ -397,7 +407,7 @@ describe("htmlGenerators", () => {
       const html = generateHomeBaseHtml(homeBase);
 
       expect(html).toContain(
-        '<div class="top-airports-title">🏠 Home Base</div>',
+        '<h3 class="top-airports-title">🏠 Home Base</h3>',
       );
       expect(html).toContain('<div class="top-airport-name">EDDF</div>');
       expect(html).toContain('<div class="top-airport-count">25 flights</div>');
@@ -439,8 +449,9 @@ describe("htmlGenerators", () => {
       const html = generateDestinationsHtml(grouped, identity, noFlag);
 
       expect(html).toContain(
-        '<div class="airports-grid-title">🗺️ Destinations</div>',
+        '<h3 class="airports-grid-title">🗺️ Destinations</h3>',
       );
+      expect(html).toContain('<div class="country-group"');
       expect(html).toContain("DE</div>");
       expect(html).toContain('<div class="airport-badge">EDDH</div>');
       expect(html).toContain('<div class="airport-badge">EDDM</div>');
@@ -493,14 +504,48 @@ describe("htmlGenerators", () => {
     });
   });
 
-  describe("generateSegmentPopupHtml", () => {
-    beforeEach(() => {
-      window.KMLHeatmap = {
-        getColorForAltitude: vi.fn(() => "rgb(255, 0, 0)"),
-        getColorForAirspeed: vi.fn(() => "rgb(0, 0, 255)"),
-      } as typeof window.KMLHeatmap;
+  describe("generateAirportPopupHtml", () => {
+    const params = {
+      name: "Frankfurt EDDF",
+      lat: 50.1,
+      lon: 8.67,
+      latDms: "50°6'0.0\"N",
+      lonDms: "8°40'12.0\"E",
+      flightCount: 20,
+      isHomeBase: false,
+    };
+
+    it("renders name, coordinates link and flight count with classes only", () => {
+      const html = generateAirportPopupHtml(params);
+
+      expect(html).toContain('class="popup-container kh-popup-airport"');
+      expect(html).toContain('class="popup-header kh-popup-header-airport"');
+      expect(html).toContain("Frankfurt EDDF");
+      expect(html).toContain('href="https://www.google.com/maps?q=50.1,8.67"');
+      expect(html).toContain('class="airport-popup-link kh-popup-link"');
+      expect(html).toContain(params.latDms);
+      expect(html).toContain('class="kh-popup-metric-label">Total Flights');
+      expect(html).toContain('class="popup-metric-value kh-popup-accent">20');
+      expect(html).not.toContain("style=");
+      expect(html).not.toContain("HOME");
     });
 
+    it("renders the home badge for the home base", () => {
+      const html = generateAirportPopupHtml({ ...params, isHomeBase: true });
+      expect(html).toContain('<span class="kh-popup-home-badge">HOME</span>');
+    });
+
+    it("escapes the name and falls back to Unknown", () => {
+      expect(generateAirportPopupHtml({ ...params, name: "<b>" })).toContain(
+        "&lt;b&gt;",
+      );
+      expect(generateAirportPopupHtml({ ...params, name: "" })).toContain(
+        "Unknown",
+      );
+    });
+  });
+
+  describe("generateSegmentPopupHtml", () => {
     const fullParams: SegmentPopupParams = {
       segment: {
         path_id: 1,
@@ -517,24 +562,41 @@ describe("htmlGenerators", () => {
       speedMax: 200,
     };
 
-    it("renders altitude and groundspeed with color coding", () => {
+    it("renders altitude and groundspeed with colour custom properties", () => {
       const html = generateSegmentPopupHtml(fullParams);
 
       expect(html).toContain("3000 ft");
+      expect(html).toContain("(914 m)");
       expect(html).toContain("120 kt");
       expect(html).toContain("222 km/h");
       expect(html).toContain("Altitude (MSL)");
       expect(html).toContain("Groundspeed");
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
-        3000,
-        0,
-        5000,
+
+      const altColor = getColorForAltitude(3000, 0, 5000);
+      const speedColor = getColorForAirspeed(120, 0, 200);
+      expect(html).toContain(
+        `class="popup-metric kh-popup-metric-colored" style="--kh-metric-color: ${altColor}; --kh-metric-bg: ${rgbToRgba(altColor, 0.15)};"`,
       );
-      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
-        120,
-        0,
-        200,
+      expect(html).toContain(
+        `class="popup-metric kh-popup-metric-colored" style="--kh-metric-color: ${speedColor}; --kh-metric-bg: ${rgbToRgba(speedColor, 0.15)};"`,
       );
+      // No other inline styles
+      expect(html.match(/style="/g)).toHaveLength(2);
+      expect(html).toContain('class="popup-header kh-popup-header-segment"');
+    });
+
+    it("rounds altitude to 50 ft steps", () => {
+      const html = generateSegmentPopupHtml({
+        ...fullParams,
+        segment: { ...fullParams.segment, altitude_ft: 3024 },
+      });
+      expect(html).toContain("3000 ft");
+
+      const html2 = generateSegmentPopupHtml({
+        ...fullParams,
+        segment: { ...fullParams.segment, altitude_ft: 3026 },
+      });
+      expect(html2).toContain("3050 ft");
     });
 
     it("uses default title and icon", () => {
@@ -557,40 +619,25 @@ describe("htmlGenerators", () => {
       expect(html).not.toContain("📍");
     });
 
-    it("defaults altitude to 0 when missing", () => {
+    it("defaults altitude and groundspeed to 0 when missing", () => {
       const html = generateSegmentPopupHtml({
         ...fullParams,
-        segment: { ...fullParams.segment, altitude_ft: undefined },
+        segment: { path_id: 1, coords: fullParams.segment.coords },
       });
 
       expect(html).toContain("0 ft");
-      expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
-        0,
-        0,
-        5000,
-      );
-    });
-
-    it("defaults groundspeed to 0 when missing", () => {
-      const html = generateSegmentPopupHtml({
-        ...fullParams,
-        segment: { ...fullParams.segment, groundspeed_knots: undefined },
-      });
-
+      expect(html).toContain("(0 m)");
       expect(html).toContain("0 kt");
       expect(html).toContain("0 km/h");
-      expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
-        0,
-        0,
-        200,
+      expect(html).toContain(
+        `--kh-metric-color: ${getColorForAltitude(0, 0, 5000)}`,
       );
     });
 
     it("computes track from segment coordinates", () => {
       const html = generateSegmentPopupHtml(fullParams);
 
-      expect(html).toContain("Track:");
-      expect(html).toMatch(/\d{3}°/);
+      expect(html).toContain('<span class="kh-popup-track">Track: 033°</span>');
       expect(html).not.toContain("N/A");
     });
 
@@ -604,13 +651,10 @@ describe("htmlGenerators", () => {
       expect(html).toMatch(/N\/A N\/A/);
     });
 
-    it("formats position in DMS", () => {
+    it("formats the end position in DMS", () => {
       const html = generateSegmentPopupHtml(fullParams);
 
-      expect(html).toContain("N");
-      expect(html).toContain("E");
-      expect(html).toContain("°");
-      expect(html).toContain("'");
+      expect(html).toContain("49°0'0.0\"N 12°0'0.0\"E");
     });
   });
 });

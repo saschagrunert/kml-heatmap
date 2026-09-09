@@ -2,940 +2,248 @@
 
 import json
 import os
-import tempfile
 from unittest.mock import patch
 
 import pytest
 
 from kml_heatmap.data_exporter import (
-    AggregatedYearResults,
-    _aggregate_year_results,
+    YearExportResult,
     _calculate_altitude_range,
-    _finalize_stats,
+    _clean_output_dir,
     _group_paths_by_year,
+    _path_id_offsets,
     _process_years_parallel,
-    _recalculate_stats_from_segments,
-    collect_unique_years,
-    export_airports_data,
     export_all_data,
-    export_metadata,
     process_year_data,
 )
+from kml_heatmap.export_reconciler import YearAggregate
+from kml_heatmap.helpers import format_flight_time, parse_timestamp_epoch
+from kml_heatmap.types import TrackPoint
 
 
-def _parse_js_data(filepath):
-    """Parse a JS file with 'window.VAR = {...};' format and return the JSON data."""
-    with open(filepath) as f:
-        content = f.read()
-    # Remove the 'window.XXX = ' prefix and trailing ';'
-    json_start = content.index("{")
-    json_str = content[json_start:].rstrip(";")
-    return json.loads(json_str)
+def _parse_js(path):
+    """Parse a 'window.X = {...};' file and return the JSON payload."""
+    content = path.read_text()
+    assert content.endswith(";")
+    return json.loads(content[content.index("=") + 1 : -1].strip())
 
 
-class TestExportAirportsData:
-    """Tests for export_airports_data function."""
-
-    def test_export_airports_basic(self):
-        """Test basic airport export."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            airports = [
-                {
-                    "lat": 50.0,
-                    "lon": 8.5,
-                    "name": "EDDF Frankfurt",
-                    "timestamps": ["2025-01-01T10:00:00Z"],
-                    "is_at_path_end": True,
-                }
-            ]
-
-            output_file, file_size = export_airports_data(airports, tmpdir)
-
-            assert os.path.exists(output_file)
-            assert file_size > 0
-
-            data = _parse_js_data(output_file)
-            assert len(data["airports"]) == 1
-            assert data["airports"][0]["name"] == "EDDF Frankfurt"
-            assert data["airports"][0]["lat"] == 50.0
-            assert data["airports"][0]["flight_count"] == 1
-
-    def test_export_airports_js_format(self):
-        """Test that airports are exported in JS format."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            airports = [
-                {
-                    "lat": 50.0,
-                    "lon": 8.5,
-                    "name": "EDDF Frankfurt",
-                    "timestamps": ["2025-01-01T10:00:00Z"],
-                    "is_at_path_end": True,
-                }
-            ]
-
-            output_file, _ = export_airports_data(airports, tmpdir)
-
-            assert output_file.endswith(".js")
-            with open(output_file) as f:
-                content = f.read()
-            assert content.startswith("window.KML_AIRPORTS = ")
-            assert content.endswith(";")
-
-    def test_export_airports_strip_timestamps(self):
-        """Test airport export with timestamp stripping."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            airports = [
-                {
-                    "lat": 50.0,
-                    "lon": 8.5,
-                    "name": "EDDF Frankfurt",
-                    "timestamps": ["2025-01-01T10:00:00Z"],
-                    "is_at_path_end": True,
-                }
-            ]
-
-            output_file, _ = export_airports_data(
-                airports, tmpdir, strip_timestamps=True
-            )
-
-            data = _parse_js_data(output_file)
-            assert "timestamps" not in data["airports"][0]
-
-    def test_export_airports_deduplicates_locations(self):
-        """Test that duplicate locations are deduplicated."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            airports = [
-                {
-                    "lat": 50.0,
-                    "lon": 8.5,
-                    "name": "EDDF Frankfurt",
-                    "timestamps": ["2025-01-01T10:00:00Z"],
-                    "is_at_path_end": True,
-                },
-                {
-                    "lat": 50.0001,  # Very close to first
-                    "lon": 8.5001,
-                    "name": "EDDF Frankfurt",
-                    "timestamps": ["2025-01-02T10:00:00Z"],
-                    "is_at_path_end": True,
-                },
-            ]
-
-            output_file, _ = export_airports_data(airports, tmpdir)
-
-            data = _parse_js_data(output_file)
-            # Close locations should be deduplicated
-            assert len(data["airports"]) >= 1
-
-    def test_export_airports_skips_invalid_names(self):
-        """Test that airports with invalid names are skipped."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            airports = [
-                {
-                    "lat": 50.0,
-                    "lon": 8.5,
-                    "name": "Unknown",  # Invalid name
-                    "timestamps": [],
-                    "is_at_path_end": True,
-                }
-            ]
-
-            output_file, _ = export_airports_data(airports, tmpdir)
-
-            data = _parse_js_data(output_file)
-            assert len(data["airports"]) == 0
-
-    def test_export_airports_empty_list(self):
-        """Test exporting empty airport list."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_file, _file_size = export_airports_data([], tmpdir)
-
-            assert os.path.exists(output_file)
-            data = _parse_js_data(output_file)
-            assert data["airports"] == []
+def _path(*points):
+    """Build a flight path from (lat, lon, alt[, iso_timestamp]) tuples."""
+    return [
+        TrackPoint(
+            p[0], p[1], p[2], parse_timestamp_epoch(p[3]) if len(p) > 3 else None
+        )
+        for p in points
+    ]
 
 
-class TestExportMetadata:
-    """Tests for export_metadata function."""
-
-    def test_export_metadata_basic(self):
-        """Test basic metadata export."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            stats = {
-                "total_distance_km": 1000,
-                "total_flights": 10,
-            }
-
-            output_file, file_size = export_metadata(
-                stats,
-                min_alt_m=0,
-                max_alt_m=5000,
-                min_groundspeed_knots=50,
-                max_groundspeed_knots=150,
-                available_years=[2024, 2025],
-                output_dir=tmpdir,
-            )
-
-            assert os.path.exists(output_file)
-            assert file_size > 0
-
-            data = _parse_js_data(output_file)
-            assert data["stats"] == stats
-            assert data["min_alt_m"] == 0
-            assert data["max_alt_m"] == 5000
-            assert data["min_groundspeed_knots"] == 50
-            assert data["max_groundspeed_knots"] == 150
-            assert data["available_years"] == [2024, 2025]
-            assert "gradient" in data
-
-    def test_export_metadata_js_format(self):
-        """Test that metadata is exported in JS format."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_file, _ = export_metadata(
-                {},
-                min_alt_m=0,
-                max_alt_m=5000,
-                min_groundspeed_knots=50,
-                max_groundspeed_knots=150,
-                available_years=[],
-                output_dir=tmpdir,
-            )
-
-            assert output_file.endswith(".js")
-            with open(output_file) as f:
-                content = f.read()
-            assert content.startswith("window.KML_METADATA = ")
-            assert content.endswith(";")
-
-    def test_export_metadata_with_file_structure(self):
-        """Test metadata export with file structure."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            file_structure = {"2024": ["data"], "2025": ["data"]}
-
-            output_file, _ = export_metadata(
-                {},
-                min_alt_m=0,
-                max_alt_m=5000,
-                min_groundspeed_knots=50,
-                max_groundspeed_knots=150,
-                available_years=[2024, 2025],
-                output_dir=tmpdir,
-                file_structure=file_structure,
-            )
-
-            data = _parse_js_data(output_file)
-            assert data["file_structure"] == file_structure
-
-    @pytest.mark.parametrize(
-        "min_speed,max_speed,expected_min,expected_max",
-        [
-            (float("inf"), 150, 0.0, 150),
-            (float("nan"), float("nan"), 0.0, 0.0),
-            (float("-inf"), float("-inf"), 0.0, 0.0),
-            (50.0, float("inf"), 50.0, 0.0),
-        ],
-        ids=["inf-min", "nan-both", "neg-inf-both", "inf-max"],
+def _timed_path():
+    return _path(
+        (50.0, 8.0, 100.0, "2025-01-01T10:00:00Z"),
+        (50.1, 8.1, 200.0, "2025-01-01T10:05:00Z"),
+        (50.2, 8.2, 300.0, "2025-01-01T10:10:00Z"),
     )
-    def test_export_metadata_invalid_speeds(
-        self, min_speed, max_speed, expected_min, expected_max
-    ):
-        """Test metadata export converts non-finite speeds to 0.0."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_file, _ = export_metadata(
-                {},
-                min_alt_m=0,
-                max_alt_m=5000,
-                min_groundspeed_knots=min_speed,
-                max_groundspeed_knots=max_speed,
-                available_years=[],
-                output_dir=tmpdir,
-            )
-
-            data = _parse_js_data(output_file)
-            assert data["min_groundspeed_knots"] == expected_min
-            assert data["max_groundspeed_knots"] == expected_max
-
-    def test_export_metadata_rounds_speeds(self):
-        """Test that groundspeeds are rounded."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_file, _ = export_metadata(
-                {},
-                min_alt_m=0,
-                max_alt_m=5000,
-                min_groundspeed_knots=50.123456,
-                max_groundspeed_knots=150.987654,
-                available_years=[],
-                output_dir=tmpdir,
-            )
-
-            data = _parse_js_data(output_file)
-            assert data["min_groundspeed_knots"] == 50.1
-            assert data["max_groundspeed_knots"] == 151.0
-
-
-class TestCollectUniqueYears:
-    """Tests for collect_unique_years function."""
-
-    def test_collect_unique_years(self):
-        """Test collecting unique years from metadata."""
-        metadata = [
-            {"year": 2024},
-            {"year": 2025},
-            {"year": 2024},  # Duplicate
-        ]
-
-        result = collect_unique_years(metadata)
-        assert result == [2024, 2025]
-
-    def test_collect_unique_years_sorted(self):
-        """Test that years are sorted."""
-        metadata = [
-            {"year": 2025},
-            {"year": 2023},
-            {"year": 2024},
-        ]
-
-        result = collect_unique_years(metadata)
-        assert result == [2023, 2024, 2025]
-
-    def test_collect_unique_years_empty(self):
-        """Test collecting years from empty metadata."""
-        result = collect_unique_years([])
-        assert result == []
-
-    def test_collect_unique_years_no_year_field(self):
-        """Test metadata without year field."""
-        metadata = [
-            {"name": "Path 1"},
-            {"name": "Path 2"},
-        ]
-
-        result = collect_unique_years(metadata)
-        assert result == []
-
-    def test_collect_unique_years_mixed(self):
-        """Test metadata with some entries having year, some not."""
-        metadata = [
-            {"year": 2024},
-            {"name": "Path without year"},
-            {"year": 2025},
-        ]
-
-        result = collect_unique_years(metadata)
-        assert result == [2024, 2025]
-
-    def test_collect_unique_years_none_values(self):
-        """Test metadata with None year values."""
-        metadata = [
-            {"year": 2024},
-            {"year": None},
-            {"year": 2025},
-        ]
-
-        result = collect_unique_years(metadata)
-        assert result == [2024, 2025]
-
-
-def _make_path_with_timestamps(coords):
-    """Create a path with timestamps from coordinate tuples."""
-    path = []
-    for lat, lon, alt, ts in coords:
-        path.append([lat, lon, alt, ts])
-    return path
 
 
 class TestProcessYearData:
-    """Tests for process_year_data function."""
-
-    def test_basic_processing(self):
-        """Test basic year data processing with simple path."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = [
-                [50.0, 8.0, 500.0],
-                [50.1, 8.1, 600.0],
-                [50.2, 8.2, 700.0],
-            ]
-            all_path_groups = [path]
-            all_path_metadata = [
-                {
-                    "airport_name": "EDDF - EDDL",
-                    "year": 2024,
-                }
-            ]
-
-            result = process_year_data(
-                year="2024",
-                year_path_groups=[all_path_groups[0]],
-                year_path_metadata=[all_path_metadata[0]],
-                min_alt_m=500.0,
-                max_alt_m=700.0,
-                output_dir=tmpdir,
-                quiet=True,
-            )
-
-            assert result["year"] == "2024"
-            assert result["full_res_segments"] is not None
-            assert result["full_res_path_info"] is not None
-            assert len(result["full_res_segments"]) > 0
-            assert len(result["full_res_path_info"]) == 1
-            assert result["file_structure"] == ["data"]
-
-            # Verify output file was created
-            year_dir = os.path.join(tmpdir, "2024")
-            assert os.path.isdir(year_dir)
-            assert os.path.exists(os.path.join(year_dir, "data.js"))
-
-    def test_with_timestamps(self):
-        """Test processing with timestamped coordinates."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = _make_path_with_timestamps(
-                [
-                    (50.0, 8.0, 500.0, "2024-06-15T10:00:00+00:00"),
-                    (50.1, 8.1, 1500.0, "2024-06-15T10:05:00+00:00"),
-                    (50.2, 8.2, 1600.0, "2024-06-15T10:10:00+00:00"),
-                ]
-            )
-
-            result = process_year_data(
-                year="2024",
-                year_path_groups=[path],
-                year_path_metadata=[{"year": 2024, "airport_name": "EDDF - EDDL"}],
-                min_alt_m=500.0,
-                max_alt_m=1600.0,
-                output_dir=tmpdir,
-                quiet=True,
-            )
-
-            assert result["max_groundspeed"] > 0
-            segments = result["full_res_segments"]
-            assert any(seg.get("time") is not None for seg in segments)
-
-    def test_empty_paths_skipped(self):
-        """Test that single-point paths are skipped."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = [[50.0, 8.0, 500.0]]
-
-            result = process_year_data(
-                year="2024",
-                year_path_groups=[path],
-                year_path_metadata=[{"year": 2024}],
-                min_alt_m=500.0,
-                max_alt_m=500.0,
-                output_dir=tmpdir,
-                quiet=True,
-            )
-
-            assert result["full_res_segments"] is not None
-            assert len(result["full_res_path_info"]) == 0
-
-    def test_aircraft_metadata_preserved(self):
-        """Test that aircraft info is included in path_info."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = [[50.0, 8.0, 500.0], [50.1, 8.1, 600.0]]
-
-            result = process_year_data(
-                year="2024",
-                year_path_groups=[path],
-                year_path_metadata=[
-                    {
-                        "year": 2024,
-                        "aircraft_registration": "D-ABCD",
-                        "aircraft_type": "C172",
-                    }
-                ],
-                min_alt_m=500.0,
-                max_alt_m=600.0,
-                output_dir=tmpdir,
-                quiet=True,
-            )
-
-            path_info = result["full_res_path_info"]
-            assert path_info[0]["aircraft_registration"] == "D-ABCD"
-            assert path_info[0]["aircraft_type"] == "C172"
-
-
-class TestExportAllData:
-    """Tests for export_all_data function."""
-
-    def test_basic_export(self):
-        """Test basic full data export pipeline."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = [[50.0, 8.0, 500.0], [50.1, 8.1, 600.0]]
-            all_path_groups = [path]
-            all_coordinates = [[50.0, 8.0], [50.1, 8.1]]
-            all_path_metadata = [{"year": 2024, "airport_name": "EDDF - EDDL"}]
-            airports = [
-                {
-                    "lat": 50.0,
-                    "lon": 8.0,
-                    "name": "EDDF Frankfurt",
-                    "timestamps": [],
-                    "is_at_path_end": True,
-                }
-            ]
-            stats = {
-                "total_points": 2,
-                "num_paths": 1,
-                "total_distance_km": 10.0,
-                "max_groundspeed_knots": 0,
+    def test_writes_d1_shaped_file(self, tmp_path):
+        metadata = [
+            {
+                "year": 2025,
+                "airport_name": "EDDF - EDDM",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "end_timestamp": "2025-01-01T10:10:00Z",
+                "aircraft_registration": "D-EXYZ",
+                "aircraft_type": "C172",
             }
+        ]
 
-            files = export_all_data(
-                all_coordinates,
-                all_path_groups,
-                all_path_metadata,
-                airports,
-                stats,
-                output_dir=tmpdir,
-            )
+        result = process_year_data(2025, [_timed_path()], metadata, 7, str(tmp_path))
 
-            assert "airports" in files
-            assert "metadata" in files
-            assert os.path.exists(files["airports"])
-            assert os.path.exists(files["metadata"])
-
-    def test_multi_year_export(self):
-        """Test export with multiple years."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            paths = [
-                [[50.0, 8.0, 500.0], [50.1, 8.1, 600.0]],
-                [[51.0, 9.0, 700.0], [51.1, 9.1, 800.0]],
-            ]
-            coords = [[50.0, 8.0], [50.1, 8.1], [51.0, 9.0], [51.1, 9.1]]
-            metadata = [
-                {"year": 2023, "airport_name": "EDDF - EDDL"},
-                {"year": 2024, "airport_name": "EDDK - EDDM"},
-            ]
-            stats = {
-                "total_points": 4,
-                "num_paths": 2,
-                "total_distance_km": 20.0,
-                "max_groundspeed_knots": 0,
+        content = (tmp_path / "2025" / "data.js").read_text()
+        assert content.startswith("window.KML_DATA_2025 = {")
+        data = _parse_js(tmp_path / "2025" / "data.js")
+        assert list(data) == ["year", "original_points", "path_info", "segments"]
+        assert data["year"] == 2025
+        assert data["original_points"] == 3
+        assert data["path_info"] == [
+            {
+                "id": 7,
+                "year": 2025,
+                "start_coords": [50.0, 8.0],
+                "end_coords": [50.2, 8.2],
+                "segment_count": 2,
+                "min_altitude_ft": 328.1,
+                "max_altitude_ft": 984.3,
+                "start_airport": "EDDF",
+                "end_airport": "EDDM",
+                "aircraft_registration": "D-EXYZ",
+                "aircraft_type": "C172",
             }
-
-            export_all_data(coords, paths, metadata, [], stats, output_dir=tmpdir)
-
-            # Both year directories should exist
-            assert os.path.isdir(os.path.join(tmpdir, "2023"))
-            assert os.path.isdir(os.path.join(tmpdir, "2024"))
-
-    def test_stats_updated_with_aggregates(self):
-        """Test that stats dict is updated with aggregated data."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = [[50.0, 8.0, 500.0], [50.1, 8.1, 600.0]]
-            stats = {
-                "total_points": 2,
-                "num_paths": 1,
-                "total_distance_km": 10.0,
-                "max_groundspeed_knots": 0,
-            }
-
-            export_all_data(
-                [[50.0, 8.0], [50.1, 8.1]],
-                [path],
-                [{"year": 2024}],
-                [],
-                stats,
-                output_dir=tmpdir,
-            )
-
-            # These keys should be populated by export_all_data
-            assert "cruise_speed_knots" in stats
-            assert "longest_flight_nm" in stats
-            assert "longest_flight_km" in stats
-
-    def test_cleans_output_directory(self):
-        """Test that existing output directory is cleaned before export."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a stale file
-            stale_file = os.path.join(tmpdir, "stale.txt")
-            with open(stale_file, "w") as f:
-                f.write("stale")
-
-            path = [[50.0, 8.0, 500.0], [50.1, 8.1, 600.0]]
-            stats = {"total_points": 2, "num_paths": 1, "max_groundspeed_knots": 0}
-
-            export_all_data(
-                [[50.0, 8.0], [50.1, 8.1]],
-                [path],
-                [{"year": 2024}],
-                [],
-                stats,
-                output_dir=tmpdir,
-            )
-
-            assert not os.path.exists(stale_file)
-
-
-class TestRecalculateStatsFromSegments:
-    """Tests for _recalculate_stats_from_segments function."""
-
-    def test_empty_segments(self):
-        """Test with empty segments list."""
-        stats = {}
-        _recalculate_stats_from_segments(stats, [], [])
-        assert stats["total_points"] == 0
-
-    def test_altitude_calculations(self):
-        """Test altitude min/max/gain calculations."""
-        stats = {}
-        segments = [
-            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 0},
-            {"altitude_m": 200, "altitude_ft": 656, "groundspeed_knots": 0},
-            {"altitude_m": 150, "altitude_ft": 492, "groundspeed_knots": 0},
-            {"altitude_m": 300, "altitude_ft": 984, "groundspeed_knots": 0},
         ]
+        assert list(data["segments"]) == ["7"]
+        rows = data["segments"]["7"]
+        assert len(rows) == 2
+        assert rows[0][:4] == [50.0, 8.0, 50.1, 8.1]
+        assert rows[0][4] == 500
+        assert rows[0][6] == 0.0
+        assert rows[1][6] == 300.0
+        assert all(len(row) == 7 for row in rows)
 
-        _recalculate_stats_from_segments(stats, segments, [])
+        assert isinstance(result, YearExportResult)
+        assert result.year == 2025
+        assert result.path_count == 1
+        assert result.original_points == 3
+        assert result.file_bytes == (tmp_path / "2025" / "data.js").stat().st_size
+        assert result.aggregate.total_points == 3
+        assert result.aggregate.num_paths == 1
 
-        assert stats["min_altitude_m"] == 100
-        assert stats["max_altitude_m"] == 300
-        assert stats["total_points"] == 8
-        # Gain: 100->200 (+100), 200->150 (no gain), 150->300 (+150) = 250
-        assert stats["total_altitude_gain_m"] == 250
+    def test_omits_none_valued_keys(self, tmp_path):
+        path = _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0))
+        process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
 
-    def test_groundspeed_averaging(self):
-        """Test average groundspeed calculation."""
-        stats = {}
-        segments = [
-            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 80},
-            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 120},
-            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 0},
+        data = _parse_js(tmp_path / "2025" / "data.js")
+        info = data["path_info"][0]
+        assert "start_airport" not in info
+        assert "aircraft_registration" not in info
+        assert None not in info.values()
+        assert all(len(row) == 6 for row in data["segments"]["0"])
+
+    def test_single_point_paths_are_skipped_but_counted(self, tmp_path):
+        paths = [
+            _path((50.0, 8.0, 100.0)),
+            _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0)),
         ]
+        metadata = [{"year": 2025}, {"year": 2025}]
 
-        _recalculate_stats_from_segments(stats, segments, [])
+        result = process_year_data(2025, paths, metadata, 3, str(tmp_path))
 
-        assert stats["avg_groundspeed_knots"] == 100.0
+        data = _parse_js(tmp_path / "2025" / "data.js")
+        assert data["original_points"] == 3
+        assert [info["id"] for info in data["path_info"]] == [3]
+        assert result.path_count == 1
 
-    def test_cruise_speed_above_threshold(self):
-        """Test cruise speed uses only segments above altitude threshold."""
-        stats = {}
-        # min_alt_m=100 -> threshold = 100*3.28084 + 1000 = 1328 ft
-        # Only segments with altitude_ft > 1328 count as cruise
-        segments = [
-            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 50},
-            {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 130,
-                "coords": [[50.0, 8.0], [50.01, 8.0]],
-            },
-            {
-                "altitude_m": 600,
-                "altitude_ft": 1968,
-                "groundspeed_knots": 130,
-                "coords": [[50.01, 8.0], [50.02, 8.0]],
-            },
-        ]
-
-        _recalculate_stats_from_segments(stats, segments, [])
-
-        # Cruise segments: altitude_ft > 1328 -> second (1640) and third (1968)
-        # Weighted average with equal distances = 130
-        assert stats["cruise_speed_knots"] == pytest.approx(130.0)
-
-    def test_cruise_altitude_histogram(self):
-        """Test most common cruise altitude calculation."""
-        stats = {}
-        # min_alt_m = min of all altitudes = 100
-        # threshold = 100 * 3.28084 + 1000 = ~1328 ft
-        # So altitude_ft > 1328 counts as cruise
-        segments = [
-            {
-                "altitude_m": 100,
-                "altitude_ft": 328,
-                "groundspeed_knots": 50,
-                "time": 0,
-            },
-            {
-                "altitude_m": 1000,
-                "altitude_ft": 3280,
-                "groundspeed_knots": 100,
-                "time": 10,
-            },
-            {
-                "altitude_m": 1000,
-                "altitude_ft": 3280,
-                "groundspeed_knots": 100,
-                "time": 20,
-            },
-            {
-                "altitude_m": 1500,
-                "altitude_ft": 4920,
-                "groundspeed_knots": 100,
-                "time": 30,
-            },
-        ]
-
-        _recalculate_stats_from_segments(stats, segments, [])
-
-        # Cruise segments (altitude_ft > 1328): 3280 (2x), 4920 (1x)
-        # Rounded to nearest 100: 3300 (2x), 4900 (1x)
-        assert stats["most_common_cruise_altitude_ft"] == 3300
-
-    def test_flight_time_from_path_durations(self):
-        """Test total flight time calculation from segment times."""
-        stats = {}
-        segments = [
-            {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 100,
-                "time": 0,
-                "path_id": 0,
-            },
-            {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 100,
-                "time": 3600,
-                "path_id": 0,
-            },
-            {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 100,
-                "time": 0,
-                "path_id": 1,
-            },
-            {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 100,
-                "time": 1800,
-                "path_id": 1,
-            },
-        ]
-
-        _recalculate_stats_from_segments(stats, segments, [])
-
-        # Path 0: 3600-0 = 3600s, Path 1: 1800-0 = 1800s
-        assert stats["total_flight_time_seconds"] == 5400
-
-    def test_aircraft_specific_stats(self):
-        """Test per-aircraft flight time and distance calculation."""
-        stats = {
-            "aircraft_list": [
-                {"registration": "D-EAGJ"},
-                {"registration": "D-EHYL"},
-            ]
+    def test_empty_year(self, tmp_path):
+        result = process_year_data(2025, [], [], 0, str(tmp_path))
+        data = _parse_js(tmp_path / "2025" / "data.js")
+        assert data == {
+            "year": 2025,
+            "original_points": 0,
+            "path_info": [],
+            "segments": {},
         }
-        segments = [
+        assert result.aggregate.min_groundspeed_or_zero == 0.0
+
+    def test_quiet_flag(self, tmp_path, capsys):
+        process_year_data(
+            2025, [_timed_path()], [{"year": 2025}], 0, str(tmp_path), True
+        )
+        assert "Processing year" not in capsys.readouterr().out
+        process_year_data(2025, [_timed_path()], [{"year": 2025}], 0, str(tmp_path))
+        assert "Processing year 2025" in capsys.readouterr().out
+
+    def test_fallback_groundspeed_from_metadata_duration(self, tmp_path):
+        path = _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0), (50.2, 8.2, 300.0))
+        metadata = [
             {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 100,
-                "time": 0,
-                "path_id": 0,
-                "coords": [[50.0, 8.0], [50.1, 8.1]],
-            },
-            {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 100,
-                "time": 3600,
-                "path_id": 0,
-                "coords": [[50.1, 8.1], [50.2, 8.2]],
-            },
-            {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 100,
-                "time": 0,
-                "path_id": 1,
-                "coords": [[51.0, 9.0], [51.1, 9.1]],
-            },
-            {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 100,
-                "time": 1800,
-                "path_id": 1,
-                "coords": [[51.1, 9.1], [51.2, 9.2]],
-            },
+                "year": 2025,
+                "timestamp": "2025-01-01T10:00:00Z",
+                "end_timestamp": "2025-01-01T10:30:00Z",
+            }
         ]
-        path_info = [
-            {"id": 0, "aircraft_registration": "D-EAGJ"},
-            {"id": 1, "aircraft_registration": "D-EHYL"},
+        process_year_data(2025, [path], metadata, 0, str(tmp_path))
+
+        rows = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        assert all(row[5] > 0 for row in rows)
+        assert all(len(row) == 6 for row in rows)
+
+    def test_zero_length_segments_excluded(self, tmp_path):
+        path = _path((50.0, 8.0, 100.0), (50.0, 8.0, 100.0), (50.1, 8.1, 200.0))
+        process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
+        rows = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        assert len(rows) == 1
+        assert rows[0][:2] != rows[0][2:4]
+
+    def test_unrealistic_groundspeed_filtered(self, tmp_path):
+        path = _path(
+            (50.0, 8.0, 100.0, "2025-01-01T10:00:00.000Z"),
+            (51.0, 9.0, 100.0, "2025-01-01T10:00:01.000Z"),
+        )
+        process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
+        rows = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        assert rows[0][5] == 0.0
+
+    @pytest.mark.slow
+    def test_large_single_path(self, tmp_path):
+        count = 50_001
+        path = [
+            TrackPoint(50.0 + i * 0.0001, 8.0 + i * 0.0001, 100.0 + i % 50, None)
+            for i in range(count)
         ]
-
-        _recalculate_stats_from_segments(stats, segments, path_info)
-
-        eagj = next(a for a in stats["aircraft_list"] if a["registration"] == "D-EAGJ")
-        ehyl = next(a for a in stats["aircraft_list"] if a["registration"] == "D-EHYL")
-
-        assert eagj["flight_time_seconds"] == 3600
-        assert ehyl["flight_time_seconds"] == 1800
-        assert eagj["flight_distance_km"] > 0
-        assert ehyl["flight_distance_km"] > 0
-        assert "flight_time_str" in eagj
-
-    def test_no_cruise_segments(self):
-        """Test when no segments are above cruise threshold."""
-        stats = {}
-        segments = [
-            {"altitude_m": 100, "altitude_ft": 328, "groundspeed_knots": 50},
-            {"altitude_m": 200, "altitude_ft": 656, "groundspeed_knots": 60},
-        ]
-
-        _recalculate_stats_from_segments(stats, segments, [])
-
-        assert stats["cruise_speed_knots"] == 0
-        assert "most_common_cruise_altitude_ft" not in stats
-
-    def test_single_point_path_no_flight_time(self):
-        """Test that paths with a single time point have no flight time."""
-        stats = {}
-        segments = [
-            {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 100,
-                "time": 100,
-                "path_id": 0,
-            },
-        ]
-
-        _recalculate_stats_from_segments(stats, segments, [])
-
-        assert stats["total_flight_time_seconds"] == 0
-
-    def test_no_aircraft_list_skips_aircraft_stats(self):
-        """Test that missing aircraft_list skips per-aircraft calculations."""
-        stats = {}
-        segments = [
-            {
-                "altitude_m": 500,
-                "altitude_ft": 1640,
-                "groundspeed_knots": 100,
-                "time": 0,
-                "path_id": 0,
-            },
-        ]
-
-        _recalculate_stats_from_segments(stats, segments, [])
-
-        # Should not crash, no aircraft keys added
-        assert "aircraft_list" not in stats
+        result = process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
+        assert result.original_points == count
+        rows = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        assert len(rows) == count - 1
 
 
 class TestCalculateAltitudeRange:
     def test_with_paths(self):
-        paths = [[[50.0, 8.5, 100.0], [50.1, 8.6, 500.0]]]
-        min_alt, max_alt = _calculate_altitude_range(paths)
-        assert min_alt == 100.0
-        assert max_alt == 500.0
+        paths = [_path((50.0, 8.5, 100.0), (50.1, 8.6, 500.0))]
+        assert _calculate_altitude_range(paths) == (100.0, 500.0)
+
+    def test_negative_altitudes_kept(self):
+        paths = [_path((50.0, 8.5, -20.0), (50.1, 8.6, 500.0))]
+        assert _calculate_altitude_range(paths) == (-20.0, 500.0)
 
     def test_empty_paths(self):
-        min_alt, max_alt = _calculate_altitude_range([])
-        assert min_alt == 0.0
-        assert max_alt == 1000.0
+        assert _calculate_altitude_range([]) == (0.0, 1000.0)
 
 
 class TestGroupPathsByYear:
     def test_groups_by_year(self):
-        metadata = [
-            {"year": 2025},
-            {"year": 2026},
-            {"year": 2025},
+        metadata = [{"year": 2025}, {"year": 2026}, {"year": 2025}]
+        assert _group_paths_by_year(metadata) == {2025: [0, 2], 2026: [1]}
+
+    def test_paths_without_year_are_skipped(self):
+        metadata = [{"year": None}, {"other": "data"}, {"year": 2024}]
+        assert _group_paths_by_year(metadata) == {2024: [2]}
+
+
+class TestPathIdOffsets:
+    def test_offsets_follow_ascending_years_and_skip_short_paths(self):
+        paths = [
+            _path((50.0, 8.0, 1.0), (50.1, 8.1, 1.0)),  # 2026
+            _path((50.0, 8.0, 1.0)),  # 2025, single point (not exported)
+            _path((50.0, 8.0, 1.0), (50.1, 8.1, 1.0)),  # 2025
+            _path((50.0, 8.0, 1.0), (50.1, 8.1, 1.0)),  # 2025
+            _path((50.0, 8.0, 1.0), (50.1, 8.1, 1.0)),  # 2027
         ]
-        result = _group_paths_by_year(metadata)
-        assert result == {"2025": [0, 2], "2026": [1]}
-
-    def test_none_year_becomes_unknown(self):
-        metadata = [{"year": None}, {"other": "data"}]
-        result = _group_paths_by_year(metadata)
-        assert result == {"unknown": [0, 1]}
-
-
-class TestAggregateYearResults:
-    def test_aggregates_groundspeed(self):
-        results = [
-            {
-                "year": "2025",
-                "max_groundspeed": 150.0,
-                "min_groundspeed": 50.0,
-                "cruise_distance": 100.0,
-                "cruise_time": 60.0,
-                "max_path_distance": 80.0,
-                "cruise_altitude_histogram": {3000: 10.0},
-                "file_structure": ["data"],
-                "full_res_segments": None,
-                "full_res_path_info": None,
-            }
-        ]
-        agg = _aggregate_year_results(results)
-        assert isinstance(agg, AggregatedYearResults)
-        assert agg.max_groundspeed_knots == 150.0
-        assert agg.min_groundspeed_knots == 50.0
-        assert agg.cruise_speed_total_distance == 100.0
-        assert agg.cruise_speed_total_time == 60.0
-        assert agg.max_path_distance_nm == 80.0
-        assert agg.cruise_altitude_histogram == {3000: 10.0}
-        assert agg.file_structure == {"2025": ["data"]}
-
-    def test_remaps_path_ids_across_years(self):
-        results = [
-            {
-                "year": "2025",
-                "max_groundspeed": 0,
-                "min_groundspeed": float("inf"),
-                "cruise_distance": 0,
-                "cruise_time": 0,
-                "max_path_distance": 0,
-                "cruise_altitude_histogram": {},
-                "file_structure": [],
-                "full_res_segments": [{"path_id": 0, "data": "seg1"}],
-                "full_res_path_info": [{"id": 0, "data": "info1"}],
-            },
-            {
-                "year": "2026",
-                "max_groundspeed": 0,
-                "min_groundspeed": float("inf"),
-                "cruise_distance": 0,
-                "cruise_time": 0,
-                "max_path_distance": 0,
-                "cruise_altitude_histogram": {},
-                "file_structure": [],
-                "full_res_segments": [{"path_id": 0, "data": "seg2"}],
-                "full_res_path_info": [{"id": 0, "data": "info2"}],
-            },
-        ]
-        agg = _aggregate_year_results(results)
-        assert agg.all_full_res_segments[0]["path_id"] == 0
-        assert agg.all_full_res_segments[1]["path_id"] == 1
-        assert agg.all_full_res_path_info[0]["id"] == 0
-        assert agg.all_full_res_path_info[1]["id"] == 1
-
-
-class TestFinalizeStats:
-    def test_cruise_speed_calculation(self):
-        stats: dict = {}
-        _finalize_stats(stats, 180.0, 50.0, 1000.0, 100.0, 200.0, {})
-        assert stats["max_groundspeed_knots"] == 180.0
-        assert stats["cruise_speed_knots"] == 36000.0
-        assert stats["longest_flight_nm"] == 200.0
-
-    def test_no_cruise_time(self):
-        stats: dict = {}
-        _finalize_stats(stats, 100.0, 50.0, 0.0, 0.0, 100.0, {})
-        assert stats["cruise_speed_knots"] == 0
-
-    def test_cruise_altitude_histogram(self):
-        stats: dict = {}
-        _finalize_stats(stats, 100.0, 50.0, 0.0, 0.0, 0.0, {5000: 30.0, 3000: 10.0})
-        assert stats["most_common_cruise_altitude_ft"] == 5000
-
-    def test_empty_cruise_histogram(self):
-        stats: dict = {}
-        _finalize_stats(stats, 100.0, 50.0, 0.0, 0.0, 0.0, {})
-        assert stats["most_common_cruise_altitude_ft"] == 0
-        assert stats["most_common_cruise_altitude_m"] == 0
+        by_year = {2026: [0], 2025: [1, 2, 3], 2027: [4]}
+        assert _path_id_offsets(by_year, paths) == {2025: 0, 2026: 2, 2027: 3}
 
 
 class TestProcessYearsParallel:
-    def test_handles_processing_error(self):
-        paths_by_year = {"2025": [0]}
+    def test_results_sorted_by_year_with_global_ids(self, tmp_path):
+        paths = [
+            _path((50.0, 8.0, 1.0), (50.1, 8.1, 1.0)),
+            _path((51.0, 9.0, 1.0), (51.1, 9.1, 1.0)),
+            _path((52.0, 10.0, 1.0), (52.1, 10.1, 1.0)),
+        ]
+        metadata = [{"year": 2026}, {"year": 2025}, {"year": 2025}]
+        by_year = {2026: [0], 2025: [1, 2]}
+
+        results = _process_years_parallel(
+            by_year, paths, metadata, {2025: 0, 2026: 2}, str(tmp_path)
+        )
+
+        assert [r.year for r in results] == [2025, 2026]
+        ids_2025 = [p["id"] for p in _parse_js(tmp_path / "2025/data.js")["path_info"]]
+        ids_2026 = [p["id"] for p in _parse_js(tmp_path / "2026/data.js")["path_info"]]
+        assert ids_2025 == [0, 1]
+        assert ids_2026 == [2]
+
+    def test_processing_error_is_wrapped(self, tmp_path):
         with (
             patch(
                 "kml_heatmap.data_exporter.process_year_data",
@@ -943,21 +251,166 @@ class TestProcessYearsParallel:
             ),
             pytest.raises(RuntimeError, match="Failed to process year 2025"),
         ):
-            _process_years_parallel(paths_by_year, [[]], [{}], 0, 1000, "/tmp")
+            _process_years_parallel(
+                {2025: [0]}, [_path((50.0, 8.0, 1.0))], [{}], {2025: 0}, str(tmp_path)
+            )
 
 
-class TestExportAllDataPrivacyMode:
-    def test_strip_timestamps_log(self, tmp_path):
-        output_dir = str(tmp_path / "out")
-        paths = [[[50.0, 8.5, 100.0], [50.1, 8.6, 200.0]]]
-        metadata = [{"year": 2025, "airport_name": "EDDS"}]
-        stats: dict = {}
-        export_all_data(
-            [[50.0, 8.5]],
-            paths,
-            metadata,
-            [],
-            stats,
-            output_dir,
-            strip_timestamps=True,
+class TestCleanOutputDir:
+    def test_removes_only_tool_owned_outputs(self, tmp_path):
+        (tmp_path / "airports.js").write_text("x")
+        (tmp_path / "metadata.js").write_text("x")
+        (tmp_path / "2025").mkdir()
+        (tmp_path / "2025" / "data.js").write_text("x")
+        (tmp_path / "notes.txt").write_text("keep me")
+        (tmp_path / "photos").mkdir()
+        (tmp_path / "2026").mkdir()
+        (tmp_path / "2026" / "data.js").write_text("x")
+        (tmp_path / "2026" / "extra.txt").write_text("keep me")
+
+        _clean_output_dir(tmp_path)
+
+        remaining = sorted(
+            p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*")
         )
+        assert remaining == ["2026", "2026/extra.txt", "notes.txt", "photos"]
+
+    def test_symlinked_year_dir_is_left_alone(self, tmp_path):
+        target = tmp_path / "elsewhere"
+        target.mkdir()
+        (target / "data.js").write_text("precious")
+        os.symlink(target, tmp_path / "2025")
+
+        _clean_output_dir(tmp_path)
+
+        assert (target / "data.js").read_text() == "precious"
+
+    def test_missing_directory_is_noop(self, tmp_path):
+        _clean_output_dir(tmp_path / "missing")
+        assert not (tmp_path / "missing").exists()
+
+
+class TestExportAllData:
+    def _stats(self):
+        return {
+            "total_points": 0,
+            "num_paths": 0,
+            "total_distance_km": 0.0,
+            "max_groundspeed_knots": 0.0,
+            "aircraft_list": [{"registration": "D-EAGJ"}],
+        }
+
+    def test_multi_year_export_is_consistent(self, tmp_path):
+        paths = [
+            _timed_path(),
+            _path((51.0, 9.0, 700.0), (51.1, 9.1, 800.0)),
+            _path((52.0, 10.0, 1.0)),
+        ]
+        metadata = [
+            {
+                "year": 2026,
+                "airport_name": "EDDF - EDDM",
+                "aircraft_registration": "D-EAGJ",
+            },
+            {"year": 2025, "airport_name": "EDDK - EDDM"},
+            {"year": 2025, "airport_name": "Log Start: x"},
+        ]
+        stats = self._stats()
+
+        files = export_all_data(paths, metadata, [], stats, output_dir=str(tmp_path))
+
+        assert set(files) == {"airports", "metadata"}
+        meta = _parse_js(tmp_path / "metadata.js")
+        assert meta["available_years"] == [2025, 2026]
+        assert set(meta) == {
+            "stats",
+            "min_alt_m",
+            "max_alt_m",
+            "min_groundspeed_knots",
+            "max_groundspeed_knots",
+            "available_years",
+            "year_file_bytes",
+        }
+        assert meta["year_file_bytes"] == {
+            "2025": (tmp_path / "2025" / "data.js").stat().st_size,
+            "2026": (tmp_path / "2026" / "data.js").stat().st_size,
+        }
+        assert meta["min_alt_m"] == 1.0
+        assert meta["max_alt_m"] == 800.0
+
+        data_2025 = _parse_js(tmp_path / "2025" / "data.js")
+        data_2026 = _parse_js(tmp_path / "2026" / "data.js")
+        assert [p["id"] for p in data_2025["path_info"]] == [0]
+        assert [p["id"] for p in data_2026["path_info"]] == [1]
+        assert stats["total_points"] == (
+            data_2025["original_points"] + data_2026["original_points"]
+        )
+        assert stats["num_paths"] == 2
+        # Segment times are segment start times: 10:00 and 10:05 -> 300 s
+        assert stats["total_flight_time_seconds"] == 300.0
+        assert stats["total_flight_time_str"] == format_flight_time(300.0)
+        assert stats["aircraft_list"][0]["flight_time_seconds"] == 300.0
+        assert stats["aircraft_list"][0]["flight_time_str"] == "0h 5m"
+        assert meta["max_groundspeed_knots"] == stats["max_groundspeed_knots"]
+
+    def test_paths_without_year_are_excluded(self, tmp_path):
+        paths = [_timed_path(), _path((51.0, 9.0, 700.0), (51.1, 9.1, 800.0))]
+        metadata = [{"year": 2025}, {"year": None}]
+        stats = self._stats()
+
+        export_all_data(paths, metadata, [], stats, output_dir=str(tmp_path))
+
+        assert sorted(p.name for p in tmp_path.iterdir()) == [
+            "2025",
+            "airports.js",
+            "metadata.js",
+        ]
+        assert stats["num_paths"] == 1
+        assert stats["total_points"] == 3
+
+    def test_stale_files_are_left_and_tool_files_replaced(self, tmp_path):
+        stale = tmp_path / "stale.txt"
+        stale.write_text("stale")
+        (tmp_path / "2019").mkdir()
+        (tmp_path / "2019" / "data.js").write_text("old")
+
+        export_all_data(
+            [_timed_path()],
+            [{"year": 2025}],
+            [],
+            self._stats(),
+            output_dir=str(tmp_path),
+        )
+
+        assert stale.exists()
+        assert not (tmp_path / "2019").exists()
+        assert (tmp_path / "2025" / "data.js").exists()
+
+    @pytest.mark.parametrize("dangerous", ["/", str(os.path.expanduser("~"))])
+    def test_dangerous_output_dir_rejected(self, dangerous):
+        with pytest.raises(ValueError, match="dangerous"):
+            export_all_data([], [], [], self._stats(), output_dir=dangerous)
+
+    def test_no_paths_produces_empty_metadata(self, tmp_path):
+        stats = self._stats()
+        export_all_data([], [], [], stats, output_dir=str(tmp_path))
+        meta = _parse_js(tmp_path / "metadata.js")
+        assert meta["available_years"] == []
+        assert meta["year_file_bytes"] == {}
+        assert stats["total_points"] == 0
+        assert stats["min_altitude_m"] is None
+
+    def test_aggregate_merge_matches_single_year(self, tmp_path):
+        """Merging per-year aggregates equals aggregating everything at once."""
+        paths = [_timed_path(), _path((51.0, 9.0, 700.0), (51.1, 9.1, 800.0))]
+        one_year = process_year_data(
+            2025, paths, [{"year": 2025}] * 2, 0, str(tmp_path)
+        )
+        year_a = process_year_data(2025, paths[:1], [{"year": 2025}], 0, str(tmp_path))
+        year_b = process_year_data(2026, paths[1:], [{"year": 2026}], 1, str(tmp_path))
+
+        merged = YearAggregate()
+        merged.merge(year_a.aggregate)
+        merged.merge(year_b.aggregate)
+
+        assert merged == one_year.aggregate

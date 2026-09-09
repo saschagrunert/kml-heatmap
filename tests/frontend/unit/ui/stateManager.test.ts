@@ -1,102 +1,109 @@
-import type { MockMapApp } from "../../testHelpers";
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { StateManager } from "../../../../kml_heatmap/frontend/ui/stateManager";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  StateManager,
+  sanitizeSavedState,
+} from "../../../../kml_heatmap/frontend/ui/stateManager";
+import { createMockApp, asMapApp, type MockApp } from "../../testHelpers";
+
+describe("sanitizeSavedState", () => {
+  it("returns an empty object for non-objects", () => {
+    expect(sanitizeSavedState(null)).toEqual({});
+    expect(sanitizeSavedState("x")).toEqual({});
+    expect(sanitizeSavedState(42)).toEqual({});
+  });
+
+  it("keeps only known, well-typed fields", () => {
+    expect(
+      sanitizeSavedState({
+        selectedYear: "2025",
+        selectedAircraft: 5,
+        zoom: "12",
+        center: { lat: 50, lng: 8 },
+        heatmapVisible: "yes",
+        altitudeVisible: true,
+        wrappedVisible: false,
+        schemaVersion: 2,
+        selectedPathIds: [1, "2", NaN, 3],
+        unknown: true,
+      }),
+    ).toEqual({
+      selectedYear: "2025",
+      center: { lat: 50, lng: 8 },
+      altitudeVisible: true,
+      wrappedVisible: false,
+      selectedPathIds: [1, 3],
+    });
+  });
+
+  it("rejects non-finite numbers", () => {
+    expect(
+      sanitizeSavedState({ zoom: Infinity, center: { lat: NaN, lng: 8 } }),
+    ).toEqual({});
+  });
+});
 
 describe("StateManager", () => {
   let stateManager: StateManager;
-  let mockApp: MockMapApp;
+  let mockApp: MockApp;
   let mockLocalStorage: { [key: string]: string };
 
+  function setLocation(search: string): void {
+    Object.defineProperty(window, "location", {
+      value: { pathname: "/", search },
+      writable: true,
+    });
+  }
+
   beforeEach(() => {
-    // Mock localStorage
     mockLocalStorage = {};
     vi.stubGlobal("localStorage", {
       getItem: vi.fn((key: string) => mockLocalStorage[key] || null),
       setItem: vi.fn((key: string, value: string) => {
         mockLocalStorage[key] = value;
       }),
-      removeItem: vi.fn((key: string) => {
-        delete mockLocalStorage[key];
-      }),
-      clear: vi.fn(() => {
-        mockLocalStorage = {};
-      }),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
       length: 0,
       key: vi.fn(),
     });
+    vi.stubGlobal("history", { replaceState: vi.fn() });
+    setLocation("");
 
-    // Mock history API
-    vi.stubGlobal("history", {
-      replaceState: vi.fn(),
-    });
+    mockApp = createMockApp();
+    mockApp.map!.getCenter.mockReturnValue({ lat: 50.0, lng: 8.0 });
+    mockApp.map!.getZoom.mockReturnValue(10);
 
-    // Mock window.location
-    Object.defineProperty(window, "location", {
-      value: {
-        pathname: "/",
-        search: "",
-      },
-      writable: true,
-    });
+    const wrappedModal = document.createElement("div");
+    wrappedModal.id = "wrapped-modal";
+    wrappedModal.style.display = "none";
+    document.body.appendChild(wrappedModal);
 
-    // Mock KMLHeatmap library
-    window.KMLHeatmap = {
-      encodeStateToUrl: vi.fn((state) => {
-        return `year=${state.selectedYear}&aircraft=${state.selectedAircraft}`;
-      }),
-      parseUrlParams: vi.fn((params) => {
-        const year = params.get("year");
-        const aircraft = params.get("aircraft");
-        if (year || aircraft) {
-          return {
-            selectedYear: year || "all",
-            selectedAircraft: aircraft || "all",
-          };
-        }
-        return null;
-      }),
-    };
-
-    // Create mock app
-    mockApp = {
-      store: {
-        subscribe: vi.fn(() => () => {}),
-        notifyMutation: vi.fn(),
-      },
-      map: {
-        getCenter: vi.fn(() => ({ lat: 50.0, lng: 8.0 })),
-        getZoom: vi.fn(() => 10),
-      },
-      heatmapVisible: true,
-      altitudeVisible: false,
-      airspeedVisible: false,
-      airportsVisible: false,
-      aviationVisible: false,
-      selectedYear: "all",
-      selectedAircraft: "all",
-      selectedPathIds: new Set<number>(),
-    };
-
-    // Mock stats panel element
-    const mockStatsPanel = document.createElement("div");
-    mockStatsPanel.id = "stats-panel";
-    mockStatsPanel.classList.add("visible");
-    document.body.appendChild(mockStatsPanel);
-
-    stateManager = new StateManager(mockApp);
+    stateManager = new StateManager(asMapApp(mockApp));
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    const statsPanel = document.getElementById("stats-panel");
-    if (statsPanel) {
-      document.body.removeChild(statsPanel);
-    }
+    vi.useRealTimers();
+    document.getElementById("wrapped-modal")?.remove();
   });
 
+  function savedState(): Record<string, unknown> {
+    return JSON.parse(mockLocalStorage["kml-heatmap-state"]!) as Record<
+      string,
+      unknown
+    >;
+  }
+
   describe("store subscriptions", () => {
-    it("subscribes to all store-backed keys on construction", () => {
-      const expectedKeys = [
+    it("subscribes to all persisted store keys on construction", () => {
+      const subscribe = vi.fn(() => () => {});
+      const app = createMockApp();
+      vi.spyOn(app.store, "subscribe").mockImplementation(subscribe);
+
+      new StateManager(asMapApp(app));
+
+      const keys = subscribe.mock.calls.map((c) => (c as unknown[])[0]);
+      expect(keys).toEqual([
         "selectedYear",
         "selectedAircraft",
         "selectedPathIds",
@@ -107,149 +114,97 @@ describe("StateManager", () => {
         "airportsVisible",
         "aviationVisible",
         "buttonsHidden",
-      ];
-
-      expect(mockApp.store!.subscribe).toHaveBeenCalledTimes(
-        expectedKeys.length,
-      );
-      for (const key of expectedKeys) {
-        expect(mockApp.store!.subscribe).toHaveBeenCalledWith(
-          key,
-          expect.any(Function),
-        );
-      }
+        "statsPanelVisible",
+        "wrappedVisible",
+      ]);
     });
 
-    it("auto-saves via debounced setTimeout when a subscribed key changes", () => {
+    it("auto-saves (debounced) when a subscribed key changes", () => {
       vi.useFakeTimers();
       const saveSpy = vi.spyOn(stateManager, "saveMapState");
 
-      const subscribeCalls = (
-        mockApp.store!.subscribe as ReturnType<typeof vi.fn>
-      ).mock.calls;
-      const callback = subscribeCalls[0][1] as () => void;
-      callback();
+      mockApp.selectedYear = "2025";
 
       expect(saveSpy).not.toHaveBeenCalled();
       vi.advanceTimersByTime(300);
       expect(saveSpy).toHaveBeenCalledTimes(1);
-      vi.useRealTimers();
     });
 
     it("coalesces multiple key changes into one save", () => {
       vi.useFakeTimers();
       const saveSpy = vi.spyOn(stateManager, "saveMapState");
 
-      const subscribeCalls = (
-        mockApp.store!.subscribe as ReturnType<typeof vi.fn>
-      ).mock.calls;
-      const callback1 = subscribeCalls[0][1] as () => void;
-      const callback2 = subscribeCalls[1][1] as () => void;
-      callback1();
-      callback2();
-
+      mockApp.selectedYear = "2025";
+      mockApp.heatmapVisible = false;
+      mockApp.store.set("wrappedVisible", true);
       vi.advanceTimersByTime(300);
+
       expect(saveSpy).toHaveBeenCalledTimes(1);
-      vi.useRealTimers();
-    });
-  });
-
-  describe("destroy", () => {
-    it("calls all unsubscribe functions", () => {
-      const unsubSpies: ReturnType<typeof vi.fn>[] = [];
-      (mockApp.store!.subscribe as ReturnType<typeof vi.fn>).mockImplementation(
-        () => {
-          const spy = vi.fn();
-          unsubSpies.push(spy);
-          return spy;
-        },
-      );
-
-      const sm = new StateManager(mockApp);
-      sm.destroy();
-
-      expect(unsubSpies.length).toBe(10);
-      unsubSpies.forEach((fn) => {
-        expect(fn).toHaveBeenCalled();
-      });
-    });
-
-    it("clears pending save timer", () => {
-      vi.useFakeTimers();
-      stateManager.scheduleSave();
-      stateManager.destroy();
-
-      const saveSpy = vi.spyOn(stateManager, "saveMapState");
-      vi.advanceTimersByTime(500);
-      expect(saveSpy).not.toHaveBeenCalled();
-      vi.useRealTimers();
     });
   });
 
   describe("saveMapState", () => {
-    it("saves current state to localStorage", () => {
-      stateManager.saveMapState();
-
-      expect(localStorage.setItem).toHaveBeenCalledWith(
-        "kml-heatmap-state",
-        expect.any(String),
-      );
-
-      const savedData = mockLocalStorage["kml-heatmap-state"];
-      const state = JSON.parse(savedData);
-
-      expect(state.center).toEqual({ lat: 50.0, lng: 8.0 });
-      expect(state.zoom).toBe(10);
-      expect(state.heatmapVisible).toBe(true);
-      expect(state.selectedYear).toBe("all");
-      expect(state.selectedAircraft).toBe("all");
-    });
-
-    it("saves selected path IDs as array", () => {
+    it("saves current state to localStorage and the URL", () => {
+      mockApp.selectedYear = "2025";
       mockApp.selectedPathIds.add(1);
       mockApp.selectedPathIds.add(2);
 
       stateManager.saveMapState();
 
-      const savedData = mockLocalStorage["kml-heatmap-state"];
-      const state = JSON.parse(savedData);
-
-      expect(state.selectedPathIds).toEqual(expect.arrayContaining([1, 2]));
-      expect(state.selectedPathIds).toHaveLength(2);
-    });
-
-    it("saves stats panel visibility state", () => {
-      stateManager.saveMapState();
-
-      const savedData = mockLocalStorage["kml-heatmap-state"];
-      const state = JSON.parse(savedData);
-
-      expect(state.statsPanelVisible).toBe(true);
-    });
-
-    it("handles missing stats panel element", () => {
-      const statsPanel = document.getElementById("stats-panel");
-      if (statsPanel) {
-        document.body.removeChild(statsPanel);
-      }
-
-      stateManager.saveMapState();
-
-      const savedData = mockLocalStorage["kml-heatmap-state"];
-      const state = JSON.parse(savedData);
-
-      expect(state.statsPanelVisible).toBe(false);
-    });
-
-    it("updates URL with current state", () => {
-      stateManager.saveMapState();
-
-      expect(window.KMLHeatmap.encodeStateToUrl).toHaveBeenCalled();
+      expect(savedState()).toEqual({
+        schemaVersion: 2,
+        center: { lat: 50, lng: 8 },
+        zoom: 10,
+        heatmapVisible: true,
+        altitudeVisible: false,
+        airspeedVisible: false,
+        airportsVisible: true,
+        aviationVisible: false,
+        selectedYear: "2025",
+        selectedAircraft: "all",
+        selectedPathIds: [1, 2],
+        statsPanelVisible: false,
+        wrappedVisible: false,
+        buttonsHidden: false,
+        isolateSelection: false,
+      });
       expect(history.replaceState).toHaveBeenCalledWith(
         null,
         "",
-        expect.stringContaining("year="),
+        "?y=2025&p=1%2C2&sv=2&lat=50.000000&lng=8.000000&z=10.00",
       );
+    });
+
+    it("reads stats panel visibility from the store", () => {
+      mockApp.store.set("statsPanelVisible", true);
+
+      stateManager.saveMapState();
+
+      expect(savedState()["statsPanelVisible"]).toBe(true);
+    });
+
+    it("reads wrapped visibility from the store when set", () => {
+      mockApp.store.set("wrappedVisible", true);
+
+      stateManager.saveMapState();
+
+      expect(savedState()["wrappedVisible"]).toBe(true);
+    });
+
+    it("falls back to the DOM for wrapped visibility when the store key is undefined", () => {
+      document.getElementById("wrapped-modal")!.style.display = "flex";
+
+      stateManager.saveMapState();
+
+      expect(savedState()["wrappedVisible"]).toBe(true);
+    });
+
+    it("treats a missing wrapped modal as hidden", () => {
+      document.getElementById("wrapped-modal")?.remove();
+
+      stateManager.saveMapState();
+
+      expect(savedState()["wrappedVisible"]).toBe(false);
     });
 
     it("does nothing if map is not initialized", () => {
@@ -258,6 +213,7 @@ describe("StateManager", () => {
       stateManager.saveMapState();
 
       expect(localStorage.setItem).not.toHaveBeenCalled();
+      expect(history.replaceState).not.toHaveBeenCalled();
     });
 
     it("handles localStorage errors gracefully", () => {
@@ -266,294 +222,161 @@ describe("StateManager", () => {
       });
 
       expect(() => stateManager.saveMapState()).not.toThrow();
+      expect(history.replaceState).toHaveBeenCalled();
     });
   });
 
   describe("loadMapState", () => {
     it("loads saved state from localStorage", () => {
-      const savedState = {
+      const state = {
         center: { lat: 48.0, lng: 11.0 },
         zoom: 12,
         heatmapVisible: false,
-        altitudeVisible: true,
-        airspeedVisible: false,
-        airportsVisible: true,
-        aviationVisible: false,
-        selectedYear: "2025",
-        selectedAircraft: "D-ABCD",
+        selectedYear: "2024",
         selectedPathIds: [1, 2],
-        statsPanelVisible: true,
       };
+      // schemaVersion is a storage detail and is not returned
+      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
+        schemaVersion: 2,
+        ...state,
+      });
 
-      mockLocalStorage["kml-heatmap-state"] = JSON.stringify(savedState);
+      expect(stateManager.loadMapState()).toEqual(state);
+    });
 
-      const loaded = stateManager.loadMapState();
+    it("drops unknown or invalid fields", () => {
+      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
+        center: { lat: 48.0, lng: 11.0 },
+        zoom: 12,
+        heatmapVisible: "true",
+        evil: "<script>",
+      });
 
-      expect(loaded).toEqual(savedState);
+      expect(stateManager.loadMapState()).toEqual({
+        center: { lat: 48.0, lng: 11.0 },
+        zoom: 12,
+      });
     });
 
     it("returns null if no saved state exists", () => {
-      const loaded = stateManager.loadMapState();
-
-      expect(loaded).toBeNull();
+      expect(stateManager.loadMapState()).toBeNull();
     });
 
     it("returns null if saved state is corrupted", () => {
-      mockLocalStorage["kml-heatmap-state"] = "invalid json {";
-
-      const loaded = stateManager.loadMapState();
-
-      expect(loaded).toBeNull();
+      mockLocalStorage["kml-heatmap-state"] = "{not json";
+      expect(stateManager.loadMapState()).toBeNull();
     });
 
-    it("returns null if saved state is valid JSON but missing required fields", () => {
+    it("returns null if saved state lacks a map view", () => {
       mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
-        heatmapVisible: true,
+        selectedYear: "2024",
       });
-
-      const loaded = stateManager.loadMapState();
-
-      expect(loaded).toBeNull();
+      expect(stateManager.loadMapState()).toBeNull();
     });
 
     it("handles localStorage errors gracefully", () => {
       vi.spyOn(localStorage, "getItem").mockImplementationOnce(() => {
-        throw new Error("localStorage not available");
+        throw new Error("denied");
       });
-
-      const loaded = stateManager.loadMapState();
-
-      expect(loaded).toBeNull();
+      expect(stateManager.loadMapState()).toBeNull();
     });
   });
 
   describe("updateUrl", () => {
-    it("updates browser URL with state", () => {
-      const state = {
-        center: { lat: 50.0, lng: 8.0 },
-        zoom: 10,
-        heatmapVisible: true,
-        altitudeVisible: false,
-        airspeedVisible: false,
-        airportsVisible: false,
-        aviationVisible: false,
-        selectedYear: "2025",
-        selectedAircraft: "D-ABCD",
-        selectedPathIds: [],
-        statsPanelVisible: false,
-      };
+    it("updates browser URL with encoded state", () => {
+      stateManager.updateUrl({ selectedYear: "2025", zoom: 9 });
 
-      stateManager.updateUrl(state);
-
-      expect(window.KMLHeatmap.encodeStateToUrl).toHaveBeenCalledWith(state);
-      expect(history.replaceState).toHaveBeenCalled();
+      expect(history.replaceState).toHaveBeenCalledWith(
+        null,
+        "",
+        "?y=2025&z=9.00",
+      );
     });
 
-    it("handles empty URL params", () => {
-      window.KMLHeatmap.encodeStateToUrl.mockReturnValueOnce("");
-
-      const state = {
-        center: { lat: 50.0, lng: 8.0 },
-        zoom: 10,
-        heatmapVisible: true,
-        altitudeVisible: false,
-        airspeedVisible: false,
-        airportsVisible: false,
-        aviationVisible: false,
-        selectedYear: "all",
-        selectedAircraft: "all",
-        selectedPathIds: [],
-        statsPanelVisible: false,
-      };
-
-      stateManager.updateUrl(state);
+    it("falls back to the pathname when no params are produced", () => {
+      stateManager.updateUrl({});
 
       expect(history.replaceState).toHaveBeenCalledWith(null, "", "/");
     });
 
     it("handles history API errors gracefully", () => {
-      vi.spyOn(history, "replaceState").mockImplementationOnce(() => {
-        throw new Error("history not available");
+      vi.mocked(history.replaceState).mockImplementationOnce(() => {
+        throw new Error("nope");
       });
 
-      const state = {
-        center: { lat: 50.0, lng: 8.0 },
-        zoom: 10,
-        heatmapVisible: true,
-        altitudeVisible: false,
-        airspeedVisible: false,
-        airportsVisible: false,
-        aviationVisible: false,
-        selectedYear: "all",
-        selectedAircraft: "all",
-        selectedPathIds: [],
-        statsPanelVisible: false,
-      };
-
-      expect(() => stateManager.updateUrl(state)).not.toThrow();
+      expect(() =>
+        stateManager.updateUrl({ selectedYear: "2025" }),
+      ).not.toThrow();
     });
   });
 
   describe("loadState", () => {
     it("prioritizes URL parameters over localStorage", () => {
-      // Set up localStorage with one state
-      const localStorageState = {
+      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
         center: { lat: 48.0, lng: 11.0 },
         zoom: 12,
-        heatmapVisible: false,
-        altitudeVisible: true,
-        airspeedVisible: false,
-        airportsVisible: true,
-        aviationVisible: false,
         selectedYear: "2024",
-        selectedAircraft: "D-EFGH",
-        selectedPathIds: [],
-        statsPanelVisible: false,
-      };
-      mockLocalStorage["kml-heatmap-state"] = JSON.stringify(localStorageState);
-
-      // Set up URL with different state
-      Object.defineProperty(window, "location", {
-        value: {
-          pathname: "/",
-          search: "?year=2025&aircraft=D-ABCD",
-        },
-        writable: true,
       });
+      setLocation("?y=2025&a=D-ABCD");
 
-      const loaded = stateManager.loadState();
-
-      expect(loaded).toEqual({
+      expect(stateManager.loadState()).toEqual({
         selectedYear: "2025",
         selectedAircraft: "D-ABCD",
       });
     });
 
     it("falls back to localStorage if no URL params", () => {
-      const localStorageState = {
+      const state = {
         center: { lat: 48.0, lng: 11.0 },
         zoom: 12,
-        heatmapVisible: false,
-        altitudeVisible: true,
-        airspeedVisible: false,
-        airportsVisible: true,
-        aviationVisible: false,
         selectedYear: "2024",
         selectedAircraft: "D-EFGH",
         selectedPathIds: [],
         statsPanelVisible: false,
       };
-      mockLocalStorage["kml-heatmap-state"] = JSON.stringify(localStorageState);
-
-      Object.defineProperty(window, "location", {
-        value: {
-          pathname: "/",
-          search: "",
-        },
-        writable: true,
+      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
+        schemaVersion: 2,
+        ...state,
       });
 
-      const loaded = stateManager.loadState();
-
-      expect(loaded).toEqual(localStorageState);
+      expect(stateManager.loadState()).toEqual(state);
     });
 
-    it("returns null if no state available", () => {
-      Object.defineProperty(window, "location", {
-        value: {
-          pathname: "/",
-          search: "",
-        },
-        writable: true,
-      });
-
-      const loaded = stateManager.loadState();
-
-      expect(loaded).toBeNull();
+    it("returns null if no state is available", () => {
+      expect(stateManager.loadState()).toBeNull();
     });
 
-    it("rejects non-finite zoom from URL", () => {
-      window.KMLHeatmap.parseUrlParams = vi.fn(() => ({
-        zoom: Infinity,
+    it("parses the full URL state including visibility flags", () => {
+      setLocation("?y=2025&p=1,2&sv=2&v=011010111&lat=50.5&lng=8.5&z=12.25");
+
+      expect(stateManager.loadState()).toEqual({
         selectedYear: "2025",
-      }));
-
-      Object.defineProperty(window, "location", {
-        value: { pathname: "/", search: "?zoom=Infinity&year=2025" },
-        writable: true,
-      });
-
-      const loaded = stateManager.loadState();
-      expect(loaded).not.toBeNull();
-      expect(loaded).not.toHaveProperty("zoom");
-      expect(loaded!.selectedYear).toBe("2025");
-    });
-
-    it("rejects NaN center coordinates from URL", () => {
-      window.KMLHeatmap.parseUrlParams = vi.fn(() => ({
-        center: { lat: NaN, lng: 8.0 },
-        selectedYear: "2025",
-      }));
-
-      Object.defineProperty(window, "location", {
-        value: { pathname: "/", search: "?lat=NaN&lng=8&year=2025" },
-        writable: true,
-      });
-
-      const loaded = stateManager.loadState();
-      expect(loaded).not.toBeNull();
-      expect(loaded).not.toHaveProperty("center");
-    });
-
-    it("filters non-numeric path IDs from URL", () => {
-      window.KMLHeatmap.parseUrlParams = vi.fn(() => ({
-        selectedPathIds: [1, "bad", NaN, 3, Infinity],
-        selectedYear: "all",
-      }));
-
-      Object.defineProperty(window, "location", {
-        value: { pathname: "/", search: "?paths=1,bad,NaN,3,Inf" },
-        writable: true,
-      });
-
-      const loaded = stateManager.loadState();
-      expect(loaded).not.toBeNull();
-      expect(loaded!.selectedPathIds).toEqual([1, 3]);
-    });
-
-    it("validates boolean fields from URL", () => {
-      window.KMLHeatmap.parseUrlParams = vi.fn(() => ({
-        heatmapVisible: true,
-        altitudeVisible: "yes",
+        selectedPathIds: [1, 2],
+        heatmapVisible: false,
+        altitudeVisible: true,
+        airspeedVisible: true,
+        airportsVisible: false,
+        aviationVisible: true,
         statsPanelVisible: false,
         wrappedVisible: true,
-      }));
-
-      Object.defineProperty(window, "location", {
-        value: { pathname: "/", search: "?heatmap=1&altitude=yes" },
-        writable: true,
+        buttonsHidden: true,
+        isolateSelection: true,
+        center: { lat: 50.5, lng: 8.5 },
+        zoom: 12.25,
       });
-
-      const loaded = stateManager.loadState();
-      expect(loaded).not.toBeNull();
-      expect(loaded!.heatmapVisible).toBe(true);
-      expect(loaded).not.toHaveProperty("altitudeVisible");
-      expect(loaded!.statsPanelVisible).toBe(false);
-      expect(loaded!.wrappedVisible).toBe(true);
     });
 
-    it("returns null when URL state has no valid fields", () => {
-      window.KMLHeatmap.parseUrlParams = vi.fn(() => ({
-        unknownField: "value",
-      }));
-
-      Object.defineProperty(window, "location", {
-        value: { pathname: "/", search: "?unknown=value" },
-        writable: true,
+    it("falls back to localStorage when URL params contain no state", () => {
+      setLocation("?debug=true");
+      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
+        center: { lat: 1, lng: 2 },
+        zoom: 3,
       });
 
-      const loaded = stateManager.loadState();
-      expect(loaded).toBeNull();
+      expect(stateManager.loadState()).toEqual({
+        center: { lat: 1, lng: 2 },
+        zoom: 3,
+      });
     });
   });
 });

@@ -2,36 +2,37 @@
 KML Heatmap Generator
 
 A tool for creating interactive heatmap visualizations from KML flight data.
+
+Submodules are imported lazily so that ``python -m kml_heatmap --help`` and
+``--version`` work without the optional runtime dependencies installed.
 """
+
+import importlib
+from typing import Any
 
 __version__ = "1.0.0"
 
-# Export key functions
-from .aircraft import lookup_aircraft_model, parse_aircraft_from_filename
-from .airports import deduplicate_airports, extract_airport_name
-from .exceptions import (
-    InvalidCoordinateError,
-    KMLHeatmapError,
-    KMLParseError,
-)
-from .geometry import haversine_distance
-from .parser import parse_kml_coordinates
-from .renderer import load_template, minify_html
-from .statistics import calculate_statistics
-from .validation import validate_kml_file
+_LAZY_EXPORTS = {
+    "KMLHeatmapError": ".exceptions",
+    "KMLParseError": ".exceptions",
+    "calculate_statistics": ".statistics",
+    "deduplicate_airports": ".airports",
+    "extract_airport_name": ".airports",
+    "haversine_distance": ".geometry",
+    "load_template": ".renderer",
+    "lookup_aircraft_model": ".aircraft",
+    "minify_html": ".renderer",
+    "parse_aircraft_from_filename": ".aircraft",
+    "parse_kml_coordinates": ".parser",
+    "validate_kml_file": ".validation",
+}
 
-__all__ = [
-    "InvalidCoordinateError",
-    "KMLHeatmapError",
-    "KMLParseError",
-    "calculate_statistics",
-    "deduplicate_airports",
-    "extract_airport_name",
-    "haversine_distance",
-    "load_template",
-    "lookup_aircraft_model",
-    "minify_html",
-    "parse_aircraft_from_filename",
-    "parse_kml_coordinates",
-    "validate_kml_file",
-]
+__all__ = ["__version__", *sorted(_LAZY_EXPORTS)]
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _LAZY_EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = importlib.import_module(module_name, __name__)
+    return getattr(module, name)

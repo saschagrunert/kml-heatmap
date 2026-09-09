@@ -38,6 +38,52 @@ interface FullStats {
   most_common_cruise_altitude_m?: number;
 }
 
+/**
+ * Well-known city pairs used to put the longest flight into perspective.
+ * Distances are approximate great-circle distances in nautical miles.
+ */
+export const REFERENCE_DISTANCES: ReadonlyArray<{
+  nm: number;
+  label: string;
+}> = [
+  { nm: 83, label: "Frankfurt to Stuttgart" },
+  { nm: 138, label: "Hamburg to Berlin" },
+  { nm: 185, label: "London to Paris" },
+  { nm: 274, label: "Berlin to Munich" },
+  { nm: 475, label: "Paris to Berlin" },
+  { nm: 620, label: "New York to Chicago" },
+  { nm: 776, label: "London to Rome" },
+  { nm: 1250, label: "Lisbon to Berlin" },
+  { nm: 2140, label: "New York to Los Angeles" },
+  { nm: 3010, label: "London to New York" },
+];
+
+/** Only compare when the reference is reasonably close to the actual value */
+const REFERENCE_TOLERANCE = 0.25;
+
+/**
+ * Find the reference distance closest to the given distance, or null when
+ * no reference is within the tolerance.
+ */
+export function findClosestReferenceDistance(
+  distanceNm: number,
+): { nm: number; label: string } | null {
+  if (!(distanceNm > 0)) return null;
+
+  let closest: { nm: number; label: string } | null = null;
+  let closestDiff = Infinity;
+  for (const ref of REFERENCE_DISTANCES) {
+    const diff = Math.abs(ref.nm - distanceNm);
+    if (diff < closestDiff) {
+      closest = ref;
+      closestDiff = diff;
+    }
+  }
+
+  if (!closest || closestDiff / distanceNm > REFERENCE_TOLERANCE) return null;
+  return closest;
+}
+
 export function calculateYearStats(
   pathInfo: PathInfo[] | null,
   segments: PathSegment[],
@@ -234,9 +280,13 @@ export function generateFunFacts(
     // Longest journey fact
     if (fullStats.longest_flight_nm && fullStats.longest_flight_nm > 0) {
       const longestNm = Math.round(fullStats.longest_flight_nm);
+      const reference = findClosestReferenceDistance(longestNm);
+      const comparison = reference
+        ? ` - about the distance from ${reference.label}!`
+        : "";
       facts.push({
         icon: "🛫",
-        text: `Your longest journey: <strong>${longestNm} nm</strong> - that's Berlin to Munich distance!`,
+        text: `Your longest journey: <strong>${longestNm} nm</strong>${comparison}`,
         category: "distance",
         priority: 8,
       });

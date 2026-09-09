@@ -5,7 +5,9 @@
 import type { Coordinate } from "./utils/geometry";
 
 /**
- * Path information from KML data
+ * Path information from KML data.
+ * Keys with null values are omitted by the exporter, so every optional field
+ * is either absent or has a value (never null).
  */
 export interface PathInfo {
   id: number;
@@ -17,19 +19,39 @@ export interface PathInfo {
   start_coords?: number[];
   end_coords?: number[];
   segment_count?: number;
+  /** Exact altitude range; segment altitudes are rounded to 100 ft */
+  min_altitude_ft?: number;
+  max_altitude_ft?: number;
 }
 
 /**
- * Path segment from exported data, representing a line between two points
- * with associated altitude, speed, and timing data.
+ * Path segment (in-memory shape expanded by the DataLoader), representing a
+ * line between two points with associated altitude, speed, and timing data.
  */
 export interface PathSegment {
   path_id: number;
   coords?: [Coordinate, Coordinate];
-  altitude_m?: number;
   altitude_ft?: number;
   groundspeed_knots?: number;
   time?: number;
+}
+
+/**
+ * Raw segment tuple as written by the exporter:
+ * [lat1, lon1, lat2, lon2, altitude_ft, groundspeed_knots, time?]
+ */
+export type RawSegment =
+  | [number, number, number, number, number, number]
+  | [number, number, number, number, number, number, number];
+
+/**
+ * Per-year data file contents (window.KML_DATA_<YEAR>)
+ */
+export interface RawYearData {
+  year: number;
+  original_points: number;
+  path_info: PathInfo[];
+  segments: Record<string, RawSegment[]>;
 }
 
 /**
@@ -63,7 +85,8 @@ export interface SpeedStats {
 }
 
 /**
- * Comprehensive flight statistics
+ * Comprehensive flight statistics.
+ * Optional fields may be absent but are never null.
  */
 export interface FilteredStatistics {
   total_points: number;
@@ -92,16 +115,14 @@ export interface FilteredStatistics {
 }
 
 /**
- * Airport information
+ * Airport information (airports.js)
  */
 export interface Airport {
-  icao: string;
   name: string;
   lat: number;
   lon: number;
-  elevation?: number;
-  type?: string;
   country?: string;
+  flight_count?: number;
 }
 
 /**
@@ -113,19 +134,17 @@ export interface Metadata {
   max_alt_m: number;
   min_groundspeed_knots: number;
   max_groundspeed_knots: number;
-  gradient: Record<string, string>;
   available_years: number[];
-  file_structure?: Record<string, string[]>;
+  year_file_bytes?: Record<string, number>;
 }
 
 /**
- * KML dataset loaded from file
+ * In-memory KML dataset (one year or all years combined)
  */
 export interface KMLDataset {
   coordinates: Coordinate[];
   path_segments: PathSegment[];
   path_info: PathInfo[];
-  resolution: string;
   original_points: number;
 }
 
@@ -141,6 +160,8 @@ export interface MapCenter {
  * Application state (used for URL encoding and state management)
  */
 export interface AppState {
+  /** Schema version of selectedPathIds; see STATE_SCHEMA_VERSION */
+  schemaVersion?: number;
   selectedYear?: string;
   selectedAircraft?: string;
   selectedPathIds?: number[];
@@ -156,6 +177,12 @@ export interface AppState {
   center?: MapCenter;
   zoom?: number;
 }
+
+/**
+ * Persisted state (localStorage / URL). All fields are optional because a
+ * restored state may contain any subset of them.
+ */
+export type SavedState = AppState;
 
 /**
  * Fun fact for wrapped/year-in-review feature
@@ -180,14 +207,29 @@ export interface YearStats {
 }
 
 /**
+ * What is being loaded (for the loading indicator text)
+ */
+export interface LoadingInfo {
+  /** Year being loaded or 'all' */
+  year: string;
+  /** Size of the file(s) in bytes when known from metadata.year_file_bytes */
+  bytes?: number;
+}
+
+/**
  * DataLoader constructor options
  */
 export interface DataLoaderOptions {
   dataDir?: string;
   scriptLoader?: (url: string) => Promise<void>;
-  showLoading?: () => void;
+  showLoading?: (info: LoadingInfo) => void;
   hideLoading?: () => void;
   getWindow?: () => Window & typeof globalThis;
+  /**
+   * Invoked once per top-level load when one or more year files failed to
+   * load, with the list of failed years.
+   */
+  onLoadError?: (failedYears: string[]) => void;
 }
 
 /**
@@ -195,7 +237,7 @@ export interface DataLoaderOptions {
  */
 declare global {
   interface Window {
-    [key: `KML_DATA_${string}`]: KMLDataset;
+    [key: `KML_DATA_${string}`]: RawYearData | undefined;
     KML_AIRPORTS?: {
       airports: Airport[];
     };

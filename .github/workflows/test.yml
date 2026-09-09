@@ -19,23 +19,22 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
-          cache: "pip"
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.lock
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "lts/*"
+          node-version-file: .nvmrc
           cache: npm
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-test.lock
+        run: pip install --require-hashes -r requirements-test.lock
       - name: Install npm dependencies
         run: npm ci
-      - name: Run ruff format check
+      - name: Check Python formatting
         run: ruff format --check .
-      - name: Run Prettier check
-        run: npx prettier --check .
+      - name: Check Prettier formatting
+        run: npm run format:check
 
   lint:
     runs-on: ubuntu-latest
@@ -45,26 +44,26 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
-          cache: "pip"
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.lock
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "lts/*"
+          node-version-file: .nvmrc
           cache: npm
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.lock
-          pip install -r requirements-test.lock
+        run: pip install --require-hashes -r requirements.lock -r requirements-test.lock
       - name: Install npm dependencies
         run: npm ci
-      - name: Run ruff lint
+      - name: Run ruff
         run: ruff check .
-      - name: Run mypy type checking
+      - name: Run mypy
         run: mypy .
-      - name: Run TypeScript type checking
+      - name: Type-check the frontend
         run: npm run typecheck
+      - name: Type-check the unit and e2e tests
+        run: npm run typecheck:tests
       - name: Run eslint
         run: npm run lint
 
@@ -77,31 +76,31 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
-          cache: "pip"
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.lock
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "lts/*"
+          node-version-file: .nvmrc
           cache: npm
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.lock
-          pip install -r requirements-test.lock
-      - name: Install JavaScript dependencies
+        run: pip install --require-hashes -r requirements.lock -r requirements-test.lock
+      - name: Install npm dependencies
         run: npm ci
       - name: Run JavaScript tests with coverage
         run: npm run test:coverage
       - name: Run Python tests with coverage
-        run: pytest --cov-report=xml:coverage/coverage.xml
+        run: pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
+      - name: Enforce the Python coverage threshold
+        run: coverage report
       - name: Upload coverage to Codecov
         if: github.actor != 'dependabot[bot]'
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage/coverage.xml,./coverage/coverage-final.json
-          fail_ci_if_error: true
+          fail_ci_if_error: false
           verbose: true
 
   build:
@@ -113,28 +112,88 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "lts/*"
+          node-version-file: .nvmrc
           cache: npm
       - name: Install npm dependencies
         run: npm ci
-      - name: Build JavaScript bundles and check size budget
+      - name: Build JavaScript bundles and check the size budget
         run: npm run build
         env:
           CI: "true"
 
-  e2e:
+  packaging:
     needs: [format, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.lock
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "lts/*"
+          node-version-file: .nvmrc
           cache: npm
+      - name: Build JavaScript bundles
+        run: npm ci && npm run build
+      - name: Build the wheel
+        run: pip wheel . --no-deps -w dist
+      - name: Install the wheel into a fresh virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-venv"
+          "$RUNNER_TEMP/wheel-venv/bin/pip" install --disable-pip-version-check dist/*.whl
+      - name: Smoke test the installed package
+        # Run outside the checkout so the installed package is imported, not the source tree
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
+          for asset in templates/map_template.html static/mapApp.bundle.js static/bundle.js static/styles.css; do
+            result=$("$RUNNER_TEMP/wheel-venv/bin/python" -c "import importlib.resources as r, kml_heatmap; print(r.files(kml_heatmap).joinpath('$asset').is_file())")
+            echo "$asset shipped: $result"
+            test "$result" = "True"
+          done
+          # Source maps carry the full TypeScript sources and must stay out
+          maps=$("$RUNNER_TEMP/wheel-venv/bin/python" -c "import importlib.resources as r, kml_heatmap; print(any(p.name.endswith('.map') for p in r.files(kml_heatmap).joinpath('static').iterdir()))")
+          echo "source maps shipped: $maps"
+          test "$maps" = "False"
+
+  e2e:
+    needs: [format, lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.lock
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install Python dependencies
+        run: pip install --require-hashes -r requirements.lock
       - name: Install npm dependencies
         run: npm ci
+      - name: Build JavaScript bundles
+        run: npm run build
+      - name: Compute the weekly cache key
+        id: week
+        run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Cache the OurAirports database
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kml-heatmap
+          key: airports-${{ steps.week.outputs.week }}
+      - name: Build the site from the current sources
+        run: python -m kml_heatmap data --output-dir docs
       - name: Get Playwright version
         id: playwright-version
         run: echo "version=$(npx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
@@ -152,39 +211,72 @@ jobs:
         run: npx playwright install-deps chromium
       - name: Run E2E tests
         run: npm run test:e2e
+      - name: Run mobile E2E tests
+        run: npm run test:e2e:mobile
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-results
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # gitleaks scans the commit history
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-test.lock
-      - name: Run Bandit security scan
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.lock
+      - name: Install Python dependencies
+        run: pip install --require-hashes -r requirements-test.lock
+      - name: Run bandit
         run: bandit -r kml_heatmap -ll
+      - name: Audit the Python lock files
+        run: |
+          pip install --disable-pip-version-check pip-audit
+          pip-audit --no-deps -r requirements.lock -r requirements-test.lock
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "lts/*"
-          cache: "npm"
-      - name: Run npm audit
-        run: npm audit --omit=dev --audit-level=high
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
+      - name: Scan for secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
   verify:
     needs: [format, lint]
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Verify docs integrity
+      - name: Compute the weekly cache key
+        id: week
+        run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Cache the OurAirports database
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kml-heatmap
+          key: airports-${{ steps.week.outputs.week }}
+      - name: Verify that docs/ matches the sources and data
         run: make verify
         env:
           CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}
@@ -198,13 +290,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
-          cache: "pip"
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.lock
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.lock
-      - name: Check KML timestamps are obfuscated
+        run: pip install --require-hashes -r requirements.lock
+      - name: Check that the KML files are obfuscated
         run: python -m kml_heatmap.obfuscate data/ --check
 
   typos:

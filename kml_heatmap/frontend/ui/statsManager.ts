@@ -3,6 +3,7 @@
  */
 import type { MapApp } from "../mapApp";
 import type { FilteredStatistics } from "../types";
+import { calculateFilteredStatistics } from "../calculations/statistics";
 import {
   countryDisplayName,
   countryFlag,
@@ -12,8 +13,22 @@ import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 import { escapeHtml } from "../utils/htmlGenerators";
 import { domCache } from "../utils/domCache";
 
+/** Duration of the stats panel hide transition (ms) */
+const PANEL_TRANSITION_MS = 300;
+
+function statsRow(label: string, value: string): string {
+  return (
+    '<div class="kh-stats-row"><strong>' +
+    label +
+    ":</strong> " +
+    value +
+    "</div>"
+  );
+}
+
 export class StatsManager {
   private app: MapApp;
+  private closeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -23,37 +38,32 @@ export class StatsManager {
   }
 
   updateStatsForSelection(): void {
+    const pathInfo = this.app.fullPathInfo ?? [];
+    const segments = this.app.fullPathSegments ?? [];
+
     if (this.app.selectedPathIds.size === 0) {
-      const statsToShow = window.KMLHeatmap.calculateFilteredStatistics({
-        pathInfo: this.app.fullPathInfo || [],
-        segments: this.app.fullPathSegments || [],
+      const statsToShow = calculateFilteredStatistics({
+        pathInfo,
+        segments,
         year: this.app.selectedYear,
         aircraft: this.app.selectedAircraft,
         coordinateCount: this.app.currentData?.original_points,
       });
-      if (statsToShow) {
-        this.updateStatsPanel(statsToShow, false);
-      }
+      this.updateStatsPanel(statsToShow, false);
       return;
     }
 
     // Calculate stats for selected paths only
-    // Filter pathInfo and segments to only selected paths
-    const selectedPathInfo = (this.app.fullPathInfo || []).filter((path) => {
-      return this.app.selectedPathIds.has(path.id);
-    });
-
-    const selectedSegments = (this.app.fullPathSegments || []).filter(
-      (segment) => {
-        return this.app.selectedPathIds.has(segment.path_id);
-      },
+    const selectedPathInfo = pathInfo.filter((path) =>
+      this.app.selectedPathIds.has(path.id),
+    );
+    const selectedSegments = segments.filter((segment) =>
+      this.app.selectedPathIds.has(segment.path_id),
     );
 
     if (selectedSegments.length === 0) return;
 
     // Calculate unique coordinate count from selected segments
-    // Note: This counts only points that have altitude data (i.e., points in segments)
-    // Some coordinates in the raw data may not have altitude and won't be counted here
     const coordSet = new Set<string>();
     for (const segment of selectedSegments) {
       if (segment.coords && segment.coords.length === 2) {
@@ -63,15 +73,13 @@ export class StatsManager {
         coordSet.add(c1[0] + "," + c1[1]);
       }
     }
-    const selectedCoordCount = coordSet.size;
 
-    // Use KMLHeatmap library to calculate stats for selected paths
-    const selectedStats = window.KMLHeatmap.calculateFilteredStatistics({
+    const selectedStats = calculateFilteredStatistics({
       pathInfo: selectedPathInfo,
       segments: selectedSegments,
       year: "all", // Don't filter by year for selection
       aircraft: "all", // Don't filter by aircraft for selection
-      coordinateCount: selectedCoordCount,
+      coordinateCount: coordSet.size,
     });
 
     this.updateStatsPanel(selectedStats, true);
@@ -82,93 +90,74 @@ export class StatsManager {
 
     // Add indicator if showing selected paths only
     if (isSelection) {
+      html += '<h2 class="kh-stats-title">📊 Selected Paths Statistics</h2>';
       html +=
-        '<p style="margin:0 0 10px 0; font-weight:bold; font-size:15px;">📊 Selected Paths Statistics</p>';
-      html +=
-        '<div style="background-color: var(--color-bg-hover); padding: 4px 8px; margin-bottom: 8px; border-radius: 3px; font-size: 11px; color: var(--color-accent-blue);">Showing stats for ' +
+        '<div class="kh-stats-note">Showing stats for ' +
         stats.num_paths +
         " selected path(s)</div>";
     } else {
-      html +=
-        '<p style="margin:0 0 10px 0; font-weight:bold; font-size:15px;">📊 Flight Statistics</p>';
+      html += '<h2 class="kh-stats-title">📊 Flight Statistics</h2>';
     }
 
-    html +=
-      '<div style="margin-bottom: 8px;"><strong>Data Points:</strong> ' +
-      stats.total_points +
-      "</div>";
-    html +=
-      '<div style="margin-bottom: 8px;"><strong>Flights:</strong> ' +
-      stats.num_paths +
-      "</div>";
+    html += statsRow("Data Points", String(stats.total_points));
+    html += statsRow("Flights", String(stats.num_paths));
 
-    if (stats.airport_names && stats.airport_names.length > 0) {
+    if (stats.airport_names.length > 0) {
       const grouped = groupByCountry(stats.airport_names);
       html +=
-        '<div style="margin-bottom: 8px; max-height: 200px; overflow-y: auto;"><strong>Airports (' +
+        '<div class="kh-stats-row kh-stats-scroll kh-stats-scroll-airports" tabindex="0">' +
+        '<h3 class="kh-stats-subtitle">Airports (' +
         stats.num_airports +
-        "):</strong>";
+        "):</h3>";
       for (const [code, airports] of grouped) {
         const f = code !== "Other" ? countryFlag(code) : "";
         const label =
           code === "Other" ? "Other" : escapeHtml(countryDisplayName(code));
         const title = f ? label + " &ensp;" + f : label;
-        html +=
-          '<div style="margin-top: 6px; margin-bottom: 3px; margin-left: 4px; font-size: 11px; color: var(--color-text-dimmed); font-weight: 600;">' +
-          title +
-          "</div>";
+        html += '<div class="kh-stats-group">' + title + "</div>";
+        html += '<ul class="kh-stats-list">';
         for (const name of airports) {
-          html +=
-            '<span style="margin-left: 10px;">• ' +
-            escapeHtml(name) +
-            "</span><br>";
+          html += "<li>" + escapeHtml(name) + "</li>";
         }
+        html += "</ul>";
       }
       html += "</div>";
     }
 
-    if (
-      stats.num_aircraft &&
-      stats.num_aircraft > 0 &&
-      stats.aircraft_list &&
-      stats.aircraft_list.length > 0
-    ) {
+    if (stats.num_aircraft > 0 && stats.aircraft_list.length > 0) {
       html +=
-        '<div style="margin-bottom: 8px; max-height: 150px; overflow-y: auto;"><strong>Aircraft (' +
+        '<div class="kh-stats-row kh-stats-scroll kh-stats-scroll-aircraft" tabindex="0">' +
+        '<h3 class="kh-stats-subtitle">Aircraft (' +
         stats.num_aircraft +
-        "):</strong><br>";
+        "):</h3>" +
+        '<ul class="kh-stats-list">';
       stats.aircraft_list.forEach((aircraft) => {
         const typeStr = aircraft.type
           ? " (" + escapeHtml(aircraft.type) + ")"
           : "";
         html +=
-          '<span style="margin-left: 10px;">• ' +
+          "<li>" +
           escapeHtml(aircraft.registration) +
           typeStr +
           " - " +
           aircraft.flights +
-          " flight(s)</span><br>";
+          " flight(s)</li>";
       });
-      html += "</div>";
+      html += "</ul></div>";
     }
 
     if (stats.total_flight_time_str) {
-      html +=
-        '<div style="margin-bottom: 8px;"><strong>Total Flight Time:</strong> ' +
-        stats.total_flight_time_str +
-        "</div>";
+      html += statsRow("Total Flight Time", stats.total_flight_time_str);
     }
 
     // Distance with km conversion
     const distanceKm = (stats.total_distance_nm * NAUTICAL_MILES_TO_KM).toFixed(
       1,
     );
-    html +=
-      '<div style="margin-bottom: 8px;"><strong>Distance:</strong> ' +
-      stats.total_distance_nm.toFixed(1) +
-      " nm (" +
-      distanceKm +
-      " km)</div>";
+    html += statsRow(
+      "Distance",
+      stats.total_distance_nm.toFixed(1) + " nm (" + distanceKm + " km)",
+    );
 
     // Average distance per trip
     if (stats.num_paths > 0) {
@@ -178,82 +167,71 @@ export class StatsManager {
       const avgDistanceKm = (
         parseFloat(avgDistanceNm) * NAUTICAL_MILES_TO_KM
       ).toFixed(1);
-      html +=
-        '<div style="margin-bottom: 8px;"><strong>Average Distance per Trip:</strong> ' +
-        avgDistanceNm +
-        " nm (" +
-        avgDistanceKm +
-        " km)</div>";
+      html += statsRow(
+        "Average Distance per Trip",
+        avgDistanceNm + " nm (" + avgDistanceKm + " km)",
+      );
     }
 
     // Longest single flight distance
     if (stats.longest_flight_nm && stats.longest_flight_nm > 0) {
       const longestKm = (stats.longest_flight_km || 0).toFixed(1);
-      html +=
-        '<div style="margin-bottom: 8px;"><strong>Longest Flight:</strong> ' +
-        stats.longest_flight_nm.toFixed(1) +
-        " nm (" +
-        longestKm +
-        " km)</div>";
+      html += statsRow(
+        "Longest Flight",
+        stats.longest_flight_nm.toFixed(1) + " nm (" + longestKm + " km)",
+      );
     }
 
     if (stats.avg_groundspeed_knots && stats.avg_groundspeed_knots > 0) {
       const kmh = Math.round(
         stats.avg_groundspeed_knots * NAUTICAL_MILES_TO_KM,
       );
-      html +=
-        '<div style="margin-bottom: 8px;"><strong>Average Groundspeed:</strong> ' +
-        Math.round(stats.avg_groundspeed_knots) +
-        " kt (" +
-        kmh +
-        " km/h)</div>";
+      html += statsRow(
+        "Average Groundspeed",
+        Math.round(stats.avg_groundspeed_knots) + " kt (" + kmh + " km/h)",
+      );
     }
 
     if (stats.cruise_speed_knots && stats.cruise_speed_knots > 0) {
-      const kmh_cruise = Math.round(
+      const kmhCruise = Math.round(
         stats.cruise_speed_knots * NAUTICAL_MILES_TO_KM,
       );
-      html +=
-        '<div style="margin-bottom: 8px;"><strong>Cruise Speed (>1000ft AGL):</strong> ' +
-        Math.round(stats.cruise_speed_knots) +
-        " kt (" +
-        kmh_cruise +
-        " km/h)</div>";
+      html += statsRow(
+        "Cruise Speed (>1000ft AGL)",
+        Math.round(stats.cruise_speed_knots) + " kt (" + kmhCruise + " km/h)",
+      );
     }
 
     if (stats.max_groundspeed_knots && stats.max_groundspeed_knots > 0) {
-      const kmh_max = Math.round(
+      const kmhMax = Math.round(
         stats.max_groundspeed_knots * NAUTICAL_MILES_TO_KM,
       );
-      html +=
-        '<div style="margin-bottom: 8px;"><strong>Max Groundspeed:</strong> ' +
-        Math.round(stats.max_groundspeed_knots) +
-        " kt (" +
-        kmh_max +
-        " km/h)</div>";
+      html += statsRow(
+        "Max Groundspeed",
+        Math.round(stats.max_groundspeed_knots) + " kt (" + kmhMax + " km/h)",
+      );
     }
 
     if (stats.max_altitude_ft) {
       // Altitude with meter conversion
       const maxAltitudeM = Math.round(stats.max_altitude_ft * FEET_TO_METERS);
-      html +=
-        '<div style="margin-bottom: 8px;"><strong>Max Altitude (MSL):</strong> ' +
-        Math.round(stats.max_altitude_ft) +
-        " ft (" +
-        maxAltitudeM +
-        " m)</div>";
+      html += statsRow(
+        "Max Altitude (MSL)",
+        Math.round(stats.max_altitude_ft) + " ft (" + maxAltitudeM + " m)",
+      );
 
       // Elevation gain with meter conversion
       if (stats.total_altitude_gain_ft) {
         const elevationGainM = Math.round(
           stats.total_altitude_gain_ft * FEET_TO_METERS,
         );
-        html +=
-          '<div style="margin-bottom: 8px;"><strong>Elevation Gain:</strong> ' +
+        html += statsRow(
+          "Elevation Gain",
           Math.round(stats.total_altitude_gain_ft) +
-          " ft (" +
-          elevationGainM +
-          " m)</div>";
+            " ft (" +
+            elevationGainM +
+            " m)",
+        );
       }
     }
 
@@ -263,37 +241,54 @@ export class StatsManager {
       stats.most_common_cruise_altitude_ft > 0
     ) {
       const cruiseAltM = Math.round(stats.most_common_cruise_altitude_m || 0);
-      html +=
-        '<div style="margin-bottom: 8px;"><strong>Most Common Cruise Altitude (AGL):</strong> ' +
-        stats.most_common_cruise_altitude_ft +
-        " ft (" +
-        cruiseAltM +
-        " m)</div>";
+      html += statsRow(
+        "Most Common Cruise Altitude (AGL)",
+        stats.most_common_cruise_altitude_ft + " ft (" + cruiseAltM + " m)",
+      );
     }
 
     const panel = domCache.get("stats-panel");
     if (panel) panel.innerHTML = html;
   }
 
-  toggleStats(): void {
+  /**
+   * Show or hide the stats panel. The store key `statsPanelVisible` is the
+   * source of truth for state persistence.
+   * @param visible - Target visibility
+   * @param save - Persist the state after the change (default true)
+   */
+  setStatsPanelVisible(visible: boolean, save = true): void {
     const panel = domCache.get("stats-panel");
     if (!panel) return;
 
-    if (panel.classList.contains("visible")) {
-      // Hide with animation
-      panel.classList.remove("visible");
-      // Wait for animation to complete before hiding
-      setTimeout(() => {
-        panel.style.display = "none";
-        this.app.stateManager.saveMapState();
-      }, 300);
-    } else {
+    if (this.closeTimer !== null) {
+      clearTimeout(this.closeTimer);
+      this.closeTimer = null;
+    }
+
+    this.app.store.set("statsPanelVisible", visible);
+
+    if (visible) {
       // Show with animation
       panel.style.display = "block";
       // Trigger reflow to ensure transition works
       panel.offsetHeight;
       panel.classList.add("visible");
-      this.app.stateManager.saveMapState();
+      if (save) this.app.stateManager.saveMapState();
+    } else {
+      // Hide with animation, then remove from layout
+      panel.classList.remove("visible");
+      this.closeTimer = setTimeout(() => {
+        this.closeTimer = null;
+        panel.style.display = "none";
+        if (save) this.app.stateManager.saveMapState();
+      }, PANEL_TRANSITION_MS);
     }
+  }
+
+  toggleStats(): void {
+    const panel = domCache.get("stats-panel");
+    if (!panel) return;
+    this.setStatsPanelVisible(!panel.classList.contains("visible"));
   }
 }

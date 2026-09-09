@@ -1,403 +1,333 @@
 """Tests for renderer module."""
 
+import json
 import os
 import string
-import tempfile
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
-from kml_heatmap.constants import HEATMAP_GRADIENT
 from kml_heatmap.renderer import (
+    _drop_paths_without_year,
     _escape_js_string,
     _package_assets,
+    _parse_kml_files,
     _parse_with_error_handling,
+    _process_data,
     _render_html,
+    create_progressive_heatmap,
     load_template,
     minify_html,
 )
+from kml_heatmap.types import TrackPoint
+
+BOUNDS = {
+    "center_lat": 51.0,
+    "center_lon": 13.0,
+    "min_lat": 48.0,
+    "max_lat": 54.0,
+    "min_lon": 9.0,
+    "max_lon": 17.0,
+}
+
+TRACK_KML = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+  <Document><Placemark><name>EDAQ - EDDC</name><gx:Track>
+    <when>{year}-03-15T10:00:00Z</when><gx:coord>12.05 51.55 110</gx:coord>
+    <when>{year}-03-15T10:10:00Z</when><gx:coord>12.5 51.4 800</gx:coord>
+    <when>{year}-03-15T10:20:00Z</when><gx:coord>13.76 51.13 230</gx:coord>
+  </gx:Track></Placemark></Document></kml>
+"""
+
+
+def _write_kml(path, year=2025):
+    path.write_text(TRACK_KML.format(year=year), encoding="utf-8")
+    return str(path)
 
 
 class TestEscapeJsString:
-    """Tests for _escape_js_string function."""
-
     def test_plain_string_unchanged(self):
-        """Test that a plain alphanumeric string passes through."""
         assert _escape_js_string("hello") == "hello"
 
-    def test_escapes_double_quotes(self):
-        """Test that double quotes are escaped."""
-        result = _escape_js_string('say "hi"')
-        assert '\\"' in result
-        assert result == 'say \\"hi\\"'
-
-    def test_escapes_single_quotes(self):
-        """Test that single quotes are escaped for JS strings."""
-        result = _escape_js_string("it's")
-        assert "\\'" in result
-
-    def test_escapes_backslash(self):
-        """Test that backslashes are escaped."""
-        result = _escape_js_string("path\\to\\file")
-        assert "\\\\" in result
-
-    def test_escapes_newline(self):
-        """Test that newlines are escaped."""
-        result = _escape_js_string("line1\nline2")
-        assert "\\n" in result
-        assert "\n" not in result
-
-    def test_escapes_tab(self):
-        """Test that tabs are escaped."""
-        result = _escape_js_string("col1\tcol2")
-        assert "\\t" in result
-
-    def test_escapes_html_angle_brackets(self):
-        """Test that angle brackets are preserved (not HTML-escaped)."""
-        result = _escape_js_string("<script>alert(1)</script>")
-        assert "<script>" in result
+    def test_escapes_quotes_backslash_and_control_chars(self):
+        assert _escape_js_string('say "hi"') == 'say \\"hi\\"'
+        assert _escape_js_string("it's") == "it\\'s"
+        assert _escape_js_string("path\\to") == "path\\\\to"
+        assert _escape_js_string("line1\nline2") == "line1\\nline2"
+        assert _escape_js_string("col1\tcol2") == "col1\\tcol2"
 
     def test_xss_payload_neutralized(self):
-        """Test that XSS payloads in API keys are safely escaped."""
         result = _escape_js_string("'; alert('xss'); //")
         assert "\\'" in result
-        assert "alert" in result
+        assert "'" not in result.replace("\\'", "")
 
-    def test_empty_string(self):
-        """Test that empty string returns empty."""
+    def test_empty_and_unicode(self):
         assert _escape_js_string("") == ""
-
-    def test_unicode_preserved(self):
-        """Test that unicode characters are handled."""
-        result = _escape_js_string("Flughafen München")
-        assert "München" in result or "M\\u00fc" in result
+        assert "M\\u00fcnchen" in _escape_js_string("Flughafen München")
 
 
 class TestLoadTemplate:
-    """Tests for load_template function."""
-
-    def test_load_template_returns_string(self):
-        """Test that load_template returns a string."""
-        template = load_template()
-        assert isinstance(template, str)
-        assert len(template) > 0
-
-    def test_load_template_contains_html(self):
-        """Test that template contains HTML markup."""
+    def test_template_content(self):
         template = load_template()
         assert "<html" in template.lower()
         assert "</html>" in template.lower()
-
-    def test_load_template_is_map_template(self):
-        """Test that template is a map template."""
-        template = load_template()
-        assert "map" in template.lower() or "leaflet" in template.lower()
-
-    def test_load_template_has_data_dir_placeholder(self):
-        """Test that template contains $data_dir_name placeholder."""
-        template = load_template()
         assert "$data_dir_name" in template
 
 
 class TestMinifyHtml:
-    """Tests for minify_html function."""
-
-    def test_minify_simple_html(self):
-        """Test minifying simple HTML."""
-        html = "<html>  <body>  <h1>Test</h1>  </body>  </html>"
+    def test_minifies_css_and_js(self):
+        html = """<html><head><style>
+            body { margin: 0; padding: 0; }
+        </style></head><body><script>
+            var x = 10;
+            console.log(x);
+        </script></body></html>"""
         minified = minify_html(html)
-        assert isinstance(minified, str)
-        assert len(minified) <= len(html)
+        assert "body{margin:0;padding:0}" in minified
+        assert "<script>var x=10;console.log(x);</script>" in minified
+        assert len(minified) < len(html)
 
-    def test_minify_html_with_css(self):
-        """Test minifying HTML with inline CSS."""
-        html = """
-        <html>
-            <head>
-                <style>
-                    body {
-                        margin: 0;
-                        padding: 0;
-                    }
-                </style>
-            </head>
-            <body></body>
-        </html>
-        """
-        minified = minify_html(html)
-        assert isinstance(minified, str)
-        assert "body{margin:0" in minified or "body{padding:0" in minified
-
-    def test_minify_html_with_javascript(self):
-        """Test minifying HTML with inline JavaScript."""
-        html = """
-        <html>
-            <body>
-                <script>
-                    var x = 10;
-                    console.log(x);
-                </script>
-            </body>
-        </html>
-        """
-        minified = minify_html(html)
-        assert isinstance(minified, str)
-        assert "<script>" in minified
-        assert "</script>" in minified
-
-    def test_minify_preserves_functionality(self):
-        """Test that minification preserves HTML functionality."""
-        html = '<html><body><div id="test">Content</div></body></html>'
-        minified = minify_html(html)
+    def test_preserves_attributes_and_content(self):
+        minified = minify_html('<html><body><div id="test">Content</div></body></html>')
         assert 'id="test"' in minified or "id=test" in minified
         assert "Content" in minified
 
-    def test_minify_removes_whitespace(self):
-        """Test that minification removes unnecessary whitespace."""
-        html = """
-        <html>
-            <body>
-                <div>
-                    <p>Test</p>
-                </div>
-            </body>
-        </html>
-        """
-        minified = minify_html(html)
-        assert len(minified) < len(html)
-        assert "\n\n" not in minified
-
-    def test_minify_empty_html(self):
-        """Test minifying empty HTML."""
-        html = "<html></html>"
-        minified = minify_html(html)
-        assert isinstance(minified, str)
-        assert len(minified) >= 0
-
-    def test_minify_complex_css(self):
-        """Test minifying HTML with complex CSS."""
-        html = """
-        <style>
-            .class1 { color: red; font-size: 12px; }
-            .class2 { background: blue; margin: 10px; }
-        </style>
-        """
-        minified = minify_html(html)
-        assert "color:red" in minified or "color: red" in minified
-
-    def test_minify_multiple_scripts(self):
-        """Test minifying HTML with multiple script tags."""
-        html = """
-        <script>var a = 1;</script>
-        <script>var b = 2;</script>
-        """
-        minified = minify_html(html)
+    def test_multiple_scripts(self):
+        minified = minify_html(
+            "<script>var a = 1;</script>\n<script>var b = 2;</script>"
+        )
         assert minified.count("<script>") == 2
         assert minified.count("</script>") == 2
 
 
-class TestHeatmapGradient:
-    """Tests for HEATMAP_GRADIENT constant."""
-
-    def test_gradient_is_dict(self):
-        """Test that gradient is a dictionary."""
-        assert isinstance(HEATMAP_GRADIENT, dict)
-
-    def test_gradient_has_values(self):
-        """Test that gradient has color values."""
-        assert len(HEATMAP_GRADIENT) > 0
-
-    def test_gradient_contains_colors(self):
-        """Test that gradient contains color strings."""
-        for value in HEATMAP_GRADIENT.values():
-            assert isinstance(value, str)
-
-    def test_gradient_keys_are_floats(self):
-        """Test that gradient keys are float values."""
-        for key in HEATMAP_GRADIENT:
-            assert isinstance(key, float)
-
-    def test_gradient_range(self):
-        """Test that gradient keys are in valid range."""
-        for key in HEATMAP_GRADIENT:
-            assert 0.0 <= key <= 1.0
-
-
 class TestParseWithErrorHandling:
-    """Tests for _parse_with_error_handling function."""
-
-    def test_returns_empty_on_nonexistent_file(self):
-        """Test that a nonexistent file returns empty results."""
-        kml_file, (coords, paths, meta) = _parse_with_error_handling(
-            "/nonexistent/file.kml"
+    def test_nonexistent_file_returns_empty(self):
+        assert _parse_with_error_handling("/nonexistent/file.kml") == (
+            "/nonexistent/file.kml",
+            ([], [], []),
         )
-        assert kml_file == "/nonexistent/file.kml"
-        assert coords == []
-        assert paths == []
-        assert meta == []
 
-    def test_returns_empty_on_invalid_kml(self):
-        """Test that invalid KML returns empty results."""
-        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False, mode="w") as f:
-            f.write("<not-kml>garbage</not-kml>")
-            path = f.name
+    def test_invalid_kml_returns_empty(self, tmp_path):
+        path = tmp_path / "bad.kml"
+        path.write_text("<not-kml>garbage")
+        assert _parse_with_error_handling(str(path)) == (str(path), ([], [], []))
 
-        try:
-            kml_file, (coords, paths, meta) = _parse_with_error_handling(path)
-            assert kml_file == path
-            # Invalid KML may return empty or raise handled errors
-            assert isinstance(coords, list)
-            assert isinstance(paths, list)
-            assert isinstance(meta, list)
-        finally:
-            os.unlink(path)
+
+class TestParseKmlFiles:
+    def test_merges_results_in_numeric_order(self, tmp_path):
+        files = [
+            _write_kml(tmp_path / "10_DEAGJ_DA20.kml", 2026),
+            _write_kml(tmp_path / "2_DEAGJ_DA20.kml", 2025),
+        ]
+
+        coords, paths, metadata = _parse_kml_files(files)
+
+        assert len(coords) == 6
+        assert len(paths) == 2
+        assert [m["filename"] for m in metadata] == [
+            "2_DEAGJ_DA20.kml",
+            "10_DEAGJ_DA20.kml",
+        ]
+        assert all(isinstance(p, TrackPoint) for p in coords)
+
+    def test_debug_output_from_forkserver_workers(self, tmp_path):
+        """Workers start via forkserver; --debug must still show their output."""
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        kml_file = _write_kml(input_dir / "1_DEAGJ_DA20.kml")
+
+        result = subprocess.run(  # noqa: S603
+            [
+                sys.executable,
+                "-m",
+                "kml_heatmap",
+                "--debug",
+                kml_file,
+                "--output-dir",
+                str(tmp_path / "out"),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=Path(__file__).parent.parent,
+        )
+
+        assert result.returncode == 0, result.stderr
+        # Emitted by a parse worker process
+        assert "DEBUG: Found 1 gx:Track element(s)" in result.stdout
+        # Emitted by init_worker pre-loading the airport database
+        assert "airports from cache" in result.stdout
+
+
+class TestDropPathsWithoutYear:
+    def test_excludes_paths_without_year(self, capsys):
+        paths = [[TrackPoint(1, 1, 1)], [TrackPoint(2, 2, 2)], [TrackPoint(3, 3, 3)]]
+        metadata = [
+            {"year": 2025, "filename": "a.kml"},
+            {"year": None, "filename": "b.kml", "airport_name": "Somewhere"},
+            {"filename": "c.kml"},
+        ]
+
+        kept_paths, kept_metadata = _drop_paths_without_year(paths, metadata)
+
+        assert kept_paths == [paths[0]]
+        assert kept_metadata == [metadata[0]]
+        err = capsys.readouterr().err
+        assert "b.kml (Somewhere)" in err
+        assert "c.kml" in err
+
+
+class TestProcessData:
+    def test_exports_and_excludes_yearless_paths(self, tmp_path):
+        coords = [
+            TrackPoint(50.0, 8.0, 100.0),
+            TrackPoint(51.0, 9.0, 200.0),
+            TrackPoint(52.0, 10.0, 1.0),
+        ]
+        paths = [coords[:2], [coords[2], TrackPoint(52.1, 10.1, 2.0)]]
+        metadata = [
+            {
+                "year": 2025,
+                "start_point": [50.0, 8.0, 100.0],
+                "airport_name": "EDDF Frankfurt Main - EDDK Cologne Bonn",
+                "aircraft_registration": "D-EAGJ",
+                "aircraft_type": "DA20",
+                "filename": "1_DEAGJ_DA20.kml",
+            },
+            {
+                "year": None,
+                "start_point": [52.0, 10.0, 1.0],
+                "airport_name": "EDDH - EDDW",
+            },
+        ]
+
+        result = _process_data(
+            coords, paths, metadata, str(tmp_path / "data"), {"D-EAGJ": "Katana"}
+        )
+
+        assert result["bounds"]["min_lat"] == 50.0
+        assert result["bounds"]["max_lat"] == 52.0
+        assert result["bounds"]["center_lon"] == 9.0
+        stats = result["stats"]
+        assert stats["num_paths"] == 1
+        assert stats["total_points"] == 2
+        assert stats["num_aircraft"] == 1
+        assert stats["aircraft_list"][0]["model"] == "Katana"
+        assert stats["airport_names"] == ["EDDF Frankfurt Main", "EDDK Cologne Bonn"]
+        assert sorted(p.name for p in (tmp_path / "data").iterdir()) == [
+            "2025",
+            "airports.js",
+            "metadata.js",
+        ]
 
 
 class TestRenderHtml:
-    """Tests for _render_html function."""
-
-    def test_renders_html_to_file(self):
-        """Test that HTML is rendered and written to output file."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_file = os.path.join(tmpdir, "index.html")
-
-            _render_html(output_file, "data")
-
-            assert os.path.exists(output_file)
-            with open(output_file) as f:
-                content = f.read()
-            assert len(content) > 0
-            # Should be minified HTML
-            assert "<!doctype html>" in content.lower() or "<!DOCTYPE" in content
-
-    def test_substitutes_data_dir_name(self):
-        """Test that $data_dir_name is substituted correctly."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_file = os.path.join(tmpdir, "index.html")
-
-            _render_html(output_file, "my_data_dir")
-
-            with open(output_file) as f:
-                content = f.read()
-            assert "my_data_dir" in content
-            assert "$data_dir_name" not in content
-
-    def test_output_is_minified(self):
-        """Test that output HTML is minified (smaller than template)."""
-        template = load_template()
-        substituted = string.Template(template).substitute(data_dir_name="data")
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_file = os.path.join(tmpdir, "index.html")
-            _render_html(output_file, "data")
-
-            output_size = os.path.getsize(output_file)
-            assert output_size < len(substituted)
+    def test_renders_minified_html_with_data_dir(self, tmp_path):
+        output_file = tmp_path / "index.html"
+        _render_html(str(output_file), "my_data_dir")
+        content = output_file.read_text()
+        assert "<!doctype html>" in content.lower()
+        assert "my_data_dir" in content
+        assert "$data_dir_name" not in content
+        substituted = string.Template(load_template()).substitute(
+            data_dir_name="my_data_dir"
+        )
+        assert len(content) < len(substituted)
 
 
 class TestPackageAssets:
-    """Tests for _package_assets function."""
+    def test_generates_config_css_and_favicons(self, tmp_path):
+        with patch.dict(
+            os.environ, {"CARTO_API_KEY": "test-carto", "OPENAIP_API_KEY": "it's"}
+        ):
+            _package_assets(str(tmp_path), BOUNDS, "data")
 
-    def test_generates_map_config(self):
-        """Test that map_config.js is generated with correct values."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            bounds = {
-                "center_lat": 51.0,
-                "center_lon": 13.0,
-                "min_lat": 48.0,
-                "max_lat": 54.0,
-                "min_lon": 9.0,
-                "max_lon": 17.0,
-            }
+        config = (tmp_path / "map_config.js").read_text()
+        assert "51.0" in config
+        assert "test-carto" in config
+        assert "it\\'s" in config
+        assert "$center_lat" not in config
+        assert (tmp_path / "styles.css").stat().st_size > 0
+        static_dir = Path(__file__).parent.parent / "kml_heatmap" / "static"
+        for fname in ("favicon.svg", "manifest.json", "bundle.js", "mapApp.bundle.js"):
+            if (static_dir / fname).exists():
+                assert (tmp_path / fname).exists()
 
-            _package_assets(tmpdir, bounds, "data")
 
-            config_path = os.path.join(tmpdir, "map_config.js")
-            assert os.path.exists(config_path)
+class TestCreateProgressiveHeatmap:
+    def test_refuses_overlapping_output_dir(self, tmp_path, capsys):
+        kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
+        assert (
+            create_progressive_heatmap(
+                [kml_file], str(tmp_path / "index.html"), str(tmp_path / "data")
+            )
+            is False
+        )
+        assert "Refusing" in capsys.readouterr().err
+        assert not (tmp_path / "data").exists()
 
-            with open(config_path) as f:
-                content = f.read()
-            assert "51.0" in content
-            assert "13.0" in content
-            assert "$center_lat" not in content
+    def test_refuses_when_aircraft_json_dir_overlaps(self, tmp_path):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        kml_file = _write_kml(input_dir / "1_DEAGJ_DA20.kml")
+        aircraft = tmp_path / "out" / "data" / "aircraft.json"
+        aircraft.parent.mkdir(parents=True)
+        aircraft.write_text("{}")
+        out = tmp_path / "out"
+        assert (
+            create_progressive_heatmap(
+                [kml_file], str(out / "index.html"), str(out / "data"), [aircraft]
+            )
+            is False
+        )
 
-    def test_copies_css(self):
-        """Test that styles.css is copied and minified."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            bounds = {
-                "center_lat": 51.0,
-                "center_lon": 13.0,
-                "min_lat": 48.0,
-                "max_lat": 54.0,
-                "min_lon": 9.0,
-                "max_lon": 17.0,
-            }
+    def test_no_valid_files(self, tmp_path):
+        assert (
+            create_progressive_heatmap(
+                [str(tmp_path / "missing.kml")],
+                str(tmp_path / "o" / "index.html"),
+                str(tmp_path / "o" / "data"),
+            )
+            is False
+        )
 
-            _package_assets(tmpdir, bounds, "data")
+    def test_no_coordinates(self, tmp_path):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        (input_dir / "empty.kml").write_text("<kml><Document/></kml>")
+        out = tmp_path / "out"
+        assert (
+            create_progressive_heatmap(
+                [str(input_dir / "empty.kml")],
+                str(out / "index.html"),
+                str(out / "data"),
+            )
+            is False
+        )
 
-            css_path = os.path.join(tmpdir, "styles.css")
-            assert os.path.exists(css_path)
-            assert os.path.getsize(css_path) > 0
+    def test_end_to_end_with_aircraft_data(self, tmp_path):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        kml_file = _write_kml(input_dir / "1_DEAGJ_DA20.kml")
+        aircraft = input_dir / "aircraft.json"
+        aircraft.write_text(json.dumps({"D-EAGJ": "Diamond Katana"}))
+        out = tmp_path / "out"
+        out.mkdir()
 
-    def test_copies_favicon_files(self):
-        """Test that favicon files are copied."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            bounds = {
-                "center_lat": 51.0,
-                "center_lon": 13.0,
-                "min_lat": 48.0,
-                "max_lat": 54.0,
-                "min_lon": 9.0,
-                "max_lon": 17.0,
-            }
+        assert (
+            create_progressive_heatmap(
+                [kml_file], str(out / "index.html"), str(out / "data"), [aircraft]
+            )
+            is True
+        )
 
-            _package_assets(tmpdir, bounds, "data")
-
-            # At least favicon.svg and manifest.json should exist
-            static_dir = Path(__file__).parent.parent / "kml_heatmap" / "static"
-            for fname in ("favicon.svg", "manifest.json"):
-                src = static_dir / fname
-                if src.exists():
-                    assert os.path.exists(os.path.join(tmpdir, fname))
-
-    def test_config_uses_env_api_keys(self):
-        """Test that API keys from environment are used in config."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            bounds = {
-                "center_lat": 51.0,
-                "center_lon": 13.0,
-                "min_lat": 48.0,
-                "max_lat": 54.0,
-                "min_lon": 9.0,
-                "max_lon": 17.0,
-            }
-
-            with patch.dict(
-                os.environ,
-                {"CARTO_API_KEY": "test-carto", "OPENAIP_API_KEY": "test-openaip"},
-            ):
-                _package_assets(tmpdir, bounds, "data")
-
-            config_path = os.path.join(tmpdir, "map_config.js")
-            with open(config_path) as f:
-                content = f.read()
-            assert "test-carto" in content
-            assert "test-openaip" in content
-
-    def test_copies_js_bundles_when_present(self):
-        """Test that JS bundles are copied when they exist."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            bounds = {
-                "center_lat": 51.0,
-                "center_lon": 13.0,
-                "min_lat": 48.0,
-                "max_lat": 54.0,
-                "min_lon": 9.0,
-                "max_lon": 17.0,
-            }
-
-            _package_assets(tmpdir, bounds, "data")
-
-            static_dir = Path(__file__).parent.parent / "kml_heatmap" / "static"
-            for bundle in ("bundle.js", "mapApp.bundle.js"):
-                if (static_dir / bundle).exists():
-                    assert os.path.exists(os.path.join(tmpdir, bundle))
+        assert (out / "index.html").exists()
+        meta = json.loads(
+            (out / "data" / "metadata.js").read_text()[
+                len("window.KML_METADATA = ") : -1
+            ]
+        )
+        assert meta["available_years"] == [2025]
+        assert meta["stats"]["aircraft_list"][0]["model"] == "Diamond Katana"
+        assert meta["stats"]["num_paths"] == 1

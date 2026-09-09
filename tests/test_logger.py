@@ -1,114 +1,100 @@
 """Tests for logger module."""
 
 import logging
+import sys
+
+import pytest
 
 from kml_heatmap.logger import logger, set_debug_mode, setup_logger
 
 
-class TestSetupLogger:
-    """Tests for setup_logger function."""
+@pytest.fixture(autouse=True)
+def _restore_level():
+    yield
+    set_debug_mode(False)
 
+
+class TestSetupLogger:
     def test_default_logger(self):
-        """Test creating logger with default settings."""
         test_logger = setup_logger("test_logger_default")
-        assert test_logger is not None
         assert test_logger.level == logging.INFO
-        assert len(test_logger.handlers) > 0
+        assert len(test_logger.handlers) == 2
+
+    def test_stdout_and_stderr_handlers(self):
+        test_logger = setup_logger("test_logger_streams")
+        stdout_handler, stderr_handler = test_logger.handlers
+        assert stdout_handler.stream is sys.stdout
+        assert stdout_handler.level == logging.INFO
+        assert stderr_handler.stream is sys.stderr
+        assert stderr_handler.level == logging.WARNING
 
     def test_logger_with_debug(self):
-        """Test creating logger with debug enabled."""
         test_logger = setup_logger("test_logger_debug", debug=True)
         assert test_logger.level == logging.DEBUG
         assert test_logger.handlers[0].level == logging.DEBUG
+        assert test_logger.handlers[1].level == logging.WARNING
 
     def test_logger_with_custom_level(self):
-        """Test creating logger with custom level."""
-        test_logger = setup_logger("test_logger_custom", level=logging.WARNING)
-        assert test_logger.level == logging.WARNING
-
-    def test_logger_with_custom_name(self):
-        """Test creating logger with custom name."""
-        test_logger = setup_logger("my_custom_logger")
-        assert test_logger.name == "my_custom_logger"
+        assert (
+            setup_logger("test_logger_custom", level=logging.WARNING).level
+            == logging.WARNING
+        )
 
     def test_logger_avoids_duplicate_handlers(self):
-        """Test that calling setup_logger twice doesn't add duplicate handlers."""
         test_logger = setup_logger("test_logger_duplicate")
         handler_count = len(test_logger.handlers)
-        # Call again with same name
-        test_logger_again = setup_logger("test_logger_duplicate")
-        assert len(test_logger_again.handlers) == handler_count
+        assert len(setup_logger("test_logger_duplicate").handlers) == handler_count
 
     def test_logger_handler_format(self):
-        """Test that logger handler has correct formatter."""
-        test_logger = setup_logger("test_logger_format")
-        handler = test_logger.handlers[0]
-        assert handler.formatter is not None
-        # Check formatter format
-        log_format = handler.formatter._fmt
-        assert "levelname" in log_format
-        assert "message" in log_format
+        handler = setup_logger("test_logger_format").handlers[0]
+        assert handler.formatter._fmt == "%(levelname)s: %(message)s"
 
     def test_debug_overrides_level(self):
-        """Test that debug=True overrides the level parameter."""
         test_logger = setup_logger(
             "test_logger_override", level=logging.WARNING, debug=True
         )
         assert test_logger.level == logging.DEBUG
 
 
+class TestOutputStreams:
+    def test_info_goes_to_stdout_only(self, capsys):
+        logger.info("hello info")
+        captured = capsys.readouterr()
+        assert "INFO: hello info" in captured.out
+        assert "hello info" not in captured.err
+
+    def test_warning_and_error_go_to_stderr_only(self, capsys):
+        logger.warning("hello warning")
+        logger.error("hello error")
+        captured = capsys.readouterr()
+        assert "WARNING: hello warning" in captured.err
+        assert "ERROR: hello error" in captured.err
+        assert "hello" not in captured.out
+
+    def test_debug_hidden_unless_enabled(self, capsys):
+        logger.debug("hidden")
+        assert "hidden" not in capsys.readouterr().out
+        set_debug_mode(True)
+        logger.debug("visible")
+        assert "DEBUG: visible" in capsys.readouterr().out
+
+
 class TestGlobalLogger:
-    """Tests for global logger instance."""
-
-    def test_global_logger_exists(self):
-        """Test that global logger is initialized."""
-        assert logger is not None
-        assert isinstance(logger, logging.Logger)
-
     def test_global_logger_name(self):
-        """Test global logger has correct name."""
+        assert isinstance(logger, logging.Logger)
         assert logger.name == "kml_heatmap"
 
 
 class TestSetDebugMode:
-    """Tests for set_debug_mode function."""
-
-    def test_enable_debug_mode(self):
-        """Test enabling debug mode."""
-        # Enable debug
+    def test_enable_debug_mode_only_touches_stdout_handler(self):
         set_debug_mode(True)
-
-        # Check global logger is set to DEBUG
         assert logger.level == logging.DEBUG
-        for handler in logger.handlers:
-            assert handler.level == logging.DEBUG
-
-        # Restore original state
-        set_debug_mode(False)
+        assert logger.handlers[0].level == logging.DEBUG
+        assert logger.handlers[1].level == logging.WARNING
 
     def test_disable_debug_mode(self):
-        """Test disabling debug mode."""
-        # Enable debug first
         set_debug_mode(True)
-
-        # Now disable
-        set_debug_mode(False)
-
-        # Check global logger is set to INFO
-        assert logger.level == logging.INFO
-        for handler in logger.handlers:
-            assert handler.level == logging.INFO
-
-    def test_toggle_debug_mode(self):
-        """Test toggling debug mode multiple times."""
-        # Start with info
         set_debug_mode(False)
         assert logger.level == logging.INFO
-
-        # Enable debug
-        set_debug_mode(True)
-        assert logger.level == logging.DEBUG
-
-        # Disable again
-        set_debug_mode(False)
-        assert logger.level == logging.INFO
+        assert logger.handlers[0].level == logging.INFO
+        assert logger.handlers[1].level == logging.WARNING

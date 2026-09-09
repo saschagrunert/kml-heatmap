@@ -1,180 +1,162 @@
 """Tests for export_writers module."""
 
 import json
-import os
-from pathlib import Path
 
-from kml_heatmap.export_writers import (
-    collect_unique_years,
-    export_airports_data,
-    export_metadata,
-)
+import pytest
+
+from kml_heatmap.export_writers import export_airports_data, export_metadata
+
+
+def _parse(path, prefix):
+    content = path.read_text()
+    assert content.startswith(prefix)
+    assert content.endswith(";")
+    return json.loads(content[len(prefix) : -1])
+
+
+def _airport(name, lat=48.6899, lon=9.2220, timestamps=None, is_at_path_end=False):
+    return {
+        "name": name,
+        "lat": lat,
+        "lon": lon,
+        "timestamps": timestamps or [],
+        "is_at_path_end": is_at_path_end,
+    }
 
 
 class TestExportAirportsData:
-    def test_valid_airports(self, tmp_path):
-        airports = [
-            {
-                "name": "EDDS Stuttgart",
-                "lat": 48.6899,
-                "lon": 9.2220,
-                "timestamps": ["2025-03-03T08:00:00Z"],
-                "is_at_path_end": False,
-            }
-        ]
+    def test_valid_airport_with_country(self, tmp_path):
+        airports = [_airport("EDDS Stuttgart", timestamps=["t1"])]
         filepath, size = export_airports_data(airports, str(tmp_path))
-        assert os.path.exists(filepath)
-        assert size > 0
 
-        content = Path(filepath).read_text()
-        assert content.startswith("window.KML_AIRPORTS = ")
-        assert content.endswith(";")
-        data = json.loads(content[len("window.KML_AIRPORTS = ") : -1])
-        assert len(data["airports"]) == 1
-        assert data["airports"][0]["flight_count"] == 1
+        assert filepath == str(tmp_path / "airports.js")
+        assert size == (tmp_path / "airports.js").stat().st_size
+        data = _parse(tmp_path / "airports.js", "window.KML_AIRPORTS = ")
+        assert data == {
+            "airports": [
+                {
+                    "country": "DE",
+                    "flight_count": 1,
+                    "lat": 48.6899,
+                    "lon": 9.222,
+                    "name": "EDDS Stuttgart",
+                }
+            ]
+        }
 
-    def test_empty_name_filtered(self, tmp_path):
+    def test_timestamps_never_exported(self, tmp_path):
+        export_airports_data(
+            [_airport("EDDS Stuttgart", timestamps=["t1"])], str(tmp_path)
+        )
+        data = _parse(tmp_path / "airports.js", "window.KML_AIRPORTS = ")
+        assert "timestamps" not in data["airports"][0]
+        assert "icao" not in data["airports"][0]
+
+    def test_unknown_icao_has_no_country(self, tmp_path):
+        export_airports_data([_airport("ZZZZ Nowhere")], str(tmp_path))
+        data = _parse(tmp_path / "airports.js", "window.KML_AIRPORTS = ")
+        assert "country" not in data["airports"][0]
+
+    def test_route_name_uses_position(self, tmp_path):
         airports = [
-            {
-                "name": "",
-                "lat": 48.0,
-                "lon": 9.0,
-                "timestamps": [],
-                "is_at_path_end": False,
-            }
+            _airport("EDDS Stuttgart - EDDP Leipzig", is_at_path_end=False),
+            _airport(
+                "EDDS Stuttgart - EDDP Leipzig",
+                lat=51.42,
+                lon=12.23,
+                is_at_path_end=True,
+            ),
         ]
-        filepath, _ = export_airports_data(airports, str(tmp_path))
-        content = Path(filepath).read_text()
-        data = json.loads(content[len("window.KML_AIRPORTS = ") : -1])
-        assert len(data["airports"]) == 0
+        export_airports_data(airports, str(tmp_path))
+        data = _parse(tmp_path / "airports.js", "window.KML_AIRPORTS = ")
+        assert [a["name"] for a in data["airports"]] == [
+            "EDDS Stuttgart",
+            "EDDP Leipzig",
+        ]
+
+    @pytest.mark.parametrize("name", ["", "Unknown", "Log Start: 03 Mar 2025", None])
+    def test_invalid_names_filtered(self, tmp_path, name):
+        export_airports_data([_airport(name)], str(tmp_path))
+        data = _parse(tmp_path / "airports.js", "window.KML_AIRPORTS = ")
+        assert data["airports"] == []
 
     def test_duplicate_locations_deduplicated(self, tmp_path):
         airports = [
-            {
-                "name": "EDDS Stuttgart",
-                "lat": 48.6899,
-                "lon": 9.2220,
-                "timestamps": ["t1"],
-                "is_at_path_end": False,
-            },
-            {
-                "name": "EDDS Stuttgart",
-                "lat": 48.6899,
-                "lon": 9.2220,
-                "timestamps": ["t2"],
-                "is_at_path_end": False,
-            },
+            _airport("EDDS Stuttgart", timestamps=["t1"]),
+            _airport("EDDS Stuttgart", lat=48.68991, lon=9.22201, timestamps=["t2"]),
         ]
-        filepath, _ = export_airports_data(airports, str(tmp_path))
-        content = Path(filepath).read_text()
-        data = json.loads(content[len("window.KML_AIRPORTS = ") : -1])
+        export_airports_data(airports, str(tmp_path))
+        data = _parse(tmp_path / "airports.js", "window.KML_AIRPORTS = ")
         assert len(data["airports"]) == 1
 
-    def test_strip_timestamps(self, tmp_path):
-        airports = [
-            {
-                "name": "EDDS Stuttgart",
-                "lat": 48.6899,
-                "lon": 9.2220,
-                "timestamps": ["2025-03-03T08:00:00Z"],
-                "is_at_path_end": False,
-            }
-        ]
-        filepath, _ = export_airports_data(
-            airports, str(tmp_path), strip_timestamps=True
-        )
-        content = Path(filepath).read_text()
-        data = json.loads(content[len("window.KML_AIRPORTS = ") : -1])
-        assert "timestamps" not in data["airports"][0]
-
-    def test_flight_count_from_multiple_timestamps(self, tmp_path):
-        airports = [
-            {
-                "name": "EDDS Stuttgart",
-                "lat": 48.6899,
-                "lon": 9.2220,
-                "timestamps": ["t1", "t2", "t3"],
-                "is_at_path_end": False,
-            }
-        ]
-        filepath, _ = export_airports_data(airports, str(tmp_path))
-        content = Path(filepath).read_text()
-        data = json.loads(content[len("window.KML_AIRPORTS = ") : -1])
+    def test_flight_count_from_timestamps(self, tmp_path):
+        airports = [_airport("EDDS Stuttgart", timestamps=["t1", "t2", "t3"])]
+        export_airports_data(airports, str(tmp_path))
+        data = _parse(tmp_path / "airports.js", "window.KML_AIRPORTS = ")
         assert data["airports"][0]["flight_count"] == 3
+
+    def test_empty_list(self, tmp_path):
+        export_airports_data([], str(tmp_path))
+        data = _parse(tmp_path / "airports.js", "window.KML_AIRPORTS = ")
+        assert data == {"airports": []}
 
 
 class TestExportMetadata:
-    def test_normal_values(self, tmp_path):
-        stats = {"total_flights": 10}
-        filepath, _size = export_metadata(
-            stats, 100.0, 5000.0, 50.0, 180.0, [2024, 2025], str(tmp_path)
-        )
-        assert os.path.exists(filepath)
-        content = Path(filepath).read_text()
-        assert content.startswith("window.KML_METADATA = ")
-        data = json.loads(content[len("window.KML_METADATA = ") : -1])
-        assert data["min_alt_m"] == 100.0
-        assert data["max_alt_m"] == 5000.0
-        assert data["min_groundspeed_knots"] == 50.0
-        assert data["max_groundspeed_knots"] == 180.0
-        assert data["available_years"] == [2024, 2025]
+    def _export(self, tmp_path, **overrides):
+        kwargs = {
+            "stats": {"total_points": 10},
+            "min_alt_m": 100.0,
+            "max_alt_m": 5000.0,
+            "min_groundspeed_knots": 50.0,
+            "max_groundspeed_knots": 180.0,
+            "available_years": [2025, 2024],
+            "year_file_bytes": {"2024": 10, "2025": 20},
+            "output_dir": str(tmp_path),
+        }
+        kwargs.update(overrides)
+        return export_metadata(**kwargs)
 
-    def test_infinite_groundspeed_clamped(self, tmp_path):
-        filepath, _ = export_metadata(
-            {}, 0, 1000, float("inf"), float("-inf"), [], str(tmp_path)
-        )
-        content = Path(filepath).read_text()
-        data = json.loads(content[len("window.KML_METADATA = ") : -1])
-        assert data["min_groundspeed_knots"] == 0.0
-        assert data["max_groundspeed_knots"] == 0.0
-
-    def test_nan_groundspeed_clamped(self, tmp_path):
-        filepath, _ = export_metadata(
-            {}, 0, 1000, float("nan"), float("nan"), [], str(tmp_path)
-        )
-        content = Path(filepath).read_text()
-        data = json.loads(content[len("window.KML_METADATA = ") : -1])
-        assert data["min_groundspeed_knots"] == 0.0
-        assert data["max_groundspeed_knots"] == 0.0
-
-    def test_with_file_structure(self, tmp_path):
-        structure = {"2025": ["full", "medium"]}
-        filepath, _ = export_metadata(
-            {}, 0, 1000, 50, 180, [2025], str(tmp_path), file_structure=structure
-        )
-        content = Path(filepath).read_text()
-        data = json.loads(content[len("window.KML_METADATA = ") : -1])
-        assert data["file_structure"] == structure
-
-    def test_without_file_structure(self, tmp_path):
-        filepath, _ = export_metadata({}, 0, 1000, 50, 180, [], str(tmp_path))
-        content = Path(filepath).read_text()
-        data = json.loads(content[len("window.KML_METADATA = ") : -1])
+    def test_d2_shape(self, tmp_path):
+        filepath, size = self._export(tmp_path)
+        assert filepath == str(tmp_path / "metadata.js")
+        assert size == (tmp_path / "metadata.js").stat().st_size
+        data = _parse(tmp_path / "metadata.js", "window.KML_METADATA = ")
+        assert data == {
+            "stats": {"total_points": 10},
+            "min_alt_m": 100.0,
+            "max_alt_m": 5000.0,
+            "min_groundspeed_knots": 50.0,
+            "max_groundspeed_knots": 180.0,
+            "available_years": [2024, 2025],
+            "year_file_bytes": {"2024": 10, "2025": 20},
+        }
+        assert "gradient" not in data
         assert "file_structure" not in data
 
+    @pytest.mark.parametrize(
+        "min_speed,max_speed,expected_min,expected_max",
+        [
+            (float("inf"), 150, 0.0, 150),
+            (float("nan"), float("nan"), 0.0, 0.0),
+            (float("-inf"), float("-inf"), 0.0, 0.0),
+            (50.0, float("inf"), 50.0, 0.0),
+        ],
+        ids=["inf-min", "nan-both", "neg-inf-both", "inf-max"],
+    )
+    def test_non_finite_speeds_become_zero(
+        self, tmp_path, min_speed, max_speed, expected_min, expected_max
+    ):
+        self._export(
+            tmp_path, min_groundspeed_knots=min_speed, max_groundspeed_knots=max_speed
+        )
+        data = _parse(tmp_path / "metadata.js", "window.KML_METADATA = ")
+        assert data["min_groundspeed_knots"] == expected_min
+        assert data["max_groundspeed_knots"] == expected_max
+
     def test_groundspeed_rounding(self, tmp_path):
-        filepath, _ = export_metadata({}, 0, 1000, 55.678, 199.123, [], str(tmp_path))
-        content = Path(filepath).read_text()
-        data = json.loads(content[len("window.KML_METADATA = ") : -1])
+        self._export(
+            tmp_path, min_groundspeed_knots=55.678, max_groundspeed_knots=199.123
+        )
+        data = _parse(tmp_path / "metadata.js", "window.KML_METADATA = ")
         assert data["min_groundspeed_knots"] == 55.7
         assert data["max_groundspeed_knots"] == 199.1
-
-
-class TestCollectUniqueYears:
-    def test_empty_list(self):
-        assert collect_unique_years([]) == []
-
-    def test_single_year(self):
-        assert collect_unique_years([{"year": 2025}]) == [2025]
-
-    def test_duplicate_years(self):
-        metadata = [{"year": 2025}, {"year": 2025}, {"year": 2024}]
-        assert collect_unique_years(metadata) == [2024, 2025]
-
-    def test_none_years_skipped(self):
-        metadata = [{"year": 2025}, {"year": None}, {"other": "data"}]
-        assert collect_unique_years(metadata) == [2025]
-
-    def test_sorted_output(self):
-        metadata = [{"year": 2026}, {"year": 2024}, {"year": 2025}]
-        assert collect_unique_years(metadata) == [2024, 2025, 2026]

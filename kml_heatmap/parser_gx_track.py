@@ -1,81 +1,83 @@
-"""Google Earth Track (gx:coord) processing."""
+"""Google Earth Track (gx:Track) processing.
+
+Every gx:Track element becomes one flight path. The <when> and <gx:coord>
+children of a track are paired by position in document order; metadata is
+taken from the enclosing Placemark.
+"""
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
-from lxml import etree
-
+from .helpers import parse_timestamp_epoch
 from .kml_parsers import validate_and_normalize_coordinate
 from .logger import logger
 from .parser_common import (
     _build_path_metadata_dict,
+    empty_placemark_metadata,
     extract_placemark_metadata,
-    find_xml_elements,
+    extract_year_from_timestamp,
 )
-from .types import FlightPath, FlightPathGroup, PathMetadata
+from .types import TrackPoint
+
+if TYPE_CHECKING:
+    from lxml import etree
+
+    from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
 
 
-def _extract_gx_track_metadata(
-    placemarks: list[etree._Element], namespaces: dict[str, str], kml_file: str
-) -> dict[str, str | None]:
-    """Extract metadata from gx:Track placemarks."""
-    for placemark in placemarks:
-        # Check if this placemark contains gx:coord elements
-        placemark_gx_coords = find_xml_elements(
-            placemark, ".//gx:coord", ".//coord", namespaces
+def local_name(tag: object) -> str:
+    """Return the tag name of an element without its namespace."""
+    if not isinstance(tag, str):
+        return ""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _find_placemark(track: etree._Element) -> etree._Element | None:
+    """Find the Placemark element enclosing a gx:Track."""
+    for ancestor in track.iterancestors():
+        if local_name(ancestor.tag) == "Placemark":
+            return ancestor
+    return None
+
+
+def _collect_track_children(
+    track: etree._Element,
+) -> tuple[list[str], list[str | None]]:
+    """Collect <when> texts and <gx:coord> texts of a track in document order."""
+    whens: list[str] = []
+    coords: list[str | None] = []
+    for child in track:
+        name = local_name(child.tag)
+        if name == "when":
+            whens.append((child.text or "").strip())
+        elif name == "coord":
+            coords.append(child.text)
+    return whens, coords
+
+
+def parse_gx_track(
+    track: etree._Element, kml_file: str, coordinates: FlightPath
+) -> tuple[FlightPath, list[str]]:
+    """Parse one gx:Track into a flight path.
+
+    Returns the path (points with altitude) and the list of <when> texts of
+    the track. Points are appended to ``coordinates`` as well.
+    """
+    whens, coord_texts = _collect_track_children(track)
+    source = f"{Path(kml_file).name} (gx:Track)"
+
+    if whens and len(whens) != len(coord_texts):
+        logger.warning(
+            "%s: gx:Track has %d <when> but %d <gx:coord> elements; "
+            "pairing them by position",
+            Path(kml_file).name,
+            len(whens),
+            len(coord_texts),
         )
 
-        if placemark_gx_coords:
-            meta = extract_placemark_metadata(placemark, namespaces, kml_file)
-
-            if meta["timestamp"]:
-                logger.debug("Found gx:Track start timestamp: %s", meta["timestamp"])
-            if meta["end_timestamp"]:
-                logger.debug("Found gx:Track end timestamp: %s", meta["end_timestamp"])
-            if meta["timestamp"] is None and meta["airport_name"]:
-                logger.debug(
-                    "No timestamp found for gx:Track with name: %s",
-                    meta["airport_name"],
-                )
-
-            return meta
-
-    return {
-        "airport_name": None,
-        "timestamp": None,
-        "end_timestamp": None,
-        "year": None,
-    }
-
-
-def _extract_gx_when_elements(
-    placemarks: list[etree._Element],
-    gx_coords: list[etree._Element],
-    namespaces: dict[str, str],
-) -> list[etree._Element]:
-    """Extract <when> elements that correspond to gx:coord elements."""
-    for placemark in placemarks:
-        when_elems = find_xml_elements(placemark, ".//kml:when", ".//when", namespaces)
-        if when_elems and len(when_elems) == len(gx_coords):
-            return when_elems
-    return []
-
-
-def _parse_gx_coordinates(
-    gx_coords: list[etree._Element],
-    when_elems: list[etree._Element],
-    kml_file: str,
-    coordinates: FlightPath,
-) -> list[list[Any]]:
-    """Parse gx:coord elements into path coordinates."""
-    gx_path = []
-
-    for idx, gx_coord in enumerate(gx_coords):
-        if gx_coord.text is None:
-            continue
-
-        coord_text = gx_coord.text.strip()
-        if not coord_text:
+    path: FlightPath = []
+    for idx, coord_text in enumerate(coord_texts):
+        if not coord_text or not coord_text.strip():
             continue
 
         parts = coord_text.split()
@@ -86,69 +88,72 @@ def _parse_gx_coordinates(
             lon = float(parts[0])
             lat = float(parts[1])
             alt = float(parts[2]) if len(parts) >= 3 else None
-
-            # Use centralized validation and normalization
-            validated = validate_and_normalize_coordinate(
-                lat, lon, alt, f"{Path(kml_file).name} (gx:Track)"
-            )
-            if validated is None:
-                continue
-
-            lat, lon, alt = validated
-
-            # Get corresponding timestamp
-            timestamp_str = None
-            when_text = when_elems[idx].text if idx < len(when_elems) else None
-            if when_text:
-                timestamp_str = when_text.strip()
-
-            coordinates.append([lat, lon])
-
-            if alt is not None:
-                # Store as [lat, lon, alt, timestamp]
-                if timestamp_str:
-                    gx_path.append([lat, lon, alt, timestamp_str])
-                else:
-                    gx_path.append([lat, lon, alt])
         except ValueError:
             logger.debug("Failed to parse gx:coord: %s", coord_text)
             continue
 
-    return gx_path
+        validated = validate_and_normalize_coordinate(lat, lon, alt, source)
+        if validated is None:
+            continue
+        lat, lon, alt = validated
+
+        ts = None
+        if idx < len(whens) and whens[idx]:
+            ts = parse_timestamp_epoch(whens[idx])
+            if ts is None:
+                logger.debug("Unparsable <when> in %s: %s", source, whens[idx])
+
+        point = TrackPoint(lat, lon, alt, ts)
+        coordinates.append(point)
+        if alt is not None:
+            path.append(point)
+
+    return path, [when for when in whens if when]
 
 
 def process_gx_track(
-    gx_coords: list[etree._Element],
-    placemarks: list[etree._Element],
+    tracks: list[etree._Element],
     namespaces: dict[str, str],
     kml_file: str,
     coordinates: FlightPath,
     path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
 ) -> None:
-    """Process Google Earth Track (gx:coord) elements."""
-    if not gx_coords:
+    """Process all gx:Track elements of a KML document, one path per track."""
+    if not tracks:
         return
 
-    # Extract metadata from placemarks
-    track_meta = _extract_gx_track_metadata(placemarks, namespaces, kml_file)
+    metadata_cache: dict[int, PlacemarkMetadata] = {}
 
-    # Extract timestamp elements
-    when_elems = _extract_gx_when_elements(placemarks, gx_coords, namespaces)
+    for track in tracks:
+        placemark = _find_placemark(track)
+        if placemark is None:
+            placemark_meta = empty_placemark_metadata()
+        else:
+            key = id(placemark)
+            if key not in metadata_cache:
+                metadata_cache[key] = extract_placemark_metadata(placemark, namespaces)
+            placemark_meta = metadata_cache[key]
 
-    # Parse coordinates
-    gx_path = _parse_gx_coordinates(gx_coords, when_elems, kml_file, coordinates)
+        path, whens = parse_gx_track(track, kml_file, coordinates)
+        if not path:
+            logger.debug("gx:Track without usable coordinates in %s", kml_file)
+            continue
 
-    # Add gx:Track as a single path group
-    if gx_path:
-        path_groups.append(gx_path)
-        meta = _build_path_metadata_dict(
-            kml_file,
-            gx_path[0],
-            track_meta["airport_name"],
-            track_meta["timestamp"],
-            track_meta["end_timestamp"],
-        )
-        path_metadata.append(meta)
+        track_meta: PlacemarkMetadata = dict(placemark_meta)  # type: ignore[assignment]
+        if whens:
+            # The track's own timestamps are authoritative for its time span
+            track_meta["timestamp"] = whens[0]
+            track_meta["end_timestamp"] = whens[-1] if len(whens) > 1 else None
+            track_meta["year"] = extract_year_from_timestamp(whens[0])
 
-    logger.debug("Parsed %d gx:coord elements into 1 track", len(gx_coords))
+        if track_meta["timestamp"] is None and track_meta["airport_name"]:
+            logger.debug(
+                "No timestamp found for gx:Track with name: %s",
+                track_meta["airport_name"],
+            )
+
+        path_groups.append(path)
+        path_metadata.append(_build_path_metadata_dict(kml_file, path[0], track_meta))
+
+    logger.debug("Parsed %d gx:Track element(s) in %s", len(tracks), kml_file)

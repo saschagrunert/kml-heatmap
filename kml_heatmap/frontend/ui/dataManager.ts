@@ -1,16 +1,22 @@
 /**
- * Data Manager - Handles data loading and management using KMLHeatmap.DataLoader
+ * Data Manager - Handles data loading and layer refresh
  */
 import type { MapApp } from "../mapApp";
-import type { KMLDataset, Airport, Metadata } from "../types";
+import type { KMLDataset, Airport, LoadingInfo, Metadata } from "../types";
 import type { Coordinate } from "../utils/geometry";
-import type { DataLoader } from "../services/dataLoader";
+import { DataLoader } from "../services/dataLoader";
+import { calculateAltitudeRange } from "../features/layers";
 import { domCache } from "../utils/domCache";
+import { formatFileSize } from "../utils/formatters";
+import { showToast } from "../utils/toast";
 
 export class DataManager {
   private app: MapApp;
   private dataLoader: DataLoader;
-  loadedData: { [key: string]: KMLDataset };
+  /** Monotonic id of the latest updateLayers() call; stale loads are dropped */
+  private updateRequestId = 0;
+  /** Set when the loader already reported a failure via toast */
+  private loadErrorReported = false;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -18,19 +24,39 @@ export class DataManager {
     // Pre-cache loading element
     domCache.cacheElements(["loading"]);
 
-    // Create DataLoader instance
-    this.dataLoader = new window.KMLHeatmap.DataLoader({
+    this.dataLoader = new DataLoader({
       dataDir: app.config.dataDir,
-      showLoading: () => this.showLoading(),
+      showLoading: (info) => this.showLoading(info),
       hideLoading: () => this.hideLoading(),
+      onLoadError: (failedYears) => {
+        this.loadErrorReported = true;
+        showToast(
+          "Failed to load flight data for " + failedYears.join(", "),
+          "error",
+        );
+      },
     });
-
-    this.loadedData = {};
   }
 
-  showLoading(): void {
+  /**
+   * Show the loading indicator. When the template provides `#loading-text`
+   * it describes what is loading, e.g. "Loading 2026 flights (1.1 MB)…".
+   */
+  showLoading(info?: LoadingInfo): void {
     const loadingEl = domCache.get("loading");
-    if (loadingEl) loadingEl.style.display = "block";
+    if (!loadingEl) return;
+
+    const textEl = domCache.get("loading-text");
+    if (textEl && info) {
+      const what = info.year === "all" ? "all flights" : info.year + " flights";
+      const size =
+        info.bytes !== undefined && info.bytes > 0
+          ? " (" + formatFileSize(info.bytes) + ")"
+          : "";
+      textEl.textContent = "Loading " + what + size + "…";
+    }
+
+    loadingEl.style.display = "block";
   }
 
   hideLoading(): void {
@@ -38,8 +64,9 @@ export class DataManager {
     if (loadingEl) loadingEl.style.display = "none";
   }
 
-  async loadData(resolution: string, year: string): Promise<KMLDataset | null> {
-    return await this.dataLoader.loadData(resolution, year);
+  async loadData(year: string): Promise<KMLDataset | null> {
+    this.loadErrorReported = false;
+    return await this.dataLoader.loadData(year);
   }
 
   async loadAirports(): Promise<Airport[]> {
@@ -50,13 +77,37 @@ export class DataManager {
     return await this.dataLoader.loadMetadata();
   }
 
-  async updateLayers(): Promise<void> {
+  /**
+   * Reload the dataset for the current year, rebuild the heatmap and the
+   * visible colour layers, then refresh statistics and airport visibility.
+   */
+  async updateLayers(preloaded?: KMLDataset | null): Promise<void> {
     if (!this.app.map) return;
 
-    // Always use full resolution data
-    const data = await this.loadData("data", this.app.selectedYear);
+    const year = this.app.selectedYear;
+    const requestId = ++this.updateRequestId;
+    // Callers that already loaded this year pass the dataset in so that a
+    // failed load is not retried (and re-reported) a second time here
+    const data =
+      preloaded !== undefined ? preloaded : await this.loadData(year);
 
-    if (!data) return;
+    // A newer updateLayers() call superseded this one: drop the stale result
+    if (requestId !== this.updateRequestId) return;
+
+    if (!data) {
+      if (!this.loadErrorReported) {
+        showToast(
+          "No flight data available for " +
+            (year === "all" ? "all years" : year),
+          "error",
+        );
+      }
+      // The selection may have been cleared by the caller, so the panel and
+      // the airport markers still have to follow it
+      this.app.statsManager.updateStatsForSelection();
+      this.app.airportManager.updateAirportOpacity();
+      return;
+    }
 
     this.app.currentData = data;
 
@@ -67,23 +118,21 @@ export class DataManager {
     const hasIsolation =
       this.app.isolateSelection && this.app.selectedPathIds.size > 0;
 
-    if ((hasFilters || hasIsolation) && data.path_segments) {
+    if (hasFilters || hasIsolation) {
       // Get filtered path IDs based on year/aircraft
       const filteredPathIds = new Set<number>();
-      if (data.path_info) {
-        data.path_info.forEach((pathInfo) => {
-          const matchesYear =
-            this.app.selectedYear === "all" ||
-            (pathInfo.year &&
-              pathInfo.year.toString() === this.app.selectedYear);
-          const matchesAircraft =
-            this.app.selectedAircraft === "all" ||
-            pathInfo.aircraft_registration === this.app.selectedAircraft;
-          if (matchesYear && matchesAircraft) {
-            filteredPathIds.add(pathInfo.id);
-          }
-        });
-      }
+      data.path_info.forEach((pathInfo) => {
+        const matchesYear =
+          this.app.selectedYear === "all" ||
+          (pathInfo.year !== undefined &&
+            pathInfo.year.toString() === this.app.selectedYear);
+        const matchesAircraft =
+          this.app.selectedAircraft === "all" ||
+          pathInfo.aircraft_registration === this.app.selectedAircraft;
+        if (matchesYear && matchesAircraft) {
+          filteredPathIds.add(pathInfo.id);
+        }
+      });
 
       // Extract coordinates from filtered segments
       const coordMap = new Map<string, Coordinate>();
@@ -138,55 +187,48 @@ export class DataManager {
       this.app.heatmapLayer.addTo(this.app.map);
     }
 
-    // Build path-to-airport relationships from path_info
-    this.app.pathToAirports = {};
+    // Build airport-to-paths relationships from path_info
     this.app.airportToPaths = {};
-
-    if (data.path_info) {
-      data.path_info.forEach((pathInfo) => {
-        const pathId = pathInfo.id;
-
-        // Store path-to-airport mapping
-        this.app.pathToAirports[pathId] = {
-          start: pathInfo.start_airport,
-          end: pathInfo.end_airport,
-        };
-
-        // Build reverse mapping: airport to paths
-        if (pathInfo.start_airport) {
-          const startSet =
-            this.app.airportToPaths[pathInfo.start_airport] ??
-            new Set<number>();
-          startSet.add(pathId);
-          this.app.airportToPaths[pathInfo.start_airport] = startSet;
-        }
-        if (pathInfo.end_airport) {
-          const endSet =
-            this.app.airportToPaths[pathInfo.end_airport] ?? new Set<number>();
-          endSet.add(pathId);
-          this.app.airportToPaths[pathInfo.end_airport] = endSet;
-        }
-      });
-    }
-
-    // Calculate altitude range from all segments in a single pass
-    if (data.path_segments && data.path_segments.length > 0) {
-      let min = data.path_segments[0]?.altitude_ft || 0;
-      let max = min;
-      for (let i = 1; i < data.path_segments.length; i++) {
-        const alt = data.path_segments[i]?.altitude_ft || 0;
-        if (alt < min) min = alt;
-        if (alt > max) max = alt;
+    data.path_info.forEach((pathInfo) => {
+      const pathId = pathInfo.id;
+      if (pathInfo.start_airport) {
+        const startSet =
+          this.app.airportToPaths[pathInfo.start_airport] ?? new Set<number>();
+        startSet.add(pathId);
+        this.app.airportToPaths[pathInfo.start_airport] = startSet;
       }
-      this.app.altitudeRange = { min, max };
+      if (pathInfo.end_airport) {
+        const endSet =
+          this.app.airportToPaths[pathInfo.end_airport] ?? new Set<number>();
+        endSet.add(pathId);
+        this.app.airportToPaths[pathInfo.end_airport] = endSet;
+      }
+    });
+
+    // Calculate altitude range from all segments
+    if (data.path_segments.length > 0) {
+      this.app.altitudeRange = calculateAltitudeRange(
+        data.path_segments,
+        null,
+        this.app.altitudeRange,
+      );
     }
 
-    // Create altitude layer paths (this will also update the legend)
-    this.app.layerManager.redrawAltitudePaths();
-
-    // Redraw airspeed paths if airspeed is visible
+    // Rebuild only the visible colour layers; hidden layers are rendered
+    // when they get toggled on (and cleared here so they hold no stale data)
+    if (this.app.altitudeVisible) {
+      this.app.layerManager.redrawAltitudePaths();
+    } else {
+      this.app.layerManager.clearLayer("altitude");
+    }
     if (this.app.airspeedVisible) {
       this.app.layerManager.redrawAirspeedPaths();
+    } else {
+      this.app.layerManager.clearLayer("airspeed");
     }
+
+    // Statistics and airport visibility follow the new data/filter state
+    this.app.statsManager.updateStatsForSelection();
+    this.app.airportManager.updateAirportOpacity();
   }
 }

@@ -1,82 +1,112 @@
 """Tests for validation module."""
 
 import os
-import tempfile
 
-from kml_heatmap.validation import validate_kml_file
+import kml_heatmap.validation as val_mod
+from kml_heatmap.validation import validate_kml_file, validate_output_dir
 
 
 class TestValidateKmlFile:
-    """Tests for validate_kml_file function."""
+    def test_valid_kml_file(self, tmp_path):
+        path = tmp_path / "test.kml"
+        path.write_text('<?xml version="1.0"?><kml><Document></Document></kml>')
+        assert validate_kml_file(str(path)) == (True, None)
 
-    def test_valid_kml_file(self):
-        """Test validation of valid KML file."""
-        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False, mode="w") as f:
-            f.write('<?xml version="1.0" encoding="UTF-8"?>')
-            f.write('<kml xmlns="http://www.opengis.net/kml/2.2">')
-            f.write("<Document></Document></kml>")
-            temp_path = f.name
+    def test_uppercase_extension_accepted(self, tmp_path):
+        path = tmp_path / "TEST.KML"
+        path.write_text("<kml/>")
+        assert validate_kml_file(str(path)) == (True, None)
 
-        try:
-            is_valid, error_msg = validate_kml_file(temp_path)
-            assert is_valid is True
-            assert error_msg is None
-        finally:
-            os.unlink(temp_path)
-
-    def test_nonexistent_file(self):
-        """Test validation of nonexistent file."""
-        is_valid, error_msg = validate_kml_file("/nonexistent/file.kml")
+    def test_nonexistent_file(self, tmp_path):
+        is_valid, error = validate_kml_file(str(tmp_path / "missing.kml"))
         assert is_valid is False
-        assert error_msg is not None
+        assert "not found" in error
 
-    def test_non_kml_extension(self):
-        """Test validation of file without .kml extension."""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            temp_path = f.name
+    def test_symlink_rejected(self, tmp_path):
+        target = tmp_path / "real.kml"
+        target.write_text("<kml/>")
+        link = tmp_path / "link.kml"
+        os.symlink(target, link)
+        is_valid, error = validate_kml_file(str(link))
+        assert is_valid is False
+        assert "Symlinks" in error
 
+    def test_non_kml_extension(self, tmp_path):
+        path = tmp_path / "test.txt"
+        path.write_text("<kml/>")
+        is_valid, error = validate_kml_file(str(path))
+        assert is_valid is False
+        assert ".kml" in error
+
+    def test_empty_file(self, tmp_path):
+        path = tmp_path / "test.kml"
+        path.write_text("")
+        is_valid, error = validate_kml_file(str(path))
+        assert is_valid is False
+        assert "empty" in error.lower()
+
+    def test_directory_instead_of_file(self, tmp_path):
+        is_valid, error = validate_kml_file(str(tmp_path))
+        assert is_valid is False
+        assert "Not a file" in error
+
+    def test_unreadable_file(self, tmp_path):
+        path = tmp_path / "test.kml"
+        path.write_text("<kml/>")
+        path.chmod(0o000)
         try:
-            is_valid, error_msg = validate_kml_file(temp_path)
+            if os.access(path, os.R_OK):
+                return  # running as root, permissions are not enforced
+            is_valid, error = validate_kml_file(str(path))
             assert is_valid is False
-            assert error_msg is not None
-            assert ".kml" in error_msg
+            assert "not readable" in error
         finally:
-            os.unlink(temp_path)
+            path.chmod(0o644)
 
-    def test_empty_file(self):
-        """Test validation of empty file."""
-        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as f:
-            temp_path = f.name
+    def test_file_too_large(self, tmp_path, monkeypatch):
+        path = tmp_path / "test.kml"
+        path.write_text('<?xml version="1.0"?><kml/>')
+        monkeypatch.setattr(val_mod, "MAX_KML_FILE_SIZE", 1)
+        is_valid, error = validate_kml_file(str(path))
+        assert is_valid is False
+        assert "too large" in error.lower()
 
-        try:
-            is_valid, error_msg = validate_kml_file(temp_path)
-            assert is_valid is False
-            assert error_msg is not None
-            assert "empty" in error_msg.lower()
-        finally:
-            os.unlink(temp_path)
 
-    def test_directory_instead_of_file(self):
-        """Test validation with directory path."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            is_valid, error_msg = validate_kml_file(temp_dir)
-            assert is_valid is False
-            assert error_msg is not None
+class TestValidateOutputDir:
+    def test_separate_directories_are_fine(self, tmp_path):
+        kml = tmp_path / "input" / "a.kml"
+        assert validate_output_dir(tmp_path / "out" / "data", [kml]) == (True, None)
 
-    def test_file_too_large(self, monkeypatch):
-        """Test validation rejects files exceeding MAX_KML_FILE_SIZE."""
-        import kml_heatmap.validation as val_mod
+    def test_sibling_of_input_dir_is_fine(self, tmp_path):
+        kml = tmp_path / "input" / "a.kml"
+        assert validate_output_dir(tmp_path / "input-data", [kml])[0] is True
 
-        with tempfile.NamedTemporaryFile(suffix=".kml", delete=False, mode="w") as f:
-            f.write('<?xml version="1.0"?><kml/>')
-            temp_path = f.name
+    def test_equal_to_input_dir_refused(self, tmp_path):
+        kml = tmp_path / "data" / "a.kml"
+        is_valid, error = validate_output_dir(tmp_path / "data", [kml])
+        assert is_valid is False
+        assert "Refusing" in error
+        assert str(tmp_path / "data") in error
 
-        try:
-            monkeypatch.setattr(val_mod, "MAX_KML_FILE_SIZE", 1)
-            is_valid, error_msg = validate_kml_file(temp_path)
+    def test_contained_in_input_dir_refused(self, tmp_path):
+        kml = tmp_path / "a.kml"
+        assert validate_output_dir(tmp_path / "data", [kml])[0] is False
 
-            assert is_valid is False
-            assert error_msg is not None
-            assert "too large" in error_msg.lower()
-        finally:
-            os.unlink(temp_path)
+    def test_containing_input_dir_refused(self, tmp_path):
+        kml = tmp_path / "out" / "data" / "flights" / "a.kml"
+        assert validate_output_dir(tmp_path / "out" / "data", [kml])[0] is False
+
+    def test_aircraft_json_is_checked_too(self, tmp_path):
+        kml = tmp_path / "input" / "a.kml"
+        aircraft = tmp_path / "out" / "data" / "aircraft.json"
+        assert (
+            validate_output_dir(tmp_path / "out" / "data", [kml, aircraft])[0] is False
+        )
+
+    def test_relative_paths_are_resolved(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert validate_output_dir("data", ["data/a.kml"])[0] is False
+        assert validate_output_dir("out/data", ["input/a.kml"])[0] is True
+
+    def test_no_inputs(self, tmp_path):
+        assert validate_output_dir(tmp_path / "data", []) == (True, None)

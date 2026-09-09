@@ -1,352 +1,242 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as L from "leaflet";
 import { AirportManager } from "../../../../kml_heatmap/frontend/ui/airportManager";
-import type { MockMapApp, MockMarker } from "../../testHelpers";
+import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
+import {
+  createMockApp,
+  createDataset,
+  asMapApp,
+  type MockApp,
+} from "../../testHelpers";
+import { marker as mockMarker, type MockMarker } from "../../../mocks/leaflet";
 
 describe("AirportManager", () => {
   let airportManager: AirportManager;
-  let mockApp: MockMapApp;
-  let mockMarker1: MockMarker;
-  let mockMarker2: MockMarker;
-  let mockMarker3: MockMarker;
+  let mockApp: MockApp;
+  let markers: Record<string, MockMarker>;
+
+  const pathInfo: PathInfo[] = [
+    {
+      id: 1,
+      year: 2025,
+      aircraft_registration: "D-ABCD",
+      start_airport: "EDDF",
+      end_airport: "EDDM",
+    },
+    {
+      id: 2,
+      year: 2025,
+      aircraft_registration: "D-EFGH",
+      start_airport: "EDDM",
+      end_airport: "EDDF",
+    },
+    {
+      id: 3,
+      year: 2024,
+      aircraft_registration: "D-ABCD",
+      start_airport: "EDDF",
+      end_airport: "EDDK",
+    },
+  ];
 
   beforeEach(() => {
-    // Mock window.KMLHeatmap
-    window.KMLHeatmap = {
-      calculateAirportFlightCounts: vi.fn(() => ({
-        EDDF: 20,
-        EDDM: 15,
-        EDDK: 5,
-      })),
-      ddToDms: vi.fn((coord: number, isLat: boolean) => {
-        if (isLat) return "50°06'00\"N";
-        return "008°40'00\"E";
-      }),
-    } as typeof window.KMLHeatmap;
-
-    // Create mock markers
-    mockMarker1 = {
-      setPopupContent: vi.fn(),
-      setOpacity: vi.fn(),
-      addTo: vi.fn(),
+    vi.mocked(L.divIcon).mockClear();
+    markers = {
+      EDDF: mockMarker([50.1, 8.67]),
+      EDDM: mockMarker([48.35, 11.78]),
+      EDDK: mockMarker([50.87, 7.14]),
+      LOWW: mockMarker([48.11, 16.57]),
     };
-    mockMarker2 = {
-      setPopupContent: vi.fn(),
-      setOpacity: vi.fn(),
-      addTo: vi.fn(),
-    };
-    mockMarker3 = {
-      setPopupContent: vi.fn(),
-      setOpacity: vi.fn(),
-      addTo: vi.fn(),
-    };
-
-    // Create mock app
-    mockApp = {
-      selectedYear: "all",
-      selectedAircraft: "all",
-      selectedPathIds: new Set<number>(),
-      fullPathInfo: [
-        {
-          id: 1,
-          year: 2025,
-          aircraft_registration: "D-ABCD",
-          start_airport: "EDDF",
-          end_airport: "EDDM",
-        },
-        {
-          id: 2,
-          year: 2025,
-          aircraft_registration: "D-EFGH",
-          start_airport: "EDDM",
-          end_airport: "EDDF",
-        },
-      ],
+    mockApp = createMockApp({
+      currentData: createDataset(pathInfo),
       allAirportsData: [
         { name: "EDDF", lat: 50.1, lon: 8.67 },
         { name: "EDDM", lat: 48.35, lon: 11.78 },
         { name: "EDDK", lat: 50.87, lon: 7.14 },
+        { name: "LOWW", lat: 48.11, lon: 16.57 },
       ],
-      airportMarkers: {
-        EDDF: mockMarker1,
-        EDDM: mockMarker2,
-        EDDK: mockMarker3,
-      },
-      airportLayer: {
-        hasLayer: vi.fn().mockReturnValue(true),
-        removeLayer: vi.fn(),
-      },
-      pathToAirports: {
-        1: { start: "EDDF", end: "EDDM" },
-        2: { start: "EDDM", end: "EDDF" },
-      },
-      map: {
-        getZoom: vi.fn().mockReturnValue(10),
-      },
-    };
+      airportMarkers: markers as unknown as MockApp["airportMarkers"],
+    });
+    mockApp.layerManager.getPathInfoMap.mockImplementation(
+      () => new Map(pathInfo.map((p) => [p.id, p])),
+    );
+    mockApp.airportLayer.hasLayer.mockReturnValue(true);
 
-    airportManager = new AirportManager(mockApp);
+    airportManager = new AirportManager(asMapApp(mockApp));
   });
 
   describe("calculateAirportFlightCounts", () => {
-    it("delegates to KMLHeatmap library", () => {
-      const result = airportManager.calculateAirportFlightCounts();
-
-      expect(
-        window.KMLHeatmap.calculateAirportFlightCounts,
-      ).toHaveBeenCalledWith(
-        mockApp.fullPathInfo,
-        mockApp.selectedYear,
-        mockApp.selectedAircraft,
-      );
-      expect(result).toEqual({
-        EDDF: 20,
-        EDDM: 15,
-        EDDK: 5,
+    it("counts flights per airport for the current filter", () => {
+      expect(airportManager.calculateAirportFlightCounts()).toEqual({
+        EDDF: 3,
+        EDDM: 2,
+        EDDK: 1,
       });
+
+      mockApp.selectedYear = "2024";
+      expect(airportManager.calculateAirportFlightCounts()).toEqual({
+        EDDF: 1,
+        EDDK: 1,
+      });
+    });
+
+    it("returns empty counts without data", () => {
+      mockApp.currentData = null;
+      expect(airportManager.calculateAirportFlightCounts()).toEqual({});
     });
   });
 
   describe("updateAirportPopups", () => {
-    it("does nothing if allAirportsData is not set", () => {
-      mockApp.allAirportsData = null;
-
-      expect(() => airportManager.updateAirportPopups()).not.toThrow();
-      expect(mockMarker1.setPopupContent).not.toHaveBeenCalled();
-    });
-
-    it("does nothing if airportMarkers is not set", () => {
-      mockApp.airportMarkers = null;
-
-      expect(() => airportManager.updateAirportPopups()).not.toThrow();
-    });
-
-    it("updates popup content for all airport markers", () => {
+    it("updates popup content for every marker", () => {
       airportManager.updateAirportPopups();
 
-      expect(mockMarker1.setPopupContent).toHaveBeenCalled();
-      expect(mockMarker2.setPopupContent).toHaveBeenCalled();
-      expect(mockMarker3.setPopupContent).toHaveBeenCalled();
-    });
-
-    it("includes airport name in popup", () => {
-      airportManager.updateAirportPopups();
-
-      const popup = mockMarker1.setPopupContent.mock.calls[0][0];
-      expect(popup).toContain("EDDF");
-    });
-
-    it("includes flight count in popup", () => {
-      airportManager.updateAirportPopups();
-
-      const popup = mockMarker1.setPopupContent.mock.calls[0][0];
-      expect(popup).toContain("20"); // Flight count for EDDF
-    });
-
-    it("includes coordinates with DMS conversion", () => {
-      airportManager.updateAirportPopups();
-
-      expect((window as any).KMLHeatmap.ddToDms).toHaveBeenCalledWith(
-        50.1,
-        true,
+      for (const marker of Object.values(markers)) {
+        expect(marker.setPopupContent).toHaveBeenCalledTimes(1);
+      }
+      const eddf = String(markers["EDDF"]!.setPopupContent.mock.calls[0]![0]);
+      expect(eddf).toContain("EDDF");
+      expect(eddf).toContain(
+        '<span class="popup-metric-value kh-popup-accent">3</span>',
       );
-      expect((window as any).KMLHeatmap.ddToDms).toHaveBeenCalledWith(
-        8.67,
-        false,
+      expect(eddf).toContain("https://www.google.com/maps?q=50.1,8.67");
+      expect(eddf).toContain("N");
+      expect(eddf).toContain("E");
+    });
+
+    it("marks the home base with the badge and the marker class", () => {
+      airportManager.updateAirportPopups();
+
+      expect(
+        String(markers["EDDF"]!.setPopupContent.mock.calls[0]![0]),
+      ).toContain("HOME");
+      expect(
+        String(markers["EDDM"]!.setPopupContent.mock.calls[0]![0]),
+      ).not.toContain("HOME");
+      expect(markers["EDDF"]!.setIcon).toHaveBeenCalledTimes(1);
+      const iconHtml = vi.mocked(L.divIcon).mock.calls.at(-1)![0]!
+        .html as string;
+      expect(iconHtml).toContain("airport-marker-home");
+      expect(iconHtml).toContain("airport-label-home");
+      // Non-home markers keep their initial (non-home) icon
+      expect(markers["EDDM"]!.setIcon).not.toHaveBeenCalled();
+    });
+
+    it("moves the home base when the filter changes", () => {
+      airportManager.updateAirportPopups();
+      vi.mocked(L.divIcon).mockClear();
+
+      // Only path 2 (EDDM -> EDDF) matches: tie, first wins (EDDM)
+      mockApp.selectedAircraft = "D-EFGH";
+      airportManager.updateAirportPopups();
+
+      expect(markers["EDDF"]!.setIcon).toHaveBeenCalledTimes(2);
+      expect(markers["EDDM"]!.setIcon).toHaveBeenCalledTimes(1);
+      const htmls = vi
+        .mocked(L.divIcon)
+        .mock.calls.map((c) => c[0]!.html as string);
+      expect(htmls.some((h) => h.includes("airport-marker-home"))).toBe(true);
+      expect(htmls.some((h) => !h.includes("airport-marker-home"))).toBe(true);
+    });
+
+    it("shows zero flights for airports outside the filter", () => {
+      airportManager.updateAirportPopups();
+
+      const loww = String(markers["LOWW"]!.setPopupContent.mock.calls[0]![0]);
+      expect(loww).toContain(
+        '<span class="popup-metric-value kh-popup-accent">0</span>',
       );
-
-      const popup = mockMarker1.setPopupContent.mock.calls[0][0];
-      expect(popup).toContain("50°06'00\"N");
-      expect(popup).toContain("008°40'00\"E");
     });
 
-    it("includes Google Maps link", () => {
-      airportManager.updateAirportPopups();
-
-      const popup = mockMarker1.setPopupContent.mock.calls[0][0];
-      expect(popup).toContain("https://www.google.com/maps?q=50.1,8.67");
-    });
-
-    it("marks home base with most flights", () => {
-      airportManager.updateAirportPopups();
-
-      const eddfPopup = mockMarker1.setPopupContent.mock.calls[0][0];
-      const eddmPopup = mockMarker2.setPopupContent.mock.calls[0][0];
-
-      expect(eddfPopup).toContain("HOME"); // EDDF has 20 flights
-      expect(eddmPopup).not.toContain("HOME"); // EDDM has 15 flights
-    });
-
-    it("handles airports with no flights", () => {
-      (window as any).KMLHeatmap.calculateAirportFlightCounts.mockReturnValue({
-        EDDF: 10,
-        EDDM: 5,
-        // EDDK has 0 flights
-      });
-
-      airportManager.updateAirportPopups();
-
-      const popup = mockMarker3.setPopupContent.mock.calls[0][0];
-      expect(popup).toContain("0"); // Should show 0 flights
-    });
-
-    it("handles airport with unknown name", () => {
-      // Add a marker with null key for testing
-      mockApp.airportMarkers[null] = mockMarker1;
-      mockApp.allAirportsData[0].name = null;
-
-      // Update mock to include null airport
-      (
-        window as any
-      ).KMLHeatmap.calculateAirportFlightCounts.mockReturnValueOnce({
-        null: 5,
-        EDDM: 15,
-        EDDK: 5,
-      });
-
-      airportManager.updateAirportPopups();
-
-      const popup = mockMarker1.setPopupContent.mock.calls[0][0];
-      expect(popup).toContain("Unknown");
-    });
-
-    it("skips markers that don't exist", () => {
-      mockApp.airportMarkers.EDDF = null;
-
+    it("skips airports without markers", () => {
+      mockApp.allAirportsData.push({ name: "NEW", lat: 1, lon: 1 });
       expect(() => airportManager.updateAirportPopups()).not.toThrow();
-      expect(mockMarker1.setPopupContent).not.toHaveBeenCalled();
-      expect(mockMarker2.setPopupContent).toHaveBeenCalled();
     });
   });
 
   describe("updateAirportOpacity", () => {
     it("shows all airports when no filters or selection", () => {
-      mockApp.selectedYear = "all";
-      mockApp.selectedAircraft = "all";
-      mockApp.selectedPathIds.clear();
       mockApp.airportLayer.hasLayer.mockReturnValue(false);
 
       airportManager.updateAirportOpacity();
 
-      expect(mockMarker1.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockMarker2.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockMarker3.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockMarker1.addTo).toHaveBeenCalledWith(mockApp.airportLayer);
+      for (const marker of Object.values(markers)) {
+        expect(marker.setOpacity).toHaveBeenCalledWith(1.0);
+        expect(marker.addTo).toHaveBeenCalledWith(mockApp.airportLayer);
+      }
+      expect(mockApp.airportLayer.removeLayer).not.toHaveBeenCalled();
     });
 
-    it("shows only airports matching year filter", () => {
+    it("shows only airports matching the year filter", () => {
+      mockApp.selectedYear = "2024";
+
+      airportManager.updateAirportOpacity();
+
+      expect(markers["EDDF"]!.setOpacity).toHaveBeenCalledWith(1.0);
+      expect(markers["EDDK"]!.setOpacity).toHaveBeenCalledWith(1.0);
+      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
+        markers["EDDM"],
+      );
+      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
+        markers["LOWW"],
+      );
+    });
+
+    it("shows only airports matching the aircraft filter", () => {
+      mockApp.selectedAircraft = "D-EFGH";
+
+      airportManager.updateAirportOpacity();
+
+      expect(markers["EDDF"]!.setOpacity).toHaveBeenCalledWith(1.0);
+      expect(markers["EDDM"]!.setOpacity).toHaveBeenCalledWith(1.0);
+      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
+        markers["EDDK"],
+      );
+    });
+
+    it("adds airports of selected paths using the path info map", () => {
+      mockApp.selectedPathIds.add(3);
+
+      airportManager.updateAirportOpacity();
+
+      expect(mockApp.layerManager.getPathInfoMap).toHaveBeenCalled();
+      expect(markers["EDDF"]!.setOpacity).toHaveBeenCalledWith(1.0);
+      expect(markers["EDDK"]!.setOpacity).toHaveBeenCalledWith(1.0);
+      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
+        markers["EDDM"],
+      );
+    });
+
+    it("only shows airports of selected paths in isolate mode", () => {
       mockApp.selectedYear = "2025";
-      mockApp.selectedAircraft = "all";
-      mockApp.selectedPathIds.clear();
+      mockApp.selectedPathIds.add(3);
+      mockApp.isolateSelection = true;
 
       airportManager.updateAirportOpacity();
 
-      // EDDF and EDDM should be visible (from filtered paths)
-      expect(mockMarker1.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockMarker2.setOpacity).toHaveBeenCalledWith(1.0);
-      // EDDK should be hidden (no paths)
+      expect(markers["EDDF"]!.setOpacity).toHaveBeenCalledWith(1.0);
+      expect(markers["EDDK"]!.setOpacity).toHaveBeenCalledWith(1.0);
       expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        mockMarker3,
+        markers["EDDM"],
       );
     });
 
-    it("shows only airports matching aircraft filter", () => {
-      mockApp.selectedYear = "all";
-      mockApp.selectedAircraft = "D-ABCD";
-      mockApp.selectedPathIds.clear();
-
-      airportManager.updateAirportOpacity();
-
-      // EDDF and EDDM should be visible (from path1)
-      expect(mockMarker1.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockMarker2.setOpacity).toHaveBeenCalledWith(1.0);
-    });
-
-    it("shows only airports from selected paths", () => {
-      mockApp.selectedYear = "all";
-      mockApp.selectedAircraft = "all";
-      mockApp.selectedPathIds.add(1);
-
-      airportManager.updateAirportOpacity();
-
-      // EDDF and EDDM should be visible (from path1)
-      expect(mockMarker1.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockMarker2.setOpacity).toHaveBeenCalledWith(1.0);
-      // EDDK should be hidden
-      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        mockMarker3,
-      );
-    });
-
-    it("uses pathToAirports fallback when fullPathInfo not available", () => {
-      mockApp.fullPathInfo = null;
-      mockApp.selectedPathIds.add(1);
-
-      airportManager.updateAirportOpacity();
-
-      // Should use pathToAirports mapping
-      expect(mockMarker1.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockMarker2.setOpacity).toHaveBeenCalledWith(1.0);
-    });
-
-    it("adds marker to layer if not already present", () => {
+    it("re-adds hidden markers that become visible", () => {
+      mockApp.selectedYear = "2024";
       mockApp.airportLayer.hasLayer.mockReturnValue(false);
-      mockApp.selectedPathIds.add(1);
 
       airportManager.updateAirportOpacity();
 
-      expect(mockMarker1.addTo).toHaveBeenCalledWith(mockApp.airportLayer);
+      expect(markers["EDDF"]!.addTo).toHaveBeenCalledWith(mockApp.airportLayer);
+      expect(markers["EDDM"]!.addTo).not.toHaveBeenCalled();
+      expect(mockApp.airportLayer.removeLayer).not.toHaveBeenCalled();
     });
 
-    it("does not add marker if already in layer", () => {
-      mockApp.airportLayer.hasLayer.mockReturnValue(true);
-      mockApp.selectedPathIds.add(1);
-
+    it("does not re-add markers already on the layer", () => {
       airportManager.updateAirportOpacity();
 
-      expect(mockMarker1.addTo).not.toHaveBeenCalled();
-    });
-
-    it("removes hidden markers from layer", () => {
-      mockApp.airportLayer.hasLayer.mockReturnValue(true);
-      mockApp.selectedPathIds.add(1);
-
-      airportManager.updateAirportOpacity();
-
-      // EDDK should be removed
-      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        mockMarker3,
-      );
-    });
-
-    it("handles both year and aircraft filters together", () => {
-      mockApp.selectedYear = "2025";
-      mockApp.selectedAircraft = "D-ABCD";
-      mockApp.selectedPathIds.clear();
-
-      airportManager.updateAirportOpacity();
-
-      // Only path1 matches both filters
-      expect(mockMarker1.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockMarker2.setOpacity).toHaveBeenCalledWith(1.0);
-    });
-
-    it("selection overrides filters", () => {
-      // Set filters that would show EDDF/EDDM
-      mockApp.selectedYear = "2025";
-      // But select only path2
-      mockApp.selectedPathIds.add(2);
-
-      airportManager.updateAirportOpacity();
-
-      // Should show airports from path2 (EDDM and EDDF)
-      expect(mockMarker1.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockMarker2.setOpacity).toHaveBeenCalledWith(1.0);
-    });
-
-    it("skips null markers", () => {
-      mockApp.airportMarkers.EDDF = null;
-
-      expect(() => airportManager.updateAirportOpacity()).not.toThrow();
+      for (const marker of Object.values(markers)) {
+        expect(marker.addTo).not.toHaveBeenCalled();
+      }
     });
   });
 
@@ -360,90 +250,43 @@ describe("AirportManager", () => {
     });
 
     afterEach(() => {
-      if (mapContainer.parentNode) {
-        document.body.removeChild(mapContainer);
-      }
+      mapContainer.remove();
     });
 
     it("does nothing if map is not initialized", () => {
       mockApp.map = null;
-
-      expect(() => airportManager.updateAirportMarkerSizes()).not.toThrow();
+      airportManager.updateAirportMarkerSizes();
+      expect(mapContainer.dataset["zoomSize"]).toBeUndefined();
     });
 
-    it("sets xlarge data-zoom-size at zoom 14+", () => {
-      mockApp.map.getZoom.mockReturnValue(14);
+    it.each([
+      [14, "xlarge"],
+      [12, "large"],
+      [10, "medium"],
+      [8, "medium-small"],
+      [6, "small"],
+      [3, ""],
+    ])("sets data-zoom-size for zoom %s", (zoom, expected) => {
+      mockApp.map!.getZoom.mockReturnValue(zoom);
 
       airportManager.updateAirportMarkerSizes();
 
-      expect(mapContainer.dataset.zoomSize).toBe("xlarge");
+      expect(mapContainer.dataset["zoomSize"]).toBe(expected);
     });
 
-    it("sets large data-zoom-size at zoom 12-13", () => {
-      mockApp.map.getZoom.mockReturnValue(12);
-
+    it("toggles zoom-hide-labels below zoom 5", () => {
+      mockApp.map!.getZoom.mockReturnValue(4);
       airportManager.updateAirportMarkerSizes();
-
-      expect(mapContainer.dataset.zoomSize).toBe("large");
-    });
-
-    it("sets medium data-zoom-size at zoom 10-11", () => {
-      mockApp.map.getZoom.mockReturnValue(10);
-
-      airportManager.updateAirportMarkerSizes();
-
-      expect(mapContainer.dataset.zoomSize).toBe("medium");
-    });
-
-    it("sets medium-small data-zoom-size at zoom 8-9", () => {
-      mockApp.map.getZoom.mockReturnValue(8);
-
-      airportManager.updateAirportMarkerSizes();
-
-      expect(mapContainer.dataset.zoomSize).toBe("medium-small");
-    });
-
-    it("sets small data-zoom-size at zoom 6-7", () => {
-      mockApp.map.getZoom.mockReturnValue(6);
-
-      airportManager.updateAirportMarkerSizes();
-
-      expect(mapContainer.dataset.zoomSize).toBe("small");
-    });
-
-    it("adds zoom-hide-labels class below zoom 5", () => {
-      mockApp.map.getZoom.mockReturnValue(4);
-
-      airportManager.updateAirportMarkerSizes();
-
       expect(mapContainer.classList.contains("zoom-hide-labels")).toBe(true);
-    });
 
-    it("removes zoom-hide-labels class at zoom 5+", () => {
-      mapContainer.classList.add("zoom-hide-labels");
-      mockApp.map.getZoom.mockReturnValue(5);
-
+      mockApp.map!.getZoom.mockReturnValue(5);
       airportManager.updateAirportMarkerSizes();
-
       expect(mapContainer.classList.contains("zoom-hide-labels")).toBe(false);
     });
 
-    it("updates data-zoom-size when zoom changes", () => {
-      mockApp.map.getZoom.mockReturnValue(6);
-      airportManager.updateAirportMarkerSizes();
-      expect(mapContainer.dataset.zoomSize).toBe("small");
-
-      mockApp.map.getZoom.mockReturnValue(14);
-      airportManager.updateAirportMarkerSizes();
-      expect(mapContainer.dataset.zoomSize).toBe("xlarge");
-    });
-
-    it("sets empty data-zoom-size at very low zoom", () => {
-      mockApp.map.getZoom.mockReturnValue(2);
-
-      airportManager.updateAirportMarkerSizes();
-
-      expect(mapContainer.dataset.zoomSize).toBe("");
+    it("does nothing without a map container", () => {
+      mapContainer.remove();
+      expect(() => airportManager.updateAirportMarkerSizes()).not.toThrow();
     });
   });
 });

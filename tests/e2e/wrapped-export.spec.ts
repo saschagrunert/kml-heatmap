@@ -1,39 +1,63 @@
 import { test, expect } from "@playwright/test";
+import {
+  KNOWN_YEARS,
+  gotoApp,
+  waitForAircraftFilter,
+  waitForYearFilter,
+} from "./helpers";
 
 test.describe("Wrapped and Export", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+    await gotoApp(page);
   });
 
   test("wrapped button opens wrapped modal", async ({ page }) => {
-    const wrappedBtn = page.locator("#wrapped-btn");
     const wrappedModal = page.locator("#wrapped-modal");
-
     await expect(wrappedModal).toBeHidden();
 
-    await wrappedBtn.click();
+    await page.locator("#wrapped-btn").click();
     await expect(wrappedModal).toBeVisible({ timeout: 5000 });
-
-    const wrappedContent = page.locator("#wrapped-content");
-    await expect(wrappedContent).toBeVisible();
+    await expect(wrappedModal).toHaveAttribute("role", "dialog");
+    await expect(wrappedModal).toHaveAttribute("aria-modal", "true");
+    await expect(page.locator("#wrapped-content")).toBeVisible();
   });
 
   test("wrapped modal closes via close button", async ({ page }) => {
-    const wrappedBtn = page.locator("#wrapped-btn");
     const wrappedModal = page.locator("#wrapped-modal");
 
-    await wrappedBtn.click();
+    await page.locator("#wrapped-btn").click();
     await expect(wrappedModal).toBeVisible({ timeout: 5000 });
 
-    const closeBtn = wrappedModal.locator(".close-btn");
-    await closeBtn.click();
+    await wrappedModal.locator(".close-btn").click();
     await expect(wrappedModal).toBeHidden();
   });
 
-  test("wrapped modal shows content sections", async ({ page }) => {
+  test("wrapped modal traps focus and returns it on close", async ({
+    page,
+  }) => {
     const wrappedBtn = page.locator("#wrapped-btn");
-    await wrappedBtn.click();
+    await wrappedBtn.focus();
+    await wrappedBtn.press("Enter");
+
+    const wrappedModal = page.locator("#wrapped-modal");
+    await expect(wrappedModal).toBeVisible({ timeout: 5000 });
+    await expect(wrappedModal.locator(".close-btn")).toBeFocused();
+    await expect(page.locator("#left-buttons")).toHaveAttribute("inert", "");
+    await expect(page.locator("#right-buttons")).toHaveAttribute("inert", "");
+    await expect(page.locator("#github-footer")).toHaveAttribute("inert", "");
+
+    await page.keyboard.press("Escape");
+
+    await expect(wrappedModal).toBeHidden();
+    await expect(page.locator("#left-buttons")).not.toHaveAttribute(
+      "inert",
+      "",
+    );
+    await expect(wrappedBtn).toBeFocused();
+  });
+
+  test("wrapped modal shows content sections", async ({ page }) => {
+    await page.locator("#wrapped-btn").click();
 
     const wrappedModal = page.locator("#wrapped-modal");
     await expect(wrappedModal).toBeVisible({ timeout: 5000 });
@@ -46,8 +70,7 @@ test.describe("Wrapped and Export", () => {
 
   test("wrapped modal shows all content cards", async ({ page }) => {
     await page.locator("#wrapped-btn").click();
-    const modal = page.locator("#wrapped-modal");
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
 
     await expect(page.locator("#wrapped-card-stats")).toBeVisible();
     await expect(page.locator("#wrapped-card-facts")).toBeVisible();
@@ -67,8 +90,7 @@ test.describe("Wrapped and Export", () => {
 
     const firstTitle = airportsCard.locator(".country-group-title").first();
     await expect(firstTitle).toBeVisible();
-    const titleText = await firstTitle.textContent();
-    expect(titleText!.trim().length).toBeGreaterThan(0);
+    await expect(firstTitle).not.toHaveText(/^\s*$/);
   });
 
   test("wrapped stats card contains flight data", async ({ page }) => {
@@ -78,9 +100,8 @@ test.describe("Wrapped and Export", () => {
     });
 
     const statsCard = page.locator("#wrapped-card-stats");
-    const text = await statsCard.textContent();
-    expect(text).toBeTruthy();
-    expect(text!.length).toBeGreaterThan(0);
+    await expect(statsCard).toContainText("Flights");
+    await expect(statsCard).toContainText("Airports");
   });
 
   test("wrapped modal includes map container", async ({ page }) => {
@@ -89,8 +110,7 @@ test.describe("Wrapped and Export", () => {
       timeout: 5000,
     });
 
-    const wrappedMap = page.locator("#wrapped-map-container #map");
-    await expect(wrappedMap).toBeAttached();
+    await expect(page.locator("#wrapped-map-container #map")).toBeAttached();
   });
 
   test("wrapped modal close button is accessible", async ({ page }) => {
@@ -100,10 +120,13 @@ test.describe("Wrapped and Export", () => {
 
     const closeBtn = modal.locator(".close-btn");
     await expect(closeBtn).toBeVisible();
+    await expect(closeBtn).toHaveAttribute(
+      "aria-label",
+      "Close year in review",
+    );
     await closeBtn.click();
     await expect(modal).toBeHidden();
 
-    // Re-open to verify it can be opened again after closing
     await page.locator("#wrapped-btn").click();
     await expect(modal).toBeVisible({ timeout: 5000 });
   });
@@ -122,28 +145,23 @@ test.describe("Wrapped and Export", () => {
     const mapEl = page.locator("#map");
     await expect(mapEl).toBeVisible();
     await expect(mapEl).toHaveClass(/leaflet-container/);
+    await expect(page.locator("#wrapped-map-container #map")).toHaveCount(0);
   });
 
   test("wrapped panel updates when year filter changes", async ({ page }) => {
     const yearSelect = page.locator("#year-select");
-    const options = yearSelect.locator("option");
-    const count = await options.count();
-    test.skip(count < 2, "Need >=2 year options to test wrapped panel update");
-
-    const yearOption = await options.nth(1).getAttribute("value");
-    if (!yearOption) return;
-    await yearSelect.selectOption(yearOption);
-    await page.waitForFunction(
-      (y) => (window as any).mapApp?.selectedYear === y,
-      yearOption,
-      { timeout: 10000 },
+    expect(await yearSelect.locator("option").count()).toBe(
+      KNOWN_YEARS.length + 1,
     );
+
+    const year = KNOWN_YEARS[0]!;
+    await yearSelect.selectOption(year);
+    await waitForYearFilter(page, year);
 
     await page.locator("#wrapped-btn").click();
     await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
 
-    const yearEl = page.locator("#wrapped-year");
-    await expect(yearEl).toHaveText(yearOption);
+    await expect(page.locator("#wrapped-year")).toHaveText(year);
     await expect(page.locator("#wrapped-title")).toHaveText(
       "✨ Your Year in Flight",
     );
@@ -154,14 +172,8 @@ test.describe("Wrapped and Export", () => {
   }) => {
     const aircraftSelect = page.locator("#aircraft-select");
     const options = aircraftSelect.locator("option");
-    const count = await options.count();
-    test.skip(
-      count < 2,
-      "Need >=2 aircraft options to test wrapped panel update",
-    );
-
-    const aircraftOption = await options.nth(1).getAttribute("value");
-    if (!aircraftOption) return;
+    expect(await options.count()).toBeGreaterThanOrEqual(2);
+    const aircraftOption = (await options.nth(1).getAttribute("value"))!;
 
     await page.locator("#wrapped-btn").click();
     await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
@@ -171,30 +183,22 @@ test.describe("Wrapped and Export", () => {
     await expect(page.locator("#wrapped-modal")).toBeHidden();
 
     await aircraftSelect.selectOption(aircraftOption);
-    await page.waitForFunction(
-      (a) => (window as any).mapApp?.selectedAircraft === a,
-      aircraftOption,
-      { timeout: 10000 },
-    );
+    await waitForAircraftFilter(page, aircraftOption);
 
     await page.locator("#wrapped-btn").click();
     await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
 
-    const filteredStatsText = await page
-      .locator("#wrapped-stats")
-      .textContent();
-    expect(filteredStatsText).not.toBe(allStatsText);
+    await expect(page.locator("#wrapped-stats")).not.toHaveText(allStatsText!);
+    await expect(page.locator("#wrapped-aircraft-fleet")).toContainText(
+      aircraftOption,
+    );
   });
 
   test("wrapped panel shows all years when year filter set to all", async ({
     page,
   }) => {
-    const yearSelect = page.locator("#year-select");
-    await yearSelect.selectOption("all");
-    await page.waitForFunction(
-      () => (window as any).mapApp?.selectedYear === "all",
-      { timeout: 10000 },
-    );
+    await page.locator("#year-select").selectOption("all");
+    await waitForYearFilter(page, "all");
 
     await page.locator("#wrapped-btn").click();
     await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
@@ -208,12 +212,12 @@ test.describe("Wrapped and Export", () => {
   test("export button triggers download", async ({ page }) => {
     // Mock dom-to-image for reliable headless testing
     await page.evaluate(() => {
-      (window as any).domtoimage = {
+      window.domtoimage = {
         toJpeg: () =>
           Promise.resolve(
             "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA",
           ),
-      };
+      } as unknown as DomToImage;
     });
 
     const downloadPromise = page.waitForEvent("download", {
@@ -224,7 +228,42 @@ test.describe("Wrapped and Export", () => {
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/^heatmap_.*\.jpg$/);
 
-    // Button should revert to original text
+    await expect(page.locator(".toast-notification")).toHaveText(
+      "Map exported",
+    );
     await expect(page.locator("#export-btn")).toHaveText("📷 Export");
+    await expect(page.locator("#export-btn")).toBeEnabled();
+    await expect(page.locator("#replay-btn")).toBeVisible();
+  });
+
+  test("export loads dom-to-image on demand and reports when unavailable", async ({
+    page,
+  }) => {
+    // The library is not part of the initial page load
+    expect(
+      await page.evaluate(
+        () => document.querySelector('script[src*="dom-to-image"]') !== null,
+      ),
+    ).toBe(false);
+
+    await page.route("**/dom-to-image*", (route) => route.abort());
+    await page.locator("#export-btn").click();
+
+    await expect(page.locator(".toast-notification")).toHaveText(
+      "Export unavailable",
+    );
+    await expect(page.locator("#export-btn")).toHaveText("📷 Export");
+    await expect(page.locator("#export-btn")).toBeEnabled();
+  });
+
+  test("share button copies the current link", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+
+    await page.locator("#share-btn").click();
+
+    await expect(page.locator(".toast-notification")).toHaveText("Link copied");
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toBe(page.url());
+    expect(copied).toContain("?");
   });
 });

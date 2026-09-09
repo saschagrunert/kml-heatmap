@@ -4,15 +4,21 @@ import {
   calculateAirspeedRange,
   shouldRenderSegment,
   calculateSegmentProperties,
+  formatAltitudeLabel,
+  formatAirspeedLabel,
   formatAltitudeLegendLabels,
   formatAirspeedLegendLabels,
-  filterSegmentsForRendering,
-  groupSegmentsByPath,
-  calculateLayerStats,
+  findNearestSegment,
+  DEFAULT_ALTITUDE_RANGE,
+  DEFAULT_AIRSPEED_RANGE,
 } from "../../../../kml_heatmap/frontend/features/layers";
+import type {
+  PathInfo,
+  PathSegment,
+} from "../../../../kml_heatmap/frontend/types";
 
 describe("layers feature", () => {
-  const mockSegments = [
+  const mockSegments: PathSegment[] = [
     { path_id: 1, altitude_ft: 5000, groundspeed_knots: 120 },
     { path_id: 1, altitude_ft: 7000, groundspeed_knots: 130 },
     { path_id: 2, altitude_ft: 3000, groundspeed_knots: 100 },
@@ -21,105 +27,102 @@ describe("layers feature", () => {
 
   describe("calculateAltitudeRange", () => {
     it("calculates range from all segments", () => {
-      const range = calculateAltitudeRange(mockSegments);
-
-      expect(range.min).toBe(3000);
-      expect(range.max).toBe(9000);
+      expect(calculateAltitudeRange(mockSegments)).toEqual({
+        min: 3000,
+        max: 9000,
+      });
     });
 
     it("calculates range from selected paths only", () => {
-      const selectedPathIds = new Set([1]);
-      const range = calculateAltitudeRange(mockSegments, selectedPathIds);
-
-      expect(range.min).toBe(5000);
-      expect(range.max).toBe(7000);
+      expect(calculateAltitudeRange(mockSegments, new Set([1]))).toEqual({
+        min: 5000,
+        max: 7000,
+      });
     });
 
     it("returns default range for empty segments", () => {
-      const range = calculateAltitudeRange([]);
-
-      expect(range.min).toBe(0);
-      expect(range.max).toBe(10000);
+      expect(calculateAltitudeRange([])).toEqual(DEFAULT_ALTITUDE_RANGE);
     });
 
-    it("returns default range when no selected paths match", () => {
-      const selectedPathIds = new Set([999]);
-      const range = calculateAltitudeRange(mockSegments, selectedPathIds);
-
-      expect(range.min).toBe(0);
-      expect(range.max).toBe(10000);
+    it("returns the given fallback when no selected paths match", () => {
+      expect(
+        calculateAltitudeRange(mockSegments, new Set([999]), {
+          min: 1,
+          max: 2,
+        }),
+      ).toEqual({ min: 1, max: 2 });
     });
 
-    it("handles single segment", () => {
-      const segments = [{ path_id: 1, altitude_ft: 5000 }];
-      const range = calculateAltitudeRange(segments);
+    it("ignores segments without altitude", () => {
+      expect(
+        calculateAltitudeRange([
+          { path_id: 1 },
+          { path_id: 1, altitude_ft: 42 },
+        ]),
+      ).toEqual({ min: 42, max: 42 });
+    });
 
-      expect(range.min).toBe(5000);
-      expect(range.max).toBe(5000);
+    it("clamps the lower bound of the colour scale at 0 for negative altitudes", () => {
+      expect(
+        calculateAltitudeRange([
+          { path_id: 1, altitude_ft: -420 },
+          { path_id: 1, altitude_ft: 3000 },
+        ]),
+      ).toEqual({ min: 0, max: 3000 });
+      expect(
+        calculateAltitudeRange([
+          { path_id: 1, altitude_ft: -420 },
+          { path_id: 1, altitude_ft: -100 },
+        ]),
+      ).toEqual({ min: 0, max: 0 });
     });
   });
 
   describe("calculateAirspeedRange", () => {
     it("calculates range from all segments", () => {
-      const range = calculateAirspeedRange(mockSegments);
-
-      expect(range.min).toBe(100);
-      expect(range.max).toBe(150);
+      expect(calculateAirspeedRange(mockSegments)).toEqual({
+        min: 100,
+        max: 150,
+      });
     });
 
     it("calculates range from selected paths only", () => {
-      const selectedPathIds = new Set([1]);
-      const range = calculateAirspeedRange(mockSegments, selectedPathIds);
-
-      expect(range.min).toBe(120);
-      expect(range.max).toBe(130);
+      expect(calculateAirspeedRange(mockSegments, new Set([2]))).toEqual({
+        min: 100,
+        max: 150,
+      });
     });
 
     it("returns default range for empty segments", () => {
-      const range = calculateAirspeedRange([]);
-
-      expect(range.min).toBe(0);
-      expect(range.max).toBe(200);
+      expect(calculateAirspeedRange([])).toEqual(DEFAULT_AIRSPEED_RANGE);
     });
 
-    it("filters out zero and negative speeds", () => {
-      const segments = [
+    it("filters out zero, negative and missing speeds", () => {
+      const segments: PathSegment[] = [
         { path_id: 1, groundspeed_knots: 0 },
-        { path_id: 1, groundspeed_knots: -10 },
-        { path_id: 1, groundspeed_knots: 100 },
-        { path_id: 1, groundspeed_knots: 200 },
+        { path_id: 1, groundspeed_knots: -5 },
+        { path_id: 1 },
+        { path_id: 1, groundspeed_knots: 80 },
       ];
-      const range = calculateAirspeedRange(segments);
-
-      expect(range.min).toBe(100);
-      expect(range.max).toBe(200);
-    });
-
-    it("handles segments without speed data", () => {
-      const segments = [
-        { path_id: 1, altitude_ft: 5000 },
-        { path_id: 1, groundspeed_knots: undefined },
-      ];
-      const range = calculateAirspeedRange(segments);
-
-      expect(range.min).toBe(0);
-      expect(range.max).toBe(200);
+      expect(calculateAirspeedRange(segments)).toEqual({ min: 80, max: 80 });
     });
   });
 
   describe("shouldRenderSegment", () => {
-    const segment = { path_id: 1 };
-    const pathInfo = {
+    const segment: PathSegment = { path_id: 1 };
+    const pathInfo: PathInfo = {
       id: 1,
       year: 2025,
       aircraft_registration: "D-EAGJ",
     };
 
     it("returns true with no filters", () => {
+      expect(shouldRenderSegment(segment, pathInfo)).toBe(true);
       expect(shouldRenderSegment(segment, pathInfo, {})).toBe(true);
+      expect(shouldRenderSegment(segment, undefined)).toBe(true);
     });
 
-    it("filters by year correctly", () => {
+    it("filters by year", () => {
       expect(shouldRenderSegment(segment, pathInfo, { year: "2025" })).toBe(
         true,
       );
@@ -128,7 +131,7 @@ describe("layers feature", () => {
       );
     });
 
-    it("filters by aircraft correctly", () => {
+    it("filters by aircraft", () => {
       expect(
         shouldRenderSegment(segment, pathInfo, { aircraft: "D-EAGJ" }),
       ).toBe(true);
@@ -144,270 +147,157 @@ describe("layers feature", () => {
           aircraft: "D-EAGJ",
         }),
       ).toBe(true);
-
       expect(
         shouldRenderSegment(segment, pathInfo, {
-          year: "2024",
-          aircraft: "D-EAGJ",
+          year: "2025",
+          aircraft: "D-EXYZ",
         }),
       ).toBe(false);
     });
 
-    it("handles missing pathInfo", () => {
-      expect(shouldRenderSegment(segment, null, { year: "2025" })).toBe(false);
-    });
-
-    it("handles pathInfo without year", () => {
-      const info = { id: 1, aircraft_registration: "D-EAGJ" };
-      expect(shouldRenderSegment(segment, info, { year: "2025" })).toBe(false);
-    });
-
-    it("handles pathInfo without aircraft", () => {
-      const info = { id: 1, year: 2025 };
-      expect(shouldRenderSegment(segment, info, { aircraft: "D-EAGJ" })).toBe(
+    it("rejects missing pathInfo or fields when a filter is active", () => {
+      expect(shouldRenderSegment(segment, undefined, { year: "2025" })).toBe(
         false,
       );
+      expect(shouldRenderSegment(segment, { id: 1 }, { year: "2025" })).toBe(
+        false,
+      );
+      expect(
+        shouldRenderSegment(segment, { id: 1 }, { aircraft: "D-EAGJ" }),
+      ).toBe(false);
     });
   });
 
   describe("calculateSegmentProperties", () => {
-    const colorFunc = (_val, _min, _max) => "#ff0000";
+    const colorFunction = (value: number, min: number, max: number): string =>
+      `rgb(${value},${min},${max})`;
 
-    it("calculates properties for selected segment", () => {
-      const props = calculateSegmentProperties(
-        {},
-        {
+    it("styles a selected segment", () => {
+      expect(
+        calculateSegmentProperties({
           pathId: 1,
           selectedPathIds: new Set([1]),
-          hasSelection: true,
-          colorFunction: colorFunc,
+          colorFunction,
           colorMin: 0,
-          colorMax: 100,
-          value: 50,
-        },
-      );
-
-      expect(props.weight).toBe(6);
-      expect(props.opacity).toBe(1.0);
-      expect(props.isSelected).toBe(true);
+          colorMax: 10,
+          value: 5,
+        }),
+      ).toEqual({
+        weight: 6,
+        opacity: 1.0,
+        color: "rgb(5,0,10)",
+        isSelected: true,
+      });
     });
 
-    it("calculates properties for non-selected segment with selection active", () => {
-      const props = calculateSegmentProperties(
-        {},
-        {
-          pathId: 2,
-          selectedPathIds: new Set([1]),
-          hasSelection: true,
-        },
-      );
-
+    it("dims an unselected segment while a selection exists", () => {
+      const props = calculateSegmentProperties({
+        pathId: 2,
+        selectedPathIds: new Set([1]),
+      });
       expect(props.weight).toBe(4);
       expect(props.opacity).toBe(0.1);
       expect(props.isSelected).toBe(false);
     });
 
-    it("calculates properties with no selection", () => {
-      const props = calculateSegmentProperties(
-        {},
-        {
-          pathId: 1,
-          selectedPathIds: new Set(),
-          hasSelection: false,
-        },
-      );
+    it("uses normal styling without a selection", () => {
+      const props = calculateSegmentProperties({ pathId: 1 });
+      expect(props).toEqual({
+        weight: 4,
+        opacity: 0.85,
+        color: "#3388ff",
+        isSelected: false,
+      });
+    });
 
+    it("draws selected paths at normal weight in isolate mode", () => {
+      const props = calculateSegmentProperties({
+        pathId: 1,
+        selectedPathIds: new Set([1]),
+        isolateSelection: true,
+      });
       expect(props.weight).toBe(4);
       expect(props.opacity).toBe(0.85);
-      expect(props.isSelected).toBe(false);
-    });
-
-    it("applies color function", () => {
-      const props = calculateSegmentProperties(
-        {},
-        {
-          pathId: 1,
-          colorFunction: colorFunc,
-          value: 50,
-        },
-      );
-
-      expect(props.color).toBe("#ff0000");
-    });
-
-    it("uses default color when no color function provided", () => {
-      const props = calculateSegmentProperties(
-        {},
-        {
-          pathId: 1,
-        },
-      );
-
-      expect(props.color).toBe("#3388ff");
+      expect(props.isSelected).toBe(true);
     });
   });
 
-  describe("formatAltitudeLegendLabels", () => {
-    it("formats altitude labels", () => {
-      const labels = formatAltitudeLegendLabels(1000, 15000);
-
-      expect(labels.min).toBe("1000 ft");
-      expect(labels.max).toBe("15000 ft");
+  describe("legend labels", () => {
+    it("formats altitude with meters", () => {
+      expect(formatAltitudeLabel(1000)).toBe("1000 ft (305 m)");
+      expect(formatAltitudeLabel(1234.6)).toBe("1235 ft (376 m)");
+      expect(formatAltitudeLabel(0)).toBe("0 ft (0 m)");
     });
 
-    it("rounds altitudes", () => {
-      const labels = formatAltitudeLegendLabels(1234.5, 5678.9);
-
-      expect(labels.min).toBe("1235 ft");
-      expect(labels.max).toBe("5679 ft");
+    it("formats airspeed with km/h", () => {
+      expect(formatAirspeedLabel(100)).toBe("100 kt (185 km/h)");
+      expect(formatAirspeedLabel(123.4)).toBe("123 kt (229 km/h)");
+      expect(formatAirspeedLabel(0)).toBe("0 kt (0 km/h)");
     });
 
-    it("handles zero altitude", () => {
-      const labels = formatAltitudeLegendLabels(0, 1000);
-
-      expect(labels.min).toBe("0 ft");
-    });
-  });
-
-  describe("formatAirspeedLegendLabels", () => {
-    it("formats speed labels", () => {
-      const labels = formatAirspeedLegendLabels(100, 200);
-
-      expect(labels.min).toBe("100 kt");
-      expect(labels.max).toBe("200 kt");
-    });
-
-    it("rounds speeds", () => {
-      const labels = formatAirspeedLegendLabels(123.4, 234.6);
-
-      expect(labels.min).toBe("123 kt");
-      expect(labels.max).toBe("235 kt");
-    });
-
-    it("handles zero speed", () => {
-      const labels = formatAirspeedLegendLabels(0, 100);
-
-      expect(labels.min).toBe("0 kt");
+    it("builds min/max label pairs", () => {
+      expect(formatAltitudeLegendLabels(0, 5000)).toEqual({
+        min: "0 ft (0 m)",
+        max: "5000 ft (1524 m)",
+      });
+      expect(formatAirspeedLegendLabels(0, 200)).toEqual({
+        min: "0 kt (0 km/h)",
+        max: "200 kt (370 km/h)",
+      });
     });
   });
 
-  describe("filterSegmentsForRendering", () => {
-    const segments = [{ path_id: 1 }, { path_id: 2 }, { path_id: 3 }];
-
-    const pathInfo = [
-      { id: 1, year: 2025, aircraft_registration: "D-EAGJ" },
-      { id: 2, year: 2024, aircraft_registration: "D-EAGJ" },
-      { id: 3, year: 2025, aircraft_registration: "D-EXYZ" },
+  describe("findNearestSegment", () => {
+    const segments: PathSegment[] = [
+      {
+        path_id: 1,
+        coords: [
+          [50.0, 8.0],
+          [50.1, 8.0],
+        ],
+      },
+      {
+        path_id: 1,
+        coords: [
+          [50.1, 8.0],
+          [50.2, 8.0],
+        ],
+      },
+      { path_id: 1 },
+      {
+        path_id: 1,
+        coords: [
+          [50.2, 8.0],
+          [50.2, 8.5],
+        ],
+      },
     ];
 
-    it("returns all segments with no filters", () => {
-      const filtered = filterSegmentsForRendering(segments, pathInfo, {});
-
-      expect(filtered).toHaveLength(3);
+    it("returns the segment closest to the point", () => {
+      expect(findNearestSegment(segments, 50.05, 8.01)).toBe(segments[0]);
+      expect(findNearestSegment(segments, 50.15, 8.01)).toBe(segments[1]);
+      expect(findNearestSegment(segments, 50.21, 8.3)).toBe(segments[3]);
     });
 
-    it("filters by year", () => {
-      const filtered = filterSegmentsForRendering(segments, pathInfo, {
-        year: "2025",
-      });
-
-      expect(filtered).toHaveLength(2);
-      expect(filtered.map((s) => s.path_id)).toEqual([1, 3]);
+    it("measures distance to the segment, not only its end points", () => {
+      // Point exactly beside the middle of the last (east-west) segment
+      expect(findNearestSegment(segments, 50.19, 8.25)).toBe(segments[3]);
     });
 
-    it("filters by aircraft", () => {
-      const filtered = filterSegmentsForRendering(segments, pathInfo, {
-        aircraft: "D-EAGJ",
-      });
-
-      expect(filtered).toHaveLength(2);
-      expect(filtered.map((s) => s.path_id)).toEqual([1, 2]);
+    it("skips segments without coords and returns undefined for an empty list", () => {
+      expect(findNearestSegment([{ path_id: 1 }], 50, 8)).toBeUndefined();
+      expect(findNearestSegment([], 50, 8)).toBeUndefined();
     });
 
-    it("filters by both criteria", () => {
-      const filtered = filterSegmentsForRendering(segments, pathInfo, {
-        year: "2025",
-        aircraft: "D-EAGJ",
-      });
-
-      expect(filtered).toHaveLength(1);
-      expect(filtered[0].path_id).toBe(1);
-    });
-
-    it("handles segments without matching pathInfo", () => {
-      const segs = [{ path_id: 999 }];
-      const filtered = filterSegmentsForRendering(segs, pathInfo, {});
-
-      expect(filtered).toHaveLength(0);
-    });
-  });
-
-  describe("groupSegmentsByPath", () => {
-    it("groups segments by path ID", () => {
-      const grouped = groupSegmentsByPath(mockSegments);
-
-      expect(grouped.size).toBe(2);
-      expect(grouped.get(1)).toHaveLength(2);
-      expect(grouped.get(2)).toHaveLength(2);
-    });
-
-    it("handles empty array", () => {
-      const grouped = groupSegmentsByPath([]);
-
-      expect(grouped.size).toBe(0);
-    });
-
-    it("handles single path", () => {
-      const segments = [{ path_id: 1 }, { path_id: 1 }, { path_id: 1 }];
-      const grouped = groupSegmentsByPath(segments);
-
-      expect(grouped.size).toBe(1);
-      expect(grouped.get(1)).toHaveLength(3);
-    });
-
-    it("preserves segment order within path", () => {
-      const segments = [
-        { path_id: 1, order: 1 },
-        { path_id: 1, order: 2 },
-        { path_id: 1, order: 3 },
-      ];
-      const grouped = groupSegmentsByPath(segments);
-
-      expect(grouped.get(1)[0].order).toBe(1);
-      expect(grouped.get(1)[1].order).toBe(2);
-      expect(grouped.get(1)[2].order).toBe(3);
-    });
-  });
-
-  describe("calculateLayerStats", () => {
-    it("calculates comprehensive layer statistics", () => {
-      const stats = calculateLayerStats(mockSegments);
-
-      expect(stats.totalSegments).toBe(4);
-      expect(stats.uniquePaths).toBe(2);
-      expect(stats.altitudeRange).toEqual({ min: 3000, max: 9000 });
-      expect(stats.speedRange).toEqual({ min: 100, max: 150 });
-    });
-
-    it("handles empty segments", () => {
-      const stats = calculateLayerStats([]);
-
-      expect(stats.totalSegments).toBe(0);
-      expect(stats.uniquePaths).toBe(0);
-      expect(stats.altitudeRange).toEqual({ min: 0, max: 10000 });
-      expect(stats.speedRange).toEqual({ min: 0, max: 200 });
-    });
-
-    it("handles single segment", () => {
-      const segments = [
-        { path_id: 1, altitude_ft: 5000, groundspeed_knots: 120 },
-      ];
-      const stats = calculateLayerStats(segments);
-
-      expect(stats.totalSegments).toBe(1);
-      expect(stats.uniquePaths).toBe(1);
-      expect(stats.altitudeRange).toEqual({ min: 5000, max: 5000 });
-      expect(stats.speedRange).toEqual({ min: 120, max: 120 });
+    it("handles zero-length segments", () => {
+      const point: PathSegment = {
+        path_id: 1,
+        coords: [
+          [50.0, 8.0],
+          [50.0, 8.0],
+        ],
+      };
+      expect(findNearestSegment([point], 50.0, 8.0)).toBe(point);
     });
   });
 });

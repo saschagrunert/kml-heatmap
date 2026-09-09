@@ -2,10 +2,14 @@
  * Filter Manager - Handles year/aircraft filtering
  */
 import type { MapApp } from "../mapApp";
+import type { KMLDataset } from "../types";
+import { aggregateAircraft, filterPaths } from "../calculations/statistics";
 import { domCache } from "../utils/domCache";
 
 export class FilterManager {
   private app: MapApp;
+  /** Monotonic id of the latest filter change; stale completions are dropped */
+  private requestId = 0;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -15,9 +19,12 @@ export class FilterManager {
   }
 
   updateAircraftDropdown(): void {
-    if (!this.app.fullPathInfo) return;
+    const pathInfo = this.app.fullPathInfo;
+    if (!pathInfo) return;
 
-    const aircraftSelect = domCache.get("aircraft-select") as HTMLSelectElement;
+    const aircraftSelect = domCache.get(
+      "aircraft-select",
+    ) as HTMLSelectElement | null;
     if (!aircraftSelect) return;
 
     const currentSelection = this.app.selectedAircraft;
@@ -27,44 +34,10 @@ export class FilterManager {
       aircraftSelect.remove(1);
     }
 
-    // Get aircraft for the current year filter
-    let yearFilteredPathInfo;
-    if (this.app.selectedYear === "all") {
-      yearFilteredPathInfo = this.app.fullPathInfo;
-    } else {
-      yearFilteredPathInfo = this.app.fullPathInfo.filter((pathInfo) => {
-        return (
-          pathInfo.year && pathInfo.year.toString() === this.app.selectedYear
-        );
-      });
-    }
-
-    // Collect aircraft from filtered paths
-    const aircraftMap: {
-      [registration: string]: {
-        registration: string;
-        type?: string;
-        flights: number;
-      };
-    } = {};
-    yearFilteredPathInfo.forEach((pathInfo) => {
-      if (pathInfo.aircraft_registration) {
-        const reg = pathInfo.aircraft_registration;
-        if (!aircraftMap[reg]) {
-          aircraftMap[reg] = {
-            registration: reg,
-            type: pathInfo.aircraft_type,
-            flights: 0,
-          };
-        }
-        aircraftMap[reg].flights += 1;
-      }
-    });
-
-    // Convert to sorted list
-    const aircraftList = Object.values(aircraftMap).sort((a, b) => {
-      return b.flights - a.flights;
-    });
+    // Aircraft for the current year filter, sorted by flight count
+    const aircraftList = aggregateAircraft(
+      filterPaths(pathInfo, this.app.selectedYear, "all"),
+    );
 
     // Populate dropdown
     let selectedAircraftExists = false;
@@ -90,59 +63,52 @@ export class FilterManager {
   }
 
   async filterByYear(): Promise<void> {
-    const yearSelect = domCache.get("year-select") as HTMLSelectElement;
+    const yearSelect = domCache.get("year-select") as HTMLSelectElement | null;
     if (!yearSelect) return;
 
     this.app.selectedYear = yearSelect.value;
-    this.app.dataManager.loadedData = {};
+    const requestId = ++this.requestId;
 
-    await this.applyFilter();
-
-    // Reload full resolution data for the new year
-    const fullResData = await this.app.dataManager.loadData(
-      "data",
-      this.app.selectedYear,
-    );
-    if (fullResData) {
-      this.app.fullPathInfo = fullResData.path_info || [];
-      this.app.fullPathSegments = fullResData.path_segments || [];
+    // 1. Load the new year's data first so the aircraft list is based on it
+    const data = await this.app.dataManager.loadData(this.app.selectedYear);
+    if (requestId !== this.requestId) return; // superseded by a newer change
+    if (data) {
+      this.app.currentData = data;
     }
 
+    // 2. Rebuild the aircraft dropdown; this may reset a registration that
+    //    did not fly in the new year back to "all"
     this.updateAircraftDropdown();
-    this.updateStatsAndAirports();
+
+    // 3. Redraw with the final year/aircraft combination (stats included)
+    await this.applyFilter(data);
+    if (requestId !== this.requestId) return;
+
+    // 4. Airport popups follow the filter
+    this.app.airportManager.updateAirportPopups();
   }
 
   async filterByAircraft(): Promise<void> {
-    const aircraftSelect = domCache.get("aircraft-select") as HTMLSelectElement;
+    const aircraftSelect = domCache.get(
+      "aircraft-select",
+    ) as HTMLSelectElement | null;
     if (!aircraftSelect) return;
 
     this.app.selectedAircraft = aircraftSelect.value;
+    const requestId = ++this.requestId;
 
     await this.applyFilter();
-    this.updateStatsAndAirports();
+    if (requestId !== this.requestId) return;
+
+    this.app.airportManager.updateAirportPopups();
   }
 
-  private async applyFilter(): Promise<void> {
-    this.app.altitudeLayer.clearLayers();
-    this.app.pathSegments = {};
+  private async applyFilter(preloaded?: KMLDataset | null): Promise<void> {
     if (!this.app.isInitializing) {
       this.app.selectedPathIds.clear();
       this.app.store.notifyMutation("selectedPathIds");
     }
 
-    await this.app.dataManager.updateLayers();
-  }
-
-  private updateStatsAndAirports(): void {
-    const filteredStats = window.KMLHeatmap.calculateFilteredStatistics({
-      pathInfo: this.app.fullPathInfo ?? [],
-      segments: this.app.fullPathSegments ?? [],
-      year: this.app.selectedYear,
-      aircraft: this.app.selectedAircraft,
-      coordinateCount: this.app.currentData?.original_points,
-    });
-    this.app.statsManager.updateStatsPanel(filteredStats, false);
-    this.app.airportManager.updateAirportOpacity();
-    this.app.airportManager.updateAirportPopups();
+    await this.app.dataManager.updateLayers(preloaded);
   }
 }

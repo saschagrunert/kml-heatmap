@@ -4,10 +4,18 @@
 import type { MapApp } from "../mapApp";
 import { domCache, hideControls, restoreControls } from "../utils/domCache";
 import {
+  calculateAirportFlightCounts,
   countryDisplayName,
   countryFlag,
+  findHomeBase,
   groupByCountry,
 } from "../features/airports";
+import { calculateYearStats, generateFunFacts } from "../features/wrapped";
+import {
+  calculateFilteredStatistics,
+  filterPaths,
+  filterSegmentsByPaths,
+} from "../calculations/statistics";
 import {
   generateStatsHtml,
   generateFunFactsHtml,
@@ -16,12 +24,19 @@ import {
   generateDestinationsHtml,
 } from "../utils/htmlGenerators";
 
+/** Elements that stay interactive while the dialog is open */
+const NON_INERT_IDS = new Set(["map"]);
+
 export class WrappedManager {
   private app: MapApp;
   private originalMapParent: HTMLElement | null;
   private originalMapIndex: number | null;
   private savedControlDisplays: Map<HTMLElement, string> = new Map();
   private escapeHandler: ((e: KeyboardEvent) => void) | null = null;
+  private previouslyFocused: HTMLElement | null = null;
+  private inertElements: Element[] = [];
+  private mapMoveTimer: ReturnType<typeof setTimeout> | null = null;
+  private mapResizeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -42,6 +57,7 @@ export class WrappedManager {
       "wrapped-modal",
       "stats-btn",
       "export-btn",
+      "share-btn",
       "wrapped-btn",
       "heatmap-btn",
       "airports-btn",
@@ -57,6 +73,10 @@ export class WrappedManager {
     ]);
   }
 
+  private setWrappedVisible(visible: boolean): void {
+    this.app.store.set("wrappedVisible", visible);
+  }
+
   showWrapped(): void {
     if (!this.app.map || this.savedControlDisplays.size > 0) return;
 
@@ -69,18 +89,11 @@ export class WrappedManager {
     const allSegments = this.app.fullPathSegments || [];
 
     // Filter once and share between both stat calculations
-    const filteredPaths = window.KMLHeatmap.filterPaths(
-      allPathInfo,
-      year,
-      aircraft,
-    );
-    const filteredSegments = window.KMLHeatmap.filterSegmentsByPaths(
-      allSegments,
-      filteredPaths,
-    );
+    const filteredPaths = filterPaths(allPathInfo, year, aircraft);
+    const filteredSegments = filterSegmentsByPaths(allSegments, filteredPaths);
     const preFiltered = { paths: filteredPaths, segments: filteredSegments };
 
-    const filteredStats = window.KMLHeatmap.calculateFilteredStatistics({
+    const filteredStats = calculateFilteredStatistics({
       pathInfo: allPathInfo,
       segments: allSegments,
       year: year,
@@ -89,7 +102,7 @@ export class WrappedManager {
       preFiltered,
     });
 
-    const yearStats = window.KMLHeatmap.calculateYearStats(
+    const yearStats = calculateYearStats(
       allPathInfo,
       allSegments,
       year,
@@ -126,10 +139,7 @@ export class WrappedManager {
     if (statsEl) statsEl.innerHTML = statsHtml;
 
     // Build fun facts section with dynamic, varied facts
-    const funFacts = window.KMLHeatmap.generateFunFacts(
-      yearStats,
-      filteredStats,
-    );
+    const funFacts = generateFunFacts(yearStats, filteredStats);
 
     const funFactsHtml = generateFunFactsHtml(funFacts);
 
@@ -145,12 +155,12 @@ export class WrappedManager {
 
     // Build home base section using year-filtered airport data
     if (yearStats.airport_names && yearStats.airport_names.length > 0) {
-      const airportCounts = window.KMLHeatmap.calculateAirportFlightCounts(
+      const airportCounts = calculateAirportFlightCounts(
         filteredPaths,
         "all",
         "all",
       );
-      const homeBase = window.KMLHeatmap.findHomeBase(airportCounts);
+      const homeBase = findHomeBase(airportCounts);
       const homeBaseCount = homeBase ? (airportCounts[homeBase] ?? 0) : 0;
 
       if (homeBase) {
@@ -198,7 +208,11 @@ export class WrappedManager {
 
     // Show modal first to ensure wrapped-map-container has dimensions
     const modal = domCache.get("wrapped-modal");
-    if (modal) modal.style.display = "flex";
+    if (modal) {
+      modal.style.display = "flex";
+      this.trapFocus(modal);
+    }
+    this.setWrappedVisible(true);
 
     // Add Escape key handler to close modal
     this.escapeHandler = (e: KeyboardEvent) => {
@@ -208,8 +222,11 @@ export class WrappedManager {
     };
     document.addEventListener("keydown", this.escapeHandler);
 
-    // Wait for modal to render and have dimensions
-    setTimeout(() => {
+    // Wait for modal to render and have dimensions. The handles are cleared
+    // on close so that a quick close cannot move the map into a hidden dialog.
+    this.mapMoveTimer = setTimeout(() => {
+      this.mapMoveTimer = null;
+      if (!this.app.store.get("wrappedVisible")) return;
       // Now move map into wrapped container (which now has dimensions)
       wrappedMapContainer.appendChild(mapContainer);
 
@@ -223,8 +240,9 @@ export class WrappedManager {
       wrappedMapContainer.offsetHeight;
 
       // Now that container has dimensions, invalidate map size
-      setTimeout(() => {
-        if (!this.app.map) return;
+      this.mapResizeTimer = setTimeout(() => {
+        this.mapResizeTimer = null;
+        if (!this.app.map || !this.app.store.get("wrappedVisible")) return;
         this.app.map.invalidateSize();
         this.app.map.fitBounds(this.app.config.bounds, { padding: [80, 80] });
 
@@ -236,8 +254,60 @@ export class WrappedManager {
     }, 50);
   }
 
+  /**
+   * Keep keyboard and screen reader focus inside the dialog: remember the
+   * opener, make everything outside the dialog inert and focus the close
+   * button. The map is excluded because it is moved into the dialog.
+   */
+  private trapFocus(modal: HTMLElement): void {
+    const active = document.activeElement;
+    this.previouslyFocused = active instanceof HTMLElement ? active : null;
+
+    this.inertElements = Array.from(document.body.children).filter(
+      (el) =>
+        el !== modal && !NON_INERT_IDS.has(el.id) && !el.hasAttribute("inert"),
+    );
+    this.inertElements.forEach((el) => el.setAttribute("inert", ""));
+
+    const closeBtn = modal.querySelector<HTMLElement>(".close-btn");
+    if (closeBtn) closeBtn.focus();
+  }
+
+  private releaseFocus(): void {
+    this.inertElements.forEach((el) => el.removeAttribute("inert"));
+    this.inertElements = [];
+
+    const opener = this.previouslyFocused;
+    this.previouslyFocused = null;
+    if (opener && document.contains(opener)) {
+      // A hidden opener (for example while the controls are collapsed) stays
+      // in the document but cannot take focus
+      opener.focus();
+      if (document.activeElement === opener) return;
+    }
+
+    // No opener to return to: do not leave focus inside the hidden dialog
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest("#wrapped-modal")) {
+      active.blur();
+    }
+  }
+
+  /** Cancel the deferred map move and resize scheduled by showWrapped */
+  private cancelPendingMapTimers(): void {
+    if (this.mapMoveTimer !== null) {
+      clearTimeout(this.mapMoveTimer);
+      this.mapMoveTimer = null;
+    }
+    if (this.mapResizeTimer !== null) {
+      clearTimeout(this.mapResizeTimer);
+      this.mapResizeTimer = null;
+    }
+  }
+
   closeWrapped(event?: MouseEvent): void {
     if (!event || (event.target as HTMLElement).id === "wrapped-modal") {
+      this.cancelPendingMapTimers();
       // Move map back to original position
       const mapContainer = domCache.get("map");
       if (!mapContainer) return;
@@ -276,12 +346,15 @@ export class WrappedManager {
 
       const modal = domCache.get("wrapped-modal");
       if (modal) modal.style.display = "none";
+      this.setWrappedVisible(false);
 
       // Remove Escape key handler
       if (this.escapeHandler) {
         document.removeEventListener("keydown", this.escapeHandler);
         this.escapeHandler = null;
       }
+
+      this.releaseFocus();
     }
   }
 }

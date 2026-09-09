@@ -94,7 +94,8 @@ export function hideControls(
 ): Map<HTMLElement, string> {
   const savedDisplays = new Map<HTMLElement, string>();
   getControlElements(extraIds).forEach((el) => {
-    if (el) {
+    // An element listed twice must keep its original display value
+    if (el && !savedDisplays.has(el)) {
       savedDisplays.set(el, el.style.display);
       el.style.display = "none";
     }

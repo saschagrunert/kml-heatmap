@@ -3,21 +3,21 @@
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .airport_lookup import extract_icao_codes_from_name, lookup_airport_country
 from .airports import extract_airport_name
-from .constants import HEATMAP_GRADIENT
 from .logger import logger
-from .types import AirportData, PathMetadata, Statistics
+
+if TYPE_CHECKING:
+    from .types import AirportData, Statistics
 
 
 def export_airports_data(
     unique_airports: list[AirportData],
     output_dir: str,
-    strip_timestamps: bool = False,
 ) -> tuple[str, int]:
-    """Export airport data to JSON file."""
+    """Export airport data to airports.js (window.KML_AIRPORTS)."""
     valid_airports = []
     seen_locations: set[str] = set()
 
@@ -49,17 +49,15 @@ def export_airports_data(
             if country:
                 airport_data["country"] = country
 
-        if not strip_timestamps:
-            airport_data["timestamps"] = apt.get("timestamps", [])
-
         valid_airports.append(airport_data)
 
-    airports_data = {"airports": valid_airports}
     airports_file = Path(output_dir) / "airports.js"
 
     with open(airports_file, "w", encoding="utf-8") as f:
         f.write("window.KML_AIRPORTS = ")
-        json.dump(airports_data, f, separators=(",", ":"), sort_keys=True)
+        json.dump(
+            {"airports": valid_airports}, f, separators=(",", ":"), sort_keys=True
+        )
         f.write(";")
 
     file_size = airports_file.stat().st_size
@@ -78,10 +76,10 @@ def export_metadata(
     min_groundspeed_knots: float,
     max_groundspeed_knots: float,
     available_years: list[int],
+    year_file_bytes: dict[str, int],
     output_dir: str,
-    file_structure: dict[str, Any] | None = None,
 ) -> tuple[str, int]:
-    """Export metadata including statistics and ranges."""
+    """Export metadata.js (window.KML_METADATA) with statistics and ranges."""
     if not math.isfinite(min_groundspeed_knots):
         min_groundspeed_knots = 0.0
     if not math.isfinite(max_groundspeed_knots):
@@ -93,12 +91,9 @@ def export_metadata(
         "max_alt_m": max_alt_m,
         "min_groundspeed_knots": round(min_groundspeed_knots, 1),
         "max_groundspeed_knots": round(max_groundspeed_knots, 1),
-        "gradient": HEATMAP_GRADIENT,
-        "available_years": available_years,
+        "available_years": sorted(available_years),
+        "year_file_bytes": year_file_bytes,
     }
-
-    if file_structure is not None:
-        meta_data["file_structure"] = file_structure
 
     meta_file = Path(output_dir) / "metadata.js"
 
@@ -112,15 +107,3 @@ def export_metadata(
     logger.info("  ✓ Metadata: %.1f KB", file_size / 1024)
 
     return str(meta_file), file_size
-
-
-def collect_unique_years(all_path_metadata: list[PathMetadata]) -> list[int]:
-    """Collect unique years from path metadata."""
-    unique_years: set[int] = set()
-
-    for meta in all_path_metadata:
-        year = meta.get("year")
-        if year:
-            unique_years.add(year)
-
-    return sorted(unique_years)

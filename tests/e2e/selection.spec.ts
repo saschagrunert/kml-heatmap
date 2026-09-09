@@ -1,54 +1,65 @@
 import { test, expect, type Page } from "@playwright/test";
 import {
-  waitForPathData,
-  selectPathForReplay,
   findSegmentFarFromAirports,
+  gotoApp,
+  readSavedState,
+  selectPathForReplay,
+  waitForAppReady,
+  waitForPathData,
 } from "./helpers";
 
 /** Select a path and return the isolate button locator */
 async function selectPathAndGetIsolateBtn(page: Page) {
   await waitForPathData(page);
-  const pathId = await page.evaluate(
-    () => (window as any).mapApp.fullPathInfo[0].id,
-  );
+  const pathId = await page.evaluate(() => window.mapApp!.fullPathInfo![0]!.id);
   await page.evaluate(
-    (id) => (window as any).mapApp.togglePathSelection(String(id)),
+    (id) => window.mapApp!.togglePathSelection(String(id)),
     pathId,
   );
-  await page.waitForFunction(
-    () => (window as any).mapApp.selectedPathIds.size === 1,
-    { timeout: 5000 },
-  );
+  await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 1, {
+    timeout: 5000,
+  });
   return { pathId, isolateBtn: page.locator("#isolate-btn") };
+}
+
+function selectedCount(page: Page): Promise<number> {
+  return page.evaluate(() => window.mapApp!.selectedPathIds.size);
+}
+
+function altitudeLayerCount(page: Page): Promise<number> {
+  return page.evaluate(() => window.mapApp!.altitudeLayer.getLayers().length);
+}
+
+function altitudeWeights(page: Page): Promise<number[]> {
+  return page.evaluate(() =>
+    window
+      .mapApp!.altitudeLayer.getLayers()
+      .map((layer) => (layer as L.Polyline).options.weight ?? 0),
+  );
 }
 
 test.describe("Path Selection", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+    await gotoApp(page);
   });
 
   test("selecting a path updates selectedPathIds", async ({ page }) => {
     await waitForPathData(page);
 
     const pathId = await page.evaluate(
-      () => (window as any).mapApp.fullPathInfo[0].id,
+      () => window.mapApp!.fullPathInfo![0]!.id,
     );
     await page.evaluate(
-      (id) => (window as any).mapApp.togglePathSelection(String(id)),
+      (id) => window.mapApp!.togglePathSelection(String(id)),
       pathId,
     );
 
     const hasPath = await page.evaluate(
-      (id) => (window as any).mapApp.selectedPathIds.has(id),
+      (id) => window.mapApp!.selectedPathIds.has(id),
       pathId,
     );
     expect(hasPath).toBe(true);
-
-    const size = await page.evaluate(
-      () => (window as any).mapApp.selectedPathIds.size,
-    );
-    expect(size).toBe(1);
+    expect(await selectedCount(page)).toBe(1);
   });
 
   test("deselecting a path removes it from selectedPathIds", async ({
@@ -57,76 +68,86 @@ test.describe("Path Selection", () => {
     await waitForPathData(page);
 
     const pathId = await page.evaluate(
-      () => (window as any).mapApp.fullPathInfo[0].id,
+      () => window.mapApp!.fullPathInfo![0]!.id,
     );
 
-    // Select
     await page.evaluate(
-      (id) => (window as any).mapApp.togglePathSelection(String(id)),
+      (id) => window.mapApp!.togglePathSelection(String(id)),
       pathId,
     );
-    await page.waitForFunction(
-      () => (window as any).mapApp.selectedPathIds.size === 1,
-    );
+    await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 1);
 
-    // Deselect
     await page.evaluate(
-      (id) => (window as any).mapApp.togglePathSelection(String(id)),
+      (id) => window.mapApp!.togglePathSelection(String(id)),
       pathId,
     );
 
-    const size = await page.evaluate(
-      () => (window as any).mapApp.selectedPathIds.size,
-    );
-    expect(size).toBe(0);
+    expect(await selectedCount(page)).toBe(0);
   });
 
-  test("selecting a path enables the replay button", async ({ page }) => {
+  test("selecting a path marks the replay button available", async ({
+    page,
+  }) => {
     const replayBtn = page.locator("#replay-btn");
-    await expect(replayBtn).toBeDisabled();
+    await expect(replayBtn).toHaveAttribute(
+      "title",
+      "Select exactly one flight with timing data to replay",
+    );
 
     await selectPathForReplay(page);
 
     await expect(replayBtn).toBeEnabled();
+    await expect(replayBtn).toHaveAttribute(
+      "title",
+      "Replay selected flight path",
+    );
     await expect(replayBtn).toHaveCSS("opacity", "1");
   });
 
-  test("selecting multiple paths disables the replay button", async ({
+  test("selecting multiple paths marks the replay button unavailable", async ({
     page,
   }) => {
     await waitForPathData(page);
 
-    const pathIds = await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      return app.fullPathInfo.slice(0, 2).map((p: any) => p.id);
-    });
+    const pathIds = await page.evaluate(() =>
+      window.mapApp!.fullPathInfo!.slice(0, 2).map((p) => p.id),
+    );
+    expect(pathIds).toHaveLength(2);
 
     for (const id of pathIds) {
       await page.evaluate(
-        (pid) => (window as any).mapApp.togglePathSelection(String(pid)),
+        (pid) => window.mapApp!.togglePathSelection(String(pid)),
         id,
       );
     }
 
-    await page.waitForFunction(
-      () => (window as any).mapApp.selectedPathIds.size === 2,
+    await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 2);
+    await expect(page.locator("#replay-btn")).toHaveAttribute(
+      "title",
+      "Select exactly one flight with timing data to replay",
     );
-    await expect(page.locator("#replay-btn")).toBeDisabled();
+    await expect(page.locator("#replay-btn")).toHaveCSS("opacity", "0.5");
   });
 
-  test("deselecting all paths disables the replay button", async ({ page }) => {
+  test("deselecting all paths marks the replay button unavailable", async ({
+    page,
+  }) => {
     const pathId = await selectPathForReplay(page);
-    await expect(page.locator("#replay-btn")).toBeEnabled();
+    await expect(page.locator("#replay-btn")).toHaveAttribute(
+      "title",
+      "Replay selected flight path",
+    );
 
     await page.evaluate(
-      (id) => (window as any).mapApp.togglePathSelection(String(id)),
+      (id) => window.mapApp!.togglePathSelection(String(id)),
       pathId,
     );
-    await page.waitForFunction(
-      () => (window as any).mapApp.selectedPathIds.size === 0,
-    );
+    await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 0);
 
-    await expect(page.locator("#replay-btn")).toBeDisabled();
+    await expect(page.locator("#replay-btn")).toHaveAttribute(
+      "title",
+      "Select exactly one flight with timing data to replay",
+    );
   });
 
   test("clicking a path on the map selects it", async ({ page }) => {
@@ -135,100 +156,93 @@ test.describe("Path Selection", () => {
     const pos = await findSegmentFarFromAirports(page, {
       includePathId: true,
     });
-    if (!pos) return;
+    expect(pos).not.toBeNull();
 
     await page.locator("#map").click({
-      position: { x: pos.x, y: pos.y },
+      position: { x: pos!.x, y: pos!.y },
     });
-    await page.waitForTimeout(300);
-
-    const size = await page.evaluate(
-      () => (window as any).mapApp.selectedPathIds.size,
+    await page.waitForFunction(
+      () => window.mapApp!.selectedPathIds.size === 1,
+      { timeout: 5000 },
     );
-    expect(size).toBe(1);
 
     const hasPath = await page.evaluate(
-      (id) => (window as any).mapApp.selectedPathIds.has(id),
-      pos.pathId,
+      (id) => window.mapApp!.selectedPathIds.has(id!),
+      pos!.pathId,
     );
     expect(hasPath).toBe(true);
   });
 
   test("clicking empty map area clears path selection", async ({ page }) => {
-    const pathId = await selectPathForReplay(page);
-    expect(
-      await page.evaluate(() => (window as any).mapApp.selectedPathIds.size),
-    ).toBe(1);
+    await selectPathForReplay(page);
+    expect(await selectedCount(page)).toBe(1);
 
-    // Click on an area of the map away from any paths
-    // Zoom out first to make it easier to find empty space
+    // Zoom out so the bottom-left corner of the map shows open sea
     await page.evaluate(() => {
-      (window as any).mapApp.map.setZoom(3, { animate: false });
+      window.mapApp!.map!.setZoom(3, { animate: false });
     });
-    await page.waitForTimeout(500);
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.map!.getZoom()))
+      .toBe(3);
 
-    // Click on a position in the ocean (bottom-left corner of map container)
-    const mapBox = await page.locator("#map").boundingBox();
-    if (mapBox) {
-      await page.mouse.click(mapBox.x + 10, mapBox.y + mapBox.height - 10);
-    }
-    await page.waitForTimeout(300);
+    const mapBox = (await page.locator("#map").boundingBox())!;
+    await page.mouse.click(mapBox.x + 10, mapBox.y + mapBox.height - 10);
 
-    const size = await page.evaluate(
-      () => (window as any).mapApp.selectedPathIds.size,
+    await page.waitForFunction(
+      () => window.mapApp!.selectedPathIds.size === 0,
+      { timeout: 5000 },
     );
-    expect(size).toBe(0);
   });
 
   test("clicking airport marker selects associated paths", async ({ page }) => {
     await waitForPathData(page);
 
-    // Get first airport that has associated paths
     const airportInfo = await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      const airportNames = Object.keys(app.airportToPaths || {});
-      if (airportNames.length === 0) return null;
+      const app = window.mapApp!;
+      const airportNames = Object.keys(app.airportToPaths);
       const name = airportNames[0];
-      const pathCount = app.airportToPaths[name].size;
-      return { name, pathCount };
+      if (!name) return null;
+      return { name, pathCount: app.airportToPaths[name]!.size };
     });
-    if (!airportInfo) return;
+    expect(airportInfo).not.toBeNull();
+    expect(airportInfo!.pathCount).toBeGreaterThan(0);
 
-    // Click the first airport marker
-    const marker = page.locator(".airport-marker").first();
-    await marker.click();
-    await page.waitForTimeout(300);
+    await page.locator(".airport-marker").first().click();
 
-    const size = await page.evaluate(
-      () => (window as any).mapApp.selectedPathIds.size,
-    );
-    expect(size).toBeGreaterThan(0);
+    await page.waitForFunction(() => window.mapApp!.selectedPathIds.size > 0, {
+      timeout: 5000,
+    });
   });
 
-  test("path polyline popup shows altitude info on click", async ({ page }) => {
+  test("clicking a path shows its altitude data and selects it", async ({
+    page,
+  }) => {
     await waitForPathData(page);
 
     const pos = await findSegmentFarFromAirports(page);
-    if (!pos) return;
+    expect(pos).not.toBeNull();
 
     await page.locator("#map").click({
-      position: { x: pos.x, y: pos.y },
+      position: { x: pos!.x, y: pos!.y },
     });
-    await page.waitForTimeout(500);
 
-    const popup = page.locator(".leaflet-popup-content");
-    const popupCount = await popup.count();
-    if (popupCount > 0) {
-      const popupText = await popup.first().textContent();
-      expect(popupText).toMatch(/Altitude:.*ft/);
-    }
+    // Pointer devices get a sticky tooltip, touch devices a popup
+    const details = page
+      .locator(".segment-tooltip, .leaflet-popup-content")
+      .first();
+    await expect(details).toBeVisible({ timeout: 5000 });
+    await expect(details).toContainText(/Altitude/);
+    await expect(details).toContainText(/ft/);
+    await page.waitForFunction(
+      () => window.mapApp!.selectedPathIds.size === 1,
+      { timeout: 5000 },
+    );
   });
 });
 
 test.describe("Solo Mode", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+    await gotoApp(page);
   });
 
   test("solo button is always visible but dimmed when no paths are selected", async ({
@@ -237,6 +251,7 @@ test.describe("Solo Mode", () => {
     const isolateBtn = page.locator("#isolate-btn");
     await expect(isolateBtn).toBeVisible();
     await expect(isolateBtn).toHaveCSS("opacity", "0.5");
+    await expect(isolateBtn).toHaveAttribute("title", "Isolate selected paths");
   });
 
   test("solo button becomes active when a path is selected", async ({
@@ -249,7 +264,10 @@ test.describe("Solo Mode", () => {
 
   test("solo button is hidden by hide buttons toggle", async ({ page }) => {
     await page.locator("#hide-buttons-btn").click();
-    await expect(page.locator("#isolate-btn")).toHaveCSS("opacity", "0");
+    await expect(page.locator("#isolate-btn")).toHaveCSS(
+      "visibility",
+      "hidden",
+    );
     await expect(page.locator("#isolate-btn")).toHaveCSS(
       "pointer-events",
       "none",
@@ -262,10 +280,9 @@ test.describe("Solo Mode", () => {
     await isolateBtn.click();
 
     await expect(isolateBtn).toHaveCSS("opacity", "1");
-    const isIsolated = await page.evaluate(
-      () => (window as any).mapApp.isolateSelection,
-    );
-    expect(isIsolated).toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
+      .toBe(true);
   });
 
   test("clicking solo button again deactivates isolate mode", async ({
@@ -274,39 +291,37 @@ test.describe("Solo Mode", () => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
 
     await isolateBtn.click();
-    await expect(isolateBtn).toHaveCSS("opacity", "1");
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
+      .toBe(true);
 
     await isolateBtn.click();
-    // Paths still selected, so button stays at full opacity but without blue border
     await expect(isolateBtn).toHaveCSS("opacity", "1");
-
-    const isIsolated = await page.evaluate(
-      () => (window as any).mapApp.isolateSelection,
-    );
-    expect(isIsolated).toBe(false);
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
+      .toBe(false);
   });
 
   test("clearing selection disables isolate mode", async ({ page }) => {
     const { pathId, isolateBtn } = await selectPathAndGetIsolateBtn(page);
 
     await isolateBtn.click();
-    expect(
-      await page.evaluate(() => (window as any).mapApp.isolateSelection),
-    ).toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
+      .toBe(true);
 
-    // Deselect the path
     await page.evaluate(
-      (id) => (window as any).mapApp.togglePathSelection(String(id)),
+      (id) => window.mapApp!.togglePathSelection(String(id)),
       pathId,
     );
     await page.waitForFunction(
-      () => (window as any).mapApp.selectedPathIds.size === 0,
+      () => window.mapApp!.selectedPathIds.size === 0,
       { timeout: 5000 },
     );
 
-    expect(
-      await page.evaluate(() => (window as any).mapApp.isolateSelection),
-    ).toBe(false);
+    expect(await page.evaluate(() => window.mapApp!.isolateSelection)).toBe(
+      false,
+    );
     await expect(isolateBtn).toHaveCSS("opacity", "0.5");
   });
 
@@ -314,47 +329,30 @@ test.describe("Solo Mode", () => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
     await isolateBtn.click();
 
-    await page.waitForFunction(() => {
-      const state = JSON.parse(
-        localStorage.getItem("kml-heatmap-state") || "{}",
-      );
-      return state.isolateSelection === true;
-    });
+    await expect
+      .poll(async () => (await readSavedState(page))["isolateSelection"])
+      .toBe(true);
 
     await page.reload();
-    await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+    await waitForAppReady(page);
 
-    await page.waitForFunction(
-      () => (window as any).mapApp?.isInitializing === false,
-      { timeout: 15000 },
+    expect(await page.evaluate(() => window.mapApp!.isolateSelection)).toBe(
+      true,
     );
-
-    const isIsolated = await page.evaluate(
-      () => (window as any).mapApp.isolateSelection,
-    );
-    expect(isIsolated).toBe(true);
   });
 
   test("isolate mode via URL parameter", async ({ page }) => {
     await waitForPathData(page);
     const pathId = await page.evaluate(
-      () => (window as any).mapApp.fullPathInfo[0].id,
+      () => window.mapApp!.fullPathInfo![0]!.id,
     );
 
     // 9th flag is isolateSelection
-    await page.goto(`/?v=100100001&p=${pathId}`);
-    await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+    await gotoApp(page, `/?v=100100001&p=${pathId}&sv=2`);
 
-    await page.waitForFunction(
-      () => (window as any).mapApp?.isInitializing === false,
-      { timeout: 15000 },
+    expect(await page.evaluate(() => window.mapApp!.isolateSelection)).toBe(
+      true,
     );
-
-    const isIsolated = await page.evaluate(
-      () => (window as any).mapApp.isolateSelection,
-    );
-    expect(isIsolated).toBe(true);
-
     await expect(page.locator("#isolate-btn")).toBeVisible();
     await expect(page.locator("#isolate-btn")).toHaveCSS("opacity", "1");
   });
@@ -363,85 +361,55 @@ test.describe("Solo Mode", () => {
     await waitForPathData(page);
 
     const pathId = await page.evaluate(
-      () => (window as any).mapApp.fullPathInfo[0].id,
+      () => window.mapApp!.fullPathInfo![0]!.id,
     );
     await page.evaluate(
-      (id) => (window as any).mapApp.togglePathSelection(String(id)),
+      (id) => window.mapApp!.togglePathSelection(String(id)),
       pathId,
     );
     await page.waitForFunction(
-      () => (window as any).mapApp.selectedPathIds.size === 1,
+      () => window.mapApp!.selectedPathIds.size === 1,
       { timeout: 5000 },
     );
+    // Consecutive segments with equal colour are merged into one polyline,
+    // so compare the rendered count before and after instead of per segment
+    const layersBefore = await altitudeLayerCount(page);
+    expect(layersBefore).toBeGreaterThan(1);
 
-    // Hide buttons
     await page.locator("#hide-buttons-btn").click();
     await expect(page.locator("#hide-buttons-btn")).toHaveText("🔽");
 
-    // isolateSelection should still be false
-    const isIsolated = await page.evaluate(
-      () => (window as any).mapApp.isolateSelection,
+    expect(await page.evaluate(() => window.mapApp!.isolateSelection)).toBe(
+      false,
     );
-    expect(isIsolated).toBe(false);
-
-    // Altitude layer should still have unselected paths visible (not hidden)
-    const totalSegments = await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      return app.currentData?.path_segments?.length ?? 0;
-    });
-    const renderedLayers = await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      return app.altitudeLayer.getLayers().length;
-    });
-
-    // With hide button, all paths should still render (not just selected ones)
-    expect(renderedLayers).toBeGreaterThan(1);
-    expect(renderedLayers).toBe(totalSegments);
+    expect(await altitudeLayerCount(page)).toBe(layersBefore);
   });
 
   test("selected paths use normal weight in solo mode", async ({ page }) => {
-    const { pathId, isolateBtn } = await selectPathAndGetIsolateBtn(page);
+    const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
 
-    // Before solo: selected paths have weight 6
-    const weightBefore = await page.evaluate((id) => {
-      const app = (window as any).mapApp;
-      const layers = app.altitudeLayer.getLayers();
-      for (const layer of layers) {
-        if (layer.options && layer.options.weight === 6) return 6;
-      }
-      return null;
-    }, pathId);
-    expect(weightBefore).toBe(6);
+    // Before solo: the selected path is drawn with weight 6
+    expect(await altitudeWeights(page)).toContain(6);
 
-    // Activate solo mode
     await isolateBtn.click();
-    await page.waitForTimeout(300);
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
+      .toBe(true);
 
-    // In solo: all visible paths should have weight 4
-    const weightsInSolo = await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      const layers = app.altitudeLayer.getLayers();
-      return layers.map((l: any) => l.options.weight);
-    });
+    // In solo: only the selected path is visible with the normal weight
+    await expect.poll(() => altitudeWeights(page)).not.toContain(6);
+    const weightsInSolo = await altitudeWeights(page);
     expect(weightsInSolo.length).toBeGreaterThan(0);
     for (const w of weightsInSolo) {
       expect(w).toBe(4);
     }
 
-    // Deactivate solo mode
     await isolateBtn.click();
-    await page.waitForTimeout(300);
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
+      .toBe(false);
 
-    // After solo: selected paths should have weight 6 again
-    const weightAfter = await page.evaluate((id) => {
-      const app = (window as any).mapApp;
-      const layers = app.altitudeLayer.getLayers();
-      for (const layer of layers) {
-        if (layer.options && layer.options.weight === 6) return 6;
-      }
-      return null;
-    }, pathId);
-    expect(weightAfter).toBe(6);
+    await expect.poll(() => altitudeWeights(page)).toContain(6);
   });
 
   test("solo mode hides unselected paths from altitude layer", async ({
@@ -449,22 +417,14 @@ test.describe("Solo Mode", () => {
   }) => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
 
-    const totalBefore = await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      return app.altitudeLayer.getLayers().length;
-    });
+    const totalBefore = await altitudeLayerCount(page);
 
-    // Activate solo mode
     await isolateBtn.click();
-    await page.waitForTimeout(300);
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
+      .toBe(true);
 
-    const totalAfter = await page.evaluate(() => {
-      const app = (window as any).mapApp;
-      return app.altitudeLayer.getLayers().length;
-    });
-
-    // Solo mode should show fewer paths (only the selected one)
-    expect(totalAfter).toBeLessThan(totalBefore);
-    expect(totalAfter).toBeGreaterThan(0);
+    await expect.poll(() => altitudeLayerCount(page)).toBeLessThan(totalBefore);
+    expect(await altitudeLayerCount(page)).toBeGreaterThan(0);
   });
 });

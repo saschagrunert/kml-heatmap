@@ -7,8 +7,9 @@
 
 import * as esbuild from "esbuild";
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import { statSync } from "fs";
+import { dirname, join, relative } from "path";
+import { readdirSync, readFileSync, statSync } from "fs";
+import { createHash } from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,16 +18,53 @@ const isWatch = process.argv.includes("--watch");
 const isDevelopment = process.env.NODE_ENV === "development" || isWatch;
 const minify = !isDevelopment;
 
+const FRONTEND_DIR = join(__dirname, "kml_heatmap/frontend");
+
+/**
+ * Recursively list files under a directory
+ */
+function listFiles(dir) {
+  const files = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listFiles(path));
+    } else if (entry.isFile()) {
+      files.push(path);
+    }
+  }
+  return files.sort();
+}
+
+/**
+ * Content hash of all frontend sources (deterministic, independent of git)
+ */
+function computeSourceHash() {
+  const hash = createHash("sha1");
+  for (const file of listFiles(FRONTEND_DIR)) {
+    hash.update(relative(__dirname, file));
+    hash.update("\0");
+    hash.update(readFileSync(file));
+    hash.update("\0");
+  }
+  return hash.digest("hex").slice(0, 12);
+}
+
+const sourceHash = computeSourceHash();
+const buildBanner = `/* kml-heatmap build ${sourceHash} */`;
+
 // Shared build options for IIFE format bundles (file:// protocol compatible)
 const sharedBuildOptions = {
   bundle: true,
   format: "iife",
-  sourcemap: isDevelopment,
+  // Always emit a .map file next to the bundle (linked via sourceMappingURL)
+  sourcemap: "linked",
   target: ["es2022"],
   platform: "browser",
   logLevel: "info",
   minify,
   metafile: true,
+  banner: { js: buildBanner },
 
   // Tree shaking
   treeShaking: true,
@@ -84,7 +122,9 @@ function formatBytes(bytes) {
 function analyzeBundleComposition(metafile, bundleName) {
   console.log(`\n📊 ${bundleName} Composition:`);
 
-  const outputs = Object.values(metafile.outputs)[0];
+  const outputs = Object.values(metafile.outputs).find(
+    (output) => output.inputs && Object.keys(output.inputs).length > 0,
+  );
   if (!outputs || !outputs.inputs) {
     console.log("  No composition data available");
     return;
@@ -201,6 +241,7 @@ async function build() {
   try {
     const mode = isDevelopment ? "development" : "production";
     console.log(`📦 Build mode: ${mode} (minify: ${minify})`);
+    console.log(`🔖 ${buildBanner}`);
 
     if (isWatch) {
       console.log("👀 Watching for changes...");
