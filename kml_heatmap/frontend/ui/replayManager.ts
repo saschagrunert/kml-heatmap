@@ -7,8 +7,7 @@ import { domCache } from "../utils/domCache";
 import { showToast } from "../utils/toast";
 import { findMinMax } from "../utils/arrayHelpers";
 import { formatTime } from "../utils/formatters";
-import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
-import { ReplayRenderer } from "./replayRenderer";
+import { ReplayRenderer, replaySegmentColor } from "./replayRenderer";
 import { ReplayState } from "./replayState";
 
 export const REPLAY_PRECONDITION_MESSAGE =
@@ -565,32 +564,24 @@ export class ReplayManager {
     const savedTime = this.state.currentTime;
     const savedIndex = this.state.lastDrawnIndex;
     this.state.layer.clearLayers();
+    // The drawn polylines are gone, so the trim stack has to be rebuilt too;
+    // stale entries would make a backward seek remove nothing visible
+    this.state.drawnLayers = [];
     this.state.lastDrawnIndex = -1;
 
     for (let i = 0; i <= savedIndex && i < this.state.segments.length; i++) {
       const seg = this.state.segments[i];
       if (!seg || (seg.time ?? 0) > savedTime) continue;
-      if (mode === "airspeed" && (seg.groundspeed_knots ?? 0) <= 0) continue;
 
-      const color =
-        mode === "altitude"
-          ? getColorForAltitude(
-              seg.altitude_ft ?? 0,
-              this.state.colorMinAlt,
-              this.state.colorMaxAlt,
-            )
-          : getColorForAirspeed(
-              seg.groundspeed_knots ?? 0,
-              this.state.colorMinSpeed,
-              this.state.colorMaxSpeed,
-            );
+      const color = replaySegmentColor(this.state, seg, mode === "airspeed");
 
-      L.polyline(seg.coords ?? [], {
+      const polyline = L.polyline(seg.coords ?? [], {
         color,
         weight: 3,
         opacity: 0.8,
       }).addTo(this.state.layer);
 
+      this.state.drawnLayers.push(polyline);
       this.state.lastDrawnIndex = i;
     }
   }
