@@ -54,9 +54,8 @@ docs
 data
 kml_test_*
 
-# Build and CI files not needed inside the images
+# Build and CI files not needed inside the image
 Dockerfile
-Dockerfile.test
 Makefile
 .github
 .pre-commit-config.yaml

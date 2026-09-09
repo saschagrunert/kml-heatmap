@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { PathSelection } from "../../../../kml_heatmap/frontend/ui/pathSelection";
 import { createMockApp, asMapApp, type MockApp } from "../../testHelpers";
 
-const mapHelpers = vi.hoisted(() => ({ invalidateMapWithDelay: vi.fn() }));
+const mapHelpers = vi.hoisted(() => ({
+  invalidateMapAfterTransition: vi.fn(),
+}));
 vi.mock("../../../../kml_heatmap/frontend/utils/mapHelpers", () => mapHelpers);
 
 describe("PathSelection", () => {
@@ -70,7 +72,7 @@ describe("PathSelection", () => {
       expect(mockApp.airportManager.updateAirportOpacity).toHaveBeenCalledTimes(
         1,
       );
-      expect(mapHelpers.invalidateMapWithDelay).toHaveBeenCalledWith(
+      expect(mapHelpers.invalidateMapAfterTransition).toHaveBeenCalledWith(
         mockApp.map,
       );
       expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
@@ -79,7 +81,7 @@ describe("PathSelection", () => {
     it("does not invalidate the map when no colour layer is visible", () => {
       pathSelection.togglePathSelection(1);
 
-      expect(mapHelpers.invalidateMapWithDelay).not.toHaveBeenCalled();
+      expect(mapHelpers.invalidateMapAfterTransition).not.toHaveBeenCalled();
       expect(mockApp.statsManager.updateStatsForSelection).toHaveBeenCalled();
     });
 
@@ -226,7 +228,9 @@ describe("PathSelection", () => {
       expect(btn.style.opacity).toBe("0.5");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
       expect(btn.classList.contains("active")).toBe(false);
-      expect(btn.style.borderColor).toBe("var(--color-border)");
+      // Colours come from the stylesheet, not from inline styles
+      expect(btn.style.borderColor).toBe("");
+      expect(btn.style.backgroundColor).toBe("");
     });
 
     it("sets full opacity but not pressed when paths are selected", () => {
@@ -248,7 +252,7 @@ describe("PathSelection", () => {
       expect(btn.style.opacity).toBe("1");
       expect(btn.getAttribute("aria-pressed")).toBe("true");
       expect(btn.classList.contains("active")).toBe(true);
-      expect(btn.style.borderColor).toBe("var(--color-accent-blue)");
+      expect(btn.style.borderColor).toBe("");
     });
 
     it("does nothing when the button is missing", () => {

@@ -4,7 +4,7 @@
 import type { MapApp } from "../mapApp";
 import { applyToggleButtonState } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
-import { invalidateMapWithDelay } from "../utils/mapHelpers";
+import { invalidateMapAfterTransition } from "../utils/mapHelpers";
 import { logError } from "../utils/logger";
 
 export class PathSelection {
@@ -85,25 +85,24 @@ export class PathSelection {
 
     this.app.layerManager.updateSelectionStyles();
     if (this.app.altitudeVisible || this.app.airspeedVisible) {
-      invalidateMapWithDelay(this.app.map);
+      invalidateMapAfterTransition(this.app.map);
     }
     this.app.statsManager.updateStatsForSelection();
     this.app.airportManager.updateAirportOpacity();
   }
 
+  /**
+   * Isolate is a toggle that also needs a selection: `active` carries the
+   * mode, the dimmed state carries "nothing to isolate yet". Colours belong
+   * to the stylesheet, so only the opacity is set here.
+   */
   updateIsolateButton(): void {
     const btn = domCache.get("isolate-btn");
     if (!btn) return;
 
-    const hasSelection = this.app.selectedPathIds.size > 0;
     applyToggleButtonState(btn, this.app.isolateSelection);
-
-    if (this.app.isolateSelection) {
-      btn.style.borderColor = "var(--color-accent-blue)";
-    } else {
-      btn.style.opacity = hasSelection ? "1.0" : "0.5";
-      btn.style.borderColor = "var(--color-border)";
+    if (!this.app.isolateSelection) {
+      btn.style.opacity = this.app.selectedPathIds.size > 0 ? "1.0" : "0.5";
     }
-    btn.style.backgroundColor = "var(--color-bg-secondary)";
   }
 }

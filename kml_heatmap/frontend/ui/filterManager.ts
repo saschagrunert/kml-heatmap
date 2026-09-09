@@ -45,7 +45,7 @@ export class FilterManager {
       const option = document.createElement("option");
       option.value = aircraft.registration;
       const typeStr = aircraft.type ? " (" + aircraft.type + ")" : "";
-      option.textContent = "✈️ " + aircraft.registration + typeStr;
+      option.textContent = aircraft.registration + typeStr;
       aircraftSelect.appendChild(option);
 
       if (aircraft.registration === currentSelection) {

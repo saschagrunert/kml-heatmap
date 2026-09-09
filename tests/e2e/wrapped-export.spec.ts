@@ -231,7 +231,7 @@ test.describe("Wrapped and Export", () => {
     await expect(page.locator(".toast-notification")).toHaveText(
       "Map exported",
     );
-    await expect(page.locator("#export-btn")).toHaveText("📷 Export");
+    await expect(page.locator("#export-btn")).toHaveText("Export image");
     await expect(page.locator("#export-btn")).toBeEnabled();
     await expect(page.locator("#replay-btn")).toBeVisible();
   });
@@ -252,7 +252,7 @@ test.describe("Wrapped and Export", () => {
     await expect(page.locator(".toast-notification")).toHaveText(
       "Export unavailable",
     );
-    await expect(page.locator("#export-btn")).toHaveText("📷 Export");
+    await expect(page.locator("#export-btn")).toHaveText("Export image");
     await expect(page.locator("#export-btn")).toBeEnabled();
   });
 

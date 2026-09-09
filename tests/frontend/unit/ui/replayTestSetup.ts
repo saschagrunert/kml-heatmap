@@ -7,6 +7,7 @@
 import { vi } from "vitest";
 import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
+import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
 import { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
 
 type AnyMock = ReturnType<typeof vi.fn>;
@@ -35,7 +36,6 @@ export interface ReplayMockApp {
   airspeedVisible: boolean;
   airportsVisible: boolean;
   aviationVisible: boolean;
-  buttonsHidden: boolean;
   selectedPathIds: Set<number>;
   fullPathInfo: unknown[];
   fullPathSegments: PathSegment[] | null;
@@ -118,7 +118,6 @@ export function createReplayMockApp(): ReplayMockApp {
     airspeedVisible: false,
     airportsVisible: true,
     aviationVisible: false,
-    buttonsHidden: false,
     selectedPathIds: new Set<number>(),
     fullPathInfo: [],
     fullPathSegments: createSegments(),
@@ -142,54 +141,117 @@ export function createReplayMockApp(): ReplayMockApp {
   };
 }
 
-/** Elements created by mountReplayDom(), keyed by id with their tag name */
-const REPLAY_DOM: Record<string, string> = {
-  "replay-controls": "div",
-  "replay-btn": "button",
-  "replay-play-btn": "button",
-  "replay-pause-btn": "button",
-  "replay-slider": "input",
-  "replay-slider-start": "span",
-  "replay-slider-end": "span",
-  "replay-time-display": "div",
-  "replay-live": "div",
-  "replay-speed": "select",
-  "replay-autozoom-btn": "button",
-  "altitude-btn": "button",
-  "altitude-legend": "div",
-  "airspeed-btn": "button",
-  "airspeed-legend": "div",
-  "heatmap-btn": "button",
-  "airports-btn": "button",
-  "aviation-btn": "button",
-  "year-select": "select",
-  "aircraft-select": "select",
+/** One element of the replay DOM fixture */
+interface FixtureNode {
+  id: string;
+  tag: string;
+  attributes?: Record<string, string>;
+  children?: FixtureNode[];
+}
+
+/**
+ * The replay panel, nested the way map_template.html nests it. The shape
+ * matters: the readout strip must land beside `#replay-live`, never inside
+ * it, and a flat fixture could not tell the two apart.
+ */
+const REPLAY_PANEL: FixtureNode = {
+  id: "replay-controls",
+  tag: "div",
+  children: [
+    {
+      id: "replay-controls-inner",
+      tag: "div",
+      children: [
+        {
+          id: "replay-buttons",
+          tag: "div",
+          children: [
+            { id: "replay-play-btn", tag: "button" },
+            { id: "replay-pause-btn", tag: "button" },
+            { id: "replay-time-display", tag: "div" },
+            { id: "replay-speed", tag: "select" },
+            { id: "replay-autozoom-btn", tag: "button" },
+          ],
+        },
+        {
+          id: "replay-slider-container",
+          tag: "div",
+          children: [
+            { id: "replay-slider-start", tag: "span" },
+            { id: "replay-slider", tag: "input" },
+            { id: "replay-slider-end", tag: "span" },
+          ],
+        },
+        {
+          id: "replay-live",
+          tag: "div",
+          attributes: { "aria-live": "polite", "aria-atomic": "true" },
+        },
+      ],
+    },
+  ],
 };
 
-export function mountReplayDom(): void {
-  for (const [id, tag] of Object.entries(REPLAY_DOM)) {
-    const element = document.createElement(tag);
-    element.id = id;
-    if (element instanceof HTMLInputElement) element.type = "range";
-    if (id === "replay-speed") {
-      for (const speed of ["10", "50", "100"]) {
-        const option = document.createElement("option");
-        option.value = speed;
-        option.textContent = speed + "x";
-        element.appendChild(option);
-      }
+/** Page chrome outside the replay panel that the manager reads or disables */
+const PAGE_CHROME: FixtureNode[] = [
+  { id: "replay-btn", tag: "button" },
+  { id: "altitude-btn", tag: "button" },
+  { id: "altitude-legend", tag: "div" },
+  { id: "airspeed-btn", tag: "button" },
+  { id: "airspeed-legend", tag: "div" },
+  { id: "heatmap-btn", tag: "button" },
+  { id: "airports-btn", tag: "button" },
+  { id: "aviation-btn", tag: "button" },
+  { id: "year-select", tag: "select" },
+  { id: "aircraft-select", tag: "select" },
+];
+
+function buildFixtureNode(node: FixtureNode): HTMLElement {
+  const element = document.createElement(node.tag);
+  element.id = node.id;
+  for (const [name, value] of Object.entries(node.attributes ?? {})) {
+    element.setAttribute(name, value);
+  }
+  if (element instanceof HTMLInputElement) element.type = "range";
+  if (node.id === "replay-btn") {
+    // Same shape as the template: an injected icon plus a label span
+    element.dataset["icon"] = "play";
+    element.innerHTML =
+      icon("play", 16) + '<span class="control-label">Replay</span>';
+  }
+  if (node.id === "replay-speed") {
+    for (const speed of ["10", "50", "100"]) {
+      const option = document.createElement("option");
+      option.value = speed;
+      option.textContent = speed + "x";
+      element.appendChild(option);
     }
-    document.body.appendChild(element);
+  }
+  for (const child of node.children ?? []) {
+    element.appendChild(buildFixtureNode(child));
+  }
+  return element;
+}
+
+export function mountReplayDom(): void {
+  for (const node of [REPLAY_PANEL, ...PAGE_CHROME]) {
+    document.body.appendChild(buildFixtureNode(node));
   }
 }
 
 export function unmountReplayDom(): void {
-  for (const id of Object.keys(REPLAY_DOM)) {
-    document.getElementById(id)?.remove();
+  for (const node of [REPLAY_PANEL, ...PAGE_CHROME]) {
+    document.getElementById(node.id)?.remove();
   }
   document
     .querySelectorAll(".toast-notification")
     .forEach((toast) => toast.remove());
+  // Replay hands the bottom edge over to the mobile bar, which only mounts
+  // on a narrow viewport; clean it up so a test that changes the width
+  // stays isolated
+  document
+    .querySelectorAll(".mobile-bar, .mobile-sheet, .sheet-scrim")
+    .forEach((element) => element.remove());
   document.body.classList.remove("replay-active");
 }
 

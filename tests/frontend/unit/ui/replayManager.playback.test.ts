@@ -61,8 +61,8 @@ describe("ReplayManager playback", () => {
       replayManager.playReplay();
 
       expect(replayManager.state.playing).toBe(true);
-      expect(el("replay-play-btn").style.display).toBe("none");
-      expect(el("replay-pause-btn").style.display).toBe("inline-block");
+      expect(el("replay-play-btn").hidden).toBe(true);
+      expect(el("replay-pause-btn").hidden).toBe(false);
       expect(liveRegionText()).toBe("Replay playing");
     });
 
@@ -153,7 +153,7 @@ describe("ReplayManager playback", () => {
       expect(replayManager.state.currentTime).toBe(replayManager.state.maxTime);
       expect(mockApp.map!.fitBounds).toHaveBeenCalled();
       expect(liveRegionText()).toBe("Replay finished");
-      expect(el("replay-play-btn").style.display).toBe("inline-block");
+      expect(el("replay-play-btn").hidden).toBe(false);
     });
 
     it("stops the loop when playing is set to false", () => {
@@ -174,8 +174,8 @@ describe("ReplayManager playback", () => {
       replayManager.pauseReplay();
 
       expect(replayManager.state.playing).toBe(false);
-      expect(el("replay-play-btn").style.display).toBe("inline-block");
-      expect(el("replay-pause-btn").style.display).toBe("none");
+      expect(el("replay-play-btn").hidden).toBe(false);
+      expect(el("replay-pause-btn").hidden).toBe(true);
     });
 
     it("cancels animation frame", () => {

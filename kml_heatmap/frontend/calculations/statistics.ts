@@ -30,6 +30,36 @@ function segmentDistance(segment: PathSegment): number {
 }
 
 /**
+ * Group timed segments by path and return per-path flight seconds.
+ * Shared by aggregateAircraft (per-aircraft time) and calculateFlightTime
+ * (total time).
+ */
+function perPathSeconds(
+  segments: PathSegment[],
+  pathIds?: Set<number>,
+): Map<number, number> {
+  const timesByPath = new Map<number, number[]>();
+  for (const seg of segments) {
+    if (seg.time === undefined) continue;
+    if (pathIds && !pathIds.has(seg.path_id)) continue;
+    let times = timesByPath.get(seg.path_id);
+    if (!times) {
+      times = [];
+      timesByPath.set(seg.path_id, times);
+    }
+    times.push(seg.time);
+  }
+  const result = new Map<number, number>();
+  timesByPath.forEach((times, pathId) => {
+    if (times.length > 0) {
+      const { min, max } = findMinMax(times);
+      result.set(pathId, max - min);
+    }
+  });
+  return result;
+}
+
+/**
  * Filter path info by year and aircraft
  * @param pathInfo - Array of path info objects
  * @param year - Year filter ('all' or specific year)
@@ -82,22 +112,44 @@ export function collectAirports(pathInfo: PathInfo[]): Set<string> {
  * @param pathInfo - Array of path info objects
  * @returns Array of aircraft objects with registration, type, and flight count
  */
-export function aggregateAircraft(pathInfo: PathInfo[]): AircraftAggregate[] {
+export function aggregateAircraft(
+  pathInfo: PathInfo[],
+  segments?: PathSegment[],
+): AircraftAggregate[] {
   const aircraftMap: Record<string, AircraftAggregate> = {};
+  const pathToReg = new Map<number, string>();
 
   pathInfo.forEach(function (path) {
     if (path.aircraft_registration) {
       const reg = path.aircraft_registration;
+      pathToReg.set(path.id, reg);
       if (!aircraftMap[reg]) {
         aircraftMap[reg] = {
           registration: reg,
           type: path.aircraft_type,
           flights: 0,
+          flight_time_seconds: 0,
         };
       }
       aircraftMap[reg].flights += 1;
     }
   });
+
+  if (segments) {
+    const pathFilter = new Set(pathToReg.keys());
+    const seconds = perPathSeconds(segments, pathFilter);
+    seconds.forEach(function (secs, pathId) {
+      const reg = pathToReg.get(pathId);
+      if (reg && aircraftMap[reg]) {
+        aircraftMap[reg].flight_time_seconds! += secs;
+      }
+    });
+    for (const agg of Object.values(aircraftMap)) {
+      if (agg.flight_time_seconds && agg.flight_time_seconds > 0) {
+        agg.flight_time_str = formatFlightTime(agg.flight_time_seconds);
+      }
+    }
+  }
 
   // Sort by flight count descending
   return Object.values(aircraftMap).sort(function (a, b) {
@@ -244,29 +296,11 @@ export function calculateFlightTime(
   segments: PathSegment[],
   pathInfo: PathInfo[],
 ): number {
-  let totalSeconds = 0;
   const pathIds = new Set(pathInfo.map((p) => p.id));
-
-  // Pre-group timed segments by path_id in a single pass
-  const segmentsByPath = new Map<number, number[]>();
-  for (const seg of segments) {
-    if (pathIds.has(seg.path_id) && seg.time !== undefined) {
-      let times = segmentsByPath.get(seg.path_id);
-      if (!times) {
-        times = [];
-        segmentsByPath.set(seg.path_id, times);
-      }
-      times.push(seg.time);
-    }
-  }
-
-  segmentsByPath.forEach(function (times) {
-    if (times.length > 0) {
-      const { min: minTime, max: maxTime } = findMinMax(times);
-      totalSeconds += maxTime - minTime;
-    }
+  let totalSeconds = 0;
+  perPathSeconds(segments, pathIds).forEach((secs) => {
+    totalSeconds += secs;
   });
-
   return totalSeconds;
 }
 
@@ -318,9 +352,9 @@ export function calculateFilteredStatistics(options: {
 
   // Collect data
   const airports = collectAirports(filteredPaths);
-  const aircraftList = aggregateAircraft(filteredPaths);
   const filteredSegments =
     preFiltered?.segments ?? filterSegmentsByPaths(segments, filteredPaths);
+  const aircraftList = aggregateAircraft(filteredPaths, filteredSegments);
 
   // Calculate metrics
   const totalDistanceKm = calculateTotalDistance(filteredSegments);

@@ -2,8 +2,13 @@ import { test, expect } from "@playwright/test";
 import {
   KNOWN_YEARS,
   gotoApp,
+  layerButton,
   readSavedState,
   selectPathForReplay,
+  setAircraftFilter,
+  setYearFilter,
+  toggleLayer,
+  usesMobileBar,
   waitForAircraftFilter,
   waitForAppReady,
   waitForPathData,
@@ -15,90 +20,12 @@ test.describe("State Persistence", () => {
     await gotoApp(page);
   });
 
-  test.describe("Button Hiding", () => {
-    test("hidden buttons are invisible and not interactive", async ({
-      page,
-    }) => {
-      await page.locator("#hide-buttons-btn").click();
-
-      const heatmapBtn = page.locator("#heatmap-btn");
-      await expect(heatmapBtn).toHaveCSS("visibility", "hidden");
-      await expect(heatmapBtn).toHaveCSS("pointer-events", "none");
-
-      const altBtn = page.locator("#altitude-btn");
-      await expect(altBtn).toHaveCSS("visibility", "hidden");
-      await expect(altBtn).toHaveCSS("pointer-events", "none");
-    });
-
-    test("hidden buttons are not clickable", async ({ page }) => {
-      await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "1");
-
-      await page.locator("#hide-buttons-btn").click();
-      await expect(page.locator("#heatmap-btn")).toHaveCSS(
-        "visibility",
-        "hidden",
-      );
-
-      await page.locator("#heatmap-btn").click({ force: true });
-      expect(await page.evaluate(() => window.mapApp!.heatmapVisible)).toBe(
-        true,
-      );
-    });
-
-    test("buttons hidden state persists in localStorage", async ({ page }) => {
-      await page.locator("#hide-buttons-btn").click();
-      await expect
-        .poll(async () => (await readSavedState(page))["buttonsHidden"])
-        .toBe(true);
-
-      await page.reload();
-      await waitForAppReady(page);
-
-      await expect(page.locator("#heatmap-btn")).toHaveCSS(
-        "visibility",
-        "hidden",
-      );
-      await expect(page.locator("#hide-buttons-btn")).toHaveText("🔽");
-    });
-
-    test("buttons hidden state via URL parameter", async ({ page }) => {
-      await gotoApp(page, "/?v=100100010");
-
-      await expect(page.locator("#heatmap-btn")).toHaveCSS(
-        "visibility",
-        "hidden",
-      );
-      await expect(page.locator("#hide-buttons-btn")).toHaveText("🔽");
-    });
-
-    test("showing buttons restores visibility and pointer-events", async ({
-      page,
-    }) => {
-      await page.locator("#hide-buttons-btn").click();
-      await expect(page.locator("#heatmap-btn")).toHaveCSS(
-        "visibility",
-        "hidden",
-      );
-
-      await page.locator("#hide-buttons-btn").click();
-      await expect(page.locator("#heatmap-btn")).toHaveCSS(
-        "visibility",
-        "visible",
-      );
-      await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "1");
-      await expect(page.locator("#heatmap-btn")).not.toHaveCSS(
-        "pointer-events",
-        "none",
-      );
-    });
-  });
-
   test.describe("localStorage", () => {
     test("state is saved to localStorage", async ({ page }) => {
       await page.evaluate(() => localStorage.removeItem("kml-heatmap-state"));
 
-      await page.locator("#heatmap-btn").click();
-      await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0.5");
+      await toggleLayer(page, "heatmap");
+      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
 
       await expect
         .poll(async () => (await readSavedState(page))["heatmapVisible"])
@@ -106,8 +33,8 @@ test.describe("State Persistence", () => {
     });
 
     test("state is restored on reload", async ({ page }) => {
-      await page.locator("#heatmap-btn").click();
-      await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0.5");
+      await toggleLayer(page, "heatmap");
+      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
       await expect
         .poll(async () => (await readSavedState(page))["heatmapVisible"])
         .toBe(false);
@@ -115,11 +42,11 @@ test.describe("State Persistence", () => {
       await page.reload();
       await waitForAppReady(page);
 
-      await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0.5");
+      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
     });
 
     test("localStorage stores expected state fields", async ({ page }) => {
-      await page.locator("#heatmap-btn").click();
+      await toggleLayer(page, "heatmap");
       await expect
         .poll(async () => (await readSavedState(page))["heatmapVisible"])
         .toBe(false);
@@ -138,7 +65,6 @@ test.describe("State Persistence", () => {
         "selectedAircraft",
         "selectedPathIds",
         "statsPanelVisible",
-        "buttonsHidden",
         "isolateSelection",
       ];
 
@@ -172,14 +98,14 @@ test.describe("State Persistence", () => {
 
   test.describe("URL and localStorage Combinations", () => {
     test("URL parameters take priority over localStorage", async ({ page }) => {
-      await page.locator("#heatmap-btn").click();
+      await toggleLayer(page, "heatmap");
       await expect
         .poll(async () => (await readSavedState(page))["heatmapVisible"])
         .toBe(false);
 
       await gotoApp(page, "/?v=100100000");
 
-      await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "1");
+      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "1");
     });
 
     test("URL year parameter overrides localStorage year", async ({ page }) => {
@@ -189,7 +115,7 @@ test.describe("State Persistence", () => {
       );
       const [year1, year2] = KNOWN_YEARS as [string, string];
 
-      await yearSelect.selectOption(year1);
+      await setYearFilter(page, year1);
       await waitForYearFilter(page, year1);
       await expect
         .poll(async () => (await readSavedState(page))["selectedYear"])
@@ -208,7 +134,7 @@ test.describe("State Persistence", () => {
       expect(await options.count()).toBeGreaterThanOrEqual(2);
 
       const aircraft = (await options.nth(1).getAttribute("value"))!;
-      await aircraftSelect.selectOption("all");
+      await setAircraftFilter(page, "all");
       await waitForAircraftFilter(page, "all");
 
       await gotoApp(page, `/?a=${aircraft}`);
@@ -219,15 +145,58 @@ test.describe("State Persistence", () => {
     test("URL visibility overrides localStorage visibility", async ({
       page,
     }) => {
-      await page.locator("#heatmap-btn").click();
+      await toggleLayer(page, "heatmap");
       await expect
         .poll(async () => (await readSavedState(page))["heatmapVisible"])
         .toBe(false);
 
       await gotoApp(page, "/?v=010100000");
 
-      await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0.5");
-      await expect(page.locator("#altitude-btn")).toHaveCSS("opacity", "1");
+      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
+      await expect(layerButton(page, "altitude")).toHaveCSS("opacity", "1");
+    });
+
+    test("a legacy shared link keeps its flags and drops the hide-controls bit", async ({
+      page,
+    }) => {
+      // The 8th slot of the visibility string carried the hide-controls
+      // flag. The feature is gone but links minted before it went away
+      // still set the bit, and the isolate flag behind it has to survive
+      // the slot being ignored rather than shifting by one.
+      await gotoApp(page, "/?v=100100011");
+
+      await expect(page.locator("#isolate-btn")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(await page.evaluate(() => window.mapApp!.isolateSelection)).toBe(
+        true,
+      );
+
+      for (const [layer, pressed] of [
+        ["heatmap", "true"],
+        ["altitude", "false"],
+        ["airspeed", "false"],
+        ["airports", "true"],
+      ] as const) {
+        await expect(layerButton(page, layer), layer).toHaveAttribute(
+          "aria-pressed",
+          pressed,
+        );
+      }
+      await expect(page.locator("#stats-panel")).toBeHidden();
+      await expect(page.locator("#wrapped-modal")).toBeHidden();
+
+      // The chrome the legacy bit used to hide is on screen either way
+      const controls = (await usesMobileBar(page))
+        ? "#mobile-bar"
+        : "#left-buttons";
+      await expect(page.locator(controls)).toBeVisible();
+
+      // And the link the app writes back no longer carries the bit
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get("v"))
+        .toBe("100100001");
     });
 
     test("URL stats panel visibility is restored", async ({ page }) => {
@@ -274,18 +243,18 @@ test.describe("State Persistence", () => {
     test("localStorage is used when no URL params present", async ({
       page,
     }) => {
-      await page.locator("#heatmap-btn").click();
+      await toggleLayer(page, "heatmap");
       await expect
         .poll(async () => (await readSavedState(page))["heatmapVisible"])
         .toBe(false);
 
       await gotoApp(page, "/");
 
-      await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0.5");
+      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
     });
 
     test("URL updates when state changes", async ({ page }) => {
-      await page.locator("#heatmap-btn").click();
+      await toggleLayer(page, "heatmap");
 
       await expect.poll(() => page.url()).toContain("v=");
     });
@@ -296,8 +265,8 @@ test.describe("State Persistence", () => {
       await gotoApp(page, `/?y=${year}&v=000100000`);
 
       await expect(page.locator("#year-select")).toHaveValue(year);
-      await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0.5");
-      await expect(page.locator("#airports-btn")).toHaveCSS("opacity", "1");
+      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
+      await expect(layerButton(page, "airports")).toHaveCSS("opacity", "1");
     });
   });
 });

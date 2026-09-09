@@ -7,6 +7,8 @@ import { domCache } from "../utils/domCache";
 import { showToast } from "../utils/toast";
 import { findMinMax } from "../utils/arrayHelpers";
 import { formatTime } from "../utils/formatters";
+import { setControlLabel } from "../utils/buttonState";
+import { setControlIcon } from "../utils/icons";
 import { ReplayRenderer, replaySegmentColor } from "./replayRenderer";
 import { ReplayState } from "./replayState";
 
@@ -15,6 +17,8 @@ export const REPLAY_PRECONDITION_MESSAGE =
 
 const REPLAY_BUTTON_LABEL = "Replay selected flight path";
 const REPLAY_BUTTON_ACTIVE_LABEL = "Stop replay";
+const REPLAY_BUTTON_TEXT = "Replay";
+const REPLAY_EXIT_LABEL = "Close replay";
 
 const REPLAY_DISABLED_CONTROL_IDS = [
   "heatmap-btn",
@@ -83,14 +87,26 @@ export class ReplayManager {
       return;
     }
 
+    // Before initializeReplay(): it ends in updateReplayDisplay(), which
+    // writes the readout, and cells that do not exist yet would leave the
+    // strip showing placeholder dashes for the whole first activation
+    const exit = this.ensureReplayChrome(panel);
+
     if (!this.initializeReplay()) return;
 
     panel.style.display = "block";
     this.state.active = true;
+    // The panel takes the bottom edge; the bar steps aside instead of
+    // stacking under it
+    this.app.mobileBar?.setReplayActive(true);
+    // Starting from the More sheet leaves focus on a tab the line above has
+    // just removed from the document, so move it into the panel
+    exit.focus();
 
     const replayBtn = domCache.get("replay-btn");
     if (replayBtn) {
-      replayBtn.textContent = "⏹️ Replay";
+      setControlIcon(replayBtn, "stop");
+      setControlLabel(replayBtn, REPLAY_BUTTON_TEXT);
       replayBtn.style.opacity = "1.0";
       replayBtn.setAttribute("aria-pressed", "true");
       replayBtn.setAttribute("aria-label", REPLAY_BUTTON_ACTIVE_LABEL);
@@ -109,10 +125,13 @@ export class ReplayManager {
     this.stopReplay(false);
     panel.style.display = "none";
     this.state.active = false;
+    this.app.mobileBar?.setReplayActive(false);
+    this.restoreFocusAfterReplay();
 
     const replayBtn = domCache.get("replay-btn");
     if (replayBtn) {
-      replayBtn.textContent = "▶️ Replay";
+      setControlIcon(replayBtn, "play");
+      setControlLabel(replayBtn, REPLAY_BUTTON_TEXT);
       replayBtn.setAttribute("aria-pressed", "false");
       replayBtn.setAttribute("aria-label", REPLAY_BUTTON_LABEL);
       replayBtn.title = REPLAY_BUTTON_LABEL;
@@ -169,6 +188,42 @@ export class ReplayManager {
     btn.title = ready
       ? "Replay selected flight path"
       : "Select exactly one flight with timing data to replay";
+  }
+
+  /**
+   * Build the parts of the replay panel the template does not carry: an
+   * exit control in the top right, away from the transport controls at the
+   * bottom, and the readout strip. Both are created once and reused.
+   */
+  private ensureReplayChrome(panel: HTMLElement): HTMLButtonElement {
+    this.renderer.ensureReadout(panel);
+
+    const existing = panel.querySelector<HTMLButtonElement>(".replay-exit");
+    if (existing) return existing;
+
+    const exit = document.createElement("button");
+    exit.type = "button";
+    exit.className = "replay-exit";
+    exit.id = "replay-exit-btn";
+    exit.title = REPLAY_EXIT_LABEL;
+    exit.setAttribute("aria-label", REPLAY_EXIT_LABEL);
+    setControlIcon(exit, "close", 20);
+    exit.addEventListener("click", () => this.toggleReplay());
+    panel.prepend(exit);
+    return exit;
+  }
+
+  /**
+   * Hand focus back when the panel closes. The exit control usually holds it
+   * and is about to be hidden with the panel, which would drop focus to
+   * <body>. The bar owns the entry point while it is showing, otherwise the
+   * replay button does.
+   */
+  private restoreFocusAfterReplay(): void {
+    const target = this.app.mobileBar?.isVisible()
+      ? document.getElementById("mobile-tab-more")
+      : domCache.get("replay-btn");
+    target?.focus();
   }
 
   private updateAutoZoomButton(): void {
@@ -445,10 +500,7 @@ export class ReplayManager {
     }
 
     this.state.playing = true;
-    const playBtn = domCache.get("replay-play-btn");
-    const pauseBtn = domCache.get("replay-pause-btn");
-    if (playBtn) playBtn.style.display = "none";
-    if (pauseBtn) pauseBtn.style.display = "inline-block";
+    setTransportState(true);
     this.announce("Replay playing");
 
     this.state.lastFrameTime = null;
@@ -500,10 +552,7 @@ export class ReplayManager {
   pauseReplay(announce: boolean = true): void {
     const wasPlaying = this.state.playing;
     this.state.playing = false;
-    const playBtn = domCache.get("replay-play-btn");
-    const pauseBtn = domCache.get("replay-pause-btn");
-    if (playBtn) playBtn.style.display = "inline-block";
-    if (pauseBtn) pauseBtn.style.display = "none";
+    setTransportState(false);
 
     if (this.state.animationFrameId) {
       cancelAnimationFrame(this.state.animationFrameId);
@@ -589,4 +638,22 @@ export class ReplayManager {
   updateReplayDisplay(isManualSeek: boolean = false): void {
     this.renderer.updateDisplay(this, isManualSeek);
   }
+}
+
+/**
+ * Show exactly one of the play and pause controls.
+ *
+ * The attribute is the only owner of which one shows. Writing an inline
+ * `display` here used to blockify the button inside the flex transport row,
+ * which pinned its icon to the left edge for the rest of the session, and it
+ * left `.initially-hidden` claiming the same state from the stylesheet.
+ */
+function setTransportState(playing: boolean): void {
+  const playBtn = domCache.get("replay-play-btn");
+  const pauseBtn = domCache.get("replay-pause-btn");
+  // The class covers only the moment before this first runs
+  playBtn?.classList.remove("initially-hidden");
+  pauseBtn?.classList.remove("initially-hidden");
+  if (playBtn) playBtn.hidden = playing;
+  if (pauseBtn) pauseBtn.hidden = !playing;
 }

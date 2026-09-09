@@ -216,7 +216,6 @@ export interface MockManagers {
     toggleAirspeed: Mock;
     toggleAirports: Mock;
     toggleAviation: Mock;
-    toggleButtonsVisibility: Mock;
     exportMap: Mock;
   };
 }
@@ -330,7 +329,6 @@ function createMockManagers(): MockManagers {
       toggleAirspeed: vi.fn(),
       toggleAirports: vi.fn(),
       toggleAviation: vi.fn(),
-      toggleButtonsVisibility: vi.fn(),
       exportMap: vi.fn(),
     },
   };
@@ -352,7 +350,6 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
     "airspeedVisible",
     "airportsVisible",
     "aviationVisible",
-    "buttonsHidden",
     "statsPanelVisible",
     "wrappedVisible",
     "currentData",
@@ -405,6 +402,7 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
     openaipLayers: {},
     savedState: null,
     restoredYearFromState: false,
+    mobileBar: null,
     ...mockManagers,
     ...other,
     get selectedYear() {
@@ -460,12 +458,6 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
     },
     set aviationVisible(v: boolean) {
       store.set("aviationVisible", v);
-    },
-    get buttonsHidden() {
-      return store.get("buttonsHidden");
-    },
-    set buttonsHidden(v: boolean) {
-      store.set("buttonsHidden", v);
     },
     get currentData() {
       return store.get("currentData");

@@ -132,27 +132,35 @@ describe("ReplayManager activation", () => {
       expect(mockApp.stateManager.saveMapState).toHaveBeenCalled();
     });
 
-    it("updates the replay button text, label and pressed state on activation", () => {
+    it("swaps the replay button to stop without losing its label", () => {
       mockApp.selectedPathIds = new Set([1]);
 
       replayManager.toggleReplay();
 
       const replayBtn = el("replay-btn");
-      expect(replayBtn.textContent).toBe("⏹️ Replay");
+      expect(replayBtn.dataset["icon"]).toBe("stop");
+      expect(replayBtn.querySelectorAll("svg.icon")).toHaveLength(1);
+      expect(replayBtn.querySelector(".control-label")!.textContent).toBe(
+        "Replay",
+      );
       expect(replayBtn.style.opacity).toBe("1");
       expect(replayBtn.getAttribute("aria-pressed")).toBe("true");
       expect(replayBtn.getAttribute("aria-label")).toBe("Stop replay");
       expect(replayBtn.title).toBe("Stop replay");
     });
 
-    it("restores the replay button label on deactivation", () => {
+    it("restores the replay button on deactivation", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.toggleReplay();
 
       replayManager.toggleReplay();
 
       const replayBtn = el("replay-btn");
-      expect(replayBtn.textContent).toBe("▶️ Replay");
+      expect(replayBtn.dataset["icon"]).toBe("play");
+      expect(replayBtn.querySelectorAll("svg.icon")).toHaveLength(1);
+      expect(replayBtn.querySelector(".control-label")!.textContent).toBe(
+        "Replay",
+      );
       expect(replayBtn.getAttribute("aria-pressed")).toBe("false");
       expect(replayBtn.getAttribute("aria-label")).toBe(
         "Replay selected flight path",
@@ -283,6 +291,114 @@ describe("ReplayManager activation", () => {
       expect(mockApp.layerManager.redrawAirspeedPaths).toHaveBeenCalledTimes(1);
       expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
       expect(mockApp.altitudeVisible).toBe(false);
+    });
+  });
+
+  describe("replay chrome", () => {
+    function activate(): HTMLElement {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      return el("replay-controls");
+    }
+
+    it("adds an exit control away from the transport controls", () => {
+      const panel = activate();
+
+      const exit = panel.querySelector<HTMLButtonElement>(".replay-exit")!;
+      expect(exit).not.toBeNull();
+      // First child so it lands in the top corner, not next to play/stop
+      expect(panel.firstElementChild).toBe(exit);
+      expect(exit.getAttribute("aria-label")).toBe("Close replay");
+    });
+
+    it("closes replay from the exit control", () => {
+      const panel = activate();
+
+      panel.querySelector<HTMLButtonElement>(".replay-exit")!.click();
+
+      expect(replayManager.state.active).toBe(false);
+      expect(panel.style.display).toBe("none");
+    });
+
+    it("adds a readout strip that is not a live region", () => {
+      const panel = activate();
+
+      const readout = panel.querySelector<HTMLElement>(".replay-readout")!;
+      expect(
+        Array.from(readout.querySelectorAll(".replay-readout-label")).map(
+          (cell) => cell.textContent,
+        ),
+      ).toEqual(["Altitude", "Groundspeed", "Track"]);
+      // The frame loop writes this many times a second
+      expect(readout.getAttribute("aria-live")).toBeNull();
+      expect(readout.closest("[aria-live]")).toBeNull();
+    });
+
+    it("keeps the readout beside the live region, never inside it", () => {
+      const panel = activate();
+
+      const live = el("replay-live");
+      // The assertion above is only worth anything while this holds
+      expect(live.getAttribute("aria-live")).toBe("polite");
+
+      const readout = panel.querySelector<HTMLElement>(".replay-readout")!;
+      expect(live.contains(readout)).toBe(false);
+      expect(readout.parentElement).toBe(el("replay-controls-inner"));
+    });
+
+    it("fills the readout on the first activation", () => {
+      // The chrome has to exist before initializeReplay() writes to it, or
+      // the strip shows placeholder dashes for the whole first replay
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+
+      expect(el("replay-readout-altitude").textContent).toBe("3000 ft");
+    });
+
+    it("moves focus into the panel and back out again", () => {
+      const panel = activate();
+
+      const exit = panel.querySelector<HTMLButtonElement>(".replay-exit")!;
+      expect(document.activeElement).toBe(exit);
+
+      // Closing hides the panel the focused control lives in; without a
+      // hand-off focus would drop to <body>
+      exit.click();
+
+      expect(document.activeElement).toBe(el("replay-btn"));
+    });
+
+    it("reports the values of the current position", () => {
+      activate();
+
+      replayManager.state.currentTime = 65;
+      replayManager.updateReplayDisplay();
+
+      expect(el("replay-readout-altitude").textContent).toBe("4000 ft");
+      expect(el("replay-readout-speed").textContent).toBe("120 kt");
+      expect(el("replay-readout-track").textContent).toMatch(/^\d{3}°$/);
+      // Both unit systems, as on every other surface
+      expect(el("replay-readout-altitude-alt").textContent).toBe("1219 m");
+      expect(el("replay-readout-speed-alt").textContent).toBe("222 km/h");
+    });
+
+    it("shows placeholders before the first segment", () => {
+      activate();
+
+      replayManager.state.currentTime = -1;
+      replayManager.updateReplayDisplay();
+
+      expect(el("replay-readout-altitude").textContent).toBe("—");
+      expect(el("replay-readout-track").textContent).toBe("—");
+    });
+
+    it("builds the chrome once across activations", () => {
+      const panel = activate();
+      replayManager.toggleReplay();
+      replayManager.toggleReplay();
+
+      expect(panel.querySelectorAll(".replay-exit")).toHaveLength(1);
+      expect(panel.querySelectorAll(".replay-readout")).toHaveLength(1);
     });
   });
 

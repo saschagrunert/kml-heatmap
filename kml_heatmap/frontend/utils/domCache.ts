@@ -83,7 +83,6 @@ export function getControlElements(
   extraIds: string[] = [],
 ): (HTMLElement | null)[] {
   return [
-    document.querySelector<HTMLElement>(".leaflet-control-zoom"),
     ...HIDEABLE_CONTROL_IDS.map((id) => domCache.get(id)),
     ...extraIds.map((id) => domCache.get(id)),
   ];

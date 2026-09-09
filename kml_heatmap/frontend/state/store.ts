@@ -20,7 +20,6 @@ export interface StoreState {
   airspeedVisible: boolean;
   airportsVisible: boolean;
   aviationVisible: boolean;
-  buttonsHidden: boolean;
   statsPanelVisible: boolean;
   /**
    * Wrapped modal visibility. `undefined` means "not tracked by the store
@@ -46,7 +45,6 @@ export function createDefaultState(): StoreState {
     airspeedVisible: false,
     airportsVisible: true,
     aviationVisible: false,
-    buttonsHidden: false,
     statsPanelVisible: false,
     wrappedVisible: undefined,
     currentData: null,

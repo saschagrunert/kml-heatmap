@@ -72,7 +72,11 @@ export function parseUrlParams(
     }
   }
 
-  // Layer visibility (9 flags: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden, isolateSelection)
+  // Layer visibility (9 flags: heatmap, altitude, airspeed, airports,
+  // aviation, stats, wrapped, buttonsHidden, isolateSelection). The 8th flag
+  // is legacy: the control chrome no longer hides, so the parsed value is
+  // dropped by sanitizeSavedState. The slot stays so older links keep the
+  // isolate flag in place.
   if (urlParams.has("v")) {
     const vis = urlParams.get("v");
     // Support old 6-char, 7-char, 8-char, and new 9-char format for backwards compatibility
@@ -173,7 +177,9 @@ export function encodeStateToUrl(state: AppState): string {
     params.set("sv", String(STATE_SCHEMA_VERSION));
   }
 
-  // Build visibility string (9 characters: heatmap, altitude, airspeed, airports, aviation, stats, wrapped, buttonsHidden, isolateSelection)
+  // Build visibility string (9 characters: heatmap, altitude, airspeed,
+  // airports, aviation, stats, wrapped, buttonsHidden, isolateSelection).
+  // The 8th is the legacy control-visibility slot and is always written as 0.
   // Only include if visibility properties are actually defined
   const hasVisibility =
     state.heatmapVisible !== undefined ||

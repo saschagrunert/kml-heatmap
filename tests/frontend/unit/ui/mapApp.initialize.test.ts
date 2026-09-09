@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import * as L from "leaflet";
 import { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
+import { invalidateMapAfterTransition } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import type {
   Airport,
   KMLDataset,
@@ -26,7 +27,7 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
 
 // Mock mapHelpers
 vi.mock("../../../../kml_heatmap/frontend/utils/mapHelpers", () => ({
-  invalidateMapWithDelay: vi.fn(),
+  invalidateMapAfterTransition: vi.fn(),
 }));
 
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
@@ -154,7 +155,6 @@ const mockUITogglesInstance = {
   toggleAirports: vi.fn(),
   toggleAviation: vi.fn(),
   exportMap: vi.fn(),
-  toggleButtonsVisibility: vi.fn(),
 };
 
 vi.mock("../../../../kml_heatmap/frontend/ui/uiToggles", () => ({
@@ -177,6 +177,14 @@ vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () => ({
   }),
 }));
 
+// The real bar registers a window resize listener it never removes, so every
+// test would leak one along with the MapApp it pins
+const mobileBarMock = vi.hoisted(() => ({ mountFor: vi.fn() }));
+
+vi.mock("../../../../kml_heatmap/frontend/ui/mobileBar", () => ({
+  MobileBar: mobileBarMock,
+}));
+
 // ---- Setup helpers ----
 
 function setupDOM(): void {
@@ -188,16 +196,38 @@ function setupDOM(): void {
     <select id="aircraft-select">
       <option value="all">All Aircraft</option>
     </select>
-    <button id="heatmap-btn" class="toggleable-btn"></button>
-    <button id="altitude-btn" class="toggleable-btn"></button>
-    <button id="airspeed-btn" class="toggleable-btn"></button>
-    <button id="airports-btn" class="toggleable-btn"></button>
-    <button id="aviation-btn" class="toggleable-btn" style="display:none"></button>
-    <button id="isolate-btn"></button>
-    <button id="hide-buttons-btn">🔼</button>
+    <div id="left-buttons" class="control-column">
+      <div class="control-row">
+        <button id="stats-btn" data-icon="stats">
+          <span class="control-label">Statistics</span>
+        </button>
+      </div>
+      <div class="control-row">
+        <button id="isolate-btn" data-icon="isolate">
+          <span class="control-label">Isolate</span>
+        </button>
+      </div>
+    </div>
+    <button id="heatmap-btn"></button>
+    <button id="altitude-btn"></button>
+    <button id="airspeed-btn"></button>
+    <button id="airports-btn"></button>
+    <div class="control-row initially-hidden">
+      <button id="aviation-btn" class="initially-hidden"></button>
+    </div>
     <div id="altitude-legend" style="display:none"></div>
     <div id="airspeed-legend" style="display:none"></div>
-    <div id="stats-panel" style="display:none"></div>
+    <div id="stats-rail" hidden>
+      <div id="stats-rail-header">
+        <button
+          id="stats-collapse-btn"
+          data-icon="collapse"
+          data-icon-size="20"
+          aria-expanded="false"
+        ></button>
+      </div>
+      <div id="stats-panel" tabindex="0"></div>
+    </div>
     <div id="loading" style="display:none"></div>
   `;
 }
@@ -286,6 +316,7 @@ describe("MapApp.initialize", () => {
     // Reset implementations too, so per-test mockImplementation() calls do
     // not leak into the next test
     vi.resetAllMocks();
+    mobileBarMock.mountFor.mockReturnValue(null);
     mockStateManagerInstance.loadState.mockReturnValue(null);
     mockReplayManagerInstance.state.active = false;
     mockReplayManagerInstance.state.airplaneMarker = null;
@@ -374,7 +405,7 @@ describe("MapApp.initialize", () => {
         "2024",
         "2025",
       ]);
-      expect(yearSelect().options[2]!.textContent).toBe("📅 2025");
+      expect(yearSelect().options[2]!.textContent).toBe("2025");
       expect(app.selectedYear).toBe("2025");
       expect(yearSelect().value).toBe("2025");
       expect(toastMock.showToast).not.toHaveBeenCalled();
@@ -554,9 +585,18 @@ describe("MapApp.initialize", () => {
       expect(appWithKey.map!.addLayer).toHaveBeenCalledWith(
         appWithKey.openaipLayers["Aviation Data"],
       );
-      expect(document.getElementById("aviation-btn")!.style.display).toBe(
-        "block",
-      );
+      // Both the button and its row leave the initially hidden state
+      expect(
+        document
+          .getElementById("aviation-btn")!
+          .classList.contains("initially-hidden"),
+      ).toBe(false);
+      expect(
+        document
+          .getElementById("aviation-btn")!
+          .closest(".control-row")!
+          .classList.contains("initially-hidden"),
+      ).toBe(false);
     });
 
     it("does not create the aviation layer without an API key", async () => {
@@ -567,9 +607,11 @@ describe("MapApp.initialize", () => {
       await initializeApp(app);
 
       expect(app.openaipLayers["Aviation Data"]).toBeUndefined();
-      expect(document.getElementById("aviation-btn")!.style.display).toBe(
-        "none",
-      );
+      expect(
+        document
+          .getElementById("aviation-btn")!
+          .classList.contains("initially-hidden"),
+      ).toBe(true);
     });
 
     it("hides the airport layer when airports are not visible", async () => {
@@ -711,38 +753,117 @@ describe("MapApp.initialize", () => {
         mockPathSelectionInstance.updateIsolateButton,
       ).toHaveBeenCalledTimes(1);
     });
+  });
 
-    it("restores hidden buttons from the store", async () => {
+  describe("statistics rail", () => {
+    it("stays closed while the statistics are hidden", async () => {
+      await initializeApp(app);
+
+      expect(document.getElementById("stats-rail")!.hidden).toBe(true);
+      expect(document.body.classList.contains("stats-open")).toBe(false);
+    });
+
+    it("opens the rail and remeasures the map", async () => {
+      await initializeApp(app);
+      vi.mocked(invalidateMapAfterTransition).mockClear();
+
+      const column = document.getElementById("left-buttons")!;
+      // The column's own layout and its labels, not the per-button state
+      // that the Statistics trigger legitimately gains when the rail opens
+      const shape = () => ({
+        className: column.className,
+        labels: [...column.querySelectorAll(".control-label")].map(
+          (el) => el.textContent,
+        ),
+        iconWidths: [...column.querySelectorAll("svg.icon")].map((el) =>
+          el.getAttribute("width"),
+        ),
+      });
+      const before = shape();
+
+      app.store.set("statsPanelVisible", true);
+
+      expect(document.getElementById("stats-rail")!.hidden).toBe(false);
+      expect(document.body.classList.contains("stats-open")).toBe(true);
+      expect(invalidateMapAfterTransition).toHaveBeenCalledWith(
+        app.map,
+        document.getElementById("map"),
+      );
+      // The column is left alone; the stylesheet slides it past the rail
+      expect(shape()).toEqual(before);
+
+      app.store.set("statsPanelVisible", false);
+
+      expect(document.getElementById("stats-rail")!.hidden).toBe(true);
+      expect(document.body.classList.contains("stats-open")).toBe(false);
+      expect(shape()).toEqual(before);
+    });
+
+    it("marks both triggers expanded and accents the statistics row", async () => {
+      await initializeApp(app);
+      const statsBtn = document.getElementById("stats-btn")!;
+      const collapseBtn = document.getElementById("stats-collapse-btn")!;
+
+      expect(statsBtn.getAttribute("aria-expanded")).toBe("false");
+      expect(statsBtn.classList.contains("active")).toBe(false);
+
+      app.store.set("statsPanelVisible", true);
+
+      expect(statsBtn.getAttribute("aria-expanded")).toBe("true");
+      expect(collapseBtn.getAttribute("aria-expanded")).toBe("true");
+      expect(statsBtn.classList.contains("active")).toBe(true);
+
+      app.store.set("statsPanelVisible", false);
+
+      expect(statsBtn.getAttribute("aria-expanded")).toBe("false");
+      expect(collapseBtn.getAttribute("aria-expanded")).toBe("false");
+      expect(statsBtn.classList.contains("active")).toBe(false);
+    });
+
+    it("hands focus back to the trigger when the collapse button hides", async () => {
+      await initializeApp(app);
+      app.store.set("statsPanelVisible", true);
+      document.getElementById("stats-collapse-btn")!.focus();
+
+      app.store.set("statsPanelVisible", false);
+
+      expect(document.activeElement).toBe(document.getElementById("stats-btn"));
+    });
+
+    it("hands focus back from the panel too", async () => {
+      await initializeApp(app);
+      app.store.set("statsPanelVisible", true);
+      document.getElementById("stats-panel")!.focus();
+
+      app.store.set("statsPanelVisible", false);
+
+      expect(document.activeElement).toBe(document.getElementById("stats-btn"));
+    });
+
+    it("leaves focus alone when it is outside the rail", async () => {
+      await initializeApp(app);
+      app.store.set("statsPanelVisible", true);
+      const heatmapBtn = document.getElementById("heatmap-btn")!;
+      heatmapBtn.focus();
+
+      app.store.set("statsPanelVisible", false);
+
+      expect(document.activeElement).toBe(heatmapBtn);
+    });
+
+    it("restores an open rail from the saved state", async () => {
+      mockStatsManagerInstance.setStatsPanelVisible.mockImplementation(
+        (visible: boolean) => app.store.set("statsPanelVisible", visible),
+      );
       mockStateManagerInstance.loadState.mockReturnValue({
-        buttonsHidden: true,
+        statsPanelVisible: true,
       });
 
       await initializeApp(app);
 
-      const hidden = [...document.querySelectorAll(".toggleable-btn")].map(
-        (el) => el.classList.contains("buttons-hidden"),
-      );
-      expect(hidden).toEqual([true, true, true, true, true]);
-      const hideButton = document.getElementById("hide-buttons-btn")!;
-      expect(hideButton.textContent).toBe("🔽");
-      expect(hideButton.getAttribute("aria-pressed")).toBe("true");
-      expect(hideButton.getAttribute("aria-label")).toBe(
-        "Show control buttons",
-      );
-      expect(hideButton.title).toBe("Show control buttons");
-
-      app.buttonsHidden = false;
-
-      expect(
-        document
-          .querySelector(".toggleable-btn")!
-          .classList.contains("buttons-hidden"),
-      ).toBe(false);
-      expect(hideButton.textContent).toBe("🔼");
-      expect(hideButton.getAttribute("aria-pressed")).toBe("false");
-      expect(hideButton.getAttribute("aria-label")).toBe(
-        "Hide control buttons",
-      );
+      expect(document.getElementById("stats-rail")!.hidden).toBe(false);
+      expect(document.body.classList.contains("stats-open")).toBe(true);
+      mockStatsManagerInstance.setStatsPanelVisible.mockReset();
     });
   });
 
@@ -808,7 +929,12 @@ describe("MapApp.initialize", () => {
 
       expect(L.map).toHaveBeenCalledWith(
         "map",
-        expect.objectContaining({ maxZoom: 20, preferCanvas: true }),
+        expect.objectContaining({
+          maxZoom: 20,
+          preferCanvas: true,
+          // Pinch, scroll and double tap cover zooming
+          zoomControl: false,
+        }),
       );
       expect(L.tileLayer).toHaveBeenCalledWith(
         expect.stringContaining("basemaps.cartocdn.com"),

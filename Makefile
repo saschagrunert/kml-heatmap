@@ -1,6 +1,5 @@
-.PHONY: all build serve serve-build test-image test lint format lock clean help
-.PHONY: lint-local format-local test-local verify
-.PHONY: check-obfuscation check-obfuscation-local require-runtime
+.PHONY: all build serve serve-build test lint format lock clean help
+.PHONY: verify check-obfuscation require-runtime
 
 # API keys are read from the environment (or the make command line) and passed
 # into the build container by name only, so their values never show up in the
@@ -42,13 +41,6 @@ else
 RUN_AS_USER = --user "$(shell id -u):$(shell id -g)"
 endif
 TTY_FLAG = $(if $(shell test -t 0 && echo y),-it,-i)
-
-# Development runs mount the checkout at /src and use the toolchain of the test
-# image. A host node_modules directory (if any) is masked with an anonymous
-# volume so that the image's /node_modules is used instead.
-DEV_RUN_FLAGS = --rm $(RUN_AS_USER) -e HOME=/tmp \
-  -v "$(CURDIR):/src" $(if $(wildcard node_modules),-v /src/node_modules,) -w /src
-DEV_RUN = $(CONTAINER_RUNTIME) run $(DEV_RUN_FLAGS) $(IMAGE_NAME)-test
 
 all: build
 
@@ -98,35 +90,10 @@ serve: require-runtime ## Serve OUTPUT_DIR on http://HOST_BIND:PORT (run 'make b
 serve-build: build ## Run build, then serve
 	$(MAKE) serve
 
-test-image: require-runtime ## Build the test image (Python and Node toolchain)
-	$(CONTAINER_RUNTIME) build -f Dockerfile.test -t $(IMAGE_NAME)-test .
-
-test: test-image ## Run the JavaScript and Python test suites in the test image
-	$(DEV_RUN)
-
-lint: test-image ## Run linters and type checkers in the test image
-	$(DEV_RUN) sh -c "ruff check . && mypy . && bandit -r kml_heatmap -ll && npm run typecheck && npm run typecheck:tests && npm run lint"
-
-format: test-image ## Run formatters in the test image
-	$(DEV_RUN) sh -c "ruff format . && npm run format"
-
-lock: test-image ## Regenerate requirements.lock and requirements-test.lock with pip-compile in the test image
-	$(DEV_RUN) sh -c '\
-	  python -m venv /tmp/pip-tools && \
-	  /tmp/pip-tools/bin/pip install --quiet --disable-pip-version-check pip-tools && \
-	  export CUSTOM_COMPILE_COMMAND="make lock" && \
-	  /tmp/pip-tools/bin/pip-compile --quiet --generate-hashes --strip-extras --upgrade --output-file=requirements.lock requirements.txt && \
-	  /tmp/pip-tools/bin/pip-compile --quiet --generate-hashes --strip-extras --upgrade --output-file=requirements-test.lock requirements-test.txt'
-
-check-obfuscation: test-image ## Check that the KML files in INPUT_DIR are obfuscated (in the test image)
-	$(CONTAINER_RUNTIME) run $(DEV_RUN_FLAGS) \
-	  -v "$(abspath $(INPUT_DIR)):/input:ro" \
-	  $(IMAGE_NAME)-test python -m kml_heatmap.obfuscate /input --check
-
-check-obfuscation-local: ## Check that the KML files in INPUT_DIR are obfuscated (local Python)
+check-obfuscation: ## Check that the KML files in INPUT_DIR are obfuscated
 	python -m kml_heatmap.obfuscate "$(INPUT_DIR)" --check
 
-lint-local: ## Run linters and type checkers with local tools
+lint: ## Run linters and type checkers
 	ruff check .
 	mypy .
 	bandit -r kml_heatmap -ll
@@ -134,14 +101,28 @@ lint-local: ## Run linters and type checkers with local tools
 	npm run typecheck:tests
 	npm run lint
 
-format-local: ## Run formatters with local tools
+format: ## Run formatters
 	ruff format .
 	npm run format
 
-test-local: ## Run the test suites with local tools
+test: ## Run the JavaScript and Python test suites with coverage
 	npm run test:coverage
 	pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml --cov-report=term
 	coverage report
+
+# pip-tools is installed into a throwaway environment rather than added to the
+# test requirements, so it cannot drift into what the lock files pin.
+lock: ## Regenerate requirements.lock and requirements-test.lock with pip-compile
+	@tmp=$$(mktemp -d) && \
+	  python -m venv "$$tmp" && \
+	  "$$tmp/bin/pip" install --quiet --disable-pip-version-check pip-tools && \
+	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
+	    --generate-hashes --strip-extras --upgrade \
+	    --output-file=requirements.lock requirements.txt && \
+	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
+	    --generate-hashes --strip-extras --upgrade \
+	    --output-file=requirements-test.lock requirements-test.txt; \
+	  status=$$?; rm -rf "$$tmp"; exit $$status
 
 verify: build ## Rebuild OUTPUT_DIR and fail if it differs from git (modified or untracked files)
 	@if [ -n "$$(git status --porcelain --ignored -- '$(OUTPUT_DIR)')" ]; then \
@@ -152,8 +133,8 @@ verify: build ## Rebuild OUTPUT_DIR and fail if it differs from git (modified or
 	fi
 	@echo "'$(OUTPUT_DIR)/' is up to date"
 
-clean: ## Remove container images (when a runtime is available) and local build artifacts
-	-@test -z "$(CONTAINER_RUNTIME)" || $(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) $(IMAGE_NAME)-test 2>/dev/null
+clean: ## Remove the container image (when a runtime is available) and local build artifacts
+	-@test -z "$(CONTAINER_RUNTIME)" || $(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) 2>/dev/null
 	rm -rf htmlcov coverage coverage.xml .coverage .coverage.* test-results playwright-report \
 	  dist build *.egg-info .mypy_cache .ruff_cache .pytest_cache .hypothesis \
 	  kml_heatmap/static/bundle.js kml_heatmap/static/bundle.js.map \

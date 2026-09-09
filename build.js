@@ -177,8 +177,9 @@ function analyzeBundleComposition(metafile, bundleName) {
 
 // Bundle size budgets in bytes
 const BUDGET_LIBRARY = 50 * 1024;
-const BUDGET_APP = 100 * 1024;
-const BUDGET_TOTAL = 150 * 1024;
+const BUDGET_APP = 115 * 1024;
+// At least the sum of the two, so a bundle can actually reach its own budget
+const BUDGET_TOTAL = 165 * 1024;
 
 /**
  * Print bundle size analysis and enforce budgets in CI

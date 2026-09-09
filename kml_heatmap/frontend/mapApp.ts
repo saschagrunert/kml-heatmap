@@ -14,15 +14,15 @@ import { AirportManager } from "./ui/airportManager";
 import { ReplayManager } from "./ui/replayManager";
 import { WrappedManager } from "./ui/wrappedManager";
 import { UIToggles } from "./ui/uiToggles";
+import { MobileBar } from "./ui/mobileBar";
 import { loadInitialData, createAirportMarkers } from "./appInitializer";
 import { logError } from "./utils/logger";
 import { domCache } from "./utils/domCache";
 import { syncToggleButton } from "./utils/buttonState";
-import {
-  HIDE_BUTTONS_LABEL,
-  MAX_ZOOM,
-  SHOW_BUTTONS_LABEL,
-} from "./utils/constants";
+import { isIconName, setControlIcon } from "./utils/icons";
+import type { IconSize } from "./utils/icons";
+import { invalidateMapAfterTransition } from "./utils/mapHelpers";
+import { MAX_ZOOM } from "./utils/constants";
 import { AppStore } from "./state/store";
 import type { Range } from "./state/store";
 import type { HeatmapLayer } from "./globals";
@@ -128,6 +128,7 @@ export class MapApp {
   replayManager!: ReplayManager;
   wrappedManager!: WrappedManager;
   uiToggles!: UIToggles;
+  mobileBar!: MobileBar | null;
 
   // Store-backed getters/setters for filters
   get selectedYear(): string {
@@ -193,14 +194,6 @@ export class MapApp {
   }
   set aviationVisible(v: boolean) {
     this.store.set("aviationVisible", v);
-  }
-
-  // Store-backed getters/setters for UI state
-  get buttonsHidden(): boolean {
-    return this.store.get("buttonsHidden");
-  }
-  set buttonsHidden(v: boolean) {
-    this.store.set("buttonsHidden", v);
   }
 
   // Store-backed getters/setters for data
@@ -276,6 +269,7 @@ export class MapApp {
     this.setupMap();
     this.initializeManagers();
     this.setupButtonSync();
+    this.setupStatsRail();
 
     // Load airports and metadata
     await this.loadInitialData();
@@ -384,9 +378,6 @@ export class MapApp {
       if (state.aviationVisible !== undefined) {
         this.aviationVisible = state.aviationVisible;
       }
-      if (state.buttonsHidden !== undefined) {
-        this.buttonsHidden = state.buttonsHidden;
-      }
       if (state.isolateSelection !== undefined) {
         this.isolateSelection = state.isolateSelection;
       }
@@ -402,6 +393,9 @@ export class MapApp {
       zoomDelta: 0.25,
       wheelPxPerZoomLevel: 120,
       preferCanvas: true,
+      // Pinch, scroll and double tap already zoom; the control only costs
+      // the bottom-right corner of the map
+      zoomControl: false,
     });
 
     const cartoUrl = this.config.cartoApiKey
@@ -445,7 +439,12 @@ export class MapApp {
 
     if (this.config.openaipApiKey) {
       const aviationBtn = domCache.get("aviation-btn");
-      if (aviationBtn) aviationBtn.style.display = "block";
+      if (aviationBtn) {
+        aviationBtn.classList.remove("initially-hidden");
+        aviationBtn
+          .closest(".control-row")
+          ?.classList.remove("initially-hidden");
+      }
     }
   }
 
@@ -464,22 +463,36 @@ export class MapApp {
     this.store.subscribe("selectedPathIds", () =>
       this.pathSelection.updateIsolateButton(),
     );
+  }
 
-    const applyButtonsHidden = (hidden: boolean): void => {
-      document.querySelectorAll(".toggleable-btn").forEach((btn) => {
-        btn.classList.toggle("buttons-hidden", hidden);
-      });
-      const hideButton = domCache.get("hide-buttons-btn");
-      if (hideButton) {
-        const label = hidden ? SHOW_BUTTONS_LABEL : HIDE_BUTTONS_LABEL;
-        hideButton.textContent = hidden ? "🔽" : "🔼";
-        hideButton.setAttribute("aria-pressed", String(hidden));
-        hideButton.setAttribute("aria-label", label);
-        hideButton.title = label;
+  /**
+   * Open and close the statistics rail. The rail turns the left column into
+   * a single row of icon-only buttons and takes the space beside the map,
+   * so Leaflet is told to remeasure once the layout has changed.
+   */
+  private setupStatsRail(): void {
+    const apply = (visible: boolean): void => {
+      const rail = domCache.get("stats-rail");
+      if (rail) {
+        // The collapse button hides itself, so focus has to leave the rail
+        // before it does; otherwise it falls back to <body>
+        if (!visible) restoreFocusFromRail(rail);
+        rail.hidden = !visible;
       }
+
+      // Both triggers are a disclosure for the rail, not a pressed toggle;
+      // only the one that stays on screen carries the active treatment
+      for (const id of ["stats-btn", "stats-collapse-btn"]) {
+        domCache.get(id)?.setAttribute("aria-expanded", String(visible));
+      }
+      domCache.get("stats-btn")?.classList.toggle("active", visible);
+
+      document.body.classList.toggle("stats-open", visible);
+      invalidateMapAfterTransition(this.map, document.getElementById("map"));
     };
-    applyButtonsHidden(this.buttonsHidden);
-    this.store.subscribe("buttonsHidden", applyButtonsHidden);
+
+    apply(this.store.get("statsPanelVisible"));
+    this.store.subscribe("statsPanelVisible", apply);
   }
 
   private initializeManagers(): void {
@@ -492,6 +505,7 @@ export class MapApp {
     this.replayManager = new ReplayManager(this);
     this.wrappedManager = new WrappedManager(this);
     this.uiToggles = new UIToggles(this);
+    this.mobileBar = MobileBar.mountFor(this);
   }
 
   async loadInitialData(): Promise<void> {
@@ -539,6 +553,51 @@ export class MapApp {
 }
 
 /**
+ * Hand focus to the first reachable statistics trigger when the rail that
+ * holds it is about to be hidden. Without this the browser drops focus to
+ * `<body>` and the next Tab restarts at the top of the document, ahead of
+ * every focusable marker on the map.
+ */
+function restoreFocusFromRail(rail: HTMLElement): void {
+  if (!rail.contains(document.activeElement)) return;
+  // The mobile tab replaces the desktop button on small viewports, and the
+  // map is the last resort: focusable, and next to the controls in order
+  for (const id of ["stats-btn", "mobile-tab-stats", "map"]) {
+    const trigger = domCache.get(id);
+    if (!trigger || rail.contains(trigger)) continue;
+    trigger.focus();
+    if (document.activeElement === trigger) return;
+  }
+}
+
+/**
+ * Draw the inline icon of every `[data-icon]` control below `root`.
+ * Re-rendering replaces the icon that is already there, so the same element
+ * can change size when the chrome becomes icon-only.
+ *
+ * The markup comes from utils/icons.ts and carries no caller strings here.
+ *
+ * @param root - Subtree to walk; the whole document by default
+ * @param size - Size for every icon; each element's own size when omitted
+ */
+export function renderControlIcons(
+  root: ParentNode = document,
+  size?: IconSize,
+): void {
+  root.querySelectorAll<HTMLElement>("[data-icon]").forEach((el) => {
+    const name = el.dataset["icon"];
+    if (!name) return;
+    if (!isIconName(name)) {
+      logError(
+        `Unknown icon name "${name}" on ${el.id ? `#${el.id}` : el.tagName}`,
+      );
+      return;
+    }
+    setControlIcon(el, name, size);
+  });
+}
+
+/**
  * Bind data-action attributes to app methods via addEventListener.
  * Buttons get "click", selects get "change", inputs get "input".
  * Handlers are bound before initialization completes; data-dependent
@@ -565,7 +624,6 @@ export function bindActions(app: MapApp): void {
     closeWrappedBackdrop: (e) =>
       app.wrappedManager.closeWrapped(e as MouseEvent),
     toggleIsolateSelection: () => app.pathSelection.toggleIsolateSelection(),
-    toggleButtonsVisibility: () => app.uiToggles.toggleButtonsVisibility(),
     playReplay: () => app.replayManager.playReplay(),
     pauseReplay: () => app.replayManager.pauseReplay(),
     stopReplay: () => app.replayManager.stopReplay(),
@@ -603,6 +661,7 @@ if (typeof window !== "undefined") {
   window.initMapApp = async (config: MapConfig): Promise<MapApp> => {
     const app = new MapApp(config);
     window.mapApp = app;
+    renderControlIcons();
     // Bind before the (long) initial load so early interactions are not lost
     bindActions(app);
     await app.initialize();

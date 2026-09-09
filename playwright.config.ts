@@ -22,6 +22,8 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      // The bar and sheet only exist below the breakpoint
+      testIgnore: /mobile\.spec\.ts$/,
       use: {
         ...devices["Desktop Chrome"],
         ...launchOptions,
@@ -29,7 +31,13 @@ export default defineConfig({
     },
     {
       name: "mobile-chromium",
-      testMatch: /(core|layers|state)\.spec\.ts$/,
+      // mobile.spec.ts drives the bottom bar and sheet; the other three are
+      // viewport-agnostic and run against whichever controls the bar puts up
+      testMatch: /(core|layers|mobile|state)\.spec\.ts$/,
+      // The bar and sheet are built at runtime and every interaction here
+      // goes through them, so a retry would hide exactly the intermittent
+      // failures this project exists to catch
+      retries: 0,
       use: {
         ...devices["Pixel 7"],
         ...launchOptions,

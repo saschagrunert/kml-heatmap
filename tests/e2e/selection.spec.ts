@@ -248,10 +248,16 @@ test.describe("Solo Mode", () => {
   test("solo button is always visible but dimmed when no paths are selected", async ({
     page,
   }) => {
-    const isolateBtn = page.locator("#isolate-btn");
+    // Scoped to the View group: isolate belongs with the other controls
+    // that change what the map shows, not with the layers
+    const isolateBtn = page.locator(
+      '#left-buttons .control-group[aria-labelledby="view-group-title"] #isolate-btn',
+    );
     await expect(isolateBtn).toBeVisible();
     await expect(isolateBtn).toHaveCSS("opacity", "0.5");
     await expect(isolateBtn).toHaveAttribute("title", "Isolate selected paths");
+    await expect(isolateBtn.locator("svg.icon")).toHaveCount(1);
+    await expect(isolateBtn.locator(".control-label")).toHaveText("Isolate");
   });
 
   test("solo button becomes active when a path is selected", async ({
@@ -260,18 +266,6 @@ test.describe("Solo Mode", () => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
     await expect(isolateBtn).toBeVisible();
     await expect(isolateBtn).toHaveCSS("opacity", "1");
-  });
-
-  test("solo button is hidden by hide buttons toggle", async ({ page }) => {
-    await page.locator("#hide-buttons-btn").click();
-    await expect(page.locator("#isolate-btn")).toHaveCSS(
-      "visibility",
-      "hidden",
-    );
-    await expect(page.locator("#isolate-btn")).toHaveCSS(
-      "pointer-events",
-      "none",
-    );
   });
 
   test("clicking solo button activates isolate mode", async ({ page }) => {
@@ -355,34 +349,6 @@ test.describe("Solo Mode", () => {
     );
     await expect(page.locator("#isolate-btn")).toBeVisible();
     await expect(page.locator("#isolate-btn")).toHaveCSS("opacity", "1");
-  });
-
-  test("hide button does not hide unselected paths", async ({ page }) => {
-    await waitForPathData(page);
-
-    const pathId = await page.evaluate(
-      () => window.mapApp!.fullPathInfo![0]!.id,
-    );
-    await page.evaluate(
-      (id) => window.mapApp!.togglePathSelection(String(id)),
-      pathId,
-    );
-    await page.waitForFunction(
-      () => window.mapApp!.selectedPathIds.size === 1,
-      { timeout: 5000 },
-    );
-    // Consecutive segments with equal colour are merged into one polyline,
-    // so compare the rendered count before and after instead of per segment
-    const layersBefore = await altitudeLayerCount(page);
-    expect(layersBefore).toBeGreaterThan(1);
-
-    await page.locator("#hide-buttons-btn").click();
-    await expect(page.locator("#hide-buttons-btn")).toHaveText("🔽");
-
-    expect(await page.evaluate(() => window.mapApp!.isolateSelection)).toBe(
-      false,
-    );
-    expect(await altitudeLayerCount(page)).toBe(layersBefore);
   });
 
   test("selected paths use normal weight in solo mode", async ({ page }) => {

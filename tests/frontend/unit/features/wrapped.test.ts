@@ -4,6 +4,7 @@ import {
   calculateAircraftColorClass,
   calculateYearStats,
   findClosestReferenceDistance,
+  findFurthestAirport,
   generateFunFacts,
   selectDiverseFacts,
 } from "../../../../kml_heatmap/frontend/features/wrapped";
@@ -667,6 +668,79 @@ describe("wrapped feature", () => {
         "fleet-aircraft-medium-high",
       );
       expect(calculateAircraftColorClass(8, 10, 1)).toBe("fleet-aircraft-high");
+    });
+  });
+  describe("findFurthestAirport", () => {
+    const coordinates = new Map<string, [number, number]>([
+      ["EDAQ Halle-Oppin", [51.55, 12.05]],
+      ["EDDM Munich", [48.35, 11.79]],
+      ["LJPZ Portoroz", [45.47, 13.61]],
+      ["EDCM Kamenz", [51.29, 14.13]],
+    ]);
+
+    it("returns the airport furthest from the home base", () => {
+      expect(
+        findFurthestAirport(
+          "EDAQ Halle-Oppin",
+          [...coordinates.keys()],
+          coordinates,
+        ),
+      ).toBe("LJPZ Portoroz");
+    });
+
+    it("never returns the home base itself", () => {
+      expect(
+        findFurthestAirport(
+          "EDAQ Halle-Oppin",
+          ["EDAQ Halle-Oppin", "EDDM Munich"],
+          coordinates,
+        ),
+      ).toBe("EDDM Munich");
+    });
+
+    it("returns null when the home base is the only airport", () => {
+      expect(
+        findFurthestAirport(
+          "EDAQ Halle-Oppin",
+          ["EDAQ Halle-Oppin"],
+          coordinates,
+        ),
+      ).toBeNull();
+    });
+
+    it("keeps the first airport on a tie", () => {
+      // Both are the same distance from the home base on the equator
+      const tied = new Map<string, [number, number]>([
+        ["EDAQ Home", [0, 0]],
+        ["AAAA West", [0, -1]],
+        ["BBBB East", [0, 1]],
+      ]);
+
+      expect(
+        findFurthestAirport("EDAQ Home", ["AAAA West", "BBBB East"], tied),
+      ).toBe("AAAA West");
+      expect(
+        findFurthestAirport("EDAQ Home", ["BBBB East", "AAAA West"], tied),
+      ).toBe("BBBB East");
+    });
+
+    it("skips airports without coordinates", () => {
+      expect(
+        findFurthestAirport(
+          "EDAQ Halle-Oppin",
+          ["ZZZZ Unknown", "EDDM Munich"],
+          coordinates,
+        ),
+      ).toBe("EDDM Munich");
+    });
+
+    it("returns null without a home base or its coordinates", () => {
+      expect(
+        findFurthestAirport(null, ["EDDM Munich"], coordinates),
+      ).toBeNull();
+      expect(
+        findFurthestAirport("ZZZZ Unknown", ["EDDM Munich"], coordinates),
+      ).toBeNull();
     });
   });
 });

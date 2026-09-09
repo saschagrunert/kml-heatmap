@@ -8,7 +8,16 @@ export const CRUISE_ALTITUDE_THRESHOLD_M = 304.8; // 1000ft in meters
 export const MIN_ZOOM = 1;
 export const MAX_ZOOM = 20;
 
+/**
+ * Elements hidden while the map is captured as an image (export, wrapped).
+ * The two grouped control columns and the statistics rail are listed as
+ * containers so their titles and separators disappear with their buttons;
+ * the individual ids stay for panels that live outside a column.
+ */
 export const HIDEABLE_CONTROL_IDS = [
+  "left-buttons",
+  "right-buttons",
+  "stats-rail",
   "stats-btn",
   "export-btn",
   "share-btn",
@@ -25,7 +34,3 @@ export const HIDEABLE_CONTROL_IDS = [
   "airspeed-legend",
   "loading",
 ] as const;
-
-/** Accessible labels for the control-visibility toggle button */
-export const SHOW_BUTTONS_LABEL = "Show control buttons";
-export const HIDE_BUTTONS_LABEL = "Hide control buttons";

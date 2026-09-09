@@ -77,13 +77,68 @@ test.describe("Filters and Statistics", () => {
     await expect(statsPanel).toBeHidden();
   });
 
+  test("statistics open as a rail and the left column slides past it", async ({
+    page,
+  }) => {
+    const rail = page.locator("#stats-rail");
+    const column = page.locator("#left-buttons");
+    const collapse = page.locator("#stats-collapse-btn");
+
+    await expect(rail).toHaveAttribute("hidden", "");
+    const closedLeft = (await column.boundingBox())!.x;
+
+    await page.locator("#stats-btn").click();
+
+    await expect(rail).not.toHaveAttribute("hidden", "");
+    await expect(page.locator("body")).toHaveClass(/stats-open/);
+    // The controls keep their labels and their size, they only move over
+    await expect(page.locator("#stats-btn .control-label")).toBeVisible();
+    await expect(page.locator("#stats-btn svg.icon")).toHaveAttribute(
+      "width",
+      "16",
+    );
+    // Poll until the slide transition has finished
+    await expect
+      .poll(async () => {
+        const rBox = await rail.boundingBox();
+        const cBox = await column.boundingBox();
+        return rBox && cBox ? cBox.x >= rBox.x + rBox.width : false;
+      })
+      .toBe(true);
+
+    // The rail carries its own way back
+    await collapse.click();
+
+    await expect(rail).toHaveAttribute("hidden", "");
+    await expect(page.locator("#stats-btn svg.icon")).toHaveAttribute(
+      "width",
+      "16",
+    );
+    await expect
+      .poll(async () => {
+        const box = await column.boundingBox();
+        return box ? Math.round(box.x) : -1;
+      })
+      .toBe(Math.round(closedLeft));
+  });
+
   test("statistics panel does not cover the left button column", async ({
     page,
-    isMobile,
   }) => {
     await page.locator("#stats-btn").click();
     const panel = page.locator("#stats-panel");
     await expect(panel).toBeVisible();
+
+    // Poll until the slide transition has finished
+    await expect
+      .poll(async () => {
+        const pBox = await panel.boundingBox();
+        const sBtn = await page.locator("#stats-btn").boundingBox();
+        return pBox && sBtn
+          ? sBtn.x >= pBox.x + pBox.width || sBtn.x + sBtn.width <= pBox.x
+          : false;
+      })
+      .toBe(true);
 
     const panelBox = (await panel.boundingBox())!;
     for (const selector of ["#stats-btn", "#export-btn", "#replay-btn"]) {
@@ -95,11 +150,6 @@ test.describe("Filters and Statistics", () => {
         box.y + box.height > panelBox.y;
       expect(overlaps, `${selector} is covered by the stats panel`).toBe(false);
     }
-    if (isMobile) {
-      // Bottom sheet on small screens
-      const viewport = page.viewportSize()!;
-      expect(panelBox.y + panelBox.height).toBeCloseTo(viewport.height, 0);
-    }
   });
 
   test("stats panel shows flight statistics with expected fields", async ({
@@ -109,10 +159,13 @@ test.describe("Filters and Statistics", () => {
     const panel = page.locator("#stats-panel");
     await expect(panel).toBeVisible();
 
-    await expect(panel).toContainText("Flight Statistics");
-    await expect(panel).toContainText("Data Points:");
-    await expect(panel).toContainText("Flights:");
-    await expect(panel).toContainText("Distance:");
+    await expect(page.locator("#stats-rail-title")).toContainText(
+      "Flight Statistics",
+    );
+    // The count decides the plural, so match the shape rather than a literal
+    await expect(panel).toContainText(/\d+ data points?\b/);
+    await expect(panel).toContainText("Flights");
+    await expect(panel).toContainText("Distance");
     await expect(panel).toContainText("nm");
   });
 
@@ -123,7 +176,7 @@ test.describe("Filters and Statistics", () => {
 
     await expect(panel).toContainText("Airports");
     await expect(panel).toContainText("Aircraft");
-    await expect(panel).toContainText("flight(s)");
+    await expect(panel).toContainText(/\d+ flights?/);
   });
 
   test("stats update for selected path", async ({ page }) => {
@@ -135,8 +188,11 @@ test.describe("Filters and Statistics", () => {
 
     await selectPathForReplay(page);
 
-    await expect(panel).toContainText("Selected Paths Statistics");
-    await expect(panel).toContainText("selected path(s)");
+    await expect(page.locator("#stats-rail-title")).toContainText(
+      "Selected Paths Statistics",
+    );
+    // Exactly one path is selected, and the readout counts it in words
+    await expect(panel).toContainText(/1 selected paths?/);
     expect(await panel.textContent()).not.toBe(globalText);
   });
 
@@ -148,7 +204,8 @@ test.describe("Filters and Statistics", () => {
     await expect(panel).toBeVisible();
 
     const pathId = await selectPathForReplay(page);
-    await expect(panel).toContainText("Selected Paths Statistics");
+    const title = page.locator("#stats-rail-title");
+    await expect(title).toContainText("Selected Paths Statistics");
 
     await page.evaluate(
       (id) => window.mapApp!.togglePathSelection(String(id)),
@@ -156,8 +213,8 @@ test.describe("Filters and Statistics", () => {
     );
     await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 0);
 
-    await expect(panel).toContainText("Flight Statistics");
-    await expect(panel).not.toContainText("Selected Paths");
+    await expect(title).toContainText("Flight Statistics");
+    await expect(title).not.toContainText("Selected Paths");
   });
 
   test("year filter updates stats panel content", async ({ page }) => {
@@ -197,7 +254,9 @@ test.describe("Filters and Statistics", () => {
 
     await aircraftSelect.selectOption("all");
     await waitForAircraftFilter(page, "all");
-    await expect(panel).toContainText("Flight Statistics");
+    await expect(page.locator("#stats-rail-title")).toContainText(
+      "Flight Statistics",
+    );
     await expect.poll(() => panel.textContent()).toBe(allText);
   });
 

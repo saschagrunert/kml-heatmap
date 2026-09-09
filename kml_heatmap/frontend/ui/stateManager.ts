@@ -19,7 +19,6 @@ const BOOLEAN_KEYS = [
   "airspeedVisible",
   "airportsVisible",
   "aviationVisible",
-  "buttonsHidden",
   "isolateSelection",
   "statsPanelVisible",
   "wrappedVisible",
@@ -97,7 +96,6 @@ export class StateManager {
       "airspeedVisible",
       "airportsVisible",
       "aviationVisible",
-      "buttonsHidden",
       "statsPanelVisible",
       "wrappedVisible",
     ];
@@ -142,7 +140,6 @@ export class StateManager {
       selectedPathIds: Array.from(this.app.selectedPathIds),
       statsPanelVisible: this.app.store.get("statsPanelVisible"),
       wrappedVisible: this.isWrappedVisible(),
-      buttonsHidden: this.app.buttonsHidden,
       isolateSelection: this.app.isolateSelection,
       // Note: replay state is NOT persisted - too complex to restore reliably
     };

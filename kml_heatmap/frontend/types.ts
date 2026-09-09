@@ -172,6 +172,11 @@ export interface AppState {
   aviationVisible?: boolean;
   statsPanelVisible?: boolean;
   wrappedVisible?: boolean;
+  /**
+   * Legacy control-visibility flag. The control chrome no longer hides, so
+   * the value is parsed and then dropped; the slot stays in the URL string
+   * to keep older shared links readable.
+   */
   buttonsHidden?: boolean;
   isolateSelection?: boolean;
   center?: MapCenter;

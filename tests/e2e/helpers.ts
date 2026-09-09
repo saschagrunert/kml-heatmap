@@ -3,7 +3,7 @@
  */
 /// <reference types="leaflet" />
 import AxeBuilder from "@axe-core/playwright";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 // Type-only import so the window.mapApp / MAP_CONFIG globals are declared
 import type {} from "../../kml_heatmap/frontend/globals";
 
@@ -206,11 +206,144 @@ export async function findSegmentFarFromAirports(
   return { ...settled, coord: pos.coord, pathId: pos.pathId };
 }
 
+/* ==========================================================================
+   Mobile bar and sheet
+
+   Below the breakpoint the two control columns are replaced by the bottom
+   bar, so the specs that are about behaviour rather than desktop chrome
+   drive whichever control the viewport actually offers.
+   ========================================================================== */
+
+/** Matches MOBILE_BAR_BREAKPOINT_PX in ui/mobileBar.ts */
+export const MOBILE_BAR_BREAKPOINT_PX = 768;
+
+/** Whether this viewport gets the bottom bar instead of the columns */
+export function usesMobileBar(page: Page): Promise<boolean> {
+  return page.evaluate(
+    (limit) => window.innerWidth < limit,
+    MOBILE_BAR_BREAKPOINT_PX,
+  );
+}
+
+/** Bar tabs that open the sheet */
+export type SheetTab = "layers" | "filter" | "more";
+
+/** Open a sheet-backed tab and wait until the sheet is showing */
+export async function openMobileSheet(
+  page: Page,
+  tab: SheetTab,
+): Promise<void> {
+  await page.locator(`#mobile-tab-${tab}`).click();
+  await expect(page.locator("#mobile-sheet")).toBeVisible();
+  // The tab carries no aria-expanded: the sheet is modal and covers the
+  // whole bar, so the tab is not an operable disclosure while it is open.
+  // The class is what says which tab the sheet belongs to.
+  await expect(page.locator(`#mobile-tab-${tab}`)).toHaveClass(/\bactive\b/);
+}
+
+/** Dismiss the sheet through its own close control */
+export async function closeMobileSheet(page: Page): Promise<void> {
+  const sheet = page.locator("#mobile-sheet");
+  if (!(await sheet.isVisible())) return;
+  await page.locator(".sheet-close").click();
+  await expect(sheet).toBeHidden();
+}
+
+/** The desktop button and the sheet row that drive the same layer */
+const LAYER_CONTROLS = {
+  heatmap: { buttonId: "heatmap-btn", rowId: "heatmap" },
+  airports: { buttonId: "airports-btn", rowId: "airports" },
+  altitude: { buttonId: "altitude-btn", rowId: "altitude" },
+  airspeed: { buttonId: "airspeed-btn", rowId: "speed" },
+  aviation: { buttonId: "aviation-btn", rowId: "aviation" },
+} as const;
+
+export type LayerName = keyof typeof LAYER_CONTROLS;
+
+/**
+ * The button in the desktop column. It stays in the document below the
+ * breakpoint, where it is the state the bar mirrors rather than a control.
+ */
+export function layerButton(page: Page, layer: LayerName): Locator {
+  return page.locator("#" + LAYER_CONTROLS[layer].buttonId);
+}
+
+/** The switch the mobile Layers sheet carries for a layer */
+export function layerSwitch(page: Page, layer: LayerName): Locator {
+  return page.locator(`.sheet-row[data-row="${LAYER_CONTROLS[layer].rowId}"]`);
+}
+
+/**
+ * Toggle a layer through whichever control this viewport offers, and wait
+ * until it took. Without the post-condition a click the sheet swallowed
+ * only shows up much later, in whatever the caller asserts next.
+ */
+export async function toggleLayer(page: Page, layer: LayerName): Promise<void> {
+  const button = layerButton(page, layer);
+  const wasPressed = (await button.getAttribute("aria-pressed")) === "true";
+
+  if (await usesMobileBar(page)) {
+    await openMobileSheet(page, "layers");
+    await layerSwitch(page, layer).click();
+    await closeMobileSheet(page);
+  } else {
+    await button.click();
+  }
+
+  await expect(button, `${layer} did not toggle`).toHaveAttribute(
+    "aria-pressed",
+    String(!wasPressed),
+  );
+}
+
+/**
+ * Choose a filter value. The sheet mirrors the page's own dropdown and
+ * writes the choice back to it, so both paths end in the same handler.
+ */
+async function selectFilter(
+  page: Page,
+  rowId: string,
+  sourceId: string,
+  value: string,
+): Promise<void> {
+  if (!(await usesMobileBar(page))) {
+    await page.locator("#" + sourceId).selectOption(value);
+    return;
+  }
+  await openMobileSheet(page, "filter");
+  await page
+    .locator(`.sheet-row[data-row="${rowId}"] select`)
+    .selectOption(value);
+  await closeMobileSheet(page);
+}
+
+/** Filter by year through the column dropdown or the Filter sheet */
+export function setYearFilter(page: Page, year: string): Promise<void> {
+  return selectFilter(page, "year", "year-select", year);
+}
+
+/** Filter by aircraft through the column dropdown or the Filter sheet */
+export function setAircraftFilter(page: Page, aircraft: string): Promise<void> {
+  return selectFilter(page, "aircraft", "aircraft-select", aircraft);
+}
+
+/** Toggle the statistics panel from the bar or the desktop button */
+export async function toggleStatsPanel(page: Page): Promise<void> {
+  const mobile = await usesMobileBar(page);
+  await page.locator(mobile ? "#mobile-tab-stats" : "#stats-btn").click();
+}
+
+/** Open the year in review from the bar or the desktop button */
+export async function openWrapped(page: Page): Promise<void> {
+  const mobile = await usesMobileBar(page);
+  await page.locator(mobile ? "#mobile-tab-wrapped" : "#wrapped-btn").click();
+}
+
 /** Enable altitude layer and wait for path data to load */
 export async function waitForPathData(page: Page): Promise<void> {
-  const altBtn = page.locator("#altitude-btn");
+  const altBtn = layerButton(page, "altitude");
   if ((await altBtn.getAttribute("aria-pressed")) !== "true") {
-    await altBtn.click();
+    await toggleLayer(page, "altitude");
   }
   await expect(altBtn).toHaveAttribute("aria-pressed", "true");
   await page.waitForFunction(
@@ -258,11 +391,24 @@ export async function activateReplay(page: Page): Promise<number> {
     "title",
     "Replay selected flight path",
   );
-  await page.locator("#replay-btn").click();
+  await startReplay(page);
   await expect(page.locator("#replay-controls")).toBeVisible({
     timeout: 5000,
   });
   return pathId;
+}
+
+/**
+ * Start replay from the More sheet on mobile, the column button otherwise.
+ * The sheet row closes the sheet itself before toggling replay.
+ */
+async function startReplay(page: Page): Promise<void> {
+  if (!(await usesMobileBar(page))) {
+    await page.locator("#replay-btn").click();
+    return;
+  }
+  await openMobileSheet(page, "more");
+  await page.locator('.sheet-row[data-row="replay"]').click();
 }
 
 /** Start playback and wait until the replay clock has advanced */

@@ -124,7 +124,7 @@ describe("FilterManager", () => {
     it("includes aircraft type in option text if available", () => {
       filterManager.updateAircraftDropdown();
 
-      expect(aircraftSelect().options[1]!.textContent).toBe("✈️ D-ABCD (DA40)");
+      expect(aircraftSelect().options[1]!.textContent).toBe("D-ABCD (DA40)");
     });
 
     it("clears previously added options", () => {

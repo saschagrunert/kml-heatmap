@@ -5,7 +5,9 @@ import {
   attachErrorCollectors,
   expectNoA11yViolations,
   gotoApp,
+  openWrapped,
   relevantConsoleErrors,
+  toggleStatsPanel,
 } from "./helpers";
 
 test.describe("Core", () => {
@@ -42,7 +44,11 @@ test.describe("Core", () => {
     await expect(page.locator(".leaflet-tile-pane")).toBeAttached();
   });
 
-  test("control buttons are present", async ({ page }) => {
+  test("control buttons are present", async ({ page, isMobile }) => {
+    test.skip(
+      isMobile,
+      "The bottom bar replaces the columns; see mobile.spec.ts",
+    );
     const buttons = [
       "#heatmap-btn",
       "#altitude-btn",
@@ -53,13 +59,16 @@ test.describe("Core", () => {
       "#share-btn",
       "#wrapped-btn",
       "#replay-btn",
-      "#hide-buttons-btn",
       "#isolate-btn",
     ];
 
     for (const selector of buttons) {
       await expect(page.locator(selector)).toBeVisible();
     }
+
+    // Above the breakpoint the columns are the interface; the bar must not
+    // also be up, offering the same controls twice
+    await expect(page.locator("#mobile-bar")).toHaveCount(0);
   });
 
   test("icon-only buttons have matching title and aria-label", async ({
@@ -67,7 +76,7 @@ test.describe("Core", () => {
   }) => {
     for (const selector of [
       "#isolate-btn",
-      "#hide-buttons-btn",
+      "#stats-collapse-btn",
       "#replay-play-btn",
       "#replay-pause-btn",
       "#replay-stop-btn",
@@ -87,7 +96,12 @@ test.describe("Core", () => {
 
   test("replay button is enabled but marked unavailable initially", async ({
     page,
+    isMobile,
   }) => {
+    test.skip(
+      isMobile,
+      "The More sheet carries replay and its hint; see mobile.spec.ts",
+    );
     const replayBtn = page.locator("#replay-btn");
     await expect(replayBtn).toBeVisible();
     // The button stays actionable so clicking it can explain why
@@ -114,8 +128,11 @@ test.describe("Core", () => {
     await expect(page.locator("#loading-text")).toBeAttached();
   });
 
-  test("map zoom control and attribution are shown", async ({ page }) => {
-    await expect(page.locator(".leaflet-control-zoom")).toBeVisible();
+  test("the zoom control is gone and the attribution is shown", async ({
+    page,
+  }) => {
+    // Pinch, scroll and double tap cover zooming
+    await expect(page.locator(".leaflet-control-zoom")).toHaveCount(0);
     const attribution = page.locator(".leaflet-control-attribution");
     await expect(attribution).toBeVisible();
     await expect(attribution).toContainText("OpenStreetMap");
@@ -171,7 +188,7 @@ test.describe("Core", () => {
     });
 
     test("open stats panel has no WCAG A/AA violations", async ({ page }) => {
-      await page.locator("#stats-btn").click();
+      await toggleStatsPanel(page);
       await expect(page.locator("#stats-panel")).toBeVisible();
 
       await expectNoA11yViolations(page, "stats panel");
@@ -184,7 +201,7 @@ test.describe("Core", () => {
     });
 
     test("wrapped dialog has no WCAG A/AA violations", async ({ page }) => {
-      await page.locator("#wrapped-btn").click();
+      await openWrapped(page);
       await expect(page.locator("#wrapped-modal")).toBeVisible();
       await expect(page.locator("#wrapped-card-airports")).toBeVisible();
 

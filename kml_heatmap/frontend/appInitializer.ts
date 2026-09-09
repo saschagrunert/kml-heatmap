@@ -29,7 +29,7 @@ export function resolveYearSelection(
     availableYears.forEach((year) => {
       const option = document.createElement("option");
       option.value = year.toString();
-      option.textContent = "📅 " + year;
+      option.textContent = String(year);
       select.appendChild(option);
     });
   }
