@@ -92,11 +92,11 @@ describe("AirportManager", () => {
       const result = airportManager.calculateAirportFlightCounts();
 
       expect(
-        window.KMLHeatmap.calculateAirportFlightCounts
+        window.KMLHeatmap.calculateAirportFlightCounts,
       ).toHaveBeenCalledWith(
         mockApp.fullPathInfo,
         mockApp.selectedYear,
-        mockApp.selectedAircraft
+        mockApp.selectedAircraft,
       );
       expect(result).toEqual({
         EDDF: 20,
@@ -147,11 +147,11 @@ describe("AirportManager", () => {
 
       expect((window as any).KMLHeatmap.ddToDms).toHaveBeenCalledWith(
         50.1,
-        true
+        true,
       );
       expect((window as any).KMLHeatmap.ddToDms).toHaveBeenCalledWith(
         8.67,
-        false
+        false,
       );
 
       const popup = mockMarker1.setPopupContent.mock.calls[0][0];
@@ -245,7 +245,7 @@ describe("AirportManager", () => {
       expect(mockMarker2.setOpacity).toHaveBeenCalledWith(1.0);
       // EDDK should be hidden (no paths)
       expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        mockMarker3
+        mockMarker3,
       );
     });
 
@@ -273,7 +273,7 @@ describe("AirportManager", () => {
       expect(mockMarker2.setOpacity).toHaveBeenCalledWith(1.0);
       // EDDK should be hidden
       expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        mockMarker3
+        mockMarker3,
       );
     });
 
@@ -314,7 +314,7 @@ describe("AirportManager", () => {
 
       // EDDK should be removed
       expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        mockMarker3
+        mockMarker3,
       );
     });
 

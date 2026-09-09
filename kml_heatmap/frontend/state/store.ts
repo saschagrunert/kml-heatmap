@@ -62,12 +62,16 @@ export class AppStore {
   private listeners: Map<keyof StoreState, Listener<unknown>[]>;
   private batchDepth: number;
   private pendingOldValues: Map<keyof StoreState, unknown>;
+  private isNotifying: boolean;
+  private flushDepth: number;
 
   constructor(initial?: Partial<StoreState>) {
     this.state = { ...createDefaultState(), ...initial };
     this.listeners = new Map();
     this.batchDepth = 0;
     this.pendingOldValues = new Map();
+    this.isNotifying = false;
+    this.flushDepth = 0;
   }
 
   get<K extends keyof StoreState>(key: K): StoreState[K] {
@@ -78,7 +82,7 @@ export class AppStore {
     const oldVal = this.state[key];
     if (oldVal === value) return;
     this.state[key] = value;
-    if (this.batchDepth > 0) {
+    if (this.batchDepth > 0 || this.isNotifying) {
       if (!this.pendingOldValues.has(key)) {
         this.pendingOldValues.set(key, oldVal);
       }
@@ -89,19 +93,25 @@ export class AppStore {
 
   update<K extends keyof StoreState>(
     key: K,
-    fn: (prev: StoreState[K]) => StoreState[K]
+    fn: (prev: StoreState[K]) => StoreState[K],
   ): void {
     this.set(key, fn(this.state[key]));
   }
 
   notifyMutation<K extends keyof StoreState>(key: K): void {
     const val = this.state[key];
-    this.notify(key, val, val);
+    if (this.batchDepth > 0 || this.isNotifying) {
+      if (!this.pendingOldValues.has(key)) {
+        this.pendingOldValues.set(key, val);
+      }
+    } else {
+      this.notify(key, val, val);
+    }
   }
 
   subscribe<K extends keyof StoreState>(
     key: K,
-    fn: Listener<StoreState[K]>
+    fn: Listener<StoreState[K]>,
   ): () => void {
     if (!this.listeners.has(key)) {
       this.listeners.set(key, []);
@@ -131,27 +141,43 @@ export class AppStore {
   private notify<K extends keyof StoreState>(
     key: K,
     newVal: StoreState[K],
-    oldVal: StoreState[K]
+    oldVal: StoreState[K],
   ): void {
     const list = this.listeners.get(key);
     if (list) {
-      for (const fn of [...list]) {
-        (fn as Listener<StoreState[K]>)(newVal, oldVal);
+      const wasNotifying = this.isNotifying;
+      this.isNotifying = true;
+      try {
+        for (const fn of [...list]) {
+          (fn as Listener<StoreState[K]>)(newVal, oldVal);
+        }
+      } finally {
+        this.isNotifying = wasNotifying;
+        if (!this.isNotifying && this.pendingOldValues.size > 0) {
+          this.flush();
+        }
       }
     }
   }
 
   private flush(): void {
-    const pending = new Map(this.pendingOldValues);
-    this.pendingOldValues.clear();
-    for (const [key, oldVal] of pending) {
-      if (this.state[key] !== oldVal) {
-        this.notify(
-          key,
-          this.state[key],
-          oldVal as StoreState[keyof StoreState]
-        );
+    if (this.flushDepth > 10) return;
+    this.flushDepth++;
+    try {
+      const pending = new Map(this.pendingOldValues);
+      this.pendingOldValues.clear();
+      for (const [key, oldVal] of pending) {
+        const currentVal = this.state[key];
+        if (
+          currentVal !== oldVal ||
+          currentVal instanceof Set ||
+          (typeof currentVal === "object" && currentVal !== null)
+        ) {
+          this.notify(key, currentVal, oldVal as StoreState[keyof StoreState]);
+        }
       }
+    } finally {
+      this.flushDepth--;
     }
   }
 }

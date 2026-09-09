@@ -48,7 +48,7 @@ describe("ReplayManager", () => {
     window.KMLHeatmap = {
       formatTime: vi.fn(
         (t: number) =>
-          `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`
+          `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`,
       ),
       getColorForAltitude: vi.fn(() => "rgb(255, 0, 0)"),
       getColorForAirspeed: vi.fn(() => "rgb(0, 0, 255)"),
@@ -265,10 +265,10 @@ describe("ReplayManager", () => {
 
       // Should hide heatmap and altitude layers
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.heatmapLayer
+        mockApp.heatmapLayer,
       );
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.altitudeLayer
+        mockApp.altitudeLayer,
       );
     });
 
@@ -389,7 +389,7 @@ describe("ReplayManager", () => {
 
       expect(replayManager.state.segments.length).toBe(3);
       expect(replayManager.state.segments.every((s) => s.path_id === 1)).toBe(
-        true
+        true,
       );
     });
 
@@ -433,10 +433,10 @@ describe("ReplayManager", () => {
       replayManager.initializeReplay();
 
       expect(replayManager.state.colorMinSpeed).toBe(
-        mockApp.airspeedRange!.min
+        mockApp.airspeedRange!.min,
       );
       expect(replayManager.state.colorMaxSpeed).toBe(
-        mockApp.airspeedRange!.max
+        mockApp.airspeedRange!.max,
       );
     });
 
@@ -486,10 +486,10 @@ describe("ReplayManager", () => {
       replayManager.initializeReplay();
 
       expect(replayManager.state.colorMinSpeed).toBe(
-        mockApp.airspeedRange!.min
+        mockApp.airspeedRange!.min,
       );
       expect(replayManager.state.colorMaxSpeed).toBe(
-        mockApp.airspeedRange!.max
+        mockApp.airspeedRange!.max,
       );
     });
 
@@ -518,7 +518,7 @@ describe("ReplayManager", () => {
       expect(replayManager.state.layer).not.toBeNull();
       // replayLayer.addTo(map) is called, not map.addLayer(replayLayer)
       expect(replayManager.state.layer!.addTo).toHaveBeenCalledWith(
-        mockApp.map
+        mockApp.map,
       );
     });
 
@@ -554,7 +554,7 @@ describe("ReplayManager", () => {
       expect(mockApp.map!.setView).toHaveBeenCalledWith(
         [48.0, 16.0],
         16,
-        expect.objectContaining({ animate: true })
+        expect.objectContaining({ animate: true }),
       );
       expect(replayManager.state.lastZoom).toBe(16);
     });
@@ -567,7 +567,7 @@ describe("ReplayManager", () => {
 
       expect(mockApp.map!.panTo).toHaveBeenCalledWith(
         [48.0, 16.0],
-        expect.objectContaining({ animate: true })
+        expect.objectContaining({ animate: true }),
       );
     });
 
@@ -617,7 +617,7 @@ describe("ReplayManager", () => {
       replayManager.hideOtherLayersDuringReplay();
 
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.heatmapLayer
+        mockApp.heatmapLayer,
       );
     });
 
@@ -627,7 +627,7 @@ describe("ReplayManager", () => {
       replayManager.hideOtherLayersDuringReplay();
 
       expect(mockApp.map!.removeLayer).not.toHaveBeenCalledWith(
-        mockApp.heatmapLayer
+        mockApp.heatmapLayer,
       );
     });
 
@@ -637,7 +637,7 @@ describe("ReplayManager", () => {
       replayManager.hideOtherLayersDuringReplay();
 
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.altitudeLayer
+        mockApp.altitudeLayer,
       );
     });
 
@@ -647,7 +647,7 @@ describe("ReplayManager", () => {
       replayManager.hideOtherLayersDuringReplay();
 
       expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.airspeedLayer
+        mockApp.airspeedLayer,
       );
     });
 
@@ -669,11 +669,11 @@ describe("ReplayManager", () => {
       replayManager.hideOtherLayersDuringReplay();
 
       expect(
-        (document.getElementById("year-select") as HTMLSelectElement).disabled
+        (document.getElementById("year-select") as HTMLSelectElement).disabled,
       ).toBe(true);
       expect(
         (document.getElementById("aircraft-select") as HTMLSelectElement)
-          .disabled
+          .disabled,
       ).toBe(true);
 
       yearSelect.remove();
@@ -716,7 +716,7 @@ describe("ReplayManager", () => {
       replayManager.restoreLayerVisibility();
 
       expect(mockApp.map!.addLayer).not.toHaveBeenCalledWith(
-        mockApp.heatmapLayer
+        mockApp.heatmapLayer,
       );
     });
 
@@ -757,11 +757,11 @@ describe("ReplayManager", () => {
       replayManager.restoreLayerVisibility();
 
       expect(
-        (document.getElementById("year-select") as HTMLSelectElement).disabled
+        (document.getElementById("year-select") as HTMLSelectElement).disabled,
       ).toBe(false);
       expect(
         (document.getElementById("aircraft-select") as HTMLSelectElement)
-          .disabled
+          .disabled,
       ).toBe(false);
 
       yearSelect.remove();
@@ -800,7 +800,7 @@ describe("ReplayManager", () => {
       expect(replayManager.state.playing).toBe(true);
       expect(mockDomElements["replay-play-btn"].style.display).toBe("none");
       expect(mockDomElements["replay-pause-btn"].style.display).toBe(
-        "inline-block"
+        "inline-block",
       );
     });
 
@@ -826,7 +826,7 @@ describe("ReplayManager", () => {
       replayManager.playReplay();
 
       expect(
-        replayManager.state.airplaneMarker!.setLatLng
+        replayManager.state.airplaneMarker!.setLatLng,
       ).toHaveBeenCalledWith([48.0, 16.0]);
     });
 
@@ -839,7 +839,7 @@ describe("ReplayManager", () => {
       expect(mockApp.map!.setView).toHaveBeenCalledWith(
         [48.0, 16.0],
         16,
-        expect.objectContaining({ animate: true })
+        expect.objectContaining({ animate: true }),
       );
     });
 
@@ -897,7 +897,7 @@ describe("ReplayManager", () => {
 
       expect(replayManager.state.playing).toBe(false);
       expect(mockDomElements["replay-play-btn"].style.display).toBe(
-        "inline-block"
+        "inline-block",
       );
       expect(mockDomElements["replay-pause-btn"].style.display).toBe("none");
     });
@@ -955,7 +955,7 @@ describe("ReplayManager", () => {
       replayManager.stopReplay();
 
       expect(
-        replayManager.state.airplaneMarker!.setLatLng
+        replayManager.state.airplaneMarker!.setLatLng,
       ).toHaveBeenCalledWith([48.0, 16.0]);
     });
   });
@@ -1204,14 +1204,14 @@ describe("ReplayManager", () => {
 
     it("adds airplane marker back to map if it was removed", () => {
       (mockApp.map!.hasLayer as ReturnType<typeof vi.fn>).mockReturnValue(
-        false
+        false,
       );
       replayManager.state.currentTime = 30;
 
       replayManager.updateReplayDisplay();
 
       expect(replayManager.state.airplaneMarker!.addTo).toHaveBeenCalledWith(
-        mockApp.map
+        mockApp.map,
       );
     });
 
@@ -1377,7 +1377,7 @@ describe("ReplayManager", () => {
 
       // Should not call bindPopup since there are no segments to display
       expect(
-        replayManager.state.airplaneMarker!.bindPopup
+        replayManager.state.airplaneMarker!.bindPopup,
       ).not.toHaveBeenCalled();
     });
 

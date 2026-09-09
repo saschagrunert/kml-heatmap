@@ -117,7 +117,7 @@ describe("statistics calculations", () => {
       const result = filterPaths(mockPathInfo, "all", "D-EAGJ");
       expect(result).toHaveLength(2);
       expect(result.every((p) => p.aircraft_registration === "D-EAGJ")).toBe(
-        true
+        true,
       );
     });
 

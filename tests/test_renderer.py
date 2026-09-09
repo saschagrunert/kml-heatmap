@@ -31,7 +31,7 @@ class TestEscapeJsString:
         assert result == 'say \\"hi\\"'
 
     def test_escapes_single_quotes(self):
-        """Test that single quotes are escaped for embedding in JS single-quoted strings."""
+        """Test that single quotes are escaped for JS strings."""
         result = _escape_js_string("it's")
         assert "\\'" in result
 

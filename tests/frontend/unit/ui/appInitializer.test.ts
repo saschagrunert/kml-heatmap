@@ -196,7 +196,7 @@ function setupMockKMLHeatmap(): void {
       total_distance_nm: 270,
     })),
     ddToDms: vi.fn((coord: number, isLat: boolean) =>
-      isLat ? `${coord.toFixed(2)}N` : `${coord.toFixed(2)}E`
+      isLat ? `${coord.toFixed(2)}N` : `${coord.toFixed(2)}E`,
     ),
     formatTime: vi.fn(() => "02:30"),
     findMinMax: vi.fn(() => ({ min: 0, max: 100 })),
@@ -266,7 +266,7 @@ async function initializeApp(
   app: MapApp,
   airports = defaultAirports,
   metadata = defaultMetadata as typeof defaultMetadata | null,
-  fullResData = defaultFullResData as typeof defaultFullResData | null
+  fullResData = defaultFullResData as typeof defaultFullResData | null,
 ): Promise<void> {
   mockDataManagerInstance.loadAirports.mockResolvedValue(airports);
   mockDataManagerInstance.loadMetadata.mockResolvedValue(metadata);
@@ -311,7 +311,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app);
 
     const yearSelect = document.getElementById(
-      "year-select"
+      "year-select",
     ) as HTMLSelectElement;
     // Should have "All Years" + one option per year
     expect(yearSelect.options.length).toBe(3); // "all" + 2024 + 2025
@@ -336,7 +336,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app);
 
     const yearSelect = document.getElementById(
-      "year-select"
+      "year-select",
     ) as HTMLSelectElement;
     expect(yearSelect.value).toBe("2024");
     expect(app.selectedYear).toBe("2024");
@@ -360,7 +360,7 @@ describe("MapApp - loadInitialData", () => {
     // loadInitialData calls the standalone createAirportMarkers(app, airports)
     // Verify side effects: markers should be stored in app.airportMarkers
     expect(Object.keys(app.airportMarkers)).toHaveLength(
-      defaultAirports.length
+      defaultAirports.length,
     );
     expect(app.airportMarkers["Frankfurt EDDF"]).toBeDefined();
     expect(app.airportMarkers["Munich EDDM"]).toBeDefined();
@@ -377,7 +377,7 @@ describe("MapApp - loadInitialData", () => {
 
     expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith(
       "data",
-      app.selectedYear
+      app.selectedYear,
     );
     expect(app.fullPathInfo).toEqual(defaultFullResData.path_info);
     expect(app.fullPathSegments).toEqual(defaultFullResData.path_segments);
@@ -390,7 +390,7 @@ describe("MapApp - loadInitialData", () => {
     mockDataManagerInstance.loadAirports.mockResolvedValue(defaultAirports);
     mockDataManagerInstance.loadMetadata.mockResolvedValue(defaultMetadata);
     mockDataManagerInstance.loadData.mockRejectedValue(
-      new Error("Network error")
+      new Error("Network error"),
     );
     mockDataManagerInstance.updateLayers.mockResolvedValue(undefined);
 
@@ -398,7 +398,7 @@ describe("MapApp - loadInitialData", () => {
 
     expect(logError).toHaveBeenCalledWith(
       "Failed to load full path data:",
-      expect.any(Error)
+      expect.any(Error),
     );
     // App should still continue
     expect(mockFilterManagerInstance.updateAircraftDropdown).toHaveBeenCalled();
@@ -438,7 +438,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app, defaultAirports, metadataNoStats as any);
 
     expect(
-      window.KMLHeatmap.calculateFilteredStatistics
+      window.KMLHeatmap.calculateFilteredStatistics,
     ).not.toHaveBeenCalled();
   });
 
@@ -460,7 +460,7 @@ describe("MapApp - loadInitialData", () => {
 
     expect(mockLayerManagerInstance.updateAirspeedLegend).toHaveBeenCalledWith(
       0,
-      150
+      150,
     );
   });
 
@@ -474,7 +474,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app, defaultAirports, metadataNoTiming);
 
     const airspeedBtn = document.getElementById(
-      "airspeed-btn"
+      "airspeed-btn",
     ) as HTMLButtonElement;
     expect(airspeedBtn.disabled).toBe(true);
     expect(airspeedBtn.style.opacity).toBe("0.3");
@@ -484,7 +484,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app);
 
     const airspeedBtn = document.getElementById(
-      "airspeed-btn"
+      "airspeed-btn",
     ) as HTMLButtonElement;
     expect(airspeedBtn.disabled).toBe(false);
   });
@@ -498,7 +498,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app);
 
     const airspeedBtn = document.getElementById(
-      "airspeed-btn"
+      "airspeed-btn",
     ) as HTMLButtonElement;
     // jsdom normalizes "1.0" to "1"
     expect(Number(airspeedBtn.style.opacity)).toBe(1.0);
@@ -509,7 +509,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app);
 
     const airspeedBtn = document.getElementById(
-      "airspeed-btn"
+      "airspeed-btn",
     ) as HTMLButtonElement;
     expect(Number(airspeedBtn.style.opacity)).toBe(0.5);
   });
@@ -524,7 +524,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app);
 
     expect(
-      mockAirportManagerInstance.updateAirportMarkerSizes
+      mockAirportManagerInstance.updateAirportMarkerSizes,
     ).toHaveBeenCalled();
   });
 
@@ -605,7 +605,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app);
 
     expect(
-      mockReplayManagerInstance.updateReplayButtonState
+      mockReplayManagerInstance.updateReplayButtonState,
     ).toHaveBeenCalled();
   });
 
@@ -613,7 +613,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app);
 
     expect(
-      mockReplayManagerInstance.updateReplayButtonState
+      mockReplayManagerInstance.updateReplayButtonState,
     ).not.toHaveBeenCalled();
   });
 
@@ -641,7 +641,7 @@ describe("MapApp - loadInitialData", () => {
 
     // Should not crash, year dropdown should only have default option
     const yearSelect = document.getElementById(
-      "year-select"
+      "year-select",
     ) as HTMLSelectElement;
     expect(yearSelect.options.length).toBe(1);
     expect(app.fullStats).toBeNull();
@@ -657,7 +657,7 @@ describe("MapApp - loadInitialData", () => {
     await initializeApp(app, defaultAirports, metadataNoYears as any);
 
     const yearSelect = document.getElementById(
-      "year-select"
+      "year-select",
     ) as HTMLSelectElement;
     expect(yearSelect.options.length).toBe(1);
   });
@@ -802,7 +802,7 @@ describe("MapApp - createAirportMarkers", () => {
     // Verify click handler was registered
     expect(markerInstance.on).toHaveBeenCalledWith(
       "click",
-      expect.any(Function)
+      expect.any(Function),
     );
 
     // Invoke the click handler
@@ -810,7 +810,7 @@ describe("MapApp - createAirportMarkers", () => {
     clickHandler({});
 
     expect(
-      (app.pathSelection as any).selectPathsByAirport
+      (app.pathSelection as any).selectPathsByAirport,
     ).toHaveBeenCalledWith("Frankfurt EDDF");
   });
 
@@ -834,7 +834,7 @@ describe("MapApp - createAirportMarkers", () => {
     clickHandler({});
 
     expect(
-      (app.pathSelection as any).selectPathsByAirport
+      (app.pathSelection as any).selectPathsByAirport,
     ).not.toHaveBeenCalled();
   });
 

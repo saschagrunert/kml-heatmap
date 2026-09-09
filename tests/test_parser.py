@@ -1063,7 +1063,8 @@ class TestParseCharterwareKML:
             <styleUrl>#4</styleUrl>
             <LineString id="2">
                 <coordinates>
-                    16.252537,47.96571,232.800003 16.252432,47.965717,231.800003 16.252419,47.96571,231.800003
+                    16.252537,47.96571,232.800003 16.252432,47.965717,231.800003
+                    16.252419,47.96571,231.800003
                 </coordinates>
                 <extrude>1</extrude>
                 <altitudeMode>absolute</altitudeMode>
@@ -1311,7 +1312,7 @@ class TestAirportExtractionFromRoute:
         try:
             _coords, _paths, metadata = parse_kml_coordinates(temp_path)
 
-            # Should extract route and format as "DEPARTURE - ARRIVAL" with full names from OurAirports
+            # Should extract route and format as "DEPARTURE - ARRIVAL"
             assert (
                 metadata[0].get("airport_name") == "EDDF Frankfurt Main - EDDM Munich"
             )
@@ -1424,7 +1425,7 @@ class TestCacheCleanupErrors:
     """Tests for cache cleanup error handling."""
 
     def test_old_cache_removal_with_permission_error(self):
-        """Test that OSError during old cache removal is handled (covers lines 129-130)."""
+        """Test that OSError during old cache removal is handled."""
         import tempfile
 
         from kml_heatmap.parser import get_cache_key

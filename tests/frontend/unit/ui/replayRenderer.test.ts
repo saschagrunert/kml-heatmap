@@ -47,13 +47,13 @@ describe("ReplayRenderer", () => {
         el.id = id;
         document.body.appendChild(el);
         mockDomElements[id] = el;
-      }
+      },
     );
 
     window.KMLHeatmap = {
       formatTime: vi.fn(
         (t: number) =>
-          `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`
+          `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`,
       ),
       getColorForAltitude: vi.fn(() => "rgb(255, 0, 0)"),
       getColorForAirspeed: vi.fn(() => "rgb(0, 0, 255)"),
@@ -76,7 +76,7 @@ describe("ReplayRenderer", () => {
     };
 
     renderer = new ReplayRenderer(
-      mockApp as unknown as ConstructorParameters<typeof ReplayRenderer>[0]
+      mockApp as unknown as ConstructorParameters<typeof ReplayRenderer>[0],
     );
   });
 
@@ -87,7 +87,7 @@ describe("ReplayRenderer", () => {
       renderer.updateAirplanePopup(
         mockReplayManager as unknown as Parameters<
           typeof renderer.updateAirplanePopup
-        >[0]
+        >[0],
       );
     });
 
@@ -98,7 +98,7 @@ describe("ReplayRenderer", () => {
       renderer.updateAirplanePopup(
         mockReplayManager as unknown as Parameters<
           typeof renderer.updateAirplanePopup
-        >[0]
+        >[0],
       );
       expect(markerObj.openPopup).not.toHaveBeenCalled();
     });
@@ -117,7 +117,7 @@ describe("ReplayRenderer", () => {
       renderer.updateAirplanePopup(
         mockReplayManager as unknown as Parameters<
           typeof renderer.updateAirplanePopup
-        >[0]
+        >[0],
       );
       expect(markerObj.bindPopup).toHaveBeenCalled();
       expect(markerObj.openPopup).toHaveBeenCalled();
@@ -136,7 +136,7 @@ describe("ReplayRenderer", () => {
       renderer.updateAirplanePopup(
         mockReplayManager as unknown as Parameters<
           typeof renderer.updateAirplanePopup
-        >[0]
+        >[0],
       );
       expect(markerObj.openPopup).toHaveBeenCalled();
     });
@@ -149,7 +149,7 @@ describe("ReplayRenderer", () => {
       renderer.updateAirplanePopup(
         mockReplayManager as unknown as Parameters<
           typeof renderer.updateAirplanePopup
-        >[0]
+        >[0],
       );
       expect(markerObj.openPopup).not.toHaveBeenCalled();
     });
@@ -159,7 +159,7 @@ describe("ReplayRenderer", () => {
       const markerObj = L.marker([0, 0]);
       const mockPopup = { setContent: vi.fn() };
       (markerObj.getPopup as ReturnType<typeof vi.fn>).mockReturnValue(
-        mockPopup
+        mockPopup,
       );
       mockReplayManager.state.airplaneMarker = markerObj;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
@@ -168,7 +168,7 @@ describe("ReplayRenderer", () => {
       renderer.updateAirplanePopup(
         mockReplayManager as unknown as Parameters<
           typeof renderer.updateAirplanePopup
-        >[0]
+        >[0],
       );
       expect(mockPopup.setContent).toHaveBeenCalled();
       expect(markerObj.bindPopup).not.toHaveBeenCalled();
@@ -181,7 +181,7 @@ describe("ReplayRenderer", () => {
         mockReplayManager as unknown as Parameters<
           typeof renderer.updateDisplay
         >[0],
-        isManualSeek
+        isManualSeek,
       );
     }
 
@@ -190,7 +190,7 @@ describe("ReplayRenderer", () => {
       mockReplayManager.state.maxTime = 300;
       callUpdateDisplay();
       expect(mockDomElements["replay-time-display"]!.textContent).toContain(
-        "1:05"
+        "1:05",
       );
     });
 
@@ -270,7 +270,7 @@ describe("ReplayRenderer", () => {
       expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
         150,
         mockReplayManager.state.colorMinSpeed,
-        mockReplayManager.state.colorMaxSpeed
+        mockReplayManager.state.colorMaxSpeed,
       );
     });
 
@@ -300,7 +300,7 @@ describe("ReplayRenderer", () => {
 
       const markerObj = L.marker([0, 0]);
       (markerObj.getElement as ReturnType<typeof vi.fn>).mockReturnValue(
-        iconElement
+        iconElement,
       );
       mockReplayManager.state.airplaneMarker = markerObj;
       mockReplayManager.state.currentTime = 5;
@@ -361,7 +361,7 @@ describe("ReplayRenderer", () => {
       callUpdateDisplay();
       expect(mockMap.setZoom).toHaveBeenCalledWith(
         11,
-        expect.objectContaining({ animate: true })
+        expect.objectContaining({ animate: true }),
       );
     });
 

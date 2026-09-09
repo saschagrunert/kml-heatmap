@@ -165,7 +165,7 @@ def generate_kml_file(
         <coordinates>
 """
 
-    for i, (lat, lon, alt) in enumerate(coords):
+    for _i, (lat, lon, alt) in enumerate(coords):
         # Convert altitude from feet to meters
         alt_meters = alt * 0.3048
         kml_content += f"          {lon},{lat},{alt_meters}\n"

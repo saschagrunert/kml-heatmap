@@ -17,7 +17,7 @@ interface SegmentClickPosition {
  */
 export async function findSegmentFarFromAirports(
   page: Page,
-  options?: { includePathId?: boolean }
+  options?: { includePathId?: boolean },
 ): Promise<SegmentClickPosition | null> {
   const includePathId = options?.includePathId ?? false;
 
@@ -51,7 +51,7 @@ export async function findSegmentFarFromAirports(
     });
 
     const point = app.map.latLngToContainerPoint(
-      L.latLng(best.coord[0], best.coord[1])
+      L.latLng(best.coord[0], best.coord[1]),
     );
     return {
       x: point.x,
@@ -68,7 +68,7 @@ export async function findSegmentFarFromAirports(
   const settled = await page.evaluate((cp) => {
     const app = (window as any).mapApp;
     const point = app.map.latLngToContainerPoint(
-      L.latLng(cp.coord[0], cp.coord[1])
+      L.latLng(cp.coord[0], cp.coord[1]),
     );
     return { x: point.x, y: point.y };
   }, pos);
@@ -82,7 +82,7 @@ export async function waitForPathData(page: Page): Promise<void> {
   await expect(page.locator("#altitude-btn")).toHaveCSS("opacity", "1");
   await page.waitForFunction(
     () => (window as any).mapApp?.fullPathInfo?.length > 0,
-    { timeout: 15000 }
+    { timeout: 15000 },
   );
 }
 
@@ -104,11 +104,11 @@ export async function selectPathForReplay(page: Page): Promise<number> {
 
   await page.evaluate(
     (id) => (window as any).mapApp.togglePathSelection(String(id)),
-    pathId
+    pathId,
   );
   await page.waitForFunction(
     () => (window as any).mapApp.selectedPathIds.size === 1,
-    { timeout: 5000 }
+    { timeout: 5000 },
   );
 
   return pathId;

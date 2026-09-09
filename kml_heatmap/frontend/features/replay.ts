@@ -51,12 +51,12 @@ export interface ValidationResult {
  */
 export function prepareReplaySegments(
   segments: PathSegment[],
-  pathId: number
+  pathId: number,
 ): PathSegment[] {
   // Filter segments that belong to selected path and have time data
   const replaySegments = segments.filter(
     (seg) =>
-      seg.path_id === pathId && seg.time !== undefined && seg.time !== null
+      seg.path_id === pathId && seg.time !== undefined && seg.time !== null,
   );
 
   // Sort by time
@@ -98,7 +98,7 @@ export function calculateTimeRange(segments: PathSegment[]): {
  */
 export function findSegmentsAtTime(
   segments: PathSegment[],
-  currentTime: number
+  currentTime: number,
 ): SegmentInfo {
   if (segments.length === 0) {
     return { current: null, next: null, index: -1 };
@@ -131,7 +131,7 @@ export function findSegmentsAtTime(
 export function interpolatePosition(
   seg1: PathSegment,
   seg2: PathSegment | null,
-  currentTime: number
+  currentTime: number,
 ): InterpolatedPosition {
   if (!seg2 || !seg1.coords) {
     // At end of path, use last segment's end point
@@ -176,7 +176,7 @@ export function interpolatePosition(
 export function calculateSmoothedBearing(
   segments: PathSegment[],
   currentIdx: number,
-  lookAhead: number = 5
+  lookAhead: number = 5,
 ): number | null {
   if (currentIdx < 0 || currentIdx >= segments.length) {
     return null;
@@ -194,7 +194,7 @@ export function calculateSmoothedBearing(
         coords[0][0],
         coords[0][1],
         coords[1][0],
-        coords[1][1]
+        coords[1][1],
       );
     }
     return null;
@@ -209,7 +209,7 @@ export function calculateSmoothedBearing(
     currentSeg.coords[1][0],
     currentSeg.coords[1][1],
     futureSeg.coords[0][0],
-    futureSeg.coords[0][1]
+    futureSeg.coords[0][1],
   );
 }
 
@@ -228,7 +228,7 @@ export function calculateAutoZoom(
     maxZoom?: number;
     cruiseAltitude?: number;
     cruiseSpeed?: number;
-  } = {}
+  } = {},
 ): number {
   const {
     minZoom = 10,
@@ -262,7 +262,7 @@ export function calculateAutoZoom(
 export function shouldRecenter(
   position: { lat: number; lon: number },
   bounds: MapBounds,
-  margin: number = 0.2
+  margin: number = 0.2,
 ): boolean {
   const latRange = bounds.north - bounds.south;
   const lonRange = bounds.east - bounds.west;
@@ -287,7 +287,7 @@ export function shouldRecenter(
  */
 export function calculateReplayProgress(
   currentTime: number,
-  maxTime: number
+  maxTime: number,
 ): number {
   if (maxTime === 0) return 0;
   return Math.min(100, (currentTime / maxTime) * 100);
@@ -307,7 +307,7 @@ export function validateReplayData(segments: PathSegment[]): ValidationResult {
   }
 
   const segmentsWithTime = segments.filter(
-    (s) => s.time !== undefined && s.time !== null
+    (s) => s.time !== undefined && s.time !== null,
   );
 
   if (segmentsWithTime.length === 0) {

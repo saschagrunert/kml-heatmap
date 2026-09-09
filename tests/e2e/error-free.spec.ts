@@ -70,10 +70,10 @@ test.describe("Error-Free Interactions", () => {
 
       await page.evaluate(
         (id) => (window as any).mapApp.togglePathSelection(String(id)),
-        pathId
+        pathId,
       );
       await page.waitForFunction(
-        () => (window as any).mapApp.selectedPathIds.size === 0
+        () => (window as any).mapApp.selectedPathIds.size === 0,
       );
 
       expect(pageErrors).toHaveLength(0);
@@ -129,7 +129,7 @@ test.describe("Error-Free Interactions", () => {
       await page.waitForTimeout(300);
 
       const isVisible = await page.evaluate(
-        () => (window as any).mapApp.heatmapVisible
+        () => (window as any).mapApp.heatmapVisible,
       );
       expect(isVisible).toBe(true);
       expect(pageErrors).toHaveLength(0);
@@ -143,7 +143,7 @@ test.describe("Error-Free Interactions", () => {
       await page.waitForTimeout(300);
 
       const isVisible = await page.evaluate(
-        () => (window as any).mapApp.heatmapVisible
+        () => (window as any).mapApp.heatmapVisible,
       );
       expect(isVisible).toBe(true);
       expect(pageErrors).toHaveLength(0);
@@ -154,7 +154,7 @@ test.describe("Error-Free Interactions", () => {
       await expect(page.locator("#altitude-btn")).toHaveCSS("opacity", "1");
       await page.waitForFunction(
         () => (window as any).mapApp?.fullPathInfo?.length > 0,
-        { timeout: 15000 }
+        { timeout: 15000 },
       );
 
       const initialPathCount = await page.evaluate(() => {
@@ -169,7 +169,7 @@ test.describe("Error-Free Interactions", () => {
       await page.waitForTimeout(300);
 
       const altVisible = await page.evaluate(
-        () => (window as any).mapApp.altitudeVisible
+        () => (window as any).mapApp.altitudeVisible,
       );
       expect(altVisible).toBe(true);
 
@@ -193,7 +193,7 @@ test.describe("Error-Free Interactions", () => {
       await page.waitForTimeout(300);
 
       const airspeedVisible = await page.evaluate(
-        () => (window as any).mapApp.airspeedVisible
+        () => (window as any).mapApp.airspeedVisible,
       );
       expect(airspeedVisible).toBe(true);
       expect(pageErrors).toHaveLength(0);
@@ -212,12 +212,12 @@ test.describe("Error-Free Interactions", () => {
       await page.waitForTimeout(500);
 
       const afterZoom = await page.evaluate(() =>
-        (window as any).mapApp.map.getZoom()
+        (window as any).mapApp.map.getZoom(),
       );
       expect(afterZoom).toBe(12);
 
       const state = await page.evaluate(() =>
-        JSON.parse(localStorage.getItem("kml-heatmap-state") || "{}")
+        JSON.parse(localStorage.getItem("kml-heatmap-state") || "{}"),
       );
       expect(state.zoom).toBe(12);
     });
@@ -239,7 +239,7 @@ test.describe("Error-Free Interactions", () => {
       await page.waitForTimeout(500);
 
       const zoom = await page.evaluate(() =>
-        (window as any).mapApp.map.getZoom()
+        (window as any).mapApp.map.getZoom(),
       );
       expect(zoom).toBe(12);
     });

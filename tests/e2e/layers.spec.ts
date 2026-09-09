@@ -130,7 +130,7 @@ test.describe("Layers", () => {
     page,
   }) => {
     const hasApiKey = await page.evaluate(
-      () => !!(window as any).MAP_CONFIG?.openaipApiKey
+      () => !!(window as any).MAP_CONFIG?.openaipApiKey,
     );
 
     if (hasApiKey) {
@@ -140,7 +140,7 @@ test.describe("Layers", () => {
 
   test("aviation button toggles aviation layer", async ({ page }) => {
     const hasApiKey = await page.evaluate(
-      () => !!(window as any).MAP_CONFIG?.openaipApiKey
+      () => !!(window as any).MAP_CONFIG?.openaipApiKey,
     );
     if (!hasApiKey) return;
 
@@ -153,7 +153,7 @@ test.describe("Layers", () => {
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "1");
     const isVisible = await page.evaluate(
-      () => (window as any).mapApp.aviationVisible
+      () => (window as any).mapApp.aviationVisible,
     );
     expect(isVisible).toBe(true);
 
@@ -165,7 +165,7 @@ test.describe("Layers", () => {
   test("airport marker sizes change with zoom level", async ({ page }) => {
     // Wait for markers and initial map load to settle
     await expect(
-      page.locator(".airport-marker-container").first()
+      page.locator(".airport-marker-container").first(),
     ).toBeAttached({ timeout: 15000 });
     await page.waitForTimeout(500);
 
@@ -179,7 +179,7 @@ test.describe("Layers", () => {
 
     await page.waitForFunction(
       () => document.getElementById("map")?.dataset.zoomSize === "large",
-      { timeout: 5000 }
+      { timeout: 5000 },
     );
 
     // Zoom to level 6 (small)
@@ -192,7 +192,7 @@ test.describe("Layers", () => {
 
     await page.waitForFunction(
       () => document.getElementById("map")?.dataset.zoomSize === "small",
-      { timeout: 5000 }
+      { timeout: 5000 },
     );
   });
 
@@ -221,7 +221,7 @@ test.describe("Layers", () => {
   test("airport labels hidden at low zoom", async ({ page }) => {
     // Wait for markers and initial map load to settle
     await expect(
-      page.locator(".airport-marker-container").first()
+      page.locator(".airport-marker-container").first(),
     ).toBeAttached({ timeout: 15000 });
     await page.waitForTimeout(500);
 
@@ -236,7 +236,7 @@ test.describe("Layers", () => {
     await page.waitForFunction(
       () =>
         document.getElementById("map")?.classList.contains("zoom-hide-labels"),
-      { timeout: 5000 }
+      { timeout: 5000 },
     );
 
     // Zoom in above level 5
@@ -250,7 +250,7 @@ test.describe("Layers", () => {
     await page.waitForFunction(
       () =>
         !document.getElementById("map")?.classList.contains("zoom-hide-labels"),
-      { timeout: 5000 }
+      { timeout: 5000 },
     );
   });
 });

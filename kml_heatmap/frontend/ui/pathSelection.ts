@@ -25,17 +25,14 @@ export class PathSelection {
     if (this.app.selectedPathIds.size === 0 && this.app.isolateSelection) {
       this.app.isolateSelection = false;
       this.updateIsolateButton();
-      // Rebuild heatmap since isolate mode changed
+      this.app.dataManager.updateLayers().catch(logError);
+    } else if (this.app.isolateSelection) {
+      this.updateIsolateButton();
+      // updateLayers calls redrawPaths, so skip separate redrawVisiblePaths
       this.app.dataManager.updateLayers().catch(logError);
     } else {
       this.updateIsolateButton();
-
       this.redrawVisiblePaths();
-
-      // If isolate mode is active, rebuild heatmap for the new selection
-      if (this.app.isolateSelection) {
-        this.app.dataManager.updateLayers().catch(logError);
-      }
     }
 
     this.app.replayManager.updateReplayButtonState();
@@ -51,11 +48,11 @@ export class PathSelection {
     }
 
     this.updateIsolateButton();
-    this.redrawVisiblePaths();
 
-    // If isolate mode is active, rebuild heatmap for the new selection
     if (this.app.isolateSelection) {
       this.app.dataManager.updateLayers().catch(logError);
+    } else {
+      this.redrawVisiblePaths();
     }
 
     this.app.replayManager.updateReplayButtonState();
@@ -69,7 +66,6 @@ export class PathSelection {
     if (this.app.isolateSelection) {
       this.app.isolateSelection = false;
       this.updateIsolateButton();
-      // Rebuild heatmap since isolate mode changed
       this.app.dataManager.updateLayers().catch(logError);
     } else {
       this.updateIsolateButton();
@@ -108,16 +104,16 @@ export class PathSelection {
 
     if (this.app.isolateSelection) {
       btn.style.opacity = "1.0";
-      btn.style.borderColor = "#4facfe";
-      btn.style.backgroundColor = "#1a3a5c";
+      btn.style.borderColor = "var(--color-accent-blue)";
+      btn.style.backgroundColor = "var(--color-bg-secondary)";
     } else if (hasSelection) {
       btn.style.opacity = "1.0";
-      btn.style.borderColor = "#555";
-      btn.style.backgroundColor = "#2b2b2b";
+      btn.style.borderColor = "var(--color-border)";
+      btn.style.backgroundColor = "var(--color-bg-secondary)";
     } else {
       btn.style.opacity = "0.5";
-      btn.style.borderColor = "#555";
-      btn.style.backgroundColor = "#2b2b2b";
+      btn.style.borderColor = "var(--color-border)";
+      btn.style.backgroundColor = "var(--color-bg-secondary)";
     }
   }
 }

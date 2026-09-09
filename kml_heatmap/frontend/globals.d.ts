@@ -28,7 +28,7 @@ declare global {
   namespace L {
     function heatLayer(
       latlngs: [number, number][] | [number, number, number][],
-      options?: HeatmapOptions
+      options?: HeatmapOptions,
     ): HeatmapLayer;
   }
 

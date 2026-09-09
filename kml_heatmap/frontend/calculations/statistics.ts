@@ -30,7 +30,7 @@ import type {
 export function filterPaths(
   pathInfo: PathInfo[],
   year: string,
-  aircraft: string
+  aircraft: string,
 ): PathInfo[] {
   return pathInfo.filter(function (path) {
     // Apply year filter
@@ -104,7 +104,7 @@ export function aggregateAircraft(pathInfo: PathInfo[]): AircraftAggregate[] {
  */
 export function filterSegmentsByPaths(
   segments: PathSegment[],
-  pathInfo: PathInfo[]
+  pathInfo: PathInfo[],
 ): PathSegment[] {
   const pathIds = new Set(pathInfo.map((p) => p.id));
   return segments.filter(function (segment) {
@@ -241,7 +241,7 @@ export function calculateLongestFlight(segments: PathSegment[]): number {
  */
 export function calculateFlightTime(
   segments: PathSegment[],
-  pathInfo: PathInfo[]
+  pathInfo: PathInfo[],
 ): number {
   let totalSeconds = 0;
   const pathIds = new Set(pathInfo.map((p) => p.id));
@@ -356,7 +356,7 @@ export function calculateFilteredStatistics(options: {
       seg.altitude_m &&
       seg.altitude_m > CRUISE_ALTITUDE_THRESHOLD_M &&
       seg.groundspeed_knots &&
-      seg.groundspeed_knots > 0
+      seg.groundspeed_knots > 0,
   );
 
   // Calculate weighted average speed (distance/time) instead of simple average
@@ -404,7 +404,7 @@ export function calculateFilteredStatistics(options: {
       }
     });
     const mostCommonBucket = Object.entries(altitudeBuckets).sort(
-      (a, b) => b[1] - a[1]
+      (a, b) => b[1] - a[1],
     )[0];
     if (mostCommonBucket) {
       mostCommonCruiseAltitudeFt = Number(mostCommonBucket[0]);

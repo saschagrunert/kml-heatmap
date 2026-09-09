@@ -13,7 +13,10 @@ def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
         prog="kml-heatmap",
-        description="Create interactive heatmap visualizations from KML files with altitude profiles.",
+        description=(
+            "Create interactive heatmap visualizations"
+            " from KML files with altitude profiles."
+        ),
         epilog="""
 examples:
   %(prog)s flight.kml

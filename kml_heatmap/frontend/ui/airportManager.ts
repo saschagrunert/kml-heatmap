@@ -17,7 +17,7 @@ export class AirportManager {
     return window.KMLHeatmap.calculateAirportFlightCounts(
       this.app.fullPathInfo ?? [],
       this.app.selectedYear,
-      this.app.selectedAircraft
+      this.app.selectedAircraft,
     );
   }
 

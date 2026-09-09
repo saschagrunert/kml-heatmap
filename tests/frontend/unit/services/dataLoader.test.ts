@@ -41,7 +41,7 @@ describe("loadScript", () => {
       });
 
     await expect(loadScript("bad.js")).rejects.toThrow(
-      "Failed to load script: bad.js"
+      "Failed to load script: bad.js",
     );
 
     appendChildSpy.mockRestore();

@@ -188,7 +188,7 @@ describe("LayerManager", () => {
       expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
         3000,
         0,
-        5000
+        5000,
       );
     });
 
@@ -201,7 +201,7 @@ describe("LayerManager", () => {
       expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
         3000,
         3000,
-        3000
+        3000,
       );
     });
 
@@ -307,7 +307,7 @@ describe("LayerManager", () => {
       expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
         3000,
         0,
-        5000
+        5000,
       );
     });
   });
@@ -333,7 +333,7 @@ describe("LayerManager", () => {
       expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
         100,
         0,
-        200
+        200,
       );
     });
 
@@ -346,7 +346,7 @@ describe("LayerManager", () => {
       expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
         100,
         100,
-        100
+        100,
       );
     });
 
@@ -437,7 +437,7 @@ describe("LayerManager", () => {
       expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
         100,
         100,
-        100
+        100,
       );
     });
 
@@ -451,7 +451,7 @@ describe("LayerManager", () => {
       expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
         100,
         0,
-        200
+        200,
       );
     });
   });
@@ -517,7 +517,7 @@ describe("LayerManager", () => {
       expect(polylineInstance).toBeDefined();
       expect(polylineInstance.bindTooltip).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ sticky: true })
+        expect.objectContaining({ sticky: true }),
       );
     });
 
@@ -541,7 +541,7 @@ describe("LayerManager", () => {
 
       const polylineInstance = (L.polyline as any).mock.results[0]?.value;
       const clickHandler = polylineInstance.on.mock.calls.find(
-        (c: any[]) => c[0] === "click"
+        (c: any[]) => c[0] === "click",
       )?.[1];
       expect(clickHandler).toBeDefined();
 
@@ -568,7 +568,7 @@ describe("LayerManager", () => {
 
       const polylineInstance = (L.polyline as any).mock.results[0]?.value;
       const clickHandler = polylineInstance.on.mock.calls.find(
-        (c: any[]) => c[0] === "click"
+        (c: any[]) => c[0] === "click",
       )?.[1];
       expect(clickHandler).toBeDefined();
 

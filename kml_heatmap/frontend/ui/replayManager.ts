@@ -113,7 +113,7 @@ export class ReplayManager {
         }
 
         const autoZoomBtn = domCache.get(
-          "replay-autozoom-btn"
+          "replay-autozoom-btn",
         ) as HTMLButtonElement | null;
         if (autoZoomBtn) {
           autoZoomBtn.style.opacity = this.state.autoZoom ? "1.0" : "0.5";
@@ -157,7 +157,7 @@ export class ReplayManager {
     if (!this.app.fullPathSegments) {
       showToast(
         "No flight data available for replay. Please wait for data to load or refresh the page.",
-        "error"
+        "error",
       );
       return false;
     }
@@ -195,7 +195,7 @@ export class ReplayManager {
     if (!this.app.currentData?.path_segments) return;
 
     const currentResSegments = this.app.currentData.path_segments.filter(
-      (seg) => seg.path_id === pathId
+      (seg) => seg.path_id === pathId,
     );
 
     const sourceSegments =
@@ -233,11 +233,11 @@ export class ReplayManager {
 
     this.app.layerManager.updateAltitudeLegend(
       this.state.colorMinAlt,
-      this.state.colorMaxAlt
+      this.state.colorMaxAlt,
     );
     this.app.layerManager.updateAirspeedLegend(
       this.state.colorMinSpeed,
-      this.state.colorMaxSpeed
+      this.state.colorMaxSpeed,
     );
   }
 
@@ -334,7 +334,7 @@ export class ReplayManager {
         "year-select",
         "aircraft-select",
       ],
-      true
+      true,
     );
   }
 
@@ -372,7 +372,7 @@ export class ReplayManager {
         "year-select",
         "aircraft-select",
       ],
-      false
+      false,
     );
   }
 

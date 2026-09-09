@@ -387,7 +387,7 @@ export class MapApp {
     if (this.savedState && this.savedState.center && this.savedState.zoom) {
       this.map.setView(
         [this.savedState.center.lat, this.savedState.center.lng],
-        this.savedState.zoom
+        this.savedState.zoom,
       );
     } else {
       this.map.fitBounds(this.config.bounds, { padding: [30, 30] });
@@ -402,7 +402,7 @@ export class MapApp {
           maxZoom: 18,
           minZoom: 7,
           subdomains: ["a", "b", "c"],
-        }
+        },
       );
     }
 

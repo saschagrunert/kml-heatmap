@@ -80,7 +80,7 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
 export function generateStatsHtml(
   yearStats: YearStats,
   fullStats: FilteredStatistics | null,
-  hasTimingData: boolean
+  hasTimingData: boolean,
 ): string {
   const statsHtml = `
             <div class="stat-card">
@@ -221,7 +221,7 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   const altColor = window.KMLHeatmap.getColorForAltitude(
     altFt,
     params.altMin,
-    params.altMax
+    params.altMax,
   );
   const altColorBg = rgbToRgba(altColor, 0.15);
 
@@ -231,7 +231,7 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   const speedColor = window.KMLHeatmap.getColorForAirspeed(
     speedKt,
     params.speedMin,
-    params.speedMax
+    params.speedMax,
   );
   const speedColorBg = rgbToRgba(speedColor, 0.15);
 
@@ -243,7 +243,7 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   let trackStr = "N/A";
   if (startCoord && endCoord) {
     const trk = Math.round(
-      calculateBearing(startCoord[0], startCoord[1], endCoord[0], endCoord[1])
+      calculateBearing(startCoord[0], startCoord[1], endCoord[0], endCoord[1]),
     );
     trackStr = String(trk).padStart(3, "0") + "°";
   }
@@ -277,7 +277,7 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
 export function generateDestinationsHtml(
   grouped: Map<string, string[]>,
   countryName: (code: string) => string,
-  flag: (code: string) => string
+  flag: (code: string) => string,
 ): string {
   if (grouped.size === 0) return "";
 

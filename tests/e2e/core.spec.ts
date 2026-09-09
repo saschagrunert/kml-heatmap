@@ -108,7 +108,7 @@ test.describe("Core", () => {
     const link = footer.locator("a");
     await expect(link).toHaveAttribute(
       "href",
-      "https://github.com/saschagrunert/kml-heatmap"
+      "https://github.com/saschagrunert/kml-heatmap",
     );
   });
 });

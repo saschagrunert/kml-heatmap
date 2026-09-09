@@ -130,7 +130,7 @@ function analyzeBundleComposition(metafile, bundleName) {
   for (const [category, bytes] of sorted) {
     const percentage = ((bytes / totalBytes) * 100).toFixed(1);
     console.log(
-      `    ${category.padEnd(25)} ${formatBytes(bytes).padStart(10)}  (${percentage}%)`
+      `    ${category.padEnd(25)} ${formatBytes(bytes).padStart(10)}  (${percentage}%)`,
     );
   }
 }
@@ -157,33 +157,33 @@ function analyzeBundleSizes() {
     const totalSize = bundleSize + appBundleSize;
 
     console.log(
-      `  📚 KMLHeatmap Library:  ${formatBytes(bundleSize).padStart(10)}`
+      `  📚 KMLHeatmap Library:  ${formatBytes(bundleSize).padStart(10)}`,
     );
     console.log(
-      `  🗺️  MapApp Bundle:      ${formatBytes(appBundleSize).padStart(10)}`
+      `  🗺️  MapApp Bundle:      ${formatBytes(appBundleSize).padStart(10)}`,
     );
     console.log(`  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(
-      `  📊 Total:              ${formatBytes(totalSize).padStart(10)}`
+      `  📊 Total:              ${formatBytes(totalSize).padStart(10)}`,
     );
 
     let budgetExceeded = false;
 
     if (bundleSize > BUDGET_LIBRARY) {
       console.log(
-        `  ⚠️  Library bundle exceeds budget (${formatBytes(bundleSize)} > ${formatBytes(BUDGET_LIBRARY)})`
+        `  ⚠️  Library bundle exceeds budget (${formatBytes(bundleSize)} > ${formatBytes(BUDGET_LIBRARY)})`,
       );
       budgetExceeded = true;
     }
     if (appBundleSize > BUDGET_APP) {
       console.log(
-        `  ⚠️  MapApp bundle exceeds budget (${formatBytes(appBundleSize)} > ${formatBytes(BUDGET_APP)})`
+        `  ⚠️  MapApp bundle exceeds budget (${formatBytes(appBundleSize)} > ${formatBytes(BUDGET_APP)})`,
       );
       budgetExceeded = true;
     }
     if (totalSize > BUDGET_TOTAL) {
       console.log(
-        `  ⚠️  Total bundle size exceeds budget (${formatBytes(totalSize)} > ${formatBytes(BUDGET_TOTAL)})`
+        `  ⚠️  Total bundle size exceeds budget (${formatBytes(totalSize)} > ${formatBytes(BUDGET_TOTAL)})`,
       );
       budgetExceeded = true;
     }

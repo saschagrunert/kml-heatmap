@@ -35,7 +35,7 @@ def _escape_js_string(value: str) -> str:
 def load_template() -> str:
     """Load the HTML template from file."""
     template_path = Path(__file__).parent / "templates" / "map_template.html"
-    with open(template_path, "r") as f:
+    with open(template_path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -53,9 +53,8 @@ def minify_html(html: str) -> str:
         """Minify JavaScript content within script tags using rjsmin."""
         js_content = match.group(1)
         minified_js: str = rjsmin.jsmin(js_content)
-        # rjsmin preserves some newlines for ASI (Automatic Semicolon Insertion) safety.
-        # Since our generated code uses explicit semicolons, we can safely remove
-        # remaining newlines. Replace with space to maintain token separation where needed.
+        # rjsmin preserves newlines for ASI safety. Our code uses explicit
+        # semicolons, so we can remove remaining newlines safely.
         minified_js = re.sub(r"\s*\n\s*", "", minified_js)
         return f"<script>{minified_js}</script>"
 
@@ -99,7 +98,7 @@ def _parse_kml_files(
     results: list[tuple[str, FlightPath, FlightPathGroup, list[PathMetadata]]] = []
     completed_count = 0
     with ProcessPoolExecutor(
-        max_workers=min(len(valid_files), os.cpu_count() or 4)
+        max_workers=max(1, min(len(valid_files), os.cpu_count() or 4))
     ) as executor:
         future_to_file = {
             executor.submit(_parse_with_error_handling, f): f for f in valid_files
@@ -153,15 +152,21 @@ def _process_data(
     aircraft_file: Path | None = None,
 ) -> dict[str, Any]:
     """Process parsed data: deduplicate airports, calculate stats, export files."""
-    lats = [coord[0] for coord in all_coordinates]
-    lons = [coord[1] for coord in all_coordinates]
+    min_lat = min_lon = float("inf")
+    max_lat = max_lon = float("-inf")
+    for coord in all_coordinates:
+        lat, lon = coord[0], coord[1]
+        min_lat = min(min_lat, lat)
+        max_lat = max(max_lat, lat)
+        min_lon = min(min_lon, lon)
+        max_lon = max(max_lon, lon)
     bounds = {
-        "min_lat": min(lats),
-        "max_lat": max(lats),
-        "min_lon": min(lons),
-        "max_lon": max(lons),
-        "center_lat": (min(lats) + max(lats)) / 2,
-        "center_lon": (min(lons) + max(lons)) / 2,
+        "min_lat": min_lat,
+        "max_lat": max_lat,
+        "min_lon": min_lon,
+        "max_lon": max_lon,
+        "center_lat": (min_lat + max_lat) / 2,
+        "center_lon": (min_lon + max_lon) / 2,
     }
 
     unique_airports: list[AirportData] = []
@@ -214,7 +219,7 @@ def _render_html(output_file: str, data_dir_name: str) -> None:
     logger.info("\nMinifying HTML...")
     minified_html = minify_html(html_content)
 
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         f.write(minified_html)
 
     file_size = Path(output_file).stat().st_size
@@ -244,7 +249,7 @@ def _generate_map_config(
     map_config_template_path = templates_dir / "map_config_template.js"
     map_config_dst = Path(output_dir) / "map_config.js"
 
-    with open(map_config_template_path, "r") as f:
+    with open(map_config_template_path, encoding="utf-8") as f:
         map_config_raw = f.read()
 
     config_vars = {
@@ -261,7 +266,7 @@ def _generate_map_config(
     map_config_content = string.Template(map_config_raw).substitute(config_vars)
     map_config_minified: str = rjsmin.jsmin(map_config_content)
 
-    with open(map_config_dst, "w") as f:
+    with open(map_config_dst, "w", encoding="utf-8") as f:
         f.write(map_config_minified)
 
     map_config_size = map_config_dst.stat().st_size
@@ -288,12 +293,12 @@ def _copy_and_minify_css(output_dir: str, static_dir: Path) -> None:
     styles_css_src = static_dir / "styles.css"
     styles_css_dst = Path(output_dir) / "styles.css"
 
-    with open(styles_css_src, "r") as f:
+    with open(styles_css_src, encoding="utf-8") as f:
         styles_css_content = f.read()
 
     styles_css_minified: str = rcssmin.cssmin(styles_css_content)
 
-    with open(styles_css_dst, "w") as f:
+    with open(styles_css_dst, "w", encoding="utf-8") as f:
         f.write(styles_css_minified)
 
     styles_css_size = styles_css_dst.stat().st_size

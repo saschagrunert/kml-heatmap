@@ -80,7 +80,7 @@ export class DOMCache {
 export const domCache = new DOMCache();
 
 export function getControlElements(
-  extraIds: string[] = []
+  extraIds: string[] = [],
 ): (HTMLElement | null)[] {
   return [
     document.querySelector<HTMLElement>(".leaflet-control-zoom"),
@@ -90,7 +90,7 @@ export function getControlElements(
 }
 
 export function hideControls(
-  extraIds: string[] = []
+  extraIds: string[] = [],
 ): Map<HTMLElement, string> {
   const savedDisplays = new Map<HTMLElement, string>();
   getControlElements(extraIds).forEach((el) => {

@@ -18,7 +18,7 @@ import type { AppState } from "../types";
  * @returns Parsed state or null if no params
  */
 export function parseUrlParams(
-  params: URLSearchParams | string
+  params: URLSearchParams | string,
 ): AppState | null {
   // Support both URLSearchParams and string input
   let urlParams: URLSearchParams;
@@ -236,7 +236,7 @@ export function getDefaultState(): AppState {
  */
 export function mergeState(
   defaultState: AppState,
-  urlState: AppState | null
+  urlState: AppState | null,
 ): AppState {
   if (!urlState) {
     return { ...defaultState };

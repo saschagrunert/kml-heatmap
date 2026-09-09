@@ -1,5 +1,6 @@
 """Unified cache directory management for kml-heatmap."""
 
+import contextlib
 import json
 import os
 import tempfile
@@ -31,7 +32,5 @@ def atomic_json_write(path: Path, data: Any, directory: Path) -> None:
     except OSError as e:
         logger.debug("Failed to write cache file %s: %s", path, e)
         if tmp_path:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass

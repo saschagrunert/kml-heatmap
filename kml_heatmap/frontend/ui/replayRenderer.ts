@@ -61,7 +61,7 @@ export class ReplayRenderer {
 
   updateDisplay(
     replayManager: ReplayManager,
-    isManualSeek: boolean = false
+    isManualSeek: boolean = false,
   ): void {
     // Update time display
     const timeDisplay = domCache.get("replay-time-display");
@@ -79,7 +79,7 @@ export class ReplayRenderer {
     const sliderStart = domCache.get("replay-slider-start");
     if (sliderStart) {
       sliderStart.textContent = window.KMLHeatmap.formatTime(
-        replayManager.state.currentTime
+        replayManager.state.currentTime,
       );
     }
 
@@ -128,14 +128,14 @@ export class ReplayRenderer {
               segmentColor = window.KMLHeatmap.getColorForAirspeed(
                 seg.groundspeed_knots ?? 0,
                 replayManager.state.colorMinSpeed,
-                replayManager.state.colorMaxSpeed
+                replayManager.state.colorMaxSpeed,
               );
             } else {
               // Use altitude colors with selected path's altitude range (default)
               segmentColor = window.KMLHeatmap.getColorForAltitude(
                 seg.altitude_ft ?? 0,
                 replayManager.state.colorMinAlt,
-                replayManager.state.colorMaxAlt
+                replayManager.state.colorMaxAlt,
               );
             }
 
@@ -206,7 +206,7 @@ export class ReplayRenderer {
         const smoothedBearing = window.KMLHeatmap.calculateSmoothedBearing(
           replayManager.state.segments,
           currentIndex,
-          5
+          5,
         );
         if (smoothedBearing !== null) {
           bearing = smoothedBearing;
@@ -280,7 +280,7 @@ export class ReplayRenderer {
                 ) {
                   const newZoom = Math.max(
                     9,
-                    replayManager.state.lastZoom - zoomOutStep
+                    replayManager.state.lastZoom - zoomOutStep,
                   );
 
                   this.app.map.setZoom(newZoom, {

@@ -22,9 +22,10 @@
   --color-accent-cyan: #00f2fe;
   --color-accent-gold: #ffd93d;
   --color-accent-orange: #ffa500;
-  --color-accent-mint: var(--color-accent-mint);
-  --color-accent-rose: var(--color-accent-rose);
+  --color-accent-mint: #66cdaa;
+  --color-accent-rose: #ff6b9d;
   --color-home-blue: #007bff;
+  --color-error: #ff4444;
 }
 
 .skip-nav {
@@ -270,7 +271,7 @@ body {
 .replay-btn {
   background-color: var(--color-bg-hover);
   color: var(--color-text);
-  border: 1px solid #666;
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 6px 12px;
   cursor: pointer;
@@ -292,7 +293,7 @@ body {
     "Noto Color Emoji", sans-serif;
 }
 .replay-btn:hover {
-  background-color: #4a4a4a;
+  background-color: var(--color-bg-hover);
 }
 .replay-btn:disabled {
   opacity: 0.5;
@@ -326,7 +327,7 @@ body {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #4facfe;
+  background: var(--color-accent-blue);
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
@@ -334,7 +335,7 @@ body {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #4facfe;
+  background: var(--color-accent-blue);
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   border: none;
@@ -403,7 +404,7 @@ body {
   outline: none;
 }
 .filter-dropdown select:focus-visible {
-  outline: 2px solid #4a9eff;
+  outline: 2px solid var(--color-accent-blue);
   outline-offset: -2px;
 }
 .filter-dropdown select:active {
@@ -1249,7 +1250,7 @@ body {
 [data-zoom-size="small"] .airport-marker {
   width: 7px;
   height: 7px;
-  border: 1px solid #ffffff;
+  border: 1px solid var(--color-text);
 }
 [data-zoom-size="small"] .airport-label {
   font-size: 10px;
@@ -1265,7 +1266,7 @@ body {
 [data-zoom-size="medium-small"] .airport-marker {
   width: 8px;
   height: 8px;
-  border: 1px solid #ffffff;
+  border: 1px solid var(--color-text);
 }
 [data-zoom-size="medium-small"] .airport-label {
   font-size: 11px;
@@ -1281,7 +1282,7 @@ body {
 [data-zoom-size="medium"] .airport-marker {
   width: 10px;
   height: 10px;
-  border: 2px solid #ffffff;
+  border: 2px solid var(--color-text);
 }
 [data-zoom-size="medium"] .airport-label {
   font-size: 12px;
@@ -1297,7 +1298,7 @@ body {
 [data-zoom-size="large"] .airport-marker {
   width: 11px;
   height: 11px;
-  border: 2px solid #ffffff;
+  border: 2px solid var(--color-text);
 }
 [data-zoom-size="large"] .airport-label {
   font-size: 12px;
@@ -1313,7 +1314,7 @@ body {
 [data-zoom-size="xlarge"] .airport-marker {
   width: 12px;
   height: 12px;
-  border: 2px solid #ffffff;
+  border: 2px solid var(--color-text);
 }
 [data-zoom-size="xlarge"] .airport-label {
   font-size: 13px;
@@ -1537,5 +1538,5 @@ body {
   transform: translateX(-50%) translateY(0);
 }
 .toast-notification.toast-error {
-  border-color: #ff4444;
+  border-color: var(--color-error);
 }

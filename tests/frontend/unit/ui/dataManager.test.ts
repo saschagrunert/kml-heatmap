@@ -234,7 +234,7 @@ describe("DataManager", () => {
           blur: 15,
           minOpacity: 0.25,
           maxOpacity: 0.6,
-        })
+        }),
       );
     });
 

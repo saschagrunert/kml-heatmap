@@ -89,7 +89,7 @@ def _download_airport_database() -> bool:
 
 
 def _load_airport_database() -> dict[str, tuple[float, float, str, str]]:
-    """Load airport database from cache or download if needed (thread-safe and process-safe)."""
+    """Load airport database from cache or download if needed."""
     global _airport_cache
 
     # Fast path: return cached data if already loaded (no lock needed)
@@ -123,7 +123,7 @@ def _load_airport_database() -> dict[str, tuple[float, float, str, str]]:
             if CACHE_FILE.exists():
                 try:
                     airports = {}
-                    with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                    with open(CACHE_FILE, encoding="utf-8") as f:
                         reader = csv.DictReader(f)
                         for row in reader:
                             icao = row.get("ident", "").strip().upper()
@@ -227,6 +227,11 @@ def extract_icao_codes_from_name(airport_name: str | None) -> list[str]:
     return [code for code in matches if code[0] in ICAO_REGION_PREFIXES]
 
 
+def _strip_airport_suffix(name: str) -> str:
+    """Remove common airport suffixes for cleaner display."""
+    return name.replace(" Airport", "").replace(" Airfield", "")
+
+
 def standardize_airport_name(airport_name: str | None) -> str | None:
     """Standardize airport name using OurAirports database."""
     if not airport_name:
@@ -249,8 +254,8 @@ def standardize_airport_name(airport_name: str | None) -> str | None:
             _, _, name1 = coords1
             _, _, name2 = coords2
             # Remove common airport suffixes for cleaner display
-            clean_name1 = name1.replace(" Airport", "").replace(" Airfield", "")
-            clean_name2 = name2.replace(" Airport", "").replace(" Airfield", "")
+            clean_name1 = _strip_airport_suffix(name1)
+            clean_name2 = _strip_airport_suffix(name2)
             standardized = (
                 f"{icao_codes[0]} {clean_name1} - {icao_codes[1]} {clean_name2}"
             )
@@ -259,7 +264,7 @@ def standardize_airport_name(airport_name: str | None) -> str | None:
         elif coords1:
             # Only first airport found
             _, _, name1 = coords1
-            clean_name1 = name1.replace(" Airport", "").replace(" Airfield", "")
+            clean_name1 = _strip_airport_suffix(name1)
             parts = airport_name.split(" - ")
             standardized = f"{icao_codes[0]} {clean_name1} - {parts[1]}"
             logger.debug("Standardized start: %s -> %s", airport_name, standardized)
@@ -267,7 +272,7 @@ def standardize_airport_name(airport_name: str | None) -> str | None:
         elif coords2:
             # Only second airport found
             _, _, name2 = coords2
-            clean_name2 = name2.replace(" Airport", "").replace(" Airfield", "")
+            clean_name2 = _strip_airport_suffix(name2)
             parts = airport_name.split(" - ")
             standardized = f"{parts[0]} - {icao_codes[1]} {clean_name2}"
             logger.debug("Standardized end: %s -> %s", airport_name, standardized)
@@ -279,7 +284,7 @@ def standardize_airport_name(airport_name: str | None) -> str | None:
         if coords:
             _, _, name = coords
             # Remove common airport suffixes for cleaner display
-            clean_name = name.replace(" Airport", "").replace(" Airfield", "")
+            clean_name = _strip_airport_suffix(name)
             standardized = f"{icao_codes[0]} {clean_name}"
             logger.debug("Standardized airport: %s -> %s", airport_name, standardized)
             return standardized

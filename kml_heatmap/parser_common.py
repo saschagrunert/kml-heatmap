@@ -272,7 +272,7 @@ def _build_path_metadata_dict(
             route_parts = route.split("-")
             departure_airport = route_parts[0]
             arrival_airport = route_parts[1]
-            # Use route as airport_name if current name is empty or is not a 4-letter ICAO code
+            # Use route as airport_name if name is empty or not ICAO
             # ICAO codes are exactly 4 uppercase letters (e.g., LOAV, EDDF, EDDM)
             # Aircraft registrations contain hyphens (e.g., OE-AKI, D-EXYZ)
             # Format: "DEPARTURE - ARRIVAL" (with spaces) for exporter compatibility

@@ -98,7 +98,7 @@ export class LayerManager {
           if (!this.app.selectedPathIds.has(seg.path_id)) return false;
           if (config.filterSegment && !config.filterSegment(seg)) return false;
           return true;
-        }
+        },
       );
       if (selectedSegments.length > 0) {
         const values = selectedSegments.map(config.getValue);
@@ -158,7 +158,7 @@ export class LayerManager {
       const color = config.getColor(
         config.getValue(segment),
         colorMin,
-        colorMax
+        colorMax,
       );
       const inSolo = this.app.isolateSelection && isSelected;
       const polyline = L.polyline(segment.coords ?? [], {
@@ -240,7 +240,7 @@ export class LayerManager {
   private updateLegend(
     min: number,
     max: number,
-    config: Pick<LayerConfig, "legendMinId" | "legendMaxId" | "formatLegend">
+    config: Pick<LayerConfig, "legendMinId" | "legendMaxId" | "formatLegend">,
   ): void {
     const minEl = domCache.get(config.legendMinId);
     const maxEl = domCache.get(config.legendMaxId);

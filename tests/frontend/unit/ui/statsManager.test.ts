@@ -96,7 +96,7 @@ describe("StatsManager", () => {
       statsManager.updateStatsForSelection();
 
       expect(
-        window.KMLHeatmap.calculateFilteredStatistics
+        window.KMLHeatmap.calculateFilteredStatistics,
       ).toHaveBeenCalledWith({
         pathInfo: mockApp.fullPathInfo,
         segments: mockApp.fullPathSegments,
@@ -343,7 +343,7 @@ describe("StatsManager", () => {
       if (panel) document.body.removeChild(panel);
 
       expect(() =>
-        statsManager.updateStatsPanel(mockStats, false)
+        statsManager.updateStatsPanel(mockStats, false),
       ).not.toThrow();
     });
   });

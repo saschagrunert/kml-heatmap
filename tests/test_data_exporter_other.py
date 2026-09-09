@@ -16,7 +16,7 @@ from kml_heatmap.data_exporter import (
 
 def _parse_js_data(filepath):
     """Parse a JS file with 'window.VAR = {...};' format and return the JSON data."""
-    with open(filepath, "r") as f:
+    with open(filepath) as f:
         content = f.read()
     json_start = content.index("{")
     json_str = content[json_start:].rstrip(";")

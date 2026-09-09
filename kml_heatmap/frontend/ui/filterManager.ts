@@ -101,7 +101,7 @@ export class FilterManager {
     // Reload full resolution data for the new year
     const fullResData = await this.app.dataManager.loadData(
       "data",
-      this.app.selectedYear
+      this.app.selectedYear,
     );
     if (fullResData) {
       this.app.fullPathInfo = fullResData.path_info || [];

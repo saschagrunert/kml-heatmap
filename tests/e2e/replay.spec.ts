@@ -12,7 +12,7 @@ test.describe("Replay", () => {
 
     await expect(page.locator("#replay-controls")).toBeVisible();
     const hasClass = await page.evaluate(() =>
-      document.body.classList.contains("replay-active")
+      document.body.classList.contains("replay-active"),
     );
     expect(hasClass).toBe(true);
   });
@@ -39,7 +39,7 @@ test.describe("Replay", () => {
     await expect(page.locator("#replay-play-btn")).toBeHidden();
 
     const isPlaying = await page.evaluate(
-      () => (window as any).mapApp.replayManager.state.playing
+      () => (window as any).mapApp.replayManager.state.playing,
     );
     expect(isPlaying).toBe(true);
   });
@@ -57,7 +57,7 @@ test.describe("Replay", () => {
     await expect(page.locator("#replay-pause-btn")).toBeHidden();
 
     const isPlaying = await page.evaluate(
-      () => (window as any).mapApp.replayManager.state.playing
+      () => (window as any).mapApp.replayManager.state.playing,
     );
     expect(isPlaying).toBe(false);
   });
@@ -71,7 +71,7 @@ test.describe("Replay", () => {
     await page.locator("#replay-stop-btn").click();
 
     const currentTime = await page.evaluate(
-      () => (window as any).mapApp.replayManager.state.currentTime
+      () => (window as any).mapApp.replayManager.state.currentTime,
     );
     expect(currentTime).toBe(0);
     await expect(page.locator("#replay-slider")).toHaveValue("0");
@@ -83,17 +83,17 @@ test.describe("Replay", () => {
     await activateReplay(page);
 
     const maxTime = await page.evaluate(
-      () => (window as any).mapApp.replayManager.state.maxTime
+      () => (window as any).mapApp.replayManager.state.maxTime,
     );
     const midpoint = Math.floor(maxTime / 2);
 
     await page.evaluate(
       (val) => (window as any).mapApp.seekReplay(String(val)),
-      midpoint
+      midpoint,
     );
 
     const currentTime = await page.evaluate(
-      () => (window as any).mapApp.replayManager.state.currentTime
+      () => (window as any).mapApp.replayManager.state.currentTime,
     );
     expect(currentTime).toBeGreaterThan(0);
   });
@@ -102,7 +102,7 @@ test.describe("Replay", () => {
     await activateReplay(page);
 
     const defaultSpeed = await page.evaluate(
-      () => (window as any).mapApp.replayManager.state.speed
+      () => (window as any).mapApp.replayManager.state.speed,
     );
     expect(defaultSpeed).toBe(50);
 
@@ -110,7 +110,7 @@ test.describe("Replay", () => {
     await page.evaluate(() => (window as any).mapApp.changeReplaySpeed());
 
     const newSpeed = await page.evaluate(
-      () => (window as any).mapApp.replayManager.state.speed
+      () => (window as any).mapApp.replayManager.state.speed,
     );
     expect(newSpeed).toBe(100);
   });
@@ -127,7 +127,7 @@ test.describe("Replay", () => {
     await autoZoomBtn.click();
     await expect(autoZoomBtn).toHaveCSS("opacity", "1");
     const isOn = await page.evaluate(
-      () => (window as any).mapApp.replayManager.state.autoZoom
+      () => (window as any).mapApp.replayManager.state.autoZoom,
     );
     expect(isOn).toBe(true);
 
@@ -135,7 +135,7 @@ test.describe("Replay", () => {
     await autoZoomBtn.click();
     await expect(autoZoomBtn).toHaveCSS("opacity", "0.5");
     const isOff = await page.evaluate(
-      () => (window as any).mapApp.replayManager.state.autoZoom
+      () => (window as any).mapApp.replayManager.state.autoZoom,
     );
     expect(isOff).toBe(false);
   });
@@ -157,7 +157,7 @@ test.describe("Replay", () => {
     await page.locator("#replay-pause-btn").click();
 
     const currentTime = await page.evaluate(
-      () => (window as any).mapApp.replayManager.state.currentTime
+      () => (window as any).mapApp.replayManager.state.currentTime,
     );
     expect(currentTime).toBeGreaterThan(0);
   });
@@ -170,7 +170,7 @@ test.describe("Replay", () => {
     await expect(page.locator("#replay-controls")).toBeHidden();
 
     const hasClass = await page.evaluate(() =>
-      document.body.classList.contains("replay-active")
+      document.body.classList.contains("replay-active"),
     );
     expect(hasClass).toBe(false);
 
@@ -222,7 +222,7 @@ test.describe("Replay", () => {
     const speedSelect = page.locator("#replay-speed");
     const options = speedSelect.locator("option");
     const values = await options.evaluateAll((els) =>
-      els.map((el) => (el as HTMLOptionElement).value)
+      els.map((el) => (el as HTMLOptionElement).value),
     );
 
     expect(values).toContain("10");

@@ -37,7 +37,7 @@ describe("htmlGenerators", () => {
 
     it("escapes all entities in a single string", () => {
       expect(escapeHtml(`<img src="x" onerror='alert(1)'>&`)).toBe(
-        "&lt;img src=&quot;x&quot; onerror=&#39;alert(1)&#39;&gt;&amp;"
+        "&lt;img src=&quot;x&quot; onerror=&#39;alert(1)&#39;&gt;&amp;",
       );
     });
 
@@ -86,7 +86,7 @@ describe("htmlGenerators", () => {
       expect(html).toContain('<div class="stat-label">Nautical Miles</div>');
       expect(html).toContain("36089 ft"); // Math.round(11000 / 0.3048)
       expect(html).toContain(
-        '<div class="stat-label">Max Altitude (MSL)</div>'
+        '<div class="stat-label">Max Altitude (MSL)</div>',
       );
 
       // Should not include timing data
@@ -119,7 +119,7 @@ describe("htmlGenerators", () => {
       const html = generateStatsHtml(
         mockYearStats,
         statsWithoutGroundspeed,
-        true
+        true,
       );
 
       expect(html).toContain("0 kt");
@@ -158,12 +158,12 @@ describe("htmlGenerators", () => {
       expect(html).toContain('data-category="distance"');
       expect(html).toContain('<span class="fun-fact-icon">✈️</span>');
       expect(html).toContain(
-        '<span class="fun-fact-text">You flew 10,000 miles!</span>'
+        '<span class="fun-fact-text">You flew 10,000 miles!</span>',
       );
       expect(html).toContain('data-category="altitude"');
       expect(html).toContain('<span class="fun-fact-icon">⬆️</span>');
       expect(html).toContain(
-        '<span class="fun-fact-text">Reached 35,000 feet</span>'
+        '<span class="fun-fact-text">Reached 35,000 feet</span>',
       );
     });
 
@@ -198,25 +198,25 @@ describe("htmlGenerators", () => {
 
     it("returns medium-high class for normalized >= 0.5 and < 0.75", () => {
       expect(calculateAircraftColorClass(0.5)).toBe(
-        "fleet-aircraft-medium-high"
+        "fleet-aircraft-medium-high",
       );
       expect(calculateAircraftColorClass(0.6)).toBe(
-        "fleet-aircraft-medium-high"
+        "fleet-aircraft-medium-high",
       );
       expect(calculateAircraftColorClass(0.74)).toBe(
-        "fleet-aircraft-medium-high"
+        "fleet-aircraft-medium-high",
       );
     });
 
     it("returns medium-low class for normalized >= 0.25 and < 0.5", () => {
       expect(calculateAircraftColorClass(0.25)).toBe(
-        "fleet-aircraft-medium-low"
+        "fleet-aircraft-medium-low",
       );
       expect(calculateAircraftColorClass(0.3)).toBe(
-        "fleet-aircraft-medium-low"
+        "fleet-aircraft-medium-low",
       );
       expect(calculateAircraftColorClass(0.49)).toBe(
-        "fleet-aircraft-medium-low"
+        "fleet-aircraft-medium-low",
       );
     });
 
@@ -256,7 +256,7 @@ describe("htmlGenerators", () => {
       const html = generateAircraftFleetHtml(yearStats);
 
       expect(html).toContain(
-        '<div class="aircraft-fleet-title">✈️ Fleet</div>'
+        '<div class="aircraft-fleet-title">✈️ Fleet</div>',
       );
       expect(html).toContain("D-EABC");
       expect(html).toContain("Cessna 172");
@@ -397,7 +397,7 @@ describe("htmlGenerators", () => {
       const html = generateHomeBaseHtml(homeBase);
 
       expect(html).toContain(
-        '<div class="top-airports-title">🏠 Home Base</div>'
+        '<div class="top-airports-title">🏠 Home Base</div>',
       );
       expect(html).toContain('<div class="top-airport-name">EDDF</div>');
       expect(html).toContain('<div class="top-airport-count">25 flights</div>');
@@ -439,7 +439,7 @@ describe("htmlGenerators", () => {
       const html = generateDestinationsHtml(grouped, identity, noFlag);
 
       expect(html).toContain(
-        '<div class="airports-grid-title">🗺️ Destinations</div>'
+        '<div class="airports-grid-title">🗺️ Destinations</div>',
       );
       expect(html).toContain("DE</div>");
       expect(html).toContain('<div class="airport-badge">EDDH</div>');
@@ -528,12 +528,12 @@ describe("htmlGenerators", () => {
       expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
         3000,
         0,
-        5000
+        5000,
       );
       expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
         120,
         0,
-        200
+        200,
       );
     });
 
@@ -567,7 +567,7 @@ describe("htmlGenerators", () => {
       expect(window.KMLHeatmap.getColorForAltitude).toHaveBeenCalledWith(
         0,
         0,
-        5000
+        5000,
       );
     });
 
@@ -582,7 +582,7 @@ describe("htmlGenerators", () => {
       expect(window.KMLHeatmap.getColorForAirspeed).toHaveBeenCalledWith(
         0,
         0,
-        200
+        200,
       );
     });
 

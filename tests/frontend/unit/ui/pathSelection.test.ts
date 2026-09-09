@@ -85,7 +85,7 @@ describe("PathSelection", () => {
       pathSelection.togglePathSelection(1);
 
       expect(
-        mockApp.replayManager!.updateReplayButtonState
+        mockApp.replayManager!.updateReplayButtonState,
       ).toHaveBeenCalledTimes(1);
     });
   });
@@ -204,7 +204,7 @@ describe("PathSelection", () => {
 
       const btn = document.getElementById("isolate-btn")!;
       expect(btn.style.opacity).toBe("0.5");
-      expect(btn.style.borderColor).toBe("rgb(85, 85, 85)");
+      expect(btn.style.borderColor).toBe("var(--color-border)");
     });
 
     it("sets active state when paths selected", () => {
@@ -214,8 +214,8 @@ describe("PathSelection", () => {
 
       const btn = document.getElementById("isolate-btn")!;
       expect(btn.style.opacity).toBe("1");
-      expect(btn.style.borderColor).toBe("rgb(85, 85, 85)");
-      expect(btn.style.backgroundColor).toBe("rgb(43, 43, 43)");
+      expect(btn.style.borderColor).toBe("var(--color-border)");
+      expect(btn.style.backgroundColor).toBe("var(--color-bg-secondary)");
     });
 
     it("sets highlighted state when isolate mode is on", () => {
@@ -226,8 +226,8 @@ describe("PathSelection", () => {
 
       const btn = document.getElementById("isolate-btn")!;
       expect(btn.style.opacity).toBe("1");
-      expect(btn.style.borderColor).toBe("rgb(79, 172, 254)");
-      expect(btn.style.backgroundColor).toBe("rgb(26, 58, 92)");
+      expect(btn.style.borderColor).toBe("var(--color-accent-blue)");
+      expect(btn.style.backgroundColor).toBe("var(--color-bg-secondary)");
     });
   });
 

@@ -4,7 +4,6 @@
  */
 
 import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
-import { calculateDistance } from "../utils/geometry";
 import { formatFlightTime } from "../utils/formatters";
 import {
   calculateAircraftColorClass as calculateAircraftColorClassFromNormalized,
@@ -12,6 +11,7 @@ import {
 } from "../utils/htmlGenerators";
 import {
   calculateFlightTime,
+  calculateTotalDistance,
   collectAirports,
   filterPaths,
   filterSegmentsByPaths,
@@ -59,7 +59,7 @@ export function calculateYearStats(
   segments: PathSegment[],
   year: number | string,
   fullStats: FullStats | null = null,
-  aircraft: string = "all"
+  aircraft: string = "all",
 ): YearStats {
   if (!pathInfo || pathInfo.length === 0) {
     return {
@@ -93,13 +93,7 @@ export function calculateYearStats(
   const filteredSegments = filterSegmentsByPaths(segments, filteredPaths);
 
   // Calculate total distance
-  let totalDistanceKm = 0;
-  filteredSegments.forEach((segment) => {
-    if (segment.coords && segment.coords.length === 2) {
-      const distance = calculateDistance(segment.coords[0], segment.coords[1]);
-      totalDistanceKm += distance;
-    }
-  });
+  const totalDistanceKm = calculateTotalDistance(filteredSegments);
   const totalDistanceNm = totalDistanceKm * KM_TO_NAUTICAL_MILES;
 
   // Calculate flight time
@@ -126,12 +120,12 @@ export function calculateYearStats(
   // Calculate flight time per aircraft
   Object.keys(aircraftMap).forEach((reg) => {
     const aircraftPaths = filteredPaths.filter(
-      (p) => p.aircraft_registration === reg
+      (p) => p.aircraft_registration === reg,
     );
     const aircraftSegments = filterSegmentsByPaths(segments, aircraftPaths);
     const aircraftSeconds = calculateFlightTime(
       aircraftSegments,
-      aircraftPaths
+      aircraftPaths,
     );
     const aircraft = aircraftMap[reg];
     if (aircraft) {
@@ -152,7 +146,7 @@ export function calculateYearStats(
 
   // Sort aircraft by flight count descending
   const aircraftList = Object.values(aircraftMap).sort(
-    (a, b) => b.flights - a.flights
+    (a, b) => b.flights - a.flights,
   );
 
   return {
@@ -170,7 +164,7 @@ export function calculateYearStats(
  */
 export function generateFunFacts(
   yearStats: YearStats,
-  fullStats: FullStats | null = null
+  fullStats: FullStats | null = null,
 ): FunFact[] {
   const facts: FunFact[] = [];
 
@@ -200,7 +194,7 @@ export function generateFunFacts(
   if (numAircraft === 1) {
     const aircraft = yearStats.aircraft_list[0];
     const model = escapeHtml(
-      aircraft?.model || aircraft?.type || aircraft?.registration || "Unknown"
+      aircraft?.model || aircraft?.type || aircraft?.registration || "Unknown",
     );
     const flights = yearStats.total_flights;
     const registration = aircraft?.registration
@@ -418,7 +412,7 @@ export function selectDiverseFacts(allFacts: FunFact[]): FunFact[] {
 export function calculateAircraftColorClass(
   flights: number,
   maxFlights: number,
-  minFlights: number
+  minFlights: number,
 ): string {
   if (maxFlights === minFlights) {
     return "fleet-aircraft-high";
@@ -432,7 +426,7 @@ export function calculateAircraftColorClass(
  */
 export function findHomeBase(
   airportNames: string[] | null,
-  airportCounts: Record<string, number>
+  airportCounts: Record<string, number>,
 ): HomeBase | null {
   if (!airportNames || airportNames.length === 0) {
     return null;
@@ -455,7 +449,7 @@ export function findHomeBase(
  */
 export function getDestinations(
   airportNames: string[] | null,
-  homeBaseName: string | null
+  homeBaseName: string | null,
 ): string[] {
   if (!airportNames) {
     return [];

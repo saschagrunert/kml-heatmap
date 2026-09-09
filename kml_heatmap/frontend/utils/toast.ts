@@ -1,6 +1,6 @@
 export function showToast(
   message: string,
-  type: "error" | "info" = "info"
+  type: "error" | "info" = "info",
 ): void {
   const toast = document.createElement("div");
   toast.className = `toast-notification toast-${type}`;

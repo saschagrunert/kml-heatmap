@@ -1,14 +1,13 @@
 """KML parse result caching."""
 
+import contextlib
 import hashlib
 import json
-import logging
 from pathlib import Path
 
 from .cache import CACHE_DIR, atomic_json_write
+from .logger import logger
 from .types import FlightPath, FlightPathGroup, PathMetadata
-
-logger = logging.getLogger(__name__)
 
 # KML parse cache subdirectory
 KML_CACHE_DIR = CACHE_DIR / "kml"
@@ -44,10 +43,8 @@ def get_cache_key(
     # Clean up old cache files for this KML file (different mtime)
     for old_cache in cache_dir.glob(f"{kml_path.stem}_{path_hash}_*.json"):
         if old_cache != cache_path:  # Don't delete the one we're about to write
-            try:
+            with contextlib.suppress(OSError):
                 old_cache.unlink()
-            except OSError:
-                pass
 
     return cache_path, False
 
@@ -57,7 +54,7 @@ def load_cached_parse(
 ) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]] | None:
     """Load cached parse results, or None if cache is invalid."""
     try:
-        with open(cache_path, "r") as f:
+        with open(cache_path, encoding="utf-8") as f:
             cached = json.load(f)
         return cached["coordinates"], cached["path_groups"], cached["path_metadata"]
     except (json.JSONDecodeError, KeyError, OSError) as e:

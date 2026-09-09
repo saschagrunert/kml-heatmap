@@ -20,20 +20,20 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateStatsHtml: vi.fn(
     (_yearStats: any, _fullStats: any, _hasTimingData: boolean) =>
-      '<div class="stat-card">stats</div>'
+      '<div class="stat-card">stats</div>',
   ),
   generateFunFactsHtml: vi.fn(
-    (_funFacts: any) => '<div class="fun-facts-title">fun facts</div>'
+    (_funFacts: any) => '<div class="fun-facts-title">fun facts</div>',
   ),
   generateAircraftFleetHtml: vi.fn(
-    (_yearStats: any) => '<div class="aircraft-fleet-title">fleet</div>'
+    (_yearStats: any) => '<div class="aircraft-fleet-title">fleet</div>',
   ),
   generateHomeBaseHtml: vi.fn(
-    (_homeBase: any) => '<div class="top-airports-title">home base</div>'
+    (_homeBase: any) => '<div class="top-airports-title">home base</div>',
   ),
   generateDestinationsHtml: vi.fn(
     (_grouped: any, _countryName: any, _flag: any) =>
-      '<div class="airports-grid-title">destinations</div>'
+      '<div class="airports-grid-title">destinations</div>',
   ),
 }));
 
@@ -97,7 +97,7 @@ const defaultFilteredStats: FilteredStatistics = {
         if (aircraft !== "all" && p.aircraft_registration !== aircraft)
           return false;
         return true;
-      })
+      }),
     ),
   },
 };
@@ -206,7 +206,7 @@ describe("WrappedManager", () => {
         mockApp.fullPathSegments,
         "2023",
         mockApp.fullStats,
-        "all"
+        "all",
       );
     });
 
@@ -220,7 +220,7 @@ describe("WrappedManager", () => {
         mockApp.fullPathSegments,
         "all",
         mockApp.fullStats,
-        "all"
+        "all",
       );
     });
 
@@ -235,14 +235,14 @@ describe("WrappedManager", () => {
         mockApp.fullPathSegments,
         "2024",
         mockApp.fullStats,
-        "D-ABCD"
+        "D-ABCD",
       );
       expect(
-        window.KMLHeatmap.calculateFilteredStatistics
+        window.KMLHeatmap.calculateFilteredStatistics,
       ).toHaveBeenCalledWith(
         expect.objectContaining({
           aircraft: "D-ABCD",
-        })
+        }),
       );
     });
 
@@ -275,7 +275,7 @@ describe("WrappedManager", () => {
         airport_names: ["EDDF", "EDDM"],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -284,7 +284,7 @@ describe("WrappedManager", () => {
         expect.objectContaining({
           name: expect.any(String),
           flight_count: 1,
-        })
+        }),
       );
     });
 
@@ -330,7 +330,7 @@ describe("WrappedManager", () => {
         max_groundspeed_knots: 150,
       };
       (window.KMLHeatmap.calculateFilteredStatistics as any).mockReturnValue(
-        stats
+        stats,
       );
 
       wrappedManager.showWrapped();
@@ -338,7 +338,7 @@ describe("WrappedManager", () => {
       expect(generateStatsHtml).toHaveBeenCalledWith(
         expect.anything(),
         stats,
-        true
+        true,
       );
     });
 
@@ -348,7 +348,7 @@ describe("WrappedManager", () => {
         max_groundspeed_knots: 0,
       };
       (window.KMLHeatmap.calculateFilteredStatistics as any).mockReturnValue(
-        stats
+        stats,
       );
 
       wrappedManager.showWrapped();
@@ -356,7 +356,7 @@ describe("WrappedManager", () => {
       expect(generateStatsHtml).toHaveBeenCalledWith(
         expect.anything(),
         stats,
-        false
+        false,
       );
     });
 
@@ -366,7 +366,7 @@ describe("WrappedManager", () => {
         max_groundspeed_knots: undefined,
       };
       (window.KMLHeatmap.calculateFilteredStatistics as any).mockReturnValue(
-        stats
+        stats,
       );
 
       wrappedManager.showWrapped();
@@ -374,7 +374,7 @@ describe("WrappedManager", () => {
       expect(generateStatsHtml).toHaveBeenCalledWith(
         expect.anything(),
         stats,
-        false
+        false,
       );
     });
 
@@ -382,7 +382,7 @@ describe("WrappedManager", () => {
       mockApp.fullStats = null;
       const stats = { ...defaultFilteredStats };
       (window.KMLHeatmap.calculateFilteredStatistics as any).mockReturnValue(
-        stats
+        stats,
       );
 
       wrappedManager.showWrapped();
@@ -390,7 +390,7 @@ describe("WrappedManager", () => {
       expect(generateStatsHtml).toHaveBeenCalledWith(
         expect.anything(),
         stats,
-        true
+        true,
       );
     });
 
@@ -413,7 +413,7 @@ describe("WrappedManager", () => {
       expect(generateFunFactsHtml).toHaveBeenCalledWith(mockFunFacts);
       const funFactsEl = document.getElementById("wrapped-fun-facts");
       expect(funFactsEl?.innerHTML).toBe(
-        '<div class="fun-facts-title">fun facts</div>'
+        '<div class="fun-facts-title">fun facts</div>',
       );
     });
 
@@ -427,7 +427,7 @@ describe("WrappedManager", () => {
         airport_names: [],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -435,7 +435,7 @@ describe("WrappedManager", () => {
       expect(generateAircraftFleetHtml).toHaveBeenCalledWith(mockYearStats);
       const fleetEl = document.getElementById("wrapped-aircraft-fleet");
       expect(fleetEl?.innerHTML).toBe(
-        '<div class="aircraft-fleet-title">fleet</div>'
+        '<div class="aircraft-fleet-title">fleet</div>',
       );
     });
 
@@ -449,7 +449,7 @@ describe("WrappedManager", () => {
         airport_names: [],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -468,7 +468,7 @@ describe("WrappedManager", () => {
         airport_names: [],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -508,7 +508,7 @@ describe("WrappedManager", () => {
         airport_names: ["EDDF", "EDDM"],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -521,7 +521,7 @@ describe("WrappedManager", () => {
         expect.objectContaining({
           name: expect.any(String),
           flight_count: 2,
-        })
+        }),
       );
     });
 
@@ -551,7 +551,7 @@ describe("WrappedManager", () => {
         airport_names: ["EDDF", "EDDM", "EDDL"],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -562,7 +562,7 @@ describe("WrappedManager", () => {
         expect.objectContaining({
           name: "EDDF",
           flight_count: 2,
-        })
+        }),
       );
     });
 
@@ -583,7 +583,7 @@ describe("WrappedManager", () => {
         airport_names: ["EDDF", "EDDM", "EDDL"],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -614,7 +614,7 @@ describe("WrappedManager", () => {
         airport_names: ["EDDF", "EDDM", "EDDL"],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -644,7 +644,7 @@ describe("WrappedManager", () => {
         airport_names: ["EDDF", "EDDM"],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -652,7 +652,7 @@ describe("WrappedManager", () => {
       expect(generateHomeBaseHtml).toHaveBeenCalled();
       const topAirportsEl = document.getElementById("wrapped-top-airports");
       expect(topAirportsEl?.innerHTML).toBe(
-        '<div class="top-airports-title">home base</div>'
+        '<div class="top-airports-title">home base</div>',
       );
     });
 
@@ -672,7 +672,7 @@ describe("WrappedManager", () => {
         airport_names: ["EDDF", "EDDM", "EDDL"],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -680,7 +680,7 @@ describe("WrappedManager", () => {
       expect(generateDestinationsHtml).toHaveBeenCalledWith(
         expect.any(Map),
         expect.any(Function),
-        expect.any(Function)
+        expect.any(Function),
       );
     });
 
@@ -694,7 +694,7 @@ describe("WrappedManager", () => {
         airport_names: [],
       };
       (window.KMLHeatmap.calculateYearStats as any).mockReturnValue(
-        mockYearStats
+        mockYearStats,
       );
 
       wrappedManager.showWrapped();
@@ -710,7 +710,7 @@ describe("WrappedManager", () => {
       vi.advanceTimersByTime(50);
 
       const wrappedMapContainer = document.getElementById(
-        "wrapped-map-container"
+        "wrapped-map-container",
       );
       const mapEl = document.getElementById("map");
       expect(wrappedMapContainer?.contains(mapEl)).toBe(true);
@@ -727,7 +727,7 @@ describe("WrappedManager", () => {
 
       // Map should have moved to wrapped container
       const wrappedMapContainer = document.getElementById(
-        "wrapped-map-container"
+        "wrapped-map-container",
       );
       expect(wrappedMapContainer?.contains(mapEl)).toBe(true);
 
@@ -784,7 +784,7 @@ describe("WrappedManager", () => {
       expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(2);
       expect(mockApp.map!.fitBounds).toHaveBeenCalledWith(
         mockApp.config.bounds,
-        { padding: [80, 80] }
+        { padding: [80, 80] },
       );
     });
 
@@ -843,7 +843,7 @@ describe("WrappedManager", () => {
 
       // Map should be in wrapped container now
       expect(
-        document.getElementById("wrapped-map-container")?.contains(mapEl)
+        document.getElementById("wrapped-map-container")?.contains(mapEl),
       ).toBe(true);
 
       wrappedManager.closeWrapped();
@@ -881,7 +881,7 @@ describe("WrappedManager", () => {
       wrappedManager.closeWrapped();
 
       const zoomControl = document.querySelector(
-        ".leaflet-control-zoom"
+        ".leaflet-control-zoom",
       ) as HTMLElement;
       expect(zoomControl?.style.display).toBe("");
     });
@@ -972,7 +972,7 @@ describe("WrappedManager", () => {
 
       // Map should still be in wrapped container
       const wrappedMapContainer = document.getElementById(
-        "wrapped-map-container"
+        "wrapped-map-container",
       );
       const mapEl = document.getElementById("map");
       expect(wrappedMapContainer?.contains(mapEl)).toBe(true);
