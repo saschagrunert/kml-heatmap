@@ -133,11 +133,19 @@ export function interpolatePosition(
   seg2: PathSegment | null,
   currentTime: number,
 ): InterpolatedPosition {
-  if (!seg2 || !seg1.coords) {
-    // At end of path, use last segment's end point
+  if (!seg1.coords) {
     return {
-      lat: seg1.coords![1][0],
-      lon: seg1.coords![1][1],
+      lat: 0,
+      lon: 0,
+      altitude: seg1.altitude_ft || 0,
+      speed: seg1.groundspeed_knots || 0,
+    };
+  }
+
+  if (!seg2) {
+    return {
+      lat: seg1.coords[1][0],
+      lon: seg1.coords[1][1],
       altitude: seg1.altitude_ft || 0,
       speed: seg1.groundspeed_knots || 0,
     };
@@ -146,12 +154,12 @@ export function interpolatePosition(
   // Interpolate between seg1 end and seg2 start
   const t1 = seg1.time!;
   const t2 = seg2.time!;
-  const progress = (currentTime - t1) / Math.max(t2 - t1, 0.001);
+  const progress = Math.min((currentTime - t1) / Math.max(t2 - t1, 0.001), 1);
 
   const startLat = seg1.coords[1][0];
   const startLon = seg1.coords[1][1];
-  const endLat = seg2.coords![0][0];
-  const endLon = seg2.coords![0][1];
+  const endLat = seg2.coords?.[0]?.[0] ?? startLat;
+  const endLon = seg2.coords?.[0]?.[1] ?? startLon;
 
   return {
     lat: startLat + (endLat - startLat) * progress,

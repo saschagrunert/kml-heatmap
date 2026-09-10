@@ -8,6 +8,7 @@ import {
   openWrapped,
   relevantConsoleErrors,
   toggleStatsPanel,
+  usesMobileBar,
 } from "./helpers";
 
 test.describe("Core", () => {
@@ -128,11 +129,13 @@ test.describe("Core", () => {
     await expect(page.locator("#loading-text")).toBeAttached();
   });
 
-  test("the zoom control is gone and the attribution is shown", async ({
+  test("the zoom control is gone and the attribution is shown on desktop", async ({
     page,
   }) => {
     // Pinch, scroll and double tap cover zooming
     await expect(page.locator(".leaflet-control-zoom")).toHaveCount(0);
+    // On mobile the attribution moves into the More sheet
+    if (await usesMobileBar(page)) return;
     const attribution = page.locator(".leaflet-control-attribution");
     await expect(attribution).toBeVisible();
     await expect(attribution).toContainText("OpenStreetMap");
@@ -170,7 +173,9 @@ test.describe("Core", () => {
     expect(await markers.count()).toBeGreaterThan(0);
   });
 
-  test("github footer is visible and labelled", async ({ page }) => {
+  test("github footer is visible and labelled on desktop", async ({ page }) => {
+    // On mobile the GitHub link moves into the More sheet
+    if (await usesMobileBar(page)) return;
     const footer = page.locator("#github-footer");
     await expect(footer).toBeVisible();
 

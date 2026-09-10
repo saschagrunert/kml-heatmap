@@ -1,12 +1,12 @@
 """Airport and metadata export writers."""
 
-import json
 import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .airport_lookup import extract_icao_codes_from_name, lookup_airport_country
 from .airports import extract_airport_name
+from .cache import atomic_js_write
 from .logger import logger
 
 if TYPE_CHECKING:
@@ -52,13 +52,9 @@ def export_airports_data(
         valid_airports.append(airport_data)
 
     airports_file = Path(output_dir) / "airports.js"
-
-    with open(airports_file, "w", encoding="utf-8") as f:
-        f.write("window.KML_AIRPORTS = ")
-        json.dump(
-            {"airports": valid_airports}, f, separators=(",", ":"), sort_keys=True
-        )
-        f.write(";")
+    atomic_js_write(
+        airports_file, "KML_AIRPORTS", {"airports": valid_airports}, sort_keys=True
+    )
 
     file_size = airports_file.stat().st_size
 
@@ -96,11 +92,7 @@ def export_metadata(
     }
 
     meta_file = Path(output_dir) / "metadata.js"
-
-    with open(meta_file, "w", encoding="utf-8") as f:
-        f.write("window.KML_METADATA = ")
-        json.dump(meta_data, f, separators=(",", ":"), sort_keys=True)
-        f.write(";")
+    atomic_js_write(meta_file, "KML_METADATA", meta_data, sort_keys=True)
 
     file_size = meta_file.stat().st_size
 

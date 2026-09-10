@@ -96,6 +96,10 @@ def _download_airport_database() -> bool:
         cache_dir = CACHE_FILE.parent
         cache_dir.mkdir(parents=True, exist_ok=True)
 
+        if not os.access(cache_dir, os.W_OK):
+            logger.warning("✗ Airport cache directory is not writable: %s", cache_dir)
+            return False
+
         logger.info("📥 Downloading OurAirports database...")
         context = ssl.create_default_context()
         with urlopen(  # nosec B310
@@ -110,16 +114,11 @@ def _download_airport_database() -> bool:
             )
             return False
 
-        # Fail before downloading ~12 MB when the cache cannot be written
-        if not os.access(cache_dir, os.W_OK):
-            logger.warning("✗ Airport cache directory is not writable: %s", cache_dir)
-            return False
-
         with tempfile.NamedTemporaryFile(
             dir=cache_dir, prefix="airports.", suffix=".tmp", delete=False
         ) as tmp:
-            tmp.write(data)
             tmp_path = Path(tmp.name)
+            tmp.write(data)
 
         if not _is_valid_csv_file(tmp_path):
             logger.warning("✗ Downloaded airport database is empty or invalid")
@@ -193,6 +192,8 @@ def _load_airport_database() -> dict[str, AirportRecord]:
                     logger.debug(
                         "Cannot lock %s, continuing without: %s", CACHE_LOCK_FILE, e
                     )
+                    if lock_file is not None:
+                        lock_file.close()
                     lock_file = None
 
             # Check again if cache is valid after acquiring lock
@@ -289,9 +290,23 @@ def extract_icao_codes_from_name(airport_name: str | None) -> list[str]:
     return [code for code in matches if code[0] in ICAO_REGION_PREFIXES]
 
 
+_AIRPORT_SUFFIXES = (
+    " International Airport",
+    " Regional Airport",
+    " Municipal Airport",
+    " Airport",
+    " Airfield",
+    " Air Base",
+    " Heliport",
+)
+
+
 def _strip_airport_suffix(name: str) -> str:
     """Remove common airport suffixes for cleaner display."""
-    return name.replace(" Airport", "").replace(" Airfield", "")
+    for suffix in _AIRPORT_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
 
 
 def standardize_airport_name(airport_name: str | None) -> str | None:

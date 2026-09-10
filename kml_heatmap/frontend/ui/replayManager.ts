@@ -9,6 +9,7 @@ import { findMinMax } from "../utils/arrayHelpers";
 import { formatTime } from "../utils/formatters";
 import { setControlLabel } from "../utils/buttonState";
 import { setControlIcon } from "../utils/icons";
+import { prepareReplaySegments } from "../features/replay";
 import { ReplayRenderer, replaySegmentColor } from "./replayRenderer";
 import { ReplayState } from "./replayState";
 
@@ -279,16 +280,11 @@ export class ReplayManager {
 
   private filterAndSortSegments(pathId: number): boolean {
     if (!this.app.fullPathSegments) return false;
-    this.state.segments = this.app.fullPathSegments.filter((seg) => {
-      return (
-        seg.path_id === pathId && seg.time !== undefined && seg.time !== null
-      );
-    });
-
-    if (this.state.segments.length === 0) return false;
-
-    this.state.segments.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
-    return true;
+    this.state.segments = prepareReplaySegments(
+      this.app.fullPathSegments,
+      pathId,
+    );
+    return this.state.segments.length > 0;
   }
 
   private calculateColorRanges(pathId: number): void {
@@ -585,6 +581,7 @@ export class ReplayManager {
 
   seekReplay(value: string): void {
     const newTime = parseFloat(value);
+    if (!isFinite(newTime)) return;
 
     if (newTime < this.state.currentTime) {
       // Drop only the segments after the new position; clearing the whole
@@ -600,7 +597,9 @@ export class ReplayManager {
     const select = domCache.get("replay-speed") as HTMLSelectElement | null;
     if (!select) return;
 
-    this.state.speed = parseFloat(select.value);
+    const speed = parseFloat(select.value);
+    if (!isFinite(speed) || speed <= 0) return;
+    this.state.speed = speed;
   }
 
   toggleAutoZoom(): void {

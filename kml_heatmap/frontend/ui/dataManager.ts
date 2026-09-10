@@ -121,7 +121,7 @@ export class DataManager {
     if (hasFilters || hasIsolation) {
       // Get filtered path IDs based on year/aircraft
       const filteredPathIds = new Set<number>();
-      data.path_info.forEach((pathInfo) => {
+      for (const pathInfo of data.path_info) {
         const matchesYear =
           this.app.selectedYear === "all" ||
           (pathInfo.year !== undefined &&
@@ -132,17 +132,14 @@ export class DataManager {
         if (matchesYear && matchesAircraft) {
           filteredPathIds.add(pathInfo.id);
         }
-      });
+      }
 
       // Extract coordinates from filtered segments
       const coordMap = new Map<string, Coordinate>();
-      data.path_segments.forEach((segment) => {
-        // Must match year/aircraft filter
-        if (!filteredPathIds.has(segment.path_id)) return;
-
-        // In isolate mode, also must match selected paths
+      for (const segment of data.path_segments) {
+        if (!filteredPathIds.has(segment.path_id)) continue;
         if (hasIsolation && !this.app.selectedPathIds.has(segment.path_id))
-          return;
+          continue;
 
         const coords = segment.coords;
         if (coords && coords.length === 2) {
@@ -151,7 +148,7 @@ export class DataManager {
           if (!coordMap.has(k0)) coordMap.set(k0, coords[0]);
           if (!coordMap.has(k1)) coordMap.set(k1, coords[1]);
         }
-      });
+      }
 
       filteredCoordinates = Array.from(coordMap.values());
     }
@@ -177,19 +174,17 @@ export class DataManager {
       },
     });
 
-    // Make heatmap non-interactive so clicks pass through to paths
-    if (this.app.heatmapLayer._canvas) {
-      this.app.heatmapLayer._canvas.style.pointerEvents = "none";
-    }
-
     // Only add to map if heatmap is visible AND not in replay mode
     if (this.app.heatmapVisible && !this.app.replayManager.state.active) {
       this.app.heatmapLayer.addTo(this.app.map);
+      if (this.app.heatmapLayer._canvas) {
+        this.app.heatmapLayer._canvas.style.pointerEvents = "none";
+      }
     }
 
     // Build airport-to-paths relationships from path_info
     this.app.airportToPaths = {};
-    data.path_info.forEach((pathInfo) => {
+    for (const pathInfo of data.path_info) {
       const pathId = pathInfo.id;
       if (pathInfo.start_airport) {
         const startSet =
@@ -203,7 +198,7 @@ export class DataManager {
         endSet.add(pathId);
         this.app.airportToPaths[pathInfo.end_airport] = endSet;
       }
-    });
+    }
 
     // Calculate altitude range from all segments
     if (data.path_segments.length > 0) {

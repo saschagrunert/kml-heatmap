@@ -30,10 +30,10 @@ export interface PathInfo {
  */
 export interface PathSegment {
   path_id: number;
-  coords?: [Coordinate, Coordinate];
-  altitude_ft?: number;
-  groundspeed_knots?: number;
-  time?: number;
+  coords?: [Coordinate, Coordinate] | undefined;
+  altitude_ft?: number | undefined;
+  groundspeed_knots?: number | undefined;
+  time?: number | undefined;
 }
 
 /**
@@ -59,8 +59,8 @@ export interface RawYearData {
  */
 export interface AircraftAggregate {
   registration: string;
-  type?: string;
-  model?: string;
+  type?: string | undefined;
+  model?: string | undefined;
   flights: number;
   flight_time_seconds?: number;
   flight_time_str?: string;
@@ -97,21 +97,21 @@ export interface FilteredStatistics {
   aircraft_list: AircraftAggregate[];
   total_distance_km: number;
   total_distance_nm: number;
-  max_altitude_m?: number;
-  min_altitude_m?: number;
-  total_altitude_gain_m?: number;
-  max_altitude_ft?: number;
-  min_altitude_ft?: number;
-  total_altitude_gain_ft?: number;
-  max_groundspeed_knots?: number;
-  avg_groundspeed_knots?: number;
-  cruise_speed_knots?: number;
-  longest_flight_km?: number;
-  longest_flight_nm?: number;
-  total_flight_time_seconds?: number;
-  total_flight_time_str?: string;
-  most_common_cruise_altitude_ft?: number;
-  most_common_cruise_altitude_m?: number;
+  max_altitude_m?: number | undefined;
+  min_altitude_m?: number | undefined;
+  total_altitude_gain_m?: number | undefined;
+  max_altitude_ft?: number | undefined;
+  min_altitude_ft?: number | undefined;
+  total_altitude_gain_ft?: number | undefined;
+  max_groundspeed_knots?: number | undefined;
+  avg_groundspeed_knots?: number | undefined;
+  cruise_speed_knots?: number | undefined;
+  longest_flight_km?: number | undefined;
+  longest_flight_nm?: number | undefined;
+  total_flight_time_seconds?: number | undefined;
+  total_flight_time_str?: string | undefined;
+  most_common_cruise_altitude_ft?: number | null | undefined;
+  most_common_cruise_altitude_m?: number | null | undefined;
 }
 
 /**
@@ -218,7 +218,7 @@ export interface LoadingInfo {
   /** Year being loaded or 'all' */
   year: string;
   /** Size of the file(s) in bytes when known from metadata.year_file_bytes */
-  bytes?: number;
+  bytes?: number | undefined;
 }
 
 /**

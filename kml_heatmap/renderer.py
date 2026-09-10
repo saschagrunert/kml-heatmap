@@ -136,7 +136,7 @@ def _parse_kml_files(valid_files: list[str]) -> ParseResult:
     )
 
     if not all_coordinates:
-        raise ValueError("No coordinates found in any KML files!")
+        raise KMLHeatmapError("No coordinates found in any KML files!")
 
     logger.info("\nTotal points: %d", len(all_coordinates))
     return all_coordinates, all_path_groups, all_path_metadata

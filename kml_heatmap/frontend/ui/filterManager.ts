@@ -41,7 +41,7 @@ export class FilterManager {
 
     // Populate dropdown
     let selectedAircraftExists = false;
-    aircraftList.forEach((aircraft) => {
+    for (const aircraft of aircraftList) {
       const option = document.createElement("option");
       option.value = aircraft.registration;
       const typeStr = aircraft.type ? " (" + aircraft.type + ")" : "";
@@ -51,7 +51,7 @@ export class FilterManager {
       if (aircraft.registration === currentSelection) {
         selectedAircraftExists = true;
       }
-    });
+    }
 
     // If current selection doesn't exist in filtered list, reset to 'all'
     if (!selectedAircraftExists && currentSelection !== "all") {

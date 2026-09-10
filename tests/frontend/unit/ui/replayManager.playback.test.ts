@@ -309,6 +309,22 @@ describe("ReplayManager playback", () => {
 
       expect(liveRegionText()).toBe("");
     });
+
+    it("ignores non-finite values", () => {
+      replayManager.state.currentTime = 42;
+
+      replayManager.seekReplay("not-a-number");
+
+      expect(replayManager.state.currentTime).toBe(42);
+    });
+
+    it("ignores Infinity", () => {
+      replayManager.state.currentTime = 42;
+
+      replayManager.seekReplay("Infinity");
+
+      expect(replayManager.state.currentTime).toBe(42);
+    });
   });
 
   describe("changeReplaySpeed", () => {
@@ -323,6 +339,30 @@ describe("ReplayManager playback", () => {
 
     it("keeps the speed if no speed select element", () => {
       el("replay-speed").remove();
+
+      replayManager.changeReplaySpeed();
+
+      expect(replayManager.state.speed).toBe(50.0);
+    });
+
+    it("ignores non-finite speed values", () => {
+      (el("replay-speed") as HTMLSelectElement).value = "abc";
+
+      replayManager.changeReplaySpeed();
+
+      expect(replayManager.state.speed).toBe(50.0);
+    });
+
+    it("ignores zero speed", () => {
+      (el("replay-speed") as HTMLSelectElement).value = "0";
+
+      replayManager.changeReplaySpeed();
+
+      expect(replayManager.state.speed).toBe(50.0);
+    });
+
+    it("ignores negative speed", () => {
+      (el("replay-speed") as HTMLSelectElement).value = "-10";
 
       replayManager.changeReplaySpeed();
 

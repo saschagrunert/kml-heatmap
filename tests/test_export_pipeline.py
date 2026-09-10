@@ -3,9 +3,9 @@
 import pytest
 
 from kml_heatmap.export_pipeline import (
-    _build_path_info,
-    _process_path_segments,
     _segment_groundspeed,
+    build_path_info,
+    process_path_segments,
 )
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.segment_calculator import SegmentSpeed
@@ -27,7 +27,7 @@ class TestBuildPathInfo:
             "timestamp": "2025-03-03T08:00:00Z",
             "end_timestamp": "2025-03-03T09:30:00Z",
         }
-        info, duration, distance = _build_path_info(_make_path(), metadata, 4, 2025)
+        info, duration, distance = build_path_info(_make_path(), metadata, 4, 2025)
         assert info["start_airport"] == "EDDS"
         assert info["end_airport"] == "EDDP"
         assert info["year"] == 2025
@@ -37,7 +37,7 @@ class TestBuildPathInfo:
 
     def test_none_values_are_omitted(self):
         metadata = {"airport_name": "", "aircraft_registration": None}
-        info, duration, _ = _build_path_info(_make_path(), metadata, 1, 2025)
+        info, duration, _ = build_path_info(_make_path(), metadata, 1, 2025)
         assert "start_airport" not in info
         assert "end_airport" not in info
         assert "aircraft_registration" not in info
@@ -53,32 +53,32 @@ class TestBuildPathInfo:
         }
 
     def test_single_airport_no_split(self):
-        info, _, _ = _build_path_info(_make_path(), {"airport_name": "EDDS"}, 0, 2025)
+        info, _, _ = build_path_info(_make_path(), {"airport_name": "EDDS"}, 0, 2025)
         assert "start_airport" not in info
 
     def test_three_part_name_not_split(self):
         metadata = {"airport_name": "EDDF - EDDM - EDDT"}
-        info, _, _ = _build_path_info(_make_path(), metadata, 0, 2025)
+        info, _, _ = build_path_info(_make_path(), metadata, 0, 2025)
         assert "start_airport" not in info
 
     def test_invalid_timestamps_zero_duration(self):
         metadata = {"timestamp": "invalid", "end_timestamp": "also-invalid"}
-        _, duration, _ = _build_path_info(_make_path(), metadata, 0, 2025)
+        _, duration, _ = build_path_info(_make_path(), metadata, 0, 2025)
         assert duration == 0.0
 
     def test_distance_calculation(self):
-        _, _, distance = _build_path_info(_make_path(), {}, 0, 2025)
+        _, _, distance = build_path_info(_make_path(), {}, 0, 2025)
         assert distance == pytest.approx(11.9, abs=0.5)
 
     def test_aircraft_metadata_included(self):
         metadata = {"aircraft_registration": "D-EAGJ", "aircraft_type": "C172"}
-        info, _, _ = _build_path_info(_make_path(), metadata, 0, 2025)
+        info, _, _ = build_path_info(_make_path(), metadata, 0, 2025)
         assert info["aircraft_registration"] == "D-EAGJ"
         assert info["aircraft_type"] == "C172"
 
     def test_segment_count_and_coords(self):
         path = _make_path(count=5)
-        info, _, _ = _build_path_info(path, {}, 0, 2025)
+        info, _, _ = build_path_info(path, {}, 0, 2025)
         assert info["segment_count"] == 4
         assert info["start_coords"] == [path[0].lat, path[0].lon]
         assert info["end_coords"] == [path[-1].lat, path[-1].lon]
@@ -102,7 +102,7 @@ class TestSegmentGroundspeed:
 
 class TestProcessPathSegments:
     def test_generates_rows_with_time(self):
-        rows, distances = _process_path_segments(_make_path(timed=True), 10.0, 540.0)
+        rows, distances = process_path_segments(_make_path(timed=True), 10.0, 540.0)
         assert len(rows) == 9
         assert len(distances) == 9
         assert all(len(row) == 7 for row in rows)
@@ -111,7 +111,7 @@ class TestProcessPathSegments:
         assert all(distance > 0 for distance in distances)
 
     def test_rows_without_time(self):
-        rows, _ = _process_path_segments(_make_path(count=3), 10.0, 600.0)
+        rows, _ = process_path_segments(_make_path(count=3), 10.0, 600.0)
         assert all(len(row) == 6 for row in rows)
 
     def test_identical_coordinates_filtered(self):
@@ -120,7 +120,7 @@ class TestProcessPathSegments:
             TrackPoint(50.0, 8.5, 1100.0, None),
             TrackPoint(50.1, 8.6, 1200.0, None),
         ]
-        rows, distances = _process_path_segments(path, 5.0, 120.0)
+        rows, distances = process_path_segments(path, 5.0, 120.0)
         assert len(rows) == 1
         assert rows[0][:4] == [50.0, 8.5, 50.1, 8.6]
         assert len(distances) == 1
@@ -130,13 +130,13 @@ class TestProcessPathSegments:
             TrackPoint(50.0, 8.5, 1523.5, None),
             TrackPoint(50.1, 8.6, 1523.5, None),
         ]
-        rows, _ = _process_path_segments(path, 5.0, 60.0)
+        rows, _ = process_path_segments(path, 5.0, 60.0)
         assert rows[0][4] == 5000
         assert rows[0][4] % 100 == 0
 
     def test_missing_altitude_on_one_end_uses_the_other(self):
         path = [TrackPoint(50.0, 8.5, None, None), TrackPoint(50.1, 8.6, 304.8, None)]
-        rows, _ = _process_path_segments(path, 5.0, 60.0)
+        rows, _ = process_path_segments(path, 5.0, 60.0)
         assert rows[0][4] == 1000
 
     def test_missing_altitude_on_both_ends_skips_segment(self):
@@ -145,13 +145,13 @@ class TestProcessPathSegments:
             TrackPoint(50.1, 8.6, None, None),
             TrackPoint(50.2, 8.7, 100.0, None),
         ]
-        rows, distances = _process_path_segments(path, 5.0, 60.0)
+        rows, distances = process_path_segments(path, 5.0, 60.0)
         assert len(rows) == 1
         assert rows[0][:2] == [50.1, 8.6]
         assert len(distances) == 1
 
     def test_groundspeed_rounded(self):
-        rows, _ = _process_path_segments(_make_path(timed=True), 10.0, 540.0)
+        rows, _ = process_path_segments(_make_path(timed=True), 10.0, 540.0)
         for row in rows:
             assert row[5] == round(row[5], 1)
             assert row[5] > 0
@@ -162,5 +162,5 @@ class TestProcessPathSegments:
             TrackPoint(50.1, 8.6, 100.0, 1000.0 + 61.26),
             TrackPoint(50.2, 8.7, 100.0, 1000.0 + 120.0),
         ]
-        rows, _ = _process_path_segments(path, 20.0, 120.0)
+        rows, _ = process_path_segments(path, 20.0, 120.0)
         assert rows[1][6] == 61.3

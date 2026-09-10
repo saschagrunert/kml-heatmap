@@ -490,7 +490,6 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
       store.set("airspeedRange", v);
     },
     loadInitialData: vi.fn(),
-    createAirportMarkers: vi.fn(),
     togglePathSelection: vi.fn(),
     seekReplay: vi.fn(),
     changeReplaySpeed: vi.fn(),

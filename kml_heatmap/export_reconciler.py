@@ -224,18 +224,17 @@ class YearAggregate:
         )
 
         if self.cruise_altitude_bins:
-            # Ties resolve to the lowest altitude, like the frontend's sort
-            most_common_ft = max(
-                sorted(self.cruise_altitude_bins),
-                key=self.cruise_altitude_bins.__getitem__,
+            most_common_ft = min(
+                self.cruise_altitude_bins,
+                key=lambda k: (-self.cruise_altitude_bins[k], k),
             )
             stats["most_common_cruise_altitude_ft"] = most_common_ft
             stats["most_common_cruise_altitude_m"] = round(
                 most_common_ft * FEET_TO_METERS, 1
             )
         else:
-            stats["most_common_cruise_altitude_ft"] = 0
-            stats["most_common_cruise_altitude_m"] = 0
+            stats["most_common_cruise_altitude_ft"] = None
+            stats["most_common_cruise_altitude_m"] = None
 
         stats["longest_flight_km"] = round(self.longest_flight_km, 1)
         stats["longest_flight_nm"] = round(

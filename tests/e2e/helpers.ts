@@ -14,7 +14,7 @@ interface SegmentClickPosition {
   x: number;
   y: number;
   coord: number[];
-  pathId?: number;
+  pathId?: number | undefined;
 }
 
 export interface ErrorCollector {

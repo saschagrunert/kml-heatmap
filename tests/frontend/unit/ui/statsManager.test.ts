@@ -573,6 +573,7 @@ describe("StatsManager", () => {
     it("cancels a pending hide when reopened quickly", () => {
       statsPanel.style.display = "block";
       statsPanel.classList.add("visible");
+      mockApp.store.set("statsPanelVisible", true);
 
       statsManager.toggleStats(); // hide (timer pending)
       vi.advanceTimersByTime(100);

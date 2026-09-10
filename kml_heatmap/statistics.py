@@ -53,6 +53,8 @@ def _build_aircraft_flights_map(
             entry = aircraft_flights.setdefault(
                 reg, {"type": atype, "count": 0, "files": set()}
             )
+            if entry["type"] is None and atype is not None:
+                entry["type"] = atype
             # Only count unique filenames (each file = one flight)
             if filename and filename not in entry["files"]:
                 entry["files"].add(filename)

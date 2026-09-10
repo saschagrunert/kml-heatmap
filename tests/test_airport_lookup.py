@@ -15,6 +15,7 @@ from kml_heatmap.airport_lookup import (
     _is_valid_csv_file,
     _load_airport_database,
     _read_airport_csv,
+    _strip_airport_suffix,
     extract_icao_codes_from_name,
     get_cache_info,
     lookup_airport_coordinates,
@@ -387,3 +388,24 @@ class TestStandardizeAirportName:
 
     def test_route_with_unknown_airports_returns_original(self):
         assert standardize_airport_name("ZZZZ - YYYY") == "ZZZZ - YYYY"
+
+
+class TestStripAirportSuffix:
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            ("Frankfurt Main Airport", "Frankfurt Main"),
+            ("Vöslau-Kottingbrunn Airfield", "Vöslau-Kottingbrunn"),
+            ("John F Kennedy International Airport", "John F Kennedy"),
+            ("Springfield Regional Airport", "Springfield"),
+            ("Cedar Rapids Municipal Airport", "Cedar Rapids"),
+            ("Ramstein Air Base", "Ramstein"),
+            ("Hospital Heliport", "Hospital"),
+            ("No Suffix Here", "No Suffix Here"),
+        ],
+    )
+    def test_strips_known_suffixes(self, name, expected):
+        assert _strip_airport_suffix(name) == expected
+
+    def test_longest_suffix_wins(self):
+        assert _strip_airport_suffix("LAX International Airport") == "LAX"

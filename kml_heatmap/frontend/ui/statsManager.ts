@@ -468,8 +468,6 @@ export class StatsManager {
   }
 
   toggleStats(): void {
-    const panel = domCache.get(PANEL_ID);
-    if (!panel) return;
-    this.setStatsPanelVisible(!panel.classList.contains("visible"));
+    this.setStatsPanelVisible(!this.app.store.get("statsPanelVisible"));
   }
 }

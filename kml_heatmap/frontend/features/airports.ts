@@ -93,7 +93,7 @@ export function calculateAirportFlightCounts(
   const filteredPaths = filterPaths(pathInfo, year, aircraft);
 
   // Count unique airports per flight (avoid double-counting round trips)
-  filteredPaths.forEach(function (path) {
+  for (const path of filteredPaths) {
     const uniqueAirports = new Set<string>();
     if (path.start_airport) {
       uniqueAirports.add(path.start_airport);
@@ -101,11 +101,10 @@ export function calculateAirportFlightCounts(
     if (path.end_airport) {
       uniqueAirports.add(path.end_airport);
     }
-    // Increment count for each unique airport in this flight
-    uniqueAirports.forEach(function (airport) {
+    for (const airport of uniqueAirports) {
       counts[airport] = (counts[airport] || 0) + 1;
-    });
-  });
+    }
+  }
 
   return counts;
 }
@@ -119,12 +118,12 @@ export function findHomeBase(airportCounts: AirportCounts): string | null {
   let homeBaseName: string | null = null;
   let maxCount = 0;
 
-  Object.keys(airportCounts).forEach(function (name) {
-    if (airportCounts[name]! > maxCount) {
-      maxCount = airportCounts[name]!;
+  for (const [name, count] of Object.entries(airportCounts)) {
+    if (count > maxCount) {
+      maxCount = count;
       homeBaseName = name;
     }
-  });
+  }
 
   return homeBaseName;
 }

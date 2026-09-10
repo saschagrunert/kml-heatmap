@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .types import FlightPath, PathInfo, PathMetadata, SegmentRow
 
 
-def _build_path_info(
+def build_path_info(
     path: FlightPath,
     metadata: PathMetadata,
     path_id: int,
@@ -104,7 +104,7 @@ def _segment_groundspeed(
     return groundspeed_knots
 
 
-def _process_path_segments(
+def process_path_segments(
     path: FlightPath,
     path_distance_km: float,
     path_duration_seconds: float,

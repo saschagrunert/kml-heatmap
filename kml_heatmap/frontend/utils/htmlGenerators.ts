@@ -161,6 +161,29 @@ function statCard(value: string, unit: string, label: string): string {
   );
 }
 
+function flightTimeCard(flightTime: string): string {
+  const formatted = flightTime.replace(
+    /(\d+)(h)\s*(\d+)(m)/,
+    (_: string, h: string, hu: string, m: string, mu: string) =>
+      escapeHtml(h) +
+      '<span class="stat-unit">' +
+      escapeHtml(hu) +
+      "</span> " +
+      escapeHtml(m) +
+      '<span class="stat-unit">' +
+      escapeHtml(mu) +
+      "</span>",
+  );
+  return (
+    '<div class="stat-card">' +
+    '<div class="stat-value">' +
+    formatted +
+    "</div>" +
+    '<div class="stat-label">Flight Time</div>' +
+    "</div>"
+  );
+}
+
 /**
  * Generate stats grid HTML
  */
@@ -176,9 +199,9 @@ export function generateStatsHtml(
   return (
     statCard(String(yearStats.total_flights), "", "Flights") +
     statCard(String(yearStats.num_airports), "", "Airports") +
-    statCard(yearStats.total_distance_nm.toFixed(0), "", "Nautical Miles") +
+    statCard(yearStats.total_distance_nm.toFixed(0), "nm", "Distance") +
     (hasTimingData
-      ? statCard(yearStats.flight_time, "", "Flight Time") +
+      ? flightTimeCard(yearStats.flight_time) +
         statCard(
           (fullStats?.max_groundspeed_knots || 0).toFixed(0),
           "kt",
@@ -194,9 +217,9 @@ export function generateStatsHtml(
  */
 export function generateFunFactsHtml(funFacts: FunFact[]): string {
   let html = wrappedSectionTitle("fun-facts-title", "wrapped", "Facts");
-  funFacts.forEach((fact: FunFact) => {
+  for (const fact of funFacts) {
     html += `<div class="fun-fact" data-category="${escapeHtml(fact.category)}"><span class="fun-fact-icon" aria-hidden="true">${fact.icon}</span><span class="fun-fact-text">${fact.text}</span></div>`;
-  });
+  }
   return html;
 }
 
@@ -230,12 +253,11 @@ export function generateAircraftFleetHtml(yearStats: YearStats): string {
     yearStats.aircraft_list[yearStats.aircraft_list.length - 1]?.flights ?? 0;
   const flightRange = maxFlights - minFlights;
 
-  yearStats.aircraft_list.forEach((aircraft) => {
+  for (const aircraft of yearStats.aircraft_list) {
     const modelStr = aircraft.model || aircraft.type || "";
     const normalized =
       flightRange > 0 ? (aircraft.flights - minFlights) / flightRange : 1;
     const colorClass = calculateAircraftColorClass(normalized);
-    // The per-aircraft flight time is the one the data carries; never derived
     const flightTimeStr = aircraft.flight_time_str || "---";
 
     html +=
@@ -259,7 +281,7 @@ export function generateAircraftFleetHtml(yearStats: YearStats): string {
       "</div>" +
       "</div>" +
       "</div>";
-  });
+  }
 
   return html;
 }
@@ -342,7 +364,7 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
     <div class="popup-container">
         <div class="popup-header kh-popup-header-segment">
             <span class="popup-header-icon">${icon}</span>
-            <span>${title}</span>
+            <span>${escapeHtml(title)}</span>
         </div>
         <div class="popup-coords kh-popup-block">
             ${lat} ${lon}<br><span class="kh-popup-track">Track: ${trackStr}</span>
