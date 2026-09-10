@@ -144,6 +144,7 @@ describe("WrappedManager", () => {
         <div id="wrapped-fun-facts"></div>
         <div id="wrapped-aircraft-fleet"></div>
         <div id="wrapped-top-airports"></div>
+        <div id="wrapped-cards-column"></div>
         <div id="wrapped-airports-grid"></div>
         <div id="wrapped-map-container"></div>
       </div>
@@ -1096,6 +1097,61 @@ describe("WrappedManager", () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
       expect(restoreControls).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("cards column scroll", () => {
+    it("starts a reopened dialog at the title", () => {
+      const column = document.getElementById("wrapped-cards-column")!;
+      Object.defineProperty(column, "scrollHeight", {
+        value: 2500,
+        configurable: true,
+      });
+      Object.defineProperty(column, "clientHeight", {
+        value: 600,
+        configurable: true,
+      });
+
+      wrappedManager.showWrapped();
+      column.scrollTop = 900;
+      wrappedManager.closeWrapped();
+
+      wrappedManager.showWrapped();
+
+      // The column keeps its position across openings, so it has to be put
+      // back or Wrapped reopens halfway down a card
+      expect(column.scrollTop).toBe(0);
+    });
+
+    it("drops the bottom fade once the end is reached", () => {
+      const column = document.getElementById("wrapped-cards-column")!;
+      Object.defineProperty(column, "scrollHeight", {
+        value: 2500,
+        configurable: true,
+      });
+      Object.defineProperty(column, "clientHeight", {
+        value: 600,
+        configurable: true,
+      });
+
+      wrappedManager.showWrapped();
+      expect(column.classList.contains("is-at-end")).toBe(false);
+
+      column.scrollTop = 1900;
+      column.dispatchEvent(new Event("scroll"));
+
+      expect(column.classList.contains("is-at-end")).toBe(true);
+    });
+
+    it("stops listening once the dialog is closed", () => {
+      const column = document.getElementById("wrapped-cards-column")!;
+      const removed = vi.spyOn(column, "removeEventListener");
+
+      wrappedManager.showWrapped();
+      wrappedManager.closeWrapped();
+
+      expect(removed).toHaveBeenCalledWith("scroll", expect.any(Function));
+      removed.mockRestore();
     });
   });
 });

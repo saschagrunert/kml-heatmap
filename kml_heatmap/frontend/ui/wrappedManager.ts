@@ -124,6 +124,10 @@ export class WrappedManager {
    * the dialog and drops the mask in CSS.
    */
   private trackCardsScroll(column: HTMLElement): void {
+    // The column keeps its scroll position between openings, so without this
+    // reopening Wrapped lands mid-card instead of on the title
+    column.scrollTop = 0;
+
     const update = (): void => {
       const atEnd =
         column.scrollTop + column.clientHeight >= column.scrollHeight - 1;

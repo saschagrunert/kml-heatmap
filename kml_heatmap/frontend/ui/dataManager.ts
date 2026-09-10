@@ -77,7 +77,9 @@ export class DataManager {
     const canvas = this.app.heatmapLayer?._canvas;
     if (!canvas) return;
     const colorLayerOn = this.app.altitudeVisible || this.app.airspeedVisible;
-    canvas.style.opacity = colorLayerOn ? "0.35" : "1";
+    // How far it steps back is a design decision, so it lives in the
+    // stylesheet with the rest of them rather than as a number in here
+    canvas.classList.toggle("heatmap-dimmed", colorLayerOn);
   }
 
   async loadData(year: string): Promise<KMLDataset | null> {

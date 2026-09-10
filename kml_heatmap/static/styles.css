@@ -46,6 +46,9 @@
     #16213e 50%,
     #0f3460 100%
   );
+  /* How far the heatmap steps back under a colour layer, so the gradient
+     rather than the bloom is what reads */
+  --heatmap-dimmed-opacity: 0.35;
   --shadow-color: rgba(0, 0, 0, 0.4);
   --shadow-color-strong: rgba(0, 0, 0, 0.6);
   /* One soft elevation per surface class */
@@ -552,6 +555,11 @@ body {
 .gradient-chip-speed,
 #airspeed-legend .gradient-bar {
   background: var(--gradient-speed);
+}
+
+/* Set by DataManager.applyHeatmapEmphasis() on the leaflet.heat canvas */
+.heatmap-dimmed {
+  opacity: var(--heatmap-dimmed-opacity);
 }
 
 /* Set by AirportManager.declutterLabels() on the labels that would be drawn
