@@ -301,4 +301,158 @@ describe("AirportManager", () => {
       expect(() => airportManager.updateAirportMarkerSizes()).not.toThrow();
     });
   });
+
+  describe("declutterLabels", () => {
+    /** Give a marker a label element whose box the test controls */
+    function withLabel(
+      name: string,
+      rect: { left: number; top: number; width: number; height: number },
+    ): HTMLElement {
+      const root = document.createElement("div");
+      const label = document.createElement("div");
+      label.className = "airport-label";
+      label.textContent = name;
+      root.appendChild(label);
+      label.getBoundingClientRect = () => ({
+        left: rect.left,
+        top: rect.top,
+        right: rect.left + rect.width,
+        bottom: rect.top + rect.height,
+        width: rect.width,
+        height: rect.height,
+        x: rect.left,
+        y: rect.top,
+        toJSON: () => ({}),
+      });
+      markers[name]!.element = root;
+      return label;
+    }
+
+    it("hides the label that would be drawn over a busier one", () => {
+      // EDDF has three flights, EDDM two, and the two boxes overlap
+      const eddf = withLabel("EDDF", {
+        left: 100,
+        top: 100,
+        width: 40,
+        height: 14,
+      });
+      const eddm = withLabel("EDDM", {
+        left: 120,
+        top: 104,
+        width: 40,
+        height: 14,
+      });
+
+      airportManager.declutterLabels();
+
+      expect(eddf.classList.contains("airport-label-crowded")).toBe(false);
+      expect(eddm.classList.contains("airport-label-crowded")).toBe(true);
+    });
+
+    it("keeps both labels when they do not overlap", () => {
+      const eddf = withLabel("EDDF", {
+        left: 0,
+        top: 0,
+        width: 40,
+        height: 14,
+      });
+      const eddm = withLabel("EDDM", {
+        left: 300,
+        top: 300,
+        width: 40,
+        height: 14,
+      });
+
+      airportManager.declutterLabels();
+
+      expect(eddf.classList.contains("airport-label-crowded")).toBe(false);
+      expect(eddm.classList.contains("airport-label-crowded")).toBe(false);
+    });
+
+    it("reconsiders a label that was hidden before", () => {
+      const eddf = withLabel("EDDF", {
+        left: 100,
+        top: 100,
+        width: 40,
+        height: 14,
+      });
+      const eddm = withLabel("EDDM", {
+        left: 120,
+        top: 104,
+        width: 40,
+        height: 14,
+      });
+      airportManager.declutterLabels();
+      expect(eddm.classList.contains("airport-label-crowded")).toBe(true);
+
+      // The map moved and they no longer overlap
+      eddm.getBoundingClientRect = () => ({
+        left: 400,
+        top: 400,
+        right: 440,
+        bottom: 414,
+        width: 40,
+        height: 14,
+        x: 400,
+        y: 400,
+        toJSON: () => ({}),
+      });
+      airportManager.declutterLabels();
+
+      expect(eddf.classList.contains("airport-label-crowded")).toBe(false);
+      expect(eddm.classList.contains("airport-label-crowded")).toBe(false);
+    });
+
+    it("skips markers that are not on the map", () => {
+      expect(() => airportManager.declutterLabels()).not.toThrow();
+    });
+  });
+
+  describe("declutterLabels after icon changes", () => {
+    it("re-runs the declutter when updateAirportPopups recreates an icon", () => {
+      const spy = vi.spyOn(airportManager, "declutterLabels");
+
+      // First pass assigns the home base, so at least one icon is recreated
+      airportManager.updateAirportPopups();
+
+      expect(spy).toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("does not re-run when no icon changed", () => {
+      airportManager.updateAirportPopups();
+      const spy = vi.spyOn(airportManager, "declutterLabels");
+
+      // Same filter, same home base: nothing is recreated
+      airportManager.updateAirportPopups();
+
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+  });
+
+  describe("flight count caching", () => {
+    it("recounts when the dataset is replaced, even at the same size", () => {
+      airportManager.updateAirportPopups();
+      expect(String(markers["EDDF"]!.popupContent())).toContain(
+        '<span class="popup-metric-value kh-popup-accent">3</span>',
+      );
+
+      // Same year, same aircraft filter and the same number of paths, but a
+      // different dataset: counts keyed on the size alone would go stale
+      mockApp.currentData = createDataset([
+        { id: 1, year: 2025, start_airport: "EDDM", end_airport: "EDDK" },
+        { id: 2, year: 2025, start_airport: "EDDM", end_airport: "EDDK" },
+        { id: 3, year: 2025, start_airport: "EDDM", end_airport: "EDDK" },
+      ]);
+      airportManager.updateAirportPopups();
+
+      expect(String(markers["EDDF"]!.popupContent())).toContain(
+        '<span class="popup-metric-value kh-popup-accent">0</span>',
+      );
+      expect(String(markers["EDDM"]!.popupContent())).toContain(
+        '<span class="popup-metric-value kh-popup-accent">3</span>',
+      );
+    });
+  });
 });

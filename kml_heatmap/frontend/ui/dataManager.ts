@@ -65,6 +65,21 @@ export class DataManager {
     if (loadingEl) loadingEl.style.display = "none";
   }
 
+  /**
+   * Fade the heatmap back while a colour layer is drawn over it.
+   *
+   * Both are on by default, and the heatmap's cyan bloom under the altitude
+   * or speed gradient washes out exactly the scale the user just switched on.
+   * The layer stays visible and its toggle still owns whether it is there at
+   * all; this only settles which of the two reads first.
+   */
+  applyHeatmapEmphasis(): void {
+    const canvas = this.app.heatmapLayer?._canvas;
+    if (!canvas) return;
+    const colorLayerOn = this.app.altitudeVisible || this.app.airspeedVisible;
+    canvas.style.opacity = colorLayerOn ? "0.35" : "1";
+  }
+
   async loadData(year: string): Promise<KMLDataset | null> {
     this.loadErrorReported = false;
     return await this.dataLoader.loadData(year);
@@ -186,6 +201,7 @@ export class DataManager {
       if (this.app.heatmapLayer._canvas) {
         this.app.heatmapLayer._canvas.style.pointerEvents = "none";
       }
+      this.applyHeatmapEmphasis();
     }
 
     // Build airport-to-paths relationships from path_info
@@ -212,6 +228,7 @@ export class DataManager {
         data.path_segments,
         null,
         this.app.altitudeRange,
+        data.path_info,
       );
     }
 

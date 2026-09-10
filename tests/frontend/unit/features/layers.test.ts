@@ -74,6 +74,61 @@ describe("layers feature", () => {
     });
   });
 
+  describe("calculateAltitudeRange with exact path ranges", () => {
+    it("widens the rounded segment range to the exact per-path values", () => {
+      // Segments carry 100 ft steps; path_info carries what was measured
+      const range = calculateAltitudeRange(
+        [{ path_id: 1, altitude_ft: 10400 }],
+        null,
+        { min: 0, max: 10000 },
+        [{ id: 1, min_altitude_ft: 343.7, max_altitude_ft: 10419.2 }],
+      );
+      expect(range.max).toBe(10419.2);
+      expect(range.min).toBe(343.7);
+    });
+
+    it("only considers the selected paths", () => {
+      const range = calculateAltitudeRange(
+        [
+          { path_id: 1, altitude_ft: 3000 },
+          { path_id: 2, altitude_ft: 9000 },
+        ],
+        new Set([1]),
+        { min: 0, max: 10000 },
+        [
+          { id: 1, max_altitude_ft: 3050 },
+          { id: 2, max_altitude_ft: 20000 },
+        ],
+      );
+      expect(range.max).toBe(3050);
+    });
+
+    it("only lets paths that are in the range widen it", () => {
+      // Path 2 has an exact altitude far above anything drawn, but none of
+      // its segments are in the set, so it must not stretch the legend
+      const range = calculateAltitudeRange(
+        [{ path_id: 1, altitude_ft: 3000 }],
+        null,
+        { min: 0, max: 10000 },
+        [
+          { id: 1, max_altitude_ft: 3050 },
+          { id: 2, max_altitude_ft: 41000 },
+        ],
+      );
+      expect(range.max).toBe(3050);
+    });
+
+    it("returns the fallback untouched when no segment matches", () => {
+      // Widening the fallback with real altitudes would report a range that
+      // is half invented: a real minimum against a made-up maximum
+      const fallback = { min: 0, max: 10000 };
+      const range = calculateAltitudeRange([], null, fallback, [
+        { id: 1, min_altitude_ft: 500, max_altitude_ft: 900 },
+      ]);
+      expect(range).toEqual(fallback);
+    });
+  });
+
   describe("calculateAirspeedRange", () => {
     it("calculates range from all segments", () => {
       expect(calculateAirspeedRange(mockSegments)).toEqual({
@@ -160,8 +215,8 @@ describe("layers feature", () => {
 
   describe("legend labels", () => {
     it("formats altitude with meters", () => {
-      expect(formatAltitudeLabel(1000)).toBe("1000 ft (305 m)");
-      expect(formatAltitudeLabel(1234.6)).toBe("1235 ft (376 m)");
+      expect(formatAltitudeLabel(1000)).toBe("1,000 ft (305 m)");
+      expect(formatAltitudeLabel(1234.6)).toBe("1,235 ft (376 m)");
       expect(formatAltitudeLabel(0)).toBe("0 ft (0 m)");
     });
 
@@ -174,7 +229,7 @@ describe("layers feature", () => {
     it("builds min/max label pairs", () => {
       expect(formatAltitudeLegendLabels(0, 5000)).toEqual({
         min: "0 ft (0 m)",
-        max: "5000 ft (1524 m)",
+        max: "5,000 ft (1,524 m)",
       });
       expect(formatAirspeedLegendLabels(0, 200)).toEqual({
         min: "0 kt (0 km/h)",

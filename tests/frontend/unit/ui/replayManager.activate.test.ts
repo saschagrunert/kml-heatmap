@@ -352,7 +352,7 @@ describe("ReplayManager activation", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.toggleReplay();
 
-      expect(el("replay-readout-altitude").textContent).toBe("3000 ft");
+      expect(el("replay-readout-altitude").textContent).toBe("3,000 ft");
     });
 
     it("moves focus into the panel and back out again", () => {
@@ -374,11 +374,11 @@ describe("ReplayManager activation", () => {
       replayManager.state.currentTime = 65;
       replayManager.updateReplayDisplay();
 
-      expect(el("replay-readout-altitude").textContent).toBe("4000 ft");
+      expect(el("replay-readout-altitude").textContent).toBe("4,000 ft");
       expect(el("replay-readout-speed").textContent).toBe("120 kt");
       expect(el("replay-readout-track").textContent).toMatch(/^\d{3}°$/);
       // Both unit systems, as on every other surface
-      expect(el("replay-readout-altitude-alt").textContent).toBe("1219 m");
+      expect(el("replay-readout-altitude-alt").textContent).toBe("1,219 m");
       expect(el("replay-readout-speed-alt").textContent).toBe("222 km/h");
     });
 

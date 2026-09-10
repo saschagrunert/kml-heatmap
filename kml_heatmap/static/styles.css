@@ -39,6 +39,13 @@
   --color-accent-orange-rgb: 255, 165, 0;
   --color-accent-gold-rgb: 255, 217, 61;
   --color-accent-mint-rgb: 102, 205, 170;
+  /* Deep navy face of the Wrapped cards; the only multi-stop surface fill */
+  --gradient-wrapped-card: linear-gradient(
+    135deg,
+    #1a1a2e 0%,
+    #16213e 50%,
+    #0f3460 100%
+  );
   --shadow-color: rgba(0, 0, 0, 0.4);
   --shadow-color-strong: rgba(0, 0, 0, 0.6);
   /* One soft elevation per surface class */
@@ -537,28 +544,20 @@ body {
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 .ramp-chip-altitude,
-.gradient-chip-altitude {
-  background: linear-gradient(
-    to right,
-    rgb(80, 160, 255) 0%,
-    rgb(0, 255, 255) 20%,
-    rgb(0, 255, 0) 40%,
-    rgb(255, 255, 0) 60%,
-    rgb(255, 165, 0) 80%,
-    rgb(255, 66, 66) 100%
-  );
+.gradient-chip-altitude,
+#altitude-legend .gradient-bar {
+  background: var(--gradient-altitude);
 }
 .ramp-chip-speed,
-.gradient-chip-speed {
-  background: linear-gradient(
-    to right,
-    rgb(0, 128, 255) 0%,
-    rgb(0, 255, 255) 20%,
-    rgb(0, 255, 0) 40%,
-    rgb(255, 255, 0) 60%,
-    rgb(255, 128, 0) 80%,
-    rgb(255, 0, 0) 100%
-  );
+.gradient-chip-speed,
+#airspeed-legend .gradient-bar {
+  background: var(--gradient-speed);
+}
+
+/* Set by AirportManager.declutterLabels() on the labels that would be drawn
+   over an already placed one. The marker dot stays; only the code is hidden. */
+.airport-label-crowded {
+  visibility: hidden;
 }
 
 .control-sep {
@@ -599,7 +598,7 @@ body {
   /* Rotation is animated here; the marker root is positioned by Leaflet */
   transform-origin: center center;
   will-change: transform;
-  transition: transform 0.15s linear;
+  transition: transform var(--duration-fast) linear;
   /* Make airplane more visible with a glow effect */
   text-shadow: 0 0 8px rgba(var(--color-accent-blue-rgb), 0.8);
 }
@@ -804,15 +803,6 @@ body {
 }
 .color-legend .gradient-bar {
   height: var(--icon-md);
-  background: linear-gradient(
-    to right,
-    rgb(80, 160, 255) 0%,
-    rgb(0, 255, 255) 20%,
-    rgb(0, 255, 0) 40%,
-    rgb(255, 255, 0) 60%,
-    rgb(255, 165, 0) 80%,
-    rgb(255, 66, 66) 100%
-  );
   border-radius: var(--radius-bar);
   margin-bottom: var(--space-xs);
 }
@@ -913,7 +903,9 @@ body.stats-open #map {
    ramp becomes unreadable while the statistics are open. */
 body.stats-open .color-legend,
 body.stats-open #left-buttons {
-  left: calc(var(--stats-rail-w) + var(--edge-gap) + var(--safe-left));
+  /* A gap the width of the edge inset alone read as one cramped double
+     panel, with no telling which surface the buttons belonged to */
+  left: calc(var(--stats-rail-w) + var(--space-lg) + var(--safe-left));
 }
 /* Wrapped re-parents #map into its own container, where the rail inset
    would leave an empty band on the left and clip the map on the right. */
@@ -1004,11 +996,14 @@ body.stats-open #left-buttons {
   background: transparent;
   flex-shrink: 0;
 }
+/* The cards are the only thing that scrolls. Scrolling the row itself took
+   the map with it and left most of the dialog empty for cards two to four. */
 #wrapped-content {
   display: flex;
   gap: var(--space-lg);
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   align-items: stretch;
   padding: 0 var(--wrapped-gutter)
     calc(var(--wrapped-gutter) + var(--safe-bottom));
@@ -1039,11 +1034,34 @@ body.stats-open #left-buttons {
   gap: var(--space-lg);
   width: 500px;
   flex-shrink: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Three of the four cards start below the fold, so the column fades out at
+     its bottom edge to say that there is more, and keeps a visible scrollbar
+     rather than the overlay one the platform would hide. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-bg-active) transparent;
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--space-lg)),
+    transparent 100%
+  );
+}
+#wrapped-cards-column.is-at-end {
+  mask-image: none;
+}
+#wrapped-cards-column::-webkit-scrollbar {
+  width: 6px;
+}
+#wrapped-cards-column::-webkit-scrollbar-thumb {
+  background-color: var(--color-bg-active);
+  border-radius: var(--radius-pill);
 }
 
 /* Square card base styles */
 .wrapped-square-card {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  background: var(--gradient-wrapped-card);
   border-radius: var(--radius-card);
   padding: var(--space-lg);
   flex-shrink: 0;
@@ -1069,6 +1087,11 @@ body.stats-open #left-buttons {
 }
 
 /* Shared card styles */
+/* The heading paints its words with a gradient through background-clip; the
+   sparkle beside them is not text to be clipped, so it keeps its own colour */
+.wrapped-title-spark {
+  -webkit-text-fill-color: initial;
+}
 .wrapped-square-card h1 {
   font-size: var(--wrapped-title);
   margin: 0 0 var(--space-sm) 0;
@@ -2318,6 +2341,11 @@ body.stats-open #left-buttons {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
+  /* The last row used to end level with the bar's top edge, which left it
+     partially obscured and under the 24px touch target minimum. */
+  .mobile-sheet .sheet-body {
+    padding-bottom: var(--space-sm);
+  }
   .sheet-row {
     position: relative;
     display: flex;
@@ -2338,9 +2366,6 @@ body.stats-open #left-buttons {
     cursor: pointer;
     touch-action: manipulation;
     box-sizing: border-box;
-    transition:
-      background-color var(--duration-fast) ease,
-      box-shadow var(--duration-fast) ease;
   }
   .sheet-row .icon {
     width: var(--icon-lg);
@@ -2357,10 +2382,24 @@ body.stats-open #left-buttons {
     outline: 2px solid var(--color-accent-blue);
     outline-offset: -2px;
   }
-  .sheet-row.active,
-  .sheet-row[aria-pressed="true"] {
+  /* Inset and rounded so two active rows next to each other stay two
+     switches: a full-bleed tint merged them into one selected group. The
+     highlight is always in the tree and fades, because a pseudo-element that
+     only exists while .active cannot transition in. */
+  .sheet-row::before {
+    content: "";
+    position: absolute;
+    inset: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-panel);
     background-color: rgba(var(--color-accent-blue-rgb), 0.14);
     box-shadow: inset 2px 0 0 0 var(--color-accent-blue);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--duration-fast) ease;
+  }
+  .sheet-row.active::before,
+  .sheet-row[aria-pressed="true"]::before {
+    opacity: 1;
   }
   .sheet-row.active .icon,
   .sheet-row[aria-pressed="true"] .icon {
@@ -2624,8 +2663,10 @@ body.stats-open #left-buttons {
   body:has(.mobile-bar) #stats-panel {
     padding-bottom: var(--space-md);
   }
-  /* The collapse control is redundant once the Stats tab toggles the sheet */
-  body:has(.mobile-bar) #stats-rail-header {
+  /* The collapse control is redundant once the Stats tab toggles the sheet.
+     The title stays: without it the sheet opens straight into bare numbers
+     with nothing saying whether they are filtered or a selection. */
+  body:has(.mobile-bar) #stats-collapse-btn {
     display: none;
   }
 
@@ -2644,15 +2685,20 @@ body.stats-open #left-buttons {
     font-size: var(--text-md);
     padding: var(--space-xs) var(--space-sm);
   }
+  /* Stacked layout: the map is a card of its own, so the dialog scrolls as
+     one column and the desktop mask and inner scroller are handed back */
   #wrapped-content {
     flex-direction: column;
     gap: var(--space-lg);
+    overflow-y: auto;
     padding: 0 var(--wrapped-gutter)
       calc(var(--wrapped-gutter) + var(--safe-bottom));
   }
   #wrapped-cards-column {
     width: 100%;
     gap: var(--space-base);
+    overflow: visible;
+    mask-image: none;
   }
   .wrapped-square-card {
     width: 100%;
@@ -2876,7 +2922,10 @@ body.stats-open #left-buttons {
   font-weight: 600;
   line-height: 1.1;
   color: var(--color-text);
-  overflow-wrap: anywhere;
+  /* The figure and its unit are one thing to read. Breaking at the space
+     before the unit made the distance cell two lines tall while the three
+     beside it stayed one, and the row of lead figures came out ragged. */
+  white-space: nowrap;
 }
 .kh-stats-lead-unit {
   font-size: var(--text-sm);
@@ -2887,6 +2936,7 @@ body.stats-open #left-buttons {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+  white-space: nowrap;
 }
 .kh-stats-lead-label {
   /* Bottom-aligned: a figure with an alt line must not push its label

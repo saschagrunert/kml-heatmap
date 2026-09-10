@@ -215,6 +215,7 @@ export class UIToggles {
         if (this.app.heatmapLayer?._canvas) {
           this.app.heatmapLayer._canvas.style.pointerEvents = "none";
         }
+        this.app.dataManager.applyHeatmapEmphasis();
       },
     );
   }
@@ -301,6 +302,9 @@ export class UIToggles {
       const legend = domCache.get(legendId);
       if (legend) legend.style.display = "block";
     }
+
+    // The heatmap underneath steps back so the colour scale reads
+    this.app.dataManager.applyHeatmapEmphasis();
 
     if (
       this.app.replayManager.state.active &&

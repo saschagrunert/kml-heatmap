@@ -87,10 +87,10 @@ describe("LayerManager", () => {
       layerManager.updateAltitudeLegend(1000, 5000);
 
       expect(document.getElementById("legend-min")!.textContent).toBe(
-        "1000 ft (305 m)",
+        "1,000 ft (305 m)",
       );
       expect(document.getElementById("legend-max")!.textContent).toBe(
-        "5000 ft (1524 m)",
+        "5,000 ft (1,524 m)",
       );
     });
 
@@ -108,10 +108,10 @@ describe("LayerManager", () => {
     it("rounds legend values", () => {
       layerManager.updateAltitudeLegend(1234.6, 5678.4);
       expect(document.getElementById("legend-min")!.textContent).toBe(
-        "1235 ft (376 m)",
+        "1,235 ft (376 m)",
       );
       expect(document.getElementById("legend-max")!.textContent).toBe(
-        "5678 ft (1731 m)",
+        "5,678 ft (1,731 m)",
       );
     });
 
@@ -249,7 +249,7 @@ describe("LayerManager", () => {
       expect(pl.options["weight"]).toBe(6);
       expect(pl.options["opacity"]).toBe(1);
       expect(document.getElementById("legend-min")!.textContent).toBe(
-        "3000 ft (914 m)",
+        "3,000 ft (914 m)",
       );
     });
 
@@ -310,7 +310,7 @@ describe("LayerManager", () => {
         "0 ft (0 m)",
       );
       expect(document.getElementById("legend-max")!.textContent).toBe(
-        "5000 ft (1524 m)",
+        "5,000 ft (1,524 m)",
       );
     });
 
@@ -456,7 +456,7 @@ describe("LayerManager", () => {
         opacity: 0.1,
       });
       expect(document.getElementById("legend-min")!.textContent).toBe(
-        "3000 ft (914 m)",
+        "3,000 ft (914 m)",
       );
     });
 
@@ -475,7 +475,7 @@ describe("LayerManager", () => {
         opacity: 0.85,
       });
       expect(document.getElementById("legend-max")!.textContent).toBe(
-        "5000 ft (1524 m)",
+        "5,000 ft (1,524 m)",
       );
     });
 
@@ -561,7 +561,7 @@ describe("LayerManager", () => {
         expect.objectContaining({ sticky: true, className: "segment-tooltip" }),
       );
       const contentFn = pl.bindTooltip.mock.calls[0]![0] as () => string;
-      expect(contentFn()).toContain("3000 ft");
+      expect(contentFn()).toContain("3,000 ft");
     });
 
     it("registers the mouseover handler before the tooltip", () => {
@@ -648,7 +648,7 @@ describe("LayerManager", () => {
       };
       expect(popupInstance.setLatLng).toHaveBeenCalledWith(event.latlng);
       expect(String(popupInstance.setContent.mock.calls[0]![0])).toContain(
-        "3000 ft",
+        "3,000 ft",
       );
       expect(popupInstance.openOn).toHaveBeenCalledWith(mockApp.map);
       expect(mockApp.pathSelection.togglePathSelection).toHaveBeenCalledWith(1);

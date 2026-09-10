@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  formatNumber,
   formatTime,
   formatSpeed,
   formatFileSize,
@@ -72,11 +73,33 @@ describe("formatter utilities", () => {
     });
 
     it("formats high speeds", () => {
-      expect(formatSpeed(1234)).toBe("1234 kt");
+      expect(formatSpeed(1234)).toBe("1,234 kt");
     });
 
     it("rounds down decimal values", () => {
       expect(formatSpeed(120.4)).toBe("120 kt");
+    });
+  });
+
+  describe("formatNumber", () => {
+    it("groups digits so long figures stay readable", () => {
+      expect(formatNumber(264400)).toBe("264,400");
+      expect(formatNumber(1700)).toBe("1,700");
+      expect(formatNumber(999)).toBe("999");
+    });
+
+    it("keeps a fixed number of decimals when asked", () => {
+      expect(formatNumber(12610.55, 1)).toBe("12,610.6");
+      expect(formatNumber(30, 1)).toBe("30.0");
+    });
+
+    it("rounds to whole numbers by default", () => {
+      expect(formatNumber(1234.6)).toBe("1,235");
+    });
+
+    it("falls back to zero for values that are not finite", () => {
+      expect(formatNumber(Number.NaN)).toBe("0");
+      expect(formatNumber(Number.POSITIVE_INFINITY)).toBe("0");
     });
   });
 });

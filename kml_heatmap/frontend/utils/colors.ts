@@ -8,6 +8,11 @@ interface ColorStop {
   b: number;
 }
 
+/** The one spelling of a colour in this module, shared with the CSS ramps */
+function rgb(stop: ColorStop): string {
+  return "rgb(" + stop.r + "," + stop.g + "," + stop.b + ")";
+}
+
 function interpolateGradient(
   normalized: number,
   stops: [ColorStop, ColorStop, ColorStop, ColorStop, ColorStop, ColorStop],
@@ -20,11 +25,11 @@ function interpolateGradient(
   const from = stops[segmentIndex as 0 | 1 | 2 | 3 | 4];
   const to = stops[Math.min(segmentIndex + 1, 5) as 0 | 1 | 2 | 3 | 4 | 5];
 
-  const r = Math.round(from.r + (to.r - from.r) * t);
-  const g = Math.round(from.g + (to.g - from.g) * t);
-  const b = Math.round(from.b + (to.b - from.b) * t);
-
-  return "rgb(" + r + "," + g + "," + b + ")";
+  return rgb({
+    r: Math.round(from.r + (to.r - from.r) * t),
+    g: Math.round(from.g + (to.g - from.g) * t),
+    b: Math.round(from.b + (to.b - from.b) * t),
+  });
 }
 
 const ALTITUDE_STOPS: [
@@ -58,6 +63,27 @@ const AIRSPEED_STOPS: [
   { r: 255, g: 128, b: 0 },
   { r: 255, g: 0, b: 0 },
 ];
+
+/** CSS `linear-gradient(...)` spelling of a stop list, evenly spaced */
+function gradientCss(stops: readonly ColorStop[]): string {
+  const steps = stops
+    .map((stop, index) => {
+      const percent = (index / (stops.length - 1)) * 100;
+      return `${rgb(stop)} ${percent}%`;
+    })
+    .join(", ");
+  return `linear-gradient(to right, ${steps})`;
+}
+
+/**
+ * Publish both ramps as custom properties so the legend bar and the row chips
+ * paint the very same stops the polylines are coloured with. Spelling them
+ * out in the stylesheet as well let the legend drift away from the map.
+ */
+export function applyGradientTokens(root: HTMLElement): void {
+  root.style.setProperty("--gradient-altitude", gradientCss(ALTITUDE_STOPS));
+  root.style.setProperty("--gradient-speed", gradientCss(AIRSPEED_STOPS));
+}
 
 /**
  * Get RGB color for a given altitude using gradient mapping

@@ -10,8 +10,10 @@ import {
   groupByCountry,
 } from "../features/airports";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
+import { formatNumber } from "../utils/formatters";
 import {
   escapeHtml,
+  markFlightTimeUnits,
   pluralFlights,
   pluralize,
   splitAirportName,
@@ -45,13 +47,22 @@ function leadItem(
   label: string,
   alt?: string,
 ): string {
+  return leadItemHtml(
+    escapeHtml(value) +
+      (unit
+        ? ' <span class="kh-stats-lead-unit">' + escapeHtml(unit) + "</span>"
+        : ""),
+    label,
+    alt,
+  );
+}
+
+/** A lead figure whose value is already marked up (see markFlightTimeUnits) */
+function leadItemHtml(valueHtml: string, label: string, alt?: string): string {
   return (
     '<div class="kh-stats-lead-item">' +
     '<span class="kh-stats-lead-value">' +
-    escapeHtml(value) +
-    (unit
-      ? ' <span class="kh-stats-lead-unit">' + escapeHtml(unit) + "</span>"
-      : "") +
+    valueHtml +
     "</span>" +
     (alt
       ? '<span class="kh-stats-lead-alt">' + escapeHtml(alt) + "</span>"
@@ -239,16 +250,16 @@ function distanceMetrics(stats: FilteredStatistics): Metric[] {
     const avgDistanceNm = stats.total_distance_nm / stats.num_paths;
     metrics.push({
       label: "Average Distance per Trip",
-      value: avgDistanceNm.toFixed(1) + " nm",
-      alt: (avgDistanceNm * NAUTICAL_MILES_TO_KM).toFixed(1) + " km",
+      value: formatNumber(avgDistanceNm, 1) + " nm",
+      alt: formatNumber(avgDistanceNm * NAUTICAL_MILES_TO_KM, 1) + " km",
     });
   }
 
   if (stats.longest_flight_nm && stats.longest_flight_nm > 0) {
     metrics.push({
       label: "Longest Flight",
-      value: stats.longest_flight_nm.toFixed(1) + " nm",
-      alt: (stats.longest_flight_km || 0).toFixed(1) + " km",
+      value: formatNumber(stats.longest_flight_nm, 1) + " nm",
+      alt: formatNumber(stats.longest_flight_km || 0, 1) + " km",
     });
   }
 
@@ -260,7 +271,7 @@ function speedMetrics(stats: FilteredStatistics): Metric[] {
   const metrics: Metric[] = [];
   const speeds: Array<[string, number | undefined]> = [
     ["Average Groundspeed", stats.avg_groundspeed_knots],
-    ["Cruise Speed (>1000ft AGL)", stats.cruise_speed_knots],
+    ["Cruise Speed (> 1000 ft AGL)", stats.cruise_speed_knots],
     ["Max Groundspeed", stats.max_groundspeed_knots],
   ];
 
@@ -268,8 +279,8 @@ function speedMetrics(stats: FilteredStatistics): Metric[] {
     if (knots && knots > 0) {
       metrics.push({
         label,
-        value: Math.round(knots) + " kt",
-        alt: Math.round(knots * NAUTICAL_MILES_TO_KM) + " km/h",
+        value: formatNumber(knots) + " kt",
+        alt: formatNumber(knots * NAUTICAL_MILES_TO_KM) + " km/h",
       });
     }
   }
@@ -284,15 +295,15 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
   if (stats.max_altitude_ft) {
     metrics.push({
       label: "Max Altitude (MSL)",
-      value: Math.round(stats.max_altitude_ft) + " ft",
-      alt: Math.round(stats.max_altitude_ft * FEET_TO_METERS) + " m",
+      value: formatNumber(stats.max_altitude_ft) + " ft",
+      alt: formatNumber(stats.max_altitude_ft * FEET_TO_METERS) + " m",
     });
 
     if (stats.total_altitude_gain_ft) {
       metrics.push({
         label: "Elevation Gain",
-        value: Math.round(stats.total_altitude_gain_ft) + " ft",
-        alt: Math.round(stats.total_altitude_gain_ft * FEET_TO_METERS) + " m",
+        value: formatNumber(stats.total_altitude_gain_ft) + " ft",
+        alt: formatNumber(stats.total_altitude_gain_ft * FEET_TO_METERS) + " m",
       });
     }
   }
@@ -303,8 +314,8 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
   ) {
     metrics.push({
       label: "Most Common Cruise Altitude (AGL)",
-      value: stats.most_common_cruise_altitude_ft + " ft",
-      alt: Math.round(stats.most_common_cruise_altitude_m || 0) + " m",
+      value: formatNumber(stats.most_common_cruise_altitude_ft) + " ft",
+      alt: formatNumber(stats.most_common_cruise_altitude_m || 0) + " m",
     });
   }
 
@@ -386,22 +397,26 @@ export class StatsManager {
     html +=
       '<div class="kh-stats-lead">' +
       leadItem(
-        stats.total_distance_nm.toFixed(1),
+        formatNumber(stats.total_distance_nm, 1),
         "nm",
         "Distance",
-        distanceKm.toFixed(1) + " km",
+        formatNumber(distanceKm, 1) + " km",
       ) +
       // Kept even without timing data so the grid always reads as four cells
-      leadItem(
-        stats.total_flight_time_str || MISSING_VALUE,
-        "",
+      leadItemHtml(
+        stats.total_flight_time_str
+          ? markFlightTimeUnits(
+              stats.total_flight_time_str,
+              "kh-stats-lead-unit",
+            )
+          : escapeHtml(MISSING_VALUE),
         "Total Flight Time",
       ) +
-      leadItem(String(stats.num_paths), "", "Flights") +
-      leadItem(String(stats.num_airports), "", "Airports") +
+      leadItem(formatNumber(stats.num_paths), "", "Flights") +
+      leadItem(formatNumber(stats.num_airports), "", "Airports") +
       "</div>";
 
-    html += metricSection("aviation", "Distance", distanceMetrics(stats));
+    html += metricSection("distance", "Distance", distanceMetrics(stats));
     html += metricSection("speed", "Speed", speedMetrics(stats));
     html += metricSection("altitude", "Altitude", altitudeMetrics(stats));
     html += aircraftSection(stats);

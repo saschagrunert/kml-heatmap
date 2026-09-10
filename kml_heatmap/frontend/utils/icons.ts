@@ -25,6 +25,7 @@ export type IconName =
   | "airport"
   | "altitude"
   | "speed"
+  | "distance"
   | "aviation"
   | "layers"
   | "filter"
@@ -62,6 +63,8 @@ const PATHS: Record<IconName, string> = {
   altitude: '<path d="M3 18l5.5-8 3.5 4.5 3-4 6 7.5z"/><path d="M3 18h18"/>',
   speed:
     '<path d="M3.5 8.5h9"/><path d="M3.5 12.5h13"/><path d="M3.5 16.5h7"/><path d="M17 6.6l3.4 5.9-3.4 5.9"/>',
+  distance:
+    '<circle cx="5.6" cy="18.4" r="2.3"/><circle cx="18.4" cy="5.6" r="2.3"/><path d="M7.5 16.9a9.2 9.2 0 0 1 9.4-9.4" stroke-dasharray="2.6 3"/>',
   aviation:
     '<path d="M12 3.2l8.4 4.3-8.4 4.3-8.4-4.3z"/><path d="M3.6 12l8.4 4.3 8.4-4.3"/><path d="M3.6 16.4l8.4 4.3 8.4-4.3"/>',
   layers: '<path d="M4 9.5h16"/><path d="M4 14.5h16"/>',

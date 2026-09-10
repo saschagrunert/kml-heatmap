@@ -470,7 +470,14 @@
         </div>
         <div id="wrapped-content">
           <!-- Cards column - left side -->
-          <div id="wrapped-cards-column">
+          <!-- tabindex: the column scrolls, so it has to be reachable by
+               keyboard (axe: scrollable-region-focusable) -->
+          <div
+            id="wrapped-cards-column"
+            tabindex="0"
+            role="region"
+            aria-label="Year in review cards"
+          >
             <!-- Card 1: Stats -->
             <section
               id="wrapped-card-stats"

@@ -33,6 +33,7 @@ interface ToggleMockApp {
     updateReplayAirplanePopup: AnyMock;
   };
   layerManager: { redrawAltitudePaths: AnyMock; redrawAirspeedPaths: AnyMock };
+  dataManager: { applyHeatmapEmphasis: AnyMock };
   config: { openaipApiKey: string };
   openaipLayers: Record<string, object>;
 }
@@ -124,6 +125,7 @@ describe("UIToggles", () => {
         redrawAltitudePaths: vi.fn(),
         redrawAirspeedPaths: vi.fn(),
       },
+      dataManager: { applyHeatmapEmphasis: vi.fn() },
       config: { openaipApiKey: "" },
       openaipLayers: {},
     };

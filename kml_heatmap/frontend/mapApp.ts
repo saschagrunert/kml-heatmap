@@ -19,6 +19,7 @@ import { loadInitialData } from "./appInitializer";
 import { logError } from "./utils/logger";
 import { domCache } from "./utils/domCache";
 import { syncToggleButton } from "./utils/buttonState";
+import { applyGradientTokens } from "./utils/colors";
 import { isIconName, setControlIcon } from "./utils/icons";
 import type { IconSize } from "./utils/icons";
 import { invalidateMapAfterTransition } from "./utils/mapHelpers";
@@ -662,6 +663,9 @@ if (typeof window !== "undefined") {
   window.initMapApp = async (config: MapConfig): Promise<MapApp> => {
     const app = new MapApp(config);
     window.mapApp = app;
+    // The legend bar and the row chips paint --gradient-*, so publish the
+    // ramps before anything that carries one is shown
+    applyGradientTokens(document.documentElement);
     renderControlIcons();
     // Bind before the (long) initial load so early interactions are not lost
     bindActions(app);

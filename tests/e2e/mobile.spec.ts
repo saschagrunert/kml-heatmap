@@ -350,7 +350,9 @@ test.describe("Mobile bar", () => {
     await expect(panel).toContainText("Flights");
     await expect(tab).toHaveAttribute("aria-pressed", "true");
     // The tab is the way back, so the rail drops its own collapse control
-    await expect(page.locator("#stats-rail-header")).toBeHidden();
+    // The title stays; only the collapse control is redundant on mobile
+    await expect(page.locator("#stats-rail-header")).toBeVisible();
+    await expect(page.locator("#stats-collapse-btn")).toBeHidden();
 
     await tab.click();
 
@@ -550,7 +552,7 @@ test.describe("Mobile bar", () => {
     await expect(page.locator("#mobile-bar")).toHaveCount(1);
     await expect(rail).toBeVisible();
     // The collapse control stays hidden: the Stats tab is what closes it
-    await expect(page.locator("#stats-rail-header")).toBeHidden();
+    await expect(page.locator("#stats-collapse-btn")).toBeHidden();
   });
 
   test("replay takes the bottom edge and the bar leaves the document", async ({

@@ -297,22 +297,14 @@ describe("URL state management", () => {
     });
 
     it("preserves the debug parameter of the current URL", () => {
-      const original = window.location;
-      Object.defineProperty(window, "location", {
-        value: { ...original, search: "?debug=true&y=1999" },
-        writable: true,
-        configurable: true,
-      });
+      const original = window.location.search;
+      window.history.replaceState(null, "", "/?debug=true&y=1999");
       try {
         expect(encodeStateToUrl({ selectedYear: "2025" })).toBe(
           "debug=true&y=2025",
         );
       } finally {
-        Object.defineProperty(window, "location", {
-          value: original,
-          writable: true,
-          configurable: true,
-        });
+        window.history.replaceState(null, "", "/" + original);
       }
     });
 

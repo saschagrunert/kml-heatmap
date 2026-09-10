@@ -32,6 +32,27 @@ import {
 /** Elements that stay interactive while the dialog is open */
 const NON_INERT_IDS = new Set(["map"]);
 
+/**
+ * Write the heading as a sparkle plus its words.
+ *
+ * The heading paints its text with a gradient through `background-clip`, and
+ * an emoji inside that ignores the clip and keeps its own colours, so the two
+ * halves of one line ended up looking unrelated. The sparkle gets its own
+ * element that the gradient rule does not apply to.
+ */
+function setWrappedTitle(titleEl: HTMLElement, text: string): void {
+  titleEl.replaceChildren();
+
+  const spark = document.createElement("span");
+  spark.className = "wrapped-title-spark";
+  spark.setAttribute("aria-hidden", "true");
+  // The space is part of the text rather than a margin, so the heading reads
+  // and copies as one line and the gap is an ordinary word space
+  spark.textContent = "✨ ";
+
+  titleEl.append(spark, text);
+}
+
 /** Airport coordinates exported by the backend, keyed by airport name */
 function airportCoordinates(): Map<string, Coordinate> {
   const coordinates = new Map<string, Coordinate>();
@@ -54,6 +75,7 @@ export class WrappedManager {
   private inertObserver: MutationObserver | null = null;
   private mapMoveTimer: ReturnType<typeof setTimeout> | null = null;
   private mapResizeTimer: ReturnType<typeof setTimeout> | null = null;
+  private cardsScrollCleanup: (() => void) | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -69,6 +91,7 @@ export class WrappedManager {
       "wrapped-aircraft-fleet",
       "wrapped-top-airports",
       "wrapped-airports-grid",
+      "wrapped-cards-column",
       "map",
       "wrapped-map-container",
       "wrapped-modal",
@@ -92,6 +115,29 @@ export class WrappedManager {
 
   private setWrappedVisible(visible: boolean): void {
     this.app.store.set("wrappedVisible", visible);
+  }
+
+  /**
+   * Keep the bottom fade of the cards column in step with its scroll
+   * position: it says "there is more below", so it has to go once there is
+   * not. Only the desktop layout scrolls the column; the stacked one scrolls
+   * the dialog and drops the mask in CSS.
+   */
+  private trackCardsScroll(column: HTMLElement): void {
+    const update = (): void => {
+      const atEnd =
+        column.scrollTop + column.clientHeight >= column.scrollHeight - 1;
+      column.classList.toggle("is-at-end", atEnd);
+    };
+    column.addEventListener("scroll", update, { passive: true });
+    // A resize can make everything fit, and then the fade would sit over
+    // nothing until the next scroll that can no longer happen
+    window.addEventListener("resize", update, { passive: true });
+    this.cardsScrollCleanup = () => {
+      column.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+    update();
   }
 
   showWrapped(): void {
@@ -132,10 +178,10 @@ export class WrappedManager {
     const yearEl = domCache.get("wrapped-year");
 
     if (year === "all") {
-      if (titleEl) titleEl.textContent = "✨ Your Flight History";
+      if (titleEl) setWrappedTitle(titleEl, "Your Flight History");
       if (yearEl) yearEl.textContent = "All Years";
     } else {
-      if (titleEl) titleEl.textContent = "✨ Your Year in Flight";
+      if (titleEl) setWrappedTitle(titleEl, "Your Year in Flight");
       if (yearEl) yearEl.textContent = year;
     }
 
@@ -240,6 +286,9 @@ export class WrappedManager {
       this.trapFocus(modal);
     }
     this.setWrappedVisible(true);
+
+    const cardsColumn = domCache.get("wrapped-cards-column");
+    if (cardsColumn) this.trackCardsScroll(cardsColumn);
 
     // Add Escape key handler to close modal
     this.escapeHandler = (e: KeyboardEvent) => {
@@ -360,6 +409,8 @@ export class WrappedManager {
   closeWrapped(event?: MouseEvent): void {
     if (!event || (event.target as HTMLElement).id === "wrapped-modal") {
       this.cancelPendingMapTimers();
+      this.cardsScrollCleanup?.();
+      this.cardsScrollCleanup = null;
       // Move map back to original position
       const mapContainer = domCache.get("map");
       if (!mapContainer) return;
