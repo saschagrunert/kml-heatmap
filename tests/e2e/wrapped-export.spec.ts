@@ -1,10 +1,32 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
 import {
   KNOWN_YEARS,
   gotoApp,
+  usesMobileBar,
   waitForAircraftFilter,
   waitForYearFilter,
 } from "./helpers";
+
+/**
+ * Wait until an element's entry animation has finished.
+ *
+ * The Wrapped surfaces fade and slide in, so anything that measures geometry
+ * has to let that settle first: the map container travels 30px over 0.8s
+ * after a 0.9s delay, and a box read part-way through moves on its own.
+ */
+async function settleAnimations(locator: Locator): Promise<void> {
+  await locator.evaluate((el) =>
+    Promise.all(el.getAnimations().map((animation) => animation.finished)),
+  );
+}
+
+/** Fail loudly if the cards no longer overflow, rather than time out */
+async function expectScrollable(column: Locator): Promise<void> {
+  const overflow = await column.evaluate(
+    (el) => el.scrollHeight - el.clientHeight,
+  );
+  expect(overflow, "the cards column has nothing to scroll").toBeGreaterThan(0);
+}
 
 test.describe("Wrapped and Export", () => {
   test.beforeEach(async ({ page }) => {
@@ -20,6 +42,61 @@ test.describe("Wrapped and Export", () => {
     await expect(wrappedModal).toHaveAttribute("role", "dialog");
     await expect(wrappedModal).toHaveAttribute("aria-modal", "true");
     await expect(page.locator("#wrapped-content")).toBeVisible();
+  });
+
+  // Desktop only: below the breakpoint the cards stack under the map and the
+  // dialog scrolls as one column, which is a different arrangement entirely
+  test("the map stays put while the cards scroll", async ({ page }) => {
+    test.skip(
+      await usesMobileBar(page),
+      "the stacked layout scrolls the dialog, not the column",
+    );
+    await page.locator("#wrapped-btn").click();
+    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+    const column = page.locator("#wrapped-cards-column");
+    const map = page.locator("#wrapped-map-container");
+    await expect(map).toBeVisible();
+
+    await settleAnimations(map);
+    await expectScrollable(column);
+
+    const before = await map.boundingBox();
+    await column.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    await expect
+      .poll(() => column.evaluate((el) => el.scrollTop))
+      .toBeGreaterThan(0);
+    const after = await map.boundingBox();
+
+    // Scrolling the row itself used to take the map with it and leave most
+    // of the dialog empty for every card after the first
+    expect(after?.y).toBe(before?.y);
+    await expect(map).toBeInViewport();
+  });
+
+  test("reopening starts at the top of the cards", async ({ page }) => {
+    test.skip(
+      await usesMobileBar(page),
+      "the stacked layout scrolls the dialog, not the column",
+    );
+    const modal = page.locator("#wrapped-modal");
+    const column = page.locator("#wrapped-cards-column");
+
+    await page.locator("#wrapped-btn").click();
+    await expect(modal).toBeVisible({ timeout: 5000 });
+    await expectScrollable(column);
+    await column.evaluate((el) => el.scrollTo(0, 900));
+    await expect
+      .poll(() => column.evaluate((el) => el.scrollTop))
+      .toBeGreaterThan(0);
+
+    await modal.locator(".close-btn").click();
+    await expect(modal).toBeHidden();
+    await page.locator("#wrapped-btn").click();
+    await expect(modal).toBeVisible({ timeout: 5000 });
+
+    // The column keeps its position between openings, so without a reset
+    // Wrapped reopens halfway down a card instead of on the title
+    await expect.poll(() => column.evaluate((el) => el.scrollTop)).toBe(0);
   });
 
   test("wrapped modal closes via close button", async ({ page }) => {

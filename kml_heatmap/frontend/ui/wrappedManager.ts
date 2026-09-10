@@ -118,12 +118,13 @@ export class WrappedManager {
   }
 
   /**
-   * Keep the bottom fade of the cards column in step with its scroll
-   * position: it says "there is more below", so it has to go once there is
-   * not. Only the desktop layout scrolls the column; the stacked one scrolls
-   * the dialog and drops the mask in CSS.
+   * Put the cards column back to the top for this opening and keep the
+   * bottom fade in step with its scroll position: the fade says "there is
+   * more below", so it has to go once there is not. Only the desktop layout
+   * scrolls the column; the stacked one scrolls the dialog and drops the
+   * mask in CSS.
    */
-  private trackCardsScroll(column: HTMLElement): void {
+  private prepareCardsScroll(column: HTMLElement): void {
     // The column keeps its scroll position between openings, so without this
     // reopening Wrapped lands mid-card instead of on the title
     column.scrollTop = 0;
@@ -292,7 +293,7 @@ export class WrappedManager {
     this.setWrappedVisible(true);
 
     const cardsColumn = domCache.get("wrapped-cards-column");
-    if (cardsColumn) this.trackCardsScroll(cardsColumn);
+    if (cardsColumn) this.prepareCardsScroll(cardsColumn);
 
     // Add Escape key handler to close modal
     this.escapeHandler = (e: KeyboardEvent) => {
