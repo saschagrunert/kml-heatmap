@@ -87,7 +87,9 @@ describe("DataManager", () => {
     mockHeatLayer = {
       addTo: vi.fn(),
       remove: vi.fn(),
-      _canvas: { style: {} } as HTMLCanvasElement,
+      // A real canvas: the emphasis toggles a class on it, and a bare
+      // { style: {} } stub cannot say whether that worked
+      _canvas: document.createElement("canvas"),
     };
     // DataManager imports leaflet, which vitest aliases to the mock module
     heatLayerSpy = vi.mocked(L.heatLayer);
@@ -445,6 +447,46 @@ describe("DataManager", () => {
       expect(
         mockApp.statsManager.updateStatsForSelection,
       ).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("applyHeatmapEmphasis", () => {
+    it("steps the heatmap back while a colour layer is over it", async () => {
+      mockApp.altitudeVisible = true;
+      await dataManager.updateLayers(baseData());
+
+      expect(mockHeatLayer._canvas!.classList.contains("heatmap-dimmed")).toBe(
+        true,
+      );
+    });
+
+    it("brings it back to full strength on its own", async () => {
+      mockApp.altitudeVisible = false;
+      mockApp.airspeedVisible = false;
+      await dataManager.updateLayers(baseData());
+
+      expect(mockHeatLayer._canvas!.classList.contains("heatmap-dimmed")).toBe(
+        false,
+      );
+    });
+
+    it("follows the speed layer too", async () => {
+      await dataManager.updateLayers(baseData());
+      expect(mockHeatLayer._canvas!.classList.contains("heatmap-dimmed")).toBe(
+        false,
+      );
+
+      mockApp.airspeedVisible = true;
+      dataManager.applyHeatmapEmphasis();
+
+      expect(mockHeatLayer._canvas!.classList.contains("heatmap-dimmed")).toBe(
+        true,
+      );
+    });
+
+    it("does nothing when there is no heatmap yet", () => {
+      mockApp.heatmapLayer = null;
+      expect(() => dataManager.applyHeatmapEmphasis()).not.toThrow();
     });
   });
 });
