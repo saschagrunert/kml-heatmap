@@ -8,7 +8,6 @@ import pytest
 
 from kml_heatmap.data_exporter import (
     YearExportResult,
-    _calculate_altitude_range,
     _clean_output_dir,
     _group_paths_by_year,
     _path_id_offsets,
@@ -83,13 +82,15 @@ class TestProcessYearData:
             }
         ]
         assert list(data["segments"]) == ["7"]
-        rows = data["segments"]["7"]
+        entry = data["segments"]["7"]
+        assert entry["start"] == [50.0, 8.0]
+        rows = entry["rows"]
         assert len(rows) == 2
-        assert rows[0][:4] == [50.0, 8.0, 50.1, 8.1]
-        assert rows[0][4] == 500
-        assert rows[0][6] == 0.0
-        assert rows[1][6] == 300.0
-        assert all(len(row) == 7 for row in rows)
+        assert rows[0][:2] == [50.1, 8.1]
+        assert rows[0][2] == 500
+        assert rows[0][4] == 0.0
+        assert rows[1][4] == 300.0
+        assert all(len(row) == 5 for row in rows)
 
         assert isinstance(result, YearExportResult)
         assert result.year == 2025
@@ -108,7 +109,7 @@ class TestProcessYearData:
         assert "start_airport" not in info
         assert "aircraft_registration" not in info
         assert None not in info.values()
-        assert all(len(row) == 6 for row in data["segments"]["0"])
+        assert all(len(row) == 4 for row in data["segments"]["0"]["rows"])
 
     def test_single_point_paths_are_skipped_but_counted(self, tmp_path):
         paths = [
@@ -154,16 +155,18 @@ class TestProcessYearData:
         ]
         process_year_data(2025, [path], metadata, 0, str(tmp_path))
 
-        rows = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
-        assert all(row[5] > 0 for row in rows)
-        assert all(len(row) == 6 for row in rows)
+        rows = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]["rows"]
+        assert all(row[3] > 0 for row in rows)
+        assert all(len(row) == 4 for row in rows)
 
     def test_zero_length_segments_excluded(self, tmp_path):
         path = _path((50.0, 8.0, 100.0), (50.0, 8.0, 100.0), (50.1, 8.1, 200.0))
         process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
-        rows = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
-        assert len(rows) == 1
-        assert rows[0][:2] != rows[0][2:4]
+        entry = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        assert len(entry["rows"]) == 1
+        # Dropping a zero-length segment keeps the chain contiguous
+        assert entry["start"] == [50.0, 8.0]
+        assert entry["rows"][0][:2] == [50.1, 8.1]
 
     def test_unrealistic_groundspeed_filtered(self, tmp_path):
         path = _path(
@@ -171,8 +174,8 @@ class TestProcessYearData:
             (51.0, 9.0, 100.0, "2025-01-01T10:00:01.000Z"),
         )
         process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
-        rows = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
-        assert rows[0][5] == 0.0
+        rows = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]["rows"]
+        assert rows[0][3] == 0.0
 
     @pytest.mark.slow
     def test_large_single_path(self, tmp_path):
@@ -183,21 +186,8 @@ class TestProcessYearData:
         ]
         result = process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
         assert result.original_points == count
-        rows = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
-        assert len(rows) == count - 1
-
-
-class TestCalculateAltitudeRange:
-    def test_with_paths(self):
-        paths = [_path((50.0, 8.5, 100.0), (50.1, 8.6, 500.0))]
-        assert _calculate_altitude_range(paths) == (100.0, 500.0)
-
-    def test_negative_altitudes_kept(self):
-        paths = [_path((50.0, 8.5, -20.0), (50.1, 8.6, 500.0))]
-        assert _calculate_altitude_range(paths) == (-20.0, 500.0)
-
-    def test_empty_paths(self):
-        assert _calculate_altitude_range([]) == (0.0, 1000.0)
+        entry = _parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        assert len(entry["rows"]) == count - 1
 
 
 class TestGroupPathsByYear:
@@ -358,8 +348,6 @@ class TestExportAllData:
         assert meta["available_years"] == [2025, 2026]
         assert set(meta) == {
             "stats",
-            "min_alt_m",
-            "max_alt_m",
             "min_groundspeed_knots",
             "max_groundspeed_knots",
             "available_years",
@@ -369,9 +357,6 @@ class TestExportAllData:
             "2025": (tmp_path / "2025" / "data.js").stat().st_size,
             "2026": (tmp_path / "2026" / "data.js").stat().st_size,
         }
-        assert meta["min_alt_m"] == 1.0
-        assert meta["max_alt_m"] == 800.0
-
         data_2025 = _parse_js(tmp_path / "2025" / "data.js")
         data_2026 = _parse_js(tmp_path / "2026" / "data.js")
         assert [p["id"] for p in data_2025["path_info"]] == [0]

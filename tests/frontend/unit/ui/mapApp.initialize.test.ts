@@ -245,8 +245,8 @@ function createApp(openaipApiKey?: string): MapApp {
 }
 
 const defaultAirports: Airport[] = [
-  { name: "Frankfurt EDDF", lat: 50.1, lon: 8.67, flight_count: 20 },
-  { name: "Munich EDDM", lat: 48.35, lon: 11.78, flight_count: 10 },
+  { name: "Frankfurt EDDF", lat: 50.1, lon: 8.67 },
+  { name: "Munich EDDM", lat: 48.35, lon: 11.78 },
 ];
 
 const defaultMetadata: Metadata = {
@@ -263,8 +263,6 @@ const defaultMetadata: Metadata = {
     total_distance_nm: 2700,
     max_groundspeed_knots: 150,
   },
-  min_alt_m: 0,
-  max_alt_m: 3000,
   min_groundspeed_knots: 0,
   max_groundspeed_knots: 150,
 };

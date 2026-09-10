@@ -115,7 +115,6 @@ export class WrappedManager {
       segments: allSegments,
       year: year,
       aircraft: aircraft,
-      coordinateCount: this.app.currentData?.original_points,
       preFiltered,
     });
 

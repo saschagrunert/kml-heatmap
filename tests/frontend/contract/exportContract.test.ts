@@ -98,15 +98,24 @@ export function isPathInfo(value: unknown): value is PathInfo {
 
 export function isRawSegment(value: unknown): value is RawSegment {
   if (!Array.isArray(value)) return false;
-  if (value.length !== 6 && value.length !== 7) return false;
+  if (value.length !== 4 && value.length !== 5) return false;
   if (!value.every(isFiniteNumber)) return false;
-  const [lat1, lon1, lat2, lon2, , groundspeed] = value;
+  const [lat, lon, , groundspeed] = value;
   return (
-    isCoordinatePair([lat1, lon1]) &&
-    isCoordinatePair([lat2, lon2]) &&
+    isCoordinatePair([lat, lon]) &&
     groundspeed !== undefined &&
     groundspeed >= 0
   );
+}
+
+export function isRawPathSegments(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const rows = value["rows"];
+  if (!Array.isArray(rows) || !rows.every(isRawSegment)) return false;
+  const start = value["start"];
+  if (!Array.isArray(start)) return false;
+  // A path with rows has to say where its first row starts
+  return rows.length === 0 ? start.length === 0 : isCoordinatePair(start);
 }
 
 export function isRawYearData(value: unknown): value is RawYearData {
@@ -118,9 +127,9 @@ export function isRawYearData(value: unknown): value is RawYearData {
   if (!Array.isArray(pathInfo) || !pathInfo.every(isPathInfo)) return false;
   const segments = value["segments"];
   if (!isRecord(segments)) return false;
-  for (const [key, list] of Object.entries(segments)) {
+  for (const [key, entry] of Object.entries(segments)) {
     if (!/^\d+$/.test(key)) return false;
-    if (!Array.isArray(list) || !list.every(isRawSegment)) return false;
+    if (!isRawPathSegments(entry)) return false;
   }
   return true;
 }
@@ -131,7 +140,9 @@ export function isAirport(value: unknown): value is Airport {
     isString(value["name"]) &&
     isCoordinatePair([value["lat"], value["lon"]]) &&
     optional(value["country"], isString) &&
-    optional(value["flight_count"], isInteger) &&
+    // The frontend derives the count from the active filter, so an exported
+    // one would only ever contradict what the panel shows
+    !("flight_count" in value) &&
     !("icao" in value)
   );
 }
@@ -211,12 +222,12 @@ export function isMetadata(value: unknown): value is Metadata {
   if (!isRecord(value)) return false;
   if (!isFilteredStatistics(value["stats"])) return false;
   if (
-    !isFiniteNumber(value["min_alt_m"]) ||
-    !isFiniteNumber(value["max_alt_m"]) ||
     !isFiniteNumber(value["min_groundspeed_knots"]) ||
     !isFiniteNumber(value["max_groundspeed_knots"])
   )
     return false;
+  // The altitude scale comes from the loaded segments, not from metadata
+  if ("min_alt_m" in value || "max_alt_m" in value) return false;
   const years = value["available_years"];
   if (!Array.isArray(years) || !years.every(isInteger)) return false;
   const bytes = value["year_file_bytes"];
@@ -261,8 +272,6 @@ const sampleMetadata = {
     total_flight_time_seconds: 3600,
     total_flight_time_str: "1h 0m",
   },
-  min_alt_m: 0,
-  max_alt_m: 1500,
   min_groundspeed_knots: 0,
   max_groundspeed_knots: 120,
   available_years: [2024, 2025],
@@ -276,7 +285,6 @@ const sampleAirports = {
       lat: 50.03,
       lon: 8.57,
       country: "DE",
-      flight_count: 2,
     },
     { name: "EDDM Munich", lat: 48.35, lon: 11.79 },
   ],
@@ -300,11 +308,14 @@ const sampleYear2025: RawYearData = {
     { id: 5, year: 2025 },
   ],
   segments: {
-    "4": [
-      [50.03, 8.57, 49.5, 9.5, 3000, 110, 0],
-      [49.5, 9.5, 48.35, 11.79, 4000, 120, 1800],
-    ],
-    "5": [[48.35, 11.79, 48.4, 11.8, 1000, 60]],
+    "4": {
+      start: [50.03, 8.57],
+      rows: [
+        [49.5, 9.5, 3000, 110, 0],
+        [48.35, 11.79, 4000, 120, 1800],
+      ],
+    },
+    "5": { start: [48.35, 11.79], rows: [[48.4, 11.8, 1000, 60]] },
   },
 };
 
@@ -492,7 +503,7 @@ describe("export contract (docs/data)", () => {
         for (const info of raw.path_info) {
           expect(info.year, `path ${info.id} year`).toBe(Number(year));
           if (info.segment_count !== undefined) {
-            expect(raw.segments[String(info.id)]?.length ?? 0).toBe(
+            expect(raw.segments[String(info.id)]?.rows.length ?? 0).toBe(
               info.segment_count,
             );
           }
@@ -501,7 +512,7 @@ describe("export contract (docs/data)", () => {
         // the loader can expand it
         const data = expandYearData(raw);
         expect(data.path_segments.length).toBe(
-          Object.values(raw.segments).reduce((n, list) => n + list.length, 0),
+          Object.values(raw.segments).reduce((n, e) => n + e.rows.length, 0),
         );
       }
     },

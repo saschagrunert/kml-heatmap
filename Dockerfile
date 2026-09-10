@@ -4,7 +4,7 @@
 # Dependabot bumps the two together and the version stays readable in the FROM
 # line itself. Do not restate the tag in a comment: it drifts silently.
 
-# Stage 1: build the JavaScript bundles
+# Stage 1: build the JavaScript bundle
 FROM docker.io/library/node:26-slim@sha256:14bf3eac4bf209d906d3c41256597d3ab1f926b2e93a79e9bdfe1efd32454239 AS js-builder
 
 WORKDIR /build
@@ -13,7 +13,7 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Build the TypeScript sources into IIFE bundles (kml_heatmap/static/*.js)
+# Build the TypeScript sources into an IIFE bundle (kml_heatmap/static/*.js)
 COPY build.js tsconfig.json ./
 COPY kml_heatmap/frontend/ ./kml_heatmap/frontend/
 RUN npm run build
@@ -37,7 +37,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY kml_heatmap/*.py kml_heatmap/py.typed ./kml_heatmap/
 COPY kml_heatmap/templates/ ./kml_heatmap/templates/
 COPY kml_heatmap/static/ ./kml_heatmap/static/
-# Built bundles (and their source maps, when present) from the builder stage
+# Built bundle (and its source map, when present) from the builder stage
 COPY --from=js-builder /build/kml_heatmap/static/ ./kml_heatmap/static/
 COPY serve.py ./
 

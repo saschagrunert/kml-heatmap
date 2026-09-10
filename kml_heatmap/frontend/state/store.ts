@@ -3,6 +3,7 @@
  * Provides get/set access with listener subscriptions and batched updates.
  */
 
+import { logError } from "../utils/logger";
 import type { FilteredStatistics, KMLDataset } from "../types";
 
 export interface Range {
@@ -33,6 +34,9 @@ export interface StoreState {
 }
 
 type Listener<T> = (newVal: T, oldVal: T) => void;
+
+/** Listener re-entrancy budget before pending notifications are abandoned */
+const MAX_FLUSH_DEPTH = 10;
 
 export function createDefaultState(): StoreState {
   return {
@@ -158,7 +162,17 @@ export class AppStore {
   }
 
   private flush(): void {
-    if (this.flushDepth > 10) return;
+    if (this.flushDepth > MAX_FLUSH_DEPTH) {
+      // A listener cycle this deep means the UI would keep re-entering the
+      // store instead of settling. Unwinding is the only way out, so make the
+      // stall visible instead of swallowing it. The pending entries are kept:
+      // once the stack has unwound, the next top-level set() flushes them.
+      logError(
+        `Store flush exceeded ${MAX_FLUSH_DEPTH} levels; deferring updates ` +
+          `for: ${[...this.pendingOldValues.keys()].join(", ")}`,
+      );
+      return;
+    }
     this.flushDepth++;
     try {
       const pending = new Map(this.pendingOldValues);

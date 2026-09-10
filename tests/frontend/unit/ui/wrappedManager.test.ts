@@ -262,7 +262,7 @@ describe("WrappedManager", () => {
       expect(calculateFilteredStatisticsSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           aircraft: "D-ABCD",
-          coordinateCount: 100,
+          year: "2024",
         }),
       );
     });

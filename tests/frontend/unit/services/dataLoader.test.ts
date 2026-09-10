@@ -10,6 +10,7 @@ import {
 import type {
   KMLDataset,
   LoadingInfo,
+  RawSegment,
   RawYearData,
 } from "../../../../kml_heatmap/frontend/types";
 
@@ -20,6 +21,14 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
 }));
 
 type MockWindow = Window & typeof globalThis & Record<string, unknown>;
+
+/** One path's exported segments: a start point and its end-point rows */
+function path(
+  start: [number, number],
+  rows: RawSegment[],
+): RawYearData["segments"][string] {
+  return { start, rows };
+}
 
 function rawYear(
   year: number,
@@ -99,11 +108,16 @@ describe("isValidYear", () => {
     expect(isValidYear("2099")).toBe(true);
   });
 
-  it("rejects malformed or out-of-range years", () => {
+  it("accepts any four-digit year", () => {
+    expect(isValidYear("1999")).toBe(true);
+    expect(isValidYear("2100")).toBe(true);
+  });
+
+  it("rejects anything that is not four digits", () => {
     expect(isValidYear("abc")).toBe(false);
-    expect(isValidYear("1999")).toBe(false);
-    expect(isValidYear("2100")).toBe(false);
     expect(isValidYear("../etc")).toBe(false);
+    expect(isValidYear("20255")).toBe(false);
+    expect(isValidYear("2025/..")).toBe(false);
   });
 });
 
@@ -114,15 +128,18 @@ describe("getGlobalVarName", () => {
 });
 
 describe("expandYearData", () => {
-  it("expands segment tuples into path segments and heatmap coordinates", () => {
+  it("expands segment rows into path segments and heatmap coordinates", () => {
     const raw = rawYear(
       2025,
       {
-        "4": [
-          [50, 8, 50.1, 8.1, 1000, 90, 0],
-          [50.1, 8.1, 50.2, 8.2, 1100, 95, 10],
-        ],
-        "7": [[51, 9, 51.1, 9.1, 500, 80]],
+        "4": path(
+          [50, 8],
+          [
+            [50.1, 8.1, 1000, 90, 0],
+            [50.2, 8.2, 1100, 95, 10],
+          ],
+        ),
+        "7": path([51, 9], [[51.1, 9.1, 500, 80]]),
       },
       [
         { id: 4, year: 2025 },
@@ -176,9 +193,9 @@ describe("expandYearData", () => {
     ]);
   });
 
-  it("omits time when the tuple has six entries", () => {
+  it("omits time when the row has four entries", () => {
     const data = expandYearData(
-      rawYear(2025, { "1": [[50, 8, 50.1, 8.1, 1000, 90]] }),
+      rawYear(2025, { "1": path([50, 8], [[50.1, 8.1, 1000, 90]]) }),
     );
     expect("time" in data.path_segments[0]!).toBe(false);
   });
@@ -186,8 +203,8 @@ describe("expandYearData", () => {
   it("orders paths by numeric path id", () => {
     const data = expandYearData(
       rawYear(2025, {
-        "10": [[50, 8, 50.1, 8.1, 1, 1]],
-        "2": [[50, 8, 50.1, 8.1, 1, 1]],
+        "10": path([50, 8], [[50.1, 8.1, 1, 1]]),
+        "2": path([50, 8], [[50.1, 8.1, 1, 1]]),
       }),
     );
     expect(data.path_segments.map((s) => s.path_id)).toEqual([2, 10]);
@@ -196,8 +213,8 @@ describe("expandYearData", () => {
   it("skips paths without segments and has no holes in the arrays", () => {
     const data = expandYearData(
       rawYear(2025, {
-        "1": [],
-        "2": [[50, 8, 50.1, 8.1, 1, 1]],
+        "1": path([50, 8], []),
+        "2": path([50, 8], [[50.1, 8.1, 1, 1]]),
       }),
     );
     expect(data.path_segments).toHaveLength(1);
@@ -207,9 +224,37 @@ describe("expandYearData", () => {
 
   it("shares the start coordinate array between segment and heatmap point", () => {
     const data = expandYearData(
-      rawYear(2025, { "1": [[50, 8, 50.1, 8.1, 1, 1]] }),
+      rawYear(2025, { "1": path([50, 8], [[50.1, 8.1, 1, 1]]) }),
     );
     expect(data.coordinates[0]).toBe(data.path_segments[0]!.coords![0]);
+  });
+
+  it("shares one coordinate array between neighbouring segments", () => {
+    const data = expandYearData(
+      rawYear(2025, {
+        "1": path(
+          [50, 8],
+          [
+            [50.1, 8.1, 1, 1],
+            [50.2, 8.2, 1, 1],
+          ],
+        ),
+      }),
+    );
+    // The end of a segment is the very same array as the next one's start
+    expect(data.path_segments[0]!.coords![1]).toBe(
+      data.path_segments[1]!.coords![0],
+    );
+  });
+
+  it("throws when a path with rows carries no start point", () => {
+    expect(() =>
+      expandYearData(
+        rawYear(2025, {
+          "1": { start: [], rows: [[50.1, 8.1, 1, 1]] },
+        }),
+      ),
+    ).toThrow("start point");
   });
 
   it("defaults missing path_info and original_points", () => {
@@ -273,7 +318,7 @@ describe("DataLoader", () => {
   function defineYear(
     year: number,
     segments: RawYearData["segments"] = {
-      "1": [[50, 8, 50.1, 8.1, 1000, 100, 0]],
+      "1": path([50, 8], [[50.1, 8.1, 1000, 100, 0]]),
     },
   ): void {
     mockWindow[`KML_DATA_${year}`] = rawYear(
@@ -305,8 +350,8 @@ describe("DataLoader", () => {
   describe("input validation", () => {
     it("rejects invalid years without loading", async () => {
       expect(await loader.loadData("abc")).toBeNull();
-      expect(await loader.loadData("1999")).toBeNull();
-      expect(await loader.loadData("2100")).toBeNull();
+      expect(await loader.loadData("../data")).toBeNull();
+      expect(await loader.loadData("20255")).toBeNull();
       expect(mockScriptLoader).not.toHaveBeenCalled();
       expect(onLoadError).not.toHaveBeenCalled();
     });
@@ -699,7 +744,7 @@ describe("DataLoader", () => {
       const defaultLoader = new DataLoader();
       expect(defaultLoader.isCached("2025")).toBe(false);
       window["KML_DATA_2025"] = rawYear(2025, {
-        "1": [[50, 8, 50.1, 8.1, 1000, 100]],
+        "1": path([50, 8], [[50.1, 8.1, 1000, 100]]),
       });
 
       const result = await defaultLoader.loadData("2025");

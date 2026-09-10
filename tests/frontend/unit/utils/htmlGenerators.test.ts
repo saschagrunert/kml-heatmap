@@ -276,40 +276,35 @@ describe("htmlGenerators", () => {
   });
 
   describe("calculateAircraftColorClass", () => {
-    it("returns high class for normalized >= 0.75", () => {
-      expect(calculateAircraftColorClass(0.75)).toBe("fleet-aircraft-high");
-      expect(calculateAircraftColorClass(0.9)).toBe("fleet-aircraft-high");
-      expect(calculateAircraftColorClass(1.0)).toBe("fleet-aircraft-high");
-    });
-
-    it("returns medium-high class for normalized >= 0.5 and < 0.75", () => {
-      expect(calculateAircraftColorClass(0.5)).toBe(
-        "fleet-aircraft-medium-high",
-      );
-      expect(calculateAircraftColorClass(0.6)).toBe(
-        "fleet-aircraft-medium-high",
-      );
-      expect(calculateAircraftColorClass(0.74)).toBe(
-        "fleet-aircraft-medium-high",
+    it("returns high class for the top quarter of the range", () => {
+      expect(calculateAircraftColorClass(8, 10, 1)).toBe("fleet-aircraft-high");
+      expect(calculateAircraftColorClass(10, 10, 1)).toBe(
+        "fleet-aircraft-high",
       );
     });
 
-    it("returns medium-low class for normalized >= 0.25 and < 0.5", () => {
-      expect(calculateAircraftColorClass(0.25)).toBe(
-        "fleet-aircraft-medium-low",
+    it("returns medium-high class for the third quarter", () => {
+      expect(calculateAircraftColorClass(5.5, 10, 1)).toBe(
+        "fleet-aircraft-medium-high",
       );
-      expect(calculateAircraftColorClass(0.3)).toBe(
-        "fleet-aircraft-medium-low",
+      expect(calculateAircraftColorClass(7.5, 10, 1)).toBe(
+        "fleet-aircraft-medium-high",
       );
-      expect(calculateAircraftColorClass(0.49)).toBe(
+    });
+
+    it("returns medium-low class for the second quarter", () => {
+      expect(calculateAircraftColorClass(4, 10, 1)).toBe(
         "fleet-aircraft-medium-low",
       );
     });
 
-    it("returns low class for normalized < 0.25", () => {
-      expect(calculateAircraftColorClass(0)).toBe("fleet-aircraft-low");
-      expect(calculateAircraftColorClass(0.1)).toBe("fleet-aircraft-low");
-      expect(calculateAircraftColorClass(0.24)).toBe("fleet-aircraft-low");
+    it("returns low class for the bottom quarter", () => {
+      expect(calculateAircraftColorClass(1, 10, 1)).toBe("fleet-aircraft-low");
+      expect(calculateAircraftColorClass(3, 10, 1)).toBe("fleet-aircraft-low");
+    });
+
+    it("returns high class when every aircraft has the same count", () => {
+      expect(calculateAircraftColorClass(5, 5, 5)).toBe("fleet-aircraft-high");
     });
   });
 

@@ -36,11 +36,13 @@ def export_airports_data(
 
         seen_locations.add(location_key)
 
+        # No flight count here: the frontend derives it per airport from the
+        # path info of the active year/aircraft filter, so an exported count
+        # would only ever be shown for the instant before the first refresh
         airport_data: dict[str, Any] = {
             "lat": apt["lat"],
             "lon": apt["lon"],
             "name": airport_name,
-            "flight_count": len(apt["timestamps"]) if apt.get("timestamps") else 1,
         }
 
         icao_codes = extract_icao_codes_from_name(airport_name)
@@ -67,8 +69,6 @@ def export_airports_data(
 
 def export_metadata(
     stats: Statistics,
-    min_alt_m: float,
-    max_alt_m: float,
     min_groundspeed_knots: float,
     max_groundspeed_knots: float,
     available_years: list[int],
@@ -83,8 +83,6 @@ def export_metadata(
 
     meta_data: dict[str, Any] = {
         "stats": stats,
-        "min_alt_m": min_alt_m,
-        "max_alt_m": max_alt_m,
         "min_groundspeed_knots": round(min_groundspeed_knots, 1),
         "max_groundspeed_knots": round(max_groundspeed_knots, 1),
         "available_years": sorted(available_years),

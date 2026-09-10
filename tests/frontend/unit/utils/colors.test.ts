@@ -2,9 +2,22 @@ import { describe, it, expect } from "vitest";
 import {
   getColorForAltitude,
   getColorForAirspeed,
-  parseRgb,
   rgbToRgba,
 } from "../../../../kml_heatmap/frontend/utils/colors";
+
+/**
+ * Split an "rgb(r,g,b)" string into its components so the tests can assert on
+ * the channels. Test-only: the application compares the strings themselves.
+ */
+function parseRgb(rgbString: string): { r: number; g: number; b: number } {
+  const match = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(rgbString);
+  if (!match) return { r: 0, g: 0, b: 0 };
+  return {
+    r: parseInt(match[1]!, 10),
+    g: parseInt(match[2]!, 10),
+    b: parseInt(match[3]!, 10),
+  };
+}
 
 describe("color utilities", () => {
   describe("getColorForAltitude", () => {
@@ -158,50 +171,6 @@ describe("color utilities", () => {
 
     it("handles alpha of 1", () => {
       expect(rgbToRgba("rgb(255,255,255)", 1)).toBe("rgba(255,255,255, 1)");
-    });
-  });
-
-  describe("parseRgb", () => {
-    it("parses valid RGB string", () => {
-      const result = parseRgb("rgb(255,128,0)");
-      expect(result).toEqual({ r: 255, g: 128, b: 0 });
-    });
-
-    it("parses RGB string with spaces", () => {
-      const result = parseRgb("rgb(255, 128, 0)");
-      expect(result).toEqual({ r: 255, g: 128, b: 0 });
-    });
-
-    it("handles single-digit values", () => {
-      const result = parseRgb("rgb(0,5,9)");
-      expect(result).toEqual({ r: 0, g: 5, b: 9 });
-    });
-
-    it("handles maximum RGB values", () => {
-      const result = parseRgb("rgb(255,255,255)");
-      expect(result).toEqual({ r: 255, g: 255, b: 255 });
-    });
-
-    it("returns zero values for invalid string", () => {
-      const result = parseRgb("invalid");
-      expect(result).toEqual({ r: 0, g: 0, b: 0 });
-    });
-
-    it("returns zero values for empty string", () => {
-      const result = parseRgb("");
-      expect(result).toEqual({ r: 0, g: 0, b: 0 });
-    });
-
-    it("can parse output from getColorForAltitude", () => {
-      const color = getColorForAltitude(5000, 0, 10000);
-      const { r, g, b } = parseRgb(color);
-
-      expect(r).toBeGreaterThanOrEqual(0);
-      expect(r).toBeLessThanOrEqual(255);
-      expect(g).toBeGreaterThanOrEqual(0);
-      expect(g).toBeLessThanOrEqual(255);
-      expect(b).toBeGreaterThanOrEqual(0);
-      expect(b).toBeLessThanOrEqual(255);
     });
   });
 });

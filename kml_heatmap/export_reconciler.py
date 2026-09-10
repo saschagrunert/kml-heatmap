@@ -24,10 +24,10 @@ if TYPE_CHECKING:
 
 __all__ = ["YearAggregate"]
 
-# Segment row layout: [lat1, lon1, lat2, lon2, altitude_ft, groundspeed_knots, time?]
-SEGMENT_ALTITUDE_INDEX = 4
-SEGMENT_SPEED_INDEX = 5
-SEGMENT_TIME_INDEX = 6
+# Segment row layout: [lat, lon, altitude_ft, groundspeed_knots, time?]
+SEGMENT_ALTITUDE_INDEX = 2
+SEGMENT_SPEED_INDEX = 3
+SEGMENT_TIME_INDEX = 4
 
 
 @dataclass

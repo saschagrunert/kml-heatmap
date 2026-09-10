@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   REFERENCE_DISTANCES,
-  calculateAircraftColorClass,
   calculateYearStats,
   findClosestReferenceDistance,
   findFurthestAirport,
@@ -625,49 +624,6 @@ describe("wrapped feature", () => {
 
     it("handles empty array", () => {
       expect(selectDiverseFacts([])).toHaveLength(0);
-    });
-  });
-
-  describe("calculateAircraftColorClass", () => {
-    it("returns high class for most flights", () => {
-      expect(calculateAircraftColorClass(10, 10, 1)).toBe(
-        "fleet-aircraft-high",
-      );
-    });
-
-    it("returns low class for least flights", () => {
-      expect(calculateAircraftColorClass(1, 10, 1)).toBe("fleet-aircraft-low");
-    });
-
-    it("returns high class for the 75th percentile", () => {
-      expect(calculateAircraftColorClass(8, 10, 1)).toBe("fleet-aircraft-high");
-    });
-
-    it("returns low class for below 25th percentile", () => {
-      // normalized = (3-1)/(10-1) = 0.222 < 0.25
-      expect(calculateAircraftColorClass(3, 10, 1)).toBe("fleet-aircraft-low");
-    });
-
-    it("returns medium-low class for 25-50th percentile", () => {
-      // normalized = (4-1)/(10-1) = 0.333
-      expect(calculateAircraftColorClass(4, 10, 1)).toBe(
-        "fleet-aircraft-medium-low",
-      );
-    });
-
-    it("handles equal min and max", () => {
-      expect(calculateAircraftColorClass(5, 5, 5)).toBe("fleet-aircraft-high");
-    });
-
-    it("handles boundary values", () => {
-      // normalized 0.5 and 0.722 are medium-high, 0.777 is high
-      expect(calculateAircraftColorClass(5.5, 10, 1)).toBe(
-        "fleet-aircraft-medium-high",
-      );
-      expect(calculateAircraftColorClass(7.5, 10, 1)).toBe(
-        "fleet-aircraft-medium-high",
-      );
-      expect(calculateAircraftColorClass(8, 10, 1)).toBe("fleet-aircraft-high");
     });
   });
   describe("findFurthestAirport", () => {

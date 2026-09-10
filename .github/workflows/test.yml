@@ -151,7 +151,7 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
-          for asset in templates/map_template.html static/mapApp.bundle.js static/bundle.js static/styles.css; do
+          for asset in templates/map_template.html static/mapApp.bundle.js static/styles.css; do
             result=$("$RUNNER_TEMP/wheel-venv/bin/python" -c "import importlib.resources as r, kml_heatmap; print(r.files(kml_heatmap).joinpath('$asset').is_file())")
             echo "$asset shipped: $result"
             test "$result" = "True"

@@ -137,5 +137,4 @@ clean: ## Remove the container image (when a runtime is available) and local bui
 	-@test -z "$(CONTAINER_RUNTIME)" || $(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) 2>/dev/null
 	rm -rf htmlcov coverage coverage.xml .coverage .coverage.* test-results playwright-report \
 	  dist build *.egg-info .mypy_cache .ruff_cache .pytest_cache .hypothesis \
-	  kml_heatmap/static/bundle.js kml_heatmap/static/bundle.js.map \
 	  kml_heatmap/static/mapApp.bundle.js kml_heatmap/static/mapApp.bundle.js.map

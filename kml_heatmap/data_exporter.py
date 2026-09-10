@@ -3,7 +3,7 @@
 Exports flight data to JS files for the browser frontend:
 - <year>/data.js: per-year path info and segments (window.KML_DATA_<year>)
 - airports.js: deduplicated airport locations (window.KML_AIRPORTS)
-- metadata.js: statistics and ranges (window.KML_METADATA)
+- metadata.js: statistics, years and the groundspeed range (KML_METADATA)
 
 Years are processed in parallel; each worker writes its year's file and
 returns a compact statistics aggregate instead of the segments themselves.
@@ -23,17 +23,17 @@ from .cache import atomic_js_write
 from .export_pipeline import build_path_info, process_path_segments
 from .export_reconciler import YearAggregate
 from .export_writers import export_airports_data, export_metadata
-from .geometry import extract_altitudes
 from .logger import logger
 from .workers import init_worker
 
 if TYPE_CHECKING:
     from .types import (
         AirportData,
+        FlightPath,
         FlightPathGroup,
         PathInfo,
         PathMetadata,
-        SegmentRow,
+        PathSegments,
         Statistics,
     )
 
@@ -66,25 +66,25 @@ def process_year_data(
 
     original_points = sum(len(path) for path in year_path_groups)
     aggregate = YearAggregate(total_points=original_points)
-    segments: dict[str, list[SegmentRow]] = {}
+    segments: dict[str, PathSegments] = {}
     path_info: list[PathInfo] = []
     path_id = path_id_offset
 
     for path, metadata in zip(year_path_groups, year_path_metadata, strict=True):
-        if len(path) <= 1:
+        if not is_exportable_path(path):
             continue
 
         info, path_duration_seconds, path_distance_km = build_path_info(
             path, metadata, path_id, year
         )
-        rows, distances = process_path_segments(
+        start, rows, distances = process_path_segments(
             path, path_distance_km, path_duration_seconds
         )
         # Zero-length segments are not exported, so report the exported count
         info["segment_count"] = len(rows)
 
         path_info.append(info)
-        segments[str(path_id)] = rows
+        segments[str(path_id)] = {"start": start, "rows": rows}
         path_min_ft = info.get("min_altitude_ft")
         path_max_ft = info.get("max_altitude_ft")
         aggregate.add_path(
@@ -128,15 +128,14 @@ def process_year_data(
     )
 
 
-def _calculate_altitude_range(
-    all_path_groups: FlightPathGroup,
-) -> tuple[float, float]:
-    """Calculate min/max altitude across all path groups."""
-    if all_path_groups:
-        all_altitudes = extract_altitudes(all_path_groups)
-        if all_altitudes:
-            return min(all_altitudes), max(all_altitudes)
-    return 0.0, 1000.0
+def is_exportable_path(path: FlightPath) -> bool:
+    """Whether a path gets an id and an entry in the export.
+
+    The same predicate decides the per-year path ids (see
+    ``_path_id_offsets``), so both must never drift apart: ids are persisted
+    in shared links and would then point at different flights.
+    """
+    return len(path) > 1
 
 
 def _group_paths_by_year(
@@ -147,7 +146,10 @@ def _group_paths_by_year(
     for path_idx, metadata in enumerate(all_path_metadata):
         year = metadata.get("year")
         if year is None:
-            logger.warning(
+            # The pipeline drops these in renderer._drop_paths_without_year,
+            # which also keeps them out of the airports and the statistics.
+            # This guard only covers direct calls to export_all_data.
+            logger.debug(
                 "Skipping path without year: %s", metadata.get("filename", path_idx)
             )
             continue
@@ -163,7 +165,9 @@ def _path_id_offsets(
     offset = 0
     for year in sorted(paths_by_year):
         offsets[year] = offset
-        offset += sum(1 for idx in paths_by_year[year] if len(all_path_groups[idx]) > 1)
+        offset += sum(
+            1 for idx in paths_by_year[year] if is_exportable_path(all_path_groups[idx])
+        )
     return offsets
 
 
@@ -305,8 +309,6 @@ def export_all_data(
 
     logger.info("\n  Exporting data to JS files...")
 
-    min_alt_m, max_alt_m = _calculate_altitude_range(all_path_groups)
-
     paths_by_year = _group_paths_by_year(all_path_metadata)
     logger.info("\n  Splitting data by year: %s", sorted(paths_by_year))
 
@@ -333,8 +335,6 @@ def export_all_data(
 
     meta_file, _ = export_metadata(
         stats,
-        min_alt_m,
-        max_alt_m,
         aggregate.min_groundspeed_or_zero,
         aggregate.max_groundspeed_knots,
         [result.year for result in year_results],

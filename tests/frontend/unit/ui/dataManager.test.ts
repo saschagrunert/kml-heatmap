@@ -7,6 +7,7 @@ import {
   vi,
   type Mock,
 } from "vitest";
+import * as L from "leaflet";
 import { DataManager } from "../../../../kml_heatmap/frontend/ui/dataManager";
 import type { HeatmapLayer } from "../../../../kml_heatmap/frontend/globals";
 import type {
@@ -88,8 +89,9 @@ describe("DataManager", () => {
       remove: vi.fn(),
       _canvas: { style: {} } as HTMLCanvasElement,
     };
-    heatLayerSpy = vi.fn(() => mockHeatLayer as HeatmapLayer);
-    (window as unknown as { L: unknown }).L = { heatLayer: heatLayerSpy };
+    // DataManager imports leaflet, which vitest aliases to the mock module
+    heatLayerSpy = vi.mocked(L.heatLayer);
+    heatLayerSpy.mockReturnValue(mockHeatLayer);
 
     mockApp = createMockApp();
     dataManager = new DataManager(asMapApp(mockApp));

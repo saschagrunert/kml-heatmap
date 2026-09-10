@@ -1,6 +1,7 @@
 /**
  * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, export, share)
  */
+import type * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import { setControlLabel } from "../utils/buttonState";
 import { domCache, hideControls, restoreControls } from "../utils/domCache";

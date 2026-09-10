@@ -2,11 +2,8 @@
  * Global type declarations
  */
 
-import type * as KMLHeatmapLib from "./main";
 import type { MapApp, MapConfig } from "./mapApp";
 import type * as L from "leaflet";
-
-export type KMLHeatmapModule = typeof KMLHeatmapLib;
 
 // Leaflet heatmap plugin types
 export interface HeatmapOptions {
@@ -47,7 +44,6 @@ declare global {
   }
 
   interface Window {
-    KMLHeatmap: KMLHeatmapModule;
     initMapApp?: (config: MapConfig) => Promise<MapApp>;
     mapApp?: MapApp;
     domtoimage?: DomToImage;
