@@ -2,6 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import {
   findSegmentFarFromAirports,
   gotoApp,
+  toggleLayer,
   waitForPathData,
 } from "./helpers";
 
@@ -280,5 +281,47 @@ test.describe("Layers", () => {
         !document.getElementById("map")?.classList.contains("zoom-hide-labels"),
       { timeout: 5000 },
     );
+  });
+
+  test.describe("Heatmap emphasis", () => {
+    /** The leaflet.heat canvas, which the emphasis class lands on */
+    const HEAT_CANVAS = "canvas.leaflet-heatmap-layer";
+
+    /** Opacity as the browser computes it, so the token stays the one source */
+    function heatOpacity(page: Page): Promise<number> {
+      return page
+        .locator(HEAT_CANVAS)
+        .evaluate((el) => Number(getComputedStyle(el).opacity));
+    }
+
+    test("the heatmap steps back while a colour layer is over it", async ({
+      page,
+    }) => {
+      const canvas = page.locator(HEAT_CANVAS);
+      await expect(canvas).toBeVisible();
+      expect(await heatOpacity(page)).toBe(1);
+
+      // waitForPathData switches the altitude layer on
+      await waitForPathData(page);
+
+      await expect(canvas).toHaveClass(/heatmap-dimmed/);
+      // Its bloom under the gradient washed out the scale just switched on
+      const dimmed = await heatOpacity(page);
+      expect(dimmed).toBeLessThan(1);
+      expect(dimmed).toBeGreaterThan(0);
+    });
+
+    test("it comes back to full strength when the layer goes", async ({
+      page,
+    }) => {
+      const canvas = page.locator(HEAT_CANVAS);
+      await waitForPathData(page);
+      await expect(canvas).toHaveClass(/heatmap-dimmed/);
+
+      await toggleLayer(page, "altitude");
+
+      await expect(canvas).not.toHaveClass(/heatmap-dimmed/);
+      expect(await heatOpacity(page)).toBe(1);
+    });
   });
 });
