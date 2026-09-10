@@ -165,6 +165,10 @@ jobs:
     needs: [format, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, mobile-chromium]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python
@@ -209,15 +213,13 @@ jobs:
       - name: Install Playwright system deps
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
-      - name: Run E2E tests
-        run: npx playwright test --project=chromium
-      - name: Run mobile E2E tests
-        run: npm run test:e2e:mobile
+      - name: Run E2E tests (${{ matrix.project }})
+        run: npx playwright test --project=${{ matrix.project }}
       - name: Upload Playwright results
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-results
+          name: playwright-results-${{ matrix.project }}
           path: |
             test-results/
             playwright-report/
