@@ -11,7 +11,6 @@ Path ids are globally unique: years are processed in ascending order and
 each year's ids continue after the previous years' path count.
 """
 
-import json
 import logging
 import os
 import re
@@ -20,7 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .export_pipeline import _build_path_info, _process_path_segments
+from .cache import atomic_js_write
+from .export_pipeline import build_path_info, process_path_segments
 from .export_reconciler import YearAggregate
 from .export_writers import export_airports_data, export_metadata
 from .geometry import extract_altitudes
@@ -74,10 +74,10 @@ def process_year_data(
         if len(path) <= 1:
             continue
 
-        info, path_duration_seconds, path_distance_km = _build_path_info(
+        info, path_duration_seconds, path_distance_km = build_path_info(
             path, metadata, path_id, year
         )
-        rows, distances = _process_path_segments(
+        rows, distances = process_path_segments(
             path, path_distance_km, path_duration_seconds
         )
         # Zero-length segments are not exported, so report the exported count
@@ -107,10 +107,7 @@ def process_year_data(
     year_dir = Path(output_dir) / str(year)
     year_dir.mkdir(parents=True, exist_ok=True)
     output_file = year_dir / "data.js"
-    with open(output_file, "w", encoding="utf-8") as f:
-        f.write(f"window.KML_DATA_{year} = ")
-        json.dump(data, f, separators=(",", ":"))
-        f.write(";")
+    atomic_js_write(output_file, f"KML_DATA_{year}", data)
 
     file_bytes = output_file.stat().st_size
 
@@ -180,6 +177,27 @@ def _process_years_parallel(
     """Process all years in parallel and return results sorted by year."""
     year_results: list[YearExportResult] = []
     debug = logger.isEnabledFor(logging.DEBUG)
+
+    if len(paths_by_year) == 1:
+        year = next(iter(paths_by_year))
+        indices = paths_by_year[year]
+        try:
+            result = process_year_data(
+                year,
+                [all_path_groups[i] for i in indices],
+                [all_path_metadata[i] for i in indices],
+                path_id_offsets[year],
+                output_dir,
+            )
+        except Exception as exc:
+            logger.exception("  Error processing year %s", year)
+            raise RuntimeError(f"Failed to process year {year}") from exc
+        logger.info(
+            "  [1/1] Year %s: %s points",
+            year,
+            f"{result.original_points:,}",
+        )
+        return [result]
 
     with ProcessPoolExecutor(
         max_workers=max(1, min(len(paths_by_year), os.cpu_count() or 4)),

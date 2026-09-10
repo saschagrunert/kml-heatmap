@@ -50,12 +50,12 @@ function perPathSeconds(
     times.push(seg.time);
   }
   const result = new Map<number, number>();
-  timesByPath.forEach((times, pathId) => {
+  for (const [pathId, times] of timesByPath) {
     if (times.length > 0) {
       const { min, max } = findMinMax(times);
       result.set(pathId, max - min);
     }
-  });
+  }
   return result;
 }
 
@@ -71,24 +71,16 @@ export function filterPaths(
   year: string,
   aircraft: string,
 ): PathInfo[] {
-  return pathInfo.filter(function (path) {
-    // Apply year filter
-    if (year !== "all") {
-      if (!path.year || path.year.toString() !== year) {
-        return false;
-      }
+  return pathInfo.filter((path) => {
+    if (year !== "all" && (!path.year || path.year.toString() !== year)) {
+      return false;
     }
-
-    // Apply aircraft filter
-    if (aircraft !== "all") {
-      if (
-        !path.aircraft_registration ||
-        path.aircraft_registration !== aircraft
-      ) {
-        return false;
-      }
+    if (
+      aircraft !== "all" &&
+      (!path.aircraft_registration || path.aircraft_registration !== aircraft)
+    ) {
+      return false;
     }
-
     return true;
   });
 }
@@ -100,10 +92,10 @@ export function filterPaths(
  */
 export function collectAirports(pathInfo: PathInfo[]): Set<string> {
   const airports = new Set<string>();
-  pathInfo.forEach(function (path) {
+  for (const path of pathInfo) {
     if (path.start_airport) airports.add(path.start_airport);
     if (path.end_airport) airports.add(path.end_airport);
-  });
+  }
   return airports;
 }
 
@@ -119,31 +111,30 @@ export function aggregateAircraft(
   const aircraftMap: Record<string, AircraftAggregate> = {};
   const pathToReg = new Map<number, string>();
 
-  pathInfo.forEach(function (path) {
+  for (const path of pathInfo) {
     if (path.aircraft_registration) {
       const reg = path.aircraft_registration;
       pathToReg.set(path.id, reg);
-      if (!aircraftMap[reg]) {
-        aircraftMap[reg] = {
-          registration: reg,
-          type: path.aircraft_type,
-          flights: 0,
-          flight_time_seconds: 0,
-        };
-      }
-      aircraftMap[reg].flights += 1;
+      const entry = aircraftMap[reg] ?? {
+        registration: reg,
+        type: path.aircraft_type,
+        flights: 0,
+        flight_time_seconds: 0,
+      };
+      aircraftMap[reg] = entry;
+      entry.flights += 1;
     }
-  });
+  }
 
   if (segments) {
     const pathFilter = new Set(pathToReg.keys());
     const seconds = perPathSeconds(segments, pathFilter);
-    seconds.forEach(function (secs, pathId) {
+    for (const [pathId, secs] of seconds) {
       const reg = pathToReg.get(pathId);
       if (reg && aircraftMap[reg]) {
         aircraftMap[reg].flight_time_seconds! += secs;
       }
-    });
+    }
     for (const agg of Object.values(aircraftMap)) {
       if (agg.flight_time_seconds && agg.flight_time_seconds > 0) {
         agg.flight_time_str = formatFlightTime(agg.flight_time_seconds);
@@ -152,9 +143,7 @@ export function aggregateAircraft(
   }
 
   // Sort by flight count descending
-  return Object.values(aircraftMap).sort(function (a, b) {
-    return b.flights - a.flights;
-  });
+  return Object.values(aircraftMap).sort((a, b) => b.flights - a.flights);
 }
 
 /**
@@ -168,9 +157,7 @@ export function filterSegmentsByPaths(
   pathInfo: PathInfo[],
 ): PathSegment[] {
   const pathIds = new Set(pathInfo.map((p) => p.id));
-  return segments.filter(function (segment) {
-    return pathIds.has(segment.path_id);
-  });
+  return segments.filter((segment) => pathIds.has(segment.path_id));
 }
 
 /**
@@ -298,9 +285,9 @@ export function calculateFlightTime(
 ): number {
   const pathIds = new Set(pathInfo.map((p) => p.id));
   let totalSeconds = 0;
-  perPathSeconds(segments, pathIds).forEach((secs) => {
+  for (const secs of perPathSeconds(segments, pathIds).values()) {
     totalSeconds += secs;
-  });
+  }
   return totalSeconds;
 }
 
@@ -327,7 +314,7 @@ export function calculateFilteredStatistics(options: {
   segments: PathSegment[];
   year?: string;
   aircraft?: string;
-  coordinateCount?: number;
+  coordinateCount?: number | undefined;
   preFiltered?: { paths: PathInfo[]; segments: PathSegment[] };
 }): FilteredStatistics {
   const {
@@ -405,7 +392,7 @@ export function calculateFilteredStatistics(options: {
     let totalDistanceNm = 0;
     let totalTimeHours = 0;
 
-    cruiseSegments.forEach((seg) => {
+    for (const seg of cruiseSegments) {
       const distanceKm = segmentDistance(seg);
       if (
         distanceKm > 0 &&
@@ -413,14 +400,12 @@ export function calculateFilteredStatistics(options: {
         seg.groundspeed_knots > 0
       ) {
         const distanceNm = distanceKm * KM_TO_NAUTICAL_MILES;
-
-        // Derive time from distance and speed: time = distance / speed
         const timeHours = distanceNm / seg.groundspeed_knots;
 
         totalDistanceNm += distanceNm;
         totalTimeHours += timeHours;
       }
-    });
+    }
 
     cruiseSpeed =
       totalTimeHours > 0 ? totalDistanceNm / totalTimeHours : undefined;
@@ -432,14 +417,14 @@ export function calculateFilteredStatistics(options: {
   let mostCommonCruiseAltitudeM: number | undefined;
   if (cruiseSegments.length > 0) {
     const altitudeBuckets: { [key: number]: number } = {};
-    cruiseSegments.forEach((seg) => {
+    for (const seg of cruiseSegments) {
       if (seg.altitude_ft !== undefined) {
         const groundLevelFt = pathMinAltFt.get(seg.path_id) ?? 0;
         const altAglFt = seg.altitude_ft - groundLevelFt;
         const bucketFt = Math.round(altAglFt / 100) * 100;
         altitudeBuckets[bucketFt] = (altitudeBuckets[bucketFt] || 0) + 1;
       }
-    });
+    }
     // Most frequent bin wins; ties resolve to the lowest bin (backend parity)
     const mostCommonBucket = Object.entries(altitudeBuckets).sort(
       (a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0]),

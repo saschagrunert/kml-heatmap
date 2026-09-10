@@ -238,6 +238,10 @@ export const popup: Mock<() => MockPopup> = vi.fn(() => {
   return obj;
 });
 
+export const control = {
+  attribution: vi.fn(() => ({ addTo: vi.fn() })),
+};
+
 export const DomEvent = {
   stopPropagation: vi.fn(),
 };
@@ -254,5 +258,6 @@ export default {
   latLng,
   latLngBounds,
   popup,
+  control,
   DomEvent,
 };

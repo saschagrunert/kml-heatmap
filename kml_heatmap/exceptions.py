@@ -27,6 +27,6 @@ class KMLParseError(KMLHeatmapError):
         parts = [message]
         if self.file_path:
             parts.append(f"File: {self.file_path}")
-        if self.line_number:
+        if self.line_number is not None:
             parts.append(f"Line: {self.line_number}")
         return " | ".join(parts)

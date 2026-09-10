@@ -204,7 +204,7 @@ class TestApplyToStats:
         assert stats["max_altitude_ft"] is None
         assert stats["avg_groundspeed_knots"] == 0.0
         assert stats["cruise_speed_knots"] == 0.0
-        assert stats["most_common_cruise_altitude_ft"] == 0
+        assert stats["most_common_cruise_altitude_ft"] is None
         assert stats["total_flight_time_str"] == "0h 0m"
         assert stats["longest_flight_km"] == 0.0
 

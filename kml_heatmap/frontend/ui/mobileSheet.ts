@@ -114,10 +114,6 @@ export class MobileSheet {
     this.root.tabIndex = -1;
     setInteractive(this.root, false);
 
-    const handle = document.createElement("div");
-    handle.className = "sheet-handle";
-    handle.setAttribute("aria-hidden", "true");
-
     const titleRow = document.createElement("div");
     titleRow.className = "sheet-title";
 
@@ -141,7 +137,7 @@ export class MobileSheet {
     this.rowsHost = document.createElement("div");
     this.rowsHost.className = "sheet-body";
 
-    this.root.append(handle, titleRow, this.rowsHost);
+    this.root.append(titleRow, this.rowsHost);
 
     this.onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
   }
@@ -162,11 +158,16 @@ export class MobileSheet {
     return this.open;
   }
 
+  clearCloseCallback(): void {
+    this.closeCallback = null;
+  }
+
   /**
    * Show the sheet with a title and a set of rows. Focus moves into the
    * sheet and returns to the opener when it closes.
    */
   openWith(title: string, rows: SheetRow[], onClose?: () => void): void {
+    if (this.open) this.close();
     this.titleEl.textContent = title;
     this.renderRows(rows);
     this.closeCallback = onClose ?? null;
@@ -298,7 +299,9 @@ export class MobileSheet {
         this.refresh();
       });
     } else if (spec.kind === "action") {
-      control.append(createChevron("chevronRight"));
+      if (spec.closeOnSelect !== false) {
+        control.append(createChevron("chevronRight"));
+      }
       element.addEventListener("click", () => {
         if (spec.closeOnSelect !== false) this.close();
         spec.onSelect();

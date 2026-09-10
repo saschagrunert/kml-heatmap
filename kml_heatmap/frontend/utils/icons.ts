@@ -35,7 +35,9 @@ export type IconName =
   | "close"
   | "aircraft"
   | "calendar"
-  | "more";
+  | "more"
+  | "github"
+  | "info";
 
 /** Path geometry only; the wrapper supplies size, stroke and colour. */
 const PATHS: Record<IconName, string> = {
@@ -75,6 +77,9 @@ const PATHS: Record<IconName, string> = {
   calendar:
     '<rect x="3.8" y="5.2" width="16.4" height="15" rx="2.2"/><path d="M3.8 9.6h16.4"/><path d="M8.2 3.4v3.6"/><path d="M15.8 3.4v3.6"/>',
   more: '<circle cx="12" cy="12" r="1.7"/><circle cx="18.6" cy="12" r="1.7"/><circle cx="5.4" cy="12" r="1.7"/>',
+  github:
+    '<path d="M12 2.5A9.5 9.5 0 0 0 9 21.2c.5.1.7-.2.7-.5v-1.7C7.1 19.6 6.5 18 6.5 18a2.5 2.5 0 0 0-1-1.4c-.8-.6.1-.6.1-.6a2 2 0 0 1 1.4 1 2 2 0 0 0 2.7.8 2 2 0 0 1 .6-1.3c-2-.2-4.2-1-4.2-4.7a3.6 3.6 0 0 1 1-2.5 3.4 3.4 0 0 1 .1-2.5s.8-.3 2.7 1a9.2 9.2 0 0 1 4.8 0c1.9-1.3 2.7-1 2.7-1a3.4 3.4 0 0 1 .1 2.5 3.6 3.6 0 0 1 1 2.5c0 3.7-2.2 4.5-4.2 4.7a2.3 2.3 0 0 1 .6 1.7v2.5c0 .3.2.6.7.5A9.5 9.5 0 0 0 12 2.5z"/>',
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 16v-4.5"/><circle cx="12" cy="8" r=".8"/>',
 };
 
 /** Stroke weight paired with each size, so density reads evenly */

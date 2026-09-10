@@ -177,34 +177,45 @@ export class UIToggles {
     }
   }
 
-  toggleHeatmap(): void {
+  private toggleSimpleLayer(
+    layer: L.Layer | null | undefined,
+    visible: boolean,
+    setVisible: (v: boolean) => void,
+    btnId: string,
+    onAdd?: () => void,
+  ): void {
     if (!this.app.map) return;
 
-    if (this.app.heatmapVisible) {
-      if (this.app.heatmapLayer) {
-        this.app.map.removeLayer(this.app.heatmapLayer);
-      }
-      this.app.heatmapVisible = false;
-      const btn = domCache.get("heatmap-btn");
-      if (btn) {
-        btn.style.opacity = "0.5";
-        btn.setAttribute("aria-pressed", "false");
-      }
-    } else {
-      if (this.app.heatmapLayer) {
-        this.app.map.addLayer(this.app.heatmapLayer);
-        // Ensure heatmap is non-interactive after adding to map
-        if (this.app.heatmapLayer._canvas) {
+    if (visible) {
+      if (layer) this.app.map.removeLayer(layer);
+      setVisible(false);
+    } else if (layer) {
+      this.app.map.addLayer(layer);
+      onAdd?.();
+      setVisible(true);
+    }
+
+    const btn = domCache.get(btnId);
+    if (btn) {
+      btn.style.opacity = visible ? "0.5" : "1.0";
+      btn.setAttribute("aria-pressed", visible ? "false" : "true");
+    }
+  }
+
+  toggleHeatmap(): void {
+    this.toggleSimpleLayer(
+      this.app.heatmapLayer,
+      this.app.heatmapVisible,
+      (v) => {
+        this.app.heatmapVisible = v;
+      },
+      "heatmap-btn",
+      () => {
+        if (this.app.heatmapLayer?._canvas) {
           this.app.heatmapLayer._canvas.style.pointerEvents = "none";
         }
-      }
-      this.app.heatmapVisible = true;
-      const btn = domCache.get("heatmap-btn");
-      if (btn) {
-        btn.style.opacity = "1.0";
-        btn.setAttribute("aria-pressed", "true");
-      }
-    }
+      },
+    );
   }
 
   toggleAltitude(): void {
@@ -300,52 +311,31 @@ export class UIToggles {
   }
 
   toggleAirports(): void {
-    if (!this.app.map) return;
-
-    if (this.app.airportsVisible) {
-      this.app.map.removeLayer(this.app.airportLayer);
-      this.app.airportsVisible = false;
-      const btn = domCache.get("airports-btn");
-      if (btn) {
-        btn.style.opacity = "0.5";
-        btn.setAttribute("aria-pressed", "false");
-      }
-    } else {
-      this.app.map.addLayer(this.app.airportLayer);
-      this.app.airportsVisible = true;
-      const btn = domCache.get("airports-btn");
-      if (btn) {
-        btn.style.opacity = "1.0";
-        btn.setAttribute("aria-pressed", "true");
-      }
-    }
+    this.toggleSimpleLayer(
+      this.app.airportLayer,
+      this.app.airportsVisible,
+      (v) => {
+        this.app.airportsVisible = v;
+      },
+      "airports-btn",
+    );
   }
 
   toggleAviation(): void {
-    if (!this.app.map) return;
-
     if (
-      this.app.config.openaipApiKey &&
-      this.app.openaipLayers["Aviation Data"]
-    ) {
-      if (this.app.aviationVisible) {
-        this.app.map.removeLayer(this.app.openaipLayers["Aviation Data"]);
-        this.app.aviationVisible = false;
-        const btn = domCache.get("aviation-btn");
-        if (btn) {
-          btn.style.opacity = "0.5";
-          btn.setAttribute("aria-pressed", "false");
-        }
-      } else {
-        this.app.map.addLayer(this.app.openaipLayers["Aviation Data"]);
-        this.app.aviationVisible = true;
-        const btn = domCache.get("aviation-btn");
-        if (btn) {
-          btn.style.opacity = "1.0";
-          btn.setAttribute("aria-pressed", "true");
-        }
-      }
-    }
+      !this.app.config.openaipApiKey ||
+      !this.app.openaipLayers["Aviation Data"]
+    )
+      return;
+
+    this.toggleSimpleLayer(
+      this.app.openaipLayers["Aviation Data"],
+      this.app.aviationVisible,
+      (v) => {
+        this.app.aviationVisible = v;
+      },
+      "aviation-btn",
+    );
   }
 
   exportMap(): void {

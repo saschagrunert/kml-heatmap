@@ -243,7 +243,24 @@ class TestProcessYearsParallel:
         assert ids_2025 == [0, 1]
         assert ids_2026 == [2]
 
-    def test_processing_error_is_wrapped(self, tmp_path):
+    def test_single_year_skips_pool(self, tmp_path):
+        paths = [
+            _path((50.0, 8.0, 1.0), (50.1, 8.1, 1.0)),
+            _path((51.0, 9.0, 1.0), (51.1, 9.1, 1.0)),
+        ]
+        metadata = [{"year": 2025}, {"year": 2025}]
+        by_year = {2025: [0, 1]}
+
+        results = _process_years_parallel(
+            by_year, paths, metadata, {2025: 0}, str(tmp_path)
+        )
+
+        assert len(results) == 1
+        assert results[0].year == 2025
+        data = _parse_js(tmp_path / "2025/data.js")
+        assert [p["id"] for p in data["path_info"]] == [0, 1]
+
+    def test_processing_error_is_wrapped_single_year(self, tmp_path):
         with (
             patch(
                 "kml_heatmap.data_exporter.process_year_data",
@@ -253,6 +270,23 @@ class TestProcessYearsParallel:
         ):
             _process_years_parallel(
                 {2025: [0]}, [_path((50.0, 8.0, 1.0))], [{}], {2025: 0}, str(tmp_path)
+            )
+
+    def test_processing_error_is_wrapped_multi_year(self, tmp_path):
+        paths = [_path((50.0, 8.0, 1.0)), _path((51.0, 9.0, 2.0))]
+        with (
+            patch(
+                "kml_heatmap.data_exporter.process_year_data",
+                side_effect=RuntimeError("boom"),
+            ),
+            pytest.raises(RuntimeError, match="Failed to process year"),
+        ):
+            _process_years_parallel(
+                {2025: [0], 2026: [1]},
+                paths,
+                [{}, {}],
+                {2025: 0, 2026: 1},
+                str(tmp_path),
             )
 
 

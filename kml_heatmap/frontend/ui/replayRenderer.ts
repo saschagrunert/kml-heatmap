@@ -275,9 +275,11 @@ export class ReplayRenderer {
 
     if (nextSegment && (lastSegment.time ?? 0) < currentTime) {
       // Interpolate between last and next segment
-      const timeFraction =
+      const timeFraction = Math.min(
         (currentTime - (lastSegment.time ?? 0)) /
-        ((nextSegment.time ?? 0) - (lastSegment.time ?? 0));
+          Math.max((nextSegment.time ?? 0) - (lastSegment.time ?? 0), 0.001),
+        1,
+      );
       const lat1 = lastSegment.coords?.[1]?.[0] ?? 0;
       const lon1 = lastSegment.coords?.[1]?.[1] ?? 0;
       const lat2 = nextSegment.coords?.[0]?.[0] ?? 0;

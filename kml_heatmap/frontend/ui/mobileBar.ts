@@ -13,8 +13,7 @@
  * of holding state of its own.
  *
  * When replay activates the bar steps aside entirely: the replay panel takes
- * the bottom edge, so the two never stack and the tile attribution keeps its
- * place above whichever one is showing.
+ * the bottom edge, so the two never stack.
  */
 import type { MapApp } from "../mapApp";
 import type { SheetRow } from "./mobileSheet";
@@ -223,13 +222,15 @@ export class MobileBar {
   }
 
   /**
-   * Run a tab. The sheet is modal: it covers the whole bar and traps focus,
-   * so a tab can only be reached while no sheet is showing. Tapping the open
-   * tab again and swapping straight from one sheet to another are therefore
-   * not possible; dismissing is the sheet's own job (close button, scrim or
-   * Escape).
+   * Run a tab. The sheet sits behind the bar, so the tabs stay reachable
+   * while it is open. Tapping the active sheet tab toggles it closed;
+   * tapping a different sheet tab swaps the content.
    */
   private selectTab(id: TabId): void {
+    if (this.openTab === id) {
+      this.closeSheet();
+      return;
+    }
     switch (id) {
       case "layers":
         this.openSheet(id, "Layers", this.layerRows());
@@ -251,6 +252,7 @@ export class MobileBar {
   }
 
   private openSheet(id: TabId, title: string, rows: SheetRow[]): void {
+    this.sheet.clearCloseCallback();
     this.openTab = id;
     this.sheet.openWith(title, rows, () => {
       this.openTab = null;
@@ -396,6 +398,28 @@ export class MobileBar {
         onSelect: () => {
           void app.uiToggles.shareLink();
         },
+      },
+      {
+        kind: "action",
+        id: "github",
+        icon: "github",
+        label: "Source code",
+        onSelect: () => {
+          window.open(
+            "https://github.com/saschagrunert/kml-heatmap",
+            "_blank",
+            "noopener",
+          );
+        },
+      },
+      {
+        kind: "action",
+        id: "attribution",
+        icon: "info",
+        label: "Map tiles",
+        hint: () => "© OpenStreetMap, © CARTO",
+        onSelect: () => {},
+        closeOnSelect: false,
       },
     ];
   }

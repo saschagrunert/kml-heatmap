@@ -150,43 +150,6 @@ describe("MapApp", () => {
     });
   });
 
-  describe("delegating methods", () => {
-    it("forward to the responsible managers", () => {
-      const app = new MapApp(config);
-      app.pathSelection = { togglePathSelection: vi.fn() } as never;
-      app.replayManager = {
-        seekReplay: vi.fn(),
-        changeReplaySpeed: vi.fn(),
-      } as never;
-
-      app.togglePathSelection("7");
-      app.seekReplay("42");
-      app.changeReplaySpeed();
-
-      expect(
-        (
-          app.pathSelection as unknown as {
-            togglePathSelection: ReturnType<typeof vi.fn>;
-          }
-        ).togglePathSelection,
-      ).toHaveBeenCalledWith(7);
-      expect(
-        (
-          app.replayManager as unknown as {
-            seekReplay: ReturnType<typeof vi.fn>;
-          }
-        ).seekReplay,
-      ).toHaveBeenCalledWith("42");
-      expect(
-        (
-          app.replayManager as unknown as {
-            changeReplaySpeed: ReturnType<typeof vi.fn>;
-          }
-        ).changeReplaySpeed,
-      ).toHaveBeenCalled();
-    });
-  });
-
   describe("window bindings", () => {
     it("defines window.initMapApp", () => {
       expect(typeof window.initMapApp).toBe("function");

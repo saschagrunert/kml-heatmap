@@ -1,11 +1,12 @@
 """Tests for cache module."""
 
+import contextlib
 import json
 import os
 from pathlib import Path
 from unittest.mock import patch
 
-from kml_heatmap.cache import CACHE_DIR, atomic_json_write
+from kml_heatmap.cache import CACHE_DIR, atomic_js_write, atomic_json_write
 
 
 class TestCacheDir:
@@ -18,6 +19,37 @@ class TestCacheDir:
     def test_cache_dir_can_be_created(self):
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         assert CACHE_DIR.is_dir()
+
+
+class TestAtomicJsWrite:
+    def test_writes_window_variable_format(self, tmp_path):
+        path = tmp_path / "data.js"
+        atomic_js_write(path, "FLIGHT_DATA", {"key": "value"})
+
+        content = path.read_text()
+        assert content == 'window.FLIGHT_DATA = {"key":"value"};'
+
+    def test_sort_keys(self, tmp_path):
+        path = tmp_path / "data.js"
+        atomic_js_write(path, "X", {"b": 2, "a": 1}, sort_keys=True)
+
+        content = path.read_text()
+        assert content == 'window.X = {"a":1,"b":2};'
+
+    def test_no_temp_files_left_behind(self, tmp_path):
+        atomic_js_write(tmp_path / "data.js", "X", [1, 2])
+        assert [p.name for p in tmp_path.iterdir()] == ["data.js"]
+
+    def test_cleans_up_temp_on_replace_failure(self, tmp_path):
+        path = tmp_path / "data.js"
+        with (
+            patch("kml_heatmap.cache.os.replace", side_effect=OSError("boom")),
+            contextlib.suppress(OSError),
+        ):
+            atomic_js_write(path, "X", {"a": 1})
+
+        assert not path.exists()
+        assert list(tmp_path.iterdir()) == []
 
 
 class TestAtomicJsonWrite:

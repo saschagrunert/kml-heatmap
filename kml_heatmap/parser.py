@@ -66,25 +66,27 @@ def _extract_kml_elements(
             str(elem.text)[:100] if elem.text else "None",
         )
 
-    total_gx_coords = sum(1 for elem in root.iter() if local_name(elem.tag) == "coord")
-    in_track = sum(
-        1
-        for track in tracks
-        for elem in track.iter()
-        if local_name(elem.tag) == "coord"
-    )
     if tracks:
+        in_track = sum(
+            1
+            for track in tracks
+            for elem in track.iter()
+            if local_name(elem.tag) == "coord"
+        )
         logger.debug(
             "Found %d gx:Track element(s) with %d gx:coord elements",
             len(tracks),
             in_track,
         )
-    if total_gx_coords > in_track:
-        logger.warning(
-            "%s: %d gx:coord element(s) outside of gx:Track were ignored",
-            Path(kml_file).name,
-            total_gx_coords - in_track,
+        total_gx_coords = sum(
+            1 for elem in root.iter() if local_name(elem.tag) == "coord"
         )
+        if total_gx_coords > in_track:
+            logger.warning(
+                "%s: %d gx:coord element(s) outside of gx:Track were ignored",
+                Path(kml_file).name,
+                total_gx_coords - in_track,
+            )
 
     placemarks = root.findall(".//kml:Placemark", namespaces)
     if not placemarks:

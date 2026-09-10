@@ -269,16 +269,18 @@ def _write_atomic(filepath: Path, content: str) -> bool:
             suffix=".tmp",
             delete=False,
         ) as tmp:
-            tmp.write(content)
             tmp_name = tmp.name
+            tmp.write(content)
         shutil.copymode(filepath, tmp_name)
         os.replace(tmp_name, filepath)
+        tmp_name = None
     except OSError as e:
         logger.warning("Skipping %s: failed to write (%s)", filepath, e)
-        if tmp_name:
+        return False
+    finally:
+        if tmp_name is not None:
             with contextlib.suppress(OSError):
                 os.unlink(tmp_name)
-        return False
     return True
 
 

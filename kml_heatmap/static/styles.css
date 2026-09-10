@@ -288,7 +288,7 @@ body {
   .btn-surface[aria-pressed="true"]:hover,
   .control-btn.active:hover,
   .control-btn[aria-pressed="true"]:hover {
-    background-color: rgba(var(--color-accent-blue-rgb), 0.2);
+    background-color: rgba(var(--color-accent-blue-rgb), 0.14);
   }
 }
 
@@ -1110,6 +1110,134 @@ body.stats-open #left-buttons {
   animation: shimmer 3s ease-in-out infinite;
   position: relative;
 }
+.wrapped-square-card .year::before,
+.wrapped-square-card .year::after {
+  content: "";
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  top: 50%;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.wrapped-square-card .year::before {
+  left: 10%;
+  animation: firework-left 2.7s ease-out 0.3s infinite;
+  box-shadow:
+    -25px -90px 1px var(--color-accent-pink),
+    35px -75px 0 var(--color-accent-cyan),
+    -65px -35px 2px var(--color-accent-gold),
+    -80px 15px 0 var(--color-accent-blue),
+    15px 80px 1px var(--color-accent-red),
+    -45px 60px 0 var(--color-accent-pink),
+    40px -50px 2px var(--color-accent-gold),
+    -55px -65px 0 var(--color-accent-cyan),
+    -15px 45px 1px var(--color-accent-blue),
+    50px 25px 0 var(--color-accent-red);
+}
+.wrapped-square-card .year::after {
+  right: 10%;
+  animation: firework-right 3.1s ease-out 1.2s infinite;
+  box-shadow:
+    50px -80px 0 var(--color-accent-gold),
+    -25px -95px 2px var(--color-accent-pink),
+    70px -20px 1px var(--color-accent-cyan),
+    80px 50px 0 var(--color-accent-blue),
+    -15px 85px 2px var(--color-accent-red),
+    55px 65px 0 var(--color-accent-gold),
+    -40px -55px 1px var(--color-accent-pink),
+    35px -40px 0 var(--color-accent-cyan),
+    -60px 30px 2px var(--color-accent-blue),
+    20px 40px 1px var(--color-accent-red);
+}
+#wrapped-card-stats::after {
+  content: "";
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  left: 50%;
+  top: 30%;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+  will-change: transform, opacity;
+  animation: firework-center 3.7s ease-out 0.7s infinite;
+  box-shadow:
+    -35px -85px 2px var(--color-accent-cyan),
+    45px -70px 0 var(--color-accent-gold),
+    -75px -10px 1px var(--color-accent-pink),
+    70px -45px 0 var(--color-accent-blue),
+    -20px 75px 2px var(--color-accent-gold),
+    60px 55px 1px var(--color-accent-red),
+    -50px 40px 0 var(--color-accent-cyan),
+    30px -60px 2px var(--color-accent-pink),
+    -10px -50px 0 var(--color-accent-blue),
+    45px 30px 1px var(--color-accent-red);
+}
+#wrapped-card-stats {
+  position: relative;
+  overflow: hidden;
+}
+@keyframes firework-left {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(15px, -10px) scale(1);
+  }
+  55% {
+    opacity: 0;
+    transform: translate(15px, -10px) scale(1.4);
+  }
+  55.1%,
+  100% {
+    opacity: 0;
+    transform: translate(-20px, 15px) scale(0);
+  }
+}
+@keyframes firework-right {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-10px, 12px) scale(1);
+  }
+  55% {
+    opacity: 0;
+    transform: translate(-10px, 12px) scale(1.4);
+  }
+  55.1%,
+  100% {
+    opacity: 0;
+    transform: translate(18px, -8px) scale(0);
+  }
+}
+@keyframes firework-center {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-12px, -15px) scale(1);
+  }
+  55% {
+    opacity: 0;
+    transform: translate(-12px, -15px) scale(1.4);
+  }
+  55.1%,
+  100% {
+    opacity: 0;
+    transform: translate(10px, 10px) scale(0);
+  }
+}
 @keyframes shimmer {
   0%,
   100% {
@@ -1147,7 +1275,12 @@ body.stats-open #left-buttons {
   margin: var(--space-lg) 0;
 }
 .wrapped-square-card .stat-card {
-  background: rgba(var(--color-text-rgb), 0.08);
+  background: linear-gradient(
+    145deg,
+    rgba(var(--color-accent-blue-rgb), 0.1) 0%,
+    rgba(var(--color-accent-cyan-rgb), 0.06) 50%,
+    rgba(var(--color-accent-pink-rgb), 0.08) 100%
+  );
   border-radius: var(--radius-sheet);
   padding: var(--space-lg);
   text-align: center;
@@ -1156,28 +1289,44 @@ body.stats-open #left-buttons {
     background-color var(--duration-base) ease,
     box-shadow var(--duration-base) ease,
     border-color var(--duration-base) ease;
-  border: 1px solid rgba(var(--color-accent-blue-rgb), 0.15);
+  border: 1px solid rgba(var(--color-accent-blue-rgb), 0.2);
+  box-shadow:
+    0 2px 8px rgba(var(--color-accent-blue-rgb), 0.08),
+    inset 0 1px 0 rgba(var(--color-accent-cyan-rgb), 0.1);
 }
 @media (hover: hover) {
   .wrapped-square-card .stat-card:hover {
     transform: translateY(-5px);
-    background: rgba(var(--color-text-rgb), 0.12);
-    box-shadow: 0 10px 25px rgba(var(--color-accent-blue-rgb), 0.2);
-    border-color: rgba(var(--color-accent-blue-rgb), 0.4);
+    background: linear-gradient(
+      145deg,
+      rgba(var(--color-accent-blue-rgb), 0.15) 0%,
+      rgba(var(--color-accent-cyan-rgb), 0.1) 50%,
+      rgba(var(--color-accent-pink-rgb), 0.12) 100%
+    );
+    box-shadow:
+      0 10px 30px rgba(var(--color-accent-blue-rgb), 0.2),
+      0 0 15px rgba(var(--color-accent-cyan-rgb), 0.1);
+    border-color: rgba(var(--color-accent-cyan-rgb), 0.4);
   }
 }
 .wrapped-square-card .stat-value {
   font-size: var(--wrapped-stat);
   font-weight: bold;
-  color: var(--color-accent-blue);
   margin-bottom: var(--space-xs);
   animation: countUp 0.8s ease-out;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-blue) 0%,
+    var(--color-accent-cyan) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
-/* The unit rides small and quiet beside its figure */
 .wrapped-square-card .stat-unit {
   font-size: var(--text-base);
   font-weight: 500;
-  color: rgba(var(--color-accent-blue-rgb), 0.7);
+  -webkit-text-fill-color: rgba(var(--color-accent-cyan-rgb), 0.8);
 }
 
 /* The four card headings share one shape: icon, then label */
@@ -1240,9 +1389,16 @@ body.stats-open #left-buttons {
   font-size: var(--wrapped-section);
   font-weight: bold;
   margin-bottom: var(--space-md);
-  color: var(--color-accent-blue);
   text-transform: uppercase;
   letter-spacing: 1px;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-blue) 0%,
+    var(--color-accent-cyan) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 .wrapped-square-card .fun-fact {
   font-size: var(--text-base);
@@ -1329,9 +1485,16 @@ body.stats-open #left-buttons {
   font-size: var(--wrapped-section);
   font-weight: bold;
   margin-bottom: var(--space-md);
-  color: var(--color-accent-red);
   text-transform: uppercase;
   letter-spacing: 1px;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-red) 0%,
+    var(--color-accent-pink) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 .wrapped-square-card .top-airport {
   display: flex;
@@ -1340,9 +1503,22 @@ body.stats-open #left-buttons {
   gap: var(--space-md);
   padding: var(--space-sm) var(--space-md);
   margin: var(--space-sm) 0;
-  background-color: rgba(var(--color-accent-red-rgb), 0.15);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-red-rgb), 0.12) 0%,
+    rgba(var(--color-accent-pink-rgb), 0.08) 100%
+  );
   border-radius: var(--radius-panel);
   border-left: 3px solid var(--color-accent-red);
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+@media (hover: hover) {
+  .wrapped-square-card .top-airport:hover {
+    transform: translateX(3px);
+    box-shadow: 0 2px 10px rgba(var(--color-accent-red-rgb), 0.15);
+  }
 }
 .wrapped-square-card .top-airport-name {
   display: flex;
@@ -1379,9 +1555,16 @@ body.stats-open #left-buttons {
   font-size: var(--wrapped-section);
   font-weight: bold;
   margin-bottom: var(--space-md);
-  color: var(--color-accent-pink);
   text-transform: uppercase;
   letter-spacing: 1px;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-pink) 0%,
+    var(--color-accent-red) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 .wrapped-square-card .country-group {
   margin-bottom: var(--space-md);
@@ -1451,9 +1634,9 @@ body.stats-open #left-buttons {
 }
 .wrapped-square-card .destination {
   display: inline-flex;
-  align-items: baseline;
-  gap: var(--space-xs);
-  padding: 6px 12px;
+  align-items: center;
+  gap: 2px;
+  padding: 6px var(--space-base);
   border-radius: 20px;
   background: linear-gradient(
     135deg,
@@ -1481,6 +1664,7 @@ body.stats-open #left-buttons {
   font-family: var(--font-mono);
   font-weight: 600;
   color: var(--color-text);
+  margin-right: var(--space-xs);
 }
 .wrapped-square-card .destination-name {
   white-space: nowrap;
@@ -1522,9 +1706,16 @@ body.stats-open #left-buttons {
   font-size: var(--wrapped-section);
   font-weight: bold;
   margin-bottom: var(--space-md);
-  color: var(--color-accent-blue);
   text-transform: uppercase;
   letter-spacing: 1px;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-blue) 0%,
+    var(--color-accent-cyan) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 .wrapped-square-card .fleet-aircraft {
   display: flex;
@@ -1533,30 +1724,55 @@ body.stats-open #left-buttons {
   padding: var(--space-sm) var(--space-md);
   margin: var(--space-sm) 0;
   border-radius: var(--radius-panel);
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+@media (hover: hover) {
+  .wrapped-square-card .fleet-aircraft:hover {
+    transform: translateX(3px);
+    box-shadow: 0 2px 10px rgba(var(--color-accent-blue-rgb), 0.12);
+  }
 }
 .wrapped-square-card .fleet-aircraft-high {
-  background-color: rgba(var(--color-accent-red-rgb), 0.15);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-red-rgb), 0.15) 0%,
+    rgba(var(--color-accent-pink-rgb), 0.08) 100%
+  );
   border-left: 3px solid var(--color-accent-red);
 }
 .wrapped-square-card .fleet-aircraft-high .fleet-aircraft-stats {
   color: var(--color-accent-red);
 }
 .wrapped-square-card .fleet-aircraft-medium-high {
-  background-color: rgba(var(--color-accent-mint-rgb), 0.15);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-mint-rgb), 0.15) 0%,
+    rgba(var(--color-accent-cyan-rgb), 0.08) 100%
+  );
   border-left: 3px solid var(--color-accent-mint);
 }
 .wrapped-square-card .fleet-aircraft-medium-high .fleet-aircraft-stats {
   color: var(--color-accent-mint);
 }
 .wrapped-square-card .fleet-aircraft-medium-low {
-  background-color: rgba(var(--color-accent-cyan-rgb), 0.15);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-cyan-rgb), 0.15) 0%,
+    rgba(var(--color-accent-blue-rgb), 0.08) 100%
+  );
   border-left: 3px solid var(--color-accent-cyan);
 }
 .wrapped-square-card .fleet-aircraft-medium-low .fleet-aircraft-stats {
   color: var(--color-accent-cyan);
 }
 .wrapped-square-card .fleet-aircraft-low {
-  background-color: rgba(var(--color-accent-blue-rgb), 0.15);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-blue-rgb), 0.15) 0%,
+    rgba(var(--color-accent-cyan-rgb), 0.06) 100%
+  );
   border-left: 3px solid var(--color-accent-blue);
 }
 .wrapped-square-card .fleet-aircraft-low .fleet-aircraft-stats {
@@ -2041,13 +2257,13 @@ body.stats-open #left-buttons {
     color: var(--color-text-dim);
   }
 
-  /* Scrim behind the sheet */
+  /* Scrim behind the sheet; both sit below the bar so the tabs stay tappable */
   .sheet-scrim {
     position: fixed;
     inset: 0;
     display: block;
     background-color: rgba(0, 0, 0, 0.5);
-    z-index: var(--z-panel);
+    z-index: calc(var(--z-controls) - 2);
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--duration-base) ease;
@@ -2057,28 +2273,22 @@ body.stats-open #left-buttons {
     pointer-events: auto;
   }
 
-  /* Sheet */
+  /* Sheet: slides up above the bar so tabs stay reachable */
   .mobile-sheet {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0;
+    bottom: calc(var(--mobile-bar-h) + var(--safe-bottom));
     display: flex;
     flex-direction: column;
-    max-height: 80vh;
-    max-height: 80dvh;
+    max-height: calc(80dvh - var(--mobile-bar-h) - var(--safe-bottom));
     background-color: var(--color-bg-secondary);
     border: 1px solid var(--color-border);
     border-bottom: none;
     border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
     box-shadow: var(--shadow-panel);
-    z-index: var(--z-panel);
+    z-index: calc(var(--z-controls) - 1);
     box-sizing: border-box;
-    /* The sheet covers the bar; this clears the bar's height plus the
-       attribution, which stays above everything */
-    padding-bottom: calc(
-      var(--mobile-bar-h) + var(--attribution-h) + var(--safe-bottom)
-    );
     transform: translateY(100%);
     visibility: hidden;
     transition:
@@ -2092,20 +2302,12 @@ body.stats-open #left-buttons {
       transform var(--duration-base) ease,
       visibility 0s linear 0s;
   }
-  .sheet-handle {
-    width: 36px;
-    height: var(--space-xs);
-    margin: var(--space-sm) auto var(--space-xs);
-    border-radius: var(--radius-pill);
-    background-color: var(--color-bg-active);
-    flex-shrink: 0;
-  }
   .sheet-title {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
     margin: 0;
-    padding: var(--space-sm) var(--space-base) var(--space-md);
+    padding: var(--space-base) var(--space-base) var(--space-md);
     /* 17px: one step above --text-base, short of --text-lg */
     font-size: calc(var(--text-md) + var(--space-xs));
     font-weight: 600;
@@ -2260,8 +2462,8 @@ body.stats-open #left-buttons {
     align-items: center;
     justify-content: center;
     margin-left: auto;
-    min-width: 44px;
-    min-height: 44px;
+    width: 44px;
+    height: 44px;
     background: transparent;
     border: none;
     box-shadow: none;
@@ -2316,16 +2518,15 @@ body.stats-open #left-buttons {
     left: 0;
   }
   #stats-panel {
-    /* Leave room for the attribution bar that sits above the sheet */
     padding: var(--space-md) var(--space-base)
-      calc(var(--space-md) + var(--safe-bottom) + var(--attribution-h));
+      calc(var(--space-md) + var(--safe-bottom));
   }
 
   /* Replay controls span the viewport width */
   #replay-controls {
     left: calc(var(--edge-gap) + var(--safe-left));
     right: calc(var(--edge-gap) + var(--safe-right));
-    bottom: calc(var(--edge-gap) + var(--safe-bottom) + var(--attribution-h));
+    bottom: calc(var(--edge-gap) + var(--safe-bottom));
     transform: none;
     min-width: 0;
     width: auto;
@@ -2399,27 +2600,26 @@ body.stats-open #left-buttons {
     height: 18px;
   }
 
-  /* Once the bottom bar exists, the attribution and the bottom-right stack
-     ride above it. Attribution is a licensing requirement and must never be
-     covered. */
+  /* On mobile the attribution and GitHub link move into the More sheet,
+     so the map controls sit directly above the bar. */
+  body:has(.mobile-bar) .leaflet-container .leaflet-control-attribution,
+  body:has(.mobile-bar) #github-footer {
+    display: none;
+  }
   body:has(.mobile-bar) .leaflet-container .leaflet-bottom.leaflet-right {
     bottom: calc(var(--mobile-bar-h) + var(--safe-bottom));
   }
-  body:has(.mobile-bar) #github-footer,
   body:has(.mobile-bar) .color-legend,
   body:has(.mobile-bar) #replay-controls,
   body:has(.mobile-bar) .toast-notification {
-    bottom: calc(
-      var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
-        var(--safe-bottom)
-    );
+    bottom: calc(var(--mobile-bar-h) + var(--space-sm) + var(--safe-bottom));
   }
   /* The statistics sheet stops above the bar rather than painting over it:
      the Stats tab is what closes it again. */
   body:has(.mobile-bar) #stats-rail:not([hidden]) {
-    bottom: calc(
-      var(--mobile-bar-h) + var(--attribution-h) + var(--safe-bottom)
-    );
+    bottom: calc(var(--mobile-bar-h) + var(--safe-bottom));
+    max-height: calc(100dvh - var(--mobile-bar-h) - var(--safe-bottom));
+    z-index: calc(var(--z-controls) - 3);
   }
   body:has(.mobile-bar) #stats-panel {
     padding-bottom: var(--space-md);
@@ -2525,11 +2725,11 @@ body.stats-open #left-buttons {
     font-size: var(--text-sm);
   }
   .wrapped-square-card .destination {
-    padding: var(--space-xs);
+    padding: var(--space-xs) var(--space-md);
     font-size: var(--text-sm);
   }
   .wrapped-square-card .destination-code {
-    min-width: 44px;
+    min-width: 0;
   }
   .wrapped-square-card .fleet-aircraft-registration,
   .wrapped-square-card .fleet-aircraft-time {
@@ -2909,6 +3109,12 @@ body.stats-open #left-buttons {
     /* Also neutralises the inline animation-delay on each country group */
     animation-delay: 0s;
     opacity: 1;
+  }
+  .wrapped-square-card .year::before,
+  .wrapped-square-card .year::after,
+  #wrapped-card-stats::after {
+    animation: none;
+    opacity: 0;
   }
   #map,
   #left-buttons,

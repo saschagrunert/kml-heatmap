@@ -46,7 +46,7 @@ describe("MobileSheet", () => {
       expect(sheet.root.hasAttribute("inert")).toBe(true);
     });
 
-    it("is a labelled modal dialog with a grab handle", () => {
+    it("is a labelled modal dialog", () => {
       expect(sheet.root.getAttribute("role")).toBe("dialog");
       expect(sheet.root.getAttribute("aria-modal")).toBe("true");
       expect(sheet.root.getAttribute("aria-labelledby")).toBe(
@@ -56,7 +56,6 @@ describe("MobileSheet", () => {
       expect(
         document.getElementById("test-sheet-title")!.querySelector("button"),
       ).toBeNull();
-      expect(sheet.root.querySelector(".sheet-handle")).not.toBeNull();
     });
   });
 

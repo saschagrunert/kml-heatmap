@@ -42,9 +42,9 @@ export class AirportManager {
     // Home base: airport with most flights in the current filter
     const homeBaseName = findHomeBase(airportCounts);
 
-    this.app.allAirportsData.forEach((airport) => {
+    for (const airport of this.app.allAirportsData) {
       const marker = this.app.airportMarkers[airport.name];
-      if (!marker) return;
+      if (!marker) continue;
 
       const flightCount = airportCounts[airport.name] || 0;
       const isHomeBase = airport.name === homeBaseName;
@@ -61,12 +61,11 @@ export class AirportManager {
 
       marker.setPopupContent(popup);
 
-      // Keep the marker's home class in sync with the popup badge
       if ((this.homeIconState.get(airport.name) ?? false) !== isHomeBase) {
         marker.setIcon(createAirportIcon(airport.name, isHomeBase));
         this.homeIconState.set(airport.name, isHomeBase);
       }
-    });
+    }
   }
 
   updateAirportOpacity(): void {
@@ -79,21 +78,20 @@ export class AirportManager {
       pathInfoById: this.app.layerManager.getPathInfoMap(),
     });
 
-    Object.keys(this.app.airportMarkers).forEach((airportName) => {
-      const marker = this.app.airportMarkers[airportName];
-      if (!marker) return;
+    for (const [airportName, marker] of Object.entries(
+      this.app.airportMarkers,
+    )) {
+      if (!marker) continue;
 
       if (visibleAirports === null || visibleAirports.has(airportName)) {
-        // Show visited airports - add to map if not already present
         marker.setOpacity(1.0);
         if (!this.app.airportLayer.hasLayer(marker)) {
           marker.addTo(this.app.airportLayer);
         }
       } else if (this.app.airportLayer.hasLayer(marker)) {
-        // Hide non-visited airports - completely remove from map to prevent clicks
         this.app.airportLayer.removeLayer(marker);
       }
-    });
+    }
   }
 
   updateAirportMarkerSizes(): void {

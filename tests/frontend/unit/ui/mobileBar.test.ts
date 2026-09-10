@@ -356,7 +356,14 @@ describe("MobileBar", () => {
       tab("more").click();
 
       expect(sheetTitle()).toBe("More");
-      expect(sheetRows()).toEqual(["replay", "isolate", "export", "share"]);
+      expect(sheetRows()).toEqual([
+        "replay",
+        "isolate",
+        "export",
+        "share",
+        "github",
+        "attribution",
+      ]);
     });
   });
 

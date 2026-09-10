@@ -61,16 +61,16 @@ export function findFurthestAirport(
 interface FullStats {
   aircraft_list?: Array<{
     registration: string;
-    model?: string;
+    model?: string | undefined;
   }>;
-  total_altitude_gain_ft?: number;
-  total_flight_time_seconds?: number;
-  cruise_speed_knots?: number;
-  longest_flight_nm?: number;
-  longest_flight_km?: number;
-  max_altitude_ft?: number;
-  most_common_cruise_altitude_ft?: number;
-  most_common_cruise_altitude_m?: number;
+  total_altitude_gain_ft?: number | undefined;
+  total_flight_time_seconds?: number | undefined;
+  cruise_speed_knots?: number | undefined;
+  longest_flight_nm?: number | undefined;
+  longest_flight_km?: number | undefined;
+  max_altitude_ft?: number | undefined;
+  most_common_cruise_altitude_ft?: number | null | undefined;
+  most_common_cruise_altitude_m?: number | null | undefined;
 }
 
 /**

@@ -15,7 +15,7 @@ import { ReplayManager } from "./ui/replayManager";
 import { WrappedManager } from "./ui/wrappedManager";
 import { UIToggles } from "./ui/uiToggles";
 import { MobileBar } from "./ui/mobileBar";
-import { loadInitialData, createAirportMarkers } from "./appInitializer";
+import { loadInitialData } from "./appInitializer";
 import { logError } from "./utils/logger";
 import { domCache } from "./utils/domCache";
 import { syncToggleButton } from "./utils/buttonState";
@@ -41,8 +41,8 @@ import type {
 export interface MapConfig {
   center: [number, number];
   bounds: [[number, number], [number, number]];
-  cartoApiKey?: string;
-  openaipApiKey?: string;
+  cartoApiKey?: string | undefined;
+  openaipApiKey?: string | undefined;
   dataDir: string;
 }
 
@@ -396,7 +396,12 @@ export class MapApp {
       // Pinch, scroll and double tap already zoom; the control only costs
       // the bottom-right corner of the map
       zoomControl: false,
+      attributionControl: false,
     });
+
+    L.control
+      .attribution({ prefix: false, position: "bottomright" })
+      .addTo(this.map);
 
     const cartoUrl = this.config.cartoApiKey
       ? `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${this.config.cartoApiKey}`
@@ -512,12 +517,8 @@ export class MapApp {
     await loadInitialData(this);
   }
 
-  createAirportMarkers(airports: Airport[]): void {
-    createAirportMarkers(this, airports);
-  }
-
-  togglePathSelection(id: string): void {
-    this.pathSelection.togglePathSelection(Number(id));
+  togglePathSelection(pathId: string): void {
+    this.pathSelection.togglePathSelection(Number(pathId));
   }
 
   seekReplay(value: string): void {

@@ -26,12 +26,12 @@ export function resolveYearSelection(
   const select = yearSelect instanceof HTMLSelectElement ? yearSelect : null;
 
   if (select) {
-    availableYears.forEach((year) => {
+    for (const year of availableYears) {
       const option = document.createElement("option");
       option.value = year.toString();
       option.textContent = String(year);
       select.appendChild(option);
-    });
+    }
   }
 
   const latestValue =
@@ -204,7 +204,7 @@ export function createAirportIcon(
  * @param airports - Array of airports to create markers for
  */
 export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
-  airports.forEach((airport) => {
+  for (const airport of airports) {
     const popup = generateAirportPopupHtml({
       name: airport.name,
       lat: airport.lat,
@@ -221,7 +221,6 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
       alt: airport.name,
     }).bindPopup(popup, { autoPanPadding: [50, 50] });
 
-    // Add click handler to select paths connected to this airport
     marker.on("click", (_e: L.LeafletMouseEvent) => {
       if (!app.replayManager.state.active) {
         app.pathSelection.selectPathsByAirport(airport.name);
@@ -230,5 +229,5 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
 
     marker.addTo(app.airportLayer);
     app.airportMarkers[airport.name] = marker;
-  });
+  }
 }

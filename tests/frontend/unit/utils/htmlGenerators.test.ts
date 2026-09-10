@@ -145,8 +145,10 @@ describe("htmlGenerators", () => {
       expect(html).toContain('<div class="stat-label">Flights</div>');
       expect(html).toContain('<div class="stat-value">10</div>');
       expect(html).toContain('<div class="stat-label">Airports</div>');
-      expect(html).toContain('<div class="stat-value">12346</div>');
-      expect(html).toContain('<div class="stat-label">Nautical Miles</div>');
+      expect(html).toContain(
+        '<div class="stat-value">12346 <span class="stat-unit">nm</span></div>',
+      );
+      expect(html).toContain('<div class="stat-label">Distance</div>');
       // Math.round(11000 / 0.3048), with the unit in its own element
       expect(html).toContain(
         '<div class="stat-value">36089 <span class="stat-unit">ft</span></div>',
@@ -163,7 +165,9 @@ describe("htmlGenerators", () => {
     it("generates stats HTML with timing data", () => {
       const html = generateStatsHtml(mockYearStats, mockFullStats, true);
 
-      expect(html).toContain("123h 45m");
+      expect(html).toContain(
+        '123<span class="stat-unit">h</span> 45<span class="stat-unit">m</span>',
+      );
       expect(html).toContain('<div class="stat-label">Flight Time</div>');
       expect(html).toContain(
         '<div class="stat-value">450 <span class="stat-unit">kt</span></div>',

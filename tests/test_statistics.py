@@ -102,6 +102,14 @@ class TestAggregateAircraftStats:
             ("D-EAGJ", 1),
         ]
 
+    def test_type_backfilled_from_later_metadata(self):
+        metadata = [
+            _meta("D-EAGJ", None, "flight1.kml"),
+            _meta("D-EAGJ", "DA20", "flight2.kml"),
+        ]
+        result = aggregate_aircraft_stats(metadata)
+        assert result["aircraft_list"][0]["type"] == "DA20"
+
     def test_model_falls_back_to_type_when_lookup_fails(self):
         result = aggregate_aircraft_stats(
             [_meta("D-XXXX", None, "flight1.kml")], {"D-EAGJ": "Katana"}

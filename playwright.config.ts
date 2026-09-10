@@ -12,7 +12,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
-  workers: isCI ? "100%" : undefined,
+  ...(isCI ? { workers: "100%" } : {}),
   use: {
     baseURL: "http://localhost:8000",
     headless: true,
@@ -21,7 +21,7 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "chromium",
+      name: "desktop",
       // The bar and sheet only exist below the breakpoint
       testIgnore: /mobile\.spec\.ts$/,
       use: {
@@ -30,7 +30,7 @@ export default defineConfig({
       },
     },
     {
-      name: "mobile-chromium",
+      name: "mobile",
       // mobile.spec.ts drives the bottom bar and sheet; the other three are
       // viewport-agnostic and run against whichever controls the bar puts up
       testMatch: /(core|layers|mobile|state)\.spec\.ts$/,

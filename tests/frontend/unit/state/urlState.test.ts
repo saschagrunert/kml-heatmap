@@ -35,8 +35,8 @@ function randomState(rnd: () => number): AppState {
     Math.floor(rnd() * 5000),
   );
   return {
-    selectedYear: years[Math.floor(rnd() * years.length)],
-    selectedAircraft: aircraft[Math.floor(rnd() * aircraft.length)],
+    selectedYear: years[Math.floor(rnd() * years.length)]!,
+    selectedAircraft: aircraft[Math.floor(rnd() * aircraft.length)]!,
     selectedPathIds: pathIds,
     heatmapVisible: bool(),
     altitudeVisible: bool(),

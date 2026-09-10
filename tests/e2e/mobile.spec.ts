@@ -52,37 +52,6 @@ function airportsOnMap(page: Page): Promise<boolean> {
   });
 }
 
-/**
- * Whether a tap at the centre of the tile attribution would reach the
- * attribution itself. Keeping it uncovered is a licensing requirement, so
- * nothing may sit over it in any state.
- */
-function attributionIsTopmost(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
-    const attribution = document.querySelector(".leaflet-control-attribution");
-    if (!attribution) return false;
-    const box = attribution.getBoundingClientRect();
-    if (box.width === 0 || box.height === 0) return false;
-    const hit = document.elementFromPoint(
-      box.left + box.width / 2,
-      box.top + box.height / 2,
-    );
-    return !!hit && (hit === attribution || attribution.contains(hit));
-  });
-}
-
-/** Poll rather than sample once: the sheet animates into its place */
-async function expectAttributionOnTop(
-  page: Page,
-  state: string,
-): Promise<void> {
-  await expect
-    .poll(() => attributionIsTopmost(page), {
-      message: `the attribution is covered while ${state}`,
-    })
-    .toBe(true);
-}
-
 /** Every tap target of a locator set is big enough to hit */
 async function expectTapTargets(page: Page, selector: string): Promise<void> {
   const targets = page.locator(selector);
@@ -146,6 +115,40 @@ test.describe("Mobile bar", () => {
 
   test("every tab is a large enough tap target", async ({ page }) => {
     await expectTapTargets(page, ".mobile-tab");
+  });
+
+  test("tapping a sheet tab again closes the sheet", async ({ page }) => {
+    for (const id of ["layers", "filter", "more"] as const) {
+      await openMobileSheet(page, id);
+      await expect(page.locator("#mobile-sheet")).toBeVisible();
+
+      await page.locator(`#mobile-tab-${id}`).click();
+      await expect(page.locator("#mobile-sheet")).toBeHidden();
+      await expect(page.locator(`#mobile-tab-${id}`)).not.toHaveClass(
+        /\bactive\b/,
+      );
+    }
+  });
+
+  test("swapping between sheet tabs highlights the new tab", async ({
+    page,
+  }) => {
+    const sheet = page.locator("#mobile-sheet");
+    for (const [from, to] of [
+      ["filter", "layers"],
+      ["layers", "more"],
+      ["more", "filter"],
+    ] as const) {
+      await openMobileSheet(page, from);
+      await page.locator(`#mobile-tab-${to}`).click();
+      await expect(sheet).toBeVisible();
+      await expect(page.locator(`#mobile-tab-${to}`)).toHaveClass(/\bactive\b/);
+      await expect(page.locator(`#mobile-tab-${from}`)).not.toHaveClass(
+        /\bactive\b/,
+      );
+      await page.locator(`#mobile-tab-${to}`).click();
+      await expect(sheet).toBeHidden();
+    }
   });
 
   test("the tabs that open the sheet say so", async ({ page }) => {
@@ -483,31 +486,35 @@ test.describe("Mobile bar", () => {
       );
     });
 
-    test("the open sheet covers the bar it was opened from", async ({
+    test("the open sheet sits above the bar and tabs stay reachable", async ({
       page,
     }) => {
       await openMobileSheet(page, "filter");
 
-      // The sheet reaches the bottom edge and pads its content clear of the
-      // bar, so the scrim, the close control and Escape are the ways out
-      // Polled rather than sampled once: the sheet slides into place
+      // The sheet sits above the bar so bar tabs remain tappable for
+      // swapping between sheets. Polled: the sheet slides into place.
       await expect
         .poll(
           () =>
             page.evaluate(() => {
-              const tab = document.getElementById("mobile-tab-filter")!;
-              const box = tab.getBoundingClientRect();
-              const hit = document.elementFromPoint(
-                box.left + box.width / 2,
-                box.top + box.height / 2,
-              );
               const sheet = document.getElementById("mobile-sheet")!;
-              return !!hit && (hit === sheet || sheet.contains(hit));
+              const bar = document.getElementById("mobile-bar")!;
+              const sheetBox = sheet.getBoundingClientRect();
+              const barBox = bar.getBoundingClientRect();
+              return sheetBox.bottom <= barBox.top + 1;
             }),
-          { message: "the sheet does not reach over the bar" },
+          { message: "the sheet should not overlap the bar" },
         )
         .toBe(true);
       await expect(page.locator("#mobile-sheet")).toBeVisible();
+
+      // Tabs remain reachable while the sheet is open
+      const tab = page.locator("#mobile-tab-layers");
+      await expect(tab).toBeVisible();
+      await tab.click();
+      await expect(page.locator("#mobile-tab-layers")).toHaveClass(
+        /\bactive\b/,
+      );
     });
   });
 
@@ -580,16 +587,15 @@ test.describe("Mobile bar", () => {
     await expect(page.locator("#mobile-bar")).toBeVisible();
   });
 
-  test("the attribution stays on top in every state", async ({ page }) => {
-    await expectAttributionOnTop(page, "idle");
-
-    await openMobileSheet(page, "layers");
-    await expectAttributionOnTop(page, "the sheet is open");
-    await closeMobileSheet(page);
-
-    await activateReplay(page);
-    await expect(page.locator("#mobile-bar")).toHaveCount(0);
-    await expectAttributionOnTop(page, "replay is active");
+  test("attribution and github are in the More sheet", async ({ page }) => {
+    await openMobileSheet(page, "more");
+    await expect(
+      page.locator('.sheet-row[data-row="attribution"]'),
+    ).toBeVisible();
+    await expect(page.locator('.sheet-row[data-row="github"]')).toBeVisible();
+    // The map attribution and footer are hidden on mobile
+    await expect(page.locator(".leaflet-control-attribution")).toBeHidden();
+    await expect(page.locator("#github-footer")).toBeHidden();
   });
 
   test.describe("Accessibility", () => {
