@@ -151,6 +151,7 @@ export interface MockManagers {
     updateLayers: Mock;
     showLoading: Mock;
     hideLoading: Mock;
+    applyHeatmapEmphasis: Mock;
   };
   layerManager: {
     redrawAltitudePaths: Mock;
@@ -264,6 +265,7 @@ function createMockManagers(): MockManagers {
       updateLayers: vi.fn().mockResolvedValue(undefined),
       showLoading: vi.fn(),
       hideLoading: vi.fn(),
+      applyHeatmapEmphasis: vi.fn(),
     },
     layerManager: {
       redrawAltitudePaths: vi.fn(),

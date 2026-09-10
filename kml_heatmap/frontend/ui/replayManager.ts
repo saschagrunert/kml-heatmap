@@ -437,6 +437,9 @@ export class ReplayManager {
       if (this.app.heatmapLayer._canvas) {
         this.app.heatmapLayer._canvas.style.pointerEvents = "none";
       }
+      // Leaving replay can switch the altitude layer on (see
+      // deactivateReplay), so the heatmap has to step back for it
+      this.app.dataManager.applyHeatmapEmphasis();
     }
 
     // Redraw once after the layer is back on the map so click handlers work

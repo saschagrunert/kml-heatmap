@@ -110,6 +110,8 @@ export interface MockMarker {
   options: Record<string, unknown>;
   /** Latest popup content, whether it was bound or set (test convenience) */
   popupContent: () => string | null;
+  /** Element getElement() hands back; tests set it to exercise DOM work */
+  element: HTMLElement | null;
 }
 
 export const marker: Mock<
@@ -134,11 +136,12 @@ export const marker: Mock<
     closePopup: vi.fn(),
     getPopup: vi.fn(() => popup),
     isPopupOpen: vi.fn(() => false),
-    getElement: vi.fn(() => null),
+    getElement: vi.fn(() => obj.element),
     on: vi.fn(),
     latlng: validated,
     options,
     popupContent: () => popup?.content ?? null,
+    element: null,
   };
   // mockReturnValue would replace the implementation, so chainable methods
   // that also record something use mockImplementation

@@ -425,7 +425,7 @@ describe("wrapped feature", () => {
       const facts = generateFunFacts(yearStats, { longest_flight_nm: 280 });
 
       const longest = facts.find((f) => f.text.includes("longest journey"));
-      expect(longest?.text).toContain("<strong>280 nm</strong>");
+      expect(longest?.text).toContain("<strong>280.0 nm</strong>");
       expect(longest?.text).toContain(
         "about the distance from Berlin to Munich!",
       );
@@ -436,7 +436,7 @@ describe("wrapped feature", () => {
 
       const longest = facts.find((f) => f.text.includes("longest journey"));
       expect(longest?.text).toBe(
-        "Your longest journey: <strong>30 nm</strong>",
+        "Your longest journey: <strong>30.0 nm</strong>",
       );
     });
 

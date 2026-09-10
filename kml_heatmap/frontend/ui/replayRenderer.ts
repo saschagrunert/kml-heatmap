@@ -8,7 +8,7 @@ import type { ReplayState } from "./replayState";
 import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
-import { formatSpeed, formatTime } from "../utils/formatters";
+import { formatNumber, formatSpeed, formatTime } from "../utils/formatters";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
@@ -144,18 +144,18 @@ export class ReplayRenderer {
    * touched, so a paused replay does not keep dirtying the DOM.
    */
   private updateReadout(segment: PathSegment | null, bearing: number): void {
-    const feet = Math.round(segment?.altitude_ft ?? 0);
+    const feet = segment?.altitude_ft ?? 0;
     const knots = segment?.groundspeed_knots ?? 0;
-    // No thousands separator, so the numbers read like the legends, the
-    // statistics panel and the segment tooltip rather than a fourth style
+    // Grouped digits, like the legends, the statistics panel and the segment
+    // tooltip, rather than a fourth style
     const values: string[] = segment
-      ? [feet + " ft", formatSpeed(knots), formatTrack(bearing)]
+      ? [formatNumber(feet) + " ft", formatSpeed(knots), formatTrack(bearing)]
       : [READOUT_PLACEHOLDER, READOUT_PLACEHOLDER, READOUT_PLACEHOLDER];
     // Every other surface pairs both unit systems, so this one does too
     const alts: string[] = segment
       ? [
-          Math.round(feet * FEET_TO_METERS) + " m",
-          Math.round(knots * NAUTICAL_MILES_TO_KM) + " km/h",
+          formatNumber(feet * FEET_TO_METERS) + " m",
+          formatNumber(knots * NAUTICAL_MILES_TO_KM) + " km/h",
         ]
       : ["", ""];
 

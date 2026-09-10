@@ -41,6 +41,7 @@ interface LayerConfig {
     segments: PathSegment[],
     selectedPathIds: Set<number>,
     fallback: Range,
+    paths: PathInfo[],
   ) => Range;
   filterSegment?: (seg: PathSegment) => boolean;
   legendMinId: string;
@@ -90,8 +91,8 @@ export class LayerManager {
         range: this.app.altitudeRange,
         getValue: (seg) => seg.altitude_ft ?? 0,
         getColor: getColorForAltitude,
-        computeRange: (segments, selected, fallback) =>
-          calculateAltitudeRange(segments, selected, fallback),
+        computeRange: (segments, selected, fallback, paths) =>
+          calculateAltitudeRange(segments, selected, fallback, paths),
         legendMinId: "legend-min",
         legendMaxId: "legend-max",
         formatLegend: formatAltitudeLabel,
@@ -154,6 +155,7 @@ export class LayerManager {
       this.app.currentData.path_segments,
       selected,
       config.range,
+      this.app.currentData.path_info,
     );
   }
 

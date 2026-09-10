@@ -5,6 +5,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
+    // One jsdom per worker instead of one per test file. vmThreads keeps the
+    // per-file module isolation the suite relies on and drops the environment
+    // setup, which otherwise dominated the run. It needs window.location to
+    // stay configurable, so tests move the location through history.
+    pool: "vmThreads",
     include: [
       "tests/frontend/unit/**/*.test.ts",
       "tests/frontend/contract/**/*.test.ts",

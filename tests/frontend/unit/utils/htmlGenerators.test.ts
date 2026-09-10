@@ -146,12 +146,12 @@ describe("htmlGenerators", () => {
       expect(html).toContain('<div class="stat-value">10</div>');
       expect(html).toContain('<div class="stat-label">Airports</div>');
       expect(html).toContain(
-        '<div class="stat-value">12346 <span class="stat-unit">nm</span></div>',
+        '<div class="stat-value">12,345.7 <span class="stat-unit">nm</span></div>',
       );
       expect(html).toContain('<div class="stat-label">Distance</div>');
-      // Math.round(11000 / 0.3048), with the unit in its own element
+      // 11000 m in feet, grouped, with the unit in its own element
       expect(html).toContain(
-        '<div class="stat-value">36089 <span class="stat-unit">ft</span></div>',
+        '<div class="stat-value">36,089 <span class="stat-unit">ft</span></div>',
       );
       expect(html).toContain(
         '<div class="stat-label">Max Altitude (MSL)</div>',
@@ -197,7 +197,7 @@ describe("htmlGenerators", () => {
       expect(html).toContain('0 <span class="stat-unit">kt</span>');
     });
 
-    it("formats distance with proper precision", () => {
+    it("formats distance like the statistics panel", () => {
       const stats: YearStats = {
         ...mockYearStats,
         total_distance_nm: 9999.999,
@@ -205,7 +205,8 @@ describe("htmlGenerators", () => {
 
       const html = generateStatsHtml(stats, mockFullStats, false);
 
-      expect(html).toContain("10000"); // Rounded
+      // One decimal and grouped digits, so the card and the panel agree
+      expect(html).toContain("10,000.0");
     });
   });
 
@@ -816,7 +817,7 @@ describe("htmlGenerators", () => {
     it("renders altitude and groundspeed with colour custom properties", () => {
       const html = generateSegmentPopupHtml(fullParams);
 
-      expect(html).toContain("3000 ft");
+      expect(html).toContain("3,000 ft");
       expect(html).toContain("(914 m)");
       expect(html).toContain("120 kt");
       expect(html).toContain("222 km/h");
@@ -841,13 +842,13 @@ describe("htmlGenerators", () => {
         ...fullParams,
         segment: { ...fullParams.segment, altitude_ft: 3024 },
       });
-      expect(html).toContain("3000 ft");
+      expect(html).toContain("3,000 ft");
 
       const html2 = generateSegmentPopupHtml({
         ...fullParams,
         segment: { ...fullParams.segment, altitude_ft: 3026 },
       });
-      expect(html2).toContain("3050 ft");
+      expect(html2).toContain("3,050 ft");
     });
 
     it("uses default title and icon", () => {

@@ -47,11 +47,14 @@ describe("StateManager", () => {
   let mockApp: MockApp;
   let mockLocalStorage: { [key: string]: string };
 
+  // Redefining window.location makes the property non-configurable for the
+  // rest of the worker, which rules out sharing one jsdom between files. The
+  // real history API moves the location instead; the tests below stub
+  // history.replaceState to observe what the manager writes, so the original
+  // is captured here before that happens.
+  const navigate = window.history.replaceState.bind(window.history);
   function setLocation(search: string): void {
-    Object.defineProperty(window, "location", {
-      value: { pathname: "/", search },
-      writable: true,
-    });
+    navigate(null, "", "/" + search);
   }
 
   beforeEach(() => {

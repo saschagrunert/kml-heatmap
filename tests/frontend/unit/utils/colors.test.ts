@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  applyGradientTokens,
   getColorForAltitude,
   getColorForAirspeed,
   rgbToRgba,
@@ -171,6 +172,37 @@ describe("color utilities", () => {
 
     it("handles alpha of 1", () => {
       expect(rgbToRgba("rgb(255,255,255)", 1)).toBe("rgba(255,255,255, 1)");
+    });
+  });
+
+  describe("applyGradientTokens", () => {
+    it("publishes both ramps as custom properties", () => {
+      const root = document.createElement("div");
+      applyGradientTokens(root);
+
+      const altitude = root.style.getPropertyValue("--gradient-altitude");
+      const speed = root.style.getPropertyValue("--gradient-speed");
+
+      expect(altitude).toContain("linear-gradient(to right,");
+      expect(speed).toContain("linear-gradient(to right,");
+      // First and last stop of each ramp, at the ends of the scale
+      expect(altitude).toContain("rgb(80,160,255) 0%");
+      expect(altitude).toContain("rgb(255,66,66) 100%");
+      expect(speed).toContain("rgb(0,128,255) 0%");
+      expect(speed).toContain("rgb(255,0,0) 100%");
+    });
+
+    it("matches the colours the paths are drawn with", () => {
+      const root = document.createElement("div");
+      applyGradientTokens(root);
+
+      // The chip and the polyline have to agree at both ends of the scale
+      expect(root.style.getPropertyValue("--gradient-altitude")).toContain(
+        getColorForAltitude(0, 0, 100) + " 0%",
+      );
+      expect(root.style.getPropertyValue("--gradient-speed")).toContain(
+        getColorForAirspeed(100, 0, 100) + " 100%",
+      );
     });
   });
 });

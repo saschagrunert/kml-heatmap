@@ -3,6 +3,23 @@
  */
 
 /**
+ * A measurement with grouped digits, so five- and six-figure values stay
+ * readable ("264,400" rather than "264400"). Every surface that prints a
+ * number goes through this, so the panel, the legends, the tooltips and the
+ * replay readout all group the same way.
+ *
+ * @param value - The number to render
+ * @param decimals - Fixed number of decimals (default: none)
+ */
+export function formatNumber(value: number, decimals = 0): string {
+  if (!Number.isFinite(value)) return "0";
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+/**
  * Format seconds into human-readable time string
  * @param seconds - Total seconds
  * @returns Formatted time (e.g., "2:30:45" or "5:30")
@@ -31,7 +48,7 @@ export function formatTime(seconds: number): string {
  * @returns Formatted speed (e.g., "120 kt")
  */
 export function formatSpeed(knots: number): string {
-  return Math.round(knots) + " kt";
+  return formatNumber(knots) + " kt";
 }
 
 /**

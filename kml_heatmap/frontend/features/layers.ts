@@ -4,9 +4,10 @@
  * segment styling and legend labels.
  */
 
-import type { PathSegment } from "../types";
+import type { PathInfo, PathSegment } from "../types";
 import type { Range } from "../state/store";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
+import { formatNumber } from "../utils/formatters";
 
 /**
  * Segment rendering properties
@@ -29,13 +30,18 @@ export interface LegendLabels {
 export const DEFAULT_ALTITUDE_RANGE: Range = { min: 0, max: 10000 };
 export const DEFAULT_AIRSPEED_RANGE: Range = { min: 0, max: 200 };
 
+/**
+ * Range over the matching segments, or null when none matched.
+ *
+ * @param seenPathIds - Filled with the ids of the paths that contributed
+ */
 function calculateRange(
   segments: PathSegment[],
   getValue: (seg: PathSegment) => number | undefined,
   filterValue: (v: number) => boolean,
-  defaultRange: Range,
   selectedPathIds: Set<number> | null,
-): Range {
+  seenPathIds?: Set<number>,
+): Range | null {
   const useSelection = selectedPathIds !== null && selectedPathIds.size > 0;
   let min = Infinity;
   let max = -Infinity;
@@ -44,12 +50,12 @@ function calculateRange(
     if (useSelection && !selectedPathIds.has(seg.path_id)) continue;
     const v = getValue(seg);
     if (v === undefined || !filterValue(v)) continue;
+    seenPathIds?.add(seg.path_id);
     if (v < min) min = v;
     if (v > max) max = v;
   }
 
-  if (min === Infinity) return defaultRange;
-  return { min, max };
+  return min === Infinity ? null : { min, max };
 }
 
 /**
@@ -63,18 +69,40 @@ export function calculateAltitudeRange(
   segments: PathSegment[],
   selectedPathIds: Set<number> | null = null,
   defaultRange: Range = DEFAULT_ALTITUDE_RANGE,
+  paths?: PathInfo[],
 ): Range {
+  const contributing = new Set<number>();
   const range = calculateRange(
     segments,
     (s) => s.altitude_ft,
     () => true,
-    defaultRange,
     selectedPathIds,
+    contributing,
   );
-  if (range.min < 0) {
-    return { min: 0, max: Math.max(range.max, 0) };
+
+  // Nothing matched, so there is nothing to widen: mixing the fallback with
+  // real per-path altitudes would report a range that is half invented
+  if (range === null) return defaultRange;
+
+  // Segment altitudes are rounded to 100 ft, so widen to the exact per-path
+  // range the exporter carries. Without this the legend reads 10400 ft while
+  // the statistics panel, which does use it, reads 10419 ft right beside it.
+  //
+  // Only the paths that are actually in the range get to widen it. Taking
+  // every path that passes the selection would let one whose segments were
+  // all filtered out stretch the legend past anything drawn on the map.
+  let { min, max } = range;
+  if (paths) {
+    for (const path of paths) {
+      if (!contributing.has(path.id)) continue;
+      if (path.min_altitude_ft !== undefined)
+        min = Math.min(min, path.min_altitude_ft);
+      if (path.max_altitude_ft !== undefined)
+        max = Math.max(max, path.max_altitude_ft);
+    }
   }
-  return range;
+
+  return min < 0 ? { min: 0, max: Math.max(max, 0) } : { min, max };
 }
 
 /**
@@ -86,12 +114,13 @@ export function calculateAirspeedRange(
   selectedPathIds: Set<number> | null = null,
   defaultRange: Range = DEFAULT_AIRSPEED_RANGE,
 ): Range {
-  return calculateRange(
-    segments,
-    (s) => s.groundspeed_knots,
-    (v) => v > 0,
-    defaultRange,
-    selectedPathIds,
+  return (
+    calculateRange(
+      segments,
+      (s) => s.groundspeed_knots,
+      (v) => v > 0,
+      selectedPathIds,
+    ) ?? defaultRange
   );
 }
 
@@ -139,18 +168,24 @@ export function calculateSegmentProperties(options: {
  * Format an altitude legend label, e.g. "1000 ft (305 m)"
  */
 export function formatAltitudeLabel(valueFt: number): string {
-  const ft = Math.round(valueFt);
-  const m = Math.round(valueFt * FEET_TO_METERS);
-  return ft + " ft (" + m + " m)";
+  return (
+    formatNumber(valueFt) +
+    " ft (" +
+    formatNumber(valueFt * FEET_TO_METERS) +
+    " m)"
+  );
 }
 
 /**
  * Format a groundspeed legend label, e.g. "100 kt (185 km/h)"
  */
 export function formatAirspeedLabel(valueKt: number): string {
-  const kt = Math.round(valueKt);
-  const kmh = Math.round(valueKt * NAUTICAL_MILES_TO_KM);
-  return kt + " kt (" + kmh + " km/h)";
+  return (
+    formatNumber(valueKt) +
+    " kt (" +
+    formatNumber(valueKt * NAUTICAL_MILES_TO_KM) +
+    " km/h)"
+  );
 }
 
 /**

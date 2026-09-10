@@ -1,6 +1,11 @@
 /**
  * HTML generation utilities for UI components
  * Pure functions that generate HTML strings
+ *
+ * Two spellings, split on purpose: a self-contained block of markup is a
+ * template literal so the tags stay indented and readable, and markup
+ * assembled a piece at a time from conditionals and loops is concatenated,
+ * where a literal would need a `${}` around every fragment.
  */
 import type {
   FilteredStatistics,
@@ -14,6 +19,7 @@ import {
   METERS_TO_FEET,
   NAUTICAL_MILES_TO_KM,
 } from "./constants";
+import { formatNumber } from "./formatters";
 import { calculateBearing, ddToDms } from "./geometry";
 import { icon } from "./icons";
 
@@ -161,23 +167,49 @@ function statCard(value: string, unit: string, label: string): string {
   );
 }
 
-function flightTimeCard(flightTime: string): string {
-  const formatted = flightTime.replace(
-    /(\d+)(h)\s*(\d+)(m)/,
-    (_: string, h: string, hu: string, m: string, mu: string) =>
-      escapeHtml(h) +
-      '<span class="stat-unit">' +
-      escapeHtml(hu) +
+/** The two surfaces that set a unit in small muted type */
+export type UnitClass = "stat-unit" | "kh-stats-lead-unit";
+
+/**
+ * Mark the h and m of a flight time as units.
+ *
+ * Every other lead figure sets its unit in the small muted type ("4,745.5
+ * nm"), so "47h 44m" has to do the same rather than shouting both letters at
+ * full weight. The class differs per surface, hence the parameter, which is a
+ * closed set rather than a string: it lands inside a class attribute, and a
+ * caller reaching this with something it read from the data would be writing
+ * markup through it.
+ *
+ * @param flightTime - Formatted time, e.g. "47h 44m"
+ * @param unitClass - Class the h and m are wrapped in
+ */
+export function markFlightTimeUnits(
+  flightTime: string,
+  unitClass: UnitClass,
+): string {
+  return escapeHtml(flightTime).replace(
+    /(\d+)\s*(h)\s*(\d+)\s*(m)/,
+    (_match, hours: string, hourUnit: string, mins: string, minUnit: string) =>
+      hours +
+      '<span class="' +
+      unitClass +
+      '">' +
+      hourUnit +
       "</span> " +
-      escapeHtml(m) +
-      '<span class="stat-unit">' +
-      escapeHtml(mu) +
+      mins +
+      '<span class="' +
+      unitClass +
+      '">' +
+      minUnit +
       "</span>",
   );
+}
+
+function flightTimeCard(flightTime: string): string {
   return (
     '<div class="stat-card">' +
     '<div class="stat-value">' +
-    formatted +
+    markFlightTimeUnits(flightTime, "stat-unit") +
     "</div>" +
     '<div class="stat-label">Flight Time</div>' +
     "</div>"
@@ -192,23 +224,23 @@ export function generateStatsHtml(
   fullStats: FilteredStatistics | null,
   hasTimingData: boolean,
 ): string {
-  const maxAltitudeFt = Math.round(
-    (fullStats?.max_altitude_m || 0) * METERS_TO_FEET,
-  );
+  const maxAltitudeFt = (fullStats?.max_altitude_m || 0) * METERS_TO_FEET;
 
   return (
-    statCard(String(yearStats.total_flights), "", "Flights") +
-    statCard(String(yearStats.num_airports), "", "Airports") +
-    statCard(yearStats.total_distance_nm.toFixed(0), "nm", "Distance") +
+    statCard(formatNumber(yearStats.total_flights), "", "Flights") +
+    statCard(formatNumber(yearStats.num_airports), "", "Airports") +
+    // One decimal, like the statistics panel: the same figure reading 4746
+    // here and 4745.5 there only makes the reader wonder which one is right
+    statCard(formatNumber(yearStats.total_distance_nm, 1), "nm", "Distance") +
     (hasTimingData
       ? flightTimeCard(yearStats.flight_time) +
         statCard(
-          (fullStats?.max_groundspeed_knots || 0).toFixed(0),
+          formatNumber(fullStats?.max_groundspeed_knots || 0),
           "kt",
           "Max Groundspeed",
         )
       : "") +
-    statCard(String(maxAltitudeFt), "ft", "Max Altitude (MSL)")
+    statCard(formatNumber(maxAltitudeFt), "ft", "Max Altitude (MSL)")
   );
 }
 
@@ -343,13 +375,11 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
 
   const altFt = segment.altitude_ft || 0;
   const altFtRounded = Math.round(altFt / 50) * 50;
-  const altMRounded = Math.round(altFtRounded * FEET_TO_METERS);
+  const altMRounded = altFtRounded * FEET_TO_METERS;
   const altColor = getColorForAltitude(altFt, params.altMin, params.altMax);
   const altColorBg = rgbToRgba(altColor, 0.15);
 
   const speedKt = segment.groundspeed_knots || 0;
-  const speedKtRounded = Math.round(speedKt);
-  const speedKmhRounded = Math.round(speedKt * NAUTICAL_MILES_TO_KM);
   const speedColor = getColorForAirspeed(
     speedKt,
     params.speedMin,
@@ -382,15 +412,15 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
         <div class="kh-popup-block">
             <div class="popup-section-label">Altitude (MSL)</div>
             <div class="popup-metric kh-popup-metric-colored" style="--kh-metric-color: ${altColor}; --kh-metric-bg: ${altColorBg};">
-                <span class="popup-metric-value">${altFtRounded} ft</span>
-                <span class="popup-metric-unit">(${altMRounded} m)</span>
+                <span class="popup-metric-value">${formatNumber(altFtRounded)} ft</span>
+                <span class="popup-metric-unit">(${formatNumber(altMRounded)} m)</span>
             </div>
         </div>
         <div class="kh-popup-block">
             <div class="popup-section-label">Groundspeed</div>
             <div class="popup-metric kh-popup-metric-colored" style="--kh-metric-color: ${speedColor}; --kh-metric-bg: ${speedColorBg};">
-                <span class="popup-metric-value">${speedKtRounded} kt</span>
-                <span class="popup-metric-unit">(${speedKmhRounded} km/h)</span>
+                <span class="popup-metric-value">${formatNumber(speedKt)} kt</span>
+                <span class="popup-metric-unit">(${formatNumber(speedKt * NAUTICAL_MILES_TO_KM)} km/h)</span>
             </div>
         </div>
     </div>`;

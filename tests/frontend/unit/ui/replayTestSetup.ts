@@ -52,6 +52,7 @@ export interface ReplayMockApp {
     updateAltitudeLegend: AnyMock;
     updateAirspeedLegend: AnyMock;
   };
+  dataManager: { applyHeatmapEmphasis: AnyMock };
   fullStats: { max_groundspeed_knots: number } | null;
 }
 
@@ -137,6 +138,7 @@ export function createReplayMockApp(): ReplayMockApp {
       updateAltitudeLegend: vi.fn(),
       updateAirspeedLegend: vi.fn(),
     },
+    dataManager: { applyHeatmapEmphasis: vi.fn() },
     fullStats: { max_groundspeed_knots: 130 },
   };
 }

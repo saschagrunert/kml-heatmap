@@ -10,19 +10,9 @@ describe("logger utilities", () => {
     // Reset console spies
     vi.restoreAllMocks();
 
-    // Mock window.location for all tests
-    delete (window as any).location;
-    (window as any).location = {
-      search: "",
-      href: "http://localhost/",
-      protocol: "http:",
-      host: "localhost",
-      hostname: "localhost",
-      port: "",
-      pathname: "/",
-      hash: "",
-      origin: "http://localhost",
-    };
+    // Move the real location rather than replacing the property: redefining
+    // it makes it non-configurable for the rest of the worker
+    window.history.replaceState(null, "", "/");
 
     // Force logger to re-initialize by calling initLogger
     // This ensures each test starts with a clean state
@@ -36,7 +26,7 @@ describe("logger utilities", () => {
 
   describe("logDebug", () => {
     it("logs when debug is enabled", () => {
-      (window as any).location.search = "?debug=true";
+      window.history.replaceState(null, "", "/?debug=true");
       initLogger(); // Initialize with debug enabled
 
       const consoleSpy = vi.spyOn(console, "log");
@@ -46,7 +36,7 @@ describe("logger utilities", () => {
     });
 
     it("does not log when debug is disabled", () => {
-      (window as any).location.search = "";
+      window.history.replaceState(null, "", "/");
       initLogger(); // Initialize with debug disabled
 
       const consoleSpy = vi.spyOn(console, "log");

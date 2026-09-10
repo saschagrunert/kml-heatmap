@@ -255,13 +255,13 @@ describe("StatsManager", () => {
         "Flights",
         "Airports",
       ]);
-      expect(leadValue(statsPanel, "Distance")).toBe("2700.0 nm");
+      expect(leadValue(statsPanel, "Distance")).toBe("2,700.0 nm");
       expect(leadValue(statsPanel, "Total Flight Time")).toBe("25h 30m");
       expect(leadValue(statsPanel, "Flights")).toBe("50");
       expect(leadValue(statsPanel, "Airports")).toBe("3");
       // The metric equivalent of the distance stays on the lead figure
       expect(statsPanel.querySelector(".kh-stats-lead-alt")!.textContent).toBe(
-        "5000.4 km",
+        "5,000.4 km",
       );
     });
 
@@ -316,20 +316,20 @@ describe("StatsManager", () => {
       expect(metricRow(statsPanel, "Average Groundspeed")).toBe(
         "120 kt (222 km/h)",
       );
-      expect(metricRow(statsPanel, "Cruise Speed (>1000ft AGL)")).toBe(
+      expect(metricRow(statsPanel, "Cruise Speed (> 1000 ft AGL)")).toBe(
         "125 kt (232 km/h)",
       );
       expect(metricRow(statsPanel, "Max Groundspeed")).toBe(
         "150 kt (278 km/h)",
       );
       expect(metricRow(statsPanel, "Max Altitude (MSL)")).toBe(
-        "10000 ft (3048 m)",
+        "10,000 ft (3,048 m)",
       );
       expect(metricRow(statsPanel, "Elevation Gain")).toBe(
-        "50000 ft (15240 m)",
+        "50,000 ft (15,240 m)",
       );
       expect(metricRow(statsPanel, "Most Common Cruise Altitude (AGL)")).toBe(
-        "5500 ft (1676 m)",
+        "5,500 ft (1,676 m)",
       );
     });
 
