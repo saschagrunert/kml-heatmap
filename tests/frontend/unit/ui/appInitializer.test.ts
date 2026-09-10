@@ -37,8 +37,8 @@ function yearSelect(): HTMLSelectElement {
 }
 
 const airports: Airport[] = [
-  { name: "Frankfurt EDDF", lat: 50.1, lon: 8.67, flight_count: 20 },
-  { name: "Munich EDDM", lat: 48.35, lon: 11.78, flight_count: 10 },
+  { name: "Frankfurt EDDF", lat: 50.1, lon: 8.67 },
+  { name: "Munich EDDM", lat: 48.35, lon: 11.78 },
 ];
 
 const metadata: Metadata = {
@@ -55,8 +55,6 @@ const metadata: Metadata = {
     total_distance_nm: 1,
     max_groundspeed_knots: 150,
   },
-  min_alt_m: 0,
-  max_alt_m: 1000,
   min_groundspeed_knots: 10,
   max_groundspeed_knots: 150,
 };
@@ -164,21 +162,20 @@ describe("appInitializer", () => {
   });
 
   describe("createAirportMarkers", () => {
-    it("creates one marker per airport with popup and icon", () => {
+    it("creates one marker per airport with an icon and no popup yet", () => {
       createAirportMarkers(asMapApp(app), airports);
 
       expect(L.marker).toHaveBeenCalledTimes(2);
       expect(vi.mocked(L.marker).mock.calls[0]![0]).toEqual([50.1, 8.67]);
       const marker = vi.mocked(L.marker).mock.results[0]!
         .value as unknown as MockMarker;
-      expect(marker.bindPopup).toHaveBeenCalledWith(expect.any(String), {
-        autoPanPadding: [50, 50],
+      // The popup is bound by AirportManager.updateAirportPopups() once the
+      // path data is loaded, so no marker ever shows a stale flight count
+      expect(marker.bindPopup).not.toHaveBeenCalled();
+      expect(vi.mocked(L.marker).mock.calls[0]![1]).toMatchObject({
+        title: "Frankfurt EDDF",
+        alt: "Frankfurt EDDF",
       });
-      const popup = String(marker.bindPopup.mock.calls[0]![0]);
-      expect(popup).toContain("Frankfurt EDDF");
-      expect(popup).toContain("https://www.google.com/maps?q=50.1,8.67");
-      expect(popup).toContain(">20<");
-      expect(popup).not.toContain("HOME");
       expect(marker.addTo).toHaveBeenCalledWith(app.airportLayer);
       expect(Object.keys(app.airportMarkers)).toEqual([
         "Frankfurt EDDF",
@@ -218,10 +215,8 @@ describe("appInitializer", () => {
       expect(L.marker).not.toHaveBeenCalled();
 
       createAirportMarkers(asMapApp(app), [{ name: "", lat: 1, lon: 2 }]);
-      const marker = vi.mocked(L.marker).mock.results[0]!
-        .value as unknown as MockMarker;
-      expect(String(marker.bindPopup.mock.calls[0]![0])).toContain("Unknown");
-      expect(String(marker.bindPopup.mock.calls[0]![0])).toContain(">0<");
+      expect(L.marker).toHaveBeenCalledTimes(1);
+      expect(Object.keys(app.airportMarkers)).toEqual([""]);
     });
 
     it("rejects invalid coordinates (mock validation)", () => {

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 __all__ = [
     "check_directory_obfuscated",
     "check_kml_obfuscated",
+    "find_kml_files",
     "obfuscate_kml_content",
     "obfuscate_kml_directory",
     "obfuscate_kml_file",
@@ -153,7 +154,14 @@ def _parse_route_date(match: re.Match[str]) -> datetime | None:
 
 
 def _find_anchor(content: str) -> datetime | None:
-    """Find the timestamp that defines the shift (first full timestamp wins)."""
+    """Find the timestamp that defines the shift (first full timestamp wins).
+
+    Every timestamp in the file is shifted by the same offset, so a document
+    holding several flights recorded on different dates only lands its first
+    flight on January 1st. ``check_kml_obfuscated`` rejects such a file rather
+    than letting the remaining dates through; the one-flight-per-file naming
+    convention this tool expects keeps that out of the way.
+    """
     full = FULL_TIMESTAMP_PATTERN.search(content)
     if full:
         return _parse_full_timestamp(full.group(3).strip())
@@ -317,9 +325,31 @@ def obfuscate_kml_files(filepaths: Iterable[Path]) -> int:
     return modified
 
 
+def find_kml_files(directory: Path) -> list[Path]:
+    """List the KML files of a directory, matching the extension like the CLI.
+
+    ``cli._collect_kml_files`` accepts ``.kml`` and ``.KML`` alike, so the
+    obfuscation pass and its check have to agree with it on the extension. A
+    case-sensitive glob would leave an uppercase file un-checked while the
+    generator happily published it.
+
+    A directory that cannot be listed yields no files, the way the glob this
+    replaced behaved; ``main`` reports a missing directory before it gets here.
+    """
+    try:
+        entries = list(directory.iterdir())
+    except OSError as e:
+        logger.debug("Cannot list %s: %s", directory, e)
+        return []
+
+    return sorted(
+        path for path in entries if path.is_file() and path.suffix.lower() == ".kml"
+    )
+
+
 def obfuscate_kml_directory(directory: Path) -> int:
     """Obfuscate all KML files in a directory. Returns count of modified files."""
-    return obfuscate_kml_files(sorted(directory.glob("*.kml")))
+    return obfuscate_kml_files(find_kml_files(directory))
 
 
 # Date shapes that may appear anywhere in a document written by another tool:
@@ -422,7 +452,7 @@ def check_directory_obfuscated(directory: Path) -> dict[str, list[str]]:
     with violations are included).
     """
     results: dict[str, list[str]] = {}
-    for kml_file in sorted(directory.glob("*.kml")):
+    for kml_file in find_kml_files(directory):
         violations = check_kml_obfuscated(kml_file)
         if violations:
             results[kml_file.name] = violations
@@ -451,7 +481,7 @@ def main() -> None:
         print(f"Error: {args.directory} is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    kml_count = len(list(args.directory.glob("*.kml")))
+    kml_count = len(find_kml_files(args.directory))
     if args.check:
         violations = check_directory_obfuscated(args.directory)
         if violations:

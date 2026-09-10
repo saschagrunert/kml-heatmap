@@ -5,8 +5,6 @@
 
 import * as L from "leaflet";
 import { domCache } from "./utils/domCache";
-import { ddToDms } from "./utils/geometry";
-import { generateAirportPopupHtml } from "./utils/htmlGenerators";
 import { showToast } from "./utils/toast";
 import type { MapApp } from "./mapApp";
 import type { Airport } from "./types";
@@ -198,28 +196,19 @@ export function createAirportIcon(
 
 /**
  * Create airport markers and add them to the airport layer.
- * The home-base class and the popup badge are applied by
- * AirportManager.updateAirportPopups() so both follow the current filter.
+ * The popup itself, the home-base class and the badge are all filled in by
+ * AirportManager.updateAirportPopups() once the path data is loaded, so no
+ * marker ever shows a flight count that the current filter contradicts.
  * @param app - The MapApp instance to operate on
  * @param airports - Array of airports to create markers for
  */
 export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
   for (const airport of airports) {
-    const popup = generateAirportPopupHtml({
-      name: airport.name,
-      lat: airport.lat,
-      lon: airport.lon,
-      latDms: ddToDms(airport.lat, true),
-      lonDms: ddToDms(airport.lon, false),
-      flightCount: airport.flight_count || 0,
-      isHomeBase: false,
-    });
-
     const marker = L.marker([airport.lat, airport.lon], {
       icon: createAirportIcon(airport.name, false),
       title: airport.name,
       alt: airport.name,
-    }).bindPopup(popup, { autoPanPadding: [50, 50] });
+    });
 
     marker.on("click", (_e: L.LeafletMouseEvent) => {
       if (!app.replayManager.state.active) {

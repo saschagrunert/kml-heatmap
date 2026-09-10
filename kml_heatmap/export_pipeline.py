@@ -4,6 +4,7 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from .constants import METERS_TO_FEET
+from .geometry import haversine_distance
 from .helpers import calculate_duration_seconds
 from .logger import logger
 from .segment_calculator import (
@@ -14,6 +15,7 @@ from .segment_calculator import (
     calculate_windowed_groundspeed,
     extract_segment_speeds,
 )
+from .types import COORDINATE_DECIMALS
 
 if TYPE_CHECKING:
     from .types import FlightPath, PathInfo, PathMetadata, SegmentRow
@@ -108,33 +110,51 @@ def process_path_segments(
     path: FlightPath,
     path_distance_km: float,
     path_duration_seconds: float,
-) -> tuple[list[SegmentRow], list[float]]:
+) -> tuple[list[float], list[SegmentRow], list[float]]:
     """Build the exported segment rows of a path.
 
-    Zero-length segments are skipped, as are segments without any altitude.
+    Only zero-length segments are skipped. Because their two endpoints are the
+    same coordinate, dropping them keeps the remaining rows geometrically
+    contiguous: every row continues where the previous one ended. Each row
+    therefore stores only its END point, and the start of the first row is
+    returned separately.
+
+    Coordinates are rounded to ``COORDINATE_DECIMALS`` (~1 m). The returned
+    distances are measured between those rounded points, because the exported
+    segments are the only flight data the frontend sees: it recomputes the
+    distance from exactly these numbers, and the reconciled statistics have to
+    agree with what it gets. The groundspeeds keep using the unrounded
+    geometry, which is about the aircraft rather than about the export.
 
     Returns:
-        Tuple of (segment rows, segment distances in km)
+        Tuple of (start point, segment rows, segment distances in km).
+        The start point is empty when the path has no exported rows.
     """
     path_start_time = next((point.ts for point in path if point.ts is not None), None)
 
     segment_speeds = extract_segment_speeds(path, path_start_time)
     timestamp_list, time_indexed_segments = build_time_indexed_segments(segment_speeds)
 
+    start: list[float] = []
     rows: list[SegmentRow] = []
     distances: list[float] = []
+    altitude_ft: float = 0.0
+    previous: tuple[float, float] | None = None
 
     for segment, (p1, p2) in zip(segment_speeds, pairwise(path), strict=True):
         if p1.lat == p2.lat and p1.lon == p2.lon:
             continue
 
         altitudes = [alt for alt in (p1.alt, p2.alt) if alt is not None]
-        if not altitudes:
-            logger.debug("Skipping segment without altitude at index %d", segment.index)
-            continue
-
-        avg_alt_m = sum(altitudes) / len(altitudes)
-        altitude_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+        if altitudes:
+            avg_alt_m = sum(altitudes) / len(altitudes)
+            altitude_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+        else:
+            # Flight paths only carry points with a known altitude (see
+            # types.FlightPath), so this is unreachable in practice. Carry the
+            # previous altitude over instead of skipping the segment: a skipped
+            # row would break the end-to-start chain the row format relies on.
+            logger.debug("Segment without altitude at index %d", segment.index)
 
         groundspeed_knots = _segment_groundspeed(
             segment,
@@ -144,11 +164,20 @@ def process_path_segments(
             path_duration_seconds,
         )
 
+        if previous is None:
+            previous = (
+                round(p1.lat, COORDINATE_DECIMALS),
+                round(p1.lon, COORDINATE_DECIMALS),
+            )
+            start = [previous[0], previous[1]]
+
+        end = (
+            round(p2.lat, COORDINATE_DECIMALS),
+            round(p2.lon, COORDINATE_DECIMALS),
+        )
         row: SegmentRow = [
-            p1.lat,
-            p1.lon,
-            p2.lat,
-            p2.lon,
+            end[0],
+            end[1],
             altitude_ft,
             round(groundspeed_knots, 1),
         ]
@@ -156,6 +185,7 @@ def process_path_segments(
             row.append(round(segment.relative_time, 1))
 
         rows.append(row)
-        distances.append(segment.distance)
+        distances.append(haversine_distance(previous[0], previous[1], *end))
+        previous = end
 
-    return rows, distances
+    return start, rows, distances

@@ -224,9 +224,18 @@ export function generateFunFactsHtml(funFacts: FunFact[]): string {
 }
 
 /**
- * Calculate color class based on normalized flight count
+ * Colour class of one fleet entry, from its flight count relative to the
+ * busiest and the quietest aircraft of the same fleet. A fleet whose entries
+ * all have the same count is drawn entirely in the warmest colour.
  */
-export function calculateAircraftColorClass(normalized: number): string {
+export function calculateAircraftColorClass(
+  flights: number,
+  maxFlights: number,
+  minFlights: number,
+): string {
+  if (maxFlights === minFlights) return "fleet-aircraft-high";
+
+  const normalized = (flights - minFlights) / (maxFlights - minFlights);
   if (normalized >= 0.75) {
     return "fleet-aircraft-high"; // Most flights - warm color
   } else if (normalized >= 0.5) {
@@ -251,13 +260,14 @@ export function generateAircraftFleetHtml(yearStats: YearStats): string {
   const maxFlights = yearStats.aircraft_list[0]?.flights ?? 0;
   const minFlights =
     yearStats.aircraft_list[yearStats.aircraft_list.length - 1]?.flights ?? 0;
-  const flightRange = maxFlights - minFlights;
 
   for (const aircraft of yearStats.aircraft_list) {
     const modelStr = aircraft.model || aircraft.type || "";
-    const normalized =
-      flightRange > 0 ? (aircraft.flights - minFlights) / flightRange : 1;
-    const colorClass = calculateAircraftColorClass(normalized);
+    const colorClass = calculateAircraftColorClass(
+      aircraft.flights,
+      maxFlights,
+      minFlights,
+    );
     const flightTimeStr = aircraft.flight_time_str || "---";
 
     html +=

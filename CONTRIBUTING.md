@@ -54,9 +54,9 @@ parentheses back is undone on the next `make format`.
 - **Never commit un-obfuscated KML files.** Every run rewrites the files in
   `data/` in place; `make check-obfuscation` (and the `obfuscation` CI job)
   verify that every committed file is obfuscated.
-- The frontend bundles in `kml_heatmap/static/` (`bundle.js`,
-  `mapApp.bundle.js` and their `.map` files) are gitignored. They are built by
-  `npm run build` and, for the images, inside the Dockerfile.
+- The frontend bundle in `kml_heatmap/static/` (`mapApp.bundle.js` and its
+  `.map` file) is gitignored. It is built by `npm run build` and, for the
+  images, inside the Dockerfile.
 - `requirements.lock` and `requirements-test.lock` are generated with
   `make lock` (pip-compile with hashes). Edit `requirements*.txt` or
   `pyproject.toml`, then regenerate the locks; the weekly `lock` workflow does

@@ -25,9 +25,21 @@ FlightPath = list[TrackPoint]
 
 FlightPathGroup = list[FlightPath]
 
-# Exported segment row: [lat1, lon1, lat2, lon2, altitude_ft, groundspeed_knots]
-# followed by an optional relative time in seconds (omitted when unavailable).
+# Exported segment row: [lat, lon, altitude_ft, groundspeed_knots] followed by
+# an optional relative time in seconds (omitted when unavailable). ``lat``/``lon``
+# are the segment's END point; its start is the end of the previous row, and
+# the first row continues from ``PathSegments.start``.
 SegmentRow = list[float]
+
+# Number of decimals kept for exported coordinates (~1 m at the equator)
+COORDINATE_DECIMALS = 5
+
+
+class PathSegments(TypedDict):
+    """Exported segments of one path: a start point and the rows after it."""
+
+    start: list[float]
+    rows: list[SegmentRow]
 
 
 class PlacemarkMetadata(TypedDict):
@@ -77,9 +89,7 @@ class AirportData(TypedDict):
     name: str | None
     lat: float
     lon: float
-    flight_count: NotRequired[int]
     path_index: NotRequired[int]
-    timestamps: NotRequired[list[str]]
     is_at_path_end: NotRequired[bool]
 
 
@@ -125,12 +135,14 @@ class Statistics(TypedDict):
 
 
 __all__ = [
+    "COORDINATE_DECIMALS",
     "AircraftInfo",
     "AirportData",
     "FlightPath",
     "FlightPathGroup",
     "PathInfo",
     "PathMetadata",
+    "PathSegments",
     "PlacemarkMetadata",
     "SegmentRow",
     "Statistics",

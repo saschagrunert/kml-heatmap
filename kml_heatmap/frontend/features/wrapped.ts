@@ -5,17 +5,14 @@
 
 import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
 import { formatFlightTime } from "../utils/formatters";
-import {
-  calculateAircraftColorClass as calculateAircraftColorClassFromNormalized,
-  escapeHtml,
-} from "../utils/htmlGenerators";
+import { escapeHtml } from "../utils/htmlGenerators";
 import {
   aggregateAircraft,
-  calculateFlightTime,
   calculateTotalDistance,
   collectAirports,
   filterPaths,
   filterSegmentsByPaths,
+  perPathSeconds,
 } from "../calculations/statistics";
 import { countCountries } from "./airports";
 import { calculateDistance, type Coordinate } from "../utils/geometry";
@@ -158,11 +155,21 @@ export function calculateYearStats(
   const totalDistanceKm = calculateTotalDistance(filteredSegments);
   const totalDistanceNm = totalDistanceKm * KM_TO_NAUTICAL_MILES;
 
-  // Calculate flight time
-  const totalSeconds = calculateFlightTime(filteredSegments, filteredPaths);
+  // One grouping pass feeds both the total flight time and the per-aircraft
+  // times inside aggregateAircraft
+  const secondsByPath = perPathSeconds(
+    filteredSegments,
+    new Set(filteredPaths.map((p) => p.id)),
+  );
+  let totalSeconds = 0;
+  for (const secs of secondsByPath.values()) totalSeconds += secs;
   const flightTime = formatFlightTime(totalSeconds);
 
-  const aircraftList = aggregateAircraft(filteredPaths, filteredSegments);
+  const aircraftList = aggregateAircraft(
+    filteredPaths,
+    filteredSegments,
+    secondsByPath,
+  );
 
   // Enrich with model from fullStats
   if (fullStats?.aircraft_list) {
@@ -434,19 +441,4 @@ export function selectDiverseFacts(allFacts: FunFact[]): FunFact[] {
   }
 
   return selected;
-}
-
-/**
- * Calculate aircraft color class for visualization
- */
-export function calculateAircraftColorClass(
-  flights: number,
-  maxFlights: number,
-  minFlights: number,
-): string {
-  if (maxFlights === minFlights) {
-    return "fleet-aircraft-high";
-  }
-  const normalized = (flights - minFlights) / (maxFlights - minFlights);
-  return calculateAircraftColorClassFromNormalized(normalized);
 }

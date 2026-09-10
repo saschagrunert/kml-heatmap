@@ -59,7 +59,13 @@ export class AirportManager {
         isHomeBase,
       });
 
-      marker.setPopupContent(popup);
+      // The markers are created without a popup so that the very first
+      // content already carries the counts of the active filter
+      if (marker.getPopup()) {
+        marker.setPopupContent(popup);
+      } else {
+        marker.bindPopup(popup, { autoPanPadding: [50, 50] });
+      }
 
       if ((this.homeIconState.get(airport.name) ?? false) !== isHomeBase) {
         marker.setIcon(createAirportIcon(airport.name, isHomeBase));

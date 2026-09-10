@@ -34,15 +34,27 @@ export interface PathSegment {
   altitude_ft?: number | undefined;
   groundspeed_knots?: number | undefined;
   time?: number | undefined;
+  /** Great-circle length in km, memoised by `segmentDistance` on first use */
+  distance_km?: number | undefined;
 }
 
 /**
- * Raw segment tuple as written by the exporter:
- * [lat1, lon1, lat2, lon2, altitude_ft, groundspeed_knots, time?]
+ * Raw segment row as written by the exporter:
+ * [lat, lon, altitude_ft, groundspeed_knots, time?].
+ *
+ * The coordinate is the segment's END point. Its start is the end of the
+ * previous row, and the first row continues from `RawPathSegments.start`.
  */
 export type RawSegment =
-  | [number, number, number, number, number, number]
-  | [number, number, number, number, number, number, number];
+  [number, number, number, number] | [number, number, number, number, number];
+
+/**
+ * Exported segments of one path: the first point and the rows after it.
+ */
+export interface RawPathSegments {
+  start: number[];
+  rows: RawSegment[];
+}
 
 /**
  * Per-year data file contents (window.KML_DATA_<YEAR>)
@@ -51,7 +63,7 @@ export interface RawYearData {
   year: number;
   original_points: number;
   path_info: PathInfo[];
-  segments: Record<string, RawSegment[]>;
+  segments: Record<string, RawPathSegments>;
 }
 
 /**
@@ -122,7 +134,6 @@ export interface Airport {
   lat: number;
   lon: number;
   country?: string;
-  flight_count?: number;
 }
 
 /**
@@ -130,8 +141,6 @@ export interface Airport {
  */
 export interface Metadata {
   stats: FilteredStatistics;
-  min_alt_m: number;
-  max_alt_m: number;
   min_groundspeed_knots: number;
   max_groundspeed_knots: number;
   available_years: number[];

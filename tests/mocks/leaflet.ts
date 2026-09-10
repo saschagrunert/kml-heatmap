@@ -108,12 +108,17 @@ export interface MockMarker {
   /** Recorded constructor arguments */
   latlng: MockLatLng;
   options: Record<string, unknown>;
+  /** Latest popup content, whether it was bound or set (test convenience) */
+  popupContent: () => string | null;
 }
 
 export const marker: Mock<
   (latlng: LatLngTuple, options?: Record<string, unknown>) => MockMarker
 > = vi.fn((latlng: LatLngTuple, options: Record<string, unknown> = {}) => {
   const validated = assertLatLng(latlng, "marker");
+  // Leaflet keeps the popup once it is bound; the mock does the same so that
+  // "bind on first update, set content afterwards" behaves as it does live
+  let popup: { content: string } | null = null;
   const obj: MockMarker = {
     addTo: vi.fn(),
     remove: vi.fn(),
@@ -122,17 +127,25 @@ export const marker: Mock<
     setIcon: vi.fn(),
     setOpacity: vi.fn(),
     bindPopup: vi.fn(),
-    setPopupContent: vi.fn(),
+    setPopupContent: vi.fn((content: unknown) => {
+      if (popup) popup.content = String(content);
+    }),
     openPopup: vi.fn(),
     closePopup: vi.fn(),
-    getPopup: vi.fn(() => null),
+    getPopup: vi.fn(() => popup),
     isPopupOpen: vi.fn(() => false),
     getElement: vi.fn(() => null),
     on: vi.fn(),
     latlng: validated,
     options,
+    popupContent: () => popup?.content ?? null,
   };
-  obj.bindPopup.mockReturnValue(obj);
+  // mockReturnValue would replace the implementation, so chainable methods
+  // that also record something use mockImplementation
+  obj.bindPopup.mockImplementation((content: unknown) => {
+    popup = { content: String(content) };
+    return obj;
+  });
   obj.addTo.mockReturnValue(obj);
   obj.setIcon.mockReturnValue(obj);
   obj.on.mockReturnValue(obj);
@@ -242,6 +255,18 @@ export const control = {
   attribution: vi.fn(() => ({ addTo: vi.fn() })),
 };
 
+export interface MockHeatLayer {
+  addTo: Mock;
+  remove: Mock;
+  _canvas?: { style: { pointerEvents: string } };
+}
+
+/** leaflet.heat plugin; the real one augments the global L namespace */
+export const heatLayer: Mock<() => MockHeatLayer> = vi.fn(() => ({
+  addTo: vi.fn(),
+  remove: vi.fn(),
+}));
+
 export const DomEvent = {
   stopPropagation: vi.fn(),
 };
@@ -260,4 +285,5 @@ export default {
   popup,
   control,
   DomEvent,
+  heatLayer,
 };

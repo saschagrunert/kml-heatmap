@@ -83,7 +83,9 @@ branch = true
 source = ["kml_heatmap"]
 
 [tool.coverage.report]
-fail_under = 90
+# Just under what the suite reaches today (see vitest.config.js for the same
+# reasoning on the frontend side)
+fail_under = 96
 exclude_also = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",

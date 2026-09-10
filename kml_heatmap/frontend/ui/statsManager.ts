@@ -240,10 +240,7 @@ function distanceMetrics(stats: FilteredStatistics): Metric[] {
     metrics.push({
       label: "Average Distance per Trip",
       value: avgDistanceNm.toFixed(1) + " nm",
-      alt:
-        (parseFloat(avgDistanceNm.toFixed(1)) * NAUTICAL_MILES_TO_KM).toFixed(
-          1,
-        ) + " km",
+      alt: (avgDistanceNm * NAUTICAL_MILES_TO_KM).toFixed(1) + " km",
     });
   }
 
@@ -317,6 +314,8 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
 export class StatsManager {
   private app: MapApp;
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Markup of the last render; an identical result is not written again */
+  private lastHtml: string | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -335,7 +334,6 @@ export class StatsManager {
         segments,
         year: this.app.selectedYear,
         aircraft: this.app.selectedAircraft,
-        coordinateCount: this.app.currentData?.original_points,
       });
       this.updateStatsPanel(statsToShow, false);
       return;
@@ -349,25 +347,13 @@ export class StatsManager {
       this.app.selectedPathIds.has(segment.path_id),
     );
 
-    if (selectedSegments.length === 0) return;
-
-    // Calculate unique coordinate count from selected segments
-    const coordSet = new Set<string>();
-    for (const segment of selectedSegments) {
-      if (segment.coords && segment.coords.length === 2) {
-        const c0 = segment.coords[0];
-        const c1 = segment.coords[1];
-        coordSet.add(c0[0] + "," + c0[1]);
-        coordSet.add(c1[0] + "," + c1[1]);
-      }
-    }
-
+    // A selection without segments still gets rendered: leaving the previous
+    // flight's numbers under the "Selected Paths" title would be worse
     const selectedStats = calculateFilteredStatistics({
       pathInfo: selectedPathInfo,
       segments: selectedSegments,
       year: "all", // Don't filter by year for selection
       aircraft: "all", // Don't filter by aircraft for selection
-      coordinateCount: coordSet.size,
     });
 
     this.updateStatsPanel(selectedStats, true);
@@ -429,6 +415,10 @@ export class StatsManager {
 
     html += "</div>";
 
+    // Rewriting identical markup reflows the whole list and drops focus out
+    // of the panel, and most refreshes produce exactly the same content
+    if (html === this.lastHtml && panel.firstChild !== null) return;
+    this.lastHtml = html;
     panel.innerHTML = html;
   }
 

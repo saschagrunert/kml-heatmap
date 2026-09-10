@@ -19,6 +19,7 @@ import type { Coordinate } from "../utils/geometry";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
+import { filterPaths } from "../calculations/statistics";
 import {
   calculateAirspeedRange,
   calculateAltitudeRange,
@@ -26,7 +27,6 @@ import {
   findNearestSegment,
   formatAirspeedLabel,
   formatAltitudeLabel,
-  shouldRenderSegment,
 } from "../features/layers";
 
 export type LayerMode = "altitude" | "airspeed";
@@ -166,11 +166,9 @@ export class LayerManager {
     this.polylinesByPath[config.mode] = byPath;
 
     const { min: colorMin, max: colorMax } = this.resolveColorRange(config);
-    const pathInfoMap = this.getPathInfoMap();
-    const filters = {
-      year: this.app.selectedYear,
-      aircraft: this.app.selectedAircraft,
-    };
+    // Resolve the filter once over the path info instead of re-deriving it per
+    // segment: `null` means every path passes, so no lookup is needed at all
+    const visiblePathIds = this.visiblePathIds(data.path_info);
     const selectedPathIds = this.app.selectedPathIds;
     const hasSelection = selectedPathIds.size > 0;
     const isolate = this.app.isolateSelection;
@@ -229,7 +227,7 @@ export class LayerManager {
 
       if (
         !coords ||
-        !shouldRenderSegment(segment, pathInfoMap.get(pathId), filters) ||
+        (visiblePathIds !== null && !visiblePathIds.has(pathId)) ||
         (config.filterSegment && !config.filterSegment(segment)) ||
         (hasSelection && isolate && !selectedPathIds.has(pathId))
       ) {
@@ -361,6 +359,17 @@ export class LayerManager {
       speedMin: this.app.airspeedRange.min,
       speedMax: this.app.airspeedRange.max,
     });
+  }
+
+  /**
+   * Ids of the paths the year/aircraft filter keeps, or `null` when no filter
+   * is active and every segment is drawn regardless of its path info.
+   */
+  private visiblePathIds(pathInfo: PathInfo[]): Set<number> | null {
+    const year = this.app.selectedYear;
+    const aircraft = this.app.selectedAircraft;
+    if (year === "all" && aircraft === "all") return null;
+    return new Set(filterPaths(pathInfo, year, aircraft).map((p) => p.id));
   }
 
   /**

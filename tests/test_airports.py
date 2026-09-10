@@ -68,7 +68,6 @@ class TestDeduplicateAirports:
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "EDDF Frankfurt - EDDK Cologne",
-                "timestamp": "2025-03-15T10:00:00Z",
             }
         ]
         path_groups = [_path((50.0, 8.5, 100), (50.86, 7.14, 200))]
@@ -80,19 +79,16 @@ class TestDeduplicateAirports:
         assert len(result) == 2
         assert result[0]["is_at_path_end"] is False
         assert result[1]["is_at_path_end"] is True
-        assert result[0]["timestamps"] == ["2025-03-15T10:00:00Z"]
 
-    def test_duplicate_locations_merge_timestamps(self):
+    def test_duplicate_locations_merge(self):
         metadata = [
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "EDDF",
-                "timestamp": "2025-03-15T10:00:00Z",
             },
             {
                 "start_point": [50.0001, 8.5001, 100],
                 "airport_name": "EDDF",
-                "timestamp": "2025-03-16T10:00:00Z",
             },
         ]
         path_groups = [
@@ -105,22 +101,16 @@ class TestDeduplicateAirports:
         )
 
         assert len(result) == 1
-        assert result[0]["timestamps"] == [
-            "2025-03-15T10:00:00Z",
-            "2025-03-16T10:00:00Z",
-        ]
 
     def test_different_locations_are_kept(self):
         metadata = [
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "EDDF",
-                "timestamp": "t1",
             },
             {
                 "start_point": [51.0, 9.5, 100],
                 "airport_name": "EDDK",
-                "timestamp": "t2",
             },
         ]
         path_groups = [
@@ -139,7 +129,6 @@ class TestDeduplicateAirports:
             {
                 "start_point": [50.0, 8.5, 5000],
                 "airport_name": "Mid-air Somewhere",
-                "timestamp": "2025-03-15T10:00:00Z",
             }
         ]
         path_groups = [_path((50.0, 8.5, 5000), (51.0, 9.5, 5000))]
@@ -155,7 +144,6 @@ class TestDeduplicateAirports:
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "EDDF Frankfurt - EDDK Cologne",
-                "timestamp": "2025-03-15T10:00:00Z",
             }
         ]
         path_groups = [_path((50.0, 8.5, 100), (50.86, 7.14, 5000))]
@@ -172,7 +160,6 @@ class TestDeduplicateAirports:
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "Log Start: EDDF",
-                "timestamp": "2025-03-15T10:00:00Z",
             }
         ]
         path_groups = [_path((50.0, 8.5, 100), (51.0, 9.5, 200))]
@@ -188,7 +175,6 @@ class TestDeduplicateAirports:
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "EDDF Frankfurt - EDDK Cologne",
-                "timestamp": "2025-03-15T10:00:00Z",
             }
         ]
         path_groups = [_path((50.0, 8.5, 100))]
@@ -200,12 +186,11 @@ class TestDeduplicateAirports:
         # Only the start point entry, no arrival from the endpoint pass
         assert len(result) == 1
 
-    def test_mid_flight_route_omits_departure_and_timestamp(self):
+    def test_mid_flight_route_omits_departure(self):
         metadata = [
             {
                 "start_point": [50.0, 8.5, 3000],
                 "airport_name": "EDDF Frankfurt - EDDK Cologne",
-                "timestamp": "2025-03-15T10:00:00Z",
             }
         ]
         path_groups = [_path((50.0, 8.5, 3000), (50.86, 7.14, 100))]
@@ -216,7 +201,6 @@ class TestDeduplicateAirports:
 
         assert len(result) == 1
         assert result[0]["is_at_path_end"] is True
-        assert result[0]["timestamps"] == []
 
 
 class TestAirportDeduplicator:
@@ -234,7 +218,6 @@ class TestAirportDeduplicator:
             lat=50.0,
             lon=8.5,
             name="Some Field Name",
-            timestamp="2025-03-15T10:00:00Z",
             path_index=0,
             is_at_path_end=False,
         )
@@ -248,7 +231,6 @@ class TestAirportDeduplicator:
             lat=50.0,
             lon=8.5,
             name="EDDF",
-            timestamp=None,
             path_index=0,
             is_at_path_end=False,
         )
@@ -262,7 +244,6 @@ class TestAirportDeduplicator:
             lat=0.0,
             lon=0.0,
             name="EDDF - EDDM",
-            timestamp=None,
             path_index=0,
             is_at_path_end=True,
         )
@@ -275,7 +256,6 @@ class TestAirportDeduplicator:
             lat=50.0,
             lon=8.5,
             name="EDDF",
-            timestamp="2025-03-15T10:00:00Z",
             path_index=0,
             is_at_path_end=False,
         )
@@ -283,13 +263,11 @@ class TestAirportDeduplicator:
             lat=50.0001,
             lon=8.5001,
             name="EDDF",
-            timestamp="2025-03-16T10:00:00Z",
             path_index=1,
             is_at_path_end=False,
         )
         assert idx1 == idx2
         assert len(deduplicator.unique_airports) == 1
-        assert len(deduplicator.unique_airports[0]["timestamps"]) == 2
 
     def test_prefer_route_names_over_markers(self):
         deduplicator = AirportDeduplicator()
@@ -297,7 +275,6 @@ class TestAirportDeduplicator:
             lat=50.0,
             lon=8.5,
             name="Log Start: EDDF",
-            timestamp="t1",
             path_index=0,
             is_at_path_end=False,
         )
@@ -305,34 +282,11 @@ class TestAirportDeduplicator:
             lat=50.0001,
             lon=8.5001,
             name="EDDF Frankfurt - EDDM Munich",
-            timestamp="t2",
             path_index=1,
             is_at_path_end=False,
         )
         assert idx1 == idx2
         assert deduplicator.unique_airports[0]["name"] == "EDDF Frankfurt - EDDM Munich"
-        # Marker timestamps are not counted as flights
-        assert deduplicator.unique_airports[0]["timestamps"] == ["t2"]
-
-    def test_skip_duplicate_timestamps(self):
-        deduplicator = AirportDeduplicator()
-        deduplicator.add_or_update_airport(
-            lat=50.0,
-            lon=8.5,
-            name="EDDF",
-            timestamp="t1",
-            path_index=0,
-            is_at_path_end=False,
-        )
-        deduplicator.add_or_update_airport(
-            lat=50.0001,
-            lon=8.5001,
-            name="EDDF",
-            timestamp="t1",
-            path_index=1,
-            is_at_path_end=False,
-        )
-        assert deduplicator.unique_airports[0]["timestamps"] == ["t1"]
 
     def test_get_unique_airports(self):
         deduplicator = AirportDeduplicator()
@@ -340,7 +294,6 @@ class TestAirportDeduplicator:
             lat=50.0,
             lon=8.5,
             name="EDDF",
-            timestamp=None,
             path_index=0,
             is_at_path_end=False,
         )
@@ -348,7 +301,6 @@ class TestAirportDeduplicator:
             lat=51.0,
             lon=9.5,
             name="EDDM",
-            timestamp=None,
             path_index=1,
             is_at_path_end=False,
         )
@@ -360,10 +312,8 @@ class TestAirportDeduplicator:
             lat=50.0,
             lon=8.5,
             name=None,
-            timestamp="t1",
             path_index=0,
             is_at_path_end=False,
         )
         assert idx == 0
         assert deduplicator.unique_airports[0]["name"] is None
-        assert deduplicator.unique_airports[0]["timestamps"] == []

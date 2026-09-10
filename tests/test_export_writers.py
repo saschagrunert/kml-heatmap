@@ -36,7 +36,6 @@ class TestExportAirportsData:
             "airports": [
                 {
                     "country": "DE",
-                    "flight_count": 1,
                     "lat": 48.6899,
                     "lon": 9.222,
                     "name": "EDDS Stuttgart",
@@ -89,11 +88,12 @@ class TestExportAirportsData:
         data = _parse(tmp_path / "airports.js", "window.KML_AIRPORTS = ")
         assert len(data["airports"]) == 1
 
-    def test_flight_count_from_timestamps(self, tmp_path):
+    def test_flight_count_never_exported(self, tmp_path):
+        """The frontend counts flights per active filter; see export_writers."""
         airports = [_airport("EDDS Stuttgart", timestamps=["t1", "t2", "t3"])]
         export_airports_data(airports, str(tmp_path))
         data = _parse(tmp_path / "airports.js", "window.KML_AIRPORTS = ")
-        assert data["airports"][0]["flight_count"] == 3
+        assert "flight_count" not in data["airports"][0]
 
     def test_empty_list(self, tmp_path):
         export_airports_data([], str(tmp_path))
@@ -105,8 +105,6 @@ class TestExportMetadata:
     def _export(self, tmp_path, **overrides):
         kwargs = {
             "stats": {"total_points": 10},
-            "min_alt_m": 100.0,
-            "max_alt_m": 5000.0,
             "min_groundspeed_knots": 50.0,
             "max_groundspeed_knots": 180.0,
             "available_years": [2025, 2024],
@@ -123,8 +121,6 @@ class TestExportMetadata:
         data = _parse(tmp_path / "metadata.js", "window.KML_METADATA = ")
         assert data == {
             "stats": {"total_points": 10},
-            "min_alt_m": 100.0,
-            "max_alt_m": 5000.0,
             "min_groundspeed_knots": 50.0,
             "max_groundspeed_knots": 180.0,
             "available_years": [2024, 2025],

@@ -4,7 +4,7 @@
  * segment styling and legend labels.
  */
 
-import type { PathInfo, PathSegment } from "../types";
+import type { PathSegment } from "../types";
 import type { Range } from "../state/store";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 
@@ -93,37 +93,6 @@ export function calculateAirspeedRange(
     defaultRange,
     selectedPathIds,
   );
-}
-
-/**
- * Determine if a segment should be rendered based on filters
- * @param _segment - Segment object
- * @param pathInfo - Path info object
- * @param filters - Filter object {year, aircraft}
- * @returns True if segment should be rendered
- */
-export function shouldRenderSegment(
-  _segment: PathSegment,
-  pathInfo: PathInfo | undefined,
-  filters: { year?: string; aircraft?: string } = {},
-): boolean {
-  const { year = "all", aircraft = "all" } = filters;
-
-  // Filter by year
-  if (year !== "all") {
-    if (!pathInfo || !pathInfo.year || pathInfo.year.toString() !== year) {
-      return false;
-    }
-  }
-
-  // Filter by aircraft
-  if (aircraft !== "all") {
-    if (!pathInfo || pathInfo.aircraft_registration !== aircraft) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 /**

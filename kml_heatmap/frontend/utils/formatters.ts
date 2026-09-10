@@ -1,7 +1,6 @@
 /**
  * Formatting utility functions
  */
-import { METERS_TO_FEET } from "./constants";
 
 /**
  * Format seconds into human-readable time string
@@ -24,26 +23,6 @@ export function formatTime(seconds: number): string {
   }
 
   return minutes + ":" + secs.toString().padStart(2, "0");
-}
-
-/**
- * Format distance in kilometers to human-readable string
- * @param km - Distance in kilometers
- * @param decimals - Number of decimal places (default: 0)
- * @returns Formatted distance (e.g., "1234 km")
- */
-export function formatDistance(km: number, decimals = 0): string {
-  return km.toFixed(decimals) + " km";
-}
-
-/**
- * Format altitude in meters to feet string
- * @param meters - Altitude in meters
- * @returns Formatted altitude (e.g., "10000 ft")
- */
-export function formatAltitude(meters: number): string {
-  const feet = Math.round(meters * METERS_TO_FEET);
-  return feet + " ft";
 }
 
 /**

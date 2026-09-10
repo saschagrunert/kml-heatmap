@@ -548,8 +548,8 @@
     </div>
 
     <!-- Scripts are deferred and execute in document order: Leaflet, data,
-         config, library bundle, application bundle. dom-to-image is loaded
-         on the first export. -->
+         config, application bundle. dom-to-image is loaded on the first
+         export. -->
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
       integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
@@ -569,9 +569,6 @@
 
     <!-- Configuration with template variables -->
     <script src="./map_config.js" defer></script>
-
-    <!-- Modular JavaScript library (utilities and features) -->
-    <script src="./bundle.js" defer></script>
 
     <!-- Main application -->
     <script src="./mapApp.bundle.js" defer></script>

@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   calculateAltitudeRange,
   calculateAirspeedRange,
-  shouldRenderSegment,
   calculateSegmentProperties,
   formatAltitudeLabel,
   formatAirspeedLabel,
@@ -12,10 +11,7 @@ import {
   DEFAULT_ALTITUDE_RANGE,
   DEFAULT_AIRSPEED_RANGE,
 } from "../../../../kml_heatmap/frontend/features/layers";
-import type {
-  PathInfo,
-  PathSegment,
-} from "../../../../kml_heatmap/frontend/types";
+import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 
 describe("layers feature", () => {
   const mockSegments: PathSegment[] = [
@@ -105,66 +101,6 @@ describe("layers feature", () => {
         { path_id: 1, groundspeed_knots: 80 },
       ];
       expect(calculateAirspeedRange(segments)).toEqual({ min: 80, max: 80 });
-    });
-  });
-
-  describe("shouldRenderSegment", () => {
-    const segment: PathSegment = { path_id: 1 };
-    const pathInfo: PathInfo = {
-      id: 1,
-      year: 2025,
-      aircraft_registration: "D-EAGJ",
-    };
-
-    it("returns true with no filters", () => {
-      expect(shouldRenderSegment(segment, pathInfo)).toBe(true);
-      expect(shouldRenderSegment(segment, pathInfo, {})).toBe(true);
-      expect(shouldRenderSegment(segment, undefined)).toBe(true);
-    });
-
-    it("filters by year", () => {
-      expect(shouldRenderSegment(segment, pathInfo, { year: "2025" })).toBe(
-        true,
-      );
-      expect(shouldRenderSegment(segment, pathInfo, { year: "2024" })).toBe(
-        false,
-      );
-    });
-
-    it("filters by aircraft", () => {
-      expect(
-        shouldRenderSegment(segment, pathInfo, { aircraft: "D-EAGJ" }),
-      ).toBe(true);
-      expect(
-        shouldRenderSegment(segment, pathInfo, { aircraft: "D-EXYZ" }),
-      ).toBe(false);
-    });
-
-    it("filters by both year and aircraft", () => {
-      expect(
-        shouldRenderSegment(segment, pathInfo, {
-          year: "2025",
-          aircraft: "D-EAGJ",
-        }),
-      ).toBe(true);
-      expect(
-        shouldRenderSegment(segment, pathInfo, {
-          year: "2025",
-          aircraft: "D-EXYZ",
-        }),
-      ).toBe(false);
-    });
-
-    it("rejects missing pathInfo or fields when a filter is active", () => {
-      expect(shouldRenderSegment(segment, undefined, { year: "2025" })).toBe(
-        false,
-      );
-      expect(shouldRenderSegment(segment, { id: 1 }, { year: "2025" })).toBe(
-        false,
-      );
-      expect(
-        shouldRenderSegment(segment, { id: 1 }, { aircraft: "D-EAGJ" }),
-      ).toBe(false);
     });
   });
 

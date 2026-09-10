@@ -73,14 +73,6 @@ const sharedBuildOptions = {
   drop: isDevelopment ? [] : ["debugger"],
 };
 
-// Build KMLHeatmap library
-const libraryBuildOptions = {
-  ...sharedBuildOptions,
-  entryPoints: [join(__dirname, "kml_heatmap/frontend/main.ts")],
-  globalName: "KMLHeatmapModules",
-  outfile: join(__dirname, "kml_heatmap/static/bundle.js"),
-};
-
 // Plugin to replace Leaflet import with global L variable
 const leafletGlobalPlugin = {
   name: "leaflet-global",
@@ -175,56 +167,31 @@ function analyzeBundleComposition(metafile, bundleName) {
   }
 }
 
-// Bundle size budgets in bytes
-const BUDGET_LIBRARY = 50 * 1024;
+// Bundle size budget in bytes
 const BUDGET_APP = 115 * 1024;
-// At least the sum of the two, so a bundle can actually reach its own budget
-const BUDGET_TOTAL = 165 * 1024;
 
 /**
- * Print bundle size analysis and enforce budgets in CI
- * Returns true if all budgets pass, false if any are exceeded
+ * Print bundle size analysis and enforce the budget in CI
+ * Returns true if the budget passes, false if it is exceeded
  */
 function analyzeBundleSizes() {
   console.log("\n📦 Bundle Size Analysis:");
   console.log("─".repeat(60));
 
-  const bundlePath = join(__dirname, "kml_heatmap/static/bundle.js");
   const appBundlePath = join(__dirname, "kml_heatmap/static/mapApp.bundle.js");
 
   try {
-    const bundleSize = statSync(bundlePath).size;
     const appBundleSize = statSync(appBundlePath).size;
-    const totalSize = bundleSize + appBundleSize;
 
     console.log(
-      `  📚 KMLHeatmap Library:  ${formatBytes(bundleSize).padStart(10)}`,
-    );
-    console.log(
       `  🗺️  MapApp Bundle:      ${formatBytes(appBundleSize).padStart(10)}`,
-    );
-    console.log(`  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    console.log(
-      `  📊 Total:              ${formatBytes(totalSize).padStart(10)}`,
     );
 
     let budgetExceeded = false;
 
-    if (bundleSize > BUDGET_LIBRARY) {
-      console.log(
-        `  ⚠️  Library bundle exceeds budget (${formatBytes(bundleSize)} > ${formatBytes(BUDGET_LIBRARY)})`,
-      );
-      budgetExceeded = true;
-    }
     if (appBundleSize > BUDGET_APP) {
       console.log(
         `  ⚠️  MapApp bundle exceeds budget (${formatBytes(appBundleSize)} > ${formatBytes(BUDGET_APP)})`,
-      );
-      budgetExceeded = true;
-    }
-    if (totalSize > BUDGET_TOTAL) {
-      console.log(
-        `  ⚠️  Total bundle size exceeds budget (${formatBytes(totalSize)} > ${formatBytes(BUDGET_TOTAL)})`,
       );
       budgetExceeded = true;
     }
@@ -232,7 +199,7 @@ function analyzeBundleSizes() {
     console.log("─".repeat(60));
     return !budgetExceeded;
   } catch (error) {
-    console.error("  ❌ Could not analyze bundle sizes:", error.message);
+    console.error("  ❌ Could not analyze the bundle size:", error.message);
     console.log("─".repeat(60));
     return true; // Don't fail on missing files
   }
@@ -246,24 +213,16 @@ async function build() {
 
     if (isWatch) {
       console.log("👀 Watching for changes...");
-      const libraryCtx = await esbuild.context(libraryBuildOptions);
       const appCtx = await esbuild.context(appBuildOptions);
-      await Promise.all([libraryCtx.watch(), appCtx.watch()]);
+      await appCtx.watch();
     } else {
-      console.log("🔨 Building JavaScript bundles...");
-      const [libraryResult, appResult] = await Promise.all([
-        esbuild.build(libraryBuildOptions),
-        esbuild.build(appBuildOptions),
-      ]);
+      console.log("🔨 Building the JavaScript bundle...");
+      const appResult = await esbuild.build(appBuildOptions);
 
       console.log("✅ Build complete!");
 
-      // Analyze bundle sizes and composition
+      // Analyze bundle size and composition
       const withinBudget = analyzeBundleSizes();
-
-      if (libraryResult.metafile) {
-        analyzeBundleComposition(libraryResult.metafile, "KMLHeatmap Library");
-      }
 
       if (appResult.metafile) {
         analyzeBundleComposition(appResult.metafile, "MapApp Bundle");

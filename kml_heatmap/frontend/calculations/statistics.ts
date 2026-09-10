@@ -4,7 +4,7 @@
  */
 
 import {
-  CRUISE_ALTITUDE_THRESHOLD_M,
+  CRUISE_ALTITUDE_THRESHOLD_FT,
   FEET_TO_METERS,
   KM_TO_NAUTICAL_MILES,
   METERS_TO_FEET,
@@ -21,20 +21,31 @@ import type {
   FilteredStatistics,
 } from "../types";
 
-function segmentDistance(segment: PathSegment): number {
+/**
+ * Great-circle length of a segment in kilometres.
+ *
+ * Every statistics refresh needs the distance of the same segments three
+ * times (total distance, longest flight, cruise weighting), so the result is
+ * memoised on the segment. The value only depends on `coords`, which the
+ * data loader never changes after expansion.
+ */
+export function segmentDistance(segment: PathSegment): number {
+  const cached = segment.distance_km;
+  if (cached !== undefined) return cached;
+
   const coords = segment.coords;
-  if (coords && coords.length === 2) {
-    return calculateDistance(coords[0], coords[1]);
-  }
-  return 0;
+  const distance =
+    coords && coords.length === 2 ? calculateDistance(coords[0], coords[1]) : 0;
+  segment.distance_km = distance;
+  return distance;
 }
 
 /**
  * Group timed segments by path and return per-path flight seconds.
- * Shared by aggregateAircraft (per-aircraft time) and calculateFlightTime
- * (total time).
+ * Shared by aggregateAircraft (per-aircraft time) and
+ * calculateFilteredStatistics (total time).
  */
-function perPathSeconds(
+export function perPathSeconds(
   segments: PathSegment[],
   pathIds?: Set<number>,
 ): Map<number, number> {
@@ -107,6 +118,7 @@ export function collectAirports(pathInfo: PathInfo[]): Set<string> {
 export function aggregateAircraft(
   pathInfo: PathInfo[],
   segments?: PathSegment[],
+  secondsByPath?: Map<number, number>,
 ): AircraftAggregate[] {
   const aircraftMap: Record<string, AircraftAggregate> = {};
   const pathToReg = new Map<number, string>();
@@ -126,9 +138,10 @@ export function aggregateAircraft(
     }
   }
 
-  if (segments) {
-    const pathFilter = new Set(pathToReg.keys());
-    const seconds = perPathSeconds(segments, pathFilter);
+  if (segments || secondsByPath) {
+    const seconds =
+      secondsByPath ??
+      perPathSeconds(segments ?? [], new Set(pathToReg.keys()));
     for (const [pathId, secs] of seconds) {
       const reg = pathToReg.get(pathId);
       if (reg && aircraftMap[reg]) {
@@ -273,24 +286,6 @@ export function calculateLongestFlight(segments: PathSegment[]): number {
   return findMax(distances);
 }
 
-/**
- * Calculate flight time statistics from segments
- * @param segments - Array of segment objects with time property
- * @param pathInfo - Array of path info objects
- * @returns Total flight time in seconds
- */
-export function calculateFlightTime(
-  segments: PathSegment[],
-  pathInfo: PathInfo[],
-): number {
-  const pathIds = new Set(pathInfo.map((p) => p.id));
-  let totalSeconds = 0;
-  for (const secs of perPathSeconds(segments, pathIds).values()) {
-    totalSeconds += secs;
-  }
-  return totalSeconds;
-}
-
 function emptyStatistics(): FilteredStatistics {
   return {
     total_points: 0,
@@ -314,7 +309,6 @@ export function calculateFilteredStatistics(options: {
   segments: PathSegment[];
   year?: string;
   aircraft?: string;
-  coordinateCount?: number | undefined;
   preFiltered?: { paths: PathInfo[]; segments: PathSegment[] };
 }): FilteredStatistics {
   const {
@@ -322,7 +316,6 @@ export function calculateFilteredStatistics(options: {
     segments,
     year = "all",
     aircraft = "all",
-    coordinateCount,
     preFiltered,
   } = options;
 
@@ -341,14 +334,24 @@ export function calculateFilteredStatistics(options: {
   const airports = collectAirports(filteredPaths);
   const filteredSegments =
     preFiltered?.segments ?? filterSegmentsByPaths(segments, filteredPaths);
-  const aircraftList = aggregateAircraft(filteredPaths, filteredSegments);
+  // One grouping pass feeds both the per-aircraft times and the total
+  const secondsByPath = perPathSeconds(
+    filteredSegments,
+    new Set(filteredPaths.map((p) => p.id)),
+  );
+  const aircraftList = aggregateAircraft(
+    filteredPaths,
+    filteredSegments,
+    secondsByPath,
+  );
 
   // Calculate metrics
   const totalDistanceKm = calculateTotalDistance(filteredSegments);
   const altitudeStats = calculateAltitudeStats(filteredSegments, filteredPaths);
   const speedStats = calculateSpeedStats(filteredSegments);
   const longestFlight = calculateLongestFlight(filteredSegments);
-  const flightTime = calculateFlightTime(filteredSegments, filteredPaths);
+  let flightTime = 0;
+  for (const secs of secondsByPath.values()) flightTime += secs;
 
   // Unit conversions
   const maxAltitudeFt = altitudeStats.max * METERS_TO_FEET;
@@ -371,8 +374,7 @@ export function calculateFilteredStatistics(options: {
     }
   }
 
-  // Calculate cruise speed (segments above 1000ft AGL)
-  const cruiseThresholdFt = CRUISE_ALTITUDE_THRESHOLD_M * METERS_TO_FEET;
+  // Calculate cruise speed (segments above 1000 ft AGL)
   const cruiseSegments = filteredSegments.filter((seg) => {
     // altitude_ft may legitimately be 0, so compare against undefined
     if (
@@ -382,7 +384,7 @@ export function calculateFilteredStatistics(options: {
     )
       return false;
     const groundLevelFt = pathMinAltFt.get(seg.path_id) ?? 0;
-    return seg.altitude_ft - groundLevelFt > cruiseThresholdFt;
+    return seg.altitude_ft - groundLevelFt > CRUISE_ALTITUDE_THRESHOLD_FT;
   });
 
   // Calculate weighted average speed (distance/time) instead of simple average
@@ -435,9 +437,13 @@ export function calculateFilteredStatistics(options: {
     }
   }
 
-  // Use provided coordinate count if available, otherwise count unique coordinates from filtered segments
-  // Note: coordinateCount represents the actual heatmap coordinates, not segment endpoints
-  const totalPoints = coordinateCount ?? filteredSegments.length * 2;
+  // Track points behind the filtered segments: every segment contributes its
+  // start point and each path adds the end point of its last segment. This is
+  // exactly what the heatmap draws, so the figure follows every filter and
+  // means the same thing for a filter and for a selection.
+  const pathsWithSegments = new Set<number>();
+  for (const seg of filteredSegments) pathsWithSegments.add(seg.path_id);
+  const totalPoints = filteredSegments.length + pathsWithSegments.size;
 
   return {
     total_points: totalPoints,

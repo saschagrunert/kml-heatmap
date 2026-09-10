@@ -14,18 +14,15 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json", "html"],
       include: ["kml_heatmap/frontend/**/*.{js,ts}"],
-      exclude: [
-        "**/node_modules/**",
-        "**/tests/**",
-        "kml_heatmap/frontend/main.ts",
-        "kml_heatmap/frontend/exports.ts",
-      ],
+      exclude: ["**/node_modules/**", "**/tests/**"],
       clean: true,
+      // Just under what the suite reaches today, so a real regression fails
+      // the build instead of quietly eating a wide margin
       thresholds: {
-        lines: 85,
-        branches: 75,
-        functions: 85,
-        statements: 85,
+        lines: 98,
+        branches: 89,
+        functions: 97,
+        statements: 97,
       },
     },
     alias: {

@@ -10,12 +10,14 @@ from pathlib import Path
 
 import pytest
 
+from kml_heatmap.geometry import haversine_distance
 from kml_heatmap.helpers import format_flight_time
 from kml_heatmap.renderer import create_progressive_heatmap
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-SEGMENT_MIN_LEN = 6
-SEGMENT_MAX_LEN = 7
+# Row: [lat, lon, altitude_ft, groundspeed_knots] plus an optional time
+SEGMENT_MIN_LEN = 4
+SEGMENT_MAX_LEN = 5
 
 
 def _select_input_files(per_year=4):
@@ -59,8 +61,9 @@ def golden_output(tmp_path_factory):
 def test_index_html_references_bundles(golden_output):
     out, _ = golden_output
     html = (out / "index.html").read_text(encoding="utf-8")
-    assert "bundle.js" in html
     assert "mapApp.bundle.js" in html
+    # The library bundle was removed; nothing may pull it back in
+    assert "./bundle.js" not in html
     assert (out / "map_config.js").exists()
     assert (out / "styles.css").exists()
 
@@ -73,22 +76,18 @@ def test_top_level_data_files(golden_output):
 
     assert set(metadata) == {
         "stats",
-        "min_alt_m",
-        "max_alt_m",
         "min_groundspeed_knots",
         "max_groundspeed_knots",
         "available_years",
         "year_file_bytes",
     }
-    assert metadata["min_alt_m"] <= metadata["max_alt_m"]
     assert 0 <= metadata["min_groundspeed_knots"] <= metadata["max_groundspeed_knots"]
 
     assert set(airports) == {"airports"}
     assert airports["airports"]
     for airport in airports["airports"]:
-        assert set(airport) <= {"name", "lat", "lon", "country", "flight_count"}
-        assert {"name", "lat", "lon", "flight_count"} <= set(airport)
-        assert airport["flight_count"] >= 1
+        assert set(airport) <= {"name", "lat", "lon", "country"}
+        assert {"name", "lat", "lon"} <= set(airport)
 
 
 def test_year_files_match_available_years(golden_output):
@@ -141,18 +140,50 @@ def test_year_data_shape_and_global_ids(golden_output):
             assert len(info["start_coords"]) == 2
             assert len(info["end_coords"]) == 2
 
-        for rows in data["segments"].values():
+        for entry in data["segments"].values():
+            rows = entry["rows"]
             assert rows
+            assert len(entry["start"]) == 2
             for row in rows:
                 assert SEGMENT_MIN_LEN <= len(row) <= SEGMENT_MAX_LEN
                 assert all(isinstance(v, int | float) for v in row)
-                assert row[4] % 100 == 0
-                assert row[5] >= 0
+                assert row[2] % 100 == 0
+                assert row[3] >= 0
 
     assert all_ids == list(range(len(all_ids)))
     assert len(all_ids) == len(inputs)
     assert metadata["stats"]["num_paths"] == len(all_ids)
     assert metadata["stats"]["total_points"] == total_original_points
+
+
+def test_distance_matches_a_recompute_from_the_exported_coordinates(golden_output):
+    """The exported segments are the only flight data the frontend sees.
+
+    It recomputes every distance from the rounded coordinates in the file, so
+    the reconciled statistics have to come out of exactly those numbers. If the
+    exporter ever measures the unrounded track instead, the panel and the
+    metadata start disagreeing and this fails.
+    """
+    out, _ = golden_output
+    data_dir = out / "data"
+    metadata = _load_js(data_dir / "metadata.js", "KML_METADATA")
+    stats = metadata["stats"]
+
+    total_km = 0.0
+    longest_km = 0.0
+    for year in metadata["available_years"]:
+        data = _load_js(data_dir / str(year) / "data.js", f"KML_DATA_{year}")
+        for entry in data["segments"].values():
+            previous = entry["start"]
+            path_km = 0.0
+            for row in entry["rows"]:
+                path_km += haversine_distance(previous[0], previous[1], row[0], row[1])
+                previous = row
+            total_km += path_km
+            longest_km = max(longest_km, path_km)
+
+    assert total_km == pytest.approx(stats["total_distance_km"], rel=1e-9)
+    assert longest_km == pytest.approx(stats["longest_flight_km"], abs=0.05)
 
 
 def test_statistics_are_internally_consistent(golden_output):

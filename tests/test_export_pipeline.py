@@ -102,17 +102,37 @@ class TestSegmentGroundspeed:
 
 class TestProcessPathSegments:
     def test_generates_rows_with_time(self):
-        rows, distances = process_path_segments(_make_path(timed=True), 10.0, 540.0)
+        start, rows, distances = process_path_segments(
+            _make_path(timed=True), 10.0, 540.0
+        )
+        assert start == [50.0, 8.5]
         assert len(rows) == 9
         assert len(distances) == 9
-        assert all(len(row) == 7 for row in rows)
-        assert rows[0][6] == 0.0
-        assert rows[1][6] == 60.0
+        assert all(len(row) == 5 for row in rows)
+        assert rows[0][4] == 0.0
+        assert rows[1][4] == 60.0
         assert all(distance > 0 for distance in distances)
 
     def test_rows_without_time(self):
-        rows, _ = process_path_segments(_make_path(count=3), 10.0, 600.0)
-        assert all(len(row) == 6 for row in rows)
+        _, rows, _ = process_path_segments(_make_path(count=3), 10.0, 600.0)
+        assert all(len(row) == 4 for row in rows)
+
+    def test_rows_are_contiguous(self):
+        """Each row starts where the previous one ended, so only ends are stored."""
+        start, rows, _ = process_path_segments(_make_path(count=5), 10.0, 600.0)
+        path = _make_path(count=5)
+        assert start == [round(path[0].lat, 5), round(path[0].lon, 5)]
+        for row, point in zip(rows, path[1:], strict=True):
+            assert row[:2] == [round(point.lat, 5), round(point.lon, 5)]
+
+    def test_coordinates_rounded_to_five_decimals(self):
+        path = [
+            TrackPoint(50.123456789, 8.987654321, 1000.0, None),
+            TrackPoint(50.223456789, 8.887654321, 1000.0, None),
+        ]
+        start, rows, _ = process_path_segments(path, 5.0, 60.0)
+        assert start == [50.12346, 8.98765]
+        assert rows[0][:2] == [50.22346, 8.88765]
 
     def test_identical_coordinates_filtered(self):
         path = [
@@ -120,9 +140,11 @@ class TestProcessPathSegments:
             TrackPoint(50.0, 8.5, 1100.0, None),
             TrackPoint(50.1, 8.6, 1200.0, None),
         ]
-        rows, distances = process_path_segments(path, 5.0, 120.0)
+        start, rows, distances = process_path_segments(path, 5.0, 120.0)
         assert len(rows) == 1
-        assert rows[0][:4] == [50.0, 8.5, 50.1, 8.6]
+        # The dropped segment had zero length, so the chain stays contiguous
+        assert start == [50.0, 8.5]
+        assert rows[0][:2] == [50.1, 8.6]
         assert len(distances) == 1
 
     def test_altitude_rounded_to_100ft(self):
@@ -130,31 +152,34 @@ class TestProcessPathSegments:
             TrackPoint(50.0, 8.5, 1523.5, None),
             TrackPoint(50.1, 8.6, 1523.5, None),
         ]
-        rows, _ = process_path_segments(path, 5.0, 60.0)
-        assert rows[0][4] == 5000
-        assert rows[0][4] % 100 == 0
+        _, rows, _ = process_path_segments(path, 5.0, 60.0)
+        assert rows[0][2] == 5000
+        assert rows[0][2] % 100 == 0
 
     def test_missing_altitude_on_one_end_uses_the_other(self):
         path = [TrackPoint(50.0, 8.5, None, None), TrackPoint(50.1, 8.6, 304.8, None)]
-        rows, _ = process_path_segments(path, 5.0, 60.0)
-        assert rows[0][4] == 1000
+        _, rows, _ = process_path_segments(path, 5.0, 60.0)
+        assert rows[0][2] == 1000
 
-    def test_missing_altitude_on_both_ends_skips_segment(self):
+    def test_missing_altitude_on_both_ends_keeps_the_segment(self):
+        """Skipping it would break the end-to-start chain of the row format."""
         path = [
             TrackPoint(50.0, 8.5, None, None),
             TrackPoint(50.1, 8.6, None, None),
             TrackPoint(50.2, 8.7, 100.0, None),
         ]
-        rows, distances = process_path_segments(path, 5.0, 60.0)
-        assert len(rows) == 1
-        assert rows[0][:2] == [50.1, 8.6]
-        assert len(distances) == 1
+        start, rows, distances = process_path_segments(path, 5.0, 60.0)
+        assert start == [50.0, 8.5]
+        assert [row[:2] for row in rows] == [[50.1, 8.6], [50.2, 8.7]]
+        assert rows[0][2] == 0.0  # no altitude known yet
+        assert rows[1][2] == 300  # 100 m rounded to the nearest 100 ft
+        assert len(distances) == 2
 
     def test_groundspeed_rounded(self):
-        rows, _ = process_path_segments(_make_path(timed=True), 10.0, 540.0)
+        _, rows, _ = process_path_segments(_make_path(timed=True), 10.0, 540.0)
         for row in rows:
-            assert row[5] == round(row[5], 1)
-            assert row[5] > 0
+            assert row[3] == round(row[3], 1)
+            assert row[3] > 0
 
     def test_relative_time_rounded(self):
         path = [
@@ -162,5 +187,11 @@ class TestProcessPathSegments:
             TrackPoint(50.1, 8.6, 100.0, 1000.0 + 61.26),
             TrackPoint(50.2, 8.7, 100.0, 1000.0 + 120.0),
         ]
-        rows, _ = process_path_segments(path, 20.0, 120.0)
-        assert rows[1][6] == 61.3
+        _, rows, _ = process_path_segments(path, 20.0, 120.0)
+        assert rows[1][4] == 61.3
+
+    def test_empty_path_has_no_start(self):
+        _, rows, _ = process_path_segments([], 0.0, 0.0)
+        assert rows == []
+        start, _, _ = process_path_segments([], 0.0, 0.0)
+        assert start == []

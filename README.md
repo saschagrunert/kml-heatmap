@@ -343,14 +343,12 @@ because the browser needs them to load the base map and the Aviation Data layer.
 
 ## Output
 
-The output directory contains the page, the frontend bundles with their source
-maps, static assets and a `data/` directory with one file per year:
+The output directory contains the page, the frontend bundle with its source
+map, static assets and a `data/` directory with one file per year:
 
 ```
 output-dir/
 ├── index.html
-├── bundle.js
-├── bundle.js.map
 ├── mapApp.bundle.js
 ├── mapApp.bundle.js.map
 ├── map_config.js          # Map defaults and the tile API keys
@@ -371,13 +369,22 @@ output-dir/
 ```
 
 Each year file sets `window.KML_DATA_<YEAR>` to an object with `year`,
-`original_points`, `path_info` and `segments`. `segments` maps a path id to a
-list of `[lat1, lon1, lat2, lon2, altitude_ft, groundspeed_knots, time]`
-entries, where `time` (relative seconds) is only present for files with
-timestamps. `metadata.js` lists the available years, the statistics and the
-size of each year file (`year_file_bytes`) so the frontend can show loading
-progress. Flights without a recognizable year are skipped instead of being
-grouped under an "unknown" year.
+`original_points`, `path_info` and `segments`. `segments` maps a path id to
+`{"start": [lat, lon], "rows": [...]}`, where each row is
+`[lat, lon, altitude_ft, groundspeed_knots, time]` and `time` (relative
+seconds) is only present for files with timestamps.
+
+The coordinate in a row is the segment's **end** point. Its start is the end
+of the previous row, and the first row continues from `start`, so a shared
+point is stored once instead of twice. This holds because the only segments
+the exporter drops are zero-length ones, whose two endpoints are the same
+coordinate. Coordinates are rounded to five decimals (about 1 m).
+
+`metadata.js` lists the available years, the statistics and the size of each
+year file (`year_file_bytes`) so the frontend can show loading progress.
+Flights without a recognizable year are skipped instead of being grouped under
+an "unknown" year. Airport entries carry no flight count: the frontend derives
+one per airport from the active year and aircraft filter.
 
 Data is exported as JavaScript files (instead of JSON) for compatibility with
 the `file://` protocol. It is organized by year and loaded on demand.
@@ -460,12 +467,14 @@ files are not parsed again.
 
 ### Data Export
 
-The tool exports all flight data at full resolution without downsampling:
+The tool exports all flight data without downsampling:
 
-- **Full fidelity**: All coordinate points are preserved
+- **Full fidelity**: Every coordinate point is preserved. Coordinates are
+  written with five decimals (about 1 m), far finer than the map can show
 - **Year-based splitting**: Data is organized by year for efficient filtering
 - **On-demand loading**: Only requested years are loaded into the browser
-- **Compact format**: Paths are stored as segment lists per path id (see [Output](#output))
+- **Compact format**: Paths are stored as a start point plus one row per
+  segment, each holding only its end point (see [Output](#output))
 
 Parsing and the per-year export run in a process pool, so large collections
 scale with the number of CPU cores. See
@@ -500,8 +509,8 @@ npm ci
 **Available commands:**
 
 ```bash
-npm run build            # Build production bundles (minified)
-npm run build:dev        # Build development bundles (with sourcemaps)
+npm run build            # Build the production bundle (minified)
+npm run build:dev        # Build the development bundle (with sourcemaps)
 npm run build:watch      # Watch mode for development
 npm run test             # Run unit tests
 npm run test:watch       # Watch mode for tests
@@ -552,11 +561,11 @@ leave traces in `test-results/` and a report in `playwright-report/`.
 
 - **Format**: IIFE (Immediately Invoked Function Expression)
 - **Protocol**: Compatible with `file://` protocol - open index.html directly in browser
-- **Production**: Minified bundles for optimal performance
+- **Production**: Minified bundle for optimal performance
 - **Development**: Unminified with sourcemaps for debugging
 
-The bundles in `kml_heatmap/static/` (`bundle.js`, `mapApp.bundle.js` and
-their `.map` files) are gitignored and created by `npm run build`.
+The bundle in `kml_heatmap/static/` (`mapApp.bundle.js` and its `.map` file)
+is gitignored and created by `npm run build`.
 
 **Architecture:**
 
@@ -570,7 +579,7 @@ their `.map` files) are gitignored and created by `npm run build`.
 - **Tests**
   - Unit tests: `tests/frontend/unit/` (Vitest)
   - E2E tests: `tests/e2e/` (Playwright)
-- **Build output** in `kml_heatmap/static/` (bundle.js, mapApp.bundle.js)
+- **Build output** in `kml_heatmap/static/` (mapApp.bundle.js)
 
 ### Backend (Python)
 

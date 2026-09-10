@@ -87,13 +87,16 @@ describe("AirportManager", () => {
   });
 
   describe("updateAirportPopups", () => {
-    it("updates popup content for every marker", () => {
+    it("binds the popup with the current counts on the first update", () => {
       airportManager.updateAirportPopups();
 
       for (const marker of Object.values(markers)) {
-        expect(marker.setPopupContent).toHaveBeenCalledTimes(1);
+        // Markers are created without a popup, so the first content the user
+        // can ever see already carries the counts of the active filter
+        expect(marker.bindPopup).toHaveBeenCalledTimes(1);
+        expect(marker.setPopupContent).not.toHaveBeenCalled();
       }
-      const eddf = String(markers["EDDF"]!.setPopupContent.mock.calls[0]![0]);
+      const eddf = String(markers["EDDF"]!.popupContent());
       expect(eddf).toContain("EDDF");
       expect(eddf).toContain(
         '<span class="popup-metric-value kh-popup-accent">3</span>',
@@ -103,15 +106,24 @@ describe("AirportManager", () => {
       expect(eddf).toContain("E");
     });
 
+    it("replaces the content of an already bound popup", () => {
+      airportManager.updateAirportPopups();
+      mockApp.selectedAircraft = "D-EFGH";
+      airportManager.updateAirportPopups();
+
+      const eddf = markers["EDDF"]!;
+      expect(eddf.bindPopup).toHaveBeenCalledTimes(1);
+      expect(eddf.setPopupContent).toHaveBeenCalledTimes(1);
+      expect(String(eddf.popupContent())).toContain(
+        '<span class="popup-metric-value kh-popup-accent">1</span>',
+      );
+    });
+
     it("marks the home base with the badge and the marker class", () => {
       airportManager.updateAirportPopups();
 
-      expect(
-        String(markers["EDDF"]!.setPopupContent.mock.calls[0]![0]),
-      ).toContain("HOME");
-      expect(
-        String(markers["EDDM"]!.setPopupContent.mock.calls[0]![0]),
-      ).not.toContain("HOME");
+      expect(String(markers["EDDF"]!.popupContent())).toContain("HOME");
+      expect(String(markers["EDDM"]!.popupContent())).not.toContain("HOME");
       expect(markers["EDDF"]!.setIcon).toHaveBeenCalledTimes(1);
       const iconHtml = vi.mocked(L.divIcon).mock.calls.at(-1)![0]!
         .html as string;
@@ -141,7 +153,7 @@ describe("AirportManager", () => {
     it("shows zero flights for airports outside the filter", () => {
       airportManager.updateAirportPopups();
 
-      const loww = String(markers["LOWW"]!.setPopupContent.mock.calls[0]![0]);
+      const loww = String(markers["LOWW"]!.popupContent());
       expect(loww).toContain(
         '<span class="popup-metric-value kh-popup-accent">0</span>',
       );

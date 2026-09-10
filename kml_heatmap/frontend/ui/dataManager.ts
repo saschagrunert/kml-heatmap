@@ -1,6 +1,7 @@
 /**
  * Data Manager - Handles data loading and layer refresh
  */
+import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import type { KMLDataset, Airport, LoadingInfo, Metadata } from "../types";
 import type { Coordinate } from "../utils/geometry";
@@ -113,27 +114,32 @@ export class DataManager {
 
     // Filter coordinates based on active filters and isolate mode
     let filteredCoordinates = data.coordinates;
-    const hasFilters =
-      this.app.selectedYear !== "all" || this.app.selectedAircraft !== "all";
     const hasIsolation =
       this.app.isolateSelection && this.app.selectedPathIds.size > 0;
 
-    if (hasFilters || hasIsolation) {
-      // Get filtered path IDs based on year/aircraft
-      const filteredPathIds = new Set<number>();
-      for (const pathInfo of data.path_info) {
-        const matchesYear =
-          this.app.selectedYear === "all" ||
-          (pathInfo.year !== undefined &&
-            pathInfo.year.toString() === this.app.selectedYear);
-        const matchesAircraft =
-          this.app.selectedAircraft === "all" ||
-          pathInfo.aircraft_registration === this.app.selectedAircraft;
-        if (matchesYear && matchesAircraft) {
-          filteredPathIds.add(pathInfo.id);
-        }
+    // Path ids the year/aircraft filter keeps. Checking the path info (about a
+    // hundred entries) is what says whether the filter changes anything at
+    // all: a year filter over that year's own file keeps every path, and then
+    // data.coordinates already is the answer. Walking every segment to
+    // rediscover that costs two string keys per segment for nothing.
+    const filteredPathIds = new Set<number>();
+    let allPathsMatch = true;
+    for (const pathInfo of data.path_info) {
+      const matchesYear =
+        this.app.selectedYear === "all" ||
+        (pathInfo.year !== undefined &&
+          pathInfo.year.toString() === this.app.selectedYear);
+      const matchesAircraft =
+        this.app.selectedAircraft === "all" ||
+        pathInfo.aircraft_registration === this.app.selectedAircraft;
+      if (matchesYear && matchesAircraft) {
+        filteredPathIds.add(pathInfo.id);
+      } else {
+        allPathsMatch = false;
       }
+    }
 
+    if (hasIsolation || !allPathsMatch) {
       // Extract coordinates from filtered segments
       const coordMap = new Map<string, Coordinate>();
       for (const segment of data.path_segments) {

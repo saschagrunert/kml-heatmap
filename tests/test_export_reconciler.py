@@ -7,20 +7,47 @@ from kml_heatmap.export_reconciler import YearAggregate
 from kml_heatmap.geometry import haversine_distance
 from kml_heatmap.helpers import format_flight_time
 
+START = (50.0, 8.0)
+STEP = 0.01
 
-def _row(alt_ft, gs, time=None, lat1=50.0, lon1=8.0, lat2=50.01, lon2=8.0):
-    row = [lat1, lon1, lat2, lon2, alt_ft, gs]
+
+# Exported row: [lat, lon, altitude_ft, groundspeed_knots, time?] where the
+# coordinate is the segment's END point (see types.SegmentRow). A row without
+# an explicit latitude is placed on a chain by _resolve, one STEP per row, so
+# that every segment has a real length.
+def _row(alt_ft, gs, time=None, lat=None, lon=None):
+    row = [lat, lon, alt_ft, gs]
     if time is not None:
         row.append(time)
     return row
 
 
-def _distances(rows):
-    return [haversine_distance(r[0], r[1], r[2], r[3]) for r in rows]
+def _resolve(rows, start=START):
+    """Fill in the end point of every row that did not name one."""
+    resolved = []
+    lat, lon = start
+    for index, row in enumerate(rows, start=1):
+        filled = list(row)
+        if filled[0] is None:
+            filled[0] = lat + index * STEP
+        if filled[1] is None:
+            filled[1] = lon
+        resolved.append(filled)
+    return resolved
+
+
+def _distances(rows, start=START):
+    """Segment distances of a contiguous row list, starting from ``start``."""
+    distances = []
+    previous = start
+    for row in _resolve(rows, start):
+        distances.append(haversine_distance(previous[0], previous[1], row[0], row[1]))
+        previous = (row[0], row[1])
+    return distances
 
 
 def _add(aggregate, rows, registration=None):
-    aggregate.add_path(rows, _distances(rows), registration)
+    aggregate.add_path(_resolve(rows), _distances(rows), registration)
 
 
 class TestAddPath:
@@ -52,9 +79,9 @@ class TestAddPath:
     def test_cruise_speed_weighted_by_distance(self):
         agg = YearAggregate()
         rows = [
-            _row(100, 80),
-            _row(1200, 150, lat1=50.0, lat2=50.01),
-            _row(1300, 100, lat1=50.01, lat2=50.03),
+            _row(100, 80, lat=50.0),
+            _row(1200, 150, lat=50.01),
+            _row(1300, 100, lat=50.03),
         ]
         _add(agg, rows)
         d1, d2 = _distances(rows)[1:]
@@ -99,7 +126,7 @@ class TestAddPath:
     def test_longest_flight_and_total_distance(self):
         agg = YearAggregate()
         short = [_row(100, 100)]
-        long = [_row(100, 100, lat2=50.5)]
+        long = [_row(100, 100, lat=50.5)]
         _add(agg, short)
         _add(agg, long)
         assert agg.longest_flight_km == pytest.approx(sum(_distances(long)))

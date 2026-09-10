@@ -8,10 +8,8 @@ from hypothesis import strategies as st
 
 from kml_heatmap.geometry import (
     EARTH_RADIUS_KM,
-    extract_altitudes,
     haversine_distance,
 )
-from kml_heatmap.types import TrackPoint
 
 latitudes = st.floats(min_value=-90.0, max_value=90.0)
 longitudes = st.floats(min_value=-180.0, max_value=180.0)
@@ -74,24 +72,3 @@ class TestHaversineProperties:
             lat2, lon2, lat3, lon3
         )
         assert direct <= via + 1e-6
-
-
-class TestExtractAltitudes:
-    def test_basic_extraction(self):
-        paths = [
-            [TrackPoint(0, 0, 100), TrackPoint(0, 0, 200)],
-            [TrackPoint(0, 0, 300)],
-        ]
-        assert extract_altitudes(paths) == [100, 200, 300]
-
-    def test_empty_paths(self):
-        assert extract_altitudes([]) == []
-        assert extract_altitudes([[], []]) == []
-
-    def test_points_without_altitude_skipped(self):
-        paths = [[TrackPoint(0, 0, None), TrackPoint(0, 0, 500), TrackPoint(0, 0)]]
-        assert extract_altitudes(paths) == [500]
-
-    def test_zero_and_negative_altitude_included(self):
-        paths = [[TrackPoint(0, 0, 0), TrackPoint(0, 0, -50)]]
-        assert extract_altitudes(paths) == [0, -50]

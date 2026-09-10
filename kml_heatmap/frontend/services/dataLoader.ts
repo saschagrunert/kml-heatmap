@@ -21,10 +21,11 @@ import type {
  * @returns true if valid
  */
 export function isValidYear(year: string): boolean {
-  // Must be 'all' or a 4-digit year between 2000-2099
+  // Must be 'all' or a four-digit year. The shape is what keeps the value out
+  // of the path; which years actually exist is metadata.available_years, so no
+  // numeric range is imposed here.
   if (year === "all") return true;
-  const yearNum = parseInt(year, 10);
-  return /^\d{4}$/.test(year) && yearNum >= 2000 && yearNum <= 2099;
+  return /^\d{4}$/.test(year);
 }
 
 /**
@@ -60,10 +61,12 @@ export function getGlobalVarName(year: string): string {
 /**
  * Expand the compact per-year file format into the in-memory dataset shape.
  *
- * The file stores segments as tuples keyed by path id:
- * `[lat1, lon1, lat2, lon2, altitude_ft, groundspeed_knots, time?]`.
- * Heatmap coordinates are derived as every segment's start point plus the
- * last segment's end point of each path. Arrays are preallocated and each
+ * Each path stores a start point and rows of
+ * `[lat, lon, altitude_ft, groundspeed_knots, time?]`, where the coordinate is
+ * the row's END point: consecutive rows are contiguous, so the start of a row
+ * is the end of the one before it. Heatmap coordinates are every segment's
+ * start point plus the last end point of each path, and neighbouring segments
+ * share the very same coordinate array. Arrays are preallocated and each
  * segment creates exactly one object.
  * @param raw - Contents of window.KML_DATA_<YEAR>
  * @returns Expanded dataset
@@ -84,7 +87,7 @@ export function expandYearData(raw: RawYearData): KMLDataset {
   let totalSegments = 0;
   let pathsWithSegments = 0;
   for (const id of pathIds) {
-    const count = segmentsByPath[id]?.length ?? 0;
+    const count = segmentsByPath[id]?.rows?.length ?? 0;
     totalSegments += count;
     if (count > 0) pathsWithSegments++;
   }
@@ -97,29 +100,34 @@ export function expandYearData(raw: RawYearData): KMLDataset {
   let segmentIndex = 0;
   let coordinateIndex = 0;
   for (const id of pathIds) {
-    const tuples = segmentsByPath[id];
-    if (!tuples || tuples.length === 0) continue;
+    const entry = segmentsByPath[id];
+    const rows = entry?.rows;
+    if (!entry || !rows || rows.length === 0) continue;
+    const startPoint = entry.start;
+    if (!startPoint || startPoint.length < 2) {
+      throw new Error(`Invalid year data: path ${id} has no start point`);
+    }
     const pathId = Number(id);
 
-    for (let i = 0; i < tuples.length; i++) {
-      const t = tuples[i]!;
-      const start: Coordinate = [t[0], t[1]];
-      const end: Coordinate = [t[2], t[3]];
+    let previous: Coordinate = [startPoint[0]!, startPoint[1]!];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!;
+      const end: Coordinate = [row[0], row[1]];
       const segment: PathSegment = {
         path_id: pathId,
-        coords: [start, end],
-        altitude_ft: t[4],
-        groundspeed_knots: t[5],
+        coords: [previous, end],
+        altitude_ft: row[2],
+        groundspeed_knots: row[3],
       };
-      if (t.length > 6) {
-        segment.time = t[6];
+      if (row.length > 4) {
+        segment.time = row[4];
       }
       path_segments[segmentIndex++] = segment;
-      coordinates[coordinateIndex++] = start;
+      coordinates[coordinateIndex++] = previous;
+      previous = end;
     }
 
-    const last = tuples[tuples.length - 1]!;
-    coordinates[coordinateIndex++] = [last[2], last[3]];
+    coordinates[coordinateIndex++] = previous;
   }
 
   return {

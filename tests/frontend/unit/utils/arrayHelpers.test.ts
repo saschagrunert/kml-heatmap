@@ -1,46 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
-  findMin,
   findMax,
   findMinMax,
 } from "../../../../kml_heatmap/frontend/utils/arrayHelpers";
 
 describe("arrayHelpers", () => {
-  describe("findMin", () => {
-    it("finds minimum value in array", () => {
-      expect(findMin([5, 2, 8, 1, 9])).toBe(1);
-    });
-
-    it("handles single element", () => {
-      expect(findMin([42])).toBe(42);
-    });
-
-    it("handles negative numbers", () => {
-      expect(findMin([-5, -2, -8, -1])).toBe(-8);
-    });
-
-    it("handles mixed positive and negative", () => {
-      expect(findMin([5, -2, 8, -10, 3])).toBe(-10);
-    });
-
-    it("handles all same values", () => {
-      expect(findMin([7, 7, 7, 7])).toBe(7);
-    });
-
-    it("returns 0 for empty array", () => {
-      expect(findMin([])).toBe(0);
-    });
-
-    it("handles large arrays efficiently", () => {
-      const largeArray = Array.from({ length: 100000 }, (_, i) => i);
-      expect(findMin(largeArray)).toBe(0);
-    });
-
-    it("handles decimals", () => {
-      expect(findMin([1.5, 0.3, 2.7, 0.1])).toBe(0.1);
-    });
-  });
-
   describe("findMax", () => {
     it("finds maximum value in array", () => {
       expect(findMax([5, 2, 8, 1, 9])).toBe(9);

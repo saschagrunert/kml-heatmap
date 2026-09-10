@@ -124,7 +124,7 @@ describe("StatsManager", () => {
         document.getElementById("stats-rail-title")!.textContent,
       ).toContain("Flight Statistics");
       expect(leadValue(statsPanel, "Flights")).toBe("1");
-      expect(statsPanel.textContent).toContain("1234 data points");
+      expect(statsPanel.textContent).toContain("3 data points");
       expect(statsPanel.textContent).toContain("EDDF");
       expect(statsPanel.textContent).not.toContain("EDDK");
       expect(leadValue(statsPanel, "Total Flight Time")).toBe("0h 10m");
@@ -157,13 +157,25 @@ describe("StatsManager", () => {
       expect(statsPanel.textContent).toContain("D-EFGH");
     });
 
-    it("keeps the panel unchanged if the selected paths have no segments", () => {
+    it("renders an empty selection instead of the previous flight", () => {
       statsPanel.innerHTML = "before";
       mockApp.selectedPathIds.add(999);
 
       statsManager.updateStatsForSelection();
 
-      expect(statsPanel.innerHTML).toBe("before");
+      expect(statsPanel.innerHTML).not.toBe("before");
+      expect(statsPanel.textContent).toContain("0 selected paths");
+      expect(leadValue(statsPanel, "Flights")).toBe("0");
+    });
+
+    it("does not rewrite the panel when the markup is unchanged", () => {
+      statsManager.updateStatsForSelection();
+      const first = statsPanel.firstElementChild;
+
+      statsManager.updateStatsForSelection();
+
+      // Same nodes, so focus and scroll position inside the panel survive
+      expect(statsPanel.firstElementChild).toBe(first);
     });
 
     it("handles missing data", () => {

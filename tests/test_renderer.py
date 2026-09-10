@@ -250,9 +250,11 @@ class TestPackageAssets:
         assert "$center_lat" not in config
         assert (tmp_path / "styles.css").stat().st_size > 0
         static_dir = Path(__file__).parent.parent / "kml_heatmap" / "static"
-        for fname in ("favicon.svg", "manifest.json", "bundle.js", "mapApp.bundle.js"):
+        for fname in ("favicon.svg", "manifest.json", "mapApp.bundle.js"):
             if (static_dir / fname).exists():
                 assert (tmp_path / fname).exists()
+        # The library bundle was removed; it must not reappear in the output
+        assert not (tmp_path / "bundle.js").exists()
 
 
 class TestCreateProgressiveHeatmap:

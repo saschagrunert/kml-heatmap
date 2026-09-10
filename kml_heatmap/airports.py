@@ -101,7 +101,6 @@ class AirportDeduplicator:
         lat: float,
         lon: float,
         name: str | None,
-        timestamp: str | None,
         path_index: int,
         is_at_path_end: bool,
     ) -> int:
@@ -141,14 +140,6 @@ class AirportDeduplicator:
 
         if apt_idx is not None:
             airport = self.unique_airports[apt_idx]
-            timestamps = airport.setdefault("timestamps", [])
-            # Only add timestamp if it's not already present (avoid duplicates)
-            if (
-                timestamp
-                and not is_point_marker(name or "")
-                and timestamp not in timestamps
-            ):
-                timestamps.append(timestamp)
 
             # Prefer route names over marker names
             current_name = airport.get("name", "")
@@ -160,15 +151,11 @@ class AirportDeduplicator:
 
             return apt_idx
 
-        timestamps = (
-            [timestamp] if timestamp and not is_point_marker(name or "") else []
-        )
         new_idx = len(self.unique_airports)
         self.unique_airports.append(
             {
                 "lat": corrected_lat,
                 "lon": corrected_lon,
-                "timestamps": timestamps,
                 "name": name,
                 "path_index": path_index,
                 "is_at_path_end": is_at_path_end,
@@ -182,16 +169,19 @@ class AirportDeduplicator:
         return self.unique_airports
 
 
-def deduplicate_airports(
+def _add_metadata_start_points(
+    deduplicator: AirportDeduplicator,
     all_path_metadata: list[PathMetadata],
     all_path_groups: FlightPathGroup,
     is_mid_flight_start_func: AltitudeCheck,
-    is_valid_landing_func: AltitudeCheck,
-) -> list[AirportData]:
-    """Deduplicate airports by location using spatial grid indexing."""
-    deduplicator = AirportDeduplicator()
+) -> None:
+    """Register the start point every path reported in its metadata.
 
-    # Process start points from metadata
+    This pass sees every path, including the ones whose name is a single
+    airport rather than a route, which is why it cannot be folded into
+    ``_add_path_endpoints`` below. The altitude comes from the metadata's
+    ``start_point`` and defaults to 0 when the point carries none.
+    """
     for idx, metadata in enumerate(all_path_metadata):
         start_point = metadata["start_point"]
         start_lat, start_lon = start_point[0], start_point[1]
@@ -213,35 +203,46 @@ def deduplicate_airports(
             lat=start_lat,
             lon=start_lon,
             name=airport_name,
-            timestamp=metadata.get("timestamp"),
             path_index=idx,
             is_at_path_end=False,
         )
 
-    # Process path endpoints (landings and takeoffs)
+
+def _add_path_endpoints(
+    deduplicator: AirportDeduplicator,
+    all_path_metadata: list[PathMetadata],
+    all_path_groups: FlightPathGroup,
+    is_mid_flight_start_func: AltitudeCheck,
+    is_valid_landing_func: AltitudeCheck,
+) -> None:
+    """Register the two ends of every path whose name is a route.
+
+    Only routes ("DEPARTURE - ARRIVAL") reach this pass, because only they say
+    which airport each end belongs to. The departure is re-registered with the
+    path's own first point, which is more accurate than the metadata start
+    point handled above and merges into the same entry. The arrival is only
+    registered when the path actually ends in a landing.
+    """
     for idx, path in enumerate(all_path_groups):
         if len(path) <= 1 or idx >= len(all_path_metadata):
             continue
 
         start, end = path[0], path[-1]
         route_name = all_path_metadata[idx].get("airport_name", "")
-        route_timestamp = all_path_metadata[idx].get("timestamp")
 
         # Skip if not a proper route name
-        if is_point_marker(route_name):
+        if is_point_marker(route_name) or " - " not in route_name:
             continue
 
         starts_at_high_altitude = is_mid_flight_start_func(path, start.alt)
         if starts_at_high_altitude:
             logger.debug("Path '%s' detected as mid-flight start", route_name)
 
-        # Process departure airport (if not high altitude start and is a route)
-        if not starts_at_high_altitude and " - " in route_name:
+        if not starts_at_high_altitude:
             deduplicator.add_or_update_airport(
                 lat=start.lat,
                 lon=start.lon,
                 name=route_name,
-                timestamp=route_timestamp,
                 path_index=idx,
                 is_at_path_end=False,
             )
@@ -251,13 +252,11 @@ def deduplicate_airports(
                 start.alt,
             )
 
-        # Process landing airport (if valid landing and is a route)
-        if " - " in route_name and is_valid_landing_func(path, end.alt):
+        if is_valid_landing_func(path, end.alt):
             deduplicator.add_or_update_airport(
                 lat=end.lat,
                 lon=end.lon,
                 name=route_name,
-                timestamp=route_timestamp if not starts_at_high_altitude else None,
                 path_index=idx,
                 is_at_path_end=True,
             )
@@ -267,4 +266,29 @@ def deduplicate_airports(
                 end.alt,
             )
 
+
+def deduplicate_airports(
+    all_path_metadata: list[PathMetadata],
+    all_path_groups: FlightPathGroup,
+    is_mid_flight_start_func: AltitudeCheck,
+    is_valid_landing_func: AltitudeCheck,
+) -> list[AirportData]:
+    """Deduplicate airports by location using spatial grid indexing.
+
+    Two passes feed the deduplicator: the metadata start points of every path,
+    then the two endpoints of the paths whose name is a route. Entries that
+    land within ``AIRPORT_DISTANCE_THRESHOLD_KM`` of each other merge, so a
+    departure seen by both passes stays one airport.
+    """
+    deduplicator = AirportDeduplicator()
+    _add_metadata_start_points(
+        deduplicator, all_path_metadata, all_path_groups, is_mid_flight_start_func
+    )
+    _add_path_endpoints(
+        deduplicator,
+        all_path_metadata,
+        all_path_groups,
+        is_mid_flight_start_func,
+        is_valid_landing_func,
+    )
     return deduplicator.get_unique_airports()

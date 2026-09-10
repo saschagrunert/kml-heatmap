@@ -8,7 +8,6 @@ import {
   calculateAltitudeStats,
   calculateSpeedStats,
   calculateLongestFlight,
-  calculateFlightTime,
   calculateFilteredStatistics,
 } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import {
@@ -380,41 +379,6 @@ describe("statistics calculations", () => {
     });
   });
 
-  describe("calculateFlightTime", () => {
-    it("sums the time span of each path", () => {
-      const segments: PathSegment[] = [
-        { path_id: 1, time: 1000 },
-        { path_id: 1, time: 1500 }, // Path 1: 500 seconds
-        { path_id: 2, time: 2000 },
-        { path_id: 2, time: 2800 }, // Path 2: 800 seconds
-      ];
-      expect(calculateFlightTime(segments, [{ id: 1 }, { id: 2 }])).toBe(1300);
-    });
-
-    it("only counts paths in pathInfo", () => {
-      const segments: PathSegment[] = [
-        { path_id: 1, time: 0 },
-        { path_id: 1, time: 100 },
-        { path_id: 2, time: 0 },
-        { path_id: 2, time: 500 },
-      ];
-      expect(calculateFlightTime(segments, [{ id: 2 }])).toBe(500);
-    });
-
-    it("returns 0 for empty segments", () => {
-      expect(calculateFlightTime([], mockPathInfo)).toBe(0);
-    });
-
-    it("ignores segments without time", () => {
-      const segments: PathSegment[] = [
-        { path_id: 1, time: 1000 },
-        { path_id: 1 },
-        { path_id: 1, time: 1500 },
-      ];
-      expect(calculateFlightTime(segments, [{ id: 1 }])).toBe(500);
-    });
-  });
-
   describe("calculateFilteredStatistics", () => {
     it("calculates comprehensive statistics", () => {
       const stats = calculateFilteredStatistics({
@@ -439,16 +403,24 @@ describe("statistics calculations", () => {
       expect(stats.avg_groundspeed_knots).toBe(130);
       expect(stats.total_flight_time_seconds).toBe(100);
       expect(stats.total_flight_time_str).toBe("0h 1m");
-      expect(stats.total_points).toBe(10); // 5 segments x 2 endpoints
+      // 5 segments plus the end point of each of the 4 paths they belong to
+      expect(stats.total_points).toBe(9);
     });
 
-    it("uses the provided coordinate count for total_points", () => {
+    it("counts the track points behind the filtered segments", () => {
       const stats = calculateFilteredStatistics({
-        pathInfo: mockPathInfo,
-        segments: mockSegments,
-        coordinateCount: 42,
+        pathInfo: [
+          { id: 1, year: 2025 },
+          { id: 2, year: 2025 },
+        ],
+        segments: [
+          { path_id: 1, altitude_ft: 1000, groundspeed_knots: 100 },
+          { path_id: 1, altitude_ft: 1000, groundspeed_knots: 100 },
+          { path_id: 2, altitude_ft: 1000, groundspeed_knots: 100 },
+        ],
       });
-      expect(stats.total_points).toBe(42);
+      // 3 segments plus one closing point for each of the 2 paths
+      expect(stats.total_points).toBe(5);
     });
 
     it("applies year filter", () => {

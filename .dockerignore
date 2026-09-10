@@ -27,7 +27,6 @@ coverage.xml
 # Node
 node_modules
 # Bundles are built inside the image; never copy stale host builds
-kml_heatmap/static/bundle.js*
 kml_heatmap/static/*.bundle.js*
 
 # IDE and AI assistant files

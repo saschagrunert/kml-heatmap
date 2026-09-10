@@ -97,29 +97,3 @@ export function getColorForAirspeed(
 export function rgbToRgba(rgb: string, alpha: number): string {
   return rgb.replace("rgb(", "rgba(").replace(")", `, ${alpha})`);
 }
-
-/**
- * RGB color components
- */
-export interface RgbColor {
-  r: number;
-  g: number;
-  b: number;
-}
-
-/**
- * Parse RGB string to component values
- * @param rgbString - RGB color string (e.g., "rgb(255, 128, 0)")
- * @returns RGB components
- */
-export function parseRgb(rgbString: string): RgbColor {
-  const match = rgbString.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-  if (!match || !match[1] || !match[2] || !match[3]) {
-    return { r: 0, g: 0, b: 0 };
-  }
-  return {
-    r: parseInt(match[1], 10),
-    g: parseInt(match[2], 10),
-    b: parseInt(match[3], 10),
-  };
-}

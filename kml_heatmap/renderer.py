@@ -61,6 +61,9 @@ def minify_html(html: str) -> str:
         minified_js = re.sub(r"\s*\n\s*", "", minified_js)
         return f"<script>{minified_js}</script>"
 
+    # Deliberately only attribute-less tags: a pattern such as `<script[^>]*>`
+    # would also match `<script src="..." defer>`, whose body is empty, and the
+    # replacement would drop the attributes and with them the referenced file.
     html = re.sub(r"<style>(.*?)</style>", minify_css_tags, html, flags=re.DOTALL)
     html = re.sub(r"<script>(.*?)</script>", minify_js_tags, html, flags=re.DOTALL)
 
@@ -291,20 +294,20 @@ def _generate_map_config(
     )
 
 
-def _copy_javascript_bundles(output_dir: str, static_dir: Path) -> None:
-    """Copy JavaScript bundle files to output directory."""
-    for bundle_name in ("bundle.js", "mapApp.bundle.js"):
-        src = static_dir / bundle_name
-        dst = Path(output_dir) / bundle_name
-        if src.exists():
-            shutil.copy2(src, dst)
-            size = dst.stat().st_size
-            logger.info("JavaScript copied: %s (%.1f KB)", dst, size / 1024)
-            source_map = static_dir / f"{bundle_name}.map"
-            if source_map.exists():
-                shutil.copy2(source_map, Path(output_dir) / source_map.name)
-        else:
-            logger.warning("%s not found - run npm build to generate it", bundle_name)
+def _copy_javascript_bundle(output_dir: str, static_dir: Path) -> None:
+    """Copy the application bundle (and its source map) to the output."""
+    bundle_name = "mapApp.bundle.js"
+    src = static_dir / bundle_name
+    dst = Path(output_dir) / bundle_name
+    if not src.exists():
+        logger.warning("%s not found - run npm build to generate it", bundle_name)
+        return
+
+    shutil.copy2(src, dst)
+    logger.info("JavaScript copied: %s (%.1f KB)", dst, dst.stat().st_size / 1024)
+    source_map = static_dir / f"{bundle_name}.map"
+    if source_map.exists():
+        shutil.copy2(source_map, Path(output_dir) / source_map.name)
 
 
 def _copy_and_minify_css(output_dir: str, static_dir: Path) -> None:
@@ -351,18 +354,15 @@ def _package_assets(
     static_dir = Path(__file__).parent / "static"
     templates_dir = Path(__file__).parent / "templates"
 
-    if not (
-        (static_dir / "bundle.js").exists()
-        and (static_dir / "mapApp.bundle.js").exists()
-    ):
-        logger.warning(
-            "JavaScript bundles not found - run 'npm run build' to generate them"
-        )
+    if (static_dir / "mapApp.bundle.js").exists():
+        logger.info("\nUsing the pre-built JavaScript bundle...")
     else:
-        logger.info("\nUsing pre-built JavaScript bundles...")
+        logger.warning(
+            "JavaScript bundle not found - run 'npm run build' to generate it"
+        )
 
     _generate_map_config(output_dir, templates_dir, bounds, data_dir_name)
-    _copy_javascript_bundles(output_dir, static_dir)
+    _copy_javascript_bundle(output_dir, static_dir)
     _copy_and_minify_css(output_dir, static_dir)
     _copy_favicon_files(output_dir, static_dir)
 
