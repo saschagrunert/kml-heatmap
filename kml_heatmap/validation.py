@@ -54,15 +54,17 @@ def validate_output_dir(
 ) -> tuple[bool, str | None]:
     """Refuse output data directories that overlap with any input directory.
 
-    The output data directory must not equal, contain, or be contained in the
-    parent directory of any input file (KML files or aircraft.json), because
-    tool-owned files inside it are removed before every export.
+    The output data directory must not be, or contain, the parent directory
+    of any input file (KML files or aircraft.json), because tool-owned files
+    inside it are removed before every export. An output directory below an
+    input directory is fine: ``kml-heatmap flight.kml --output-dir out`` from
+    the file's own directory writes to ``out/`` without touching the inputs.
     """
     output = Path(data_dir).resolve()
 
     for input_path in input_paths:
         parent = Path(input_path).resolve().parent
-        if output == parent or output in parent.parents or parent in output.parents:
+        if output == parent or output in parent.parents:
             message = (
                 f"Refusing to use output data directory '{output}': it overlaps "
                 f"with the input directory '{parent}'. Choose a different "

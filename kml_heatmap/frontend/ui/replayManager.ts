@@ -10,6 +10,7 @@ import { formatTime } from "../utils/formatters";
 import { setControlLabel } from "../utils/buttonState";
 import { setControlIcon } from "../utils/icons";
 import { prepareReplaySegments } from "../features/replay";
+import { segmentsForPathIds } from "../calculations/statistics";
 import { ReplayRenderer, replaySegmentColor } from "./replayRenderer";
 import { ReplayState } from "./replayState";
 
@@ -29,10 +30,15 @@ const REPLAY_DISABLED_CONTROL_IDS = [
   "aircraft-select",
 ];
 
+/** Delay before the colour layers are redrawn after replay ends (ms) */
+const LAYER_REDRAW_DELAY_MS = 50;
+
 export class ReplayManager {
   private app: MapApp;
   private renderer: ReplayRenderer;
   private markerClickHandler: ((e: Event) => void) | null = null;
+  /** Pending colour layer redraws scheduled by restoreLayerVisibility */
+  private redrawTimers: ReturnType<typeof setTimeout>[] = [];
   state: ReplayState;
 
   constructor(app: MapApp) {
@@ -64,6 +70,26 @@ export class ReplayManager {
         this.announce("Moved to " + formatTime(this.state.currentTime));
       });
     }
+
+    // Whether replay is available follows the selection and the timing data
+    const refresh = (): void => this.updateReplayButtonState();
+    app.store.subscribe("selectedPathIds", refresh);
+    app.store.subscribe("fullStats", refresh);
+    refresh();
+  }
+
+  /** Cancel every pending timer; the panel itself stays as it is */
+  destroy(): void {
+    this.cancelRedrawTimers();
+    if (this.state.animationFrameId) {
+      cancelAnimationFrame(this.state.animationFrameId);
+      this.state.animationFrameId = null;
+    }
+  }
+
+  private cancelRedrawTimers(): void {
+    for (const timer of this.redrawTimers) clearTimeout(timer);
+    this.redrawTimers = [];
   }
 
   /** Whether the current selection can be replayed */
@@ -118,7 +144,6 @@ export class ReplayManager {
 
     document.body.classList.add("replay-active");
     this.hideOtherLayersDuringReplay();
-    this.app.stateManager.saveMapState();
   }
 
   private deactivateReplay(panel: HTMLElement): void {
@@ -159,26 +184,19 @@ export class ReplayManager {
     }
 
     // Ensure a colored path layer is visible for path selection after replay.
-    // restoreLayerVisibility() adds the layer and redraws it once.
+    // restoreLayerVisibility() adds the layer and redraws it once; the
+    // button and the legend follow the store.
     if (!this.app.altitudeVisible && !this.app.airspeedVisible) {
       this.app.altitudeVisible = true;
-      const altBtn = domCache.get("altitude-btn");
-      if (altBtn) {
-        altBtn.style.opacity = "1.0";
-        altBtn.setAttribute("aria-pressed", "true");
-      }
-      const altLegend = domCache.get("altitude-legend");
-      if (altLegend) altLegend.style.display = "block";
     }
 
     this.restoreLayerVisibility();
     this.updateReplayButtonState();
-    this.app.stateManager.saveMapState();
     this.announce("Replay closed");
   }
 
   updateReplayButtonState(): void {
-    const btn = domCache.get("replay-btn") as HTMLButtonElement | null;
+    const btn = domCache.get("replay-btn", HTMLButtonElement);
     if (!btn) return;
 
     // The button stays enabled so it can explain why replay is unavailable
@@ -268,6 +286,9 @@ export class ReplayManager {
 
     this.calculateColorRanges(selectedPathId);
     this.setupReplayUI();
+    // The speed select may hold a value restored by the browser, so the
+    // state follows it rather than the other way round
+    this.changeReplaySpeed();
 
     if (!this.createReplayMarker()) return false;
 
@@ -290,8 +311,9 @@ export class ReplayManager {
   private calculateColorRanges(pathId: number): void {
     if (!this.app.currentData?.path_segments) return;
 
-    const currentResSegments = this.app.currentData.path_segments.filter(
-      (seg) => seg.path_id === pathId,
+    const currentResSegments = segmentsForPathIds(
+      this.app.currentData.path_segments,
+      [pathId],
     );
 
     const sourceSegments =
@@ -319,7 +341,7 @@ export class ReplayManager {
     const lastSegment = this.state.segments[this.state.segments.length - 1];
     this.state.maxTime = lastSegment?.time ?? 0;
 
-    const slider = domCache.get("replay-slider") as HTMLInputElement | null;
+    const slider = domCache.get("replay-slider", HTMLInputElement);
     if (slider) slider.max = this.state.maxTime.toString();
 
     const sliderEnd = domCache.get("replay-slider-end");
@@ -443,24 +465,29 @@ export class ReplayManager {
     }
 
     // Redraw once after the layer is back on the map so click handlers work
-    // on mobile Safari.
+    // on mobile Safari. A redraw still pending from an earlier close is
+    // dropped rather than run twice.
+    this.cancelRedrawTimers();
     if (this.app.altitudeVisible) {
       this.app.map.addLayer(this.app.altitudeLayer);
-      setTimeout(() => {
-        this.app.layerManager.redrawAltitudePaths();
-        if (this.app.map) this.app.map.invalidateSize();
-      }, 50);
+      this.scheduleRedraw(() => this.app.layerManager.redrawAltitudePaths());
     }
 
     if (this.app.airspeedVisible) {
       this.app.map.addLayer(this.app.airspeedLayer);
-      setTimeout(() => {
-        this.app.layerManager.redrawAirspeedPaths();
-        if (this.app.map) this.app.map.invalidateSize();
-      }, 50);
+      this.scheduleRedraw(() => this.app.layerManager.redrawAirspeedPaths());
     }
 
     this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, false);
+  }
+
+  private scheduleRedraw(redraw: () => void): void {
+    const timer = setTimeout(() => {
+      this.redrawTimers = this.redrawTimers.filter((t) => t !== timer);
+      redraw();
+      if (this.app.map) this.app.map.invalidateSize();
+    }, LAYER_REDRAW_DELAY_MS);
+    this.redrawTimers.push(timer);
   }
 
   private setElementsDisabled(ids: string[], disabled: boolean): void {
@@ -597,7 +624,7 @@ export class ReplayManager {
   }
 
   changeReplaySpeed(): void {
-    const select = domCache.get("replay-speed") as HTMLSelectElement | null;
+    const select = domCache.get("replay-speed", HTMLSelectElement);
     if (!select) return;
 
     const speed = parseFloat(select.value);

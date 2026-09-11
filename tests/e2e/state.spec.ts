@@ -1,7 +1,8 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
-  KNOWN_YEARS,
+  firstPathId,
   gotoApp,
+  knownYears,
   layerButton,
   readSavedState,
   selectPathForReplay,
@@ -11,7 +12,6 @@ import {
   usesMobileBar,
   waitForAircraftFilter,
   waitForAppReady,
-  waitForPathData,
   waitForYearFilter,
 } from "./helpers";
 
@@ -109,11 +109,14 @@ test.describe("State Persistence", () => {
     });
 
     test("URL year parameter overrides localStorage year", async ({ page }) => {
+      const years = await knownYears(page);
+      expect(
+        years.length,
+        "two years to switch between",
+      ).toBeGreaterThanOrEqual(2);
       const yearSelect = page.locator("#year-select");
-      expect(await yearSelect.locator("option").count()).toBe(
-        KNOWN_YEARS.length + 1,
-      );
-      const [year1, year2] = KNOWN_YEARS as [string, string];
+      await expect(yearSelect.locator("option")).toHaveCount(years.length + 1);
+      const [year1, year2] = years as [string, string];
 
       await setYearFilter(page, year1);
       await waitForYearFilter(page, year1);
@@ -222,10 +225,7 @@ test.describe("State Persistence", () => {
     test("URL path selection overrides localStorage paths", async ({
       page,
     }) => {
-      await waitForPathData(page);
-      const pathId = await page.evaluate(
-        () => window.mapApp!.fullPathInfo![0]!.id,
-      );
+      const pathId = await firstPathId(page);
 
       await gotoApp(page, `/?p=${pathId}&sv=2`);
 
@@ -256,11 +256,14 @@ test.describe("State Persistence", () => {
     test("URL updates when state changes", async ({ page }) => {
       await toggleLayer(page, "heatmap");
 
-      await expect.poll(() => page.url()).toContain("v=");
+      // The first flag is the heatmap; every other flag keeps its default
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get("v"))
+        .toBe("000100000");
     });
 
     test("combined URL params are applied together", async ({ page }) => {
-      const year = KNOWN_YEARS[0]!;
+      const year = (await knownYears(page))[0]!;
 
       await gotoApp(page, `/?y=${year}&v=000100000`);
 

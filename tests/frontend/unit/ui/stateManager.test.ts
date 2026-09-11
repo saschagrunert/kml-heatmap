@@ -145,6 +145,27 @@ describe("StateManager", () => {
     });
   });
 
+  describe("flush", () => {
+    it("saves at once and drops the pending debounced save", () => {
+      vi.useFakeTimers();
+      stateManager.scheduleSave();
+      expect(mockLocalStorage["kml-heatmap-state"]).toBeUndefined();
+
+      stateManager.flush();
+
+      expect(mockLocalStorage["kml-heatmap-state"]).toBeDefined();
+      const saveSpy = vi.spyOn(stateManager, "saveMapState");
+      vi.advanceTimersByTime(1000);
+      expect(saveSpy).not.toHaveBeenCalled();
+    });
+
+    it("saves even when nothing was scheduled", () => {
+      stateManager.flush();
+
+      expect(mockLocalStorage["kml-heatmap-state"]).toBeDefined();
+    });
+  });
+
   describe("saveMapState", () => {
     it("saves current state to localStorage and the URL", () => {
       mockApp.selectedYear = "2025";

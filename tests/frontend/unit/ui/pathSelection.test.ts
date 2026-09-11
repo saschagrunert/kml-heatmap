@@ -44,9 +44,6 @@ describe("PathSelection", () => {
 
       expect(mockApp.selectedPathIds.has(1)).toBe(true);
       expect(notify).toHaveBeenCalledWith("selectedPathIds");
-      expect(
-        mockApp.replayManager.updateReplayButtonState,
-      ).toHaveBeenCalledTimes(1);
     });
 
     it("removes path when already selected", () => {
@@ -57,8 +54,10 @@ describe("PathSelection", () => {
       expect(mockApp.selectedPathIds.has(1)).toBe(false);
     });
 
-    it("restyles polylines in place and refreshes stats and airports", () => {
+    it("restyles polylines in place and leaves the rest to the store", () => {
       mockApp.altitudeVisible = true;
+      const listener = vi.fn();
+      mockApp.store.subscribe("selectedPathIds", listener);
 
       pathSelection.togglePathSelection(1);
 
@@ -66,23 +65,27 @@ describe("PathSelection", () => {
         1,
       );
       expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
-      expect(
-        mockApp.statsManager.updateStatsForSelection,
-      ).toHaveBeenCalledTimes(1);
-      expect(mockApp.airportManager.updateAirportOpacity).toHaveBeenCalledTimes(
-        1,
-      );
       expect(mapHelpers.invalidateMapAfterTransition).toHaveBeenCalledWith(
         mockApp.map,
       );
       expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
+      // Statistics, airports and the replay button subscribe to this
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(
+        mockApp.statsManager.updateStatsForSelection,
+      ).not.toHaveBeenCalled();
+      expect(
+        mockApp.airportManager.updateAirportOpacity,
+      ).not.toHaveBeenCalled();
+      expect(
+        mockApp.replayManager.updateReplayButtonState,
+      ).not.toHaveBeenCalled();
     });
 
     it("does not invalidate the map when no colour layer is visible", () => {
       pathSelection.togglePathSelection(1);
 
       expect(mapHelpers.invalidateMapAfterTransition).not.toHaveBeenCalled();
-      expect(mockApp.statsManager.updateStatsForSelection).toHaveBeenCalled();
     });
 
     it("rebuilds layers in isolate mode", () => {
@@ -93,9 +96,6 @@ describe("PathSelection", () => {
 
       expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
       expect(mockApp.layerManager.updateSelectionStyles).not.toHaveBeenCalled();
-      expect(
-        mockApp.statsManager.updateStatsForSelection,
-      ).not.toHaveBeenCalled();
     });
 
     it("disables isolate mode when the last path is deselected", () => {
@@ -109,6 +109,20 @@ describe("PathSelection", () => {
       // hidden have to be drawn again
       expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
       expect(mockApp.layerManager.updateSelectionStyles).not.toHaveBeenCalled();
+    });
+
+    it("lets listeners see the final state of both keys at once", () => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.isolateSelection = true;
+      const seen: [number, boolean][] = [];
+      mockApp.store.subscribe("selectedPathIds", () => {
+        seen.push([mockApp.selectedPathIds.size, mockApp.isolateSelection]);
+      });
+
+      pathSelection.togglePathSelection(1);
+
+      // Never an empty selection that is still isolating
+      expect(seen).toEqual([[0, false]]);
     });
 
     it("logs errors from updateLayers", async () => {
@@ -133,10 +147,7 @@ describe("PathSelection", () => {
       pathSelection.selectPathsByAirport("EDDF");
 
       expect([...mockApp.selectedPathIds]).toEqual([1, 2, 3]);
-      expect(mockApp.replayManager.updateReplayButtonState).toHaveBeenCalled();
       expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalled();
-      expect(mockApp.statsManager.updateStatsForSelection).toHaveBeenCalled();
-      expect(mockApp.airportManager.updateAirportOpacity).toHaveBeenCalled();
     });
 
     it("adds to an existing selection", () => {
@@ -154,7 +165,7 @@ describe("PathSelection", () => {
 
       expect(mockApp.selectedPathIds.size).toBe(0);
       expect(notify).not.toHaveBeenCalled();
-      expect(mockApp.replayManager.updateReplayButtonState).toHaveBeenCalled();
+      expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalled();
     });
 
     it("rebuilds layers when isolate mode is active", () => {
@@ -178,7 +189,6 @@ describe("PathSelection", () => {
 
       expect(mockApp.selectedPathIds.size).toBe(0);
       expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalled();
-      expect(mockApp.replayManager.updateReplayButtonState).toHaveBeenCalled();
     });
 
     it("disables isolate mode when clearing selection", () => {
@@ -221,10 +231,8 @@ describe("PathSelection", () => {
     });
   });
 
-  describe("updateIsolateButton", () => {
-    it("sets dimmed, not pressed state when no paths are selected", () => {
-      pathSelection.updateIsolateButton();
-
+  describe("isolate button", () => {
+    it("is dimmed and not pressed at construction without a selection", () => {
       expect(btn.style.opacity).toBe("0.5");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
       expect(btn.classList.contains("active")).toBe(false);
@@ -233,31 +241,59 @@ describe("PathSelection", () => {
       expect(btn.style.backgroundColor).toBe("");
     });
 
-    it("sets full opacity but not pressed when paths are selected", () => {
-      mockApp.selectedPathIds.add(1);
+    it("reflects a restored selection and mode at construction", () => {
+      const app = createMockApp({
+        selectedPathIds: new Set([1]),
+        isolateSelection: true,
+      });
 
-      pathSelection.updateIsolateButton();
+      new PathSelection(asMapApp(app));
+
+      expect(btn.style.opacity).toBe("1");
+      expect(btn.getAttribute("aria-pressed")).toBe("true");
+      expect(btn.classList.contains("active")).toBe(true);
+    });
+
+    it("lights up when paths are selected and stays unpressed", () => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.store.notifyMutation("selectedPathIds");
 
       expect(btn.style.opacity).toBe("1");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
       expect(btn.classList.contains("active")).toBe(false);
     });
 
-    it("sets pressed state when isolate mode is on", () => {
+    it("follows isolate mode through the store", () => {
       mockApp.selectedPathIds.add(1);
+      mockApp.store.notifyMutation("selectedPathIds");
+
       mockApp.isolateSelection = true;
-
-      pathSelection.updateIsolateButton();
-
-      expect(btn.style.opacity).toBe("1");
       expect(btn.getAttribute("aria-pressed")).toBe("true");
       expect(btn.classList.contains("active")).toBe(true);
-      expect(btn.style.borderColor).toBe("");
+      expect(btn.style.opacity).toBe("1");
+
+      mockApp.isolateSelection = false;
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+      expect(btn.style.opacity).toBe("1");
+    });
+
+    it("dims again once the selection is cleared", () => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.store.notifyMutation("selectedPathIds");
+      expect(btn.style.opacity).toBe("1");
+
+      pathSelection.clearSelection();
+
+      expect(btn.style.opacity).toBe("0.5");
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
     });
 
     it("does nothing when the button is missing", () => {
       btn.remove();
       expect(() => pathSelection.updateIsolateButton()).not.toThrow();
+      expect(() =>
+        mockApp.store.notifyMutation("selectedPathIds"),
+      ).not.toThrow();
     });
   });
 });

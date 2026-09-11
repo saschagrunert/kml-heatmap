@@ -17,6 +17,8 @@ export interface HeatmapOptions {
 
 export interface HeatmapLayer extends L.Layer {
   _canvas?: HTMLCanvasElement; // Private Leaflet property for canvas access
+  /** Replace the points and redraw; the canvas stays where it is */
+  setLatLngs(latlngs: [number, number][] | [number, number, number][]): this;
 }
 
 declare global {

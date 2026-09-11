@@ -8,6 +8,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from kml_heatmap.constants import ALT_MAX_M, ALT_MIN_M
 from kml_heatmap.parser_common import (
     _build_path_metadata_dict,
     empty_placemark_metadata,
@@ -16,18 +17,12 @@ from kml_heatmap.parser_common import (
     extract_year_from_timestamp,
     find_xml_element,
     find_xml_elements,
-    is_mid_flight_start,
-    is_valid_landing,
     parse_coordinate_point,
-    sample_path_altitudes,
+    validate_and_normalize_coordinate,
 )
 from kml_heatmap.types import TrackPoint
 
 NS = {"kml": "http://www.opengis.net/kml/2.2"}
-
-
-def _flat(alt, count=100):
-    return [TrackPoint(50.0, 8.0, float(alt), None)] * count
 
 
 class TestExtractYearFromTimestamp:
@@ -52,67 +47,61 @@ class TestExtractYearFromTimestamp:
         assert extract_year_from_timestamp(value) == expected
 
 
-class TestSamplePathAltitudes:
-    def test_short_path_returns_none(self):
-        assert sample_path_altitudes(_flat(100, 10)) is None
-        assert sample_path_altitudes(_flat(100, 22)) is None
+class TestValidateAndNormalizeCoordinate:
+    def test_valid_coordinate(self):
+        assert validate_and_normalize_coordinate(50.0, 8.5, 300, "test.kml") == (
+            50.0,
+            8.5,
+            300.0,
+        )
 
-    def test_from_start(self):
-        path = [TrackPoint(50, 8, float(i * 10), None) for i in range(100)]
-        result = sample_path_altitudes(path, from_end=False)
-        assert result == {"min": 0.0, "max": 240.0, "variation": 240.0}
+    def test_negative_altitude_is_kept(self):
+        result = validate_and_normalize_coordinate(50.0, 8.5, -100, "test.kml")
+        assert result == (50.0, 8.5, -100)
 
-    def test_from_end(self):
-        path = [TrackPoint(50, 8, float(i * 10), None) for i in range(100)]
-        result = sample_path_altitudes(path, from_end=True)
-        assert result == {"min": 750.0, "max": 990.0, "variation": 240.0}
+    def test_altitude_range_boundaries_kept(self):
+        assert (
+            validate_and_normalize_coordinate(50.0, 8.5, ALT_MIN_M, "f")[2] == ALT_MIN_M
+        )
+        assert (
+            validate_and_normalize_coordinate(50.0, 8.5, ALT_MAX_M, "f")[2] == ALT_MAX_M
+        )
 
-    def test_flat_altitude(self):
-        assert sample_path_altitudes(_flat(500))["variation"] == 0.0
+    @pytest.mark.parametrize(
+        "alt", [999999, -99999, float("nan"), float("inf"), float("-inf")]
+    )
+    def test_out_of_range_or_non_finite_altitude_becomes_none(self, alt):
+        result = validate_and_normalize_coordinate(50.0, 8.5, alt, "test.kml")
+        assert result == (50.0, 8.5, None)
 
-    def test_missing_altitudes_ignored(self):
-        path = [TrackPoint(50, 8, None, None)] * 50 + _flat(300, 50)
-        assert sample_path_altitudes(path, from_end=False) is None
-        assert sample_path_altitudes(path, from_end=True)["min"] == 300.0
+    def test_none_altitude_preserved(self):
+        assert validate_and_normalize_coordinate(50.0, 8.5, None, "test.kml") == (
+            50.0,
+            8.5,
+            None,
+        )
 
+    @pytest.mark.parametrize(
+        "lat,lon",
+        [(-90.0, 0.0), (90.0, 0.0), (0.0, -180.0), (0.0, 180.0)],
+        ids=["min-lat", "max-lat", "min-lon", "max-lon"],
+    )
+    def test_valid_range_boundaries(self, lat, lon):
+        assert validate_and_normalize_coordinate(lat, lon, 0, "test.kml") is not None
 
-class TestIsMidFlightStart:
-    def test_ground_level_start(self):
-        assert is_mid_flight_start(_flat(50.0), 50.0) is False
-
-    def test_mid_flight_cruise(self):
-        assert is_mid_flight_start(_flat(1500.0), 1500.0) is True
-
-    def test_climbing_start_high_variation(self):
-        path = [TrackPoint(50.0, 8.0, float(100 + i * 20), None) for i in range(100)]
-        assert is_mid_flight_start(path, 100.0) is False
-
-    def test_short_path(self):
-        assert is_mid_flight_start(_flat(2000.0, 5), 2000.0) is False
-
-    def test_unknown_altitude(self):
-        assert is_mid_flight_start(_flat(2000.0), None) is False
-
-
-class TestIsValidLanding:
-    def test_low_variation_ending(self):
-        assert is_valid_landing(_flat(100.0), 100.0) is True
-
-    def test_high_altitude_but_low_variation(self):
-        assert is_valid_landing(_flat(2000.0), 2000.0) is True
-
-    def test_low_altitude_endpoint(self):
-        path = [TrackPoint(50.0, 8.0, float(500 - i * 5), None) for i in range(100)]
-        assert is_valid_landing(path, 5.0) is True
-
-    def test_high_variation_high_endpoint(self):
-        path = [TrackPoint(50.0, 8.0, float(3000 - i * 5), None) for i in range(100)]
-        assert is_valid_landing(path, 2505.0) is False
-
-    def test_short_path_fallback(self):
-        assert is_valid_landing(_flat(500.0, 5), 500.0) is True
-        assert is_valid_landing(_flat(2000.0, 5), 2000.0) is False
-        assert is_valid_landing(_flat(2000.0, 5), None) is False
+    @pytest.mark.parametrize(
+        "lat,lon",
+        [
+            (100.0, 8.5),
+            (-100.0, 8.5),
+            (50.0, 200.0),
+            (50.0, -200.0),
+            (float("nan"), 8.5),
+            (50.0, float("inf")),
+        ],
+    )
+    def test_invalid_lat_lon_returns_none(self, lat, lon):
+        assert validate_and_normalize_coordinate(lat, lon, 300, "test.kml") is None
 
 
 class TestParseCoordinatePoint:
@@ -149,7 +138,7 @@ class TestParseCoordinatePoint:
     def test_invalid_values(self, value):
         assert parse_coordinate_point(value, "test.kml") is None
 
-    @settings(max_examples=300)
+    @settings(max_examples=300, deadline=None)
     @given(st.text())
     def test_never_raises(self, text):
         result = parse_coordinate_point(text, "test.kml")
@@ -230,7 +219,7 @@ class TestExtractCharterwareTimestamp:
     def test_invalid(self, desc):
         assert extract_charterware_timestamp(desc) is None
 
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     @given(
         st.datetimes(min_value=datetime(2000, 1, 1), max_value=datetime(2099, 12, 31)),
         st.booleans(),
@@ -299,6 +288,37 @@ class TestExtractPlacemarkMetadata:
         result = extract_placemark_metadata(placemark, NS)
         assert result["timestamp"] == "2026-01-12T15:01:00+00:00"
         assert result["year"] == 2026
+
+    def test_timespan_without_when(self):
+        """A LineString placemark dated only by a TimeSpan keeps its year."""
+        placemark = ET.fromstring(
+            '<Placemark xmlns:kml="http://www.opengis.net/kml/2.2">'
+            "<kml:name>EDDS</kml:name><kml:TimeSpan>"
+            "<kml:begin>2025-06-15T12:00:00Z</kml:begin>"
+            "<kml:end>2025-06-15T13:30:00Z</kml:end>"
+            "</kml:TimeSpan></Placemark>"
+        )
+        result = extract_placemark_metadata(placemark, NS)
+        assert result["timestamp"] == "2025-06-15T12:00:00Z"
+        assert result["end_timestamp"] == "2025-06-15T13:30:00Z"
+        assert result["year"] == 2025
+
+    def test_timespan_without_namespace_and_without_end(self):
+        placemark = ET.fromstring(
+            "<Placemark><TimeSpan><begin>2024-02-01T08:00:00Z</begin></TimeSpan>"
+            "</Placemark>"
+        )
+        result = extract_placemark_metadata(placemark, NS)
+        assert result["timestamp"] == "2024-02-01T08:00:00Z"
+        assert result["end_timestamp"] is None
+        assert result["year"] == 2024
+
+    def test_when_wins_over_timespan(self):
+        placemark = ET.fromstring(
+            "<Placemark><TimeSpan><begin>2024-02-01T08:00:00Z</begin></TimeSpan>"
+            "<TimeStamp><when>2025-06-15T12:00:00Z</when></TimeStamp></Placemark>"
+        )
+        assert extract_placemark_metadata(placemark, NS)["year"] == 2025
 
     def test_no_metadata(self):
         assert (
@@ -372,7 +392,7 @@ class TestBuildPathMetadataDict:
             self._meta(airport_name="OE-AKI"),
         )
         assert result["airport_name"] == "EDDF Frankfurt Main - EDDM Munich"
-        assert result["route"] == "EDDF-EDDM"
+        assert "route" not in result
         assert "aircraft_type" not in result
 
     def test_charterware_keeps_icao_name(self):

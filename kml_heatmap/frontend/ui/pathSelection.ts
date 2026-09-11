@@ -12,21 +12,33 @@ export class PathSelection {
 
   constructor(app: MapApp) {
     this.app = app;
+
+    // The isolate button reads two keys, so it cannot use syncToggleButton;
+    // this is its only writer
+    const refresh = (): void => this.updateIsolateButton();
+    app.store.subscribe("selectedPathIds", refresh);
+    app.store.subscribe("isolateSelection", refresh);
+    refresh();
   }
 
   togglePathSelection(pathId: number): void {
-    if (this.app.selectedPathIds.has(pathId)) {
-      this.app.selectedPathIds.delete(pathId);
-    } else {
-      this.app.selectedPathIds.add(pathId);
-    }
-    this.app.store.notifyMutation("selectedPathIds");
-
-    // If no paths remain selected, disable isolate mode
     const wasIsolating = this.app.isolateSelection;
-    if (this.app.selectedPathIds.size === 0 && this.app.isolateSelection) {
-      this.app.isolateSelection = false;
-    }
+
+    // Both changes land in one flush so no listener sees a selection that is
+    // empty while isolate mode is still on
+    this.app.store.batch(() => {
+      if (this.app.selectedPathIds.has(pathId)) {
+        this.app.selectedPathIds.delete(pathId);
+      } else {
+        this.app.selectedPathIds.add(pathId);
+      }
+      this.app.store.notifyMutation("selectedPathIds");
+
+      // If no paths remain selected, disable isolate mode
+      if (this.app.selectedPathIds.size === 0 && this.app.isolateSelection) {
+        this.app.isolateSelection = false;
+      }
+    });
 
     this.afterSelectionChange(wasIsolating);
   }
@@ -44,14 +56,17 @@ export class PathSelection {
   }
 
   clearSelection(): void {
-    this.app.selectedPathIds.clear();
-    this.app.store.notifyMutation("selectedPathIds");
-
-    // Disable isolate mode when selection is cleared
     const wasIsolating = this.app.isolateSelection;
-    if (this.app.isolateSelection) {
-      this.app.isolateSelection = false;
-    }
+
+    this.app.store.batch(() => {
+      this.app.selectedPathIds.clear();
+      this.app.store.notifyMutation("selectedPathIds");
+
+      // Disable isolate mode when selection is cleared
+      if (this.app.isolateSelection) {
+        this.app.isolateSelection = false;
+      }
+    });
 
     this.afterSelectionChange(wasIsolating);
   }
@@ -60,25 +75,22 @@ export class PathSelection {
     if (this.app.selectedPathIds.size === 0) return;
 
     this.app.isolateSelection = !this.app.isolateSelection;
-    this.updateIsolateButton();
 
     // Isolate mode changes which paths/coordinates are drawn: rebuild
     this.app.dataManager.updateLayers().catch(logError);
   }
 
   /**
-   * Apply a selection change: when isolate mode is active before or after the
-   * change the layers are rebuilt (isolate mode draws only the selected
-   * paths, so both entering and leaving it changes which paths exist),
-   * otherwise the drawn polylines are restyled in place. Statistics and
-   * airport visibility are refreshed in both cases.
+   * Apply a selection change to the drawn paths: when isolate mode is active
+   * before or after the change the layers are rebuilt (isolate mode draws
+   * only the selected paths, so both entering and leaving it changes which
+   * paths exist), otherwise the drawn polylines are restyled in place.
+   *
+   * Statistics, airport visibility and the replay button follow the store on
+   * their own.
    */
   private afterSelectionChange(wasIsolating = this.app.isolateSelection): void {
-    this.updateIsolateButton();
-    this.app.replayManager.updateReplayButtonState();
-
     if (this.app.isolateSelection || wasIsolating) {
-      // updateLayers refreshes stats and airport visibility itself
       this.app.dataManager.updateLayers().catch(logError);
       return;
     }
@@ -87,8 +99,6 @@ export class PathSelection {
     if (this.app.altitudeVisible || this.app.airspeedVisible) {
       invalidateMapAfterTransition(this.app.map);
     }
-    this.app.statsManager.updateStatsForSelection();
-    this.app.airportManager.updateAirportOpacity();
   }
 
   /**

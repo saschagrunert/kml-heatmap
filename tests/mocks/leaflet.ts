@@ -2,7 +2,9 @@
  * Mock implementation of leaflet for testing.
  *
  * Factories validate `[lat, lng]` tuples so tests fail loudly when code
- * passes NaN, out-of-range or malformed coordinates to Leaflet.
+ * passes NaN, out-of-range or malformed coordinates to Leaflet. Maps and
+ * layer groups remember what was added to them, so `hasLayer` answers the
+ * way Leaflet does and a double add or a missing remove shows up.
  */
 import { vi, type Mock } from "vitest";
 
@@ -11,6 +13,13 @@ export type LatLngTuple = [number, number];
 export interface MockLatLng {
   lat: number;
   lng: number;
+}
+
+/** Anything that can hold layers: a map or a layer group */
+interface LayerHost {
+  addLayer: Mock;
+  removeLayer: Mock;
+  hasLayer: Mock;
 }
 
 /**
@@ -44,6 +53,14 @@ export function assertLatLng(value: unknown, context = "latlng"): MockLatLng {
     throw new Error(`${context}: longitude ${lng} out of range [-180, 180]`);
   }
   return { lat, lng };
+}
+
+/** `layer.addTo(host)` registers the layer with the host when it tracks one */
+function addToHost(layer: object, host: unknown): void {
+  const candidate = host as Partial<LayerHost> | null | undefined;
+  if (candidate && typeof candidate.addLayer === "function") {
+    candidate.addLayer(layer);
+  }
 }
 
 export interface MockPolyline {
@@ -83,7 +100,10 @@ export const polyline: Mock<
   };
   obj.bindPopup.mockReturnValue(obj);
   obj.bindTooltip.mockReturnValue(obj);
-  obj.addTo.mockReturnValue(obj);
+  obj.addTo.mockImplementation((host: unknown) => {
+    addToHost(obj, host);
+    return obj;
+  });
   obj.on.mockReturnValue(obj);
   obj.setStyle.mockReturnValue(obj);
   obj.setLatLngs.mockReturnValue(obj);
@@ -149,34 +169,59 @@ export const marker: Mock<
     popup = { content: String(content) };
     return obj;
   });
-  obj.addTo.mockReturnValue(obj);
+  obj.addTo.mockImplementation((host: unknown) => {
+    addToHost(obj, host);
+    return obj;
+  });
   obj.setIcon.mockReturnValue(obj);
   obj.on.mockReturnValue(obj);
   return obj;
 });
 
-export interface MockLayerGroup {
+/**
+ * Tracked membership shared by maps and layer groups. `hasLayer` reflects
+ * what was added and not removed since, as it does in Leaflet.
+ */
+function createLayerHost(): LayerHost & { layers: Set<object> } {
+  const layers = new Set<object>();
+  return {
+    layers,
+    addLayer: vi.fn((layer: object) => {
+      layers.add(layer);
+    }),
+    removeLayer: vi.fn((layer: object) => {
+      layers.delete(layer);
+    }),
+    hasLayer: vi.fn((layer: object) => layers.has(layer)),
+  };
+}
+
+export interface MockLayerGroup extends LayerHost {
   addTo: Mock;
   clearLayers: Mock;
   removeFrom: Mock;
-  hasLayer: Mock;
-  addLayer: Mock;
-  removeLayer: Mock;
+  /** Layers currently in the group (test convenience) */
+  layers: Set<object>;
 }
 
-export const layerGroup: Mock<() => MockLayerGroup> = vi.fn(() => ({
-  addTo: vi.fn(),
-  clearLayers: vi.fn(),
-  removeFrom: vi.fn(),
-  hasLayer: vi.fn(() => false),
-  addLayer: vi.fn(),
-  removeLayer: vi.fn(),
-}));
+export const layerGroup: Mock<() => MockLayerGroup> = vi.fn(() => {
+  const host = createLayerHost();
+  const obj: MockLayerGroup = {
+    ...host,
+    addTo: vi.fn(),
+    clearLayers: vi.fn(() => {
+      host.layers.clear();
+    }),
+    removeFrom: vi.fn(),
+  };
+  obj.addTo.mockImplementation((target: unknown) => {
+    addToHost(obj, target);
+    return obj;
+  });
+  return obj;
+});
 
-export interface MockMap {
-  addLayer: Mock;
-  removeLayer: Mock;
-  hasLayer: Mock;
+export interface MockMap extends LayerHost {
   setView: Mock;
   fitBounds: Mock;
   panTo: Mock;
@@ -188,12 +233,12 @@ export interface MockMap {
   invalidateSize: Mock;
   on: Mock;
   off: Mock;
+  /** Layers currently on the map (test convenience) */
+  layers: Set<object>;
 }
 
 export const map: Mock<() => MockMap> = vi.fn(() => ({
-  addLayer: vi.fn(),
-  removeLayer: vi.fn(),
-  hasLayer: vi.fn(() => false),
+  ...createLayerHost(),
   setView: vi.fn((center: unknown) => assertLatLng(center, "map.setView")),
   fitBounds: vi.fn(),
   panTo: vi.fn((center: unknown) => assertLatLng(center, "map.panTo")),
@@ -207,12 +252,26 @@ export const map: Mock<() => MockMap> = vi.fn(() => ({
   off: vi.fn(),
 }));
 
-const tileLayerInstance = {
-  addTo: vi.fn(),
-  remove: vi.fn(),
-  on: vi.fn(() => tileLayerInstance),
-};
-export const tileLayer = vi.fn(() => tileLayerInstance);
+export interface MockTileLayer {
+  addTo: Mock;
+  remove: Mock;
+  on: Mock;
+}
+
+/** One instance per call, so two tile layers never share a spy */
+export const tileLayer: Mock<() => MockTileLayer> = vi.fn(() => {
+  const obj: MockTileLayer = {
+    addTo: vi.fn(),
+    remove: vi.fn(),
+    on: vi.fn(),
+  };
+  obj.addTo.mockImplementation((host: unknown) => {
+    addToHost(obj, host);
+    return obj;
+  });
+  obj.on.mockReturnValue(obj);
+  return obj;
+});
 
 export const svg = vi.fn(() => ({}));
 
@@ -228,11 +287,34 @@ export const latLng = vi.fn((lat: number, lng: number) =>
   assertLatLng([lat, lng], "latLng"),
 );
 
-export const latLngBounds = vi.fn(() => ({
-  extend: vi.fn(),
-  isValid: vi.fn(() => true),
-  getCenter: vi.fn(() => ({ lat: 50.0, lng: 8.0 })),
-}));
+export interface MockLatLngBounds {
+  extend: Mock;
+  isValid: Mock;
+  getCenter: Mock;
+  /** Points the bounds were built from and extended with */
+  points: LatLngTuple[];
+}
+
+/** Bounds are only valid once they contain a point, as in Leaflet */
+export const latLngBounds: Mock<(latlngs?: LatLngTuple[]) => MockLatLngBounds> =
+  vi.fn((latlngs: LatLngTuple[] = []) => {
+    const points: LatLngTuple[] = [];
+    for (const ll of latlngs) {
+      assertLatLng(ll, "latLngBounds");
+      points.push(ll);
+    }
+    const obj: MockLatLngBounds = {
+      extend: vi.fn((ll: LatLngTuple) => {
+        assertLatLng(ll, "latLngBounds.extend");
+        points.push(ll);
+        return obj;
+      }),
+      isValid: vi.fn(() => points.length > 0),
+      getCenter: vi.fn(() => ({ lat: 50.0, lng: 8.0 })),
+      points,
+    };
+    return obj;
+  });
 
 export interface MockPopup {
   setLatLng: Mock;
@@ -261,14 +343,30 @@ export const control = {
 export interface MockHeatLayer {
   addTo: Mock;
   remove: Mock;
+  setLatLngs: Mock;
   _canvas?: { style: { pointerEvents: string } };
+  /** Points the layer currently draws (test convenience) */
+  latlngs: LatLngTuple[];
 }
 
 /** leaflet.heat plugin; the real one augments the global L namespace */
-export const heatLayer: Mock<() => MockHeatLayer> = vi.fn(() => ({
-  addTo: vi.fn(),
-  remove: vi.fn(),
-}));
+export const heatLayer: Mock<(latlngs?: LatLngTuple[]) => MockHeatLayer> =
+  vi.fn((latlngs: LatLngTuple[] = []) => {
+    const obj: MockHeatLayer = {
+      addTo: vi.fn(),
+      remove: vi.fn(),
+      setLatLngs: vi.fn((next: LatLngTuple[]) => {
+        obj.latlngs = next;
+        return obj;
+      }),
+      latlngs,
+    };
+    obj.addTo.mockImplementation((host: unknown) => {
+      addToHost(obj, host);
+      return obj;
+    });
+    return obj;
+  });
 
 export const DomEvent = {
   stopPropagation: vi.fn(),

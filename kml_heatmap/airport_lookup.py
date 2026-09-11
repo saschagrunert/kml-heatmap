@@ -2,6 +2,7 @@
 
 import contextlib
 import csv
+import hashlib
 import os
 import re
 import ssl
@@ -10,7 +11,6 @@ import threading
 import time
 import urllib.error
 from pathlib import Path
-from typing import Any
 from urllib.request import urlopen
 
 # Try to import fcntl for Unix-like systems (for process-safe file locking)
@@ -30,8 +30,9 @@ from .logger import logger
 _ICAO_PATTERN = re.compile(r"\b([A-Z]{4})\b")
 
 __all__ = [
+    "database_fingerprint",
     "extract_icao_codes_from_name",
-    "get_cache_info",
+    "load_airport_database",
     "lookup_airport_coordinates",
     "lookup_airport_country",
     "standardize_airport_name",
@@ -43,8 +44,13 @@ OURAIRPORTS_URL = "https://davidmegginson.github.io/ourairports-data/airports.cs
 # Cache settings
 CACHE_FILE = CACHE_DIR / "airports.csv"
 CACHE_LOCK_FILE = CACHE_DIR / "airports.lock"
+# Touched when a download fails so that the other processes of the same run
+# (and the next runs within DOWNLOAD_RETRY_SECONDS) do not each wait for the
+# timeout again while offline
+DOWNLOAD_FAILED_MARKER = CACHE_DIR / "airports.download-failed"
 CACHE_MAX_AGE_DAYS = 30
 DOWNLOAD_TIMEOUT_SECONDS = 30
+DOWNLOAD_RETRY_SECONDS = 3600
 MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 REQUIRED_COLUMNS = ("ident", "name", "latitude_deg", "longitude_deg")
 
@@ -89,17 +95,29 @@ def _is_cache_valid() -> bool:
     return _is_valid_csv_file(CACHE_FILE)
 
 
-def _download_airport_database() -> bool:
-    """Download the OurAirports database into the cache atomically."""
+def _recent_download_failure() -> bool:
+    """True when a download failed less than DOWNLOAD_RETRY_SECONDS ago."""
+    try:
+        age = time.time() - DOWNLOAD_FAILED_MARKER.stat().st_mtime
+    except OSError:
+        return False
+    return 0 <= age < DOWNLOAD_RETRY_SECONDS
+
+
+def _record_download_failure() -> None:
+    with contextlib.suppress(OSError):
+        DOWNLOAD_FAILED_MARKER.touch()
+
+
+def _clear_download_failure() -> None:
+    with contextlib.suppress(OSError):
+        DOWNLOAD_FAILED_MARKER.unlink()
+
+
+def _fetch_airport_database(cache_dir: Path) -> bool:
+    """Download the database into the cache; False on any failure."""
     tmp_path: Path | None = None
     try:
-        cache_dir = CACHE_FILE.parent
-        cache_dir.mkdir(parents=True, exist_ok=True)
-
-        if not os.access(cache_dir, os.W_OK):
-            logger.warning("✗ Airport cache directory is not writable: %s", cache_dir)
-            return False
-
         logger.info("📥 Downloading OurAirports database...")
         context = ssl.create_default_context()
         with urlopen(  # nosec B310
@@ -138,6 +156,40 @@ def _download_airport_database() -> bool:
                 tmp_path.unlink()
 
 
+def _download_airport_database() -> bool:
+    """Download the OurAirports database into the cache atomically.
+
+    A failed attempt is remembered in the cache directory and not retried
+    for DOWNLOAD_RETRY_SECONDS, so an offline run pays the timeout once
+    instead of once per worker process.
+    """
+    cache_dir = CACHE_FILE.parent
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.warning("✗ Cannot create airport cache directory %s: %s", cache_dir, e)
+        return False
+
+    if not os.access(cache_dir, os.W_OK):
+        logger.warning("✗ Airport cache directory is not writable: %s", cache_dir)
+        return False
+
+    if _recent_download_failure():
+        logger.debug(
+            "Skipping airport database download: the last attempt failed less "
+            "than %d s ago",
+            DOWNLOAD_RETRY_SECONDS,
+        )
+        return False
+
+    if _fetch_airport_database(cache_dir):
+        _clear_download_failure()
+        return True
+
+    _record_download_failure()
+    return False
+
+
 def _read_airport_csv(path: Path) -> dict[str, AirportRecord]:
     """Parse the airports CSV into a mapping of ICAO code to record."""
     airports: dict[str, AirportRecord] = {}
@@ -160,69 +212,92 @@ def _read_airport_csv(path: Path) -> dict[str, AirportRecord]:
     return airports
 
 
-def _load_airport_database() -> dict[str, AirportRecord]:
-    """Load airport database from cache or download if needed."""
+def _ensure_cache_file() -> None:
+    """Download the database when the cache is stale, under a file lock.
+
+    The lock coordinates the processes of one run (Unix only). A cache
+    directory that cannot be written (read-only mount, foreign owner) only
+    disables the lock; loading continues. Only the download runs under the
+    lock: parsing the CSV is per process and must not serialize the workers.
+    """
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.debug("Cannot create cache directory %s: %s", CACHE_DIR, e)
+
+    lock_file = None
+    if HAS_FCNTL:
+        try:
+            lock_file = open(CACHE_LOCK_FILE, "w", encoding="utf-8")  # noqa: SIM115
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        except OSError as e:
+            logger.debug("Cannot lock %s, continuing without: %s", CACHE_LOCK_FILE, e)
+            if lock_file is not None:
+                lock_file.close()
+            lock_file = None
+
+    try:
+        # Check again after acquiring the lock: another process might have
+        # downloaded the database while we waited
+        if not _is_cache_valid():
+            logger.debug("Airport database cache is stale, missing or invalid")
+            _download_airport_database()
+    finally:
+        if lock_file:
+            try:
+                if HAS_FCNTL:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                lock_file.close()
+            except OSError:
+                pass
+
+
+def load_airport_database() -> dict[str, AirportRecord]:
+    """Load the airport database from the cache, downloading it when needed.
+
+    The parsed database is kept per process; the first call in a process
+    pays for the parse (and possibly the download).
+    """
     global _airport_cache
 
     # Fast path: return cached data if already loaded (no lock needed)
     if _airport_cache is not None:
         return _airport_cache
 
-    # Acquire thread lock to ensure only one thread in this process loads the database
+    # Only one thread per process loads the database
     with _cache_lock:
-        # Double-check: another thread might have loaded it while we waited for the lock
+        # Double-check: another thread might have loaded it while we waited
         if _airport_cache is not None:
             return _airport_cache
 
-        # Use file-based lock to coordinate across processes (Unix only). A cache
-        # directory that cannot be written (read-only mount, foreign owner) only
-        # disables the lock; loading continues.
-        try:
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            logger.debug("Cannot create cache directory %s: %s", CACHE_DIR, e)
+        _ensure_cache_file()
 
-        lock_file = None
-        try:
-            if HAS_FCNTL:
-                try:
-                    lock_file = open(CACHE_LOCK_FILE, "w", encoding="utf-8")  # noqa: SIM115
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-                except OSError as e:
-                    logger.debug(
-                        "Cannot lock %s, continuing without: %s", CACHE_LOCK_FILE, e
-                    )
-                    if lock_file is not None:
-                        lock_file.close()
-                    lock_file = None
+        if CACHE_FILE.exists():
+            try:
+                airports = _read_airport_csv(CACHE_FILE)
+                _airport_cache = airports
+                logger.debug("Loaded %s airports from cache", f"{len(airports):,}")
+                return airports
+            except (OSError, csv.Error, ValueError, UnicodeDecodeError) as e:
+                logger.warning("Failed to load airport cache: %s", e)
 
-            # Check again if cache is valid after acquiring lock
-            # (another process might have downloaded it while we waited)
-            if not _is_cache_valid():
-                logger.debug("Airport database cache is stale, missing or invalid")
-                _download_airport_database()
+        logger.warning("Airport database unavailable - airport lookups will fail")
+        _airport_cache = {}
+        return _airport_cache
 
-            if CACHE_FILE.exists():
-                try:
-                    airports = _read_airport_csv(CACHE_FILE)
-                    _airport_cache = airports
-                    logger.debug("Loaded %s airports from cache", f"{len(airports):,}")
-                    return airports
-                except (OSError, csv.Error, ValueError, UnicodeDecodeError) as e:
-                    logger.warning("Failed to load airport cache: %s", e)
 
-            logger.warning("Airport database unavailable - airport lookups will fail")
-            _airport_cache = {}
-            return _airport_cache
+def database_fingerprint() -> str:
+    """A short token that changes whenever the cached airport database does.
 
-        finally:
-            if lock_file:
-                try:
-                    if HAS_FCNTL:
-                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-                    lock_file.close()
-                except OSError:
-                    pass
+    Returns ``"nodb"`` while there is no cached database, so results computed
+    without one are told apart from results computed with it.
+    """
+    try:
+        stat = CACHE_FILE.stat()
+    except OSError:
+        return "nodb"
+    token = f"{stat.st_size}:{stat.st_mtime_ns}".encode()
+    return hashlib.sha256(token).hexdigest()[:8]
 
 
 def lookup_airport_coordinates(icao_code: str) -> tuple[float, float, str] | None:
@@ -231,7 +306,7 @@ def lookup_airport_coordinates(icao_code: str) -> tuple[float, float, str] | Non
         logger.debug("Invalid ICAO code: %s", icao_code)
         return None
 
-    airports = _load_airport_database()
+    airports = load_airport_database()
 
     icao_upper = icao_code.upper()
     if icao_upper in airports:
@@ -248,7 +323,7 @@ def lookup_airport_country(icao_code: str) -> str | None:
     if not icao_code or len(icao_code) != 4:
         return None
 
-    airports = _load_airport_database()
+    airports = load_airport_database()
 
     icao_upper = icao_code.upper()
     if icao_upper in airports:
@@ -256,26 +331,6 @@ def lookup_airport_country(icao_code: str) -> str | None:
         return country if country else None
 
     return None
-
-
-def get_cache_info() -> dict[str, Any]:
-    """Get information about the airport database cache."""
-    info: dict[str, Any] = {
-        "cache_file": str(CACHE_FILE),
-        "cache_exists": CACHE_FILE.exists(),
-        "cache_valid": _is_cache_valid(),
-        "database_loaded": _airport_cache is not None,
-    }
-
-    if CACHE_FILE.exists():
-        stat = CACHE_FILE.stat()
-        info["cache_size_mb"] = stat.st_size / 1024 / 1024
-        info["cache_age_days"] = (time.time() - stat.st_mtime) / (24 * 3600)
-
-    if _airport_cache is not None:
-        info["airport_count"] = len(_airport_cache)
-
-    return info
 
 
 def extract_icao_codes_from_name(airport_name: str | None) -> list[str]:

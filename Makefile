@@ -1,5 +1,5 @@
 .PHONY: all build serve serve-build test lint format lock clean help
-.PHONY: verify check-obfuscation require-runtime
+.PHONY: check-obfuscation require-runtime
 
 # API keys are read from the environment (or the make command line) and passed
 # into the build container by name only, so their values never show up in the
@@ -110,28 +110,22 @@ test: ## Run the JavaScript and Python test suites with coverage
 	pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml --cov-report=term
 	coverage report
 
-# pip-tools is installed into a throwaway environment rather than added to the
-# test requirements, so it cannot drift into what the lock files pin.
-lock: ## Regenerate requirements.lock and requirements-test.lock with pip-compile
+# The dependencies are declared once, in pyproject.toml: the runtime
+# dependencies become requirements.lock, the test and dev extras
+# requirements-test.lock. pip-tools is installed into a throwaway environment
+# rather than added to the extras, so it cannot drift into what the lock
+# files pin.
+lock: ## Regenerate requirements.lock and requirements-test.lock from pyproject.toml with pip-compile
 	@tmp=$$(mktemp -d) && \
 	  python -m venv "$$tmp" && \
 	  "$$tmp/bin/pip" install --quiet --disable-pip-version-check pip-tools && \
 	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
 	    --generate-hashes --strip-extras --upgrade \
-	    --output-file=requirements.lock requirements.txt && \
+	    --output-file=requirements.lock pyproject.toml && \
 	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
-	    --generate-hashes --strip-extras --upgrade \
-	    --output-file=requirements-test.lock requirements-test.txt; \
+	    --generate-hashes --strip-extras --upgrade --extra test --extra dev \
+	    --output-file=requirements-test.lock pyproject.toml; \
 	  status=$$?; rm -rf "$$tmp"; exit $$status
-
-verify: build ## Rebuild OUTPUT_DIR and fail if it differs from git (modified or untracked files)
-	@if [ -n "$$(git status --porcelain --ignored -- '$(OUTPUT_DIR)')" ]; then \
-	  echo "error: '$(OUTPUT_DIR)/' is not up to date; commit the regenerated files:"; \
-	  git --no-pager status --short -- '$(OUTPUT_DIR)'; \
-	  git --no-pager diff --stat -- '$(OUTPUT_DIR)'; \
-	  exit 1; \
-	fi
-	@echo "'$(OUTPUT_DIR)/' is up to date"
 
 clean: ## Remove the container image (when a runtime is available) and local build artifacts
 	-@test -z "$(CONTAINER_RUNTIME)" || $(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) 2>/dev/null

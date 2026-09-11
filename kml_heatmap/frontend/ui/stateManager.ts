@@ -113,6 +113,18 @@ export class StateManager {
   }
 
   /**
+   * Save right now instead of after the debounce. Only the share action
+   * needs this: it reads the URL the moment the user asks for it.
+   */
+  flush(): void {
+    if (this.saveTimer !== null) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    this.saveMapState();
+  }
+
+  /**
    * Wrapped visibility from the store; falls back to the DOM while the
    * wrapped manager does not yet publish its state to the store.
    */

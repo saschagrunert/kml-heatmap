@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   AppStore,
+  STORE_ACCESSOR_KEYS,
   createDefaultState,
+  defineStoreAccessors,
 } from "../../../../kml_heatmap/frontend/state/store";
 
 describe("createDefaultState", () => {
@@ -349,6 +351,43 @@ describe("AppStore", () => {
 
       store.set("currentData", null);
       expect(fn).toHaveBeenCalledWith(null, data);
+    });
+  });
+
+  describe("defineStoreAccessors", () => {
+    it("forwards every accessor key to the store", () => {
+      const store = new AppStore();
+      const holder = { store } as { store: AppStore } & Record<string, unknown>;
+
+      defineStoreAccessors(holder);
+
+      for (const key of STORE_ACCESSOR_KEYS) {
+        expect(holder[key]).toBe(store.get(key));
+      }
+      holder["selectedYear"] = "2025";
+      expect(store.get("selectedYear")).toBe("2025");
+      store.set("heatmapVisible", false);
+      expect(holder["heatmapVisible"]).toBe(false);
+    });
+
+    it("notifies subscribers through the accessor", () => {
+      const store = new AppStore();
+      const holder = { store } as { store: AppStore } & Record<string, unknown>;
+      defineStoreAccessors(holder);
+      const fn = vi.fn();
+      store.subscribe("selectedAircraft", fn);
+
+      holder["selectedAircraft"] = "D-EAGJ";
+
+      expect(fn).toHaveBeenCalledWith("D-EAGJ", "all");
+    });
+
+    it("covers every non-panel key of the default state", () => {
+      const panelKeys = new Set(["statsPanelVisible", "wrappedVisible"]);
+      const expected = Object.keys(createDefaultState()).filter(
+        (key) => !panelKeys.has(key),
+      );
+      expect([...STORE_ACCESSOR_KEYS].sort()).toEqual(expected.sort());
     });
   });
 });

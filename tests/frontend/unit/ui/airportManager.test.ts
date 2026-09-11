@@ -108,8 +108,8 @@ describe("AirportManager", () => {
 
     it("replaces the content of an already bound popup", () => {
       airportManager.updateAirportPopups();
+      // The filter change reaches the manager through the store
       mockApp.selectedAircraft = "D-EFGH";
-      airportManager.updateAirportPopups();
 
       const eddf = markers["EDDF"]!;
       expect(eddf.bindPopup).toHaveBeenCalledTimes(1);
@@ -234,6 +234,9 @@ describe("AirportManager", () => {
 
     it("re-adds hidden markers that become visible", () => {
       mockApp.selectedYear = "2024";
+      // The year change already hid the markers outside the filter; from
+      // here on nothing is on the layer
+      mockApp.airportLayer.removeLayer.mockClear();
       mockApp.airportLayer.hasLayer.mockReturnValue(false);
 
       airportManager.updateAirportOpacity();
@@ -428,6 +431,48 @@ describe("AirportManager", () => {
 
       expect(spy).not.toHaveBeenCalled();
       spy.mockRestore();
+    });
+  });
+
+  describe("store subscriptions", () => {
+    it("refreshes the popups and the visibility when the filter changes", () => {
+      const popups = vi.spyOn(airportManager, "updateAirportPopups");
+      const opacity = vi.spyOn(airportManager, "updateAirportOpacity");
+
+      mockApp.selectedYear = "2024";
+
+      expect(popups).toHaveBeenCalledTimes(1);
+      expect(opacity).toHaveBeenCalledTimes(1);
+
+      mockApp.selectedAircraft = "D-ABCD";
+
+      expect(popups).toHaveBeenCalledTimes(2);
+      expect(opacity).toHaveBeenCalledTimes(2);
+    });
+
+    it("refreshes only the visibility for a selection change", () => {
+      const popups = vi.spyOn(airportManager, "updateAirportPopups");
+      const opacity = vi.spyOn(airportManager, "updateAirportOpacity");
+
+      mockApp.selectedPathIds.add(3);
+      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.isolateSelection = true;
+
+      expect(popups).not.toHaveBeenCalled();
+      expect(opacity).toHaveBeenCalledTimes(2);
+    });
+
+    it("binds the popups and hides the markers as soon as a dataset arrives", () => {
+      mockApp.selectedYear = "2024";
+      for (const marker of Object.values(markers)) marker.bindPopup.mockClear();
+      mockApp.airportLayer.removeLayer.mockClear();
+
+      mockApp.currentData = createDataset(pathInfo.slice(2));
+
+      expect(markers["EDDF"]!.setPopupContent).toHaveBeenCalled();
+      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
+        markers["EDDM"],
+      );
     });
   });
 

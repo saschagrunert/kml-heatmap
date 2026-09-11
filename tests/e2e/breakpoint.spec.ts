@@ -12,7 +12,7 @@
  * for the duration, so the bar's idea of what `display` they had is only
  * correct when it happens to mount first.
  */
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { gotoApp, MOBILE_BAR_BREAKPOINT_PX, waitForAppReady } from "./helpers";
 
 const BREAKPOINT_PX = MOBILE_BAR_BREAKPOINT_PX;

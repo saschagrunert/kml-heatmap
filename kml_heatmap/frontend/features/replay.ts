@@ -4,6 +4,7 @@
  */
 
 import { calculateBearing } from "../utils/geometry";
+import { segmentsForPathIds } from "../calculations/statistics";
 import type { PathSegment } from "../types";
 
 /**
@@ -16,10 +17,10 @@ export function prepareReplaySegments(
   segments: PathSegment[],
   pathId: number,
 ): PathSegment[] {
-  // Filter segments that belong to selected path and have time data
-  const replaySegments = segments.filter(
-    (seg) =>
-      seg.path_id === pathId && seg.time !== undefined && seg.time !== null,
+  // The path's own segments come from the per-path index; only the ones
+  // with time data can be replayed
+  const replaySegments = segmentsForPathIds(segments, [pathId]).filter(
+    (seg) => seg.time !== undefined && seg.time !== null,
   );
 
   // Sort by time

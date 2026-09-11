@@ -6,13 +6,82 @@ from kml_heatmap.airports import (
     AirportDeduplicator,
     deduplicate_airports,
     extract_airport_name,
+    is_mid_flight_start,
     is_point_marker,
+    is_valid_landing,
+    sample_path_altitudes,
 )
 from kml_heatmap.types import TrackPoint
 
 
 def _path(*points):
     return [TrackPoint(lat, lon, alt, None) for lat, lon, alt in points]
+
+
+def _flat(alt, count=100):
+    return [TrackPoint(50.0, 8.0, float(alt), None)] * count
+
+
+def _profile(*altitudes):
+    """A path along a meridian with the given altitudes, one point each."""
+    return [
+        TrackPoint(50.0 + i * 0.01, 8.0, float(alt), None)
+        for i, alt in enumerate(altitudes)
+    ]
+
+
+class TestSamplePathAltitudes:
+    def test_short_path_returns_none(self):
+        assert sample_path_altitudes(_flat(100, 10)) is None
+        assert sample_path_altitudes(_flat(100, 22)) is None
+
+    def test_from_start_and_from_end(self):
+        path = _profile(*range(0, 1000, 10))  # 100 points, 0..990
+        start = sample_path_altitudes(path)
+        end = sample_path_altitudes(path, from_end=True)
+        assert start == {"min": 0.0, "max": 240.0, "variation": 240.0}
+        assert end == {"min": 750.0, "max": 990.0, "variation": 240.0}
+
+    def test_sample_is_capped(self):
+        path = _profile(*range(1000))
+        assert sample_path_altitudes(path)["max"] == 49.0
+
+    def test_no_altitudes_returns_none(self):
+        path = [TrackPoint(50.0, 8.0, None, None)] * 100
+        assert sample_path_altitudes(path) is None
+
+
+class TestIsMidFlightStart:
+    def test_flat_high_start_is_mid_flight(self):
+        assert is_mid_flight_start(_flat(2000), 2000.0) is True
+
+    def test_climbing_start_is_not(self):
+        assert is_mid_flight_start(_profile(*range(100, 4100, 40)), 100.0) is False
+
+    def test_low_start_is_not(self):
+        assert is_mid_flight_start(_flat(100), 100.0) is False
+
+    def test_short_path_or_unknown_altitude(self):
+        assert is_mid_flight_start(_flat(2000, 5), 2000.0) is False
+        assert is_mid_flight_start(_flat(2000), None) is False
+
+
+class TestIsValidLanding:
+    def test_stable_low_end_is_a_landing(self):
+        assert is_valid_landing(_flat(100), 100.0) is True
+
+    def test_descent_to_low_altitude_is_a_landing(self):
+        descent = _profile(*range(3000, 90, -30))
+        assert is_valid_landing(descent, descent[-1].alt) is True
+
+    def test_high_variable_end_is_not(self):
+        climb = _profile(*range(100, 4100, 40))
+        assert is_valid_landing(climb, climb[-1].alt) is False
+
+    def test_short_path_uses_fallback_altitude(self):
+        assert is_valid_landing(_flat(100, 3), 100.0) is True
+        assert is_valid_landing(_flat(5000, 3), 5000.0) is False
+        assert is_valid_landing(_flat(100, 3), None) is False
 
 
 class TestExtractAirportName:
@@ -61,7 +130,7 @@ class TestIsPointMarker:
 
 class TestDeduplicateAirports:
     def test_empty_metadata(self):
-        assert deduplicate_airports([], [], lambda p, a: False, lambda p, a: True) == []
+        assert deduplicate_airports([], []) == []
 
     def test_single_route_creates_departure_and_arrival(self):
         metadata = [
@@ -72,13 +141,28 @@ class TestDeduplicateAirports:
         ]
         path_groups = [_path((50.0, 8.5, 100), (50.86, 7.14, 200))]
 
-        result = deduplicate_airports(
-            metadata, path_groups, lambda p, a: False, lambda p, a: True
-        )
+        result = deduplicate_airports(metadata, path_groups)
 
         assert len(result) == 2
         assert result[0]["is_at_path_end"] is False
         assert result[1]["is_at_path_end"] is True
+
+    def test_departure_is_registered_once(self):
+        """The metadata start point is the path's first point; no second pass."""
+        path = _path((50.0, 8.5, 100), (50.4, 8.3, 900), (50.86, 7.14, 200))
+        metadata = [
+            {
+                "start_point": [path[0].lat, path[0].lon, path[0].alt],
+                "airport_name": "Some Field - Other Field",
+            }
+        ]
+
+        result = deduplicate_airports(metadata, [path])
+
+        assert [(a["lat"], a["is_at_path_end"]) for a in result] == [
+            (50.0, False),
+            (50.86, True),
+        ]
 
     def test_duplicate_locations_merge(self):
         metadata = [
@@ -96,9 +180,7 @@ class TestDeduplicateAirports:
             _path((50.0001, 8.5001, 100), (51.0, 9.5, 200)),
         ]
 
-        result = deduplicate_airports(
-            metadata, path_groups, lambda p, a: False, lambda p, a: True
-        )
+        result = deduplicate_airports(metadata, path_groups)
 
         assert len(result) == 1
 
@@ -118,24 +200,20 @@ class TestDeduplicateAirports:
             _path((51.0, 9.5, 100), (52.0, 10.5, 200)),
         ]
 
-        result = deduplicate_airports(
-            metadata, path_groups, lambda p, a: False, lambda p, a: True
-        )
+        result = deduplicate_airports(metadata, path_groups)
 
         assert len(result) == 2
 
     def test_mid_flight_start_filtered(self):
         metadata = [
             {
-                "start_point": [50.0, 8.5, 5000],
+                "start_point": [50.0, 8.0, 5000],
                 "airport_name": "Mid-air Somewhere",
             }
         ]
-        path_groups = [_path((50.0, 8.5, 5000), (51.0, 9.5, 5000))]
+        path_groups = [_flat(5000, 40)]
 
-        result = deduplicate_airports(
-            metadata, path_groups, lambda p, a: a > 1000, lambda p, a: True
-        )
+        result = deduplicate_airports(metadata, path_groups)
 
         assert result == []
 
@@ -148,9 +226,7 @@ class TestDeduplicateAirports:
         ]
         path_groups = [_path((50.0, 8.5, 100), (50.86, 7.14, 5000))]
 
-        result = deduplicate_airports(
-            metadata, path_groups, lambda p, a: False, lambda p, a: a < 1000
-        )
+        result = deduplicate_airports(metadata, path_groups)
 
         assert len(result) == 1
         assert result[0]["is_at_path_end"] is False
@@ -164,9 +240,7 @@ class TestDeduplicateAirports:
         ]
         path_groups = [_path((50.0, 8.5, 100), (51.0, 9.5, 200))]
 
-        result = deduplicate_airports(
-            metadata, path_groups, lambda p, a: False, lambda p, a: True
-        )
+        result = deduplicate_airports(metadata, path_groups)
 
         assert result == []
 
@@ -179,25 +253,30 @@ class TestDeduplicateAirports:
         ]
         path_groups = [_path((50.0, 8.5, 100))]
 
-        result = deduplicate_airports(
-            metadata, path_groups, lambda p, a: False, lambda p, a: True
-        )
+        result = deduplicate_airports(metadata, path_groups)
 
         # Only the start point entry, no arrival from the endpoint pass
         assert len(result) == 1
 
+    def test_metadata_without_matching_path(self):
+        metadata = [{"start_point": [50.0, 8.5], "airport_name": "EDDF"}]
+
+        result = deduplicate_airports(metadata, [])
+
+        assert len(result) == 1
+
     def test_mid_flight_route_omits_departure(self):
+        cruise = [3000.0] * 30
+        descent = [3000.0 - i * 290.0 for i in range(1, 11)]
+        path = _profile(*cruise, *descent)
         metadata = [
             {
-                "start_point": [50.0, 8.5, 3000],
+                "start_point": [path[0].lat, path[0].lon, 3000],
                 "airport_name": "EDDF Frankfurt - EDDK Cologne",
             }
         ]
-        path_groups = [_path((50.0, 8.5, 3000), (50.86, 7.14, 100))]
 
-        result = deduplicate_airports(
-            metadata, path_groups, lambda p, a: a > 1000, lambda p, a: True
-        )
+        result = deduplicate_airports(metadata, [path])
 
         assert len(result) == 1
         assert result[0]["is_at_path_end"] is True

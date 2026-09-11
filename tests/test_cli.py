@@ -126,6 +126,26 @@ class TestFileCollection:
         assert "No KML files specified or found" in captured.err
         assert "No KML files" not in captured.out
 
+    def test_duplicate_inputs_are_processed_once(self, tmp_path, capsys):
+        kml_dir = tmp_path / "flights"
+        kml_dir.mkdir()
+        (kml_dir / "1_a_b.kml").write_text(MINIMAL_KML)
+        (kml_dir / "2_a_b.kml").write_text(MINIMAL_KML)
+
+        mock_create = _run(
+            [
+                str(kml_dir),
+                str(kml_dir / "1_a_b.kml"),
+                str(kml_dir / ".." / "flights" / "2_a_b.kml"),
+                "--output-dir",
+                str(tmp_path / "out"),
+            ]
+        )
+
+        names = [Path(f).name for f in mock_create.call_args[0][0]]
+        assert names == ["1_a_b.kml", "2_a_b.kml"]
+        assert capsys.readouterr().err.count("Ignoring duplicate input") == 2
+
     def test_mixed_files_and_directories(self, tmp_path):
         standalone = tmp_path / "one" / "standalone.kml"
         standalone.parent.mkdir()
@@ -160,22 +180,26 @@ class TestOutputHandling:
         assert exc_info.value.code == 1
         assert "failed" in capsys.readouterr().err.lower()
 
-    def test_overlapping_output_dir_refused_before_processing(self, workspace, capsys):
-        input_dir, kml, _ = workspace
+    def test_overlapping_output_dir_refused_before_processing(self, tmp_path, capsys):
+        # The output data directory (<output-dir>/data) would be the input dir
+        input_dir = tmp_path / "data"
+        input_dir.mkdir()
+        kml = input_dir / "test.kml"
+        kml.write_text(MINIMAL_KML)
         with pytest.raises(SystemExit) as exc_info:
-            _run([str(kml), "--output-dir", str(input_dir)])
+            _run([str(kml), "--output-dir", str(tmp_path)])
         assert exc_info.value.code == 1
         assert "Refusing" in capsys.readouterr().err
+        assert not (tmp_path / "index.html").exists()
 
-    def test_default_output_dir_refused_when_input_is_in_cwd(
-        self, workspace, capsys, monkeypatch
-    ):
+    def test_default_output_dir_next_to_input_is_accepted(self, workspace, monkeypatch):
+        """``kml-heatmap flight.kml`` in the file's directory is the documented use."""
         input_dir, kml, _ = workspace
         monkeypatch.chdir(input_dir)
-        with pytest.raises(SystemExit) as exc_info:
-            _run([kml.name])
-        assert exc_info.value.code == 1
-        assert "Refusing" in capsys.readouterr().err
+        mock_create = _run([kml.name])
+        args = mock_create.call_args[0]
+        assert args[1] == str(Path(".") / "index.html")
+        assert args[2] == str(Path(".") / "data")
 
 
 class TestDebugFlag:

@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .helpers import parse_timestamp_epoch
-from .kml_parsers import validate_and_normalize_coordinate
 from .logger import logger
 from .parser_common import (
     _build_path_metadata_dict,
     empty_placemark_metadata,
     extract_placemark_metadata,
     extract_year_from_timestamp,
+    validate_and_normalize_coordinate,
 )
 from .types import TrackPoint
 
@@ -140,7 +140,7 @@ def process_gx_track(
             logger.debug("gx:Track without usable coordinates in %s", kml_file)
             continue
 
-        track_meta: PlacemarkMetadata = dict(placemark_meta)  # type: ignore[assignment]
+        track_meta = placemark_meta.copy()
         if whens:
             # The track's own timestamps are authoritative for its time span
             track_meta["timestamp"] = whens[0]

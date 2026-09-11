@@ -9,7 +9,10 @@ import { ReplayState } from "../../../../kml_heatmap/frontend/ui/replayState";
 import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
 import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
-import * as colors from "../../../../kml_heatmap/frontend/utils/colors";
+import {
+  getColorForAirspeed,
+  getColorForAltitude,
+} from "../../../../kml_heatmap/frontend/utils/colors";
 import * as replayFeature from "../../../../kml_heatmap/frontend/features/replay";
 import { generateSegmentPopupHtml } from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
 import * as L from "leaflet";
@@ -374,8 +377,7 @@ describe("ReplayRenderer", () => {
       expect(markerObj.setLatLng).toHaveBeenCalledWith([50.01, 8.51]);
     });
 
-    it("uses airspeed colors when airspeed is visible and altitude is not", () => {
-      const airspeedSpy = vi.spyOn(colors, "getColorForAirspeed");
+    it("draws with airspeed colors when airspeed is visible and altitude is not", () => {
       mockApp.airspeedVisible = true;
       mockApp.altitudeVisible = false;
 
@@ -388,16 +390,13 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(airspeedSpy).toHaveBeenCalledWith(
-        150,
-        mockReplayManager.state.colorMinSpeed,
-        mockReplayManager.state.colorMaxSpeed,
-      );
+      const { colorMinSpeed, colorMaxSpeed } = mockReplayManager.state;
+      expect(vi.mocked(L.polyline).mock.calls[0]![1]).toMatchObject({
+        color: getColorForAirspeed(150, colorMinSpeed, colorMaxSpeed),
+      });
     });
 
     it("falls back to altitude colors for segments without groundspeed", () => {
-      const airspeedSpy = vi.spyOn(colors, "getColorForAirspeed");
-      const altitudeSpy = vi.spyOn(colors, "getColorForAltitude");
       mockApp.airspeedVisible = true;
       mockApp.altitudeVisible = false;
 
@@ -409,8 +408,9 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(airspeedSpy).not.toHaveBeenCalled();
-      expect(altitudeSpy).toHaveBeenCalledWith(3000, 0, 10000);
+      expect(vi.mocked(L.polyline).mock.calls[0]![1]).toMatchObject({
+        color: getColorForAltitude(3000, 0, 10000),
+      });
     });
 
     it("falls back to first segment coords when no lastSegment", () => {

@@ -21,18 +21,37 @@ if TYPE_CHECKING:
     from .types import FlightPath, PathInfo, PathMetadata, SegmentRow
 
 
+def path_metrics(path: FlightPath, metadata: PathMetadata) -> tuple[float, float]:
+    """The duration (from the metadata timestamps) and distance of a path.
+
+    Returns:
+        Tuple of (path_duration_seconds, path_distance_km); the duration is 0
+        when the metadata carries no usable start and end timestamp.
+    """
+    path_duration_seconds = 0.0
+    start_ts = metadata.get("timestamp")
+    end_ts = metadata.get("end_timestamp")
+
+    if start_ts and end_ts:
+        path_duration_seconds = calculate_duration_seconds(start_ts, end_ts)
+        if path_duration_seconds == 0:
+            logger.debug("  Could not parse timestamps '%s' -> '%s'", start_ts, end_ts)
+
+    return path_duration_seconds, calculate_path_distance(path)
+
+
 def build_path_info(
     path: FlightPath,
     metadata: PathMetadata,
     path_id: int,
     year: int,
-) -> tuple[PathInfo, float, float]:
-    """Build the path info entry and compute path metrics.
+    segment_count: int,
+) -> PathInfo:
+    """Build the path info entry of an exported path.
 
-    Keys without a value are omitted from the entry.
-
-    Returns:
-        Tuple of (info, path_duration_seconds, path_distance_km)
+    ``segment_count`` is the number of exported rows, which the caller knows
+    once ``process_path_segments`` has dropped the zero-length segments. Keys
+    without a value are omitted from the entry.
     """
     airport_name = metadata.get("airport_name") or ""
     start_airport = None
@@ -44,23 +63,12 @@ def build_path_info(
             start_airport = parts[0].strip()
             end_airport = parts[1].strip()
 
-    path_duration_seconds = 0.0
-    start_ts = metadata.get("timestamp")
-    end_ts = metadata.get("end_timestamp")
-
-    if start_ts and end_ts:
-        path_duration_seconds = calculate_duration_seconds(start_ts, end_ts)
-        if path_duration_seconds == 0:
-            logger.debug("  Could not parse timestamps '%s' -> '%s'", start_ts, end_ts)
-
-    path_distance_km = calculate_path_distance(path)
-
     info: PathInfo = {
         "id": path_id,
         "year": year,
         "start_coords": [path[0].lat, path[0].lon],
         "end_coords": [path[-1].lat, path[-1].lon],
-        "segment_count": len(path) - 1,
+        "segment_count": segment_count,
     }
 
     # Segment altitudes are rounded to 100 ft for rendering, so the exact
@@ -81,7 +89,7 @@ def build_path_info(
     if aircraft_type:
         info["aircraft_type"] = aircraft_type
 
-    return info, path_duration_seconds, path_distance_km
+    return info
 
 
 def _segment_groundspeed(

@@ -9,6 +9,10 @@ import {
   calculateSpeedStats,
   calculateLongestFlight,
   calculateFilteredStatistics,
+  buildSegmentRanges,
+  perPathSeconds,
+  segmentRangesFor,
+  segmentsForPathIds,
 } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import {
   FEET_TO_METERS,
@@ -635,6 +639,104 @@ describe("statistics calculations", () => {
       expect(stats.max_altitude_ft).toBeCloseTo(10999, 6);
       expect(stats.max_groundspeed_knots).toBe(149);
       expect(stats.total_flight_time_seconds).toBe(1000 * 90);
+    });
+  });
+
+  describe("segment index", () => {
+    const grouped: PathSegment[] = [
+      { path_id: 1, time: 0 },
+      { path_id: 1, time: 10 },
+      { path_id: 2, time: 0 },
+      { path_id: 3, time: 0 },
+      { path_id: 3, time: 5 },
+      { path_id: 3, time: 9 },
+    ];
+
+    it("locates every path as a slice of a grouped array", () => {
+      expect(buildSegmentRanges(grouped)).toEqual(
+        new Map([
+          [1, [0, 2]],
+          [2, [2, 3]],
+          [3, [3, 6]],
+        ]),
+      );
+      expect(buildSegmentRanges([])).toEqual(new Map());
+    });
+
+    it("refuses an array where a path comes back after another one", () => {
+      expect(
+        buildSegmentRanges([{ path_id: 1 }, { path_id: 2 }, { path_id: 1 }]),
+      ).toBeNull();
+    });
+
+    it("builds the index once per array", () => {
+      const first = segmentRangesFor(grouped);
+      expect(segmentRangesFor(grouped)).toBe(first);
+      expect(segmentRangesFor([...grouped])).not.toBe(first);
+    });
+
+    it("returns the segments of the given paths in array order", () => {
+      const result = segmentsForPathIds(grouped, [3, 1]);
+
+      expect(result).toEqual([
+        grouped[0],
+        grouped[1],
+        grouped[3],
+        grouped[4],
+        grouped[5],
+      ]);
+      expect(segmentsForPathIds(grouped, new Set([2]))).toEqual([grouped[2]]);
+      expect(segmentsForPathIds(grouped, [99])).toEqual([]);
+      expect(segmentsForPathIds(grouped, [])).toEqual([]);
+    });
+
+    it("falls back to a filter for an array that is not grouped", () => {
+      const interleaved: PathSegment[] = [
+        { path_id: 1, time: 0 },
+        { path_id: 2, time: 0 },
+        { path_id: 1, time: 10 },
+      ];
+
+      expect(segmentsForPathIds(interleaved, [1])).toEqual([
+        interleaved[0],
+        interleaved[2],
+      ]);
+      expect(filterSegmentsByPaths(interleaved, [{ id: 2 }])).toEqual([
+        interleaved[1],
+      ]);
+    });
+  });
+
+  describe("perPathSeconds", () => {
+    it("measures each path from its first to its last timestamp", () => {
+      const seconds = perPathSeconds([
+        { path_id: 1, time: 30 },
+        { path_id: 1, time: 0 },
+        { path_id: 1, time: 90 },
+        { path_id: 2, time: 5 },
+        { path_id: 3 },
+      ]);
+
+      expect(seconds).toEqual(
+        new Map([
+          [1, 90],
+          [2, 0],
+        ]),
+      );
+    });
+
+    it("restricts the paths when a set is given", () => {
+      const seconds = perPathSeconds(
+        [
+          { path_id: 1, time: 0 },
+          { path_id: 1, time: 60 },
+          { path_id: 2, time: 0 },
+          { path_id: 2, time: 10 },
+        ],
+        new Set([2]),
+      );
+
+      expect(seconds).toEqual(new Map([[2, 10]]));
     });
   });
 });

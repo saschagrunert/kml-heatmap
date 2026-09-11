@@ -1,12 +1,18 @@
 """Tests for export_pipeline module."""
 
+from itertools import pairwise
+
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from kml_heatmap.export_pipeline import (
     _segment_groundspeed,
     build_path_info,
+    path_metrics,
     process_path_segments,
 )
+from kml_heatmap.geometry import haversine_distance
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.segment_calculator import SegmentSpeed
 from kml_heatmap.types import TrackPoint
@@ -20,28 +26,37 @@ def _make_path(count=10, alt=1000.0, timed=False):
     return path
 
 
-class TestBuildPathInfo:
-    def test_airport_name_parsing(self):
+class TestPathMetrics:
+    def test_duration_and_distance(self):
         metadata = {
-            "airport_name": "EDDS - EDDP",
             "timestamp": "2025-03-03T08:00:00Z",
             "end_timestamp": "2025-03-03T09:30:00Z",
         }
-        info, duration, distance = build_path_info(_make_path(), metadata, 4, 2025)
+        duration, distance = path_metrics(_make_path(), metadata)
+        assert duration == pytest.approx(5400.0)
+        assert distance == pytest.approx(11.9, abs=0.5)
+
+    def test_missing_or_invalid_timestamps_give_zero_duration(self):
+        assert path_metrics(_make_path(), {})[0] == 0.0
+        metadata = {"timestamp": "invalid", "end_timestamp": "also-invalid"}
+        assert path_metrics(_make_path(), metadata)[0] == 0.0
+
+
+class TestBuildPathInfo:
+    def test_airport_name_parsing(self):
+        metadata = {"airport_name": "EDDS - EDDP"}
+        info = build_path_info(_make_path(), metadata, 4, 2025, 9)
         assert info["start_airport"] == "EDDS"
         assert info["end_airport"] == "EDDP"
         assert info["year"] == 2025
         assert info["id"] == 4
-        assert duration == pytest.approx(5400.0)
-        assert distance > 0
 
     def test_none_values_are_omitted(self):
         metadata = {"airport_name": "", "aircraft_registration": None}
-        info, duration, _ = build_path_info(_make_path(), metadata, 1, 2025)
+        info = build_path_info(_make_path(), metadata, 1, 2025, 9)
         assert "start_airport" not in info
         assert "end_airport" not in info
         assert "aircraft_registration" not in info
-        assert duration == 0.0
         assert set(info) == {
             "id",
             "year",
@@ -52,36 +67,47 @@ class TestBuildPathInfo:
             "segment_count",
         }
 
+    def test_key_order_is_stable(self):
+        """The exported JSON keeps this order; the frontend contract test pins it."""
+        info = build_path_info(_make_path(), {"airport_name": "A - B"}, 1, 2025, 9)
+        assert list(info) == [
+            "id",
+            "year",
+            "start_coords",
+            "end_coords",
+            "segment_count",
+            "min_altitude_ft",
+            "max_altitude_ft",
+            "start_airport",
+            "end_airport",
+        ]
+
     def test_single_airport_no_split(self):
-        info, _, _ = build_path_info(_make_path(), {"airport_name": "EDDS"}, 0, 2025)
+        info = build_path_info(_make_path(), {"airport_name": "EDDS"}, 0, 2025, 9)
         assert "start_airport" not in info
 
     def test_three_part_name_not_split(self):
         metadata = {"airport_name": "EDDF - EDDM - EDDT"}
-        info, _, _ = build_path_info(_make_path(), metadata, 0, 2025)
+        info = build_path_info(_make_path(), metadata, 0, 2025, 9)
         assert "start_airport" not in info
-
-    def test_invalid_timestamps_zero_duration(self):
-        metadata = {"timestamp": "invalid", "end_timestamp": "also-invalid"}
-        _, duration, _ = build_path_info(_make_path(), metadata, 0, 2025)
-        assert duration == 0.0
-
-    def test_distance_calculation(self):
-        _, _, distance = build_path_info(_make_path(), {}, 0, 2025)
-        assert distance == pytest.approx(11.9, abs=0.5)
 
     def test_aircraft_metadata_included(self):
         metadata = {"aircraft_registration": "D-EAGJ", "aircraft_type": "C172"}
-        info, _, _ = build_path_info(_make_path(), metadata, 0, 2025)
+        info = build_path_info(_make_path(), metadata, 0, 2025, 9)
         assert info["aircraft_registration"] == "D-EAGJ"
         assert info["aircraft_type"] == "C172"
 
     def test_segment_count_and_coords(self):
         path = _make_path(count=5)
-        info, _, _ = build_path_info(path, {}, 0, 2025)
-        assert info["segment_count"] == 4
+        info = build_path_info(path, {}, 0, 2025, 3)
+        assert info["segment_count"] == 3
         assert info["start_coords"] == [path[0].lat, path[0].lon]
         assert info["end_coords"] == [path[-1].lat, path[-1].lon]
+
+    def test_altitude_range_omitted_without_altitudes(self):
+        path = [TrackPoint(50.0, 8.5, None, None), TrackPoint(50.1, 8.6, None, None)]
+        info = build_path_info(path, {}, 0, 2025, 1)
+        assert "min_altitude_ft" not in info
 
 
 class TestSegmentGroundspeed:
@@ -195,3 +221,49 @@ class TestProcessPathSegments:
         assert rows == []
         start, _, _ = process_path_segments([], 0.0, 0.0)
         assert start == []
+
+
+class TestProcessPathSegmentsProperties:
+    @settings(max_examples=150, deadline=None)
+    @given(
+        st.lists(
+            st.tuples(
+                st.floats(min_value=-89.0, max_value=89.0),
+                st.floats(min_value=-179.0, max_value=179.0),
+                st.floats(min_value=0.0, max_value=5000.0),
+            ),
+            min_size=2,
+            max_size=25,
+        ),
+        st.booleans(),
+    )
+    def test_rows_form_a_contiguous_chain(self, points, timed):
+        """Every row continues where the previous one ended.
+
+        The exported format stores only end points, so the chain must stay
+        intact whatever the geometry, including repeated (zero-length) points.
+        """
+        path = [
+            TrackPoint(lat, lon, alt, float(i) if timed else None)
+            for i, (lat, lon, alt) in enumerate(points)
+        ]
+        start, rows, distances = process_path_segments(path, 1.0, 60.0)
+
+        assert len(rows) == len(distances)
+        assert len(start) == (2 if rows else 0)
+        previous = start
+        for row, distance in zip(rows, distances, strict=True):
+            # The distance of a row is measured from the previous end point,
+            # which is exactly how the frontend walks the chain
+            assert distance == pytest.approx(
+                haversine_distance(previous[0], previous[1], row[0], row[1])
+            )
+            assert row[2] % 100 == 0
+            assert row[3] >= 0
+            previous = row[:2]
+        exported_ends = [row[:2] for row in rows]
+        assert exported_ends == [
+            [round(p2.lat, 5), round(p2.lon, 5)]
+            for p1, p2 in pairwise(path)
+            if (p1.lat, p1.lon) != (p2.lat, p2.lon)
+        ]

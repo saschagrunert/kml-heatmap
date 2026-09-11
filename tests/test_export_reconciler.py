@@ -1,11 +1,12 @@
 """Tests for export_reconciler module."""
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
-from kml_heatmap.constants import FEET_TO_METERS, KM_TO_NAUTICAL_MILES, METERS_TO_FEET
+from kml_heatmap.constants import FEET_TO_METERS, KM_TO_NAUTICAL_MILES
 from kml_heatmap.export_reconciler import YearAggregate
 from kml_heatmap.geometry import haversine_distance
-from kml_heatmap.helpers import format_flight_time
 
 START = (50.0, 8.0)
 STEP = 0.01
@@ -175,78 +176,81 @@ class TestMerge:
         assert merged.min_groundspeed_or_zero == 0.0
 
 
-class TestApplyToStats:
-    def test_stats_are_internally_consistent(self):
-        agg = YearAggregate(total_points=10)
-        _add(agg, [_row(100, 100, 0.0), _row(300, 120, 90.0)], "D-EAGJ")
-        _add(agg, [_row(0, 100, 0.0), _row(1500, 130, 45.0)], "D-EHYL")
-        stats = {
-            "aircraft_list": [{"registration": "D-EAGJ"}, {"registration": "D-XXXX"}]
-        }
+def _as_dict(aggregate):
+    return {
+        field: getattr(aggregate, field) for field in YearAggregate.__dataclass_fields__
+    }
 
-        agg.apply_to_stats(stats)
 
-        assert stats["total_points"] == 10
-        assert stats["num_paths"] == 2
-        assert stats["min_altitude_m"] == pytest.approx(0.0)
-        assert stats["max_altitude_m"] == pytest.approx(1500 * FEET_TO_METERS)
-        assert stats["min_altitude_ft"] == pytest.approx(
-            stats["min_altitude_m"] * METERS_TO_FEET
-        )
-        assert stats["max_altitude_ft"] == pytest.approx(
-            stats["max_altitude_m"] * METERS_TO_FEET
-        )
-        assert stats["total_distance_nm"] == pytest.approx(
-            stats["total_distance_km"] * KM_TO_NAUTICAL_MILES
-        )
-        assert stats["total_altitude_gain_ft"] == pytest.approx(
-            stats["total_altitude_gain_m"] * METERS_TO_FEET
-        )
-        assert stats["max_groundspeed_knots"] == 130
-        assert stats["avg_groundspeed_knots"] == pytest.approx(112.5)
-        assert stats["cruise_speed_knots"] == pytest.approx(130)
-        assert stats["most_common_cruise_altitude_ft"] == 1500
-        assert stats["most_common_cruise_altitude_m"] == round(1500 * FEET_TO_METERS, 1)
-        assert stats["total_flight_time_seconds"] == pytest.approx(135.0)
-        assert stats["total_flight_time_str"] == format_flight_time(135.0)
-        assert stats["longest_flight_nm"] == pytest.approx(
-            stats["longest_flight_km"] * KM_TO_NAUTICAL_MILES, abs=0.1
-        )
-        eagj, other = stats["aircraft_list"]
-        assert eagj["flight_time_seconds"] == 90.0
-        assert eagj["flight_time_str"] == "0h 1m"
-        assert eagj["flight_distance_km"] > 0
-        assert other == {
-            "registration": "D-XXXX",
-            "flight_time_seconds": 0.0,
-            "flight_time_str": "0h 0m",
-            "flight_distance_km": 0.0,
-        }
+_rows = st.lists(
+    st.tuples(
+        st.integers(min_value=0, max_value=50).map(lambda n: n * 100),
+        st.floats(min_value=0.0, max_value=200.0),
+    ).map(lambda pair: _row(*pair)),
+    min_size=0,
+    max_size=6,
+)
+_paths = st.lists(
+    st.tuples(_rows, st.sampled_from([None, "D-EAGJ", "D-EHYL"])),
+    min_size=0,
+    max_size=8,
+)
 
-    def test_no_segments_gives_zero_and_none(self):
-        stats = {}
-        YearAggregate().apply_to_stats(stats)
-        assert stats["total_points"] == 0
-        assert stats["min_altitude_m"] is None
-        assert stats["max_altitude_ft"] is None
-        assert stats["avg_groundspeed_knots"] == 0.0
-        assert stats["cruise_speed_knots"] == 0.0
-        assert stats["most_common_cruise_altitude_ft"] is None
-        assert stats["total_flight_time_str"] == "0h 0m"
-        assert stats["longest_flight_km"] == 0.0
 
-    def test_most_common_altitude_ties_resolve_to_lowest(self):
-        agg = YearAggregate()
-        _add(agg, [_row(0, 100), _row(3000, 100), _row(2000, 100)])
-        stats = {}
-        agg.apply_to_stats(stats)
-        assert stats["most_common_cruise_altitude_ft"] == 2000
+class TestMergeProperties:
+    @settings(max_examples=150, deadline=None)
+    @given(_paths, st.integers(min_value=0, max_value=8))
+    def test_merging_chunks_equals_a_single_pass(self, paths, split):
+        """The chunked export merges partial aggregates; the result must not
+        depend on where the year was cut."""
+        split = min(split, len(paths))
+        whole = YearAggregate()
+        for rows, registration in paths:
+            _add(whole, rows, registration)
 
-    def test_altitude_stats_match_frontend_derivation(self):
-        agg = YearAggregate()
-        _add(agg, [_row(1700, 100), _row(2300, 100)])
-        stats = {}
-        agg.apply_to_stats(stats)
-        # The frontend derives altitude_m = altitude_ft * FEET_TO_METERS
-        assert stats["min_altitude_m"] == 1700 * FEET_TO_METERS
-        assert stats["max_altitude_m"] == 2300 * FEET_TO_METERS
+        first, second = YearAggregate(), YearAggregate()
+        for rows, registration in paths[:split]:
+            _add(first, rows, registration)
+        for rows, registration in paths[split:]:
+            _add(second, rows, registration)
+        merged = YearAggregate()
+        merged.merge(first)
+        merged.merge(second)
+
+        expected = _as_dict(whole)
+        actual = _as_dict(merged)
+        for field, value in expected.items():
+            if isinstance(value, dict):
+                assert actual[field].keys() == value.keys()
+                for key in value:
+                    assert actual[field][key] == pytest.approx(value[key])
+            elif isinstance(value, float):
+                assert actual[field] == pytest.approx(value)
+            else:
+                assert actual[field] == value
+
+    @settings(max_examples=50, deadline=None)
+    @given(_paths)
+    def test_merge_is_associative(self, paths):
+        parts = []
+        for rows, registration in paths:
+            part = YearAggregate()
+            _add(part, rows, registration)
+            parts.append(part)
+
+        left = YearAggregate()
+        for part in parts:
+            left.merge(part)
+
+        right = YearAggregate()
+        for part in reversed(parts):
+            right.merge(part)
+
+        assert left.num_paths == right.num_paths
+        assert left.total_distance_km == pytest.approx(right.total_distance_km)
+        assert left.min_altitude_ft == right.min_altitude_ft
+        assert left.max_altitude_ft == right.max_altitude_ft
+        assert left.cruise_altitude_bins == right.cruise_altitude_bins
+        assert left.total_flight_time_seconds == pytest.approx(
+            right.total_flight_time_seconds
+        )

@@ -2,8 +2,11 @@
  * Stats Manager - Handles statistics panel updates
  */
 import type { MapApp } from "../mapApp";
-import type { FilteredStatistics } from "../types";
-import { calculateFilteredStatistics } from "../calculations/statistics";
+import type { FilteredStatistics, PathInfo, PathSegment } from "../types";
+import {
+  calculateFilteredStatistics,
+  segmentsForPathIds,
+} from "../calculations/statistics";
 import {
   countryDisplayName,
   countryFlag,
@@ -21,11 +24,26 @@ import {
 import { icon, type IconName } from "../utils/icons";
 import { domCache } from "../utils/domCache";
 
-/** Duration of the stats panel hide transition (ms) */
-const PANEL_TRANSITION_MS = 300;
-
-/** Panel element: owns visibility and the panel transition */
+/** Panel element the statistics are rendered into */
 const PANEL_ID = "stats-panel";
+
+/** Store keys the rendered statistics depend on */
+const STATS_KEYS = [
+  "currentData",
+  "selectedPathIds",
+  "selectedYear",
+  "selectedAircraft",
+] as const;
+
+/** Everything a statistics render was computed from */
+interface StatsInputs {
+  pathInfo: PathInfo[];
+  segments: PathSegment[];
+  year: string;
+  aircraft: string;
+  /** Sorted selected path ids, or "" without a selection */
+  selection: string;
+}
 
 /** Stand-in for a measurement the data does not carry */
 const MISSING_VALUE = "—";
@@ -324,39 +342,80 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
 
 export class StatsManager {
   private app: MapApp;
-  private closeTimer: ReturnType<typeof setTimeout> | null = null;
   /** Markup of the last render; an identical result is not written again */
   private lastHtml: string | null = null;
+  /** What the last statistics were computed from; identical inputs skip it */
+  private lastInputs: StatsInputs | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
 
     // Pre-cache the stats panel element
     domCache.cacheElements([PANEL_ID]);
+
+    // The panel follows the data and the filters; nothing has to call it
+    for (const key of STATS_KEYS) {
+      app.store.subscribe(key, () => this.updateStatsForSelection());
+    }
   }
 
-  updateStatsForSelection(): void {
-    const pathInfo = this.app.fullPathInfo ?? [];
-    const segments = this.app.fullPathSegments ?? [];
+  /** The inputs of the current state, in a shape that compares cheaply */
+  private currentInputs(): StatsInputs {
+    const selected = this.app.selectedPathIds;
+    return {
+      pathInfo: this.app.fullPathInfo ?? [],
+      segments: this.app.fullPathSegments ?? [],
+      year: this.app.selectedYear,
+      aircraft: this.app.selectedAircraft,
+      selection:
+        selected.size === 0
+          ? ""
+          : Array.from(selected)
+              .sort((a, b) => a - b)
+              .join(","),
+    };
+  }
 
-    if (this.app.selectedPathIds.size === 0) {
+  private static sameInputs(a: StatsInputs, b: StatsInputs): boolean {
+    return (
+      a.pathInfo === b.pathInfo &&
+      a.segments === b.segments &&
+      a.year === b.year &&
+      a.aircraft === b.aircraft &&
+      a.selection === b.selection
+    );
+  }
+
+  /**
+   * Render the statistics of the current filter, or of the selection when
+   * there is one. The calculation walks every segment, so it only runs
+   * when something it depends on has changed; a selection click that ends
+   * in the same state as before costs nothing.
+   */
+  updateStatsForSelection(): void {
+    const inputs = this.currentInputs();
+    if (this.lastInputs && StatsManager.sameInputs(this.lastInputs, inputs)) {
+      return;
+    }
+    this.lastInputs = inputs;
+
+    const { pathInfo, segments } = inputs;
+    const selected = this.app.selectedPathIds;
+
+    if (selected.size === 0) {
       const statsToShow = calculateFilteredStatistics({
         pathInfo,
         segments,
-        year: this.app.selectedYear,
-        aircraft: this.app.selectedAircraft,
+        year: inputs.year,
+        aircraft: inputs.aircraft,
       });
       this.updateStatsPanel(statsToShow, false);
       return;
     }
 
     // Calculate stats for selected paths only
-    const selectedPathInfo = pathInfo.filter((path) =>
-      this.app.selectedPathIds.has(path.id),
-    );
-    const selectedSegments = segments.filter((segment) =>
-      this.app.selectedPathIds.has(segment.path_id),
-    );
+    const selectedPathInfo = pathInfo.filter((path) => selected.has(path.id));
+    const selectedSegments = segmentsForPathIds(segments, selected);
 
     // A selection without segments still gets rendered: leaving the previous
     // flight's numbers under the "Selected Paths" title would be worse
@@ -439,37 +498,12 @@ export class StatsManager {
 
   /**
    * Show or hide the stats panel. The store key `statsPanelVisible` is the
-   * source of truth for state persistence.
+   * source of truth: the rail, the triggers and state persistence all
+   * follow it, so this is a store write and nothing else.
    * @param visible - Target visibility
-   * @param save - Persist the state after the change (default true)
    */
-  setStatsPanelVisible(visible: boolean, save = true): void {
-    const panel = domCache.get(PANEL_ID);
-    if (!panel) return;
-
-    if (this.closeTimer !== null) {
-      clearTimeout(this.closeTimer);
-      this.closeTimer = null;
-    }
-
+  setStatsPanelVisible(visible: boolean): void {
     this.app.store.set("statsPanelVisible", visible);
-
-    if (visible) {
-      // Show with animation
-      panel.style.display = "block";
-      // Trigger reflow to ensure transition works
-      panel.offsetHeight;
-      panel.classList.add("visible");
-      if (save) this.app.stateManager.saveMapState();
-    } else {
-      // Hide with animation, then remove from layout
-      panel.classList.remove("visible");
-      this.closeTimer = setTimeout(() => {
-        this.closeTimer = null;
-        panel.style.display = "none";
-        if (save) this.app.stateManager.saveMapState();
-      }, PANEL_TRANSITION_MS);
-    }
   }
 
   toggleStats(): void {

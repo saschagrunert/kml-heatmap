@@ -98,6 +98,35 @@ describe("DOMCache", () => {
     });
   });
 
+  describe("get with an element class", () => {
+    it("returns the element when it is an instance of the class", () => {
+      const select = document.createElement("select");
+      select.id = "year-select";
+      document.body.appendChild(select);
+
+      const result = domCache.get("year-select", HTMLSelectElement);
+
+      expect(result).toBe(select);
+      // The narrowed type is what callers rely on
+      expect(result?.options).toBeDefined();
+    });
+
+    it("returns null when the element is of another class", () => {
+      const div = document.createElement("div");
+      div.id = "year-select";
+      document.body.appendChild(div);
+
+      expect(domCache.get("year-select", HTMLSelectElement)).toBeNull();
+      expect(domCache.get("year-select", HTMLButtonElement)).toBeNull();
+      // The untyped lookup still finds it
+      expect(domCache.get("year-select")).toBe(div);
+    });
+
+    it("returns null when the element is missing", () => {
+      expect(domCache.get("missing", HTMLButtonElement)).toBeNull();
+    });
+  });
+
   describe("cacheElements", () => {
     it("caches multiple elements at once", () => {
       const el1 = document.createElement("div");

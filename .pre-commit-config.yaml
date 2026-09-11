@@ -1,14 +1,15 @@
 ---
 # Install with: pip install pre-commit && pre-commit install
-# Generated files (docs/) and input data (data/) are excluded from the fixers.
+# Input data (data/) is excluded from the fixers; the generated site (docs/)
+# is not tracked at all.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: end-of-file-fixer
-        exclude: ^(docs|data)/
+        exclude: ^data/
       - id: trailing-whitespace
-        exclude: ^(docs|data)/
+        exclude: ^data/
         args: [--markdown-linebreak-ext=md]
       - id: check-merge-conflict
       - id: check-toml

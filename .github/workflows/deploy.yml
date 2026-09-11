@@ -1,0 +1,76 @@
+---
+# Builds the site from the sources and the KML files in data/ and publishes
+# it to GitHub Pages. The generated site is not committed: every push to main
+# deploys what the sources produce, so there is no output to keep in sync.
+name: deploy
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.lock
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install Python dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Install npm dependencies
+        run: npm ci
+      - name: Build the JavaScript bundle
+        run: npm run build
+      - name: Compute the weekly cache key
+        id: week
+        run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Cache the OurAirports database
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kml-heatmap
+          key: airports-${{ steps.week.outputs.week }}
+      - name: Build the site
+        run: python -m kml_heatmap data --output-dir site
+        env:
+          CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}
+          OPENAIP_API_KEY: ${{ secrets.OPENAIP_API_KEY }}
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Switches the Pages source to GitHub Actions on the first run; see
+      # CONTRIBUTING.md for the setting to check if that does not take
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+        with:
+          enablement: true
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

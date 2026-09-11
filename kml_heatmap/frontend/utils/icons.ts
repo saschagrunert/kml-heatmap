@@ -186,3 +186,28 @@ export function setControlIcon(
   button.querySelector(":scope > svg.icon")?.remove();
   button.insertAdjacentHTML("afterbegin", icon(name, drawn));
 }
+
+/**
+ * Draw the inline icon of every `[data-icon]` control below `root`.
+ * Re-rendering replaces the icon that is already there, so the same element
+ * can change size when the chrome becomes icon-only.
+ *
+ * @param root - Subtree to walk; the whole document by default
+ * @param size - Size for every icon; each element's own size when omitted
+ */
+export function renderControlIcons(
+  root: ParentNode = document,
+  size?: IconSize,
+): void {
+  root.querySelectorAll<HTMLElement>("[data-icon]").forEach((el) => {
+    const name = el.dataset["icon"];
+    if (!name) return;
+    if (!isIconName(name)) {
+      logError(
+        `Unknown icon name "${name}" on ${el.id ? `#${el.id}` : el.tagName}`,
+      );
+      return;
+    }
+    setControlIcon(el, name, size);
+  });
+}

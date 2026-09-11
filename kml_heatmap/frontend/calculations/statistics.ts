@@ -11,7 +11,7 @@ import {
 } from "../utils/constants";
 import { calculateDistance } from "../utils/geometry";
 import { formatFlightTime } from "../utils/formatters";
-import { findMax, findMinMax } from "../utils/arrayHelpers";
+import { findMax } from "../utils/arrayHelpers";
 import type {
   PathInfo,
   PathSegment,
@@ -44,27 +44,109 @@ export function segmentDistance(segment: PathSegment): number {
  * Group timed segments by path and return per-path flight seconds.
  * Shared by aggregateAircraft (per-aircraft time) and
  * calculateFilteredStatistics (total time).
+ *
+ * Only the first and last time of each path matter, so a running min and
+ * max per path replaces collecting every timestamp.
  */
 export function perPathSeconds(
   segments: PathSegment[],
   pathIds?: Set<number>,
 ): Map<number, number> {
-  const timesByPath = new Map<number, number[]>();
+  const bounds = new Map<number, { min: number; max: number }>();
   for (const seg of segments) {
     if (seg.time === undefined) continue;
     if (pathIds && !pathIds.has(seg.path_id)) continue;
-    let times = timesByPath.get(seg.path_id);
-    if (!times) {
-      times = [];
-      timesByPath.set(seg.path_id, times);
+    const range = bounds.get(seg.path_id);
+    if (!range) {
+      bounds.set(seg.path_id, { min: seg.time, max: seg.time });
+    } else {
+      if (seg.time < range.min) range.min = seg.time;
+      if (seg.time > range.max) range.max = seg.time;
     }
-    times.push(seg.time);
   }
   const result = new Map<number, number>();
-  for (const [pathId, times] of timesByPath) {
-    if (times.length > 0) {
-      const { min, max } = findMinMax(times);
-      result.set(pathId, max - min);
+  for (const [pathId, { min, max }] of bounds) {
+    result.set(pathId, max - min);
+  }
+  return result;
+}
+
+/** Half-open index range `[start, end)` of one path within a segment array */
+export type SegmentRange = [start: number, end: number];
+
+/** Path id to its range; null when the array is not grouped by path */
+export type SegmentRanges = Map<number, SegmentRange> | null;
+
+/** One index per segment array; the arrays never change after expansion */
+const segmentRangesCache = new WeakMap<PathSegment[], SegmentRanges>();
+
+/**
+ * Locate every path's segments in one pass. The exporter writes the
+ * segments of a path contiguously and the loader keeps that order, so a
+ * path is a slice of the array. An array where a path id comes back after
+ * a different one is not indexable and yields null, which makes the callers
+ * fall back to a filter.
+ */
+export function buildSegmentRanges(segments: PathSegment[]): SegmentRanges {
+  const ranges = new Map<number, SegmentRange>();
+  let current = -1;
+  for (let i = 0; i < segments.length; i++) {
+    const pathId = segments[i]!.path_id;
+    if (pathId === current) {
+      ranges.get(pathId)![1] = i + 1;
+      continue;
+    }
+    if (ranges.has(pathId)) return null;
+    ranges.set(pathId, [i, i + 1]);
+    current = pathId;
+  }
+  return ranges;
+}
+
+/**
+ * The index of a segment array, built once per array. Every dataset the
+ * loader produces gets exactly one; temporary arrays are indexed on demand
+ * and dropped with the array.
+ */
+export function segmentRangesFor(segments: PathSegment[]): SegmentRanges {
+  const cached = segmentRangesCache.get(segments);
+  if (cached !== undefined) return cached;
+  const ranges = buildSegmentRanges(segments);
+  segmentRangesCache.set(segments, ranges);
+  return ranges;
+}
+
+/**
+ * The segments of the given paths, in array order. Sliced through the index
+ * where the array has one, so the cost is the size of the result rather than
+ * the size of the dataset.
+ */
+export function segmentsForPathIds(
+  segments: PathSegment[],
+  pathIds: Iterable<number>,
+): PathSegment[] {
+  const ranges = segmentRangesFor(segments);
+  if (ranges === null) {
+    const wanted = pathIds instanceof Set ? pathIds : new Set(pathIds);
+    return segments.filter((segment) => wanted.has(segment.path_id));
+  }
+
+  const found: SegmentRange[] = [];
+  for (const pathId of pathIds) {
+    const range = ranges.get(pathId);
+    if (range) found.push(range);
+  }
+  if (found.length === 0) return [];
+  // Array order, whatever order the ids came in
+  found.sort((a, b) => a[0] - b[0]);
+
+  let total = 0;
+  for (const [start, end] of found) total += end - start;
+  const result: PathSegment[] = new Array<PathSegment>(total);
+  let index = 0;
+  for (const [start, end] of found) {
+    for (let i = start; i < end; i++) {
+      result[index++] = segments[i]!;
     }
   }
   return result;
@@ -169,8 +251,10 @@ export function filterSegmentsByPaths(
   segments: PathSegment[],
   pathInfo: PathInfo[],
 ): PathSegment[] {
-  const pathIds = new Set(pathInfo.map((p) => p.id));
-  return segments.filter((segment) => pathIds.has(segment.path_id));
+  return segmentsForPathIds(
+    segments,
+    pathInfo.map((p) => p.id),
+  );
 }
 
 /**

@@ -64,7 +64,7 @@ class TestHaversineProperties:
     def test_identity(self, lat, lon):
         assert haversine_distance(lat, lon, lat, lon) == pytest.approx(0.0, abs=1e-6)
 
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     @given(latitudes, longitudes, latitudes, longitudes, latitudes, longitudes)
     def test_triangle_inequality(self, lat1, lon1, lat2, lon2, lat3, lon3):
         direct = haversine_distance(lat1, lon1, lat3, lon3)

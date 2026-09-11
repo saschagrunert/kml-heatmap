@@ -32,6 +32,20 @@ import {
 /** Elements that stay interactive while the dialog is open */
 const NON_INERT_IDS = new Set(["map"]);
 
+/** Delay before the map is remeasured after moving back out of the dialog */
+const MAP_RESTORE_DELAY_MS = 100;
+
+/**
+ * Whether an element must stay out of the inert set: the map, which the
+ * dialog takes over, and toasts, whose live region would otherwise fall
+ * silent for as long as Wrapped is open.
+ */
+function staysInteractive(el: Element): boolean {
+  return (
+    NON_INERT_IDS.has(el.id) || el.classList.contains("toast-notification")
+  );
+}
+
 /**
  * Write the heading as a sparkle plus its words.
  *
@@ -75,6 +89,7 @@ export class WrappedManager {
   private inertObserver: MutationObserver | null = null;
   private mapMoveTimer: ReturnType<typeof setTimeout> | null = null;
   private mapResizeTimer: ReturnType<typeof setTimeout> | null = null;
+  private mapRestoreTimer: ReturnType<typeof setTimeout> | null = null;
   private cardsScrollCleanup: (() => void) | null = null;
 
   constructor(app: MapApp) {
@@ -147,6 +162,10 @@ export class WrappedManager {
 
   showWrapped(): void {
     if (!this.app.map || this.savedControlDisplays.size > 0) return;
+
+    // A close that is still settling must not remeasure a map that is about
+    // to move back into the dialog
+    this.cancelPendingMapTimers();
 
     // Use the currently selected year (including 'all')
     const year = this.app.selectedYear;
@@ -326,11 +345,6 @@ export class WrappedManager {
         if (!this.app.map || !this.app.store.get("wrappedVisible")) return;
         this.app.map.invalidateSize();
         this.app.map.fitBounds(this.app.config.bounds, { padding: [80, 80] });
-
-        // Save state after wrapped panel is shown
-        if (this.app.stateManager) {
-          this.app.stateManager.saveMapState();
-        }
       }, 100);
     }, 50);
   }
@@ -350,11 +364,7 @@ export class WrappedManager {
     this.previouslyFocused = active instanceof HTMLElement ? active : null;
 
     const makeInert = (el: Element): void => {
-      if (
-        el === modal ||
-        NON_INERT_IDS.has(el.id) ||
-        el.hasAttribute("inert")
-      ) {
+      if (el === modal || staysInteractive(el) || el.hasAttribute("inert")) {
         return;
       }
       el.setAttribute("inert", "");
@@ -399,7 +409,7 @@ export class WrappedManager {
     }
   }
 
-  /** Cancel the deferred map move and resize scheduled by showWrapped */
+  /** Cancel the deferred map move, resize and restore timers */
   private cancelPendingMapTimers(): void {
     if (this.mapMoveTimer !== null) {
       clearTimeout(this.mapMoveTimer);
@@ -409,6 +419,23 @@ export class WrappedManager {
       clearTimeout(this.mapResizeTimer);
       this.mapResizeTimer = null;
     }
+    if (this.mapRestoreTimer !== null) {
+      clearTimeout(this.mapRestoreTimer);
+      this.mapRestoreTimer = null;
+    }
+  }
+
+  /** Drop every pending timer and listener; the dialog stays as it is */
+  destroy(): void {
+    this.cancelPendingMapTimers();
+    this.cardsScrollCleanup?.();
+    this.cardsScrollCleanup = null;
+    if (this.escapeHandler) {
+      document.removeEventListener("keydown", this.escapeHandler);
+      this.escapeHandler = null;
+    }
+    this.inertObserver?.disconnect();
+    this.inertObserver = null;
   }
 
   closeWrapped(event?: MouseEvent): void {
@@ -441,15 +468,11 @@ export class WrappedManager {
         restoreControls(this.savedControlDisplays);
         this.savedControlDisplays.clear();
 
-        // Force map to recalculate size
-        setTimeout(() => {
+        // Force map to recalculate size once it is back in the page layout
+        this.mapRestoreTimer = setTimeout(() => {
+          this.mapRestoreTimer = null;
           if (this.app.map) this.app.map.invalidateSize();
-
-          // Save state after wrapped panel is closed
-          if (this.app.stateManager) {
-            this.app.stateManager.saveMapState();
-          }
-        }, 100);
+        }, MAP_RESTORE_DELAY_MS);
       }
 
       const modal = domCache.get("wrapped-modal");

@@ -49,13 +49,16 @@ export function loadScript(url: string): Promise<void> {
   });
 }
 
+/** Name of the global a per-year data file defines */
+export type YearDataGlobal = `KML_DATA_${string}`;
+
 /**
  * Generate global variable name for a per-year data file
  * @param year - Year string
  * @returns Global variable name (window.KML_DATA_<YEAR>)
  */
-export function getGlobalVarName(year: string): string {
-  return "KML_DATA_" + year;
+export function getGlobalVarName(year: string): YearDataGlobal {
+  return `KML_DATA_${year}`;
 }
 
 /**
@@ -289,21 +292,21 @@ export class DataLoader {
     this.beginLoading(year);
     try {
       const globalVarName = getGlobalVarName(year);
-      const globals = this.getWindow() as unknown as Record<string, unknown>;
+      const win = this.getWindow();
 
-      if (!globals[globalVarName]) {
+      if (!win[globalVarName]) {
         logDebug("Loading data (" + year + ")...");
         await this.scriptLoader(this.dataDir + "/" + year + "/data.js");
       }
 
-      const raw = globals[globalVarName] as RawYearData | undefined;
+      const raw = win[globalVarName];
       if (!raw) {
         throw new Error("Global " + globalVarName + " was not defined");
       }
 
       const data = expandYearData(raw);
       // Drop the raw global so the data is not held twice in memory
-      delete globals[globalVarName];
+      delete win[globalVarName];
 
       this.cache.set(year, data);
       logDebug(

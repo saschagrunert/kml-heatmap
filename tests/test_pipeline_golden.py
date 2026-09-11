@@ -4,7 +4,6 @@ Checks the structural invariants of the generated output (D1/D2 file shapes
 and the internal consistency of the statistics) rather than exact numbers.
 """
 
-import json
 import re
 from pathlib import Path
 
@@ -13,6 +12,7 @@ import pytest
 from kml_heatmap.geometry import haversine_distance
 from kml_heatmap.helpers import format_flight_time
 from kml_heatmap.renderer import create_progressive_heatmap
+from tests.conftest import parse_js as _load_js
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 # Row: [lat, lon, altitude_ft, groundspeed_knots] plus an optional time
@@ -20,8 +20,14 @@ SEGMENT_MIN_LEN = 4
 SEGMENT_MAX_LEN = 5
 
 
-def _select_input_files(per_year=4):
-    """Pick a deterministic subset of committed files covering every year."""
+PER_YEAR = 4
+
+
+def _select_input_files(per_year=PER_YEAR):
+    """Pick a deterministic subset of committed files covering every year.
+
+    Returns the selection and the number of files found per year.
+    """
     by_year = {}
     for path in sorted(DATA_DIR.glob("*.kml")):
         match = re.search(r"<when>(\d{4})-", path.read_text(encoding="utf-8"))
@@ -30,23 +36,16 @@ def _select_input_files(per_year=4):
     selected = []
     for year in sorted(by_year):
         selected.extend(by_year[year][:per_year])
-    return selected
-
-
-def _load_js(path, variable):
-    content = path.read_text(encoding="utf-8")
-    prefix = f"window.{variable} = "
-    assert content.startswith(prefix), f"{path} does not start with {prefix!r}"
-    assert content.endswith(";")
-    return json.loads(content[len(prefix) : -1])
+    return selected, {year: len(paths) for year, paths in by_year.items()}
 
 
 @pytest.fixture(scope="module")
 def golden_output(tmp_path_factory):
-    inputs = _select_input_files()
+    inputs, files_per_year = _select_input_files()
     if not inputs:
         pytest.skip("no sample KML files available (data/ is not part of the image)")
-    assert 6 <= len(inputs) <= 8, f"expected 6-8 input files, got {len(inputs)}"
+    assert len(files_per_year) >= 2, "the sample data must span at least two years"
+    assert len(inputs) == sum(min(PER_YEAR, n) for n in files_per_year.values())
     out = tmp_path_factory.mktemp("golden")
     ok = create_progressive_heatmap(
         [str(p) for p in inputs],

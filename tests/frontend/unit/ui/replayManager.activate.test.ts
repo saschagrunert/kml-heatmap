@@ -12,9 +12,10 @@ import {
   liveRegionText,
   mockAnimationFrame,
   mountReplayDom,
+  statsWithSpeed,
   unmountReplayDom,
-  type ReplayMockApp,
 } from "./replayTestSetup";
+import { createDataset, type MockApp } from "../../testHelpers";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateSegmentPopupHtml: vi.fn(() => "<div>popup</div>"),
@@ -26,7 +27,7 @@ function toastText(): string | null {
 
 describe("ReplayManager activation", () => {
   let replayManager: ReplayManager;
-  let mockApp: ReplayMockApp;
+  let mockApp: MockApp;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -74,11 +75,43 @@ describe("ReplayManager activation", () => {
       expect(replayManager.canReplay()).toBe(false);
 
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.fullStats = { max_groundspeed_knots: 0 };
+      mockApp.fullStats = statsWithSpeed(0);
       expect(replayManager.canReplay()).toBe(false);
 
       mockApp.fullStats = null;
       expect(replayManager.canReplay()).toBe(false);
+    });
+  });
+
+  describe("store subscriptions", () => {
+    it("marks the button ready as soon as one timed flight is selected", () => {
+      const btn = el("replay-btn") as HTMLButtonElement;
+      expect(btn.style.opacity).toBe("0.5");
+
+      mockApp.selectedPathIds.add(1);
+      mockApp.store.notifyMutation("selectedPathIds");
+
+      expect(btn.style.opacity).toBe("1");
+      expect(btn.title).toBe("Replay selected flight path");
+    });
+
+    it("follows the timing data of the loaded metadata", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      const btn = el("replay-btn") as HTMLButtonElement;
+      expect(btn.style.opacity).toBe("1");
+
+      mockApp.fullStats = statsWithSpeed(0);
+
+      expect(btn.style.opacity).toBe("0.5");
+    });
+
+    it("reflects a selection restored before the manager existed", () => {
+      const app = createReplayMockApp();
+      app.selectedPathIds.add(1);
+
+      createReplayManager(app);
+
+      expect((el("replay-btn") as HTMLButtonElement).style.opacity).toBe("1");
     });
   });
 
@@ -90,7 +123,6 @@ describe("ReplayManager activation", () => {
       replayManager.toggleReplay();
 
       expect(replayManager.state.active).toBe(false);
-      expect(mockApp.stateManager.saveMapState).not.toHaveBeenCalled();
     });
 
     it("shows an explanatory toast when no path is selected", () => {
@@ -113,7 +145,7 @@ describe("ReplayManager activation", () => {
 
     it("shows an explanatory toast when the selection has no timing data", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.fullStats = { max_groundspeed_knots: 0 };
+      mockApp.fullStats = statsWithSpeed(0);
 
       replayManager.toggleReplay();
 
@@ -129,7 +161,26 @@ describe("ReplayManager activation", () => {
       expect(replayManager.state.active).toBe(true);
       expect(el("replay-controls").style.display).toBe("block");
       expect(document.body.classList.contains("replay-active")).toBe(true);
-      expect(mockApp.stateManager.saveMapState).toHaveBeenCalled();
+    });
+
+    it("leaves persistence to the store subscription", () => {
+      mockApp.selectedPathIds = new Set([1]);
+
+      replayManager.toggleReplay();
+      replayManager.toggleReplay();
+
+      // Replay state itself is not persisted, and the altitude layer it
+      // switches on reaches the state manager through the store
+      expect(mockApp.stateManager.saveMapState).not.toHaveBeenCalled();
+    });
+
+    it("takes the speed from the select on activation", () => {
+      (el("replay-speed") as HTMLSelectElement).value = "100";
+      mockApp.selectedPathIds = new Set([1]);
+
+      replayManager.toggleReplay();
+
+      expect(replayManager.state.speed).toBe(100);
     });
 
     it("swaps the replay button to stop without losing its label", () => {
@@ -292,6 +343,35 @@ describe("ReplayManager activation", () => {
       expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
       expect(mockApp.altitudeVisible).toBe(false);
     });
+
+    it("drops a pending redraw when replay is closed again before it runs", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      mockApp.altitudeVisible = true;
+
+      replayManager.toggleReplay();
+      replayManager.toggleReplay();
+      replayManager.toggleReplay();
+      replayManager.toggleReplay();
+      vi.advanceTimersByTime(500);
+
+      // Two closes, but the first redraw was still pending when the second
+      // close scheduled its own
+      expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalledTimes(1);
+    });
+
+    it("cancels pending redraws and the frame loop on destroy", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      mockApp.altitudeVisible = true;
+      replayManager.toggleReplay();
+      replayManager.playReplay();
+      replayManager.toggleReplay();
+
+      replayManager.destroy();
+      vi.advanceTimersByTime(500);
+
+      expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
+      expect(replayManager.state.animationFrameId).toBeNull();
+    });
   });
 
   describe("replay chrome", () => {
@@ -403,8 +483,8 @@ describe("ReplayManager activation", () => {
   });
 
   describe("initializeReplay", () => {
-    it("returns false and shows toast if no fullPathSegments", () => {
-      mockApp.fullPathSegments = null;
+    it("returns false and shows toast if no data is loaded", () => {
+      mockApp.currentData = null;
       mockApp.selectedPathIds = new Set([1]);
 
       const result = replayManager.initializeReplay();
@@ -433,7 +513,7 @@ describe("ReplayManager activation", () => {
 
     it("filters segments by selected path id", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.fullPathSegments!.push({
+      mockApp.currentData!.path_segments.push({
         path_id: 2,
         coords: [
           [49.0, 17.0],
@@ -452,7 +532,7 @@ describe("ReplayManager activation", () => {
 
     it("ignores segments without timing data", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.fullPathSegments!.push({
+      mockApp.currentData!.path_segments.push({
         path_id: 1,
         coords: [
           [48.3, 16.3],
@@ -467,7 +547,7 @@ describe("ReplayManager activation", () => {
 
     it("sorts segments by time", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.fullPathSegments!.push({
+      mockApp.currentData!.path_segments.push({
         path_id: 1,
         coords: [
           [48.4, 16.4],
@@ -485,8 +565,25 @@ describe("ReplayManager activation", () => {
       ]);
     });
 
-    it("calculates color ranges from current data path_segments", () => {
+    it("calculates the colour ranges from the path's own segments", () => {
       mockApp.selectedPathIds = new Set([1]);
+      // Another path's segments must not widen the ranges
+      mockApp.currentData = createDataset(
+        [{ id: 1 }, { id: 2 }],
+        [
+          ...createSegments(),
+          {
+            path_id: 2,
+            coords: [
+              [49.0, 17.0],
+              [49.1, 17.1],
+            ],
+            altitude_ft: 9000,
+            groundspeed_knots: 200,
+            time: 0,
+          },
+        ],
+      );
 
       replayManager.initializeReplay();
 
@@ -496,50 +593,12 @@ describe("ReplayManager activation", () => {
       expect(replayManager.state.colorMaxSpeed).toBe(130);
     });
 
-    it("uses fallback airspeed range when no groundspeeds > 0 in current data", () => {
+    it("uses the app's airspeed range when the path has no groundspeeds", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.currentData!.path_segments = [
-        { path_id: 1, altitude_ft: 3000, groundspeed_knots: 0 },
-      ];
-
-      replayManager.initializeReplay();
-
-      expect(replayManager.state.colorMinSpeed).toBe(mockApp.airspeedRange.min);
-      expect(replayManager.state.colorMaxSpeed).toBe(mockApp.airspeedRange.max);
-    });
-
-    it("uses full resolution segments when no current res segments match path", () => {
-      mockApp.selectedPathIds = new Set([1]);
-      mockApp.currentData!.path_segments = [
-        { path_id: 999, altitude_ft: 1000, groundspeed_knots: 50 },
-      ];
-
-      replayManager.initializeReplay();
-
-      // Full resolution segments range from 3000 to 5000 ft
-      expect(replayManager.state.colorMinAlt).toBe(3000);
-      expect(replayManager.state.colorMaxAlt).toBe(5000);
-    });
-
-    it("keeps the previous color ranges when currentData is missing", () => {
-      mockApp.selectedPathIds = new Set([1]);
-      mockApp.currentData = null;
-      replayManager.state.colorMinAlt = 123;
-
-      replayManager.initializeReplay();
-
-      expect(replayManager.state.colorMinAlt).toBe(123);
-    });
-
-    it("uses app airspeedRange as fallback when full-res segments have no groundspeeds", () => {
-      mockApp.selectedPathIds = new Set([1]);
-      mockApp.currentData!.path_segments = [
-        { path_id: 999, altitude_ft: 1000, groundspeed_knots: 50 },
-      ];
-      mockApp.fullPathSegments = createSegments().map((seg) => ({
-        ...seg,
-        groundspeed_knots: 0,
-      }));
+      mockApp.currentData = createDataset(
+        [{ id: 1 }],
+        createSegments().map((seg) => ({ ...seg, groundspeed_knots: 0 })),
+      );
 
       replayManager.initializeReplay();
 
@@ -583,7 +642,10 @@ describe("ReplayManager activation", () => {
 
     it("returns false when the first segment has no coordinates", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.fullPathSegments = [{ path_id: 1, time: 0 }];
+      mockApp.currentData = createDataset(
+        [{ id: 1 }],
+        [{ path_id: 1, time: 0 }],
+      );
 
       expect(replayManager.initializeReplay()).toBe(false);
     });
@@ -750,7 +812,7 @@ describe("ReplayManager activation", () => {
 
     it("sets pointer-events none on heatmap canvas when restoring", () => {
       const canvas = document.createElement("canvas");
-      mockApp.heatmapLayer._canvas = canvas;
+      mockApp.heatmapLayer!._canvas = canvas;
       mockApp.heatmapVisible = true;
 
       replayManager.restoreLayerVisibility();
@@ -832,7 +894,7 @@ describe("ReplayManager activation", () => {
 
     it("marks the button unavailable when no timing data", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.fullStats = { max_groundspeed_knots: 0 };
+      mockApp.fullStats = statsWithSpeed(0);
 
       replayManager.updateReplayButtonState();
 

@@ -2,7 +2,6 @@
  * Filter Manager - Handles year/aircraft filtering
  */
 import type { MapApp } from "../mapApp";
-import type { KMLDataset } from "../types";
 import { aggregateAircraft, filterPaths } from "../calculations/statistics";
 import { domCache } from "../utils/domCache";
 
@@ -22,9 +21,7 @@ export class FilterManager {
     const pathInfo = this.app.fullPathInfo;
     if (!pathInfo) return;
 
-    const aircraftSelect = domCache.get(
-      "aircraft-select",
-    ) as HTMLSelectElement | null;
+    const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
     if (!aircraftSelect) return;
 
     const currentSelection = this.app.selectedAircraft;
@@ -62,53 +59,62 @@ export class FilterManager {
     }
   }
 
+  /**
+   * Switch to the year the dropdown shows. The store only changes once the
+   * year has loaded: a failed load puts the dropdown back to the year that
+   * is still on the map instead of leaving the two disagreeing.
+   */
   async filterByYear(): Promise<void> {
-    const yearSelect = domCache.get("year-select") as HTMLSelectElement | null;
+    const yearSelect = domCache.get("year-select", HTMLSelectElement);
     if (!yearSelect) return;
 
-    this.app.selectedYear = yearSelect.value;
+    const previousYear = this.app.selectedYear;
+    const requestedYear = yearSelect.value;
     const requestId = ++this.requestId;
 
     // 1. Load the new year's data first so the aircraft list is based on it
-    const data = await this.app.dataManager.loadData(this.app.selectedYear);
+    const data = await this.app.dataManager.loadData(requestedYear);
     if (requestId !== this.requestId) return; // superseded by a newer change
-    if (data) {
-      this.app.currentData = data;
+    if (!data) {
+      // The loader has already reported the failure
+      yearSelect.value = previousYear;
+      return;
     }
 
-    // 2. Rebuild the aircraft dropdown; this may reset a registration that
-    //    did not fly in the new year back to "all"
-    this.updateAircraftDropdown();
+    // 2. Publish the year, the data and the aircraft list together, so the
+    //    statistics and the airports see the final combination once. The
+    //    dropdown may reset a registration that did not fly in the new year
+    //    back to "all".
+    this.app.store.batch(() => {
+      this.app.selectedYear = requestedYear;
+      this.app.currentData = data;
+      this.updateAircraftDropdown();
+      this.clearSelectionUnlessInitializing();
+    });
 
-    // 3. Redraw with the final year/aircraft combination (stats included)
-    await this.applyFilter(data);
-    if (requestId !== this.requestId) return;
-
-    // 4. Airport popups follow the filter
-    this.app.airportManager.updateAirportPopups();
+    // 3. Redraw with the final year/aircraft combination
+    await this.app.dataManager.updateLayers(data);
   }
 
   async filterByAircraft(): Promise<void> {
-    const aircraftSelect = domCache.get(
-      "aircraft-select",
-    ) as HTMLSelectElement | null;
+    const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
     if (!aircraftSelect) return;
 
-    this.app.selectedAircraft = aircraftSelect.value;
-    const requestId = ++this.requestId;
+    // A pending year change must not land on top of this one
+    ++this.requestId;
 
-    await this.applyFilter();
-    if (requestId !== this.requestId) return;
+    this.app.store.batch(() => {
+      this.app.selectedAircraft = aircraftSelect.value;
+      this.clearSelectionUnlessInitializing();
+    });
 
-    this.app.airportManager.updateAirportPopups();
+    await this.app.dataManager.updateLayers();
   }
 
-  private async applyFilter(preloaded?: KMLDataset | null): Promise<void> {
-    if (!this.app.isInitializing) {
-      this.app.selectedPathIds.clear();
-      this.app.store.notifyMutation("selectedPathIds");
-    }
-
-    await this.app.dataManager.updateLayers(preloaded);
+  /** A filter change drops the selection, except while restoring state */
+  private clearSelectionUnlessInitializing(): void {
+    if (this.app.isInitializing) return;
+    this.app.selectedPathIds.clear();
+    this.app.store.notifyMutation("selectedPathIds");
   }
 }

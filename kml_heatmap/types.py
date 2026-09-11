@@ -61,7 +61,6 @@ class PathMetadata(TypedDict):
     aircraft_type: NotRequired[str | None]
     start_airport: NotRequired[str | None]
     end_airport: NotRequired[str | None]
-    route: NotRequired[str | None]
     timestamp: NotRequired[str | None]
     end_timestamp: NotRequired[str | None]
     filename: NotRequired[str | None]

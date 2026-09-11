@@ -3,6 +3,8 @@
 import json
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from kml_heatmap.aircraft import (
     load_aircraft_data,
@@ -64,6 +66,25 @@ class TestNormalizeRegistration:
     def test_prefix_only_unchanged(self):
         assert normalize_registration("D") == "D"
         assert normalize_registration("") == ""
+
+
+class TestNormalizeRegistrationProperties:
+    @settings(max_examples=200, deadline=None)
+    @given(
+        st.text(alphabet=st.characters(whitelist_categories=("Lu", "Nd")), max_size=8)
+    )
+    def test_idempotent(self, raw):
+        once = normalize_registration(raw)
+        assert normalize_registration(once) == once
+
+    @settings(max_examples=200, deadline=None)
+    @given(
+        st.text(alphabet=st.characters(whitelist_categories=("Lu", "Nd")), max_size=8)
+    )
+    def test_only_inserts_one_hyphen(self, raw):
+        result = normalize_registration(raw)
+        assert result.replace("-", "") == raw
+        assert result.count("-") <= 1
 
 
 class TestParseAircraftFromFilenameNumbered:

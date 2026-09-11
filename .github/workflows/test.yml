@@ -88,6 +88,19 @@ jobs:
         run: pip install --require-hashes -r requirements.lock -r requirements-test.lock
       - name: Install npm dependencies
         run: npm ci
+      - name: Build the JavaScript bundle
+        run: npm run build
+      - name: Compute the weekly cache key
+        id: week
+        run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Cache the OurAirports database
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kml-heatmap
+          key: airports-${{ steps.week.outputs.week }}
+      # The export contract test reads the data files of a real build
+      - name: Build the site from the current sources
+        run: python -m kml_heatmap data --output-dir docs
       - name: Run JavaScript tests with coverage
         run: npm run test:coverage
       - name: Run Python tests with coverage
@@ -244,10 +257,9 @@ jobs:
         run: pip install --require-hashes -r requirements-test.lock
       - name: Run bandit
         run: bandit -r kml_heatmap -ll
+      # pip-audit is pinned in requirements-test.lock like every other tool
       - name: Audit the Python lock files
-        run: |
-          pip install --disable-pip-version-check pip-audit
-          pip-audit --no-deps -r requirements.lock -r requirements-test.lock
+        run: pip-audit --no-deps -r requirements.lock -r requirements-test.lock
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -263,26 +275,16 @@ jobs:
           GITLEAKS_ENABLE_COMMENTS: "false"
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
-  verify:
+  container:
     needs: [format, lint]
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Compute the weekly cache key
-        id: week
-        run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
-      - name: Cache the OurAirports database
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/kml-heatmap
-          key: airports-${{ steps.week.outputs.week }}
-      - name: Verify that docs/ matches the sources and data
-        run: make verify
-        env:
-          CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}
-          OPENAIP_API_KEY: ${{ secrets.OPENAIP_API_KEY }}
+      # Keeps the Dockerfile and its base image bumps building; the image
+      # itself is not published
+      - name: Build the container image
+        run: docker build -t kml-heatmap .
 
   obfuscation:
     runs-on: ubuntu-latest

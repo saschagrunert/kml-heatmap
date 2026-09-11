@@ -3,8 +3,41 @@
  * Pure helpers for airport data, flight counting and visibility
  */
 
+import * as L from "leaflet";
 import type { PathInfo } from "../types";
 import { filterPaths } from "../calculations/statistics";
+
+/**
+ * Build the divIcon for an airport marker
+ * @param name - Airport name (ICAO code is extracted from it)
+ * @param isHomeBase - Whether the airport is the current home base
+ */
+export function createAirportIcon(
+  name: string,
+  isHomeBase: boolean,
+): L.DivIcon {
+  const icaoMatch = name ? name.match(/\b([A-Z]{4})\b/) : null;
+  const icao = icaoMatch ? icaoMatch[1] : "APT";
+  const homeClass = isHomeBase ? " airport-marker-home" : "";
+  const homeLabelClass = isHomeBase ? " airport-label-home" : "";
+
+  const markerHtml =
+    '<div class="airport-marker-container"><div class="airport-marker' +
+    homeClass +
+    '"></div><div class="airport-label' +
+    homeLabelClass +
+    '">' +
+    icao +
+    "</div></div>";
+
+  return L.divIcon({
+    html: markerHtml,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+    popupAnchor: [0, -6],
+    className: "",
+  });
+}
 
 let _countryByAirport: Map<string, string> | null = null;
 

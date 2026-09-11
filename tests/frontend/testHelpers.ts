@@ -11,8 +11,14 @@ import type {
 } from "../../kml_heatmap/frontend/types";
 import {
   AppStore,
+  defineStoreAccessors,
+  STORE_ACCESSOR_KEYS,
   type StoreState,
 } from "../../kml_heatmap/frontend/state/store";
+import {
+  syncLegend,
+  syncToggleButton,
+} from "../../kml_heatmap/frontend/utils/buttonState";
 import {
   layerGroup,
   map as createMockMap,
@@ -20,92 +26,6 @@ import {
   type MockLayerGroup,
   type MockMap as LeafletMockMap,
 } from "../mocks/leaflet";
-
-/**
- * Mock Leaflet marker for testing
- */
-export interface MockMarker {
-  setPopupContent: Mock;
-  setOpacity: Mock;
-  addTo: Mock;
-  setIcon?: Mock;
-  on?: Mock;
-  off?: Mock;
-  bindPopup?: Mock;
-  openPopup?: Mock;
-  closePopup?: Mock;
-}
-
-/**
- * Mock Leaflet layer for testing
- */
-export interface MockLayer {
-  hasLayer: Mock;
-  removeLayer: Mock;
-  addLayer?: Mock;
-  clearLayers?: Mock;
-  eachLayer?: Mock;
-}
-
-/**
- * Mock Leaflet map for testing
- */
-export interface MockMap {
-  addLayer?: Mock;
-  removeLayer?: Mock;
-  setView?: Mock;
-  fitBounds?: Mock;
-  getZoom?: Mock;
-  getCenter?: Mock;
-  invalidateSize?: Mock;
-}
-
-/**
- * Mock manager with common methods
- */
-export interface MockManager {
-  updateStatsPanel?: Mock;
-  updateStatsForSelection?: Mock;
-  updateAirportOpacity?: Mock;
-  updateAirportPopups?: Mock;
-  saveMapState?: Mock;
-  updateLayers?: Mock;
-  loadData?: Mock;
-  clearLayers?: Mock;
-  redrawAltitudePaths?: Mock;
-  redrawAirspeedPaths?: Mock;
-  updateSelectionStyles?: Mock;
-  updateReplayButtonState?: Mock;
-  state?: { active: boolean };
-}
-
-/**
- * Loosely typed partial MapApp for hand-written mocks (legacy tests).
- * Prefer `createMockApp()` for new tests.
- */
-export type MockMapApp = Partial<MapApp> & {
-  store?: Pick<AppStore, "notifyMutation">;
-  selectedYear: string;
-  selectedAircraft: string;
-  selectedPathIds: Set<number>;
-  fullPathInfo: PathInfo[];
-  allAirportsData?: Airport[];
-  airportMarkers?: Record<string, MockMarker>;
-  airportLayer?: MockLayer;
-  airportToPaths?: Record<string, Set<number>>;
-  fullPathSegments?: unknown[];
-  isInitializing?: boolean;
-  dataManager?: MockManager;
-  statsManager?: MockManager;
-  airportManager?: MockManager;
-  stateManager?: MockManager;
-  replayManager?: MockManager;
-  layerManager?: MockManager;
-  altitudeLayer?: MockLayer;
-  altitudeVisible?: boolean;
-  airspeedVisible?: boolean;
-  map?: MockMap;
-};
 
 /**
  * Build a dataset from path info and segments
@@ -190,12 +110,14 @@ export interface MockManagers {
   stateManager: {
     saveMapState: Mock;
     scheduleSave: Mock;
+    flush: Mock;
     loadState: Mock;
     loadMapState: Mock;
     updateUrl: Mock;
   };
   replayManager: {
     state: { active: boolean; airplaneMarker: null };
+    canReplay: Mock;
     updateReplayButtonState: Mock;
     toggleReplay: Mock;
     playReplay: Mock;
@@ -206,10 +128,12 @@ export interface MockManagers {
     toggleAutoZoom: Mock;
     redrawReplayPath: Mock;
     updateReplayAirplanePopup: Mock;
+    destroy: Mock;
   };
   wrappedManager: {
     showWrapped: Mock;
     closeWrapped: Mock;
+    destroy: Mock;
   };
   uiToggles: {
     toggleHeatmap: Mock;
@@ -218,6 +142,7 @@ export interface MockManagers {
     toggleAirports: Mock;
     toggleAviation: Mock;
     exportMap: Mock;
+    shareLink: Mock;
   };
 }
 
@@ -304,12 +229,14 @@ function createMockManagers(): MockManagers {
     stateManager: {
       saveMapState: vi.fn(),
       scheduleSave: vi.fn(),
+      flush: vi.fn(),
       loadState: vi.fn(() => null),
       loadMapState: vi.fn(() => null),
       updateUrl: vi.fn(),
     },
     replayManager: {
       state: { active: false, airplaneMarker: null },
+      canReplay: vi.fn(() => false),
       updateReplayButtonState: vi.fn(),
       toggleReplay: vi.fn(),
       playReplay: vi.fn(),
@@ -320,10 +247,12 @@ function createMockManagers(): MockManagers {
       toggleAutoZoom: vi.fn(),
       redrawReplayPath: vi.fn(),
       updateReplayAirplanePopup: vi.fn(),
+      destroy: vi.fn(),
     },
     wrappedManager: {
       showWrapped: vi.fn(),
       closeWrapped: vi.fn(),
+      destroy: vi.fn(),
     },
     uiToggles: {
       toggleHeatmap: vi.fn(),
@@ -332,37 +261,31 @@ function createMockManagers(): MockManagers {
       toggleAirports: vi.fn(),
       toggleAviation: vi.fn(),
       exportMap: vi.fn(),
+      shareLink: vi.fn().mockResolvedValue(undefined),
     },
   };
 }
 
+/** Every store key: the accessor keys plus the two panel flags */
+const STORE_KEYS: readonly (keyof StoreState)[] = [
+  ...STORE_ACCESSOR_KEYS,
+  "statsPanelVisible",
+  "wrappedVisible",
+];
+
 /**
  * Create a mock MapApp with store-backed accessors, mocked Leaflet objects
  * and mocked managers. Store keys can be seeded through `overrides`.
+ *
+ * The accessors come from the same `defineStoreAccessors` the real MapApp
+ * uses, so the double cannot drift from it.
  */
 export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
   const { map: mapOverride, config, managers, ...rest } = overrides;
-  const storeKeys: (keyof StoreState)[] = [
-    "selectedYear",
-    "selectedAircraft",
-    "selectedPathIds",
-    "isolateSelection",
-    "heatmapVisible",
-    "altitudeVisible",
-    "airspeedVisible",
-    "airportsVisible",
-    "aviationVisible",
-    "statsPanelVisible",
-    "wrappedVisible",
-    "currentData",
-    "fullStats",
-    "altitudeRange",
-    "airspeedRange",
-  ];
   const initial: Partial<StoreState> = {};
   const other: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(rest)) {
-    if ((storeKeys as string[]).includes(key)) {
+    if ((STORE_KEYS as string[]).includes(key)) {
       (initial as Record<string, unknown>)[key] = value;
     } else {
       other[key] = value;
@@ -407,98 +330,22 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
     mobileBar: null,
     ...mockManagers,
     ...other,
-    get selectedYear() {
-      return store.get("selectedYear");
-    },
-    set selectedYear(v: string) {
-      store.set("selectedYear", v);
-    },
-    get selectedAircraft() {
-      return store.get("selectedAircraft");
-    },
-    set selectedAircraft(v: string) {
-      store.set("selectedAircraft", v);
-    },
-    get selectedPathIds() {
-      return store.get("selectedPathIds");
-    },
-    set selectedPathIds(v: Set<number>) {
-      store.set("selectedPathIds", v);
-    },
-    get isolateSelection() {
-      return store.get("isolateSelection");
-    },
-    set isolateSelection(v: boolean) {
-      store.set("isolateSelection", v);
-    },
-    get heatmapVisible() {
-      return store.get("heatmapVisible");
-    },
-    set heatmapVisible(v: boolean) {
-      store.set("heatmapVisible", v);
-    },
-    get altitudeVisible() {
-      return store.get("altitudeVisible");
-    },
-    set altitudeVisible(v: boolean) {
-      store.set("altitudeVisible", v);
-    },
-    get airspeedVisible() {
-      return store.get("airspeedVisible");
-    },
-    set airspeedVisible(v: boolean) {
-      store.set("airspeedVisible", v);
-    },
-    get airportsVisible() {
-      return store.get("airportsVisible");
-    },
-    set airportsVisible(v: boolean) {
-      store.set("airportsVisible", v);
-    },
-    get aviationVisible() {
-      return store.get("aviationVisible");
-    },
-    set aviationVisible(v: boolean) {
-      store.set("aviationVisible", v);
-    },
-    get currentData() {
-      return store.get("currentData");
-    },
-    set currentData(v: KMLDataset | null) {
-      store.set("currentData", v);
-    },
     get fullPathInfo() {
       return store.get("currentData")?.path_info ?? null;
     },
     get fullPathSegments() {
       return store.get("currentData")?.path_segments ?? null;
     },
-    get fullStats() {
-      return store.get("fullStats");
-    },
-    set fullStats(v) {
-      store.set("fullStats", v);
-    },
-    get altitudeRange() {
-      return store.get("altitudeRange");
-    },
-    set altitudeRange(v) {
-      store.set("altitudeRange", v);
-    },
-    get airspeedRange() {
-      return store.get("airspeedRange");
-    },
-    set airspeedRange(v) {
-      store.set("airspeedRange", v);
-    },
     loadInitialData: vi.fn(),
     togglePathSelection: vi.fn(),
     seekReplay: vi.fn(),
     changeReplaySpeed: vi.fn(),
     initialize: vi.fn(),
+    destroy: vi.fn(),
   };
+  defineStoreAccessors(app);
 
-  return app;
+  return app as unknown as MockApp;
 }
 
 /**
@@ -506,4 +353,43 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
  */
 export function asMapApp(app: MockApp): MapApp {
   return app as unknown as MapApp;
+}
+
+/**
+ * Wire the store-driven toggle buttons and legends the way MapApp does in
+ * setupButtonSync, for tests that assert on the button or legend state a
+ * manager causes through the store.
+ */
+export function syncControlsWithStore(store: AppStore): void {
+  syncToggleButton(store, "heatmapVisible", "heatmap-btn");
+  syncToggleButton(store, "altitudeVisible", "altitude-btn");
+  syncToggleButton(store, "airspeedVisible", "airspeed-btn");
+  syncToggleButton(store, "airportsVisible", "airports-btn");
+  syncToggleButton(store, "aviationVisible", "aviation-btn");
+  syncLegend(store, "altitudeVisible", "altitude-legend");
+  syncLegend(store, "airspeedVisible", "airspeed-legend");
+}
+
+/**
+ * Mount `id: tag` elements on the body. The returned function removes them
+ * again.
+ */
+export function mountElements(spec: Record<string, string>): () => void {
+  const created: HTMLElement[] = [];
+  for (const [id, tag] of Object.entries(spec)) {
+    const element = document.createElement(tag);
+    element.id = id;
+    document.body.appendChild(element);
+    created.push(element);
+  }
+  return () => {
+    for (const element of created) element.remove();
+  };
+}
+
+/** Get an element that must exist */
+export function el(id: string): HTMLElement {
+  const element = document.getElementById(id);
+  if (!element) throw new Error(`Missing test element #${id}`);
+  return element;
 }

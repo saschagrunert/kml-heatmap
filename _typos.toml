@@ -13,3 +13,7 @@ extend-exclude = [
   # Vendored OurAirports rows: IATA codes such as MUC and BRE are not words
   "tests/fixtures/*.csv",
 ]
+
+[default.extend-words]
+# Unicode general category "decimal number", used in Hypothesis strategies
+Nd = "Nd"

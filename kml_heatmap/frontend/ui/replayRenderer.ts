@@ -88,11 +88,45 @@ export function replaySegmentColor(
       );
 }
 
+/** The last values written to the transport row, so a frame that changes
+ * nothing visible writes nothing */
+interface TransportCache {
+  timeText: string;
+  sliderValue: string;
+  startText: string;
+}
+
 export class ReplayRenderer {
   private app: MapApp;
+  private transport: TransportCache = {
+    timeText: "",
+    sliderValue: "",
+    startText: "",
+  };
+  /** The marker element whose rotating icon is cached, and that icon */
+  private iconRoot: HTMLElement | null = null;
+  private iconDiv: HTMLElement | null = null;
+  private lastTransform = "";
 
   constructor(app: MapApp) {
     this.app = app;
+  }
+
+  /**
+   * The rotating icon inside the airplane marker. Leaflet builds a new
+   * element whenever the marker is (re)added to the map, so the lookup is
+   * keyed on that element rather than on the marker and only runs when it
+   * changes, not once per frame.
+   */
+  private airplaneIcon(marker: L.Marker): HTMLElement | null {
+    const root = marker.getElement() ?? null;
+    if (root !== this.iconRoot) {
+      this.iconRoot = root;
+      const found = root?.querySelector(".replay-airplane-icon");
+      this.iconDiv = found instanceof HTMLElement ? found : null;
+      this.lastTransform = "";
+    }
+    return this.iconDiv;
   }
 
   /**
@@ -222,16 +256,22 @@ export class ReplayRenderer {
     const currentLabel = formatTime(currentTime);
     const maxLabel = formatTime(state.maxTime);
 
-    // Update time display
-    const timeDisplay = domCache.get("replay-time-display");
-    if (timeDisplay) {
-      timeDisplay.textContent = currentLabel + " / " + maxLabel;
+    // The transport row is written only when its text changes: at 50x the
+    // label changes a few times a second, the frame loop runs sixty
+    const timeText = currentLabel + " / " + maxLabel;
+    if (timeText !== this.transport.timeText) {
+      this.transport.timeText = timeText;
+      const timeDisplay = domCache.get("replay-time-display");
+      if (timeDisplay) timeDisplay.textContent = timeText;
     }
 
-    // Update slider position and its spoken value
-    const slider = domCache.get("replay-slider") as HTMLInputElement | null;
+    const slider = domCache.get("replay-slider", HTMLInputElement);
     if (slider) {
-      slider.value = currentTime.toString();
+      const sliderValue = currentTime.toString();
+      if (sliderValue !== this.transport.sliderValue) {
+        this.transport.sliderValue = sliderValue;
+        slider.value = sliderValue;
+      }
       // Rewriting this every frame would make screen readers announce
       // continuously, so only do it when the spoken value changes
       const valueText = currentLabel + " of " + maxLabel;
@@ -240,8 +280,11 @@ export class ReplayRenderer {
       }
     }
 
-    const sliderStart = domCache.get("replay-slider-start");
-    if (sliderStart) sliderStart.textContent = currentLabel;
+    if (currentLabel !== this.transport.startText) {
+      this.transport.startText = currentLabel;
+      const sliderStart = domCache.get("replay-slider-start");
+      if (sliderStart) sliderStart.textContent = currentLabel;
+    }
 
     // Find current position in replay timeline (for airplane positioning)
     const currentIndex = this.locateCurrentIndex(state, isManualSeek);
@@ -274,7 +317,9 @@ export class ReplayRenderer {
     let bearing: number;
 
     if (nextSegment && (lastSegment.time ?? 0) < currentTime) {
-      // Interpolate between last and next segment
+      // Between two segment times the airplane is somewhere along the next
+      // segment: from the end of the last one, which is also where the next
+      // one starts, towards the end of the next one
       const timeFraction = Math.min(
         (currentTime - (lastSegment.time ?? 0)) /
           Math.max((nextSegment.time ?? 0) - (lastSegment.time ?? 0), 0.001),
@@ -282,8 +327,8 @@ export class ReplayRenderer {
       );
       const lat1 = lastSegment.coords?.[1]?.[0] ?? 0;
       const lon1 = lastSegment.coords?.[1]?.[1] ?? 0;
-      const lat2 = nextSegment.coords?.[0]?.[0] ?? 0;
-      const lon2 = nextSegment.coords?.[0]?.[1] ?? 0;
+      const lat2 = nextSegment.coords?.[1]?.[0] ?? 0;
+      const lon2 = nextSegment.coords?.[1]?.[1] ?? 0;
 
       currentPos = [
         lat1 + (lat2 - lat1) * timeFraction,
@@ -317,11 +362,15 @@ export class ReplayRenderer {
       this.keepAirplaneInView(replayManager, currentPos, isManualSeek);
     }
 
-    // Update rotation using hardware-accelerated transforms
-    const iconDiv = marker.getElement()?.querySelector(".replay-airplane-icon");
-    if (iconDiv instanceof HTMLElement) {
-      iconDiv.style.transform =
-        "translate3d(0,0,0) rotate(" + (bearing - 45) + "deg)";
+    // Update rotation using hardware-accelerated transforms; the same
+    // heading as last frame is not written again
+    const iconDiv = this.airplaneIcon(marker);
+    if (iconDiv) {
+      const transform = "translate3d(0,0,0) rotate(" + (bearing - 45) + "deg)";
+      if (transform !== this.lastTransform) {
+        this.lastTransform = transform;
+        iconDiv.style.transform = transform;
+      }
     }
 
     // Update popup content if it is open

@@ -1,4 +1,4 @@
-"""Airport deduplication and name extraction.
+"""Airport deduplication, name extraction and the altitude heuristics behind it.
 
 Uses a spatial grid approach for O(1) proximity lookups: divides the map into
 ~2km grid cells and checks the cell plus 8 neighbors for nearby airports,
@@ -7,26 +7,98 @@ avoiding O(n^2) pairwise distance checks.
 
 import math
 import re
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from .airport_lookup import extract_icao_codes_from_name, lookup_airport_coordinates
-from .constants import AIRPORT_DISTANCE_THRESHOLD_KM, AIRPORT_GRID_SIZE_DEGREES
+from .constants import (
+    AIRPORT_DISTANCE_THRESHOLD_KM,
+    AIRPORT_GRID_SIZE_DEGREES,
+    LANDING_FALLBACK_ALTITUDE_M,
+    LANDING_MAX_ALTITUDE_M,
+    LANDING_MAX_VARIATION_M,
+    MID_FLIGHT_MAX_VARIATION_M,
+    MID_FLIGHT_MIN_ALTITUDE_M,
+    PATH_SAMPLE_MAX_SIZE,
+    PATH_SAMPLE_MIN_SIZE,
+)
 from .geometry import haversine_distance
 from .logger import logger
-from .types import AirportData, FlightPath, FlightPathGroup, PathMetadata
+
+if TYPE_CHECKING:
+    from .types import AirportData, FlightPath, FlightPathGroup, PathMetadata
 
 __all__ = [
     "POINT_MARKERS",
     "AirportDeduplicator",
     "deduplicate_airports",
     "extract_airport_name",
+    "is_mid_flight_start",
     "is_point_marker",
+    "is_valid_landing",
+    "sample_path_altitudes",
 ]
 
 # Marker types to filter out
 POINT_MARKERS = ["Log Start", "Log Stop", "Takeoff", "Landing"]
 
-AltitudeCheck = Callable[[FlightPath, float | None], bool]
+
+def sample_path_altitudes(
+    path: FlightPath, from_end: bool = False
+) -> dict[str, float] | None:
+    """Extract altitude statistics from a path sample."""
+    if len(path) <= 10:
+        return None
+
+    sample_size = min(PATH_SAMPLE_MAX_SIZE, len(path) // 4)
+    if sample_size <= PATH_SAMPLE_MIN_SIZE:
+        return None
+
+    sample = path[-sample_size:] if from_end else path[:sample_size]
+    alts = [point.alt for point in sample if point.alt is not None]
+    if not alts:
+        return None
+    return {"min": min(alts), "max": max(alts), "variation": max(alts) - min(alts)}
+
+
+def is_mid_flight_start(path: FlightPath, start_alt: float | None) -> bool:
+    """Detect if a path started mid-flight by analyzing altitude patterns."""
+    if start_alt is None:
+        return False
+
+    sample = sample_path_altitudes(path, from_end=False)
+    if not sample:
+        return False
+
+    # Mid-flight indicators:
+    # - Starting altitude above typical airports
+    # - AND altitude variation in first part is small (not climbing/descending much)
+    is_mid_flight = (
+        start_alt > MID_FLIGHT_MIN_ALTITUDE_M
+        and sample["variation"] < MID_FLIGHT_MAX_VARIATION_M
+    )
+
+    if is_mid_flight:
+        logger.debug(
+            "Detected mid-flight start at %.0fm (variation: %.0fm)",
+            start_alt,
+            sample["variation"],
+        )
+
+    return is_mid_flight
+
+
+def is_valid_landing(path: FlightPath, end_alt: float | None) -> bool:
+    """Check if a path ends with a valid landing."""
+    sample = sample_path_altitudes(path, from_end=True)
+    if not sample:
+        # Short path, just accept if altitude seems reasonable
+        return end_alt is not None and end_alt < LANDING_FALLBACK_ALTITUDE_M
+
+    # Valid landing: either descending significantly OR stable at low variation
+    # Also accept any endpoint if variation at end is small - indicates stable landing
+    return sample["variation"] < LANDING_MAX_VARIATION_M or (
+        end_alt is not None and end_alt < LANDING_MAX_ALTITUDE_M
+    )
 
 
 def is_point_marker(name: str | None) -> bool:
@@ -169,18 +241,17 @@ class AirportDeduplicator:
         return self.unique_airports
 
 
-def _add_metadata_start_points(
+def _add_departures(
     deduplicator: AirportDeduplicator,
     all_path_metadata: list[PathMetadata],
     all_path_groups: FlightPathGroup,
-    is_mid_flight_start_func: AltitudeCheck,
 ) -> None:
     """Register the start point every path reported in its metadata.
 
-    This pass sees every path, including the ones whose name is a single
-    airport rather than a route, which is why it cannot be folded into
-    ``_add_path_endpoints`` below. The altitude comes from the metadata's
-    ``start_point`` and defaults to 0 when the point carries none.
+    The parsers build the metadata start point from the path's first point,
+    so this pass covers the departure of every path, including the ones whose
+    name is a single airport rather than a route. The altitude comes from the
+    metadata's ``start_point`` and defaults to 0 when the point carries none.
     """
     for idx, metadata in enumerate(all_path_metadata):
         start_point = metadata["start_point"]
@@ -195,7 +266,7 @@ def _add_metadata_start_points(
 
         # Skip mid-flight starts
         path = all_path_groups[idx] if idx < len(all_path_groups) else []
-        if is_mid_flight_start_func(path, start_alt):
+        if is_mid_flight_start(path, start_alt):
             logger.debug("Skipping mid-flight start '%s'", airport_name)
             continue
 
@@ -208,51 +279,29 @@ def _add_metadata_start_points(
         )
 
 
-def _add_path_endpoints(
+def _add_arrivals(
     deduplicator: AirportDeduplicator,
     all_path_metadata: list[PathMetadata],
     all_path_groups: FlightPathGroup,
-    is_mid_flight_start_func: AltitudeCheck,
-    is_valid_landing_func: AltitudeCheck,
 ) -> None:
-    """Register the two ends of every path whose name is a route.
+    """Register the end point of every path whose name is a route.
 
     Only routes ("DEPARTURE - ARRIVAL") reach this pass, because only they say
-    which airport each end belongs to. The departure is re-registered with the
-    path's own first point, which is more accurate than the metadata start
-    point handled above and merges into the same entry. The arrival is only
-    registered when the path actually ends in a landing.
+    which airport the end belongs to. The arrival is only registered when the
+    path actually ends in a landing.
     """
     for idx, path in enumerate(all_path_groups):
         if len(path) <= 1 or idx >= len(all_path_metadata):
             continue
 
-        start, end = path[0], path[-1]
+        end = path[-1]
         route_name = all_path_metadata[idx].get("airport_name", "")
 
         # Skip if not a proper route name
         if is_point_marker(route_name) or " - " not in route_name:
             continue
 
-        starts_at_high_altitude = is_mid_flight_start_func(path, start.alt)
-        if starts_at_high_altitude:
-            logger.debug("Path '%s' detected as mid-flight start", route_name)
-
-        if not starts_at_high_altitude:
-            deduplicator.add_or_update_airport(
-                lat=start.lat,
-                lon=start.lon,
-                name=route_name,
-                path_index=idx,
-                is_at_path_end=False,
-            )
-            logger.debug(
-                "Processed departure airport for '%s' at %sm altitude",
-                route_name,
-                start.alt,
-            )
-
-        if is_valid_landing_func(path, end.alt):
+        if is_valid_landing(path, end.alt):
             deduplicator.add_or_update_airport(
                 lat=end.lat,
                 lon=end.lon,
@@ -270,25 +319,14 @@ def _add_path_endpoints(
 def deduplicate_airports(
     all_path_metadata: list[PathMetadata],
     all_path_groups: FlightPathGroup,
-    is_mid_flight_start_func: AltitudeCheck,
-    is_valid_landing_func: AltitudeCheck,
 ) -> list[AirportData]:
     """Deduplicate airports by location using spatial grid indexing.
 
-    Two passes feed the deduplicator: the metadata start points of every path,
-    then the two endpoints of the paths whose name is a route. Entries that
-    land within ``AIRPORT_DISTANCE_THRESHOLD_KM`` of each other merge, so a
-    departure seen by both passes stays one airport.
+    Two passes feed the deduplicator: the start point of every path, then the
+    end point of the paths whose name is a route. Entries that land within
+    ``AIRPORT_DISTANCE_THRESHOLD_KM`` of each other merge.
     """
     deduplicator = AirportDeduplicator()
-    _add_metadata_start_points(
-        deduplicator, all_path_metadata, all_path_groups, is_mid_flight_start_func
-    )
-    _add_path_endpoints(
-        deduplicator,
-        all_path_metadata,
-        all_path_groups,
-        is_mid_flight_start_func,
-        is_valid_landing_func,
-    )
+    _add_departures(deduplicator, all_path_metadata, all_path_groups)
+    _add_arrivals(deduplicator, all_path_metadata, all_path_groups)
     return deduplicator.get_unique_airports()

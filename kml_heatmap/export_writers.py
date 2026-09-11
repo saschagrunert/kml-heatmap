@@ -12,6 +12,31 @@ from .logger import logger
 if TYPE_CHECKING:
     from .types import AirportData, Statistics
 
+__all__ = ["export_airports_data", "export_metadata", "exported_airport_names"]
+
+
+def _exported_airports(
+    unique_airports: list[AirportData],
+) -> list[tuple[AirportData, str]]:
+    """Pair every airport that has a displayable name with that name.
+
+    Nearby airports were already merged by ``airports.deduplicate_airports``,
+    so no further deduplication happens here.
+    """
+    exported = []
+    for apt in unique_airports:
+        full_name = apt.get("name") or "Unknown"
+        is_at_path_end = apt.get("is_at_path_end", False)
+        airport_name = extract_airport_name(full_name, is_at_path_end)
+        if airport_name:
+            exported.append((apt, airport_name))
+    return exported
+
+
+def exported_airport_names(unique_airports: list[AirportData]) -> list[str]:
+    """The names of the airports that ``export_airports_data`` writes."""
+    return [name for _, name in _exported_airports(unique_airports)]
+
 
 def export_airports_data(
     unique_airports: list[AirportData],
@@ -19,23 +44,8 @@ def export_airports_data(
 ) -> tuple[str, int]:
     """Export airport data to airports.js (window.KML_AIRPORTS)."""
     valid_airports = []
-    seen_locations: set[str] = set()
 
-    for apt in unique_airports:
-        full_name = apt.get("name") or "Unknown"
-        is_at_path_end = apt.get("is_at_path_end", False)
-        airport_name = extract_airport_name(full_name, is_at_path_end)
-
-        if not airport_name:
-            continue
-
-        location_key = f"{apt['lat']:.4f},{apt['lon']:.4f}"
-
-        if location_key in seen_locations:
-            continue
-
-        seen_locations.add(location_key)
-
+    for apt, airport_name in _exported_airports(unique_airports):
         # No flight count here: the frontend derives it per airport from the
         # path info of the active year/aircraft filter, so an exported count
         # would only ever be shown for the instant before the first refresh

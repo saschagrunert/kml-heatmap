@@ -1,24 +1,19 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import {
   findSegmentFarFromAirports,
+  firstPathId,
   gotoApp,
   readSavedState,
   selectPathForReplay,
+  togglePathSelection,
   waitForAppReady,
   waitForPathData,
 } from "./helpers";
 
 /** Select a path and return the isolate button locator */
 async function selectPathAndGetIsolateBtn(page: Page) {
-  await waitForPathData(page);
-  const pathId = await page.evaluate(() => window.mapApp!.fullPathInfo![0]!.id);
-  await page.evaluate(
-    (id) => window.mapApp!.togglePathSelection(String(id)),
-    pathId,
-  );
-  await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 1, {
-    timeout: 5000,
-  });
+  const pathId = await firstPathId(page);
+  await togglePathSelection(page, pathId, 1);
   return { pathId, isolateBtn: page.locator("#isolate-btn") };
 }
 
@@ -44,15 +39,8 @@ test.describe("Path Selection", () => {
   });
 
   test("selecting a path updates selectedPathIds", async ({ page }) => {
-    await waitForPathData(page);
-
-    const pathId = await page.evaluate(
-      () => window.mapApp!.fullPathInfo![0]!.id,
-    );
-    await page.evaluate(
-      (id) => window.mapApp!.togglePathSelection(String(id)),
-      pathId,
-    );
+    const pathId = await firstPathId(page);
+    await togglePathSelection(page, pathId, 1);
 
     const hasPath = await page.evaluate(
       (id) => window.mapApp!.selectedPathIds.has(id),
@@ -65,22 +53,9 @@ test.describe("Path Selection", () => {
   test("deselecting a path removes it from selectedPathIds", async ({
     page,
   }) => {
-    await waitForPathData(page);
-
-    const pathId = await page.evaluate(
-      () => window.mapApp!.fullPathInfo![0]!.id,
-    );
-
-    await page.evaluate(
-      (id) => window.mapApp!.togglePathSelection(String(id)),
-      pathId,
-    );
-    await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 1);
-
-    await page.evaluate(
-      (id) => window.mapApp!.togglePathSelection(String(id)),
-      pathId,
-    );
+    const pathId = await firstPathId(page);
+    await togglePathSelection(page, pathId, 1);
+    await togglePathSelection(page, pathId, 0);
 
     expect(await selectedCount(page)).toBe(0);
   });
@@ -114,14 +89,10 @@ test.describe("Path Selection", () => {
     );
     expect(pathIds).toHaveLength(2);
 
-    for (const id of pathIds) {
-      await page.evaluate(
-        (pid) => window.mapApp!.togglePathSelection(String(pid)),
-        id,
-      );
+    for (const [index, id] of pathIds.entries()) {
+      await togglePathSelection(page, id, index + 1);
     }
 
-    await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 2);
     await expect(page.locator("#replay-btn")).toHaveAttribute(
       "title",
       "Select exactly one flight with timing data to replay",
@@ -138,11 +109,7 @@ test.describe("Path Selection", () => {
       "Replay selected flight path",
     );
 
-    await page.evaluate(
-      (id) => window.mapApp!.togglePathSelection(String(id)),
-      pathId,
-    );
-    await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 0);
+    await togglePathSelection(page, pathId, 0);
 
     await expect(page.locator("#replay-btn")).toHaveAttribute(
       "title",
@@ -197,21 +164,34 @@ test.describe("Path Selection", () => {
   test("clicking airport marker selects associated paths", async ({ page }) => {
     await waitForPathData(page);
 
-    const airportInfo = await page.evaluate(() => {
+    // Pick an airport, centre the map on its marker and note which paths
+    // the app files under it, so the click can be checked against them
+    const airport = await page.evaluate(() => {
       const app = window.mapApp!;
-      const airportNames = Object.keys(app.airportToPaths);
-      const name = airportNames[0];
-      if (!name) return null;
-      return { name, pathCount: app.airportToPaths[name]!.size };
+      const name = Object.keys(app.airportToPaths)[0];
+      const marker = name ? app.airportMarkers[name] : undefined;
+      if (!name || !marker) return null;
+      app.map!.setView(marker.getLatLng(), 12, { animate: false });
+      const box = marker.getElement()!.getBoundingClientRect();
+      return {
+        name,
+        pathIds: [...app.airportToPaths[name]!].sort((a, b) => a - b),
+        x: box.x + box.width / 2,
+        y: box.y + box.height / 2,
+      };
     });
-    expect(airportInfo).not.toBeNull();
-    expect(airportInfo!.pathCount).toBeGreaterThan(0);
+    expect(airport).not.toBeNull();
+    expect(airport!.pathIds.length).toBeGreaterThan(0);
 
-    await page.locator(".airport-marker").first().click();
+    await page.mouse.click(airport!.x, airport!.y);
 
-    await page.waitForFunction(() => window.mapApp!.selectedPathIds.size > 0, {
-      timeout: 5000,
-    });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          [...window.mapApp!.selectedPathIds].sort((a, b) => a - b),
+        ),
+      )
+      .toEqual(airport!.pathIds);
   });
 
   test("clicking a path shows its altitude data and selects it", async ({
@@ -304,14 +284,7 @@ test.describe("Solo Mode", () => {
       .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
       .toBe(true);
 
-    await page.evaluate(
-      (id) => window.mapApp!.togglePathSelection(String(id)),
-      pathId,
-    );
-    await page.waitForFunction(
-      () => window.mapApp!.selectedPathIds.size === 0,
-      { timeout: 5000 },
-    );
+    await togglePathSelection(page, pathId, 0);
 
     expect(await page.evaluate(() => window.mapApp!.isolateSelection)).toBe(
       false,
@@ -336,10 +309,7 @@ test.describe("Solo Mode", () => {
   });
 
   test("isolate mode via URL parameter", async ({ page }) => {
-    await waitForPathData(page);
-    const pathId = await page.evaluate(
-      () => window.mapApp!.fullPathInfo![0]!.id,
-    );
+    const pathId = await firstPathId(page);
 
     // 9th flag is isolateSelection
     await gotoApp(page, `/?v=100100001&p=${pathId}&sv=2`);

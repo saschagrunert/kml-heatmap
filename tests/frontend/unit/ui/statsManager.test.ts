@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { StatsManager } from "../../../../kml_heatmap/frontend/ui/statsManager";
+import * as statistics from "../../../../kml_heatmap/frontend/calculations/statistics";
 import type { FilteredStatistics } from "../../../../kml_heatmap/frontend/types";
 import {
   createMockApp,
@@ -60,7 +61,6 @@ describe("StatsManager", () => {
 
     statsPanel = document.createElement("div");
     statsPanel.id = "stats-panel";
-    statsPanel.style.display = "none";
     document.body.appendChild(statsPanel);
 
     mockApp = createMockApp({
@@ -550,75 +550,127 @@ describe("StatsManager", () => {
     });
   });
 
-  describe("toggleStats", () => {
-    beforeEach(() => {
-      vi.useFakeTimers();
-    });
-
-    it("shows the panel, updates the store and saves state", () => {
+  describe("panel visibility", () => {
+    it("toggleStats flips the store key the rail follows", () => {
       statsManager.toggleStats();
-
-      expect(statsPanel.style.display).toBe("block");
-      expect(statsPanel.classList.contains("visible")).toBe(true);
       expect(mockApp.store.get("statsPanelVisible")).toBe(true);
-      expect(mockApp.stateManager.saveMapState).toHaveBeenCalledTimes(1);
-    });
-
-    it("hides the panel after the transition and saves state", () => {
-      statsPanel.style.display = "block";
-      statsPanel.classList.add("visible");
-      mockApp.store.set("statsPanelVisible", true);
 
       statsManager.toggleStats();
-
-      expect(statsPanel.classList.contains("visible")).toBe(false);
       expect(mockApp.store.get("statsPanelVisible")).toBe(false);
-      expect(statsPanel.style.display).toBe("block");
-      expect(mockApp.stateManager.saveMapState).not.toHaveBeenCalled();
-
-      vi.advanceTimersByTime(300);
-
-      expect(statsPanel.style.display).toBe("none");
-      expect(mockApp.stateManager.saveMapState).toHaveBeenCalledTimes(1);
     });
 
-    it("cancels a pending hide when reopened quickly", () => {
-      statsPanel.style.display = "block";
-      statsPanel.classList.add("visible");
-      mockApp.store.set("statsPanelVisible", true);
+    it("setStatsPanelVisible writes the store and nothing else", () => {
+      statsManager.setStatsPanelVisible(true);
 
-      statsManager.toggleStats(); // hide (timer pending)
-      vi.advanceTimersByTime(100);
-      statsManager.toggleStats(); // show again
-      vi.advanceTimersByTime(300);
-
-      expect(statsPanel.style.display).toBe("block");
-      expect(statsPanel.classList.contains("visible")).toBe(true);
       expect(mockApp.store.get("statsPanelVisible")).toBe(true);
+      // The rail's hidden attribute is the only thing that shows the panel;
+      // no inline style, class or explicit save is involved
+      expect(statsPanel.style.display).toBe("");
+      expect(statsPanel.classList.contains("visible")).toBe(false);
+      expect(mockApp.stateManager.saveMapState).not.toHaveBeenCalled();
     });
 
-    it("does nothing if panel doesn't exist", () => {
+    it("works without a panel element", () => {
       statsPanel.remove();
       expect(() => statsManager.toggleStats()).not.toThrow();
-      expect(mockApp.stateManager.saveMapState).not.toHaveBeenCalled();
-    });
-
-    it("triggers reflow when showing (for animation)", () => {
-      const offsetHeightSpy = vi.spyOn(statsPanel, "offsetHeight", "get");
-
-      statsManager.toggleStats();
-
-      expect(offsetHeightSpy).toHaveBeenCalled();
+      expect(mockApp.store.get("statsPanelVisible")).toBe(true);
     });
   });
 
-  describe("setStatsPanelVisible", () => {
-    it("can show without saving state (restore)", () => {
-      statsManager.setStatsPanelVisible(true, false);
+  describe("store subscriptions", () => {
+    it("re-renders when the data, the filters or the selection change", () => {
+      statsManager.updateStatsForSelection();
+      expect(leadValue(statsPanel, "Flights")).toBe("2");
 
-      expect(statsPanel.classList.contains("visible")).toBe(true);
-      expect(mockApp.store.get("statsPanelVisible")).toBe(true);
-      expect(mockApp.stateManager.saveMapState).not.toHaveBeenCalled();
+      mockApp.selectedYear = "2025";
+      expect(leadValue(statsPanel, "Flights")).toBe("1");
+
+      mockApp.selectedAircraft = "D-EFGH";
+      expect(leadValue(statsPanel, "Flights")).toBe("0");
+
+      mockApp.selectedAircraft = "all";
+      mockApp.selectedPathIds.add(2);
+      mockApp.store.notifyMutation("selectedPathIds");
+      expect(
+        document.getElementById("stats-rail-title")!.textContent,
+      ).toContain("Selected Paths Statistics");
+
+      mockApp.currentData = null;
+      expect(leadValue(statsPanel, "Flights")).toBe("0");
+    });
+
+    it("renders as soon as data arrives", () => {
+      const app = createMockApp();
+      const panel = document.createElement("div");
+      panel.id = "stats-panel";
+      statsPanel.remove();
+      document.body.appendChild(panel);
+      try {
+        new StatsManager(asMapApp(app));
+        expect(panel.firstChild).toBeNull();
+
+        app.currentData = mockApp.currentData;
+
+        expect(leadValue(panel, "Flights")).toBe("2");
+      } finally {
+        panel.remove();
+      }
+    });
+  });
+
+  describe("memoization", () => {
+    it("computes the statistics once for unchanged inputs", () => {
+      statsManager.updateStatsForSelection();
+      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+
+      statsManager.updateStatsForSelection();
+      // A mutation notification without an actual change is also a no-op
+      mockApp.store.notifyMutation("selectedPathIds");
+
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("recomputes when the selection changes and again when it is cleared", () => {
+      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+
+      mockApp.selectedPathIds.add(1);
+      mockApp.store.notifyMutation("selectedPathIds");
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      mockApp.selectedPathIds.add(2);
+      mockApp.store.notifyMutation("selectedPathIds");
+      expect(spy).toHaveBeenCalledTimes(2);
+
+      mockApp.selectedPathIds.clear();
+      mockApp.store.notifyMutation("selectedPathIds");
+      expect(spy).toHaveBeenCalledTimes(3);
+      spy.mockRestore();
+    });
+
+    it("treats the same ids in another order as the same selection", () => {
+      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds.add(1);
+      mockApp.store.notifyMutation("selectedPathIds");
+      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+
+      mockApp.selectedPathIds = new Set([1, 2]);
+
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("recomputes for a replaced dataset of the same shape", () => {
+      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+
+      mockApp.currentData = createDataset(
+        mockApp.currentData!.path_info,
+        mockApp.currentData!.path_segments,
+        99,
+      );
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
     });
   });
 });

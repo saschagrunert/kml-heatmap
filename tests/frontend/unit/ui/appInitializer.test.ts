@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as L from "leaflet";
 import {
-  createAirportIcon,
   createAirportMarkers,
   loadInitialData,
   resolveYearSelection,
@@ -16,6 +15,7 @@ import {
   createDataset,
   createSegment,
   asMapApp,
+  syncControlsWithStore,
   type MockApp,
 } from "../../testHelpers";
 import type { MockMarker } from "../../../mocks/leaflet";
@@ -27,8 +27,8 @@ function setupDOM(): void {
   document.body.innerHTML = `
     <select id="year-select"><option value="all">All Years</option></select>
     <button id="airspeed-btn"></button>
-    <div id="altitude-legend" style="display:none"></div>
-    <div id="airspeed-legend" style="display:none"></div>
+    <div id="altitude-legend"></div>
+    <div id="airspeed-legend"></div>
   `;
 }
 
@@ -134,33 +134,6 @@ describe("appInitializer", () => {
     });
   });
 
-  describe("createAirportIcon", () => {
-    it("extracts the ICAO code and marks the home base", () => {
-      createAirportIcon("Frankfurt EDDF", true);
-
-      const options = vi.mocked(L.divIcon).mock.calls[0]![0]!;
-      const html = options.html as string;
-      expect(html).toContain(">EDDF<");
-      expect(html).toContain("airport-marker airport-marker-home");
-      expect(html).toContain("airport-label airport-label-home");
-      expect(options).toMatchObject({
-        iconSize: [12, 12],
-        iconAnchor: [6, 6],
-        popupAnchor: [0, -6],
-        className: "",
-      });
-    });
-
-    it("falls back to APT without an ICAO code and omits home classes", () => {
-      createAirportIcon("Small Airfield 123", false);
-
-      const html = vi.mocked(L.divIcon).mock.calls[0]![0]!.html as string;
-      expect(html).toContain(">APT<");
-      expect(html).not.toContain("airport-marker-home");
-      expect(html).not.toContain("airport-label-home");
-    });
-  });
-
   describe("createAirportMarkers", () => {
     it("creates one marker per airport with an icon and no popup yet", () => {
       createAirportMarkers(asMapApp(app), airports);
@@ -177,6 +150,7 @@ describe("appInitializer", () => {
         alt: "Frankfurt EDDF",
       });
       expect(marker.addTo).toHaveBeenCalledWith(app.airportLayer);
+      expect(app.airportLayer.hasLayer(marker)).toBe(true);
       expect(Object.keys(app.airportMarkers)).toEqual([
         "Frankfurt EDDF",
         "Munich EDDM",
@@ -256,9 +230,6 @@ describe("appInitializer", () => {
       app.filterManager.updateAircraftDropdown.mockImplementation(() =>
         order.push("dropdown"),
       );
-      app.airportManager.updateAirportPopups.mockImplementation(() =>
-        order.push("popups"),
-      );
       app.airportManager.updateAirportMarkerSizes.mockImplementation(() =>
         order.push("markerSizes"),
       );
@@ -270,7 +241,6 @@ describe("appInitializer", () => {
         "loadMetadata",
         "loadData",
         "dropdown",
-        "popups",
         "updateLayers",
         "markerSizes",
       ]);
@@ -287,16 +257,31 @@ describe("appInitializer", () => {
       );
     });
 
-    it("enables the airspeed button with timing data", async () => {
+    it("publishes the dataset after the markers exist, so their popups can follow it", async () => {
+      const markersAtPublish: string[][] = [];
+      app.store.subscribe("currentData", () => {
+        markersAtPublish.push(Object.keys(app.airportMarkers));
+      });
+
+      await loadInitialData(asMapApp(app));
+
+      expect(markersAtPublish).toEqual([["Frankfurt EDDF", "Munich EDDM"]]);
+    });
+
+    it("enables the airspeed button with timing data and leaves its look to the store", async () => {
+      syncControlsWithStore(app.store);
+
       await loadInitialData(asMapApp(app));
 
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(false);
       expect(btn.style.opacity).toBe("0.5");
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
     });
 
-    it("lights the airspeed button when airspeed is visible", async () => {
+    it("keeps the airspeed button lit when airspeed is visible", async () => {
       app.airspeedVisible = true;
+      syncControlsWithStore(app.store);
 
       await loadInitialData(asMapApp(app));
 
@@ -318,7 +303,6 @@ describe("appInitializer", () => {
 
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(true);
-      expect(btn.style.opacity).toBe("0.3");
       expect(app.airspeedRange).toEqual({ min: 0, max: 200 });
     });
 
@@ -327,15 +311,13 @@ describe("appInitializer", () => {
       await expect(loadInitialData(asMapApp(app))).resolves.toBeUndefined();
     });
 
-    it("restores the altitude layer and legend", async () => {
+    it("restores the altitude layer", async () => {
       app.altitudeVisible = true;
 
       await loadInitialData(asMapApp(app));
 
       expect(app.map!.addLayer).toHaveBeenCalledWith(app.altitudeLayer);
-      expect(document.getElementById("altitude-legend")!.style.display).toBe(
-        "block",
-      );
+      expect(app.map!.addLayer).not.toHaveBeenCalledWith(app.airspeedLayer);
     });
 
     it("adds the aviation layer when configured and visible", async () => {
@@ -356,25 +338,12 @@ describe("appInitializer", () => {
       expect(app.airportManager.updateAirportMarkerSizes).toHaveBeenCalled();
     });
 
-    it("updates the replay button when paths were restored", async () => {
-      app.selectedPathIds.add(1);
-
-      await loadInitialData(asMapApp(app));
-
-      expect(app.replayManager.updateReplayButtonState).toHaveBeenCalledTimes(
-        1,
-      );
-    });
-
-    it("restores the stats panel without saving state", async () => {
+    it("restores the stats panel through the stats manager", async () => {
       app.savedState = { statsPanelVisible: true };
 
       await loadInitialData(asMapApp(app));
 
-      expect(app.statsManager.setStatsPanelVisible).toHaveBeenCalledWith(
-        true,
-        false,
-      );
+      expect(app.statsManager.setStatsPanelVisible).toHaveBeenCalledWith(true);
     });
 
     it("handles null metadata and data", async () => {

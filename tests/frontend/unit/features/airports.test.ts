@@ -271,4 +271,38 @@ describe("airports feature", () => {
       expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
     });
   });
+
+  describe("createAirportIcon", () => {
+    function optionsOf(name: string, isHome: boolean): Record<string, unknown> {
+      // The Leaflet mock hands the options straight back as the icon
+      return (
+        mod.createAirportIcon(name, isHome) as unknown as {
+          options: Record<string, unknown>;
+        }
+      ).options;
+    }
+
+    it("extracts the ICAO code and marks the home base", () => {
+      const options = optionsOf("Frankfurt EDDF", true);
+      const html = options["html"] as string;
+
+      expect(html).toContain(">EDDF<");
+      expect(html).toContain("airport-marker airport-marker-home");
+      expect(html).toContain("airport-label airport-label-home");
+      expect(options).toMatchObject({
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
+        popupAnchor: [0, -6],
+        className: "",
+      });
+    });
+
+    it("falls back to APT without an ICAO code and omits home classes", () => {
+      const html = optionsOf("Small Airfield 123", false)["html"] as string;
+
+      expect(html).toContain(">APT<");
+      expect(html).not.toContain("airport-marker-home");
+      expect(html).not.toContain("airport-label-home");
+    });
+  });
 });

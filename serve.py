@@ -3,7 +3,6 @@
 
 import http.server
 import os
-import socketserver
 import sys
 
 PORT = int(os.environ.get("PORT", "8000"))
@@ -21,6 +20,13 @@ class CORSHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return super().end_headers()
 
 
+class Server(http.server.ThreadingHTTPServer):
+    """Serve requests concurrently and allow an immediate restart on the port."""
+
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 data_dir = "/data"
 if not os.path.isdir(data_dir):
     print(f"Error: {data_dir} does not exist. Are you running inside Docker?")
@@ -30,7 +36,7 @@ print(f"Starting HTTP server on {BIND_HOST}:{PORT}...")
 print(f"Serving files from: {os.getcwd()}")
 print(f"Open http://localhost:{PORT}/ in your browser")
 
-with socketserver.TCPServer((BIND_HOST, PORT), CORSHTTPRequestHandler) as httpd:
+with Server((BIND_HOST, PORT), CORSHTTPRequestHandler) as httpd:
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
