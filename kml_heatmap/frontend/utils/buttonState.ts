@@ -42,6 +42,24 @@ export function syncToggleButton(
 }
 
 /**
+ * Keep a colour legend in step with the visibility key of its layer. The
+ * stylesheet hides every legend; this is the only place that shows one.
+ * @returns Unsubscribe function
+ */
+export function syncLegend(
+  store: AppStore,
+  key: BooleanStoreKey,
+  legendId: string,
+): () => void {
+  const apply = (visible: boolean): void => {
+    const legend = domCache.get(legendId);
+    if (legend) legend.style.display = visible ? "block" : "none";
+  };
+  apply(store.get(key));
+  return store.subscribe(key, (value) => apply(value));
+}
+
+/**
  * Set the text of a control button without touching its icon.
  * A button that carries no label span gets one: assigning `textContent`
  * would drop every child, the injected `svg.icon` included.

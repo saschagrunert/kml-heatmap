@@ -53,7 +53,7 @@
 ### Requirements
 
 - Python 3.14 (see `.python-version`) and Node.js 26 (see `.nvmrc`)
-- podman or docker for `make build`/`serve`/`verify` (auto-detected, podman first)
+- podman or docker for `make build`/`serve` (auto-detected, podman first)
 
 ### Quick Start
 
@@ -74,6 +74,8 @@ make serve
 
 Both methods work equally well. `make serve` only serves the existing `docs/`
 directory; run `make build` (or `make serve-build`) to regenerate it first.
+`docs/` is a local build output and is not committed: the published site is
+built from the sources by the `deploy` workflow (see [Development](#development)).
 
 **Warning:** the tool rewrites the KML files in `data/` in place to remove
 flight dates (see [Privacy](#privacy)). Keep a copy of the originals if you
@@ -187,9 +189,11 @@ make CARTO_API_KEY=your_carto_key OPENAIP_API_KEY=your_openaip_key
 make serve
 ```
 
-The keys are embedded in `docs/map_config.js`, which is published with the site
-and committed to git. Treat them as public client-side keys and restrict them to
-your site's domain (referrer restriction) in the CARTO and OpenAIP dashboards.
+The keys are embedded in the generated `map_config.js`, which is published with
+the site. Treat them as public client-side keys and restrict them to your
+site's domain (referrer restriction) in the CARTO and OpenAIP dashboards. The
+`deploy` workflow reads them from the `CARTO_API_KEY` and `OPENAIP_API_KEY`
+repository secrets.
 
 **Note:** OpenAIP tiles return 403 Forbidden without a valid API key. To verify
 your key works:
@@ -219,14 +223,13 @@ Targets (`make help` prints this list with the current variable values):
 - `test` - Run the JavaScript and Python test suites with coverage
 - `lint` - Run linters and type checkers
 - `format` - Run formatters
-- `lock` - Regenerate `requirements.lock` and `requirements-test.lock` with pip-compile
+- `lock` - Regenerate `requirements.lock` and `requirements-test.lock` from `pyproject.toml` with pip-compile
 - `check-obfuscation` - Check that the KML files in `INPUT_DIR` are obfuscated
-- `verify` - Rebuild `OUTPUT_DIR` and fail if it differs from git (modified or untracked files)
 - `clean` - Remove the container image (when a runtime is available) and local build artifacts
 - `help` - Show available targets and variables
 
-Only `build`, `serve`, `verify` and `clean` need podman or docker. The rest
-(`test`, `lint`, `format`, `lock`, `help`) run locally. With docker the
+Only `build`, `serve` and `clean` need podman or docker. The rest (`test`,
+`lint`, `format`, `lock`, `help`) run locally. With docker the
 containers run as your user id so that generated files are not owned by root;
 with rootless podman the Makefile adds `--userns=keep-id` so that the same user
 id works inside the container.
@@ -277,7 +280,7 @@ From a fresh clone, build the frontend bundles first (they are not committed):
 ```bash
 npm ci && npm run build
 
-pip install -r requirements.txt   # or: pip install .
+pip install .                     # the runtime dependencies from pyproject.toml
 python -m kml_heatmap your_track.kml --output-dir out
 
 # Option 1: open directly
@@ -301,9 +304,11 @@ kml-heatmap [--output-dir DIR] [--debug] [--version] path [path ...]
   non-recursively for `.kml` files (case-insensitive) and processed in numeric
   order. `aircraft.json` is looked up in every input directory.
 - `--output-dir DIR` - Output directory (default: current directory). The tool
-  refuses to run if the output `data/` directory would overlap any input
-  directory, and it deletes only its own files there (`airports.js`,
-  `metadata.js`, `<year>/data.js`). From the repository root use
+  refuses to run if the output `data/` directory would be an input directory
+  or contain one, and it deletes only its own files there (`airports.js`,
+  `metadata.js`, `<year>/data.js`). An output directory below the input
+  directory is fine, so `kml-heatmap flight.kml` in the file's directory
+  writes to `./index.html` and `./data/`. From the repository root use
   `--output-dir docs`, as the `Makefile` does.
 - `--debug` - Show debug output
 - `--version` - Show the version and exit
@@ -338,8 +343,10 @@ Removed from the site:
 - Individual flight dates and times
 
 The CARTO and OpenAIP keys are public client-side tile keys. They are embedded
-in `docs/map_config.js`, published with the site and committed to git by design,
-because the browser needs them to load the base map and the Aviation Data layer.
+in the generated `map_config.js` and published with the site by design, because
+the browser needs them to load the base map and the Aviation Data layer. The
+generated site is not committed; the keys live in the repository secrets and in
+the deployed site only.
 
 ## Output
 
@@ -487,9 +494,14 @@ other aviation apps.
 ## Development
 
 `make help` lists all targets. `make test`, `make lint`, `make format` and
-`make lock` run locally (Python and Node required). `make verify` rebuilds
-`docs/` inside the container and fails if the result differs from git, and
-`make lock` regenerates the hashed Python lock files.
+`make lock` run locally (Python and Node required); `make lock` regenerates the
+hashed Python lock files from `pyproject.toml`.
+
+The published site is built by the `deploy` workflow on every push to `main`:
+it runs the same steps as `make build` (frontend bundle, then
+`python -m kml_heatmap data`) and uploads the result to GitHub Pages. Nothing
+generated is committed; `docs/` is only the default output directory of a
+local `make build`.
 
 Install the pre-commit hooks (ruff, prettier, typos, gitleaks, whitespace
 fixers) with `pip install pre-commit && pre-commit install`. See
@@ -533,7 +545,10 @@ End-to-end tests use [Playwright](https://playwright.dev/) with Chromium. They
 verify the full map rendering pipeline including map initialization, layer
 toggles, filters, statistics panel, wrapped modal, airport markers and replay.
 A mobile project runs the suite with a phone viewport, and every page is
-scanned for accessibility violations with axe.
+scanned for accessibility violations with axe. The suite does not reach the
+network: Leaflet, leaflet.heat and dom-to-image are served from the pinned
+copies in `node_modules` and every map tile is answered locally (see
+`tests/e2e/fixtures.ts`).
 
 The tests run against `docs/`, which must be built from the current sources
 first:
@@ -587,12 +602,14 @@ is gitignored and created by `npm run build`.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-test.txt
+pip install -e '.[test,dev]'
 ```
 
-The CI and the container images install the hashed lock files
-(`requirements.lock`, `requirements-test.lock`) instead; regenerate them with
-`make lock` after changing `requirements*.txt`.
+The dependencies are declared once, in `pyproject.toml`: the runtime
+dependencies plus the `test` and `dev` extras. The CI and the container images
+install the hashed lock files compiled from it (`requirements.lock`,
+`requirements-test.lock`) instead; regenerate them with `make lock` after
+changing the dependencies.
 
 **Testing:**
 
@@ -604,7 +621,7 @@ pytest                                          # Run all tests
 pytest tests/test_parser.py                     # Run specific test file
 pytest -x                                       # Stop on first failure
 pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml --cov-report=term
-coverage report                                 # Enforces fail_under = 90
+coverage report                                 # Enforces the fail_under floor from pyproject.toml
 pytest --cov=kml_heatmap --cov-report=html      # HTML coverage report (htmlcov/)
 ```
 

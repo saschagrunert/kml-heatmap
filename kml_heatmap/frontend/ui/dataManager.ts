@@ -3,7 +3,13 @@
  */
 import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
-import type { KMLDataset, Airport, LoadingInfo, Metadata } from "../types";
+import type {
+  KMLDataset,
+  Airport,
+  LoadingInfo,
+  Metadata,
+  PathSegment,
+} from "../types";
 import type { Coordinate } from "../utils/geometry";
 import { DataLoader } from "../services/dataLoader";
 import { calculateAltitudeRange } from "../features/layers";
@@ -42,10 +48,15 @@ export class DataManager {
   /**
    * Show the loading indicator. When the template provides `#loading-text`
    * it describes what is loading, e.g. "Loading 2026 flights (1.1 MB)…".
+   *
+   * The indicator is a live region, and a live region only announces text
+   * that changes while it is displayed, so it is shown before it is written.
    */
   showLoading(info?: LoadingInfo): void {
     const loadingEl = domCache.get("loading");
     if (!loadingEl) return;
+
+    loadingEl.style.display = "block";
 
     const textEl = domCache.get("loading-text");
     if (textEl && info) {
@@ -56,8 +67,6 @@ export class DataManager {
           : "";
       textEl.textContent = "Loading " + what + size + "…";
     }
-
-    loadingEl.style.display = "block";
   }
 
   hideLoading(): void {
@@ -96,8 +105,9 @@ export class DataManager {
   }
 
   /**
-   * Reload the dataset for the current year, rebuild the heatmap and the
-   * visible colour layers, then refresh statistics and airport visibility.
+   * Reload the dataset for the current year, then rebuild the heatmap and
+   * the visible colour layers. The statistics panel and the airport markers
+   * follow the store on their own.
    */
   async updateLayers(preloaded?: KMLDataset | null): Promise<void> {
     if (!this.app.map) return;
@@ -120,10 +130,6 @@ export class DataManager {
           "error",
         );
       }
-      // The selection may have been cleared by the caller, so the panel and
-      // the airport markers still have to follow it
-      this.app.statsManager.updateStatsForSelection();
-      this.app.airportManager.updateAirportOpacity();
       return;
     }
 
@@ -157,51 +163,43 @@ export class DataManager {
     }
 
     if (hasIsolation || !allPathsMatch) {
-      // Extract coordinates from filtered segments
-      const coordMap = new Map<string, Coordinate>();
-      for (const segment of data.path_segments) {
-        if (!filteredPathIds.has(segment.path_id)) continue;
-        if (hasIsolation && !this.app.selectedPathIds.has(segment.path_id))
-          continue;
-
-        const coords = segment.coords;
-        if (coords && coords.length === 2) {
-          const k0 = coords[0][0] + "," + coords[0][1];
-          const k1 = coords[1][0] + "," + coords[1][1];
-          if (!coordMap.has(k0)) coordMap.set(k0, coords[0]);
-          if (!coordMap.has(k1)) coordMap.set(k1, coords[1]);
-        }
-      }
-
-      filteredCoordinates = Array.from(coordMap.values());
+      filteredCoordinates = heatmapCoordinates(data.path_segments, (pathId) =>
+        hasIsolation
+          ? this.app.selectedPathIds.has(pathId)
+          : filteredPathIds.has(pathId),
+      );
     }
 
-    // Update heatmap - only add if visible
-    if (this.app.heatmapLayer) {
-      this.app.heatmapLayer.remove();
+    // The heat layer is created once and fed new points from then on; a
+    // fresh layer per filter change meant a new canvas every time
+    let heatLayer = this.app.heatmapLayer;
+    if (heatLayer) {
+      heatLayer.setLatLngs(filteredCoordinates);
+    } else {
+      heatLayer = L.heatLayer(filteredCoordinates, {
+        radius: 10,
+        blur: 15,
+        minOpacity: 0.25,
+        maxOpacity: 0.6,
+        max: 1.0, // Maximum point intensity for better performance
+        gradient: {
+          0.0: "blue",
+          0.3: "cyan",
+          0.5: "lime",
+          0.7: "yellow",
+          1.0: "red",
+        },
+      });
+      this.app.heatmapLayer = heatLayer;
     }
-
-    // Create heatmap using leaflet.heat directly
-    this.app.heatmapLayer = L.heatLayer(filteredCoordinates, {
-      radius: 10,
-      blur: 15,
-      minOpacity: 0.25,
-      maxOpacity: 0.6,
-      max: 1.0, // Maximum point intensity for better performance
-      gradient: {
-        0.0: "blue",
-        0.3: "cyan",
-        0.5: "lime",
-        0.7: "yellow",
-        1.0: "red",
-      },
-    });
 
     // Only add to map if heatmap is visible AND not in replay mode
     if (this.app.heatmapVisible && !this.app.replayManager.state.active) {
-      this.app.heatmapLayer.addTo(this.app.map);
-      if (this.app.heatmapLayer._canvas) {
-        this.app.heatmapLayer._canvas.style.pointerEvents = "none";
+      if (!this.app.map.hasLayer(heatLayer)) {
+        heatLayer.addTo(this.app.map);
+      }
+      if (heatLayer._canvas) {
+        heatLayer._canvas.style.pointerEvents = "none";
       }
       this.applyHeatmapEmphasis();
     }
@@ -246,9 +244,36 @@ export class DataManager {
     } else {
       this.app.layerManager.clearLayer("airspeed");
     }
-
-    // Statistics and airport visibility follow the new data/filter state
-    this.app.statsManager.updateStatsForSelection();
-    this.app.airportManager.updateAirportOpacity();
   }
+}
+
+/**
+ * The heatmap points of the paths `keep` accepts: every kept segment's start
+ * point plus the end point of each path, the same set the loader builds for
+ * the whole dataset. Neighbouring segments share their coordinate array, so
+ * no key has to be built to avoid listing a point twice.
+ */
+export function heatmapCoordinates(
+  segments: PathSegment[],
+  keep: (pathId: number) => boolean,
+): Coordinate[] {
+  const coordinates: Coordinate[] = [];
+  let lastKept: [Coordinate, Coordinate] | null = null;
+  let lastPathId = -1;
+
+  for (const segment of segments) {
+    if (!keep(segment.path_id)) continue;
+    const coords = segment.coords;
+    if (!coords) continue;
+
+    if (lastKept && segment.path_id !== lastPathId) {
+      coordinates.push(lastKept[1]);
+    }
+    coordinates.push(coords[0]);
+    lastKept = coords;
+    lastPathId = segment.path_id;
+  }
+  if (lastKept) coordinates.push(lastKept[1]);
+
+  return coordinates;
 }

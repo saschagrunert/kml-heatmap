@@ -11,8 +11,8 @@ import {
   mockAnimationFrame,
   mountReplayDom,
   unmountReplayDom,
-  type ReplayMockApp,
 } from "./replayTestSetup";
+import type { MockApp } from "../../testHelpers";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateSegmentPopupHtml: vi.fn(() => "<div>popup</div>"),
@@ -20,7 +20,7 @@ vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
 
 describe("ReplayManager playback", () => {
   let replayManager: ReplayManager;
-  let mockApp: ReplayMockApp;
+  let mockApp: MockApp;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -178,13 +178,18 @@ describe("ReplayManager playback", () => {
       expect(el("replay-pause-btn").hidden).toBe(true);
     });
 
-    it("cancels animation frame", () => {
-      replayManager.state.animationFrameId = 42;
+    it("stops the frame loop, so the time no longer advances", () => {
+      replayManager.playReplay();
+      vi.advanceTimersByTime(16);
+      vi.advanceTimersByTime(16);
+      const timeAtPause = replayManager.state.currentTime;
+      expect(timeAtPause).toBeGreaterThan(0);
 
       replayManager.pauseReplay();
+      vi.advanceTimersByTime(200);
 
-      expect(cancelAnimationFrame).toHaveBeenCalledWith(42);
       expect(replayManager.state.animationFrameId).toBeNull();
+      expect(replayManager.state.currentTime).toBe(timeAtPause);
     });
 
     it("resets frame time", () => {
@@ -245,7 +250,8 @@ describe("ReplayManager playback", () => {
     });
 
     it("resets the slider and time display", () => {
-      replayManager.state.currentTime = 50;
+      replayManager.seekReplay("50");
+      expect((el("replay-slider") as HTMLInputElement).value).toBe("50");
 
       replayManager.stopReplay();
 

@@ -265,8 +265,27 @@ def obfuscate_kml_content(content: str) -> str | None:
     return new_content if new_content != content else None
 
 
+def _fsync_directory(directory: Path) -> None:
+    """Flush a directory entry to disk (best effort, not every FS supports it)."""
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def _write_atomic(filepath: Path, content: str) -> bool:
-    """Write content via a temp file in the same directory and os.replace."""
+    """Write content via a temp file in the same directory and os.replace.
+
+    The file being replaced is the user's only copy of the flight, so the data
+    is flushed to disk before the rename and the directory entry after it: a
+    crash in between leaves either the old file or the complete new one.
+    """
     tmp_name: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -279,9 +298,12 @@ def _write_atomic(filepath: Path, content: str) -> bool:
         ) as tmp:
             tmp_name = tmp.name
             tmp.write(content)
+            tmp.flush()
+            os.fsync(tmp.fileno())
         shutil.copymode(filepath, tmp_name)
         os.replace(tmp_name, filepath)
         tmp_name = None
+        _fsync_directory(filepath.parent)
     except OSError as e:
         logger.warning("Skipping %s: failed to write (%s)", filepath, e)
         return False

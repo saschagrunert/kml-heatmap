@@ -1,29 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  INIT_ERROR_HTML,
   MapApp,
-  bindActions,
-  renderControlIcons,
+  initMapApp,
+  reportInitFailure,
 } from "../../../../kml_heatmap/frontend/mapApp";
-import { setControlIcon } from "../../../../kml_heatmap/frontend/utils/icons";
-import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
+import { STORE_ACCESSOR_KEYS } from "../../../../kml_heatmap/frontend/state/store";
 import type {
   KMLDataset,
   FilteredStatistics,
 } from "../../../../kml_heatmap/frontend/types";
 
-// Mock domCache
-vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
-  domCache: {
-    get: vi.fn((id: string) => document.getElementById(id)),
-    cacheElements: vi.fn(),
-  },
-}));
-
-// Mock logger
-vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
-  logDebug: vi.fn(),
-  logError: vi.fn(),
-}));
+const loggerMock = vi.hoisted(() => ({ logDebug: vi.fn(), logError: vi.fn() }));
+vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => loggerMock);
 
 const config = {
   center: [48.0, 16.0] as [number, number],
@@ -54,11 +43,6 @@ describe("MapApp", () => {
       expect(app.pathRenderer).toBeDefined();
       expect(app.airportToPaths).toEqual({});
       expect(app.airportMarkers).toEqual({});
-      expect(app.stateManager).toBeUndefined();
-      expect(app.dataManager).toBeUndefined();
-      expect(app.layerManager).toBeUndefined();
-      expect(app.replayManager).toBeUndefined();
-      expect(app.uiToggles).toBeUndefined();
     });
   });
 
@@ -69,15 +53,16 @@ describe("MapApp", () => {
       app = new MapApp(config);
     });
 
+    it("exposes every accessor key as a property that reads the store", () => {
+      for (const key of STORE_ACCESSOR_KEYS) {
+        expect(app[key]).toBe(app.store.get(key));
+      }
+    });
+
     it("selectedYear getter/setter delegates to store", () => {
       app.selectedYear = "2025";
       expect(app.store.get("selectedYear")).toBe("2025");
       expect(app.selectedYear).toBe("2025");
-    });
-
-    it("selectedAircraft getter/setter delegates to store", () => {
-      app.selectedAircraft = "D-EAGJ";
-      expect(app.store.get("selectedAircraft")).toBe("D-EAGJ");
     });
 
     it("selectedPathIds getter/setter delegates to store", () => {
@@ -100,15 +85,13 @@ describe("MapApp", () => {
       expect(app[key]).toBe(!initial);
     });
 
-    it("currentData getter/setter delegates to store", () => {
-      const data: KMLDataset = {
-        coordinates: [],
-        path_segments: [],
-        path_info: [],
-        original_points: 0,
-      };
-      app.currentData = data;
-      expect(app.store.get("currentData")).toBe(data);
+    it("notifies store subscribers through the setter", () => {
+      const fn = vi.fn();
+      app.store.subscribe("selectedAircraft", fn);
+
+      app.selectedAircraft = "D-EAGJ";
+
+      expect(fn).toHaveBeenCalledWith("D-EAGJ", "all");
     });
 
     it("fullPathInfo and fullPathSegments derive from currentData", () => {
@@ -123,11 +106,12 @@ describe("MapApp", () => {
       };
       app.currentData = data;
 
+      expect(app.store.get("currentData")).toBe(data);
       expect(app.fullPathInfo).toBe(data.path_info);
       expect(app.fullPathSegments).toBe(data.path_segments);
     });
 
-    it("fullStats getter/setter delegates to store", () => {
+    it("fullStats and the ranges delegate to store", () => {
       const stats: FilteredStatistics = {
         total_points: 100,
         num_paths: 5,
@@ -139,91 +123,28 @@ describe("MapApp", () => {
         total_distance_nm: 27,
       };
       app.fullStats = stats;
-      expect(app.store.get("fullStats")).toBe(stats);
-    });
-
-    it("altitudeRange and airspeedRange delegate to store", () => {
       app.altitudeRange = { min: 100, max: 5000 };
       app.airspeedRange = { min: 50, max: 150 };
+
+      expect(app.store.get("fullStats")).toBe(stats);
       expect(app.store.get("altitudeRange")).toEqual({ min: 100, max: 5000 });
       expect(app.store.get("airspeedRange")).toEqual({ min: 50, max: 150 });
     });
   });
 
-  describe("window bindings", () => {
-    it("defines window.initMapApp", () => {
-      expect(typeof window.initMapApp).toBe("function");
-    });
-
-    // Shared setup for data-action binding tests
-    let actionElements: Record<string, HTMLElement>;
-    let result: MapApp;
+  describe("initMapApp", () => {
     let initSpy: ReturnType<typeof vi.spyOn>;
     let bindOrder: string[];
+    let btn: HTMLButtonElement;
 
-    beforeEach(async () => {
-      actionElements = {};
+    beforeEach(() => {
       bindOrder = [];
-      const buttonActions = [
-        "toggleHeatmap",
-        "toggleStats",
-        "toggleAltitude",
-        "toggleAirspeed",
-        "toggleAirports",
-        "toggleAviation",
-        "toggleReplay",
-        "exportMap",
-        "showWrapped",
-        "closeWrapped",
-        "closeWrappedBackdrop",
-        "toggleIsolateSelection",
-        "playReplay",
-        "pauseReplay",
-        "stopReplay",
-        "toggleAutoZoom",
-        "stopPropagation",
-        "unknownAction",
-      ];
-
-      buttonActions.forEach((action) => {
-        const btn = document.createElement("button");
-        btn.dataset["action"] = action;
-        document.body.appendChild(btn);
-        actionElements[action] = btn;
-      });
-
-      const yearSelect = document.createElement("select");
-      yearSelect.id = "year-select";
-      yearSelect.dataset["action"] = "filterByYear";
-      document.body.appendChild(yearSelect);
-      actionElements["filterByYear"] = yearSelect;
-
-      const aircraftSelect = document.createElement("select");
-      aircraftSelect.id = "aircraft-select";
-      aircraftSelect.dataset["action"] = "filterByAircraft";
-      document.body.appendChild(aircraftSelect);
-      actionElements["filterByAircraft"] = aircraftSelect;
-
-      const slider = document.createElement("input");
-      slider.type = "range";
-      slider.dataset["action"] = "seekReplay";
-      slider.value = "50";
-      document.body.appendChild(slider);
-      actionElements["seekReplay"] = slider;
-
-      const speedSelect = document.createElement("select");
-      speedSelect.dataset["action"] = "changeReplaySpeed";
-      document.body.appendChild(speedSelect);
-      actionElements["changeReplaySpeed"] = speedSelect;
+      btn = document.createElement("button");
+      btn.dataset["action"] = "toggleStats";
+      btn.dataset["icon"] = "stats";
+      document.body.appendChild(btn);
 
       const addSpy = vi.spyOn(HTMLElement.prototype, "addEventListener");
-      initSpy = vi
-        .spyOn(MapApp.prototype, "initialize")
-        .mockImplementation(function (this: MapApp) {
-          bindOrder.push("initialize");
-          this.isInitializing = false;
-          return Promise.resolve();
-        });
       addSpy.mockImplementation(function (
         this: HTMLElement,
         ...args: Parameters<HTMLElement["addEventListener"]>
@@ -231,200 +152,36 @@ describe("MapApp", () => {
         if (!bindOrder.includes("bind")) bindOrder.push("bind");
         return EventTarget.prototype.addEventListener.apply(this, args);
       });
-
-      result = await window.initMapApp!(config);
-      addSpy.mockRestore();
-
-      result.uiToggles = {
-        toggleHeatmap: vi.fn(),
-        toggleAltitude: vi.fn(),
-        toggleAirspeed: vi.fn(),
-        toggleAirports: vi.fn(),
-        toggleAviation: vi.fn(),
-        exportMap: vi.fn(),
-      } as never;
-      result.statsManager = { toggleStats: vi.fn() } as never;
-      result.replayManager = {
-        toggleReplay: vi.fn(),
-        playReplay: vi.fn(),
-        pauseReplay: vi.fn(),
-        stopReplay: vi.fn(),
-        seekReplay: vi.fn(),
-        changeReplaySpeed: vi.fn(),
-        toggleAutoZoom: vi.fn(),
-      } as never;
-      result.filterManager = {
-        filterByYear: vi.fn().mockResolvedValue(undefined),
-        filterByAircraft: vi.fn().mockResolvedValue(undefined),
-      } as never;
-      result.pathSelection = {
-        togglePathSelection: vi.fn(),
-        toggleIsolateSelection: vi.fn(),
-      } as never;
-      result.wrappedManager = {
-        showWrapped: vi.fn(),
-        closeWrapped: vi.fn(),
-      } as never;
+      initSpy = vi
+        .spyOn(MapApp.prototype, "initialize")
+        .mockImplementation(function (this: MapApp) {
+          bindOrder.push("initialize");
+          this.isInitializing = false;
+          return Promise.resolve();
+        });
     });
 
     afterEach(() => {
-      Object.values(actionElements).forEach((el) => el.remove());
-      initSpy.mockRestore();
+      btn.remove();
+      vi.restoreAllMocks();
+      delete window.mapApp;
     });
 
-    const mocks = (): Record<
-      string,
-      Record<string, ReturnType<typeof vi.fn>>
-    > =>
-      result as unknown as Record<
-        string,
-        Record<string, ReturnType<typeof vi.fn>>
-      >;
+    it("is exposed on window", () => {
+      expect(window.initMapApp).toBe(initMapApp);
+    });
 
-    it("initMapApp creates the app, binds actions before initializing, then initializes", () => {
-      expect(result).toBeInstanceOf(MapApp);
-      expect(window.mapApp).toBe(result);
+    it("creates the app, draws the icons, binds actions and then initializes", async () => {
+      const app = await initMapApp(config);
+
+      expect(app).toBeInstanceOf(MapApp);
+      expect(window.mapApp).toBe(app);
       expect(bindOrder).toEqual(["bind", "initialize"]);
       expect(initSpy).toHaveBeenCalledTimes(1);
-    });
+      expect(btn.querySelector("svg.icon")).not.toBeNull();
 
-    it("binds UI toggle actions", () => {
-      actionElements["toggleHeatmap"]!.click();
-      actionElements["toggleAltitude"]!.click();
-      actionElements["toggleAirspeed"]!.click();
-      actionElements["toggleAirports"]!.click();
-      actionElements["toggleAviation"]!.click();
-      actionElements["exportMap"]!.click();
-
-      const ui = mocks()["uiToggles"]!;
-      expect(ui["toggleHeatmap"]).toHaveBeenCalledTimes(1);
-      expect(ui["toggleAltitude"]).toHaveBeenCalledTimes(1);
-      expect(ui["toggleAirspeed"]).toHaveBeenCalledTimes(1);
-      expect(ui["toggleAirports"]).toHaveBeenCalledTimes(1);
-      expect(ui["toggleAviation"]).toHaveBeenCalledTimes(1);
-      expect(ui["exportMap"]).toHaveBeenCalledTimes(1);
-    });
-
-    it("binds stats action", () => {
-      actionElements["toggleStats"]!.click();
-      expect(mocks()["statsManager"]!["toggleStats"]).toHaveBeenCalledTimes(1);
-    });
-
-    it("binds replay actions", () => {
-      actionElements["toggleReplay"]!.click();
-      actionElements["playReplay"]!.click();
-      actionElements["pauseReplay"]!.click();
-      actionElements["stopReplay"]!.click();
-      actionElements["seekReplay"]!.dispatchEvent(new Event("input"));
-      actionElements["changeReplaySpeed"]!.dispatchEvent(new Event("change"));
-      actionElements["toggleAutoZoom"]!.click();
-
-      const replay = mocks()["replayManager"]!;
-      expect(replay["toggleReplay"]).toHaveBeenCalledTimes(1);
-      expect(replay["playReplay"]).toHaveBeenCalledTimes(1);
-      expect(replay["pauseReplay"]).toHaveBeenCalledTimes(1);
-      expect(replay["stopReplay"]).toHaveBeenCalledTimes(1);
-      expect(replay["seekReplay"]).toHaveBeenCalledWith("50");
-      expect(replay["changeReplaySpeed"]).toHaveBeenCalledTimes(1);
-      expect(replay["toggleAutoZoom"]).toHaveBeenCalledTimes(1);
-    });
-
-    it("binds filter actions", () => {
-      actionElements["filterByYear"]!.dispatchEvent(new Event("change"));
-      actionElements["filterByAircraft"]!.dispatchEvent(new Event("change"));
-
-      const filter = mocks()["filterManager"]!;
-      expect(filter["filterByYear"]).toHaveBeenCalledTimes(1);
-      expect(filter["filterByAircraft"]).toHaveBeenCalledTimes(1);
-    });
-
-    it("binds wrapped modal actions", () => {
-      actionElements["showWrapped"]!.click();
-      actionElements["closeWrapped"]!.click();
-      actionElements["closeWrappedBackdrop"]!.click();
-
-      const wrapped = mocks()["wrappedManager"]!;
-      expect(wrapped["showWrapped"]).toHaveBeenCalledTimes(1);
-      expect(wrapped["closeWrapped"]).toHaveBeenCalledTimes(2);
-      expect(wrapped["closeWrapped"]).toHaveBeenLastCalledWith(
-        expect.any(MouseEvent),
-      );
-    });
-
-    it("binds path selection actions", () => {
-      actionElements["toggleIsolateSelection"]!.click();
-      expect(
-        mocks()["pathSelection"]!["toggleIsolateSelection"],
-      ).toHaveBeenCalledTimes(1);
-    });
-
-    it("stops propagation for stopPropagation actions", () => {
-      const event = new MouseEvent("click", { bubbles: true });
-      const stop = vi.spyOn(event, "stopPropagation");
-
-      actionElements["stopPropagation"]!.dispatchEvent(event);
-
-      expect(stop).toHaveBeenCalled();
-    });
-
-    it("ignores unknown actions", () => {
-      expect(() => actionElements["unknownAction"]!.click()).not.toThrow();
-    });
-
-    it("ignores data-dependent actions while initializing but keeps UI toggles", () => {
-      result.isInitializing = true;
-
-      actionElements["filterByYear"]!.dispatchEvent(new Event("change"));
-      actionElements["filterByAircraft"]!.dispatchEvent(new Event("change"));
-      actionElements["toggleReplay"]!.click();
-      actionElements["showWrapped"]!.click();
-      actionElements["exportMap"]!.click();
-      actionElements["toggleIsolateSelection"]!.click();
-      actionElements["toggleHeatmap"]!.click();
-      actionElements["toggleAltitude"]!.click();
-      actionElements["toggleStats"]!.click();
-
-      expect(mocks()["filterManager"]!["filterByYear"]).not.toHaveBeenCalled();
-      expect(
-        mocks()["filterManager"]!["filterByAircraft"],
-      ).not.toHaveBeenCalled();
-      expect(mocks()["replayManager"]!["toggleReplay"]).not.toHaveBeenCalled();
-      expect(mocks()["wrappedManager"]!["showWrapped"]).not.toHaveBeenCalled();
-      expect(mocks()["uiToggles"]!["exportMap"]).not.toHaveBeenCalled();
-      expect(
-        mocks()["pathSelection"]!["toggleIsolateSelection"],
-      ).not.toHaveBeenCalled();
-      expect(mocks()["uiToggles"]!["toggleHeatmap"]).toHaveBeenCalledTimes(1);
-      expect(mocks()["uiToggles"]!["toggleAltitude"]).toHaveBeenCalledTimes(1);
-      expect(mocks()["statsManager"]!["toggleStats"]).toHaveBeenCalledTimes(1);
-    });
-
-    it("logs rejected filter promises instead of throwing", async () => {
-      const { logError } =
-        await import("../../../../kml_heatmap/frontend/utils/logger");
-      const error = new Error("filter failed");
-      mocks()["filterManager"]!["filterByYear"]!.mockRejectedValueOnce(error);
-
-      actionElements["filterByYear"]!.dispatchEvent(new Event("change"));
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(logError).toHaveBeenCalledWith(error);
-    });
-  });
-
-  describe("bindActions", () => {
-    it("can be called directly for an app instance", () => {
-      const app = new MapApp(config);
-      app.isInitializing = false;
       app.statsManager = { toggleStats: vi.fn() } as never;
-      const btn = document.createElement("button");
-      btn.dataset["action"] = "toggleStats";
-      document.body.appendChild(btn);
-
-      bindActions(app);
       btn.click();
-
       expect(
         (
           app.statsManager as unknown as {
@@ -432,116 +189,81 @@ describe("MapApp", () => {
           }
         ).toggleStats,
       ).toHaveBeenCalledTimes(1);
-      btn.remove();
     });
   });
 
-  describe("renderControlIcons", () => {
-    let host: HTMLElement;
+  describe("reportInitFailure", () => {
+    let mapEl: HTMLElement;
 
     beforeEach(() => {
-      vi.mocked(logError).mockClear();
-      host = document.createElement("div");
-      document.body.appendChild(host);
+      mapEl = document.createElement("div");
+      mapEl.id = "map";
+      mapEl.innerHTML = "<canvas></canvas>";
+      document.body.appendChild(mapEl);
     });
 
     afterEach(() => {
-      host.remove();
+      mapEl.remove();
     });
 
-    it("draws the icon of every [data-icon] element at the row size", () => {
-      host.innerHTML =
-        '<button data-icon="stats"><span class="control-label">Statistics</span></button>' +
-        '<button data-icon="heatmap"></button>';
+    it("logs the error and replaces the map with a message", () => {
+      const error = new Error("no data");
 
-      renderControlIcons(host);
+      reportInitFailure(error);
 
-      const icons = host.querySelectorAll("svg.icon");
-      expect(icons).toHaveLength(2);
-      expect(icons[0]!.getAttribute("width")).toBe("16");
-      expect(icons[0]!.getAttribute("aria-hidden")).toBe("true");
-      // The icon precedes the label it belongs to
-      expect(host.querySelector("button")!.firstElementChild).toBe(icons[0]);
-    });
-
-    it("honours a per-element size and overrides it with an explicit one", () => {
-      host.innerHTML =
-        '<button data-icon="close" data-icon-size="20"></button>' +
-        '<button data-icon="stats"></button>';
-
-      renderControlIcons(host);
-      expect(host.querySelectorAll("svg.icon")[0]!.getAttribute("width")).toBe(
-        "20",
-      );
-
-      renderControlIcons(host, 24);
-      const widths = Array.from(host.querySelectorAll("svg.icon")).map((el) =>
-        el.getAttribute("width"),
-      );
-      expect(widths).toEqual(["24", "24"]);
-    });
-
-    it("replaces the icon instead of adding a second one", () => {
-      host.innerHTML =
-        '<button data-icon="stats"><span class="control-label">Statistics</span></button>';
-
-      renderControlIcons(host);
-      renderControlIcons(host, 20);
-
-      expect(host.querySelectorAll("svg.icon")).toHaveLength(1);
-      expect(host.querySelector("svg.icon")!.getAttribute("width")).toBe("20");
-      expect(host.querySelector(".control-label")!.textContent).toBe(
-        "Statistics",
+      expect(loggerMock.logError).toHaveBeenCalledWith(error);
+      expect(mapEl.innerHTML).toBe(INIT_ERROR_HTML);
+      expect(mapEl.querySelector(".kh-init-error")!.textContent).toBe(
+        "Failed to initialize map. Please reload the page.",
       );
     });
 
-    it("falls back to the row size for an unknown size and skips empty names", () => {
-      host.innerHTML =
-        '<button data-icon="stats" data-icon-size="17"></button>' +
-        '<button data-icon=""></button>';
+    it("still logs when there is no map element", () => {
+      mapEl.remove();
 
-      renderControlIcons(host);
-
-      const icons = host.querySelectorAll("svg.icon");
-      expect(icons).toHaveLength(1);
-      expect(icons[0]!.getAttribute("width")).toBe("16");
+      expect(() => reportInitFailure(new Error("boom"))).not.toThrow();
+      expect(loggerMock.logError).toHaveBeenCalled();
     });
 
-    it("logs and skips an unknown icon name instead of drawing nothing", () => {
-      host.innerHTML =
-        '<button id="typo-btn" data-icon="definitely-not-an-icon"></button>' +
-        '<button data-icon="stats"></button>';
+    it("is what a failed initialization ends in", async () => {
+      const error = new Error("init failed");
+      vi.spyOn(MapApp.prototype, "initialize").mockRejectedValue(error);
 
-      renderControlIcons(host);
+      await initMapApp(config).catch(reportInitFailure);
 
-      expect(host.querySelectorAll("svg.icon")).toHaveLength(1);
-      expect(host.querySelector("#typo-btn")!.innerHTML).toBe("");
-      expect(logError).toHaveBeenCalledWith(
-        expect.stringContaining("definitely-not-an-icon"),
-      );
+      expect(loggerMock.logError).toHaveBeenCalledWith(error);
+      expect(mapEl.querySelector(".kh-init-error")).not.toBeNull();
+      delete window.mapApp;
     });
+  });
 
-    it("keeps a later icon swap at the size the column was drawn at", () => {
-      host.innerHTML =
-        '<button id="replay-btn" data-icon="play"></button>' +
-        '<button data-icon="stats"></button>';
+  describe("destroy", () => {
+    it("cancels the deferred Wrapped reopening", () => {
+      vi.useFakeTimers();
+      const app = new MapApp(config);
+      const showWrapped = vi.fn();
+      app.wrappedManager = { showWrapped, destroy: vi.fn() } as never;
+      app.replayManager = { destroy: vi.fn() } as never;
+      app.mobileBar = null;
+      app.savedState = { wrappedVisible: true };
 
-      // The compact column redraws every icon at the larger size
-      renderControlIcons(host, 20);
-      const replayBtn = host.querySelector<HTMLElement>("#replay-btn")!;
-      expect(replayBtn.dataset["iconSize"]).toBe("20");
+      // The reopening is scheduled at the end of initialize(); reproduce
+      // only that step so no manager has to be built
+      (
+        app as unknown as {
+          wrappedRestoreTimer: ReturnType<typeof setTimeout> | null;
+        }
+      ).wrappedRestoreTimer = setTimeout(() => showWrapped(), 500);
 
-      // A replay toggle swaps that one icon without naming a size
-      setControlIcon(replayBtn, "stop");
+      app.destroy();
+      vi.advanceTimersByTime(1000);
 
-      expect(replayBtn.querySelector("svg.icon")!.getAttribute("width")).toBe(
-        "20",
-      );
+      expect(showWrapped).not.toHaveBeenCalled();
       expect(
-        [...host.querySelectorAll("svg.icon")].map((el) =>
-          el.getAttribute("width"),
-        ),
-      ).toEqual(["20", "20"]);
+        (app.replayManager as unknown as { destroy: ReturnType<typeof vi.fn> })
+          .destroy,
+      ).toHaveBeenCalled();
+      vi.useRealTimers();
     });
   });
 });

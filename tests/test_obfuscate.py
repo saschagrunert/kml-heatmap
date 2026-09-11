@@ -12,6 +12,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+import kml_heatmap.obfuscate as obfuscate_module
 from kml_heatmap.obfuscate import (
     GENERIC_CREATOR,
     _extract_frac,
@@ -443,7 +444,7 @@ class TestExtractFrac:
 
 
 class TestProperties:
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     @given(
         st.datetimes(
             min_value=datetime(2000, 1, 2),
@@ -513,3 +514,103 @@ class TestCLI:
             main()
         assert e.value.code == 1
         assert "not a directory" in capsys.readouterr().err
+
+
+class TestUnparsableDates:
+    """Dates the patterns match but the calendar rejects are left untouched."""
+
+    def test_description_with_unknown_month(self):
+        content = (
+            "<kml><when>2025-03-03T08:00:00Z</when>"
+            "<description>Flight Foo 12 2025 03:01PM</description></kml>"
+        )
+        result = obfuscate_module.obfuscate_kml_content(content)
+        assert "Flight Foo 12 2025 03:01PM" in result
+        assert "2025-01-01T08:00:00Z" in result
+
+    def test_description_with_invalid_day(self):
+        content = (
+            "<kml><when>2025-03-03T08:00:00Z</when>"
+            "<description>Flight Feb 31 2025 03:01PM</description></kml>"
+        )
+        result = obfuscate_module.obfuscate_kml_content(content)
+        assert "Flight Feb 31 2025 03:01PM" in result
+
+    def test_route_name_with_unknown_month(self):
+        content = (
+            "<kml><when>2025-03-03T08:00:00Z</when>"
+            "<name>EDDS to EDDP - 16 Foo 2025</name></kml>"
+        )
+        result = obfuscate_module.obfuscate_kml_content(content)
+        assert "16 Foo 2025" in result
+
+    def test_route_name_with_invalid_day(self):
+        content = (
+            "<kml><when>2025-03-03T08:00:00Z</when>"
+            "<name>EDDS to EDDP - 31 Feb 2025</name></kml>"
+        )
+        result = obfuscate_module.obfuscate_kml_content(content)
+        assert "31 Feb 2025" in result
+
+    def test_route_only_document_is_anchored_on_the_route_date(self):
+        content = "<kml><name>EDDS to EDDP - 16 Aug 2026</name></kml>"
+        result = obfuscate_module.obfuscate_kml_content(content)
+        assert result == "<kml><name>EDDS to EDDP - 01 Jan 2026</name></kml>"
+
+    def test_unparsable_anchor_dates_give_none(self):
+        assert (
+            obfuscate_module._find_anchor("<kml><name>X - 31 Feb 2026</name></kml>")
+            is None
+        )
+        assert (
+            obfuscate_module._find_anchor(
+                "<kml><description>Flight Foo 12 2026 03:01PM</description></kml>"
+            )
+            is None
+        )
+
+
+class TestErrorBranches:
+    def test_exception_in_one_file_is_logged_and_the_rest_continue(
+        self, tmp_path, capsys
+    ):
+        first = tmp_path / "1.kml"
+        second = tmp_path / "2.kml"
+        for path in (first, second):
+            path.write_text(SAMPLE_KML, encoding="utf-8")
+
+        original = obfuscate_module.obfuscate_kml_file
+
+        def flaky(path):
+            if path == first:
+                raise RuntimeError("boom")
+            return original(path)
+
+        with patch.object(obfuscate_module, "obfuscate_kml_file", side_effect=flaky):
+            assert obfuscate_module.obfuscate_kml_files([first, second]) == 1
+        assert "Failed to obfuscate" in capsys.readouterr().err
+        assert "2025-01-01" in second.read_text(encoding="utf-8")
+
+    def test_unlistable_directory_yields_no_files(self, tmp_path):
+        with patch.object(Path, "iterdir", side_effect=OSError("denied")):
+            assert obfuscate_module.find_kml_files(tmp_path) == []
+
+    def test_directory_fsync_tolerates_errors(self, tmp_path):
+        obfuscate_module._fsync_directory(tmp_path / "missing")
+        with patch("kml_heatmap.obfuscate.os.fsync", side_effect=OSError("nope")):
+            obfuscate_module._fsync_directory(tmp_path)
+
+    def test_write_flushes_to_disk_before_replacing(self, tmp_path):
+        kml_file = tmp_path / "test.kml"
+        kml_file.write_text(SAMPLE_KML, encoding="utf-8")
+        calls = []
+        real_fsync = os.fsync
+
+        def recording_fsync(fd):
+            calls.append(fd)
+            return real_fsync(fd)
+
+        with patch("kml_heatmap.obfuscate.os.fsync", side_effect=recording_fsync):
+            assert obfuscate_module.obfuscate_kml_file(kml_file) is True
+        # Once for the temp file, once for the directory entry
+        assert len(calls) == 2

@@ -2,8 +2,12 @@
  * ReplayManager: path redraw, frame display updates and the airplane popup.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as L from "leaflet";
 import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
-import * as colors from "../../../../kml_heatmap/frontend/utils/colors";
+import {
+  getColorForAirspeed,
+  getColorForAltitude,
+} from "../../../../kml_heatmap/frontend/utils/colors";
 import * as replayFeature from "../../../../kml_heatmap/frontend/features/replay";
 import { generateSegmentPopupHtml } from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
 import {
@@ -13,8 +17,8 @@ import {
   mockAnimationFrame,
   mountReplayDom,
   unmountReplayDom,
-  type ReplayMockApp,
 } from "./replayTestSetup";
+import type { MockApp } from "../../testHelpers";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateSegmentPopupHtml: vi.fn(() => "<div>popup</div>"),
@@ -24,7 +28,7 @@ type AnyMock = ReturnType<typeof vi.fn>;
 
 describe("ReplayManager display", () => {
   let replayManager: ReplayManager;
-  let mockApp: ReplayMockApp;
+  let mockApp: MockApp;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -36,7 +40,13 @@ describe("ReplayManager display", () => {
     replayManager.initializeReplay();
     replayManager.state.active = true;
     vi.mocked(generateSegmentPopupHtml).mockClear();
+    vi.mocked(L.polyline).mockClear();
   });
+
+  /** Colours of the polylines drawn since the last mockClear, in order */
+  function drawnColors(): unknown[] {
+    return vi.mocked(L.polyline).mock.calls.map((call) => call[1]?.["color"]);
+  }
 
   afterEach(() => {
     vi.useRealTimers();
@@ -51,25 +61,25 @@ describe("ReplayManager display", () => {
     });
 
     it("clears layer and redraws segments up to savedIndex with altitude colors", () => {
-      const altitudeSpy = vi.spyOn(colors, "getColorForAltitude");
-
       replayManager.redrawReplayPath("altitude");
 
       expect(replayManager.state.layer!.clearLayers).toHaveBeenCalled();
       // Segments at t=0 and t=60 are at or before t=100
       expect(replayManager.state.lastDrawnIndex).toBe(1);
-      expect(altitudeSpy).toHaveBeenCalledTimes(2);
-      expect(altitudeSpy).toHaveBeenCalledWith(3000, 3000, 5000);
+      expect(drawnColors()).toEqual([
+        getColorForAltitude(3000, 3000, 5000),
+        getColorForAltitude(4000, 3000, 5000),
+      ]);
     });
 
     it("clears layer and redraws segments with airspeed colors", () => {
-      const airspeedSpy = vi.spyOn(colors, "getColorForAirspeed");
-
       replayManager.redrawReplayPath("airspeed");
 
       expect(replayManager.state.layer!.clearLayers).toHaveBeenCalled();
-      expect(airspeedSpy).toHaveBeenCalledTimes(2);
-      expect(airspeedSpy).toHaveBeenCalledWith(100, 100, 130);
+      expect(drawnColors()).toEqual([
+        getColorForAirspeed(100, 100, 130),
+        getColorForAirspeed(120, 100, 130),
+      ]);
     });
 
     it("rebuilds the trim stack so a later backward seek still works", () => {
@@ -90,8 +100,6 @@ describe("ReplayManager display", () => {
     it("draws zero-groundspeed segments with the altitude colour", () => {
       // Skipping them would both hide part of the trail and desync
       // drawnLayers from lastDrawnIndex, breaking a later backward seek
-      const altitudeSpy = vi.spyOn(colors, "getColorForAltitude");
-      const airspeedSpy = vi.spyOn(colors, "getColorForAirspeed");
       replayManager.state.segments = [
         {
           path_id: 1,
@@ -110,8 +118,7 @@ describe("ReplayManager display", () => {
 
       expect(replayManager.state.lastDrawnIndex).toBe(0);
       expect(replayManager.state.drawnLayers).toHaveLength(1);
-      expect(altitudeSpy).toHaveBeenCalledWith(1000, 3000, 5000);
-      expect(airspeedSpy).not.toHaveBeenCalled();
+      expect(drawnColors()).toEqual([getColorForAltitude(1000, 3000, 5000)]);
     });
 
     it("keeps drawnLayers aligned with lastDrawnIndex when speeds vary", () => {
@@ -181,19 +188,42 @@ describe("ReplayManager display", () => {
       expect(el("replay-slider-start").textContent).toBe("1:00");
     });
 
+    it("writes the transport row only when its text changes", () => {
+      replayManager.state.currentTime = 60;
+      replayManager.updateReplayDisplay();
+      const timeDisplay = el("replay-time-display");
+      const sliderStart = el("replay-slider-start");
+      // A sentinel survives a frame that changes nothing visible
+      timeDisplay.textContent = "sentinel";
+      sliderStart.textContent = "sentinel";
+
+      replayManager.state.currentTime = 60.2;
+      replayManager.updateReplayDisplay();
+
+      expect(timeDisplay.textContent).toBe("sentinel");
+      expect(sliderStart.textContent).toBe("sentinel");
+      // The slider itself moves with the fine time value
+      expect((el("replay-slider") as HTMLInputElement).value).toBe("60.2");
+
+      replayManager.state.currentTime = 61;
+      replayManager.updateReplayDisplay();
+
+      expect(timeDisplay.textContent).toBe("1:01 / 2:00");
+      expect(sliderStart.textContent).toBe("1:01");
+    });
+
     it("draws path segments incrementally from the last drawn index", () => {
-      const altitudeSpy = vi.spyOn(colors, "getColorForAltitude");
       replayManager.state.currentTime = 65;
 
       replayManager.updateReplayDisplay();
       expect(replayManager.state.lastDrawnIndex).toBe(1);
-      expect(altitudeSpy).toHaveBeenCalledTimes(2);
+      expect(L.polyline).toHaveBeenCalledTimes(2);
 
       // The next frame only draws newly reached segments
       replayManager.state.currentTime = 125;
       replayManager.updateReplayDisplay();
       expect(replayManager.state.lastDrawnIndex).toBe(2);
-      expect(altitudeSpy).toHaveBeenCalledTimes(3);
+      expect(L.polyline).toHaveBeenCalledTimes(3);
     });
 
     it("does not draw segments when at time 0", () => {
@@ -226,25 +256,27 @@ describe("ReplayManager display", () => {
     });
 
     it("uses airspeed colors when airspeed visible and altitude not visible", () => {
-      const airspeedSpy = vi.spyOn(colors, "getColorForAirspeed");
       mockApp.airspeedVisible = true;
       mockApp.altitudeVisible = false;
       replayManager.state.currentTime = 65;
 
       replayManager.updateReplayDisplay();
 
-      expect(airspeedSpy).toHaveBeenCalledWith(100, 100, 130);
+      expect(drawnColors()).toEqual([
+        getColorForAirspeed(100, 100, 130),
+        getColorForAirspeed(120, 100, 130),
+      ]);
     });
 
     it("adds airplane marker back to map if it was removed", () => {
-      mockApp.map!.hasLayer.mockReturnValue(false);
+      const marker = replayManager.state.airplaneMarker!;
+      mockApp.map!.removeLayer(marker);
+      expect(mockApp.map!.hasLayer(marker)).toBe(false);
       replayManager.state.currentTime = 30;
 
       replayManager.updateReplayDisplay();
 
-      expect(replayManager.state.airplaneMarker!.addTo).toHaveBeenCalledWith(
-        mockApp.map,
-      );
+      expect(mockApp.map!.hasLayer(marker)).toBe(true);
     });
 
     it("updates airplane rotation via element transform", () => {
@@ -311,7 +343,9 @@ describe("ReplayManager display", () => {
       });
     });
 
-    it("interpolates position between segments", () => {
+    it("interpolates the position along the segment being flown", () => {
+      // Segment 0 ends at t=0 at [48.1, 16.1]; segment 1 (t=60) ends at
+      // [48.2, 16.2]. Halfway in time the airplane is halfway along it.
       replayManager.state.currentTime = 30;
       const setLatLng = replayManager.state.airplaneMarker!
         .setLatLng as AnyMock;
@@ -319,12 +353,59 @@ describe("ReplayManager display", () => {
 
       replayManager.updateReplayDisplay();
 
-      // Halfway between the end of segment 0 and the start of segment 1
-      // (both [48.1, 16.1]), so the interpolated position is that point
       expect(setLatLng).toHaveBeenCalledTimes(1);
       const [lat, lon] = setLatLng.mock.calls[0]![0] as [number, number];
-      expect(lat).toBeCloseTo(48.1, 5);
-      expect(lon).toBeCloseTo(16.1, 5);
+      expect(lat).toBeCloseTo(48.15, 5);
+      expect(lon).toBeCloseTo(16.15, 5);
+    });
+
+    it("moves the airplane between two frames within one segment", () => {
+      const setLatLng = replayManager.state.airplaneMarker!
+        .setLatLng as AnyMock;
+      replayManager.state.currentTime = 15;
+      replayManager.updateReplayDisplay();
+      replayManager.state.currentTime = 45;
+      replayManager.updateReplayDisplay();
+
+      const positions = setLatLng.mock.calls.map(
+        (call) => call[0] as [number, number],
+      );
+      const first = positions[positions.length - 2]!;
+      const second = positions[positions.length - 1]!;
+      expect(second[0]).toBeGreaterThan(first[0]);
+      expect(second[1]).toBeGreaterThan(first[1]);
+    });
+
+    it("rewrites the rotation only when the heading changes", () => {
+      const mockElement = document.createElement("div");
+      const iconDiv = document.createElement("div");
+      iconDiv.className = "replay-airplane-icon";
+      mockElement.appendChild(iconDiv);
+      (
+        replayManager.state.airplaneMarker!.getElement as AnyMock
+      ).mockReturnValue(mockElement);
+      replayManager.state.currentTime = 65;
+      replayManager.updateReplayDisplay();
+      const transform = iconDiv.style.transform;
+      expect(transform).toContain("rotate(");
+
+      // The same heading a frame later is not written again (a valid
+      // transform is used as the sentinel; jsdom drops invalid values)
+      iconDiv.style.transform = "rotate(1deg)";
+      replayManager.state.currentTime = 66;
+      replayManager.updateReplayDisplay();
+      expect(iconDiv.style.transform).toBe("rotate(1deg)");
+
+      // A rebuilt marker element gets its own lookup and write
+      const rebuilt = document.createElement("div");
+      const rebuiltIcon = document.createElement("div");
+      rebuiltIcon.className = "replay-airplane-icon";
+      rebuilt.appendChild(rebuiltIcon);
+      (
+        replayManager.state.airplaneMarker!.getElement as AnyMock
+      ).mockReturnValue(rebuilt);
+      replayManager.updateReplayDisplay();
+      expect(rebuiltIcon.style.transform).toBe(transform);
     });
 
     it("uses last known bearing when smoothed bearing is null", () => {

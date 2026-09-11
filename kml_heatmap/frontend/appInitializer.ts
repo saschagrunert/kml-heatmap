@@ -4,6 +4,7 @@
  */
 
 import * as L from "leaflet";
+import { createAirportIcon } from "./features/airports";
 import { domCache } from "./utils/domCache";
 import { showToast } from "./utils/toast";
 import type { MapApp } from "./mapApp";
@@ -20,8 +21,7 @@ export function resolveYearSelection(
   app: MapApp,
   availableYears: number[],
 ): void {
-  const yearSelect = domCache.get("year-select");
-  const select = yearSelect instanceof HTMLSelectElement ? yearSelect : null;
+  const select = domCache.get("year-select", HTMLSelectElement);
 
   if (select) {
     for (const year of availableYears) {
@@ -84,7 +84,8 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   }
 
   // Load the selected year's data; currentData is the single source of
-  // path_info and path_segments for all managers
+  // path_info and path_segments for all managers. The statistics panel and
+  // the airport markers follow it through their store subscriptions.
   const data = await app.dataManager.loadData(app.selectedYear);
   if (data) {
     app.currentData = data;
@@ -92,9 +93,6 @@ export async function loadInitialData(app: MapApp): Promise<void> {
 
   // Populate aircraft dropdown
   app.filterManager.updateAircraftDropdown();
-
-  // Update airport popups (and home-base marker) with initial filter counts
-  app.airportManager.updateAirportPopups();
 
   // Load groundspeed range from metadata
   const hasTimingData =
@@ -112,16 +110,11 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // Enable/disable airspeed button based on timing data availability
   // (e.g., Charterware files without per-point timestamps won't have speed data)
   // Note: Altitude visualization still works (altitude data is in coordinates)
-  const airspeedBtn = domCache.get("airspeed-btn") as HTMLButtonElement | null;
+  // The pressed state and the opacity follow the store (see setupButtonSync);
+  // only the disabled flag is owned here.
+  const airspeedBtn = domCache.get("airspeed-btn", HTMLButtonElement);
   if (airspeedBtn) {
-    if (!hasTimingData) {
-      airspeedBtn.disabled = true;
-      airspeedBtn.style.opacity = "0.3";
-    } else {
-      airspeedBtn.disabled = false;
-      // Set opacity based on visibility state (0.5 = off, 1.0 = on)
-      airspeedBtn.style.opacity = app.airspeedVisible ? "1.0" : "0.5";
-    }
+    airspeedBtn.disabled = !hasTimingData;
   }
 
   // Initial layer build (heatmap, visible colour layers, stats, airports)
@@ -130,17 +123,13 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // Set initial airport marker sizes
   app.airportManager.updateAirportMarkerSizes();
 
-  // Restore layer visibility
+  // Restore layer visibility; the legends follow the store
   if (app.map) {
     if (app.altitudeVisible) {
       app.map.addLayer(app.altitudeLayer);
-      const legend = domCache.get("altitude-legend");
-      if (legend) legend.style.display = "block";
     }
     if (app.airspeedVisible) {
       app.map.addLayer(app.airspeedLayer);
-      const legend = domCache.get("airspeed-legend");
-      if (legend) legend.style.display = "block";
     }
     if (
       app.aviationVisible &&
@@ -151,47 +140,10 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     }
   }
 
-  // Update replay button state if paths were restored
-  if (app.selectedPathIds.size > 0) {
-    app.replayManager.updateReplayButtonState();
-  }
-
   // Restore stats panel visibility
   if (app.savedState && app.savedState.statsPanelVisible) {
-    app.statsManager.setStatsPanelVisible(true, false);
+    app.statsManager.setStatsPanelVisible(true);
   }
-}
-
-/**
- * Build the divIcon for an airport marker
- * @param name - Airport name (ICAO code is extracted from it)
- * @param isHomeBase - Whether the airport is the current home base
- */
-export function createAirportIcon(
-  name: string,
-  isHomeBase: boolean,
-): L.DivIcon {
-  const icaoMatch = name ? name.match(/\b([A-Z]{4})\b/) : null;
-  const icao = icaoMatch ? icaoMatch[1] : "APT";
-  const homeClass = isHomeBase ? " airport-marker-home" : "";
-  const homeLabelClass = isHomeBase ? " airport-label-home" : "";
-
-  const markerHtml =
-    '<div class="airport-marker-container"><div class="airport-marker' +
-    homeClass +
-    '"></div><div class="airport-label' +
-    homeLabelClass +
-    '">' +
-    icao +
-    "</div></div>";
-
-  return L.divIcon({
-    html: markerHtml,
-    iconSize: [12, 12],
-    iconAnchor: [6, 6],
-    popupAnchor: [0, -6],
-    className: "",
-  });
 }
 
 /**

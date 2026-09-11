@@ -15,26 +15,19 @@ import { ReplayManager } from "./ui/replayManager";
 import { WrappedManager } from "./ui/wrappedManager";
 import { UIToggles } from "./ui/uiToggles";
 import { MobileBar } from "./ui/mobileBar";
+import { bindActions } from "./ui/actions";
 import { loadInitialData } from "./appInitializer";
 import { logError } from "./utils/logger";
 import { domCache } from "./utils/domCache";
-import { syncToggleButton } from "./utils/buttonState";
+import { syncLegend, syncToggleButton } from "./utils/buttonState";
 import { applyGradientTokens } from "./utils/colors";
-import { isIconName, setControlIcon } from "./utils/icons";
-import type { IconSize } from "./utils/icons";
+import { renderControlIcons } from "./utils/icons";
 import { invalidateMapAfterTransition } from "./utils/mapHelpers";
-import { MAX_ZOOM } from "./utils/constants";
-import { AppStore } from "./state/store";
-import type { Range } from "./state/store";
+import { MAX_ZOOM, MIN_ZOOM } from "./utils/constants";
+import { AppStore, defineStoreAccessors } from "./state/store";
+import type { StoreAccessors } from "./state/store";
 import type { HeatmapLayer } from "./globals";
-import type {
-  PathInfo,
-  PathSegment,
-  Airport,
-  FilteredStatistics,
-  AppState,
-  KMLDataset,
-} from "./types";
+import type { PathInfo, PathSegment, Airport, AppState } from "./types";
 
 /**
  * Map configuration passed to constructor
@@ -68,28 +61,29 @@ export interface OpenAIPLayersMap {
   [layerName: string]: L.TileLayer;
 }
 
-/**
- * data-action handlers that need loaded data and are ignored while the app
- * is still initializing (pending filter changes are applied afterwards).
- */
-const DEFERRED_WHILE_INITIALIZING = new Set([
-  "filterByYear",
-  "filterByAircraft",
-  "toggleReplay",
-  "playReplay",
-  "pauseReplay",
-  "stopReplay",
-  "seekReplay",
-  "changeReplaySpeed",
-  "toggleAutoZoom",
-  "showWrapped",
-  "exportMap",
-  "toggleIsolateSelection",
-]);
+/** Delay before a Wrapped panel restored from state opens again */
+const WRAPPED_RESTORE_DELAY_MS = 500;
 
 export class MapApp {
   // Observable state store
   readonly store: AppStore;
+
+  // Store-backed properties. The accessors are defined once on the
+  // prototype by `defineStoreAccessors` below; these declarations only
+  // give them their types (see STORE_ACCESSOR_KEYS for the list).
+  declare selectedYear: StoreAccessors["selectedYear"];
+  declare selectedAircraft: StoreAccessors["selectedAircraft"];
+  declare selectedPathIds: StoreAccessors["selectedPathIds"];
+  declare isolateSelection: StoreAccessors["isolateSelection"];
+  declare heatmapVisible: StoreAccessors["heatmapVisible"];
+  declare altitudeVisible: StoreAccessors["altitudeVisible"];
+  declare airspeedVisible: StoreAccessors["airspeedVisible"];
+  declare airportsVisible: StoreAccessors["airportsVisible"];
+  declare aviationVisible: StoreAccessors["aviationVisible"];
+  declare currentData: StoreAccessors["currentData"];
+  declare fullStats: StoreAccessors["fullStats"];
+  declare altitudeRange: StoreAccessors["altitudeRange"];
+  declare airspeedRange: StoreAccessors["airspeedRange"];
 
   // Configuration
   config: MapConfig;
@@ -131,79 +125,8 @@ export class MapApp {
   uiToggles!: UIToggles;
   mobileBar!: MobileBar | null;
 
-  // Store-backed getters/setters for filters
-  get selectedYear(): string {
-    return this.store.get("selectedYear");
-  }
-  set selectedYear(v: string) {
-    this.store.set("selectedYear", v);
-  }
-
-  get selectedAircraft(): string {
-    return this.store.get("selectedAircraft");
-  }
-  set selectedAircraft(v: string) {
-    this.store.set("selectedAircraft", v);
-  }
-
-  // Store-backed getters/setters for selection
-  get selectedPathIds(): Set<number> {
-    return this.store.get("selectedPathIds");
-  }
-  set selectedPathIds(v: Set<number>) {
-    this.store.set("selectedPathIds", v);
-  }
-
-  get isolateSelection(): boolean {
-    return this.store.get("isolateSelection");
-  }
-  set isolateSelection(v: boolean) {
-    this.store.set("isolateSelection", v);
-  }
-
-  // Store-backed getters/setters for layer visibility
-  get heatmapVisible(): boolean {
-    return this.store.get("heatmapVisible");
-  }
-  set heatmapVisible(v: boolean) {
-    this.store.set("heatmapVisible", v);
-  }
-
-  get altitudeVisible(): boolean {
-    return this.store.get("altitudeVisible");
-  }
-  set altitudeVisible(v: boolean) {
-    this.store.set("altitudeVisible", v);
-  }
-
-  get airspeedVisible(): boolean {
-    return this.store.get("airspeedVisible");
-  }
-  set airspeedVisible(v: boolean) {
-    this.store.set("airspeedVisible", v);
-  }
-
-  get airportsVisible(): boolean {
-    return this.store.get("airportsVisible");
-  }
-  set airportsVisible(v: boolean) {
-    this.store.set("airportsVisible", v);
-  }
-
-  get aviationVisible(): boolean {
-    return this.store.get("aviationVisible");
-  }
-  set aviationVisible(v: boolean) {
-    this.store.set("aviationVisible", v);
-  }
-
-  // Store-backed getters/setters for data
-  get currentData(): KMLDataset | null {
-    return this.store.get("currentData");
-  }
-  set currentData(v: KMLDataset | null) {
-    this.store.set("currentData", v);
-  }
+  /** Pending reopening of a Wrapped panel that was open when state was saved */
+  private wrappedRestoreTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Path info of the loaded dataset (single source of truth: currentData) */
   get fullPathInfo(): PathInfo[] | null {
@@ -213,28 +136,6 @@ export class MapApp {
   /** Segments of the loaded dataset (single source of truth: currentData) */
   get fullPathSegments(): PathSegment[] | null {
     return this.currentData?.path_segments ?? null;
-  }
-
-  get fullStats(): FilteredStatistics | null {
-    return this.store.get("fullStats");
-  }
-  set fullStats(v: FilteredStatistics | null) {
-    this.store.set("fullStats", v);
-  }
-
-  // Store-backed getters/setters for computed ranges
-  get altitudeRange(): Range {
-    return this.store.get("altitudeRange");
-  }
-  set altitudeRange(v: Range) {
-    this.store.set("altitudeRange", v);
-  }
-
-  get airspeedRange(): Range {
-    return this.store.get("airspeedRange");
-  }
-  set airspeedRange(v: Range) {
-    this.store.set("airspeedRange", v);
   }
 
   constructor(config: MapConfig) {
@@ -281,21 +182,27 @@ export class MapApp {
     // Mark initialization as complete
     this.isInitializing = false;
 
-    // Restore isolate selection button state
-    this.pathSelection.updateIsolateButton();
-
     // Restore wrapped panel state if it was open
     if (this.savedState && this.savedState.wrappedVisible) {
-      setTimeout(() => {
+      this.wrappedRestoreTimer = setTimeout(() => {
+        this.wrappedRestoreTimer = null;
         this.wrappedManager.showWrapped();
-      }, 500);
+      }, WRAPPED_RESTORE_DELAY_MS);
     }
-
-    // Save state after initialization
-    this.stateManager.saveMapState();
 
     // Apply filter changes made through the selects while loading
     await this.applyPendingFilterChanges();
+  }
+
+  /** Cancel pending work and detach the chrome built at runtime */
+  destroy(): void {
+    if (this.wrappedRestoreTimer !== null) {
+      clearTimeout(this.wrappedRestoreTimer);
+      this.wrappedRestoreTimer = null;
+    }
+    this.replayManager?.destroy();
+    this.wrappedManager?.destroy();
+    this.mobileBar?.destroy();
   }
 
   /**
@@ -303,18 +210,16 @@ export class MapApp {
    * bound handlers; apply them once the initial data is loaded.
    */
   private async applyPendingFilterChanges(): Promise<void> {
-    const yearSelect = domCache.get("year-select");
-    const aircraftSelect = domCache.get("aircraft-select");
+    const yearSelect = domCache.get("year-select", HTMLSelectElement);
+    const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
     // Capture both before filtering: switching the year rebuilds the aircraft
     // dropdown and would otherwise overwrite a pending aircraft selection.
     const pendingYear =
-      yearSelect instanceof HTMLSelectElement &&
-      yearSelect.value !== this.selectedYear
+      yearSelect && yearSelect.value !== this.selectedYear
         ? yearSelect.value
         : null;
     const pendingAircraft =
-      aircraftSelect instanceof HTMLSelectElement &&
-      aircraftSelect.value !== this.selectedAircraft
+      aircraftSelect && aircraftSelect.value !== this.selectedAircraft
         ? aircraftSelect.value
         : null;
 
@@ -322,10 +227,7 @@ export class MapApp {
       await this.filterManager.filterByYear();
     }
 
-    if (
-      pendingAircraft === null ||
-      !(aircraftSelect instanceof HTMLSelectElement)
-    ) {
+    if (pendingAircraft === null || !aircraftSelect) {
       return;
     }
     // The aircraft may not exist in the newly selected year
@@ -389,6 +291,7 @@ export class MapApp {
     this.map = L.map("map", {
       center: this.config.center,
       zoom: 10,
+      minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
       zoomSnap: 0.25,
       zoomDelta: 0.25,
@@ -416,7 +319,12 @@ export class MapApp {
       })
       .addTo(this.map);
 
-    if (this.savedState && this.savedState.center && this.savedState.zoom) {
+    // A saved zoom of 0 is a view like any other, not a missing one
+    if (
+      this.savedState &&
+      this.savedState.center &&
+      this.savedState.zoom !== undefined
+    ) {
       this.map.setView(
         [this.savedState.center.lat, this.savedState.center.lng],
         this.savedState.zoom,
@@ -455,8 +363,9 @@ export class MapApp {
   }
 
   /**
-   * The store drives the toggle buttons: initial state and every change
-   * are reflected in aria-pressed, the active class and the opacity.
+   * The store drives the toggle buttons and the colour legends: initial
+   * state and every change are reflected in aria-pressed, the active class,
+   * the opacity and the legend visibility. Nothing else writes them.
    */
   private setupButtonSync(): void {
     syncToggleButton(this.store, "heatmapVisible", "heatmap-btn");
@@ -464,11 +373,9 @@ export class MapApp {
     syncToggleButton(this.store, "airspeedVisible", "airspeed-btn");
     syncToggleButton(this.store, "airportsVisible", "airports-btn");
     syncToggleButton(this.store, "aviationVisible", "aviation-btn");
-    syncToggleButton(this.store, "isolateSelection", "isolate-btn");
-    // The isolate button additionally depends on whether paths are selected
-    this.store.subscribe("selectedPathIds", () =>
-      this.pathSelection.updateIsolateButton(),
-    );
+    syncLegend(this.store, "altitudeVisible", "altitude-legend");
+    syncLegend(this.store, "airspeedVisible", "airspeed-legend");
+    // The isolate button depends on two keys, so PathSelection owns it
   }
 
   /**
@@ -554,6 +461,8 @@ export class MapApp {
   }
 }
 
+defineStoreAccessors(MapApp.prototype);
+
 /**
  * Hand focus to the first reachable statistics trigger when the rail that
  * holds it is about to be hidden. Without this the browser drops focus to
@@ -572,116 +481,42 @@ function restoreFocusFromRail(rail: HTMLElement): void {
   }
 }
 
+/** Markup shown in place of the map when initialization fails */
+export const INIT_ERROR_HTML =
+  '<div class="kh-init-error">Failed to initialize map. Please reload the page.</div>';
+
 /**
- * Draw the inline icon of every `[data-icon]` control below `root`.
- * Re-rendering replaces the icon that is already there, so the same element
- * can change size when the chrome becomes icon-only.
- *
- * The markup comes from utils/icons.ts and carries no caller strings here.
- *
- * @param root - Subtree to walk; the whole document by default
- * @param size - Size for every icon; each element's own size when omitted
+ * Create the app, bind the controls and run the initial load. Exported so
+ * the failure path can be exercised without a page load.
  */
-export function renderControlIcons(
-  root: ParentNode = document,
-  size?: IconSize,
-): void {
-  root.querySelectorAll<HTMLElement>("[data-icon]").forEach((el) => {
-    const name = el.dataset["icon"];
-    if (!name) return;
-    if (!isIconName(name)) {
-      logError(
-        `Unknown icon name "${name}" on ${el.id ? `#${el.id}` : el.tagName}`,
-      );
-      return;
-    }
-    setControlIcon(el, name, size);
-  });
+export async function initMapApp(config: MapConfig): Promise<MapApp> {
+  const app = new MapApp(config);
+  window.mapApp = app;
+  // The legend bar and the row chips paint --gradient-*, so publish the
+  // ramps before anything that carries one is shown
+  applyGradientTokens(document.documentElement);
+  renderControlIcons();
+  // Bind before the (long) initial load so early interactions are not lost
+  bindActions(app);
+  await app.initialize();
+  return app;
 }
 
-/**
- * Bind data-action attributes to app methods via addEventListener.
- * Buttons get "click", selects get "change", inputs get "input".
- * Handlers are bound before initialization completes; data-dependent
- * actions are ignored while `app.isInitializing` is true.
- */
-export function bindActions(app: MapApp): void {
-  const actions: Record<string, (e: Event) => void> = {
-    toggleHeatmap: () => app.uiToggles.toggleHeatmap(),
-    toggleStats: () => app.statsManager.toggleStats(),
-    toggleAltitude: () => app.uiToggles.toggleAltitude(),
-    toggleAirspeed: () => app.uiToggles.toggleAirspeed(),
-    toggleAirports: () => app.uiToggles.toggleAirports(),
-    toggleAviation: () => app.uiToggles.toggleAviation(),
-    toggleReplay: () => app.replayManager.toggleReplay(),
-    filterByYear: () => {
-      app.filterManager.filterByYear().catch(logError);
-    },
-    filterByAircraft: () => {
-      app.filterManager.filterByAircraft().catch(logError);
-    },
-    exportMap: () => app.uiToggles.exportMap(),
-    showWrapped: () => app.wrappedManager.showWrapped(),
-    closeWrapped: () => app.wrappedManager.closeWrapped(),
-    closeWrappedBackdrop: (e) =>
-      app.wrappedManager.closeWrapped(e as MouseEvent),
-    toggleIsolateSelection: () => app.pathSelection.toggleIsolateSelection(),
-    playReplay: () => app.replayManager.playReplay(),
-    pauseReplay: () => app.replayManager.pauseReplay(),
-    stopReplay: () => app.replayManager.stopReplay(),
-    seekReplay: (e) =>
-      app.replayManager.seekReplay((e.target as HTMLInputElement).value),
-    changeReplaySpeed: () => app.replayManager.changeReplaySpeed(),
-    toggleAutoZoom: () => app.replayManager.toggleAutoZoom(),
-    stopPropagation: (e) => e.stopPropagation(),
-  };
-
-  document.querySelectorAll<HTMLElement>("[data-action]").forEach((el) => {
-    const action = el.dataset["action"];
-    if (!action) return;
-    const fn = actions[action];
-    if (!fn) return;
-
-    const handler = (e: Event): void => {
-      if (app.isInitializing && DEFERRED_WHILE_INITIALIZING.has(action)) {
-        return;
-      }
-      fn(e);
-    };
-    if (el.tagName === "SELECT") {
-      el.addEventListener("change", handler);
-    } else if (el.tagName === "INPUT") {
-      el.addEventListener("input", handler);
-    } else {
-      el.addEventListener("click", handler);
-    }
-  });
+/** Log the failure and tell the user, in place of a map that never came */
+export function reportInitFailure(error: unknown): void {
+  logError(error);
+  const mapEl = document.getElementById("map");
+  if (mapEl) {
+    mapEl.innerHTML = INIT_ERROR_HTML;
+  }
 }
 
 // Initialize app and bind DOM event listeners
 if (typeof window !== "undefined") {
-  window.initMapApp = async (config: MapConfig): Promise<MapApp> => {
-    const app = new MapApp(config);
-    window.mapApp = app;
-    // The legend bar and the row chips paint --gradient-*, so publish the
-    // ramps before anything that carries one is shown
-    applyGradientTokens(document.documentElement);
-    renderControlIcons();
-    // Bind before the (long) initial load so early interactions are not lost
-    bindActions(app);
-    await app.initialize();
-    return app;
-  };
+  window.initMapApp = initMapApp;
 }
 
 // Auto-initialize when module loads
 if (typeof window !== "undefined" && window.MAP_CONFIG && window.initMapApp) {
-  window.initMapApp(window.MAP_CONFIG).catch((err) => {
-    logError(err);
-    const mapEl = document.getElementById("map");
-    if (mapEl) {
-      mapEl.innerHTML =
-        '<div class="kh-init-error">Failed to initialize map. Please reload the page.</div>';
-    }
-  });
+  window.initMapApp(window.MAP_CONFIG).catch(reportInitFailure);
 }

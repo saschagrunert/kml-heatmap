@@ -209,7 +209,31 @@ describe("FilterManager", () => {
       expect(mockApp.selectedAircraft).toBe("all");
       expect(aircraftSelect().value).toBe("all");
       expect(order).toEqual(["loadData", "updateLayers:all"]);
-      expect(mockApp.airportManager.updateAirportPopups).toHaveBeenCalled();
+    });
+
+    it("publishes the year, the data and the aircraft list in one flush", async () => {
+      mockApp.selectedAircraft = "D-EFGH";
+      aircraftSelect().innerHTML =
+        '<option value="all">All Aircraft</option><option value="D-EFGH">D-EFGH</option>';
+      aircraftSelect().value = "D-EFGH";
+      addYearOption("2024");
+      (document.getElementById("year-select") as HTMLSelectElement).value =
+        "2024";
+      const newData = year2024Data();
+      mockApp.dataManager.loadData.mockResolvedValue(newData);
+      // What a listener sees when it is told about the year
+      const seen: { data: KMLDataset | null; aircraft: string }[] = [];
+      mockApp.store.subscribe("selectedYear", () => {
+        seen.push({
+          data: mockApp.currentData,
+          aircraft: mockApp.selectedAircraft,
+        });
+      });
+
+      await filterManager.filterByYear();
+
+      // Never a new year with the old data or an aircraft that did not fly
+      expect(seen).toEqual([{ data: newData, aircraft: "all" }]);
     });
 
     it("keeps the aircraft selection when it exists in the new year", async () => {
@@ -243,14 +267,27 @@ describe("FilterManager", () => {
       expect(mockApp.selectedPathIds.size).toBe(1);
     });
 
-    it("still redraws (and toasts through updateLayers) when the year fails to load", async () => {
+    it("puts the dropdown back and leaves the store alone when the year fails to load", async () => {
       const previous = mockApp.currentData;
+      mockApp.selectedYear = "2025";
+      addYearOption("2025");
+      addYearOption("2024");
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      yearSelect.value = "2024";
       mockApp.dataManager.loadData.mockResolvedValue(null);
+      const listener = vi.fn();
+      mockApp.store.subscribe("selectedYear", listener);
 
       await filterManager.filterByYear();
 
+      // The map still shows 2025, so the dropdown says so too
+      expect(mockApp.selectedYear).toBe("2025");
+      expect(yearSelect.value).toBe("2025");
       expect(mockApp.currentData).toBe(previous);
-      expect(mockApp.dataManager.updateLayers).toHaveBeenCalled();
+      expect(listener).not.toHaveBeenCalled();
+      expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
     });
 
     it("discards stale completions when a newer year change arrives", async () => {
@@ -280,9 +317,6 @@ describe("FilterManager", () => {
 
       expect(mockApp.selectedYear).toBe("2025");
       expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
-      expect(mockApp.airportManager.updateAirportPopups).toHaveBeenCalledTimes(
-        1,
-      );
     });
 
     it("does nothing if year select element doesn't exist", async () => {
@@ -306,7 +340,23 @@ describe("FilterManager", () => {
 
       expect(mockApp.selectedAircraft).toBe("D-ABCD");
       expect(mockApp.dataManager.updateLayers).toHaveBeenCalled();
-      expect(mockApp.airportManager.updateAirportPopups).toHaveBeenCalled();
+    });
+
+    it("clears the selection in the same flush as the aircraft change", async () => {
+      const select = aircraftSelect();
+      const option = document.createElement("option");
+      option.value = "D-ABCD";
+      select.appendChild(option);
+      select.value = "D-ABCD";
+      mockApp.selectedPathIds.add(1);
+      const seen: number[] = [];
+      mockApp.store.subscribe("selectedAircraft", () => {
+        seen.push(mockApp.selectedPathIds.size);
+      });
+
+      await filterManager.filterByAircraft();
+
+      expect(seen).toEqual([0]);
     });
 
     it("clears selected paths when not initializing", async () => {
@@ -326,26 +376,30 @@ describe("FilterManager", () => {
       expect(mockApp.selectedPathIds.size).toBe(1);
     });
 
-    it("discards stale completions when superseded", async () => {
-      let resolveFirst: () => void = () => {};
-      mockApp.dataManager.updateLayers
-        .mockImplementationOnce(
-          () =>
-            new Promise<void>((resolve) => {
-              resolveFirst = resolve;
-            }),
-        )
-        .mockResolvedValueOnce(undefined);
-
-      const first = filterManager.filterByAircraft();
-      const second = filterManager.filterByAircraft();
-      await second;
-      resolveFirst();
-      await first;
-
-      expect(mockApp.airportManager.updateAirportPopups).toHaveBeenCalledTimes(
-        1,
+    it("supersedes a year change that is still loading", async () => {
+      addYearOption("2024");
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      let resolveYear: (d: KMLDataset) => void = () => {};
+      mockApp.dataManager.loadData.mockImplementationOnce(
+        () =>
+          new Promise<KMLDataset>((resolve) => {
+            resolveYear = resolve;
+          }),
       );
+      const before = mockApp.currentData;
+
+      yearSelect.value = "2024";
+      const pendingYear = filterManager.filterByYear();
+      await filterManager.filterByAircraft();
+      resolveYear(year2024Data());
+      await pendingYear;
+
+      // The year that finished loading after the aircraft change is dropped
+      expect(mockApp.selectedYear).toBe("all");
+      expect(mockApp.currentData).toBe(before);
+      expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
     });
 
     it("does nothing if aircraft select element doesn't exist", async () => {

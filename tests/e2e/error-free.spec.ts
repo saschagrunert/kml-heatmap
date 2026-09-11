@@ -1,24 +1,63 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import {
   activateReplay,
   attachErrorCollectors,
   gotoApp,
+  openWrapped,
   readSavedState,
   relevantConsoleErrors,
   selectPathForReplay,
+  toggleLayer,
+  togglePathSelection,
   waitForAircraftFilter,
   waitForAppReady,
   waitForPathData,
   waitForYearFilter,
   type ErrorCollector,
+  type LayerName,
 } from "./helpers";
 
-/** Toggle a layer button and wait for its pressed state to flip */
-async function toggle(page: Page, selector: string): Promise<void> {
-  const button = page.locator(selector);
-  const pressed = (await button.getAttribute("aria-pressed")) === "true";
-  await button.click();
-  await expect(button).toHaveAttribute("aria-pressed", String(!pressed));
+/** Hex or rgb(a) as Leaflet writes it into the polyline options */
+const COLOR_PATTERN = /^(#[0-9a-f]{6}|rgba?\(.+\))$/i;
+
+/** Stroke colour of every polyline in a colour layer, in layer order */
+function layerColors(
+  page: Page,
+  layer: "altitudeLayer" | "airspeedLayer",
+): Promise<string[]> {
+  return page.evaluate(
+    (name) =>
+      window
+        .mapApp![name].getLayers()
+        .map((polyline) => String((polyline as L.Polyline).options.color)),
+    layer,
+  );
+}
+
+/** The layer carries a gradient of valid colours */
+function expectColorRamp(colors: string[]): void {
+  expect(colors.length).toBeGreaterThan(0);
+  for (const color of colors) expect(color).toMatch(COLOR_PATTERN);
+  // A ramp, not one colour for every run
+  expect(new Set(colors).size).toBeGreaterThan(1);
+}
+
+/** The heatmap is on the map and its canvas has a size to paint into */
+async function expectHeatmapPainted(page: Page): Promise<void> {
+  const heat = await page.evaluate(() => {
+    const app = window.mapApp!;
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      "canvas.leaflet-heatmap-layer",
+    );
+    return {
+      onMap: !!app.heatmapLayer && app.map!.hasLayer(app.heatmapLayer),
+      width: canvas?.width ?? 0,
+      height: canvas?.height ?? 0,
+    };
+  });
+  expect(heat.onMap).toBe(true);
+  expect(heat.width).toBeGreaterThan(0);
+  expect(heat.height).toBeGreaterThan(0);
 }
 
 function expectClean(errors: ErrorCollector): void {
@@ -37,14 +76,14 @@ test.describe("Error-Free Interactions", () => {
 
   test.describe("Console Error-Free", () => {
     test("no errors during layer toggling", async ({ page }) => {
-      const buttons = [
-        "#heatmap-btn",
-        "#altitude-btn",
-        "#airspeed-btn",
-        "#airports-btn",
+      const layers: LayerName[] = [
+        "heatmap",
+        "altitude",
+        "airspeed",
+        "airports",
       ];
-      for (const selector of buttons) await toggle(page, selector);
-      for (const selector of buttons) await toggle(page, selector);
+      for (const layer of layers) await toggleLayer(page, layer);
+      for (const layer of layers) await toggleLayer(page, layer);
 
       expectClean(errors);
     });
@@ -77,13 +116,7 @@ test.describe("Error-Free Interactions", () => {
     }) => {
       const pathId = await selectPathForReplay(page);
 
-      await page.evaluate(
-        (id) => window.mapApp!.togglePathSelection(String(id)),
-        pathId,
-      );
-      await page.waitForFunction(
-        () => window.mapApp!.selectedPathIds.size === 0,
-      );
+      await togglePathSelection(page, pathId, 0);
 
       expectClean(errors);
     });
@@ -105,13 +138,10 @@ test.describe("Error-Free Interactions", () => {
     });
 
     test("no errors during wrapped modal lifecycle", async ({ page }) => {
-      await page.locator("#wrapped-btn").click();
-      await expect(page.locator("#wrapped-modal")).toBeVisible({
-        timeout: 5000,
-      });
+      const modal = await openWrapped(page);
 
-      await page.locator("#wrapped-modal .close-btn").click();
-      await expect(page.locator("#wrapped-modal")).toBeHidden();
+      await modal.locator(".close-btn").click();
+      await expect(modal).toBeHidden();
 
       expectClean(errors);
     });
@@ -141,9 +171,7 @@ test.describe("Error-Free Interactions", () => {
       const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
       await setZoom(page, zoom + 2);
 
-      expect(await page.evaluate(() => window.mapApp!.heatmapVisible)).toBe(
-        true,
-      );
+      await expectHeatmapPainted(page);
       expectClean(errors);
     });
 
@@ -151,19 +179,15 @@ test.describe("Error-Free Interactions", () => {
       const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
       await setZoom(page, Math.max(1, zoom - 3));
 
-      expect(await page.evaluate(() => window.mapApp!.heatmapVisible)).toBe(
-        true,
-      );
+      await expectHeatmapPainted(page);
       expectClean(errors);
     });
 
     test("zooming preserves altitude path colors", async ({ page }) => {
       await waitForPathData(page);
 
-      const initialPathCount = await page.evaluate(
-        () => window.mapApp!.currentData?.path_segments.length ?? 0,
-      );
-      expect(initialPathCount).toBeGreaterThan(0);
+      const before = await layerColors(page, "altitudeLayer");
+      expectColorRamp(before);
 
       const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
       await setZoom(page, zoom + 2);
@@ -171,22 +195,19 @@ test.describe("Error-Free Interactions", () => {
       expect(await page.evaluate(() => window.mapApp!.altitudeVisible)).toBe(
         true,
       );
-      const afterPathCount = await page.evaluate(
-        () => window.mapApp!.currentData?.path_segments.length ?? 0,
-      );
-      expect(afterPathCount).toBe(initialPathCount);
+      // Zooming must redraw the same runs in the same colours
+      expect(await layerColors(page, "altitudeLayer")).toEqual(before);
       expectClean(errors);
     });
 
     test("zooming preserves airspeed path colors", async ({ page }) => {
-      await page.locator("#airspeed-btn").click();
-      await expect(page.locator("#airspeed-btn")).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      await toggleLayer(page, "airspeed");
       await page.waitForFunction(
         () => window.mapApp!.airspeedLayer.getLayers().length > 0,
       );
+
+      const before = await layerColors(page, "airspeedLayer");
+      expectColorRamp(before);
 
       const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
       await setZoom(page, zoom + 2);
@@ -194,6 +215,7 @@ test.describe("Error-Free Interactions", () => {
       expect(await page.evaluate(() => window.mapApp!.airspeedVisible)).toBe(
         true,
       );
+      expect(await layerColors(page, "airspeedLayer")).toEqual(before);
       expectClean(errors);
     });
 

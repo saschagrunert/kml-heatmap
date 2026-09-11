@@ -878,9 +878,9 @@ body {
 }
 
 /* The panel fills the rail rather than being positioned against the
-   viewport. The rail's `hidden` attribute is what opens and closes the
-   surface, so the panel itself does not fade: a half-transparent panel
-   would put its text over the map at an unreadable contrast for the
+   viewport. The rail's `hidden` attribute is the only thing that opens and
+   closes the surface, so the panel itself does not fade: a half-transparent
+   panel would put its text over the map at an unreadable contrast for the
    length of the transition. */
 #stats-panel {
   flex: 1;
@@ -889,11 +889,8 @@ body {
   font-size: var(--text-md);
   padding: var(--space-md) var(--space-base)
     calc(var(--space-lg) + var(--safe-bottom));
-  display: none;
   color: var(--color-text);
   box-sizing: border-box;
-}
-#stats-panel.visible {
   -webkit-user-select: text;
   user-select: text;
 }

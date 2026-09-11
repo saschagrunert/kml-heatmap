@@ -5,8 +5,10 @@
 [extend]
 useDefault = true
 
-# Generated site files that embed the public client-side tile API keys
-# (CARTO, OpenAIP). They are published with the site by design.
+# The generated site used to be committed, and its map_config.js embeds the
+# public client-side tile API keys (CARTO, OpenAIP). The file is no longer
+# tracked, but gitleaks scans the history, so the old revisions still need
+# the allowlist.
 [[allowlists]]
-description = "Generated site files with public tile API keys"
+description = "Historic generated site files with public tile API keys"
 paths = ['''^docs/map_config\.js$''']

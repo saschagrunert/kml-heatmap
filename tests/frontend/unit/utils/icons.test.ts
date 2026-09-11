@@ -3,6 +3,7 @@ import {
   icon,
   iconSizeOf,
   isIconName,
+  renderControlIcons,
   setControlIcon,
   DEFAULT_ICON_SIZE,
 } from "../../../../kml_heatmap/frontend/utils/icons";
@@ -144,6 +145,118 @@ describe("icons", () => {
       expect(button.dataset["icon"]).toBeUndefined();
       expect(logError).toHaveBeenCalledWith(
         expect.stringContaining("not-an-icon"),
+      );
+    });
+  });
+
+  describe("renderControlIcons", () => {
+    let host: HTMLElement;
+
+    beforeEach(() => {
+      vi.mocked(logError).mockClear();
+      host = document.createElement("div");
+      document.body.appendChild(host);
+    });
+
+    afterEach(() => {
+      host.remove();
+    });
+
+    it("draws the icon of every [data-icon] element at the row size", () => {
+      host.innerHTML =
+        '<button data-icon="stats"><span class="control-label">Statistics</span></button>' +
+        '<button data-icon="heatmap"></button>';
+
+      renderControlIcons(host);
+
+      const icons = host.querySelectorAll("svg.icon");
+      expect(icons).toHaveLength(2);
+      expect(icons[0]!.getAttribute("width")).toBe("16");
+      expect(icons[0]!.getAttribute("aria-hidden")).toBe("true");
+      // The icon precedes the label it belongs to
+      expect(host.querySelector("button")!.firstElementChild).toBe(icons[0]);
+    });
+
+    it("honours a per-element size and overrides it with an explicit one", () => {
+      host.innerHTML =
+        '<button data-icon="close" data-icon-size="20"></button>' +
+        '<button data-icon="stats"></button>';
+
+      renderControlIcons(host);
+      expect(host.querySelectorAll("svg.icon")[0]!.getAttribute("width")).toBe(
+        "20",
+      );
+
+      renderControlIcons(host, 24);
+      const widths = Array.from(host.querySelectorAll("svg.icon")).map((el) =>
+        el.getAttribute("width"),
+      );
+      expect(widths).toEqual(["24", "24"]);
+    });
+
+    it("replaces the icon instead of adding a second one", () => {
+      host.innerHTML =
+        '<button data-icon="stats"><span class="control-label">Statistics</span></button>';
+
+      renderControlIcons(host);
+      renderControlIcons(host, 20);
+
+      expect(host.querySelectorAll("svg.icon")).toHaveLength(1);
+      expect(host.querySelector("svg.icon")!.getAttribute("width")).toBe("20");
+      expect(host.querySelector(".control-label")!.textContent).toBe(
+        "Statistics",
+      );
+    });
+
+    it("falls back to the row size for an unknown size and skips empty names", () => {
+      host.innerHTML =
+        '<button data-icon="stats" data-icon-size="17"></button>' +
+        '<button data-icon=""></button>';
+
+      renderControlIcons(host);
+
+      const icons = host.querySelectorAll("svg.icon");
+      expect(icons).toHaveLength(1);
+      expect(icons[0]!.getAttribute("width")).toBe("16");
+    });
+
+    it("logs and skips an unknown icon name instead of drawing nothing", () => {
+      host.innerHTML =
+        '<button id="typo-btn" data-icon="definitely-not-an-icon"></button>' +
+        '<button data-icon="stats"></button>';
+
+      renderControlIcons(host);
+
+      expect(host.querySelectorAll("svg.icon")).toHaveLength(1);
+      expect(host.querySelector("#typo-btn")!.innerHTML).toBe("");
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining("definitely-not-an-icon"),
+      );
+    });
+
+    it("walks the whole document by default", () => {
+      host.innerHTML = '<button data-icon="stats"></button>';
+
+      renderControlIcons();
+
+      expect(host.querySelector("svg.icon")).not.toBeNull();
+    });
+
+    it("keeps a later icon swap at the size the column was drawn at", () => {
+      host.innerHTML =
+        '<button id="replay-btn" data-icon="play"></button>' +
+        '<button data-icon="stats"></button>';
+
+      // The compact column redraws every icon at the larger size
+      renderControlIcons(host, 20);
+      const replayBtn = host.querySelector<HTMLElement>("#replay-btn")!;
+      expect(replayBtn.dataset["iconSize"]).toBe("20");
+
+      // A replay toggle swaps that one icon without naming a size
+      setControlIcon(replayBtn, "stop");
+
+      expect(replayBtn.querySelector("svg.icon")!.getAttribute("width")).toBe(
+        "20",
       );
     });
   });

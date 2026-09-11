@@ -16,6 +16,10 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:8000",
     headless: true,
+    // The page honours prefers-reduced-motion, so the entry animations and
+    // slide transitions are skipped and a scan never catches a half-faded
+    // panel. Specs that measure animations settle them explicitly as well.
+    reducedMotion: "reduce",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },

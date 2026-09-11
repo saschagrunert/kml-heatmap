@@ -21,8 +21,9 @@ export default defineConfig({
       include: ["kml_heatmap/frontend/**/*.{js,ts}"],
       exclude: ["**/node_modules/**", "**/tests/**"],
       clean: true,
-      // Just under what the suite reaches today, so a real regression fails
-      // the build instead of quietly eating a wide margin
+      // One to three points below what the suite reaches, so a real
+      // regression fails the build while a new defensive branch does not.
+      // Codecov enforces patch coverage on top.
       thresholds: {
         lines: 98,
         branches: 89,

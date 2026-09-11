@@ -38,6 +38,55 @@ type Listener<T> = (newVal: T, oldVal: T) => void;
 /** Listener re-entrancy budget before pending notifications are abandoned */
 const MAX_FLUSH_DEPTH = 10;
 
+/**
+ * Store keys that MapApp exposes as plain properties. Reading one reads the
+ * store, assigning one writes it, so the managers never have to know which
+ * state lives in the store and which does not.
+ */
+export const STORE_ACCESSOR_KEYS = [
+  "selectedYear",
+  "selectedAircraft",
+  "selectedPathIds",
+  "isolateSelection",
+  "heatmapVisible",
+  "altitudeVisible",
+  "airspeedVisible",
+  "airportsVisible",
+  "aviationVisible",
+  "currentData",
+  "fullStats",
+  "altitudeRange",
+  "airspeedRange",
+] as const;
+
+export type StoreAccessorKey = (typeof STORE_ACCESSOR_KEYS)[number];
+
+/** The accessor properties, typed exactly like the store keys they wrap */
+export type StoreAccessors = Pick<StoreState, StoreAccessorKey>;
+
+/**
+ * Define a getter/setter pair per key on `target` that forwards to
+ * `target.store`. Used on the MapApp prototype and on test doubles, so the
+ * two cannot drift apart.
+ */
+export function defineStoreAccessors(
+  target: { store: AppStore },
+  keys: readonly StoreAccessorKey[] = STORE_ACCESSOR_KEYS,
+): void {
+  for (const key of keys) {
+    Object.defineProperty(target, key, {
+      get(this: { store: AppStore }) {
+        return this.store.get(key);
+      },
+      set(this: { store: AppStore }, value: StoreState[typeof key]) {
+        this.store.set(key, value);
+      },
+      enumerable: true,
+      configurable: true,
+    });
+  }
+}
+
 export function createDefaultState(): StoreState {
   return {
     selectedYear: "all",

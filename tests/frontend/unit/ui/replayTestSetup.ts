@@ -1,60 +1,28 @@
 /**
  * Shared fixtures for the ReplayManager test files.
  *
- * The real domCache and the real pure helpers (formatTime, colors, bearing)
- * are used; only the map, layers and managers of MapApp are mocked.
+ * The app double is the shared `createMockApp`: a real store behind the
+ * accessors, the Leaflet mock for the map and the layers, and stubs for the
+ * other managers. The real domCache and the real pure helpers (formatTime,
+ * colors, bearing) are used.
  */
 import { vi } from "vitest";
-import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
-import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
+import type { HeatmapLayer } from "../../../../kml_heatmap/frontend/globals";
+import type {
+  FilteredStatistics,
+  PathSegment,
+} from "../../../../kml_heatmap/frontend/types";
 import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
 import { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
+import {
+  asMapApp,
+  createDataset,
+  createMockApp,
+  syncControlsWithStore,
+  type MockApp,
+} from "../../testHelpers";
 
-type AnyMock = ReturnType<typeof vi.fn>;
-
-export interface ReplayMockMap {
-  addLayer: AnyMock;
-  removeLayer: AnyMock;
-  hasLayer: AnyMock;
-  invalidateSize: AnyMock;
-  setView: AnyMock;
-  panTo: AnyMock;
-  setZoom: AnyMock;
-  getSize: AnyMock;
-  latLngToContainerPoint: AnyMock;
-  fitBounds: AnyMock;
-}
-
-export interface ReplayMockApp {
-  map: ReplayMockMap | null;
-  heatmapLayer: { _canvas: HTMLCanvasElement | null };
-  heatmapVisible: boolean;
-  altitudeLayer: object;
-  airspeedLayer: object;
-  airportLayer: object;
-  altitudeVisible: boolean;
-  airspeedVisible: boolean;
-  airportsVisible: boolean;
-  aviationVisible: boolean;
-  selectedPathIds: Set<number>;
-  fullPathInfo: unknown[];
-  fullPathSegments: PathSegment[] | null;
-  currentData: {
-    path_info: { id: number }[];
-    path_segments: PathSegment[];
-  } | null;
-  altitudeRange: { min: number; max: number };
-  airspeedRange: { min: number; max: number };
-  stateManager: { saveMapState: AnyMock };
-  layerManager: {
-    redrawAltitudePaths: AnyMock;
-    redrawAirspeedPaths: AnyMock;
-    updateAltitudeLegend: AnyMock;
-    updateAirspeedLegend: AnyMock;
-  };
-  dataManager: { applyHeatmapEmphasis: AnyMock };
-  fullStats: { max_groundspeed_knots: number } | null;
-}
+export { el } from "../../testHelpers";
 
 /** Three consecutive segments of path 1 at t = 0, 60 and 120 seconds */
 export function createSegments(): PathSegment[] {
@@ -92,55 +60,40 @@ export function createSegments(): PathSegment[] {
   ];
 }
 
-export function createMockMap(): ReplayMockMap {
+/** Full statistics that only carry the groundspeed replay looks at */
+export function statsWithSpeed(
+  maxGroundspeedKnots: number,
+): FilteredStatistics {
   return {
-    addLayer: vi.fn(),
-    removeLayer: vi.fn(),
-    hasLayer: vi.fn(() => true),
-    invalidateSize: vi.fn(),
-    setView: vi.fn(),
-    panTo: vi.fn(),
-    setZoom: vi.fn(),
-    getSize: vi.fn(() => ({ x: 800, y: 600 })),
-    latLngToContainerPoint: vi.fn(() => ({ x: 400, y: 300 })),
-    fitBounds: vi.fn(),
+    total_points: 0,
+    num_paths: 1,
+    num_airports: 0,
+    airport_names: [],
+    num_aircraft: 0,
+    aircraft_list: [],
+    total_distance_km: 0,
+    total_distance_nm: 0,
+    max_groundspeed_knots: maxGroundspeedKnots,
   };
 }
 
-export function createReplayMockApp(): ReplayMockApp {
-  return {
-    map: createMockMap(),
-    heatmapLayer: { _canvas: null },
-    heatmapVisible: true,
-    altitudeLayer: {},
-    airspeedLayer: {},
-    airportLayer: {},
-    altitudeVisible: false,
-    airspeedVisible: false,
-    airportsVisible: true,
-    aviationVisible: false,
-    selectedPathIds: new Set<number>(),
-    fullPathInfo: [],
-    fullPathSegments: createSegments(),
-    currentData: {
-      path_info: [{ id: 1 }],
-      path_segments: [
-        { path_id: 1, altitude_ft: 3000, groundspeed_knots: 100 },
-        { path_id: 1, altitude_ft: 5000, groundspeed_knots: 130 },
-      ],
-    },
-    altitudeRange: { min: 0, max: 10000 },
-    airspeedRange: { min: 0, max: 200 },
-    stateManager: { saveMapState: vi.fn() },
-    layerManager: {
-      redrawAltitudePaths: vi.fn(),
-      redrawAirspeedPaths: vi.fn(),
-      updateAltitudeLegend: vi.fn(),
-      updateAirspeedLegend: vi.fn(),
-    },
-    dataManager: { applyHeatmapEmphasis: vi.fn() },
-    fullStats: { max_groundspeed_knots: 130 },
-  };
+/**
+ * A mock app holding path 1 with timing data. The buttons and legends are
+ * wired to the store the way MapApp does it, so the tests can read the
+ * altitude button the way the user sees it.
+ */
+export function createReplayMockApp(): MockApp {
+  const app = createMockApp({
+    currentData: createDataset([{ id: 1 }], createSegments()),
+    fullStats: statsWithSpeed(130),
+  });
+  app.heatmapLayer = {
+    addTo: vi.fn(),
+    remove: vi.fn(),
+    setLatLngs: vi.fn(),
+  } as unknown as HeatmapLayer;
+  syncControlsWithStore(app.store);
+  return app;
 }
 
 /** One element of the replay DOM fixture */
@@ -226,6 +179,7 @@ function buildFixtureNode(node: FixtureNode): HTMLElement {
       const option = document.createElement("option");
       option.value = speed;
       option.textContent = speed + "x";
+      if (speed === "50") option.selected = true;
       element.appendChild(option);
     }
   }
@@ -257,15 +211,8 @@ export function unmountReplayDom(): void {
   document.body.classList.remove("replay-active");
 }
 
-/** Get an element that must exist */
-export function el(id: string): HTMLElement {
-  const element = document.getElementById(id);
-  if (!element) throw new Error(`Missing test element #${id}`);
-  return element;
-}
-
-export function createReplayManager(app: ReplayMockApp): ReplayManager {
-  return new ReplayManager(app as unknown as MapApp);
+export function createReplayManager(app: MockApp): ReplayManager {
+  return new ReplayManager(asMapApp(app));
 }
 
 /** Drive requestAnimationFrame through fake timers (16 ms per frame) */
@@ -280,5 +227,5 @@ export function mockAnimationFrame(): void {
 
 /** Last message written to the replay live region */
 export function liveRegionText(): string {
-  return el("replay-live").textContent ?? "";
+  return document.getElementById("replay-live")?.textContent ?? "";
 }

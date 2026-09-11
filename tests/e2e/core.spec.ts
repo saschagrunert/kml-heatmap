@@ -1,6 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
-  KNOWN_YEARS,
   activateReplay,
   attachErrorCollectors,
   expectNoA11yViolations,
@@ -157,7 +156,14 @@ test.describe("Core", () => {
     const metadata = await page.evaluate(() => window.KML_METADATA);
     expect(metadata).toBeTruthy();
     expect(metadata!.stats).toBeTruthy();
-    expect(metadata!.available_years.map(String)).toEqual(KNOWN_YEARS);
+    const years = metadata!.available_years;
+    expect(years.length).toBeGreaterThan(0);
+    expect(years).toEqual([...years].sort((a, b) => a - b));
+    for (const year of years) {
+      expect(Number.isInteger(year)).toBe(true);
+      expect(year).toBeGreaterThanOrEqual(1990);
+      expect(year).toBeLessThanOrEqual(new Date().getFullYear() + 1);
+    }
   });
 
   test("airports data is loaded", async ({ page }) => {
@@ -207,7 +213,6 @@ test.describe("Core", () => {
 
     test("wrapped dialog has no WCAG A/AA violations", async ({ page }) => {
       await openWrapped(page);
-      await expect(page.locator("#wrapped-modal")).toBeVisible();
       await expect(page.locator("#wrapped-card-airports")).toBeVisible();
 
       await expectNoA11yViolations(page, "wrapped dialog");

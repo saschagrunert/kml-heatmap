@@ -5,16 +5,26 @@ import type { MapApp } from "../mapApp";
 import {
   calculateAirportFlightCounts,
   calculateVisibleAirports,
+  createAirportIcon,
   findHomeBase,
 } from "../features/airports";
 import type { AirportCounts } from "../features/airports";
 import type { PathInfo } from "../types";
 import { ddToDms } from "../utils/geometry";
 import { generateAirportPopupHtml } from "../utils/htmlGenerators";
-import { createAirportIcon } from "../appInitializer";
 
 /** Padding added around a label box before two are called overlapping */
 const LABEL_GAP_PX = 2;
+
+/** Store keys that change the popup counts and the home base */
+const POPUP_KEYS = ["currentData", "selectedYear", "selectedAircraft"] as const;
+
+/** Store keys that change which markers are shown */
+const VISIBILITY_KEYS = [
+  ...POPUP_KEYS,
+  "selectedPathIds",
+  "isolateSelection",
+] as const;
 
 export class AirportManager {
   private app: MapApp;
@@ -30,6 +40,15 @@ export class AirportManager {
 
   constructor(app: MapApp) {
     this.app = app;
+
+    // The markers follow the data, the filters and the selection; nothing
+    // has to remember to refresh them
+    for (const key of POPUP_KEYS) {
+      app.store.subscribe(key, () => this.updateAirportPopups());
+    }
+    for (const key of VISIBILITY_KEYS) {
+      app.store.subscribe(key, () => this.updateAirportOpacity());
+    }
   }
 
   // Calculate airport flight counts based on current filters

@@ -6,14 +6,14 @@
  * that interface; the behaviour the columns cover on wider viewports is
  * exercised here through the bar instead.
  */
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import {
-  KNOWN_YEARS,
   activateReplay,
   attachErrorCollectors,
   closeMobileSheet,
   expectNoA11yViolations,
   gotoApp,
+  knownYears,
   layerButton,
   layerSwitch,
   openMobileSheet,
@@ -298,7 +298,8 @@ test.describe("Mobile bar", () => {
 
   test.describe("Filter sheet", () => {
     test("changing the year moves the map data with it", async ({ page }) => {
-      const year = KNOWN_YEARS[0]!;
+      const years = await knownYears(page);
+      const year = years[0]!;
       const source = page.locator("#year-select");
 
       await openMobileSheet(page, "filter");
@@ -306,9 +307,7 @@ test.describe("Mobile bar", () => {
       const select = row.locator("select");
 
       // The sheet mirrors the page's own dropdown, minus its filter name
-      await expect(select.locator("option")).toHaveCount(
-        KNOWN_YEARS.length + 1,
-      );
+      await expect(select.locator("option")).toHaveCount(years.length + 1);
       await expect(select.locator("option").first()).toHaveText("All");
       await expect(select).toHaveValue(await source.inputValue());
 

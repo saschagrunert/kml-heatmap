@@ -7,8 +7,18 @@ import { expect, type Locator, type Page } from "@playwright/test";
 // Type-only import so the window.mapApp / MAP_CONFIG globals are declared
 import type {} from "../../kml_heatmap/frontend/globals";
 
-/** Data set committed to the repository: two years of flights */
-export const KNOWN_YEARS = ["2025", "2026"];
+/**
+ * The years the built site carries, as the year filter spells them. Read
+ * from the exported metadata so the specs follow the data set instead of
+ * breaking when another year of flights is committed.
+ */
+export async function knownYears(page: Page): Promise<string[]> {
+  const years = await page.evaluate(() =>
+    (window.KML_METADATA?.available_years ?? []).map(String),
+  );
+  expect(years.length, "the site exports no years").toBeGreaterThan(0);
+  return years;
+}
 
 interface SegmentClickPosition {
   x: number;
@@ -53,10 +63,38 @@ export async function attachErrorCollectors(
   return collector;
 }
 
-/** Console errors that are not caused by the page itself (network hiccups) */
+/**
+ * Every console error. The fixture in fixtures.ts answers all CDN and tile
+ * requests locally, so a failed resource load is a defect of the page or of
+ * the test setup, never a network hiccup to filter out.
+ */
 export function relevantConsoleErrors(collector: ErrorCollector): string[] {
-  return collector.consoleErrors.filter(
-    (text) => !/net::ERR_|Failed to load resource/.test(text),
+  return collector.consoleErrors;
+}
+
+/**
+ * Wait until every running CSS animation and transition below `target` has
+ * finished. Animations that never end (spinners) are left alone.
+ *
+ * The control surfaces slide and fade in, so anything that measures
+ * geometry or scans the page for contrast has to let that settle first: a
+ * box read part-way through moves on its own, and axe sees the colours of
+ * the half-faded frame.
+ */
+export async function settleAnimations(target: Page | Locator): Promise<void> {
+  const root = "goto" in target ? target.locator(":root") : target;
+  await root.evaluate((el) =>
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((animation) =>
+          Number.isFinite(
+            Number(animation.effect?.getComputedTiming().endTime ?? 0),
+          ),
+        )
+        // A cancelled animation rejects; it is over either way
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
   );
 }
 
@@ -333,10 +371,43 @@ export async function toggleStatsPanel(page: Page): Promise<void> {
   await page.locator(mobile ? "#mobile-tab-stats" : "#stats-btn").click();
 }
 
-/** Open the year in review from the bar or the desktop button */
-export async function openWrapped(page: Page): Promise<void> {
+/**
+ * Open the year in review from the bar or the desktop button and wait until
+ * the dialog is showing. Returns the dialog.
+ */
+export async function openWrapped(page: Page): Promise<Locator> {
   const mobile = await usesMobileBar(page);
   await page.locator(mobile ? "#mobile-tab-wrapped" : "#wrapped-btn").click();
+  const modal = page.locator("#wrapped-modal");
+  await expect(modal).toBeVisible({ timeout: 5000 });
+  return modal;
+}
+
+/** The id of the first path of the loaded data set */
+export async function firstPathId(page: Page): Promise<number> {
+  await waitForPathData(page);
+  return page.evaluate(() => window.mapApp!.fullPathInfo![0]!.id);
+}
+
+/**
+ * Toggle one path in or out of the selection and wait until the selection
+ * has the expected size, so the change has taken before the caller asserts
+ * on anything that follows from it.
+ */
+export async function togglePathSelection(
+  page: Page,
+  pathId: number,
+  expectedSize: number,
+): Promise<void> {
+  await page.evaluate(
+    (id) => window.mapApp!.togglePathSelection(String(id)),
+    pathId,
+  );
+  await page.waitForFunction(
+    (size) => window.mapApp!.selectedPathIds.size === size,
+    expectedSize,
+    { timeout: 5000 },
+  );
 }
 
 /** Enable altitude layer and wait for path data to load */
@@ -373,13 +444,7 @@ export async function selectPathForReplay(page: Page): Promise<number> {
   });
   expect(pathId).not.toBeNull();
 
-  await page.evaluate(
-    (id) => window.mapApp!.togglePathSelection(String(id)),
-    pathId,
-  );
-  await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 1, {
-    timeout: 5000,
-  });
+  await togglePathSelection(page, pathId!, 1);
 
   return pathId!;
 }
@@ -423,12 +488,18 @@ export async function playUntilProgress(page: Page): Promise<void> {
 
 const A11Y_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
-/** Run an axe-core scan and fail on WCAG A/AA violations */
+/**
+ * Run an axe-core scan and fail on WCAG A/AA violations. The scan waits for
+ * the page's animations first: a panel caught mid-fade has not reached its
+ * final colours, and the contrast check reported that as a violation once
+ * in a while.
+ */
 export async function expectNoA11yViolations(
   page: Page,
   label: string,
   configure?: (builder: AxeBuilder) => AxeBuilder,
 ): Promise<void> {
+  await settleAnimations(page);
   let builder = new AxeBuilder({ page }).withTags(A11Y_TAGS);
   if (configure) builder = configure(builder);
   const results = await builder.analyze();

@@ -6,6 +6,7 @@ installed there so no test needs the network, and any attempt to download the
 airport database fails loudly.
 """
 
+import json
 import os
 import shutil
 import tempfile
@@ -57,9 +58,35 @@ def no_network(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def reset_airport_cache():
-    """Reset the in-process airport cache before and after each test."""
+    """Reset the airport cache and the download failure marker around each test.
+
+    The marker lives in the (session private) cache directory; a test that
+    exercises a failed download must not stop the next test from trying.
+    """
     import kml_heatmap.airport_lookup as airport_lookup_module
 
     airport_lookup_module._airport_cache = None
+    airport_lookup_module._clear_download_failure()
     yield
     airport_lookup_module._airport_cache = None
+    airport_lookup_module._clear_download_failure()
+
+
+def parse_js(path, variable=None):
+    """Parse a ``window.<variable> = <json>;`` file and return the payload.
+
+    With ``variable`` the exact prefix is checked, otherwise any window
+    variable is accepted.
+    """
+    content = Path(path).read_text(encoding="utf-8")
+    prefix = f"window.{variable} = " if variable else "window."
+    assert content.startswith(prefix), f"{path} does not start with {prefix!r}"
+    assert content.endswith(";"), f"{path} does not end with a semicolon"
+    start = len(prefix) if variable else content.index("=") + 1
+    return json.loads(content[start:-1].strip())
+
+
+@pytest.fixture(name="parse_js")
+def parse_js_fixture():
+    """The ``parse_js`` helper as a fixture."""
+    return parse_js

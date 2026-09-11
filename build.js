@@ -131,10 +131,7 @@ function analyzeBundleComposition(metafile, bundleName) {
 
     // Categorize files
     let category;
-    if (file.includes("node_modules")) {
-      const match = file.match(/node_modules\/([^/]+)/);
-      category = match ? `📦 ${match[1]}` : "📦 dependencies";
-    } else if (file.includes("frontend/calculations")) {
+    if (file.includes("frontend/calculations")) {
       category = "🧮 calculations";
     } else if (file.includes("frontend/features")) {
       category = "✨ features";
@@ -171,7 +168,7 @@ function analyzeBundleComposition(metafile, bundleName) {
 const BUDGET_APP = 115 * 1024;
 
 /**
- * Print bundle size analysis and enforce the budget in CI
+ * Print bundle size analysis and check it against the budget
  * Returns true if the budget passes, false if it is exceeded
  */
 function analyzeBundleSizes() {
@@ -228,8 +225,9 @@ async function build() {
         analyzeBundleComposition(appResult.metafile, "MapApp Bundle");
       }
 
-      // Fail build in CI when bundle size budget is exceeded
-      if (!withinBudget && process.env.CI) {
+      // A production bundle over budget fails the build wherever it runs;
+      // a development bundle is unminified and only gets the warning
+      if (!withinBudget && minify) {
         console.error("\n❌ Bundle size budget exceeded!");
         process.exit(1);
       }

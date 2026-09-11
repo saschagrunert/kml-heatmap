@@ -1,6 +1,7 @@
 """Tests for airport_lookup module."""
 
 import csv
+import os
 import time
 import urllib.error
 from unittest.mock import MagicMock, patch
@@ -13,11 +14,11 @@ from kml_heatmap.airport_lookup import (
     _download_airport_database,
     _is_cache_valid,
     _is_valid_csv_file,
-    _load_airport_database,
     _read_airport_csv,
     _strip_airport_suffix,
+    database_fingerprint,
     extract_icao_codes_from_name,
-    get_cache_info,
+    load_airport_database,
     lookup_airport_coordinates,
     lookup_airport_country,
     standardize_airport_name,
@@ -79,22 +80,6 @@ class TestLookupAirportCountry:
     def test_empty_country_is_none(self):
         lookup_module._airport_cache = {"TEST": (50.0, 8.5, "Test Airport", "")}
         assert lookup_airport_country("TEST") is None
-
-
-class TestCacheInfo:
-    def test_get_cache_info_keys(self):
-        info = get_cache_info()
-        assert info["cache_exists"] is True
-        assert info["cache_valid"] is True
-        assert info["database_loaded"] is False
-        assert info["cache_size_mb"] > 0
-
-    def test_get_cache_info_with_loaded_database(self):
-        lookup_module._airport_cache = {
-            "TEST": (50.0, 8.5, "Test Airport", "DE"),
-            "EDDF": (50.0333, 8.5706, "Frankfurt Airport", "DE"),
-        }
-        assert get_cache_info()["airport_count"] == 2
 
 
 class TestIsValidCsvFile:
@@ -250,6 +235,89 @@ class TestDownloadAirportDatabase:
         assert kwargs["context"] is not None
 
 
+class TestDownloadFailureMarker:
+    @pytest.fixture
+    def isolated_cache(self, tmp_path):
+        with (
+            patch.object(lookup_module, "CACHE_FILE", tmp_path / "airports.csv"),
+            patch.object(lookup_module, "DOWNLOAD_FAILED_MARKER", tmp_path / "failed"),
+        ):
+            yield tmp_path
+
+    def test_failure_is_remembered_and_not_retried(self, isolated_cache):
+        marker = isolated_cache / "failed"
+        with patch.object(
+            lookup_module, "urlopen", side_effect=OSError("offline")
+        ) as first:
+            assert _download_airport_database() is False
+        first.assert_called_once()
+        assert marker.exists()
+
+        with patch.object(lookup_module, "urlopen") as second:
+            assert _download_airport_database() is False
+        second.assert_not_called()
+
+    def test_old_failure_is_retried(self, isolated_cache):
+        marker = isolated_cache / "failed"
+        marker.touch()
+        stale = time.time() - lookup_module.DOWNLOAD_RETRY_SECONDS - 1
+        os.utime(marker, (stale, stale))
+
+        with patch.object(
+            lookup_module, "urlopen", return_value=_mock_response(VALID_CSV)
+        ) as mock_urlopen:
+            assert _download_airport_database() is True
+        mock_urlopen.assert_called_once()
+        assert not marker.exists()
+
+    def test_invalid_response_is_remembered_too(self, isolated_cache):
+        with patch.object(lookup_module, "urlopen", return_value=_mock_response(b"")):
+            assert _download_airport_database() is False
+        assert (isolated_cache / "failed").exists()
+
+    def test_workers_share_the_marker(self, isolated_cache):
+        """After one failure the other processes of a run skip the download."""
+        with patch.object(lookup_module, "urlopen", side_effect=OSError("offline")):
+            assert load_airport_database() == {}
+        lookup_module._airport_cache = None
+        with patch.object(lookup_module, "urlopen") as mock_urlopen:
+            assert load_airport_database() == {}
+        mock_urlopen.assert_not_called()
+
+    def test_marker_helpers_tolerate_missing_directory(self, tmp_path):
+        marker = tmp_path / "missing" / "failed"
+        with patch.object(lookup_module, "DOWNLOAD_FAILED_MARKER", marker):
+            assert lookup_module._recent_download_failure() is False
+            lookup_module._record_download_failure()
+            lookup_module._clear_download_failure()
+        assert not marker.exists()
+
+    def test_unwritable_cache_directory(self, tmp_path):
+        blocker = tmp_path / "file"
+        blocker.write_text("not a directory")
+        with patch.object(lookup_module, "CACHE_FILE", blocker / "airports.csv"):
+            assert _download_airport_database() is False
+
+
+class TestDatabaseFingerprint:
+    def test_nodb_without_cache_file(self, tmp_path):
+        with patch.object(lookup_module, "CACHE_FILE", tmp_path / "missing.csv"):
+            assert database_fingerprint() == "nodb"
+
+    def test_changes_with_the_file(self, tmp_path):
+        database = tmp_path / "airports.csv"
+        with patch.object(lookup_module, "CACHE_FILE", database):
+            database.write_bytes(VALID_CSV)
+            first = database_fingerprint()
+            assert first == database_fingerprint()
+            database.write_bytes(
+                VALID_CSV + b'3,"EDDM","large_airport","Munich",48.35,11.78,"DE"\n'
+            )
+            second = database_fingerprint()
+        assert first != second
+        assert len(first) == 8
+
+
 class TestReadAirportCsv:
     def test_skips_non_numeric_coordinates(self, tmp_path):
         path = tmp_path / "airports.csv"
@@ -275,8 +343,8 @@ class TestReadAirportCsv:
 
 class TestLoadAirportDatabase:
     def test_loads_fixture_and_caches_instance(self):
-        db1 = _load_airport_database()
-        db2 = _load_airport_database()
+        db1 = load_airport_database()
+        db2 = load_airport_database()
         assert db1 is db2
         assert "EDDP" in db1
 
@@ -289,7 +357,7 @@ class TestLoadAirportDatabase:
                 lookup_module, "urlopen", return_value=_mock_response(VALID_CSV)
             ) as mock_urlopen,
         ):
-            db = _load_airport_database()
+            db = load_airport_database()
 
         mock_urlopen.assert_called_once()
         assert "TEST" in db
@@ -300,7 +368,7 @@ class TestLoadAirportDatabase:
             patch.object(lookup_module, "CACHE_FILE", tmp_path / "missing.csv"),
             patch.object(lookup_module, "urlopen", side_effect=OSError("offline")),
         ):
-            assert _load_airport_database() == {}
+            assert load_airport_database() == {}
             assert lookup_airport_coordinates("EDDP") is None
 
     def test_csv_error_returns_empty(self, tmp_path):
@@ -311,7 +379,7 @@ class TestLoadAirportDatabase:
             patch.object(lookup_module, "_is_cache_valid", return_value=True),
             patch("csv.DictReader", side_effect=csv.Error("CSV error")),
         ):
-            assert _load_airport_database() == {}
+            assert load_airport_database() == {}
 
     def test_works_without_fcntl(self, tmp_path):
         cache_file = tmp_path / "airports.csv"
@@ -320,8 +388,14 @@ class TestLoadAirportDatabase:
             patch.object(lookup_module, "HAS_FCNTL", False),
             patch.object(lookup_module, "CACHE_FILE", cache_file),
         ):
-            db = _load_airport_database()
+            db = load_airport_database()
         assert "EDDF" in db
+
+    def test_unopenable_lock_file_is_tolerated(self, tmp_path):
+        lock_file = tmp_path / "missing" / "airports.lock"
+        with patch.object(lookup_module, "CACHE_LOCK_FILE", lock_file):
+            db = load_airport_database()
+        assert "EDDP" in db
 
     def test_lock_release_failure_is_handled(self):
         original_flock = lookup_module.fcntl.flock
@@ -332,7 +406,7 @@ class TestLoadAirportDatabase:
             return original_flock(fd, op)
 
         with patch.object(lookup_module.fcntl, "flock", side_effect=flock_side_effect):
-            db = _load_airport_database()
+            db = load_airport_database()
         assert "EDDP" in db
 
 

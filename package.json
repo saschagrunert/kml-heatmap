@@ -24,7 +24,7 @@
     "build:watch": "node build.js --watch",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:mobile": "playwright test --project=mobile-chromium"
+    "test:e2e:mobile": "playwright test --project=mobile"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
@@ -34,9 +34,12 @@
     "@types/node": "^26.5.0",
     "@vitest/coverage-v8": "^5.0.0",
     "@vitest/ui": "^5.0.0",
+    "dom-to-image": "2.6.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.10.0",
     "jsdom": "^30.0.1",
+    "leaflet": "1.9.4",
+    "leaflet.heat": "0.2.0",
     "prettier": "^3.9.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.0",

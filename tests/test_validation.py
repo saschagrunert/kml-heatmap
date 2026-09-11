@@ -88,9 +88,15 @@ class TestValidateOutputDir:
         assert "Refusing" in error
         assert str(tmp_path / "data") in error
 
-    def test_contained_in_input_dir_refused(self, tmp_path):
+    def test_below_input_dir_is_fine(self, tmp_path):
+        """The documented ``flight.kml --output-dir out`` from the file's directory."""
         kml = tmp_path / "a.kml"
-        assert validate_output_dir(tmp_path / "data", [kml])[0] is False
+        assert validate_output_dir(tmp_path / "out" / "data", [kml]) == (True, None)
+
+    def test_default_output_dir_next_to_input_is_fine(self, tmp_path):
+        """``--output-dir .`` puts the data directory below the input directory."""
+        kml = tmp_path / "a.kml"
+        assert validate_output_dir(tmp_path / "data", [kml]) == (True, None)
 
     def test_containing_input_dir_refused(self, tmp_path):
         kml = tmp_path / "out" / "data" / "flights" / "a.kml"

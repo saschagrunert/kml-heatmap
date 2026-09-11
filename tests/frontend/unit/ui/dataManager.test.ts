@@ -8,7 +8,10 @@ import {
   type Mock,
 } from "vitest";
 import * as L from "leaflet";
-import { DataManager } from "../../../../kml_heatmap/frontend/ui/dataManager";
+import {
+  DataManager,
+  heatmapCoordinates,
+} from "../../../../kml_heatmap/frontend/ui/dataManager";
 import type { HeatmapLayer } from "../../../../kml_heatmap/frontend/globals";
 import type {
   DataLoaderOptions,
@@ -87,6 +90,7 @@ describe("DataManager", () => {
     mockHeatLayer = {
       addTo: vi.fn(),
       remove: vi.fn(),
+      setLatLngs: vi.fn(),
       // A real canvas: the emphasis toggles a class on it, and a bare
       // { style: {} } stub cannot say whether that worked
       _canvas: document.createElement("canvas"),
@@ -156,6 +160,33 @@ describe("DataManager", () => {
       dataManager.showLoading();
       expect(textEl.textContent).toBe("Loading 2025 flights…");
       expect(loadingEl.style.display).toBe("block");
+    });
+
+    it("shows the indicator before writing its text, so the live region announces it", () => {
+      const loadingEl = document.getElementById("loading")!;
+      const textEl = document.createElement("span");
+      textEl.id = "loading-text";
+      loadingEl.appendChild(textEl);
+      const displayWhenWritten: string[] = [];
+      const descriptor = Object.getOwnPropertyDescriptor(
+        Node.prototype,
+        "textContent",
+      )!;
+      Object.defineProperty(textEl, "textContent", {
+        configurable: true,
+        get(this: Node) {
+          return descriptor.get!.call(this) as string | null;
+        },
+        set(this: Node, value: string | null) {
+          displayWhenWritten.push(loadingEl.style.display);
+          descriptor.set!.call(this, value);
+        },
+      });
+
+      dataManager.showLoading({ year: "2026" });
+
+      expect(displayWhenWritten).toEqual(["block"]);
+      expect(textEl.textContent).toBe("Loading 2026 flights…");
     });
 
     it("works without #loading-text", () => {
@@ -272,15 +303,22 @@ describe("DataManager", () => {
       expect(mockHeatLayer._canvas!.style.pointerEvents).toBe("none");
     });
 
-    it("removes the existing heatmap layer before creating a new one", async () => {
-      const oldLayer = { addTo: vi.fn(), remove: vi.fn() };
-      mockApp.heatmapLayer = oldLayer as unknown as HeatmapLayer;
-      loaderMocks.loadData.mockResolvedValue(baseData());
+    it("feeds the existing heat layer new points instead of creating another", async () => {
+      const existing = {
+        addTo: vi.fn(),
+        remove: vi.fn(),
+        setLatLngs: vi.fn(),
+      };
+      mockApp.heatmapLayer = existing as unknown as HeatmapLayer;
+      const data = baseData();
+      loaderMocks.loadData.mockResolvedValue(data);
 
       await dataManager.updateLayers();
 
-      expect(oldLayer.remove).toHaveBeenCalled();
-      expect(mockApp.heatmapLayer).toBe(mockHeatLayer);
+      expect(existing.setLatLngs).toHaveBeenCalledWith(data.coordinates);
+      expect(existing.remove).not.toHaveBeenCalled();
+      expect(heatLayerSpy).not.toHaveBeenCalled();
+      expect(mockApp.heatmapLayer).toBe(existing);
     });
 
     it("adds heatmap to map if visible and not in replay mode", async () => {
@@ -290,6 +328,17 @@ describe("DataManager", () => {
       await dataManager.updateLayers();
 
       expect(mockHeatLayer.addTo).toHaveBeenCalledWith(mockApp.map);
+    });
+
+    it("does not add the heat layer a second time when it is already on the map", async () => {
+      mockApp.heatmapLayer = mockHeatLayer as HeatmapLayer;
+      mockApp.map!.addLayer(mockHeatLayer);
+      loaderMocks.loadData.mockResolvedValue(baseData());
+
+      await dataManager.updateLayers();
+
+      expect(mockHeatLayer.addTo).not.toHaveBeenCalled();
+      expect(mockApp.map!.hasLayer(mockHeatLayer)).toBe(true);
     });
 
     it("does not add heatmap if not visible", async () => {
@@ -407,17 +456,23 @@ describe("DataManager", () => {
       expect(mockApp.layerManager.clearLayer).toHaveBeenCalledWith("airspeed");
     });
 
-    it("refreshes statistics and airport visibility once", async () => {
-      loaderMocks.loadData.mockResolvedValue(baseData());
+    it("publishes the dataset through the store once and calls no manager for it", async () => {
+      const data = baseData();
+      loaderMocks.loadData.mockResolvedValue(data);
+      const listener = vi.fn();
+      mockApp.store.subscribe("currentData", listener);
 
       await dataManager.updateLayers();
 
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith(data, null);
+      // Statistics and airport markers follow the store on their own
       expect(
         mockApp.statsManager.updateStatsForSelection,
-      ).toHaveBeenCalledTimes(1);
-      expect(mockApp.airportManager.updateAirportOpacity).toHaveBeenCalledTimes(
-        1,
-      );
+      ).not.toHaveBeenCalled();
+      expect(
+        mockApp.airportManager.updateAirportOpacity,
+      ).not.toHaveBeenCalled();
     });
 
     it("discards stale results when a newer updateLayers call supersedes it", async () => {
@@ -444,9 +499,46 @@ describe("DataManager", () => {
 
       expect(mockApp.currentData).toBe(newer);
       expect(heatLayerSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("heatmapCoordinates", () => {
+    const start: [number, number] = [50, 8];
+    const mid: [number, number] = [50.1, 8.1];
+    const end: [number, number] = [50.2, 8.2];
+    const other: [number, number] = [52, 10];
+    const otherEnd: [number, number] = [53, 11];
+    const segments = [
+      createSegment({ path_id: 1, coords: [start, mid] }),
+      createSegment({ path_id: 1, coords: [mid, end] }),
+      createSegment({ path_id: 2, coords: [other, otherEnd] }),
+    ];
+
+    it("lists every start point once and each path's end point", () => {
+      expect(heatmapCoordinates(segments, () => true)).toEqual([
+        start,
+        mid,
+        end,
+        other,
+        otherEnd,
+      ]);
+    });
+
+    it("keeps only the paths the filter accepts", () => {
+      expect(heatmapCoordinates(segments, (id) => id === 2)).toEqual([
+        other,
+        otherEnd,
+      ]);
+      expect(heatmapCoordinates(segments, () => false)).toEqual([]);
+    });
+
+    it("skips segments without coordinates", () => {
       expect(
-        mockApp.statsManager.updateStatsForSelection,
-      ).toHaveBeenCalledTimes(1);
+        heatmapCoordinates(
+          [{ path_id: 1 }, createSegment({ path_id: 1, coords: [start, mid] })],
+          () => true,
+        ),
+      ).toEqual([start, mid]);
     });
   });
 

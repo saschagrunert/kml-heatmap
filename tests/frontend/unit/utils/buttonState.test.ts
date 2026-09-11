@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   applyToggleButtonState,
   setControlLabel,
+  syncLegend,
   syncToggleButton,
 } from "../../../../kml_heatmap/frontend/utils/buttonState";
 import { AppStore } from "../../../../kml_heatmap/frontend/state/store";
@@ -84,6 +85,55 @@ describe("buttonState", () => {
         syncToggleButton(store, "altitudeVisible", "missing-btn"),
       ).not.toThrow();
       expect(() => store.set("altitudeVisible", true)).not.toThrow();
+    });
+  });
+
+  describe("syncLegend", () => {
+    let legend: HTMLElement;
+
+    beforeEach(() => {
+      legend = document.createElement("div");
+      legend.id = "altitude-legend";
+      document.body.appendChild(legend);
+    });
+
+    afterEach(() => {
+      legend.remove();
+    });
+
+    it("shows the legend while its layer is visible and hides it otherwise", () => {
+      const store = new AppStore({ altitudeVisible: true });
+
+      syncLegend(store, "altitudeVisible", "altitude-legend");
+      expect(legend.style.display).toBe("block");
+
+      store.set("altitudeVisible", false);
+      expect(legend.style.display).toBe("none");
+
+      store.set("altitudeVisible", true);
+      expect(legend.style.display).toBe("block");
+    });
+
+    it("stops following after unsubscribe", () => {
+      const store = new AppStore({ altitudeVisible: false });
+      const unsubscribe = syncLegend(
+        store,
+        "altitudeVisible",
+        "altitude-legend",
+      );
+
+      unsubscribe();
+      store.set("altitudeVisible", true);
+
+      expect(legend.style.display).toBe("none");
+    });
+
+    it("tolerates a missing legend", () => {
+      const store = new AppStore();
+      expect(() =>
+        syncLegend(store, "airspeedVisible", "missing-legend"),
+      ).not.toThrow();
+      expect(() => store.set("airspeedVisible", true)).not.toThrow();
     });
   });
 

@@ -1,6 +1,7 @@
 """Command-line interface."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -16,8 +17,24 @@ def _fatal(message: str) -> None:
 
 
 def _collect_kml_files(paths: list[str]) -> list[str]:
-    """Resolve KML files from file and directory arguments."""
+    """Resolve KML files from file and directory arguments.
+
+    A file named more than once (directly, or through its directory) is
+    processed once; it would otherwise be counted twice in every statistic.
+    Paths are normalized but symlinks are not followed: a symlink is rejected
+    by the validation later and must not shadow its target here.
+    """
     kml_files: list[str] = []
+    seen: set[str] = set()
+
+    def add(kml_file: str) -> None:
+        normalized = os.path.abspath(kml_file)
+        if normalized in seen:
+            logger.warning("Ignoring duplicate input: %s", kml_file)
+            return
+        seen.add(normalized)
+        kml_files.append(kml_file)
+
     for path in paths:
         p = Path(path)
         if p.is_dir():
@@ -26,14 +43,15 @@ def _collect_kml_files(paths: list[str]) -> list[str]:
                 key=numeric_filename_key,
             )
             if dir_kml_files:
-                kml_files.extend(dir_kml_files)
+                for kml_file in dir_kml_files:
+                    add(kml_file)
                 logger.info(
                     "Found %d KML file(s) in directory: %s", len(dir_kml_files), path
                 )
             else:
                 logger.warning("No KML files found in directory: %s", path)
         elif p.is_file():
-            kml_files.append(path)
+            add(path)
         else:
             logger.warning("File or directory not found: %s", path)
     return kml_files
@@ -107,8 +125,9 @@ and dates are shifted so that every flight starts on January 1st of its year
 (time of day and intervals are preserved) and the creator attribute is
 replaced. Keep a copy of the originals if you need the real dates.
 
-The output data directory (<output-dir>/data) must not overlap with the
-directory of any input file.
+The output data directory (<output-dir>/data) must not be the directory of
+an input file, or contain one. An output directory below the input directory
+(the default, the current directory) is fine.
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

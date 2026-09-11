@@ -184,7 +184,7 @@ class TestCharterwareIntegration:
         assert len(paths) == 1
         meta = metadata[0]
         assert meta["aircraft_registration"] == "OE-AKI"
-        assert meta["route"] == "LOAV-LOAV"
+        assert "route" not in meta
         assert "aircraft_type" not in meta
         assert meta["timestamp"] == "2026-01-12T15:01:00+00:00"
         assert meta["year"] == 2026
@@ -200,7 +200,6 @@ class TestCharterwareIntegration:
         kml_file = _write(tmp_path, "2026-02-15_1030h_D-EXYZ_EDDF-EDDM.kml", kml)
         _, _, metadata = parse_kml_coordinates(kml_file)
         assert metadata[0]["airport_name"] == "EDDF Frankfurt Main - EDDM Munich"
-        assert metadata[0]["route"] == "EDDF-EDDM"
         assert metadata[0]["timestamp"] == "2026-02-15T10:30:00+00:00"
 
     def test_skydemon_airport_name_not_replaced(self, tmp_path):
@@ -214,6 +213,35 @@ class TestCharterwareIntegration:
             metadata[0]["airport_name"]
             == "EDAV Eberswalde-Finow - EDBH Stralsund-Barth"
         )
-        assert "route" not in metadata[0]
         assert metadata[0]["aircraft_registration"] == "D-EHYL"
         assert metadata[0]["aircraft_type"] == "DA40"
+
+
+class TestTimeSpanPlacemark:
+    KML = f"""{KML_HEADER}
+  <Document>
+    <Placemark>
+      <name>EDDS - EDDP</name>
+      <TimeSpan>
+        <begin>2025-06-15T12:00:00Z</begin>
+        <end>2025-06-15T13:30:00Z</end>
+      </TimeSpan>
+      <LineString>
+        <coordinates>8.5,50.0,300 9.0,51.0,400 9.5,51.5,350</coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>"""
+
+    def test_timespan_gives_year_and_duration(self, tmp_path):
+        """The obfuscator shifts TimeSpan dates; the parser must read them too."""
+        from kml_heatmap.export_pipeline import path_metrics
+
+        kml_file = _write(tmp_path, "1_DEAGJ_DA20.kml", self.KML)
+        _, paths, metadata = parse_kml_coordinates(kml_file)
+
+        assert metadata[0]["year"] == 2025
+        assert metadata[0]["timestamp"] == "2025-06-15T12:00:00Z"
+        assert metadata[0]["end_timestamp"] == "2025-06-15T13:30:00Z"
+        duration, _ = path_metrics(paths[0], metadata[0])
+        assert duration == 5400.0

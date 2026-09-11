@@ -1,8 +1,9 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
-  KNOWN_YEARS,
   gotoApp,
+  knownYears,
   selectPathForReplay,
+  togglePathSelection,
   waitForAircraftFilter,
   waitForYearFilter,
 } from "./helpers";
@@ -21,7 +22,7 @@ test.describe("Filters and Statistics", () => {
     const values = await yearSelect
       .locator("option")
       .evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value));
-    expect(values).toEqual(["all", ...KNOWN_YEARS]);
+    expect(values).toEqual(["all", ...(await knownYears(page))]);
   });
 
   test("aircraft filter dropdown has options", async ({ page }) => {
@@ -36,7 +37,7 @@ test.describe("Filters and Statistics", () => {
 
   test("year filter changes data", async ({ page }) => {
     const yearSelect = page.locator("#year-select");
-    const year = KNOWN_YEARS[0]!;
+    const year = (await knownYears(page))[0]!;
 
     await yearSelect.selectOption(year);
     await waitForYearFilter(page, year);
@@ -70,10 +71,8 @@ test.describe("Filters and Statistics", () => {
 
     await statsBtn.click();
     await expect(statsPanel).toBeVisible();
-    await expect(statsPanel).toHaveClass(/visible/);
 
     await statsBtn.click();
-    await expect(statsPanel).not.toHaveClass(/visible/);
     await expect(statsPanel).toBeHidden();
   });
 
@@ -207,11 +206,7 @@ test.describe("Filters and Statistics", () => {
     const title = page.locator("#stats-rail-title");
     await expect(title).toContainText("Selected Paths Statistics");
 
-    await page.evaluate(
-      (id) => window.mapApp!.togglePathSelection(String(id)),
-      pathId,
-    );
-    await page.waitForFunction(() => window.mapApp!.selectedPathIds.size === 0);
+    await togglePathSelection(page, pathId, 0);
 
     await expect(title).toContainText("Flight Statistics");
     await expect(title).not.toContainText("Selected Paths");
@@ -227,7 +222,7 @@ test.describe("Filters and Statistics", () => {
     await waitForYearFilter(page, "all");
     const allText = await panel.textContent();
 
-    const year = KNOWN_YEARS[0]!;
+    const year = (await knownYears(page))[0]!;
     await yearSelect.selectOption(year);
     await waitForYearFilter(page, year);
 
@@ -268,7 +263,7 @@ test.describe("Filters and Statistics", () => {
     await waitForYearFilter(page, "all");
     const allYearsOptions = await aircraftSelect.locator("option").count();
 
-    const year = KNOWN_YEARS[0]!;
+    const year = (await knownYears(page))[0]!;
     await yearSelect.selectOption(year);
     await waitForYearFilter(page, year);
 

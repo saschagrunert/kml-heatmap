@@ -1,24 +1,13 @@
-import { test, expect, type Locator } from "@playwright/test";
+import { test, expect, type Locator } from "./fixtures";
 import {
-  KNOWN_YEARS,
   gotoApp,
+  knownYears,
+  openWrapped,
+  settleAnimations,
   usesMobileBar,
   waitForAircraftFilter,
   waitForYearFilter,
 } from "./helpers";
-
-/**
- * Wait until an element's entry animation has finished.
- *
- * The Wrapped surfaces fade and slide in, so anything that measures geometry
- * has to let that settle first: the map container travels 30px over 0.8s
- * after a 0.9s delay, and a box read part-way through moves on its own.
- */
-async function settleAnimations(locator: Locator): Promise<void> {
-  await locator.evaluate((el) =>
-    Promise.all(el.getAnimations().map((animation) => animation.finished)),
-  );
-}
 
 /** Fail loudly if the cards no longer overflow, rather than time out */
 async function expectScrollable(column: Locator): Promise<void> {
@@ -37,8 +26,7 @@ test.describe("Wrapped and Export", () => {
     const wrappedModal = page.locator("#wrapped-modal");
     await expect(wrappedModal).toBeHidden();
 
-    await page.locator("#wrapped-btn").click();
-    await expect(wrappedModal).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
     await expect(wrappedModal).toHaveAttribute("role", "dialog");
     await expect(wrappedModal).toHaveAttribute("aria-modal", "true");
     await expect(page.locator("#wrapped-content")).toBeVisible();
@@ -51,8 +39,7 @@ test.describe("Wrapped and Export", () => {
       await usesMobileBar(page),
       "the stacked layout scrolls the dialog, not the column",
     );
-    await page.locator("#wrapped-btn").click();
-    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
     const column = page.locator("#wrapped-cards-column");
     const map = page.locator("#wrapped-map-container");
     await expect(map).toBeVisible();
@@ -81,8 +68,7 @@ test.describe("Wrapped and Export", () => {
     const modal = page.locator("#wrapped-modal");
     const column = page.locator("#wrapped-cards-column");
 
-    await page.locator("#wrapped-btn").click();
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
     await expectScrollable(column);
     await column.evaluate((el) => el.scrollTo(0, 900));
     await expect
@@ -91,8 +77,7 @@ test.describe("Wrapped and Export", () => {
 
     await modal.locator(".close-btn").click();
     await expect(modal).toBeHidden();
-    await page.locator("#wrapped-btn").click();
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
 
     // The column keeps its position between openings, so without a reset
     // Wrapped reopens halfway down a card instead of on the title
@@ -102,8 +87,7 @@ test.describe("Wrapped and Export", () => {
   test("wrapped modal closes via close button", async ({ page }) => {
     const wrappedModal = page.locator("#wrapped-modal");
 
-    await page.locator("#wrapped-btn").click();
-    await expect(wrappedModal).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
 
     await wrappedModal.locator(".close-btn").click();
     await expect(wrappedModal).toBeHidden();
@@ -134,10 +118,7 @@ test.describe("Wrapped and Export", () => {
   });
 
   test("wrapped modal shows content sections", async ({ page }) => {
-    await page.locator("#wrapped-btn").click();
-
-    const wrappedModal = page.locator("#wrapped-modal");
-    await expect(wrappedModal).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
 
     await expect(page.locator("#wrapped-card-stats")).toBeVisible();
     await expect(page.locator("#wrapped-title")).toBeVisible();
@@ -146,8 +127,7 @@ test.describe("Wrapped and Export", () => {
   });
 
   test("wrapped modal shows all content cards", async ({ page }) => {
-    await page.locator("#wrapped-btn").click();
-    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
 
     await expect(page.locator("#wrapped-card-stats")).toBeVisible();
     await expect(page.locator("#wrapped-card-facts")).toBeVisible();
@@ -156,8 +136,7 @@ test.describe("Wrapped and Export", () => {
   });
 
   test("wrapped destinations are grouped by country", async ({ page }) => {
-    await page.locator("#wrapped-btn").click();
-    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
 
     const airportsCard = page.locator("#wrapped-card-airports");
     await expect(airportsCard).toBeVisible();
@@ -171,10 +150,7 @@ test.describe("Wrapped and Export", () => {
   });
 
   test("wrapped stats card contains flight data", async ({ page }) => {
-    await page.locator("#wrapped-btn").click();
-    await expect(page.locator("#wrapped-modal")).toBeVisible({
-      timeout: 5000,
-    });
+    await openWrapped(page);
 
     const statsCard = page.locator("#wrapped-card-stats");
     await expect(statsCard).toContainText("Flights");
@@ -182,18 +158,13 @@ test.describe("Wrapped and Export", () => {
   });
 
   test("wrapped modal includes map container", async ({ page }) => {
-    await page.locator("#wrapped-btn").click();
-    await expect(page.locator("#wrapped-modal")).toBeVisible({
-      timeout: 5000,
-    });
+    await openWrapped(page);
 
     await expect(page.locator("#wrapped-map-container #map")).toBeAttached();
   });
 
   test("wrapped modal close button is accessible", async ({ page }) => {
-    await page.locator("#wrapped-btn").click();
-    const modal = page.locator("#wrapped-modal");
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    const modal = await openWrapped(page);
 
     const closeBtn = modal.locator(".close-btn");
     await expect(closeBtn).toBeVisible();
@@ -204,17 +175,13 @@ test.describe("Wrapped and Export", () => {
     await closeBtn.click();
     await expect(modal).toBeHidden();
 
-    await page.locator("#wrapped-btn").click();
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
   });
 
   test("map returns to original position after closing wrapped", async ({
     page,
   }) => {
-    await page.locator("#wrapped-btn").click();
-    await expect(page.locator("#wrapped-modal")).toBeVisible({
-      timeout: 5000,
-    });
+    await openWrapped(page);
 
     await page.locator("#wrapped-modal .close-btn").click();
     await expect(page.locator("#wrapped-modal")).toBeHidden();
@@ -226,17 +193,15 @@ test.describe("Wrapped and Export", () => {
   });
 
   test("wrapped panel updates when year filter changes", async ({ page }) => {
+    const years = await knownYears(page);
     const yearSelect = page.locator("#year-select");
-    expect(await yearSelect.locator("option").count()).toBe(
-      KNOWN_YEARS.length + 1,
-    );
+    await expect(yearSelect.locator("option")).toHaveCount(years.length + 1);
 
-    const year = KNOWN_YEARS[0]!;
+    const year = years[0]!;
     await yearSelect.selectOption(year);
     await waitForYearFilter(page, year);
 
-    await page.locator("#wrapped-btn").click();
-    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
 
     await expect(page.locator("#wrapped-year")).toHaveText(year);
     await expect(page.locator("#wrapped-title")).toHaveText(
@@ -252,8 +217,7 @@ test.describe("Wrapped and Export", () => {
     expect(await options.count()).toBeGreaterThanOrEqual(2);
     const aircraftOption = (await options.nth(1).getAttribute("value"))!;
 
-    await page.locator("#wrapped-btn").click();
-    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
 
     const allStatsText = await page.locator("#wrapped-stats").textContent();
     await page.locator("#wrapped-modal .close-btn").click();
@@ -262,8 +226,7 @@ test.describe("Wrapped and Export", () => {
     await aircraftSelect.selectOption(aircraftOption);
     await waitForAircraftFilter(page, aircraftOption);
 
-    await page.locator("#wrapped-btn").click();
-    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
 
     await expect(page.locator("#wrapped-stats")).not.toHaveText(allStatsText!);
     await expect(page.locator("#wrapped-aircraft-fleet")).toContainText(
@@ -277,8 +240,7 @@ test.describe("Wrapped and Export", () => {
     await page.locator("#year-select").selectOption("all");
     await waitForYearFilter(page, "all");
 
-    await page.locator("#wrapped-btn").click();
-    await expect(page.locator("#wrapped-modal")).toBeVisible({ timeout: 5000 });
+    await openWrapped(page);
 
     await expect(page.locator("#wrapped-year")).toHaveText("All Years");
     await expect(page.locator("#wrapped-title")).toHaveText(

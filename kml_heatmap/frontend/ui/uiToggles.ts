@@ -4,7 +4,7 @@
 import type * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import { setControlLabel } from "../utils/buttonState";
-import { domCache, hideControls, restoreControls } from "../utils/domCache";
+import { domCache } from "../utils/domCache";
 import { showToast } from "../utils/toast";
 
 type ColorLayerMode = "altitude" | "airspeed";
@@ -167,22 +167,16 @@ export class UIToggles {
       "stats-panel",
       "loading",
     ]);
-
-    // The share button is bound here because the data-action map in
-    // mapApp.ts does not know this action yet.
-    const shareBtn = domCache.get("share-btn");
-    if (shareBtn) {
-      shareBtn.addEventListener("click", () => {
-        void this.shareLink();
-      });
-    }
   }
 
+  /**
+   * Add or remove a layer and record the result in the store. The buttons
+   * and legends follow the store, so nothing here touches them.
+   */
   private toggleSimpleLayer(
     layer: L.Layer | null | undefined,
     visible: boolean,
     setVisible: (v: boolean) => void,
-    btnId: string,
     onAdd?: () => void,
   ): void {
     if (!this.app.map) return;
@@ -195,12 +189,6 @@ export class UIToggles {
       onAdd?.();
       setVisible(true);
     }
-
-    const btn = domCache.get(btnId);
-    if (btn) {
-      btn.style.opacity = visible ? "0.5" : "1.0";
-      btn.setAttribute("aria-pressed", visible ? "false" : "true");
-    }
   }
 
   toggleHeatmap(): void {
@@ -210,7 +198,6 @@ export class UIToggles {
       (v) => {
         this.app.heatmapVisible = v;
       },
-      "heatmap-btn",
       () => {
         if (this.app.heatmapLayer?._canvas) {
           this.app.heatmapLayer._canvas.style.pointerEvents = "none";
@@ -240,12 +227,6 @@ export class UIToggles {
       mode === "altitude" ? this.app.altitudeLayer : this.app.airspeedLayer;
     const otherLayer =
       mode === "altitude" ? this.app.airspeedLayer : this.app.altitudeLayer;
-    const btnId = mode === "altitude" ? "altitude-btn" : "airspeed-btn";
-    const otherBtnId = mode === "altitude" ? "airspeed-btn" : "altitude-btn";
-    const legendId =
-      mode === "altitude" ? "altitude-legend" : "airspeed-legend";
-    const otherLegendId =
-      mode === "altitude" ? "airspeed-legend" : "altitude-legend";
     const redraw =
       mode === "altitude"
         ? () => this.app.layerManager.redrawAltitudePaths()
@@ -260,30 +241,17 @@ export class UIToggles {
       else this.app.airspeedVisible = value;
     };
 
+    // The buttons and the legends follow the store keys written below
     if (isVisible) {
       if (this.app.replayManager.state.active && !otherVisible) return;
       this.app.map.removeLayer(layer);
       setVisible(false);
-      const btn = domCache.get(btnId);
-      if (btn) {
-        btn.style.opacity = "0.5";
-        btn.setAttribute("aria-pressed", "false");
-      }
-      const legend = domCache.get(legendId);
-      if (legend) legend.style.display = "none";
     } else {
       if (otherVisible) {
         if (!this.app.replayManager.state.active) {
           this.app.map.removeLayer(otherLayer);
         }
         setOtherVisible(false);
-        const otherBtn = domCache.get(otherBtnId);
-        if (otherBtn) {
-          otherBtn.style.opacity = "0.5";
-          otherBtn.setAttribute("aria-pressed", "false");
-        }
-        const otherLegend = domCache.get(otherLegendId);
-        if (otherLegend) otherLegend.style.display = "none";
       }
 
       if (!this.app.replayManager.state.active) {
@@ -294,13 +262,6 @@ export class UIToggles {
       }
 
       setVisible(true);
-      const btn = domCache.get(btnId);
-      if (btn) {
-        btn.style.opacity = "1.0";
-        btn.setAttribute("aria-pressed", "true");
-      }
-      const legend = domCache.get(legendId);
-      if (legend) legend.style.display = "block";
     }
 
     // The heatmap underneath steps back so the colour scale reads
@@ -322,7 +283,6 @@ export class UIToggles {
       (v) => {
         this.app.airportsVisible = v;
       },
-      "airports-btn",
     );
   }
 
@@ -339,12 +299,16 @@ export class UIToggles {
       (v) => {
         this.app.aviationVisible = v;
       },
-      "aviation-btn",
     );
   }
 
+  /**
+   * Capture the map as an image. Only the `#map` element is rendered, and
+   * the controls are its siblings, so they never appear in the image and
+   * nothing has to be hidden for it.
+   */
   exportMap(): void {
-    const btn = domCache.get("export-btn") as HTMLButtonElement | null;
+    const btn = domCache.get("export-btn", HTMLButtonElement);
     const mapContainer = domCache.get("map");
     if (!btn || !mapContainer) return;
     // An export is already running
@@ -353,10 +317,8 @@ export class UIToggles {
     btn.disabled = true;
     // Only the label changes so the button keeps its icon
     setControlLabel(btn, EXPORT_BUTTON_BUSY_LABEL);
-    const savedDisplays = hideControls(["replay-btn", "share-btn"]);
 
     const restore = () => {
-      restoreControls(savedDisplays);
       btn.disabled = false;
       setControlLabel(btn, EXPORT_BUTTON_LABEL);
     };
@@ -374,9 +336,6 @@ export class UIToggles {
       showToast("Export unavailable", "error");
       return;
     }
-
-    // Give the browser a moment to repaint without the hidden controls
-    await new Promise<void>((resolve) => setTimeout(resolve, 200));
 
     const scale = window.innerWidth < MOBILE_BREAKPOINT_PX ? 1 : 2;
     const dataUrl = await domtoimage.toJpeg(mapContainer, {
@@ -412,8 +371,8 @@ export class UIToggles {
    * the link is copied to the clipboard.
    */
   async shareLink(): Promise<void> {
-    // Flush any pending state so the URL reflects the current view
-    this.app.stateManager.saveMapState();
+    // The URL is read right now, so the debounced save has to land first
+    this.app.stateManager.flush();
     const url = window.location.href;
 
     if (typeof navigator.share === "function") {

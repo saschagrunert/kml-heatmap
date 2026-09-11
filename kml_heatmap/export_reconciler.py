@@ -3,8 +3,9 @@
 The exported segments are the only flight data the frontend sees, so every
 numeric statistic is computed from them: each worker process aggregates its
 year's segments into a compact ``YearAggregate`` and the main process merges
-the aggregates and writes them into the statistics dict. This keeps the
-statistics panel consistent with what the frontend computes for its filters.
+the aggregates; ``statistics.build_statistics`` turns the result into the
+statistics dict. This keeps the statistics panel consistent with what the
+frontend computes for its filters.
 """
 
 from dataclasses import dataclass, field
@@ -15,12 +16,10 @@ from .constants import (
     CRUISE_ALTITUDE_THRESHOLD_FT,
     FEET_TO_METERS,
     KM_TO_NAUTICAL_MILES,
-    METERS_TO_FEET,
 )
-from .helpers import format_flight_time
 
 if TYPE_CHECKING:
-    from .types import SegmentRow, Statistics
+    from .types import SegmentRow
 
 __all__ = ["YearAggregate"]
 
@@ -64,7 +63,15 @@ class YearAggregate:
         registration: str | None,
         altitude_range_ft: tuple[float, float] | None = None,
     ) -> None:
-        """Accumulate one exported path (its segment rows and their distances)."""
+        """Accumulate one exported path (its segment rows and their distances).
+
+        The flight time is the span of the segment times, exactly as the
+        frontend computes it from the exported rows. Segment times are start
+        offsets and zero-length (standstill) segments are not exported, so the
+        span is the time between the first and the last movement; the source
+        file's own time span would also count the standstill before and after
+        and disagree with what the statistics panel shows.
+        """
         self.num_paths += 1
         if not segments:
             return
@@ -188,69 +195,4 @@ class YearAggregate:
         for registration, distance in other.aircraft_distance_km.items():
             self.aircraft_distance_km[registration] = (
                 self.aircraft_distance_km.get(registration, 0.0) + distance
-            )
-
-    def apply_to_stats(self, stats: Statistics) -> None:
-        """Write the reconciled statistics into ``stats`` (authoritative)."""
-        stats["total_points"] = self.total_points
-        stats["num_paths"] = self.num_paths
-        stats["total_distance_km"] = self.total_distance_km
-        stats["total_distance_nm"] = self.total_distance_km * KM_TO_NAUTICAL_MILES
-
-        if self.min_altitude_ft is not None and self.max_altitude_ft is not None:
-            stats["min_altitude_m"] = self.min_altitude_ft * FEET_TO_METERS
-            stats["max_altitude_m"] = self.max_altitude_ft * FEET_TO_METERS
-            stats["min_altitude_ft"] = self.min_altitude_ft
-            stats["max_altitude_ft"] = self.max_altitude_ft
-        else:
-            stats["min_altitude_m"] = None
-            stats["max_altitude_m"] = None
-            stats["min_altitude_ft"] = None
-            stats["max_altitude_ft"] = None
-
-        stats["total_altitude_gain_m"] = self.total_altitude_gain_m
-        stats["total_altitude_gain_ft"] = self.total_altitude_gain_m * METERS_TO_FEET
-
-        stats["max_groundspeed_knots"] = round(self.max_groundspeed_knots, 1)
-        stats["avg_groundspeed_knots"] = (
-            self.groundspeed_sum / self.groundspeed_count
-            if self.groundspeed_count > 0
-            else 0.0
-        )
-        stats["cruise_speed_knots"] = (
-            self.cruise_distance_nm / self.cruise_time_hours
-            if self.cruise_time_hours > 0
-            else 0.0
-        )
-
-        if self.cruise_altitude_bins:
-            most_common_ft = min(
-                self.cruise_altitude_bins,
-                key=lambda k: (-self.cruise_altitude_bins[k], k),
-            )
-            stats["most_common_cruise_altitude_ft"] = most_common_ft
-            stats["most_common_cruise_altitude_m"] = round(
-                most_common_ft * FEET_TO_METERS, 1
-            )
-        else:
-            stats["most_common_cruise_altitude_ft"] = None
-            stats["most_common_cruise_altitude_m"] = None
-
-        stats["longest_flight_km"] = round(self.longest_flight_km, 1)
-        stats["longest_flight_nm"] = round(
-            self.longest_flight_km * KM_TO_NAUTICAL_MILES, 1
-        )
-
-        stats["total_flight_time_seconds"] = self.total_flight_time_seconds
-        stats["total_flight_time_str"] = format_flight_time(
-            self.total_flight_time_seconds
-        )
-
-        for aircraft in stats.get("aircraft_list", []):
-            registration = aircraft["registration"]
-            seconds = self.aircraft_time_seconds.get(registration, 0.0)
-            aircraft["flight_time_seconds"] = seconds
-            aircraft["flight_time_str"] = format_flight_time(seconds)
-            aircraft["flight_distance_km"] = self.aircraft_distance_km.get(
-                registration, 0.0
             )

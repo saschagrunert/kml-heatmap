@@ -18,11 +18,12 @@ response within a few days.
 
 ## Public tile API keys
 
-The generated site embeds the CARTO and OpenAIP tile API keys in
-`docs/map_config.js`. They are public client-side keys that the browser needs
-to load the base map and the Aviation Data layer, so they are published with
-the site and committed to git by design. Reports about these keys being
-visible are not security issues.
+The generated site embeds the CARTO and OpenAIP tile API keys in its
+`map_config.js`. They are public client-side keys that the browser needs to
+load the base map and the Aviation Data layer, so they are published with the
+site by design. The `deploy` workflow reads them from the repository secrets;
+the generated site itself is not committed. Reports about these keys being
+visible on the site are not security issues.
 
 ## Automated checks
 

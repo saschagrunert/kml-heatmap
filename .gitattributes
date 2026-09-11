@@ -18,6 +18,3 @@
 Makefile text eol=lf
 Dockerfile text eol=lf
 Dockerfile.* text eol=lf
-
-# Generated site: collapsed in GitHub diffs and excluded from language stats
-docs/** linguist-generated=true -diff
