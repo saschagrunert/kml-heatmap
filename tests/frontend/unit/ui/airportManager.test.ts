@@ -57,9 +57,6 @@ describe("AirportManager", () => {
       ],
       airportMarkers: markers as unknown as MockApp["airportMarkers"],
     });
-    mockApp.layerManager.getPathInfoMap.mockImplementation(
-      () => new Map(pathInfo.map((p) => [p.id, p])),
-    );
     mockApp.airportLayer.hasLayer.mockReturnValue(true);
 
     airportManager = new AirportManager(asMapApp(mockApp));
@@ -205,17 +202,29 @@ describe("AirportManager", () => {
       );
     });
 
-    it("adds airports of selected paths using the path info map", () => {
+    it("adds airports of selected paths to the filter's airports", () => {
+      mockApp.selectedYear = "2025";
+      mockApp.airportLayer.removeLayer.mockClear();
+      // Path 3 flew in 2024, to EDDK
       mockApp.selectedPathIds.add(3);
 
       airportManager.updateAirportOpacity();
 
-      expect(mockApp.layerManager.getPathInfoMap).toHaveBeenCalled();
-      expect(markers["EDDF"]!.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(markers["EDDK"]!.setOpacity).toHaveBeenCalledWith(1.0);
+      for (const name of ["EDDF", "EDDM", "EDDK"]) {
+        expect(markers[name]!.setOpacity).toHaveBeenCalledWith(1.0);
+      }
+      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledTimes(1);
       expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        markers["EDDM"],
+        markers["LOWW"],
       );
+    });
+
+    it("keeps every airport for a selection without a filter (regression)", () => {
+      mockApp.selectedPathIds.add(3);
+
+      airportManager.updateAirportOpacity();
+
+      expect(mockApp.airportLayer.removeLayer).not.toHaveBeenCalled();
     });
 
     it("only shows airports of selected paths in isolate mode", () => {
@@ -435,6 +444,43 @@ describe("AirportManager", () => {
   });
 
   describe("store subscriptions", () => {
+    it("refreshes each once for an update that changes several keys (regression)", () => {
+      const popups = vi.spyOn(airportManager, "updateAirportPopups");
+      const opacity = vi.spyOn(airportManager, "updateAirportOpacity");
+
+      // What a year switch publishes
+      mockApp.selectedPathIds.add(1);
+      mockApp.store.batch(() => {
+        mockApp.selectedYear = "2024";
+        mockApp.currentData = createDataset(pathInfo.slice(2));
+        mockApp.selectedAircraft = "D-ABCD";
+        mockApp.selectedPathIds.clear();
+        mockApp.store.notifyMutation("selectedPathIds");
+      });
+
+      expect(popups).toHaveBeenCalledTimes(1);
+      expect(opacity).toHaveBeenCalledTimes(1);
+    });
+
+    it("declutters the labels again when the airports are shown (regression)", () => {
+      mockApp.airportsVisible = false;
+      const declutter = vi.spyOn(airportManager, "declutterLabels");
+
+      // Leaflet rebuilds each icon from its HTML when the layer comes back,
+      // which drops the crowded class of every label
+      mockApp.airportsVisible = true;
+
+      expect(declutter).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not declutter when the airports are hidden", () => {
+      const declutter = vi.spyOn(airportManager, "declutterLabels");
+
+      mockApp.airportsVisible = false;
+
+      expect(declutter).not.toHaveBeenCalled();
+    });
+
     it("refreshes the popups and the visibility when the filter changes", () => {
       const popups = vi.spyOn(airportManager, "updateAirportPopups");
       const opacity = vi.spyOn(airportManager, "updateAirportOpacity");

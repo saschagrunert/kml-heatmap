@@ -12,6 +12,7 @@ import type {
 } from "../types";
 import type { Coordinate } from "../utils/geometry";
 import { DataLoader } from "../services/dataLoader";
+import { datasetIndex } from "../calculations/datasetIndex";
 import { calculateAltitudeRange } from "../features/layers";
 import { domCache } from "../utils/domCache";
 import { formatFileSize } from "../utils/formatters";
@@ -24,12 +25,11 @@ export class DataManager {
   private updateRequestId = 0;
   /** Set when the loader already reported a failure via toast */
   private loadErrorReported = false;
+  /** Year the published dataset was loaded for */
+  private dataYear: string | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
-
-    // Pre-cache loading element
-    domCache.cacheElements(["loading"]);
 
     this.dataLoader = new DataLoader({
       dataDir: app.config.dataDir,
@@ -105,19 +105,29 @@ export class DataManager {
   }
 
   /**
-   * Reload the dataset for the current year, then rebuild the heatmap and
-   * the visible colour layers. The statistics panel and the airport markers
-   * follow the store on their own.
+   * Rebuild the heatmap and the visible colour layers for the current year,
+   * loading its dataset first when it is not the one on the map. The
+   * statistics panel and the airport markers follow the store on their own.
+   *
+   * @param preloaded - The current year's dataset, from a caller that has
+   *   already loaded it, so a failed load is not retried (and reported) twice
    */
   async updateLayers(preloaded?: KMLDataset | null): Promise<void> {
     if (!this.app.map) return;
 
     const year = this.app.selectedYear;
     const requestId = ++this.updateRequestId;
-    // Callers that already loaded this year pass the dataset in so that a
-    // failed load is not retried (and re-reported) a second time here
+    // A redraw for the selection or the aircraft keeps the dataset on the
+    // map. Loading it again would retry a year that failed to load, report
+    // it once more and publish a new dataset that every consumer recomputes;
+    // only a year switch retries.
+    const current = this.app.currentData;
     const data =
-      preloaded !== undefined ? preloaded : await this.loadData(year);
+      preloaded !== undefined
+        ? preloaded
+        : current !== null && this.dataYear === year
+          ? current
+          : await this.loadData(year);
 
     // A newer updateLayers() call superseded this one: drop the stale result
     if (requestId !== this.updateRequestId) return;
@@ -134,39 +144,27 @@ export class DataManager {
     }
 
     this.app.currentData = data;
+    this.dataYear = year;
 
     // Filter coordinates based on active filters and isolate mode
     let filteredCoordinates = data.coordinates;
-    const hasIsolation =
-      this.app.isolateSelection && this.app.selectedPathIds.size > 0;
+    const selected = this.app.selectedPathIds;
+    const hasIsolation = this.app.isolateSelection && selected.size > 0;
 
-    // Path ids the year/aircraft filter keeps. Checking the path info (about a
-    // hundred entries) is what says whether the filter changes anything at
-    // all: a year filter over that year's own file keeps every path, and then
-    // data.coordinates already is the answer. Walking every segment to
-    // rediscover that costs two string keys per segment for nothing.
-    const filteredPathIds = new Set<number>();
-    let allPathsMatch = true;
-    for (const pathInfo of data.path_info) {
-      const matchesYear =
-        this.app.selectedYear === "all" ||
-        (pathInfo.year !== undefined &&
-          pathInfo.year.toString() === this.app.selectedYear);
-      const matchesAircraft =
-        this.app.selectedAircraft === "all" ||
-        pathInfo.aircraft_registration === this.app.selectedAircraft;
-      if (matchesYear && matchesAircraft) {
-        filteredPathIds.add(pathInfo.id);
-      } else {
-        allPathsMatch = false;
-      }
-    }
+    // What the year/aircraft filter keeps. A year filter over that year's own
+    // file keeps every path, and then data.coordinates already is the answer.
+    const view = datasetIndex(data).filter(
+      this.app.selectedYear,
+      this.app.selectedAircraft,
+    );
 
-    if (hasIsolation || !allPathsMatch) {
+    if (hasIsolation || !view.keepsAll) {
+      // Isolation shows the selected paths the filter keeps, exactly what
+      // the colour layers draw
       filteredCoordinates = heatmapCoordinates(data.path_segments, (pathId) =>
         hasIsolation
-          ? this.app.selectedPathIds.has(pathId)
-          : filteredPathIds.has(pathId),
+          ? selected.has(pathId) && view.pathIds.has(pathId)
+          : view.pathIds.has(pathId),
       );
     }
 
@@ -204,29 +202,10 @@ export class DataManager {
       this.applyHeatmapEmphasis();
     }
 
-    // Build airport-to-paths relationships from path_info
-    this.app.airportToPaths = {};
-    for (const pathInfo of data.path_info) {
-      const pathId = pathInfo.id;
-      if (pathInfo.start_airport) {
-        const startSet =
-          this.app.airportToPaths[pathInfo.start_airport] ?? new Set<number>();
-        startSet.add(pathId);
-        this.app.airportToPaths[pathInfo.start_airport] = startSet;
-      }
-      if (pathInfo.end_airport) {
-        const endSet =
-          this.app.airportToPaths[pathInfo.end_airport] ?? new Set<number>();
-        endSet.add(pathId);
-        this.app.airportToPaths[pathInfo.end_airport] = endSet;
-      }
-    }
-
     // Calculate altitude range from all segments
     if (data.path_segments.length > 0) {
       this.app.altitudeRange = calculateAltitudeRange(
         data.path_segments,
-        null,
         this.app.altitudeRange,
         data.path_info,
       );

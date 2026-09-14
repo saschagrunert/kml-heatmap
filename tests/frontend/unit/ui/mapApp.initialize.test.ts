@@ -16,7 +16,6 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
 }));
 vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
   domCache: {
-    cacheElements: vi.fn(),
     get: vi.fn((id: string, ctor?: new () => HTMLElement) => {
       const element = document.getElementById(id);
       if (!element || !ctor) return element;
@@ -133,7 +132,8 @@ describe("MapApp.initialize", () => {
       expect(mockDataManagerInstance.loadMetadata).toHaveBeenCalledTimes(1);
       expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("2025");
       expect(app.allAirportsData).toEqual(defaultAirports);
-      expect(app.fullStats).toEqual(defaultMetadata.stats);
+      expect(app.aircraftModels).toBe(defaultMetadata.aircraft_models);
+      expect(app.hasTimingData).toBe(true);
       expect(app.currentData).toBe(defaultData);
       expect(app.fullPathInfo).toBe(defaultData.path_info);
       expect(app.fullPathSegments).toBe(defaultData.path_segments);
@@ -199,7 +199,8 @@ describe("MapApp.initialize", () => {
       await initializeApp(app, defaultAirports, null);
 
       expect(yearSelect().options).toHaveLength(1);
-      expect(app.fullStats).toBeNull();
+      expect(app.aircraftModels).toEqual({});
+      expect(app.hasTimingData).toBe(false);
       expect(app.selectedYear).toBe("all");
       expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("all");
     });
@@ -453,7 +454,10 @@ describe("MapApp.initialize", () => {
         isolateSelection: true,
       });
 
-      await initializeApp(app);
+      await initializeApp(app, defaultAirports, defaultMetadata, {
+        ...defaultData,
+        path_info: [...defaultData.path_info, { id: 2, year: 2025 }],
+      });
 
       expect([...app.selectedPathIds]).toEqual([1, 2]);
       expect(app.isolateSelection).toBe(true);
@@ -461,6 +465,43 @@ describe("MapApp.initialize", () => {
       expect(
         mockReplayManagerInstance.updateReplayButtonState,
       ).not.toHaveBeenCalled();
+    });
+
+    it("drops restored paths the loaded data does not have", async () => {
+      // Ids are content hashes: a link can outlive the flight it names
+      mockStateManagerInstance.loadState.mockReturnValue({
+        selectedPathIds: [1, 840108108563],
+        isolateSelection: true,
+      });
+
+      await initializeApp(app);
+
+      expect([...app.selectedPathIds]).toEqual([1]);
+      expect(app.isolateSelection).toBe(true);
+    });
+
+    it("drops the isolate flag with the last restored path that is gone", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({
+        selectedPathIds: [840108108563],
+        isolateSelection: true,
+      });
+
+      await initializeApp(app);
+
+      expect(app.selectedPathIds.size).toBe(0);
+      expect(app.isolateSelection).toBe(false);
+    });
+
+    it("drops a restored isolate flag without a selection (regression)", async () => {
+      // A link written before path ids were versioned loses its paths but
+      // still carries the isolate flag
+      mockStateManagerInstance.loadState.mockReturnValue({
+        isolateSelection: true,
+      });
+
+      await initializeApp(app);
+
+      expect(app.isolateSelection).toBe(false);
     });
 
     it("restores the stats panel through the stats manager", async () => {

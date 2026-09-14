@@ -6,13 +6,11 @@
  * other managers. The real domCache and the real pure helpers (formatTime,
  * colors, bearing) are used.
  */
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import type { HeatmapLayer } from "../../../../kml_heatmap/frontend/globals";
-import type {
-  FilteredStatistics,
-  PathSegment,
-} from "../../../../kml_heatmap/frontend/types";
+import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
+import { LIVE_REGION_DELAY_MS } from "../../../../kml_heatmap/frontend/utils/toast";
 import { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
 import {
   asMapApp,
@@ -60,23 +58,6 @@ export function createSegments(): PathSegment[] {
   ];
 }
 
-/** Full statistics that only carry the groundspeed replay looks at */
-export function statsWithSpeed(
-  maxGroundspeedKnots: number,
-): FilteredStatistics {
-  return {
-    total_points: 0,
-    num_paths: 1,
-    num_airports: 0,
-    airport_names: [],
-    num_aircraft: 0,
-    aircraft_list: [],
-    total_distance_km: 0,
-    total_distance_nm: 0,
-    max_groundspeed_knots: maxGroundspeedKnots,
-  };
-}
-
 /**
  * A mock app holding path 1 with timing data. The buttons and legends are
  * wired to the store the way MapApp does it, so the tests can read the
@@ -85,7 +66,7 @@ export function statsWithSpeed(
 export function createReplayMockApp(): MockApp {
   const app = createMockApp({
     currentData: createDataset([{ id: 1 }], createSegments()),
-    fullStats: statsWithSpeed(130),
+    hasTimingData: true,
   });
   app.heatmapLayer = {
     addTo: vi.fn(),
@@ -157,6 +138,7 @@ const PAGE_CHROME: FixtureNode[] = [
   { id: "heatmap-btn", tag: "button" },
   { id: "airports-btn", tag: "button" },
   { id: "aviation-btn", tag: "button" },
+  { id: "wrapped-btn", tag: "button" },
   { id: "year-select", tag: "select" },
   { id: "aircraft-select", tag: "select" },
 ];
@@ -189,6 +171,11 @@ function buildFixtureNode(node: FixtureNode): HTMLElement {
   return element;
 }
 
+/** The map's closePopup spy */
+export function closePopupSpy(app: MockApp): Mock {
+  return app.map!.closePopup;
+}
+
 export function mountReplayDom(): void {
   for (const node of [REPLAY_PANEL, ...PAGE_CHROME]) {
     document.body.appendChild(buildFixtureNode(node));
@@ -200,8 +187,8 @@ export function unmountReplayDom(): void {
     document.getElementById(node.id)?.remove();
   }
   document
-    .querySelectorAll(".toast-notification")
-    .forEach((toast) => toast.remove());
+    .querySelectorAll("#toast-stack, #toast-status, #toast-alert")
+    .forEach((element) => element.remove());
   // Replay hands the bottom edge over to the mobile bar, which only mounts
   // on a narrow viewport; clean it up so a test that changes the width
   // stays isolated
@@ -225,7 +212,11 @@ export function mockAnimationFrame(): void {
   });
 }
 
-/** Last message written to the replay live region */
+/**
+ * Last message written to the replay live region. The region is filled a
+ * moment after it is cleared, so the fake clock is moved past that first.
+ */
 export function liveRegionText(): string {
+  vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
   return document.getElementById("replay-live")?.textContent ?? "";
 }

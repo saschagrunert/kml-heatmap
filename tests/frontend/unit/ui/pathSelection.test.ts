@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { PathSelection } from "../../../../kml_heatmap/frontend/ui/pathSelection";
-import { createMockApp, asMapApp, type MockApp } from "../../testHelpers";
+import {
+  createMockApp,
+  createDataset,
+  asMapApp,
+  type MockApp,
+} from "../../testHelpers";
 
 const mapHelpers = vi.hoisted(() => ({
   invalidateMapAfterTransition: vi.fn(),
@@ -175,6 +180,32 @@ describe("PathSelection", () => {
       pathSelection.selectPathsByAirport("EDDF");
 
       expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
+    });
+
+    it("selects only the flights the aircraft filter keeps (regression)", () => {
+      const app = createMockApp({
+        currentData: createDataset([
+          {
+            id: 1,
+            aircraft_registration: "D-ABCD",
+            start_airport: "EDDF",
+            end_airport: "EDDM",
+          },
+          {
+            id: 2,
+            aircraft_registration: "D-EFGH",
+            start_airport: "EDDF",
+            end_airport: "EDDK",
+          },
+        ]),
+        selectedAircraft: "D-ABCD",
+      });
+      const selection = new PathSelection(asMapApp(app));
+
+      selection.selectPathsByAirport("EDDF");
+
+      // The panel read "2 selected paths" beside the one flight on the map
+      expect([...app.selectedPathIds]).toEqual([1]);
     });
   });
 

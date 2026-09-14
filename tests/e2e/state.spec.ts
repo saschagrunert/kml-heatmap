@@ -5,6 +5,7 @@ import {
   knownYears,
   layerButton,
   readSavedState,
+  selectionParams,
   selectPathForReplay,
   setAircraftFilter,
   setYearFilter,
@@ -165,8 +166,11 @@ test.describe("State Persistence", () => {
       // The 8th slot of the visibility string carried the hide-controls
       // flag. The feature is gone but links minted before it went away
       // still set the bit, and the isolate flag behind it has to survive
-      // the slot being ignored rather than shifting by one.
-      await gotoApp(page, "/?v=100100011");
+      // the slot being ignored rather than shifting by one. Isolation only
+      // sticks with a selection to isolate, so the link carries one.
+      await gotoApp(page);
+      const pathId = await firstPathId(page);
+      await gotoApp(page, `/?v=100100011&${selectionParams(pathId)}`);
 
       await expect(page.locator("#isolate-btn")).toHaveAttribute(
         "aria-pressed",
@@ -227,7 +231,7 @@ test.describe("State Persistence", () => {
     }) => {
       const pathId = await firstPathId(page);
 
-      await gotoApp(page, `/?p=${pathId}&sv=2`);
+      await gotoApp(page, `/?${selectionParams(pathId)}`);
 
       await page.waitForFunction(
         () => window.mapApp!.selectedPathIds.size > 0,
@@ -238,6 +242,43 @@ test.describe("State Persistence", () => {
         pathId,
       );
       expect(hasPath).toBe(true);
+    });
+
+    test("a linked flight that no longer exists is dropped with the isolate flag", async ({
+      page,
+    }) => {
+      const pathId = await firstPathId(page);
+      // Ids are content hashes, so a flight removed from the export leaves
+      // an id behind that nothing answers to
+      const missing = await page.evaluate(() => {
+        const known = new Set(window.mapApp!.fullPathInfo!.map((p) => p.id));
+        let id = 1;
+        while (known.has(id)) id++;
+        return id;
+      });
+
+      await gotoApp(page, `/?v=100100001&${selectionParams(missing)}`);
+
+      expect(
+        await page.evaluate(() => ({
+          selected: window.mapApp!.selectedPathIds.size,
+          isolate: window.mapApp!.isolateSelection,
+        })),
+      ).toEqual({ selected: 0, isolate: false });
+      await expect(page.locator("#isolate-btn")).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+
+      // A flight that still exists keeps its place in the same link
+      await gotoApp(page, `/?${selectionParams(missing, pathId)}`);
+
+      expect(
+        await page.evaluate(() => [...window.mapApp!.selectedPathIds]),
+      ).toEqual([pathId]);
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get("p"))
+        .toBe(String(pathId));
     });
 
     test("localStorage is used when no URL params present", async ({

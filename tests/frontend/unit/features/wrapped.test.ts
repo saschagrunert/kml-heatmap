@@ -184,7 +184,7 @@ describe("wrapped feature", () => {
         mockPathInfo,
         mockSegments,
         2025,
-        null,
+        {},
         "all",
         preFiltered,
       );
@@ -211,22 +211,30 @@ describe("wrapped feature", () => {
       });
     });
 
-    it("enriches aircraft with model from fullStats", () => {
-      const fullStats = {
-        aircraft_list: [{ registration: "D-EAGJ", model: "Diamond DA40 NG" }],
-      };
-
-      const stats = calculateYearStats(
-        mockPathInfo,
-        mockSegments,
-        2025,
-        fullStats,
-      );
+    it("enriches aircraft with the model names from the metadata", () => {
+      const stats = calculateYearStats(mockPathInfo, mockSegments, 2025, {
+        "D-EAGJ": "Diamond DA40 NG",
+      });
 
       const aircraft = stats.aircraft_list.find(
         (a) => a.registration === "D-EAGJ",
       );
       expect(aircraft?.model).toBe("Diamond DA40 NG");
+      // Aircraft that aircraft.json does not know keep their KML type
+      for (const other of stats.aircraft_list) {
+        if (other.registration !== "D-EAGJ") {
+          expect(other.model).toBeUndefined();
+        }
+      }
+    });
+
+    it("never takes a model from the object prototype", () => {
+      const pathInfo = [
+        { id: 1, year: 2025, aircraft_registration: "toString" },
+      ];
+      const stats = calculateYearStats(pathInfo, [], 2025, {});
+
+      expect(stats.aircraft_list[0]?.model).toBeUndefined();
     });
 
     it("filters by aircraft when aircraft parameter is provided", () => {
@@ -234,7 +242,7 @@ describe("wrapped feature", () => {
         mockPathInfo,
         mockSegments,
         "all",
-        null,
+        {},
         "D-EAGJ",
       );
 
@@ -248,7 +256,7 @@ describe("wrapped feature", () => {
         mockPathInfo,
         mockSegments,
         2025,
-        null,
+        {},
         "D-EAGJ",
       );
 
@@ -261,7 +269,7 @@ describe("wrapped feature", () => {
         mockPathInfo,
         mockSegments,
         2025,
-        null,
+        {},
         "D-NONE",
       );
 
@@ -378,7 +386,18 @@ describe("wrapped feature", () => {
         total_flight_time_seconds: 100000,
       });
 
-      expect(facts.some((f) => f.category === "time")).toBe(true);
+      const time = facts.find((f) => f.category === "time");
+      expect(time?.text).toContain("27 hours");
+    });
+
+    it("gives a flight time under an hour in minutes", () => {
+      const facts = generateFunFacts(yearStats, {
+        total_flight_time_seconds: 45 * 60,
+      });
+
+      const time = facts.find((f) => f.category === "time");
+      expect(time?.text).toContain("0h 45m");
+      expect(time?.text).not.toContain("0 hours");
     });
 
     it("generates speed facts when provided", () => {
@@ -528,7 +547,6 @@ describe("wrapped feature", () => {
         total_flight_time_seconds: 100000,
         cruise_speed_knots: 120,
         longest_flight_nm: 300,
-        longest_flight_km: 555,
         max_altitude_ft: 5000,
         most_common_cruise_altitude_ft: 1500,
         most_common_cruise_altitude_m: 457,
@@ -544,7 +562,6 @@ describe("wrapped feature", () => {
         total_flight_time_seconds: 100000,
         cruise_speed_knots: 120,
         longest_flight_nm: 300,
-        longest_flight_km: 555,
         max_altitude_ft: 45000,
         most_common_cruise_altitude_ft: 1500,
         most_common_cruise_altitude_m: 457,

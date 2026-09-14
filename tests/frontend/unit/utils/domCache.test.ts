@@ -127,47 +127,6 @@ describe("DOMCache", () => {
     });
   });
 
-  describe("cacheElements", () => {
-    it("caches multiple elements at once", () => {
-      const el1 = document.createElement("div");
-      el1.id = "element-1";
-      const el2 = document.createElement("div");
-      el2.id = "element-2";
-      const el3 = document.createElement("div");
-      el3.id = "element-3";
-
-      document.body.appendChild(el1);
-      document.body.appendChild(el2);
-      document.body.appendChild(el3);
-
-      domCache.cacheElements(["element-1", "element-2", "element-3"]);
-
-      expect(domCache.has("element-1")).toBe(true);
-      expect(domCache.has("element-2")).toBe(true);
-      expect(domCache.has("element-3")).toBe(true);
-      expect(domCache.size).toBe(3);
-    });
-
-    it("skips non-existent elements", () => {
-      const el1 = document.createElement("div");
-      el1.id = "exists";
-      document.body.appendChild(el1);
-
-      domCache.cacheElements(["exists", "does-not-exist", "also-missing"]);
-
-      expect(domCache.has("exists")).toBe(true);
-      expect(domCache.has("does-not-exist")).toBe(false);
-      expect(domCache.has("also-missing")).toBe(false);
-      expect(domCache.size).toBe(1);
-    });
-
-    it("handles empty array", () => {
-      domCache.cacheElements([]);
-
-      expect(domCache.size).toBe(0);
-    });
-  });
-
   describe("clear", () => {
     it("removes all cached elements", () => {
       const el1 = document.createElement("div");
@@ -178,7 +137,8 @@ describe("DOMCache", () => {
       document.body.appendChild(el1);
       document.body.appendChild(el2);
 
-      domCache.cacheElements(["element-1", "element-2"]);
+      domCache.get("element-1");
+      domCache.get("element-2");
       expect(domCache.size).toBe(2);
 
       domCache.clear();
@@ -213,7 +173,8 @@ describe("DOMCache", () => {
       document.body.appendChild(el1);
       document.body.appendChild(el2);
 
-      domCache.cacheElements(["keep", "remove"]);
+      domCache.get("keep");
+      domCache.get("remove");
       expect(domCache.size).toBe(2);
 
       domCache.remove("remove");

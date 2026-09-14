@@ -134,7 +134,7 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
             <a href="${googleMapsLink}"
                target="_blank"
                rel="noopener noreferrer"
-               class="airport-popup-link kh-popup-link">
+               class="kh-popup-link">
                 <span>&#x1F4CD;</span>
                 <span>${params.latDms}<br>${params.lonDms}</span>
             </a>
@@ -221,10 +221,10 @@ function flightTimeCard(flightTime: string): string {
  */
 export function generateStatsHtml(
   yearStats: YearStats,
-  fullStats: FilteredStatistics | null,
+  filteredStats: FilteredStatistics | null,
   hasTimingData: boolean,
 ): string {
-  const maxAltitudeFt = (fullStats?.max_altitude_m || 0) * METERS_TO_FEET;
+  const maxAltitudeFt = (filteredStats?.max_altitude_m || 0) * METERS_TO_FEET;
 
   return (
     statCard(formatNumber(yearStats.total_flights), "", "Flights") +
@@ -235,7 +235,7 @@ export function generateStatsHtml(
     (hasTimingData
       ? flightTimeCard(yearStats.flight_time) +
         statCard(
-          formatNumber(fullStats?.max_groundspeed_knots || 0),
+          formatNumber(filteredStats?.max_groundspeed_knots || 0),
           "kt",
           "Max Groundspeed",
         )

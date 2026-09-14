@@ -2,8 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   parseUrlParams,
   encodeStateToUrl,
-  getDefaultState,
-  mergeState,
 } from "../../../../kml_heatmap/frontend/state/urlState";
 import {
   MAX_ZOOM,
@@ -78,22 +76,29 @@ describe("URL state management", () => {
     });
 
     it("parses path IDs when the schema version matches", () => {
-      expect(parseUrlParams("p=5&sv=2")).toEqual({ selectedPathIds: [5] });
-      expect(parseUrlParams("p=1,5,12,25&sv=2")).toEqual({
+      expect(parseUrlParams("p=5&sv=3")).toEqual({ selectedPathIds: [5] });
+      expect(parseUrlParams("p=1,5,12,25&sv=3")).toEqual({
         selectedPathIds: [1, 5, 12, 25],
       });
     });
 
+    it("parses content hash ids exactly", () => {
+      expect(parseUrlParams("p=840108108563,1099511627775&sv=3")).toEqual({
+        selectedPathIds: [840108108563, 1099511627775],
+      });
+    });
+
     it("ignores path IDs without a current schema version", () => {
-      // Path ids were renumbered; ids from an older release would select
-      // different flights, so they are dropped rather than applied
+      // Ids from an older release were positions in the export and would
+      // select different flights, so they are dropped rather than applied
       expect(parseUrlParams("p=1,5,12")).toEqual({});
       expect(parseUrlParams("p=1,5,12&sv=1")).toEqual({});
+      expect(parseUrlParams("p=1,5,12&sv=2")).toEqual({});
       expect(parseUrlParams("y=2025&p=1,5")).toEqual({ selectedYear: "2025" });
     });
 
     it("filters out invalid path IDs", () => {
-      expect(parseUrlParams("p=1,invalid,5,NaN,,12&sv=2")).toEqual({
+      expect(parseUrlParams("p=1,invalid,5,NaN,,12&sv=3")).toEqual({
         selectedPathIds: [1, 5, 12],
       });
     });
@@ -191,7 +196,7 @@ describe("URL state management", () => {
 
     it("parses complete state", () => {
       const url =
-        "y=2025&a=D-EAGJ&p=1,5,12&sv=2&v=010101&lat=51.5&lng=13.4&z=10.5";
+        "y=2025&a=D-EAGJ&p=1,5,12&sv=3&v=010101&lat=51.5&lng=13.4&z=10.5";
       expect(parseUrlParams(url)).toEqual({
         selectedYear: "2025",
         selectedAircraft: "D-EAGJ",
@@ -233,7 +238,7 @@ describe("URL state management", () => {
     it("encodes path IDs and omits an empty list", () => {
       expect(
         encodeStateToUrl({ selectedYear: "all", selectedPathIds: [1, 5, 12] }),
-      ).toBe("y=all&p=1%2C5%2C12&sv=2");
+      ).toBe("y=all&p=1%2C5%2C12&sv=3");
       expect(
         encodeStateToUrl({ selectedYear: "all", selectedPathIds: [] }),
       ).toBe("y=all");
@@ -408,52 +413,6 @@ describe("URL state management", () => {
         }
         expect(decoded, `case ${i}`).toEqual(expected);
       }
-    });
-  });
-
-  describe("getDefaultState", () => {
-    it("returns default state object", () => {
-      expect(getDefaultState()).toEqual({
-        selectedYear: "all",
-        selectedAircraft: "all",
-        selectedPathIds: [],
-        heatmapVisible: true,
-        altitudeVisible: false,
-        airspeedVisible: false,
-        airportsVisible: true,
-        aviationVisible: false,
-        statsPanelVisible: false,
-        wrappedVisible: false,
-        buttonsHidden: false,
-        isolateSelection: false,
-      });
-    });
-
-    it("returns a new object each time", () => {
-      expect(getDefaultState()).not.toBe(getDefaultState());
-    });
-  });
-
-  describe("mergeState", () => {
-    it("returns a copy of the default state when URL state is null", () => {
-      const defaults = getDefaultState();
-      const merged = mergeState(defaults, null);
-      expect(merged).toEqual(defaults);
-      expect(merged).not.toBe(defaults);
-    });
-
-    it("URL state takes priority over defaults", () => {
-      const merged = mergeState(getDefaultState(), {
-        selectedYear: "2025",
-        heatmapVisible: false,
-      });
-      expect(merged.selectedYear).toBe("2025");
-      expect(merged.heatmapVisible).toBe(false);
-      expect(merged.airportsVisible).toBe(true);
-    });
-
-    it("handles empty URL state object", () => {
-      expect(mergeState(getDefaultState(), {})).toEqual(getDefaultState());
     });
   });
 });

@@ -52,7 +52,8 @@
 
 ### Requirements
 
-- Python 3.14 (see `.python-version`) and Node.js 26 (see `.nvmrc`)
+- Python 3.14 (see `.python-version`) and Node.js 26 (see `.nvmrc`; 24.15 or a
+  later 24.x release works as well)
 - podman or docker for `make build`/`serve` (auto-detected, podman first)
 
 ### Quick Start
@@ -75,7 +76,7 @@ make serve
 Both methods work equally well. `make serve` only serves the existing `docs/`
 directory; run `make build` (or `make serve-build`) to regenerate it first.
 `docs/` is a local build output and is not committed: the published site is
-built from the sources by the `deploy` workflow (see [Development](#development)).
+built from the sources in CI once all tests pass (see [Development](#development)).
 
 **Warning:** the tool rewrites the KML files in `data/` in place to remove
 flight dates (see [Privacy](#privacy)). Keep a copy of the originals if you
@@ -123,6 +124,14 @@ Where:
 
 The flight date used for the year filter is taken from the `<description>`
 element of the file, not from the filename.
+
+Obfuscation renames these files (see [Privacy](#privacy)): the date becomes
+January 1st of the same year and the time slot a sequence number per year and
+directory, written as a time (`0000h`, `0001h`, ..., `0059h`, `0100h`). The
+example becomes `2026-01-01_0000h_OE-AKI_LOAV-LOAV.kml`, and the next flight of
+2026 in the same directory `2026-01-01_0001h_...`. Files are numbered in the
+order of their original names, after the highest number already present, so the
+names keep sorting in flight order. An existing file is never replaced.
 
 **Note:** Charterware KML files do not include per-point timestamps. As
 coordinates are not at fixed intervals, the tool does not attempt to infer
@@ -192,8 +201,8 @@ make serve
 The keys are embedded in the generated `map_config.js`, which is published with
 the site. Treat them as public client-side keys and restrict them to your
 site's domain (referrer restriction) in the CARTO and OpenAIP dashboards. The
-`deploy` workflow reads them from the `CARTO_API_KEY` and `OPENAIP_API_KEY`
-repository secrets.
+`site` job of the `test` workflow reads them from the `CARTO_API_KEY` and
+`OPENAIP_API_KEY` repository secrets.
 
 **Note:** OpenAIP tiles return 403 Forbidden without a valid API key. To verify
 your key works:
@@ -209,7 +218,8 @@ Variables:
 
 - `CONTAINER_RUNTIME` - Container runtime; auto-detects `podman`, then `docker`
 - `INPUT_DIR` - Directory with the KML files (default: `data`)
-- `OUTPUT_DIR` - Output directory (default: `docs`)
+- `OUTPUT_DIR` - Output directory (default: `docs`); it must not be `INPUT_DIR`,
+  lie inside it or contain it, and the two need different base names
 - `CACHE_DIR` - Host directory mounted as `/cache` (default: `~/.cache/kml-heatmap`)
 - `HOST_BIND` - Address `make serve` binds on the host (default: `127.0.0.1`; use `0.0.0.0` for the local network)
 - `PORT` - Host port for `make serve` (default: `8000`)
@@ -275,19 +285,20 @@ and `KML_HEATMAP_CACHE_DIR=/cache`. `serve.py` serves `/data` and reads
 
 ### Python Usage
 
-From a fresh clone, build the frontend bundles first (they are not committed):
+From a fresh clone, build the frontend bundle first (it is not committed, and
+the generator refuses to run without it):
 
 ```bash
 npm ci && npm run build
 
 pip install .                     # the runtime dependencies from pyproject.toml
-python -m kml_heatmap your_track.kml --output-dir out
+python -m kml_heatmap your_track.kml   # writes docs/; use --output-dir for another place
 
 # Option 1: open directly
-open out/index.html
+open docs/index.html
 
 # Option 2: serve over HTTP
-python -m http.server 8000 --bind 127.0.0.1 -d out
+python -m http.server 8000 --bind 127.0.0.1 -d docs
 ```
 
 `pip install .` also provides the `kml-heatmap` console script and ships the
@@ -302,30 +313,55 @@ kml-heatmap [--output-dir DIR] [--debug] [--version] path [path ...]
 
 - `path` - KML files and/or directories. Directories are scanned
   non-recursively for `.kml` files (case-insensitive) and processed in numeric
-  order. `aircraft.json` is looked up in every input directory.
-- `--output-dir DIR` - Output directory (default: current directory). The tool
-  refuses to run if the output `data/` directory would be an input directory
-  or contain one, and it deletes only its own files there (`airports.js`,
-  `metadata.js`, `<year>/data.js`). An output directory below the input
-  directory is fine, so `kml-heatmap flight.kml` in the file's directory
-  writes to `./index.html` and `./data/`. From the repository root use
-  `--output-dir docs`, as the `Makefile` does.
+  order. `aircraft.json` is looked up in every input directory. A path that
+  does not exist is an error.
+- `--output-dir DIR` - Output directory (default: `docs`). The tool refuses to
+  run if the output `data/` directory would be an input directory or contain
+  one. An output directory below the input directory is fine, so
+  `kml-heatmap flight.kml` in the file's directory writes to `./docs/`.
 - `--debug` - Show debug output
 - `--version` - Show the version and exit
+
+Every file is written into a hidden staging directory inside the output first
+and moved into place only when the whole site was generated, so a run that
+fails while generating leaves the previous site untouched. Only a failure
+while the finished files are moved into place (a disk filling up in that
+moment) can leave a mix, which the next run repairs. Two runs cannot write
+to one output directory at the same time; the second one stops. Afterwards the
+tool removes only its own files that the new site no longer has (the files of
+years that dropped out, a stale `mapApp.bundle.js.map`) and leaves anything
+else in the output directory alone. It never writes through a symlink: a
+symlink in place of one of its files stops the run.
+
+The exit status is 1 when no site could be generated: a missing input path, a
+missing JavaScript bundle, an input file that is not valid KML or cannot be
+parsed (such as an empty file or a symlink), no flight with a determinable
+year, or an error such as an unwritable output directory.
 
 ## Privacy
 
 **The tool rewrites your input KML files in place** (atomically, after
 validation) so that the files committed to this repository never contain real
 flight dates. Timestamps are shifted to January 1st of their year while keeping
-the intervals between points, and date-bearing names, descriptions and the
-creator field are replaced.
+the intervals between points; a file holding flights on several dates moves
+each of them to January 1st of its own year. Date-bearing names, descriptions,
+Charterware file names and the creator field are replaced. Read-only files and
+symlinks are reported instead of rewritten.
 Obfuscated KML files still contain:
 
 - The year of each flight
 - The UTC time of day and the durations between points
 - Full precision coordinates and altitudes
 - The order of the flights (from the file numbering)
+
+`python -m kml_heatmap.obfuscate <dir> --check` verifies a directory: every
+flight must start on January 1st, and no other date may appear anywhere in a
+file or its name, except the two days after January 1st that a flight past
+midnight runs into. Timestamps within one Placemark, or no more than 12 hours
+apart, count as one flight and are never split; a recording that runs longer
+than those days fails the check rather than being cut in two. When a date
+cannot be removed (in a file name, say, or an element the tool does not
+rewrite), the generator lists it and stops.
 
 The generated site in `docs/` contains no absolute timestamps at all. Flight
 paths carry only relative seconds since the start of each flight, which is
@@ -368,7 +404,7 @@ output-dir/
 ├── apple-touch-icon.png
 └── data/
     ├── airports.js        # window.KML_AIRPORTS: airport markers
-    ├── metadata.js        # window.KML_METADATA: statistics, years, year_file_bytes
+    ├── metadata.js        # window.KML_METADATA: years, file sizes, speed range, models
     ├── 2025/
     │   └── data.js        # window.KML_DATA_2025
     └── 2026/
@@ -376,21 +412,29 @@ output-dir/
 ```
 
 Each year file sets `window.KML_DATA_<YEAR>` to an object with `year`,
-`original_points`, `path_info` and `segments`. `segments` maps a path id to
+`original_points`, `path_info` and `segments`. `path_info` lists the flights in
+input order, each with its id, year, airports, aircraft and exact altitude
+range; where a flight starts and ends is read from its segments. `segments`
+maps a path id to
 `{"start": [lat, lon], "rows": [...]}`, where each row is
 `[lat, lon, altitude_ft, groundspeed_knots, time]` and `time` (relative
 seconds) is only present for files with timestamps.
 
 The coordinate in a row is the segment's **end** point. Its start is the end
 of the previous row, and the first row continues from `start`, so a shared
-point is stored once instead of twice. This holds because the only segments
-the exporter drops are zero-length ones, whose two endpoints are the same
-coordinate. Coordinates are rounded to five decimals (about 1 m).
+point is stored once instead of twice. Coordinates are rounded to five
+decimals (about 1 m), and the only segments the exporter drops are the ones
+whose two endpoints round to the same coordinate (standing still), which keeps
+the rows contiguous.
 
-`metadata.js` lists the available years, the statistics and the size of each
-year file (`year_file_bytes`) so the frontend can show loading progress.
+`metadata.js` lists the available years, the size of each year file
+(`year_file_bytes`) so the frontend can show loading progress, the groundspeed
+range of the speed scale and the model names `aircraft.json` knows for the
+exported aircraft (`aircraft_models`). It carries no statistics: the frontend
+computes them from the year files for the active year, aircraft and selection.
 Flights without a recognizable year are skipped instead of being grouped under
-an "unknown" year. Airport entries carry no flight count: the frontend derives
+an "unknown" year, and the map bounds in `map_config.js` cover only the
+exported flights. Airport entries carry no flight count: the frontend derives
 one per airport from the active year and aircraft filter.
 
 Data is exported as JavaScript files (instead of JSON) for compatibility with
@@ -408,7 +452,7 @@ the `file://` protocol. It is organized by year and loaded on demand.
 
 ### Controls
 
-- **Stats** - View statistics (distance, altitude, airports, flight time)
+- **Stats** - View statistics (distance, altitude, airports, flight time). Flight time runs from the first to the last recorded point that moved at the exported precision (about 1 m), so standing perfectly still before and after is not counted, while GPS noise on the ground still is
 - **Export** - Save the current map view as a JPG image
 - **Copy link** - Share the current URL (native share dialog where available, otherwise copied to the clipboard)
 - **Wrapped** - View the year-in-review summary; Escape closes it
@@ -431,7 +475,13 @@ browser's address bar or use the copy-link button:
 
 - Specific year or all years (`?y=2025` or `?y=all`)
 - Aircraft filter (`?a=D-EAGJ`)
-- Selected paths (`?p=1,5,12`)
+- Selected paths (`?p=695806902132,104044549516&sv=3`). A path id is derived
+  from the flight's coordinates and altitudes, so a link keeps selecting the
+  same flights after the site is regenerated with other flights added or
+  removed; a flight that is no longer there is dropped from the selection.
+  `sv` is the version of the id scheme: links written before version 3, when
+  ids were positions in the export, lose their selection instead of selecting
+  different flights
 - Layer visibility (9 flags: heatmap, altitude, speed, airports, aviation, stats, wrapped, an unused legacy slot, isolateSelection). The 8th slot belonged to a control-visibility toggle that no longer exists; it is always written as `0` and kept so older shared links still read their isolate flag from the 9th
   - Example: `?v=100100000`
 - Map position (`?lat=51.5&lng=13.4&z=10`)
@@ -469,19 +519,32 @@ run and cached for 30 days in `~/.cache/kml-heatmap` (override with
 `KML_HEATMAP_CACHE_DIR`; the container image uses `/cache`). Mount the cache
 directory as the `Makefile` does (`-v ~/.cache/kml-heatmap:/cache`) to avoid
 downloading it on every container run. The same directory holds a per-file
-parse cache (`kml/`) keyed by path and modification time, so unchanged KML
-files are not parsed again.
+parse cache (`kml/`) keyed by file name and content, the parser code and the
+airport database, so unchanged KML files are not parsed again; entries unused
+for 30 days are removed.
+
+Without the database the site is still generated, with the airport names as
+the KML files spell them and without countries. Set
+`KML_HEATMAP_REQUIRE_AIRPORT_DB=1` to fail instead, as CI does for the
+published site.
 
 ### Data Export
 
 The tool exports all flight data without downsampling:
 
-- **Full fidelity**: Every coordinate point is preserved. Coordinates are
-  written with five decimals (about 1 m), far finer than the map can show
+- **Full fidelity**: Every recorded movement is preserved. Coordinates are
+  written with five decimals (about 1 m), far finer than the map can show;
+  only points that do not move at that precision (standing still) are dropped
 - **Year-based splitting**: Data is organized by year for efficient filtering
 - **On-demand loading**: Only requested years are loaded into the browser
 - **Compact format**: Paths are stored as a start point plus one row per
   segment, each holding only its end point (see [Output](#output))
+- **Stable path ids**: A path id is a 40-bit hash of the path's coordinates,
+  rounded as exported, and altitudes; a duplicate flight takes the next free
+  id in input order. Ids survive regenerating the site, so shared links and
+  saved selections keep their flights
+- **Reproducible output**: The files do not depend on the number of CPU cores
+  or on how the years were split for the workers
 
 Parsing and the per-year export run in a process pool, so large collections
 scale with the number of CPU cores. See
@@ -497,14 +560,17 @@ other aviation apps.
 `make lock` run locally (Python and Node required); `make lock` regenerates the
 hashed Python lock files from `pyproject.toml`.
 
-The published site is built by the `deploy` workflow on every push to `main`:
-it runs the same steps as `make build` (frontend bundle, then
-`python -m kml_heatmap data`) and uploads the result to GitHub Pages. Nothing
+The published site is built on every push to `main` by the `site` and
+`deploy` jobs of the `test` workflow, which wait for every test job to pass
+and skip a commit that is no longer the head of `main`:
+they run the same steps as `make build` (frontend bundle, then
+`python -m kml_heatmap data`) and upload the result to GitHub Pages. Nothing
 generated is committed; `docs/` is only the default output directory of a
 local `make build`.
 
 Install the pre-commit hooks (ruff, prettier, typos, gitleaks, whitespace
-fixers) with `pip install pre-commit && pre-commit install`. See
+fixers and, for commits that touch `data/`, the obfuscation check) with
+`pip install pre-commit && pre-commit install`. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and commit conventions.
 
 ### Frontend (TypeScript)
@@ -521,15 +587,16 @@ npm ci
 **Available commands:**
 
 ```bash
-npm run build            # Build the production bundle (minified)
-npm run build:dev        # Build the development bundle (with sourcemaps)
+npm run build            # Build the production bundle (minified, size budget checked)
+npm run build:dev        # Build the development bundle (unminified)
 npm run build:watch      # Watch mode for development
 npm run test             # Run unit tests
 npm run test:watch       # Watch mode for tests
 npm run test:ui          # Run tests with UI
 npm run test:coverage    # Generate coverage report
-npm run test:e2e         # Run E2E tests (Playwright, desktop Chromium)
+npm run test:e2e         # Run E2E tests (Playwright, all projects)
 npm run test:e2e:mobile  # Run E2E tests with the mobile project
+npm run test:e2e:webkit  # Run E2E tests with the WebKit (iPhone) project
 npm run test:e2e:ui      # Run E2E tests with interactive UI
 npm run typecheck        # Type-check the frontend
 npm run typecheck:tests  # Type-check the unit and e2e tests
@@ -541,21 +608,27 @@ npm run format:check     # Check code formatting
 
 **E2E Tests:**
 
-End-to-end tests use [Playwright](https://playwright.dev/) with Chromium. They
-verify the full map rendering pipeline including map initialization, layer
-toggles, filters, statistics panel, wrapped modal, airport markers and replay.
-A mobile project runs the suite with a phone viewport, and every page is
-scanned for accessibility violations with axe. The suite does not reach the
-network: Leaflet, leaflet.heat and dom-to-image are served from the pinned
-copies in `node_modules` and every map tile is answered locally (see
-`tests/e2e/fixtures.ts`).
+End-to-end tests use [Playwright](https://playwright.dev/). They verify the
+full map rendering pipeline including map initialization, layer toggles,
+filters, statistics panel, wrapped modal, airport markers and replay. The
+`desktop` project runs every spec but `mobile.spec.ts` in Chromium. The
+`mobile` project runs `mobile.spec.ts` and the viewport independent specs
+(`core`, `layers`, `state`) on a phone viewport, and the `webkit` project runs
+`core` and `mobile` on an emulated iPhone. Every page is scanned for
+accessibility violations with axe. The suite does not reach the network:
+Leaflet, leaflet.heat and dom-to-image are served from the pinned copies in
+`node_modules` and every map tile is answered locally (see
+`tests/e2e/fixtures.ts`). A few specs depend on whether the site was built
+with `CARTO_API_KEY` and `OPENAIP_API_KEY` (any value works) and skip
+otherwise; CI tests a site with dummy keys and one without.
 
 The tests run against `docs/`, which must be built from the current sources
-first:
+first. The global setup compares the build hash in `docs/mapApp.bundle.js`
+with the frontend sources and stops with a hint when they differ:
 
 ```bash
 # Install Playwright browsers (first time only)
-npx playwright install --with-deps chromium
+npx playwright install --with-deps chromium webkit
 
 # Build the site from the current sources
 npm run build && python -m kml_heatmap data --output-dir docs
@@ -564,20 +637,26 @@ npm run build && python -m kml_heatmap data --output-dir docs
 npm run test:e2e
 npm run test:e2e:mobile
 
-# On NixOS, use the system Chromium
-nix-shell -p chromium python3 --run 'CHROMIUM_PATH=$(which chromium) npm run test:e2e'
+# On NixOS, use the system Chromium; Playwright's WebKit build does not run
+# there, but the Playwright container image carries it (use the image tag of
+# the version `npx playwright --version` prints)
+nix-shell -p chromium python3 --run 'CHROMIUM_PATH=$(which chromium) npm run test:e2e -- --project=desktop --project=mobile'
+podman run --rm --userns=keep-id -v "$PWD:/work" -w /work mcr.microsoft.com/playwright:v1.63.0-noble npx playwright test --project=webkit
 ```
 
 Tests are located in `tests/e2e/` and configured via `playwright.config.ts`.
-The test server starts `python3 -m http.server` serving `docs/`. Failed runs
-leave traces in `test-results/` and a report in `playwright-report/`.
+The test server starts `python3 -m http.server` serving `docs/`. Failed tests
+keep their traces in `test-results/`, and every run writes an HTML report to
+`playwright-report/` (`npx playwright show-report`).
 
 **Build Output:**
 
 - **Format**: IIFE (Immediately Invoked Function Expression)
 - **Protocol**: Compatible with `file://` protocol - open index.html directly in browser
-- **Production**: Minified bundle for optimal performance
-- **Development**: Unminified with sourcemaps for debugging
+- **Production**: Minified bundle for optimal performance; the build fails
+  when it exceeds the size budget in `build.js`
+- **Development**: Unminified for debugging
+- Both write a source map next to the bundle
 
 The bundle in `kml_heatmap/static/` (`mapApp.bundle.js` and its `.map` file)
 is gitignored and created by `npm run build`.
@@ -621,15 +700,16 @@ pytest                                          # Run all tests
 pytest tests/test_parser.py                     # Run specific test file
 pytest -x                                       # Stop on first failure
 pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml --cov-report=term
-coverage report                                 # Enforces the fail_under floor from pyproject.toml
 pytest --cov=kml_heatmap --cov-report=html      # HTML coverage report (htmlcov/)
 ```
 
+A run with `--cov` fails below the `fail_under` floor in `pyproject.toml`.
 Property-based tests use [Hypothesis](https://hypothesis.readthedocs.io/).
 
 **Checks:**
 
 ```bash
+python scripts/check_locks.py           # Lock files match pyproject.toml
 ruff check . && ruff format --check .   # Lint and formatting
 mypy .                                  # Type checking
 bandit -r kml_heatmap -ll               # Security scan

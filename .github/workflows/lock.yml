@@ -1,9 +1,15 @@
 ---
 # Regenerates the Python lock files with `make lock` and opens a pull request.
-# Requires "Allow GitHub Actions to create and approve pull requests" under
-# Settings > Actions > General; without it the create-pull-request step fails
-# with a 403. Pull requests created with the default GITHUB_TOKEN also do not
-# trigger the test workflow; close and reopen the PR to run CI on it.
+#
+# The compile job installs pip-tools and resolves every dependency, so it
+# runs with a read-only token that is not left in the checkout. Only the
+# pull-request job can write, and it runs nothing from the repository or
+# from PyPI: it takes the two lock files from the artifact and commits them.
+#
+# Needs "Allow GitHub Actions to create and approve pull requests" under
+# Settings > Actions > General; without it the pull-request job fails with a
+# 403. A pull request opened with GITHUB_TOKEN does not trigger the test
+# workflow either, so close and reopen it to run CI (see CONTRIBUTING.md).
 name: lock
 on:
   schedule:
@@ -15,20 +21,45 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 jobs:
-  lock:
+  compile:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
       - name: Regenerate the lock files
         run: make lock
+      - name: Upload the lock files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lock-files
+          path: |
+            requirements.lock
+            requirements-test.lock
+          if-no-files-found: error
+          retention-days: 1
+
+  pull-request:
+    needs: compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # The action authenticates its own git calls with the token input
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the lock files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: lock-files
       - name: Open a pull request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:

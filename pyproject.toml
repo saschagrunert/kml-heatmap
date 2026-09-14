@@ -104,6 +104,9 @@ mypy_path = "stubs"
 exclude = [
     "^serve\\.py$",
     "^scripts/",
+    # Local build and output directories (a wheel build leaves a second copy of
+    # the package in build/lib)
+    "^(build|dist|out|site|venv|docs|htmlcov|coverage)/",
 ]
 
 [[tool.mypy.overrides]]

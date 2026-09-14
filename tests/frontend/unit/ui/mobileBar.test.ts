@@ -352,6 +352,53 @@ describe("MobileBar", () => {
       expect(tab("wrapped").classList.contains("active")).toBe(true);
     });
 
+    it("closes an open sheet before opening the statistics", () => {
+      tab("filter").click();
+      expect(bar!.sheet.isOpen()).toBe(true);
+
+      tab("stats").click();
+
+      // The statistics sheet sits below the scrim and would open underneath
+      expect(bar!.sheet.isOpen()).toBe(false);
+      expect(tab("filter").classList.contains("active")).toBe(false);
+      expect(app.statsManager.toggleStats).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes an open sheet before opening Wrapped", () => {
+      tab("layers").click();
+      expect(bar!.sheet.isOpen()).toBe(true);
+
+      tab("wrapped").click();
+
+      expect(bar!.sheet.isOpen()).toBe(false);
+      expect(tab("layers").classList.contains("active")).toBe(false);
+      expect(app.wrappedManager.showWrapped).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["wrapped", "layers"],
+      ["stats", "filter"],
+    ] as const)(
+      "hands focus to the %s tab before opening it over the %s sheet",
+      (target, sheet) => {
+        let focusedOnOpen: Element | null = null;
+        const record = (): void => {
+          focusedOnOpen = document.activeElement;
+        };
+        app.wrappedManager.showWrapped.mockImplementation(record);
+        app.statsManager.toggleStats.mockImplementation(record);
+        tab(sheet).focus();
+        tab(sheet).click();
+
+        tab(target).focus();
+        tab(target).click();
+
+        // Closing the sheet returned focus to its own tab, and Wrapped took
+        // that as its opener: Escape then landed on the wrong tab
+        expect(focusedOnOpen).toBe(tab(target));
+      },
+    );
+
     it("collects the remaining controls under More", () => {
       tab("more").click();
 

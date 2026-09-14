@@ -2,11 +2,7 @@
 
 import pytest
 
-from kml_heatmap.export_writers import (
-    export_airports_data,
-    export_metadata,
-    exported_airport_names,
-)
+from kml_heatmap.export_writers import export_airports_data, export_metadata
 
 
 def _airport(name, lat=48.6899, lon=9.2220, timestamps=None, is_at_path_end=False):
@@ -19,21 +15,19 @@ def _airport(name, lat=48.6899, lon=9.2220, timestamps=None, is_at_path_end=Fals
     }
 
 
-class TestExportedAirportNames:
-    def test_names_follow_the_export(self):
+class TestExportAirportsData:
+    def test_names_of_routes_and_markers(self, tmp_path, parse_js):
         airports = [
             _airport("EDDS Stuttgart - EDDP Leipzig"),
             _airport("EDDS Stuttgart - EDDP Leipzig", is_at_path_end=True),
             _airport("Log Start: 03 Mar 2025"),
             _airport(None),
         ]
-        assert exported_airport_names(airports) == ["EDDS Stuttgart", "EDDP Leipzig"]
+        export_airports_data(airports, str(tmp_path))
+        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        names = [airport["name"] for airport in data["airports"]]
+        assert names == ["EDDS Stuttgart", "EDDP Leipzig"]
 
-    def test_empty(self):
-        assert exported_airport_names([]) == []
-
-
-class TestExportAirportsData:
     def test_valid_airport_with_country(self, tmp_path, parse_js):
         airports = [_airport("EDDS Stuttgart", timestamps=["t1"])]
         filepath, size = export_airports_data(airports, str(tmp_path))
@@ -59,6 +53,16 @@ class TestExportAirportsData:
         data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
         assert "timestamps" not in data["airports"][0]
         assert "icao" not in data["airports"][0]
+
+    def test_country_of_an_airport_name_with_dash(self, tmp_path, parse_js):
+        """The deduplicator stores one airport, not "EDAQ ... - LFBN ..."."""
+        airports = [
+            _airport("LFBN Niort - Marais Poitevin", lat=46.31, is_at_path_end=True)
+        ]
+        export_airports_data(airports, str(tmp_path))
+        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        assert data["airports"][0]["name"] == "LFBN Niort - Marais Poitevin"
+        assert data["airports"][0]["country"] == "FR"
 
     def test_unknown_icao_has_no_country(self, tmp_path, parse_js):
         export_airports_data([_airport("ZZZZ Nowhere")], str(tmp_path))
@@ -114,11 +118,11 @@ class TestExportAirportsData:
 class TestExportMetadata:
     def _export(self, tmp_path, **overrides):
         kwargs = {
-            "stats": {"total_points": 10},
             "min_groundspeed_knots": 50.0,
             "max_groundspeed_knots": 180.0,
             "available_years": [2025, 2024],
             "year_file_bytes": {"2024": 10, "2025": 20},
+            "aircraft_models": {"D-EHYL": "Diamond Star", "D-EAGJ": "Katana"},
             "output_dir": str(tmp_path),
         }
         kwargs.update(overrides)
@@ -130,14 +134,18 @@ class TestExportMetadata:
         assert size == (tmp_path / "metadata.js").stat().st_size
         data = parse_js(tmp_path / "metadata.js", "KML_METADATA")
         assert data == {
-            "stats": {"total_points": 10},
             "min_groundspeed_knots": 50.0,
             "max_groundspeed_knots": 180.0,
             "available_years": [2024, 2025],
             "year_file_bytes": {"2024": 10, "2025": 20},
+            "aircraft_models": {"D-EAGJ": "Katana", "D-EHYL": "Diamond Star"},
         }
-        assert "gradient" not in data
-        assert "file_structure" not in data
+        # The frontend computes the statistics itself
+        assert "stats" not in data
+        # Written with sorted keys, so a re-export is byte identical
+        content = (tmp_path / "metadata.js").read_text()
+        assert content.index('"D-EAGJ"') < content.index('"D-EHYL"')
+        assert list(data) == sorted(data)
 
     @pytest.mark.parametrize(
         "min_speed,max_speed,expected_min,expected_max",

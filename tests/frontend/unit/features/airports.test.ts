@@ -157,6 +157,17 @@ describe("airports feature", () => {
       expect([...visible!].sort()).toEqual(["EDDK", "EDDM"]);
     });
 
+    it("keeps every airport for a selection without a filter (regression)", () => {
+      // A year filter keeps its airports beside a selection, so no filter
+      // must not hide every airport the selection does not touch
+      expect(
+        mod.calculateVisibleAirports({
+          pathInfo: mockPathInfo,
+          selectedPathIds: new Set([3]),
+        }),
+      ).toBeNull();
+    });
+
     it("uses the provided path info map for selected paths", () => {
       const byId = new Map<number, PathInfo>([
         [99, { id: 99, start_airport: "LOWW" }],
@@ -164,6 +175,7 @@ describe("airports feature", () => {
       const visible = mod.calculateVisibleAirports({
         pathInfo: mockPathInfo,
         selectedPathIds: new Set([99, 1]),
+        isolateSelection: true,
         pathInfoById: byId,
       });
       // path 1 is unknown to the map, so only LOWW is visible
@@ -174,6 +186,7 @@ describe("airports feature", () => {
       const visible = mod.calculateVisibleAirports({
         pathInfo: mockPathInfo,
         selectedPathIds: new Set([999]),
+        isolateSelection: true,
       });
       expect(visible!.size).toBe(0);
     });

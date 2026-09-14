@@ -5,8 +5,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   DOM_TO_IMAGE_INTEGRITY,
   DOM_TO_IMAGE_URL,
+  MAX_CANVAS_PIXELS,
   UIToggles,
   dataUrlToBlob,
+  exportScale,
   isSmallDevice,
   loadDomToImage,
   resetDomToImageLoader,
@@ -46,6 +48,13 @@ function setInnerWidth(width: number): void {
   });
 }
 
+function setDevicePixelRatio(ratio: number): void {
+  Object.defineProperty(window, "devicePixelRatio", {
+    value: ratio,
+    configurable: true,
+  });
+}
+
 function defineNavigatorProperty(name: string, value: unknown): void {
   Object.defineProperty(navigator, name, { value, configurable: true });
 }
@@ -79,6 +88,7 @@ describe("UIToggles export and share", () => {
     delete window.domtoimage;
     resetDomToImageLoader();
     setInnerWidth(1024);
+    Reflect.deleteProperty(window, "devicePixelRatio");
     deleteNavigatorProperty("share");
     deleteNavigatorProperty("canShare");
     deleteNavigatorProperty("clipboard");
@@ -166,6 +176,39 @@ describe("UIToggles export and share", () => {
       const blob = dataUrlToBlob("no-comma");
 
       expect(blob.type).toBe("application/octet-stream");
+    });
+  });
+
+  describe("exportScale", () => {
+    it("uses 2x on desktop whatever the pixel density", () => {
+      setInnerWidth(1280);
+      setDevicePixelRatio(1);
+      expect(exportScale(1280, 800)).toBe(2);
+    });
+
+    it("follows a phone's pixel density up to 3x", () => {
+      setInnerWidth(390);
+      setDevicePixelRatio(2.625);
+      expect(exportScale(390, 844)).toBe(2.625);
+
+      setDevicePixelRatio(4);
+      expect(exportScale(390, 844)).toBe(3);
+
+      setDevicePixelRatio(0);
+      expect(exportScale(390, 844)).toBe(1);
+    });
+
+    it("keeps the canvas within the iOS pixel limit", () => {
+      setInnerWidth(1280);
+      const scale = exportScale(3000, 3000);
+
+      expect(scale).toBeLessThan(2);
+      expect(3000 * scale * (3000 * scale)).toBeCloseTo(MAX_CANVAS_PIXELS, 0);
+    });
+
+    it("tolerates a map that has no size yet", () => {
+      setInnerWidth(1280);
+      expect(exportScale(0, 0)).toBe(2);
     });
   });
 
@@ -338,16 +381,22 @@ describe("UIToggles export and share", () => {
       expect(btn.textContent).toBe("Export image");
     });
 
-    it("caps the scale at 1 on small devices", async () => {
+    it("exports at the pixel density of a phone", async () => {
       setInnerWidth(500);
+      setDevicePixelRatio(3);
       const toJpeg = installDomToImage();
 
       uiToggles.exportMap();
       await finishExport();
 
+      // A fixed 1x left a 3x phone with an image a third of its resolution
       expect(toJpeg).toHaveBeenCalledWith(
         el("map"),
-        expect.objectContaining({ width: 800, height: 600 }),
+        expect.objectContaining({
+          width: 2400,
+          height: 1800,
+          style: expect.objectContaining({ transform: "scale(3)" }),
+        }),
       );
     });
 
@@ -545,7 +594,6 @@ describe("UIToggles export and share", () => {
 
       expect(writeText).toHaveBeenCalledWith(window.location.href);
       expect(toast()?.textContent).toBe("Link copied");
-      expect(toast()?.getAttribute("role")).toBe("status");
     });
 
     it("shows an error toast when the clipboard is unavailable", async () => {

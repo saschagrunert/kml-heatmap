@@ -6,8 +6,12 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .exceptions import KMLHeatmapError
 from .helpers import numeric_filename_key
 from .logger import logger, set_debug_mode
+
+# Obfuscation violations listed per file before the rest are summarized
+MAX_REPORTED_VIOLATIONS = 5
 
 
 def _fatal(message: str) -> None:
@@ -53,7 +57,8 @@ def _collect_kml_files(paths: list[str]) -> list[str]:
         elif p.is_file():
             add(path)
         else:
-            logger.warning("File or directory not found: %s", path)
+            # A mistyped input would otherwise publish a site without it
+            _fatal(f"File or directory not found: {path}")
     return kml_files
 
 
@@ -73,36 +78,103 @@ def _find_aircraft_files(kml_files: list[str]) -> list[Path]:
     return aircraft_files
 
 
-def _obfuscate_inputs(kml_files: list[str]) -> None:
-    """Rewrite the (validated) input KML files in place for privacy.
+def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
+    """Rename and rewrite the (validated) input KML files in place for privacy.
 
+    Returns ``kml_files`` with the new path of every renamed Charterware file.
     Exits with an error when a file cannot be rewritten: publishing data that
     still carries real dates would be worse than not publishing at all.
     """
-    from .obfuscate import check_kml_obfuscated, obfuscate_kml_files
+    from .obfuscate import (
+        check_kml_obfuscated,
+        obfuscate_kml_files,
+        rename_charterware_files,
+    )
     from .validation import validate_kml_file
 
     valid: list[Path] = []
+    valid_names: list[str] = []
     for kml_file in kml_files:
         is_valid, error_msg = validate_kml_file(kml_file)
         if is_valid:
             valid.append(Path(kml_file))
+            valid_names.append(kml_file)
         else:
-            # Invalid files are skipped by the parser too, so they are never
-            # published and cannot leak anything
+            # An invalid file fails the run later, before anything is
+            # published, so it cannot leak anything
             logger.warning("Not obfuscating: %s", error_msg)
 
-    modified = obfuscate_kml_files(valid)
-    logger.info("Obfuscated %d of %d KML file(s) in place", modified, len(valid))
+    renamed = rename_charterware_files(valid)
+    # Keyed by the given spelling: Path() would normalize "./a.kml" to "a.kml"
+    new_names = {
+        name: str(new)
+        for name, old, new in zip(valid_names, valid, renamed, strict=True)
+        if new != old
+    }
+    modified = obfuscate_kml_files(renamed)
+    logger.info("Obfuscated %d of %d KML file(s) in place", modified, len(renamed))
 
-    failed = [path for path in valid if check_kml_obfuscated(path)]
-    for path in failed:
+    failed = False
+    for path in renamed:
+        violations = check_kml_obfuscated(path)
+        if not violations:
+            continue
+        failed = True
         logger.error("Still contains real dates: %s", path)
+        for violation in violations[:MAX_REPORTED_VIOLATIONS]:
+            logger.error("  %s", violation)
+        if len(violations) > MAX_REPORTED_VIOLATIONS:
+            logger.error("  ... and %d more", len(violations) - MAX_REPORTED_VIOLATIONS)
     if failed:
         _fatal(
-            "Could not obfuscate every input file; refusing to continue "
-            "(see the messages above)"
+            "Could not obfuscate every input file; refusing to continue. See "
+            "the messages above: a file that is read-only or not UTF-8 has to "
+            "be fixed first, and a date in a place the tool does not rewrite "
+            "(such as the file name) has to be removed by hand"
         )
+
+    return [new_names.get(kml_file, kml_file) for kml_file in kml_files]
+
+
+def _generate(paths: list[str], output_dir: Path) -> None:
+    """Obfuscate the inputs and generate the site into ``output_dir``."""
+    kml_files = _collect_kml_files(paths)
+
+    if not kml_files:
+        _fatal("No KML files specified or found!")
+
+    print("\nKML Heatmap Generator")
+    print(f"{'=' * 50}\n")
+
+    output_file = str(output_dir / "index.html")
+    data_dir = str(output_dir / "data")
+
+    aircraft_files = _find_aircraft_files(kml_files)
+
+    from .renderer import BUNDLE_FILE, create_progressive_heatmap
+    from .validation import validate_output_dir
+
+    # Both are checked again inside create_progressive_heatmap, which is
+    # public API; checking here stops before the inputs are rewritten
+    is_safe, error_msg = validate_output_dir(data_dir, [*kml_files, *aircraft_files])
+    if not is_safe:
+        _fatal(error_msg or "Unsafe output directory")
+    if not BUNDLE_FILE.is_file():
+        _fatal(
+            f"JavaScript bundle not found: {BUNDLE_FILE} (run 'npm run build' "
+            "to generate it); the input files were left unchanged"
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    kml_files = _obfuscate_inputs(kml_files)
+
+    success = create_progressive_heatmap(
+        kml_files, output_file, data_dir, aircraft_files=aircraft_files
+    )
+
+    if not success:
+        _fatal("Heatmap generation failed (see messages above)")
 
 
 def main() -> None:
@@ -123,11 +195,14 @@ examples:
 The input KML files are rewritten IN PLACE before processing: all timestamps
 and dates are shifted so that every flight starts on January 1st of its year
 (time of day and intervals are preserved) and the creator attribute is
-replaced. Keep a copy of the originals if you need the real dates.
+replaced. Charterware files are renamed to January 1st as well
+(2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml becomes 2026-01-01_0000h_...). Keep a
+copy of the originals if you need the real dates.
 
 The output data directory (<output-dir>/data) must not be the directory of
 an input file, or contain one. An output directory below the input directory
-(the default, the current directory) is fine.
+(such as the default, docs) is fine. A run that fails while generating the
+site leaves the previous site in the output directory untouched.
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -139,8 +214,8 @@ an input file, or contain one. An output directory below the input directory
     )
     parser.add_argument(
         "--output-dir",
-        default=".",
-        help="output directory (default: current directory)",
+        default="docs",
+        help="output directory (default: docs)",
     )
     parser.add_argument(
         "--debug",
@@ -158,36 +233,9 @@ an input file, or contain one. An output directory below the input directory
     if args.debug:
         set_debug_mode(True)
 
-    kml_files = _collect_kml_files(args.paths)
-
-    if not kml_files:
-        _fatal("No KML files specified or found!")
-
-    print("\nKML Heatmap Generator")
-    print(f"{'=' * 50}\n")
-
-    output_dir = Path(args.output_dir)
-    output_file = str(output_dir / "index.html")
-    data_dir = str(output_dir / "data")
-
-    aircraft_files = _find_aircraft_files(kml_files)
-
-    from .renderer import create_progressive_heatmap
-    from .validation import validate_output_dir
-
-    # Validated again inside create_progressive_heatmap, which is public API;
-    # checking here reports the problem before any work is done.
-    is_safe, error_msg = validate_output_dir(data_dir, [*kml_files, *aircraft_files])
-    if not is_safe:
-        _fatal(error_msg or "Unsafe output directory")
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    _obfuscate_inputs(kml_files)
-
-    success = create_progressive_heatmap(
-        kml_files, output_file, data_dir, aircraft_files=aircraft_files
-    )
-
-    if not success:
-        _fatal("Heatmap generation failed (see messages above)")
+    try:
+        _generate(args.paths, Path(args.output_dir))
+    except (KMLHeatmapError, OSError) as e:
+        # Expected failures (an unwritable output directory, a missing airport
+        # database) end in one line instead of a traceback
+        _fatal(str(e))

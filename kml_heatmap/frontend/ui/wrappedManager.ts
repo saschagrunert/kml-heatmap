@@ -1,10 +1,17 @@
 /**
  * Wrapped Manager - Handles year-in-review/wrapped feature
  */
+import type { FitBoundsOptions, LatLng } from "leaflet";
 import type { MapApp } from "../mapApp";
+import type { Airport } from "../types";
 import { domCache, hideControls, restoreControls } from "../utils/domCache";
+import { prefersReducedMotion } from "../utils/motion";
 import {
-  calculateAirportFlightCounts,
+  TOAST_ALERT_ID,
+  TOAST_STACK_ID,
+  TOAST_STATUS_ID,
+} from "../utils/toast";
+import {
   countryDisplayName,
   countryFlag,
   findHomeBase,
@@ -16,11 +23,8 @@ import {
   generateFunFacts,
 } from "../features/wrapped";
 import type { Coordinate } from "../utils/geometry";
-import {
-  calculateFilteredStatistics,
-  filterPaths,
-  filterSegmentsByPaths,
-} from "../calculations/statistics";
+import { calculateFilteredStatistics } from "../calculations/statistics";
+import { datasetIndex } from "../calculations/datasetIndex";
 import {
   generateStatsHtml,
   generateFunFactsHtml,
@@ -29,22 +33,23 @@ import {
   generateDestinationsHtml,
 } from "../utils/htmlGenerators";
 
-/** Elements that stay interactive while the dialog is open */
-const NON_INERT_IDS = new Set(["map"]);
+/**
+ * Elements that stay out of the inert set while the dialog is open: the
+ * map, which the dialog takes over, and the toasts, whose live regions
+ * would otherwise fall silent for as long as Wrapped is open.
+ */
+const NON_INERT_IDS = new Set([
+  "map",
+  TOAST_STACK_ID,
+  TOAST_STATUS_ID,
+  TOAST_ALERT_ID,
+]);
 
 /** Delay before the map is remeasured after moving back out of the dialog */
 const MAP_RESTORE_DELAY_MS = 100;
 
-/**
- * Whether an element must stay out of the inert set: the map, which the
- * dialog takes over, and toasts, whose live region would otherwise fall
- * silent for as long as Wrapped is open.
- */
-function staysInteractive(el: Element): boolean {
-  return (
-    NON_INERT_IDS.has(el.id) || el.classList.contains("toast-notification")
-  );
-}
+/** Padding around the data when the dialog fits the map to it */
+const FIT_PADDING: [number, number] = [80, 80];
 
 /**
  * Write the heading as a sparkle plus its words.
@@ -67,13 +72,24 @@ function setWrappedTitle(titleEl: HTMLElement, text: string): void {
   titleEl.append(spark, text);
 }
 
-/** Airport coordinates exported by the backend, keyed by airport name */
+const coordinatesByAirports = new WeakMap<Airport[], Map<string, Coordinate>>();
+
+/**
+ * Airport coordinates exported by the backend, keyed by airport name. Kept
+ * with the airports array, which is loaded once.
+ */
 function airportCoordinates(): Map<string, Coordinate> {
-  const coordinates = new Map<string, Coordinate>();
-  for (const airport of window.KML_AIRPORTS?.airports ?? []) {
-    if (typeof airport.lat === "number" && typeof airport.lon === "number") {
-      coordinates.set(airport.name, [airport.lat, airport.lon]);
+  const airports = window.KML_AIRPORTS?.airports;
+  if (!airports) return new Map();
+  let coordinates = coordinatesByAirports.get(airports);
+  if (!coordinates) {
+    coordinates = new Map();
+    for (const airport of airports) {
+      if (typeof airport.lat === "number" && typeof airport.lon === "number") {
+        coordinates.set(airport.name, [airport.lat, airport.lon]);
+      }
     }
+    coordinatesByAirports.set(airports, coordinates);
   }
   return coordinates;
 }
@@ -91,41 +107,24 @@ export class WrappedManager {
   private mapResizeTimer: ReturnType<typeof setTimeout> | null = null;
   private mapRestoreTimer: ReturnType<typeof setTimeout> | null = null;
   private cardsScrollCleanup: (() => void) | null = null;
+  /**
+   * The map view from before the dialog fitted it to the data. Kept until
+   * the close has put it back, so a reopening in between does not take the
+   * fitted view for the user's.
+   */
+  private savedView: { center: LatLng; zoom: number } | null = null;
+  private unsubscribeData: () => void;
 
   constructor(app: MapApp) {
     this.app = app;
     this.originalMapParent = null;
     this.originalMapIndex = null;
 
-    // Pre-cache wrapped modal elements
-    domCache.cacheElements([
-      "wrapped-title",
-      "wrapped-year",
-      "wrapped-stats",
-      "wrapped-fun-facts",
-      "wrapped-aircraft-fleet",
-      "wrapped-top-airports",
-      "wrapped-airports-grid",
-      "wrapped-cards-column",
-      "map",
-      "wrapped-map-container",
-      "wrapped-modal",
-      "stats-btn",
-      "export-btn",
-      "share-btn",
-      "wrapped-btn",
-      "heatmap-btn",
-      "airports-btn",
-      "altitude-btn",
-      "airspeed-btn",
-      "aviation-btn",
-      "year-filter",
-      "aircraft-filter",
-      "stats-panel",
-      "altitude-legend",
-      "airspeed-legend",
-      "loading",
-    ]);
+    // A year that finishes loading while the dialog is open replaces the
+    // cards, which were computed from the data that was there before
+    this.unsubscribeData = app.store.subscribe("currentData", () => {
+      if (app.store.get("wrappedVisible") === true) this.renderContent();
+    });
   }
 
   private setWrappedVisible(visible: boolean): void {
@@ -160,39 +159,128 @@ export class WrappedManager {
     update();
   }
 
+  /** Fit options for the overview, without the animation for reduced motion */
+  private fitOptions(): FitBoundsOptions {
+    return { padding: FIT_PADDING, animate: !prefersReducedMotion() };
+  }
+
   showWrapped(): void {
     if (!this.app.map || this.savedControlDisplays.size > 0) return;
+    // Replay owns the map while it runs; its control is disabled then, and
+    // this covers every other way in (the mobile tab, a restored state)
+    if (this.app.replayManager.state.active) return;
 
     // A close that is still settling must not remeasure a map that is about
     // to move back into the dialog
     this.cancelPendingMapTimers();
 
+    this.renderContent();
+
+    // Move the map into the wrapped container
+    const mapContainer = domCache.get("map");
+    const wrappedMapContainer = domCache.get("wrapped-map-container");
+
+    if (!mapContainer || !wrappedMapContainer) return;
+
+    // Store original position if not already stored
+    if (!this.originalMapParent) {
+      this.originalMapParent = mapContainer.parentNode as HTMLElement;
+      this.originalMapIndex = Array.from(
+        this.originalMapParent.children,
+      ).indexOf(mapContainer);
+    }
+
+    // The dialog fits the map to all the data; closing it puts the user's
+    // own view back. A view still waiting to be put back by a close that is
+    // settling is the user's, the current one is the fitted one.
+    this.savedView ??= {
+      center: this.app.map.getCenter(),
+      zoom: this.app.map.getZoom(),
+    };
+    this.app.map.fitBounds(this.app.config.bounds, this.fitOptions());
+
+    // Hide controls in wrapped view FIRST
+    this.savedControlDisplays = hideControls();
+
+    // Show modal first to ensure wrapped-map-container has dimensions
+    const modal = domCache.get("wrapped-modal");
+    if (modal) {
+      modal.style.display = "flex";
+      this.trapFocus(modal);
+    }
+    this.setWrappedVisible(true);
+
+    const cardsColumn = domCache.get("wrapped-cards-column");
+    if (cardsColumn) this.prepareCardsScroll(cardsColumn);
+    // The stacked layout scrolls the content row instead of the column, and
+    // it keeps its position between openings just the same
+    const content = domCache.get("wrapped-content");
+    if (content) content.scrollTop = 0;
+
+    // Add Escape key handler to close modal
+    this.escapeHandler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        this.closeWrapped();
+      }
+    };
+    document.addEventListener("keydown", this.escapeHandler);
+
+    // Wait for modal to render and have dimensions. The handles are cleared
+    // on close so that a quick close cannot move the map into a hidden dialog.
+    this.mapMoveTimer = setTimeout(() => {
+      this.mapMoveTimer = null;
+      if (!this.app.store.get("wrappedVisible")) return;
+      // Now move map into wrapped container (which now has dimensions)
+      wrappedMapContainer.appendChild(mapContainer);
+
+      // Make sure the map container fills the wrapped container
+      mapContainer.style.width = "100%";
+      mapContainer.style.height = "100%";
+      mapContainer.style.borderRadius = "12px";
+      mapContainer.style.overflow = "hidden";
+
+      // Force a layout recalculation
+      wrappedMapContainer.offsetHeight;
+
+      // Now that container has dimensions, invalidate map size
+      this.mapResizeTimer = setTimeout(() => {
+        this.mapResizeTimer = null;
+        if (!this.app.map || !this.app.store.get("wrappedVisible")) return;
+        this.app.map.invalidateSize();
+        this.app.map.fitBounds(this.app.config.bounds, this.fitOptions());
+      }, 100);
+    }, 50);
+  }
+
+  /**
+   * Fill the cards for the selected year and aircraft from the loaded data.
+   * Runs on opening and again when other data finishes loading while the
+   * dialog is open.
+   */
+  private renderContent(): void {
     // Use the currently selected year (including 'all')
     const year = this.app.selectedYear;
 
     const aircraft = this.app.selectedAircraft;
 
-    const allPathInfo = this.app.fullPathInfo || [];
-    const allSegments = this.app.fullPathSegments || [];
+    // The filter view of the dataset is shared with the statistics panel,
+    // so a filter it already computed is not walked again here
+    const data = this.app.currentData;
+    const view = data ? datasetIndex(data).filter(year, aircraft) : null;
+    const preFiltered = {
+      paths: view?.paths ?? [],
+      segments: view?.segments() ?? [],
+    };
 
-    // Filter once and share between both stat calculations
-    const filteredPaths = filterPaths(allPathInfo, year, aircraft);
-    const filteredSegments = filterSegmentsByPaths(allSegments, filteredPaths);
-    const preFiltered = { paths: filteredPaths, segments: filteredSegments };
-
-    const filteredStats = calculateFilteredStatistics({
-      pathInfo: allPathInfo,
-      segments: allSegments,
-      year: year,
-      aircraft: aircraft,
-      preFiltered,
-    });
+    const filteredStats = view
+      ? view.statistics()
+      : calculateFilteredStatistics({ pathInfo: [], segments: [] });
 
     const yearStats = calculateYearStats(
-      allPathInfo,
-      allSegments,
+      data?.path_info ?? [],
+      data?.path_segments ?? [],
       year,
-      this.app.fullStats,
+      this.app.aircraftModels,
       aircraft,
       preFiltered,
     );
@@ -249,11 +337,7 @@ export class WrappedManager {
 
     // Build home base section using year-filtered airport data
     if (yearStats.airport_names && yearStats.airport_names.length > 0) {
-      const airportCounts = calculateAirportFlightCounts(
-        filteredPaths,
-        "all",
-        "all",
-      );
+      const airportCounts = view?.airportCounts() ?? {};
       const homeBase = findHomeBase(airportCounts);
       const homeBaseCount = homeBase ? (airportCounts[homeBase] ?? 0) : 0;
 
@@ -282,71 +366,6 @@ export class WrappedManager {
         if (gridEl) gridEl.innerHTML = destinationsHtml;
       }
     }
-
-    // Move the map into the wrapped container
-    const mapContainer = domCache.get("map");
-    const wrappedMapContainer = domCache.get("wrapped-map-container");
-
-    if (!mapContainer || !wrappedMapContainer) return;
-
-    // Store original position if not already stored
-    if (!this.originalMapParent) {
-      this.originalMapParent = mapContainer.parentNode as HTMLElement;
-      this.originalMapIndex = Array.from(
-        this.originalMapParent.children,
-      ).indexOf(mapContainer);
-    }
-
-    // Zoom to fit all data with extra padding
-    this.app.map.fitBounds(this.app.config.bounds, { padding: [80, 80] });
-
-    // Hide controls in wrapped view FIRST
-    this.savedControlDisplays = hideControls();
-
-    // Show modal first to ensure wrapped-map-container has dimensions
-    const modal = domCache.get("wrapped-modal");
-    if (modal) {
-      modal.style.display = "flex";
-      this.trapFocus(modal);
-    }
-    this.setWrappedVisible(true);
-
-    const cardsColumn = domCache.get("wrapped-cards-column");
-    if (cardsColumn) this.prepareCardsScroll(cardsColumn);
-
-    // Add Escape key handler to close modal
-    this.escapeHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        this.closeWrapped();
-      }
-    };
-    document.addEventListener("keydown", this.escapeHandler);
-
-    // Wait for modal to render and have dimensions. The handles are cleared
-    // on close so that a quick close cannot move the map into a hidden dialog.
-    this.mapMoveTimer = setTimeout(() => {
-      this.mapMoveTimer = null;
-      if (!this.app.store.get("wrappedVisible")) return;
-      // Now move map into wrapped container (which now has dimensions)
-      wrappedMapContainer.appendChild(mapContainer);
-
-      // Make sure the map container fills the wrapped container
-      mapContainer.style.width = "100%";
-      mapContainer.style.height = "100%";
-      mapContainer.style.borderRadius = "12px";
-      mapContainer.style.overflow = "hidden";
-
-      // Force a layout recalculation
-      wrappedMapContainer.offsetHeight;
-
-      // Now that container has dimensions, invalidate map size
-      this.mapResizeTimer = setTimeout(() => {
-        this.mapResizeTimer = null;
-        if (!this.app.map || !this.app.store.get("wrappedVisible")) return;
-        this.app.map.invalidateSize();
-        this.app.map.fitBounds(this.app.config.bounds, { padding: [80, 80] });
-      }, 100);
-    }, 50);
   }
 
   /**
@@ -364,7 +383,11 @@ export class WrappedManager {
     this.previouslyFocused = active instanceof HTMLElement ? active : null;
 
     const makeInert = (el: Element): void => {
-      if (el === modal || staysInteractive(el) || el.hasAttribute("inert")) {
+      if (
+        el === modal ||
+        NON_INERT_IDS.has(el.id) ||
+        el.hasAttribute("inert")
+      ) {
         return;
       }
       el.setAttribute("inert", "");
@@ -427,6 +450,7 @@ export class WrappedManager {
 
   /** Drop every pending timer and listener; the dialog stays as it is */
   destroy(): void {
+    this.unsubscribeData();
     this.cancelPendingMapTimers();
     this.cardsScrollCleanup?.();
     this.cardsScrollCleanup = null;
@@ -468,10 +492,18 @@ export class WrappedManager {
         restoreControls(this.savedControlDisplays);
         this.savedControlDisplays.clear();
 
-        // Force map to recalculate size once it is back in the page layout
+        // Force map to recalculate size once it is back in the page layout,
+        // then put the user's view back. The move this fires is what saves
+        // the view to the URL again.
         this.mapRestoreTimer = setTimeout(() => {
           this.mapRestoreTimer = null;
-          if (this.app.map) this.app.map.invalidateSize();
+          const view = this.savedView;
+          this.savedView = null;
+          if (!this.app.map) return;
+          this.app.map.invalidateSize();
+          if (view) {
+            this.app.map.setView(view.center, view.zoom, { animate: false });
+          }
         }, MAP_RESTORE_DELAY_MS);
       }
 

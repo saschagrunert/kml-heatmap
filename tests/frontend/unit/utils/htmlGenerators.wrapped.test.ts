@@ -25,7 +25,7 @@ describe("htmlGenerators (Wrapped sections)", () => {
       aircraft_list: [],
     };
 
-    const mockFullStats: FilteredStatistics = {
+    const mockFilteredStats: FilteredStatistics = {
       total_distance_km: 22870.5,
       total_distance_nm: 12345.67,
       total_points: 1000,
@@ -42,7 +42,7 @@ describe("htmlGenerators (Wrapped sections)", () => {
     };
 
     it("generates stats HTML without timing data", () => {
-      const html = generateStatsHtml(mockYearStats, mockFullStats, false);
+      const html = generateStatsHtml(mockYearStats, mockFilteredStats, false);
 
       expect(html).toContain('<div class="stat-card">');
       expect(html).toContain('<div class="stat-value">42</div>');
@@ -67,7 +67,7 @@ describe("htmlGenerators (Wrapped sections)", () => {
     });
 
     it("generates stats HTML with timing data", () => {
-      const html = generateStatsHtml(mockYearStats, mockFullStats, true);
+      const html = generateStatsHtml(mockYearStats, mockFilteredStats, true);
 
       expect(html).toContain(
         '123<span class="stat-unit">h</span> 45<span class="stat-unit">m</span>',
@@ -79,7 +79,7 @@ describe("htmlGenerators (Wrapped sections)", () => {
       expect(html).toContain('<div class="stat-label">Max Groundspeed</div>');
     });
 
-    it("handles null fullStats", () => {
+    it("handles null statistics", () => {
       const html = generateStatsHtml(mockYearStats, null, false);
 
       expect(html).toContain("42");
@@ -88,7 +88,7 @@ describe("htmlGenerators (Wrapped sections)", () => {
 
     it("handles missing max_groundspeed_knots", () => {
       const statsWithoutGroundspeed: FilteredStatistics = {
-        ...mockFullStats,
+        ...mockFilteredStats,
         max_groundspeed_knots: undefined,
       };
 
@@ -107,7 +107,7 @@ describe("htmlGenerators (Wrapped sections)", () => {
         total_distance_nm: 9999.999,
       };
 
-      const html = generateStatsHtml(stats, mockFullStats, false);
+      const html = generateStatsHtml(stats, mockFilteredStats, false);
 
       // One decimal and grouped digits, so the card and the panel agree
       expect(html).toContain("10,000.0");

@@ -180,8 +180,9 @@ Examples:
     Path(output_dir).mkdir(exist_ok=True)
 
     print(f"Generating {num_files:,} KML files in {output_dir}/")
-    estimated_size_mb = num_files * 0.05
-    print(f"This will create approximately {estimated_size_mb:.0f}MB of test data...")
+    # Measured: 50 points per flight come to about 3.4 KB per file
+    estimated_size_mb = num_files * 3.4 / 1024
+    print(f"This will create approximately {estimated_size_mb:.1f} MB of test data...")
 
     airport_list = list(AIRPORTS.keys())
 
@@ -200,8 +201,17 @@ Examples:
     print(f"\n✓ Successfully generated {num_files:,} KML files in {output_dir}/")
     print("\nTo test with this data, run:")
     print(f"  make build INPUT_DIR={output_dir}")
-    print("\nOr with Docker:")
-    print(f"  docker run --rm -v $(pwd):/data kml-heatmap {output_dir}")
+    # --user: the image's own user cannot write to host directories.
+    # --output-dir: only a mounted directory reaches the host.
+    name = Path(output_dir).resolve().name
+    print("\nOr with Docker (writes the site to out/):")
+    print("  mkdir -p out ~/.cache/kml-heatmap")
+    print(
+        '  docker run --rm --user "$(id -u):$(id -g)" '
+        f'-v "{Path(output_dir).resolve()}:/data/{name}" '
+        '-v "$PWD/out:/data/out" -v ~/.cache/kml-heatmap:/cache '
+        f"kml-heatmap {name} --output-dir out"
+    )
 
 
 if __name__ == "__main__":

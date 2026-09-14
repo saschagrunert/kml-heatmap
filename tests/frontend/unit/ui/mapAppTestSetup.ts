@@ -69,7 +69,6 @@ export const mockLayerManagerInstance = {
   redrawAltitudePaths: vi.fn(),
   redrawAirspeedPaths: vi.fn(),
   clearLayer: vi.fn(),
-  getPathInfoMap: vi.fn(() => new Map()),
 };
 
 export const mockStateManagerInstance = {
@@ -166,19 +165,9 @@ export const defaultAirports: Airport[] = [
 export const defaultMetadata: Metadata = {
   available_years: [2024, 2025],
   year_file_bytes: { "2024": 10, "2025": 20 },
-  stats: {
-    total_points: 10000,
-    num_paths: 100,
-    num_airports: 5,
-    airport_names: [],
-    num_aircraft: 3,
-    aircraft_list: [],
-    total_distance_km: 5000,
-    total_distance_nm: 2700,
-    max_groundspeed_knots: 150,
-  },
   min_groundspeed_knots: 0,
   max_groundspeed_knots: 150,
+  aircraft_models: { "D-ABCD": "Diamond DA40" },
 };
 
 export const defaultData: KMLDataset = {

@@ -4,15 +4,16 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .constants import SECONDS_PER_HOUR
-
 __all__ = [
+    "DATE_PATTERN",
     "calculate_duration_seconds",
-    "format_flight_time",
     "numeric_filename_key",
     "parse_iso_timestamp",
     "parse_timestamp_epoch",
 ]
+
+# A date as flight logs write it into names: "16 Aug 2026" or "2026-08-16"
+DATE_PATTERN = re.compile(r"(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
 
 
 def parse_iso_timestamp(timestamp_str: str | None) -> datetime | None:
@@ -50,17 +51,6 @@ def calculate_duration_seconds(
         return end - start
 
     return 0.0
-
-
-def format_flight_time(seconds: float) -> str:
-    """Format flight time in seconds to human-readable string."""
-    if seconds <= 0:
-        return "0h 0m"
-
-    hours = int(seconds // SECONDS_PER_HOUR)
-    minutes = int((seconds % SECONDS_PER_HOUR) // 60)
-
-    return f"{hours}h {minutes}m"
 
 
 def numeric_filename_key(path: str) -> tuple[int, int, str]:

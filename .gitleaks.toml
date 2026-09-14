@@ -5,10 +5,14 @@
 [extend]
 useDefault = true
 
-# The generated site used to be committed, and its map_config.js embeds the
-# public client-side tile API keys (CARTO, OpenAIP). The file is no longer
-# tracked, but gitleaks scans the history, so the old revisions still need
-# the allowlist.
+# The generated site used to be committed, and its pages embedded the public
+# client-side tile API keys (Stadia, CARTO, OpenAIP). None of these files is
+# tracked any more, but the CI security job scans the whole commit history,
+# so the old revisions still need the allowlist. [[allowlists]] needs
+# gitleaks 8.25 or newer; older versions ignore it without a warning.
 [[allowlists]]
 description = "Historic generated site files with public tile API keys"
-paths = ['''^docs/map_config\.js$''']
+paths = [
+  '''^docs/(index\.html|map\.js|map_config\.js)$''',
+  '''^example/index\.html$''',
+]

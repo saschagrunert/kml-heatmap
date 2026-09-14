@@ -13,10 +13,15 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Build the TypeScript sources into an IIFE bundle (kml_heatmap/static/*.js)
+# Build the TypeScript sources into an IIFE bundle (kml_heatmap/static/*.js).
+# The whole package comes along, so a new module or subpackage reaches the
+# runtime image without a Dockerfile change. The TypeScript sources are
+# dropped here rather than in .dockerignore, which would hide them from this
+# stage as well.
 COPY build.js tsconfig.json ./
-COPY kml_heatmap/frontend/ ./kml_heatmap/frontend/
-RUN npm run build
+COPY scripts/source-hash.js ./scripts/
+COPY kml_heatmap/ ./kml_heatmap/
+RUN npm run build && rm -rf kml_heatmap/frontend
 
 # Stage 2: Python runtime
 FROM docker.io/library/python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
@@ -33,12 +38,9 @@ RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy the Python package (no TypeScript sources), templates and static assets
-COPY kml_heatmap/*.py kml_heatmap/py.typed ./kml_heatmap/
-COPY kml_heatmap/templates/ ./kml_heatmap/templates/
-COPY kml_heatmap/static/ ./kml_heatmap/static/
-# Built bundle (and its source map, when present) from the builder stage
-COPY --from=js-builder /build/kml_heatmap/static/ ./kml_heatmap/static/
+# The Python package with its templates, static assets and the built bundle
+# (and its source map), without the TypeScript sources
+COPY --from=js-builder /build/kml_heatmap/ ./kml_heatmap/
 COPY serve.py ./
 
 # Run as an unprivileged user; /data is the work directory for input and

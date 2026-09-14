@@ -24,11 +24,13 @@ test.describe("Replay", () => {
     // The button is actionable even when replay is unavailable
     await replayBtn.click({ force: true });
 
-    const toast = page.locator(".toast-notification");
-    await expect(toast).toHaveText(
+    await expect(page.locator(".toast-notification")).toHaveText(
       "Select exactly one flight with timing data to replay",
     );
-    await expect(toast).toHaveAttribute("role", "status");
+    // Screen readers hear it through the persistent status region
+    await expect(page.locator("#toast-status")).toHaveText(
+      "Select exactly one flight with timing data to replay",
+    );
     await expect(page.locator("#replay-controls")).toBeHidden();
   });
 

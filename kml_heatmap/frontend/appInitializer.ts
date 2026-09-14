@@ -7,8 +7,9 @@ import * as L from "leaflet";
 import { createAirportIcon } from "./features/airports";
 import { domCache } from "./utils/domCache";
 import { showToast } from "./utils/toast";
+import { datasetIndex } from "./calculations/datasetIndex";
 import type { MapApp } from "./mapApp";
-import type { Airport } from "./types";
+import type { Airport, KMLDataset } from "./types";
 
 /**
  * Populate the year dropdown and make sure the selected year exists.
@@ -78,9 +79,10 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // Add airport markers
   createAirportMarkers(app, airports);
 
-  // Load and store full statistics
-  if (metadata && metadata.stats) {
-    app.fullStats = metadata.stats;
+  // The statistics are computed from the loaded paths; the metadata only
+  // adds the model names that aircraft.json knows
+  if (metadata) {
+    app.aircraftModels = metadata.aircraft_models ?? {};
   }
 
   // Load the selected year's data; currentData is the single source of
@@ -88,20 +90,23 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // the airport markers follow it through their store subscriptions.
   const data = await app.dataManager.loadData(app.selectedYear);
   if (data) {
-    app.currentData = data;
+    // One flush, so nobody sees the dataset with a selection it does not have
+    app.store.batch(() => {
+      dropUnknownPathIds(app, data);
+      app.currentData = data;
+    });
   }
 
   // Populate aircraft dropdown
   app.filterManager.updateAircraftDropdown();
 
-  // Load groundspeed range from metadata
-  const hasTimingData =
-    metadata !== null &&
-    metadata.max_groundspeed_knots !== undefined &&
-    metadata.max_groundspeed_knots > 0;
+  // Load groundspeed range from metadata; exports without timestamps have
+  // no groundspeeds at all, and then no speed layer and no replay
+  const hasTimingData = metadata !== null && metadata.max_groundspeed_knots > 0;
+  app.hasTimingData = hasTimingData;
 
   if (hasTimingData) {
-    const minSpeed = metadata.min_groundspeed_knots ?? 0;
+    const minSpeed = metadata.min_groundspeed_knots;
     const maxSpeed = metadata.max_groundspeed_knots;
     app.airspeedRange = { min: minSpeed, max: maxSpeed };
     app.layerManager.updateAirspeedLegend(minSpeed, maxSpeed);
@@ -117,8 +122,10 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     airspeedBtn.disabled = !hasTimingData;
   }
 
-  // Initial layer build (heatmap, visible colour layers, stats, airports)
-  await app.dataManager.updateLayers();
+  // Initial layer build (heatmap, visible colour layers, stats, airports).
+  // The dataset is handed over: a year that failed to load above would be
+  // fetched and reported a second time otherwise.
+  await app.dataManager.updateLayers(data);
 
   // Set initial airport marker sizes
   app.airportManager.updateAirportMarkerSizes();
@@ -144,6 +151,33 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   if (app.savedState && app.savedState.statsPanelVisible) {
     app.statsManager.setStatsPanelVisible(true);
   }
+}
+
+/**
+ * Drop the restored path ids that are not in the loaded dataset.
+ *
+ * Ids are derived from the flights, so a shared link or a saved state keeps
+ * pointing at the same flight after a re-export; one whose flight is gone
+ * is dropped quietly. Isolation goes with the last id: the controls cannot
+ * leave isolate mode on over an empty selection. A dataset missing a year
+ * that failed to load cannot tell a deleted flight from an unloaded one, so
+ * it drops nothing.
+ * @param app - The MapApp instance to operate on
+ * @param data - The dataset the selection has to refer to
+ */
+export function dropUnknownPathIds(app: MapApp, data: KMLDataset): void {
+  const selected = app.selectedPathIds;
+  if (selected.size === 0 || data.incomplete) return;
+
+  const known = datasetIndex(data).pathInfoById;
+  const unknown = [...selected].filter((pathId) => !known.has(pathId));
+  if (unknown.length === 0) return;
+
+  app.store.batch(() => {
+    for (const pathId of unknown) selected.delete(pathId);
+    app.store.notifyMutation("selectedPathIds");
+    if (selected.size === 0) app.isolateSelection = false;
+  });
 }
 
 /**

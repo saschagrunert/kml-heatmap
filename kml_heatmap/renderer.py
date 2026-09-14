@@ -1,5 +1,6 @@
 """HTML generation, rendering, and pipeline orchestration."""
 
+import hashlib
 import html
 import json
 import logging
@@ -12,7 +13,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import minify_html as mh
 import rcssmin
@@ -22,16 +23,21 @@ from .aircraft import merge_aircraft_data
 from .airport_lookup import load_airport_database
 from .airports import deduplicate_airports
 from .cache import atomic_text_write
-from .data_exporter import export_all_data
+from .data_exporter import (
+    ExportResult,
+    SiteOutput,
+    export_all_data,
+    is_exportable_path,
+)
 from .exceptions import KMLHeatmapError, KMLParseError
 from .logger import logger
 from .parser import parse_kml_coordinates
 from .parser_cache import prune_stale_cache_entries
 from .validation import validate_kml_file, validate_output_dir
-from .workers import init_worker
+from .workers import init_worker, parse_worker_count
 
 if TYPE_CHECKING:
-    from .types import AirportData, FlightPath, FlightPathGroup, PathMetadata
+    from .types import FlightPath, FlightPathGroup, PathMetadata
 
 __all__ = [
     "CoordinateExtent",
@@ -40,6 +46,32 @@ __all__ = [
     "load_template",
     "minify_html",
 ]
+
+STATIC_DIR = Path(__file__).parent / "static"
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+# Built by `npm run build` and not committed
+BUNDLE_FILE = STATIC_DIR / "mapApp.bundle.js"
+# The sources of the bundle; only present in a checkout, not in the image
+FRONTEND_DIR = Path(__file__).parent / "frontend"
+# First line of the bundle; the group is the source hash (scripts/source-hash.js)
+BUNDLE_BANNER = re.compile(rb"/\* kml-heatmap build ([0-9a-f]{12}) \*/")
+FAVICON_FILES = (
+    "favicon.svg",
+    "favicon.ico",
+    "favicon-192.png",
+    "favicon-512.png",
+    "apple-touch-icon.png",
+    "manifest.json",
+)
+# The files the tool owns next to the page. Any of them that a run does not
+# produce (the source map of a bundle built without one) is removed.
+SITE_FILES = (
+    "map_config.js",
+    "styles.css",
+    BUNDLE_FILE.name,
+    f"{BUNDLE_FILE.name}.map",
+    *FAVICON_FILES,
+)
 
 
 @dataclass(frozen=True)
@@ -91,12 +123,11 @@ class ParsedFile:
     """What a parse worker sends back to the main process.
 
     The flat coordinate list stays in the worker: the main process only
-    needs its extent and size, which keeps the data crossing the process
-    boundary (and held in the parent) to the flight paths themselves.
+    needs its size, which keeps the data crossing the process boundary (and
+    held in the parent) to the flight paths themselves.
     """
 
     kml_file: str
-    extent: CoordinateExtent | None = None
     point_count: int = 0
     path_groups: FlightPathGroup = field(default_factory=list)
     path_metadata: list[PathMetadata] = field(default_factory=list)
@@ -110,39 +141,58 @@ def _escape_js_string(value: str) -> str:
 
 def load_template() -> str:
     """Load the HTML template from file."""
-    template_path = Path(__file__).parent / "templates" / "map_template.html"
+    template_path = TEMPLATES_DIR / "map_template.html"
     with open(template_path, encoding="utf-8") as f:
         return f.read()
 
 
 def minify_html(html_content: str) -> str:
-    """Minify HTML, CSS, and JavaScript using specialized minification libraries."""
+    """Minify the HTML page.
 
-    def minify_css_tags(match: re.Match[str]) -> str:
-        """Minify CSS content within style tags using rcssmin."""
-        minified_css: str = rcssmin.cssmin(match.group(1))
-        return f"<style>{minified_css}</style>"
-
-    def minify_js_tags(match: re.Match[str]) -> str:
-        """Minify JavaScript content within script tags using rjsmin."""
-        minified_js: str = rjsmin.jsmin(match.group(1))
-        # rjsmin preserves newlines for ASI safety. Our code uses explicit
-        # semicolons, so we can remove remaining newlines safely.
-        minified_js = re.sub(r"\s*\n\s*", "", minified_js)
-        return f"<script>{minified_js}</script>"
-
-    # Deliberately only attribute-less tags: a pattern such as `<script[^>]*>`
-    # would also match `<script src="..." defer>`, whose body is empty, and the
-    # replacement would drop the attributes and with them the referenced file.
-    html_content = re.sub(
-        r"<style>(.*?)</style>", minify_css_tags, html_content, flags=re.DOTALL
-    )
-    html_content = re.sub(
-        r"<script>(.*?)</script>", minify_js_tags, html_content, flags=re.DOTALL
-    )
-
+    Only the markup: the template has no inline styles or scripts (its CSP
+    blocks inline scripts), the stylesheet and the config are minified as
+    separate files.
+    """
     minified: str = mh.minify(html_content)
     return minified
+
+
+def _frontend_source_hash() -> str | None:
+    """The hash build.js stamps into the bundle, None without the sources.
+
+    Mirrors scripts/source-hash.js: every .ts file in path order, each as its
+    path relative to the repository and its content.
+    """
+    if not FRONTEND_DIR.is_dir():
+        return None
+    root = FRONTEND_DIR.parent.parent
+    digest = hashlib.sha1(usedforsecurity=False)
+    for path in sorted(FRONTEND_DIR.rglob("*.ts"), key=str):
+        digest.update(path.relative_to(root).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:12]
+
+
+def _warn_about_a_stale_bundle() -> None:
+    """Warn when the bundle was built from other sources than the checkout's.
+
+    An old bundle left over from before a pull reads a data format the new
+    generator no longer writes; the page then breaks in ways that are hard to
+    trace back to a missing ``npm run build``.
+    """
+    try:
+        current = _frontend_source_hash()
+        with BUNDLE_FILE.open("rb") as bundle:
+            match = BUNDLE_BANNER.match(bundle.readline())
+    except OSError:
+        return
+    if current is not None and (match is None or match.group(1).decode() != current):
+        logger.warning(
+            "The JavaScript bundle was built from other frontend sources; "
+            "run 'npm run build' to rebuild it"
+        )
 
 
 def _parse_with_error_handling(kml_file: str) -> ParsedFile:
@@ -152,18 +202,12 @@ def _parse_with_error_handling(kml_file: str) -> ParsedFile:
     except (OSError, ValueError, TypeError, KMLParseError) as e:
         logger.error("Error processing %s: %s", kml_file, e)
         return ParsedFile(kml_file)
-    return ParsedFile(
-        kml_file,
-        CoordinateExtent.of(coordinates),
-        len(coordinates),
-        path_groups,
-        path_metadata,
-    )
+    return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata)
 
 
 def _parse_kml_files(
     valid_files: list[str],
-) -> tuple[CoordinateExtent, FlightPathGroup, list[PathMetadata]]:
+) -> tuple[FlightPathGroup, list[PathMetadata]]:
     """Parse KML files in parallel and merge the results in input order.
 
     The input order decides the path ids, so the merge must not depend on
@@ -175,13 +219,24 @@ def _parse_kml_files(
     # the workers then find a valid cache instead of each waiting for the
     # download, and the cache keys below see the same database as they do
     load_airport_database()
-    prune_stale_cache_entries(valid_files)
+    prune_stale_cache_entries()
 
     results: list[ParsedFile] = []
-    completed_count = 0
     debug = logger.isEnabledFor(logging.DEBUG)
+
+    def record(parsed: ParsedFile) -> None:
+        results.append(parsed)
+        logger.info(
+            "  [%d/%d] %.0f%% - %s",
+            len(results),
+            len(valid_files),
+            (len(results) / len(valid_files)) * 100,
+            Path(parsed.kml_file).name,
+        )
+
+    pool_broken = False
     with ProcessPoolExecutor(
-        max_workers=max(1, min(len(valid_files), os.cpu_count() or 4)),
+        max_workers=parse_worker_count(valid_files),
         initializer=init_worker,
         initargs=(debug,),
     ) as executor:
@@ -191,39 +246,53 @@ def _parse_kml_files(
         for future in as_completed(future_to_file):
             try:
                 parsed = future.result()
-            except BrokenProcessPool as e:
-                raise KMLHeatmapError(
-                    "A parser worker process crashed; run with --debug for details"
-                ) from e
+            except BrokenProcessPool:
+                # Usually a worker killed for running out of memory while
+                # others parsed large files at the same time
+                pool_broken = True
+                break
+            except KMLHeatmapError:
+                # Not a problem of this one file (the airport database, say),
+                # so every other file would fail the same way
+                executor.shutdown(wait=True, cancel_futures=True)
+                raise
             except Exception:
                 kml_file = future_to_file[future]
                 logger.exception("Unexpected error processing %s", kml_file)
                 parsed = ParsedFile(kml_file)
-            results.append(parsed)
-            completed_count += 1
-            logger.info(
-                "  [%d/%d] %.0f%% - %s",
-                completed_count,
-                len(valid_files),
-                (completed_count / len(valid_files)) * 100,
-                Path(parsed.kml_file).name,
-            )
+            record(parsed)
+
+    if pool_broken:
+        done = {parsed.kml_file for parsed in results}
+        remaining = [f for f in valid_files if f not in done]
+        logger.warning(
+            "  A parser worker process crashed; parsing the %d remaining "
+            "file(s) one at a time",
+            len(remaining),
+        )
+        # Still in a worker: a file that is too large to parse must not take
+        # the main process down with it, and one at a time names the file
+        with ProcessPoolExecutor(
+            max_workers=1, initializer=init_worker, initargs=(debug,)
+        ) as executor:
+            for kml_file in remaining:
+                try:
+                    parsed = executor.submit(
+                        _parse_with_error_handling, kml_file
+                    ).result()
+                except BrokenProcessPool:
+                    raise KMLHeatmapError(
+                        f"A parser worker process crashed on {kml_file}, possibly "
+                        "out of memory; run with --debug for details"
+                    ) from None
+                record(parsed)
 
     input_order = {kml_file: index for index, kml_file in enumerate(valid_files)}
     results.sort(key=lambda parsed: input_order[parsed.kml_file])
-    failed_count = sum(1 for parsed in results if parsed.point_count == 0)
-    if failed_count > 0:
-        logger.warning(
-            "  %d of %d file(s) failed to parse", failed_count, len(valid_files)
-        )
-
-    extent: CoordinateExtent | None = None
     total_points = 0
     all_path_groups: FlightPathGroup = []
     all_path_metadata: list[PathMetadata] = []
     for parsed in results:
-        if parsed.extent is not None:
-            extent = parsed.extent.union(extent)
         total_points += parsed.point_count
         all_path_groups.extend(parsed.path_groups)
         all_path_metadata.extend(parsed.path_metadata)
@@ -235,11 +304,17 @@ def _parse_kml_files(
         parse_time / len(valid_files),
     )
 
-    if extent is None:
+    if total_points == 0:
         raise KMLHeatmapError("No coordinates found in any KML files!")
+    failed_count = sum(1 for parsed in results if parsed.point_count == 0)
+    if failed_count > 0:
+        raise KMLHeatmapError(
+            f"{failed_count} of {len(valid_files)} file(s) failed to parse "
+            "(see above); fix or remove them"
+        )
 
     logger.info("\nTotal points: %d", total_points)
-    return extent, all_path_groups, all_path_metadata
+    return all_path_groups, all_path_metadata
 
 
 def _drop_paths_without_year(
@@ -261,39 +336,62 @@ def _drop_paths_without_year(
     return kept_groups, kept_metadata
 
 
-def _process_data(
-    extent: CoordinateExtent,
+def _map_extent(all_path_groups: FlightPathGroup) -> CoordinateExtent:
+    """The extent of the exported paths, which the map is fitted to.
+
+    Only exported paths count: an excluded path would widen the map and give
+    away where it was. Raises when there is nothing to export at all.
+    """
+    extent: CoordinateExtent | None = None
+    for path in all_path_groups:
+        path_extent = CoordinateExtent.of(path) if is_exportable_path(path) else None
+        if path_extent is not None:
+            extent = path_extent.union(extent)
+    if extent is None:
+        raise KMLHeatmapError("No flight paths with a determinable year to export")
+    return extent
+
+
+def _export_site(
     all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
-    data_dir: str,
+    output_file: Path,
+    data_dir: Path,
     aircraft_data: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    """Process parsed data: deduplicate airports, export files, build stats."""
+) -> ExportResult:
+    """Export the data, render the page and package its assets.
+
+    Everything is staged first and published at the end (see ``SiteOutput``),
+    so a failure at any step leaves the previous site in the output as it was.
+    """
     all_path_groups, all_path_metadata = _drop_paths_without_year(
         all_path_groups, all_path_metadata
     )
+    extent = _map_extent(all_path_groups)
 
-    unique_airports: list[AirportData] = []
-    if all_path_metadata:
-        logger.info("\nProcessing %d start points...", len(all_path_metadata))
-        unique_airports = deduplicate_airports(all_path_metadata, all_path_groups)
-        logger.info("  Found %d unique airports", len(unique_airports))
+    logger.info("\nProcessing %d start points...", len(all_path_metadata))
+    unique_airports = deduplicate_airports(all_path_metadata, all_path_groups)
+    logger.info("  Found %d unique airports", len(unique_airports))
 
-    result = export_all_data(
-        all_path_groups,
-        all_path_metadata,
-        unique_airports,
-        data_dir,
-        aircraft_data=aircraft_data,
-    )
+    data_dir_name = data_dir.name
+    with SiteOutput(output_file.parent, data_dir, SITE_FILES) as site:
+        result = export_all_data(
+            all_path_groups,
+            all_path_metadata,
+            unique_airports,
+            site.data_stage,
+            aircraft_data=aircraft_data,
+        )
+        _render_html(site.site_stage / output_file.name, data_dir_name)
+        _package_assets(site.site_stage, extent.as_map_bounds(), data_dir_name)
 
-    return {
-        "stats": result.stats,
-        "bounds": extent.as_map_bounds(),
-    }
+        logger.info("\nPublishing the site to %s", output_file.parent)
+        site.publish(result.years)
+
+    return result
 
 
-def _render_html(output_file: str, data_dir_name: str) -> None:
+def _render_html(output_file: Path, data_dir_name: str) -> None:
     """Render and minify the HTML template."""
     logger.info("\nGenerating progressive HTML...")
 
@@ -303,14 +401,16 @@ def _render_html(output_file: str, data_dir_name: str) -> None:
     logger.info("\nMinifying HTML...")
     minified_html = minify_html(html_content)
 
-    atomic_text_write(Path(output_file), minified_html)
+    atomic_text_write(output_file, minified_html)
 
-    file_size = Path(output_file).stat().st_size
+    file_size = output_file.stat().st_size
     original_size = len(html_content)
     minified_size = len(minified_html)
     reduction = (1 - minified_size / original_size) * 100
 
-    logger.info("Progressive HTML saved: %s (%.1f KB)", output_file, file_size / 1024)
+    logger.info(
+        "Progressive HTML saved: %s (%.1f KB)", output_file.name, file_size / 1024
+    )
     logger.info(
         "  Minification: %.1f KB -> %.1f KB (%.1f%% reduction)",
         original_size / 1024,
@@ -320,8 +420,7 @@ def _render_html(output_file: str, data_dir_name: str) -> None:
 
 
 def _generate_map_config(
-    output_dir: str,
-    templates_dir: Path,
+    output_dir: Path,
     bounds: dict[str, float],
     data_dir_name: str,
 ) -> None:
@@ -329,8 +428,8 @@ def _generate_map_config(
     carto_api_key = os.environ.get("CARTO_API_KEY", "")
     openaip_api_key = os.environ.get("OPENAIP_API_KEY", "")
 
-    map_config_template_path = templates_dir / "map_config_template.js"
-    map_config_dst = Path(output_dir) / "map_config.js"
+    map_config_template_path = TEMPLATES_DIR / "map_config_template.js"
+    map_config_dst = output_dir / "map_config.js"
 
     with open(map_config_template_path, encoding="utf-8") as f:
         map_config_raw = f.read()
@@ -353,30 +452,26 @@ def _generate_map_config(
 
     map_config_size = map_config_dst.stat().st_size
     logger.info(
-        "Configuration generated: %s (%.1f KB)", map_config_dst, map_config_size / 1024
+        "Configuration generated: %s (%.1f KB)",
+        map_config_dst.name,
+        map_config_size / 1024,
     )
 
 
-def _copy_javascript_bundle(output_dir: str, static_dir: Path) -> None:
-    """Copy the application bundle (and its source map) to the output."""
-    bundle_name = "mapApp.bundle.js"
-    src = static_dir / bundle_name
-    dst = Path(output_dir) / bundle_name
-    if not src.exists():
-        logger.warning("%s not found - run npm build to generate it", bundle_name)
-        return
-
-    shutil.copy2(src, dst)
-    logger.info("JavaScript copied: %s (%.1f KB)", dst, dst.stat().st_size / 1024)
-    source_map = static_dir / f"{bundle_name}.map"
+def _copy_javascript_bundle(output_dir: Path, bundle: Path) -> None:
+    """Copy the application bundle (and its source map, if any) to the output."""
+    dst = output_dir / bundle.name
+    shutil.copy2(bundle, dst)
+    logger.info("JavaScript copied: %s (%.1f KB)", dst.name, dst.stat().st_size / 1024)
+    source_map = bundle.with_name(f"{bundle.name}.map")
     if source_map.exists():
-        shutil.copy2(source_map, Path(output_dir) / source_map.name)
+        shutil.copy2(source_map, output_dir / source_map.name)
 
 
-def _copy_and_minify_css(output_dir: str, static_dir: Path) -> None:
+def _copy_and_minify_css(output_dir: Path, static_dir: Path) -> None:
     """Copy and minify CSS to output directory."""
     styles_css_src = static_dir / "styles.css"
-    styles_css_dst = Path(output_dir) / "styles.css"
+    styles_css_dst = output_dir / "styles.css"
 
     with open(styles_css_src, encoding="utf-8") as f:
         styles_css_content = f.read()
@@ -386,47 +481,29 @@ def _copy_and_minify_css(output_dir: str, static_dir: Path) -> None:
     atomic_text_write(styles_css_dst, styles_css_minified)
 
     styles_css_size = styles_css_dst.stat().st_size
-    logger.info("CSS copied: %s (%.1f KB)", styles_css_dst, styles_css_size / 1024)
+    logger.info("CSS copied: %s (%.1f KB)", styles_css_dst.name, styles_css_size / 1024)
 
 
-def _copy_favicon_files(output_dir: str, static_dir: Path) -> None:
+def _copy_favicon_files(output_dir: Path, static_dir: Path) -> None:
     """Copy favicon and manifest files to output directory."""
-    for favicon_file in (
-        "favicon.svg",
-        "favicon.ico",
-        "favicon-192.png",
-        "favicon-512.png",
-        "apple-touch-icon.png",
-        "manifest.json",
-    ):
+    for favicon_file in FAVICON_FILES:
         src = static_dir / favicon_file
-        dst = Path(output_dir) / favicon_file
         if src.exists():
-            shutil.copy2(src, dst)
+            shutil.copy2(src, output_dir / favicon_file)
 
-    logger.info("Favicon files copied to %s", output_dir)
+    logger.info("Favicon files copied")
 
 
 def _package_assets(
-    output_dir: str,
+    output_dir: Path,
     bounds: dict[str, float],
     data_dir_name: str,
 ) -> None:
     """Generate config and copy static assets (pre-built JS bundles, CSS, icons)."""
-    static_dir = Path(__file__).parent / "static"
-    templates_dir = Path(__file__).parent / "templates"
-
-    if (static_dir / "mapApp.bundle.js").exists():
-        logger.info("\nUsing the pre-built JavaScript bundle...")
-    else:
-        logger.warning(
-            "JavaScript bundle not found - run 'npm run build' to generate it"
-        )
-
-    _generate_map_config(output_dir, templates_dir, bounds, data_dir_name)
-    _copy_javascript_bundle(output_dir, static_dir)
-    _copy_and_minify_css(output_dir, static_dir)
-    _copy_favicon_files(output_dir, static_dir)
+    _generate_map_config(output_dir, bounds, data_dir_name)
+    _copy_javascript_bundle(output_dir, BUNDLE_FILE)
+    _copy_and_minify_css(output_dir, STATIC_DIR)
+    _copy_favicon_files(output_dir, STATIC_DIR)
 
 
 def create_progressive_heatmap(
@@ -437,18 +514,30 @@ def create_progressive_heatmap(
 ) -> bool:
     """Create a progressive-loading heatmap with external data files.
 
-    Returns False (after logging the reason) when nothing could be generated;
-    no exception escapes for the failure modes the pipeline knows about.
+    Returns False (after logging the reason) when the site could not be
+    generated; a previous site in the output is then left as it was. No
+    exception escapes for the failure modes the pipeline knows about.
     """
     aircraft_files = aircraft_files or []
 
-    # Stage 0: Refuse output directories that overlap with the inputs
+    # Stage 0: Refuse output directories that overlap with the inputs, and a
+    # run that could only produce a page without its application
     is_safe, error_msg = validate_output_dir(data_dir, [*kml_files, *aircraft_files])
     if not is_safe:
         logger.error("%s", error_msg)
         return False
 
-    # Stage 1: Validate and parse
+    if not BUNDLE_FILE.is_file():
+        logger.error(
+            "JavaScript bundle not found: %s (run 'npm run build' to generate it)",
+            BUNDLE_FILE,
+        )
+        return False
+    _warn_about_a_stale_bundle()
+
+    # Stage 1: Validate and parse. A file that cannot be used fails the run:
+    # a site published without one of the flights, and exit status 0, would
+    # hide it until someone notices the flight is missing.
     valid_files = []
     for kml_file in kml_files:
         is_valid, error_msg = validate_kml_file(kml_file)
@@ -460,36 +549,36 @@ def create_progressive_heatmap(
     if not valid_files:
         logger.error("No valid KML files to process!")
         return False
+    if len(valid_files) < len(kml_files):
+        logger.error(
+            "%d of %d input file(s) are not valid KML files (see above); "
+            "fix or remove them",
+            len(kml_files) - len(valid_files),
+            len(kml_files),
+        )
+        return False
 
     logger.info("Parsing %d KML file(s)...", len(valid_files))
 
     try:
-        extent, all_path_groups, all_path_metadata = _parse_kml_files(valid_files)
-    except (ValueError, KMLHeatmapError) as e:
+        all_path_groups, all_path_metadata = _parse_kml_files(valid_files)
+    except (ValueError, OSError, KMLHeatmapError) as e:
         logger.error(str(e))
         return False
 
-    # Stage 2: Process data
+    # Stage 2: Export the data, the page and the assets
     aircraft_data = merge_aircraft_data(aircraft_files) if aircraft_files else None
     try:
-        result = _process_data(
-            extent,
+        _export_site(
             all_path_groups,
             all_path_metadata,
-            data_dir,
+            Path(output_file),
+            Path(data_dir),
             aircraft_data=aircraft_data,
         )
-    except (ValueError, RuntimeError, OSError) as e:
+    except (ValueError, RuntimeError, OSError, KMLHeatmapError) as e:
         logger.error("Export failed: %s", e)
         return False
-
-    # Stage 3: Render HTML
-    data_dir_name = Path(data_dir).name
-    _render_html(output_file, data_dir_name)
-
-    # Stage 4: Package assets
-    output_dir = str(Path(output_file).parent)
-    _package_assets(output_dir, result["bounds"], data_dir_name)
 
     logger.info(
         "  Open %s in a web browser (works with file:// or serve via HTTP)", output_file

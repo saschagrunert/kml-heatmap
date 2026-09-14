@@ -2,7 +2,10 @@
  * ReplayManager: play, pause, stop, seek, speed and auto-zoom.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
+import {
+  MAX_FRAME_DELTA_MS,
+  type ReplayManager,
+} from "../../../../kml_heatmap/frontend/ui/replayManager";
 import {
   createReplayManager,
   createReplayMockApp,
@@ -123,7 +126,6 @@ describe("ReplayManager playback", () => {
         16,
         expect.objectContaining({ animate: true }),
       );
-      expect(replayManager.state.lastZoom).toBe(16);
     });
 
     it("advances time with the configured speed and keeps looping", () => {
@@ -156,6 +158,67 @@ describe("ReplayManager playback", () => {
       expect(el("replay-play-btn").hidden).toBe(false);
     });
 
+    it("advances a frame after a stall by at most the frame cap", () => {
+      replayManager.state.speed = 10;
+      vi.mocked(requestAnimationFrame).mockRestore();
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+        frames.push(cb);
+        return frames.length;
+      });
+
+      replayManager.playReplay();
+      frames.shift()!(1000);
+      // The page froze for five seconds before the next frame
+      frames.shift()!(6000);
+
+      // 100 ms of wall-clock time at 10x, not the 50 s the stall was worth
+      expect(replayManager.state.currentTime).toBeCloseTo(
+        (MAX_FRAME_DELTA_MS / 1000) * 10,
+        5,
+      );
+    });
+
+    it("does not count the time the tab was hidden", () => {
+      replayManager.state.speed = 500;
+      vi.mocked(requestAnimationFrame).mockRestore();
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+        frames.push(cb);
+        return frames.length;
+      });
+      replayManager.playReplay();
+      frames.shift()!(1000);
+      frames.shift()!(1016);
+      const beforeHiding = replayManager.state.currentTime;
+
+      Object.defineProperty(document, "hidden", {
+        value: true,
+        configurable: true,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+      Reflect.deleteProperty(document, "hidden");
+      // A minute later the tab is shown again and frames resume
+      frames.shift()!(61016);
+
+      expect(replayManager.state.currentTime).toBe(beforeHiding);
+    });
+
+    it("stops listening for visibility changes once destroyed", () => {
+      replayManager.destroy();
+      replayManager.state.lastFrameTime = 1234;
+
+      Object.defineProperty(document, "hidden", {
+        value: true,
+        configurable: true,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+      Reflect.deleteProperty(document, "hidden");
+
+      // A destroyed manager no longer listens
+      expect(replayManager.state.lastFrameTime).toBe(1234);
+    });
+
     it("stops the loop when playing is set to false", () => {
       replayManager.playReplay();
       replayManager.state.playing = false;
@@ -164,6 +227,21 @@ describe("ReplayManager playback", () => {
 
       expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
       expect(replayManager.state.currentTime).toBe(0);
+    });
+  });
+
+  describe("airplane popup panning", () => {
+    it("lets an open popup pan the map only while paused", () => {
+      const popup = { options: { autoPan: true }, setContent: vi.fn() };
+      (
+        replayManager.state.airplaneMarker!.getPopup as ReturnType<typeof vi.fn>
+      ).mockReturnValue(popup);
+
+      replayManager.playReplay();
+      expect(popup.options.autoPan).toBe(false);
+
+      replayManager.pauseReplay();
+      expect(popup.options.autoPan).toBe(true);
     });
   });
 
@@ -190,6 +268,38 @@ describe("ReplayManager playback", () => {
 
       expect(replayManager.state.animationFrameId).toBeNull();
       expect(replayManager.state.currentTime).toBe(timeAtPause);
+    });
+
+    it("hands focus from Play to Pause and back", () => {
+      el("replay-play-btn").focus();
+
+      replayManager.playReplay();
+      // Play is hidden now; focus must not drop to <body>
+      expect(document.activeElement).toBe(el("replay-pause-btn"));
+
+      replayManager.pauseReplay();
+      expect(document.activeElement).toBe(el("replay-play-btn"));
+    });
+
+    it("hands focus to Play when the replay finishes on Pause", () => {
+      replayManager.state.currentTime = replayManager.state.maxTime - 0.001;
+      replayManager.state.speed = 1000;
+      replayManager.playReplay();
+      el("replay-pause-btn").focus();
+
+      vi.advanceTimersByTime(50);
+
+      expect(replayManager.state.playing).toBe(false);
+      expect(document.activeElement).toBe(el("replay-play-btn"));
+    });
+
+    it("leaves focus elsewhere alone", () => {
+      el("replay-speed").focus();
+
+      replayManager.playReplay();
+      replayManager.pauseReplay();
+
+      expect(document.activeElement).toBe(el("replay-speed"));
     });
 
     it("resets frame time", () => {

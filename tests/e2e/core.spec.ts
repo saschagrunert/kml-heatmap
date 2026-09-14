@@ -128,13 +128,16 @@ test.describe("Core", () => {
     await expect(page.locator("#loading-text")).toBeAttached();
   });
 
-  test("the zoom control is gone and the attribution is shown on desktop", async ({
-    page,
-  }) => {
+  test("the zoom control is gone", async ({ page }) => {
     // Pinch, scroll and double tap cover zooming
     await expect(page.locator(".leaflet-control-zoom")).toHaveCount(0);
-    // On mobile the attribution moves into the More sheet
-    if (await usesMobileBar(page)) return;
+  });
+
+  test("the attribution is shown on desktop", async ({ page }) => {
+    test.skip(
+      await usesMobileBar(page),
+      "The More sheet carries the attribution; see mobile.spec.ts",
+    );
     const attribution = page.locator(".leaflet-control-attribution");
     await expect(attribution).toBeVisible();
     await expect(attribution).toContainText("OpenStreetMap");
@@ -155,7 +158,10 @@ test.describe("Core", () => {
   test("metadata is loaded", async ({ page }) => {
     const metadata = await page.evaluate(() => window.KML_METADATA);
     expect(metadata).toBeTruthy();
-    expect(metadata!.stats).toBeTruthy();
+    // The statistics are computed in the browser, not exported
+    expect(metadata).not.toHaveProperty("stats");
+    expect(metadata!.aircraft_models).toEqual(expect.any(Object));
+    expect(metadata!.aircraft_models).not.toBeNull();
     const years = metadata!.available_years;
     expect(years.length).toBeGreaterThan(0);
     expect(years).toEqual([...years].sort((a, b) => a - b));
@@ -180,8 +186,10 @@ test.describe("Core", () => {
   });
 
   test("github footer is visible and labelled on desktop", async ({ page }) => {
-    // On mobile the GitHub link moves into the More sheet
-    if (await usesMobileBar(page)) return;
+    test.skip(
+      await usesMobileBar(page),
+      "The More sheet carries the GitHub link; see mobile.spec.ts",
+    );
     const footer = page.locator("#github-footer");
     await expect(footer).toBeVisible();
 

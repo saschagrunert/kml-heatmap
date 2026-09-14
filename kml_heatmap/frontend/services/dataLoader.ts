@@ -83,9 +83,14 @@ export function expandYearData(raw: RawYearData): KMLDataset {
     throw new Error("Invalid year data: missing 'segments' map");
   }
 
-  // Integer-like object keys are iterated in ascending numeric order, so
-  // segments end up sorted by path id and, within a path, in file order.
-  const pathIds = Object.keys(segmentsByPath);
+  // Paths in path_info order, which is the order of the input. The keys of
+  // the segments object are no substitute: ids are content hashes, and
+  // JavaScript iterates the ones below 2^32 in numeric order first.
+  const pathInfo = Array.isArray(raw.path_info) ? raw.path_info : [];
+  // A Set keeps a path listed twice from being expanded twice
+  const listed = new Set(pathInfo.map((info) => String(info.id)));
+  for (const id of Object.keys(segmentsByPath)) listed.add(id);
+  const pathIds = [...listed];
 
   let totalSegments = 0;
   let pathsWithSegments = 0;
@@ -136,7 +141,7 @@ export function expandYearData(raw: RawYearData): KMLDataset {
   return {
     coordinates,
     path_segments,
-    path_info: Array.isArray(raw.path_info) ? raw.path_info : [],
+    path_info: pathInfo,
     original_points:
       typeof raw.original_points === "number" ? raw.original_points : 0,
   };
@@ -144,8 +149,8 @@ export function expandYearData(raw: RawYearData): KMLDataset {
 
 /**
  * Combine multiple year datasets into one.
- * Path ids are globally unique across years, so this is a plain
- * concatenation: segment and path info objects are shared, not copied.
+ * Path ids are unique across years, so this is a plain concatenation:
+ * segment and path info objects are shared, not copied.
  * @param yearDatasets - Array of year datasets (null entries are skipped)
  * @returns Combined dataset
  */
@@ -372,6 +377,8 @@ export class DataLoader {
       // rest of the session; retry the missing years on the next call
       if (failedYears.length === 0) {
         this.cache.set("all", combined);
+      } else {
+        combined.incomplete = true;
       }
       logDebug("Combined all years:", combined.original_points + " points");
       return combined;
@@ -415,21 +422,5 @@ export class DataLoader {
       logError("Error loading metadata:", error);
       return null;
     }
-  }
-
-  /**
-   * Clear all cached data
-   */
-  clearCache(): void {
-    this.cache.clear();
-  }
-
-  /**
-   * Check if data is cached
-   * @param year - Year string or 'all'
-   * @returns True if cached
-   */
-  isCached(year: string): boolean {
-    return this.cache.has(year);
   }
 }

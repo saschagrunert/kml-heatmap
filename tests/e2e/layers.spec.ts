@@ -2,6 +2,9 @@ import { test, expect, type Locator, type Page } from "./fixtures";
 import {
   findSegmentFarFromAirports,
   gotoApp,
+  expectOpenaipTiles,
+  hasOpenaipKey,
+  openaipTiles,
   toggleLayer,
   waitForPathData,
 } from "./helpers";
@@ -165,7 +168,7 @@ test.describe("Layers", () => {
     await expect(page.locator(".airport-marker").first()).toBeAttached();
   });
 
-  test("aviation button follows the API key configuration", async ({
+  test("the aviation button is hidden without an OpenAIP key", async ({
     page,
     isMobile,
   }) => {
@@ -173,17 +176,30 @@ test.describe("Layers", () => {
       isMobile,
       "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
     );
-    const hasApiKey = await page.evaluate(
-      () => !!window.MAP_CONFIG?.openaipApiKey,
+    test.skip(
+      await hasOpenaipKey(page),
+      "The site under test was built with OPENAIP_API_KEY",
     );
-    const btn = page.locator("#aviation-btn");
 
-    if (!hasApiKey) {
-      await expect(btn).toBeHidden();
-      return;
-    }
+    await expect(page.locator("#aviation-btn")).toBeHidden();
+  });
+
+  test("the aviation button toggles the OpenAIP layer", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(
+      isMobile,
+      "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
+    );
+    test.skip(
+      !(await hasOpenaipKey(page)),
+      "The site under test was built without OPENAIP_API_KEY",
+    );
+    const btn = page.locator(`${LAYERS_GROUP} #aviation-btn`);
 
     await expect(btn).toBeVisible();
+    await expect(btn.locator("svg.icon")).toHaveCount(1);
     await expect(btn).toHaveCSS("opacity", "0.5");
 
     await btn.click();
@@ -191,9 +207,24 @@ test.describe("Layers", () => {
     expect(await page.evaluate(() => window.mapApp!.aviationVisible)).toBe(
       true,
     );
+    await expectOpenaipTiles(page);
 
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "0.5");
+    await expect(openaipTiles(page)).toHaveCount(0);
+  });
+
+  test("the base map tiles carry the CARTO key only when there is one", async ({
+    page,
+  }) => {
+    const key = await page.evaluate(() => window.MAP_CONFIG?.cartoApiKey ?? "");
+    const tile = page
+      .locator('.leaflet-tile-pane img[src*=".basemaps.cartocdn.com/"]')
+      .first();
+    await expect(tile).toBeAttached();
+
+    const src = new URL((await tile.getAttribute("src"))!);
+    expect(src.searchParams.get("key")).toBe(key || null);
   });
 
   test("airport marker sizes change with zoom level", async ({ page }) => {

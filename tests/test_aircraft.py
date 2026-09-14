@@ -12,6 +12,7 @@ from kml_heatmap.aircraft import (
     merge_aircraft_data,
     normalize_registration,
     parse_aircraft_from_filename,
+    resolve_aircraft_models,
 )
 
 
@@ -216,3 +217,15 @@ class TestLookupAircraftModel:
     def test_lookup_without_data(self):
         assert lookup_aircraft_model("D-EAGJ") is None
         assert lookup_aircraft_model("D-EAGJ", {}) is None
+
+
+class TestResolveAircraftModels:
+    def test_known_models_by_registration(self):
+        data = {"D-EAGJ": "Katana", "D-EHYL": "Diamond Star", "D-XXXX": "Unused"}
+        registrations = ["D-EHYL", None, "D-EAGJ", "D-ESST", "D-EAGJ", ""]
+        models = resolve_aircraft_models(registrations, data)
+        assert models == {"D-EAGJ": "Katana", "D-EHYL": "Diamond Star"}
+        assert list(models) == ["D-EAGJ", "D-EHYL"]
+
+    def test_without_aircraft_data(self):
+        assert resolve_aircraft_models(["D-EAGJ"]) == {}

@@ -6,7 +6,6 @@ import pytest
 
 from kml_heatmap.helpers import (
     calculate_duration_seconds,
-    format_flight_time,
     numeric_filename_key,
     parse_iso_timestamp,
     parse_timestamp_epoch,
@@ -102,26 +101,6 @@ class TestCalculateDurationSeconds:
             calculate_duration_seconds("2025-03-15T00:00:00Z", "2025-03-16T00:00:00Z")
             == 86400
         )
-
-
-class TestFormatFlightTime:
-    @pytest.mark.parametrize(
-        "seconds,expected",
-        [
-            (0, "0h 0m"),
-            (-100, "0h 0m"),
-            (45, "0h 0m"),
-            (60, "0h 1m"),
-            (1800, "0h 30m"),
-            (3600, "1h 0m"),
-            (3660, "1h 1m"),
-            (3665, "1h 1m"),
-            (9000, "2h 30m"),
-            (360000, "100h 0m"),
-        ],
-    )
-    def test_formatting(self, seconds, expected):
-        assert format_flight_time(seconds) == expected
 
 
 class TestNumericFilenameKey:

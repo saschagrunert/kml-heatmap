@@ -10,16 +10,21 @@ import { test, expect, type Page } from "./fixtures";
 import {
   activateReplay,
   attachErrorCollectors,
+  chooseSheetOption,
   closeMobileSheet,
   expectNoA11yViolations,
+  expectOpenaipTiles,
   gotoApp,
+  hasOpenaipKey,
   knownYears,
   layerButton,
   layerSwitch,
   openMobileSheet,
+  openWrapped,
   playUntilProgress,
   relevantConsoleErrors,
   selectPathForReplay,
+  settleAnimations,
   waitForAircraftFilter,
   waitForYearFilter,
   type ErrorCollector,
@@ -267,21 +272,28 @@ test.describe("Mobile bar", () => {
       await expect(altitudeLegend).toBeHidden();
     });
 
-    test("aviation data follows the API key configuration", async ({
+    test("there is no aviation switch without an OpenAIP key", async ({
       page,
     }) => {
-      const hasApiKey = await page.evaluate(
-        () => !!window.MAP_CONFIG?.openaipApiKey,
+      test.skip(
+        await hasOpenaipKey(page),
+        "The site under test was built with OPENAIP_API_KEY",
+      );
+      await openMobileSheet(page, "layers");
+
+      await expect(layerSwitch(page, "aviation")).toHaveCount(0);
+    });
+
+    test("the aviation switch toggles the OpenAIP layer", async ({ page }) => {
+      test.skip(
+        !(await hasOpenaipKey(page)),
+        "The site under test was built without OPENAIP_API_KEY",
       );
       await openMobileSheet(page, "layers");
       const row = layerSwitch(page, "aviation");
-
-      if (!hasApiKey) {
-        await expect(row).toHaveCount(0);
-        return;
-      }
-
+      await expect(row).toHaveAttribute("role", "switch");
       await expect(row).toHaveAttribute("aria-checked", "false");
+      await expectTapTargets(page, '.sheet-row[data-row="aviation"]');
 
       await row.click();
 
@@ -293,6 +305,7 @@ test.describe("Mobile bar", () => {
       expect(await page.evaluate(() => window.mapApp!.aviationVisible)).toBe(
         true,
       );
+      await expectOpenaipTiles(page);
     });
   });
 
@@ -311,7 +324,7 @@ test.describe("Mobile bar", () => {
       await expect(select.locator("option").first()).toHaveText("All");
       await expect(select).toHaveValue(await source.inputValue());
 
-      await select.selectOption(year);
+      await chooseSheetOption(select, year);
 
       await waitForYearFilter(page, year);
       await expect(source).toHaveValue(year);
@@ -329,7 +342,7 @@ test.describe("Mobile bar", () => {
       const select = page.locator('.sheet-row[data-row="aircraft"] select');
       await expect(select.locator("option")).toHaveCount(await options.count());
 
-      await select.selectOption(aircraft);
+      await chooseSheetOption(select, aircraft);
 
       await waitForAircraftFilter(page, aircraft);
       await expect(source).toHaveValue(aircraft);
@@ -374,6 +387,53 @@ test.describe("Mobile bar", () => {
 
     await expect(modal).toBeHidden();
     await expect(tab).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test.describe("Wrapped", () => {
+    // Stacked layout: the map is the last card and the dialog content is the
+    // one scroller, unlike the desktop column in wrapped-export.spec.ts
+    async function scrollToEnd(page: Page): Promise<void> {
+      const content = page.locator("#wrapped-content");
+      await settleAnimations(content);
+      const overflow = await content.evaluate(
+        (el) => el.scrollHeight - el.clientHeight,
+      );
+      expect(
+        overflow,
+        "the stacked dialog has nothing to scroll",
+      ).toBeGreaterThan(0);
+      await content.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+      await expect
+        .poll(() => content.evaluate((el) => el.scrollTop))
+        .toBeGreaterThan(0);
+    }
+
+    test("the cards and the map scroll as one column", async ({ page }) => {
+      await openWrapped(page);
+      const column = page.locator("#wrapped-cards-column");
+      const map = page.locator("#wrapped-map-container");
+
+      await scrollToEnd(page);
+
+      // The desktop inner scroller is handed back, so nothing scrolls twice
+      expect(
+        await column.evaluate((el) => el.scrollHeight - el.clientHeight),
+      ).toBe(0);
+      await expect(map).toBeInViewport();
+    });
+
+    test("reopening starts at the top", async ({ page }) => {
+      const modal = await openWrapped(page);
+      const content = page.locator("#wrapped-content");
+      await scrollToEnd(page);
+
+      await modal.locator("[data-action=closeWrapped]").click();
+      await expect(modal).toBeHidden();
+      await openWrapped(page);
+
+      await expect.poll(() => content.evaluate((el) => el.scrollTop)).toBe(0);
+      await expect(page.locator("#wrapped-title")).toBeInViewport();
+    });
   });
 
   test.describe("More sheet", () => {

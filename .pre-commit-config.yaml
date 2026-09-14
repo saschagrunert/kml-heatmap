@@ -1,7 +1,7 @@
 ---
 # Install with: pip install pre-commit && pre-commit install
 # Input data (data/) is excluded from the fixers; the generated site (docs/)
-# is not tracked at all.
+# is not tracked at all. Dependabot bumps the revs below.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -40,3 +40,15 @@ repos:
     rev: v8.30.1
     hooks:
       - id: gitleaks
+
+  - repo: local
+    hooks:
+      # The obfuscation CI job only runs once the dates are already pushed to
+      # the public repository. Needs Python 3.14 as `python`, such as the
+      # project's virtual environment (see CONTRIBUTING.md).
+      - id: check-obfuscation
+        name: check that the KML files are obfuscated
+        entry: python -m kml_heatmap.obfuscate data --check
+        language: system
+        files: (?i)^data/.*\.kml$
+        pass_filenames: false

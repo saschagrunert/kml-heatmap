@@ -3,6 +3,7 @@
 import contextlib
 import csv
 import hashlib
+import http.client
 import os
 import re
 import ssl
@@ -11,6 +12,7 @@ import threading
 import time
 import urllib.error
 from pathlib import Path
+from typing import NamedTuple
 from urllib.request import urlopen
 
 # Try to import fcntl for Unix-like systems (for process-safe file locking)
@@ -24,18 +26,30 @@ except ImportError:
 
 from .cache import CACHE_DIR
 from .constants import ICAO_REGION_PREFIXES
+from .exceptions import AirportDatabaseError
+from .helpers import DATE_PATTERN
 from .logger import logger
 
 # Pre-compiled pattern for ICAO code extraction
 _ICAO_PATTERN = re.compile(r"\b([A-Z]{4})\b")
 
+# Route names: "EDDS Stuttgart - EDDP Leipzig" or "EDDS to EDDP - 16 Aug 2026"
+_ROUTE_SEPARATOR = re.compile(r"\s+(?:-|to)\s+")
+_ROUTE_DATE_SUFFIX = re.compile(rf"\s+-\s+{DATE_PATTERN.pattern}\s*$")
+
 __all__ = [
+    "REQUIRE_DATABASE_ENV",
+    "AirportNames",
+    "airport_icao_code",
     "database_fingerprint",
     "extract_icao_codes_from_name",
     "load_airport_database",
     "lookup_airport_coordinates",
     "lookup_airport_country",
+    "split_route_name",
     "standardize_airport_name",
+    "standardize_airport_names",
+    "standardize_route",
 ]
 
 # OurAirports database URL
@@ -52,7 +66,11 @@ CACHE_MAX_AGE_DAYS = 30
 DOWNLOAD_TIMEOUT_SECONDS = 30
 DOWNLOAD_RETRY_SECONDS = 3600
 MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
+# The database has about 86,000 rows; a body far below that was cut off
+MIN_DOWNLOAD_ROWS = 50_000
 REQUIRED_COLUMNS = ("ident", "name", "latitude_deg", "longitude_deg")
+# Set to "1" to fail instead of running without airport names (CI, deploys)
+REQUIRE_DATABASE_ENV = "KML_HEATMAP_REQUIRE_AIRPORT_DB"
 
 AirportRecord = tuple[float, float, str, str]
 
@@ -124,11 +142,34 @@ def _fetch_airport_database(cache_dir: Path) -> bool:
             OURAIRPORTS_URL, timeout=DOWNLOAD_TIMEOUT_SECONDS, context=context
         ) as response:
             data = response.read(MAX_DOWNLOAD_BYTES + 1)
+            content_length = response.headers.get("Content-Length")
 
         if len(data) > MAX_DOWNLOAD_BYTES:
             logger.warning(
                 "✗ Airport database exceeds %d MB, refusing to cache it",
                 MAX_DOWNLOAD_BYTES // (1024 * 1024),
+            )
+            return False
+
+        # A body shorter than announced ends the read without an error, and a
+        # cut at a line boundary still looks like a complete CSV file
+        if (
+            content_length is not None
+            and content_length.isdigit()
+            and len(data) != int(content_length)
+        ):
+            logger.warning(
+                "✗ Airport database download is incomplete (%d of %s bytes)",
+                len(data),
+                content_length,
+            )
+            return False
+        rows = data.count(b"\n")
+        if rows < MIN_DOWNLOAD_ROWS:
+            logger.warning(
+                "✗ Airport database download has only %d rows, expected at least %d",
+                rows,
+                MIN_DOWNLOAD_ROWS,
             )
             return False
 
@@ -147,7 +188,13 @@ def _fetch_airport_database(cache_dir: Path) -> bool:
         logger.info("✓ Downloaded %.1f MB airport database", len(data) / 1024 / 1024)
         return True
 
-    except (OSError, urllib.error.URLError, ValueError) as e:
+    # http.client.IncompleteRead (a connection dropped mid-body) is no OSError
+    except (
+        OSError,
+        urllib.error.URLError,
+        http.client.HTTPException,
+        ValueError,
+    ) as e:
         logger.warning("✗ Failed to download airport database: %s", e)
         return False
     finally:
@@ -252,11 +299,20 @@ def _ensure_cache_file() -> None:
                 pass
 
 
+def _database_required() -> bool:
+    return os.environ.get(REQUIRE_DATABASE_ENV) == "1"
+
+
 def load_airport_database() -> dict[str, AirportRecord]:
     """Load the airport database from the cache, downloading it when needed.
 
     The parsed database is kept per process; the first call in a process
     pays for the parse (and possibly the download).
+
+    Raises:
+        AirportDatabaseError: When ``KML_HEATMAP_REQUIRE_AIRPORT_DB`` is "1"
+            and no complete database could be loaded. Without it the run
+            continues with raw airport names.
     """
     global _airport_cache
 
@@ -271,16 +327,25 @@ def load_airport_database() -> dict[str, AirportRecord]:
             return _airport_cache
 
         _ensure_cache_file()
+        required = _database_required()
 
-        if CACHE_FILE.exists():
+        # A stale but complete cache is still used when the download failed
+        if CACHE_FILE.exists() and (not required or _is_valid_csv_file(CACHE_FILE)):
             try:
                 airports = _read_airport_csv(CACHE_FILE)
-                _airport_cache = airports
-                logger.debug("Loaded %s airports from cache", f"{len(airports):,}")
-                return airports
             except (OSError, csv.Error, ValueError, UnicodeDecodeError) as e:
                 logger.warning("Failed to load airport cache: %s", e)
+            else:
+                if airports or not required:
+                    _airport_cache = airports
+                    logger.debug("Loaded %s airports from cache", f"{len(airports):,}")
+                    return airports
 
+        if required:
+            raise AirportDatabaseError(
+                f"The OurAirports database could not be loaded from {CACHE_FILE}, "
+                f"and {REQUIRE_DATABASE_ENV}=1 requires it"
+            )
         logger.warning("Airport database unavailable - airport lookups will fail")
         _airport_cache = {}
         return _airport_cache
@@ -345,6 +410,26 @@ def extract_icao_codes_from_name(airport_name: str | None) -> list[str]:
     return [code for code in matches if code[0] in ICAO_REGION_PREFIXES]
 
 
+def _starts_with_icao_code(text: str) -> bool:
+    match = _ICAO_PATTERN.match(text)
+    return match is not None and match.group(1)[0] in ICAO_REGION_PREFIXES
+
+
+def airport_icao_code(airport_name: str | None) -> str | None:
+    """The ICAO code of a single airport name, or None.
+
+    Flight logs and standardized names lead with the code, so "EGDY RNAS
+    Yeovilton" is EGDY. A name that does not start with a code has to hold
+    exactly one.
+    """
+    codes = extract_icao_codes_from_name(airport_name)
+    if not codes:
+        return None
+    if len(codes) == 1 or (airport_name and _starts_with_icao_code(airport_name)):
+        return codes[0]
+    return None
+
+
 _AIRPORT_SUFFIXES = (
     " International Airport",
     " Regional Airport",
@@ -364,48 +449,92 @@ def _strip_airport_suffix(name: str) -> str:
     return name
 
 
-def standardize_airport_name(airport_name: str | None) -> str | None:
-    """Standardize airport name using OurAirports database."""
+def _database_name(icao_code: str) -> str | None:
+    """The standardized name of an airport ("EDDS Stuttgart"), or None."""
+    coords = lookup_airport_coordinates(icao_code)
+    if coords is None:
+        return None
+    return f"{icao_code} {_strip_airport_suffix(coords[2])}"
+
+
+def split_route_name(name: str | None) -> tuple[str, str] | None:
+    """Split a route name into its departure and arrival, or return None.
+
+    A trailing date ("EDDS to EDDP - 16 Aug 2026") is not part of the route.
+    Airport names may contain " - " themselves (LFBN "Niort - Marais
+    Poitevin"), so in a name with ICAO codes only a separator (" - " or
+    " to ") followed by a code can split it, and exactly one such separator
+    must exist. A standardized single airport name is never a route. A name
+    without any code splits at its only " - ".
+    """
+    if not name:
+        return None
+    name = _ROUTE_DATE_SUFFIX.sub("", name).strip()
+
+    if not extract_icao_codes_from_name(name):
+        parts = [part.strip() for part in name.split(" - ")]
+        if len(parts) == 2 and all(parts):
+            return parts[0], parts[1]
+        return None
+
+    icao_code = airport_icao_code(name)
+    if icao_code is not None and _database_name(icao_code) == name:
+        return None
+
+    separators = [
+        match
+        for match in _ROUTE_SEPARATOR.finditer(name)
+        if _starts_with_icao_code(name[match.end() :])
+    ]
+    if len(separators) != 1:
+        return None
+    # The name is stripped and a separator starts with whitespace, so neither
+    # side can be empty
+    return name[: separators[0].start()], name[separators[0].end() :]
+
+
+class AirportNames(NamedTuple):
+    """A standardized placemark name and, for a route, its two airports."""
+
+    name: str | None
+    start_airport: str | None = None
+    end_airport: str | None = None
+
+
+def _standardize_single_airport(name: str) -> str:
+    icao_code = airport_icao_code(name)
+    standardized = _database_name(icao_code) if icao_code else None
+    if standardized is None:
+        return name
+    logger.debug("Standardized airport: %s -> %s", name, standardized)
+    return standardized
+
+
+def standardize_route(departure: str, arrival: str) -> AirportNames:
+    """Standardize both airports of a route and build its display name."""
+    start = _standardize_single_airport(departure)
+    end = _standardize_single_airport(arrival)
+    return AirportNames(f"{start} - {end}", start, end)
+
+
+def standardize_airport_names(airport_name: str | None) -> AirportNames:
+    """Standardize a placemark name using the OurAirports database.
+
+    ICAO codes become "CODE Name". A route also returns its departure and
+    arrival airport, so that nothing downstream has to split the display
+    name (``split_route_name`` explains why that is ambiguous).
+    """
     if not airport_name:
-        return airport_name
+        return AirportNames(airport_name)
 
-    icao_codes = extract_icao_codes_from_name(airport_name)
+    route = split_route_name(airport_name)
+    if route is not None:
+        return standardize_route(*route)
 
-    if not icao_codes:
-        return airport_name
+    single = _ROUTE_DATE_SUFFIX.sub("", airport_name).strip() or airport_name
+    return AirportNames(_standardize_single_airport(single))
 
-    # Handle route format "AIRPORT1 Name1 - AIRPORT2 Name2"
-    if " - " in airport_name and len(icao_codes) == 2:
-        coords1 = lookup_airport_coordinates(icao_codes[0])
-        coords2 = lookup_airport_coordinates(icao_codes[1])
-        parts = airport_name.split(" - ")
 
-        if coords1 and coords2:
-            clean_name1 = _strip_airport_suffix(coords1[2])
-            clean_name2 = _strip_airport_suffix(coords2[2])
-            standardized = (
-                f"{icao_codes[0]} {clean_name1} - {icao_codes[1]} {clean_name2}"
-            )
-            logger.debug("Standardized route: %s -> %s", airport_name, standardized)
-            return standardized
-        if coords1:
-            clean_name1 = _strip_airport_suffix(coords1[2])
-            standardized = f"{icao_codes[0]} {clean_name1} - {parts[1]}"
-            logger.debug("Standardized start: %s -> %s", airport_name, standardized)
-            return standardized
-        if coords2:
-            clean_name2 = _strip_airport_suffix(coords2[2])
-            standardized = f"{parts[0]} - {icao_codes[1]} {clean_name2}"
-            logger.debug("Standardized end: %s -> %s", airport_name, standardized)
-            return standardized
-
-    # Single airport format
-    elif len(icao_codes) == 1:
-        coords = lookup_airport_coordinates(icao_codes[0])
-        if coords:
-            clean_name = _strip_airport_suffix(coords[2])
-            standardized = f"{icao_codes[0]} {clean_name}"
-            logger.debug("Standardized airport: %s -> %s", airport_name, standardized)
-            return standardized
-
-    return airport_name
+def standardize_airport_name(airport_name: str | None) -> str | None:
+    """Standardize an airport or route name using the OurAirports database."""
+    return standardize_airport_names(airport_name).name

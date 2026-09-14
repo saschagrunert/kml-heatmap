@@ -6,10 +6,7 @@ import {
   reportInitFailure,
 } from "../../../../kml_heatmap/frontend/mapApp";
 import { STORE_ACCESSOR_KEYS } from "../../../../kml_heatmap/frontend/state/store";
-import type {
-  KMLDataset,
-  FilteredStatistics,
-} from "../../../../kml_heatmap/frontend/types";
+import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
 
 const loggerMock = vi.hoisted(() => ({ logDebug: vi.fn(), logError: vi.fn() }));
 vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => loggerMock);
@@ -111,22 +108,45 @@ describe("MapApp", () => {
       expect(app.fullPathSegments).toBe(data.path_segments);
     });
 
-    it("fullStats and the ranges delegate to store", () => {
-      const stats: FilteredStatistics = {
-        total_points: 100,
-        num_paths: 5,
-        num_airports: 2,
-        airport_names: [],
-        num_aircraft: 1,
-        aircraft_list: [],
-        total_distance_km: 50,
-        total_distance_nm: 27,
+    it("lists the paths of each airport among the flights the filter keeps", () => {
+      app.currentData = {
+        coordinates: [],
+        path_segments: [],
+        path_info: [
+          {
+            id: 1,
+            aircraft_registration: "D-ABCD",
+            start_airport: "EDDF",
+            end_airport: "EDDM",
+          },
+          {
+            id: 2,
+            aircraft_registration: "D-EFGH",
+            start_airport: "EDDM",
+            end_airport: "EDDF",
+          },
+        ],
+        original_points: 0,
       };
-      app.fullStats = stats;
+      expect(app.airportToPaths["EDDF"]).toEqual(new Set([1, 2]));
+
+      // A click on a shared airport must not select the other aircraft's
+      // flight (regression)
+      app.selectedAircraft = "D-EFGH";
+
+      expect(app.airportToPaths["EDDF"]).toEqual(new Set([2]));
+      expect(app.airportToPaths["EDDM"]).toEqual(new Set([2]));
+    });
+
+    it("the metadata values and the ranges delegate to store", () => {
+      const models = { "D-EAGJ": "Katana" };
+      app.aircraftModels = models;
+      app.hasTimingData = true;
       app.altitudeRange = { min: 100, max: 5000 };
       app.airspeedRange = { min: 50, max: 150 };
 
-      expect(app.store.get("fullStats")).toBe(stats);
+      expect(app.store.get("aircraftModels")).toBe(models);
+      expect(app.store.get("hasTimingData")).toBe(true);
       expect(app.store.get("altitudeRange")).toEqual({ min: 100, max: 5000 });
       expect(app.store.get("airspeedRange")).toEqual({ min: 50, max: 150 });
     });

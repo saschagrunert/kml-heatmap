@@ -2,6 +2,7 @@
 
 from lxml import etree
 
+from kml_heatmap.aircraft import parse_aircraft_from_filename
 from kml_heatmap.constants import KML_NAMESPACES
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.parser_gx_track import local_name, parse_gx_track, process_gx_track
@@ -54,6 +55,7 @@ def _run(tracks):
         coordinates,
         path_groups,
         path_metadata,
+        parse_aircraft_from_filename("1_DEAGJ_DA20.kml"),
     )
     return coordinates, path_groups, path_metadata
 

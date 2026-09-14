@@ -9,8 +9,11 @@ from kml_heatmap.airports import (
     is_mid_flight_start,
     is_point_marker,
     is_valid_landing,
+    route_airports,
     sample_path_altitudes,
 )
+from kml_heatmap.constants import AIRPORT_GRID_SIZE_DEGREES
+from kml_heatmap.geometry import haversine_distance
 from kml_heatmap.types import TrackPoint
 
 
@@ -112,6 +115,44 @@ class TestExtractAirportName:
     def test_single_word_without_icao(self):
         assert extract_airport_name("Somewhere", False) is None
 
+    @pytest.mark.parametrize("is_at_path_end", [False, True])
+    def test_airport_name_with_dash_is_not_split(self, is_at_path_end):
+        """The deduplicator stores one airport; LFBN is "Niort - Marais Poitevin"."""
+        name = "LFBN Niort - Marais Poitevin"
+        assert extract_airport_name(name, is_at_path_end) == name
+
+    def test_route_with_dashed_arrival(self):
+        route = "EDAQ Halle-Oppin - LFBN Niort - Marais Poitevin"
+        assert extract_airport_name(route, True) == "LFBN Niort - Marais Poitevin"
+        assert extract_airport_name(route, False) == "EDAQ Halle-Oppin"
+
+
+class TestRouteAirports:
+    def test_structured_airports_win(self):
+        metadata = {
+            "airport_name": "EDAQ Halle-Oppin - LFBN Niort - Marais Poitevin",
+            "start_airport": "EDAQ Halle-Oppin",
+            "end_airport": "LFBN Niort - Marais Poitevin",
+        }
+        assert route_airports(metadata) == (
+            "EDAQ Halle-Oppin",
+            "LFBN Niort - Marais Poitevin",
+        )
+
+    def test_parsed_name_that_is_no_route(self):
+        """The parser sets both keys to None; the name is not split again."""
+        metadata = {
+            "airport_name": "Some Field - Other Field",
+            "start_airport": None,
+            "end_airport": None,
+        }
+        assert route_airports(metadata) == (None, None)
+
+    def test_metadata_without_the_keys_splits_the_name(self):
+        assert route_airports({"airport_name": "EDDS - EDDP"}) == ("EDDS", "EDDP")
+        assert route_airports({"airport_name": "EDDS"}) == (None, None)
+        assert route_airports({}) == (None, None)
+
 
 class TestIsPointMarker:
     @pytest.mark.parametrize(
@@ -122,6 +163,26 @@ class TestIsPointMarker:
 
     def test_route_not_marker(self):
         assert is_point_marker("EDAQ Halle - EDMV Vilshofen") is False
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "CYNL Points North Landing",
+            "CYNL Points North Landing - EDDP Leipzig/Halle",
+            "BGDH Danmarkshavn Landing Strip",
+            "Takeoff Field",
+            "Log Starter",
+        ],
+    )
+    def test_marker_words_inside_a_name(self, name):
+        """49 airports have "Landing" in their name; their flights must count."""
+        assert is_point_marker(name) is False
+
+    @pytest.mark.parametrize(
+        "name", ["Landing: 2025-01-01", "Log Stop: 03 Mar 2025 08:54 Z", "Takeoff"]
+    )
+    def test_obfuscated_and_bare_markers(self, name):
+        assert is_point_marker(name) is True
 
     @pytest.mark.parametrize("value", ["", None])
     def test_empty_name_is_marker(self, value):
@@ -265,6 +326,49 @@ class TestDeduplicateAirports:
 
         assert len(result) == 1
 
+    def test_route_airports_keep_their_own_names(self):
+        """A " - " inside an airport name must not merge both names into one."""
+        path = _path((51.55, 12.05, 100), (48.9, 6.0, 900), (46.31, -0.39, 60))
+        metadata = [
+            {
+                "start_point": [51.55, 12.05, 100],
+                "airport_name": "EDAQ Halle-Oppin - LFBN Niort - Marais Poitevin",
+                "start_airport": "EDAQ Halle-Oppin",
+                "end_airport": "LFBN Niort - Marais Poitevin",
+            }
+        ]
+
+        result = deduplicate_airports(metadata, [path])
+
+        assert [(a["name"], a["is_at_path_end"]) for a in result] == [
+            ("EDAQ Halle-Oppin", False),
+            ("LFBN Niort - Marais Poitevin", True),
+        ]
+        # Both snap to their own database position
+        assert result[0]["lat"] == pytest.approx(51.552223)
+        assert result[1]["lat"] == pytest.approx(46.313477)
+        assert [
+            extract_airport_name(a["name"], a["is_at_path_end"]) for a in result
+        ] == [
+            "EDAQ Halle-Oppin",
+            "LFBN Niort - Marais Poitevin",
+        ]
+
+    def test_parsed_non_route_registers_no_arrival(self):
+        path = _path((50.0, 8.5, 100), (50.86, 7.14, 200))
+        metadata = [
+            {
+                "start_point": [50.0, 8.5, 100],
+                "airport_name": "Some Field - Other Field - Third",
+                "start_airport": None,
+                "end_airport": None,
+            }
+        ]
+
+        result = deduplicate_airports(metadata, [path])
+
+        assert [a["name"] for a in result] == ["Some Field - Other Field - Third"]
+
     def test_mid_flight_route_omits_departure(self):
         cruise = [3000.0] * 30
         descent = [3000.0 - i * 290.0 for i in range(1, 11)]
@@ -366,6 +470,29 @@ class TestAirportDeduplicator:
         )
         assert idx1 == idx2
         assert deduplicator.unique_airports[0]["name"] == "EDDF Frankfurt - EDDM Munich"
+
+    @pytest.mark.parametrize("lat", [0.0, 51.0, 70.0, -65.0, 89.99])
+    def test_fields_within_the_merge_distance_merge_at_any_latitude(self, lat):
+        """At 51°N a 0.018° grid cell is only 1.26 km wide."""
+        dlon = 1.45 / haversine_distance(lat, 0.0, lat, 1.0)
+        # Start just before a cell boundary so the second point is two cells on
+        start = 445 * AIRPORT_GRID_SIZE_DEGREES - 0.00001
+        assert haversine_distance(lat, start, lat, start + dlon) < 1.5
+        deduplicator = AirportDeduplicator()
+        for lon in (start, start + dlon):
+            deduplicator.add_or_update_airport(
+                lat=lat, lon=lon, name=None, path_index=0, is_at_path_end=False
+            )
+        assert len(deduplicator.unique_airports) == 1
+
+    def test_fields_beyond_the_merge_distance_stay_apart(self):
+        deduplicator = AirportDeduplicator()
+        dlon = 1.6 / haversine_distance(51.0, 0.0, 51.0, 1.0)
+        for lon in (8.0, 8.0 + dlon):
+            deduplicator.add_or_update_airport(
+                lat=51.0, lon=lon, name=None, path_index=0, is_at_path_end=False
+            )
+        assert len(deduplicator.unique_airports) == 2
 
     def test_get_unique_airports(self):
         deduplicator = AirportDeduplicator()

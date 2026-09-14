@@ -542,6 +542,16 @@ describe("StatsManager", () => {
       expect(text).toContain("0 data points");
     });
 
+    it("shows the altitude of a flight that stayed at sea level", () => {
+      statsManager.updateStatsPanel(
+        { ...mockStats, max_altitude_ft: 0, total_altitude_gain_ft: 0 },
+        false,
+      );
+
+      expect(metricRow(statsPanel, "Max Altitude (MSL)")).toContain("0 ft");
+      expect(metricRow(statsPanel, "Elevation Gain")).toContain("0 ft");
+    });
+
     it("does nothing if the panel element is missing", () => {
       statsPanel.remove();
       expect(() =>
@@ -578,6 +588,10 @@ describe("StatsManager", () => {
   });
 
   describe("store subscriptions", () => {
+    beforeEach(() => {
+      mockApp.store.set("statsPanelVisible", true);
+    });
+
     it("re-renders when the data, the filters or the selection change", () => {
       statsManager.updateStatsForSelection();
       expect(leadValue(statsPanel, "Flights")).toBe("2");
@@ -599,8 +613,26 @@ describe("StatsManager", () => {
       expect(leadValue(statsPanel, "Flights")).toBe("0");
     });
 
+    it("renders on opening when the data arrived before the manager", () => {
+      const app = createMockApp({ statsPanelVisible: false });
+      app.currentData = mockApp.currentData;
+      const panel = document.createElement("div");
+      panel.id = "stats-panel";
+      statsPanel.remove();
+      document.body.appendChild(panel);
+      try {
+        new StatsManager(asMapApp(app));
+
+        app.store.set("statsPanelVisible", true);
+
+        expect(leadValue(panel, "Flights")).toBe("2");
+      } finally {
+        panel.remove();
+      }
+    });
+
     it("renders as soon as data arrives", () => {
-      const app = createMockApp();
+      const app = createMockApp({ statsPanelVisible: true });
       const panel = document.createElement("div");
       panel.id = "stats-panel";
       statsPanel.remove();
@@ -616,9 +648,66 @@ describe("StatsManager", () => {
         panel.remove();
       }
     });
+
+    it("computes once for an update that changes several keys", () => {
+      const spy = vi.spyOn(statsManager, "updateStatsForSelection");
+
+      mockApp.store.batch(() => {
+        mockApp.selectedYear = "2025";
+        mockApp.selectedAircraft = "D-ABCD";
+        mockApp.selectedPathIds.add(1);
+        mockApp.store.notifyMutation("selectedPathIds");
+      });
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    });
+  });
+
+  describe("closed panel", () => {
+    it("computes nothing while the panel is closed (regression)", () => {
+      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+
+      mockApp.selectedYear = "2025";
+      mockApp.selectedPathIds.add(1);
+      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds.clear();
+      mockApp.store.notifyMutation("selectedPathIds");
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(statsPanel.firstChild).toBeNull();
+      spy.mockRestore();
+    });
+
+    it("renders what changed while closed when the panel opens", () => {
+      mockApp.selectedYear = "2025";
+
+      mockApp.store.set("statsPanelVisible", true);
+
+      expect(leadValue(statsPanel, "Flights")).toBe("1");
+    });
+
+    it("does not recompute on opening when nothing changed", () => {
+      mockApp.store.set("statsPanelVisible", true);
+      mockApp.currentData = createDataset(
+        mockApp.currentData!.path_info,
+        mockApp.currentData!.path_segments,
+      );
+      mockApp.store.set("statsPanelVisible", false);
+      const spy = vi.spyOn(statsManager, "updateStatsPanel");
+
+      mockApp.store.set("statsPanelVisible", true);
+
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
   });
 
   describe("memoization", () => {
+    beforeEach(() => {
+      mockApp.store.set("statsPanelVisible", true);
+    });
+
     it("computes the statistics once for unchanged inputs", () => {
       statsManager.updateStatsForSelection();
       const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
@@ -642,9 +731,32 @@ describe("StatsManager", () => {
       mockApp.store.notifyMutation("selectedPathIds");
       expect(spy).toHaveBeenCalledTimes(2);
 
+      // Back to the filter's statistics, computed when the panel opened
       mockApp.selectedPathIds.clear();
       mockApp.store.notifyMutation("selectedPathIds");
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(leadValue(statsPanel, "Flights")).toBe("2");
+      spy.mockRestore();
+    });
+
+    it("keeps the filter's statistics for the next time a selection is cleared (regression)", () => {
+      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+
+      for (let i = 0; i < 3; i++) {
+        mockApp.selectedPathIds.add(1);
+        mockApp.store.notifyMutation("selectedPathIds");
+        mockApp.selectedPathIds.clear();
+        mockApp.store.notifyMutation("selectedPathIds");
+      }
+
+      // The filter's statistics were computed when the panel opened and are
+      // kept; only each selection itself is computed again
+      const filterRuns = spy.mock.calls.filter(
+        ([options]) => options.pathInfo === mockApp.fullPathInfo,
+      );
+      expect(filterRuns).toHaveLength(0);
       expect(spy).toHaveBeenCalledTimes(3);
+      expect(leadValue(statsPanel, "Flights")).toBe("2");
       spy.mockRestore();
     });
 
@@ -663,9 +775,10 @@ describe("StatsManager", () => {
     it("recomputes for a replaced dataset of the same shape", () => {
       const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
 
+      // The loader always builds new arrays for a new dataset
       mockApp.currentData = createDataset(
-        mockApp.currentData!.path_info,
-        mockApp.currentData!.path_segments,
+        [...mockApp.currentData!.path_info],
+        [...mockApp.currentData!.path_segments],
         99,
       );
 

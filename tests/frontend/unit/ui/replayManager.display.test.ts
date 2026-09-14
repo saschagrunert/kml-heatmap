@@ -344,8 +344,9 @@ describe("ReplayManager display", () => {
     });
 
     it("interpolates the position along the segment being flown", () => {
-      // Segment 0 ends at t=0 at [48.1, 16.1]; segment 1 (t=60) ends at
-      // [48.2, 16.2]. Halfway in time the airplane is halfway along it.
+      // A segment's time is its start: segment 0 runs from [48.0, 16.0] at
+      // t=0 to [48.1, 16.1] at t=60, when segment 1 starts. Halfway in time
+      // the airplane is halfway along segment 0, not already on segment 1.
       replayManager.state.currentTime = 30;
       const setLatLng = replayManager.state.airplaneMarker!
         .setLatLng as AnyMock;
@@ -355,8 +356,50 @@ describe("ReplayManager display", () => {
 
       expect(setLatLng).toHaveBeenCalledTimes(1);
       const [lat, lon] = setLatLng.mock.calls[0]![0] as [number, number];
-      expect(lat).toBeCloseTo(48.15, 5);
-      expect(lon).toBeCloseTo(16.15, 5);
+      expect(lat).toBeCloseTo(48.05, 5);
+      expect(lon).toBeCloseTo(16.05, 5);
+    });
+
+    it("starts a segment at its first point and ends the flight at the last", () => {
+      const setLatLng = replayManager.state.airplaneMarker!
+        .setLatLng as AnyMock;
+
+      replayManager.state.currentTime = 60;
+      replayManager.updateReplayDisplay();
+      expect(setLatLng).toHaveBeenLastCalledWith([48.1, 16.1]);
+
+      replayManager.state.currentTime = 120;
+      replayManager.updateReplayDisplay();
+      expect(setLatLng).toHaveBeenLastCalledWith([48.3, 16.3]);
+    });
+
+    it("crosses a gap in the recording over its duration, not at its start", () => {
+      replayManager.state.segments = [
+        {
+          path_id: 1,
+          coords: [
+            [48.0, 16.0],
+            [49.0, 17.0],
+          ],
+          time: 0,
+        },
+        {
+          path_id: 1,
+          coords: [
+            [49.0, 17.0],
+            [49.1, 17.1],
+          ],
+          time: 600,
+        },
+      ];
+      const setLatLng = replayManager.state.airplaneMarker!
+        .setLatLng as AnyMock;
+
+      replayManager.state.currentTime = 1;
+      replayManager.updateReplayDisplay(true);
+
+      const [lat] = setLatLng.mock.lastCall![0] as [number, number];
+      expect(lat).toBeLessThan(48.01);
     });
 
     it("moves the airplane between two frames within one segment", () => {
@@ -429,7 +472,7 @@ describe("ReplayManager display", () => {
     it("auto-zooms out when too many recenters happen", () => {
       replayManager.state.playing = true;
       replayManager.state.autoZoom = true;
-      replayManager.state.lastZoom = 14;
+      mockApp.map!.getZoom.mockReturnValue(14);
       replayManager.state.currentTime = 65;
       mockApp.map!.latLngToContainerPoint.mockReturnValue({
         x: 10,
@@ -444,11 +487,12 @@ describe("ReplayManager display", () => {
 
       replayManager.updateReplayDisplay();
 
-      expect(mockApp.map!.setZoom).toHaveBeenCalledWith(
+      // Out around the airplane, five seconds into the second segment
+      expect(mockApp.map!.setView).toHaveBeenCalledWith(
+        [expect.closeTo(48.1083, 3), expect.closeTo(16.1083, 3)],
         13,
         expect.objectContaining({ animate: true }),
       );
-      expect(replayManager.state.lastZoom).toBe(13);
       expect(replayManager.state.recenterTimestamps).toEqual([]);
     });
   });
@@ -473,6 +517,27 @@ describe("ReplayManager display", () => {
           title: "Current Position",
         }),
       );
+    });
+
+    it("rebuilds an open popup only when the airplane reaches another segment", () => {
+      const mockPopup = { setContent: vi.fn() };
+      const marker = replayManager.state.airplaneMarker!;
+      (marker.getPopup as AnyMock).mockReturnValue(mockPopup);
+      (marker.isPopupOpen as AnyMock).mockReturnValue(true);
+
+      replayManager.state.currentTime = 61;
+      replayManager.updateReplayDisplay();
+      replayManager.state.currentTime = 62;
+      replayManager.updateReplayDisplay();
+      replayManager.state.currentTime = 63;
+      replayManager.updateReplayDisplay();
+      expect(mockPopup.setContent).toHaveBeenCalledTimes(1);
+
+      replayManager.state.currentTime = 121;
+      replayManager.updateReplayDisplay();
+      expect(mockPopup.setContent).toHaveBeenCalledTimes(2);
+      // Already open, so it is not opened again
+      expect(marker.openPopup).not.toHaveBeenCalled();
     });
 
     it("does not touch the popup when it is closed", () => {
@@ -526,13 +591,29 @@ describe("ReplayManager display", () => {
           icon: "✈️",
         }),
       );
+      // Paused, the popup pans the map to show itself: without that a click
+      // on an airplane near the top edge opened it off the map
       expect(
         replayManager.state.airplaneMarker!.bindPopup,
       ).toHaveBeenCalledWith(
         "<div>popup</div>",
-        expect.objectContaining({ autoPanPadding: [50, 50] }),
+        expect.objectContaining({ autoPan: true }),
       );
       expect(replayManager.state.airplaneMarker!.openPopup).toHaveBeenCalled();
+    });
+
+    it("creates a popup that leaves the map alone while playing", () => {
+      replayManager.state.playing = true;
+
+      replayManager.updateReplayAirplanePopup();
+
+      // autoPan would stop the map's recenter pan on every frame
+      expect(
+        replayManager.state.airplaneMarker!.bindPopup,
+      ).toHaveBeenCalledWith(
+        "<div>popup</div>",
+        expect.objectContaining({ autoPan: false }),
+      );
     });
 
     it("uses first segment when no segment has time <= currentTime", () => {

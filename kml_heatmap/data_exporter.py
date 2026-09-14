@@ -3,73 +3,118 @@
 Exports flight data to JS files for the browser frontend:
 - <year>/data.js: per-year path info and segments (window.KML_DATA_<year>)
 - airports.js: deduplicated airport locations (window.KML_AIRPORTS)
-- metadata.js: statistics, years and the groundspeed range (KML_METADATA)
+- metadata.js: years, year file sizes, the groundspeed range and the aircraft
+  models (window.KML_METADATA)
+
+The frontend computes every flight statistic from the year files, so the
+export keeps no statistics of its own beyond the groundspeed range.
 
 The work is split into chunks that run in parallel: a year with many paths is
 cut into several chunks so that the export scales with the number of CPU
 cores even when there are only one or two years. Each worker writes its share
-of the year file as JSON fragments and returns a compact statistics aggregate
-instead of the segments themselves; the main process concatenates the
+of the year file as JSON fragments and returns its counts and groundspeed
+range instead of the segments themselves; the main process concatenates the
 fragments into the year file without parsing them.
 
-Path ids are globally unique and deterministic: years are processed in
-ascending order, each year's ids continue after the previous years' path
-count, and within a year the ids follow the input order.
+Path ids are derived from the path content (see ``path_content_id``) in the
+main process, before the work is chunked. They end up in shared links and in
+the saved state of the frontend, so a re-export has to keep the id of every
+flight that is still there, whatever was added or removed around it. Within a
+year file the paths keep the input order.
+
+``SiteOutput`` has every file written into staging directories and moves them
+into place only once all of them were written, so a run that fails while
+writing leaves the previous site as it was. One run at a time writes to an
+output directory.
 """
 
+import contextlib
+import errno
+import fcntl
+import hashlib
 import json
 import logging
 import math
 import os
 import re
 import shutil
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass
+import struct
+import tempfile
+from concurrent.futures import Executor, ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, Self
 
+from .aircraft import resolve_aircraft_models
 from .cache import atomic_write
+from .exceptions import KMLHeatmapError
 from .export_pipeline import build_path_info, path_metrics, process_path_segments
-from .export_reconciler import YearAggregate
-from .export_writers import (
-    export_airports_data,
-    export_metadata,
-    exported_airport_names,
-)
+from .export_writers import export_airports_data, export_metadata
 from .logger import logger
-from .statistics import build_statistics
+from .types import COORDINATE_DECIMALS
 from .workers import init_worker
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping, Sequence
 
-    from .types import (
-        AirportData,
-        FlightPath,
-        FlightPathGroup,
-        PathMetadata,
-        Statistics,
-    )
+    from .types import AirportData, FlightPath, FlightPathGroup, PathMetadata
 
 __all__ = [
     "MIN_PATHS_PER_CHUNK",
+    "PATH_ID_BITS",
     "ChunkResult",
     "ExportResult",
+    "GroundspeedRange",
+    "SiteOutput",
     "YearExportResult",
+    "assign_path_ids",
     "export_all_data",
     "is_exportable_path",
+    "path_content_id",
     "process_year_chunk",
-    "process_year_data",
 ]
 
 YEAR_DIR_PATTERN = re.compile(r"^\d{4}$")
 TOOL_OWNED_FILES = ("airports.js", "metadata.js")
 # Fragments written by the chunk workers, assembled into data.js afterwards
 PART_PATTERN = re.compile(r"^\.data\.\d+\.(info|segments)\.part$")
+# Hidden directories a run writes its files into before publishing them
+STAGING_PREFIX = ".kml-heatmap-staging-"
+# Published last: they reference the other files, so a page loaded while the
+# files are moved never points at one that is not in place yet
+ENTRY_POINT_FILES = ("metadata.js", "index.html")
 # A year is not split below this many paths per chunk: a worker process only
 # pays off when it has real work to do
 MIN_PATHS_PER_CHUNK = 50
 JSON_SEPARATORS = (",", ":")
+# Path ids are this wide: exact JavaScript numbers, short enough for a link,
+# and wide enough that 100,000 flights rarely need a collision resolved
+PATH_ID_BITS = 40
+# Segment row layout: [lat, lon, altitude_ft, groundspeed_knots, time?]
+SEGMENT_SPEED_INDEX = 3
+
+
+@dataclass
+class GroundspeedRange:
+    """The lowest positive and the highest groundspeed of exported rows.
+
+    Only the extremes are kept, and they merge to the same values in any
+    order, so the range does not depend on how the years were chunked.
+    """
+
+    min_knots: float | None = None
+    max_knots: float = 0.0
+
+    def include(self, low: float, high: float) -> None:
+        """Widen the range to cover ``low`` and ``high``."""
+        self.min_knots = low if self.min_knots is None else min(self.min_knots, low)
+        self.max_knots = max(self.max_knots, high)
+
+    def merge(self, other: GroundspeedRange) -> None:
+        """Widen the range to cover ``other``."""
+        if other.min_knots is not None:
+            self.include(other.min_knots, other.max_knots)
 
 
 @dataclass
@@ -80,7 +125,7 @@ class ChunkResult:
     index: int
     path_count: int
     original_points: int
-    aggregate: YearAggregate
+    groundspeed: GroundspeedRange = field(default_factory=GroundspeedRange)
 
 
 @dataclass
@@ -91,15 +136,14 @@ class YearExportResult:
     path_count: int
     original_points: int
     file_bytes: int
-    aggregate: YearAggregate
+    groundspeed: GroundspeedRange = field(default_factory=GroundspeedRange)
 
 
 @dataclass
 class ExportResult:
     """Everything ``export_all_data`` produced."""
 
-    files: dict[str, str]
-    stats: Statistics
+    years: list[int]
 
 
 @dataclass
@@ -107,17 +151,73 @@ class _ChunkPlan:
     year: int
     index: int
     path_indices: list[int]
-    path_id_offset: int
+    # One entry per path index: its id, or None when it is not exported
+    path_ids: list[int | None]
 
 
 def is_exportable_path(path: FlightPath) -> bool:
     """Whether a path gets an id and an entry in the export.
 
-    The same predicate decides the path id offsets (see ``_plan_chunks``), so
-    both must never drift apart: ids are persisted in shared links and would
-    then point at different flights.
+    It has to move at the exported precision: points that all round to one
+    coordinate make no segment row, and a flight without rows would still
+    count in the frontend with its airports and aircraft.
     """
-    return len(path) > 1
+    if len(path) < 2:
+        return False
+    start = (
+        round(path[0].lat, COORDINATE_DECIMALS),
+        round(path[0].lon, COORDINATE_DECIMALS),
+    )
+    return any(
+        (round(point.lat, COORDINATE_DECIMALS), round(point.lon, COORDINATE_DECIMALS))
+        != start
+        for point in path[1:]
+    )
+
+
+def path_content_id(path: FlightPath) -> int:
+    """The id a path gets unless an earlier path already holds it.
+
+    A hash of the coordinates, rounded the way they are exported, and of the
+    altitudes. It survives a re-export, flights added or removed around it
+    and the renaming of Charterware files, none of which a position in the
+    input or a file name would.
+    """
+    values: list[float] = []
+    for point in path:
+        values.append(round(point.lat, COORDINATE_DECIMALS))
+        values.append(round(point.lon, COORDINATE_DECIMALS))
+        values.append(math.nan if point.alt is None else round(point.alt, 1))
+    packed = struct.pack(f"<{len(values)}d", *values)
+    digest = hashlib.blake2b(packed, digest_size=8).digest()
+    return int.from_bytes(digest, "big") >> (64 - PATH_ID_BITS)
+
+
+def assign_path_ids(
+    paths_by_year: Mapping[int, list[int]], all_path_groups: FlightPathGroup
+) -> dict[int, int]:
+    """The id of every exported path, keyed by its index in the input.
+
+    A path whose content id an earlier path (in input order) already holds,
+    a duplicate recording or a real collision, takes the next free id. The
+    ids therefore only depend on the paths and their order, never on the
+    chunking or the number of workers.
+    """
+    exported = sorted(
+        index
+        for indices in paths_by_year.values()
+        for index in indices
+        if is_exportable_path(all_path_groups[index])
+    )
+    ids: dict[int, int] = {}
+    taken: set[int] = set()
+    for index in exported:
+        path_id = path_content_id(all_path_groups[index])
+        while path_id in taken:
+            path_id = (path_id + 1) % (1 << PATH_ID_BITS)
+        taken.add(path_id)
+        ids[index] = path_id
+    return ids
 
 
 def _part_paths(output_dir: str, year: int, index: int) -> tuple[Path, Path]:
@@ -132,66 +232,65 @@ def process_year_chunk(
     year: int,
     year_path_groups: FlightPathGroup,
     year_path_metadata: list[PathMetadata],
-    path_id_offset: int,
+    path_ids: Sequence[int | None],
     output_dir: str,
     index: int = 0,
 ) -> ChunkResult:
     """Export a chunk of a year's paths into JSON fragments.
 
-    Writes ``<output_dir>/<year>/.data.<index>.info.part`` (the path_info
-    entries, comma separated) and ``.data.<index>.segments.part`` (the
+    ``path_ids`` holds the id of each path, None for the paths that are not
+    exported (see ``assign_path_ids``). Writes
+    ``<output_dir>/<year>/.data.<index>.info.part`` (the path_info entries,
+    comma separated) and ``.data.<index>.segments.part`` (the
     ``"<id>":{...}`` entries of the segments object, comma separated). The
     fragments are streamed path by path, so the chunk never holds all of its
     segment rows in memory at once.
     """
     original_points = sum(len(path) for path in year_path_groups)
-    aggregate = YearAggregate(total_points=original_points)
+    groundspeed = GroundspeedRange()
     info_part, segments_part = _part_paths(output_dir, year, index)
     info_part.parent.mkdir(parents=True, exist_ok=True)
 
     path_count = 0
-    path_id = path_id_offset
     with (
         open(info_part, "w", encoding="utf-8") as info_out,
         open(segments_part, "w", encoding="utf-8") as segments_out,
     ):
-        for path, metadata in zip(year_path_groups, year_path_metadata, strict=True):
-            if not is_exportable_path(path):
+        for path, metadata, path_id in zip(
+            year_path_groups, year_path_metadata, path_ids, strict=True
+        ):
+            if path_id is None:
                 continue
 
             path_duration_seconds, path_distance_km = path_metrics(path, metadata)
-            start, rows, distances = process_path_segments(
+            start, rows = process_path_segments(
                 path, path_distance_km, path_duration_seconds
             )
-            info = build_path_info(path, metadata, path_id, year, len(rows))
+            info = build_path_info(path, metadata, path_id, year)
 
+            # json.dumps rather than json.dump: only the one-shot encoder is
+            # the C implementation, dumping to a file uses the Python one
             separator = "," if path_count else ""
-            info_out.write(separator)
-            json.dump(info, info_out, separators=JSON_SEPARATORS)
-            segments_out.write(f'{separator}"{path_id}":')
-            json.dump(
-                {"start": start, "rows": rows}, segments_out, separators=JSON_SEPARATORS
+            info_out.write(separator + json.dumps(info, separators=JSON_SEPARATORS))
+            segments = {"start": start, "rows": rows}
+            segments_out.write(
+                f'{separator}"{path_id}":'
+                + json.dumps(segments, separators=JSON_SEPARATORS)
             )
 
-            path_min_ft = info.get("min_altitude_ft")
-            path_max_ft = info.get("max_altitude_ft")
-            aggregate.add_path(
-                rows,
-                distances,
-                metadata.get("aircraft_registration"),
-                (path_min_ft, path_max_ft)
-                if path_min_ft is not None and path_max_ft is not None
-                else None,
-            )
+            speeds = [
+                row[SEGMENT_SPEED_INDEX] for row in rows if row[SEGMENT_SPEED_INDEX] > 0
+            ]
+            if speeds:
+                groundspeed.include(min(speeds), max(speeds))
             path_count += 1
-            path_id += 1
 
     return ChunkResult(
         year=year,
         index=index,
         path_count=path_count,
         original_points=original_points,
-        aggregate=aggregate,
+        groundspeed=groundspeed,
     )
 
 
@@ -241,64 +340,47 @@ def _assemble_year_file(
     finally:
         _remove_parts(output_dir, year, [chunk.index for chunk in chunks])
 
-    aggregate = YearAggregate()
+    groundspeed = GroundspeedRange()
     for chunk in chunks:
-        aggregate.merge(chunk.aggregate)
+        groundspeed.merge(chunk.groundspeed)
 
     return YearExportResult(
         year=year,
         path_count=sum(chunk.path_count for chunk in chunks),
         original_points=original_points,
         file_bytes=output_file.stat().st_size,
-        aggregate=aggregate,
+        groundspeed=groundspeed,
     )
-
-
-def process_year_data(
-    year: int,
-    year_path_groups: FlightPathGroup,
-    year_path_metadata: list[PathMetadata],
-    path_id_offset: int,
-    output_dir: str,
-    quiet: bool = False,
-) -> YearExportResult:
-    """Export a single year's data to <output_dir>/<year>/data.js in one go."""
-    if not quiet:
-        logger.info("\n  Processing year %s (%d paths)...", year, len(year_path_groups))
-
-    chunk = process_year_chunk(
-        year, year_path_groups, year_path_metadata, path_id_offset, output_dir
-    )
-    result = _assemble_year_file(year, [chunk], output_dir)
-
-    if not quiet:
-        logger.info(
-            "    ✓ %d path(s), %s points (%.1f KB)",
-            result.path_count,
-            f"{result.original_points:,}",
-            result.file_bytes / 1024,
-        )
-
-    return result
 
 
 def _group_paths_by_year(
+    all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
 ) -> dict[int, list[int]]:
-    """Group path indices by year; paths without a year are skipped."""
+    """Group path indices by year; paths without a year are skipped.
+
+    A year without a single exportable path is left out, so that a file with
+    nothing but point markers does not add an empty year. In the other years
+    the markers stay in the groups, where they count for ``original_points``
+    and for the chunk sizes as before.
+    """
     paths_by_year: dict[int, list[int]] = {}
     for path_idx, metadata in enumerate(all_path_metadata):
         year = metadata.get("year")
         if year is None:
             # The pipeline drops these in renderer._drop_paths_without_year,
-            # which also keeps them out of the airports and the statistics.
+            # which also keeps them out of the airports.
             # This guard only covers direct calls to export_all_data.
             logger.debug(
                 "Skipping path without year: %s", metadata.get("filename", path_idx)
             )
             continue
         paths_by_year.setdefault(year, []).append(path_idx)
-    return paths_by_year
+    return {
+        year: indices
+        for year, indices in paths_by_year.items()
+        if any(is_exportable_path(all_path_groups[i]) for i in indices)
+    }
 
 
 def _chunk_count(path_count: int, year_count: int, max_workers: int) -> int:
@@ -310,27 +392,23 @@ def _chunk_count(path_count: int, year_count: int, max_workers: int) -> int:
 
 def _plan_chunks(
     paths_by_year: dict[int, list[int]],
-    all_path_groups: FlightPathGroup,
+    path_ids: Mapping[int, int],
     max_workers: int,
 ) -> list[_ChunkPlan]:
-    """Cut the years into chunks and assign every chunk its first path id.
+    """Cut the years into chunks, in input order, and hand each its path ids.
 
-    Ids only depend on the order of the paths, never on the chunking: chunk
-    boundaries fall between paths and each chunk starts where the previous
-    one (in year and input order) ended.
+    ``path_ids`` are the ids of the exported paths by input index (see
+    ``assign_path_ids``); the chunk boundaries do not change them.
     """
     plans: list[_ChunkPlan] = []
-    offset = 0
     for year in sorted(paths_by_year):
         indices = paths_by_year[year]
         chunks = _chunk_count(len(indices), len(paths_by_year), max_workers)
         size = max(1, math.ceil(len(indices) / chunks))
         for index, start in enumerate(range(0, max(1, len(indices)), size)):
             chunk_indices = indices[start : start + size]
-            plans.append(_ChunkPlan(year, index, chunk_indices, offset))
-            offset += sum(
-                1 for i in chunk_indices if is_exportable_path(all_path_groups[i])
-            )
+            chunk_ids = [path_ids.get(i) for i in chunk_indices]
+            plans.append(_ChunkPlan(year, index, chunk_indices, chunk_ids))
     return plans
 
 
@@ -344,7 +422,7 @@ def _run_chunk(
         plan.year,
         [all_path_groups[i] for i in plan.path_indices],
         [all_path_metadata[i] for i in plan.path_indices],
-        plan.path_id_offset,
+        plan.path_ids,
         output_dir,
         plan.index,
     )
@@ -369,11 +447,22 @@ def _export_chunks(
             return f"Year {plan.year}"
         return f"Year {plan.year} (part {plan.index + 1}/{parts})"
 
-    def fail(plan: _ChunkPlan, exc: BaseException) -> RuntimeError:
+    def fail(
+        plan: _ChunkPlan, exc: Exception, executor: Executor | None = None
+    ) -> RuntimeError:
+        if executor is not None:
+            # Chunks that are still running (or already handed to a worker)
+            # would write their fragments after the cleanup below
+            executor.shutdown(wait=True, cancel_futures=True)
         for year, indices in parts_per_year.items():
             _remove_parts(output_dir, year, indices)
-        logger.exception("  Error processing year %s", plan.year)
-        return RuntimeError(f"Failed to process year {plan.year}")
+        if isinstance(exc, OSError | KMLHeatmapError | BrokenProcessPool):
+            # Expected failures (a full disk, a worker killed for running out
+            # of memory) are reported in one line
+            logger.debug("Error processing year %s", plan.year, exc_info=exc)
+        else:
+            logger.exception("  Error processing year %s", plan.year)
+        return RuntimeError(f"Failed to process year {plan.year}: {exc}")
 
     chunk_results: list[ChunkResult] = []
     if len(plans) == 1:
@@ -399,7 +488,7 @@ def _export_chunks(
                     plan.year,
                     [all_path_groups[i] for i in plan.path_indices],
                     [all_path_metadata[i] for i in plan.path_indices],
-                    plan.path_id_offset,
+                    plan.path_ids,
                     output_dir,
                     plan.index,
                 ): plan
@@ -410,7 +499,7 @@ def _export_chunks(
                 try:
                     result = future.result()
                 except Exception as exc:
-                    raise fail(plan, exc) from exc
+                    raise fail(plan, exc, executor) from exc
                 chunk_results.append(result)
                 logger.info(
                     "  [%d/%d] %s: %s points",
@@ -435,113 +524,285 @@ def _protected_directories() -> tuple[Path, ...]:
         return (Path("/"),)
 
 
-def _clean_output_dir(output_path: Path) -> None:
-    """Remove tool-owned outputs only; anything else is left with a warning."""
-    if not output_path.is_dir():
-        return
+def _refuse_symlink(path: Path) -> ValueError:
+    return ValueError(
+        f"Refusing to write through the symlink {path}; "
+        "remove it or choose a different output directory"
+    )
 
-    for name in TOOL_OWNED_FILES:
-        target = output_path / name
+
+def _check_target(root: Path, relative: Path) -> None:
+    """Refuse a destination that a staged file cannot safely be moved to.
+
+    Symlinks are neither written through nor replaced, and nothing but a
+    regular file (or a directory on the way to one) is replaced. The
+    permission to create the file is checked as well, so that a read-only
+    directory stops the run before the first file was moved.
+    """
+    directory = root
+    for part in relative.parts[:-1]:
+        child = directory / part
+        if child.is_symlink():
+            raise _refuse_symlink(child)
+        if not child.exists():
+            break
+        if not child.is_dir():
+            raise ValueError(f"Refusing to write into {child}: not a directory")
+        directory = child
+    else:
+        target = root / relative
         if target.is_symlink():
-            raise ValueError(
-                f"Refusing to write through the symlink {target}; "
-                "remove it or choose a different output directory"
-            )
-        if target.is_file():
-            target.unlink()
+            raise _refuse_symlink(target)
+        if target.exists() and not target.is_file():
+            raise ValueError(f"Refusing to replace {target}: not a regular file")
+    if not os.access(directory, os.W_OK | os.X_OK):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(directory))
 
-    for child in sorted(output_path.iterdir()):
+
+def _staged_files(stage: Path) -> list[Path]:
+    """The files of a staging directory, relative to it, in publishing order.
+
+    Files in subdirectories (the year files) come first and the entry points
+    last, see ``ENTRY_POINT_FILES``.
+    """
+    files = [path.relative_to(stage) for path in stage.rglob("*") if path.is_file()]
+    return sorted(
+        files,
+        key=lambda relative: (
+            len(relative.parts) == 1,
+            relative.name in ENTRY_POINT_FILES,
+            relative.as_posix(),
+        ),
+    )
+
+
+def _remove_stale_file(path: Path) -> None:
+    """Remove a tool-owned file that the published run did not produce.
+
+    The new site is already in place at this point, so a file that cannot be
+    removed only gets a warning; a symlink is somebody else's and left alone.
+    """
+    if path.is_symlink():
+        logger.warning("Leaving symlink in output directory: %s", path)
+    elif path.is_file():
+        try:
+            path.unlink()
+        except OSError as e:
+            logger.warning("Could not remove stale output %s: %s", path, e)
+
+
+def _remove_stale_data(data_dir: Path, years: set[str]) -> None:
+    """Remove year files that are not part of the site any more.
+
+    Anything the tool does not own is left in place with a warning.
+    """
+    for child in sorted(data_dir.iterdir()):
+        if child.name in TOOL_OWNED_FILES or child.name.startswith(STAGING_PREFIX):
+            continue
         # "unknown" is the year-less directory written by older versions
         if (
             child.is_dir()
             and not child.is_symlink()
             and (YEAR_DIR_PATTERN.match(child.name) or child.name == "unknown")
         ):
-            data_file = child / "data.js"
-            if data_file.is_symlink():
-                raise ValueError(
-                    f"Refusing to write through the symlink {data_file}; "
-                    "remove it or choose a different output directory"
-                )
-            if data_file.is_file():
-                data_file.unlink()
-            # Fragments left behind by an interrupted run
-            for stale in child.iterdir():
-                if stale.is_file() and PART_PATTERN.match(stale.name):
-                    stale.unlink()
-            try:
-                child.rmdir()
-            except OSError:
-                logger.warning("Leaving non-empty year directory: %s", child)
+            stale = child.name not in years
+            for item in sorted(child.iterdir()):
+                # Fragments are left behind by interrupted older versions,
+                # which wrote them into the output directory itself
+                if (stale and item.name == "data.js") or PART_PATTERN.match(item.name):
+                    _remove_stale_file(item)
+            if stale:
+                try:
+                    child.rmdir()
+                except OSError:
+                    logger.warning("Leaving non-empty year directory: %s", child)
             continue
         logger.warning("Leaving unexpected item in output directory: %s", child)
+
+
+def _lock_directory(directory: Path) -> int:
+    """Take the lock of an output directory, or fail when a run holds it.
+
+    Two runs writing one site would delete each other's staging directories.
+    The lock is on the directory itself, so no lock file ends up published
+    with the site. It is released when the returned descriptor is closed.
+    """
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        raise KMLHeatmapError(
+            f"Another run is writing to {directory}; wait for it to finish"
+        ) from None
+    except OSError:
+        # A file system without locks: run unguarded, as before
+        pass
+    return fd
+
+
+def _remove_leftover_stages(directory: Path) -> None:
+    """Remove the staging directories of runs that were killed.
+
+    Only called with the directory's lock held, so no stage of a running
+    run is among them.
+    """
+    for child in directory.iterdir():
+        if (
+            child.name.startswith(STAGING_PREFIX)
+            and child.is_dir()
+            and not child.is_symlink()
+        ):
+            shutil.rmtree(child, ignore_errors=True)
+
+
+class SiteOutput:
+    """Write a site into staging directories and publish it all at once.
+
+    Every file is written into a hidden staging directory inside its
+    destination, which keeps the final renames on one filesystem, and moved
+    into place only once all files were written. A failed run leaves the
+    previous site untouched instead of deleting it or mixing two versions.
+    Files the tool does not own are never touched.
+
+    Use it as a context manager: write the data files into ``data_stage`` and
+    the page and its assets into ``site_stage``, then call ``publish``. The
+    staging directories are removed on exit, published or not.
+    """
+
+    site_stage: Path
+    data_stage: Path
+
+    def __init__(
+        self,
+        output_dir: str | Path,
+        data_dir: str | Path,
+        site_files: Iterable[str] = (),
+    ) -> None:
+        """Prepare the output of a site.
+
+        ``site_files`` are the names the tool owns in ``output_dir``; the
+        ones a run does not produce are removed when it is published.
+        """
+        self.output_dir = Path(output_dir).resolve()
+        self.data_dir = Path(data_dir).resolve()
+        if self.data_dir in _protected_directories():
+            raise ValueError(f"Refusing to use dangerous output directory: {data_dir}")
+        self.site_files = tuple(site_files)
+        self._cleanup = contextlib.ExitStack()
+
+    def __enter__(self) -> Self:
+        try:
+            for destination in dict.fromkeys((self.output_dir, self.data_dir)):
+                destination.mkdir(parents=True, exist_ok=True)
+                self._cleanup.callback(os.close, _lock_directory(destination))
+                _remove_leftover_stages(destination)
+            self.site_stage = self._stage(self.output_dir)
+            self.data_stage = self._stage(self.data_dir)
+        except BaseException:
+            self._cleanup.close()
+            raise
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self._cleanup.close()
+
+    def _stage(self, destination: Path) -> Path:
+        stage = Path(tempfile.mkdtemp(prefix=STAGING_PREFIX, dir=destination))
+        self._cleanup.callback(shutil.rmtree, stage, ignore_errors=True)
+        return stage
+
+    def publish(self, years: Iterable[int]) -> None:
+        """Move the staged files into place, then remove stale outputs.
+
+        Every destination is checked before the first file moves, so that a
+        refusal leaves the previous site as it was. The data files move
+        first and the page last. ``years`` are the years of the new site.
+        """
+        for stage, required in (
+            (self.site_stage, "index.html"),
+            (self.data_stage, "metadata.js"),
+        ):
+            # A stage that lost its page or metadata is a bug or a stage
+            # removed from under the run; publishing it would break the site
+            if not (stage / required).is_file():
+                raise KMLHeatmapError(f"Staged site is incomplete: {required} missing")
+        site_files = _staged_files(self.site_stage)
+        moves = [
+            (self.data_stage, self.data_dir, relative)
+            for relative in _staged_files(self.data_stage)
+        ] + [(self.site_stage, self.output_dir, relative) for relative in site_files]
+
+        for _, destination, relative in moves:
+            _check_target(destination, relative)
+        for stage, destination, relative in moves:
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(stage / relative, target)
+
+        produced = {relative.name for relative in site_files}
+        for name in self.site_files:
+            if name not in produced:
+                _remove_stale_file(self.output_dir / name)
+        _remove_stale_data(self.data_dir, {str(year) for year in years})
 
 
 def export_all_data(
     all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
     unique_airports: list[AirportData],
-    output_dir: str = "data",
+    output_dir: str | Path = "data",
     aircraft_data: Mapping[str, str] | None = None,
 ) -> ExportResult:
-    """Orchestrate the full data export pipeline and build the statistics."""
-    output_path = Path(output_dir).resolve()
-    if output_path in _protected_directories():
-        raise ValueError(f"Refusing to use dangerous output directory: {output_dir}")
+    """Write the data files into ``output_dir``.
 
-    if output_path.exists():
-        logger.info("\n  Cleaning tool-owned files in: %s", output_dir)
-        _clean_output_dir(output_path)
-
+    ``output_dir`` is expected to hold no previous export: the pipeline
+    passes the data staging directory of a ``SiteOutput``, which publishes
+    the files.
+    """
+    output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
     logger.info("\n  Exporting data to JS files...")
 
-    paths_by_year = _group_paths_by_year(all_path_metadata)
+    paths_by_year = _group_paths_by_year(all_path_groups, all_path_metadata)
     logger.info("\n  Splitting data by year: %s", sorted(paths_by_year))
 
+    path_ids = assign_path_ids(paths_by_year, all_path_groups)
     max_workers = os.cpu_count() or 4
-    plans = _plan_chunks(paths_by_year, all_path_groups, max_workers)
+    plans = _plan_chunks(paths_by_year, path_ids, max_workers)
 
     logger.info(
         "\n  Processing %d year(s) in %d chunk(s)...", len(paths_by_year), len(plans)
     )
     year_results = _export_chunks(
-        plans, all_path_groups, all_path_metadata, output_dir, max_workers
+        plans, all_path_groups, all_path_metadata, str(output_path), max_workers
     )
 
-    aggregate = YearAggregate()
+    groundspeed = GroundspeedRange()
     year_file_bytes: dict[str, int] = {}
     for result in year_results:
-        aggregate.merge(result.aggregate)
+        groundspeed.merge(result.groundspeed)
         year_file_bytes[str(result.year)] = result.file_bytes
 
-    logger.info("\n  Reconciling statistics from segment data...")
-    stats = build_statistics(
-        aggregate,
-        all_path_metadata,
-        exported_airport_names(unique_airports),
+    # Only the aircraft of exported paths: the frontend never shows another
+    aircraft_models = resolve_aircraft_models(
+        (all_path_metadata[index].get("aircraft_registration") for index in path_ids),
         aircraft_data,
     )
 
-    files: dict[str, str] = {}
-
-    airports_file, _ = export_airports_data(unique_airports, output_dir)
-    files["airports"] = airports_file
-
-    meta_file, _ = export_metadata(
-        stats,
-        aggregate.min_groundspeed_or_zero,
-        aggregate.max_groundspeed_knots,
-        [result.year for result in year_results],
+    years = [result.year for result in year_results]
+    _, airports_bytes = export_airports_data(unique_airports, str(output_path))
+    _, metadata_bytes = export_metadata(
+        groundspeed.min_knots or 0.0,
+        groundspeed.max_knots,
+        years,
         year_file_bytes,
-        output_dir,
+        aircraft_models,
+        str(output_path),
     )
-    files["metadata"] = meta_file
 
-    total_size = sum(Path(f).stat().st_size for f in files.values()) + sum(
-        year_file_bytes.values()
-    )
+    total_size = airports_bytes + metadata_bytes + sum(year_file_bytes.values())
     logger.info("  Total data size: %.1f KB", total_size / 1024)
 
-    return ExportResult(files=files, stats=stats)
+    return ExportResult(years=years)

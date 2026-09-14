@@ -1,0 +1,104 @@
+/**
+ * Refuse to test a site that does not match the checkout.
+ *
+ * The specs run against docs/, which Playwright never builds itself. A site
+ * generated before the last change used to fail (or pass) locally for reasons
+ * unrelated to the change at hand. build.js stamps the hash of the frontend
+ * sources into the first line of the bundle, so a mismatch with the sources
+ * on disk is caught here, before any spec starts. The stylesheet, the page
+ * template and the generator are not part of the bundle; a site older than
+ * any of them is refused too.
+ *
+ * CI builds one site with dummy tile API keys and one without, and says
+ * which through E2E_API_KEYS ("dummy" or "none"). A build that lost its keys
+ * fails here instead of quietly skipping the specs for the keyed layers.
+ */
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { runInNewContext } from "node:vm";
+import {
+  BANNER_PATTERN,
+  computeSourceHash,
+  REPO_ROOT,
+} from "../../scripts/source-hash.js";
+
+/** The directory the web server serves and the specs test */
+export const SITE_DIR = join(REPO_ROOT, "docs");
+
+const REBUILD_HINT =
+  "rebuild it with `npm run build && python -m kml_heatmap data --output-dir docs`";
+
+function readSiteFile(name: string): string {
+  try {
+    return readFileSync(join(SITE_DIR, name), "utf8");
+  } catch {
+    throw new Error(`docs/${name} is missing; ${REBUILD_HINT}`);
+  }
+}
+
+function checkBuildHash(): void {
+  const built = BANNER_PATTERN.exec(readSiteFile("mapApp.bundle.js"))?.[1];
+  const current = computeSourceHash();
+  if (built !== current) {
+    throw new Error(
+      `docs/ was built from other frontend sources (bundle ${built ?? "without a build hash"}, ` +
+        `sources ${current}); ${REBUILD_HINT}`,
+    );
+  }
+}
+
+/** Files the generator copies or renders into the site, besides the bundle */
+function generatorSources(): string[] {
+  const packageDir = join(REPO_ROOT, "kml_heatmap");
+  const inDir = (dir: string, suffix: string): string[] =>
+    readdirSync(join(packageDir, dir))
+      .filter((name) => name.endsWith(suffix))
+      .map((name) => join(packageDir, dir, name));
+  return [
+    ...inDir(".", ".py"),
+    ...inDir("static", ".css"),
+    ...inDir("templates", ""),
+  ];
+}
+
+function checkSiteAge(): void {
+  readSiteFile("index.html");
+  const built = statSync(join(SITE_DIR, "index.html")).mtimeMs;
+  const newer = generatorSources().filter(
+    (file) => statSync(file).mtimeMs > built,
+  );
+  if (newer.length > 0) {
+    const names = newer.map((file) => file.slice(REPO_ROOT.length + 1));
+    throw new Error(`docs/ is older than ${names.join(", ")}; ${REBUILD_HINT}`);
+  }
+}
+
+function checkApiKeys(): void {
+  const expected = process.env["E2E_API_KEYS"];
+  if (expected === undefined) return;
+  if (expected !== "dummy" && expected !== "none") {
+    throw new Error(
+      `E2E_API_KEYS must be "dummy" or "none", not "${expected}"`,
+    );
+  }
+
+  const sandbox: {
+    window: { MAP_CONFIG?: { cartoApiKey?: string; openaipApiKey?: string } };
+  } = { window: {} };
+  runInNewContext(readSiteFile("map_config.js"), sandbox);
+  const config = sandbox.window.MAP_CONFIG;
+  for (const name of ["cartoApiKey", "openaipApiKey"] as const) {
+    const present = !!config?.[name];
+    if (present !== (expected === "dummy")) {
+      throw new Error(
+        `E2E_API_KEYS=${expected}, but docs/map_config.js ${present ? "carries" : "lacks"} ${name}`,
+      );
+    }
+  }
+}
+
+export default function globalSetup(): void {
+  checkBuildHash();
+  checkSiteAge();
+  checkApiKeys();
+}

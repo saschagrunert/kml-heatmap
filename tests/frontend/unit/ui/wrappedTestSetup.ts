@@ -2,7 +2,6 @@
  * Shared fixtures for the WrappedManager test files: a dialog fixture, a
  * small flight history with airports in two countries, and the mock app.
  */
-import type { FilteredStatistics } from "../../../../kml_heatmap/frontend/types";
 import {
   createDataset,
   createMockApp,
@@ -38,15 +37,17 @@ export function mountWrappedDom(): void {
     <div id="loading"></div>
     <div id="wrapped-modal">
       <button class="close-btn">Close</button>
-      <div id="wrapped-title"></div>
-      <div id="wrapped-year"></div>
-      <div id="wrapped-stats"></div>
-      <div id="wrapped-fun-facts"></div>
-      <div id="wrapped-aircraft-fleet"></div>
-      <div id="wrapped-top-airports"></div>
-      <div id="wrapped-cards-column"></div>
-      <div id="wrapped-airports-grid"></div>
-      <div id="wrapped-map-container"></div>
+      <div id="wrapped-content">
+        <div id="wrapped-title"></div>
+        <div id="wrapped-year"></div>
+        <div id="wrapped-stats"></div>
+        <div id="wrapped-fun-facts"></div>
+        <div id="wrapped-aircraft-fleet"></div>
+        <div id="wrapped-top-airports"></div>
+        <div id="wrapped-cards-column"></div>
+        <div id="wrapped-airports-grid"></div>
+        <div id="wrapped-map-container"></div>
+      </div>
     </div>
     <div id="github-footer"></div>
   `;
@@ -140,32 +141,17 @@ export function createFlightHistory() {
   );
 }
 
-/** Full statistics, only used for the aircraft model lookup */
-export const fullStats: FilteredStatistics = {
-  total_points: 8,
-  num_paths: 4,
-  num_airports: 4,
-  airport_names: [],
-  num_aircraft: 2,
-  aircraft_list: [
-    {
-      registration: "D-ABCD",
-      type: "DA40",
-      model: "Diamond DA40",
-      flights: 3,
-    },
-    { registration: "D-EFGH", type: "C172", model: "Cessna 172", flights: 1 },
-  ],
-  total_distance_km: 0,
-  total_distance_nm: 0,
-  max_groundspeed_knots: 120,
+/** The model names metadata.js carries for the aircraft of the history */
+export const aircraftModels = {
+  "D-ABCD": "Diamond DA40",
+  "D-EFGH": "Cessna 172",
 };
 
 export function createWrappedMockApp(): MockApp {
   return createMockApp({
     selectedYear: "2024",
     currentData: createFlightHistory(),
-    fullStats,
+    aircraftModels,
     config: {
       bounds: [
         [50, 8],

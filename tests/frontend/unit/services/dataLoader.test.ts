@@ -200,14 +200,67 @@ describe("expandYearData", () => {
     expect("time" in data.path_segments[0]!).toBe(false);
   });
 
-  it("orders paths by numeric path id", () => {
+  it("orders paths like path_info, whatever their ids", () => {
+    // Ids are content hashes; JavaScript would list "2" before the others
     const data = expandYearData(
-      rawYear(2025, {
-        "10": path([50, 8], [[50.1, 8.1, 1, 1]]),
-        "2": path([50, 8], [[50.1, 8.1, 1, 1]]),
-      }),
+      rawYear(
+        2025,
+        {
+          "840108108563": path([50, 8], [[50.1, 8.1, 1, 1]]),
+          "10": path([50, 8], [[50.1, 8.1, 1, 1]]),
+          "2": path([50, 8], [[50.1, 8.1, 1, 1]]),
+        },
+        [
+          { id: 840108108563, year: 2025 },
+          { id: 10, year: 2025 },
+          { id: 2, year: 2025 },
+        ],
+      ),
     );
-    expect(data.path_segments.map((s) => s.path_id)).toEqual([2, 10]);
+    expect(data.path_segments.map((s) => s.path_id)).toEqual([
+      840108108563, 10, 2,
+    ]);
+  });
+
+  it("still expands segments that path_info does not list", () => {
+    const data = expandYearData(
+      rawYear(
+        2025,
+        {
+          "10": path([50, 8], [[50.1, 8.1, 1, 1]]),
+          "2": path([50, 8], [[50.1, 8.1, 1, 1]]),
+        },
+        [{ id: 10, year: 2025 }],
+      ),
+    );
+    expect(data.path_segments.map((s) => s.path_id)).toEqual([10, 2]);
+  });
+
+  it("expands an unlisted path even when the counts match", () => {
+    const data = expandYearData(
+      rawYear(
+        2025,
+        {
+          "10": path([50, 8], [[50.1, 8.1, 1, 1]]),
+          "30": path([50, 8], [[50.1, 8.1, 1, 1]]),
+        },
+        [
+          { id: 10, year: 2025 },
+          { id: 20, year: 2025 },
+        ],
+      ),
+    );
+    expect(data.path_segments.map((s) => s.path_id)).toEqual([10, 30]);
+  });
+
+  it("expands a path listed twice once", () => {
+    const data = expandYearData(
+      rawYear(2025, { "10": path([50, 8], [[50.1, 8.1, 1, 1]]) }, [
+        { id: 10, year: 2025 },
+        { id: 10, year: 2025 },
+      ]),
+    );
+    expect(data.path_segments).toHaveLength(1);
   });
 
   it("skips paths without segments and has no holes in the arrays", () => {
@@ -481,13 +534,14 @@ describe("DataLoader", () => {
     it("does not cache failed loads", async () => {
       mockScriptLoader.mockRejectedValueOnce(new Error("boom"));
       expect(await loader.loadData("2025")).toBeNull();
-      expect(loader.isCached("2025")).toBe(false);
 
       mockScriptLoader.mockImplementationOnce(() => {
         defineYear(2025);
         return Promise.resolve();
       });
       expect(await loader.loadData("2025")).not.toBeNull();
+      // The failure was not remembered: the file was requested again
+      expect(mockScriptLoader).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -629,6 +683,7 @@ describe("DataLoader", () => {
 
       expect(result).not.toBeNull();
       expect(result!.path_segments).toHaveLength(1);
+      expect(result!.incomplete).toBe(true);
       expect(onLoadError).toHaveBeenCalledTimes(1);
       expect(onLoadError).toHaveBeenCalledWith(["2024"]);
     });
@@ -641,8 +696,12 @@ describe("DataLoader", () => {
 
       expect(result).toBeNull();
       expect(onLoadError).toHaveBeenCalledWith(["2024", "2025"]);
-      expect(loader.isCached("all")).toBe(false);
       expect(mockHideLoading).toHaveBeenCalled();
+
+      // Nothing was cached, so the next call tries the files again
+      mockScriptLoader.mockClear();
+      expect(await loader.loadAndCombineAllYears()).toBeNull();
+      expect(mockScriptLoader).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -717,32 +776,9 @@ describe("DataLoader", () => {
     });
   });
 
-  describe("cache management", () => {
-    it("clearCache removes all cached data", async () => {
-      defineYear(2025);
-
-      await loader.loadData("2025");
-      expect(loader.isCached("2025")).toBe(true);
-
-      loader.clearCache();
-      expect(loader.isCached("2025")).toBe(false);
-    });
-
-    it("isCached reflects loaded years only", async () => {
-      defineYear(2025);
-      expect(loader.isCached("2025")).toBe(false);
-
-      await loader.loadData("2025");
-
-      expect(loader.isCached("2025")).toBe(true);
-      expect(loader.isCached("2024")).toBe(false);
-    });
-  });
-
   describe("default options", () => {
     it("reads globals from window by default", async () => {
       const defaultLoader = new DataLoader();
-      expect(defaultLoader.isCached("2025")).toBe(false);
       window["KML_DATA_2025"] = rawYear(2025, {
         "1": path([50, 8], [[50.1, 8.1, 1000, 100]]),
       });

@@ -76,9 +76,11 @@ export function calculateBearing(
  */
 export function ddToDms(dd: number, isLat: boolean): string {
   const direction = dd >= 0 ? (isLat ? "N" : "E") : isLat ? "S" : "W";
-  dd = Math.abs(dd);
-  const degrees = Math.floor(dd);
-  const minutes = Math.floor((dd - degrees) * 60);
-  const seconds = ((dd - degrees) * 60 - minutes) * 60;
+  // Round once, in the unit that is printed, and split afterwards: rounding
+  // only the seconds turns 59.96 into "60.0" instead of carrying the minute
+  const tenths = Math.round(Math.abs(dd) * 36000);
+  const degrees = Math.floor(tenths / 36000);
+  const minutes = Math.floor((tenths % 36000) / 600);
+  const seconds = (tenths % 600) / 10;
   return degrees + "°" + minutes + "'" + seconds.toFixed(1) + '"' + direction;
 }

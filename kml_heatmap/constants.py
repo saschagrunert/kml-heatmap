@@ -16,10 +16,6 @@ MAX_GROUNDSPEED_KNOTS = 200  # Reasonable max for typical general aviation
 MIN_SEGMENT_TIME_SECONDS = 0.1  # Avoid division by very small time differences
 SPEED_WINDOW_SECONDS = 120  # 2 minute rolling average window for speed calculation
 
-# === Altitude Thresholds ===
-CRUISE_ALTITUDE_THRESHOLD_FT = 1000  # AGL threshold for cruise altitude calculations
-ALTITUDE_BIN_SIZE_FT = 100  # Bin size for altitude histograms
-
 # === Validation Ranges ===
 LAT_MIN = -90.0
 LAT_MAX = 90.0

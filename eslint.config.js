@@ -1,21 +1,38 @@
 // @ts-check
 
+import { readFileSync } from "node:fs";
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
+
+/**
+ * The .gitignore patterns as flat config globs, so a local virtualenv or an
+ * output directory the docs suggest is not linted. This follows
+ * includeIgnoreFile() from @eslint/compat, which is not worth a dependency
+ * for the simple patterns used here: a pattern without an inner slash
+ * matches at any depth, one with a slash is anchored at the root.
+ */
+function gitignorePatterns() {
+  return readFileSync(new URL(".gitignore", import.meta.url), "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => {
+      const negated = line.startsWith("!");
+      const pattern = negated ? line.slice(1) : line;
+      const slash = pattern.indexOf("/");
+      const anywhere = slash < 0 || slash === pattern.length - 1 ? "**/" : "";
+      const anchored = slash === 0 ? pattern.slice(1) : pattern;
+      return `${negated ? "!" : ""}${anywhere}${anchored}`;
+    });
+}
 
 export default tseslint.config(
   {
     ignores: [
-      ".claude/**",
-      "build/**",
-      "node_modules/**",
-      "dist/**",
-      "coverage/**",
-      "htmlcov/**",
-      "docs/**",
+      ...gitignorePatterns(),
+      // Tracked, but generated or vendored
       "kml_heatmap/static/**",
       "kml_heatmap/templates/**",
-      ".git/**",
     ],
   },
   eslint.configs.recommended,

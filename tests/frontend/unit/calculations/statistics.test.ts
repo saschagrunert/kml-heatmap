@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   filterPaths,
+  groundLevelsFt,
   collectAirports,
   aggregateAircraft,
   filterSegmentsByPaths,
@@ -22,6 +23,7 @@ import type {
   PathInfo,
   PathSegment,
 } from "../../../../kml_heatmap/frontend/types";
+import { createSegment } from "../../testHelpers";
 
 const FT = (meters: number): number => meters * METERS_TO_FEET;
 
@@ -322,6 +324,80 @@ describe("statistics calculations", () => {
       expect(stats.min).toBeCloseTo(-420, 6);
       expect(stats.gain).toBeCloseTo(520, 6);
     });
+
+    it("replaces a rounded extreme with the exact one on either side (regression)", () => {
+      // Rounding put the segments at 1,300 ft and -1,400 ft, past the exact
+      // 1,291.1 ft and -1,379.4 ft; keeping the wider of the two drifted
+      const stats = calculateAltitudeStats(
+        [
+          { path_id: 1, altitude_ft: -1400 },
+          { path_id: 1, altitude_ft: 1300 },
+        ],
+        [{ id: 1, min_altitude_ft: -1379.4, max_altitude_ft: 1291.1 }],
+      );
+      expect(stats.max * METERS_TO_FEET).toBeCloseTo(1291.1, 6);
+      expect(stats.min * METERS_TO_FEET).toBeCloseTo(-1379.4, 6);
+    });
+
+    it("uses the exact range only for paths that have segments", () => {
+      const stats = calculateAltitudeStats(
+        [
+          { path_id: 1, altitude_ft: 3000 },
+          { path_id: 2, altitude_ft: 900 },
+        ],
+        [
+          { id: 1, min_altitude_ft: 2950, max_altitude_ft: 3040 },
+          // Path 2 has no exact range, path 3 no segments
+          { id: 2 },
+          { id: 3, min_altitude_ft: -500, max_altitude_ft: 41000 },
+        ],
+      );
+      expect(stats.max * METERS_TO_FEET).toBeCloseTo(3040, 6);
+      expect(stats.min * METERS_TO_FEET).toBeCloseTo(900, 6);
+    });
+
+    it("ignores exact ranges without any altitude to go with them", () => {
+      expect(
+        calculateAltitudeStats(
+          [{ path_id: 1 }],
+          [{ id: 1, min_altitude_ft: 1, max_altitude_ft: 2 }],
+        ),
+      ).toEqual({ min: 0, max: 0, gain: 0 });
+    });
+  });
+
+  describe("groundLevelsFt", () => {
+    it("takes the first percentile of each path's altitudes", () => {
+      // 200 samples: index floor(199 * 0.01) = 1, the second lowest
+      const segments: PathSegment[] = [
+        { path_id: 1, altitude_ft: -1400 },
+        ...Array.from({ length: 150 }, () => ({
+          path_id: 1,
+          altitude_ft: 3000,
+        })),
+        ...Array.from({ length: 49 }, () => ({ path_id: 1, altitude_ft: 0 })),
+        { path_id: 2, altitude_ft: 500 },
+        { path_id: 2, altitude_ft: 400 },
+        { path_id: 2 },
+      ];
+
+      expect(groundLevelsFt(segments)).toEqual(
+        new Map([
+          [1, 0],
+          // Fewer than a hundred samples: the lowest one
+          [2, 400],
+        ]),
+      );
+    });
+
+    it("joins the samples of a path that comes back later", () => {
+      const levels = groundLevelsFt([
+        { path_id: 1, altitude_ft: 900 },
+        { path_id: 2, altitude_ft: 100 },
+        { path_id: 1, altitude_ft: 700 },
+      ]);
+      expect(levels.get(1)).toBe(700);
+    });
   });
 
   describe("calculateSpeedStats", () => {
@@ -409,6 +485,26 @@ describe("statistics calculations", () => {
       expect(stats.total_flight_time_str).toBe("0h 1m");
       // 5 segments plus the end point of each of the 4 paths they belong to
       expect(stats.total_points).toBe(9);
+    });
+
+    it("reports a sea-level flight at 0 ft and no altitude without data", () => {
+      const pathInfo = [{ id: 1, year: 2025 }];
+      const atSeaLevel = calculateFilteredStatistics({
+        pathInfo,
+        segments: [
+          createSegment({ path_id: 1, altitude_ft: 0 }),
+          createSegment({ path_id: 1, altitude_ft: 0 }),
+        ],
+      });
+      expect(atSeaLevel.max_altitude_ft).toBe(0);
+      expect(atSeaLevel.total_altitude_gain_ft).toBe(0);
+
+      const withoutAltitude = calculateFilteredStatistics({
+        pathInfo,
+        segments: [createSegment({ path_id: 1, altitude_ft: undefined })],
+      });
+      expect(withoutAltitude.max_altitude_ft).toBeUndefined();
+      expect(withoutAltitude.total_altitude_gain_ft).toBeUndefined();
     });
 
     it("counts the track points behind the filtered segments", () => {
@@ -560,6 +656,33 @@ describe("statistics calculations", () => {
         1400 * FEET_TO_METERS,
         6,
       );
+    });
+
+    it("does not let a single altitude glitch turn the taxi into cruise (regression)", () => {
+      const seg = (altitudeFt: number, index: number): PathSegment => ({
+        path_id: 1,
+        coords: [
+          [50 + index * 0.001, 8.0],
+          [50 + (index + 1) * 0.001, 8.0],
+        ],
+        altitude_ft: altitudeFt,
+        groundspeed_knots: altitudeFt > 0 ? 110 : 15,
+      });
+      // Taxi at 0 ft, a one-sample glitch to -1,400 ft, cruise at 3,000 ft
+      const segments = [
+        ...Array.from({ length: 60 }, (_, i) => seg(0, i)),
+        seg(-1400, 60),
+        ...Array.from({ length: 60 }, (_, i) => seg(3000, 61 + i)),
+      ];
+
+      const stats = calculateFilteredStatistics({
+        pathInfo: [{ id: 1 }],
+        segments,
+      });
+
+      // Measured from the lowest sample the taxi at 15 kt was 1,400 ft AGL
+      expect(stats.cruise_speed_knots).toBeCloseTo(110, 6);
+      expect(stats.most_common_cruise_altitude_ft).toBe(3000);
     });
 
     it("resolves ties for the most common cruise altitude to the lowest bin", () => {

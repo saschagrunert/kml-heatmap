@@ -14,12 +14,13 @@
 import * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import type { Range } from "../state/store";
-import type { PathInfo, PathSegment } from "../types";
+import type { KMLDataset, PathInfo, PathSegment } from "../types";
 import type { Coordinate } from "../utils/geometry";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
-import { filterPaths } from "../calculations/statistics";
+import { datasetIndex } from "../calculations/datasetIndex";
+import { segmentsForPathIds } from "../calculations/statistics";
 import {
   calculateAirspeedRange,
   calculateAltitudeRange,
@@ -37,9 +38,9 @@ interface LayerConfig {
   range: Range;
   getValue: (seg: PathSegment) => number;
   getColor: (value: number, min: number, max: number) => string;
+  /** Range of the given segments, `fallback` when they have no value */
   computeRange: (
     segments: PathSegment[],
-    selectedPathIds: Set<number>,
     fallback: Range,
     paths: PathInfo[],
   ) => Range;
@@ -64,8 +65,6 @@ export function isTouchDevice(): boolean {
 
 export class LayerManager {
   private app: MapApp;
-  private pathInfoMapCache: Map<number, PathInfo> | null = null;
-  private pathInfoMapSource: PathInfo[] | null = null;
   private polylinesByPath: Record<LayerMode, Map<number, PolylineEntry[]>> = {
     altitude: new Map(),
     airspeed: new Map(),
@@ -73,14 +72,6 @@ export class LayerManager {
 
   constructor(app: MapApp) {
     this.app = app;
-
-    // Pre-cache legend elements
-    domCache.cacheElements([
-      "legend-min",
-      "legend-max",
-      "airspeed-legend-min",
-      "airspeed-legend-max",
-    ]);
   }
 
   private getConfig(mode: LayerMode): LayerConfig {
@@ -91,8 +82,7 @@ export class LayerManager {
         range: this.app.altitudeRange,
         getValue: (seg) => seg.altitude_ft ?? 0,
         getColor: getColorForAltitude,
-        computeRange: (segments, selected, fallback, paths) =>
-          calculateAltitudeRange(segments, selected, fallback, paths),
+        computeRange: calculateAltitudeRange,
         legendMinId: "legend-min",
         legendMaxId: "legend-max",
         formatLegend: formatAltitudeLabel,
@@ -104,8 +94,8 @@ export class LayerManager {
       range: this.app.airspeedRange,
       getValue: (seg) => seg.groundspeed_knots ?? 0,
       getColor: getColorForAirspeed,
-      computeRange: (segments, selected, fallback) =>
-        calculateAirspeedRange(segments, selected, fallback),
+      computeRange: (segments, fallback) =>
+        calculateAirspeedRange(segments, fallback),
       filterSegment: (seg) => (seg.groundspeed_knots ?? 0) > 0,
       legendMinId: "airspeed-legend-min",
       legendMaxId: "airspeed-legend-max",
@@ -132,30 +122,21 @@ export class LayerManager {
   }
 
   /**
-   * Number of polylines currently drawn for a layer (merged runs)
-   */
-  getPolylineCount(mode: LayerMode): number {
-    let count = 0;
-    for (const entries of this.polylinesByPath[mode].values()) {
-      count += entries.length;
-    }
-    return count;
-  }
-
-  /**
    * Colour range used for the layer: the selected paths' range when a
    * selection exists, the layer's full range otherwise.
    */
   private resolveColorRange(config: LayerConfig): Range {
     const selected = this.app.selectedPathIds;
-    if (selected.size === 0 || !this.app.currentData) {
+    const data = this.app.currentData;
+    if (selected.size === 0 || !data) {
       return config.range;
     }
+    // Only the selected paths' segments, sliced out through the path index:
+    // a selection click should not walk the whole dataset
     return config.computeRange(
-      this.app.currentData.path_segments,
-      selected,
+      segmentsForPathIds(data.path_segments, selected),
       config.range,
-      this.app.currentData.path_info,
+      data.path_info,
     );
   }
 
@@ -170,7 +151,7 @@ export class LayerManager {
     const { min: colorMin, max: colorMax } = this.resolveColorRange(config);
     // Resolve the filter once over the path info instead of re-deriving it per
     // segment: `null` means every path passes, so no lookup is needed at all
-    const visiblePathIds = this.visiblePathIds(data.path_info);
+    const visiblePathIds = this.visiblePathIds(data);
     const selectedPathIds = this.app.selectedPathIds;
     const hasSelection = selectedPathIds.size > 0;
     const isolate = this.app.isolateSelection;
@@ -367,24 +348,11 @@ export class LayerManager {
    * Ids of the paths the year/aircraft filter keeps, or `null` when no filter
    * is active and every segment is drawn regardless of its path info.
    */
-  private visiblePathIds(pathInfo: PathInfo[]): Set<number> | null {
+  private visiblePathIds(data: KMLDataset): Set<number> | null {
     const year = this.app.selectedYear;
     const aircraft = this.app.selectedAircraft;
     if (year === "all" && aircraft === "all") return null;
-    return new Set(filterPaths(pathInfo, year, aircraft).map((p) => p.id));
-  }
-
-  /**
-   * Path info indexed by id (cached per currentData.path_info instance)
-   */
-  getPathInfoMap(): Map<number, PathInfo> {
-    const source = this.app.currentData?.path_info;
-    if (!source) return new Map();
-    if (source !== this.pathInfoMapSource) {
-      this.pathInfoMapCache = new Map(source.map((p) => [p.id, p]));
-      this.pathInfoMapSource = source;
-    }
-    return this.pathInfoMapCache!;
+    return datasetIndex(data).filter(year, aircraft).pathIds;
   }
 
   private updateLegend(

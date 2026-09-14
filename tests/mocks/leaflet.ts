@@ -231,6 +231,7 @@ export interface MockMap extends LayerHost {
   getSize: Mock;
   latLngToContainerPoint: Mock;
   invalidateSize: Mock;
+  closePopup: Mock;
   on: Mock;
   off: Mock;
   /** Layers currently on the map (test convenience) */
@@ -248,6 +249,7 @@ export const map: Mock<() => MockMap> = vi.fn(() => ({
   getSize: vi.fn(() => ({ x: 800, y: 600 })),
   latLngToContainerPoint: vi.fn(() => ({ x: 400, y: 300 })),
   invalidateSize: vi.fn(),
+  closePopup: vi.fn(),
   on: vi.fn(),
   off: vi.fn(),
 }));

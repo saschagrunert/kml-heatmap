@@ -9,6 +9,7 @@ import {
   findHomeBase,
 } from "../features/airports";
 import type { AirportCounts } from "../features/airports";
+import { datasetIndex } from "../calculations/datasetIndex";
 import type { PathInfo } from "../types";
 import { ddToDms } from "../utils/geometry";
 import { generateAirportPopupHtml } from "../utils/htmlGenerators";
@@ -30,25 +31,22 @@ export class AirportManager {
   private app: MapApp;
   /** Home-base icon state per airport marker (icons are recreated on change) */
   private homeIconState: Map<string, boolean> = new Map();
-  /** Flight counts and exactly what they were counted from */
-  private countsCache: {
-    pathInfo: PathInfo[];
-    year: string;
-    aircraft: string;
-    counts: AirportCounts;
-  } | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
 
     // The markers follow the data, the filters and the selection; nothing
-    // has to remember to refresh them
-    for (const key of POPUP_KEYS) {
-      app.store.subscribe(key, () => this.updateAirportPopups());
-    }
-    for (const key of VISIBILITY_KEYS) {
-      app.store.subscribe(key, () => this.updateAirportOpacity());
-    }
+    // has to remember to refresh them. A year switch changes four of these
+    // keys at once, and both refreshes touch every marker, so each runs once
+    // per update rather than once per key.
+    app.store.subscribeKeys(POPUP_KEYS, () => this.updateAirportPopups());
+    app.store.subscribeKeys(VISIBILITY_KEYS, () => this.updateAirportOpacity());
+
+    // Adding the layer back rebuilds every marker icon from its HTML, which
+    // drops the crowded class; the labels would overlap until the next zoom
+    app.store.subscribe("airportsVisible", (visible) => {
+      if (visible) this.declutterLabels();
+    });
   }
 
   // Calculate airport flight counts based on current filters
@@ -61,33 +59,17 @@ export class AirportManager {
   }
 
   /**
-   * The same counts, remembered until the filter or the dataset changes.
+   * The same counts, kept with the dataset for as long as the filter stays.
    *
    * declutterLabels() needs them to decide which label wins, and it runs on
    * every zoom, where nothing about the counts can have changed.
    */
   private airportFlightCounts(): AirportCounts {
-    const pathInfo = this.app.fullPathInfo ?? [];
-    const year = this.app.selectedYear;
-    const aircraft = this.app.selectedAircraft;
-
-    // The path info is compared by identity: the loader hands out one array
-    // per year, so a different dataset is a different array. Comparing its
-    // length instead would have let two datasets of the same size share a
-    // cache entry.
-    const cache = this.countsCache;
-    if (
-      cache !== null &&
-      cache.pathInfo === pathInfo &&
-      cache.year === year &&
-      cache.aircraft === aircraft
-    ) {
-      return cache.counts;
-    }
-
-    const counts = calculateAirportFlightCounts(pathInfo, year, aircraft);
-    this.countsCache = { pathInfo, year, aircraft, counts };
-    return counts;
+    const data = this.app.currentData;
+    if (!data) return {};
+    return datasetIndex(data)
+      .filter(this.app.selectedYear, this.app.selectedAircraft)
+      .airportCounts();
   }
 
   /**
@@ -141,13 +123,16 @@ export class AirportManager {
   }
 
   updateAirportOpacity(): void {
+    const data = this.app.currentData;
     const visibleAirports = calculateVisibleAirports({
-      pathInfo: this.app.fullPathInfo ?? [],
+      pathInfo: data?.path_info ?? [],
       selectedYear: this.app.selectedYear,
       selectedAircraft: this.app.selectedAircraft,
       selectedPathIds: this.app.selectedPathIds,
       isolateSelection: this.app.isolateSelection,
-      pathInfoById: this.app.layerManager.getPathInfoMap(),
+      pathInfoById: data
+        ? datasetIndex(data).pathInfoById
+        : new Map<number, PathInfo>(),
     });
 
     for (const [airportName, marker] of Object.entries(

@@ -2,7 +2,7 @@ export const METERS_TO_FEET = 3.28084;
 export const FEET_TO_METERS = 1.0 / METERS_TO_FEET;
 export const NAUTICAL_MILES_TO_KM = 1.852;
 export const KM_TO_NAUTICAL_MILES = 1.0 / NAUTICAL_MILES_TO_KM;
-/** AGL threshold for cruise statistics; matches constants.py */
+/** AGL threshold for cruise statistics */
 export const CRUISE_ALTITUDE_THRESHOLD_FT = 1000;
 
 /** Zoom limits of the map (tile layers and URL state share these) */
@@ -14,6 +14,10 @@ export const MAX_ZOOM = 20;
  * The two grouped control columns and the statistics rail are listed as
  * containers so their titles and separators disappear with their buttons;
  * the individual ids stay for panels that live outside a column.
+ *
+ * The loading indicator is not listed: the dialog covers it anyway, and
+ * restoring the display saved on opening put back a `block` that a load
+ * finishing in the meantime had already cleared, stranding the indicator.
  */
 export const HIDEABLE_CONTROL_IDS = [
   "left-buttons",
@@ -33,5 +37,4 @@ export const HIDEABLE_CONTROL_IDS = [
   "stats-panel",
   "altitude-legend",
   "airspeed-legend",
-  "loading",
 ] as const;

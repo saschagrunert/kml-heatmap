@@ -82,7 +82,9 @@ def atomic_js_write(
 
     def write(tmp: IO[str]) -> None:
         tmp.write(f"window.{var_name} = ")
-        json.dump(data, tmp, separators=(",", ":"), sort_keys=sort_keys)
+        # One dumps call uses the C encoder; dump streams through the much
+        # slower pure-Python one
+        tmp.write(json.dumps(data, separators=(",", ":"), sort_keys=sort_keys))
         tmp.write(";")
 
     atomic_write(path, write)
@@ -91,6 +93,7 @@ def atomic_js_write(
 def atomic_json_write(path: Path, data: Any) -> None:
     """Write a cache file as compact JSON atomically; failures are logged only."""
     try:
-        atomic_write(path, lambda tmp: json.dump(data, tmp, separators=(",", ":")))
+        content = json.dumps(data, separators=(",", ":"))
+        atomic_write(path, lambda tmp: tmp.write(content))
     except OSError as e:
         logger.debug("Failed to write cache file %s: %s", path, e)

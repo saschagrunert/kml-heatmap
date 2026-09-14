@@ -16,6 +16,10 @@ export const DOM_TO_IMAGE_INTEGRITY =
   "sha384-zESinL+vR3OR5XGFqKjneclbVKOL8SfP+fKKO3K9BHAaPtboci56Vu3g5flevHk9";
 
 const MOBILE_BREAKPOINT_PX = 768;
+/** Largest canvas iOS Safari will draw into (16.7 million pixels) */
+export const MAX_CANVAS_PIXELS = 16_777_216;
+/** Phones get their pixel density up to this factor */
+const MAX_PHONE_EXPORT_SCALE = 3;
 const EXPORT_BUTTON_LABEL = "Export image";
 const EXPORT_BUTTON_BUSY_LABEL = "Exporting…";
 
@@ -57,6 +61,25 @@ export function isSmallDevice(): boolean {
     typeof window.matchMedia === "function" &&
     window.matchMedia("(pointer: coarse)").matches
   );
+}
+
+/**
+ * Scale of the exported image relative to the map's CSS size. Desktops get
+ * 2x. A phone gets its own pixel density, since 1x left a 390x844 image on
+ * a 3x screen. Either way the canvas stays within what iOS will allocate,
+ * past which the export comes out blank.
+ */
+export function exportScale(width: number, height: number): number {
+  const preferred =
+    window.innerWidth < MOBILE_BREAKPOINT_PX
+      ? Math.min(
+          Math.max(window.devicePixelRatio || 1, 1),
+          MAX_PHONE_EXPORT_SCALE,
+        )
+      : 2;
+  const area = width * height;
+  if (area <= 0) return preferred;
+  return Math.min(preferred, Math.sqrt(MAX_CANVAS_PIXELS / area));
 }
 
 /** Convert a data: URL into a Blob without going through fetch() */
@@ -142,31 +165,6 @@ export class UIToggles {
 
   constructor(app: MapApp) {
     this.app = app;
-
-    // Pre-cache frequently accessed DOM elements
-    domCache.cacheElements([
-      "isolate-btn",
-      "heatmap-btn",
-      "altitude-btn",
-      "airspeed-btn",
-      "airports-btn",
-      "aviation-btn",
-      "altitude-legend",
-      "airspeed-legend",
-      "export-btn",
-      "share-btn",
-      "map",
-      "stats-btn",
-      "wrapped-btn",
-      "replay-btn",
-      "year-filter",
-      "aircraft-filter",
-      "left-buttons",
-      "right-buttons",
-      "stats-rail",
-      "stats-panel",
-      "loading",
-    ]);
   }
 
   /**
@@ -337,10 +335,13 @@ export class UIToggles {
       return;
     }
 
-    const scale = window.innerWidth < MOBILE_BREAKPOINT_PX ? 1 : 2;
+    const scale = exportScale(
+      mapContainer.offsetWidth,
+      mapContainer.offsetHeight,
+    );
     const dataUrl = await domtoimage.toJpeg(mapContainer, {
-      width: mapContainer.offsetWidth * scale,
-      height: mapContainer.offsetHeight * scale,
+      width: Math.round(mapContainer.offsetWidth * scale),
+      height: Math.round(mapContainer.offsetHeight * scale),
       // width/height only resize the canvas; the clone has to be scaled too
       style: {
         transform: "scale(" + scale + ")",

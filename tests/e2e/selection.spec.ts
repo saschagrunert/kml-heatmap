@@ -4,6 +4,7 @@ import {
   firstPathId,
   gotoApp,
   readSavedState,
+  selectionParams,
   selectPathForReplay,
   togglePathSelection,
   waitForAppReady,
@@ -312,7 +313,7 @@ test.describe("Solo Mode", () => {
     const pathId = await firstPathId(page);
 
     // 9th flag is isolateSelection
-    await gotoApp(page, `/?v=100100001&p=${pathId}&sv=2`);
+    await gotoApp(page, `/?v=100100001&${selectionParams(pathId)}`);
 
     expect(await page.evaluate(() => window.mapApp!.isolateSelection)).toBe(
       true,

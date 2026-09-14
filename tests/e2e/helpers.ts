@@ -6,6 +6,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page } from "@playwright/test";
 // Type-only import so the window.mapApp / MAP_CONFIG globals are declared
 import type {} from "../../kml_heatmap/frontend/globals";
+import { STATE_SCHEMA_VERSION } from "../../kml_heatmap/frontend/state/urlState";
 
 /**
  * The years the built site carries, as the year filter spells them. Read
@@ -18,6 +19,35 @@ export async function knownYears(page: Page): Promise<string[]> {
   );
   expect(years.length, "the site exports no years").toBeGreaterThan(0);
   return years;
+}
+
+/**
+ * Whether the site under test was built with an OpenAIP key. The specs for
+ * either case skip in the other one rather than pass without asserting
+ * anything; CI builds a site of each kind (see global-setup.ts).
+ */
+export function hasOpenaipKey(page: Page): Promise<boolean> {
+  return page.evaluate(() => !!window.MAP_CONFIG?.openaipApiKey);
+}
+
+/** Tiles of the OpenAIP aviation overlay that are on the map */
+export function openaipTiles(page: Page): Locator {
+  return page.locator('.leaflet-tile-pane img[src*=".api.tiles.openaip.net/"]');
+}
+
+/**
+ * Zoom in far enough for the aviation overlay, which starts at zoom 7, and
+ * wait for its tiles. They have to ask for the configured key.
+ */
+export async function expectOpenaipTiles(page: Page): Promise<void> {
+  const key = await page.evaluate(() => {
+    window.mapApp!.map!.setZoom(8, { animate: false });
+    return window.MAP_CONFIG!.openaipApiKey;
+  });
+  const tile = openaipTiles(page).first();
+  await expect(tile).toBeAttached();
+  const src = new URL((await tile.getAttribute("src"))!);
+  expect(src.searchParams.get("apiKey")).toBe(key);
 }
 
 interface SegmentClickPosition {
@@ -106,8 +136,9 @@ export async function gotoApp(page: Page, path = "/"): Promise<void> {
 
 /**
  * Wait for the app to finish initializing (also after a reload). Leaflet
- * ignores setZoom/setView while its zoom animation from the restored view is
- * still running, so the map must be idle as well.
+ * ignores setZoom/setView while a zoom animation is running, so the map must
+ * be idle as well. The specs run with reduced motion, which turns the map's
+ * animations off; the check keeps a spec that turns it back on safe.
  */
 export async function waitForAppReady(page: Page): Promise<void> {
   await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
@@ -335,6 +366,40 @@ export async function toggleLayer(page: Page, layer: LayerName): Promise<void> {
 }
 
 /**
+ * Pick an option in one of the sheet's dropdowns. They sit transparent over
+ * their row so a tap opens the native picker. Headless WebKit reports such a
+ * select as hidden until something forces a repaint, so selectOption times
+ * out there. In WebKit the value is set and the change event fired the way a
+ * pick in the native picker does, after checking what selectOption would
+ * have: the select is enabled and nothing covers it.
+ */
+export async function chooseSheetOption(
+  select: Locator,
+  value: string,
+): Promise<void> {
+  if (select.page().context().browser()?.browserType().name() !== "webkit") {
+    await select.selectOption(value);
+    return;
+  }
+  await expect(select.locator(`option[value="${value}"]`)).toBeAttached();
+  await expect(select).toBeEnabled();
+  const onTop = await select.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      box.left + box.width / 2,
+      box.top + box.height / 2,
+    );
+    return hit === element || element.contains(hit);
+  });
+  expect(onTop, "the select is covered").toBe(true);
+  await select.evaluate((element, choice) => {
+    (element as HTMLSelectElement).value = choice;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
+
+/**
  * Choose a filter value. The sheet mirrors the page's own dropdown and
  * writes the choice back to it, so both paths end in the same handler.
  */
@@ -349,9 +414,10 @@ async function selectFilter(
     return;
   }
   await openMobileSheet(page, "filter");
-  await page
-    .locator(`.sheet-row[data-row="${rowId}"] select`)
-    .selectOption(value);
+  await chooseSheetOption(
+    page.locator(`.sheet-row[data-row="${rowId}"] select`),
+    value,
+  );
   await closeMobileSheet(page);
 }
 
@@ -383,10 +449,21 @@ export async function openWrapped(page: Page): Promise<Locator> {
   return modal;
 }
 
-/** The id of the first path of the loaded data set */
+/**
+ * The id of the first path of the loaded data set. Ids are content hashes,
+ * so this is whatever id the first flight has, not a small number.
+ */
 export async function firstPathId(page: Page): Promise<number> {
   await waitForPathData(page);
   return page.evaluate(() => window.mapApp!.fullPathInfo![0]!.id);
+}
+
+/**
+ * The query parameters of a link that selects `pathIds`, with the schema
+ * version the app requires before it applies them
+ */
+export function selectionParams(...pathIds: number[]): string {
+  return `p=${pathIds.join(",")}&sv=${STATE_SCHEMA_VERSION}`;
 }
 
 /**

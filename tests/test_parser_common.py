@@ -8,6 +8,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from kml_heatmap.aircraft import parse_aircraft_from_filename
 from kml_heatmap.constants import ALT_MAX_M, ALT_MIN_M
 from kml_heatmap.parser_common import (
     _build_path_metadata_dict,
@@ -45,6 +46,12 @@ class TestExtractYearFromTimestamp:
     )
     def test_extract(self, value, expected):
         assert extract_year_from_timestamp(value) == expected
+
+    def test_year_of_an_offset_timestamp_is_the_utc_year(self):
+        """The obfuscator anchors on the UTC date; both must agree on the year."""
+        assert extract_year_from_timestamp("2025-01-01T00:30:00+02:00") == 2024
+        assert extract_year_from_timestamp("2024-12-31T23:30:00-02:00") == 2025
+        assert extract_year_from_timestamp("2025-01-01T00:30:00") == 2025
 
 
 class TestValidateAndNormalizeCoordinate:
@@ -246,6 +253,8 @@ class TestExtractPlacemarkMetadata:
         )
         assert extract_placemark_metadata(placemark, NS) == {
             "airport_name": "EDDS Stuttgart",
+            "start_airport": None,
+            "end_airport": None,
             "timestamp": "2025-03-03T08:58:01Z",
             "end_timestamp": "2025-03-03T10:30:00Z",
             "year": 2025,
@@ -269,6 +278,27 @@ class TestExtractPlacemarkMetadata:
         result = extract_placemark_metadata(placemark, NS)
         assert result["timestamp"] == "16 Aug 2026"
         assert result["year"] == 2026
+
+    def test_route_airports_are_kept_apart(self):
+        """LFBN is "Niort - Marais Poitevin"; the display name cannot be split."""
+        placemark = ET.fromstring(
+            "<Placemark><name>EDAQ Halle-Oppin - LFBN Niort</name></Placemark>"
+        )
+        result = extract_placemark_metadata(placemark, NS)
+        assert result["airport_name"] == (
+            "EDAQ Halle-Oppin - LFBN Niort - Marais Poitevin"
+        )
+        assert result["start_airport"] == "EDAQ Halle-Oppin"
+        assert result["end_airport"] == "LFBN Niort - Marais Poitevin"
+
+    def test_route_date_is_not_an_airport(self):
+        placemark = ET.fromstring(
+            "<Placemark><name>EDDS to EDZZ - 16 Aug 2026</name></Placemark>"
+        )
+        result = extract_placemark_metadata(placemark, NS)
+        assert result["airport_name"] == "EDDS Stuttgart - EDZZ"
+        assert result["start_airport"] == "EDDS Stuttgart"
+        assert result["end_airport"] == "EDZZ"
 
     def test_log_start_name(self):
         placemark = ET.fromstring(
@@ -333,8 +363,13 @@ class TestBuildPathMetadataDict:
         meta.update(overrides)
         return meta
 
+    @staticmethod
+    def _build(kml_file, point, meta):
+        aircraft_info = parse_aircraft_from_filename(kml_file.rsplit("/", 1)[-1])
+        return _build_path_metadata_dict(kml_file, point, meta, aircraft_info)
+
     def test_basic_metadata(self):
-        result = _build_path_metadata_dict(
+        result = self._build(
             "test.kml",
             TrackPoint(50.0, 8.5, 100.0, 12.0),
             self._meta(
@@ -347,6 +382,8 @@ class TestBuildPathMetadataDict:
         assert result == {
             "start_point": [50.0, 8.5, 100.0],
             "airport_name": "EDDS",
+            "start_airport": None,
+            "end_airport": None,
             "timestamp": "2025-03-03T08:58:01Z",
             "end_timestamp": "2025-03-03T10:30:00Z",
             "filename": "test.kml",
@@ -354,7 +391,7 @@ class TestBuildPathMetadataDict:
         }
 
     def test_year_comes_from_placemark_metadata(self):
-        result = _build_path_metadata_dict(
+        result = self._build(
             "test.kml",
             TrackPoint(50.0, 8.5, 100.0),
             self._meta(timestamp="x", year=2031),
@@ -362,21 +399,17 @@ class TestBuildPathMetadataDict:
         assert result["year"] == 2031
 
     def test_no_aircraft_info(self):
-        result = _build_path_metadata_dict(
-            "test.kml", TrackPoint(50.0, 8.5, 100.0), self._meta()
-        )
+        result = self._build("test.kml", TrackPoint(50.0, 8.5, 100.0), self._meta())
         assert result["year"] is None
         assert result["airport_name"] == ""
         assert "aircraft_registration" not in result
 
     def test_start_point_without_altitude(self):
-        result = _build_path_metadata_dict(
-            "test.kml", TrackPoint(50.0, 8.5, None), self._meta()
-        )
+        result = self._build("test.kml", TrackPoint(50.0, 8.5, None), self._meta())
         assert result["start_point"] == [50.0, 8.5]
 
     def test_with_aircraft_in_filename(self):
-        result = _build_path_metadata_dict(
+        result = self._build(
             "some/dir/1_DEAGJ_DA20.kml",
             TrackPoint(50.0, 8.5, 100.0),
             self._meta(airport_name="EDDS"),
@@ -386,19 +419,32 @@ class TestBuildPathMetadataDict:
         assert result["filename"] == "1_DEAGJ_DA20.kml"
 
     def test_charterware_route_becomes_airport_name(self):
-        result = _build_path_metadata_dict(
+        result = self._build(
             "2026-01-12_1513h_OE-AKI_EDDF-EDDM.kml",
             TrackPoint(50.0, 8.5, 100.0),
             self._meta(airport_name="OE-AKI"),
         )
         assert result["airport_name"] == "EDDF Frankfurt Main - EDDM Munich"
+        assert result["start_airport"] == "EDDF Frankfurt Main"
+        assert result["end_airport"] == "EDDM Munich"
         assert "route" not in result
         assert "aircraft_type" not in result
 
     def test_charterware_keeps_icao_name(self):
-        result = _build_path_metadata_dict(
+        result = self._build(
             "2026-01-12_1513h_OE-AKI_EDDF-EDDM.kml",
             TrackPoint(50.0, 8.5, 100.0),
             self._meta(airport_name="LOAV"),
         )
         assert result["airport_name"] == "LOAV"
+        assert result["start_airport"] is None
+
+    def test_route_airports_are_carried_over(self):
+        result = self._build(
+            "1_DEAGJ_DA20.kml",
+            TrackPoint(50.0, 8.5, 100.0),
+            self._meta(
+                airport_name="A - B - C", start_airport="A - B", end_airport="C"
+            ),
+        )
+        assert (result["start_airport"], result["end_airport"]) == ("A - B", "C")

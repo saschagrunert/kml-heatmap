@@ -12,7 +12,9 @@ European airports.
 - Curved flight paths using quadratic Bezier curves (not straight lines)
 - Random deviations to spread data across Germany for better heatmap visualization
 - Realistic altitude profiles (climb, cruise, descend)
-- SkyDemon-compatible KML format with proper timestamps
+- SkyDemon-style filenames (`N_REGISTRATION_TYPE.kml`) with one flight date
+  per file (a `<TimeStamp>` element) and no per-point times, so the speed
+  layer falls back to path averages
 
 ### Usage
 
@@ -48,10 +50,27 @@ docker run --rm --user "$(id -u):$(id -g)" \
 
 Recommended test sizes:
 
-- **1k flights**: Quick test, ~50MB source data
-- **10k flights**: Standard test, ~500MB source data
-- **100k flights**: Stress test, ~5GB source data (about 5M points), processed
-  in about 10 minutes with parallel parsing and export
+Every file holds 50 points and takes about 3.4 KB.
+
+- **1k flights**: Quick test, ~3.4 MB source data
+- **10k flights**: Standard test, ~34 MB source data
+- **100k flights**: Stress test, ~340 MB source data (about 5M points),
+  processed in about 10 minutes with parallel parsing and export
 
 These numbers are the reference for the processing time mentioned in the main
 `README.md`. The system has been tested and optimized to handle 100k+ flights.
+
+## check_locks.py
+
+Checks that `requirements.lock` and `requirements-test.lock` still satisfy
+the ranges in `pyproject.toml` and agree on the shared pins. Dependabot bumps
+`pyproject.toml` without recompiling the locks, so this fails such a pull
+request with a hint to run `make lock`. `make lint` and the CI lint job run
+it.
+
+## source-hash.js
+
+The content hash of `kml_heatmap/frontend/`. `build.js` writes it into the
+first line of the bundle, and the Playwright global setup
+(`tests/e2e/global-setup.ts`) compares that line in `docs/mapApp.bundle.js`
+with the sources, so the e2e tests refuse to run against a stale site.

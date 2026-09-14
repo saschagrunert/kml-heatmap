@@ -1,6 +1,7 @@
 """Tests for airport_lookup module."""
 
 import csv
+import http.client
 import os
 import time
 import urllib.error
@@ -11,18 +12,24 @@ import pytest
 import kml_heatmap.airport_lookup as lookup_module
 from kml_heatmap.airport_lookup import (
     MAX_DOWNLOAD_BYTES,
+    REQUIRE_DATABASE_ENV,
+    AirportNames,
     _download_airport_database,
     _is_cache_valid,
     _is_valid_csv_file,
     _read_airport_csv,
     _strip_airport_suffix,
+    airport_icao_code,
     database_fingerprint,
     extract_icao_codes_from_name,
     load_airport_database,
     lookup_airport_coordinates,
     lookup_airport_country,
+    split_route_name,
     standardize_airport_name,
+    standardize_airport_names,
 )
+from kml_heatmap.exceptions import AirportDatabaseError
 
 VALID_CSV = (
     b'"id","ident","type","name","latitude_deg","longitude_deg","iso_country"\n'
@@ -31,12 +38,21 @@ VALID_CSV = (
 )
 
 
-def _mock_response(payload):
+def _mock_response(payload, content_length=None):
     response = MagicMock()
     response.read.return_value = payload
+    length = len(payload) if content_length is None else content_length
+    response.headers = {"Content-Length": str(length)}
     response.__enter__ = MagicMock(return_value=response)
     response.__exit__ = MagicMock(return_value=False)
     return response
+
+
+@pytest.fixture
+def small_downloads():
+    """Accept the two-row test CSV as a complete download."""
+    with patch.object(lookup_module, "MIN_DOWNLOAD_ROWS", 1):
+        yield
 
 
 class TestLookupAirportCoordinates:
@@ -131,6 +147,7 @@ class TestIsCacheValid:
             assert _is_cache_valid() is False
 
 
+@pytest.mark.usefixtures("small_downloads")
 class TestDownloadAirportDatabase:
     def test_successful_download_is_atomic(self, tmp_path):
         cache_file = tmp_path / "airports.csv"
@@ -222,6 +239,56 @@ class TestDownloadAirportDatabase:
         ):
             assert _download_airport_database() is False
 
+    def test_body_shorter_than_content_length_rejected(self, tmp_path):
+        """A cut at a line boundary still ends in a newline and has a header."""
+        cache_file = tmp_path / "airports.csv"
+        cut = VALID_CSV[: VALID_CSV.index(b"\n", 90) + 1]
+        with (
+            patch.object(lookup_module, "CACHE_FILE", cache_file),
+            patch.object(
+                lookup_module,
+                "urlopen",
+                return_value=_mock_response(cut, content_length=len(VALID_CSV)),
+            ),
+        ):
+            assert _download_airport_database() is False
+        assert not cache_file.exists()
+
+    def test_missing_content_length_is_accepted(self, tmp_path):
+        cache_file = tmp_path / "airports.csv"
+        response = _mock_response(VALID_CSV)
+        response.headers = {}
+        with (
+            patch.object(lookup_module, "CACHE_FILE", cache_file),
+            patch.object(lookup_module, "urlopen", return_value=response),
+        ):
+            assert _download_airport_database() is True
+
+    def test_too_few_rows_rejected(self, tmp_path):
+        cache_file = tmp_path / "airports.csv"
+        with (
+            patch.object(lookup_module, "CACHE_FILE", cache_file),
+            patch.object(lookup_module, "MIN_DOWNLOAD_ROWS", 4),
+            patch.object(
+                lookup_module, "urlopen", return_value=_mock_response(VALID_CSV)
+            ),
+        ):
+            assert _download_airport_database() is False
+        assert not cache_file.exists()
+
+    def test_connection_dropped_mid_body_is_handled(self, tmp_path):
+        """IncompleteRead is no OSError and used to end the run with a traceback."""
+        response = _mock_response(VALID_CSV)
+        response.read.side_effect = http.client.IncompleteRead(b"partial", 100)
+        with (
+            patch.object(lookup_module, "CACHE_FILE", tmp_path / "airports.csv"),
+            patch.object(lookup_module, "DOWNLOAD_FAILED_MARKER", tmp_path / "failed"),
+            patch.object(lookup_module, "urlopen", return_value=response),
+        ):
+            assert _download_airport_database() is False
+        assert (tmp_path / "failed").exists()
+        assert not (tmp_path / "airports.csv").exists()
+
     def test_uses_timeout_and_tls_context(self, tmp_path):
         with (
             patch.object(lookup_module, "CACHE_FILE", tmp_path / "airports.csv"),
@@ -235,6 +302,7 @@ class TestDownloadAirportDatabase:
         assert kwargs["context"] is not None
 
 
+@pytest.mark.usefixtures("small_downloads")
 class TestDownloadFailureMarker:
     @pytest.fixture
     def isolated_cache(self, tmp_path):
@@ -348,6 +416,7 @@ class TestLoadAirportDatabase:
         assert db1 is db2
         assert "EDDP" in db1
 
+    @pytest.mark.usefixtures("small_downloads")
     def test_invalid_cache_triggers_redownload(self, tmp_path):
         cache_file = tmp_path / "airports.csv"
         cache_file.write_bytes(b"no,header\n")
@@ -397,6 +466,58 @@ class TestLoadAirportDatabase:
             db = load_airport_database()
         assert "EDDP" in db
 
+    def test_required_database_raises_when_the_download_fails(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv(REQUIRE_DATABASE_ENV, "1")
+        with (
+            patch.object(lookup_module, "CACHE_FILE", tmp_path / "missing.csv"),
+            patch.object(lookup_module, "urlopen", side_effect=OSError("offline")),
+            pytest.raises(AirportDatabaseError, match=REQUIRE_DATABASE_ENV),
+        ):
+            load_airport_database()
+        # Nothing is cached, so a later call raises again instead of going on
+        assert lookup_module._airport_cache is None
+
+    def test_required_database_rejects_an_invalid_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(REQUIRE_DATABASE_ENV, "1")
+        cache_file = tmp_path / "airports.csv"
+        cache_file.write_bytes(VALID_CSV[:-5])
+        with (
+            patch.object(lookup_module, "CACHE_FILE", cache_file),
+            patch.object(lookup_module, "urlopen", side_effect=OSError("offline")),
+            pytest.raises(AirportDatabaseError),
+        ):
+            load_airport_database()
+
+    def test_required_database_rejects_a_cache_without_airports(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv(REQUIRE_DATABASE_ENV, "1")
+        cache_file = tmp_path / "airports.csv"
+        cache_file.write_text("ident,name,latitude_deg,longitude_deg\n")
+        with (
+            patch.object(lookup_module, "CACHE_FILE", cache_file),
+            patch.object(lookup_module, "_is_cache_valid", return_value=True),
+            pytest.raises(AirportDatabaseError),
+        ):
+            load_airport_database()
+
+    def test_required_database_loads_a_valid_cache(self, monkeypatch):
+        monkeypatch.setenv(REQUIRE_DATABASE_ENV, "1")
+        assert "EDDP" in load_airport_database()
+
+    @pytest.mark.parametrize("value", ["", "0", "true"])
+    def test_other_values_do_not_require_the_database(
+        self, tmp_path, monkeypatch, value
+    ):
+        monkeypatch.setenv(REQUIRE_DATABASE_ENV, value)
+        with (
+            patch.object(lookup_module, "CACHE_FILE", tmp_path / "missing.csv"),
+            patch.object(lookup_module, "urlopen", side_effect=OSError("offline")),
+        ):
+            assert load_airport_database() == {}
+
     def test_lock_release_failure_is_handled(self):
         original_flock = lookup_module.fcntl.flock
 
@@ -427,6 +548,110 @@ class TestExtractIcaoCodesFromName:
     @pytest.mark.parametrize("value", ["", None])
     def test_empty_input(self, value):
         assert extract_icao_codes_from_name(value) == []
+
+
+class TestAirportIcaoCode:
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            ("EDDS Stuttgart", "EDDS"),
+            ("EGDY RNAS Yeovilton", "EGDY"),
+            ("Flugplatz EDAQ", "EDAQ"),
+            ("Near EDDS and EDDP", None),
+            ("Some Field", None),
+            ("", None),
+            (None, None),
+        ],
+    )
+    def test_code(self, name, expected):
+        assert airport_icao_code(name) == expected
+
+
+class TestSplitRouteName:
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            ("EDDS - EDDP", ("EDDS", "EDDP")),
+            (
+                "EDDS Stuttgart - EDDP Leipzig/Halle",
+                ("EDDS Stuttgart", "EDDP Leipzig/Halle"),
+            ),
+            ("EDDS to EDDP - 16 Aug 2026", ("EDDS", "EDDP")),
+            ("EDDS to EDZZ - 01 Jan 2026", ("EDDS", "EDZZ")),
+            ("EDZZ to EDDP - 2026-01-01", ("EDZZ", "EDDP")),
+            (
+                "EDAQ Halle-Oppin - LFBN Niort - Marais Poitevin",
+                ("EDAQ Halle-Oppin", "LFBN Niort - Marais Poitevin"),
+            ),
+            (
+                "LFBN Niort - Marais Poitevin - EDAQ Halle-Oppin",
+                ("LFBN Niort - Marais Poitevin", "EDAQ Halle-Oppin"),
+            ),
+            (
+                "Private Strip - EDAQ Halle-Oppin",
+                ("Private Strip", "EDAQ Halle-Oppin"),
+            ),
+            ("Some Field - Other Field", ("Some Field", "Other Field")),
+        ],
+    )
+    def test_routes(self, name, expected):
+        assert split_route_name(name) == expected
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "EDDS",
+            "EDDS Stuttgart",
+            "EDDS - 16 Aug 2026",
+            # A database name holding " - " followed by four capitals
+            "YSNW Naval Air Station Nowra - HMAS Albatross",
+            "LFBN Niort - Marais Poitevin",
+            "EDAQ Halle-Oppin - Private Strip",
+            "EDDF - EDDM - EDDT",
+            "A - B - C",
+            "Log Start: 03 Mar 2025 08:58 Z",
+            "",
+            None,
+        ],
+    )
+    def test_not_routes(self, name):
+        assert split_route_name(name) is None
+
+
+class TestStandardizeAirportNames:
+    def test_route_keeps_both_airports(self):
+        assert standardize_airport_names("EDAQ - LFBN") == AirportNames(
+            "EDAQ Halle-Oppin - LFBN Niort - Marais Poitevin",
+            "EDAQ Halle-Oppin",
+            "LFBN Niort - Marais Poitevin",
+        )
+
+    def test_trailing_date_is_neither_airport_nor_name(self):
+        """With only EDDS known the date used to become the arrival airport."""
+        assert standardize_airport_names("EDDS to EDZZ - 16 Aug 2026") == (
+            AirportNames("EDDS Stuttgart - EDZZ", "EDDS Stuttgart", "EDZZ")
+        )
+        assert standardize_airport_names("EDZZ to EDDP - 16 Aug 2026") == (
+            AirportNames("EDZZ - EDDP Leipzig/Halle", "EDZZ", "EDDP Leipzig/Halle")
+        )
+
+    def test_date_is_stripped_from_a_single_airport(self):
+        assert standardize_airport_names("EDDS - 16 Aug 2026") == AirportNames(
+            "EDDS Stuttgart"
+        )
+
+    def test_single_airport_has_no_route(self):
+        assert standardize_airport_names("EDDP") == AirportNames("EDDP Leipzig/Halle")
+
+    def test_single_database_name_with_dash_stays_one_airport(self):
+        names = standardize_airport_names("YSNW")
+        assert names == AirportNames("YSNW Naval Air Station Nowra - HMAS Albatross")
+
+    def test_without_database(self):
+        lookup_module._airport_cache = {}
+        assert standardize_airport_names("EDDS to EDDP - 16 Aug 2026") == (
+            AirportNames("EDDS - EDDP", "EDDS", "EDDP")
+        )
 
 
 class TestStandardizeAirportName:

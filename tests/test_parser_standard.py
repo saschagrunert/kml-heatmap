@@ -16,7 +16,13 @@ def _elem(text):
 def _run(elements, metadata=None, kml_file="test.kml"):
     coordinates, path_groups, path_metadata = [], [], []
     process_standard_coordinates(
-        elements, metadata or {}, kml_file, coordinates, path_groups, path_metadata
+        elements,
+        metadata or {},
+        kml_file,
+        coordinates,
+        path_groups,
+        path_metadata,
+        {},
     )
     return coordinates, path_groups, path_metadata
 
@@ -54,6 +60,8 @@ class TestProcessStandardCoordinates:
         metadata = {
             id(elem): {
                 "airport_name": "EDDS",
+                "start_airport": None,
+                "end_airport": None,
                 "timestamp": "2025-03-03T08:58:01Z",
                 "end_timestamp": None,
                 "year": 2025,
@@ -82,14 +90,38 @@ class TestProcessStandardCoordinates:
         assert len(path_groups) == 2
         assert len(path_metadata) == 2
 
-    def test_coordinates_without_altitude_are_not_paths(self):
-        coordinates, path_groups, path_metadata = _run([_elem("8.5,50.0 8.6,50.1")])
+    def test_coordinates_without_altitude_are_not_paths(self, capsys):
+        coordinates, path_groups, path_metadata = _run(
+            [_elem("8.5,50.0 8.6,50.1")], kml_file="dir/1_DEAGJ_DA20.kml"
+        )
         assert coordinates == [
             TrackPoint(50.0, 8.5, None, None),
             TrackPoint(50.1, 8.6, None, None),
         ]
         assert path_groups == []
         assert path_metadata == []
+        # The file still has points, so nothing else would reveal the lost flight
+        assert "1_DEAGJ_DA20.kml: 1 line(s) without usable altitudes were ignored" in (
+            capsys.readouterr().err
+        )
+
+    def test_point_without_altitude_is_not_reported(self, capsys):
+        _run([_elem("8.5,50.0")])
+        assert capsys.readouterr().err == ""
+
+    def test_aircraft_info_of_the_file_is_used(self):
+        coordinates, path_groups, path_metadata = [], [], []
+        process_standard_coordinates(
+            [_elem("8.5,50.0,100.0")],
+            {},
+            "whatever.kml",
+            coordinates,
+            path_groups,
+            path_metadata,
+            {"registration": "D-EAGJ", "type": "DA20", "format": "numbered"},
+        )
+        assert path_metadata[0]["aircraft_registration"] == "D-EAGJ"
+        assert path_metadata[0]["aircraft_type"] == "DA20"
 
     def test_invalid_altitude_point_excluded_from_path(self):
         coordinates, path_groups, _ = _run([_elem("8.5,50.0,999999 8.6,50.1,150.0")])

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as L from "leaflet";
 import {
   createAirportMarkers,
+  dropUnknownPathIds,
   loadInitialData,
   resolveYearSelection,
 } from "../../../../kml_heatmap/frontend/appInitializer";
@@ -44,19 +45,9 @@ const airports: Airport[] = [
 const metadata: Metadata = {
   available_years: [2024, 2025],
   year_file_bytes: {},
-  stats: {
-    total_points: 1,
-    num_paths: 1,
-    num_airports: 1,
-    airport_names: [],
-    num_aircraft: 1,
-    aircraft_list: [],
-    total_distance_km: 1,
-    total_distance_nm: 1,
-    max_groundspeed_knots: 150,
-  },
   min_groundspeed_knots: 10,
   max_groundspeed_knots: 150,
+  aircraft_models: { "D-ABCD": "Diamond DA40" },
 };
 
 describe("appInitializer", () => {
@@ -245,7 +236,8 @@ describe("appInitializer", () => {
         "markerSizes",
       ]);
       expect(app.allAirportsData).toBe(airports);
-      expect(app.fullStats).toBe(metadata.stats);
+      expect(app.aircraftModels).toBe(metadata.aircraft_models);
+      expect(app.hasTimingData).toBe(true);
       expect(app.selectedYear).toBe("2025");
       expect(app.dataManager.loadData).toHaveBeenCalledWith("2025");
       expect(app.currentData).toBe(data);
@@ -255,6 +247,15 @@ describe("appInitializer", () => {
         10,
         150,
       );
+    });
+
+    it("falls back to no models for metadata from an older export", async () => {
+      const { aircraft_models: _, ...older } = metadata;
+      app.dataManager.loadMetadata.mockResolvedValue(older);
+
+      await loadInitialData(asMapApp(app));
+
+      expect(app.aircraftModels).toEqual({});
     });
 
     it("publishes the dataset after the markers exist, so their popups can follow it", async () => {
@@ -352,13 +353,30 @@ describe("appInitializer", () => {
 
       await loadInitialData(asMapApp(app));
 
-      expect(app.fullStats).toBeNull();
+      expect(app.aircraftModels).toEqual({});
+      expect(app.hasTimingData).toBe(false);
       expect(app.currentData).toBeNull();
       expect(app.selectedYear).toBe("all");
       expect(app.dataManager.loadData).toHaveBeenCalledWith("all");
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(true);
       expect(app.dataManager.updateLayers).toHaveBeenCalled();
+    });
+
+    it("builds the layers from the dataset it loaded (regression)", async () => {
+      await loadInitialData(asMapApp(app));
+
+      expect(app.dataManager.updateLayers).toHaveBeenCalledWith(data);
+    });
+
+    it("does not load a year that failed a second time for the layers (regression)", async () => {
+      app.dataManager.loadData.mockResolvedValue(null);
+
+      await loadInitialData(asMapApp(app));
+
+      // updateLayers() without the result would fetch and report it again
+      expect(app.dataManager.loadData).toHaveBeenCalledTimes(1);
+      expect(app.dataManager.updateLayers).toHaveBeenCalledWith(null);
     });
 
     it("keeps created markers accessible for the airport manager", async () => {
@@ -368,6 +386,90 @@ describe("appInitializer", () => {
         "Frankfurt EDDF"
       ] as unknown as MockMarker;
       expect(marker.latlng).toEqual({ lat: 50.1, lng: 8.67 });
+    });
+
+    it("keeps no restored path the dataset does not have", async () => {
+      app.selectedPathIds = new Set([1, 99]);
+      const selections: number[][] = [];
+      app.store.subscribe("currentData", () => {
+        selections.push([...app.selectedPathIds]);
+      });
+
+      await loadInitialData(asMapApp(app));
+
+      // Nobody sees the new dataset with the stale id still selected
+      expect(selections).toEqual([[1]]);
+    });
+  });
+
+  describe("dropUnknownPathIds", () => {
+    const data = createDataset([
+      { id: 840108108563, year: 2025 },
+      { id: 7, year: 2025 },
+    ]);
+
+    it("keeps a selection the dataset knows untouched", () => {
+      const selected = new Set([7, 840108108563]);
+      app.selectedPathIds = selected;
+      app.isolateSelection = true;
+      const listener = vi.fn();
+      app.store.subscribe("selectedPathIds", listener);
+
+      dropUnknownPathIds(asMapApp(app), data);
+
+      expect(app.selectedPathIds).toBe(selected);
+      expect([...selected]).toEqual([7, 840108108563]);
+      expect(app.isolateSelection).toBe(true);
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it("drops unknown ids and keeps isolating the rest", () => {
+      app.selectedPathIds = new Set([3, 7, 12]);
+      app.isolateSelection = true;
+      const listener = vi.fn();
+      app.store.subscribe("selectedPathIds", listener);
+
+      dropUnknownPathIds(asMapApp(app), data);
+
+      expect([...app.selectedPathIds]).toEqual([7]);
+      expect(app.isolateSelection).toBe(true);
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it("turns isolation off when no selected id is left", () => {
+      app.selectedPathIds = new Set([3]);
+      app.isolateSelection = true;
+      const seen: [number, boolean][] = [];
+      app.store.subscribe("selectedPathIds", () => {
+        seen.push([app.selectedPathIds.size, app.isolateSelection]);
+      });
+
+      dropUnknownPathIds(asMapApp(app), data);
+
+      expect(app.selectedPathIds.size).toBe(0);
+      expect(app.isolateSelection).toBe(false);
+      // Both changes arrive together: never an empty isolated selection
+      expect(seen).toEqual([[0, false]]);
+    });
+
+    it("keeps the ids when a year of the dataset failed to load", () => {
+      app.selectedPathIds = new Set([7, 99]);
+      app.isolateSelection = true;
+
+      dropUnknownPathIds(asMapApp(app), { ...data, incomplete: true });
+
+      expect([...app.selectedPathIds]).toEqual([7, 99]);
+      expect(app.isolateSelection).toBe(true);
+    });
+
+    it("does nothing without a selection", () => {
+      app.isolateSelection = false;
+      const listener = vi.fn();
+      app.store.subscribe("selectedPathIds", listener);
+
+      dropUnknownPathIds(asMapApp(app), data);
+
+      expect(listener).not.toHaveBeenCalled();
     });
   });
 });

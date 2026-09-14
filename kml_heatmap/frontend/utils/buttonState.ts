@@ -2,6 +2,10 @@
  * Store-driven toggle button state.
  * The store is the single source of truth: a button reflects its boolean
  * store key through `aria-pressed`, the `active` class and its opacity.
+ * `aria-pressed` is what assistive technology reads. The stylesheet draws
+ * the pressed look from the class alone, because the statistics disclosure
+ * and the mobile tabs that open a sheet carry the class but no
+ * `aria-pressed`.
  */
 import type { AppStore, StoreState } from "../state/store";
 import { domCache } from "./domCache";
@@ -41,9 +45,18 @@ export function syncToggleButton(
   return store.subscribe(key, (value) => apply(value));
 }
 
+/** Show or hide a colour legend, which the stylesheet hides by default */
+export function applyLegendVisibility(
+  legend: HTMLElement,
+  visible: boolean,
+): void {
+  legend.style.display = visible ? "block" : "none";
+}
+
 /**
  * Keep a colour legend in step with the visibility key of its layer. The
- * stylesheet hides every legend; this is the only place that shows one.
+ * stylesheet hides every legend; apart from the replay trail, which uses
+ * the altitude scale with no layer on, this is what shows one.
  * @returns Unsubscribe function
  */
 export function syncLegend(
@@ -53,7 +66,7 @@ export function syncLegend(
 ): () => void {
   const apply = (visible: boolean): void => {
     const legend = domCache.get(legendId);
-    if (legend) legend.style.display = visible ? "block" : "none";
+    if (legend) applyLegendVisibility(legend, visible);
   };
   apply(store.get(key));
   return store.subscribe(key, (value) => apply(value));

@@ -1,29 +1,40 @@
 """Tests for data_exporter module."""
 
+import errno
 import os
+import tempfile
+from concurrent.futures import Future
 from unittest.mock import patch
 
 import pytest
 
 import kml_heatmap.data_exporter as exporter_module
 from kml_heatmap.data_exporter import (
+    PATH_ID_BITS,
+    STAGING_PREFIX,
     ChunkResult,
     ExportResult,
+    GroundspeedRange,
+    SiteOutput,
     YearExportResult,
     _assemble_year_file,
     _chunk_count,
-    _clean_output_dir,
     _export_chunks,
     _group_paths_by_year,
     _part_paths,
     _plan_chunks,
+    assign_path_ids,
     export_all_data,
+    path_content_id,
     process_year_chunk,
-    process_year_data,
 )
-from kml_heatmap.export_reconciler import YearAggregate
-from kml_heatmap.helpers import format_flight_time, parse_timestamp_epoch
+from kml_heatmap.exceptions import KMLHeatmapError
+from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.types import TrackPoint
+
+skip_as_root = pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores directory permissions"
+)
 
 
 def _path(*points):
@@ -36,11 +47,11 @@ def _path(*points):
     ]
 
 
-def _timed_path():
+def _timed_path(offset=0.0):
     return _path(
-        (50.0, 8.0, 100.0, "2025-01-01T10:00:00Z"),
-        (50.1, 8.1, 200.0, "2025-01-01T10:05:00Z"),
-        (50.2, 8.2, 300.0, "2025-01-01T10:10:00Z"),
+        (50.0 + offset, 8.0, 100.0, "2025-01-01T10:00:00Z"),
+        (50.1 + offset, 8.1, 200.0, "2025-01-01T10:05:00Z"),
+        (50.2 + offset, 8.2, 300.0, "2025-01-01T10:10:00Z"),
     )
 
 
@@ -52,7 +63,22 @@ def _leftover_parts(directory):
     return sorted(p.name for p in directory.rglob("*.part"))
 
 
-class TestProcessYearData:
+def _write_year(year, paths, metadata, path_ids, output_dir):
+    """Export a year as a single chunk, the way a small year is exported."""
+    chunk = process_year_chunk(year, paths, metadata, path_ids, str(output_dir))
+    return _assemble_year_file(year, [chunk], str(output_dir))
+
+
+def _ids_by_start(output_dir, parse_js):
+    """Path id by the start point of its segments, over every year file."""
+    ids = {}
+    for data_file in sorted(output_dir.glob("*/data.js")):
+        for path_id, entry in parse_js(data_file)["segments"].items():
+            ids[tuple(entry["start"])] = int(path_id)
+    return ids
+
+
+class TestYearFile:
     def test_writes_d1_shaped_file(self, tmp_path, parse_js):
         metadata = [
             {
@@ -65,7 +91,7 @@ class TestProcessYearData:
             }
         ]
 
-        result = process_year_data(2025, [_timed_path()], metadata, 7, str(tmp_path))
+        result = _write_year(2025, [_timed_path()], metadata, [7], tmp_path)
 
         content = (tmp_path / "2025" / "data.js").read_text()
         assert content.startswith("window.KML_DATA_2025 = {")
@@ -77,9 +103,6 @@ class TestProcessYearData:
             {
                 "id": 7,
                 "year": 2025,
-                "start_coords": [50.0, 8.0],
-                "end_coords": [50.2, 8.2],
-                "segment_count": 2,
                 "min_altitude_ft": 328.1,
                 "max_altitude_ft": 984.3,
                 "start_airport": "EDDF",
@@ -90,12 +113,11 @@ class TestProcessYearData:
         ]
         # The key order is part of the format: it is what the file:// site
         # has always shipped and what the chunk assembly reproduces
-        assert list(data["path_info"][0])[:5] == [
+        assert list(data["path_info"][0])[:4] == [
             "id",
             "year",
-            "start_coords",
-            "end_coords",
-            "segment_count",
+            "min_altitude_ft",
+            "max_altitude_ft",
         ]
         assert list(data["segments"]) == ["7"]
         entry = data["segments"]["7"]
@@ -113,13 +135,13 @@ class TestProcessYearData:
         assert result.path_count == 1
         assert result.original_points == 3
         assert result.file_bytes == (tmp_path / "2025" / "data.js").stat().st_size
-        assert result.aggregate.total_points == 3
-        assert result.aggregate.num_paths == 1
+        speeds = [row[3] for row in rows]
+        assert result.groundspeed == GroundspeedRange(min(speeds), max(speeds))
         assert _leftover_parts(tmp_path) == []
 
     def test_omits_none_valued_keys(self, tmp_path, parse_js):
         path = _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0))
-        process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
+        _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
 
         data = parse_js(tmp_path / "2025" / "data.js")
         info = data["path_info"][0]
@@ -128,14 +150,14 @@ class TestProcessYearData:
         assert None not in info.values()
         assert all(len(row) == 4 for row in data["segments"]["0"]["rows"])
 
-    def test_single_point_paths_are_skipped_but_counted(self, tmp_path, parse_js):
+    def test_paths_without_an_id_are_skipped_but_counted(self, tmp_path, parse_js):
         paths = [
             _path((50.0, 8.0, 100.0)),
             _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0)),
         ]
         metadata = [{"year": 2025}, {"year": 2025}]
 
-        result = process_year_data(2025, paths, metadata, 3, str(tmp_path))
+        result = _write_year(2025, paths, metadata, [None, 3], tmp_path)
 
         data = parse_js(tmp_path / "2025" / "data.js")
         assert data["original_points"] == 3
@@ -143,7 +165,7 @@ class TestProcessYearData:
         assert result.path_count == 1
 
     def test_empty_year(self, tmp_path, parse_js):
-        result = process_year_data(2025, [], [], 0, str(tmp_path))
+        result = _write_year(2025, [], [], [], tmp_path)
         data = parse_js(tmp_path / "2025" / "data.js")
         assert data == {
             "year": 2025,
@@ -151,15 +173,7 @@ class TestProcessYearData:
             "path_info": [],
             "segments": {},
         }
-        assert result.aggregate.min_groundspeed_or_zero == 0.0
-
-    def test_quiet_flag(self, tmp_path, capsys):
-        process_year_data(
-            2025, [_timed_path()], [{"year": 2025}], 0, str(tmp_path), True
-        )
-        assert "Processing year" not in capsys.readouterr().out
-        process_year_data(2025, [_timed_path()], [{"year": 2025}], 0, str(tmp_path))
-        assert "Processing year 2025" in capsys.readouterr().out
+        assert result.groundspeed == GroundspeedRange()
 
     def test_fallback_groundspeed_from_metadata_duration(self, tmp_path, parse_js):
         path = _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0), (50.2, 8.2, 300.0))
@@ -170,7 +184,7 @@ class TestProcessYearData:
                 "end_timestamp": "2025-01-01T10:30:00Z",
             }
         ]
-        process_year_data(2025, [path], metadata, 0, str(tmp_path))
+        _write_year(2025, [path], metadata, [0], tmp_path)
 
         rows = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]["rows"]
         assert all(row[3] > 0 for row in rows)
@@ -178,23 +192,24 @@ class TestProcessYearData:
 
     def test_zero_length_segments_excluded(self, tmp_path, parse_js):
         path = _path((50.0, 8.0, 100.0), (50.0, 8.0, 100.0), (50.1, 8.1, 200.0))
-        process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
+        _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
         data = parse_js(tmp_path / "2025" / "data.js")
         entry = data["segments"]["0"]
         assert len(entry["rows"]) == 1
         # Dropping a zero-length segment keeps the chain contiguous
         assert entry["start"] == [50.0, 8.0]
         assert entry["rows"][0][:2] == [50.1, 8.1]
-        assert data["path_info"][0]["segment_count"] == 1
 
     def test_unrealistic_groundspeed_filtered(self, tmp_path, parse_js):
         path = _path(
             (50.0, 8.0, 100.0, "2025-01-01T10:00:00.000Z"),
             (51.0, 9.0, 100.0, "2025-01-01T10:00:01.000Z"),
         )
-        process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
+        result = _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
         rows = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]["rows"]
         assert rows[0][3] == 0.0
+        # A row without a speed does not pull the range down to zero
+        assert result.groundspeed == GroundspeedRange()
 
     @pytest.mark.slow
     def test_large_single_path(self, tmp_path, parse_js):
@@ -203,10 +218,102 @@ class TestProcessYearData:
             TrackPoint(50.0 + i * 0.0001, 8.0 + i * 0.0001, 100.0 + i % 50, None)
             for i in range(count)
         ]
-        result = process_year_data(2025, [path], [{"year": 2025}], 0, str(tmp_path))
+        result = _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
         assert result.original_points == count
         entry = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
         assert len(entry["rows"]) == count - 1
+
+
+class TestGroundspeedRange:
+    def test_merge_does_not_depend_on_the_order(self):
+        parts = [
+            GroundspeedRange(40.0, 120.0),
+            GroundspeedRange(),
+            GroundspeedRange(12.5, 90.0),
+        ]
+        forward, backward = GroundspeedRange(), GroundspeedRange()
+        for part in parts:
+            forward.merge(part)
+        for part in reversed(parts):
+            backward.merge(part)
+        assert forward == backward == GroundspeedRange(12.5, 120.0)
+
+    def test_empty_ranges_stay_empty(self):
+        merged = GroundspeedRange()
+        merged.merge(GroundspeedRange())
+        assert merged == GroundspeedRange(None, 0.0)
+
+
+class TestPathIds:
+    def test_content_id_is_a_stable_40_bit_integer(self):
+        path_id = path_content_id(_two_point_path(0))
+        assert path_id == path_content_id(_two_point_path(0))
+        assert 0 <= path_id < 2**PATH_ID_BITS
+        # Exact in JavaScript, where the ids end up
+        assert path_id <= 2**53 - 1
+        # Pinned: ids are persisted in shared links and saved state, so a
+        # change of the derivation has to be deliberate (and bump
+        # STATE_SCHEMA_VERSION in the frontend)
+        assert path_id == 840108108563
+
+    def test_content_id_follows_the_exported_precision(self):
+        base = path_content_id(_two_point_path(0))
+        # Below the five exported decimals the path is the same
+        jitter = _path((50.000001, 8.0, 100.0), (50.1, 8.100002, 200.0))
+        assert path_content_id(jitter) == base
+        # A moved point or a different altitude is a different path
+        moved = _path((50.0, 8.0, 100.0), (50.1, 8.2, 200.0))
+        climbed = _path((50.0, 8.0, 100.0), (50.1, 8.1, 250.0))
+        assert path_content_id(moved) != base
+        assert path_content_id(climbed) != base
+
+    def test_content_id_ignores_the_timestamps(self):
+        """Obfuscation shifts the dates; the flight stays the same."""
+        untimed = _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0), (50.2, 8.2, 300.0))
+        assert path_content_id(_timed_path()) == path_content_id(untimed)
+
+    def test_only_exported_paths_get_an_id(self):
+        paths = [_two_point_path(0), _path((52.0, 10.0, 1.0)), _two_point_path(1)]
+        ids = assign_path_ids({2025: [0, 1], 2026: [2]}, paths)
+        assert ids == {
+            0: path_content_id(paths[0]),
+            2: path_content_id(paths[2]),
+        }
+
+    def test_a_duplicate_takes_the_next_free_id_in_input_order(self):
+        paths = [_two_point_path(1), _two_point_path(0), _two_point_path(0)]
+        # The later year comes first in the input: input order decides
+        ids = assign_path_ids({2026: [1, 2], 2025: [0]}, paths)
+        first = path_content_id(paths[1])
+        assert ids[1] == first
+        assert ids[2] == first + 1
+        assert ids[0] == path_content_id(paths[0])
+
+    def test_a_collision_wraps_around_the_id_space(self, monkeypatch):
+        monkeypatch.setattr(
+            exporter_module, "path_content_id", lambda path: 2**PATH_ID_BITS - 1
+        )
+        paths = [_two_point_path(0), _two_point_path(1), _two_point_path(2)]
+        assert assign_path_ids({2025: [0, 1, 2]}, paths) == {
+            0: 2**PATH_ID_BITS - 1,
+            1: 0,
+            2: 1,
+        }
+
+    def test_removing_a_path_keeps_the_ids_of_the_others(self, tmp_path, parse_js):
+        paths = [_timed_path(offset) for offset in range(5)]
+        metadata = [{"year": 2025}, {"year": 2026}, {"year": 2025}] + [
+            {"year": 2026}
+        ] * 2
+        export_all_data(paths, metadata, [], output_dir=str(tmp_path / "all"))
+        del paths[2], metadata[2]
+        export_all_data(paths, metadata, [], output_dir=str(tmp_path / "fewer"))
+
+        before = _ids_by_start(tmp_path / "all", parse_js)
+        after = _ids_by_start(tmp_path / "fewer", parse_js)
+        assert len(before) == 5
+        del before[(52.0, 8.0)]
+        assert after == before
 
 
 class TestProcessYearChunk:
@@ -214,7 +321,9 @@ class TestProcessYearChunk:
         paths = [_two_point_path(0), _path((52.0, 10.0, 1.0)), _two_point_path(1)]
         metadata = [{"year": 2025}] * 3
 
-        result = process_year_chunk(2025, paths, metadata, 5, str(tmp_path), index=2)
+        result = process_year_chunk(
+            2025, paths, metadata, [5, None, 6], str(tmp_path), index=2
+        )
 
         info_part, segments_part = _part_paths(str(tmp_path), 2025, 2)
         assert info_part.name == ".data.2.info.part"
@@ -231,12 +340,20 @@ class TestProcessYearChunk:
             index=2,
             path_count=2,
             original_points=5,
-            aggregate=result.aggregate,
+            groundspeed=GroundspeedRange(),
         )
-        assert result.aggregate.num_paths == 2
+
+    def test_paths_keep_the_input_order_whatever_their_ids(self, tmp_path):
+        paths = [_two_point_path(0), _two_point_path(1)]
+        process_year_chunk(2025, paths, [{"year": 2025}] * 2, [9, 2], str(tmp_path))
+        info_part, segments_part = _part_paths(str(tmp_path), 2025, 0)
+        assert info_part.read_text().index('"id":9') < info_part.read_text().index(
+            '"id":2'
+        )
+        assert segments_part.read_text().startswith('"9":')
 
     def test_empty_chunk_writes_empty_fragments(self, tmp_path):
-        result = process_year_chunk(2025, [], [], 0, str(tmp_path))
+        result = process_year_chunk(2025, [], [], [], str(tmp_path))
         for part in _part_paths(str(tmp_path), 2025, 0):
             assert part.read_text() == ""
         assert result.path_count == 0
@@ -245,11 +362,11 @@ class TestProcessYearChunk:
 class TestAssembleYearFile:
     def test_concatenates_chunks_in_index_order(self, tmp_path, parse_js):
         second = process_year_chunk(
-            2025, [_two_point_path(1)], [{"year": 2025}], 1, str(tmp_path), index=1
+            2025, [_two_point_path(1)], [{"year": 2025}], [1], str(tmp_path), index=1
         )
-        empty = process_year_chunk(2025, [], [], 1, str(tmp_path), index=2)
+        empty = process_year_chunk(2025, [], [], [], str(tmp_path), index=2)
         first = process_year_chunk(
-            2025, [_two_point_path(0)], [{"year": 2025}], 0, str(tmp_path), index=0
+            2025, [_two_point_path(0)], [{"year": 2025}], [0], str(tmp_path), index=0
         )
 
         result = _assemble_year_file(2025, [second, empty, first], str(tmp_path))
@@ -260,34 +377,45 @@ class TestAssembleYearFile:
         assert list(data["segments"]) == ["0", "1"]
         assert data["original_points"] == 4
         assert result.path_count == 2
-        assert result.aggregate.num_paths == 2
         assert _leftover_parts(tmp_path) == []
 
-    def test_chunked_output_equals_unchunked_output(self, tmp_path, parse_js):
+    def test_merges_the_groundspeed_ranges_of_the_chunks(self, tmp_path):
+        chunks = [
+            process_year_chunk(2025, [], [], [], str(tmp_path), index=index)
+            for index in range(3)
+        ]
+        chunks[0].groundspeed = GroundspeedRange(35.0, 96.0)
+        chunks[2].groundspeed = GroundspeedRange(20.5, 80.0)
+
+        result = _assemble_year_file(2025, chunks, str(tmp_path))
+
+        assert result.groundspeed == GroundspeedRange(20.5, 96.0)
+
+    def test_chunked_output_equals_unchunked_output(self, tmp_path):
         paths = [_two_point_path(i) for i in range(7)]
         metadata = [{"year": 2025, "aircraft_registration": "D-EAGJ"}] * 7
+        ids = list(range(3, 10))
         whole = tmp_path / "whole"
         chunked = tmp_path / "chunked"
 
-        process_year_data(2025, paths, metadata, 3, str(whole))
+        _write_year(2025, paths, metadata, ids, whole)
         chunks = [
-            process_year_chunk(2025, paths[:3], metadata[:3], 3, str(chunked), 0),
-            process_year_chunk(2025, paths[3:5], metadata[3:5], 6, str(chunked), 1),
-            process_year_chunk(2025, paths[5:], metadata[5:], 8, str(chunked), 2),
+            process_year_chunk(2025, paths[:3], metadata[:3], ids[:3], str(chunked), 0),
+            process_year_chunk(
+                2025, paths[3:5], metadata[3:5], ids[3:5], str(chunked), 1
+            ),
+            process_year_chunk(2025, paths[5:], metadata[5:], ids[5:], str(chunked), 2),
         ]
         result = _assemble_year_file(2025, chunks, str(chunked))
 
         assert (chunked / "2025" / "data.js").read_bytes() == (
             whole / "2025" / "data.js"
         ).read_bytes()
-        assert result.aggregate.num_paths == 7
-        assert result.aggregate.aircraft_distance_km["D-EAGJ"] == pytest.approx(
-            result.aggregate.total_distance_km
-        )
+        assert result.path_count == 7
 
     def test_parts_are_removed_even_when_the_write_fails(self, tmp_path):
         chunk = process_year_chunk(
-            2025, [_two_point_path(0)], [{"year": 2025}], 0, str(tmp_path)
+            2025, [_two_point_path(0)], [{"year": 2025}], [0], str(tmp_path)
         )
         with (
             patch("kml_heatmap.cache.os.replace", side_effect=OSError("boom")),
@@ -300,12 +428,32 @@ class TestAssembleYearFile:
 
 class TestGroupPathsByYear:
     def test_groups_by_year(self):
+        paths = [_two_point_path(i) for i in range(3)]
         metadata = [{"year": 2025}, {"year": 2026}, {"year": 2025}]
-        assert _group_paths_by_year(metadata) == {2025: [0, 2], 2026: [1]}
+        assert _group_paths_by_year(paths, metadata) == {2025: [0, 2], 2026: [1]}
 
     def test_paths_without_year_are_skipped(self):
+        paths = [_two_point_path(i) for i in range(3)]
         metadata = [{"year": None}, {"other": "data"}, {"year": 2024}]
-        assert _group_paths_by_year(metadata) == {2024: [2]}
+        assert _group_paths_by_year(paths, metadata) == {2024: [2]}
+
+    def test_a_year_without_exportable_paths_is_not_listed(self):
+        """Single point markers (Log Start/Stop) must not make an empty year."""
+        marker = _path((51.5, 12.0, 20.0))
+        paths = [marker, marker, marker, _timed_path()]
+        metadata = [{"year": 2024}, {"year": 2024}, {"year": 2025}, {"year": 2025}]
+        assert _group_paths_by_year(paths, metadata) == {2025: [2, 3]}
+
+    def test_a_path_that_does_not_move_is_not_exported(self):
+        """Jitter below the exported precision makes no segment row."""
+        standing = _path(
+            (51.500001, 12.000001, 100.0),
+            (51.500002, 11.999999, 100.0),
+            (51.499999, 12.000002, 101.0),
+        )
+        paths = [standing, _timed_path()]
+        metadata = [{"year": 2024}, {"year": 2025}]
+        assert _group_paths_by_year(paths, metadata) == {2025: [1]}
 
 
 class TestChunkPlanning:
@@ -322,43 +470,80 @@ class TestChunkPlanning:
     def test_chunk_count(self, paths, years, workers, expected):
         assert _chunk_count(paths, years, workers) == expected
 
-    def test_offsets_follow_ascending_years_and_skip_short_paths(self):
-        paths = [
-            _two_point_path(0),  # 2026
-            _path((50.0, 8.0, 1.0)),  # 2025, single point (not exported)
-            _two_point_path(1),  # 2025
-            _two_point_path(2),  # 2025
-            _two_point_path(3),  # 2027
-        ]
+    def test_plans_follow_ascending_years_and_carry_the_path_ids(self):
         by_year = {2026: [0], 2025: [1, 2, 3], 2027: [4]}
+        # Path 1 is not exported, so it has no id
+        ids = {0: 70, 2: 50, 3: 10, 4: 30}
 
-        plans = _plan_chunks(by_year, paths, max_workers=4)
+        plans = _plan_chunks(by_year, ids, max_workers=4)
 
-        assert [(p.year, p.index, p.path_indices, p.path_id_offset) for p in plans] == [
-            (2025, 0, [1, 2, 3], 0),
-            (2026, 0, [0], 2),
-            (2027, 0, [4], 3),
+        assert [(p.year, p.index, p.path_indices, p.path_ids) for p in plans] == [
+            (2025, 0, [1, 2, 3], [None, 50, 10]),
+            (2026, 0, [0], [70]),
+            (2027, 0, [4], [30]),
         ]
 
-    def test_chunks_continue_the_ids_within_a_year(self, monkeypatch):
+    def test_chunks_split_a_year_in_input_order(self, monkeypatch):
         monkeypatch.setattr(exporter_module, "MIN_PATHS_PER_CHUNK", 1)
-        paths = [_two_point_path(i) for i in range(5)] + [_path((50.0, 8.0, 1.0))]
         by_year = {2025: [0, 1, 2, 3, 4, 5], 2026: []}
+        ids = {index: 100 - index for index in range(5)}
 
-        plans = _plan_chunks(by_year, paths, max_workers=4)
+        plans = _plan_chunks(by_year, ids, max_workers=4)
 
-        assert [(p.year, p.index, p.path_indices, p.path_id_offset) for p in plans] == [
-            (2025, 0, [0, 1, 2], 0),
-            (2025, 1, [3, 4, 5], 3),
-            (2026, 0, [], 5),
+        assert [(p.year, p.index, p.path_indices, p.path_ids) for p in plans] == [
+            (2025, 0, [0, 1, 2], [100, 99, 98]),
+            (2025, 1, [3, 4, 5], [97, 96, None]),
+            (2026, 0, [], []),
         ]
+
+
+def _failing_chunk(*args):
+    """A picklable process_year_chunk stand-in that always fails.
+
+    A MagicMock cannot be pickled, and a work item that fails to pickle can
+    deadlock ProcessPoolExecutor.shutdown(wait=True).
+    """
+    raise RuntimeError("boom")
+
+
+class _RunningChunksPool:
+    """A process pool stand-in whose first chunk fails with a full disk.
+
+    The other chunks count as already running: like in a real pool they only
+    finish, and write their fragments, once the pool is shut down.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.running = []
+        self.submitted = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.shutdown()
+        return False
+
+    def submit(self, fn, *args):
+        future = Future()
+        self.submitted += 1
+        if self.submitted == 1:
+            future.set_exception(OSError(errno.ENOSPC, "No space left on device"))
+        else:
+            self.running.append((future, fn, args))
+        return future
+
+    def shutdown(self, wait=True, cancel_futures=False):
+        for future, fn, args in self.running:
+            future.set_result(fn(*args))
+        self.running = []
 
 
 class TestExportChunks:
     def test_single_chunk_runs_without_a_pool(self, tmp_path, parse_js):
         paths = [_two_point_path(0), _two_point_path(1)]
         metadata = [{"year": 2025}, {"year": 2025}]
-        plans = _plan_chunks({2025: [0, 1]}, paths, max_workers=4)
+        plans = _plan_chunks({2025: [0, 1]}, {0: 0, 1: 1}, max_workers=4)
 
         with patch("kml_heatmap.data_exporter.ProcessPoolExecutor") as pool:
             results = _export_chunks(plans, paths, metadata, str(tmp_path), 4)
@@ -368,18 +553,19 @@ class TestExportChunks:
         data = parse_js(tmp_path / "2025/data.js")
         assert [p["id"] for p in data["path_info"]] == [0, 1]
 
-    def test_results_sorted_by_year_with_global_ids(self, tmp_path, parse_js):
+    def test_results_sorted_by_year_with_their_ids(self, tmp_path, parse_js):
         paths = [_two_point_path(0), _two_point_path(1), _two_point_path(2)]
         metadata = [{"year": 2026}, {"year": 2025}, {"year": 2025}]
-        plans = _plan_chunks({2026: [0], 2025: [1, 2]}, paths, max_workers=4)
+        ids = {0: 30, 1: 20, 2: 10}
+        plans = _plan_chunks({2026: [0], 2025: [1, 2]}, ids, max_workers=4)
 
         results = _export_chunks(plans, paths, metadata, str(tmp_path), 4)
 
         assert [r.year for r in results] == [2025, 2026]
         ids_2025 = [p["id"] for p in parse_js(tmp_path / "2025/data.js")["path_info"]]
         ids_2026 = [p["id"] for p in parse_js(tmp_path / "2026/data.js")["path_info"]]
-        assert ids_2025 == [0, 1]
-        assert ids_2026 == [2]
+        assert ids_2025 == [20, 10]
+        assert ids_2026 == [30]
         assert _leftover_parts(tmp_path) == []
 
     def test_chunked_year_matches_the_unchunked_file(
@@ -387,10 +573,11 @@ class TestExportChunks:
     ):
         paths = [_two_point_path(i) for i in range(6)]
         metadata = [{"year": 2025}] * 6
+        ids = {index: 1000 + index for index in range(6)}
         whole = tmp_path / "whole"
         chunked = tmp_path / "chunked"
         _export_chunks(
-            _plan_chunks({2025: list(range(6))}, paths, 1),
+            _plan_chunks({2025: list(range(6))}, ids, 1),
             paths,
             metadata,
             str(whole),
@@ -398,7 +585,7 @@ class TestExportChunks:
         )
 
         monkeypatch.setattr(exporter_module, "MIN_PATHS_PER_CHUNK", 1)
-        plans = _plan_chunks({2025: list(range(6))}, paths, max_workers=3)
+        plans = _plan_chunks({2025: list(range(6))}, ids, max_workers=3)
         assert len(plans) == 3
         results = _export_chunks(plans, paths, metadata, str(chunked), 3)
 
@@ -408,91 +595,344 @@ class TestExportChunks:
         assert results[0].path_count == 6
         assert _leftover_parts(chunked) == []
 
-    def test_processing_error_is_wrapped_single_chunk(self, tmp_path):
+    def test_processing_error_is_wrapped_single_chunk(self, tmp_path, capsys):
         paths = [_two_point_path(0)]
-        plans = _plan_chunks({2025: [0]}, paths, 4)
+        plans = _plan_chunks({2025: [0]}, {0: 0}, 4)
         with (
             patch(
                 "kml_heatmap.data_exporter.process_year_chunk",
                 side_effect=RuntimeError("boom"),
             ),
-            pytest.raises(RuntimeError, match="Failed to process year 2025"),
+            pytest.raises(RuntimeError, match="Failed to process year 2025: boom"),
         ):
             _export_chunks(plans, paths, [{}], str(tmp_path), 4)
+        # An unexpected error keeps its traceback for the bug report
+        assert "Traceback" in capsys.readouterr().err
 
     def test_processing_error_is_wrapped_multi_chunk(self, tmp_path):
         paths = [_two_point_path(0), _two_point_path(1)]
-        plans = _plan_chunks({2025: [0], 2026: [1]}, paths, 4)
+        plans = _plan_chunks({2025: [0], 2026: [1]}, {0: 0, 1: 1}, 4)
         (tmp_path / "2026").mkdir()
         stale = _part_paths(str(tmp_path), 2026, 0)[0]
         stale.write_text("partial")
         with (
-            patch(
-                "kml_heatmap.data_exporter.process_year_chunk",
-                side_effect=RuntimeError("boom"),
-            ),
+            patch("kml_heatmap.data_exporter.process_year_chunk", _failing_chunk),
             pytest.raises(RuntimeError, match="Failed to process year"),
         ):
             _export_chunks(plans, paths, [{}, {}], str(tmp_path), 4)
         # Fragments of every planned chunk are removed on failure
         assert _leftover_parts(tmp_path) == []
 
+    def test_failed_chunk_waits_for_running_chunks_before_cleaning_up(
+        self, tmp_path, capsys
+    ):
+        paths = [_two_point_path(i) for i in range(4)]
+        metadata = [{"year": 2026}] * 4
+        plans = _plan_chunks(
+            {2026: [0], 2027: [1], 2028: [2], 2029: [3]},
+            {index: index for index in range(4)},
+            4,
+        )
+        pool = _RunningChunksPool()
+
+        with (
+            patch("kml_heatmap.data_exporter.ProcessPoolExecutor", return_value=pool),
+            pytest.raises(RuntimeError, match="No space left on device"),
+        ):
+            _export_chunks(plans, paths, metadata, str(tmp_path), 4)
+
+        assert _leftover_parts(tmp_path) == []
+        # An expected error is one line, without a traceback
+        assert "Traceback" not in capsys.readouterr().err
+
     def test_no_plans(self, tmp_path):
         assert _export_chunks([], [], [], str(tmp_path), 4) == []
 
 
-class TestCleanOutputDir:
-    def test_removes_only_tool_owned_outputs(self, tmp_path):
-        (tmp_path / "airports.js").write_text("x")
-        (tmp_path / "metadata.js").write_text("x")
-        (tmp_path / "2025").mkdir()
-        (tmp_path / "2025" / "data.js").write_text("x")
-        (tmp_path / "2025" / ".data.0.info.part").write_text("stale fragment")
-        (tmp_path / "notes.txt").write_text("keep me")
-        (tmp_path / "photos").mkdir()
-        (tmp_path / "2026").mkdir()
-        (tmp_path / "2026" / "data.js").write_text("x")
-        (tmp_path / "2026" / "extra.txt").write_text("keep me")
+def _stage_site(site, years=(2025,), version="new"):
+    """Write a minimal site into the staging directories of ``site``."""
+    for year in years:
+        (site.data_stage / str(year)).mkdir()
+        (site.data_stage / str(year) / "data.js").write_text(f"{version} {year}")
+    (site.data_stage / "airports.js").write_text(f"{version} airports")
+    (site.data_stage / "metadata.js").write_text(f"{version} metadata")
+    (site.site_stage / "index.html").write_text(f"{version} page")
+    (site.site_stage / "manifest.json").write_text(f"{version} manifest")
 
-        _clean_output_dir(tmp_path)
 
-        remaining = sorted(
-            p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*")
-        )
-        assert remaining == ["2026", "2026/extra.txt", "notes.txt", "photos"]
+def _publish_site(out, years=(2025,), version="old"):
+    with SiteOutput(out, out / "data", ("manifest.json",)) as site:
+        _stage_site(site, years, version)
+        site.publish(years)
 
-    def test_symlinked_year_dir_is_left_alone(self, tmp_path):
-        target = tmp_path / "elsewhere"
-        target.mkdir()
-        (target / "data.js").write_text("precious")
-        os.symlink(target, tmp_path / "2025")
 
-        _clean_output_dir(tmp_path)
+def _tree(directory):
+    """Every file and symlink below ``directory`` with its content or target."""
+    tree = {}
+    for path in sorted(directory.rglob("*")):
+        name = path.relative_to(directory).as_posix()
+        if path.is_symlink():
+            tree[name] = f"-> {os.readlink(path)}"
+        elif path.is_file():
+            tree[name] = path.read_text()
+    return tree
 
-        assert (target / "data.js").read_text() == "precious"
 
-    def test_symlinked_tool_files_are_refused(self, tmp_path):
-        target = tmp_path / "elsewhere.js"
-        target.write_text("precious")
-        os.symlink(target, tmp_path / "airports.js")
+def _stages(directory):
+    return sorted(
+        p.name for p in directory.rglob("*") if p.name.startswith(STAGING_PREFIX)
+    )
 
-        with pytest.raises(ValueError, match="symlink"):
-            _clean_output_dir(tmp_path)
-        assert target.read_text() == "precious"
 
-    def test_symlinked_year_data_file_is_refused(self, tmp_path):
-        target = tmp_path / "elsewhere.js"
-        target.write_text("precious")
-        (tmp_path / "2025").mkdir()
-        os.symlink(target, tmp_path / "2025" / "data.js")
+class TestSiteOutput:
+    def test_publishes_the_staged_files(self, tmp_path):
+        out = tmp_path / "out"
 
-        with pytest.raises(ValueError, match="symlink"):
-            _clean_output_dir(tmp_path)
-        assert target.read_text() == "precious"
+        with SiteOutput(out, out / "data") as site:
+            assert site.site_stage.parent == out
+            assert site.data_stage.parent == out / "data"
+            assert site.site_stage.name.startswith(STAGING_PREFIX)
+            _stage_site(site, years=(2025, 2026))
+            site.publish([2025, 2026])
 
-    def test_missing_directory_is_noop(self, tmp_path):
-        _clean_output_dir(tmp_path / "missing")
-        assert not (tmp_path / "missing").exists()
+        assert _tree(out) == {
+            "data/2025/data.js": "new 2025",
+            "data/2026/data.js": "new 2026",
+            "data/airports.js": "new airports",
+            "data/metadata.js": "new metadata",
+            "index.html": "new page",
+            "manifest.json": "new manifest",
+        }
+        assert _stages(out) == []
+
+    def test_a_second_run_on_the_same_output_is_refused(self, tmp_path):
+        """It would delete the staging directories of the running one."""
+        out = tmp_path / "out"
+        with SiteOutput(out, out / "data") as site:
+            with (
+                pytest.raises(KMLHeatmapError, match="Another run"),
+                SiteOutput(out, out / "data"),
+            ):
+                pass
+            # The first run still has its stages and publishes normally
+            _stage_site(site)
+            site.publish([2025])
+
+        assert _tree(out)["index.html"] == "new page"
+        # Released on exit
+        _publish_site(out)
+
+    def test_runs_unguarded_where_locks_are_not_supported(self, tmp_path):
+        out = tmp_path / "out"
+        with patch(
+            "kml_heatmap.data_exporter.fcntl.flock",
+            side_effect=OSError(errno.ENOLCK, "No locks available"),
+        ):
+            _publish_site(out)
+        assert _tree(out)["index.html"] == "old page"
+
+    def test_an_incomplete_stage_is_not_published(self, tmp_path):
+        out = tmp_path / "out"
+        _publish_site(out)
+        previous = _tree(out)
+
+        with SiteOutput(out, out / "data") as site:
+            _stage_site(site)
+            (site.site_stage / "index.html").unlink()
+            with pytest.raises(KMLHeatmapError, match=r"index\.html missing"):
+                site.publish([2025])
+
+        assert _tree(out) == previous
+
+    def test_a_failed_run_leaves_the_previous_site(self, tmp_path):
+        out = tmp_path / "out"
+        _publish_site(out)
+        previous = _tree(out)
+
+        def run_out_of_space():
+            with SiteOutput(out, out / "data") as site:
+                _stage_site(site, years=(2026,))
+                raise OSError(errno.ENOSPC, "No space left on device")
+
+        with pytest.raises(OSError, match="No space"):
+            run_out_of_space()
+
+        assert _tree(out) == previous
+        assert _stages(out) == []
+
+    def test_stale_outputs_are_removed_and_foreign_files_kept(self, tmp_path, capsys):
+        out = tmp_path / "out"
+        _publish_site(out, years=(2019, 2025))
+        data = out / "data"
+        (data / "2019" / ".data.0.info.part").write_text("fragment")
+        (data / "2025" / ".data.1.segments.part").write_text("fragment")
+        (data / "unknown").mkdir()
+        (data / "unknown" / "data.js").write_text("old versions")
+        (data / "2018").mkdir()
+        (data / "2018" / "data.js").write_text("old")
+        (data / "2018" / "notes.txt").write_text("keep me")
+        (data / "notes.txt").write_text("keep me")
+        (out / "CNAME").write_text("keep me")
+
+        with SiteOutput(out, data, ("manifest.json", "styles.css")) as site:
+            _stage_site(site)
+            (site.site_stage / "manifest.json").unlink()
+            site.publish([2025])
+
+        assert _tree(out) == {
+            "CNAME": "keep me",
+            "data/2018/notes.txt": "keep me",
+            "data/2025/data.js": "new 2025",
+            "data/airports.js": "new airports",
+            "data/metadata.js": "new metadata",
+            "data/notes.txt": "keep me",
+            "index.html": "new page",
+        }
+        err = capsys.readouterr().err
+        assert "Leaving non-empty year directory" in err
+        assert "Leaving unexpected item in output directory" in err
+
+    @pytest.mark.parametrize(
+        "sabotage",
+        [
+            pytest.param(
+                lambda out, victim: (out / "data" / "metadata.js").symlink_to(victim),
+                id="symlinked-metadata",
+            ),
+            pytest.param(
+                lambda out, victim: (out / "manifest.json").symlink_to(victim),
+                id="symlinked-site-file",
+            ),
+            pytest.param(
+                lambda out, victim: (out / "data" / "2026").symlink_to(victim.parent),
+                id="symlinked-year-dir",
+            ),
+            pytest.param(
+                lambda out, victim: (out / "data" / "2026").write_text("a file"),
+                id="file-in-place-of-a-year-dir",
+            ),
+            pytest.param(
+                lambda out, victim: (out / "data" / "2026" / "data.js").mkdir(
+                    parents=True
+                ),
+                id="directory-in-place-of-a-file",
+            ),
+        ],
+    )
+    def test_refusals_come_before_anything_is_moved(self, tmp_path, sabotage):
+        out = tmp_path / "out"
+        _publish_site(out)
+        (out / "manifest.json").unlink()
+        (out / "data" / "metadata.js").unlink()
+        victim = tmp_path / "victim" / "data.js"
+        victim.parent.mkdir()
+        victim.write_text("precious")
+        sabotage(out, victim)
+        previous = _tree(out)
+
+        with SiteOutput(out, out / "data") as site:
+            _stage_site(site, years=(2025, 2026))
+            with pytest.raises(ValueError, match="Refusing"):
+                site.publish([2025, 2026])
+
+        assert _tree(out) == previous
+        assert victim.read_text() == "precious"
+        assert _stages(out) == []
+
+    def test_stale_symlinks_are_left_alone(self, tmp_path, capsys):
+        out = tmp_path / "out"
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "data.js").write_text("precious")
+        (out / "data" / "2020").mkdir(parents=True)
+        (out / "data" / "2019").symlink_to(elsewhere)
+        (out / "data" / "2020" / "data.js").symlink_to(elsewhere / "data.js")
+        (out / "mapApp.bundle.js.map").symlink_to(elsewhere / "data.js")
+
+        with SiteOutput(out, out / "data", ("mapApp.bundle.js.map",)) as site:
+            _stage_site(site)
+            site.publish([2025])
+
+        assert (elsewhere / "data.js").read_text() == "precious"
+        assert (out / "data" / "2019").is_symlink()
+        assert (out / "data" / "2020" / "data.js").is_symlink()
+        assert (out / "mapApp.bundle.js.map").is_symlink()
+        assert "Leaving symlink in output directory" in capsys.readouterr().err
+
+    @skip_as_root
+    def test_unwritable_directory_is_refused_before_anything_is_moved(self, tmp_path):
+        out = tmp_path / "out"
+        _publish_site(out)
+        previous = _tree(out)
+
+        with SiteOutput(out, out / "data") as site:
+            _stage_site(site, years=(2025, 2026))
+            (out / "data").chmod(0o555)
+            try:
+                with pytest.raises(PermissionError):
+                    site.publish([2025, 2026])
+            finally:
+                (out / "data").chmod(0o755)
+
+        assert _tree(out) == previous
+
+    @skip_as_root
+    def test_stale_file_that_cannot_be_removed_is_a_warning(self, tmp_path, capsys):
+        out = tmp_path / "out"
+        _publish_site(out, years=(2019, 2025))
+        (out / "data" / "2019").chmod(0o555)
+        try:
+            _publish_site(out, version="new")
+        finally:
+            (out / "data" / "2019").chmod(0o755)
+
+        assert (out / "data" / "2019" / "data.js").exists()
+        assert (out / "data" / "2025" / "data.js").read_text() == "new 2025"
+        assert "Could not remove stale output" in capsys.readouterr().err
+
+    def test_stages_of_killed_runs_are_removed(self, tmp_path):
+        out = tmp_path / "out"
+        for leftover in (out, out / "data"):
+            stage = leftover / f"{STAGING_PREFIX}killed"
+            stage.mkdir(parents=True)
+            (stage / "index.html").write_text("half written")
+
+        _publish_site(out)
+
+        assert _stages(out) == []
+        assert (out / "index.html").read_text() == "old page"
+
+    def test_failing_to_create_a_stage_removes_the_other(self, tmp_path):
+        out = tmp_path / "out"
+        real_mkdtemp = tempfile.mkdtemp
+
+        def mkdtemp(**kwargs):
+            if _stages(out):
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return real_mkdtemp(**kwargs)
+
+        with (
+            patch("kml_heatmap.data_exporter.tempfile.mkdtemp", mkdtemp),
+            pytest.raises(OSError, match="No space"),
+            SiteOutput(out, out / "data"),
+        ):
+            pass
+
+        assert (out / "data").is_dir()
+        assert _stages(out) == []
+
+    @pytest.mark.parametrize("dangerous", ["/", str(os.path.expanduser("~"))])
+    def test_dangerous_data_dir_rejected(self, tmp_path, dangerous):
+        with pytest.raises(ValueError, match="dangerous"):
+            SiteOutput(tmp_path, dangerous)
+
+    def test_protected_directories_without_home(self):
+        with patch.object(
+            exporter_module.Path, "home", side_effect=RuntimeError("no home")
+        ):
+            assert exporter_module._protected_directories() == (
+                exporter_module.Path("/"),
+            )
 
 
 class TestExportAllData:
@@ -516,128 +956,120 @@ class TestExportAllData:
 
         result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
 
-        assert isinstance(result, ExportResult)
-        assert set(result.files) == {"airports", "metadata"}
+        assert result == ExportResult(years=[2025, 2026])
         meta = parse_js(tmp_path / "metadata.js", "KML_METADATA")
-        assert meta["available_years"] == [2025, 2026]
-        assert set(meta) == {
-            "stats",
-            "min_groundspeed_knots",
-            "max_groundspeed_knots",
-            "available_years",
-            "year_file_bytes",
-        }
-        assert meta["year_file_bytes"] == {
-            "2025": (tmp_path / "2025" / "data.js").stat().st_size,
-            "2026": (tmp_path / "2026" / "data.js").stat().st_size,
-        }
         data_2025 = parse_js(tmp_path / "2025" / "data.js")
         data_2026 = parse_js(tmp_path / "2026" / "data.js")
-        assert [p["id"] for p in data_2025["path_info"]] == [0]
-        assert [p["id"] for p in data_2026["path_info"]] == [1]
-        stats = result.stats
-        assert meta["stats"] == stats
-        assert stats["total_points"] == (
-            data_2025["original_points"] + data_2026["original_points"]
-        )
-        assert stats["num_paths"] == 2
-        # Segment times are segment start times: 10:00 and 10:05 -> 300 s
-        assert stats["total_flight_time_seconds"] == 300.0
-        assert stats["total_flight_time_str"] == format_flight_time(300.0)
-        assert stats["num_aircraft"] == 1
-        assert stats["aircraft_list"][0]["registration"] == "D-EAGJ"
-        assert stats["aircraft_list"][0]["flights"] == 1
-        assert stats["aircraft_list"][0]["flight_time_seconds"] == 300.0
-        assert stats["aircraft_list"][0]["flight_time_str"] == "0h 5m"
-        assert meta["max_groundspeed_knots"] == stats["max_groundspeed_knots"]
-        assert stats["num_airports"] == 0
+        speeds = [
+            row[3]
+            for row in data_2026["segments"][str(path_content_id(paths[0]))]["rows"]
+        ]
+        assert meta == {
+            "aircraft_models": {},
+            "available_years": [2025, 2026],
+            "max_groundspeed_knots": max(speeds),
+            "min_groundspeed_knots": min(speeds),
+            "year_file_bytes": {
+                "2025": (tmp_path / "2025" / "data.js").stat().st_size,
+                "2026": (tmp_path / "2026" / "data.js").stat().st_size,
+            },
+        }
+        assert [p["id"] for p in data_2025["path_info"]] == [path_content_id(paths[1])]
+        assert [p["id"] for p in data_2026["path_info"]] == [path_content_id(paths[0])]
+        assert data_2025["original_points"] == 3
         assert _leftover_parts(tmp_path) == []
 
-    def test_airport_names_and_models_in_stats(self, tmp_path):
-        airports = [
-            {"name": "EDDF Frankfurt - EDDK Cologne", "lat": 50.0, "lon": 8.5},
-            {
-                "name": "EDDF Frankfurt - EDDK Cologne",
-                "lat": 50.9,
-                "lon": 7.1,
-                "is_at_path_end": True,
-            },
-            {"name": "Log Start: nothing", "lat": 1.0, "lon": 1.0},
-        ]
+    def test_aircraft_models_of_the_exported_paths(self, tmp_path, parse_js):
+        paths = [_timed_path(), _path((52.0, 10.0, 1.0)), _timed_path(1.0)]
         metadata = [
-            {"year": 2025, "aircraft_registration": "D-EAGJ", "filename": "a.kml"}
+            {"year": 2025, "aircraft_registration": "D-EAGJ"},
+            # A single point is not exported, so neither is its aircraft
+            {"year": 2025, "aircraft_registration": "D-EHYL"},
+            {"year": 2025, "aircraft_registration": "D-ESST"},
         ]
 
-        result = export_all_data(
-            [_timed_path()],
+        export_all_data(
+            paths,
             metadata,
-            airports,
+            [],
             output_dir=str(tmp_path),
-            aircraft_data={"D-EAGJ": "Katana"},
+            aircraft_data={"D-EAGJ": "Katana", "D-EHYL": "Star", "D-XXXX": "Other"},
         )
 
-        assert result.stats["airport_names"] == ["EDDF Frankfurt", "EDDK Cologne"]
-        assert result.stats["num_airports"] == 2
-        assert result.stats["aircraft_list"][0]["model"] == "Katana"
+        meta = parse_js(tmp_path / "metadata.js", "KML_METADATA")
+        assert meta["aircraft_models"] == {"D-EAGJ": "Katana"}
 
-    def test_paths_without_year_are_excluded(self, tmp_path):
+    def test_paths_without_year_are_excluded(self, tmp_path, parse_js):
         paths = [_timed_path(), _path((51.0, 9.0, 700.0), (51.1, 9.1, 800.0))]
         metadata = [{"year": 2025}, {"year": None}]
 
-        result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
+        export_all_data(paths, metadata, [], output_dir=str(tmp_path))
 
         assert sorted(p.name for p in tmp_path.iterdir()) == [
             "2025",
             "airports.js",
             "metadata.js",
         ]
-        assert result.stats["num_paths"] == 1
-        assert result.stats["total_points"] == 3
+        data = parse_js(tmp_path / "2025" / "data.js")
+        assert [info["id"] for info in data["path_info"]] == [path_content_id(paths[0])]
+        assert data["original_points"] == 3
 
-    def test_stale_files_are_left_and_tool_files_replaced(self, tmp_path):
-        stale = tmp_path / "stale.txt"
-        stale.write_text("stale")
-        (tmp_path / "2019").mkdir()
-        (tmp_path / "2019" / "data.js").write_text("old")
+    def test_year_with_only_point_markers_is_not_exported(self, tmp_path, parse_js):
+        paths = [_path((51.5, 12.0, 20.0)), _path((51.5, 12.0, 20.0)), _timed_path()]
+        metadata = [{"year": 2024}, {"year": 2024}, {"year": 2025}]
 
-        export_all_data([_timed_path()], [{"year": 2025}], [], output_dir=str(tmp_path))
+        result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
 
-        assert stale.exists()
-        assert not (tmp_path / "2019").exists()
-        assert (tmp_path / "2025" / "data.js").exists()
-
-    @pytest.mark.parametrize("dangerous", ["/", str(os.path.expanduser("~"))])
-    def test_dangerous_output_dir_rejected(self, dangerous):
-        with pytest.raises(ValueError, match="dangerous"):
-            export_all_data([], [], [], output_dir=dangerous)
-
-    def test_protected_directories_without_home(self):
-        with patch.object(
-            exporter_module.Path, "home", side_effect=RuntimeError("no home")
-        ):
-            assert exporter_module._protected_directories() == (
-                exporter_module.Path("/"),
-            )
+        assert result.years == [2025]
+        assert parse_js(tmp_path / "metadata.js")["available_years"] == [2025]
+        assert not (tmp_path / "2024").exists()
 
     def test_no_paths_produces_empty_metadata(self, tmp_path, parse_js):
         result = export_all_data([], [], [], output_dir=str(tmp_path))
-        meta = parse_js(tmp_path / "metadata.js")
-        assert meta["available_years"] == []
-        assert meta["year_file_bytes"] == {}
-        assert result.stats["total_points"] == 0
-        assert result.stats["min_altitude_m"] is None
+        assert result.years == []
+        assert parse_js(tmp_path / "metadata.js") == {
+            "aircraft_models": {},
+            "available_years": [],
+            "max_groundspeed_knots": 0.0,
+            "min_groundspeed_knots": 0.0,
+            "year_file_bytes": {},
+        }
 
-    def test_aggregate_merge_matches_single_year(self, tmp_path):
-        """Merging per-year aggregates equals aggregating everything at once."""
-        paths = [_timed_path(), _path((51.0, 9.0, 700.0), (51.1, 9.1, 800.0))]
-        one_year = process_year_data(
-            2025, paths, [{"year": 2025}] * 2, 0, str(tmp_path)
-        )
-        year_a = process_year_data(2025, paths[:1], [{"year": 2025}], 0, str(tmp_path))
-        year_b = process_year_data(2026, paths[1:], [{"year": 2026}], 1, str(tmp_path))
+    def test_output_does_not_depend_on_the_worker_count(self, tmp_path, monkeypatch):
+        """One worker or several, chunked or not: the files are byte identical."""
+        paths = [_timed_path(offset / 10) for offset in range(6)]
+        paths.append(_path((52.0, 10.0, 1.0)))
+        metadata = [
+            {"year": 2025 + index % 2, "aircraft_registration": "D-EAGJ"}
+            for index in range(len(paths))
+        ]
+        monkeypatch.setattr(exporter_module, "MIN_PATHS_PER_CHUNK", 1)
 
-        merged = YearAggregate()
-        merged.merge(year_a.aggregate)
-        merged.merge(year_b.aggregate)
+        trees = []
+        for cpu_count in (1, 4):
+            output_dir = tmp_path / str(cpu_count)
+            with patch(
+                "kml_heatmap.data_exporter.os.cpu_count", return_value=cpu_count
+            ):
+                export_all_data(
+                    paths,
+                    metadata,
+                    [],
+                    output_dir=str(output_dir),
+                    aircraft_data={"D-EAGJ": "Katana"},
+                )
+            trees.append(
+                {
+                    path.relative_to(output_dir).as_posix(): path.read_bytes()
+                    for path in sorted(output_dir.rglob("*"))
+                    if path.is_file()
+                }
+            )
 
-        assert merged == one_year.aggregate
+        assert sorted(trees[0]) == [
+            "2025/data.js",
+            "2026/data.js",
+            "airports.js",
+            "metadata.js",
+        ]
+        assert trees[0] == trees[1]
