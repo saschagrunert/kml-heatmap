@@ -15,7 +15,6 @@ __version__ = "1.0.0"
 _LAZY_EXPORTS = {
     "KMLHeatmapError": ".exceptions",
     "KMLParseError": ".exceptions",
-    "build_statistics": ".statistics",
     "check_kml_obfuscated": ".obfuscate",
     "create_progressive_heatmap": ".renderer",
     "deduplicate_airports": ".airports",

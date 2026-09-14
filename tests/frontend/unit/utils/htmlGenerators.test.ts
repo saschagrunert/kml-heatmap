@@ -117,7 +117,7 @@ describe("htmlGenerators", () => {
       expect(html).toContain('class="popup-header kh-popup-header-airport"');
       expect(html).toContain("Frankfurt EDDF");
       expect(html).toContain('href="https://www.google.com/maps?q=50.1,8.67"');
-      expect(html).toContain('class="airport-popup-link kh-popup-link"');
+      expect(html).toContain('class="kh-popup-link"');
       expect(html).toContain(params.latDms);
       expect(html).toContain('class="kh-popup-metric-label">Total Flights');
       expect(html).toContain('class="popup-metric-value kh-popup-accent">20');

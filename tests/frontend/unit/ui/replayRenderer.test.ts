@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  AUTO_ZOOM_SETTLE_MS,
+  RECENTER_PAN_DURATION_S,
   ReplayRenderer,
   SEEK_PAN_THROTTLE_MS,
   findSegmentIndexAtTime,
   formatTrack,
+  unwrapRotation,
+  zoomOutSteps,
 } from "../../../../kml_heatmap/frontend/ui/replayRenderer";
+import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import { ReplayState } from "../../../../kml_heatmap/frontend/ui/replayState";
 import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
 import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
@@ -74,6 +79,45 @@ describe("formatTrack", () => {
     expect(formatTrack(-45)).toBe("315°");
     expect(formatTrack(400)).toBe("040°");
     expect(formatTrack(360)).toBe("000°");
+  });
+});
+
+describe("unwrapRotation", () => {
+  it("takes the first heading as it is", () => {
+    expect(unwrapRotation(null, 300)).toBe(300);
+  });
+
+  it("turns the short way across north in both directions", () => {
+    expect(unwrapRotation(350, 10)).toBe(370);
+    expect(unwrapRotation(10, 350)).toBe(-10);
+    expect(unwrapRotation(-45, 314)).toBe(-46);
+  });
+
+  it("keeps turning from an angle that has already wrapped", () => {
+    expect(unwrapRotation(725, 10)).toBe(730);
+  });
+});
+
+describe("zoomOutSteps", () => {
+  const size = { x: 800, y: 600 };
+
+  it("takes one level while the airplane is at most twice as far out", () => {
+    expect(zoomOutSteps({ x: 400, y: 300 }, size)).toBe(1);
+    expect(zoomOutSteps({ x: -10, y: 300 }, size)).toBe(1);
+    expect(zoomOutSteps({ x: 400, y: -300 }, size)).toBe(1);
+  });
+
+  it("takes a level for every further doubling", () => {
+    expect(zoomOutSteps({ x: 400, y: -301 }, size)).toBe(2);
+    expect(zoomOutSteps({ x: 2200, y: 300 }, size)).toBe(3);
+  });
+
+  it("stays within the four levels Leaflet animates", () => {
+    expect(zoomOutSteps({ x: 400, y: -100_000 }, size)).toBe(4);
+  });
+
+  it("takes one level for a map without a size", () => {
+    expect(zoomOutSteps({ x: 0, y: 0 }, { x: 0, y: 0 })).toBe(1);
   });
 });
 
@@ -451,6 +495,33 @@ describe("ReplayRenderer", () => {
       expect(mockReplayManager.state.lastBearing).not.toBeNull();
     });
 
+    it("turns the icon the short way when the heading crosses north", () => {
+      const iconDiv = document.createElement("div");
+      iconDiv.className = "replay-airplane-icon";
+      const iconElement = document.createElement("div");
+      iconElement.appendChild(iconDiv);
+      const markerObj = L.marker([0, 0]);
+      (markerObj.getElement as AnyMock).mockReturnValue(iconElement);
+      mockReplayManager.state.airplaneMarker = markerObj;
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+      const bearing = vi.spyOn(replayFeature, "calculateSmoothedBearing");
+
+      bearing.mockReturnValue(350);
+      callUpdateDisplay();
+      expect(iconDiv.style.transform).toContain("rotate(305deg)");
+
+      // 350 to 10 degrees is a 20 degree turn: 325, not a transition back
+      // through 180 to -35
+      bearing.mockReturnValue(10);
+      callUpdateDisplay();
+      expect(iconDiv.style.transform).toContain("rotate(325deg)");
+
+      bearing.mockReturnValue(340);
+      callUpdateDisplay();
+      expect(iconDiv.style.transform).toContain("rotate(295deg)");
+    });
+
     it("keeps the last bearing when no smoothed bearing is available", () => {
       vi.spyOn(replayFeature, "calculateSmoothedBearing").mockReturnValue(null);
       mockReplayManager.state.lastBearing = 90;
@@ -581,11 +652,11 @@ describe("ReplayRenderer", () => {
 
     it("auto-zooms out after frequent recenters", () => {
       mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
+      mockMap["getZoom"]!.mockReturnValue(12);
 
       mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
       mockReplayManager.state.playing = true;
       mockReplayManager.state.autoZoom = true;
-      mockReplayManager.state.lastZoom = 12;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
@@ -598,20 +669,95 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(mockMap["setZoom"]).toHaveBeenCalledWith(
+      // Around the airplane: Leaflet puts the view back on the point it
+      // zoomed around once the animation ends
+      expect(mockMap["setView"]).toHaveBeenCalledWith(
+        [50.01, 8.51],
         11,
         expect.objectContaining({ animate: true }),
       );
-      expect(mockReplayManager.state.lastZoom).toBe(11);
+      expect(mockMap["setZoom"]).not.toHaveBeenCalled();
       expect(mockReplayManager.state.recenterTimestamps).toEqual([]);
     });
 
-    it("does not zoom out below zoom level 9", () => {
+    it("zooms out from the map's own zoom, which the user may have changed", () => {
+      // Replay opened with auto-zoom at 16, then the user zoomed out to 12.5:
+      // a remembered 16 made "zoom out" set 15
+      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
+      mockMap["getZoom"]!.mockReturnValue(12.5);
+      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      mockReplayManager.state.playing = true;
+      mockReplayManager.state.autoZoom = true;
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+      const now = Date.now();
+      mockReplayManager.state.recenterTimestamps = [now - 900, now - 600];
+
+      callUpdateDisplay();
+
+      expect(mockMap["setView"]).toHaveBeenCalledWith(
+        [50.01, 8.51],
+        11.5,
+        expect.anything(),
+      );
+    });
+
+    it("counts one recenter per pan, not one per frame of it", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(10_000);
       mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
       mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
       mockReplayManager.state.playing = true;
       mockReplayManager.state.autoZoom = true;
-      mockReplayManager.state.lastZoom = 9;
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+
+      // Twenty frames (320 ms) of the airplane near the edge while the pan
+      // runs: the map follows on every frame, but it is one recenter and
+      // no zoom. Counted per frame this fired a burst of zoom-outs.
+      for (let frame = 0; frame < 20; frame++) {
+        callUpdateDisplay();
+        vi.advanceTimersByTime(16);
+      }
+      expect(mockMap["panTo"]).toHaveBeenCalledTimes(20);
+      expect(mockReplayManager.state.recenterTimestamps).toHaveLength(1);
+      expect(mockMap["setView"]).not.toHaveBeenCalled();
+
+      // Once a pan has had its time, still being at the edge is a new one
+      vi.advanceTimersByTime(RECENTER_PAN_DURATION_S * 1000);
+      callUpdateDisplay();
+      expect(mockReplayManager.state.recenterTimestamps).toHaveLength(2);
+    });
+
+    it("pans without animation for reduced motion", () => {
+      vi.spyOn(motion, "prefersReducedMotion").mockReturnValue(true);
+      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
+      mockMap["getZoom"]!.mockReturnValue(12);
+      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      mockReplayManager.state.playing = true;
+      mockReplayManager.state.autoZoom = true;
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+      const now = Date.now();
+      mockReplayManager.state.recenterTimestamps = [now - 2000, now - 1000];
+
+      callUpdateDisplay();
+
+      expect(mockMap["panTo"]).toHaveBeenCalledWith(
+        [50.01, 8.51],
+        expect.objectContaining({ animate: false }),
+      );
+      expect(mockMap["setView"]).toHaveBeenCalledWith([50.01, 8.51], 11, {
+        animate: false,
+      });
+    });
+
+    it("does not zoom out below zoom level 9", () => {
+      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
+      mockMap["getZoom"]!.mockReturnValue(9);
+      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      mockReplayManager.state.playing = true;
+      mockReplayManager.state.autoZoom = true;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
       const now = Date.now();
@@ -623,7 +769,60 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(mockMap["setZoom"]).not.toHaveBeenCalled();
+      expect(mockMap["setView"]).not.toHaveBeenCalled();
+    });
+
+    it("zooms out at once when the airplane has left the map", () => {
+      // At 200x the pan fell behind at zoom 16, and waiting for three
+      // recenters left the airplane above the map for over a second
+      vi.useFakeTimers();
+      vi.setSystemTime(10_000);
+      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 400, y: -20 });
+      mockMap["getZoom"]!.mockReturnValue(16);
+      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      mockReplayManager.state.playing = true;
+      mockReplayManager.state.autoZoom = true;
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+
+      callUpdateDisplay();
+      expect(mockMap["setView"]).toHaveBeenCalledTimes(1);
+      expect(mockMap["setView"]).toHaveBeenCalledWith(
+        [50.01, 8.51],
+        15,
+        expect.objectContaining({ animate: true }),
+      );
+
+      // Still outside while Leaflet animates that zoom: no second call,
+      // which Leaflet would drop
+      mockMap["getZoom"]!.mockReturnValue(15);
+      vi.advanceTimersByTime(AUTO_ZOOM_SETTLE_MS - 50);
+      callUpdateDisplay();
+      expect(mockMap["setView"]).toHaveBeenCalledTimes(1);
+
+      // Once it has ended, further out takes more than one level
+      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 400, y: -700 });
+      vi.advanceTimersByTime(50);
+      callUpdateDisplay();
+      expect(mockMap["setView"]).toHaveBeenCalledTimes(2);
+      expect(mockMap["setView"]).toHaveBeenLastCalledWith(
+        [50.01, 8.51],
+        13,
+        expect.anything(),
+      );
+    });
+
+    it("leaves the zoom alone off the map when auto-zoom is off", () => {
+      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: -50, y: 300 });
+      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      mockReplayManager.state.playing = true;
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+
+      callUpdateDisplay();
+
+      expect(mockMap["panTo"]).toHaveBeenCalled();
+      expect(mockMap["setView"]).not.toHaveBeenCalled();
     });
 
     it("adds marker to map if missing", () => {

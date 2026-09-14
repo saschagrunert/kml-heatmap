@@ -261,10 +261,21 @@ describe("FilterManager", () => {
     it("preserves selected paths when initializing", async () => {
       mockApp.isInitializing = true;
       mockApp.selectedPathIds.add(1);
+      mockApp.isolateSelection = true;
 
       await filterManager.filterByYear();
 
       expect(mockApp.selectedPathIds.size).toBe(1);
+      expect(mockApp.isolateSelection).toBe(true);
+    });
+
+    it("leaves isolate mode together with the selection", async () => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.isolateSelection = true;
+
+      await filterManager.filterByYear();
+
+      expect(mockApp.isolateSelection).toBe(false);
     });
 
     it("puts the dropdown back and leaves the store alone when the year fails to load", async () => {
@@ -317,6 +328,37 @@ describe("FilterManager", () => {
 
       expect(mockApp.selectedYear).toBe("2025");
       expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
+      // The newer change owns the dropdown
+      expect(yearSelect.value).toBe("2025");
+    });
+
+    it("leaves the dropdown to a newer year change that is still loading", async () => {
+      addYearOption("2024");
+      addYearOption("2023");
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      let resolveFirst: (d: KMLDataset) => void = () => {};
+      mockApp.dataManager.loadData
+        .mockImplementationOnce(
+          () =>
+            new Promise<KMLDataset>((resolve) => {
+              resolveFirst = resolve;
+            }),
+        )
+        .mockImplementationOnce(() => new Promise<KMLDataset>(() => {}));
+
+      yearSelect.value = "2024";
+      const first = filterManager.filterByYear();
+      // Back to a year that is still being requested by the first change
+      yearSelect.value = "2023";
+      void filterManager.filterByYear();
+      yearSelect.value = "2024";
+      void filterManager.filterByYear();
+      resolveFirst(year2024Data());
+      await first;
+
+      expect(yearSelect.value).toBe("2024");
     });
 
     it("does nothing if year select element doesn't exist", async () => {
@@ -376,6 +418,26 @@ describe("FilterManager", () => {
       expect(mockApp.selectedPathIds.size).toBe(1);
     });
 
+    it("leaves isolate mode in the same flush as the selection (regression)", async () => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.isolateSelection = true;
+      const select = aircraftSelect();
+      const option = document.createElement("option");
+      option.value = "D-ABCD";
+      select.appendChild(option);
+      select.value = "D-ABCD";
+      const seen: [number, boolean][] = [];
+      mockApp.store.subscribe("selectedPathIds", () => {
+        seen.push([mockApp.selectedPathIds.size, mockApp.isolateSelection]);
+      });
+
+      await filterManager.filterByAircraft();
+
+      // Isolating an empty selection left the button pressed but stuck, and
+      // the next flight click hid every other flight at once
+      expect(seen).toEqual([[0, false]]);
+    });
+
     it("supersedes a year change that is still loading", async () => {
       addYearOption("2024");
       const yearSelect = document.getElementById(
@@ -400,6 +462,8 @@ describe("FilterManager", () => {
       expect(mockApp.selectedYear).toBe("all");
       expect(mockApp.currentData).toBe(before);
       expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
+      // ... and so is the year the dropdown showed for it (regression)
+      expect(yearSelect.value).toBe("all");
     });
 
     it("does nothing if aircraft select element doesn't exist", async () => {

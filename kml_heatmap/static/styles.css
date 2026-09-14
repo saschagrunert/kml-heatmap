@@ -283,11 +283,12 @@ body {
   outline-offset: 2px;
 }
 
-/* Pressed / selected: the one place the accent enters the chrome */
+/* Pressed / selected: the one place the accent enters the chrome. The
+   `active` class is the only hook: the toggles set it next to aria-pressed
+   (utils/buttonState.ts), and the statistics disclosure and the mobile tabs
+   that open a sheet have no aria-pressed to key off. */
 .btn-surface.active,
-.btn-surface[aria-pressed="true"],
-.control-btn.active,
-.control-btn[aria-pressed="true"] {
+.control-btn.active {
   background-color: rgba(var(--color-accent-blue-rgb), 0.14);
   border-color: var(--color-accent-blue);
   color: var(--color-text);
@@ -295,9 +296,7 @@ body {
 }
 @media (hover: hover) {
   .btn-surface.active:hover,
-  .btn-surface[aria-pressed="true"]:hover,
-  .control-btn.active:hover,
-  .control-btn[aria-pressed="true"]:hover {
+  .control-btn.active:hover {
     background-color: rgba(var(--color-accent-blue-rgb), 0.14);
   }
 }
@@ -356,7 +355,7 @@ body {
 #right-buttons[hidden] {
   display: none;
 }
-/* Same reason: `.replay-btn` sets a display of its own, so the play and
+/* Same reason: `.btn-surface` sets a display of its own, so the play and
    pause controls need the attribute to outrank it. */
 .replay-btn[hidden] {
   display: none;
@@ -365,9 +364,6 @@ body {
 /* Initial state classes. `.initially-hidden` is defined at the end of the
    file so it beats the component rules that set a display of their own. */
 .initially-half-opacity {
-  opacity: 0.5;
-}
-.initially-dimmed {
   opacity: 0.5;
 }
 
@@ -504,16 +500,21 @@ body {
 .control-row > .control-btn select:focus-visible {
   outline: none;
 }
-.control-row:has(> .control-btn.active),
-.control-row:has(> .control-btn[aria-pressed="true"]) {
+.control-row:has(> .control-btn.active) {
   background-color: rgba(var(--color-accent-blue-rgb), 0.14);
   box-shadow: inset 2px 0 0 0 var(--color-accent-blue);
 }
 @media (hover: hover) {
-  .control-row:hover:has(> .control-btn.active),
-  .control-row:hover:has(> .control-btn[aria-pressed="true"]) {
+  .control-row:hover:has(> .control-btn.active) {
     background-color: rgba(var(--color-accent-blue-rgb), 0.14);
   }
+}
+/* A disabled toggle still shows whether its layer is on, at half strength
+   like the rest of a disabled control rather than as a live selection */
+.control-row:has(> .control-btn.active:disabled),
+.control-row:hover:has(> .control-btn.active:disabled) {
+  background-color: rgba(var(--color-accent-blue-rgb), 0.07);
+  box-shadow: inset 2px 0 0 0 rgba(var(--color-accent-blue-rgb), 0.5);
 }
 .control-row:has(> .control-btn:disabled) {
   color: var(--color-text-muted);
@@ -623,26 +624,11 @@ body {
   /* Keep the transport row clear of the exit control in the corner */
   padding-right: 48px;
 }
+/* The transport controls are `.btn-surface` controls; this only centres
+   their content */
 .replay-btn {
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  gap: var(--space-sm);
-  background-color: var(--color-bg-raised);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  padding: var(--space-xs) var(--space-md);
-  min-height: var(--btn-min-height);
   cursor: pointer;
-  font-size: var(--text-md);
-  font-weight: 500;
-  box-sizing: border-box;
-  touch-action: manipulation;
-  transition:
-    background-color var(--duration-fast) ease,
-    border-color var(--duration-base) ease,
-    box-shadow var(--duration-fast) ease;
 }
 /* Icon-only buttons (play/pause/stop): square, sized off the icon scale */
 #replay-play-btn,
@@ -653,21 +639,6 @@ body {
   padding: 0;
   min-width: 44px;
   line-height: 1;
-}
-@media (hover: hover) {
-  .replay-btn:hover {
-    background-color: var(--color-bg-active);
-  }
-}
-.replay-btn.active,
-.replay-btn[aria-pressed="true"] {
-  background-color: rgba(var(--color-accent-blue-rgb), 0.14);
-  border-color: var(--color-accent-blue);
-  box-shadow: inset 2px 0 0 0 var(--color-accent-blue);
-}
-.replay-btn:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
-  outline-offset: 2px;
 }
 #replay-time-display {
   color: var(--color-text);
@@ -916,6 +887,47 @@ body.stats-open #left-buttons {
    would leave an empty band on the left and clip the map on the right. */
 #wrapped-map-container #map {
   left: 0;
+}
+/* Replay above the breakpoint. The panel is centred on the map, not on the
+   viewport, where it ran over the rail. */
+@media (min-width: 768px) {
+  body.stats-open #replay-controls {
+    left: calc(50% + var(--stats-rail-w) / 2);
+    /* Just above the breakpoint the map beside the rail (452 px at 768 px)
+       is narrower than the panel, which hung past both of its edges */
+    max-width: calc(100% - var(--stats-rail-w) - 2 * var(--edge-gap));
+  }
+}
+/* The legend keeps its corner beside the panel as long as the two fit side
+   by side, and stands on top of the panel only in windows too narrow for
+   that: the panel covered the scale's labels there. With the panel about
+   460 px wide and the legend up to 225 px (41,000 ft labels), they meet
+   below about 960 px, and below about 1340 px beside the rail, where the
+   panel is centred on the narrower map. ReplayManager measures
+   --replay-panel-h. */
+@media (min-width: 768px) and (max-width: 959.98px) {
+  body.replay-active .color-legend {
+    bottom: calc(
+      var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
+        var(--space-sm)
+    );
+  }
+}
+@media (min-width: 960px) and (max-width: 1339.98px) {
+  body.stats-open.replay-active .color-legend {
+    bottom: calc(
+      var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
+        var(--space-sm)
+    );
+  }
+}
+/* Centred beside the rail, the panel covers the GitHub link in the bottom
+   right corner until the window is about 900 px wide. The link steps aside
+   for the replay there, as it does on a phone. */
+@media (min-width: 768px) and (max-width: 899.98px) {
+  body.stats-open.replay-active #github-footer {
+    visibility: hidden;
+  }
 }
 
 /* ==========================================================================
@@ -1676,6 +1688,8 @@ body.stats-open #left-buttons {
   font-weight: 500;
   color: var(--color-text);
   white-space: nowrap;
+  max-width: 100%;
+  box-sizing: border-box;
   transition:
     transform var(--duration-base) ease,
     box-shadow var(--duration-base) ease,
@@ -1688,14 +1702,22 @@ body.stats-open #left-buttons {
     border-color: rgba(var(--color-accent-pink-rgb), 0.8);
   }
 }
+/* The name is the part that gives way in a narrow pill. A shrinkable code
+   was squeezed to 20 px beside a wrapped name and ran into its text. */
 .wrapped-square-card .destination-code {
+  flex-shrink: 0;
   font-family: var(--font-mono);
   font-weight: 600;
   color: var(--color-text);
   margin-right: var(--space-xs);
 }
+/* A long airport name wraps inside its pill. Kept on one line, a 39
+   character name made the pill wider than the card on a phone and the
+   dialog scrolled sideways. */
 .wrapped-square-card .destination-name {
-  white-space: nowrap;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: var(--color-text-secondary);
 }
 .wrapped-square-card .destination-tag {
@@ -2069,11 +2091,6 @@ body.stats-open #left-buttons {
   display: none;
 }
 
-/* Airport popup link hover */
-.airport-popup-link:hover {
-  text-decoration: underline;
-}
-
 /* ==========================================================================
    Popup content
    ========================================================================== */
@@ -2169,38 +2186,45 @@ body.stats-open #left-buttons {
 /* ==========================================================================
    Toast notifications (above the modal)
    ========================================================================== */
-.toast-notification {
+/* Toasts stack in one fixed column, newest at the bottom, instead of each
+   being drawn at the same fixed position over the one before it */
+.toast-stack {
   position: fixed;
   bottom: calc(var(--space-lg) + var(--safe-bottom));
   left: 50%;
-  transform: translateX(-50%) translateY(20px);
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  width: max-content;
+  max-width: min(400px, calc(100vw - var(--space-lg) * 2));
+  pointer-events: none;
+}
+.toast-notification {
+  transform: translateY(20px);
   background-color: rgba(var(--color-bg-secondary-rgb), 0.95);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
   padding: var(--space-md) var(--space-lg);
   font-size: var(--text-base);
-  z-index: var(--z-toast);
   opacity: 0;
   box-shadow: var(--shadow-panel);
   transition:
     opacity var(--duration-base) ease,
     transform var(--duration-base) ease;
-  pointer-events: none;
-  max-width: min(400px, calc(100vw - var(--space-lg) * 2));
+  max-width: 100%;
   box-sizing: border-box;
   text-align: center;
 }
 .toast-notification.toast-visible {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateY(0);
 }
 .toast-notification.toast-error {
   border-color: var(--color-error);
-}
-
-.kh-popup-link:hover {
-  text-decoration: underline;
 }
 
 /* ==========================================================================
@@ -2214,6 +2238,47 @@ body.stats-open #left-buttons {
 .mobile-sheet,
 .sheet-scrim {
   display: none;
+}
+
+/* ==========================================================================
+   Wrapped, stacked (narrow and medium viewports)
+
+   Side by side the dialog needs the 500px cards, the gap, the 400px map
+   minimum and both gutters: 1004px. Below that the map was cut off, which
+   covers iPads in either orientation and landscape phones, so the dialog
+   stacks until the row fits.
+   ========================================================================== */
+@media (max-width: 1023.98px) {
+  /* The map is a card of its own, so the dialog scrolls as one column and
+     the desktop mask and inner scroller are handed back */
+  #wrapped-content {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  #wrapped-cards-column {
+    width: 100%;
+    overflow: visible;
+    mask-image: none;
+  }
+  .wrapped-square-card {
+    width: 100%;
+    height: auto;
+    box-sizing: border-box;
+  }
+  #wrapped-map-container {
+    width: 100%;
+    padding-bottom: 100%;
+    position: relative;
+    height: 0;
+    min-width: 0;
+  }
+  #wrapped-map-container > * {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+  }
 }
 
 /* ==========================================================================
@@ -2276,8 +2341,7 @@ body.stats-open #left-buttons {
     outline: 2px solid var(--color-accent-blue);
     outline-offset: -2px;
   }
-  .mobile-tab.active,
-  .mobile-tab[aria-pressed="true"] {
+  .mobile-tab.active {
     color: var(--color-accent-blue);
   }
   .mobile-tab:disabled {
@@ -2402,12 +2466,10 @@ body.stats-open #left-buttons {
     opacity: 0;
     transition: opacity var(--duration-fast) ease;
   }
-  .sheet-row.active::before,
-  .sheet-row[aria-pressed="true"]::before {
+  .sheet-row.active::before {
     opacity: 1;
   }
-  .sheet-row.active .icon,
-  .sheet-row[aria-pressed="true"] .icon {
+  .sheet-row.active .icon {
     color: var(--color-accent-blue);
   }
   .sheet-row:disabled,
@@ -2655,7 +2717,7 @@ body.stats-open #left-buttons {
   }
   body:has(.mobile-bar) .color-legend,
   body:has(.mobile-bar) #replay-controls,
-  body:has(.mobile-bar) .toast-notification {
+  body:has(.mobile-bar) .toast-stack {
     bottom: calc(var(--mobile-bar-h) + var(--space-sm) + var(--safe-bottom));
   }
   /* The statistics sheet stops above the bar rather than painting over it:
@@ -2690,40 +2752,11 @@ body.stats-open #left-buttons {
     font-size: var(--text-md);
     padding: var(--space-xs) var(--space-sm);
   }
-  /* Stacked layout: the map is a card of its own, so the dialog scrolls as
-     one column and the desktop mask and inner scroller are handed back */
-  #wrapped-content {
-    flex-direction: column;
-    gap: var(--space-lg);
-    overflow-y: auto;
-    padding: 0 var(--wrapped-gutter)
-      calc(var(--wrapped-gutter) + var(--safe-bottom));
-  }
   #wrapped-cards-column {
-    width: 100%;
     gap: var(--space-base);
-    overflow: visible;
-    mask-image: none;
   }
   .wrapped-square-card {
-    width: 100%;
-    height: auto;
     padding: var(--space-base);
-    box-sizing: border-box;
-  }
-  #wrapped-map-container {
-    width: 100%;
-    padding-bottom: 100%;
-    position: relative;
-    height: 0;
-    min-width: 0;
-  }
-  #wrapped-map-container > * {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
   }
   .wrapped-square-card h1 {
     word-wrap: break-word;
@@ -2779,9 +2812,6 @@ body.stats-open #left-buttons {
     padding: var(--space-xs) var(--space-md);
     font-size: var(--text-sm);
   }
-  .wrapped-square-card .destination-code {
-    min-width: 0;
-  }
   .wrapped-square-card .fleet-aircraft-registration,
   .wrapped-square-card .fleet-aircraft-time {
     font-size: var(--text-sm);
@@ -2821,6 +2851,9 @@ body.stats-open #left-buttons {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
+}
+.kh-popup-link:hover {
+  text-decoration: underline;
 }
 .kh-popup-link:focus-visible {
   outline: 2px solid var(--color-accent-blue);
@@ -3130,8 +3163,7 @@ body.stats-open #left-buttons {
    Initial hidden state
 
    Last in the file on purpose: `.initially-hidden` has to beat the display
-   of `.control-row`, `.btn-surface` and `.replay-btn`, which it ties with
-   on specificity.
+   of `.control-row` and `.btn-surface`, which it ties with on specificity.
    ========================================================================== */
 .initially-hidden {
   display: none;

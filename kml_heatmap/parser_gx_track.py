@@ -118,6 +118,7 @@ def process_gx_track(
     coordinates: FlightPath,
     path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
+    aircraft_info: dict[str, str | None],
 ) -> None:
     """Process all gx:Track elements of a KML document, one path per track."""
     if not tracks:
@@ -154,6 +155,8 @@ def process_gx_track(
             )
 
         path_groups.append(path)
-        path_metadata.append(_build_path_metadata_dict(kml_file, path[0], track_meta))
+        path_metadata.append(
+            _build_path_metadata_dict(kml_file, path[0], track_meta, aircraft_info)
+        )
 
     logger.debug("Parsed %d gx:Track element(s) in %s", len(tracks), kml_file)

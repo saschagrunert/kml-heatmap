@@ -164,9 +164,10 @@ export function findHomeBase(airportCounts: AirportCounts): string | null {
 /**
  * Determine which airports are visible for the current filter and selection.
  *
- * - no filter and no selection: every airport (returns null)
+ * - no filter and no isolation: every airport (returns null)
  * - year/aircraft filter: airports touched by matching paths
- * - selection: airports of the selected paths are added
+ * - selection: airports of the selected paths are added, so a selection
+ *   never hides an airport the filter shows (with or without a filter)
  * - isolate mode: only airports of the selected paths
  * @returns Set of visible airport names, or null when all are visible
  */
@@ -190,7 +191,7 @@ export function calculateVisibleAirports(options: {
   const hasSelection = selectedPathIds.size > 0;
   const hasIsolation = isolateSelection && hasSelection;
 
-  if (!hasFilters && !hasSelection) {
+  if (!hasFilters && !hasIsolation) {
     return null;
   }
 

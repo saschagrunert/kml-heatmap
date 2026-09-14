@@ -13,9 +13,28 @@ import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
 import { calculateSmoothedBearing } from "../features/replay";
+import { prefersReducedMotion } from "../utils/motion";
 
 /** Minimum interval between map pans triggered by slider drags */
 export const SEEK_PAN_THROTTLE_MS = 250;
+
+/** Duration of the pan that brings the airplane back into view (seconds) */
+export const RECENTER_PAN_DURATION_S = 0.5;
+
+/** Auto-zoom does not zoom out beyond this level */
+const AUTO_ZOOM_MIN = 9;
+
+/**
+ * Most levels one auto zoom-out takes: Leaflet animates a zoom change of up
+ * to four levels (its zoomAnimationThreshold) and jumps beyond that
+ */
+const AUTO_ZOOM_MAX_STEP = 4;
+
+/**
+ * Time before auto-zoom may zoom out again (ms). Leaflet's zoom animation
+ * takes 250 ms, and a zoom asked for while it runs is dropped.
+ */
+export const AUTO_ZOOM_SETTLE_MS = 300;
 
 /** Fraction of the viewport used as the "near edge" margin for auto-panning */
 const EDGE_MARGIN_FRACTION = 0.1;
@@ -67,6 +86,40 @@ export function findSegmentIndexAtTime(
 }
 
 /**
+ * The rotation that shows `target` degrees after `previous`, turning the
+ * short way. A CSS transition tweens the icon's raw angle, so writing the
+ * heading as is spun the airplane almost a full turn whenever it crossed
+ * north (350 to 10 degrees went back through 180).
+ */
+export function unwrapRotation(
+  previous: number | null,
+  target: number,
+): number {
+  if (previous === null) return target;
+  const delta = ((((target - previous) % 360) + 540) % 360) - 180;
+  return previous + delta;
+}
+
+/**
+ * Levels to zoom out by once the airplane has left the map. It left because
+ * it outruns the pan at this zoom, and how far outside it got says by how
+ * much: each level out halves its speed on screen.
+ */
+export function zoomOutSteps(
+  point: { x: number; y: number },
+  size: { x: number; y: number },
+): number {
+  const halfX = size.x / 2;
+  const halfY = size.y / 2;
+  const ratio = Math.max(
+    Math.abs(point.x - halfX) / halfX,
+    Math.abs(point.y - halfY) / halfY,
+  );
+  if (!(ratio > 1)) return 1;
+  return Math.min(AUTO_ZOOM_MAX_STEP, Math.ceil(Math.log2(ratio)));
+}
+
+/**
  * Colour of one replay segment. Segments without a groundspeed fall back to
  * the altitude colour, so both draw paths cover exactly the same segments.
  */
@@ -88,6 +141,28 @@ export function replaySegmentColor(
       );
 }
 
+/**
+ * Draw the segment at `index` on the replay layer and push it onto the trim
+ * stack that a backward seek unwinds.
+ */
+export function drawReplaySegment(
+  state: ReplayState,
+  index: number,
+  useAirspeedColors: boolean,
+): void {
+  const segment = state.segments[index];
+  if (!segment || !state.layer) return;
+
+  const polyline = L.polyline(segment.coords ?? [], {
+    color: replaySegmentColor(state, segment, useAirspeedColors),
+    weight: 3,
+    opacity: 0.8,
+  }).addTo(state.layer);
+
+  state.drawnLayers.push(polyline);
+  state.lastDrawnIndex = index;
+}
+
 /** The last values written to the transport row, so a frame that changes
  * nothing visible writes nothing */
 interface TransportCache {
@@ -107,6 +182,12 @@ export class ReplayRenderer {
   private iconRoot: HTMLElement | null = null;
   private iconDiv: HTMLElement | null = null;
   private lastTransform = "";
+  /** Unwrapped rotation of the icon in degrees (see unwrapRotation) */
+  private rotation: number | null = null;
+  /** Segment index the airplane popup content was last built for */
+  private popupIndex = -1;
+  /** Wall-clock time before which auto-zoom does not zoom out again */
+  private autoZoomSettlesAt = 0;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -125,6 +206,7 @@ export class ReplayRenderer {
       const found = root?.querySelector(".replay-airplane-icon");
       this.iconDiv = found instanceof HTMLElement ? found : null;
       this.lastTransform = "";
+      this.rotation = null;
     }
     return this.iconDiv;
   }
@@ -223,6 +305,7 @@ export class ReplayRenderer {
     const idx = index ?? findSegmentIndexAtTime(segments, state.currentTime);
     const currentSegment = segments[idx] ?? segments[0];
     if (!currentSegment) return;
+    this.popupIndex = idx;
 
     const popupContent = generateSegmentPopupHtml({
       segment: currentSegment,
@@ -237,13 +320,26 @@ export class ReplayRenderer {
     const popup = state.airplaneMarker.getPopup();
     if (!popup) {
       state.airplaneMarker.bindPopup(popupContent, {
-        autoPanPadding: [50, 50],
+        autoPan: !state.playing,
       });
     } else {
       popup.setContent(popupContent);
     }
 
-    state.airplaneMarker.openPopup();
+    if (!state.airplaneMarker.isPopupOpen()) state.airplaneMarker.openPopup();
+  }
+
+  /**
+   * Let the airplane popup pan the map only while the replay is paused.
+   * Leaflet's autoPan runs on every move of the marker the popup is bound
+   * to and stops the map's running pan each time, so while playing the map
+   * never caught up with the airplane. Without it when paused, though, a
+   * click on an airplane near the top edge opened the popup off the map.
+   */
+  syncPopupAutoPan(replayManager: ReplayManager): void {
+    const state = replayManager.state;
+    const popup = state.airplaneMarker?.getPopup();
+    if (popup) popup.options.autoPan = !state.playing;
   }
 
   updateDisplay(
@@ -313,37 +409,26 @@ export class ReplayRenderer {
       return;
     }
 
-    let currentPos: [number, number];
-    let bearing: number;
-
-    if (nextSegment && (lastSegment.time ?? 0) < currentTime) {
-      // Between two segment times the airplane is somewhere along the next
-      // segment: from the end of the last one, which is also where the next
-      // one starts, towards the end of the next one
-      const timeFraction = Math.min(
-        (currentTime - (lastSegment.time ?? 0)) /
-          Math.max((nextSegment.time ?? 0) - (lastSegment.time ?? 0), 0.001),
-        1,
-      );
-      const lat1 = lastSegment.coords?.[1]?.[0] ?? 0;
-      const lon1 = lastSegment.coords?.[1]?.[1] ?? 0;
-      const lat2 = nextSegment.coords?.[1]?.[0] ?? 0;
-      const lon2 = nextSegment.coords?.[1]?.[1] ?? 0;
-
-      currentPos = [
-        lat1 + (lat2 - lat1) * timeFraction,
-        lon1 + (lon2 - lon1) * timeFraction,
-      ];
-      bearing = calculateBearing(lat1, lon1, lat2, lon2);
-    } else {
-      // Use end of last segment
-      currentPos = lastSegment.coords?.[1] ?? [0, 0];
-      const lat1 = lastSegment.coords?.[0]?.[0] ?? 0;
-      const lon1 = lastSegment.coords?.[0]?.[1] ?? 0;
-      const lat2 = lastSegment.coords?.[1]?.[0] ?? 0;
-      const lon2 = lastSegment.coords?.[1]?.[1] ?? 0;
-      bearing = calculateBearing(lat1, lon1, lat2, lon2);
+    // A segment's time is when it starts, so until the next segment's time
+    // the airplane is on this one, moving from its first point to its
+    // second. The last segment has no end time and is shown at its end.
+    const lat1 = lastSegment.coords?.[0]?.[0] ?? 0;
+    const lon1 = lastSegment.coords?.[0]?.[1] ?? 0;
+    const lat2 = lastSegment.coords?.[1]?.[0] ?? 0;
+    const lon2 = lastSegment.coords?.[1]?.[1] ?? 0;
+    let fraction = 1;
+    if (nextSegment) {
+      const start = lastSegment.time ?? 0;
+      const duration = (nextSegment.time ?? 0) - start;
+      if (duration > 0) {
+        fraction = Math.min(Math.max((currentTime - start) / duration, 0), 1);
+      }
     }
+    const currentPos: [number, number] = [
+      lat1 + (lat2 - lat1) * fraction,
+      lon1 + (lon2 - lon1) * fraction,
+    ];
+    let bearing = calculateBearing(lat1, lon1, lat2, lon2);
 
     // Smooth the heading by looking ahead several segments
     const smoothedBearing = calculateSmoothedBearing(segments, currentIndex, 5);
@@ -366,15 +451,21 @@ export class ReplayRenderer {
     // heading as last frame is not written again
     const iconDiv = this.airplaneIcon(marker);
     if (iconDiv) {
-      const transform = "translate3d(0,0,0) rotate(" + (bearing - 45) + "deg)";
+      this.rotation = unwrapRotation(this.rotation, bearing - 45);
+      const transform = "translate3d(0,0,0) rotate(" + this.rotation + "deg)";
       if (transform !== this.lastTransform) {
         this.lastTransform = transform;
         iconDiv.style.transform = transform;
       }
     }
 
-    // Update popup content if it is open
-    if (marker.getPopup() && marker.isPopupOpen()) {
+    // The popup describes a segment, so an open one is rebuilt only once the
+    // airplane has reached another segment, not on every frame
+    if (
+      marker.getPopup() &&
+      marker.isPopupOpen() &&
+      currentIndex !== this.popupIndex
+    ) {
       this.updateAirplanePopup(replayManager, currentIndex);
     }
   }
@@ -427,17 +518,7 @@ export class ReplayRenderer {
       const seg = segments[i];
       if (!seg) continue;
       if ((seg.time ?? 0) > state.currentTime) break;
-
-      const color = replaySegmentColor(state, seg, useAirspeedColors);
-
-      const polyline = L.polyline(seg.coords ?? [], {
-        color,
-        weight: 3,
-        opacity: 0.8,
-      }).addTo(layer);
-
-      state.drawnLayers.push(polyline);
-      state.lastDrawnIndex = i;
+      drawReplaySegment(state, i, useAirspeedColors);
     }
   }
 
@@ -460,7 +541,7 @@ export class ReplayRenderer {
   /**
    * Pan the map when the airplane approaches the viewport edge. During
    * slider drags pans are throttled and not animated; auto zoom-out only
-   * reacts to recenters that happen while playing.
+   * happens while playing.
    */
   private keepAirplaneInView(
     replayManager: ReplayManager,
@@ -483,13 +564,11 @@ export class ReplayRenderer {
       point.y > mapSize.y - marginY;
     if (!nearEdge) return;
 
+    const outsideViewport =
+      point.x < 0 || point.x > mapSize.x || point.y < 0 || point.y > mapSize.y;
+
     const now = Date.now();
     if (isManualSeek) {
-      const outsideViewport =
-        point.x < 0 ||
-        point.x > mapSize.x ||
-        point.y < 0 ||
-        point.y > mapSize.y;
       const throttled = now - state.lastSeekPanTime < SEEK_PAN_THROTTLE_MS;
       if (throttled && !outsideViewport) return;
       state.lastSeekPanTime = now;
@@ -497,31 +576,53 @@ export class ReplayRenderer {
       return;
     }
 
+    // The pan follows the airplane on every frame it is near the edge, which
+    // keeps a fast replay in view
+    const animate = !prefersReducedMotion();
     map.panTo(currentPos, {
-      animate: true,
-      duration: 0.5,
+      animate,
+      duration: RECENTER_PAN_DURATION_S,
       easeLinearity: 0.25,
       noMoveStart: true,
     });
 
-    const cutoffTime = now - 30000;
-    state.recenterTimestamps = state.recenterTimestamps.filter(
-      (ts) => ts > cutoffTime,
-    );
-    state.recenterTimestamps.push(now);
+    // Those frames are one recenter, though, until a pan had its time to
+    // move the map. Counted per frame, three frames in a row fired a burst
+    // of zoom-outs that Leaflet dropped during its zoom animation.
+    const newRecenter = now >= state.recenterPanEndsAt;
+    if (newRecenter) {
+      state.recenterPanEndsAt = now + RECENTER_PAN_DURATION_S * 1000;
+      const cutoffTime = now - 30000;
+      state.recenterTimestamps = state.recenterTimestamps.filter(
+        (ts) => ts > cutoffTime,
+      );
+      state.recenterTimestamps.push(now);
+    }
+    if (!state.autoZoom) return;
 
-    // Zoom out when the map had to recenter frequently in a short time
-    if (!state.autoZoom || state.recenterTimestamps.length <= 2) return;
+    // Zoom out when the map had to recenter frequently in a short time, or
+    // right away once the airplane has left the map: the pan cannot keep up
+    // at this zoom, and waiting for more recenters kept it off screen for
+    // seconds at 200x
     const fiveSecondsAgo = now - 5000;
-    const recentRecenters = state.recenterTimestamps.filter(
-      (ts) => ts >= fiveSecondsAgo,
-    );
-    if (recentRecenters.length <= 2) return;
-    if (state.lastZoom === null || state.lastZoom <= 9) return;
+    const frequent =
+      newRecenter &&
+      state.recenterTimestamps.filter((ts) => ts >= fiveSecondsAgo).length > 2;
+    if (!frequent && !outsideViewport) return;
+    if (now < this.autoZoomSettlesAt) return;
 
-    const newZoom = Math.max(9, state.lastZoom - 1);
-    map.setZoom(newZoom, { animate: true, duration: 0.5 });
-    state.lastZoom = newZoom;
+    // From the map's own zoom: a remembered level goes stale as soon as the
+    // user zooms, and "zoom out" then zoomed in
+    const zoom = map.getZoom();
+    if (zoom <= AUTO_ZOOM_MIN) return;
+    const steps = outsideViewport ? zoomOutSteps(point, mapSize) : 1;
+    // Around the airplane, not the centre: once its animation ends Leaflet
+    // puts the view back on the point it zoomed around and drops the pans
+    // made meanwhile, and the old centre had lost the airplane by then
+    map.setView(currentPos, Math.max(AUTO_ZOOM_MIN, zoom - steps), {
+      animate,
+    });
     state.recenterTimestamps = [];
+    this.autoZoomSettlesAt = now + AUTO_ZOOM_SETTLE_MS;
   }
 }

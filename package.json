@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
-    "node": ">=24"
+    "node": "^24.15.0 || >=26"
   },
   "scripts": {
     "test": "vitest run",
@@ -24,7 +24,8 @@
     "build:watch": "node build.js --watch",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:mobile": "playwright test --project=mobile"
+    "test:e2e:mobile": "playwright test --project=mobile",
+    "test:e2e:webkit": "playwright test --project=webkit"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

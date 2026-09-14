@@ -23,8 +23,13 @@ import { syncLegend, syncToggleButton } from "./utils/buttonState";
 import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
 import { invalidateMapAfterTransition } from "./utils/mapHelpers";
+import { prefersReducedMotion } from "./utils/motion";
 import { MAX_ZOOM, MIN_ZOOM } from "./utils/constants";
 import { AppStore, defineStoreAccessors } from "./state/store";
+import {
+  datasetIndex,
+  type PathIdsByAirport,
+} from "./calculations/datasetIndex";
 import type { StoreAccessors } from "./state/store";
 import type { HeatmapLayer } from "./globals";
 import type { PathInfo, PathSegment, Airport, AppState } from "./types";
@@ -43,9 +48,7 @@ export interface MapConfig {
 /**
  * Airport to paths mapping
  */
-export interface AirportToPathsMap {
-  [airportName: string]: Set<number>;
-}
+export type AirportToPathsMap = PathIdsByAirport;
 
 /**
  * Airport markers mapping
@@ -81,7 +84,8 @@ export class MapApp {
   declare airportsVisible: StoreAccessors["airportsVisible"];
   declare aviationVisible: StoreAccessors["aviationVisible"];
   declare currentData: StoreAccessors["currentData"];
-  declare fullStats: StoreAccessors["fullStats"];
+  declare aircraftModels: StoreAccessors["aircraftModels"];
+  declare hasTimingData: StoreAccessors["hasTimingData"];
   declare altitudeRange: StoreAccessors["altitudeRange"];
   declare airspeedRange: StoreAccessors["airspeedRange"];
 
@@ -101,8 +105,7 @@ export class MapApp {
   /** Shared canvas renderer for altitude/airspeed polylines */
   pathRenderer: L.Canvas;
 
-  // Selection state (non-store)
-  airportToPaths: AirportToPathsMap;
+  // Airport markers (non-store)
   airportMarkers: AirportMarkersMap;
 
   // OpenAIP layer
@@ -138,6 +141,19 @@ export class MapApp {
     return this.currentData?.path_segments ?? null;
   }
 
+  /**
+   * Paths per airport among the flights the year/aircraft filter keeps. A
+   * click on an airport selects these, so it never picks a flight the map
+   * does not show.
+   */
+  get airportToPaths(): AirportToPathsMap {
+    const data = this.currentData;
+    if (!data) return {};
+    return datasetIndex(data)
+      .filter(this.selectedYear, this.selectedAircraft)
+      .pathIdsByAirport();
+  }
+
   constructor(config: MapConfig) {
     this.store = new AppStore();
     this.config = config;
@@ -154,8 +170,7 @@ export class MapApp {
     this.airportLayer = L.layerGroup();
     this.pathRenderer = L.canvas({ padding: 0.5 });
 
-    // Selection state (non-store)
-    this.airportToPaths = {};
+    // Airport markers (non-store)
     this.airportMarkers = {};
 
     // OpenAIP layer
@@ -174,7 +189,7 @@ export class MapApp {
     this.setupStatsRail();
 
     // Load airports and metadata
-    await this.loadInitialData();
+    await loadInitialData(this);
 
     // Setup map event handlers
     this.setupEventHandlers();
@@ -281,13 +296,21 @@ export class MapApp {
       if (state.aviationVisible !== undefined) {
         this.aviationVisible = state.aviationVisible;
       }
+      // Isolating nothing is not a state the controls can leave: a link
+      // written before path ids were versioned drops its selection but still
+      // carries the isolate flag
       if (state.isolateSelection !== undefined) {
-        this.isolateSelection = state.isolateSelection;
+        this.isolateSelection =
+          state.isolateSelection && this.selectedPathIds.size > 0;
       }
     });
   }
 
   private setupMap(): void {
+    // The app passes `animate: false` to its own moves, which leaves the
+    // ones Leaflet runs itself: double click, wheel and pinch zooms, tile
+    // and marker fades and the glide after a drag
+    const animate = !prefersReducedMotion();
     this.map = L.map("map", {
       center: this.config.center,
       zoom: 10,
@@ -301,6 +324,10 @@ export class MapApp {
       // the bottom-right corner of the map
       zoomControl: false,
       attributionControl: false,
+      zoomAnimation: animate,
+      fadeAnimation: animate,
+      markerZoomAnimation: animate,
+      inertia: animate,
     });
 
     L.control
@@ -365,7 +392,10 @@ export class MapApp {
   /**
    * The store drives the toggle buttons and the colour legends: initial
    * state and every change are reflected in aria-pressed, the active class,
-   * the opacity and the legend visibility. Nothing else writes them.
+   * the opacity and the legend visibility. Replay is the one other writer
+   * while it runs: it shows the heatmap as off, clears the opacity of the
+   * toggles it disables and shows the altitude scale for its trail, and
+   * puts all three back in step with the store when it closes.
    */
   private setupButtonSync(): void {
     syncToggleButton(this.store, "heatmapVisible", "heatmap-btn");
@@ -421,20 +451,12 @@ export class MapApp {
     this.mobileBar = MobileBar.mountFor(this);
   }
 
-  async loadInitialData(): Promise<void> {
-    await loadInitialData(this);
-  }
-
   togglePathSelection(pathId: string): void {
     this.pathSelection.togglePathSelection(Number(pathId));
   }
 
   seekReplay(value: string): void {
     this.replayManager.seekReplay(value);
-  }
-
-  changeReplaySpeed(): void {
-    this.replayManager.changeReplaySpeed();
   }
 
   private setupEventHandlers(): void {

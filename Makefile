@@ -66,6 +66,12 @@ build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR
 	@test -d "$(INPUT_DIR)" || { \
 	  echo "error: input directory '$(INPUT_DIR)' not found; put your KML files there or run 'make build INPUT_DIR=path'"; \
 	  exit 1; }
+	@case "$(abspath $(OUTPUT_DIR))/" in "$(abspath $(INPUT_DIR))/"*) \
+	  echo "error: OUTPUT_DIR must not be INPUT_DIR or a directory inside it"; \
+	  exit 1;; esac
+	@case "$(abspath $(INPUT_DIR))/" in "$(abspath $(OUTPUT_DIR))/"*) \
+	  echo "error: OUTPUT_DIR must not contain INPUT_DIR, the site would be written over it"; \
+	  exit 1;; esac
 	@test "$(INPUT_MOUNT)" != "$(OUTPUT_MOUNT)" || { \
 	  echo "error: INPUT_DIR and OUTPUT_DIR must have different base names"; \
 	  exit 1; }
@@ -94,6 +100,7 @@ check-obfuscation: ## Check that the KML files in INPUT_DIR are obfuscated
 	python -m kml_heatmap.obfuscate "$(INPUT_DIR)" --check
 
 lint: ## Run linters and type checkers
+	python scripts/check_locks.py
 	ruff check .
 	mypy .
 	bandit -r kml_heatmap -ll
@@ -108,17 +115,19 @@ format: ## Run formatters
 test: ## Run the JavaScript and Python test suites with coverage
 	npm run test:coverage
 	pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml --cov-report=term
-	coverage report
 
 # The dependencies are declared once, in pyproject.toml: the runtime
 # dependencies become requirements.lock, the test and dev extras
 # requirements-test.lock. pip-tools is installed into a throwaway environment
 # rather than added to the extras, so it cannot drift into what the lock
-# files pin.
+# files pin. Its own version is pinned too, so the unattended lock workflow
+# does not install whatever pip-tools release happens to be the newest.
+PIP_TOOLS_VERSION := 7.6.1
+
 lock: ## Regenerate requirements.lock and requirements-test.lock from pyproject.toml with pip-compile
 	@tmp=$$(mktemp -d) && \
 	  python -m venv "$$tmp" && \
-	  "$$tmp/bin/pip" install --quiet --disable-pip-version-check pip-tools && \
+	  "$$tmp/bin/pip" install --quiet --disable-pip-version-check "pip-tools==$(PIP_TOOLS_VERSION)" && \
 	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
 	    --generate-hashes --strip-extras --upgrade \
 	    --output-file=requirements.lock pyproject.toml && \

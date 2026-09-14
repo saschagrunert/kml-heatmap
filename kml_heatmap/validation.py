@@ -55,8 +55,8 @@ def validate_output_dir(
     """Refuse output data directories that overlap with any input directory.
 
     The output data directory must not be, or contain, the parent directory
-    of any input file (KML files or aircraft.json), because tool-owned files
-    inside it are removed before every export. An output directory below an
+    of any input file (KML files or aircraft.json), because a run replaces or
+    removes the tool-owned files inside it. An output directory below an
     input directory is fine: ``kml-heatmap flight.kml --output-dir out`` from
     the file's own directory writes to ``out/`` without touching the inputs.
     """

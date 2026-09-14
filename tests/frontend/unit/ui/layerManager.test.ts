@@ -21,7 +21,6 @@ import type { MockPolyline } from "../../../mocks/leaflet";
 // Mock domCache
 vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
   domCache: {
-    cacheElements: vi.fn(),
     get: vi.fn((id: string) => document.getElementById(id)),
   },
 }));
@@ -147,7 +146,7 @@ describe("LayerManager", () => {
       expect(pl.options["weight"]).toBe(4);
       expect(pl.options["opacity"]).toBe(0.85);
       expect(pl.addTo).toHaveBeenCalledWith(mockApp.altitudeLayer);
-      expect(layerManager.getPolylineCount("altitude")).toBe(1);
+      expect(mockApp.altitudeLayer.layers.size).toBe(1);
     });
 
     it("merges contiguous segments with the same rounded value into one polyline", () => {
@@ -207,7 +206,7 @@ describe("LayerManager", () => {
         [49, 17],
         [49.1, 17.1],
       ]);
-      expect(layerManager.getPolylineCount("altitude")).toBe(3);
+      expect(mockApp.altitudeLayer.layers.size).toBe(3);
     });
 
     it("never merges segments of different paths", () => {
@@ -405,12 +404,12 @@ describe("LayerManager", () => {
   describe("clearLayer", () => {
     it("removes polylines and resets the tracking map", () => {
       layerManager.redrawAltitudePaths();
-      expect(layerManager.getPolylineCount("altitude")).toBe(1);
+      expect(mockApp.altitudeLayer.layers.size).toBe(1);
 
       layerManager.clearLayer("altitude");
 
       expect(mockApp.altitudeLayer.clearLayers).toHaveBeenCalledTimes(2);
-      expect(layerManager.getPolylineCount("altitude")).toBe(0);
+      expect(mockApp.altitudeLayer.layers.size).toBe(0);
     });
   });
 
@@ -503,24 +502,6 @@ describe("LayerManager", () => {
         weight: 4,
         opacity: 0.1,
       });
-    });
-  });
-
-  describe("getPathInfoMap", () => {
-    it("indexes path info by id and caches per data instance", () => {
-      const first = layerManager.getPathInfoMap();
-      expect(first.get(1)?.aircraft_registration).toBe("D-ABCD");
-      expect(layerManager.getPathInfoMap()).toBe(first);
-
-      mockApp.currentData = createDataset([{ id: 5 }]);
-      const second = layerManager.getPathInfoMap();
-      expect(second).not.toBe(first);
-      expect(second.has(5)).toBe(true);
-    });
-
-    it("returns an empty map without data", () => {
-      mockApp.currentData = null;
-      expect(layerManager.getPathInfoMap().size).toBe(0);
     });
   });
 

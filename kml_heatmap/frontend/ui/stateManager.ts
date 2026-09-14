@@ -9,9 +9,22 @@ import {
   encodeStateToUrl,
   parseUrlParams,
 } from "../state/urlState";
-import { domCache } from "../utils/domCache";
 
 const STORAGE_KEY = "kml-heatmap-state";
+
+/**
+ * Storage key of the map at this location. Every page of an origin shares
+ * one localStorage, so two maps published side by side (user.github.io/a/
+ * and /b/) would otherwise restore each other's year, view and selection.
+ * The key names the page's directory, which index.html and its folder share;
+ * a map at the root of its origin keeps the key it has always used.
+ */
+export function storageKey(
+  pathname: string = window.location.pathname,
+): string {
+  const directory = pathname.slice(0, pathname.lastIndexOf("/") + 1);
+  return directory === "/" ? STORAGE_KEY : STORAGE_KEY + ":" + directory;
+}
 
 const BOOLEAN_KEYS = [
   "heatmapVisible",
@@ -83,8 +96,11 @@ export class StateManager {
   constructor(app: MapApp) {
     this.app = app;
 
-    // Pre-cache state-related elements
-    domCache.cacheElements(["stats-panel", "wrapped-modal"]);
+    // A change made just before the page goes away would still be waiting
+    // for the debounce, and nothing runs once the page is gone
+    window.addEventListener("pagehide", () => {
+      if (this.saveTimer !== null) this.flush();
+    });
 
     const persistKeys: (keyof StoreState)[] = [
       "selectedYear",
@@ -124,17 +140,6 @@ export class StateManager {
     this.saveMapState();
   }
 
-  /**
-   * Wrapped visibility from the store; falls back to the DOM while the
-   * wrapped manager does not yet publish its state to the store.
-   */
-  private isWrappedVisible(): boolean {
-    const fromStore = this.app.store.get("wrappedVisible");
-    if (fromStore !== undefined) return fromStore;
-    const wrappedModalEl = domCache.get("wrapped-modal");
-    return wrappedModalEl ? wrappedModalEl.style.display === "flex" : false;
-  }
-
   saveMapState(): void {
     if (!this.app.map) return;
 
@@ -151,12 +156,12 @@ export class StateManager {
       selectedAircraft: this.app.selectedAircraft,
       selectedPathIds: Array.from(this.app.selectedPathIds),
       statsPanelVisible: this.app.store.get("statsPanelVisible"),
-      wrappedVisible: this.isWrappedVisible(),
+      wrappedVisible: this.app.store.get("wrappedVisible"),
       isolateSelection: this.app.isolateSelection,
-      // Note: replay state is NOT persisted - too complex to restore reliably
+      // Replay state is not persisted: too complex to restore reliably
     };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(storageKey(), JSON.stringify(state));
     } catch (_e) {
       // Silently fail if localStorage is not available
     }
@@ -167,7 +172,17 @@ export class StateManager {
 
   loadMapState(): SavedState | null {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const key = storageKey();
+      let saved = localStorage.getItem(key);
+      if (!saved && key !== STORAGE_KEY) {
+        // Releases before the per-directory key saved every map under the
+        // plain key; the first map to find it there adopts it once
+        saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          localStorage.setItem(key, saved);
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      }
       if (saved) {
         const parsed: unknown = JSON.parse(saved);
         const state = sanitizeSavedState(parsed);

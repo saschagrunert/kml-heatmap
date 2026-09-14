@@ -1,6 +1,7 @@
 """Custom exceptions for KML Heatmap Generator."""
 
 __all__ = [
+    "AirportDatabaseError",
     "KMLHeatmapError",
     "KMLParseError",
 ]
@@ -8,6 +9,10 @@ __all__ = [
 
 class KMLHeatmapError(Exception):
     """Base exception for all KML Heatmap errors."""
+
+
+class AirportDatabaseError(KMLHeatmapError):
+    """Raised when a required airport database cannot be loaded."""
 
 
 class KMLParseError(KMLHeatmapError):

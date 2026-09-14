@@ -9,6 +9,7 @@ import type {
   Airport,
   KMLDataset,
 } from "../../kml_heatmap/frontend/types";
+import { datasetIndex } from "../../kml_heatmap/frontend/calculations/datasetIndex";
 import {
   AppStore,
   defineStoreAccessors,
@@ -80,8 +81,6 @@ export interface MockManagers {
     updateSelectionStyles: Mock;
     updateAltitudeLegend: Mock;
     updateAirspeedLegend: Mock;
-    getPathInfoMap: Mock;
-    getPolylineCount: Mock;
   };
   filterManager: {
     updateAircraftDropdown: Mock;
@@ -199,8 +198,6 @@ function createMockManagers(): MockManagers {
       updateSelectionStyles: vi.fn(),
       updateAltitudeLegend: vi.fn(),
       updateAirspeedLegend: vi.fn(),
-      getPathInfoMap: vi.fn(() => new Map<number, PathInfo>()),
-      getPolylineCount: vi.fn(() => 0),
     },
     filterManager: {
       updateAircraftDropdown: vi.fn(),
@@ -322,7 +319,14 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
     airspeedLayer: layerGroup(),
     airportLayer: layerGroup(),
     pathRenderer: canvas(),
-    airportToPaths: {},
+    // Derived like MapApp's getter; an override replaces it with fixed data
+    get airportToPaths(): MapApp["airportToPaths"] {
+      const data = store.get("currentData");
+      if (!data) return {};
+      return datasetIndex(data)
+        .filter(store.get("selectedYear"), store.get("selectedAircraft"))
+        .pathIdsByAirport();
+    },
     airportMarkers: {},
     openaipLayers: {},
     savedState: null,
@@ -336,10 +340,8 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
     get fullPathSegments() {
       return store.get("currentData")?.path_segments ?? null;
     },
-    loadInitialData: vi.fn(),
     togglePathSelection: vi.fn(),
     seekReplay: vi.fn(),
-    changeReplaySpeed: vi.fn(),
     initialize: vi.fn(),
     destroy: vi.fn(),
   };

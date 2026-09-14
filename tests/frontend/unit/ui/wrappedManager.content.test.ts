@@ -4,6 +4,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { WrappedManager } from "../../../../kml_heatmap/frontend/ui/wrappedManager";
+import { datasetIndex } from "../../../../kml_heatmap/frontend/calculations/datasetIndex";
+import * as statistics from "../../../../kml_heatmap/frontend/calculations/statistics";
 import { createDataset, asMapApp, type MockApp } from "../../testHelpers";
 import {
   createWrappedMockApp,
@@ -77,6 +79,18 @@ describe("WrappedManager content", () => {
     expect(cards["Distance"]).toMatch(/^\d[\d,]*\.\d nm$/);
   });
 
+  it("reuses the statistics the panel computed for the same filter", () => {
+    const view = datasetIndex(mockApp.currentData!).filter("2024", "all");
+    const panelStats = view.statistics();
+    const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+
+    wrappedManager.showWrapped();
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(statCards()["Flights"]).toBe(String(panelStats.num_paths));
+    spy.mockRestore();
+  });
+
   it("counts every year when all years are selected", () => {
     mockApp.selectedYear = "all";
 
@@ -130,7 +144,7 @@ describe("WrappedManager content", () => {
     expect(texts.some((t) => t.includes("2 countries"))).toBe(true);
   });
 
-  it("lists the fleet busiest first with the model from the full statistics", () => {
+  it("lists the fleet busiest first with the model from the metadata", () => {
     wrappedManager.showWrapped();
 
     const entries = [

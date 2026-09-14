@@ -3,19 +3,23 @@
 import hashlib
 import json
 import os
+import shutil
+import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 import kml_heatmap.airport_lookup as lookup_module
+import kml_heatmap.parser_cache as parser_cache_module
 from kml_heatmap.airport_lookup import database_fingerprint
 from kml_heatmap.parser_cache import (
     CACHE_FORMAT_VERSION,
+    CACHE_MAX_AGE_DAYS,
     KML_CACHE_DIR,
-    _entry_prefix,
     get_cache_key,
     load_cached_parse,
+    parser_fingerprint,
     prune_stale_cache_entries,
     save_to_cache,
 )
@@ -27,18 +31,24 @@ COORDS = [SHARED, TrackPoint(51.0, 9.5, None, None)]
 # parsers build it
 PATHS = [[SHARED]]
 METADATA = [{"filename": "test.kml", "start_point": [50.0, 8.5, 300.0], "year": 2025}]
-
-
-def _hash(path):
-    return hashlib.sha256(str(Path(path).resolve()).encode()).hexdigest()[:12]
+DAY = 24 * 3600
 
 
 def _expected_name(kml):
-    stat = kml.stat()
+    digest = hashlib.blake2b(kml.name.encode() + b"\0", digest_size=16)
+    digest.update(kml.read_bytes())
     return (
-        f"{kml.stem}_{_hash(kml)}_v{CACHE_FORMAT_VERSION}"
-        f"_{stat.st_mtime_ns}_{stat.st_size}_{database_fingerprint()}.json"
+        f"{digest.hexdigest()}_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}"
+        f"_{database_fingerprint()}.json"
     )
+
+
+def _entry(cache_dir, name, age_days=0.0):
+    entry = cache_dir / name
+    entry.write_text("{}")
+    stamp = time.time() - age_days * DAY
+    os.utime(entry, (stamp, stamp))
+    return entry
 
 
 class TestGetCacheKey:
@@ -48,7 +58,7 @@ class TestGetCacheKey:
             False,
         )
 
-    def test_key_includes_version_mtime_size_and_database(self, tmp_path):
+    def test_key_includes_content_version_parser_and_database(self, tmp_path):
         kml = tmp_path / "test.kml"
         kml.write_bytes(b"<kml/>")
 
@@ -64,7 +74,10 @@ class TestGetCacheKey:
         kml.write_bytes(b"<kml/>")
         cache_path, _ = get_cache_key(str(kml))
         assert cache_path is not None
-        assert cache_path.parent == KML_CACHE_DIR
+        assert cache_path.parent == parser_cache_module.KML_CACHE_DIR
+
+    def test_default_cache_dir_is_below_the_cache_directory(self):
+        assert KML_CACHE_DIR.name == "kml"
 
     def test_unwritable_cache_dir_disables_cache(self, tmp_path):
         kml = tmp_path / "test.kml"
@@ -72,6 +85,15 @@ class TestGetCacheKey:
         blocker = tmp_path / "file"
         blocker.write_text("not a directory")
         assert get_cache_key(str(kml), cache_dir=blocker / "cache") == (None, False)
+
+    def test_unreadable_file_disables_cache(self, tmp_path):
+        kml = tmp_path / "test.kml"
+        kml.write_bytes(b"<kml/>")
+        with patch("builtins.open", side_effect=OSError("denied")):
+            assert get_cache_key(str(kml), cache_dir=tmp_path / "cache") == (
+                None,
+                False,
+            )
 
     def test_valid_after_save(self, tmp_path):
         kml = tmp_path / "test.kml"
@@ -81,29 +103,63 @@ class TestGetCacheKey:
         save_to_cache(cache_path, COORDS, PATHS, METADATA)
         assert get_cache_key(str(kml), cache_dir=cache_dir) == (cache_path, True)
 
-    def test_size_change_invalidates_key(self, tmp_path):
+    def test_content_change_invalidates_key(self, tmp_path):
         kml = tmp_path / "test.kml"
-        kml.write_bytes(b"<kml/>")
+        kml.write_bytes(b"<kml>one</kml>")
+        stat = kml.stat()
         cache_dir = tmp_path / "cache"
         first, _ = get_cache_key(str(kml), cache_dir=cache_dir)
 
-        kml.write_bytes(b"<kml>changed</kml>")
+        # Same size and modification time: a key built from those would miss it
+        kml.write_bytes(b"<kml>two</kml>")
+        os.utime(kml, ns=(stat.st_atime_ns, stat.st_mtime_ns))
         second, valid = get_cache_key(str(kml), cache_dir=cache_dir)
 
         assert second != first
         assert valid is False
 
-    def test_mtime_change_invalidates_key(self, tmp_path):
+    def test_key_survives_a_checkout(self, tmp_path):
+        """A fresh clone has new modification times and another path."""
+        kml = tmp_path / "a" / "1_DEAGJ_DA20.kml"
+        kml.parent.mkdir()
+        kml.write_bytes(b"<kml/>")
+        clone = tmp_path / "b" / "1_DEAGJ_DA20.kml"
+        clone.parent.mkdir()
+        shutil.copyfile(kml, clone)
+        stat = kml.stat()
+        os.utime(clone, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+        cache_dir = tmp_path / "cache"
+
+        first, _ = get_cache_key(str(kml), cache_dir=cache_dir)
+        second, _ = get_cache_key(str(clone), cache_dir=cache_dir)
+
+        assert first == second
+
+    def test_file_name_is_part_of_the_key(self, tmp_path):
+        """The parse result carries the name and the aircraft taken from it."""
+        first = tmp_path / "1_DEAGJ_DA20.kml"
+        second = tmp_path / "1_DEHYL_DA40.kml"
+        first.write_bytes(b"<kml/>")
+        second.write_bytes(b"<kml/>")
+        cache_dir = tmp_path / "cache"
+
+        assert get_cache_key(str(first), cache_dir=cache_dir) != get_cache_key(
+            str(second), cache_dir=cache_dir
+        )
+
+    def test_parser_change_invalidates_key(self, tmp_path):
         kml = tmp_path / "test.kml"
         kml.write_bytes(b"<kml/>")
         cache_dir = tmp_path / "cache"
         first, _ = get_cache_key(str(kml), cache_dir=cache_dir)
 
-        stat = kml.stat()
-        os.utime(kml, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
-        second, _ = get_cache_key(str(kml), cache_dir=cache_dir)
+        with patch.object(
+            parser_cache_module, "parser_fingerprint", return_value="0badc0de"
+        ):
+            second, _ = get_cache_key(str(kml), cache_dir=cache_dir)
 
         assert second != first
+        assert "_0badc0de_" in second.name
 
     def test_airport_database_change_invalidates_key(self, tmp_path):
         """Names are standardized with the database, so it is part of the key."""
@@ -123,70 +179,136 @@ class TestGetCacheKey:
         assert len({without_db, with_db, with_other_db}) == 3
 
 
-class TestEntryPrefix:
-    def test_prefix_of_current_and_older_formats(self):
-        hash12 = "0123456789ab"
-        assert _entry_prefix(f"1_DEAGJ_DA20_{hash12}_v3_1_2_abcd1234.json") == (
-            f"1_DEAGJ_DA20_{hash12}_"
-        )
-        assert _entry_prefix(f"test_{hash12}_v2_1_2.json") == f"test_{hash12}_"
+class TestParserFingerprint:
+    def test_changes_with_the_parser_code(self, tmp_path):
+        package = tmp_path / "kml_heatmap"
+        package.mkdir()
+        for module in parser_cache_module._PARSER_MODULES:
+            (package / f"{module}.py").write_text(f"# {module}\n")
+        fake_file = str(package / "parser_cache.py")
 
-    @pytest.mark.parametrize("name", ["notes.txt", "weird.json", "a_b_c.json"])
-    def test_unrelated_names(self, name):
-        assert _entry_prefix(name) is None
+        with patch.object(parser_cache_module, "__file__", fake_file):
+            parser_fingerprint.cache_clear()
+            first = parser_fingerprint()
+            (package / "parser_common.py").write_text("# changed\n")
+            parser_fingerprint.cache_clear()
+            second = parser_fingerprint()
+            (package / "parser_standard.py").unlink()
+            parser_fingerprint.cache_clear()
+            third = parser_fingerprint()
+        parser_fingerprint.cache_clear()
+
+        assert len({first, second, third}) == 3
+        assert len(first) == 8
+        assert parser_fingerprint() != first
 
 
 class TestPruneStaleCacheEntries:
-    def test_removes_only_outdated_entries_of_the_given_files(self, tmp_path):
-        kml = tmp_path / "test.kml"
-        kml.write_bytes(b"<kml/>")
+    def _current_suffix(self):
+        return (
+            f"_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}"
+            f"_{database_fingerprint()}.json"
+        )
+
+    def test_removes_entries_no_key_can_produce(self, tmp_path):
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
-        current = cache_dir / _expected_name(kml)
-        current.write_text("{}")
-        old_version = cache_dir / f"test_{_hash(kml)}_v2_1111_22.json"
-        old_version.write_text("{}")
-        old_mtime = cache_dir / f"test_{_hash(kml)}_v3_1111_22_nodb.json"
-        old_mtime.write_text("{}")
-        other_file = cache_dir / "other_abcdefabcdef_v3_1111_22_nodb.json"
-        other_file.write_text("{}")
-        unrelated = cache_dir / "notes.txt"
-        unrelated.write_text("keep")
-
-        removed = prune_stale_cache_entries([str(kml)], cache_dir=cache_dir)
-
-        assert removed == 2
-        assert sorted(p.name for p in cache_dir.iterdir()) == sorted(
-            [current.name, other_file.name, "notes.txt"]
+        digest = "0123456789abcdef0123456789abcdef"
+        current = _entry(cache_dir, digest + self._current_suffix())
+        old_version = _entry(
+            cache_dir,
+            f"{digest}_v{CACHE_FORMAT_VERSION - 1}_{parser_fingerprint()}"
+            f"_{database_fingerprint()}.json",
         )
+        old_parser = _entry(
+            cache_dir,
+            f"{digest}_v{CACHE_FORMAT_VERSION}_00000000_{database_fingerprint()}.json",
+        )
+        old_database = _entry(
+            cache_dir,
+            f"{digest}_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}_nodb.json",
+        )
+        legacy = _entry(cache_dir, "1_DEAGJ_DA20_0123456789ab_v3_1_2_nodb.json")
+        unrelated = _entry(cache_dir, "notes.txt", age_days=365)
+
+        removed = prune_stale_cache_entries(cache_dir=cache_dir)
+
+        assert removed == 4
+        assert sorted(p.name for p in cache_dir.iterdir()) == sorted(
+            [current.name, unrelated.name]
+        )
+        assert not any(
+            p.exists() for p in (old_version, old_parser, old_database, legacy)
+        )
+
+    def test_removes_entries_unused_for_too_long(self, tmp_path):
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        fresh = _entry(cache_dir, "a" * 32 + self._current_suffix(), age_days=1)
+        old = _entry(
+            cache_dir, "b" * 32 + self._current_suffix(), CACHE_MAX_AGE_DAYS + 1
+        )
+        old_tmp = _entry(cache_dir, ".x.json.abc.tmp", CACHE_MAX_AGE_DAYS + 1)
+        new_tmp = _entry(cache_dir, ".y.json.abc.tmp")
+
+        assert prune_stale_cache_entries([], cache_dir=cache_dir) == 2
+        assert fresh.exists()
+        assert new_tmp.exists()
+        assert not old.exists()
+        assert not old_tmp.exists()
+
+    def test_loading_an_entry_renews_it(self, tmp_path):
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        entry = cache_dir / ("c" * 32 + self._current_suffix())
+        save_to_cache(entry, COORDS, PATHS, METADATA)
+        stamp = time.time() - (CACHE_MAX_AGE_DAYS + 1) * DAY
+        os.utime(entry, (stamp, stamp))
+
+        assert load_cached_parse(entry) is not None
+        assert prune_stale_cache_entries(cache_dir=cache_dir) == 0
+        assert entry.exists()
 
     def test_get_cache_key_does_not_prune(self, tmp_path):
         kml = tmp_path / "test.kml"
         kml.write_bytes(b"<kml/>")
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
-        old_version = cache_dir / f"test_{_hash(kml)}_v2_1111_22.json"
-        old_version.write_text("{}")
+        legacy = _entry(cache_dir, "test_0123456789ab_v2_1111_22.json")
 
         get_cache_key(str(kml), cache_dir=cache_dir)
 
-        assert old_version.exists()
+        assert legacy.exists()
 
-    def test_missing_files_and_directories_are_ignored(self, tmp_path):
-        assert prune_stale_cache_entries([str(tmp_path / "missing.kml")]) == 0
-        kml = tmp_path / "test.kml"
-        kml.write_bytes(b"<kml/>")
-        assert prune_stale_cache_entries([str(kml)], cache_dir=tmp_path / "no") == 0
+    def test_missing_directory_is_ignored(self, tmp_path):
+        assert prune_stale_cache_entries(cache_dir=tmp_path / "no") == 0
 
-    def test_unlink_errors_are_ignored(self, tmp_path):
-        kml = tmp_path / "test.kml"
-        kml.write_bytes(b"<kml/>")
+    def test_default_directory(self, tmp_path):
+        with patch.object(parser_cache_module, "KML_CACHE_DIR", tmp_path):
+            _entry(tmp_path, "legacy_0123456789ab_v2_1_2.json")
+            assert prune_stale_cache_entries([str(tmp_path / "x.kml")]) == 1
+
+    def test_vanished_entry_is_ignored(self, tmp_path):
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
-        (cache_dir / f"test_{_hash(kml)}_v2_1111_22.json").write_text("{}")
+        entry = _entry(cache_dir, "d" * 32 + self._current_suffix())
+        real_stat = Path.stat
+
+        def stat(path, *args, **kwargs):
+            if path == entry:
+                raise OSError("gone")
+            return real_stat(path, *args, **kwargs)
+
+        with patch.object(Path, "stat", stat):
+            assert prune_stale_cache_entries(cache_dir=cache_dir) == 0
+
+    def test_unlink_errors_are_ignored(self, tmp_path):
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        _entry(cache_dir, "test_0123456789ab_v2_1111_22.json")
 
         with patch.object(Path, "unlink", side_effect=OSError("mock")):
-            assert prune_stale_cache_entries([str(kml)], cache_dir=cache_dir) == 0
+            assert prune_stale_cache_entries(cache_dir=cache_dir) == 0
 
 
 class TestSaveAndLoad:

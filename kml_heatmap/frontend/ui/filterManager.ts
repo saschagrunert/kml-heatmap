@@ -9,12 +9,11 @@ export class FilterManager {
   private app: MapApp;
   /** Monotonic id of the latest filter change; stale completions are dropped */
   private requestId = 0;
+  /** Request id of the latest year change */
+  private yearRequestId = 0;
 
   constructor(app: MapApp) {
     this.app = app;
-
-    // Pre-cache filter elements
-    domCache.cacheElements(["aircraft-select", "year-select"]);
   }
 
   updateAircraftDropdown(): void {
@@ -71,10 +70,22 @@ export class FilterManager {
     const previousYear = this.app.selectedYear;
     const requestedYear = yearSelect.value;
     const requestId = ++this.requestId;
+    this.yearRequestId = requestId;
 
     // 1. Load the new year's data first so the aircraft list is based on it
     const data = await this.app.dataManager.loadData(requestedYear);
-    if (requestId !== this.requestId) return; // superseded by a newer change
+    if (requestId !== this.requestId) {
+      // Superseded. A newer year change owns the dropdown; an aircraft
+      // change does not touch it, so it would keep showing a year that is
+      // never applied, and picking that year again would fire no change
+      if (
+        this.yearRequestId === requestId &&
+        yearSelect.value === requestedYear
+      ) {
+        yearSelect.value = this.app.selectedYear;
+      }
+      return;
+    }
     if (!data) {
       // The loader has already reported the failure
       yearSelect.value = previousYear;
@@ -111,10 +122,16 @@ export class FilterManager {
     await this.app.dataManager.updateLayers();
   }
 
-  /** A filter change drops the selection, except while restoring state */
+  /**
+   * A filter change drops the selection, except while restoring state.
+   * Isolate mode goes with it: left on over an empty selection, the button
+   * stays pressed but cannot be released, and the next click on a flight
+   * would hide every other flight at once.
+   */
   private clearSelectionUnlessInitializing(): void {
     if (this.app.isInitializing) return;
     this.app.selectedPathIds.clear();
     this.app.store.notifyMutation("selectedPathIds");
+    this.app.isolateSelection = false;
   }
 }

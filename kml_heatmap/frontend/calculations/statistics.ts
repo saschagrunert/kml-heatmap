@@ -12,6 +12,7 @@ import {
 import { calculateDistance } from "../utils/geometry";
 import { formatFlightTime } from "../utils/formatters";
 import { findMax } from "../utils/arrayHelpers";
+import type { Range } from "../state/store";
 import type {
   PathInfo,
   PathSegment,
@@ -270,17 +271,72 @@ export function calculateTotalDistance(segments: PathSegment[]): number {
   return total;
 }
 
+const pathsByIdCache = new WeakMap<PathInfo[], Map<number, PathInfo>>();
+
+/** Paths by id, kept with the array: a filter view hands the same one again */
+function pathsById(paths: PathInfo[]): Map<number, PathInfo> {
+  let byId = pathsByIdCache.get(paths);
+  if (!byId) {
+    byId = new Map(paths.map((path) => [path.id, path]));
+    pathsByIdCache.set(paths, byId);
+  }
+  return byId;
+}
+
+/**
+ * Altitude range in feet of the paths the segments belong to.
+ *
+ * Segment altitudes are rounded to 100 ft and can land on either side of
+ * the exact value (1,291 ft rounds to 1,300 ft), so a path's exact range
+ * from path_info replaces its rounded one. The rounded extremes only stand
+ * in for a path that does not carry it. Paths without a segment here do not
+ * count at all. Null when no segment has an altitude.
+ */
+export function altitudeRangeFt(
+  segments: PathSegment[],
+  paths?: PathInfo[],
+): Range | null {
+  const exact = paths ? pathsById(paths) : null;
+  let min = Infinity;
+  let max = -Infinity;
+  let pathId = NaN;
+  let pathMin = Infinity;
+  let pathMax = -Infinity;
+
+  const closePath = (): void => {
+    if (pathMin === Infinity) return;
+    const info = exact?.get(pathId);
+    min = Math.min(min, info?.min_altitude_ft ?? pathMin);
+    max = Math.max(max, info?.max_altitude_ft ?? pathMax);
+  };
+
+  for (const segment of segments) {
+    if (segment.path_id !== pathId) {
+      closePath();
+      pathId = segment.path_id;
+      pathMin = Infinity;
+      pathMax = -Infinity;
+    }
+    const alt = segment.altitude_ft;
+    if (alt === undefined) continue;
+    if (alt < pathMin) pathMin = alt;
+    if (alt > pathMax) pathMax = alt;
+  }
+  closePath();
+
+  return min === Infinity ? null : { min, max };
+}
+
 /**
  * Calculate altitude statistics from segments (altitude_ft, converted)
  * @param segments - Array of segment objects
+ * @param paths - Path info carrying the exact per-path altitude range
  * @returns Altitude statistics in meters
  */
 export function calculateAltitudeStats(
   segments: PathSegment[],
   paths?: PathInfo[],
 ): AltitudeStats {
-  let min = Infinity;
-  let max = -Infinity;
   let gain = 0;
   let prevAlt: number | null = null;
   let prevPathId: number | null = null;
@@ -294,32 +350,22 @@ export function calculateAltitudeStats(
     }
     if (segment.altitude_ft === undefined) continue;
     const alt = segment.altitude_ft * FEET_TO_METERS;
-    if (alt < min) min = alt;
-    if (alt > max) max = alt;
     if (prevAlt !== null && alt > prevAlt) {
       gain += alt - prevAlt;
     }
     prevAlt = alt;
   }
 
-  // Segment altitudes are rounded to 100 ft, so prefer the exact per-path
-  // range the exporter carries in path_info when it is available
-  if (paths) {
-    for (const path of paths) {
-      if (path.min_altitude_ft !== undefined) {
-        min = Math.min(min, path.min_altitude_ft * FEET_TO_METERS);
-      }
-      if (path.max_altitude_ft !== undefined) {
-        max = Math.max(max, path.max_altitude_ft * FEET_TO_METERS);
-      }
-    }
-  }
-
-  if (min === Infinity) {
+  const range = altitudeRangeFt(segments, paths);
+  if (range === null) {
     return { min: 0, max: 0, gain: 0 };
   }
 
-  return { min, max, gain };
+  return {
+    min: range.min * FEET_TO_METERS,
+    max: range.max * FEET_TO_METERS,
+    gain,
+  };
 }
 
 /**
@@ -368,6 +414,56 @@ export function calculateLongestFlight(segments: PathSegment[]): number {
   if (distances.length === 0) return 0;
 
   return findMax(distances);
+}
+
+/** Share of a path's altitude samples that may lie below its ground level */
+const GROUND_LEVEL_PERCENTILE = 0.01;
+
+/**
+ * Ground level of every path, in feet: the altitude at index
+ * `floor((n - 1) * 0.01)` of the path's `n` segment altitudes sorted in
+ * ascending order.
+ *
+ * The lowest sample alone is not robust: one barometric glitch to -1,400 ft
+ * lifts a taxi at 0 ft 1,400 ft above "ground" and counts it as cruise. A
+ * glitch is a handful of samples while the time on the ground is many more,
+ * so the first percentile skips the one and still lands on the other.
+ */
+export function groundLevelsFt(segments: PathSegment[]): Map<number, number> {
+  // Altitudes are rounded to 100 ft, so a histogram per path holds a few
+  // dozen entries where sorting every sample would copy all of them
+  const histograms = new Map<number, Map<number, number>>();
+  let pathId = NaN;
+  let histogram: Map<number, number> | undefined;
+  for (const segment of segments) {
+    const alt = segment.altitude_ft;
+    if (alt === undefined) continue;
+    if (segment.path_id !== pathId || !histogram) {
+      pathId = segment.path_id;
+      histogram = histograms.get(pathId);
+      if (!histogram) {
+        histogram = new Map();
+        histograms.set(pathId, histogram);
+      }
+    }
+    histogram.set(alt, (histogram.get(alt) ?? 0) + 1);
+  }
+
+  const levels = new Map<number, number>();
+  for (const [id, counts] of histograms) {
+    let samples = 0;
+    for (const count of counts.values()) samples += count;
+    const index = Math.floor((samples - 1) * GROUND_LEVEL_PERCENTILE);
+    let seen = 0;
+    for (const alt of [...counts.keys()].sort((a, b) => a - b)) {
+      seen += counts.get(alt)!;
+      if (seen > index) {
+        levels.set(id, alt);
+        break;
+      }
+    }
+  }
+  return levels;
 }
 
 function emptyStatistics(): FilteredStatistics {
@@ -438,6 +534,11 @@ export function calculateFilteredStatistics(options: {
   for (const secs of secondsByPath.values()) flightTime += secs;
 
   // Unit conversions
+  // A filter without any altitude reports none instead of 0 m, so that a
+  // flight that never left sea level still shows its altitude
+  const hasAltitude = filteredSegments.some(
+    (seg) => seg.altitude_ft !== undefined,
+  );
   const maxAltitudeFt = altitudeStats.max * METERS_TO_FEET;
   const minAltitudeFt = altitudeStats.min * METERS_TO_FEET;
   const totalAltitudeGainFt = altitudeStats.gain * METERS_TO_FEET;
@@ -447,16 +548,8 @@ export function calculateFilteredStatistics(options: {
   const flightTimeStr =
     flightTime > 0 ? formatFlightTime(flightTime) : undefined;
 
-  // Compute per-path minimum altitude for AGL-based cruise detection
-  const pathMinAltFt = new Map<number, number>();
-  for (const seg of filteredSegments) {
-    if (seg.altitude_ft !== undefined) {
-      const current = pathMinAltFt.get(seg.path_id);
-      if (current === undefined || seg.altitude_ft < current) {
-        pathMinAltFt.set(seg.path_id, seg.altitude_ft);
-      }
-    }
-  }
+  // Per-path ground level for AGL-based cruise detection
+  const groundLevels = groundLevelsFt(filteredSegments);
 
   // Calculate cruise speed (segments above 1000 ft AGL)
   const cruiseSegments = filteredSegments.filter((seg) => {
@@ -467,7 +560,7 @@ export function calculateFilteredStatistics(options: {
       seg.groundspeed_knots <= 0
     )
       return false;
-    const groundLevelFt = pathMinAltFt.get(seg.path_id) ?? 0;
+    const groundLevelFt = groundLevels.get(seg.path_id) ?? 0;
     return seg.altitude_ft - groundLevelFt > CRUISE_ALTITUDE_THRESHOLD_FT;
   });
 
@@ -505,7 +598,7 @@ export function calculateFilteredStatistics(options: {
     const altitudeBuckets: { [key: number]: number } = {};
     for (const seg of cruiseSegments) {
       if (seg.altitude_ft !== undefined) {
-        const groundLevelFt = pathMinAltFt.get(seg.path_id) ?? 0;
+        const groundLevelFt = groundLevels.get(seg.path_id) ?? 0;
         const altAglFt = seg.altitude_ft - groundLevelFt;
         const bucketFt = Math.round(altAglFt / 100) * 100;
         altitudeBuckets[bucketFt] = (altitudeBuckets[bucketFt] || 0) + 1;
@@ -538,12 +631,12 @@ export function calculateFilteredStatistics(options: {
     aircraft_list: aircraftList,
     total_distance_km: totalDistanceKm,
     total_distance_nm: totalDistanceKm * KM_TO_NAUTICAL_MILES,
-    max_altitude_m: altitudeStats.max,
-    min_altitude_m: altitudeStats.min,
-    total_altitude_gain_m: altitudeStats.gain,
-    max_altitude_ft: maxAltitudeFt,
-    min_altitude_ft: minAltitudeFt,
-    total_altitude_gain_ft: totalAltitudeGainFt,
+    max_altitude_m: hasAltitude ? altitudeStats.max : undefined,
+    min_altitude_m: hasAltitude ? altitudeStats.min : undefined,
+    total_altitude_gain_m: hasAltitude ? altitudeStats.gain : undefined,
+    max_altitude_ft: hasAltitude ? maxAltitudeFt : undefined,
+    min_altitude_ft: hasAltitude ? minAltitudeFt : undefined,
+    total_altitude_gain_ft: hasAltitude ? totalAltitudeGainFt : undefined,
     max_groundspeed_knots: speedStats.max,
     avg_groundspeed_knots: speedStats.avg,
     cruise_speed_knots: cruiseSpeed,

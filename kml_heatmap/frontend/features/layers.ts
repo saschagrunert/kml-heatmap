@@ -1,13 +1,14 @@
 /**
  * Layer rendering helpers
- * Pure functions used by the LayerManager for colour ranges, filtering,
- * segment styling and legend labels.
+ * Pure functions used by the LayerManager for colour ranges, segment
+ * styling, legend labels and tooltips.
  */
 
 import type { PathInfo, PathSegment } from "../types";
 import type { Range } from "../state/store";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 import { formatNumber } from "../utils/formatters";
+import { altitudeRangeFt } from "../calculations/statistics";
 
 /**
  * Segment rendering properties
@@ -19,109 +20,49 @@ export interface SegmentProperties {
   isSelected: boolean;
 }
 
-/**
- * Legend labels
- */
-export interface LegendLabels {
-  min: string;
-  max: string;
-}
-
 export const DEFAULT_ALTITUDE_RANGE: Range = { min: 0, max: 10000 };
 export const DEFAULT_AIRSPEED_RANGE: Range = { min: 0, max: 200 };
 
 /**
- * Range over the matching segments, or null when none matched.
+ * Altitude colour range (feet) of the given segments, falling back to
+ * `defaultRange` when none has an altitude. Callers pass the segments of the
+ * paths the range is for (the selection, or the whole dataset).
  *
- * @param seenPathIds - Filled with the ids of the paths that contributed
- */
-function calculateRange(
-  segments: PathSegment[],
-  getValue: (seg: PathSegment) => number | undefined,
-  filterValue: (v: number) => boolean,
-  selectedPathIds: Set<number> | null,
-  seenPathIds?: Set<number>,
-): Range | null {
-  const useSelection = selectedPathIds !== null && selectedPathIds.size > 0;
-  let min = Infinity;
-  let max = -Infinity;
-
-  for (const seg of segments) {
-    if (useSelection && !selectedPathIds.has(seg.path_id)) continue;
-    const v = getValue(seg);
-    if (v === undefined || !filterValue(v)) continue;
-    seenPathIds?.add(seg.path_id);
-    if (v < min) min = v;
-    if (v > max) max = v;
-  }
-
-  return min === Infinity ? null : { min, max };
-}
-
-/**
- * Altitude colour range (feet) of the given segments, optionally restricted
- * to the selected paths. Falls back to `defaultRange` when nothing matches.
+ * The range uses the exact per-path altitudes from `paths` where they exist,
+ * like the statistics panel beside the legend does (see altitudeRangeFt).
  * Negative altitudes (below the MSL reference) are kept in the data but drawn
  * with the lowest colour: the scale's lower bound is clamped at 0 ft so the
  * legend and colours match the previous (clamped) exports.
  */
 export function calculateAltitudeRange(
   segments: PathSegment[],
-  selectedPathIds: Set<number> | null = null,
   defaultRange: Range = DEFAULT_ALTITUDE_RANGE,
   paths?: PathInfo[],
 ): Range {
-  const contributing = new Set<number>();
-  const range = calculateRange(
-    segments,
-    (s) => s.altitude_ft,
-    () => true,
-    selectedPathIds,
-    contributing,
-  );
-
-  // Nothing matched, so there is nothing to widen: mixing the fallback with
-  // real per-path altitudes would report a range that is half invented
+  const range = altitudeRangeFt(segments, paths);
   if (range === null) return defaultRange;
 
-  // Segment altitudes are rounded to 100 ft, so widen to the exact per-path
-  // range the exporter carries. Without this the legend reads 10400 ft while
-  // the statistics panel, which does use it, reads 10419 ft right beside it.
-  //
-  // Only the paths that are actually in the range get to widen it. Taking
-  // every path that passes the selection would let one whose segments were
-  // all filtered out stretch the legend past anything drawn on the map.
-  let { min, max } = range;
-  if (paths) {
-    for (const path of paths) {
-      if (!contributing.has(path.id)) continue;
-      if (path.min_altitude_ft !== undefined)
-        min = Math.min(min, path.min_altitude_ft);
-      if (path.max_altitude_ft !== undefined)
-        max = Math.max(max, path.max_altitude_ft);
-    }
-  }
-
+  const { min, max } = range;
   return min < 0 ? { min: 0, max: Math.max(max, 0) } : { min, max };
 }
 
 /**
  * Groundspeed range (knots) of the given segments, ignoring segments without
- * a positive speed. Optionally restricted to the selected paths.
+ * a positive speed. Falls back to `defaultRange` when none has one.
  */
 export function calculateAirspeedRange(
   segments: PathSegment[],
-  selectedPathIds: Set<number> | null = null,
   defaultRange: Range = DEFAULT_AIRSPEED_RANGE,
 ): Range {
-  return (
-    calculateRange(
-      segments,
-      (s) => s.groundspeed_knots,
-      (v) => v > 0,
-      selectedPathIds,
-    ) ?? defaultRange
-  );
+  let min = Infinity;
+  let max = -Infinity;
+  for (const segment of segments) {
+    const speed = segment.groundspeed_knots;
+    if (speed === undefined || speed <= 0) continue;
+    if (speed < min) min = speed;
+    if (speed > max) max = speed;
+  }
+  return min === Infinity ? defaultRange : { min, max };
 }
 
 /**
@@ -186,38 +127,6 @@ export function formatAirspeedLabel(valueKt: number): string {
     formatNumber(valueKt * NAUTICAL_MILES_TO_KM) +
     " km/h)"
   );
-}
-
-/**
- * Format legend labels for altitude
- * @param min - Minimum altitude in feet
- * @param max - Maximum altitude in feet
- * @returns Formatted labels
- */
-export function formatAltitudeLegendLabels(
-  min: number,
-  max: number,
-): LegendLabels {
-  return {
-    min: formatAltitudeLabel(min),
-    max: formatAltitudeLabel(max),
-  };
-}
-
-/**
- * Format legend labels for airspeed
- * @param min - Minimum speed in knots
- * @param max - Maximum speed in knots
- * @returns Formatted labels
- */
-export function formatAirspeedLegendLabels(
-  min: number,
-  max: number,
-): LegendLabels {
-  return {
-    min: formatAirspeedLabel(min),
-    max: formatAirspeedLabel(max),
-  };
 }
 
 /**

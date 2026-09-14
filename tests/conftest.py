@@ -57,6 +57,19 @@ def no_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def private_parse_cache(monkeypatch, tmp_path_factory):
+    """Give every test its own parse cache directory (in this process).
+
+    Entries are keyed by file name and content, so two tests writing the same
+    KML file would otherwise share an entry and skip the parse (and its log
+    output) depending on the order they run in.
+    """
+    monkeypatch.setattr(
+        "kml_heatmap.parser_cache.KML_CACHE_DIR", tmp_path_factory.mktemp("kml")
+    )
+
+
+@pytest.fixture(autouse=True)
 def reset_airport_cache():
     """Reset the airport cache and the download failure marker around each test.
 

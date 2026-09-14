@@ -1,18 +1,5 @@
-.pytest_cache
-.ruff_cache
-.mypy_cache
-.hypothesis
-.venv
-venv
-coverage
-dist
-docs
-htmlcov
-test-results
-playwright-report
+# Prettier reads .gitignore as well, so this only lists tracked files that
+# must keep their own formatting
 *.lock
+# A string.Template with $placeholders, not valid JavaScript
 kml_heatmap/templates/map_config_template.js
-kml_heatmap/static/bundle.js
-kml_heatmap/static/mapApp.bundle.js
-kml_heatmap/static/*.map
-.claude/

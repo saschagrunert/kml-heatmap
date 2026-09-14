@@ -241,10 +241,19 @@ export class MobileBar {
       case "more":
         this.openSheet(id, "More", this.moreRows());
         break;
+      // The statistics sheet sits below the scrim and Wrapped's dialog above
+      // the bar, so an open sheet would stay on top of the one or open (and
+      // marked active) behind the other. Closing it hands focus back to the
+      // tab that opened it, so the tapped tab takes focus again before
+      // Wrapped records where to return it on close.
       case "stats":
+        this.closeSheet();
+        this.tabs.get(id)?.focus();
         this.app.statsManager.toggleStats();
         break;
       case "wrapped":
+        this.closeSheet();
+        this.tabs.get(id)?.focus();
         this.app.wrappedManager.showWrapped();
         break;
     }

@@ -1,80 +1,115 @@
 """KML parse result caching.
 
-Cache files are keyed by the KML path, its size and modification time, the
-cache format version and a fingerprint of the airport database, so any change
-invalidates the entry. The airport database is part of the key because the
-parser standardizes airport names with it: a file parsed while the database
-was unavailable would otherwise keep its raw names until the KML changed.
+Cache files are keyed by the content and name of the KML file, the cache
+format version, a fingerprint of the parser code and a fingerprint of the
+airport database, so any change invalidates the entry. The content rather
+than the modification time is hashed so that entries survive git checkouts
+and CI clones; hashing costs little next to parsing. The name is part of the
+key because the parse result carries it (and the aircraft taken from it). The
+airport database is part of the key because the parser standardizes airport
+names with it: a file parsed while the database was unavailable would
+otherwise keep its raw names until the KML changed.
 
 Stale entries are not removed on the fly. ``prune_stale_cache_entries`` does
-that in one pass over the cache directory before a run, which keeps a cold run
-over many files linear instead of listing the directory once per file.
+that in one pass over the cache directory before a run: entries that another
+parser, format version or airport database wrote can never be read again,
+and any other entry goes once it has not been used for ``CACHE_MAX_AGE_DAYS``.
 """
 
 import contextlib
+import functools
 import hashlib
 import json
+import os
 import re
+import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .airport_lookup import database_fingerprint
 from .cache import CACHE_DIR, atomic_json_write
 from .logger import logger
 from .types import FlightPath, FlightPathGroup, PathMetadata, TrackPoint
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
 __all__ = [
     "CACHE_FORMAT_VERSION",
+    "CACHE_MAX_AGE_DAYS",
     "KML_CACHE_DIR",
     "get_cache_key",
     "load_cached_parse",
+    "parser_fingerprint",
     "prune_stale_cache_entries",
     "save_to_cache",
 ]
 
 # Bump whenever the serialized structure changes.
-CACHE_FORMAT_VERSION = 3
+CACHE_FORMAT_VERSION = 4
+
+# Entries not read or written for this long are removed
+CACHE_MAX_AGE_DAYS = 30
 
 # KML parse cache subdirectory
 KML_CACHE_DIR = CACHE_DIR / "kml"
 
+# The modules whose code decides what a parse returns
+_PARSER_MODULES = (
+    "aircraft",
+    "airport_lookup",
+    "constants",
+    "helpers",
+    "parser",
+    "parser_cache",
+    "parser_common",
+    "parser_gx_track",
+    "parser_standard",
+    "types",
+)
 
-_HASH_TOKEN = re.compile(r"^[0-9a-f]{12}$")
-_VERSION_TOKEN = re.compile(r"^v\d+$")
+_ENTRY_NAME = re.compile(
+    r"^[0-9a-f]{32}_v(?P<version>\d+)_(?P<parser>[0-9a-f]{8})"
+    r"_(?P<database>[0-9a-f]{8}|nodb)\.json$"
+)
+_HASH_CHUNK_BYTES = 1024 * 1024
 
 
-def _path_hash(kml_path: Path) -> str:
-    return hashlib.sha256(str(kml_path.resolve()).encode()).hexdigest()[:12]
+@functools.cache
+def parser_fingerprint() -> str:
+    """A short token that changes whenever the parser code does."""
+    digest = hashlib.sha256()
+    package = Path(__file__).parent
+    for module in _PARSER_MODULES:
+        digest.update(module.encode())
+        try:
+            digest.update((package / f"{module}.py").read_bytes())
+        except OSError:
+            # No sources (a bytecode-only install): the format version
+            # still invalidates entries on structural changes
+            continue
+    return digest.hexdigest()[:8]
 
 
-def _cache_prefix(kml_path: Path) -> str:
-    """The part of a cache file name that identifies the KML file itself."""
-    return f"{kml_path.stem}_{_path_hash(kml_path)}_"
-
-
-def _entry_prefix(name: str) -> str | None:
-    """Recover the file prefix from a cache entry name of any format version.
-
-    The stem may contain underscores, so the prefix ends at the 12 hex digit
-    path hash that is followed by the version token.
-    """
-    if not name.endswith(".json"):
+def _content_digest(kml_path: Path) -> str | None:
+    """Hash the file name and content of a KML file (None when unreadable)."""
+    digest = hashlib.blake2b(kml_path.name.encode() + b"\0", digest_size=16)
+    try:
+        with open(kml_path, "rb") as f:
+            while chunk := f.read(_HASH_CHUNK_BYTES):
+                digest.update(chunk)
+    except OSError:
         return None
-    tokens = name[: -len(".json")].split("_")
-    for index in range(1, len(tokens) - 1):
-        if _HASH_TOKEN.match(tokens[index]) and _VERSION_TOKEN.match(tokens[index + 1]):
-            return "_".join(tokens[: index + 1]) + "_"
-    return None
+    return digest.hexdigest()
 
 
 def _cache_name(kml_path: Path) -> str | None:
-    try:
-        stat = kml_path.stat()
-    except OSError:
+    content = _content_digest(kml_path)
+    if content is None:
         return None
     return (
-        f"{_cache_prefix(kml_path)}v{CACHE_FORMAT_VERSION}"
-        f"_{stat.st_mtime_ns}_{stat.st_size}_{database_fingerprint()}.json"
+        f"{content}_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}"
+        f"_{database_fingerprint()}.json"
     )
 
 
@@ -99,35 +134,55 @@ def get_cache_key(
     return cache_path, cache_path.exists()
 
 
-def prune_stale_cache_entries(
-    kml_files: list[str], cache_dir: Path | None = None
-) -> int:
-    """Remove outdated cache entries of the given files in one directory pass.
+def _is_stale(entry: Path, now: float) -> bool:
+    match = _ENTRY_NAME.match(entry.name)
+    if match is None:
+        if entry.suffix == ".json":
+            # An older naming scheme, which no current key produces
+            return True
+        if entry.suffix != ".tmp":
+            return False
+        # A temp file an interrupted write left behind goes by its age
+    elif (
+        int(match["version"]) != CACHE_FORMAT_VERSION
+        or match["parser"] != parser_fingerprint()
+        or match["database"] != database_fingerprint()
+    ):
+        return True
+    try:
+        age_seconds = now - entry.stat().st_mtime
+    except OSError:
+        return False
+    return age_seconds > CACHE_MAX_AGE_DAYS * 24 * 3600
 
-    An entry is outdated when it belongs to one of the files but is not the
-    entry the current size, modification time, version and airport database
-    would produce. Entries of files outside this run are left alone. Returns
-    the number of removed entries.
+
+def prune_stale_cache_entries(
+    kml_files: Iterable[str] = (), cache_dir: Path | None = None
+) -> int:
+    """Remove the cache entries that are no longer useful in one directory pass.
+
+    An entry goes when no current key can produce it (a legacy name, another
+    format version, parser or airport database) or when it has not been used
+    for ``CACHE_MAX_AGE_DAYS``, like a temp file an interrupted write left.
+    Reading an entry renews it. Other files are left alone. Returns the
+    number of removed entries.
+
+    ``kml_files`` is not needed any more: content keys cannot be matched to
+    input paths without hashing every input again.
     """
+    del kml_files
     if cache_dir is None:
         cache_dir = KML_CACHE_DIR
-
-    current: dict[str, str] = {}
-    for kml_file in kml_files:
-        kml_path = Path(kml_file)
-        cache_name = _cache_name(kml_path)
-        if cache_name is not None:
-            current[_cache_prefix(kml_path)] = cache_name
 
     try:
         entries = list(cache_dir.iterdir())
     except OSError:
         return 0
 
+    now = time.time()
     removed = 0
     for entry in entries:
-        prefix = _entry_prefix(entry.name)
-        if prefix is None or prefix not in current or entry.name == current[prefix]:
+        if not _is_stale(entry, now):
             continue
         with contextlib.suppress(OSError):
             entry.unlink()
@@ -150,7 +205,8 @@ def load_cached_parse(
 
     Path points are stored as indices into the coordinate list, so a path
     point and its coordinate entry are the same object after loading, as
-    they are after parsing.
+    they are after parsing. A loaded entry is touched, which keeps it from
+    being pruned for its age.
     """
     try:
         with open(cache_path, encoding="utf-8") as f:
@@ -180,6 +236,9 @@ def load_cached_parse(
     ) as e:
         logger.debug("Cache file %s is corrupt or unreadable: %s", cache_path, e)
         return None
+
+    with contextlib.suppress(OSError):
+        os.utime(cache_path)
     return coordinates, path_groups, path_metadata
 
 

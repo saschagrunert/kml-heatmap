@@ -1,17 +1,81 @@
 ---
+# Tests every pull request and push to main. A push to main (or a manual run
+# on main) also builds the site and publishes it to GitHub Pages, but only
+# once every test job has passed. The weekly run only repeats the security
+# job, so a new advisory for a pinned dependency or a leaked secret shows up
+# without a push.
 name: test
 on:
   push:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Runs on main are not cancelled once they started. Of the pushes waiting
+  # behind a running one only the newest is kept, so the newest commit is
+  # always tested and deployed. The weekly run gets its own group so it can
+  # never replace a push that is waiting to deploy.
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'schedule' || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  format:
+  lint:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.lock
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # requirements-test.lock pins the runtime dependencies as well, to the
+      # same versions (scripts/check_locks.py checks that)
+      - name: Install dependencies
+        id: deps
+        run: |
+          pip install --require-hashes -r requirements-test.lock
+          npm ci
+      # Every check below runs even when an earlier one failed, so a single
+      # run reports all of them
+      - name: Check that the lock files match pyproject.toml
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: python scripts/check_locks.py
+      - name: Check Python formatting
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: ruff format --check .
+      - name: Check Prettier formatting
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: npm run format:check
+      - name: Run ruff
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: ruff check .
+      - name: Run mypy
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: mypy .
+      - name: Type-check the frontend
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: npm run typecheck
+      - name: Type-check the unit and e2e tests
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: npm run typecheck:tests
+      - name: Run eslint
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: npm run lint
+
+  unit:
+    needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -31,82 +95,31 @@ jobs:
         run: pip install --require-hashes -r requirements-test.lock
       - name: Install npm dependencies
         run: npm ci
-      - name: Check Python formatting
-        run: ruff format --check .
-      - name: Check Prettier formatting
-        run: npm run format:check
-
-  lint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements*.lock
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Install Python dependencies
-        run: pip install --require-hashes -r requirements.lock -r requirements-test.lock
-      - name: Install npm dependencies
-        run: npm ci
-      - name: Run ruff
-        run: ruff check .
-      - name: Run mypy
-        run: mypy .
-      - name: Type-check the frontend
-        run: npm run typecheck
-      - name: Type-check the unit and e2e tests
-        run: npm run typecheck:tests
-      - name: Run eslint
-        run: npm run lint
-
-  unit:
-    needs: [format, lint]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements*.lock
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Install Python dependencies
-        run: pip install --require-hashes -r requirements.lock -r requirements-test.lock
-      - name: Install npm dependencies
-        run: npm ci
       - name: Build the JavaScript bundle
         run: npm run build
       - name: Compute the weekly cache key
         id: week
         run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+      # Only the CSV: a failed download leaves a marker file behind that
+      # suppresses retries for an hour, and a cache saved with it would hand
+      # that to every job restoring it. During an outage the build falls back
+      # to an earlier week's copy.
       - name: Cache the OurAirports database
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/kml-heatmap
+          path: ~/.cache/kml-heatmap/airports.csv
           key: airports-${{ steps.week.outputs.week }}
+          restore-keys: airports-
       # The export contract test reads the data files of a real build
       - name: Build the site from the current sources
         run: python -m kml_heatmap data --output-dir docs
+        env:
+          KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
       - name: Run JavaScript tests with coverage
         run: npm run test:coverage
+      # Also enforces fail_under from pyproject.toml
       - name: Run Python tests with coverage
         run: pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
-      - name: Enforce the Python coverage threshold
-        run: coverage report
       - name: Upload coverage to Codecov
         if: github.actor != 'dependabot[bot]'
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
@@ -116,26 +129,8 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
-  build:
-    needs: [format, lint]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Install npm dependencies
-        run: npm ci
-      - name: Build JavaScript bundles and check the size budget
-        run: npm run build
-        env:
-          CI: "true"
-
   packaging:
-    needs: [format, lint]
+    needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -151,7 +146,8 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - name: Build JavaScript bundles
+      # Fails when the minified bundle exceeds the size budget in build.js
+      - name: Build the JavaScript bundle
         run: npm ci && npm run build
       - name: Build the wheel
         run: pip wheel . --no-deps -w dist
@@ -159,11 +155,10 @@ jobs:
         run: |
           python -m venv "$RUNNER_TEMP/wheel-venv"
           "$RUNNER_TEMP/wheel-venv/bin/pip" install --disable-pip-version-check dist/*.whl
-      - name: Smoke test the installed package
+      - name: Check the shipped assets
         # Run outside the checkout so the installed package is imported, not the source tree
         working-directory: ${{ runner.temp }}
         run: |
-          "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
           for asset in templates/map_template.html static/mapApp.bundle.js static/styles.css; do
             result=$("$RUNNER_TEMP/wheel-venv/bin/python" -c "import importlib.resources as r, kml_heatmap; print(r.files(kml_heatmap).joinpath('$asset').is_file())")
             echo "$asset shipped: $result"
@@ -173,15 +168,44 @@ jobs:
           maps=$("$RUNNER_TEMP/wheel-venv/bin/python" -c "import importlib.resources as r, kml_heatmap; print(any(p.name.endswith('.map') for p in r.files(kml_heatmap).joinpath('static').iterdir()))")
           echo "source maps shipped: $maps"
           test "$maps" = "False"
+      # Loads the parser, the minifiers, the renderer and the templates, which
+      # `--version` alone never imports. The airport fixture stands in for
+      # the OurAirports download.
+      - name: Generate a site with the installed package
+        working-directory: ${{ runner.temp }}
+        env:
+          KML_HEATMAP_CACHE_DIR: ${{ runner.temp }}/smoke/cache
+        run: |
+          mkdir -p smoke/input smoke/cache
+          cp "$GITHUB_WORKSPACE/tests/fixtures/airports.csv" smoke/cache/
+          kml=("$GITHUB_WORKSPACE"/data/*.kml)
+          cp "${kml[@]:0:3}" smoke/input/
+          "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
+          "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" smoke/input --output-dir smoke/site
+          for file in index.html map_config.js mapApp.bundle.js data/metadata.js; do
+            test -s "smoke/site/$file" || { echo "::error::smoke/site/$file was not generated"; exit 1; }
+          done
+          # Still the fixture, so nothing was downloaded
+          cmp "$GITHUB_WORKSPACE/tests/fixtures/airports.csv" smoke/cache/airports.csv
 
   e2e:
-    needs: [format, lint]
+    needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         project: [desktop, mobile]
+        # The published site has tile API keys and a default build has none.
+        # Both paths get tested; tests/e2e/fixtures.ts answers the tile
+        # servers locally, so the dummy keys never leave the runner.
+        api-keys: [dummy, none]
+        browser: [chromium]
+        include:
+          # The phone interface in Safari's engine, with the published setup
+          - project: webkit
+            api-keys: dummy
+            browser: webkit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python
@@ -199,7 +223,7 @@ jobs:
         run: pip install --require-hashes -r requirements.lock
       - name: Install npm dependencies
         run: npm ci
-      - name: Build JavaScript bundles
+      - name: Build the JavaScript bundle
         run: npm run build
       - name: Compute the weekly cache key
         id: week
@@ -207,10 +231,15 @@ jobs:
       - name: Cache the OurAirports database
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/kml-heatmap
+          path: ~/.cache/kml-heatmap/airports.csv
           key: airports-${{ steps.week.outputs.week }}
+          restore-keys: airports-
       - name: Build the site from the current sources
         run: python -m kml_heatmap data --output-dir docs
+        env:
+          KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
+          CARTO_API_KEY: ${{ matrix.api-keys == 'dummy' && 'e2e-carto' || '' }}
+          OPENAIP_API_KEY: ${{ matrix.api-keys == 'dummy' && 'e2e-openaip' || '' }}
       - name: Get Playwright version
         id: playwright-version
         run: echo "version=$(npx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
@@ -219,20 +248,23 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ steps.playwright-version.outputs.version }}-chromium
+          key: playwright-${{ steps.playwright-version.outputs.version }}-${{ matrix.browser }}
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: Install Playwright system deps
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
-      - name: Run E2E tests (${{ matrix.project }})
+        run: npx playwright install-deps ${{ matrix.browser }}
+      - name: Run E2E tests (${{ matrix.project }}, ${{ matrix.api-keys }} API keys)
         run: npx playwright test --project=${{ matrix.project }}
+        env:
+          # Checked against docs/map_config.js by tests/e2e/global-setup.ts
+          E2E_API_KEYS: ${{ matrix.api-keys }}
       - name: Upload Playwright results
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-results-${{ matrix.project }}
+          name: playwright-results-${{ matrix.project }}-${{ matrix.api-keys }}
           path: |
             test-results/
             playwright-report/
@@ -245,7 +277,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # gitleaks scans the commit history
+          # gitleaks scans the whole commit history
           fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -267,26 +299,44 @@ jobs:
           cache: npm
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
-      - name: Scan for secrets
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_CONFIG: .gitleaks.toml
-          GITLEAKS_ENABLE_COMMENTS: "false"
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+      # The same gitleaks release as the pre-commit hook, whose rev Dependabot
+      # bumps. The config's [[allowlists]] needs gitleaks 8.25 or newer.
+      - name: Scan the commit history for secrets
+        run: |
+          version=$(awk '$3 == "https://github.com/gitleaks/gitleaks" { found = 1; next } found && $1 == "rev:" { print $2; exit }' .pre-commit-config.yaml)
+          test -n "$version" || { echo "::error::no gitleaks rev in .pre-commit-config.yaml"; exit 1; }
+          docker run --rm -v "$PWD:/repo:ro" "ghcr.io/gitleaks/gitleaks:$version" \
+            git --redact --verbose --config /repo/.gitleaks.toml /repo
 
   container:
-    needs: [format, lint]
+    needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Keeps the Dockerfile and its base image bumps building; the image
-      # itself is not published
+      # The image itself is not published
       - name: Build the container image
         run: docker build -t kml-heatmap .
+      # Runs the image the way the Makefile does, with the airport fixture in
+      # place of the OurAirports download
+      - name: Generate a site with the image
+        run: |
+          smoke="$RUNNER_TEMP/smoke"
+          mkdir -p "$smoke/input" "$smoke/site" "$smoke/cache"
+          cp tests/fixtures/airports.csv "$smoke/cache/"
+          kml=(data/*.kml)
+          cp "${kml[@]:0:3}" "$smoke/input/"
+          docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
+            kml-heatmap input --output-dir site
+          for file in index.html map_config.js mapApp.bundle.js data/metadata.js; do
+            test -s "$smoke/site/$file" || { echo "::error::$file was not generated"; exit 1; }
+          done
+          # Still the fixture, and without a network nothing else was fetched
+          cmp tests/fixtures/airports.csv "$smoke/cache/airports.csv"
 
   obfuscation:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -303,8 +353,108 @@ jobs:
         run: python -m kml_heatmap.obfuscate data/ --check
 
   typos:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: crate-ci/typos@d43b6c087ac471e2ea7b8af622ff15f05c0c365b # v1.50.1
+
+  # Publishing waits for every test job. The security job is not a gate: a
+  # new advisory for a test dependency must not hold back new flights, and
+  # the weekly run reports it anyway.
+  publishable:
+    needs: [lint, unit, packaging, e2e, container, obfuscation, typos]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.head.outputs.publish }}
+    steps:
+      # A re-run of an older run keeps its commit; publishing that would
+      # replace the site of a newer push
+      - name: Check that the commit is still the head of main
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::main moved on to $head; not publishing $GITHUB_SHA"
+          fi
+
+  # Builds the published site from the sources and the KML files in data/.
+  # Nothing generated is committed, so every deployment is exactly what the
+  # tested commit produces. Only this job sees the real tile API keys.
+  site:
+    needs: publishable
+    if: needs.publishable.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.lock
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install Python dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Install npm dependencies
+        run: npm ci
+      - name: Build the JavaScript bundle
+        run: npm run build
+      - name: Compute the weekly cache key
+        id: week
+        run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Cache the OurAirports database
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kml-heatmap/airports.csv
+          key: airports-${{ steps.week.outputs.week }}
+          restore-keys: airports-
+      - name: Build the site
+        run: python -m kml_heatmap data --output-dir site
+        env:
+          KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
+          CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}
+          OPENAIP_API_KEY: ${{ secrets.OPENAIP_API_KEY }}
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Deployments never overlap and are never cancelled half way
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Reads the Pages site configuration. The Pages source has to be set to
+      # "GitHub Actions" by hand (see CONTRIBUTING.md): enabling or switching
+      # it needs a token with more rights than GITHUB_TOKEN.
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

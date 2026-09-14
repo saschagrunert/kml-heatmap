@@ -4,7 +4,6 @@ import {
   knownYears,
   openWrapped,
   settleAnimations,
-  usesMobileBar,
   waitForAircraftFilter,
   waitForYearFilter,
 } from "./helpers";
@@ -32,13 +31,10 @@ test.describe("Wrapped and Export", () => {
     await expect(page.locator("#wrapped-content")).toBeVisible();
   });
 
-  // Desktop only: below the breakpoint the cards stack under the map and the
-  // dialog scrolls as one column, which is a different arrangement entirely
+  // The mobile project does not run this file: below the breakpoint the
+  // cards stack above the map and the dialog scrolls as one column, which
+  // mobile.spec.ts covers
   test("the map stays put while the cards scroll", async ({ page }) => {
-    test.skip(
-      await usesMobileBar(page),
-      "the stacked layout scrolls the dialog, not the column",
-    );
     await openWrapped(page);
     const column = page.locator("#wrapped-cards-column");
     const map = page.locator("#wrapped-map-container");
@@ -61,10 +57,6 @@ test.describe("Wrapped and Export", () => {
   });
 
   test("reopening starts at the top of the cards", async ({ page }) => {
-    test.skip(
-      await usesMobileBar(page),
-      "the stacked layout scrolls the dialog, not the column",
-    );
     const modal = page.locator("#wrapped-modal");
     const column = page.locator("#wrapped-cards-column");
 

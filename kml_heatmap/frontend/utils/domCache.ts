@@ -49,19 +49,6 @@ export class DOMCache {
   }
 
   /**
-   * Pre-cache multiple elements by their IDs
-   * @param ids - Array of element IDs to cache
-   */
-  cacheElements(ids: string[]): void {
-    ids.forEach((id) => {
-      const element = document.getElementById(id);
-      if (element) {
-        this.cache.set(id, element);
-      }
-    });
-  }
-
-  /**
    * Clear the cache (useful for cleanup or when DOM changes)
    */
   clear(): void {

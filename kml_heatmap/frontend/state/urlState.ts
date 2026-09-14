@@ -7,11 +7,13 @@ import type { AppState } from "../types";
 import { MAX_ZOOM, MIN_ZOOM } from "../utils/constants";
 
 /**
- * Schema version of the persisted selection. Path ids are assigned by the
- * exporter and were renumbered, so ids saved by an older release refer to
- * different flights and must be discarded rather than silently applied.
+ * Schema version of the persisted selection. Ids saved by an older release
+ * refer to different flights and must be discarded rather than silently
+ * applied. Version 3 ids are derived from the flight content instead of its
+ * position in the export, so they stay valid across re-exports; an id whose
+ * flight was removed is dropped once the data has loaded.
  */
-export const STATE_SCHEMA_VERSION = 2;
+export const STATE_SCHEMA_VERSION = 3;
 
 /**
  * Parse URL parameters into state object
@@ -222,41 +224,4 @@ export function encodeStateToUrl(state: AppState): string {
   }
 
   return params.toString();
-}
-
-/**
- * Build default state object
- * @returns Default state with all flags
- */
-export function getDefaultState(): AppState {
-  return {
-    selectedYear: "all",
-    selectedAircraft: "all",
-    selectedPathIds: [],
-    heatmapVisible: true,
-    altitudeVisible: false,
-    airspeedVisible: false,
-    airportsVisible: true,
-    aviationVisible: false,
-    statsPanelVisible: false,
-    wrappedVisible: false,
-    buttonsHidden: false,
-    isolateSelection: false,
-  };
-}
-
-/**
- * Merge state objects with priority (urlState overrides defaultState)
- * @param defaultState - Default state values
- * @param urlState - State from URL (takes priority)
- * @returns Merged state
- */
-export function mergeState(
-  defaultState: AppState,
-  urlState: AppState | null,
-): AppState {
-  if (!urlState) {
-    return { ...defaultState };
-  }
-  return { ...defaultState, ...urlState };
 }

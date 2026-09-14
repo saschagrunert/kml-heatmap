@@ -1,16 +1,19 @@
 """Golden pipeline test: run the full export on committed data/*.kml files.
 
-Checks the structural invariants of the generated output (D1/D2 file shapes
-and the internal consistency of the statistics) rather than exact numbers.
+Checks the shape of the generated output and pins the values a fixed subset
+of the sample data produces, so that a consistent regression (every speed
+halved, a flight dropped, ids renumbered) fails instead of passing as
+internally consistent.
 """
 
 import re
 from pathlib import Path
+from pprint import pformat
 
 import pytest
 
+from kml_heatmap.data_exporter import PATH_ID_BITS
 from kml_heatmap.geometry import haversine_distance
-from kml_heatmap.helpers import format_flight_time
 from kml_heatmap.renderer import create_progressive_heatmap
 from tests.conftest import parse_js as _load_js
 
@@ -21,6 +24,38 @@ SEGMENT_MAX_LEN = 5
 
 
 PER_YEAR = 4
+
+# What the subset of data/ picked by _select_input_files exports, with the
+# fixture airport database of the tests. After an intended change to the
+# parser, the exporter or the sample data, run
+#
+#     pytest tests/test_pipeline_golden.py -k golden_values
+#
+# which fails with the new values, and paste them here; review the diff like
+# any other change. The path ids are persisted in shared links: changing them
+# needs a new STATE_SCHEMA_VERSION in the frontend (state/urlState.ts).
+GOLDEN = {
+    "aircraft_models": {
+        "D-EAGJ": "Diamond DA-20A-1 Katana",
+        "D-ELGD": "Cessna T182T Turbo Skylane",
+    },
+    "airport_names": [
+        "EDAC Leipzig-Altenburg Airport",
+        "EDAQ Halle-Oppin",
+        "EDCB Ballenstedt",
+        "EDCM Kamenz",
+    ],
+    "available_years": [2025, 2026],
+    "distance_km": {2025: 673.9, 2026: 1162.5},
+    "flight_seconds": {2025: 19148.8, 2026: 24468.4},
+    "groundspeed_knots": (0.1, 166.3),
+    "path_count": 8,
+    "path_ids": {
+        2025: [695806902132, 104044549516, 686180647743, 980899696672],
+        2026: [645968488099, 241448899525, 197972773580, 210679907966],
+    },
+    "segment_rows": {2025: 5650, 2026: 5964},
+}
 
 
 def _select_input_files(per_year=PER_YEAR):
@@ -39,6 +74,68 @@ def _select_input_files(per_year=PER_YEAR):
     return selected, {year: len(paths) for year, paths in by_year.items()}
 
 
+def _build_site(out, inputs):
+    """Run the pipeline on ``inputs`` into ``out / "site"``.
+
+    Only the CLI obfuscates the input files, so data/ is safe to read here.
+    """
+    # The pipeline requires the bundle, which the Python tests do not build
+    bundle = out / "static" / "mapApp.bundle.js"
+    bundle.parent.mkdir(parents=True)
+    bundle.write_text("/* test bundle */", encoding="utf-8")
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr("kml_heatmap.renderer.BUNDLE_FILE", bundle)
+        return create_progressive_heatmap(
+            [str(p) for p in inputs],
+            str(out / "site" / "index.html"),
+            str(out / "site" / "data"),
+            [DATA_DIR / "aircraft.json"],
+        )
+
+
+def _observed_values(data_dir):
+    """The values GOLDEN pins, read from a generated data directory."""
+    metadata = _load_js(data_dir / "metadata.js", "KML_METADATA")
+    airports = _load_js(data_dir / "airports.js", "KML_AIRPORTS")["airports"]
+    path_ids = {}
+    segment_rows = {}
+    distance_km = {}
+    flight_seconds = {}
+    for year in metadata["available_years"]:
+        data = _load_js(data_dir / str(year) / "data.js", f"KML_DATA_{year}")
+        path_ids[year] = [info["id"] for info in data["path_info"]]
+        entries = data["segments"].values()
+        segment_rows[year] = sum(len(entry["rows"]) for entry in entries)
+        # The rows chain from the start point; the time column is relative to
+        # the start of the flight, the way the frontend reads both
+        distance = 0.0
+        seconds = 0.0
+        for entry in entries:
+            previous = entry["start"]
+            for row in entry["rows"]:
+                distance += haversine_distance(*previous[:2], *row[:2])
+                previous = row
+            times = [row[4] for row in entry["rows"] if len(row) > 4]
+            if times:
+                seconds += max(times) - min(times)
+        distance_km[year] = round(distance, 1)
+        flight_seconds[year] = round(seconds, 1)
+    return {
+        "aircraft_models": metadata["aircraft_models"],
+        "airport_names": sorted(airport["name"] for airport in airports),
+        "available_years": metadata["available_years"],
+        "distance_km": distance_km,
+        "flight_seconds": flight_seconds,
+        "groundspeed_knots": (
+            metadata["min_groundspeed_knots"],
+            metadata["max_groundspeed_knots"],
+        ),
+        "path_count": sum(len(ids) for ids in path_ids.values()),
+        "path_ids": path_ids,
+        "segment_rows": segment_rows,
+    }
+
+
 @pytest.fixture(scope="module")
 def golden_output(tmp_path_factory):
     inputs, files_per_year = _select_input_files()
@@ -47,14 +144,14 @@ def golden_output(tmp_path_factory):
     assert len(files_per_year) >= 2, "the sample data must span at least two years"
     assert len(inputs) == sum(min(PER_YEAR, n) for n in files_per_year.values())
     out = tmp_path_factory.mktemp("golden")
-    ok = create_progressive_heatmap(
-        [str(p) for p in inputs],
-        str(out / "index.html"),
-        str(out / "data"),
-        [DATA_DIR / "aircraft.json"],
-    )
-    assert ok is True
-    return out, inputs
+    assert _build_site(out, inputs) is True
+    return out / "site", inputs
+
+
+def test_golden_values(golden_output):
+    out, _ = golden_output
+    observed = _observed_values(out / "data")
+    assert observed == GOLDEN, "GOLDEN is now:\n" + pformat(observed)
 
 
 def test_index_html_references_bundles(golden_output):
@@ -73,8 +170,9 @@ def test_top_level_data_files(golden_output):
     metadata = _load_js(data_dir / "metadata.js", "KML_METADATA")
     airports = _load_js(data_dir / "airports.js", "KML_AIRPORTS")
 
+    # No statistics: the frontend computes them from the year files
     assert set(metadata) == {
-        "stats",
+        "aircraft_models",
         "min_groundspeed_knots",
         "max_groundspeed_knots",
         "available_years",
@@ -103,18 +201,17 @@ def test_year_files_match_available_years(golden_output):
         assert metadata["year_file_bytes"][str(year)] == data_file.stat().st_size
 
 
-def test_year_data_shape_and_global_ids(golden_output):
+def test_year_data_shape_and_unique_ids(golden_output):
     out, inputs = golden_output
     data_dir = out / "data"
     metadata = _load_js(data_dir / "metadata.js", "KML_METADATA")
 
     all_ids = []
-    total_original_points = 0
+    registrations = set()
     for year in metadata["available_years"]:
         data = _load_js(data_dir / str(year) / "data.js", f"KML_DATA_{year}")
         assert list(data) == ["year", "original_points", "path_info", "segments"]
         assert data["year"] == year
-        total_original_points += data["original_points"]
 
         ids = [info["id"] for info in data["path_info"]]
         assert set(data["segments"]) == {str(i) for i in ids}
@@ -128,16 +225,12 @@ def test_year_data_shape_and_global_ids(golden_output):
                 "year",
                 "start_airport",
                 "end_airport",
-                "start_coords",
-                "end_coords",
-                "segment_count",
                 "min_altitude_ft",
                 "max_altitude_ft",
             }
             assert None not in info.values()
             assert info["year"] == year
-            assert len(info["start_coords"]) == 2
-            assert len(info["end_coords"]) == 2
+            registrations.add(info.get("aircraft_registration"))
 
         for entry in data["segments"].values():
             rows = entry["rows"]
@@ -149,61 +242,18 @@ def test_year_data_shape_and_global_ids(golden_output):
                 assert row[2] % 100 == 0
                 assert row[3] >= 0
 
-    assert all_ids == list(range(len(all_ids)))
-    assert len(all_ids) == len(inputs)
-    assert metadata["stats"]["num_paths"] == len(all_ids)
-    assert metadata["stats"]["total_points"] == total_original_points
+    assert len(set(all_ids)) == len(all_ids) == len(inputs)
+    assert all(0 <= path_id < 2**PATH_ID_BITS for path_id in all_ids)
+    assert set(metadata["aircraft_models"]) <= registrations
 
 
-def test_distance_matches_a_recompute_from_the_exported_coordinates(golden_output):
-    """The exported segments are the only flight data the frontend sees.
+def test_ids_survive_removing_an_input_file(golden_output, tmp_path):
+    """Shared links name flights by id; another flight must not take it."""
+    out, inputs = golden_output
+    before = _observed_values(out / "data")["path_ids"]
 
-    It recomputes every distance from the rounded coordinates in the file, so
-    the reconciled statistics have to come out of exactly those numbers. If the
-    exporter ever measures the unrounded track instead, the panel and the
-    metadata start disagreeing and this fails.
-    """
-    out, _ = golden_output
-    data_dir = out / "data"
-    metadata = _load_js(data_dir / "metadata.js", "KML_METADATA")
-    stats = metadata["stats"]
+    assert _build_site(tmp_path, inputs[1:]) is True
 
-    total_km = 0.0
-    longest_km = 0.0
-    for year in metadata["available_years"]:
-        data = _load_js(data_dir / str(year) / "data.js", f"KML_DATA_{year}")
-        for entry in data["segments"].values():
-            previous = entry["start"]
-            path_km = 0.0
-            for row in entry["rows"]:
-                path_km += haversine_distance(previous[0], previous[1], row[0], row[1])
-                previous = row
-            total_km += path_km
-            longest_km = max(longest_km, path_km)
-
-    assert total_km == pytest.approx(stats["total_distance_km"], rel=1e-9)
-    assert longest_km == pytest.approx(stats["longest_flight_km"], abs=0.05)
-
-
-def test_statistics_are_internally_consistent(golden_output):
-    out, _ = golden_output
-    stats = _load_js(out / "data" / "metadata.js", "KML_METADATA")["stats"]
-
-    assert stats["total_flight_time_seconds"] > 0
-    assert stats["total_flight_time_str"] == format_flight_time(
-        stats["total_flight_time_seconds"]
-    )
-    assert stats["total_distance_nm"] == pytest.approx(
-        stats["total_distance_km"] / 1.852
-    )
-    assert stats["min_altitude_m"] <= stats["max_altitude_m"]
-    assert stats["max_groundspeed_knots"] >= stats["avg_groundspeed_knots"] > 0
-    assert stats["num_airports"] == len(stats["airport_names"])
-    assert stats["num_aircraft"] == len(stats["aircraft_list"])
-    total_aircraft_time = sum(a["flight_time_seconds"] for a in stats["aircraft_list"])
-    assert total_aircraft_time == pytest.approx(stats["total_flight_time_seconds"])
-    for aircraft in stats["aircraft_list"]:
-        assert aircraft["flight_time_str"] == format_flight_time(
-            aircraft["flight_time_seconds"]
-        )
-        assert aircraft["model"]
+    after = _observed_values(tmp_path / "site" / "data")["path_ids"]
+    first_year = min(before)
+    assert after == {**before, first_year: before[first_year][1:]}

@@ -1,13 +1,7 @@
 [files]
-# Generated or minified files and lock files are not spell checked
+# typos skips what .gitignore lists (the generated site and bundles); lock
+# files are tracked but not worth spell checking
 extend-exclude = [
-  "docs/bundle.js",
-  "docs/mapApp.bundle.js",
-  "docs/*.map",
-  "docs/data/**",
-  "kml_heatmap/static/bundle.js",
-  "kml_heatmap/static/mapApp.bundle.js",
-  "kml_heatmap/static/*.map",
   "*.lock",
   "package-lock.json",
   # Vendored OurAirports rows: IATA codes such as MUC and BRE are not words

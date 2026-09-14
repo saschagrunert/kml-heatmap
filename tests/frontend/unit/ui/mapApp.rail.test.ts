@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import * as L from "leaflet";
 import { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
 import { invalidateMapAfterTransition } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
 // The instances the mocked manager constructors hand out live in the setup
 // module, which is loaded before the mocks are registered
@@ -17,7 +18,6 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
 }));
 vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
   domCache: {
-    cacheElements: vi.fn(),
     get: vi.fn((id: string, ctor?: new () => HTMLElement) => {
       const element = document.getElementById(id);
       if (!element || !ctor) return element;
@@ -363,6 +363,33 @@ describe("MapApp controls and map", () => {
       );
       appWithKey.destroy();
     });
+
+    it.each([
+      [false, true],
+      [true, false],
+    ])(
+      "creates the map for reduced motion %s with animations %s",
+      async (reduced, animate) => {
+        // Reduced motion used to cover only the app's own moves, while double
+        // click, wheel and pinch still animated and a drag still glided on
+        const spy = vi
+          .spyOn(motion, "prefersReducedMotion")
+          .mockReturnValue(reduced);
+
+        await initializeApp(app);
+
+        expect(L.map).toHaveBeenLastCalledWith(
+          "map",
+          expect.objectContaining({
+            zoomAnimation: animate,
+            fadeAnimation: animate,
+            markerZoomAnimation: animate,
+            inertia: animate,
+          }),
+        );
+        spy.mockRestore();
+      },
+    );
 
     it("appends the CARTO API key to the tile URL when configured", async () => {
       const appWithCarto = new MapApp({

@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { showToast } from "../../../../kml_heatmap/frontend/utils/toast";
+import {
+  LIVE_REGION_DELAY_MS,
+  TOAST_ALERT_ID,
+  TOAST_STACK_ID,
+  TOAST_STATUS_ID,
+  announceInRegion,
+  showToast,
+} from "../../../../kml_heatmap/frontend/utils/toast";
 
 describe("showToast", () => {
   beforeEach(() => {
@@ -13,9 +20,9 @@ describe("showToast", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
-    document
-      .querySelectorAll(".toast-notification")
-      .forEach((el) => el.remove());
+    for (const id of [TOAST_STACK_ID, TOAST_STATUS_ID, TOAST_ALERT_ID]) {
+      document.getElementById(id)?.remove();
+    }
   });
 
   it("creates a toast element in the DOM", () => {
@@ -47,18 +54,59 @@ describe("showToast", () => {
     expect(toast!.classList.contains("toast-error")).toBe(true);
   });
 
-  it("sets role=status for info toasts", () => {
-    showToast("Accessible message");
+  it("stacks consecutive toasts in one container instead of on top of each other", () => {
+    showToast("First");
+    showToast("Second");
 
-    const toast = document.querySelector(".toast-notification");
-    expect(toast!.getAttribute("role")).toBe("status");
+    const stack = document.getElementById(TOAST_STACK_ID)!;
+    expect(
+      Array.from(stack.children).map((toast) => toast.textContent),
+    ).toEqual(["First", "Second"]);
+    expect(document.querySelectorAll(`#${TOAST_STACK_ID}`)).toHaveLength(1);
   });
 
-  it("sets role=alert for error toasts", () => {
-    showToast("Error message", "error");
+  it("speaks info toasts through the persistent status region", () => {
+    showToast("Link copied");
 
-    const toast = document.querySelector(".toast-notification");
-    expect(toast!.getAttribute("role")).toBe("alert");
+    const region = document.getElementById(TOAST_STATUS_ID)!;
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    // The visible toast is only the picture of the message, so it is not
+    // announced a second time
+    expect(
+      document.getElementById(TOAST_STACK_ID)!.getAttribute("aria-hidden"),
+    ).toBe("true");
+    expect(
+      document.querySelector(".toast-notification")!.getAttribute("role"),
+    ).toBeNull();
+
+    // Filled after a tick, so screen readers see a change to a region they
+    // already track
+    expect(region.textContent).toBe("");
+    vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+    expect(region.textContent).toBe("Link copied");
+  });
+
+  it("speaks error toasts through the persistent alert region", () => {
+    showToast("Export failed", "error");
+    vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+
+    const region = document.getElementById(TOAST_ALERT_ID)!;
+    expect(region.getAttribute("role")).toBe("alert");
+    expect(region.textContent).toBe("Export failed");
+    expect(document.getElementById(TOAST_STATUS_ID)).toBeNull();
+  });
+
+  it("uses the regions the page already carries", () => {
+    const region = document.createElement("div");
+    region.id = TOAST_STATUS_ID;
+    document.body.appendChild(region);
+
+    showToast("Map exported");
+    vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+
+    expect(document.querySelectorAll(`#${TOAST_STATUS_ID}`)).toHaveLength(1);
+    expect(region.textContent).toBe("Map exported");
   });
 
   it("removes toast-visible class after 4 seconds", () => {
@@ -90,5 +138,37 @@ describe("showToast", () => {
 
     vi.advanceTimersByTime(1000);
     expect(document.contains(toast)).toBe(false);
+  });
+});
+
+describe("announceInRegion", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("clears the region now and writes the message after a tick", () => {
+    const region = document.createElement("div");
+    region.textContent = "Replay playing";
+
+    announceInRegion(region, "Replay playing");
+
+    // The same message again is still a change the reader announces
+    expect(region.textContent).toBe("");
+    vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+    expect(region.textContent).toBe("Replay playing");
+  });
+
+  it("lets a newer message replace one that was not written yet", () => {
+    const region = document.createElement("div");
+
+    announceInRegion(region, "Replay paused at 1:05");
+    announceInRegion(region, "Replay closed");
+    vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+
+    expect(region.textContent).toBe("Replay closed");
   });
 });

@@ -1,15 +1,19 @@
 """Airport deduplication, name extraction and the altitude heuristics behind it.
 
 Uses a spatial grid approach for O(1) proximity lookups: divides the map into
-~2km grid cells and checks the cell plus 8 neighbors for nearby airports,
-avoiding O(n^2) pairwise distance checks.
+~2km grid cells and checks the cells within the merge distance for nearby
+airports, avoiding O(n^2) pairwise distance checks.
 """
 
 import math
 import re
 from typing import TYPE_CHECKING
 
-from .airport_lookup import extract_icao_codes_from_name, lookup_airport_coordinates
+from .airport_lookup import (
+    airport_icao_code,
+    lookup_airport_coordinates,
+    split_route_name,
+)
 from .constants import (
     AIRPORT_DISTANCE_THRESHOLD_KM,
     AIRPORT_GRID_SIZE_DEGREES,
@@ -21,7 +25,7 @@ from .constants import (
     PATH_SAMPLE_MAX_SIZE,
     PATH_SAMPLE_MIN_SIZE,
 )
-from .geometry import haversine_distance
+from .geometry import EARTH_RADIUS_KM, haversine_distance
 from .logger import logger
 
 if TYPE_CHECKING:
@@ -35,11 +39,18 @@ __all__ = [
     "is_mid_flight_start",
     "is_point_marker",
     "is_valid_landing",
+    "route_airports",
     "sample_path_altitudes",
 ]
 
 # Marker types to filter out
 POINT_MARKERS = ["Log Start", "Log Stop", "Takeoff", "Landing"]
+# SkyDemon writes "Landing: 03 Mar 2025 08:50 Z". Only the start of a name
+# counts: dozens of airports have "Landing" in their name (CYNL, KNFE, ...).
+_POINT_MARKER_PATTERN = re.compile(
+    "(?:" + "|".join(map(re.escape, POINT_MARKERS)) + ")(?::|$)"
+)
+_KM_PER_DEGREE = math.radians(EARTH_RADIUS_KM)
 
 
 def sample_path_altitudes(
@@ -105,25 +116,44 @@ def is_point_marker(name: str | None) -> bool:
     """Check if a name represents a point marker (not a flight path)."""
     if not name:
         return True
-    return any(marker in name for marker in POINT_MARKERS)
+    return _POINT_MARKER_PATTERN.match(name) is not None
+
+
+def route_airports(metadata: PathMetadata) -> tuple[str | None, str | None]:
+    """The departure and arrival airport of a path, both None for no route.
+
+    The parser records both when it standardizes the name, because airport
+    names may contain " - " and the display name cannot be split reliably.
+    Only metadata built without those keys falls back to splitting it.
+    """
+    if "start_airport" in metadata or "end_airport" in metadata:
+        return metadata.get("start_airport"), metadata.get("end_airport")
+    route = split_route_name(metadata.get("airport_name"))
+    return route if route is not None else (None, None)
+
+
+def _airport_at(name: str, is_at_path_end: bool) -> str:
+    """The departure or arrival of a route name; any other name as it is."""
+    route = split_route_name(name)
+    if route is None:
+        return name
+    return route[1] if is_at_path_end else route[0]
 
 
 def extract_airport_name(full_name: str, is_at_path_end: bool = False) -> str | None:
-    """Extract clean airport name from route name."""
+    """Extract a clean airport name, or None when it is no airport.
+
+    ``deduplicate_airports`` stores the name of one airport. A route name
+    ("DEPARTURE - ARRIVAL") yields the airport selected by ``is_at_path_end``.
+    """
     if not full_name or full_name in ["Airport", "Unknown", ""]:
         return None
 
     # Check if it's a marker prefix that shouldn't have made it here
-    marker_pattern = r"^(Log Start|Takeoff|Landing|Log Stop):\s*.+$"
-    if re.match(marker_pattern, full_name):
+    if is_point_marker(full_name):
         return None
 
-    # Extract airport from route format "XXX - YYY"
-    if " - " in full_name and full_name.count(" - ") == 1:
-        parts = full_name.split(" - ")
-        airport_name = parts[1].strip() if is_at_path_end else parts[0].strip()
-    else:
-        airport_name = full_name
+    airport_name = _airport_at(full_name, is_at_path_end)
 
     # Validate: must have ICAO code OR be multi-word name
     has_icao_code = bool(re.search(r"\b[A-Z]{4}\b", airport_name))
@@ -149,12 +179,30 @@ class AirportDeduplicator:
         """Get grid cell key for a coordinate."""
         return (math.floor(lat / self.grid_size), math.floor(lon / self.grid_size))
 
+    def _search_cells(self, lat: float) -> tuple[int, int]:
+        """How many cells around a point, per axis, can hold a nearby airport.
+
+        A degree of longitude shrinks with the cosine of the latitude: at 51°N
+        a 0.018° cell is only 1.26 km wide, less than the merge distance, so
+        a single neighbor cell is not enough. The pole side of the search
+        radius is the narrowest, so its width decides.
+        """
+        cell_km = self.grid_size * _KM_PER_DEGREE
+        lat_cells = math.ceil(AIRPORT_DISTANCE_THRESHOLD_KM / cell_km)
+        edge_lat = min(90.0, abs(lat) + lat_cells * self.grid_size)
+        lon_cell_km = cell_km * math.cos(math.radians(edge_lat))
+        max_lon_cells = math.ceil(360 / self.grid_size)
+        if lon_cell_km * max_lon_cells <= AIRPORT_DISTANCE_THRESHOLD_KM:
+            return lat_cells, max_lon_cells
+        lon_cells = math.ceil(AIRPORT_DISTANCE_THRESHOLD_KM / lon_cell_km)
+        return lat_cells, min(lon_cells, max_lon_cells)
+
     def _find_nearby_airport(self, lat: float, lon: float) -> int | None:
         """Find airport within threshold using spatial grid."""
         grid_key = self._get_grid_key(lat, lon)
-        # Check current cell and 8 neighbors
-        for dlat in (-1, 0, 1):
-            for dlon in (-1, 0, 1):
+        lat_cells, lon_cells = self._search_cells(lat)
+        for dlat in range(-lat_cells, lat_cells + 1):
+            for dlon in range(-lon_cells, lon_cells + 1):
                 neighbor_key = (grid_key[0] + dlat, grid_key[1] + dlon)
                 for apt_idx in self.spatial_grid.get(neighbor_key, ()):
                     airport = self.unique_airports[apt_idx]
@@ -183,17 +231,7 @@ class AirportDeduplicator:
         corrected_lon = lon
 
         if name:
-            icao_codes = extract_icao_codes_from_name(name)
-
-            # For routes, extract the relevant ICAO code based on position
-            if " - " in name and len(icao_codes) == 2:
-                # Use departure ICAO for start, arrival ICAO for end
-                icao_code = icao_codes[1] if is_at_path_end else icao_codes[0]
-            elif len(icao_codes) == 1:
-                icao_code = icao_codes[0]
-            else:
-                icao_code = None
-
+            icao_code = airport_icao_code(_airport_at(name, is_at_path_end))
             if icao_code:
                 coords = lookup_airport_coordinates(icao_code)
                 if coords:
@@ -252,6 +290,8 @@ def _add_departures(
     so this pass covers the departure of every path, including the ones whose
     name is a single airport rather than a route. The altitude comes from the
     metadata's ``start_point`` and defaults to 0 when the point carries none.
+    A route registers its departure airport under that airport's own name,
+    the name the path info of the export refers to.
     """
     for idx, metadata in enumerate(all_path_metadata):
         start_point = metadata["start_point"]
@@ -270,10 +310,11 @@ def _add_departures(
             logger.debug("Skipping mid-flight start '%s'", airport_name)
             continue
 
+        start_airport, _ = route_airports(metadata)
         deduplicator.add_or_update_airport(
             lat=start_lat,
             lon=start_lon,
-            name=airport_name,
+            name=start_airport or airport_name,
             path_index=idx,
             is_at_path_end=False,
         )
@@ -288,24 +329,26 @@ def _add_arrivals(
 
     Only routes ("DEPARTURE - ARRIVAL") reach this pass, because only they say
     which airport the end belongs to. The arrival is only registered when the
-    path actually ends in a landing.
+    path actually ends in a landing, under the arrival airport's own name.
     """
     for idx, path in enumerate(all_path_groups):
         if len(path) <= 1 or idx >= len(all_path_metadata):
             continue
 
         end = path[-1]
-        route_name = all_path_metadata[idx].get("airport_name", "")
+        metadata = all_path_metadata[idx]
+        route_name = metadata.get("airport_name", "")
+        _, end_airport = route_airports(metadata)
 
         # Skip if not a proper route name
-        if is_point_marker(route_name) or " - " not in route_name:
+        if is_point_marker(route_name) or not end_airport:
             continue
 
         if is_valid_landing(path, end.alt):
             deduplicator.add_or_update_airport(
                 lat=end.lat,
                 lon=end.lon,
-                name=route_name,
+                name=end_airport,
                 path_index=idx,
                 is_at_path_end=True,
             )

@@ -4,6 +4,8 @@
   "exclude": ["node_modules", "kml_heatmap/static"],
   "compilerOptions": {
     "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
     "types": ["vitest/globals", "@playwright/test", "node"],
     "allowUmdGlobalAccess": true
   }

@@ -2,15 +2,20 @@
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from lxml import etree
 
-from .constants import KML_NAMESPACES
+from .aircraft import parse_aircraft_from_filename
+from .constants import KML_NAMESPACE, KML_NAMESPACES
 from .exceptions import KMLParseError
 from .logger import logger
 from .parser_cache import get_cache_key, load_cached_parse, save_to_cache
-from .parser_common import extract_placemark_metadata, find_xml_elements
+from .parser_common import (
+    extract_placemark_metadata,
+    find_xml_element,
+    find_xml_elements,
+)
 from .parser_gx_track import local_name, process_gx_track
 from .parser_standard import process_standard_coordinates
 
@@ -21,11 +26,25 @@ __all__ = [
     "parse_kml_coordinates",
 ]
 
+# gx:coord elements the track parser never reads. libxml2 counts them in one
+# pass; walking the tree twice in Python took a fifth of the parse time.
+_LOOSE_GX_COORDS = etree.XPath(
+    "count(//*[local-name()='coord'][not(ancestor::*[local-name()='Track'])])"
+)
+_TRACK_GX_COORDS = etree.XPath(
+    "count(//*[local-name()='Track']//*[local-name()='coord'])"
+)
+
 
 def _parse_kml_tree(kml_file: str) -> etree._Element:
     """Parse KML file and return XML root element."""
     try:
-        parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        # huge_tree lifts libxml2's 10 MB limit per text node, which a single
+        # long <coordinates> reaches well below the accepted file size.
+        # Entities stay unresolved and the amplification limit still applies.
+        parser = etree.XMLParser(
+            resolve_entities=False, no_network=True, huge_tree=True
+        )
         tree = etree.parse(kml_file, parser)
         root = tree.getroot()
 
@@ -41,6 +60,19 @@ def _parse_kml_tree(kml_file: str) -> etree._Element:
         raise KMLParseError(f"XML parsing error: {e}", file_path=kml_file) from e
     except OSError as e:
         raise KMLParseError(f"File I/O error: {e}", file_path=kml_file) from e
+
+
+def _document_namespaces(root: etree._Element) -> dict[str, str]:
+    """The namespaces to search a document with.
+
+    Google Earth's legacy namespaces (http://earth.google.com/kml/2.x) hold
+    the same elements as the OGC one and are used together with gx:Track.
+    A root element in such a namespace takes the place of the ``kml`` prefix.
+    """
+    namespace = etree.QName(root).namespace
+    if namespace and namespace != KML_NAMESPACE and local_name(root.tag) == "kml":
+        return {**KML_NAMESPACES, "kml": namespace}
+    return KML_NAMESPACES
 
 
 def _extract_kml_elements(
@@ -67,25 +99,18 @@ def _extract_kml_elements(
         )
 
     if tracks:
-        in_track = sum(
-            1
-            for track in tracks
-            for elem in track.iter()
-            if local_name(elem.tag) == "coord"
-        )
-        logger.debug(
-            "Found %d gx:Track element(s) with %d gx:coord elements",
-            len(tracks),
-            in_track,
-        )
-        total_gx_coords = sum(
-            1 for elem in root.iter() if local_name(elem.tag) == "coord"
-        )
-        if total_gx_coords > in_track:
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Found %d gx:Track element(s) with %d gx:coord elements",
+                len(tracks),
+                int(cast("float", _TRACK_GX_COORDS(root))),
+            )
+        loose_gx_coords = int(cast("float", _LOOSE_GX_COORDS(root)))
+        if loose_gx_coords:
             logger.warning(
                 "%s: %d gx:coord element(s) outside of gx:Track were ignored",
                 Path(kml_file).name,
-                total_gx_coords - in_track,
+                loose_gx_coords,
             )
 
     placemarks = root.findall(".//kml:Placemark", namespaces)
@@ -97,9 +122,16 @@ def _extract_kml_elements(
 
 def _build_coord_metadata_map(
     placemarks: list[etree._Element], namespaces: dict[str, str]
-) -> dict[int, PlacemarkMetadata]:
-    """Create mapping from coordinate elements to their placemark metadata."""
+) -> tuple[dict[int, PlacemarkMetadata], set[int]]:
+    """Map coordinate elements to their placemark metadata.
+
+    Also returns the ids of the LineString coordinates to skip: a placemark
+    holding both a gx:Track and a LineString (a MultiGeometry) is one
+    feature, and the LineString is the fallback geometry for viewers without
+    gx support. Parsing both would count the flight twice.
+    """
     coord_to_metadata: dict[int, PlacemarkMetadata] = {}
+    track_fallback_lines: set[int] = set()
     for placemark in placemarks:
         placemark_coords = find_xml_elements(
             placemark, ".//kml:coordinates", ".//coordinates", namespaces
@@ -107,11 +139,23 @@ def _build_coord_metadata_map(
         if not placemark_coords:
             continue
 
+        track = find_xml_element(placemark, ".//gx:Track", ".//Track", namespaces)
+        if track is not None:
+            for coord_elem in placemark_coords:
+                parent = coord_elem.getparent()
+                if parent is not None and local_name(parent.tag) == "LineString":
+                    track_fallback_lines.add(id(coord_elem))
+
         metadata = extract_placemark_metadata(placemark, namespaces)
         for coord_elem in placemark_coords:
             coord_to_metadata[id(coord_elem)] = metadata
 
-    return coord_to_metadata
+    if track_fallback_lines:
+        logger.debug(
+            "Ignoring %d LineString(s) next to a gx:Track in the same placemark",
+            len(track_fallback_lines),
+        )
+    return coord_to_metadata, track_fallback_lines
 
 
 def _log_parse_result(
@@ -149,12 +193,21 @@ def parse_kml_coordinates(
     path_metadata: list[PathMetadata] = []
 
     root = _parse_kml_tree(kml_file)
-    namespaces = KML_NAMESPACES
+    namespaces = _document_namespaces(root)
 
     coord_elements, tracks, placemarks = _extract_kml_elements(
         root, namespaces, kml_file
     )
-    coord_to_metadata = _build_coord_metadata_map(placemarks, namespaces)
+    coord_to_metadata, track_fallback_lines = _build_coord_metadata_map(
+        placemarks, namespaces
+    )
+    if track_fallback_lines:
+        coord_elements = [
+            elem for elem in coord_elements if id(elem) not in track_fallback_lines
+        ]
+
+    # Once per file: it logs its complaints about the name on every call
+    aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
 
     process_standard_coordinates(
         coord_elements,
@@ -163,10 +216,17 @@ def parse_kml_coordinates(
         coordinates,
         path_groups,
         path_metadata,
+        aircraft_info,
     )
 
     process_gx_track(
-        tracks, namespaces, kml_file, coordinates, path_groups, path_metadata
+        tracks,
+        namespaces,
+        kml_file,
+        coordinates,
+        path_groups,
+        path_metadata,
+        aircraft_info,
     )
 
     _log_parse_result(kml_file, coordinates, path_groups, cached=False)

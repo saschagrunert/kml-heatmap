@@ -6,8 +6,10 @@ setup, the checks that run in CI and the conventions used in this repository.
 ## Setup
 
 - Python 3.14 (`.python-version`) and Node.js 26 (`.nvmrc`). CI and the
-  container image use Node.js 26; Node.js 24 or newer works for local
-  development (`engines` in `package.json`).
+  container image use Node.js 26; Node.js 24.15 or a later 24.x release, or
+  Node.js 26 or newer, works for local development (`engines` in
+  `package.json`). vitest does not support Node.js 25, and jsdom needs at
+  least 24.15.
 - podman or docker for `make build` and `make serve` (optional)
 
 ```bash
@@ -23,7 +25,9 @@ pip install pre-commit && pre-commit install
 ```
 
 The pre-commit hooks run ruff (check and format), prettier, typos, gitleaks and
-the whitespace fixers on every commit.
+the whitespace fixers on every commit. When a commit touches `data/`, they also
+check that the KML files are obfuscated; that hook runs `python -m
+kml_heatmap.obfuscate`, so commit with the virtual environment active.
 
 ## Checks
 
@@ -32,10 +36,10 @@ from your virtual environment and `node_modules`, the same way CI does, so no
 container is involved:
 
 ```bash
-make lint            # ruff, mypy, bandit, tsc (frontend and tests), eslint
+make lint            # lock files, ruff, mypy, bandit, tsc (frontend and tests), eslint
 make format          # ruff format, prettier
 make test            # vitest and pytest with coverage; pytest flags are in README.md
-npm run test:e2e     # Playwright (see README.md for the prerequisites)
+npm run test:e2e     # Playwright: desktop, mobile and WebKit (see README.md)
 make check-obfuscation
 make lock            # regenerates the Python lock files after changing pyproject.toml
 ```
@@ -50,22 +54,31 @@ parentheses back is undone on the next `make format`.
 ## Repository rules
 
 - **The generated site is not tracked.** `docs/` is only the default output
-  directory of a local `make build`. The `deploy` workflow builds the site
-  from the sources and `data/` on every push to `main` and publishes it to
-  GitHub Pages; the `unit` and `e2e` CI jobs build their own copy. The
-  repository's Pages source has to be "GitHub Actions" (Settings > Pages);
-  the workflow switches it over on its first run.
+  directory of a local `make build`. On every push to `main` the `test`
+  workflow builds the site from the sources and `data/` and publishes it to
+  GitHub Pages, in its `site` and `deploy` jobs, which only start once every
+  test job has passed and only while the commit is still the head of `main`
+  (a re-run of an older run does not publish). The `unit` and `e2e` jobs build their own copies; the
+  e2e jobs test one with dummy tile API keys and one without. The
+  repository's Pages source has to be "GitHub Actions" (Settings > Pages).
+  Set it by hand: the workflow token is not allowed to change it.
 - **Never commit un-obfuscated KML files.** Every run rewrites the files in
-  `data/` in place; `make check-obfuscation` (and the `obfuscation` CI job)
-  verify that every committed file is obfuscated.
+  `data/` in place; the pre-commit hook, `make check-obfuscation` and the
+  `obfuscation` CI job verify that every committed file is obfuscated. Only
+  the hook runs before the dates would be public.
 - The frontend bundle in `kml_heatmap/static/` (`mapApp.bundle.js` and its
   `.map` file) is gitignored. It is built by `npm run build` and, for the
   images, inside the Dockerfile.
 - The Python dependencies are declared once, in `pyproject.toml` (runtime
   dependencies plus the `test` and `dev` extras). `requirements.lock` and
   `requirements-test.lock` are compiled from it with `make lock` (pip-compile
-  with hashes). Edit `pyproject.toml`, then regenerate the locks; the weekly
-  `lock` workflow does the same and opens a pull request.
+  with hashes). Edit `pyproject.toml`, then regenerate the locks; the CI lint
+  job fails while the locks no longer satisfy `pyproject.toml`, which is what
+  a Dependabot `pip` pull request needs `make lock` for. The weekly `lock`
+  workflow regenerates them as well and opens a pull request. That needs
+  "Allow GitHub Actions to create and approve pull requests" (Settings >
+  Actions > General), and a pull request opened by the workflow token does
+  not start CI: close and reopen it to run the checks.
 - The e2e suite serves Leaflet, leaflet.heat and dom-to-image from
   `node_modules` in place of the CDN copies the page loads. Their versions in
   `package.json` have to match the URLs and integrity hashes in
@@ -76,7 +89,7 @@ parentheses back is undone on the next `make format`.
 ## Commits and pull requests
 
 - Use conventional prefixes as seen in the history: `fix:`, `feat:`, `chore:`,
-  `ci:` (Dependabot uses `npm`, `pip`, `docker` and `ci`).
+  `ci:` (Dependabot uses `npm`, `pip`, `docker`, `pre-commit` and `ci`).
 - Sign off every commit: `git commit -s`. The Developer Certificate of Origin
   applies.
 - Keep one commit per branch. Amend it when addressing review feedback and keep

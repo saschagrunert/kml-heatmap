@@ -4,9 +4,12 @@
 AGENTS.md
 .playwright-mcp
 
-# Generated site: the default OUTPUT_DIR of `make build`. It is built and
-# deployed by the deploy workflow and never committed.
+# Generated sites, never committed: docs/ is the default OUTPUT_DIR of
+# `make build`, out/ the output of the README examples and site/ the one the
+# deploy job publishes.
 /docs/
+/out/
+/site/
 
 # Python
 __pycache__

@@ -7,9 +7,12 @@
 
 import * as esbuild from "esbuild";
 import { fileURLToPath } from "url";
-import { dirname, join, relative } from "path";
-import { readdirSync, readFileSync, statSync } from "fs";
-import { createHash } from "crypto";
+import { dirname, join } from "path";
+import { statSync } from "fs";
+import {
+  buildBanner as makeBanner,
+  computeSourceHash,
+} from "./scripts/source-hash.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -18,40 +21,8 @@ const isWatch = process.argv.includes("--watch");
 const isDevelopment = process.env.NODE_ENV === "development" || isWatch;
 const minify = !isDevelopment;
 
-const FRONTEND_DIR = join(__dirname, "kml_heatmap/frontend");
-
-/**
- * Recursively list files under a directory
- */
-function listFiles(dir) {
-  const files = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...listFiles(path));
-    } else if (entry.isFile()) {
-      files.push(path);
-    }
-  }
-  return files.sort();
-}
-
-/**
- * Content hash of all frontend sources (deterministic, independent of git)
- */
-function computeSourceHash() {
-  const hash = createHash("sha1");
-  for (const file of listFiles(FRONTEND_DIR)) {
-    hash.update(relative(__dirname, file));
-    hash.update("\0");
-    hash.update(readFileSync(file));
-    hash.update("\0");
-  }
-  return hash.digest("hex").slice(0, 12);
-}
-
 const sourceHash = computeSourceHash();
-const buildBanner = `/* kml-heatmap build ${sourceHash} */`;
+const buildBanner = makeBanner(sourceHash);
 
 // Shared build options for IIFE format bundles (file:// protocol compatible)
 const sharedBuildOptions = {
@@ -164,7 +135,9 @@ function analyzeBundleComposition(metafile, bundleName) {
   }
 }
 
-// Bundle size budget in bytes
+// Size budget of the minified bundle in bytes. Every production build checks
+// it, so every CI job that builds the bundle enforces it. Raise it on purpose
+// when a change needs the room, not to make a build pass.
 const BUDGET_APP = 115 * 1024;
 
 /**

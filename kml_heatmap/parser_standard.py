@@ -1,5 +1,6 @@
 """Standard KML <coordinates> processing."""
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .logger import logger
@@ -23,8 +24,11 @@ def process_standard_coordinates(
     coordinates: FlightPath,
     path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
+    aircraft_info: dict[str, str | None],
 ) -> None:
     """Process standard KML <coordinates> elements."""
+    lines_without_altitude = 0
+
     for idx, coord_elem in enumerate(coord_elements):
         if coord_elem.text is None:
             logger.debug("Coordinate element %d has None text, skipping", idx)
@@ -61,11 +65,24 @@ def process_standard_coordinates(
             # are not at fixed intervals.
             path_groups.append(current_path)
             path_metadata.append(
-                _build_path_metadata_dict(kml_file, current_path[0], metadata)
+                _build_path_metadata_dict(
+                    kml_file, current_path[0], metadata, aircraft_info
+                )
             )
+        elif element_coords > 1:
+            lines_without_altitude += 1
 
         if element_coords > 0:
             coord_type = (
                 "Point" if element_coords == 1 else f"Path ({element_coords} points)"
             )
             logger.debug("Element %d: %s", idx, coord_type)
+
+    if lines_without_altitude:
+        # Only the file's point count would show it otherwise, and that is
+        # not zero, so the missing flight would go unnoticed
+        logger.warning(
+            "%s: %d line(s) without usable altitudes were ignored",
+            Path(kml_file).name,
+            lines_without_altitude,
+        )

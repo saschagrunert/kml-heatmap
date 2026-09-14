@@ -16,7 +16,14 @@ import {
 } from "../calculations/statistics";
 import { countCountries } from "./airports";
 import { calculateDistance, type Coordinate } from "../utils/geometry";
-import type { FunFact, PathInfo, PathSegment, YearStats } from "../types";
+import type {
+  AircraftModels,
+  FilteredStatistics,
+  FunFact,
+  PathInfo,
+  PathSegment,
+  YearStats,
+} from "../types";
 
 /**
  * Find the airport furthest from the home base. Airports without known
@@ -52,23 +59,17 @@ export function findFurthestAirport(
   return furthest;
 }
 
-/**
- * Full statistics for enrichment
- */
-interface FullStats {
-  aircraft_list?: Array<{
-    registration: string;
-    model?: string | undefined;
-  }>;
-  total_altitude_gain_ft?: number | undefined;
-  total_flight_time_seconds?: number | undefined;
-  cruise_speed_knots?: number | undefined;
-  longest_flight_nm?: number | undefined;
-  longest_flight_km?: number | undefined;
-  max_altitude_ft?: number | undefined;
-  most_common_cruise_altitude_ft?: number | null | undefined;
-  most_common_cruise_altitude_m?: number | null | undefined;
-}
+/** The statistics of the selected year and aircraft the fun facts draw on */
+type FunFactStats = Pick<
+  FilteredStatistics,
+  | "total_altitude_gain_ft"
+  | "total_flight_time_seconds"
+  | "cruise_speed_knots"
+  | "longest_flight_nm"
+  | "max_altitude_ft"
+  | "most_common_cruise_altitude_ft"
+  | "most_common_cruise_altitude_m"
+>;
 
 /**
  * Well-known city pairs used to put the longest flight into perspective.
@@ -120,7 +121,7 @@ export function calculateYearStats(
   pathInfo: PathInfo[] | null,
   segments: PathSegment[],
   year: number | string,
-  fullStats: FullStats | null = null,
+  aircraftModels: AircraftModels = {},
   aircraft: string = "all",
   preFiltered?: { paths: PathInfo[]; segments: PathSegment[] },
 ): YearStats {
@@ -171,15 +172,13 @@ export function calculateYearStats(
     secondsByPath,
   );
 
-  // Enrich with model from fullStats
-  if (fullStats?.aircraft_list) {
-    const modelMap = new Map(
-      fullStats.aircraft_list.map((a) => [a.registration, a.model]),
-    );
-    for (const ac of aircraftList) {
-      const model = modelMap.get(ac.registration);
-      if (model) ac.model = model;
-    }
+  // The full model name only comes from aircraft.json. An own-key lookup, so
+  // a registration can never read something off the object prototype
+  for (const ac of aircraftList) {
+    const model = Object.hasOwn(aircraftModels, ac.registration)
+      ? aircraftModels[ac.registration]
+      : undefined;
+    if (model) ac.model = model;
   }
 
   return {
@@ -194,10 +193,12 @@ export function calculateYearStats(
 
 /**
  * Generate fun facts from year statistics
+ * @param yearStats - The Wrapped summary of the selected year and aircraft
+ * @param filteredStats - The statistics of the same selection
  */
 export function generateFunFacts(
   yearStats: YearStats,
-  fullStats: FullStats | null = null,
+  filteredStats: FunFactStats | null = null,
 ): FunFact[] {
   const facts: FunFact[] = [];
 
@@ -289,10 +290,10 @@ export function generateFunFacts(
     const avgDistanceNm = distanceNm / yearStats.total_flights;
     if (avgDistanceNm > 0) {
       // Only show cruise speed if timing data is available
-      if (fullStats?.cruise_speed_knots) {
+      if (filteredStats?.cruise_speed_knots) {
         facts.push({
           icon: "✈️",
-          text: `Cruising at <strong>${formatNumber(fullStats.cruise_speed_knots)} kt</strong>, averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip`,
+          text: `Cruising at <strong>${formatNumber(filteredStats.cruise_speed_knots)} kt</strong>, averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip`,
           category: "distance",
           priority: 8,
         });
@@ -308,10 +309,13 @@ export function generateFunFacts(
     }
   }
 
-  if (fullStats) {
+  if (filteredStats) {
     // Longest journey fact
-    if (fullStats.longest_flight_nm && fullStats.longest_flight_nm > 0) {
-      const longestNm = fullStats.longest_flight_nm;
+    if (
+      filteredStats.longest_flight_nm &&
+      filteredStats.longest_flight_nm > 0
+    ) {
+      const longestNm = filteredStats.longest_flight_nm;
       const reference = findClosestReferenceDistance(longestNm);
       const comparison = reference
         ? ` - about the distance from ${reference.label}!`
@@ -325,8 +329,8 @@ export function generateFunFacts(
     }
 
     // Altitude facts
-    if (fullStats.total_altitude_gain_ft) {
-      const totalGainFt = fullStats.total_altitude_gain_ft;
+    if (filteredStats.total_altitude_gain_ft) {
+      const totalGainFt = filteredStats.total_altitude_gain_ft;
       facts.push({
         icon: "⬆️",
         text: `Total elevation gain: <strong>${formatNumber(totalGainFt)} ft</strong>`,
@@ -335,8 +339,10 @@ export function generateFunFacts(
       });
 
       const everestFt = 29029;
-      if (fullStats.total_altitude_gain_ft > everestFt) {
-        const ratio = (fullStats.total_altitude_gain_ft / everestFt).toFixed(1);
+      if (filteredStats.total_altitude_gain_ft > everestFt) {
+        const ratio = (
+          filteredStats.total_altitude_gain_ft / everestFt
+        ).toFixed(1);
         facts.push({
           icon: "🏔️",
           text: `You climbed <strong>${ratio}x</strong> Mount Everest in altitude!`,
@@ -348,11 +354,11 @@ export function generateFunFacts(
 
     // Most common cruise altitude
     if (
-      fullStats.most_common_cruise_altitude_ft &&
-      fullStats.most_common_cruise_altitude_m
+      filteredStats.most_common_cruise_altitude_ft &&
+      filteredStats.most_common_cruise_altitude_m
     ) {
-      const cruiseAltFt = fullStats.most_common_cruise_altitude_ft;
-      const cruiseAltM = fullStats.most_common_cruise_altitude_m;
+      const cruiseAltFt = filteredStats.most_common_cruise_altitude_ft;
+      const cruiseAltM = filteredStats.most_common_cruise_altitude_m;
       facts.push({
         icon: "⬆️",
         text: `Most common cruise: <strong>${formatNumber(cruiseAltFt)} ft</strong> AGL (<strong>${formatNumber(cruiseAltM)} m</strong>)`,
@@ -362,31 +368,39 @@ export function generateFunFacts(
     }
 
     // Time facts (lower priority - time is shown in stats cards above)
-    if (fullStats.total_flight_time_seconds) {
-      const hours = Math.floor(fullStats.total_flight_time_seconds / 3600);
+    if (filteredStats.total_flight_time_seconds) {
+      const seconds = filteredStats.total_flight_time_seconds;
+      // Under an hour, whole hours would read "0 hours in the air"
+      const duration =
+        seconds >= 3600
+          ? `${formatNumber(Math.floor(seconds / 3600))} hours`
+          : formatFlightTime(seconds);
       facts.push({
         icon: "⏱️",
-        text: `Total flight time: <strong>${hours} hours</strong> in the air!`,
+        text: `Total flight time: <strong>${duration}</strong> in the air!`,
         category: "time",
         priority: 4,
       });
     }
 
     // Speed facts (lower priority - speed is included in other facts)
-    if (fullStats.cruise_speed_knots) {
+    if (filteredStats.cruise_speed_knots) {
       facts.push({
         icon: "⚡",
-        text: `Average cruise speed: <strong>${formatNumber(fullStats.cruise_speed_knots)} knots</strong>`,
+        text: `Average cruise speed: <strong>${formatNumber(filteredStats.cruise_speed_knots)} knots</strong>`,
         category: "speed",
         priority: 3,
       });
     }
 
     // Achievement facts
-    if (fullStats.max_altitude_ft && fullStats.max_altitude_ft > 40000) {
+    if (
+      filteredStats.max_altitude_ft &&
+      filteredStats.max_altitude_ft > 40000
+    ) {
       facts.push({
         icon: "🚀",
-        text: `High altitude achievement: <strong>${formatNumber(fullStats.max_altitude_ft)} feet</strong>!`,
+        text: `High altitude achievement: <strong>${formatNumber(filteredStats.max_altitude_ft)} feet</strong>!`,
         category: "achievement",
         priority: 9,
       });

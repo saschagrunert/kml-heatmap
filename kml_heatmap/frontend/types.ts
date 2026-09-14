@@ -7,18 +7,20 @@ import type { Coordinate } from "./utils/geometry";
 /**
  * Path information from KML data.
  * Keys with null values are omitted by the exporter, so every optional field
- * is either absent or has a value (never null).
+ * is either absent or has a value (never null). Where a path starts and ends
+ * and how many segments it has come from its segments.
  */
 export interface PathInfo {
+  /**
+   * Derived from the flight itself, so it survives a re-export: stable in
+   * shared links, but neither dense, ordered nor small (up to 2^40)
+   */
   id: number;
   aircraft_registration?: string;
   aircraft_type?: string;
   year?: number;
   start_airport?: string;
   end_airport?: string;
-  start_coords?: number[];
-  end_coords?: number[];
-  segment_count?: number;
   /** Exact altitude range; segment altitudes are rounded to 100 ft */
   min_altitude_ft?: number;
   max_altitude_ft?: number;
@@ -136,15 +138,28 @@ export interface Airport {
   country?: string;
 }
 
+/** Full aircraft model names by registration, from aircraft.json */
+export type AircraftModels = Readonly<Record<string, string>>;
+
 /**
- * Metadata exported by the backend (metadata.js)
+ * Metadata exported by the backend (metadata.js). The exporter writes every
+ * field and none is ever null; the statistics are computed from the year
+ * files instead.
  */
 export interface Metadata {
-  stats: FilteredStatistics;
+  /** Lowest positive groundspeed; 0 without timing data */
   min_groundspeed_knots: number;
+  /** Highest groundspeed; 0 without timing data */
   max_groundspeed_knots: number;
   available_years: number[];
-  year_file_bytes?: Record<string, number>;
+  /** Size of each year file in bytes, by year */
+  year_file_bytes: Record<string, number>;
+  /** Only the registrations aircraft.json knows a model for */
+  /**
+   * Missing from exports made before it was added, which a browser can still
+   * hold in its cache next to a newer bundle
+   */
+  aircraft_models?: AircraftModels;
 }
 
 /**
@@ -155,6 +170,8 @@ export interface KMLDataset {
   path_segments: PathSegment[];
   path_info: PathInfo[];
   original_points: number;
+  /** Set on an "all years" dataset that is missing a year that failed to load */
+  incomplete?: boolean;
 }
 
 /**

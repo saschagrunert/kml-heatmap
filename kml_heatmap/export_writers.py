@@ -10,9 +10,11 @@ from .cache import atomic_js_write
 from .logger import logger
 
 if TYPE_CHECKING:
-    from .types import AirportData, Statistics
+    from collections.abc import Mapping
 
-__all__ = ["export_airports_data", "export_metadata", "exported_airport_names"]
+    from .types import AirportData
+
+__all__ = ["export_airports_data", "export_metadata"]
 
 
 def _exported_airports(
@@ -31,11 +33,6 @@ def _exported_airports(
         if airport_name:
             exported.append((apt, airport_name))
     return exported
-
-
-def exported_airport_names(unique_airports: list[AirportData]) -> list[str]:
-    """The names of the airports that ``export_airports_data`` writes."""
-    return [name for _, name in _exported_airports(unique_airports)]
 
 
 def export_airports_data(
@@ -78,25 +75,31 @@ def export_airports_data(
 
 
 def export_metadata(
-    stats: Statistics,
     min_groundspeed_knots: float,
     max_groundspeed_knots: float,
     available_years: list[int],
     year_file_bytes: dict[str, int],
+    aircraft_models: Mapping[str, str],
     output_dir: str,
 ) -> tuple[str, int]:
-    """Export metadata.js (window.KML_METADATA) with statistics and ranges."""
+    """Export metadata.js (window.KML_METADATA).
+
+    No statistics: the frontend computes them from the year files for every
+    filter. It needs the years and their file sizes before loading any year,
+    the groundspeed range for the speed scale and the aircraft models, which
+    only aircraft.json knows.
+    """
     if not math.isfinite(min_groundspeed_knots):
         min_groundspeed_knots = 0.0
     if not math.isfinite(max_groundspeed_knots):
         max_groundspeed_knots = 0.0
 
     meta_data: dict[str, Any] = {
-        "stats": stats,
         "min_groundspeed_knots": round(min_groundspeed_knots, 1),
         "max_groundspeed_knots": round(max_groundspeed_knots, 1),
         "available_years": sorted(available_years),
         "year_file_bytes": year_file_bytes,
+        "aircraft_models": dict(aircraft_models),
     }
 
     meta_file = Path(output_dir) / "metadata.js"

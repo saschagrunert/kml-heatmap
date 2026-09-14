@@ -21,12 +21,13 @@ response within a few days.
 The generated site embeds the CARTO and OpenAIP tile API keys in its
 `map_config.js`. They are public client-side keys that the browser needs to
 load the base map and the Aviation Data layer, so they are published with the
-site by design. The `deploy` workflow reads them from the repository secrets;
-the generated site itself is not committed. Reports about these keys being
-visible on the site are not security issues.
+site by design. The `site` job of the `test` workflow reads them from the
+repository secrets; the generated site itself is not committed. Reports about
+these keys being visible on the site are not security issues.
 
 ## Automated checks
 
-Every pull request runs bandit, `pip-audit` against the hashed lock files,
-`npm audit`, and gitleaks. Dependabot and the weekly `lock` workflow keep the
-dependencies current.
+Every pull request and push runs bandit, `pip-audit` against the hashed lock
+files, `npm audit`, and a gitleaks scan of the whole commit history, and the
+same job runs weekly so new advisories show up without a push. Dependabot and
+the weekly `lock` workflow keep the dependencies current.

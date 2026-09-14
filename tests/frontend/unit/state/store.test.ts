@@ -110,26 +110,6 @@ describe("AppStore", () => {
     });
   });
 
-  describe("update", () => {
-    it("applies updater function", () => {
-      const store = new AppStore({
-        altitudeRange: { min: 100, max: 500 },
-      });
-      store.update("altitudeRange", (prev) => ({ ...prev, max: 1000 }));
-      expect(store.get("altitudeRange")).toEqual({ min: 100, max: 1000 });
-    });
-
-    it("notifies listeners", () => {
-      const store = new AppStore();
-      const fn = vi.fn();
-      store.subscribe("selectedPathIds", fn);
-      const newSet = new Set([1, 2, 3]);
-      store.update("selectedPathIds", () => newSet);
-      expect(fn).toHaveBeenCalledOnce();
-      expect(store.get("selectedPathIds")).toBe(newSet);
-    });
-  });
-
   describe("notifyMutation", () => {
     it("fires listeners for in-place mutations", () => {
       const store = new AppStore();
@@ -275,6 +255,20 @@ describe("AppStore", () => {
       expect(() => store.set("selectedYear", "2024")).not.toThrow();
     });
 
+    it("stays quiet for an object set and set back within a batch", () => {
+      const original = { min: 0, max: 10000 };
+      const store = new AppStore({ altitudeRange: original });
+      const fn = vi.fn();
+      store.subscribe("altitudeRange", fn);
+
+      store.batch(() => {
+        store.set("altitudeRange", { min: 0, max: 5000 });
+        store.set("altitudeRange", original);
+      });
+
+      expect(fn).not.toHaveBeenCalled();
+    });
+
     it("defers notifyMutation during batch", () => {
       const store = new AppStore();
       const fn = vi.fn();
@@ -316,7 +310,112 @@ describe("AppStore", () => {
     });
   });
 
+  describe("subscribeKeys", () => {
+    it("runs once for a batch that changes several of its keys", () => {
+      const store = new AppStore();
+      const fn = vi.fn();
+      store.subscribeKeys(["selectedYear", "selectedAircraft"], fn);
+
+      store.batch(() => {
+        store.set("selectedYear", "2024");
+        store.set("selectedAircraft", "D-EXYZ");
+      });
+
+      expect(fn).toHaveBeenCalledOnce();
+    });
+
+    it("runs for each separate change and ignores other keys", () => {
+      const store = new AppStore();
+      const fn = vi.fn();
+      store.subscribeKeys(["selectedYear", "selectedAircraft"], fn);
+
+      store.set("selectedYear", "2024");
+      store.set("selectedAircraft", "D-EXYZ");
+      store.set("heatmapVisible", false);
+
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
+
+    it("sees the final state of the whole batch", () => {
+      const store = new AppStore();
+      const seen: string[] = [];
+      store.subscribeKeys(["selectedYear", "selectedAircraft"], () => {
+        seen.push(
+          store.get("selectedYear") + "/" + store.get("selectedAircraft"),
+        );
+      });
+
+      store.batch(() => {
+        store.set("selectedYear", "2024");
+        store.set("selectedAircraft", "D-EXYZ");
+      });
+
+      expect(seen).toEqual(["2024/D-EXYZ"]);
+    });
+
+    it("runs again for a key another listener changes after it ran", () => {
+      const store = new AppStore();
+      const fn = vi.fn();
+      store.subscribeKeys(["selectedYear", "selectedAircraft"], () => {
+        fn(store.get("selectedAircraft"));
+      });
+      store.subscribe("selectedYear", () => {
+        store.set("selectedAircraft", "D-EXYZ");
+      });
+
+      store.batch(() => {
+        store.set("selectedYear", "2024");
+      });
+
+      expect(fn.mock.calls).toEqual([["all"], ["D-EXYZ"]]);
+    });
+
+    it("unsubscribes from every key", () => {
+      const store = new AppStore();
+      const fn = vi.fn();
+      const unsubscribe = store.subscribeKeys(
+        ["selectedYear", "selectedAircraft"],
+        fn,
+      );
+
+      unsubscribe();
+      store.set("selectedYear", "2024");
+      store.set("selectedAircraft", "D-EXYZ");
+
+      expect(fn).not.toHaveBeenCalled();
+    });
+  });
+
   describe("listener safety", () => {
+    it("keeps notifying after a listener throws", () => {
+      const store = new AppStore();
+      const error = new Error("broken listener");
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const after = vi.fn();
+      const otherKey = vi.fn();
+      store.subscribe("selectedYear", () => {
+        throw error;
+      });
+      store.subscribe("selectedYear", after);
+      store.subscribe("heatmapVisible", otherKey);
+
+      store.batch(() => {
+        store.set("selectedYear", "2024");
+        store.set("heatmapVisible", false);
+      });
+
+      // The rest of the listeners and the rest of the flush still ran
+      expect(after).toHaveBeenCalledOnce();
+      expect(otherKey).toHaveBeenCalledOnce();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "Store listener for selectedYear failed:",
+        error,
+      );
+      consoleSpy.mockRestore();
+    });
+
     it("handles unsubscribe during notification", () => {
       const store = new AppStore();
       const calls: string[] = [];

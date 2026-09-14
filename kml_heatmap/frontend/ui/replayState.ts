@@ -27,8 +27,9 @@ export class ReplayState {
   colorMinSpeed = 0;
   colorMaxSpeed = 200;
   autoZoom = false;
-  lastZoom: number | null = null;
   recenterTimestamps: number[] = [];
+  /** Wall-clock time before which pans count as the same recenter */
+  recenterPanEndsAt = 0;
   /** Wall-clock time of the last pan triggered by a manual seek */
   lastSeekPanTime = 0;
 
@@ -39,6 +40,7 @@ export class ReplayState {
     this.currentIndex = -1;
     this.lastBearing = null;
     this.recenterTimestamps = [];
+    this.recenterPanEndsAt = 0;
     this.lastSeekPanTime = 0;
   }
 }

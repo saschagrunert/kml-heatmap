@@ -43,16 +43,27 @@ class PathSegments(TypedDict):
 
 
 class PlacemarkMetadata(TypedDict):
-    """Metadata extracted from a KML Placemark element."""
+    """Metadata extracted from a KML Placemark element.
+
+    ``airport_name`` is the display name; for a route ``start_airport`` and
+    ``end_airport`` hold its two airports (both None otherwise).
+    """
 
     airport_name: str | None
+    start_airport: str | None
+    end_airport: str | None
     timestamp: str | None
     end_timestamp: str | None
     year: int | None
 
 
 class PathMetadata(TypedDict):
-    """Metadata for a flight path."""
+    """Metadata for a flight path.
+
+    The parser always sets ``start_airport`` and ``end_airport``: the two
+    airports of a route, or None when the name is not one. Metadata without
+    these keys only comes from code that builds it by hand.
+    """
 
     start_point: list[float]
     airport_name: str
@@ -75,9 +86,6 @@ class PathInfo(TypedDict):
     aircraft_type: NotRequired[str]
     start_airport: NotRequired[str]
     end_airport: NotRequired[str]
-    start_coords: NotRequired[list[float]]
-    end_coords: NotRequired[list[float]]
-    segment_count: NotRequired[int]
     min_altitude_ft: NotRequired[float]
     max_altitude_ft: NotRequired[float]
 
@@ -92,50 +100,8 @@ class AirportData(TypedDict):
     is_at_path_end: NotRequired[bool]
 
 
-class AircraftInfo(TypedDict):
-    """Aircraft statistics entry."""
-
-    registration: str
-    type: str | None
-    model: str | None
-    flights: int
-    flight_time_seconds: float
-    flight_time_str: str
-    flight_distance_km: float
-
-
-class Statistics(TypedDict):
-    """Flight statistics."""
-
-    total_distance_km: float
-    total_distance_nm: float
-    total_points: int
-    num_paths: int
-    min_altitude_m: float | None
-    max_altitude_m: float | None
-    min_altitude_ft: float | None
-    max_altitude_ft: float | None
-    total_altitude_gain_m: NotRequired[float]
-    total_altitude_gain_ft: NotRequired[float]
-    total_flight_time_seconds: NotRequired[float]
-    total_flight_time_str: NotRequired[str | None]
-    avg_groundspeed_knots: NotRequired[float]
-    max_groundspeed_knots: NotRequired[float]
-    cruise_speed_knots: NotRequired[float]
-    most_common_cruise_altitude_ft: NotRequired[float | None]
-    most_common_cruise_altitude_m: NotRequired[float | None]
-    longest_flight_nm: NotRequired[float]
-    longest_flight_km: NotRequired[float]
-    num_airports: NotRequired[int]
-    airport_names: NotRequired[list[str]]
-    num_aircraft: NotRequired[int]
-    aircraft_types: NotRequired[list[str]]
-    aircraft_list: NotRequired[list[AircraftInfo]]
-
-
 __all__ = [
     "COORDINATE_DECIMALS",
-    "AircraftInfo",
     "AirportData",
     "FlightPath",
     "FlightPathGroup",
@@ -144,6 +110,5 @@ __all__ = [
     "PathSegments",
     "PlacemarkMetadata",
     "SegmentRow",
-    "Statistics",
     "TrackPoint",
 ]

@@ -71,4 +71,6 @@ class TestHaversineProperties:
         via = haversine_distance(lat1, lon1, lat2, lon2) + haversine_distance(
             lat2, lon2, lat3, lon3
         )
-        assert direct <= via + 1e-6
+        # Relative slack: near antipodal points the rounding error of a
+        # 20,000 km distance is about 1e-5 km, more than any absolute epsilon
+        assert direct <= via * (1 + 1e-9) + 1e-6

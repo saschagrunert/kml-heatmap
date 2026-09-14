@@ -153,5 +153,12 @@ describe("geometry utilities", () => {
       const result = ddToDms(51.50735, true);
       expect(result).toMatch(/\d+°\d+'\d+\.\d"/);
     });
+
+    it("carries seconds that round up to 60 into the minute", () => {
+      // 51°32'59.9964": rounding only the seconds printed 32'60.0"
+      expect(ddToDms(51.549999, true)).toBe("51°33'0.0\"N");
+      // ... and a full minute into the degree
+      expect(ddToDms(-8.999999, false)).toBe("9°0'0.0\"W");
+    });
   });
 });

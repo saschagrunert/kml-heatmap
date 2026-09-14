@@ -21,7 +21,6 @@ import { cwd, env } from "node:process";
 import { expandYearData } from "../../../kml_heatmap/frontend/services/dataLoader";
 import type {
   Airport,
-  FilteredStatistics,
   Metadata,
   PathInfo,
   RawSegment,
@@ -30,6 +29,21 @@ import type {
 
 // vitest runs with the repository root as working directory
 const DATA_DIR = join(cwd(), "docs", "data");
+
+/** Path ids are 40-bit content hashes (PATH_ID_BITS in data_exporter.py) */
+const PATH_ID_LIMIT = 2 ** 40;
+
+/** Fields the exporter no longer writes; a comeback fails the contract */
+const REMOVED_PATH_INFO_KEYS = ["start_coords", "end_coords", "segment_count"];
+const REMOVED_METADATA_KEYS = [
+  // The frontend computes every statistic from the year files
+  "stats",
+  "gradient",
+  "file_structure",
+  // The altitude scale comes from the loaded segments
+  "min_alt_m",
+  "max_alt_m",
+];
 
 type Json = Record<string, unknown>;
 
@@ -87,18 +101,13 @@ function isCoordinatePair(value: unknown): value is number[] {
 
 export function isPathInfo(value: unknown): value is PathInfo {
   if (!isRecord(value)) return false;
-  if (!isInteger(value["id"]) || value["id"] < 0) return false;
-  // build_path_info always writes these; paths without a year are dropped
+  const id = value["id"];
+  if (!isInteger(id) || id < 0 || id >= PATH_ID_LIMIT) return false;
+  // build_path_info always writes the year; paths without one are dropped
   // before export
-  if (
-    !isInteger(value["year"]) ||
-    !isCoordinatePair(value["start_coords"]) ||
-    !isCoordinatePair(value["end_coords"]) ||
-    !isInteger(value["segment_count"]) ||
-    value["segment_count"] < 0
-  ) {
-    return false;
-  }
+  if (!isInteger(value["year"])) return false;
+  // The start, the end and the segment count come from the segments
+  if (REMOVED_PATH_INFO_KEYS.some((key) => key in value)) return false;
   // The altitude range is written when at least one point has an altitude
   const minAltitude = value["min_altitude_ft"];
   const maxAltitude = value["max_altitude_ft"];
@@ -180,89 +189,26 @@ export function isAirportsFile(
   );
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(isString);
-}
-
-/** The reconciler writes the time and distance of every listed aircraft */
-function isAircraftAggregate(value: unknown): boolean {
+/** Model names by registration; only the ones aircraft.json knows */
+function isAircraftModels(value: unknown): value is Record<string, string> {
   return (
     isRecord(value) &&
-    isString(value["registration"]) &&
-    isInteger(value["flights"]) &&
-    value["flights"] > 0 &&
-    isFiniteNumber(value["flight_time_seconds"]) &&
-    isString(value["flight_time_str"]) &&
-    isFiniteNumber(value["flight_distance_km"]) &&
-    optional(value["type"], isString) &&
-    optional(value["model"], isString)
-  );
-}
-
-export function isFilteredStatistics(
-  value: unknown,
-): value is FilteredStatistics {
-  if (!isRecord(value)) return false;
-  // Every field the reconciler writes unconditionally
-  const required: [string, (v: unknown) => boolean][] = [
-    ["total_points", isInteger],
-    ["num_paths", isInteger],
-    ["num_airports", isInteger],
-    ["num_aircraft", isInteger],
-    ["total_distance_km", isFiniteNumber],
-    ["total_distance_nm", isFiniteNumber],
-    ["total_altitude_gain_m", isFiniteNumber],
-    ["total_altitude_gain_ft", isFiniteNumber],
-    ["max_groundspeed_knots", isFiniteNumber],
-    ["avg_groundspeed_knots", isFiniteNumber],
-    ["cruise_speed_knots", isFiniteNumber],
-    ["longest_flight_km", isFiniteNumber],
-    ["longest_flight_nm", isFiniteNumber],
-    ["total_flight_time_seconds", isFiniteNumber],
-    ["total_flight_time_str", isString],
-    ["airport_names", isStringArray],
-  ];
-  for (const [key, guard] of required) {
-    if (!guard(value[key])) return false;
-  }
-  if (
-    !Array.isArray(value["aircraft_list"]) ||
-    !value["aircraft_list"].every(isAircraftAggregate)
-  )
-    return false;
-  if (!optional(value["aircraft_types"], isStringArray)) return false;
-  // D3: the fields the reconciler only has with altitude or cruise data may
-  // be absent, never null
-  const optionalNumbers = [
-    "max_altitude_m",
-    "min_altitude_m",
-    "max_altitude_ft",
-    "min_altitude_ft",
-    "most_common_cruise_altitude_ft",
-    "most_common_cruise_altitude_m",
-  ];
-  for (const key of optionalNumbers) {
-    if (!optional(value[key], isFiniteNumber)) return false;
-  }
-  // Both ends of a range or neither
-  return (
-    (value["min_altitude_ft"] === undefined) ===
-      (value["max_altitude_ft"] === undefined) &&
-    (value["min_altitude_m"] === undefined) ===
-      (value["max_altitude_m"] === undefined)
+    Object.values(value).every((model) => isString(model) && model.length > 0)
   );
 }
 
 export function isMetadata(value: unknown): value is Metadata {
   if (!isRecord(value)) return false;
-  if (!isFilteredStatistics(value["stats"])) return false;
+  // Both 0 without timing data, never null
+  const minSpeed = value["min_groundspeed_knots"];
+  const maxSpeed = value["max_groundspeed_knots"];
   if (
-    !isFiniteNumber(value["min_groundspeed_knots"]) ||
-    !isFiniteNumber(value["max_groundspeed_knots"])
+    !isFiniteNumber(minSpeed) ||
+    !isFiniteNumber(maxSpeed) ||
+    minSpeed < 0 ||
+    minSpeed > maxSpeed
   )
     return false;
-  // The altitude scale comes from the loaded segments, not from metadata
-  if ("min_alt_m" in value || "max_alt_m" in value) return false;
   const years = value["available_years"];
   if (!Array.isArray(years) || !years.every(isInteger)) return false;
   // Written for every year so the loader can show progress
@@ -276,50 +222,19 @@ export function isMetadata(value: unknown): value is Metadata {
       return false;
     }
   }
+  if (!isAircraftModels(value["aircraft_models"])) return false;
   // D2: removed keys must not come back
-  return !("gradient" in value) && !("file_structure" in value);
+  return !REMOVED_METADATA_KEYS.some((key) => key in value);
 }
 
 // ---- inline sample (new format) ----
 
 const sampleMetadata = {
-  stats: {
-    total_points: 3,
-    num_paths: 2,
-    num_airports: 2,
-    airport_names: ["EDDF Frankfurt", "EDDM Munich"],
-    num_aircraft: 1,
-    aircraft_list: [
-      {
-        registration: "D-EAGJ",
-        type: "DA20",
-        model: "Diamond DA-20",
-        flights: 2,
-        flight_time_seconds: 3600,
-        flight_time_str: "1h 0m",
-        flight_distance_km: 300,
-      },
-    ],
-    total_distance_km: 300,
-    total_distance_nm: 162,
-    max_altitude_m: 1500,
-    min_altitude_m: 0,
-    max_altitude_ft: 4921,
-    min_altitude_ft: 0,
-    total_altitude_gain_m: 1500,
-    total_altitude_gain_ft: 4921,
-    max_groundspeed_knots: 120,
-    avg_groundspeed_knots: 100,
-    cruise_speed_knots: 110,
-    longest_flight_km: 200,
-    longest_flight_nm: 108,
-    total_flight_time_seconds: 3600,
-    total_flight_time_str: "1h 0m",
-  },
-  min_groundspeed_knots: 0,
+  min_groundspeed_knots: 0.1,
   max_groundspeed_knots: 120,
   available_years: [2024, 2025],
   year_file_bytes: { "2024": 1234, "2025": 5678 },
+  aircraft_models: { "D-EAGJ": "Diamond DA-20A-1 Katana" },
 };
 
 const sampleAirports = {
@@ -338,31 +253,22 @@ const sampleYear2025: RawYearData = {
   year: 2025,
   original_points: 3,
   path_info: [
+    // Ids are content hashes: large, sparse and in no particular order
     {
-      id: 4,
+      id: 840108108563,
       year: 2025,
       aircraft_registration: "D-EAGJ",
       aircraft_type: "DA20",
       start_airport: "EDDF Frankfurt",
       end_airport: "EDDM Munich",
-      start_coords: [50.03, 8.57],
-      end_coords: [48.35, 11.79],
-      segment_count: 2,
       min_altitude_ft: 2950.5,
       max_altitude_ft: 4010,
     },
-    // A path without airports, aircraft or altitudes still carries the
-    // fields the exporter derives from the coordinates
-    {
-      id: 5,
-      year: 2025,
-      start_coords: [48.35, 11.79],
-      end_coords: [48.4, 11.8],
-      segment_count: 1,
-    },
+    // A path without airports, aircraft or altitudes has only an id and a year
+    { id: 5, year: 2025 },
   ],
   segments: {
-    "4": {
+    "840108108563": {
       start: [50.03, 8.57],
       rows: [
         [49.5, 9.5, 3000, 110, 0],
@@ -398,58 +304,40 @@ describe("export contract (inline new-format sample)", () => {
     ).toBe(true);
   });
 
-  it("rejects metadata with removed keys or null stats fields", () => {
-    expect(isMetadata({ ...sampleMetadata, gradient: {} })).toBe(false);
-    expect(isMetadata({ ...sampleMetadata, file_structure: {} })).toBe(false);
-    expect(
-      isMetadata({
-        ...sampleMetadata,
-        stats: { ...sampleMetadata.stats, total_flight_time_str: null },
-      }),
-    ).toBe(false);
-    expect(
-      isMetadata({
-        ...sampleMetadata,
-        stats: { ...sampleMetadata.stats, max_altitude_ft: null },
-      }),
-    ).toBe(false);
+  it("rejects metadata with removed keys or null fields", () => {
+    for (const key of REMOVED_METADATA_KEYS) {
+      expect(isMetadata({ ...sampleMetadata, [key]: {} }), key).toBe(false);
+    }
+    expect(isMetadata({ ...sampleMetadata, min_groundspeed_knots: null })).toBe(
+      false,
+    );
+    expect(isMetadata({ ...sampleMetadata, aircraft_models: null })).toBe(
+      false,
+    );
     expect(isMetadata({ ...sampleMetadata, available_years: ["2025"] })).toBe(
       false,
     );
     expect(isMetadata({ ...sampleMetadata, year_file_bytes: { abc: 1 } })).toBe(
       false,
     );
+    expect(
+      isMetadata({ ...sampleMetadata, aircraft_models: { "D-EAGJ": "" } }),
+    ).toBe(false);
+    // The lowest speed cannot be above the highest
+    expect(isMetadata({ ...sampleMetadata, min_groundspeed_knots: 130 })).toBe(
+      false,
+    );
   });
 
   it("rejects metadata that drops a field the exporter always writes", () => {
-    for (const key of [
-      "total_flight_time_seconds",
-      "total_flight_time_str",
-      "cruise_speed_knots",
-      "longest_flight_nm",
-      "total_altitude_gain_ft",
-      "airport_names",
-    ]) {
-      const stats: Record<string, unknown> = { ...sampleMetadata.stats };
-      delete stats[key];
-      expect(isMetadata({ ...sampleMetadata, stats }), key).toBe(false);
+    for (const key of Object.keys(sampleMetadata)) {
+      const metadata: Record<string, unknown> = { ...sampleMetadata };
+      delete metadata[key];
+      expect(isMetadata(metadata), key).toBe(false);
     }
-    // One end of the altitude range without the other
-    const stats: Record<string, unknown> = { ...sampleMetadata.stats };
-    delete stats["min_altitude_ft"];
-    expect(isMetadata({ ...sampleMetadata, stats })).toBe(false);
     // A year without its file size
     expect(
       isMetadata({ ...sampleMetadata, year_file_bytes: { "2024": 1234 } }),
-    ).toBe(false);
-    // An aircraft without its reconciled time and distance
-    const [aircraft] = sampleMetadata.stats.aircraft_list;
-    const { flight_time_seconds: _seconds, ...bare } = aircraft!;
-    expect(
-      isMetadata({
-        ...sampleMetadata,
-        stats: { ...sampleMetadata.stats, aircraft_list: [bare] },
-      }),
     ).toBe(false);
   });
 
@@ -485,7 +373,7 @@ describe("export contract (inline new-format sample)", () => {
     expect(
       isRawYearData({
         ...sampleYear2025,
-        segments: { "4": [[1, 2, 3, 4, 5]] },
+        segments: { "5": [[1, 2, 3, 4, 5]] },
       }),
     ).toBe(false);
     expect(
@@ -504,12 +392,7 @@ describe("export contract (inline new-format sample)", () => {
 
   it("rejects path info that drops a field the exporter always writes", () => {
     const [full] = sampleYear2025.path_info;
-    for (const key of [
-      "year",
-      "start_coords",
-      "end_coords",
-      "segment_count",
-    ] as const) {
+    for (const key of ["id", "year"] as const) {
       const info: Record<string, unknown> = { ...full };
       delete info[key];
       expect(isPathInfo(info), key).toBe(false);
@@ -521,12 +404,27 @@ describe("export contract (inline new-format sample)", () => {
     expect(isPathInfo({ ...full, min_altitude_ft: null })).toBe(false);
   });
 
+  it("rejects path info with removed fields or an id out of range", () => {
+    const [full] = sampleYear2025.path_info;
+    for (const key of REMOVED_PATH_INFO_KEYS) {
+      expect(isPathInfo({ ...full, [key]: 1 }), key).toBe(false);
+    }
+    expect(isPathInfo({ ...full, id: -1 })).toBe(false);
+    expect(isPathInfo({ ...full, id: 1.5 })).toBe(false);
+    expect(isPathInfo({ ...full, id: PATH_ID_LIMIT })).toBe(false);
+    expect(isPathInfo({ ...full, id: PATH_ID_LIMIT - 1 })).toBe(true);
+  });
+
   it("expands the sample into the in-memory dataset shape", () => {
     const data = expandYearData(sampleYear2025);
     expect(data.path_segments).toHaveLength(3);
     expect(data.coordinates).toHaveLength(5);
+    // In path_info order, although JavaScript lists the key "5" first
+    expect(data.path_segments.map((segment) => segment.path_id)).toEqual([
+      840108108563, 840108108563, 5,
+    ]);
     expect(data.path_segments[0]).toEqual({
-      path_id: 4,
+      path_id: 840108108563,
       coords: [
         [50.03, 8.57],
         [49.5, 9.5],
@@ -558,6 +456,9 @@ describe("export contract (docs/data)", () => {
       "KML_METADATA",
     );
     expect(isMetadata(parsed)).toBe(true);
+    for (const key of REMOVED_METADATA_KEYS) {
+      expect(parsed, key).not.toHaveProperty(key);
+    }
     const metadata = parsed as Metadata;
     expect(metadata.available_years).toEqual(
       [...metadata.available_years].sort((a, b) => a - b),
@@ -577,7 +478,7 @@ describe("export contract (docs/data)", () => {
   });
 
   it.skipIf(!available)(
-    "every <year>/data.js matches the per-year contract with globally unique path ids",
+    "every <year>/data.js matches the per-year contract with unique path ids",
     () => {
       const years = readdirSync(DATA_DIR, { withFileTypes: true })
         .filter((e) => e.isDirectory() && /^\d{4}$/.test(e.name))
@@ -585,8 +486,12 @@ describe("export contract (docs/data)", () => {
         .sort();
       expect(years.length).toBeGreaterThan(0);
 
+      const metadata = parseDataFile(
+        readFileSync(join(DATA_DIR, "metadata.js"), "utf8"),
+        "KML_METADATA",
+      ) as Metadata;
       const seenIds = new Set<number>();
-      let previousMaxId = -1;
+      const registrations = new Set<string>();
       for (const year of years) {
         const parsed = parseDataFile(
           readFileSync(join(DATA_DIR, year, "data.js"), "utf8"),
@@ -603,10 +508,7 @@ describe("export contract (docs/data)", () => {
             false,
           );
           seenIds.add(id);
-          // ids are assigned in ascending year order with cumulative offsets
-          expect(id).toBeGreaterThan(previousMaxId);
         }
-        previousMaxId = Math.max(previousMaxId, ...ids);
 
         // every segment list belongs to a known path of this year
         const idSet = new Set(ids);
@@ -617,11 +519,17 @@ describe("export contract (docs/data)", () => {
         }
         for (const info of raw.path_info) {
           expect(info.year, `path ${info.id} year`).toBe(Number(year));
-          // The count is written for every path and has to match its rows
+          for (const key of REMOVED_PATH_INFO_KEYS) {
+            expect(info, `path ${info.id}`).not.toHaveProperty(key);
+          }
+          // Every exported path has at least one segment to draw
           expect(
             raw.segments[String(info.id)]?.rows.length ?? 0,
-            `path ${info.id} segment_count`,
-          ).toBe(info.segment_count);
+            `path ${info.id} rows`,
+          ).toBeGreaterThan(0);
+          if (info.aircraft_registration) {
+            registrations.add(info.aircraft_registration);
+          }
         }
 
         // the loader can expand it
@@ -629,6 +537,11 @@ describe("export contract (docs/data)", () => {
         expect(data.path_segments.length).toBe(
           Object.values(raw.segments).reduce((n, e) => n + e.rows.length, 0),
         );
+      }
+
+      // Models are only exported for aircraft that fly in the year files
+      for (const registration of Object.keys(metadata.aircraft_models ?? {})) {
+        expect(registrations.has(registration), registration).toBe(true);
       }
     },
   );

@@ -23,6 +23,7 @@ import {
 } from "../utils/htmlGenerators";
 import { icon, type IconName } from "../utils/icons";
 import { domCache } from "../utils/domCache";
+import { datasetIndex } from "../calculations/datasetIndex";
 
 /** Panel element the statistics are rendered into */
 const PANEL_ID = "stats-panel";
@@ -310,14 +311,15 @@ function speedMetrics(stats: FilteredStatistics): Metric[] {
 function altitudeMetrics(stats: FilteredStatistics): Metric[] {
   const metrics: Metric[] = [];
 
-  if (stats.max_altitude_ft) {
+  // 0 ft is an altitude; undefined means the filter has none
+  if (stats.max_altitude_ft !== undefined) {
     metrics.push({
       label: "Max Altitude (MSL)",
       value: formatNumber(stats.max_altitude_ft) + " ft",
       alt: formatNumber(stats.max_altitude_ft * FEET_TO_METERS) + " m",
     });
 
-    if (stats.total_altitude_gain_ft) {
+    if (stats.total_altitude_gain_ft !== undefined) {
       metrics.push({
         label: "Elevation Gain",
         value: formatNumber(stats.total_altitude_gain_ft) + " ft",
@@ -350,13 +352,19 @@ export class StatsManager {
   constructor(app: MapApp) {
     this.app = app;
 
-    // Pre-cache the stats panel element
-    domCache.cacheElements([PANEL_ID]);
-
-    // The panel follows the data and the filters; nothing has to call it
-    for (const key of STATS_KEYS) {
-      app.store.subscribe(key, () => this.updateStatsForSelection());
-    }
+    // The panel follows the data, the filters and the selection; nothing has
+    // to call it. The statistics walk every segment of the filter, so they
+    // are only computed for an open panel, and once per update however many
+    // of the keys it changed.
+    app.store.subscribeKeys(STATS_KEYS, () => {
+      if (app.store.get("statsPanelVisible")) this.updateStatsForSelection();
+    });
+    // The rail on desktop and the Stats tab on mobile both open this panel
+    // through the same key. Opening it renders whatever changed while it was
+    // closed; lastInputs skips the work when nothing did.
+    app.store.subscribe("statsPanelVisible", (visible) => {
+      if (visible) this.updateStatsForSelection();
+    });
   }
 
   /** The inputs of the current state, in a shape that compares cheaply */
@@ -403,12 +411,12 @@ export class StatsManager {
     const selected = this.app.selectedPathIds;
 
     if (selected.size === 0) {
-      const statsToShow = calculateFilteredStatistics({
-        pathInfo,
-        segments,
-        year: inputs.year,
-        aircraft: inputs.aircraft,
-      });
+      // Clearing a selection comes back to the filter's statistics, which
+      // are kept with the dataset instead of computed again every time
+      const data = this.app.currentData;
+      const statsToShow = data
+        ? datasetIndex(data).filter(inputs.year, inputs.aircraft).statistics()
+        : calculateFilteredStatistics({ pathInfo, segments });
       this.updateStatsPanel(statsToShow, false);
       return;
     }

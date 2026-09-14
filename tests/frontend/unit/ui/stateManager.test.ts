@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   StateManager,
   sanitizeSavedState,
+  storageKey,
 } from "../../../../kml_heatmap/frontend/ui/stateManager";
 import { createMockApp, asMapApp, type MockApp } from "../../testHelpers";
 
@@ -22,7 +23,7 @@ describe("sanitizeSavedState", () => {
         heatmapVisible: "yes",
         altitudeVisible: true,
         wrappedVisible: false,
-        schemaVersion: 2,
+        schemaVersion: 3,
         selectedPathIds: [1, "2", NaN, 3],
         unknown: true,
       }),
@@ -35,10 +36,32 @@ describe("sanitizeSavedState", () => {
     });
   });
 
+  it("drops path ids saved with an older id scheme", () => {
+    // Version 2 ids were positions in the export, not content hashes
+    expect(
+      sanitizeSavedState({ schemaVersion: 2, selectedPathIds: [1, 2] }),
+    ).toEqual({});
+    expect(sanitizeSavedState({ selectedPathIds: [1, 2] })).toEqual({});
+  });
+
   it("rejects non-finite numbers", () => {
     expect(
       sanitizeSavedState({ zoom: Infinity, center: { lat: NaN, lng: 8 } }),
     ).toEqual({});
+  });
+});
+
+describe("storageKey", () => {
+  it("keys the state by the directory of the page", () => {
+    expect(storageKey("/a/")).toBe("kml-heatmap-state:/a/");
+    // The page itself and its folder are the same map
+    expect(storageKey("/a/index.html")).toBe("kml-heatmap-state:/a/");
+    expect(storageKey("/b/")).not.toBe(storageKey("/a/"));
+  });
+
+  it("keeps the original key for a map at the root of its origin", () => {
+    expect(storageKey("/")).toBe("kml-heatmap-state");
+    expect(storageKey("/index.html")).toBe("kml-heatmap-state");
   });
 });
 
@@ -53,9 +76,12 @@ describe("StateManager", () => {
   // history.replaceState to observe what the manager writes, so the original
   // is captured here before that happens.
   const navigate = window.history.replaceState.bind(window.history);
-  function setLocation(search: string): void {
-    navigate(null, "", "/" + search);
+  function setLocation(search: string, pathname = "/"): void {
+    navigate(null, "", pathname + search);
   }
+
+  /** Storage key of the map the tests run at, the root of the origin */
+  const KEY = "kml-heatmap-state";
 
   beforeEach(() => {
     mockLocalStorage = {};
@@ -64,7 +90,9 @@ describe("StateManager", () => {
       setItem: vi.fn((key: string, value: string) => {
         mockLocalStorage[key] = value;
       }),
-      removeItem: vi.fn(),
+      removeItem: vi.fn((key: string) => {
+        delete mockLocalStorage[key];
+      }),
       clear: vi.fn(),
       length: 0,
       key: vi.fn(),
@@ -76,25 +104,17 @@ describe("StateManager", () => {
     mockApp.map!.getCenter.mockReturnValue({ lat: 50.0, lng: 8.0 });
     mockApp.map!.getZoom.mockReturnValue(10);
 
-    const wrappedModal = document.createElement("div");
-    wrappedModal.id = "wrapped-modal";
-    wrappedModal.style.display = "none";
-    document.body.appendChild(wrappedModal);
-
     stateManager = new StateManager(asMapApp(mockApp));
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
-    document.getElementById("wrapped-modal")?.remove();
+    setLocation("");
   });
 
   function savedState(): Record<string, unknown> {
-    return JSON.parse(mockLocalStorage["kml-heatmap-state"]!) as Record<
-      string,
-      unknown
-    >;
+    return JSON.parse(mockLocalStorage[KEY]!) as Record<string, unknown>;
   }
 
   describe("store subscriptions", () => {
@@ -149,11 +169,11 @@ describe("StateManager", () => {
     it("saves at once and drops the pending debounced save", () => {
       vi.useFakeTimers();
       stateManager.scheduleSave();
-      expect(mockLocalStorage["kml-heatmap-state"]).toBeUndefined();
+      expect(mockLocalStorage[KEY]).toBeUndefined();
 
       stateManager.flush();
 
-      expect(mockLocalStorage["kml-heatmap-state"]).toBeDefined();
+      expect(mockLocalStorage[KEY]).toBeDefined();
       const saveSpy = vi.spyOn(stateManager, "saveMapState");
       vi.advanceTimersByTime(1000);
       expect(saveSpy).not.toHaveBeenCalled();
@@ -162,7 +182,27 @@ describe("StateManager", () => {
     it("saves even when nothing was scheduled", () => {
       stateManager.flush();
 
-      expect(mockLocalStorage["kml-heatmap-state"]).toBeDefined();
+      expect(mockLocalStorage[KEY]).toBeDefined();
+    });
+
+    it("saves a change still waiting for the debounce when the page goes away", () => {
+      vi.useFakeTimers();
+      mockApp.selectedYear = "2025";
+      expect(mockLocalStorage[KEY]).toBeUndefined();
+
+      window.dispatchEvent(new Event("pagehide"));
+
+      expect(JSON.parse(mockLocalStorage[KEY]!)).toMatchObject({
+        selectedYear: "2025",
+      });
+    });
+
+    it("does not save on pagehide when nothing is pending", () => {
+      const saveSpy = vi.spyOn(stateManager, "saveMapState");
+
+      window.dispatchEvent(new Event("pagehide"));
+
+      expect(saveSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -175,7 +215,7 @@ describe("StateManager", () => {
       stateManager.saveMapState();
 
       expect(savedState()).toEqual({
-        schemaVersion: 2,
+        schemaVersion: 3,
         center: { lat: 50, lng: 8 },
         zoom: 10,
         heatmapVisible: true,
@@ -193,7 +233,7 @@ describe("StateManager", () => {
       expect(history.replaceState).toHaveBeenCalledWith(
         null,
         "",
-        "?y=2025&p=1%2C2&sv=2&lat=50.000000&lng=8.000000&z=10.00",
+        "?y=2025&p=1%2C2&sv=3&lat=50.000000&lng=8.000000&z=10.00",
       );
     });
 
@@ -213,20 +253,20 @@ describe("StateManager", () => {
       expect(savedState()["wrappedVisible"]).toBe(true);
     });
 
-    it("falls back to the DOM for wrapped visibility when the store key is undefined", () => {
-      document.getElementById("wrapped-modal")!.style.display = "flex";
-
-      stateManager.saveMapState();
-
-      expect(savedState()["wrappedVisible"]).toBe(true);
-    });
-
-    it("treats a missing wrapped modal as hidden", () => {
-      document.getElementById("wrapped-modal")?.remove();
+    it("saves Wrapped as closed before the Wrapped manager published it", () => {
+      expect(mockApp.store.get("wrappedVisible")).toBe(false);
 
       stateManager.saveMapState();
 
       expect(savedState()["wrappedVisible"]).toBe(false);
+    });
+
+    it("saves under the key of the page's directory", () => {
+      setLocation("", "/b/index.html");
+
+      stateManager.saveMapState();
+
+      expect(Object.keys(mockLocalStorage)).toEqual(["kml-heatmap-state:/b/"]);
     });
 
     it("does nothing if map is not initialized", () => {
@@ -258,8 +298,8 @@ describe("StateManager", () => {
         selectedPathIds: [1, 2],
       };
       // schemaVersion is a storage detail and is not returned
-      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
-        schemaVersion: 2,
+      mockLocalStorage[KEY] = JSON.stringify({
+        schemaVersion: 3,
         ...state,
       });
 
@@ -267,7 +307,7 @@ describe("StateManager", () => {
     });
 
     it("drops unknown or invalid fields", () => {
-      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
+      mockLocalStorage[KEY] = JSON.stringify({
         center: { lat: 48.0, lng: 11.0 },
         zoom: 12,
         heatmapVisible: "true",
@@ -285,12 +325,12 @@ describe("StateManager", () => {
     });
 
     it("returns null if saved state is corrupted", () => {
-      mockLocalStorage["kml-heatmap-state"] = "{not json";
+      mockLocalStorage[KEY] = "{not json";
       expect(stateManager.loadMapState()).toBeNull();
     });
 
     it("returns null if saved state lacks a map view", () => {
-      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
+      mockLocalStorage[KEY] = JSON.stringify({
         selectedYear: "2024",
       });
       expect(stateManager.loadMapState()).toBeNull();
@@ -334,7 +374,7 @@ describe("StateManager", () => {
 
   describe("loadState", () => {
     it("prioritizes URL parameters over localStorage", () => {
-      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
+      mockLocalStorage[KEY] = JSON.stringify({
         center: { lat: 48.0, lng: 11.0 },
         zoom: 12,
         selectedYear: "2024",
@@ -356,8 +396,8 @@ describe("StateManager", () => {
         selectedPathIds: [],
         statsPanelVisible: false,
       };
-      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
-        schemaVersion: 2,
+      mockLocalStorage[KEY] = JSON.stringify({
+        schemaVersion: 3,
         ...state,
       });
 
@@ -368,8 +408,43 @@ describe("StateManager", () => {
       expect(stateManager.loadState()).toBeNull();
     });
 
+    it("does not restore the state of another map on the same origin (regression)", () => {
+      mockLocalStorage["kml-heatmap-state:/a/"] = JSON.stringify({
+        schemaVersion: 3,
+        center: { lat: 48.0, lng: 11.0 },
+        zoom: 12,
+        selectedYear: "2024",
+        selectedPathIds: [3],
+      });
+      setLocation("", "/b/");
+
+      expect(stateManager.loadState()).toBeNull();
+
+      setLocation("", "/a/index.html");
+      expect(stateManager.loadState()).toMatchObject({ selectedYear: "2024" });
+    });
+
+    it("adopts the state saved under the key of earlier releases once", () => {
+      mockLocalStorage[KEY] = JSON.stringify({
+        schemaVersion: 3,
+        center: { lat: 48.0, lng: 11.0 },
+        zoom: 12,
+        selectedYear: "2024",
+      });
+      setLocation("", "/kml-heatmap/");
+
+      expect(stateManager.loadState()).toMatchObject({ selectedYear: "2024" });
+      expect(Object.keys(mockLocalStorage)).toEqual([
+        "kml-heatmap-state:/kml-heatmap/",
+      ]);
+
+      // A second map on the origin finds nothing left to adopt
+      setLocation("", "/other/");
+      expect(stateManager.loadState()).toBeNull();
+    });
+
     it("parses the full URL state including visibility flags", () => {
-      setLocation("?y=2025&p=1,2&sv=2&v=011010111&lat=50.5&lng=8.5&z=12.25");
+      setLocation("?y=2025&p=1,2&sv=3&v=011010111&lat=50.5&lng=8.5&z=12.25");
 
       expect(stateManager.loadState()).toEqual({
         selectedYear: "2025",
@@ -390,7 +465,7 @@ describe("StateManager", () => {
 
     it("falls back to localStorage when URL params contain no state", () => {
       setLocation("?debug=true");
-      mockLocalStorage["kml-heatmap-state"] = JSON.stringify({
+      mockLocalStorage[KEY] = JSON.stringify({
         center: { lat: 1, lng: 2 },
         zoom: 3,
       });

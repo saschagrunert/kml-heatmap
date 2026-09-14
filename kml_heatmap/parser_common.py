@@ -6,9 +6,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .aircraft import parse_aircraft_from_filename
-from .airport_lookup import standardize_airport_name
+from .airport_lookup import standardize_airport_names, standardize_route
 from .constants import ALT_MAX_M, ALT_MIN_M, LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
+from .helpers import DATE_PATTERN
 from .logger import logger
 
 if TYPE_CHECKING:
@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from .types import PathMetadata, PlacemarkMetadata, TrackPoint
 
 # Pre-compiled regex patterns for performance
-DATE_PATTERN = re.compile(r"(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
 YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
 # Charterware description: "Flight Jan 12 2026 03:01PM" or "Flight January 12 ..."
 CHARTERWARE_PATTERN = re.compile(
@@ -29,6 +28,8 @@ def empty_placemark_metadata() -> PlacemarkMetadata:
     """Return placemark metadata with no information."""
     return {
         "airport_name": None,
+        "start_airport": None,
+        "end_airport": None,
         "timestamp": None,
         "end_timestamp": None,
         "year": None,
@@ -41,9 +42,14 @@ def extract_year_from_timestamp(timestamp: str | None) -> int | None:
         return None
 
     try:
-        # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z")
+        # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z").
+        # The obfuscator anchors on the UTC date, so this is the UTC year:
+        # 2025-01-01T00:30:00+02:00 belongs to 2024 before and after it.
         if "T" in timestamp:
-            return datetime.fromisoformat(timestamp).year
+            parsed = datetime.fromisoformat(timestamp)
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(UTC)
+            return parsed.year
         # Try to extract year from date string (e.g., "03 Mar 2025" or "2025-03-03")
         year_match = YEAR_PATTERN.search(timestamp)
         if year_match:
@@ -196,7 +202,7 @@ def extract_placemark_metadata(
     kml_name = _element_text(name_elem)
 
     # Standardize airport name using ICAO codes from the name itself
-    airport_name = standardize_airport_name(kml_name)
+    airport_names = standardize_airport_names(kml_name)
 
     timestamp, end_timestamp = _extract_time_range(placemark, namespaces)
 
@@ -215,7 +221,9 @@ def extract_placemark_metadata(
         timestamp = extract_charterware_timestamp(_element_text(desc_elem))
 
     return {
-        "airport_name": airport_name,
+        "airport_name": airport_names.name,
+        "start_airport": airport_names.start_airport,
+        "end_airport": airport_names.end_airport,
         "timestamp": timestamp,
         "end_timestamp": end_timestamp,
         "year": extract_year_from_timestamp(timestamp),
@@ -226,22 +234,27 @@ def _build_path_metadata_dict(
     kml_file: str,
     path_start: TrackPoint,
     placemark_meta: PlacemarkMetadata,
+    aircraft_info: dict[str, str | None],
 ) -> PathMetadata:
-    """Build path metadata dictionary."""
-    aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
+    """Build path metadata dictionary.
+
+    ``aircraft_info`` is ``parse_aircraft_from_filename`` of the file, parsed
+    once per file by the caller.
+    """
     airport_name = placemark_meta["airport_name"]
+    start_airport = placemark_meta["start_airport"]
+    end_airport = placemark_meta["end_airport"]
 
     # For Charterware files, use route information for airport name
     # Route format: DEPARTURE-ARRIVAL (e.g., LOAV-LOAV or EDDF-EDDM)
-    # Convert to exporter format: "DEPARTURE - ARRIVAL" (with spaces around hyphen)
     route = aircraft_info.get("route")
     if aircraft_info.get("format") == "charterware" and route and "-" in route:
         departure_airport, arrival_airport = route.split("-", 1)
         # Use route as airport_name if name is empty or not an ICAO code
         # (ICAO codes are exactly 4 uppercase letters, registrations have hyphens)
         if not airport_name or len(airport_name) != 4:
-            airport_name = standardize_airport_name(
-                f"{departure_airport} - {arrival_airport}"
+            airport_name, start_airport, end_airport = standardize_route(
+                departure_airport, arrival_airport
             )
 
     start_point = [path_start.lat, path_start.lon]
@@ -251,6 +264,8 @@ def _build_path_metadata_dict(
     meta: PathMetadata = {
         "start_point": start_point,
         "airport_name": airport_name or "",
+        "start_airport": start_airport,
+        "end_airport": end_airport,
         "timestamp": placemark_meta["timestamp"],
         "end_timestamp": placemark_meta["end_timestamp"],
         "filename": Path(kml_file).name,

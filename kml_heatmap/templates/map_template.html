@@ -221,7 +221,7 @@
         <div class="control-row">
           <button
             id="heatmap-btn"
-            class="btn-surface control-btn"
+            class="btn-surface control-btn active"
             data-action="toggleHeatmap"
             data-icon="heatmap"
             title="Toggle heatmap overlay"
@@ -234,7 +234,7 @@
         <div class="control-row">
           <button
             id="airports-btn"
-            class="btn-surface control-btn"
+            class="btn-surface control-btn active"
             data-action="toggleAirports"
             data-icon="airport"
             title="Toggle airport markers"
@@ -248,7 +248,7 @@
         <div class="control-row">
           <button
             id="altitude-btn"
-            class="btn-surface control-btn"
+            class="btn-surface control-btn active"
             data-action="toggleAltitude"
             data-icon="altitude"
             title="Toggle altitude color visualization"
@@ -262,7 +262,7 @@
         <div class="control-row">
           <button
             id="airspeed-btn"
-            class="btn-surface control-btn initially-dimmed"
+            class="btn-surface control-btn initially-half-opacity"
             data-action="toggleAirspeed"
             data-icon="speed"
             disabled
@@ -358,6 +358,23 @@
       </div>
     </div>
 
+    <!-- Toast announcements. Present from the start, so screen readers track
+         them before utils/toast.ts writes a message into one. -->
+    <div
+      id="toast-status"
+      class="visually-hidden"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+    <div
+      id="toast-alert"
+      class="visually-hidden"
+      role="alert"
+      aria-live="assertive"
+      aria-atomic="true"
+    ></div>
+
     <!-- Loading indicator (shown/hidden by the data manager, text is updatable) -->
     <div id="loading" role="status" aria-live="polite">
       <span class="loading-spinner" aria-hidden="true"></span>
@@ -374,7 +391,7 @@
         >
           <button
             id="replay-play-btn"
-            class="replay-btn"
+            class="btn-surface replay-btn"
             data-action="playReplay"
             data-icon="play"
             data-icon-size="20"
@@ -383,7 +400,7 @@
           ></button>
           <button
             id="replay-pause-btn"
-            class="replay-btn initially-hidden"
+            class="btn-surface replay-btn initially-hidden"
             data-action="pauseReplay"
             data-icon="pause"
             data-icon-size="20"
@@ -392,7 +409,7 @@
           ></button>
           <button
             id="replay-stop-btn"
-            class="replay-btn"
+            class="btn-surface replay-btn"
             data-action="stopReplay"
             data-icon="stop"
             data-icon-size="20"
@@ -402,7 +419,7 @@
           <div id="replay-time-display">00:00 / 00:00</div>
           <select
             id="replay-speed"
-            class="replay-btn"
+            class="btn-surface replay-btn"
             data-action="changeReplaySpeed"
             aria-label="Replay speed multiplier"
           >
@@ -415,7 +432,7 @@
           </select>
           <button
             id="replay-autozoom-btn"
-            class="replay-btn"
+            class="btn-surface replay-btn"
             data-action="toggleAutoZoom"
             data-icon="autoZoom"
             data-icon-size="20"

@@ -4,9 +4,15 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { WrappedManager } from "../../../../kml_heatmap/frontend/ui/wrappedManager";
-import { showToast } from "../../../../kml_heatmap/frontend/utils/toast";
+import {
+  TOAST_STACK_ID,
+  TOAST_STATUS_ID,
+  showToast,
+} from "../../../../kml_heatmap/frontend/utils/toast";
+import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import { asMapApp, type MockApp } from "../../testHelpers";
 import {
+  createFlightHistory,
   createWrappedMockApp,
   el,
   installAirports,
@@ -28,6 +34,7 @@ describe("WrappedManager dialog", () => {
   afterEach(() => {
     wrappedManager.destroy();
     vi.useRealTimers();
+    vi.restoreAllMocks();
     document.body.innerHTML = "";
     delete window.KML_AIRPORTS;
   });
@@ -99,10 +106,81 @@ describe("WrappedManager dialog", () => {
       showToast("Link copied", "info");
       await Promise.resolve();
 
-      const toast = document.querySelector(".toast-notification")!;
-      expect(toast.hasAttribute("inert")).toBe(false);
-      expect(toast.getAttribute("role")).toBe("status");
-      toast.remove();
+      const region = document.getElementById(TOAST_STATUS_ID)!;
+      expect(region.hasAttribute("inert")).toBe(false);
+      expect(region.getAttribute("role")).toBe("status");
+      expect(
+        document.getElementById(TOAST_STACK_ID)!.hasAttribute("inert"),
+      ).toBe(false);
+    });
+
+    it("leaves the loading indicator to the data manager", () => {
+      // Restoring the display saved on opening stranded the indicator when
+      // a load finished while the dialog was open
+      el("loading").style.display = "block";
+      openWrapped();
+      el("loading").style.display = "none";
+
+      wrappedManager.closeWrapped();
+
+      expect(el("loading").style.display).toBe("none");
+    });
+
+    it("does not open while a replay runs", () => {
+      mockApp.replayManager.state.active = true;
+
+      wrappedManager.showWrapped();
+
+      expect(el("wrapped-modal").style.display).toBe("");
+      expect(mockApp.store.get("wrappedVisible")).toBe(false);
+      expect(mockApp.map!.fitBounds).not.toHaveBeenCalled();
+    });
+
+    it("refreshes the cards when data finishes loading while it is open", () => {
+      const flightCount = (): string | undefined =>
+        Array.from(el("wrapped-stats").querySelectorAll(".stat-card"))
+          .find(
+            (card) =>
+              card.querySelector(".stat-label")?.textContent === "Flights",
+          )
+          ?.querySelector(".stat-value")
+          ?.textContent.trim();
+      openWrapped();
+      expect(flightCount()).toBe("3");
+
+      // Only the data changes, with the year left as it was, so the cards
+      // follow the data and not a filter change that came with it
+      const history = createFlightHistory();
+      history.path_info = history.path_info.filter((path) => path.id !== 3);
+      history.path_segments = history.path_segments.filter(
+        (segment) => segment.path_id !== 3,
+      );
+      mockApp.currentData = history;
+
+      expect(flightCount()).toBe("2");
+      expect(el("wrapped-year").textContent).toBe("2024");
+    });
+
+    it("leaves the cards alone when data loads while it is closed", () => {
+      openWrapped();
+      wrappedManager.closeWrapped();
+      el("wrapped-year").textContent = "untouched";
+
+      mockApp.currentData = createFlightHistory();
+
+      expect(el("wrapped-year").textContent).toBe("untouched");
+    });
+
+    it("fits the map without animation for reduced motion", () => {
+      vi.spyOn(motion, "prefersReducedMotion").mockReturnValue(true);
+
+      openWrapped();
+      vi.advanceTimersByTime(100);
+
+      expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(2);
+      for (const call of mockApp.map!.fitBounds.mock.calls) {
+        expect(call[1]).toMatchObject({ animate: false });
+      }
     });
 
     it("keeps the map interactive because it moves into the dialog", () => {
@@ -143,7 +221,7 @@ describe("WrappedManager dialog", () => {
       expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(2);
       expect(mockApp.map!.fitBounds).toHaveBeenCalledWith(
         mockApp.config.bounds,
-        { padding: [80, 80] },
+        { padding: [80, 80], animate: true },
       );
     });
 
@@ -180,7 +258,7 @@ describe("WrappedManager dialog", () => {
       wrappedManager.showWrapped();
 
       expect(el("wrapped-modal").style.display).toBe("");
-      expect(mockApp.store.get("wrappedVisible")).toBeUndefined();
+      expect(mockApp.store.get("wrappedVisible")).toBe(false);
     });
   });
 
@@ -276,6 +354,49 @@ describe("WrappedManager dialog", () => {
 
       expect(() => wrappedManager.closeWrapped()).not.toThrow();
       expect(document.activeElement).toBe(document.body);
+    });
+
+    it("puts the user's view back once the map is back in the page", () => {
+      const center = { lat: 48.1, lng: 11.6 };
+      mockApp.map!.getCenter.mockReturnValue(center);
+      mockApp.map!.getZoom.mockReturnValue(13);
+      openWrapped();
+      vi.advanceTimersByTime(100);
+
+      wrappedManager.closeWrapped();
+      expect(mockApp.map!.setView).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(100);
+
+      // After the remeasure, so the view is fitted to the page-sized map
+      const remeasured =
+        mockApp.map!.invalidateSize.mock.invocationCallOrder.at(-1)!;
+      expect(mockApp.map!.setView).toHaveBeenCalledTimes(1);
+      expect(mockApp.map!.setView).toHaveBeenCalledWith(center, 13, {
+        animate: false,
+      });
+      expect(mockApp.map!.setView.mock.invocationCallOrder[0]!).toBeGreaterThan(
+        remeasured,
+      );
+    });
+
+    it("keeps the user's view through a reopening before it was put back", () => {
+      const center = { lat: 48.1, lng: 11.6 };
+      mockApp.map!.getCenter.mockReturnValue(center);
+      mockApp.map!.getZoom.mockReturnValue(13);
+      openWrapped();
+      wrappedManager.closeWrapped();
+
+      // Reopened before the restore ran: the map still shows the fitted view
+      mockApp.map!.getCenter.mockReturnValue({ lat: 51, lng: 9 });
+      mockApp.map!.getZoom.mockReturnValue(7.75);
+      openWrapped();
+      wrappedManager.closeWrapped();
+      vi.advanceTimersByTime(100);
+
+      expect(mockApp.map!.setView).toHaveBeenCalledTimes(1);
+      expect(mockApp.map!.setView).toHaveBeenCalledWith(center, 13, {
+        animate: false,
+      });
     });
 
     it("remeasures the map once it is back in the page", () => {
@@ -430,6 +551,27 @@ describe("WrappedManager dialog", () => {
       // The column keeps its position across openings, so it has to be put
       // back or Wrapped reopens halfway down a card
       expect(column.scrollTop).toBe(0);
+    });
+
+    it("starts a reopened stacked dialog at the top", () => {
+      // Below the desktop layout the content row scrolls, not the column
+      const content = el("wrapped-content");
+      Object.defineProperty(content, "scrollHeight", {
+        value: 3300,
+        configurable: true,
+      });
+      Object.defineProperty(content, "clientHeight", {
+        value: 780,
+        configurable: true,
+      });
+
+      openWrapped();
+      content.scrollTop = 1770;
+      wrappedManager.closeWrapped();
+
+      openWrapped();
+
+      expect(content.scrollTop).toBe(0);
     });
 
     it("drops the bottom fade once the end is reached", () => {

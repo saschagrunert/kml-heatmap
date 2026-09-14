@@ -146,6 +146,106 @@ class TestParseKmlCoordinates:
         assert len(coords) == 1
         assert "outside of gx:Track were ignored" in capsys.readouterr().err
 
+    def test_gx_coord_counts_in_debug_output(self, tmp_path, capsys):
+        from kml_heatmap.logger import set_debug_mode
+
+        set_debug_mode(True)
+        try:
+            parse_kml_coordinates(_write(tmp_path, "debug.kml", GX_TRACK_KML))
+        finally:
+            set_debug_mode(False)
+        output = capsys.readouterr()
+        assert "Found 1 gx:Track element(s) with 2 gx:coord elements" in output.out
+        assert "outside of gx:Track" not in output.err
+
+    def test_legacy_google_namespace_with_gx_track(self, tmp_path):
+        """Names and LineStrings must not get lost next to a gx:Track."""
+        kml = GX_TRACK_KML.replace(
+            'xmlns="http://www.opengis.net/kml/2.2"',
+            'xmlns="http://earth.google.com/kml/2.2"',
+        ).replace(
+            "</Document>",
+            "<Placemark><name>EDDS - EDDP</name><LineString>"
+            "<coordinates>9.2,48.7,300 12.2,51.4,300</coordinates>"
+            "</LineString></Placemark></Document>",
+        )
+        _, paths, metadata = parse_kml_coordinates(_write(tmp_path, "legacy.kml", kml))
+        assert len(paths) == 2
+        assert [m["airport_name"] for m in metadata] == [
+            "EDDS Stuttgart - EDDP Leipzig/Halle",
+            "Track",
+        ]
+
+    def test_line_string_next_to_a_track_is_not_counted_twice(self, tmp_path):
+        kml = f"""{KML_HEADER}<Document><Placemark><name>EDDS - EDDP</name>
+        <MultiGeometry><gx:Track>
+          <when>2025-03-15T10:00:00Z</when><gx:coord>8.5 50.0 300</gx:coord>
+          <when>2025-03-15T10:01:00Z</when><gx:coord>9.0 51.0 400</gx:coord>
+        </gx:Track>
+        <LineString><coordinates>8.5,50.0,300 9.0,51.0,400</coordinates></LineString>
+        </MultiGeometry></Placemark>
+        <Placemark><name>Other</name><LineString>
+          <coordinates>8.5,50.0,300 9.0,51.0,400</coordinates>
+        </LineString></Placemark></Document></kml>"""
+        coords, paths, metadata = parse_kml_coordinates(
+            _write(tmp_path, "both.kml", kml)
+        )
+        assert len(paths) == 2
+        assert [m["airport_name"] for m in metadata] == [
+            "Other",
+            "EDDS Stuttgart - EDDP Leipzig/Halle",
+        ]
+        assert paths[1][0].ts is not None
+        assert len(coords) == 4
+
+    def test_text_node_over_10_mb(self, tmp_path):
+        points = "9.123456,48.123456,1234.5 " * 420_000
+        kml = (
+            f"{KML_HEADER}<Document><Placemark><name>Long</name><LineString>"
+            f"<coordinates>{points}</coordinates></LineString></Placemark>"
+            "</Document></kml>"
+        )
+        coords, paths, _ = parse_kml_coordinates(_write(tmp_path, "long.kml", kml))
+        assert len(coords) == 420_000
+        assert len(paths) == 1
+
+    def test_entity_expansion_is_still_rejected(self, tmp_path):
+        entities = "".join(
+            f'<!ENTITY lol{i} "' + f"&lol{i - 1};" * 10 + '">' for i in range(1, 10)
+        )
+        kml = (
+            '<?xml version="1.0"?><!DOCTYPE kml [<!ENTITY lol0 "lol">'
+            f"{entities}]><kml><name>&lol9;</name></kml>"
+        )
+        with pytest.raises(KMLParseError, match="XML parsing error"):
+            parse_kml_coordinates(_write(tmp_path, "lol.kml", kml))
+
+    def test_external_entities_are_not_resolved(self, tmp_path):
+        secret = tmp_path / "secret.txt"
+        secret.write_text("do not read")
+        kml = (
+            '<?xml version="1.0"?>'
+            f'<!DOCTYPE kml [<!ENTITY x SYSTEM "{secret.as_uri()}">]>'
+            "<kml><Placemark><name>&x;</name><LineString>"
+            "<coordinates>8.5,50.0,300 9.0,51.0,400</coordinates>"
+            "</LineString></Placemark></kml>"
+        )
+        _, _, metadata = parse_kml_coordinates(_write(tmp_path, "xxe.kml", kml))
+        assert "do not read" not in str(metadata)
+
+    def test_filename_is_parsed_once_per_file(self, tmp_path, capsys):
+        kml = LINESTRING_KML.replace(
+            "</Document>",
+            "<Placemark><name>Second</name><LineString>"
+            "<coordinates>8.5,50.0,300 9.0,51.0,400</coordinates>"
+            "</LineString></Placemark></Document>",
+        )
+        _, paths, _ = parse_kml_coordinates(
+            _write(tmp_path, "1_DEAGJ_DA20_extra.kml", kml)
+        )
+        assert len(paths) == 2
+        assert capsys.readouterr().err.count("Ignoring extra filename parts") == 1
+
     def test_debug_logging_lists_tags(self, tmp_path, capsys):
         from kml_heatmap.logger import set_debug_mode
 

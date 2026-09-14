@@ -359,26 +359,22 @@ describe("DataManager", () => {
       expect(mockHeatLayer.addTo).not.toHaveBeenCalled();
     });
 
-    it("builds airport-to-paths relationships from path_info", async () => {
-      loaderMocks.loadData.mockResolvedValue(
-        createDataset([
-          { id: 1, start_airport: "EDDF", end_airport: "EDDM" },
-          { id: 2, start_airport: "EDDM", end_airport: "EDDF" },
-        ]),
-      );
-
-      await dataManager.updateLayers();
-
-      expect([...mockApp.airportToPaths["EDDF"]!]).toEqual([1, 2]);
-      expect([...mockApp.airportToPaths["EDDM"]!]).toEqual([1, 2]);
-    });
-
     it("calculates altitude range from segments", async () => {
       loaderMocks.loadData.mockResolvedValue(baseData());
 
       await dataManager.updateLayers();
 
       expect(mockApp.altitudeRange).toEqual({ min: 1000, max: 5000 });
+    });
+
+    it("takes the exact altitude of a path over its rounded segments", async () => {
+      const data = baseData();
+      data.path_info[0]!.max_altitude_ft = 4960.4;
+      data.path_info[0]!.min_altitude_ft = 1012.5;
+
+      await dataManager.updateLayers(data);
+
+      expect(mockApp.altitudeRange).toEqual({ min: 1012.5, max: 4960.4 });
     });
 
     it("keeps the previous altitude range when there are no segments", async () => {
@@ -429,6 +425,72 @@ describe("DataManager", () => {
         [52.0, 10.0],
         [53.0, 11.0],
       ]);
+    });
+
+    it("isolates only the selected paths the aircraft filter keeps (regression)", async () => {
+      // Path 1 is D-ABCD, path 2 is D-EFGH: the colour layers draw only
+      // path 2, so the heatmap must not draw path 1 beside it
+      mockApp.selectedAircraft = "D-EFGH";
+      mockApp.isolateSelection = true;
+      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
+      loaderMocks.loadData.mockResolvedValue(baseData());
+
+      await dataManager.updateLayers();
+
+      const coords = heatLayerSpy.mock.calls[0]![0] as [number, number][];
+      expect(coords).toEqual([
+        [52.0, 10.0],
+        [53.0, 11.0],
+      ]);
+    });
+
+    it("redraws the dataset on the map instead of loading it again", async () => {
+      const data = baseData();
+      mockApp.selectedYear = "2025";
+      await dataManager.updateLayers(data);
+
+      await dataManager.updateLayers();
+
+      expect(loaderMocks.loadData).not.toHaveBeenCalled();
+      expect(mockApp.currentData).toBe(data);
+      expect(heatLayerSpy).toHaveBeenCalledTimes(1);
+      expect(mockHeatLayer.setLatLngs).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not retry and report a partial load on every redraw (regression)", async () => {
+      // "all" combined from the years that loaded; the loader does not cache
+      // a partial combination and reports the missing year on each call
+      const partial = baseData();
+      loaderMocks.loadData.mockImplementationOnce(() => {
+        loaderMocks.options!.onLoadError!(["2024"]);
+        return Promise.resolve(partial);
+      });
+      await dataManager.updateLayers();
+      const listener = vi.fn();
+      mockApp.store.subscribe("currentData", listener);
+
+      // The isolate toggle, a selection in isolate mode, the aircraft filter
+      await dataManager.updateLayers();
+      await dataManager.updateLayers();
+
+      expect(loaderMocks.loadData).toHaveBeenCalledTimes(1);
+      expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+      expect(mockApp.currentData).toBe(partial);
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it("loads again once the year differs from the dataset on the map", async () => {
+      mockApp.selectedYear = "2025";
+      await dataManager.updateLayers(baseData());
+      const next = createDataset([{ id: 3, year: 2024 }]);
+      loaderMocks.loadData.mockResolvedValue(next);
+
+      mockApp.selectedYear = "2024";
+      await dataManager.updateLayers();
+
+      expect(loaderMocks.loadData).toHaveBeenCalledWith("2024");
+      expect(mockApp.currentData).toBe(next);
     });
 
     it("redraws only the visible colour layers and clears hidden ones", async () => {

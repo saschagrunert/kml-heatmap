@@ -17,6 +17,7 @@ __all__ = [
     "merge_aircraft_data",
     "normalize_registration",
     "parse_aircraft_from_filename",
+    "resolve_aircraft_models",
 ]
 
 # ICAO nationality prefixes that are written with a hyphen. Longer prefixes are
@@ -90,6 +91,26 @@ def lookup_aircraft_model(
     if not aircraft_data:
         return None
     return aircraft_data.get(registration)
+
+
+def resolve_aircraft_models(
+    registrations: Iterable[str | None],
+    aircraft_data: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """The model of every registration that aircraft.json knows.
+
+    Registrations without a model are left out; the frontend shows the
+    aircraft type from the KML file for them.
+    """
+    models: dict[str, str] = {}
+    for registration in sorted({reg for reg in registrations if reg}):
+        model = lookup_aircraft_model(registration, aircraft_data)
+        if model:
+            logger.info("  ✓ %s: %s", registration, model)
+            models[registration] = model
+        else:
+            logger.info("  ⚠ %s: no model in aircraft.json", registration)
+    return models
 
 
 def normalize_registration(raw: str) -> str:
