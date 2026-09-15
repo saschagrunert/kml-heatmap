@@ -96,6 +96,34 @@ describe("MobileSheet", () => {
       expect(document.activeElement).toBe(opener);
     });
 
+    it("returns focus to the tab that swapped the sheet, not the first opener", () => {
+      const first = document.createElement("button");
+      const second = document.createElement("button");
+      document.body.append(first, second);
+      first.focus();
+      sheet.openWith("Layers", []);
+
+      // The tabs stay reachable while the sheet is open
+      second.focus();
+      sheet.openWith("Filter", []);
+      sheet.close();
+
+      expect(document.activeElement).toBe(second);
+    });
+
+    it("keeps the first opener when the swap left focus inside the sheet", () => {
+      const first = document.createElement("button");
+      document.body.append(first);
+      first.focus();
+      sheet.openWith("Layers", []);
+      expect(document.activeElement).toBe(sheet.root);
+
+      sheet.openWith("Filter", []);
+      sheet.close();
+
+      expect(document.activeElement).toBe(first);
+    });
+
     it("replaces the rows of a previous open", () => {
       const spec = (id: string): SheetRow => ({
         kind: "action",
@@ -304,6 +332,25 @@ describe("MobileSheet", () => {
       expect(
         row(sheet, "year").querySelector(".sheet-row-value")!.textContent,
       ).toBe("2024");
+    });
+
+    it("reads the page's dropdown back even when the choice matches it", () => {
+      const select = row(sheet, "year").querySelector("select")!;
+      select.value = "2024";
+      select.dispatchEvent(new Event("change"));
+      // The page put its dropdown back (the year failed to load) without
+      // an event; the row still says 2024
+      source.value = "2025";
+      const changed = vi.fn();
+      source.addEventListener("change", changed);
+
+      select.value = "2025";
+      select.dispatchEvent(new Event("change"));
+
+      expect(changed).not.toHaveBeenCalled();
+      expect(
+        row(sheet, "year").querySelector(".sheet-row-value")!.textContent,
+      ).toBe("2025");
     });
 
     it("follows the source when it is disabled during replay", () => {

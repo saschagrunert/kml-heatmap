@@ -1,5 +1,6 @@
 """Standard KML <coordinates> processing."""
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,8 @@ if TYPE_CHECKING:
 
     from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
 
+_SPACE_AFTER_COMMA = re.compile(r",\s+")
+
 
 def process_standard_coordinates(
     coord_elements: list[etree._Element],
@@ -26,8 +29,15 @@ def process_standard_coordinates(
     path_metadata: list[PathMetadata],
     aircraft_info: dict[str, str | None],
 ) -> None:
-    """Process standard KML <coordinates> elements."""
+    """Process standard KML <coordinates> elements.
+
+    A flight path needs at least two points: a lone ``<Point>`` (a waypoint,
+    a home field) is kept in ``coordinates`` but is no path, so it neither
+    gets exported nor registers an airport.
+    """
     lines_without_altitude = 0
+    # Once per file: parse_coordinate_point runs once per coordinate
+    filename = Path(kml_file).name
 
     for idx, coord_elem in enumerate(coord_elements):
         if coord_elem.text is None:
@@ -41,12 +51,17 @@ def process_standard_coordinates(
 
         metadata = coord_to_metadata.get(id(coord_elem), empty_placemark_metadata())
 
-        # Split by whitespace (spaces, tabs, newlines)
+        # Tuples are separated by whitespace and their values by commas.
+        # Google Earth also accepts a space after the comma ("8.5, 50.0, 300"),
+        # which the split below would tear apart.
+        if _SPACE_AFTER_COMMA.search(coord_text):
+            coord_text = _SPACE_AFTER_COMMA.sub(",", coord_text)
+
         current_path: FlightPath = []
         element_coords = 0
 
         for point_text in coord_text.split():
-            parsed = parse_coordinate_point(point_text, kml_file)
+            parsed = parse_coordinate_point(point_text, filename)
             if parsed is None:
                 continue
 
@@ -60,7 +75,7 @@ def process_standard_coordinates(
 
             element_coords += 1
 
-        if current_path:
+        if len(current_path) > 1:
             # No synthetic timestamps for Charterware files: their coordinates
             # are not at fixed intervals.
             path_groups.append(current_path)
@@ -83,6 +98,6 @@ def process_standard_coordinates(
         # not zero, so the missing flight would go unnoticed
         logger.warning(
             "%s: %d line(s) without usable altitudes were ignored",
-            Path(kml_file).name,
+            filename,
             lines_without_altitude,
         )

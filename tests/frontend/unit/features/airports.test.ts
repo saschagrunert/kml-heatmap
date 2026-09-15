@@ -273,15 +273,37 @@ describe("airports feature", () => {
       expect(mod.groupByCountry([]).size).toBe(0);
     });
 
-    it("caches the country map per module instance", () => {
+    it("follows a replaced airport list", () => {
       expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
       window.KML_AIRPORTS = { airports: [] };
-      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
+      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
+    });
+
+    it("keeps the map while the airport list stays the same", () => {
+      const airports = window.KML_AIRPORTS!.airports;
+      expect(mod.groupByCountry(["LSZH Zurich"]).get("CH")).toEqual([
+        "LSZH Zurich",
+      ]);
+      // A change inside the same array is not seen: the list is treated as
+      // immutable once loaded, like the rest of the page treats it
+      airports.push({ name: "LOWW Vienna", lat: 48, lon: 16, country: "AT" });
+      expect(mod.countCountries(["LOWW Vienna"]).size).toBe(0);
     });
 
     it("handles missing KML_AIRPORTS", () => {
       delete window.KML_AIRPORTS;
       expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
+    });
+
+    it("picks up airports.js when it arrives after the first lookup", () => {
+      delete window.KML_AIRPORTS;
+      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
+      window.KML_AIRPORTS = {
+        airports: [
+          { name: "EDAV Halle-Oppin", lat: 51, lon: 12, country: "DE" },
+        ],
+      };
+      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
     });
   });
 

@@ -140,7 +140,11 @@ export const marker: Mock<
   const validated = assertLatLng(latlng, "marker");
   // Leaflet keeps the popup once it is bound; the mock does the same so that
   // "bind on first update, set content afterwards" behaves as it does live
-  let popup: { content: string } | null = null;
+  let popup: {
+    content: string;
+    options: Record<string, unknown>;
+    setContent: Mock;
+  } | null = null;
   const obj: MockMarker = {
     addTo: vi.fn(),
     remove: vi.fn(),
@@ -165,10 +169,20 @@ export const marker: Mock<
   };
   // mockReturnValue would replace the implementation, so chainable methods
   // that also record something use mockImplementation
-  obj.bindPopup.mockImplementation((content: unknown) => {
-    popup = { content: String(content) };
-    return obj;
-  });
+  obj.bindPopup.mockImplementation(
+    (content: unknown, options: Record<string, unknown> = {}) => {
+      const bound = {
+        content: String(content),
+        options: { ...options },
+        setContent: vi.fn((next: unknown) => {
+          bound.content = String(next);
+          return bound;
+        }),
+      };
+      popup = bound;
+      return obj;
+    },
+  );
   obj.addTo.mockImplementation((host: unknown) => {
     addToHost(obj, host);
     return obj;

@@ -507,6 +507,30 @@ export async function waitForPathData(page: Page): Promise<void> {
   );
 }
 
+/**
+ * The heat canvas and the canvas the coloured paths are drawn on share the
+ * overlay pane. Whichever was appended last would paint on top, so the
+ * stylesheet pins the heat canvas underneath; this reads the result.
+ */
+export async function expectHeatUnderPaths(page: Page): Promise<void> {
+  const pane = page.locator(".leaflet-overlay-pane");
+  await expect(pane.locator("canvas.leaflet-heatmap-layer")).toHaveCount(1);
+  await expect(pane.locator("canvas:not(.leaflet-heatmap-layer)")).toHaveCount(
+    1,
+  );
+  const order = await pane.evaluate((el) => {
+    const zIndex = (selector: string): number =>
+      Number(getComputedStyle(el.querySelector(selector)!).zIndex);
+    return {
+      heat: zIndex("canvas.leaflet-heatmap-layer"),
+      paths: zIndex("canvas:not(.leaflet-heatmap-layer)"),
+    };
+  });
+  expect(order.heat, "the heat canvas paints over the paths").toBeLessThan(
+    order.paths,
+  );
+}
+
 /** Select a single path with timing data for replay */
 export async function selectPathForReplay(page: Page): Promise<number> {
   await waitForPathData(page);

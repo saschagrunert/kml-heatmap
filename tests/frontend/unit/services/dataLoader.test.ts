@@ -85,6 +85,51 @@ describe("loadScript", () => {
     appendChildSpy.mockRestore();
   });
 
+  it("gives up on a script that neither loads nor errors", async () => {
+    vi.useFakeTimers();
+    let script: HTMLScriptElement | undefined;
+    const appendChildSpy = vi
+      .spyOn(document.head, "appendChild")
+      .mockImplementation((node: Node) => {
+        script = node as HTMLScriptElement;
+        const remove = vi.fn();
+        script.remove = remove;
+        return node;
+      });
+
+    const pending = loadScript("stalled.js", 5000);
+    vi.advanceTimersByTime(4999);
+    expect(script!.remove).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+
+    await expect(pending).rejects.toThrow(
+      "Timed out loading script: stalled.js",
+    );
+    expect(script!.remove).toHaveBeenCalledOnce();
+    // A late load is no longer reported
+    expect(script!.onload).toBeNull();
+    expect(script!.onerror).toBeNull();
+
+    appendChildSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("does not time out a script that loaded", async () => {
+    vi.useFakeTimers();
+    const appendChildSpy = vi
+      .spyOn(document.head, "appendChild")
+      .mockImplementation((node: Node) => {
+        (node as HTMLScriptElement).onload?.(new Event("load"));
+        return node;
+      });
+
+    await loadScript("fast.js", 10);
+    expect(vi.getTimerCount()).toBe(0);
+
+    appendChildSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
   it("rejects on script load error", async () => {
     const appendChildSpy = vi
       .spyOn(document.head, "appendChild")

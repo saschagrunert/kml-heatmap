@@ -86,14 +86,33 @@ class TestExtractSegmentSpeeds:
             _pt(50.0, 8.5, ts="2025-03-15T10:00:00Z"),
             _pt(60.0, 18.5, ts="2025-03-15T10:00:01Z"),
         ]
-        assert extract_segment_speeds(path, None)[0].speed == 0.0
+        seg = extract_segment_speeds(path, None)[0]
+        assert seg.speed == 0.0
+        assert seg.valid is False
 
     def test_very_short_time_delta_ignored(self):
         path = [
             _pt(50.0, 8.5, ts="2025-03-15T10:00:00.000Z"),
             _pt(50.0, 8.5, ts="2025-03-15T10:00:00.001Z"),
         ]
-        assert extract_segment_speeds(path, None)[0].speed == 0.0
+        seg = extract_segment_speeds(path, None)[0]
+        assert seg.speed == 0.0
+        assert seg.valid is False
+
+    def test_standing_still_is_a_valid_measurement(self):
+        path = [
+            _pt(50.0, 8.5, ts="2025-03-15T10:00:00Z"),
+            _pt(50.0, 8.5, ts="2025-03-15T10:01:00Z"),
+        ]
+        seg = extract_segment_speeds(path, None)[0]
+        assert seg.speed == 0.0
+        assert seg.valid is True
+
+    def test_untimed_segment_is_not_valid(self):
+        assert (
+            extract_segment_speeds([_pt(50.0, 8.5), _pt(51.0, 9.5)], None)[0].valid
+            is False
+        )
 
     def test_partial_timestamp_data(self):
         path = [
@@ -111,14 +130,31 @@ class TestBuildTimeIndexedSegments:
 
     def test_sorted_and_filtered(self):
         segments = [
-            SegmentSpeed(0, 200.0, None, 100.0, 1.0, 10.0),
-            SegmentSpeed(1, 100.0, None, 0.0, 1.0, 10.0),  # zero speed filtered
-            SegmentSpeed(2, None, None, 120.0, 1.0, 10.0),  # no timestamp filtered
-            SegmentSpeed(3, 50.0, None, 120.0, 1.0, 10.0),
+            SegmentSpeed(0, 200.0, None, 100.0, 1.0, 10.0, valid=True),
+            SegmentSpeed(1, 100.0, None, 0.0, 0.0, 10.0, valid=True),  # standing
+            SegmentSpeed(2, None, None, 120.0, 1.0, 10.0),  # no timestamp
+            SegmentSpeed(3, 150.0, None, 0.0, 100.0, 1.0),  # implausible
+            SegmentSpeed(4, 50.0, None, 120.0, 1.0, 10.0, valid=True),
         ]
         timestamps, indexed = build_time_indexed_segments(segments)
-        assert timestamps == [50.0, 200.0]
-        assert [s.index for s in indexed] == [3, 0]
+        assert timestamps == [50.0, 100.0, 200.0]
+        assert [s.index for s in indexed] == [4, 1, 0]
+
+    def test_standing_time_counts_in_the_window(self):
+        """A minute standing still and a minute at 100 kt average to 50 kt."""
+        one_minute_at_100_kt = 100 * 1.852 / 60  # km
+        path = [
+            _pt(50.0, 8.5, ts="2025-03-15T10:00:00Z"),
+            _pt(50.0, 8.5, ts="2025-03-15T10:01:00Z"),
+            _pt(50.0 + one_minute_at_100_kt / 111.195, 8.5, ts="2025-03-15T10:02:00Z"),
+        ]
+        segments = extract_segment_speeds(path, None)
+        timestamps, indexed = build_time_indexed_segments(segments)
+        speed, _, seconds = calculate_windowed_groundspeed(
+            segments[1].timestamp, timestamps, indexed
+        )
+        assert seconds == 120.0
+        assert speed == pytest.approx(50.0, rel=1e-3)
 
 
 class TestCalculateWindowedGroundspeed:

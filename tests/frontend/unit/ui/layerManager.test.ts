@@ -510,6 +510,27 @@ describe("LayerManager", () => {
       expect(isTouchDevice()).toBe(false);
     });
 
+    it("asks the hover media query when the browser has one", () => {
+      // A laptop with a touchscreen is driven by its mouse most of the
+      // time; touch support alone lost it the hover tooltips
+      let hoverless = false;
+      Object.defineProperty(window, "matchMedia", {
+        value: vi.fn((query: string) => ({
+          matches: query === "(hover: none)" && hoverless,
+        })),
+        configurable: true,
+        writable: true,
+      });
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
+      try {
+        expect(isTouchDevice()).toBe(false);
+        hoverless = true;
+        expect(isTouchDevice()).toBe(true);
+      } finally {
+        delete (window as { matchMedia?: unknown }).matchMedia;
+      }
+    });
+
     it("returns true when ontouchstart exists", () => {
       (window as { ontouchstart?: unknown }).ontouchstart = null;
       expect(isTouchDevice()).toBe(true);

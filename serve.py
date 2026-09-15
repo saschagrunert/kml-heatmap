@@ -12,6 +12,11 @@ CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "")
 
 
 class CORSHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def list_directory(self, path):
+        # The site is addressed by its files; a listing of the data directory
+        # is nothing a page needs
+        self.send_error(404, "Directory listing not supported")
+
     def end_headers(self):
         if CORS_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", CORS_ORIGIN)

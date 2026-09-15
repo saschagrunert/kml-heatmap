@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures";
 import {
   activateReplay,
+  expectHeatUnderPaths,
   gotoApp,
   playUntilProgress,
   waitForPathData,
@@ -381,5 +382,37 @@ test.describe("Replay", () => {
       window.mapApp!.replayManager.state.airplaneMarker!.closePopup();
     });
     await expect(popup).toBeHidden();
+  });
+
+  test("Enter on the focused airplane marker opens its popup", async ({
+    page,
+  }) => {
+    await activateReplay(page);
+    const marker = page.locator(".leaflet-marker-icon", {
+      has: page.locator(".replay-airplane-icon"),
+    });
+
+    // The popup used to be bound on the first click, so the keyboard had
+    // nothing to open until a pointer had been there
+    await marker.focus();
+    await page.keyboard.press("Enter");
+
+    const popup = page.locator(".leaflet-popup-content");
+    await expect(popup).toBeVisible({ timeout: 3000 });
+    await expect(popup).toContainText("Current Position");
+  });
+
+  test("the heat canvas stays under the paths after a replay", async ({
+    page,
+  }) => {
+    await waitForPathData(page);
+    await expectHeatUnderPaths(page);
+    await activateReplay(page);
+
+    await page.locator("#replay-btn").click();
+    await expect(page.locator("#replay-controls")).toBeHidden();
+
+    // Closing replay adds the heat layer back, after the path canvas
+    await expectHeatUnderPaths(page);
   });
 });

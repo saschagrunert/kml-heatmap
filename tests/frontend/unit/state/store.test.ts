@@ -128,7 +128,7 @@ describe("AppStore", () => {
       store.subscribe("selectedPathIds", fn);
       store.get("selectedPathIds").add(1);
       store.notifyMutation("selectedPathIds");
-      const [newVal, oldVal] = fn.mock.calls[0]!;
+      const [newVal, oldVal] = fn.mock.calls[0] as [unknown, unknown];
       expect(newVal).toBe(oldVal);
     });
   });
@@ -295,6 +295,69 @@ describe("AppStore", () => {
       expect(pathFn).toHaveBeenCalledOnce();
     });
 
+    it("notifies a key re-set by a listener once, against its pre-batch value", () => {
+      const store = new AppStore({ selectedAircraft: "D-ABCD" });
+      const aircraftFn = vi.fn();
+      store.subscribe("selectedYear", () => {
+        store.set("selectedAircraft", "D-XXXX");
+      });
+      store.subscribe("selectedAircraft", aircraftFn);
+
+      store.batch(() => {
+        store.set("selectedYear", "2024");
+        store.set("selectedAircraft", "D-EFGH");
+      });
+
+      // Nobody sees the intermediate D-EFGH: one notification, from the
+      // value before the batch to the value the listener settled on
+      expect(aircraftFn).toHaveBeenCalledOnce();
+      expect(aircraftFn).toHaveBeenCalledWith("D-XXXX", "D-ABCD");
+    });
+
+    it("notifies a delivered key again when a later listener changes it", () => {
+      const store = new AppStore();
+      const aircraftFn = vi.fn();
+      store.subscribe("selectedAircraft", aircraftFn);
+      store.subscribe("selectedYear", () => {
+        store.set("selectedAircraft", "D-XXXX");
+      });
+
+      store.batch(() => {
+        store.set("selectedAircraft", "D-EFGH");
+        store.set("selectedYear", "2024");
+      });
+
+      expect(aircraftFn.mock.calls).toEqual([
+        ["D-EFGH", "all"],
+        ["D-XXXX", "D-EFGH"],
+      ]);
+    });
+
+    it("gives up on listeners that keep changing each other's keys", () => {
+      const store = new AppStore();
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let rounds = 0;
+      store.subscribe("selectedYear", (year) => {
+        rounds++;
+        store.set("selectedAircraft", `aircraft-${year}`);
+      });
+      store.subscribe("selectedAircraft", (aircraft) => {
+        store.set("selectedYear", `year-${aircraft}`);
+      });
+
+      expect(() => store.set("selectedYear", "2024")).not.toThrow();
+
+      expect(rounds).toBeLessThan(20);
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Store flush exceeded"),
+      );
+      // The state moved on, the last change is still pending
+      expect(store.get("selectedYear")).toMatch(/^year-/);
+      consoleSpy.mockRestore();
+    });
+
     it("listener calling batch() during notification works", () => {
       const store = new AppStore();
       const aircraftFn = vi.fn();
@@ -311,6 +374,25 @@ describe("AppStore", () => {
   });
 
   describe("subscribeKeys", () => {
+    it("runs again when a listener changes one of its keys after it ran", () => {
+      const store = new AppStore();
+      const seen: string[] = [];
+      store.subscribeKeys(["selectedYear", "selectedAircraft"], () => {
+        seen.push(store.get("selectedAircraft"));
+      });
+      store.subscribe("selectedYear", () => {
+        store.set("selectedAircraft", "D-XXXX");
+      });
+
+      store.batch(() => {
+        store.set("selectedAircraft", "D-EFGH");
+        store.set("selectedYear", "2024");
+      });
+
+      // Once for the batch, once for the change the year listener made
+      expect(seen).toEqual(["D-EFGH", "D-XXXX"]);
+    });
+
     it("runs once for a batch that changes several of its keys", () => {
       const store = new AppStore();
       const fn = vi.fn();

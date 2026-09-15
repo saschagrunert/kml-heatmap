@@ -99,14 +99,18 @@ serve-build: build ## Run build, then serve
 check-obfuscation: ## Check that the KML files in INPUT_DIR are obfuscated
 	python -m kml_heatmap.obfuscate "$(INPUT_DIR)" --check
 
-lint: ## Run linters and type checkers
+lint: ## Run the same linters, formatters (check only) and type checkers as the CI lint job
 	python scripts/check_locks.py
 	ruff check .
+	ruff format --check .
 	mypy .
 	bandit -r kml_heatmap -ll
 	npm run typecheck
 	npm run typecheck:tests
 	npm run lint
+	npm run format:check
+	@if command -v typos >/dev/null 2>&1; then typos; else \
+	  echo "note: typos is not installed, skipping the spell check (CI runs it)"; fi
 
 format: ## Run formatters
 	ruff format .

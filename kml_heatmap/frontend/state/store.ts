@@ -35,8 +35,15 @@ export interface StoreState {
 
 type Listener<T> = (newVal: T, oldVal: T) => void;
 
-/** Listener re-entrancy budget before pending notifications are abandoned */
+/**
+ * How many rounds of listener-triggered changes one flush delivers before
+ * the remaining ones are deferred to the next top-level set()
+ */
 const MAX_FLUSH_DEPTH = 10;
+
+/** Colour range defaults; features/layers.ts falls back to the same values */
+export const DEFAULT_ALTITUDE_RANGE: Range = { min: 0, max: 10000 };
+export const DEFAULT_AIRSPEED_RANGE: Range = { min: 0, max: 200 };
 
 /**
  * Store keys that MapApp exposes as plain properties. Reading one reads the
@@ -104,8 +111,10 @@ export function createDefaultState(): StoreState {
     currentData: null,
     aircraftModels: {},
     hasTimingData: false,
-    altitudeRange: { min: 0, max: 10000 },
-    airspeedRange: { min: 0, max: 200 },
+    // Copies: a range set to the shared default object would compare equal
+    // to the initial state and never be announced
+    altitudeRange: { ...DEFAULT_ALTITUDE_RANGE },
+    airspeedRange: { ...DEFAULT_AIRSPEED_RANGE },
   };
 }
 
@@ -205,7 +214,9 @@ export class AppStore {
       fn();
     } finally {
       this.batchDepth--;
-      if (this.batchDepth === 0) {
+      // A batch opened by a listener leaves its changes to the flush or
+      // notification that is already running
+      if (this.batchDepth === 0 && this.flushDepth === 0 && !this.isNotifying) {
         this.flush();
       }
     }
@@ -232,7 +243,12 @@ export class AppStore {
         }
       } finally {
         this.isNotifying = wasNotifying;
-        if (!this.isNotifying && this.pendingOldValues.size > 0) {
+        // A flush in progress picks up what the listeners set itself
+        if (
+          !this.isNotifying &&
+          this.flushDepth === 0 &&
+          this.pendingOldValues.size > 0
+        ) {
           this.flush();
         }
       }
@@ -240,32 +256,43 @@ export class AppStore {
   }
 
   private flush(): void {
-    if (this.flushDepth > MAX_FLUSH_DEPTH) {
-      // A listener cycle this deep means the UI would keep re-entering the
-      // store instead of settling. Unwinding is the only way out, so make the
-      // stall visible instead of swallowing it. The pending entries are kept:
-      // once the stack has unwound, the next top-level set() flushes them.
-      logError(
-        `Store flush exceeded ${MAX_FLUSH_DEPTH} levels; deferring updates ` +
-          `for: ${[...this.pendingOldValues.keys()].join(", ")}`,
-      );
-      return;
-    }
     this.flushDepth++;
-    // A nested flush carries changes made after the outer pass notified, so
-    // it gets its own record of who already ran
+    // Pending keys are drained from the live map, so a key a listener sets
+    // while the flush runs is delivered once, against the value it had before
+    // the batch, instead of once by a nested flush and once more from a
+    // snapshot with a stale old value. Keys set by listeners land behind the
+    // ones of the batch and form the next round: subscribeKeys listeners run
+    // once per round, since the state changed after their last run.
     const outerRan = this.flushRan;
     this.flushRan = new Set();
+    let round = 0;
+    let roundKeys = new Set(this.pendingOldValues.keys());
     try {
-      const pending = new Map(this.pendingOldValues);
-      const mutated = new Set(this.pendingMutations);
-      this.pendingOldValues.clear();
-      this.pendingMutations.clear();
-      for (const [key, oldVal] of pending) {
+      while (this.pendingOldValues.size > 0) {
+        const [key, oldVal] = this.pendingOldValues.entries().next().value!;
+        if (!roundKeys.has(key)) {
+          round++;
+          if (round > MAX_FLUSH_DEPTH) {
+            // Listeners this deep in each other's changes would keep the UI
+            // re-entering the store instead of settling. Make the stall
+            // visible instead of swallowing it; the pending entries are
+            // kept, the next top-level set() flushes them.
+            logError(
+              `Store flush exceeded ${MAX_FLUSH_DEPTH} rounds; deferring ` +
+                `updates for: ${[...this.pendingOldValues.keys()].join(", ")}`,
+            );
+            return;
+          }
+          roundKeys = new Set(this.pendingOldValues.keys());
+          this.flushRan = new Set();
+        }
+        roundKeys.delete(key);
+        this.pendingOldValues.delete(key);
+        const mutated = this.pendingMutations.delete(key);
         const currentVal = this.state[key];
         // A value set and set back within a batch changed nothing; one
         // changed in place keeps its reference and is announced anyway
-        if (currentVal !== oldVal || mutated.has(key)) {
+        if (currentVal !== oldVal || mutated) {
           this.notify(key, currentVal, oldVal as StoreState[keyof StoreState]);
         }
       }

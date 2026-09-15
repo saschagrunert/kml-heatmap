@@ -305,7 +305,7 @@ describe("ReplayManager activation", () => {
       expect(document.body.classList.contains("replay-active")).toBe(false);
     });
 
-    it("removes airplane marker and its click handler on deactivation", () => {
+    it("removes the airplane marker on deactivation", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.toggleReplay();
       const marker = replayManager.state.airplaneMarker;
@@ -334,7 +334,9 @@ describe("ReplayManager activation", () => {
       replayManager.toggleReplay();
       replayManager.toggleReplay();
 
-      expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.heatmapLayer);
+      // The data manager adds it, with the points of the filter changes
+      // made during the replay and the dimming its new canvas has lost
+      expect(mockApp.dataManager.showHeatmap).toHaveBeenCalledTimes(1);
     });
 
     it("leaves the colour layers off when neither was on before replay", () => {
@@ -951,22 +953,12 @@ describe("ReplayManager activation", () => {
       expect((el("year-select") as HTMLSelectElement).disabled).toBe(true);
     });
 
-    it("restores heatmap when visible", () => {
+    it("restores the heatmap through the data manager when visible", () => {
       mockApp.heatmapVisible = true;
 
       replayManager.restoreLayerVisibility();
 
-      expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.heatmapLayer);
-    });
-
-    it("sets pointer-events none on heatmap canvas when restoring", () => {
-      const canvas = document.createElement("canvas");
-      mockApp.heatmapLayer!._canvas = canvas;
-      mockApp.heatmapVisible = true;
-
-      replayManager.restoreLayerVisibility();
-
-      expect(canvas.style.pointerEvents).toBe("none");
+      expect(mockApp.dataManager.showHeatmap).toHaveBeenCalledTimes(1);
     });
 
     it("does not restore heatmap when not visible", () => {
@@ -974,6 +966,7 @@ describe("ReplayManager activation", () => {
 
       replayManager.restoreLayerVisibility();
 
+      expect(mockApp.dataManager.showHeatmap).not.toHaveBeenCalled();
       expect(mockApp.map!.addLayer).not.toHaveBeenCalledWith(
         mockApp.heatmapLayer,
       );

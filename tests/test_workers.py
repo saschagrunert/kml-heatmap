@@ -41,7 +41,7 @@ class TestParseWorkerCount:
     def test_one_worker_per_cpu_when_memory_suffices(self, tmp_path):
         files = self._files(tmp_path, 10, 10, 10)
         with (
-            patch("os.cpu_count", return_value=2),
+            patch("os.process_cpu_count", return_value=2),
             patch.object(
                 workers_module, "_available_memory_bytes", return_value=64_000 * MB
             ),
@@ -50,7 +50,7 @@ class TestParseWorkerCount:
 
     def test_never_more_workers_than_files(self, tmp_path):
         files = self._files(tmp_path, 10)
-        with patch("os.cpu_count", return_value=8):
+        with patch("os.process_cpu_count", return_value=8):
             assert parse_worker_count(files) == 1
 
     def test_large_files_limit_the_pool(self, tmp_path):
@@ -60,7 +60,7 @@ class TestParseWorkerCount:
         per_small = workers_module.WORKER_BASE_BYTES + 10 * 15
         available = per_large + per_small + per_small // 2
         with (
-            patch("os.cpu_count", return_value=8),
+            patch("os.process_cpu_count", return_value=8),
             patch.object(
                 workers_module, "_available_memory_bytes", return_value=available
             ),
@@ -75,7 +75,7 @@ class TestParseWorkerCount:
     def test_unknown_memory_does_not_limit(self, tmp_path):
         files = self._files(tmp_path, 10, 10, 10)
         with (
-            patch("os.cpu_count", return_value=4),
+            patch("os.process_cpu_count", return_value=4),
             patch.object(workers_module, "_available_memory_bytes", return_value=None),
         ):
             assert parse_worker_count(files) == 3

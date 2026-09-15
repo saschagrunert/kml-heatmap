@@ -30,7 +30,6 @@ output directory.
 
 import contextlib
 import errno
-import fcntl
 import hashlib
 import json
 import logging
@@ -40,7 +39,13 @@ import re
 import shutil
 import struct
 import tempfile
-from concurrent.futures import Executor, ProcessPoolExecutor, as_completed
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    Executor,
+    Future,
+    ProcessPoolExecutor,
+    wait,
+)
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,7 +58,15 @@ from .export_pipeline import build_path_info, path_metrics, process_path_segment
 from .export_writers import export_airports_data, export_metadata
 from .logger import logger
 from .types import COORDINATE_DECIMALS
+from .validation import protected_directories
 from .workers import init_worker
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no fcntl
+    # Without file locks two runs on one output directory are not detected;
+    # the export itself works
+    fcntl = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -87,6 +100,8 @@ ENTRY_POINT_FILES = ("metadata.js", "index.html")
 # A year is not split below this many paths per chunk: a worker process only
 # pays off when it has real work to do
 MIN_PATHS_PER_CHUNK = 50
+# Chunks handed to the process pool ahead of time, per worker
+MAX_QUEUED_CHUNKS_PER_WORKER = 2
 JSON_SEPARATORS = (",", ":")
 # Path ids are this wide: exact JavaScript numbers, short enough for a link,
 # and wide enough that 100,000 flights rarely need a collision resolved
@@ -477,51 +492,60 @@ def _export_chunks(
         )
     elif plans:
         debug = logger.isEnabledFor(logging.DEBUG)
+        workers = max(1, min(len(plans), max_workers))
         with ProcessPoolExecutor(
-            max_workers=max(1, min(len(plans), max_workers)),
+            max_workers=workers,
             initializer=init_worker,
             initargs=(debug,),
         ) as executor:
-            futures = {
-                executor.submit(
-                    process_year_chunk,
-                    plan.year,
-                    [all_path_groups[i] for i in plan.path_indices],
-                    [all_path_metadata[i] for i in plan.path_indices],
-                    plan.path_ids,
-                    output_dir,
-                    plan.index,
-                ): plan
-                for plan in plans
-            }
-            for completed, future in enumerate(as_completed(futures), start=1):
-                plan = futures[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    raise fail(plan, exc, executor) from exc
-                chunk_results.append(result)
-                logger.info(
-                    "  [%d/%d] %s: %s points",
-                    completed,
-                    len(futures),
-                    describe(plan),
-                    f"{result.original_points:,}",
-                )
+            # Submitting every chunk at once would pickle the whole dataset
+            # into the executor's queue while the main process still holds
+            # it; a bounded number of chunks is in flight at any time
+            pending: dict[Future[ChunkResult], _ChunkPlan] = {}
+            queued = iter(plans)
+
+            def submit_next() -> None:
+                plan = next(queued, None)
+                if plan is not None:
+                    pending[
+                        executor.submit(
+                            process_year_chunk,
+                            plan.year,
+                            [all_path_groups[i] for i in plan.path_indices],
+                            [all_path_metadata[i] for i in plan.path_indices],
+                            plan.path_ids,
+                            output_dir,
+                            plan.index,
+                        )
+                    ] = plan
+
+            for _ in range(workers * MAX_QUEUED_CHUNKS_PER_WORKER):
+                submit_next()
+            completed = 0
+            while pending:
+                done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                for future in done:
+                    plan = pending.pop(future)
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        raise fail(plan, exc, executor) from exc
+                    chunk_results.append(result)
+                    completed += 1
+                    logger.info(
+                        "  [%d/%d] %s: %s points",
+                        completed,
+                        len(plans),
+                        describe(plan),
+                        f"{result.original_points:,}",
+                    )
+                    submit_next()
 
     year_results = []
     for year in sorted(parts_per_year):
         chunks = [chunk for chunk in chunk_results if chunk.year == year]
         year_results.append(_assemble_year_file(year, chunks, output_dir))
     return year_results
-
-
-def _protected_directories() -> tuple[Path, ...]:
-    """Directories that must never be used as the data output directory."""
-    try:
-        return (Path("/"), Path.home())
-    except RuntimeError:  # no HOME and no passwd entry (containers)
-        return (Path("/"),)
 
 
 def _refuse_symlink(path: Path) -> ValueError:
@@ -628,6 +652,8 @@ def _lock_directory(directory: Path) -> int:
     with the site. It is released when the returned descriptor is closed.
     """
     fd = os.open(directory, os.O_RDONLY)
+    if fcntl is None:
+        return fd
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -686,8 +712,12 @@ class SiteOutput:
         """
         self.output_dir = Path(output_dir).resolve()
         self.data_dir = Path(data_dir).resolve()
-        if self.data_dir in _protected_directories():
-            raise ValueError(f"Refusing to use dangerous output directory: {data_dir}")
+        for given, resolved in (
+            (output_dir, self.output_dir),
+            (data_dir, self.data_dir),
+        ):
+            if resolved in protected_directories():
+                raise ValueError(f"Refusing to use dangerous output directory: {given}")
         self.site_files = tuple(site_files)
         self._cleanup = contextlib.ExitStack()
 
@@ -769,7 +799,7 @@ def export_all_data(
     logger.info("\n  Splitting data by year: %s", sorted(paths_by_year))
 
     path_ids = assign_path_ids(paths_by_year, all_path_groups)
-    max_workers = os.cpu_count() or 4
+    max_workers = os.process_cpu_count() or 4
     plans = _plan_chunks(paths_by_year, path_ids, max_workers)
 
     logger.info(

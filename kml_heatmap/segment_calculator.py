@@ -35,7 +35,13 @@ __all__ = [
 
 @dataclass(slots=True)
 class SegmentSpeed:
-    """Instantaneous speed information for one path segment."""
+    """Instantaneous speed information for one path segment.
+
+    ``valid`` marks a segment whose speed is a measurement: both points are
+    timed, the time delta is usable and the speed plausible. Only valid
+    segments enter the rolling window, including the ones where the aircraft
+    stood still (speed 0), because their time counts toward the average.
+    """
 
     index: int
     timestamp: float | None
@@ -43,6 +49,7 @@ class SegmentSpeed:
     speed: float
     distance: float
     time_delta: float
+    valid: bool = False
 
 
 def calculate_path_distance(path: FlightPath) -> float:
@@ -68,6 +75,7 @@ def extract_segment_speeds(
         timestamp = None
         time_delta = 0.0
         relative_time = None
+        valid = False
 
         if p1.ts is not None and p2.ts is not None:
             time_delta = p2.ts - p1.ts
@@ -79,8 +87,9 @@ def extract_segment_speeds(
             if time_delta >= MIN_SEGMENT_TIME_SECONDS:
                 segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
                 instant_speed = (segment_distance_nm / time_delta) * SECONDS_PER_HOUR
+                valid = instant_speed <= MAX_GROUNDSPEED_KNOTS
 
-                if instant_speed > MAX_GROUNDSPEED_KNOTS:
+                if not valid:
                     instant_speed = 0.0  # Ignore unrealistic speeds
 
         segment_speeds.append(
@@ -91,6 +100,7 @@ def extract_segment_speeds(
                 speed=instant_speed,
                 distance=segment_distance_km,
                 time_delta=time_delta,
+                valid=valid,
             )
         )
 
@@ -100,9 +110,15 @@ def extract_segment_speeds(
 def build_time_indexed_segments(
     segment_speeds: list[SegmentSpeed],
 ) -> tuple[list[float], list[SegmentSpeed]]:
-    """Build time-sorted lists for efficient window queries."""
+    """Build time-sorted lists for efficient window queries.
+
+    Only valid segments take part (see ``SegmentSpeed``). A segment where
+    the aircraft stood still is valid: leaving it out made the window
+    average the speed of the moving time only, so a minute of holding
+    followed by a minute at 100 kt averaged to 100 kt instead of 50.
+    """
     timed = sorted(
-        (seg for seg in segment_speeds if seg.timestamp is not None and seg.speed != 0),
+        (seg for seg in segment_speeds if seg.valid and seg.timestamp is not None),
         key=lambda seg: seg.timestamp or 0.0,
     )
     timestamp_list = [seg.timestamp for seg in timed if seg.timestamp is not None]

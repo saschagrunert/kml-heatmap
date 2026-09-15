@@ -35,13 +35,15 @@ PATH_SAMPLE_MAX_SIZE = 50  # Maximum sample size for path analysis
 PATH_SAMPLE_MIN_SIZE = 5  # Minimum sample size for path analysis
 
 # === Mid-Flight Detection ===
-MID_FLIGHT_MIN_ALTITUDE_M = 400  # Minimum altitude to consider mid-flight start
+# Heights are above the field elevation when the airport database knows it
+# (see airports.reference_altitude), above sea level otherwise
+MID_FLIGHT_MIN_ALTITUDE_M = 400  # Minimum height to consider mid-flight start
 MID_FLIGHT_MAX_VARIATION_M = 100  # Maximum altitude variation for stable flight
 
 # === Landing Detection ===
 LANDING_MAX_VARIATION_M = 50  # Maximum altitude variation for stable landing
-LANDING_MAX_ALTITUDE_M = 600  # Maximum altitude for valid landing endpoint
-LANDING_FALLBACK_ALTITUDE_M = 1000  # Fallback altitude threshold for short paths
+LANDING_MAX_ALTITUDE_M = 600  # Maximum height for valid landing endpoint
+LANDING_FALLBACK_ALTITUDE_M = 1000  # Fallback height threshold for short paths
 
 # === XML/KML Namespaces ===
 KML_NAMESPACE = "http://www.opengis.net/kml/2.2"

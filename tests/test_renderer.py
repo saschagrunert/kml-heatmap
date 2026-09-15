@@ -466,6 +466,42 @@ class TestExportSite:
         assert (out / "index.html").exists()
         assert _stages(out) == []
 
+    def test_airports_leave_out_excluded_paths(self, tmp_path, parse_js):
+        """A path without an export must not publish its location either."""
+        paths = [
+            [TrackPoint(50.0, 8.0, 100.0), TrackPoint(51.0, 9.0, 200.0)],
+            # A single point (a waypoint placemark with an altitude)
+            [TrackPoint(49.5678, 10.1234, 320.0)],
+            # A recording that never moved
+            [TrackPoint(47.654321, 7.123456, 400.0)] * 3,
+        ]
+        metadata = [
+            {
+                "year": 2025,
+                "start_point": [50.0, 8.0, 100.0],
+                "airport_name": "EDDF Frankfurt Main - EDDK Cologne Bonn",
+            },
+            {
+                "year": 2025,
+                "start_point": [49.5678, 10.1234, 320.0],
+                "airport_name": "Home Strip",
+            },
+            {
+                "year": 2025,
+                "start_point": [47.654321, 7.123456, 400.0],
+                "airport_name": "Secret Strip",
+            },
+        ]
+        out = tmp_path / "out"
+
+        _export_site(paths, metadata, out / "index.html", out / "data")
+
+        airports = parse_js(out / "data" / "airports.js")["airports"]
+        assert [airport["name"] for airport in airports] == [
+            "EDDF Frankfurt Main",
+            "EDDK Cologne Bonn",
+        ]
+
     def test_nothing_exportable_raises_before_writing(self, tmp_path):
         paths = [[TrackPoint(50.0, 8.0, 100.0), TrackPoint(51.0, 9.0, 200.0)]]
         metadata = [{"year": None, "start_point": [50.0, 8.0, 100.0]}]
@@ -602,6 +638,37 @@ class TestCreateProgressiveHeatmap:
             )
             is False
         )
+
+    @pytest.mark.usefixtures("bundle")
+    def test_output_dir_equal_to_input_dir_is_refused(self, tmp_path, capsys):
+        """The site files would land next to the KML files, and stale
+        tool-owned files (a foreign manifest.json) would be removed."""
+        input_dir = tmp_path / "input"
+        kml_file = _write_kml(input_dir / "1_DEAGJ_DA20.kml")
+        (input_dir / "manifest.json").write_text("{}")
+
+        ok = create_progressive_heatmap(
+            [kml_file], str(input_dir / "index.html"), str(input_dir / "data")
+        )
+
+        assert ok is False
+        assert "Refusing to use output directory" in capsys.readouterr().err
+        assert (input_dir / "manifest.json").read_text() == "{}"
+        assert not (input_dir / "index.html").exists()
+
+    @pytest.mark.usefixtures("bundle")
+    def test_data_dir_outside_the_output_dir_is_refused(self, tmp_path, capsys):
+        """The page loads the data directory by its name, next to itself."""
+        kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
+
+        ok = create_progressive_heatmap(
+            [kml_file], str(tmp_path / "a" / "index.html"), str(tmp_path / "b" / "data")
+        )
+
+        assert ok is False
+        assert "must be directly inside the output directory" in capsys.readouterr().err
+        assert not (tmp_path / "a").exists()
+        assert not (tmp_path / "b").exists()
 
     @pytest.mark.usefixtures("bundle")
     def test_one_invalid_input_fails_the_run(self, tmp_path, capsys):

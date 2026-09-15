@@ -124,8 +124,8 @@ export interface FilteredStatistics {
   longest_flight_nm?: number | undefined;
   total_flight_time_seconds?: number | undefined;
   total_flight_time_str?: string | undefined;
-  most_common_cruise_altitude_ft?: number | null | undefined;
-  most_common_cruise_altitude_m?: number | null | undefined;
+  most_common_cruise_altitude_ft?: number | undefined;
+  most_common_cruise_altitude_m?: number | undefined;
 }
 
 /**
@@ -221,6 +221,10 @@ export type SavedState = AppState;
 export interface FunFact {
   category: string;
   icon: string;
+  /**
+   * Trusted markup, rendered as is. The generator escapes every value it
+   * takes from the data (registrations, models) before building the text.
+   */
   text: string;
   priority: number;
 }

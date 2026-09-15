@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from .airport_lookup import (
     airport_icao_code,
     lookup_airport_coordinates,
+    lookup_airport_elevation,
     split_route_name,
 )
 from .constants import (
@@ -34,11 +35,13 @@ if TYPE_CHECKING:
 __all__ = [
     "POINT_MARKERS",
     "AirportDeduplicator",
+    "airport_elevation",
     "deduplicate_airports",
     "extract_airport_name",
     "is_mid_flight_start",
     "is_point_marker",
     "is_valid_landing",
+    "reference_altitude",
     "route_airports",
     "sample_path_altitudes",
 ]
@@ -71,8 +74,47 @@ def sample_path_altitudes(
     return {"min": min(alts), "max": max(alts), "variation": max(alts) - min(alts)}
 
 
-def is_mid_flight_start(path: FlightPath, start_alt: float | None) -> bool:
-    """Detect if a path started mid-flight by analyzing altitude patterns."""
+def airport_elevation(name: str | None, is_at_path_end: bool) -> float | None:
+    """The field elevation in meters of the airport a name refers to.
+
+    A route name refers to its departure or its arrival, selected by
+    ``is_at_path_end``. None when the name holds no ICAO code or the
+    database does not know the field or its elevation.
+    """
+    if not name:
+        return None
+    return lookup_airport_elevation(
+        airport_icao_code(_airport_at(name, is_at_path_end))
+    )
+
+
+def reference_altitude(path: FlightPath, airport_elevation_m: float | None) -> float:
+    """The ground altitude the start or end of a path is compared against.
+
+    The altitudes of a track are above sea level, but whether a flat start
+    is a taxi or a cruise depends on the height above the field: Munich lies
+    at 453 m, Samedan at 1707 m. The elevation of the named airport is the
+    reference when the database has it. Otherwise the lowest altitude of the
+    path stands in for the ground, provided the path climbs or descends at
+    all; a recording that is flat throughout never touched the ground, and
+    sea level keeps its flat start from counting as a departure.
+    """
+    if airport_elevation_m is not None:
+        return airport_elevation_m
+    altitudes = [point.alt for point in path if point.alt is not None]
+    if altitudes and max(altitudes) - min(altitudes) > MID_FLIGHT_MAX_VARIATION_M:
+        return min(altitudes)
+    return 0.0
+
+
+def is_mid_flight_start(
+    path: FlightPath, start_alt: float | None, reference_alt: float = 0.0
+) -> bool:
+    """Detect if a path started mid-flight by analyzing altitude patterns.
+
+    ``reference_alt`` is the ground altitude the start is measured against
+    (see ``reference_altitude``); the default is sea level.
+    """
     if start_alt is None:
         return False
 
@@ -81,34 +123,43 @@ def is_mid_flight_start(path: FlightPath, start_alt: float | None) -> bool:
         return False
 
     # Mid-flight indicators:
-    # - Starting altitude above typical airports
+    # - Starting well above the ground
     # - AND altitude variation in first part is small (not climbing/descending much)
     is_mid_flight = (
-        start_alt > MID_FLIGHT_MIN_ALTITUDE_M
+        start_alt - reference_alt > MID_FLIGHT_MIN_ALTITUDE_M
         and sample["variation"] < MID_FLIGHT_MAX_VARIATION_M
     )
 
     if is_mid_flight:
         logger.debug(
-            "Detected mid-flight start at %.0fm (variation: %.0fm)",
+            "Detected mid-flight start at %.0fm (%.0fm above the reference, "
+            "variation: %.0fm)",
             start_alt,
+            start_alt - reference_alt,
             sample["variation"],
         )
 
     return is_mid_flight
 
 
-def is_valid_landing(path: FlightPath, end_alt: float | None) -> bool:
-    """Check if a path ends with a valid landing."""
+def is_valid_landing(
+    path: FlightPath, end_alt: float | None, reference_alt: float = 0.0
+) -> bool:
+    """Check if a path ends with a valid landing.
+
+    ``reference_alt`` is the ground altitude the end is measured against
+    (see ``reference_altitude``); the default is sea level.
+    """
+    height = end_alt - reference_alt if end_alt is not None else None
     sample = sample_path_altitudes(path, from_end=True)
     if not sample:
-        # Short path, just accept if altitude seems reasonable
-        return end_alt is not None and end_alt < LANDING_FALLBACK_ALTITUDE_M
+        # Short path, just accept if the height seems reasonable
+        return height is not None and height < LANDING_FALLBACK_ALTITUDE_M
 
     # Valid landing: either descending significantly OR stable at low variation
     # Also accept any endpoint if variation at end is small - indicates stable landing
     return sample["variation"] < LANDING_MAX_VARIATION_M or (
-        end_alt is not None and end_alt < LANDING_MAX_ALTITUDE_M
+        height is not None and height < LANDING_MAX_ALTITUDE_M
     )
 
 
@@ -292,6 +343,10 @@ def _add_departures(
     metadata's ``start_point`` and defaults to 0 when the point carries none.
     A route registers its departure airport under that airport's own name,
     the name the path info of the export refers to.
+
+    A path with fewer than two points is no flight: a lone waypoint or a
+    stationary recording gets no entry in the export either, and its airport
+    would tell where it was.
     """
     for idx, metadata in enumerate(all_path_metadata):
         start_point = metadata["start_point"]
@@ -304,17 +359,23 @@ def _add_departures(
             logger.debug("Skipping point marker '%s'", airport_name)
             continue
 
-        # Skip mid-flight starts
         path = all_path_groups[idx] if idx < len(all_path_groups) else []
-        if is_mid_flight_start(path, start_alt):
+        if len(path) < 2:
+            logger.debug("Skipping the start of '%s': no flight path", airport_name)
+            continue
+
+        # Skip mid-flight starts
+        start_airport, _ = route_airports(metadata)
+        name = start_airport or airport_name
+        reference = reference_altitude(path, airport_elevation(name, False))
+        if is_mid_flight_start(path, start_alt, reference):
             logger.debug("Skipping mid-flight start '%s'", airport_name)
             continue
 
-        start_airport, _ = route_airports(metadata)
         deduplicator.add_or_update_airport(
             lat=start_lat,
             lon=start_lon,
-            name=start_airport or airport_name,
+            name=name,
             path_index=idx,
             is_at_path_end=False,
         )
@@ -344,7 +405,8 @@ def _add_arrivals(
         if is_point_marker(route_name) or not end_airport:
             continue
 
-        if is_valid_landing(path, end.alt):
+        reference = reference_altitude(path, airport_elevation(end_airport, True))
+        if is_valid_landing(path, end.alt, reference):
             deduplicator.add_or_update_airport(
                 lat=end.lat,
                 lon=end.lon,

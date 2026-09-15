@@ -505,7 +505,7 @@ function restoreFocusFromRail(rail: HTMLElement): void {
 
 /** Markup shown in place of the map when initialization fails */
 export const INIT_ERROR_HTML =
-  '<div class="kh-init-error">Failed to initialize map. Please reload the page.</div>';
+  '<div class="kh-init-error" role="alert">Failed to initialize map. Please reload the page.</div>';
 
 /**
  * Create the app, bind the controls and run the initial load. Exported so

@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
-    "node": "^24.15.0 || >=26"
+    "node": ">=26"
   },
   "scripts": {
     "test": "vitest run",

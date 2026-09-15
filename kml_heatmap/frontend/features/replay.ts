@@ -20,7 +20,7 @@ export function prepareReplaySegments(
   // The path's own segments come from the per-path index; only the ones
   // with time data can be replayed
   const replaySegments = segmentsForPathIds(segments, [pathId]).filter(
-    (seg) => seg.time !== undefined && seg.time !== null,
+    (seg) => seg.time !== undefined,
   );
 
   // Sort by time

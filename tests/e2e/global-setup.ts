@@ -47,7 +47,11 @@ function checkBuildHash(): void {
   }
 }
 
-/** Files the generator copies or renders into the site, besides the bundle */
+/**
+ * Files the generator copies or renders into the site, besides the bundle,
+ * and the dependency lock: a bumped Leaflet or esbuild changes what the
+ * fixture serves and what the bundle contains
+ */
 function generatorSources(): string[] {
   const packageDir = join(REPO_ROOT, "kml_heatmap");
   const inDir = (dir: string, suffix: string): string[] =>
@@ -56,8 +60,11 @@ function generatorSources(): string[] {
       .map((name) => join(packageDir, dir, name));
   return [
     ...inDir(".", ".py"),
-    ...inDir("static", ".css"),
+    // Every static asset but the bundle and its map, which checkBuildHash
+    // covers and which a build in between refreshes anyway
+    ...inDir("static", "").filter((file) => !file.includes(".bundle.js")),
     ...inDir("templates", ""),
+    join(REPO_ROOT, "package-lock.json"),
   ];
 }
 

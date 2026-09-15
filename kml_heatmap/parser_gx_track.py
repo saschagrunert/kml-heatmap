@@ -60,22 +60,31 @@ def parse_gx_track(
 ) -> tuple[FlightPath, list[str]]:
     """Parse one gx:Track into a flight path.
 
-    Returns the path (points with altitude) and the list of <when> texts of
-    the track. Points are appended to ``coordinates`` as well.
+    Returns the path (points with altitude) and the <when> texts of the
+    path's points that carry a timestamp, in path order: the first and last
+    of them are the time span of the path. A <when> that is unparsable, or
+    that belongs to a coordinate that was rejected or has no altitude, is
+    not among them. Points are appended to ``coordinates`` as well.
+
+    A timestamp earlier than the one before it (a GPS week rollover, a clock
+    resync) is dropped, so time never runs backwards along a path.
     """
     whens, coord_texts = _collect_track_children(track)
-    source = f"{Path(kml_file).name} (gx:Track)"
+    filename = Path(kml_file).name
+    source = f"{filename} (gx:Track)"
 
     if whens and len(whens) != len(coord_texts):
         logger.warning(
             "%s: gx:Track has %d <when> but %d <gx:coord> elements; "
             "pairing them by position",
-            Path(kml_file).name,
+            filename,
             len(whens),
             len(coord_texts),
         )
 
     path: FlightPath = []
+    path_whens: list[str] = []
+    last_ts: float | None = None
     for idx, coord_text in enumerate(coord_texts):
         if not coord_text or not coord_text.strip():
             continue
@@ -102,13 +111,22 @@ def parse_gx_track(
             ts = parse_timestamp_epoch(whens[idx])
             if ts is None:
                 logger.debug("Unparsable <when> in %s: %s", source, whens[idx])
+            elif last_ts is not None and ts < last_ts:
+                logger.debug(
+                    "Out-of-order <when> in %s dropped: %s", source, whens[idx]
+                )
+                ts = None
+            else:
+                last_ts = ts
 
         point = TrackPoint(lat, lon, alt, ts)
         coordinates.append(point)
         if alt is not None:
             path.append(point)
+            if ts is not None:
+                path_whens.append(whens[idx])
 
-    return path, [when for when in whens if when]
+    return path, path_whens
 
 
 def process_gx_track(
@@ -124,6 +142,7 @@ def process_gx_track(
     if not tracks:
         return
 
+    filename = Path(kml_file).name
     metadata_cache: dict[int, PlacemarkMetadata] = {}
 
     for track in tracks:
@@ -138,12 +157,14 @@ def process_gx_track(
 
         path, whens = parse_gx_track(track, kml_file, coordinates)
         if not path:
-            logger.debug("gx:Track without usable coordinates in %s", kml_file)
+            logger.debug("gx:Track without usable coordinates in %s", filename)
             continue
 
         track_meta = placemark_meta.copy()
         if whens:
-            # The track's own timestamps are authoritative for its time span
+            # The track's own timestamps are authoritative for its time span:
+            # those of the path's points, not of the raw <when> list, whose
+            # first entry may be unparsable or belong to a rejected coordinate
             track_meta["timestamp"] = whens[0]
             track_meta["end_timestamp"] = whens[-1] if len(whens) > 1 else None
             track_meta["year"] = extract_year_from_timestamp(whens[0])
@@ -159,4 +180,4 @@ def process_gx_track(
             _build_path_metadata_dict(kml_file, path[0], track_meta, aircraft_info)
         )
 
-    logger.debug("Parsed %d gx:Track element(s) in %s", len(tracks), kml_file)
+    logger.debug("Parsed %d gx:Track element(s) in %s", len(tracks), filename)

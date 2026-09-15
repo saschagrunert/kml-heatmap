@@ -110,6 +110,20 @@ class TestFileCollection:
         names = [Path(f).name for f in mock_create.call_args[0][0]]
         assert names == ["2_a_b.kml", "10_a_b.kml", "flight3.KML"]
 
+    def test_directory_is_searched_with_its_subdirectories(self, tmp_path):
+        """The obfuscation check sees the same files as the generator."""
+        kml_dir = tmp_path / "kml_files"
+        (kml_dir / "2025").mkdir(parents=True)
+        (kml_dir / "2_a_b.kml").write_text(MINIMAL_KML)
+        (kml_dir / "2025" / "1_a_b.kml").write_text(MINIMAL_KML)
+
+        mock_create = _run([str(kml_dir), "--output-dir", str(tmp_path / "out")])
+
+        files = [
+            Path(f).relative_to(kml_dir).as_posix() for f in mock_create.call_args[0][0]
+        ]
+        assert files == ["2_a_b.kml", "2025/1_a_b.kml"]
+
     def test_directory_without_kml_files_exits(self, tmp_path, capsys):
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
@@ -205,6 +219,23 @@ class TestOutputHandling:
         assert exc_info.value.code == 1
         assert "Refusing" in capsys.readouterr().err
         assert not (tmp_path / "index.html").exists()
+
+    def test_output_dir_equal_to_input_dir_refused(self, workspace, capsys):
+        """The tool would replace and remove its own files next to the inputs."""
+        input_dir, kml, _ = workspace
+        with pytest.raises(SystemExit) as exc_info:
+            _run([str(kml), "--output-dir", str(input_dir)])
+        assert exc_info.value.code == 1
+        assert "Refusing to use output directory" in capsys.readouterr().err
+        assert not (input_dir / "index.html").exists()
+
+    @pytest.mark.parametrize("dangerous", ["/", "~"])
+    def test_dangerous_output_dir_refused(self, workspace, capsys, dangerous):
+        _, kml, _ = workspace
+        with pytest.raises(SystemExit) as exc_info:
+            _run([str(kml), "--output-dir", os.path.expanduser(dangerous)])
+        assert exc_info.value.code == 1
+        assert "dangerous" in capsys.readouterr().err
 
     def test_default_output_dir_next_to_input_is_accepted(self, workspace, monkeypatch):
         """``kml-heatmap flight.kml`` in the file's directory is the documented use."""
@@ -414,6 +445,7 @@ class TestObfuscationFailsClosed:
             _run([str(kml), "--output-dir", str(tmp_path / "out")])
 
         err = capsys.readouterr().err
+        assert "Not obfuscated: " in err
         assert "File name contains a date: 2024-03-14" in err
         assert "removed by hand" in err
 

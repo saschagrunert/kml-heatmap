@@ -107,7 +107,9 @@ def parse_worker_count(kml_files: Sequence[str]) -> int:
     as many workers as the largest files fit into the available memory, at
     least one; an unknown amount of memory does not limit it.
     """
-    workers = max(1, min(len(kml_files), os.cpu_count() or 4))
+    # process_cpu_count honors the CPU affinity, and with it a container's
+    # CPU quota; cpu_count would start one worker per CPU of the host
+    workers = max(1, min(len(kml_files), os.process_cpu_count() or 4))
     available = _available_memory_bytes()
     if available is None:
         return workers

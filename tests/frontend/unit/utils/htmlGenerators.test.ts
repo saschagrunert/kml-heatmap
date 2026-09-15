@@ -3,6 +3,7 @@ import {
   escapeHtml,
   generateAirportPopupHtml,
   generateSegmentPopupHtml,
+  markFlightTimeUnits,
   pluralFlights,
   pluralize,
   splitAirportName,
@@ -69,6 +70,25 @@ describe("htmlGenerators", () => {
       });
       expect(splitAirportName("EDAQ")).toEqual({ code: "", name: "EDAQ" });
       expect(splitAirportName("")).toEqual({ code: "", name: "" });
+    });
+  });
+
+  describe("markFlightTimeUnits", () => {
+    it("wraps the hour and minute units", () => {
+      expect(markFlightTimeUnits("47h 44m", "stat-unit")).toBe(
+        '47<span class="stat-unit">h</span> 44<span class="stat-unit">m</span>',
+      );
+    });
+
+    it("leaves a time without both units alone", () => {
+      expect(markFlightTimeUnits("44m", "stat-unit")).toBe("44m");
+      expect(markFlightTimeUnits("", "stat-unit")).toBe("");
+    });
+
+    it("escapes the text before marking it up", () => {
+      expect(markFlightTimeUnits("<b>1h 2m</b>", "kh-stats-lead-unit")).toBe(
+        '&lt;b&gt;1<span class="kh-stats-lead-unit">h</span> 2<span class="kh-stats-lead-unit">m</span>&lt;/b&gt;',
+      );
     });
   });
 

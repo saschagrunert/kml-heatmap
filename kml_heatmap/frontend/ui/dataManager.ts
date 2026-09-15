@@ -11,6 +11,7 @@ import type {
   PathSegment,
 } from "../types";
 import type { Coordinate } from "../utils/geometry";
+import type { HeatmapLayer } from "../globals";
 import { DataLoader } from "../services/dataLoader";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { calculateAltitudeRange } from "../features/layers";
@@ -27,6 +28,8 @@ export class DataManager {
   private loadErrorReported = false;
   /** Year the published dataset was loaded for */
   private dataYear: string | null = null;
+  /** Points the heat layer missed while it was off the map */
+  private pendingHeatmapPoints: Coordinate[] | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -89,6 +92,40 @@ export class DataManager {
     // How far it steps back is a design decision, so it lives in the
     // stylesheet with the rest of them rather than as a number in here
     canvas.classList.toggle("heatmap-dimmed", colorLayerOn);
+  }
+
+  /**
+   * Hand the heat layer its points. leaflet.heat redraws through the map it
+   * was added to, and Leaflet drops that reference when the layer comes off
+   * the map, so a layer that was on the map once (the canvas exists) and is
+   * off it now (heatmap toggled off, or hidden for a replay) throws in
+   * setLatLngs. The points wait for showHeatmap() instead.
+   */
+  private setHeatmapPoints(layer: HeatmapLayer, points: Coordinate[]): void {
+    if (this.app.map?.hasLayer(layer)) {
+      layer.setLatLngs(points);
+      this.pendingHeatmapPoints = null;
+    } else {
+      this.pendingHeatmapPoints = points;
+    }
+  }
+
+  /**
+   * Put the heat layer on the map, with the points it missed while it was
+   * off, a canvas that lets clicks through to the paths and the dimming it
+   * gets under a colour layer. Every place that adds the layer goes through
+   * here, so no add is left without one of the three.
+   */
+  showHeatmap(): void {
+    const layer = this.app.heatmapLayer;
+    if (!layer || !this.app.map) return;
+    if (!this.app.map.hasLayer(layer)) layer.addTo(this.app.map);
+    if (this.pendingHeatmapPoints) {
+      layer.setLatLngs(this.pendingHeatmapPoints);
+      this.pendingHeatmapPoints = null;
+    }
+    if (layer._canvas) layer._canvas.style.pointerEvents = "none";
+    this.applyHeatmapEmphasis();
   }
 
   async loadData(year: string): Promise<KMLDataset | null> {
@@ -170,15 +207,14 @@ export class DataManager {
 
     // The heat layer is created once and fed new points from then on; a
     // fresh layer per filter change meant a new canvas every time
-    let heatLayer = this.app.heatmapLayer;
+    const heatLayer = this.app.heatmapLayer;
     if (heatLayer) {
-      heatLayer.setLatLngs(filteredCoordinates);
+      this.setHeatmapPoints(heatLayer, filteredCoordinates);
     } else {
-      heatLayer = L.heatLayer(filteredCoordinates, {
+      this.app.heatmapLayer = L.heatLayer(filteredCoordinates, {
         radius: 10,
         blur: 15,
         minOpacity: 0.25,
-        maxOpacity: 0.6,
         max: 1.0, // Maximum point intensity for better performance
         gradient: {
           0.0: "blue",
@@ -188,18 +224,11 @@ export class DataManager {
           1.0: "red",
         },
       });
-      this.app.heatmapLayer = heatLayer;
     }
 
     // Only add to map if heatmap is visible AND not in replay mode
     if (this.app.heatmapVisible && !this.app.replayManager.state.active) {
-      if (!this.app.map.hasLayer(heatLayer)) {
-        heatLayer.addTo(this.app.map);
-      }
-      if (heatLayer._canvas) {
-        heatLayer._canvas.style.pointerEvents = "none";
-      }
-      this.applyHeatmapEmphasis();
+      this.showHeatmap();
     }
 
     // Calculate altitude range from all segments

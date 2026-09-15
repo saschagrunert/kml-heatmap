@@ -90,6 +90,12 @@ class TestParseKmlCoordinates:
         with pytest.raises(KMLParseError, match="XML parsing error"):
             parse_kml_coordinates(_write(tmp_path, "bad.kml", "not valid xml <"))
 
+    def test_parse_error_names_the_line(self, tmp_path):
+        kml = "<?xml version='1.0'?>\n<kml>\n<Document>\n<Placemark>\n</kml>"
+        with pytest.raises(KMLParseError, match="Line: 5") as excinfo:
+            parse_kml_coordinates(_write(tmp_path, "bad.kml", kml))
+        assert excinfo.value.line_number == 5
+
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(KMLParseError, match="I/O error"):
             parse_kml_coordinates(str(tmp_path / "missing.kml"))
@@ -102,7 +108,25 @@ class TestParseKmlCoordinates:
             _write(tmp_path, "empty.kml", kml)
         )
         assert (coords, paths, metadata) == ([], [], [])
-        assert "No valid coordinates found" in capsys.readouterr().err
+        # One line, with the file name: files are parsed in parallel
+        err = capsys.readouterr().err
+        assert "empty.kml: No valid coordinates found" in err
+        assert err.count("\n") == 1
+
+    def test_unprefixed_track_next_to_namespaced_point(self, tmp_path):
+        """The namespace fallback is decided per element kind."""
+        kml = f"""{KML_HEADER}
+  <Document><Placemark><name>Home</name><Point><coordinates>8.5,50.0,100</coordinates></Point>
+  </Placemark><Placemark><name>Flight</name>
+  <Track><when>2025-03-15T10:00:00Z</when><coord>8.5 50.0 300</coord>
+  <when>2025-03-15T10:01:00Z</when><coord>9.0 51.0 400</coord></Track>
+  </Placemark></Document></kml>"""
+        coords, paths, metadata = parse_kml_coordinates(
+            _write(tmp_path, "mixed.kml", kml)
+        )
+        assert len(coords) == 3
+        assert len(paths) == 1
+        assert metadata[0]["year"] == 2025
 
     def test_namespace_less_kml(self, tmp_path):
         kml = """<?xml version="1.0"?><kml><Document><Placemark><name>Plain</name>

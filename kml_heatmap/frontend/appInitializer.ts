@@ -74,6 +74,13 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // Populate year filter dropdown and validate the selected year
   if (metadata && metadata.available_years) {
     resolveYearSelection(app, metadata.available_years);
+  } else if (app.selectedYear !== "all") {
+    // Without the index there is no year to offer, so a restored year
+    // would show as "All years" in the dropdown while the map loads it
+    showToast("The list of years is unavailable, showing all years", "error");
+    app.selectedYear = "all";
+    const select = domCache.get("year-select", HTMLSelectElement);
+    if (select) select.value = "all";
   }
 
   // Add airport markers
@@ -104,6 +111,12 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // no groundspeeds at all, and then no speed layer and no replay
   const hasTimingData = metadata !== null && metadata.max_groundspeed_knots > 0;
   app.hasTimingData = hasTimingData;
+
+  // A restored speed layer has no speeds to draw. Its button is disabled
+  // below, and a disabled button cannot be released, so the store is put
+  // right here rather than restoring an empty layer that shows as pressed
+  // over a legend with placeholder labels.
+  if (!hasTimingData && app.airspeedVisible) app.airspeedVisible = false;
 
   if (hasTimingData) {
     const minSpeed = metadata.min_groundspeed_knots;
@@ -196,10 +209,16 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
       alt: airport.name,
     });
 
-    marker.on("click", (_e: L.LeafletMouseEvent) => {
+    const select = (): void => {
       if (!app.replayManager.state.active) {
         app.pathSelection.selectPathsByAirport(airport.name);
       }
+    };
+    marker.on("click", select);
+    // Enter on the focused marker: Leaflet reports it as keypress, not as
+    // click, and opened the popup without selecting the flights
+    marker.on("keypress", (e: L.LeafletKeyboardEvent) => {
+      if (e.originalEvent.key === "Enter") select();
     });
 
     marker.addTo(app.airportLayer);

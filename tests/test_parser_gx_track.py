@@ -138,7 +138,47 @@ class TestParseGxTrack:
         track = _track(_document(), ["8.5 50.0 300"], ["yesterday"])
         path, whens = parse_gx_track(track, "test.kml", [])
         assert path[0].ts is None
-        assert whens == ["yesterday"]
+        assert whens == []
+
+    def test_returned_whens_are_those_of_the_timed_path_points(self):
+        track = _track(
+            _document(),
+            ["invalid", "8.5 50.0", "8.5 50.0 300", "9.0 51.0 400"],
+            [
+                "2024-03-01T10:00:00Z",
+                "2025-03-01T09:00:00Z",
+                "2025-03-01T10:00:00Z",
+                "2025-03-01T11:00:00Z",
+            ],
+        )
+        path, whens = parse_gx_track(track, "test.kml", [])
+        assert len(path) == 2
+        assert whens == ["2025-03-01T10:00:00Z", "2025-03-01T11:00:00Z"]
+
+    def test_out_of_order_timestamp_is_dropped(self):
+        """A GPS week rollover or a clock resync must not run time backwards."""
+        track = _track(
+            _document(),
+            ["8.5 50.0 300", "8.6 50.1 300", "8.7 50.2 300", "8.8 50.3 300"],
+            [
+                "2025-03-01T10:00:00Z",
+                "2025-03-01T10:05:00Z",
+                "2025-03-01T09:00:00Z",
+                "2025-03-01T10:10:00Z",
+            ],
+        )
+        path, whens = parse_gx_track(track, "test.kml", [])
+        assert [p.ts for p in path] == [
+            parse_timestamp_epoch("2025-03-01T10:00:00Z"),
+            parse_timestamp_epoch("2025-03-01T10:05:00Z"),
+            None,
+            parse_timestamp_epoch("2025-03-01T10:10:00Z"),
+        ]
+        assert whens == [
+            "2025-03-01T10:00:00Z",
+            "2025-03-01T10:05:00Z",
+            "2025-03-01T10:10:00Z",
+        ]
 
     def test_ignores_comments_and_other_children(self):
         track = _track(_document(), ["8.5 50.0 300"], ["2025-03-01T10:00:00Z"])
@@ -261,3 +301,17 @@ class TestProcessGxTrack:
     def test_track_without_valid_coords_is_skipped(self):
         track = _track(_placemark(_document(), name="X"), ["invalid"])
         assert _run([track]) == ([], [], [])
+
+    def test_time_span_comes_from_the_path_points(self):
+        """An unparsable first <when> must not cost the track its year."""
+        track = _track(
+            _placemark(_document(), name="EDDS"),
+            ["8.5 50.0 300", "9.0 51.0 400", "9.1 51.1 400"],
+            ["N/A", "2025-03-01T10:00:00Z", "2025-03-01T11:00:00Z"],
+        )
+
+        _, _, path_metadata = _run([track])
+
+        assert path_metadata[0]["timestamp"] == "2025-03-01T10:00:00Z"
+        assert path_metadata[0]["end_timestamp"] == "2025-03-01T11:00:00Z"
+        assert path_metadata[0]["year"] == 2025

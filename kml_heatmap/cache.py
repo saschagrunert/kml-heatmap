@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CACHE_DIR",
+    "REGULAR_FILE_MODE",
     "atomic_js_write",
     "atomic_json_write",
     "atomic_text_write",
@@ -34,10 +35,18 @@ CACHE_DIR = Path(_cache_dir_env) if _cache_dir_env else _default_cache_dir()
 
 
 def _regular_file_mode() -> int:
-    """The mode a plain ``open(path, "w")`` would give a new file."""
+    """The mode a plain ``open(path, "w")`` would give a new file.
+
+    Reading the umask means setting it, which briefly changes the mode of
+    every file another thread creates in the meantime. It is therefore read
+    once at import, before any pool or thread exists.
+    """
     umask = os.umask(0)
     os.umask(umask)
     return 0o666 & ~umask
+
+
+REGULAR_FILE_MODE = _regular_file_mode()
 
 
 def atomic_write(path: Path, write: Callable[[IO[str]], object]) -> None:
@@ -61,7 +70,7 @@ def atomic_write(path: Path, write: Callable[[IO[str]], object]) -> None:
         ) as tmp:
             tmp_path = tmp.name
             write(tmp)
-        os.chmod(tmp_path, _regular_file_mode())
+        os.chmod(tmp_path, REGULAR_FILE_MODE)
         os.replace(tmp_path, path)
         tmp_path = None
     finally:

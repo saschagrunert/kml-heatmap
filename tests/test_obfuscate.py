@@ -449,6 +449,60 @@ class TestExtendedPatterns:
             assert obfuscate_kml_content(once) is None
 
 
+class TestRewriteGaps:
+    """Shapes the check flagged but the rewrite used to leave to the user."""
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Takeoff: 14 Mar 2024 09:12:05 Z",
+            "Takeoff: 4 Mar 2024 09:12 Z",
+            "Log Stop: 4 Mar 2024 09:12:05 Z",
+        ],
+    )
+    def test_marker_names_with_seconds_or_a_single_digit_day(self, name):
+        result = obfuscate_kml_content(f"<kml><name>{name}</name></kml>")
+        label = name.split(":")[0]
+        assert result == f"<kml><name>{label}: 2024-01-01</name></kml>"
+
+    @pytest.mark.parametrize(
+        "when,expected",
+        [
+            ("2024-03-14 09:12:00", "2024-01-01T09:12:00Z"),
+            ("2024-03-14T09:12:00z", "2024-01-01T09:12:00Z"),
+            ("<![CDATA[2024-03-14T09:12:00Z]]>", "2024-01-01T09:12:00Z"),
+            ("<![CDATA[ 2024-03-14 09:12:00.5z ]]>", "2024-01-01T09:12:00.5Z"),
+        ],
+    )
+    def test_loose_timestamps_are_rewritten_in_the_canonical_form(
+        self, tmp_path, when, expected
+    ):
+        result = obfuscate_kml_content(f"<kml><when>{when}</when></kml>")
+        assert result == f"<kml><when>{expected}</when></kml>"
+        kml_file = tmp_path / "t.kml"
+        kml_file.write_text(result, encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == []
+
+    def test_loose_timestamp_on_jan_1_is_normalized(self):
+        """The parsers read the canonical form; the date does not move."""
+        result = obfuscate_kml_content("<kml><when>2025-01-01 10:00:00</when></kml>")
+        assert result == "<kml><when>2025-01-01T10:00:00Z</when></kml>"
+
+    def test_route_name_with_a_single_digit_day(self):
+        result = obfuscate_kml_content(
+            "<kml><name>EDDS to EDDP - 6 Aug 2026</name></kml>"
+        )
+        assert result == "<kml><name>EDDS to EDDP - 01 Jan 2026</name></kml>"
+
+    def test_description_with_a_single_digit_hour(self):
+        result = obfuscate_kml_content(
+            "<kml><description>Flight Jan 12 2026 3:01PM path</description></kml>"
+        )
+        assert result == (
+            "<kml><description>Flight Jan 01 2026 03:01PM path</description></kml>"
+        )
+
+
 class TestObfuscateFile:
     def test_crlf_line_endings_are_kept(self, tmp_path):
         kml_file = tmp_path / "test.kml"
@@ -699,10 +753,90 @@ class TestCheckObfuscated:
             ("10-Mar-2026", ["10-Mar-2026"]),
             ("SkyDemon for iPhone v4.2.2.429", []),
             ("2026&#45;03&#45;10T10:00:00Z", ["2026-03-10"]),
+            # Dash-separated, single-digit and two-digit-year numeric dates
+            ("14-03-2024", ["14-03-2024"]),
+            ("3/14/2024", ["3/14/2024"]),
+            ("1/1/2026 01-01-2026", []),
+            ("14.03.24", ["14.03.24"]),
+            ("01.01.26", []),
+            ("track_14-03-2024.kml", ["14-03-2024"]),
+            # Compact dates, with a real month and day only
+            ("20240314", ["20240314"]),
+            ("flight_20240314.kml", ["20240314"]),
+            ("20260101 20260103 20261301 12345678", []),
+            ("20260104", ["20260104"]),
+            # A year and month, an ISO week and an ordinal date
+            ("2024-03", ["2024-03"]),
+            ("2026-01 2023-2024", []),
+            ("2024-W11 2024-W11-3", ["2024-W11", "2024-W11-3"]),
+            ("2026-W01", []),
+            ("2024-074", ["2024-074"]),
+            ("2026-002", []),
+            # Month names with ordinals, without a day, and in file names
+            ("14th March 2024", ["14th March 2024"]),
+            ("March 2024", ["March 2024"]),
+            ("January 2026", []),
+            ("N123AB_Mar14_2024.kml", ["Mar14_2024"]),
+            ("Cessna 172 2024", []),
+            ("Log Start: 2025-01-01", []),
+            ("Flight Jan 01 2026 03:01PM", []),
+            # Unix time in a data value
+            ("<value>1710406320</value>", ["1710406320"]),
+            ("<gx:value>1710406320000</gx:value>", ["1710406320000"]),
+            ('<SimpleData name="t">1710406320</SimpleData>', ["1710406320"]),
+            ("<value>1735689600</value>", []),
+            ("<value>12345</value> 1710406320", []),
+            # Ten digits, but not a time of this era
+            ("<value>9999999999</value>", []),
         ],
     )
     def test_stray_dates_tolerate_the_days_after_jan_1(self, text, stray):
         assert _find_stray_dates(text) == stray
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "flight_20240314.kml",
+            "track_14-03-2024.kml",
+            "N123AB_Mar14_2024.kml",
+            "log 2024-03.kml",
+        ],
+    )
+    def test_other_file_name_shapes_are_violations(self, tmp_path, name):
+        kml_file = tmp_path / name
+        kml_file.write_text("<kml/>", encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == [
+            f"File name contains a date: {_find_stray_dates(name)[0]}"
+        ]
+
+    def test_leftover_temp_file_is_a_violation(self, tmp_path):
+        """A rewrite killed before the rename leaves the original dates in a
+        file the KML listing ignores."""
+        (tmp_path / "a.kml").write_text(
+            "<kml><when>2025-01-01T10:00:00Z</when></kml>", encoding="utf-8"
+        )
+        leftover = tmp_path / ".a.kml.x1y2z3.tmp"
+        leftover.write_text(SAMPLE_KML, encoding="utf-8")
+
+        violations = check_directory_obfuscated(tmp_path)
+
+        assert list(violations) == [".a.kml.x1y2z3.tmp"]
+        assert "Leftover temporary file" in violations[".a.kml.x1y2z3.tmp"][0]
+
+    def test_directory_check_includes_subdirectories(self, tmp_path):
+        """The generator reads subdirectories, so the check has to see them."""
+        (tmp_path / "sub" / "deeper").mkdir(parents=True)
+        (tmp_path / "a.kml").write_text(SAMPLE_KML, encoding="utf-8")
+        (tmp_path / "sub" / "b.kml").write_text(SAMPLE_KML, encoding="utf-8")
+        (tmp_path / "sub" / "deeper" / "c.kml").write_text(SAMPLE_KML, encoding="utf-8")
+
+        assert set(check_directory_obfuscated(tmp_path)) == {
+            "a.kml",
+            "sub/b.kml",
+            "sub/deeper/c.kml",
+        }
+        assert obfuscate_kml_directory(tmp_path) == 3
+        assert check_directory_obfuscated(tmp_path) == {}
 
     def test_charterware_file_name_with_date_is_a_violation(self, tmp_path):
         kml_file = tmp_path / "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml"
@@ -832,6 +966,32 @@ class TestCLI:
         with patch("sys.argv", ["obfuscate", str(tmp_path), "--check"]):
             main()
         assert "All 1 KML file(s) are properly obfuscated" in capsys.readouterr().out
+
+    def test_check_mode_reports_leftover_temp_files(self, tmp_path, capsys):
+        (tmp_path / ".test.kml.abcd.tmp").write_text(SAMPLE_KML, encoding="utf-8")
+        with (
+            patch("sys.argv", ["obfuscate", str(tmp_path), "--check"]),
+            pytest.raises(SystemExit) as e,
+        ):
+            main()
+        assert e.value.code == 1
+        assert ".test.kml.abcd.tmp: Leftover temporary file" in capsys.readouterr().out
+
+    def test_nested_files_are_obfuscated_and_named_by_their_path(
+        self, tmp_path, capsys
+    ):
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "test.kml").write_text(SAMPLE_KML, encoding="utf-8")
+        with patch("sys.argv", ["obfuscate", str(tmp_path)]):
+            main()
+        assert "Obfuscated 1 of 1" in capsys.readouterr().out
+        (tmp_path / "sub" / "test.kml").write_text(SAMPLE_KML, encoding="utf-8")
+        with (
+            patch("sys.argv", ["obfuscate", str(tmp_path), "--check"]),
+            pytest.raises(SystemExit),
+        ):
+            main()
+        assert "  sub/test.kml: " in capsys.readouterr().out
 
     def test_obfuscate_mode(self, tmp_path, capsys):
         (tmp_path / "test.kml").write_text(SAMPLE_KML, encoding="utf-8")

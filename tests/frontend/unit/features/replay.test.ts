@@ -74,7 +74,7 @@ describe("replay feature", () => {
       const segments: PathSegment[] = [
         { path_id: 1, time: 1000 },
         { path_id: 1, time: undefined },
-        { path_id: 1, time: null as unknown as number },
+        { path_id: 1 },
         { path_id: 1, time: 1100 },
       ];
 

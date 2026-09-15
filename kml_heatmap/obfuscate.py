@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from .helpers import parse_iso_timestamp
 from .logger import logger
+from .validation import find_kml_files as _find_kml_files
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -50,34 +51,43 @@ __all__ = [
 # An optional namespace prefix of an element name ("kml:when")
 _PREFIX = r"(?:[\w.-]+:)?"
 
-# gx:Track/TimeStamp <when> and TimeSpan <begin>/<end>
+# gx:Track/TimeStamp <when> and TimeSpan <begin>/<end>, plain or in CDATA
 TIMESTAMP_PATTERN = re.compile(
-    r"(<(" + _PREFIX + r"(?:when|begin|end))\b[^>]*>)([^<]*)(</\2\s*>)"
+    r"(<(" + _PREFIX + r"(?:when|begin|end))\b[^>]*>)"
+    r"((?:<!\[CDATA\[.*?\]\]>|[^<])*)(</\2\s*>)"
 )
+CDATA_PATTERN = re.compile(r"^\s*<!\[CDATA\[(.*?)\]\]>\s*$", re.DOTALL)
+# "2024-03-14 09:12:00" and a lowercase "z" are read by the parsers of some
+# tools, so they are read here too; the rewrite emits the canonical form
+LOOSE_TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d)")
 FRACTION_PATTERN = re.compile(r"\.\d+")
 UTC_OFFSET_PATTERN = re.compile(r"[+-]\d{2}:?\d{2}$")
 # Valid KML timestamps without a time: xsd:date and xsd:gYearMonth
 DATE_ONLY_PATTERN = re.compile(r"(\d{4})-\d{2}-\d{2}(Z|[+-]\d{2}:\d{2})?")
 YEAR_MONTH_PATTERN = re.compile(r"(\d{4})-(\d{2})(Z|[+-]\d{2}:\d{2})?")
 
-_MARKER_DATE_RE = r"(Log Start|Takeoff|Landing|Log Stop):\s*\d{2}\s+\w{3}\s+"
+# SkyDemon marker: "Takeoff: 03 Mar 2025 08:31 Z", with or without seconds
+_MARKER_DATE_RE = r"(Log Start|Takeoff|Landing|Log Stop):\s*\d{1,2}\s+\w{3}\s+"
+_MARKER_TIME_RE = r"\d{2}:\d{2}(?::\d{2})?\s+Z"
 NAME_DATE_PATTERN = re.compile(
     r"(<("
     + _PREFIX
     + r"name)\b[^>]*>)\s*"
     + _MARKER_DATE_RE
-    + r"(\d{4})\s+\d{2}:\d{2}\s+Z\s*(</\2\s*>)"
+    + r"(\d{4})\s+"
+    + _MARKER_TIME_RE
+    + r"\s*(</\2\s*>)"
 )
-CHECK_NAME_DATE_PATTERN = re.compile(_MARKER_DATE_RE + r"\d{4}\s+\d{2}:\d{2}\s+Z")
+CHECK_NAME_DATE_PATTERN = re.compile(_MARKER_DATE_RE + r"\d{4}\s+" + _MARKER_TIME_RE)
 
 # Charterware description: "Flight Jan 12 2026 03:01PM path of OE-AKI"
 DESCRIPTION_DATE_PATTERN = re.compile(
-    r"(Flight\s+)([A-Za-z]{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}):(\d{2})(AM|PM)"
+    r"(Flight\s+)([A-Za-z]{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{1,2}):(\d{2})(AM|PM)"
 )
 # Route name with date: "<name>EDDS to EDDP - 16 Aug 2026</name>"
 ROUTE_DATE_PATTERN = re.compile(
     r"(?P<head><(?P<tag>" + _PREFIX + r"name)\b[^>]*>[^<]*?\s-\s)"
-    r"(?P<day>\d{2})\s+(?P<month>[A-Za-z]{3})\s+(?P<year>\d{4})"
+    r"(?P<day>\d{1,2})\s+(?P<month>[A-Za-z]{3})\s+(?P<year>\d{4})"
     r"(?P<tail>\s*</(?P=tag)\s*>)"
 )
 # Either quote: creator="SkyDemon" or creator='SkyDemon'
@@ -90,6 +100,9 @@ CHARTERWARE_NAME_PATTERN = re.compile(
     r"_(?P<hour>[01]\d|2[0-3])(?P<minute>[0-5]\d)h_(?P<rest>.+)"
 )
 MINUTES_PER_DAY = 24 * 60
+
+# The temp file of _write_atomic: ".<name>.kml.XXXXXXXX.tmp"
+TEMP_FILE_PATTERN = re.compile(r"^\..*\.kml\.[^.]+\.tmp$", re.IGNORECASE)
 
 # A flight keeps its intervals, so after the shift its timestamps may run
 # into the following days. Timestamps and dates up to this many days after
@@ -137,6 +150,22 @@ MONTHS_LONG = (
     "November",
     "December",
 )
+
+
+def _timestamp_text(raw: str) -> str:
+    """The timestamp of a <when> element in the form the rewrite emits.
+
+    A CDATA section is unwrapped, a space between date and time becomes the
+    "T" and a lowercase "z" the "Z"; anything else is left as it is.
+    """
+    text = raw.strip()
+    cdata = CDATA_PATTERN.match(text)
+    if cdata:
+        text = cdata.group(1).strip()
+    text = LOOSE_TIMESTAMP_PATTERN.sub(r"\1T\2", text, count=1)
+    if text.endswith("z"):
+        text = text[:-1] + "Z"
+    return text
 
 
 def _parse_full_timestamp(ts_str: str) -> datetime | None:
@@ -285,17 +314,23 @@ class _Timestamps(NamedTuple):
     has_utc_offset: bool
     # Date-only timestamps that are not on January 1st
     dates_to_move: list[str]
+    # A timestamp not written the way the rewrite writes it (CDATA, a space
+    # instead of the "T"): rewritten so the parsers read it like the check
+    has_loose_text: bool
 
 
 def _scan_timestamps(content: str) -> _Timestamps:
     first_text: dict[datetime, str] = {}
     has_utc_offset = False
+    has_loose_text = False
     dates_to_move: list[str] = []
     spans = [match.span() for match in PLACEMARK_PATTERN.finditer(content)]
     span_starts = [start for start, _ in spans]
     placemarks: list[list[datetime]] = [[] for _ in spans]
     for match in TIMESTAMP_PATTERN.finditer(content):
-        text = match.group(3).strip()
+        text = _timestamp_text(match.group(3))
+        if text != match.group(3):
+            has_loose_text = True
         dt = _parse_full_timestamp(text)
         if dt is not None:
             first_text.setdefault(dt, text)
@@ -307,7 +342,9 @@ def _scan_timestamps(content: str) -> _Timestamps:
         elif _date_only_on_jan_first(text) not in (None, text):
             dates_to_move.append(text)
     groups = _timestamp_groups(first_text, placemarks)
-    return _Timestamps(first_text, groups, has_utc_offset, dates_to_move)
+    return _Timestamps(
+        first_text, groups, has_utc_offset, dates_to_move, has_loose_text
+    )
 
 
 def _has_real_creator(content: str) -> bool:
@@ -326,7 +363,7 @@ def obfuscate_kml_content(content: str) -> str | None:
     offsets = _timestamp_offsets(timestamps.groups)
 
     def shift_timestamp(match: re.Match[str]) -> str:
-        ts_str = match.group(3).strip()
+        ts_str = _timestamp_text(match.group(3))
         dt = _parse_full_timestamp(ts_str)
         if dt is not None:
             shifted = _format_timestamp(dt + offsets[dt], _extract_frac(ts_str))
@@ -364,7 +401,12 @@ def obfuscate_kml_content(content: str) -> str | None:
     # Rewriting every timestamp of an obfuscated file only reproduces it, and
     # the CLI checks all inputs on every run
     new_content = content
-    if timestamps.has_utc_offset or timestamps.dates_to_move or any(offsets.values()):
+    if (
+        timestamps.has_utc_offset
+        or timestamps.has_loose_text
+        or timestamps.dates_to_move
+        or any(offsets.values())
+    ):
         new_content = TIMESTAMP_PATTERN.sub(shift_timestamp, content)
     new_content = NAME_DATE_PATTERN.sub(marker_on_jan_first, new_content)
     new_content = DESCRIPTION_DATE_PATTERN.sub(description_on_jan_first, new_content)
@@ -585,33 +627,38 @@ def rename_charterware_files(filepaths: Iterable[Path]) -> list[Path]:
 
 
 def find_kml_files(directory: Path) -> list[Path]:
-    """List the KML files of a directory, matching the extension like the CLI.
+    """List the KML files of a directory tree, the ones the generator reads.
 
-    ``cli._collect_kml_files`` accepts ``.kml`` and ``.KML`` alike, so the
-    obfuscation pass and its check have to agree with it on the extension. A
-    case-sensitive glob would leave an uppercase file un-checked while the
-    generator happily published it. Symlinks are skipped with a warning, as
-    the generator refuses them: rewriting one would replace the link with a
-    regular file and leave the dates in its target.
-
-    A directory that cannot be listed yields no files, the way the glob this
-    replaced behaved; ``main`` reports a missing directory before it gets here.
+    The generator (``cli._collect_kml_files``) and this module share
+    ``validation.find_kml_files``, so they agree on the extension (``.kml``
+    and ``.KML`` alike) and on the subdirectories: a file in a subfolder of
+    the data directory is checked like the generator publishes it. Symlinks
+    are skipped with a warning, as the generator refuses them: rewriting one
+    would replace the link with a regular file and leave the dates in its
+    target.
     """
-    try:
-        entries = list(directory.iterdir())
-    except OSError as e:
-        logger.debug("Cannot list %s: %s", directory, e)
-        return []
-
     kml_files = []
-    for path in sorted(entries):
-        if path.suffix.lower() != ".kml":
-            continue
+    for path in _find_kml_files(directory):
         if path.is_symlink():
             logger.warning("Skipping %s: symlinks are not allowed", path)
-        elif path.is_file():
+        else:
             kml_files.append(path)
     return kml_files
+
+
+def _leftover_temp_files(directory: Path) -> list[Path]:
+    """The temp files of rewrites that were killed before the rename.
+
+    They hold the complete un-obfuscated file, with a name the KML listing
+    ignores, so the check names them instead of certifying the directory.
+    """
+    leftovers: list[Path] = []
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = sorted(d for d in dirs if not (Path(root) / d).is_symlink())
+        leftovers.extend(
+            Path(root) / name for name in sorted(files) if TEMP_FILE_PATTERN.match(name)
+        )
+    return leftovers
 
 
 def _obfuscate_listed_files(kml_files: list[Path]) -> int:
@@ -631,9 +678,12 @@ def obfuscate_kml_directory(directory: Path) -> int:
     return _obfuscate_listed_files(find_kml_files(directory))
 
 
-# Date shapes that may appear anywhere in a document written by another tool:
-# 2024-03-14 (also inside 2024-03-14T09:12:00Z), 2024/03/14, 2024.03.14,
-# 14.03.2024, 14/03/2024, "14 Mar 2024", "14-MAR-2024" and "March 14 2024".
+# Date shapes that may appear anywhere in a document written by another tool.
+# Numeric: 2024-03-14 (also inside 2024-03-14T09:12:00Z), 2024/03/14,
+# 2024.03.14, 14.03.2024, 14/03/2024, 14-03-2024, 3/14/2024, 14.03.24, the
+# compact 20240314, the year and month 2024-03, the ISO week 2024-W11 and the
+# ordinal date 2024-074. With a month name: "14 Mar 2024", "14th March 2024",
+# "14-MAR-2024", "March 14, 2024", "Mar14_2024" and "March 2024".
 # The ISO pattern leaves out the days after January 1st themselves: every
 # timestamp holds such a date, and testing each one in Python doubled the
 # time of the check. The other numeric shapes only pass as 01.01, since the
@@ -645,21 +695,63 @@ _STRAY_DATE_PATTERNS = (
     ),
     re.compile(
         r"(?<![\d.])\d{4}(?P<sep>[./])(?!01(?P=sep)01(?!\d))"
-        r"\d{2}(?P=sep)\d{2}(?![\d.])"
+        r"\d{2}(?P=sep)\d{2}(?!\d|\.\d)"
     ),
+    # Day first or month first, with a two- or four-digit year
     re.compile(
-        r"(?<![\d.])(?!01(?P<skip>[./])01(?P=skip))"
-        r"\d{2}(?P<sep>[./])\d{2}(?P=sep)\d{4}(?!\d)"
+        r"(?<![\d.])(?!0?1(?P<skip>[./-])0?1(?P=skip)\d{2}(?:\d{2})?(?!\d|\.\d))"
+        r"\d{1,2}(?P<sep>[./-])\d{1,2}(?P=sep)\d{2}(?:\d{2})?(?!\d|\.\d)"
+    ),
+    # 2024-03 (a year and month), 2024-W11 (an ISO week) and 2024-074 (an
+    # ordinal date); January, the first week and the first days pass
+    re.compile(r"(?<!\d)\d{4}-(?!01(?![\d-]))(?:0[1-9]|1[0-2])(?![\d-])"),
+    re.compile(r"(?<!\d)\d{4}-W(?!01(?!\d))(?:0[1-9]|[1-4]\d|5[0-3])(?:-[1-7])?(?!\d)"),
+    re.compile(
+        rf"(?<!\d)\d{{4}}-(?!0(?:{_DAYS_AFTER_JAN_1})(?!\d))"
+        r"(?:00[1-9]|0[1-9]\d|[12]\d\d|3[0-5]\d|36[0-6])(?![\d-])"
     ),
 )
-_STRAY_TEXT_MONTH = re.compile(
-    r"\b(\d{1,2})[\s-]+([A-Za-z]{3,9})[\s-]+(\d{4})\b|"
-    r"\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})\b"
+# 20240314: only years of this and the last century, and a real month and
+# day, so that a serial number rarely passes as a date
+_COMPACT_DATE_PATTERN = re.compile(
+    rf"(?<!\d)(?:19|20)\d{{2}}(?!01(?:{_DAYS_AFTER_JAN_1})(?!\d))"
+    r"(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?!\d)"
 )
+# Unix time (seconds or milliseconds) in a data value: "<value>1710406320</value>"
+_EPOCH_VALUE_PATTERN = re.compile(
+    r"<("
+    + _PREFIX
+    + r"(?:value|SimpleData))\b[^>]*>\s*(\d{10}|\d{13})(?:\.\d+)?\s*</\1\s*>"
+)
+_EPOCH_RANGE = (
+    datetime(2000, 1, 1, tzinfo=UTC).timestamp(),
+    datetime(2100, 1, 1, tzinfo=UTC).timestamp(),
+)
+_MONTH_RE = r"[A-Za-z]{3,9}"
+_DAY_RE = r"\d{1,2}(?:st|nd|rd|th)?"
+_SEP_RE = r"[\s_.,-]"
+_STRAY_TEXT_MONTH = re.compile(
+    rf"(?<![A-Za-z\d])(?P<day1>{_DAY_RE}){_SEP_RE}*(?P<month1>{_MONTH_RE})"
+    rf"{_SEP_RE}*(?P<year1>\d{{4}})(?!\d)|"
+    rf"(?<![A-Za-z])(?P<month2>{_MONTH_RE}){_SEP_RE}*(?P<day2>{_DAY_RE})"
+    rf"{_SEP_RE}*(?P<year2>\d{{4}})(?!\d)|"
+    rf"(?<![A-Za-z])(?P<month3>{_MONTH_RE}){_SEP_RE}+(?P<year3>\d{{4}})(?!\d)"
+)
+_MONTH_NUMBERS = {name.lower(): i + 1 for i, name in enumerate(MONTHS_LONG)}
+_MONTH_NUMBERS.update({name.lower(): i + 1 for i, name in enumerate(MONTHS_SHORT)})
 
 
 def _near_jan_first(month: int, day: int) -> bool:
     return month == 1 and 1 <= day <= 1 + MAX_DAYS_AFTER_JAN_1
+
+
+def _epoch_near_jan_first(value: str) -> bool:
+    seconds = int(value) / (1000 if len(value) == 13 else 1)
+    if not _EPOCH_RANGE[0] <= seconds < _EPOCH_RANGE[1]:
+        # Not a time of this era: some other number
+        return True
+    dt = datetime.fromtimestamp(seconds, tz=UTC)
+    return _near_jan_first(dt.month, dt.day)
 
 
 def _find_stray_dates(content: str) -> list[str]:
@@ -669,19 +761,25 @@ def _find_stray_dates(content: str) -> list[str]:
         content = content + "\n" + html.unescape(content)
     found = [
         match.group(0)
-        for pattern in _STRAY_DATE_PATTERNS
+        for pattern in (*_STRAY_DATE_PATTERNS, _COMPACT_DATE_PATTERN)
         for match in pattern.finditer(content)
     ]
 
-    months = {name.lower(): i + 1 for i, name in enumerate(MONTHS_LONG)}
-    months.update({name.lower(): i + 1 for i, name in enumerate(MONTHS_SHORT)})
+    found.extend(
+        match.group(2)
+        for match in _EPOCH_VALUE_PATTERN.finditer(content)
+        if not _epoch_near_jan_first(match.group(2))
+    )
+
     for match in _STRAY_TEXT_MONTH.finditer(content):
-        if match.group(1) is not None:
-            day, month_name = match.group(1), match.group(2)
-        else:
-            day, month_name = match.group(5), match.group(4)
-        month = months.get(month_name.lower())
-        if month is not None and not _near_jan_first(month, int(day)):
+        month_name = match["month1"] or match["month2"] or match["month3"]
+        month = _MONTH_NUMBERS.get(month_name.lower())
+        if month is None:
+            continue
+        day_text = match["day1"] or match["day2"]
+        # A month with a year but no day gives the month away as well
+        day = int(re.sub(r"[a-z]+$", "", day_text)) if day_text else 1
+        if not _near_jan_first(month, day):
             found.append(match.group(0))
 
     return found
@@ -763,22 +861,35 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
     return list(dict.fromkeys(violations))
 
 
-def _check_listed_files(kml_files: list[Path]) -> dict[str, list[str]]:
+def _relative_name(path: Path, directory: Path) -> str:
+    """The name a violation is reported under: the path below ``directory``."""
+    return path.relative_to(directory).as_posix()
+
+
+def _check_listed_files(kml_files: list[Path], directory: Path) -> dict[str, list[str]]:
     results: dict[str, list[str]] = {}
     for kml_file in kml_files:
         violations = check_kml_obfuscated(kml_file)
         if violations:
-            results[kml_file.name] = violations
+            results[_relative_name(kml_file, directory)] = violations
+    for leftover in _leftover_temp_files(directory):
+        results[_relative_name(leftover, directory)] = [
+            (
+                "Leftover temporary file of an interrupted rewrite, holds the "
+                "original dates: remove it"
+            )
+        ]
     return results
 
 
 def check_directory_obfuscated(directory: Path) -> dict[str, list[str]]:
-    """Check all KML files in a directory for obfuscation violations.
+    """Check all KML files in a directory tree for obfuscation violations.
 
-    Returns a dict mapping filenames to their violations (only files
-    with violations are included).
+    Returns a dict mapping file names (relative to ``directory``) to their
+    violations; only files with violations are included. A temp file left by
+    an interrupted rewrite is a violation as well.
     """
-    return _check_listed_files(find_kml_files(directory))
+    return _check_listed_files(find_kml_files(directory), directory)
 
 
 def main() -> None:
@@ -811,7 +922,7 @@ def main() -> None:
         # (read-only, or a date in a place the tool does not touch) fails below
         kml_files = find_kml_files(args.directory)
 
-    violations = _check_listed_files(kml_files)
+    violations = _check_listed_files(kml_files, args.directory)
     if violations:
         print("Obfuscation violations found:")
         for filename, issues in violations.items():

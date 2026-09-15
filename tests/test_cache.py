@@ -70,14 +70,24 @@ class TestAtomicWrite:
         atomic_write(path, lambda tmp: tmp.write("<html/>"))
         assert oct(path.stat().st_mode & 0o777) == "0o644"
 
-    def test_honors_a_strict_umask(self, tmp_path):
+    def test_umask_is_read_once_at_import(self, tmp_path):
+        """Reading the umask means setting it, which must not happen while
+        other threads create files; the mode is taken at import."""
         previous = os.umask(0o077)
         try:
+            path = tmp_path / "as-imported.txt"
+            atomic_text_write(path, "x")
+            assert path.stat().st_mode & 0o777 == 0o666 & ~previous
+
+            reloaded = importlib.reload(cache_module)
+            assert reloaded.REGULAR_FILE_MODE == 0o600
             path = tmp_path / "private.txt"
             atomic_text_write(path, "x")
             assert oct(path.stat().st_mode & 0o777) == "0o600"
         finally:
             os.umask(previous)
+            importlib.reload(cache_module)
+        assert 0o666 & ~previous == cache_module.REGULAR_FILE_MODE
 
     def test_replaces_existing_file(self, tmp_path):
         path = tmp_path / "file.txt"

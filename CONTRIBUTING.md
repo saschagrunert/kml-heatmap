@@ -6,10 +6,8 @@ setup, the checks that run in CI and the conventions used in this repository.
 ## Setup
 
 - Python 3.14 (`.python-version`) and Node.js 26 (`.nvmrc`). CI and the
-  container image use Node.js 26; Node.js 24.15 or a later 24.x release, or
-  Node.js 26 or newer, works for local development (`engines` in
-  `package.json`). vitest does not support Node.js 25, and jsdom needs at
-  least 24.15.
+  container image use Node.js 26, and that is the only release the tests
+  run on, so `engines` in `package.json` asks for 26 or newer.
 - podman or docker for `make build` and `make serve` (optional)
 
 ```bash
@@ -36,7 +34,7 @@ from your virtual environment and `node_modules`, the same way CI does, so no
 container is involved:
 
 ```bash
-make lint            # lock files, ruff, mypy, bandit, tsc (frontend and tests), eslint
+make lint            # lock and hook pins, ruff (check and format), mypy, bandit, tsc (frontend and tests), eslint, prettier, typos
 make format          # ruff format, prettier
 make test            # vitest and pytest with coverage; pytest flags are in README.md
 npm run test:e2e     # Playwright: desktop, mobile and WebKit (see README.md)

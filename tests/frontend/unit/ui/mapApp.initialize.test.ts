@@ -206,6 +206,25 @@ describe("MapApp.initialize", () => {
     });
   });
 
+  describe("without a data index", () => {
+    it("falls back to all years, says so and keeps the dropdown in step", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({
+        selectedYear: "2024",
+      });
+
+      await initializeApp(app, defaultAirports, null);
+
+      // The dropdown had only "All years" to show while the map loaded 2024
+      expect(app.selectedYear).toBe("all");
+      expect(yearSelect().value).toBe("all");
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "The list of years is unavailable, showing all years",
+        "error",
+      );
+      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("all");
+    });
+  });
+
   describe("year selection", () => {
     it("populates the year dropdown and defaults to the latest year", async () => {
       await initializeApp(app);
@@ -338,6 +357,28 @@ describe("MapApp.initialize", () => {
       expect(
         mockLayerManagerInstance.updateAirspeedLegend,
       ).not.toHaveBeenCalled();
+    });
+
+    it("releases a restored speed layer without timing data (regression)", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({
+        airspeedVisible: true,
+      });
+
+      await initializeApp(app, defaultAirports, {
+        ...defaultMetadata,
+        max_groundspeed_knots: 0,
+      });
+
+      // The button is disabled, so a pressed state could never have been
+      // released, and the empty layer showed a legend with placeholders
+      expect(app.airspeedVisible).toBe(false);
+      expect(app.map!.addLayer).not.toHaveBeenCalledWith(app.airspeedLayer);
+      const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+      expect(document.getElementById("airspeed-legend")!.style.display).toBe(
+        "none",
+      );
     });
 
     it("keeps the airspeed button lit when airspeed is visible", async () => {

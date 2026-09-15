@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type * as L from "leaflet";
 import { invalidateMapAfterTransition } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+
+/** A map stub that only knows the one method the helper calls */
+function mapStub(): L.Map & { invalidateSize: ReturnType<typeof vi.fn> } {
+  return { invalidateSize: vi.fn() } as unknown as L.Map & {
+    invalidateSize: ReturnType<typeof vi.fn>;
+  };
+}
 
 describe("mapHelpers", () => {
   beforeEach(() => {
@@ -13,9 +21,7 @@ describe("mapHelpers", () => {
 
   describe("invalidateMapAfterTransition", () => {
     it("invalidates after fallback timeout when no element is given", () => {
-      const mockMap = {
-        invalidateSize: vi.fn(),
-      } as any;
+      const mockMap = mapStub();
 
       invalidateMapAfterTransition(mockMap);
 
@@ -27,9 +33,7 @@ describe("mapHelpers", () => {
     });
 
     it("invalidates on transitionend when element is given", () => {
-      const mockMap = {
-        invalidateSize: vi.fn(),
-      } as any;
+      const mockMap = mapStub();
       const el = document.createElement("div");
 
       invalidateMapAfterTransition(mockMap, el);
@@ -44,9 +48,7 @@ describe("mapHelpers", () => {
     });
 
     it("falls back to timeout when transitionend does not fire", () => {
-      const mockMap = {
-        invalidateSize: vi.fn(),
-      } as any;
+      const mockMap = mapStub();
       const el = document.createElement("div");
 
       invalidateMapAfterTransition(mockMap, el);
@@ -57,9 +59,7 @@ describe("mapHelpers", () => {
     });
 
     it("does not double-call when both transitionend and timeout fire", () => {
-      const mockMap = {
-        invalidateSize: vi.fn(),
-      } as any;
+      const mockMap = mapStub();
       const el = document.createElement("div");
 
       invalidateMapAfterTransition(mockMap, el);
@@ -81,9 +81,7 @@ describe("mapHelpers", () => {
     });
 
     it("ignores transitionend from child elements", () => {
-      const mockMap = {
-        invalidateSize: vi.fn(),
-      } as any;
+      const mockMap = mapStub();
       const el = document.createElement("div");
       const child = document.createElement("span");
       el.append(child);

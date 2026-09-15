@@ -10,7 +10,6 @@ export interface HeatmapOptions {
   radius?: number;
   blur?: number;
   minOpacity?: number;
-  maxOpacity?: number;
   max?: number;
   gradient?: Record<string, string>;
 }

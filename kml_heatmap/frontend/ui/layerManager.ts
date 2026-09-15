@@ -59,7 +59,15 @@ interface PolylineEntry {
   segments: PathSegment[];
 }
 
+/**
+ * Whether the pointer cannot hover, so tooltips need a tap instead. Touch
+ * support alone does not say: a laptop with a touchscreen is driven by its
+ * mouse most of the time, and lost the hover tooltips for having one.
+ */
 export function isTouchDevice(): boolean {
+  if (typeof window.matchMedia === "function") {
+    return window.matchMedia("(hover: none)").matches;
+  }
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
 }
 

@@ -1,9 +1,11 @@
 /**
- * Content hash of the frontend sources.
+ * Content hash of the frontend sources and the build configuration.
  *
  * build.js stamps it into the bundle banner, and the e2e global setup reads
  * the banner back to refuse a site that was built from other sources. Both
- * import it from here so the two can never hash differently.
+ * import it from here so the two can never hash differently. The build
+ * script, the compiler options and the esbuild version shape the bundle as
+ * much as the sources do, so they are part of the hash.
  */
 
 import { createHash } from "node:crypto";
@@ -13,6 +15,21 @@ import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FRONTEND_DIR = join(REPO_ROOT, "kml_heatmap/frontend");
+/** Files outside the sources that change the bundle */
+const BUILD_FILES = ["build.js", "tsconfig.json"].map((name) =>
+  join(REPO_ROOT, name),
+);
+
+/**
+ * The esbuild version package-lock.json pins
+ * @returns {string}
+ */
+function esbuildVersion() {
+  const lock = JSON.parse(
+    readFileSync(join(REPO_ROOT, "package-lock.json"), "utf8"),
+  );
+  return String(lock.packages["node_modules/esbuild"].version);
+}
 
 /** First line of every bundle; the capture group is the source hash */
 export const BANNER_PATTERN = /^\/\* kml-heatmap build ([0-9a-f]{12}) \*\//;
@@ -38,17 +55,20 @@ function listFiles(dir) {
 }
 
 /**
- * Hash of all frontend sources (deterministic, independent of git)
+ * Hash of all frontend sources and the build configuration (deterministic,
+ * independent of git)
  * @returns {string}
  */
 export function computeSourceHash() {
   const hash = createHash("sha1");
-  for (const file of listFiles(FRONTEND_DIR)) {
+  for (const file of [...listFiles(FRONTEND_DIR), ...BUILD_FILES]) {
     hash.update(relative(REPO_ROOT, file));
     hash.update("\0");
     hash.update(readFileSync(file));
     hash.update("\0");
   }
+  hash.update(`esbuild ${esbuildVersion()}`);
+  hash.update("\0");
   return hash.digest("hex").slice(0, 12);
 }
 

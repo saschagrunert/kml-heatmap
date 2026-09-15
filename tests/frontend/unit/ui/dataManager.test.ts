@@ -297,7 +297,6 @@ describe("DataManager", () => {
           radius: 10,
           blur: 15,
           minOpacity: 0.25,
-          maxOpacity: 0.6,
         }),
       );
       expect(mockHeatLayer._canvas!.style.pointerEvents).toBe("none");
@@ -561,6 +560,79 @@ describe("DataManager", () => {
 
       expect(mockApp.currentData).toBe(newer);
       expect(heatLayerSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("heat layer off the map", () => {
+    it("keeps the points instead of feeding a layer that is off the map (regression)", async () => {
+      // leaflet.heat redraws through the map it was added to, which Leaflet
+      // clears on removal, so setLatLngs threw once the layer had been on
+      // the map and was taken off (heatmap toggled off, or hidden for a
+      // replay); the colour layers were then never redrawn for a new filter
+      const offMap = {
+        addTo: vi.fn(),
+        remove: vi.fn(),
+        setLatLngs: vi.fn(() => {
+          throw new TypeError(
+            "Cannot read properties of null (reading '_animating')",
+          );
+        }),
+      };
+      mockApp.heatmapLayer = offMap as unknown as HeatmapLayer;
+      mockApp.heatmapVisible = false;
+      mockApp.altitudeVisible = true;
+      loaderMocks.loadData.mockResolvedValue(baseData());
+
+      await expect(dataManager.updateLayers()).resolves.toBeUndefined();
+
+      expect(offMap.setLatLngs).not.toHaveBeenCalled();
+      expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalledTimes(1);
+    });
+
+    it("feeds the layer the points it missed when it is shown again", async () => {
+      const layer = {
+        addTo: vi.fn(),
+        remove: vi.fn(),
+        setLatLngs: vi.fn(),
+        _canvas: document.createElement("canvas"),
+      };
+      mockApp.heatmapLayer = layer as unknown as HeatmapLayer;
+      mockApp.heatmapVisible = false;
+      const data = baseData();
+      loaderMocks.loadData.mockResolvedValue(data);
+      await dataManager.updateLayers();
+      expect(layer.setLatLngs).not.toHaveBeenCalled();
+
+      mockApp.heatmapVisible = true;
+      dataManager.showHeatmap();
+
+      expect(layer.addTo).toHaveBeenCalledWith(mockApp.map);
+      expect(layer.setLatLngs).toHaveBeenCalledWith(data.coordinates);
+      expect(layer._canvas.style.pointerEvents).toBe("none");
+    });
+
+    it("feeds a layer that is on the map right away", async () => {
+      mockApp.heatmapLayer = mockHeatLayer as HeatmapLayer;
+      mockApp.map!.addLayer(mockHeatLayer);
+      const data = baseData();
+      loaderMocks.loadData.mockResolvedValue(data);
+
+      await dataManager.updateLayers();
+      dataManager.showHeatmap();
+
+      expect(mockHeatLayer.setLatLngs).toHaveBeenCalledTimes(1);
+      expect(mockHeatLayer.setLatLngs).toHaveBeenCalledWith(data.coordinates);
+      expect(mockHeatLayer.addTo).not.toHaveBeenCalled();
+    });
+
+    it("does nothing without a layer or a map", () => {
+      mockApp.heatmapLayer = null;
+      expect(() => dataManager.showHeatmap()).not.toThrow();
+
+      mockApp.heatmapLayer = mockHeatLayer as HeatmapLayer;
+      mockApp.map = null;
+      dataManager.showHeatmap();
+      expect(mockHeatLayer.addTo).not.toHaveBeenCalled();
     });
   });
 

@@ -1,14 +1,19 @@
 """Tests for airports module."""
 
+from unittest.mock import patch
+
 import pytest
 
+import kml_heatmap.airports as airports_module
 from kml_heatmap.airports import (
     AirportDeduplicator,
+    airport_elevation,
     deduplicate_airports,
     extract_airport_name,
     is_mid_flight_start,
     is_point_marker,
     is_valid_landing,
+    reference_altitude,
     route_airports,
     sample_path_altitudes,
 )
@@ -68,6 +73,42 @@ class TestIsMidFlightStart:
         assert is_mid_flight_start(_flat(2000, 5), 2000.0) is False
         assert is_mid_flight_start(_flat(2000), None) is False
 
+    def test_height_is_measured_above_the_reference(self):
+        """A taxi at Munich (453 m) is flat and above 400 m, but on the ground."""
+        assert is_mid_flight_start(_flat(453), 453.0) is True
+        assert is_mid_flight_start(_flat(453), 453.0, 453.0) is False
+        assert is_mid_flight_start(_flat(900), 900.0, 453.0) is True
+
+
+class TestReferenceAltitude:
+    def test_airport_elevation_wins(self):
+        assert reference_altitude(_profile(*range(100, 4100, 40)), 1707.0) == 1707.0
+
+    def test_lowest_altitude_of_a_climbing_path(self):
+        assert reference_altitude(_profile(*range(1700, 4100, 40)), None) == 1700.0
+
+    def test_flat_path_has_no_ground_in_it(self):
+        """A cruise recording keeps sea level, so its flat start stays mid-flight."""
+        assert reference_altitude(_flat(2000), None) == 0.0
+        assert reference_altitude(_profile(*range(2000, 2090, 10)), None) == 0.0
+
+    def test_empty_path(self):
+        assert reference_altitude([], None) == 0.0
+
+
+class TestAirportElevation:
+    def test_from_the_database(self):
+        assert airport_elevation("EDDM Munich - EDDK Cologne", False) == pytest.approx(
+            1487 / 3.28084
+        )
+        assert airport_elevation("EDDM Munich - EDDK Cologne", True) == pytest.approx(
+            302 / 3.28084
+        )
+
+    @pytest.mark.parametrize("name", [None, "", "Some Field", "XXXX Unknown"])
+    def test_unknown(self, name):
+        assert airport_elevation(name, False) is None
+
 
 class TestIsValidLanding:
     def test_stable_low_end_is_a_landing(self):
@@ -85,6 +126,14 @@ class TestIsValidLanding:
         assert is_valid_landing(_flat(100, 3), 100.0) is True
         assert is_valid_landing(_flat(5000, 3), 5000.0) is False
         assert is_valid_landing(_flat(100, 3), None) is False
+
+    def test_height_is_measured_above_the_reference(self):
+        """A descent onto Samedan (1707 m) ends far above 600 m MSL."""
+        descent = _profile(*range(3500, 1700, -30))
+        assert is_valid_landing(descent, descent[-1].alt) is False
+        assert is_valid_landing(descent, descent[-1].alt, 1707.0) is True
+        assert is_valid_landing(_flat(1707, 3), 1707.0) is False
+        assert is_valid_landing(_flat(1707, 3), 1707.0, 1707.0) is True
 
 
 class TestExtractAirportName:
@@ -305,26 +354,99 @@ class TestDeduplicateAirports:
 
         assert result == []
 
-    def test_short_path_skipped_in_endpoint_processing(self):
+    def test_single_point_path_registers_nothing(self):
+        """A waypoint or a stationary recording is no flight; its position
+        would give away where it was although the export holds no path."""
         metadata = [
             {
                 "start_point": [50.0, 8.5, 100],
-                "airport_name": "EDDF Frankfurt - EDDK Cologne",
+                "airport_name": "Home Strip - EDDK Cologne",
             }
         ]
         path_groups = [_path((50.0, 8.5, 100))]
 
-        result = deduplicate_airports(metadata, path_groups)
-
-        # Only the start point entry, no arrival from the endpoint pass
-        assert len(result) == 1
+        assert deduplicate_airports(metadata, path_groups) == []
 
     def test_metadata_without_matching_path(self):
         metadata = [{"start_point": [50.0, 8.5], "airport_name": "EDDF"}]
 
-        result = deduplicate_airports(metadata, [])
+        assert deduplicate_airports(metadata, []) == []
 
-        assert len(result) == 1
+    def test_departure_from_a_high_field(self):
+        """Munich lies at 453 m: the taxi-out is flat and above 400 m MSL."""
+        taxi = [453.0] * 30
+        climb = [453.0 + i * 100.0 for i in range(1, 31)]
+        path = _profile(*taxi, *climb)
+        metadata = [
+            {
+                "start_point": [path[0].lat, path[0].lon, 453.0],
+                "airport_name": "EDDM Munich - EDDK Cologne",
+            }
+        ]
+
+        result = deduplicate_airports(metadata, [path])
+
+        assert [(a["name"], a["is_at_path_end"]) for a in result] == [
+            ("EDDM Munich", False)
+        ]
+
+    def test_departure_from_an_alpine_field(self):
+        """Samedan lies at 1707 m; the fixture database has no elevation for
+        it, so the lookup is stubbed."""
+        taxi = [1707.0] * 30
+        climb = [1707.0 + i * 100.0 for i in range(1, 31)]
+        path = _profile(*taxi, *climb)
+        metadata = [
+            {
+                "start_point": [path[0].lat, path[0].lon, 1707.0],
+                "airport_name": "LSZS Samedan - EDDM Munich",
+            }
+        ]
+
+        with patch.object(
+            airports_module, "lookup_airport_elevation", return_value=1707.0
+        ):
+            result = deduplicate_airports(metadata, [path])
+
+        assert [(a["name"], a["is_at_path_end"]) for a in result] == [
+            ("LSZS Samedan", False)
+        ]
+
+    def test_departure_from_a_high_field_without_the_database(self):
+        """Without a known elevation the lowest altitude of the path is the ground."""
+        taxi = [1707.0] * 30
+        climb = [1707.0 + i * 100.0 for i in range(1, 31)]
+        path = _profile(*taxi, *climb)
+        metadata = [
+            {
+                "start_point": [path[0].lat, path[0].lon, 1707.0],
+                "airport_name": "Alpine Strip - Valley Field",
+            }
+        ]
+
+        result = deduplicate_airports(metadata, [path])
+
+        assert [a["name"] for a in result] == ["Alpine Strip"]
+
+    def test_landing_at_an_alpine_field(self):
+        descent = [3500.0 - i * 60.0 for i in range(30)]
+        path = _profile(*descent, 1707.0, 1707.0)
+        metadata = [
+            {
+                "start_point": [path[0].lat, path[0].lon, 3500.0],
+                "airport_name": "EDDM Munich - LSZS Samedan",
+            }
+        ]
+
+        with patch.object(
+            airports_module, "lookup_airport_elevation", return_value=1707.0
+        ):
+            result = deduplicate_airports(metadata, [path])
+
+        assert [(a["name"], a["is_at_path_end"]) for a in result] == [
+            ("EDDM Munich", False),
+            ("LSZS Samedan", True),
+        ]
 
     def test_route_airports_keep_their_own_names(self):
         """A " - " inside an airport name must not merge both names into one."""

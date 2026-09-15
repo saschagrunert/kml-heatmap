@@ -3,6 +3,8 @@
 import errno
 import os
 import tempfile
+import threading
+import time
 from concurrent.futures import Future
 from unittest.mock import patch
 
@@ -539,6 +541,40 @@ class _RunningChunksPool:
         self.running = []
 
 
+class _CountingPool:
+    """A process pool stand-in that finishes each chunk on a thread shortly
+    after it was submitted and records how many were in flight at once."""
+
+    def __init__(self, *args, **kwargs):
+        self.submitted = 0
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.lock = threading.Lock()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def submit(self, fn, *args):
+        future = Future()
+        with self.lock:
+            self.submitted += 1
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+
+        def run():
+            time.sleep(0.005)
+            result = fn(*args)
+            with self.lock:
+                self.in_flight -= 1
+            future.set_result(result)
+
+        threading.Thread(target=run).start()
+        return future
+
+
 class TestExportChunks:
     def test_single_chunk_runs_without_a_pool(self, tmp_path, parse_js):
         paths = [_two_point_path(0), _two_point_path(1)]
@@ -647,6 +683,33 @@ class TestExportChunks:
 
     def test_no_plans(self, tmp_path):
         assert _export_chunks([], [], [], str(tmp_path), 4) == []
+
+    def test_chunks_are_handed_to_the_pool_a_few_at_a_time(
+        self, tmp_path, monkeypatch, parse_js
+    ):
+        """Submitting every chunk at once would pickle the whole dataset into
+        the executor's queue while the main process still holds it."""
+        years = list(range(2020, 2028))
+        paths = [_two_point_path(i) for i in range(len(years))]
+        metadata = [{"year": year} for year in years]
+        monkeypatch.setattr(exporter_module, "MIN_PATHS_PER_CHUNK", 1)
+        plans = _plan_chunks(
+            {year: [index] for index, year in enumerate(years)},
+            {index: index for index in range(len(years))},
+            max_workers=2,
+        )
+        assert len(plans) == len(years)
+        pool = _CountingPool()
+
+        with patch("kml_heatmap.data_exporter.ProcessPoolExecutor", return_value=pool):
+            results = _export_chunks(plans, paths, metadata, str(tmp_path), 2)
+
+        assert [r.year for r in results] == years
+        assert pool.submitted == len(years)
+        assert pool.max_in_flight <= 2 * exporter_module.MAX_QUEUED_CHUNKS_PER_WORKER
+        assert _leftover_parts(tmp_path) == []
+        for year in years:
+            assert len(parse_js(tmp_path / f"{year}/data.js")["path_info"]) == 1
 
 
 def _stage_site(site, years=(2025,), version="new"):
@@ -926,13 +989,28 @@ class TestSiteOutput:
         with pytest.raises(ValueError, match="dangerous"):
             SiteOutput(tmp_path, dangerous)
 
+    @pytest.mark.parametrize("dangerous", ["/", str(os.path.expanduser("~"))])
+    def test_dangerous_output_dir_rejected(self, dangerous):
+        with pytest.raises(ValueError, match="dangerous"):
+            SiteOutput(dangerous, os.path.join(dangerous, "data"))
+
     def test_protected_directories_without_home(self):
         with patch.object(
             exporter_module.Path, "home", side_effect=RuntimeError("no home")
         ):
-            assert exporter_module._protected_directories() == (
+            assert exporter_module.protected_directories() == (
                 exporter_module.Path("/"),
             )
+
+    def test_runs_unguarded_without_fcntl(self, tmp_path, monkeypatch):
+        """Windows has no fcntl; the export works without the lock."""
+        monkeypatch.setattr(exporter_module, "fcntl", None)
+        out = tmp_path / "out"
+        _publish_site(out)
+        assert _tree(out)["index.html"] == "old page"
+        # A second run is not detected, but nothing breaks either
+        with SiteOutput(out, out / "data"), SiteOutput(out, out / "data"):
+            pass
 
 
 class TestExportAllData:
@@ -1049,7 +1127,8 @@ class TestExportAllData:
         for cpu_count in (1, 4):
             output_dir = tmp_path / str(cpu_count)
             with patch(
-                "kml_heatmap.data_exporter.os.cpu_count", return_value=cpu_count
+                "kml_heatmap.data_exporter.os.process_cpu_count",
+                return_value=cpu_count,
             ):
                 export_all_data(
                     paths,

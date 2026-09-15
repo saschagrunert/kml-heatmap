@@ -409,30 +409,6 @@ describe("WrappedManager dialog", () => {
       expect(mockApp.map!.invalidateSize).toHaveBeenCalled();
     });
 
-    it("does nothing when the event target is not the backdrop", () => {
-      openWrapped();
-      const innerElement = document.createElement("div");
-      innerElement.id = "some-inner-element";
-
-      wrappedManager.closeWrapped({
-        target: innerElement,
-      } as unknown as MouseEvent);
-
-      expect(el("wrapped-modal").style.display).toBe("flex");
-      expect(el("wrapped-map-container").contains(el("map"))).toBe(true);
-      expect(el("stats-btn").style.display).toBe("none");
-    });
-
-    it("closes when the event target is the backdrop", () => {
-      openWrapped();
-
-      wrappedManager.closeWrapped({
-        target: el("wrapped-modal"),
-      } as unknown as MouseEvent);
-
-      expect(el("wrapped-modal").style.display).toBe("none");
-    });
-
     it("leaves the dialog open when the map container is missing", () => {
       openWrapped();
       el("map").remove();
@@ -483,6 +459,28 @@ describe("WrappedManager dialog", () => {
       // Only the reopening's own timers may run; the close timer would have
       // remeasured a map that is already inside the dialog again
       expect(mockApp.map!.invalidateSize).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("userMapView", () => {
+    it("offers the user's view while the map is fitted, until it is put back", () => {
+      const center = { lat: 48.1, lng: 11.6 };
+      mockApp.map!.getCenter.mockReturnValue(center);
+      mockApp.map!.getZoom.mockReturnValue(13);
+      expect(wrappedManager.userMapView()).toBeNull();
+
+      openWrapped();
+      // The map shows the fitted overview now
+      mockApp.map!.getCenter.mockReturnValue({ lat: 51, lng: 9 });
+      mockApp.map!.getZoom.mockReturnValue(7.75);
+      expect(wrappedManager.userMapView()).toEqual({ center, zoom: 13 });
+
+      wrappedManager.closeWrapped();
+      // Still the user's until the close has put it back, so a save that
+      // runs in between (the dialog state changed) keeps it
+      expect(wrappedManager.userMapView()).toEqual({ center, zoom: 13 });
+      vi.advanceTimersByTime(100);
+      expect(wrappedManager.userMapView()).toBeNull();
     });
   });
 

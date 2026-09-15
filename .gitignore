@@ -1,5 +1,7 @@
 *.kml
 !data/*.kml
+# Temp files of an interrupted obfuscation run hold the original dates
+data/.*.tmp
 /index.html
 AGENTS.md
 .playwright-mcp

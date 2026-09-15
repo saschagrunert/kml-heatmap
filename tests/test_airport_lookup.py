@@ -14,6 +14,7 @@ from kml_heatmap.airport_lookup import (
     MAX_DOWNLOAD_BYTES,
     REQUIRE_DATABASE_ENV,
     AirportNames,
+    AirportRecord,
     _download_airport_database,
     _is_cache_valid,
     _is_valid_csv_file,
@@ -25,10 +26,12 @@ from kml_heatmap.airport_lookup import (
     load_airport_database,
     lookup_airport_coordinates,
     lookup_airport_country,
+    lookup_airport_elevation,
     split_route_name,
     standardize_airport_name,
     standardize_airport_names,
 )
+from kml_heatmap.cache import REGULAR_FILE_MODE
 from kml_heatmap.exceptions import AirportDatabaseError
 
 VALID_CSV = (
@@ -94,8 +97,25 @@ class TestLookupAirportCountry:
         assert lookup_airport_country(code) is None
 
     def test_empty_country_is_none(self):
-        lookup_module._airport_cache = {"TEST": (50.0, 8.5, "Test Airport", "")}
+        lookup_module._airport_cache = {
+            "TEST": AirportRecord(50.0, 8.5, "Test Airport", "")
+        }
         assert lookup_airport_country("TEST") is None
+
+
+class TestLookupAirportElevation:
+    def test_from_fixture(self):
+        # EDAQ Halle-Oppin: 348 ft
+        assert lookup_airport_elevation("edaq") == pytest.approx(106.07, abs=0.01)
+
+    def test_unknown_or_missing(self, tmp_path):
+        assert lookup_airport_elevation("XXXX") is None
+        assert lookup_airport_elevation("EDD") is None
+        assert lookup_airport_elevation(None) is None
+        # A database without the column
+        path = tmp_path / "airports.csv"
+        path.write_bytes(VALID_CSV)
+        assert _read_airport_csv(path)["EDDF"].elevation_m is None
 
 
 class TestIsValidCsvFile:
@@ -161,6 +181,8 @@ class TestDownloadAirportDatabase:
 
         assert cache_file.read_bytes() == VALID_CSV
         assert list(tmp_path.glob("*.tmp")) == []
+        # Readable like any other cache file, not the 0600 of the temp file
+        assert cache_file.stat().st_mode & 0o777 == REGULAR_FILE_MODE
 
     def test_empty_response_rejected(self, tmp_path):
         cache_file = tmp_path / "airports.csv"

@@ -4,7 +4,7 @@
  */
 
 import * as L from "leaflet";
-import type { PathInfo } from "../types";
+import type { Airport, PathInfo } from "../types";
 import { filterPaths } from "../calculations/statistics";
 
 /**
@@ -40,11 +40,22 @@ export function createAirportIcon(
 }
 
 let _countryByAirport: Map<string, string> | null = null;
+/** The airport list the map was built from */
+let _countrySource: readonly Airport[] | undefined;
 
+/**
+ * Country per airport name, from the airport list the page holds. The map
+ * follows the list: airports.js may arrive after the first lookup (the
+ * loader fetches it on demand when the template did not), and a list loaded
+ * later replaces an earlier one.
+ */
 function getCountryByAirportMap(): Map<string, string> {
-  if (_countryByAirport) return _countryByAirport;
-  _countryByAirport = new Map();
   const kmlAirports = window.KML_AIRPORTS?.airports;
+  if (_countryByAirport && kmlAirports === _countrySource) {
+    return _countryByAirport;
+  }
+  _countryByAirport = new Map();
+  _countrySource = kmlAirports;
   if (kmlAirports) {
     for (const a of kmlAirports) {
       if (a.country) _countryByAirport.set(a.name, a.country);

@@ -57,7 +57,9 @@ def _parse_kml_tree(kml_file: str) -> etree._Element:
         return root
 
     except etree.ParseError as e:
-        raise KMLParseError(f"XML parsing error: {e}", file_path=kml_file) from e
+        raise KMLParseError(
+            f"XML parsing error: {e}", file_path=kml_file, line_number=e.lineno
+        ) from e
     except OSError as e:
         raise KMLParseError(f"File I/O error: {e}", file_path=kml_file) from e
 
@@ -89,6 +91,14 @@ def _extract_kml_elements(
                 elem.tag = elem.tag.split("}", 1)[1]
         coord_elements = root.findall(".//coordinates")
         tracks = root.findall(".//Track")
+    else:
+        # One kind may still be in another (or no) namespace, such as an
+        # unprefixed <Track> next to a namespaced <Point>. The wildcard
+        # iteration runs in C and the tree is left as it is.
+        if not coord_elements:
+            coord_elements = list(root.iter("{*}coordinates"))
+        if not tracks:
+            tracks = list(root.iter("{*}Track"))
 
     logger.debug("Found %d coordinate elements", len(coord_elements))
     for i, elem in enumerate(coord_elements[:2]):
@@ -232,11 +242,13 @@ def parse_kml_coordinates(
     _log_parse_result(kml_file, coordinates, path_groups, cached=False)
 
     if not coordinates:
-        logger.warning("No valid coordinates found!")
-        logger.warning("This could mean:")
-        logger.warning("  - The KML file uses a different structure")
-        logger.warning("  - The coordinates are in an unexpected format")
-        logger.warning("  - Try running with --debug flag for more information")
+        # One line with the file name: the files of a run are parsed in
+        # parallel, so the lines of several warnings would interleave
+        logger.warning(
+            "%s: No valid coordinates found (unexpected structure or coordinate "
+            "format; run with --debug for details)",
+            Path(kml_file).name,
+        )
 
     if cache_path:
         save_to_cache(cache_path, coordinates, path_groups, path_metadata)

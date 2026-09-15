@@ -4,6 +4,7 @@
 import type { MapApp } from "../mapApp";
 import { aggregateAircraft, filterPaths } from "../calculations/statistics";
 import { domCache } from "../utils/domCache";
+import { showToast } from "../utils/toast";
 
 export class FilterManager {
   private app: MapApp;
@@ -51,6 +52,17 @@ export class FilterManager {
 
     // If current selection doesn't exist in filtered list, reset to 'all'
     if (!selectedAircraftExists && currentSelection !== "all") {
+      // Said out loud, like a year that is not available: the recipient of
+      // a shared link would otherwise see every aircraft without knowing
+      // that the filter in the link was dropped
+      const year = this.app.selectedYear;
+      showToast(
+        currentSelection +
+          " has no flights in " +
+          (year === "all" ? "the loaded years" : year) +
+          ", showing all aircraft",
+        "info",
+      );
       this.app.selectedAircraft = "all";
       aircraftSelect.value = "all";
     } else {
@@ -87,8 +99,11 @@ export class FilterManager {
       return;
     }
     if (!data) {
-      // The loader has already reported the failure
+      // The loader has already reported the failure. The Filter sheet
+      // mirrors the dropdown, not the store, and the store did not change,
+      // so it is told to read the dropdown again.
       yearSelect.value = previousYear;
+      this.app.mobileBar?.sheet.refresh();
       return;
     }
 

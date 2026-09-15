@@ -19,6 +19,7 @@ import {
   unmountReplayDom,
 } from "./replayTestSetup";
 import type { MockApp } from "../../testHelpers";
+import type { MockMarker } from "../../../mocks/leaflet";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateSegmentPopupHtml: vi.fn(() => "<div>popup</div>"),
@@ -576,8 +577,10 @@ describe("ReplayManager display", () => {
       ).not.toHaveBeenCalled();
     });
 
-    it("creates popup with the segment at the current time", () => {
+    it("fills the popup with the segment at the current time and opens it", () => {
       replayManager.state.currentTime = 30;
+      const marker = replayManager.state
+        .airplaneMarker as unknown as MockMarker;
 
       replayManager.updateReplayAirplanePopup();
 
@@ -591,29 +594,44 @@ describe("ReplayManager display", () => {
           icon: "✈️",
         }),
       );
-      // Paused, the popup pans the map to show itself: without that a click
-      // on an airplane near the top edge opened it off the map
-      expect(
-        replayManager.state.airplaneMarker!.bindPopup,
-      ).toHaveBeenCalledWith(
-        "<div>popup</div>",
-        expect.objectContaining({ autoPan: true }),
-      );
-      expect(replayManager.state.airplaneMarker!.openPopup).toHaveBeenCalled();
+      // The popup is bound when the marker is created (so that Enter on the
+      // focused marker opens it too) and gets its content here
+      expect(marker.bindPopup).toHaveBeenCalledTimes(1);
+      expect(marker.popupContent()).toBe("<div>popup</div>");
+      expect(marker.openPopup).toHaveBeenCalled();
     });
 
-    it("creates a popup that leaves the map alone while playing", () => {
-      replayManager.state.playing = true;
-
-      replayManager.updateReplayAirplanePopup();
+    it("is bound so that it pans the map only while paused", () => {
+      const marker = replayManager.state
+        .airplaneMarker as unknown as MockMarker;
+      // Paused, the popup pans the map to show itself: without that a click
+      // on an airplane near the top edge opened it off the map
+      expect(marker.bindPopup).toHaveBeenCalledWith(
+        "",
+        expect.objectContaining({ autoPan: true }),
+      );
 
       // autoPan would stop the map's recenter pan on every frame
-      expect(
-        replayManager.state.airplaneMarker!.bindPopup,
-      ).toHaveBeenCalledWith(
-        "<div>popup</div>",
-        expect.objectContaining({ autoPan: false }),
-      );
+      const popupOptions = (): Record<string, unknown> =>
+        (marker.getPopup() as { options: Record<string, unknown> }).options;
+      replayManager.playReplay();
+      expect(popupOptions()["autoPan"]).toBe(false);
+      replayManager.pauseReplay();
+      expect(popupOptions()["autoPan"]).toBe(true);
+    });
+
+    it("fills the popup when Leaflet opens it on a click or on Enter", () => {
+      const marker = replayManager.state
+        .airplaneMarker as unknown as MockMarker;
+      const onOpen = marker.on.mock.calls.find(
+        (call) => call[0] === "popupopen",
+      )?.[1] as (() => void) | undefined;
+      expect(onOpen).toBeDefined();
+      replayManager.state.currentTime = 30;
+
+      onOpen!();
+
+      expect(marker.popupContent()).toBe("<div>popup</div>");
     });
 
     it("uses first segment when no segment has time <= currentTime", () => {
@@ -628,13 +646,13 @@ describe("ReplayManager display", () => {
 
     it("returns early when replaySegments is empty", () => {
       replayManager.state.segments = [];
+      const marker = replayManager.state
+        .airplaneMarker as unknown as MockMarker;
 
       replayManager.updateReplayAirplanePopup();
 
       expect(generateSegmentPopupHtml).not.toHaveBeenCalled();
-      expect(
-        replayManager.state.airplaneMarker!.bindPopup,
-      ).not.toHaveBeenCalled();
+      expect(marker.popupContent()).toBe("");
     });
 
     it("updates existing popup content instead of creating new one", () => {
@@ -647,9 +665,10 @@ describe("ReplayManager display", () => {
       replayManager.updateReplayAirplanePopup();
 
       expect(mockPopup.setContent).toHaveBeenCalledWith("<div>popup</div>");
+      // Bound once, when the marker was created
       expect(
         replayManager.state.airplaneMarker!.bindPopup,
-      ).not.toHaveBeenCalled();
+      ).toHaveBeenCalledTimes(1);
     });
   });
 });
