@@ -37,34 +37,39 @@ PER_YEAR = 4
 GOLDEN = {
     "aircraft_models": {
         "D-EAGJ": "Diamond DA-20A-1 Katana",
+        "D-EHYL": "Diamond DA-40TDI Diamond Star",
         "D-ELGD": "Cessna T182T Turbo Skylane",
     },
-    "airport_names": [
-        "EDAC Leipzig-Altenburg Airport",
-        "EDAQ Halle-Oppin",
-        "EDCB Ballenstedt",
-        "EDCM Kamenz",
-    ],
+    "airport_names": ["EDAQ Halle-Oppin", "EDVM Hildesheim"],
     "available_years": [2025, 2026],
-    "distance_km": {2025: 673.9, 2026: 1162.5},
-    "flight_seconds": {2025: 19148.8, 2026: 24468.4},
+    "distance_km": {2025: 387.5, 2026: 1176.2},
+    "flight_seconds": {2025: 12338.5, 2026: 23987.6},
     "groundspeed_knots": (0.1, 166.3),
     "path_count": 8,
     "path_ids": {
-        2025: [695806902132, 104044549516, 686180647743, 980899696672],
-        2026: [645968488099, 241448899525, 197972773580, 210679907966],
+        2025: [411100833082, 642456146975, 336383306180, 68245584272],
+        2026: [197972773580, 210679907966, 714877417394, 750385786302],
     },
-    "segment_rows": {2025: 5650, 2026: 5964},
+    "segment_rows": {2025: 4070, 2026: 5609},
 }
+
+
+def _file_number(path):
+    """The leading number of a data file name like ``42_DELGD_C182.kml``."""
+    match = re.match(r"\d+", path.name)
+    return (int(match.group()) if match else -1, path.name)
 
 
 def _select_input_files(per_year=PER_YEAR):
     """Pick a deterministic subset of committed files covering every year.
 
+    The files are ordered by their numeric prefix, so that adding newer
+    recordings to data/ does not change the subset.
+
     Returns the selection and the number of files found per year.
     """
     by_year = {}
-    for path in sorted(DATA_DIR.glob("*.kml")):
+    for path in sorted(DATA_DIR.glob("*.kml"), key=_file_number):
         match = re.search(r"<when>(\d{4})-", path.read_text(encoding="utf-8"))
         if match:
             by_year.setdefault(match.group(1), []).append(path)
