@@ -426,7 +426,13 @@ export class MobileBar {
         id: "attribution",
         icon: "info",
         label: "Map tiles",
-        hint: () => "© OpenStreetMap, © CARTO",
+        // What the map's own attribution control says, which the stylesheet
+        // hides below the breakpoint; the OpenAIP credit comes and goes
+        // with its layer, so it is read rather than repeated here
+        hint: () =>
+          document
+            .querySelector(".leaflet-control-attribution")
+            ?.textContent?.trim() || "© OpenStreetMap contributors, © CARTO",
         onSelect: () => {},
         closeOnSelect: false,
       },

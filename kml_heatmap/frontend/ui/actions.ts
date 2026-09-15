@@ -48,8 +48,6 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
     },
     showWrapped: () => app.wrappedManager.showWrapped(),
     closeWrapped: () => app.wrappedManager.closeWrapped(),
-    closeWrappedBackdrop: (e) =>
-      app.wrappedManager.closeWrapped(e as MouseEvent),
     toggleIsolateSelection: () => app.pathSelection.toggleIsolateSelection(),
     playReplay: () => app.replayManager.playReplay(),
     pauseReplay: () => app.replayManager.pauseReplay(),
@@ -58,7 +56,6 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
       app.replayManager.seekReplay((e.target as HTMLInputElement).value),
     changeReplaySpeed: () => app.replayManager.changeReplaySpeed(),
     toggleAutoZoom: () => app.replayManager.toggleAutoZoom(),
-    stopPropagation: (e) => e.stopPropagation(),
   };
 }
 

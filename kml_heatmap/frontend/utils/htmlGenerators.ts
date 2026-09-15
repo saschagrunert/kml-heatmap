@@ -224,7 +224,7 @@ export function generateStatsHtml(
   filteredStats: FilteredStatistics | null,
   hasTimingData: boolean,
 ): string {
-  const maxAltitudeFt = (filteredStats?.max_altitude_m || 0) * METERS_TO_FEET;
+  const maxAltitudeM = filteredStats?.max_altitude_m;
 
   return (
     statCard(formatNumber(yearStats.total_flights), "", "Flights") +
@@ -240,12 +240,20 @@ export function generateStatsHtml(
           "Max Groundspeed",
         )
       : "") +
-    statCard(formatNumber(maxAltitudeFt), "ft", "Max Altitude (MSL)")
+    // Like the timing cards: no data, no card, rather than a figure of 0 ft
+    (maxAltitudeM === undefined
+      ? ""
+      : statCard(
+          formatNumber(maxAltitudeM * METERS_TO_FEET),
+          "ft",
+          "Max Altitude (MSL)",
+        ))
   );
 }
 
 /**
- * Generate fun facts HTML
+ * Generate fun facts HTML. The fact text is trusted markup (see FunFact);
+ * only the category, which ends up in an attribute, is escaped here.
  */
 export function generateFunFactsHtml(funFacts: FunFact[]): string {
   let html = wrappedSectionTitle("fun-facts-title", "wrapped", "Facts");

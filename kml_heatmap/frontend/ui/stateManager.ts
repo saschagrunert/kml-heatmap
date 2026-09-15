@@ -143,10 +143,16 @@ export class StateManager {
   saveMapState(): void {
     if (!this.app.map) return;
 
-    const state: SavedState = {
-      schemaVersion: STATE_SCHEMA_VERSION,
+    // While Wrapped has the map fitted to all the data, the view worth
+    // keeping is the one the user had before
+    const view = this.app.wrappedManager.userMapView() ?? {
       center: this.app.map.getCenter(),
       zoom: this.app.map.getZoom(),
+    };
+    const state: SavedState = {
+      schemaVersion: STATE_SCHEMA_VERSION,
+      center: view.center,
+      zoom: view.zoom,
       heatmapVisible: this.app.heatmapVisible,
       altitudeVisible: this.app.altitudeVisible,
       airspeedVisible: this.app.airspeedVisible,

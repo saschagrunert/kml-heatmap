@@ -462,12 +462,50 @@ describe("wrapped feature", () => {
     it("generates loyal aircraft fact for single aircraft", () => {
       const singleAircraftStats: YearStats = {
         ...yearStats,
+        total_flights: 10,
         aircraft_list: [{ registration: "D-EAGJ", type: "DA40", flights: 10 }],
       };
 
       const facts = generateFunFacts(singleAircraftStats);
 
-      expect(facts.some((f) => f.text.includes("Loyal"))).toBe(true);
+      const loyal = facts.find((f) => f.category === "aircraft");
+      expect(loyal?.text).toBe(
+        "Loyal to <strong>D-EAGJ</strong> - all 10 flights in this DA40!",
+      );
+    });
+
+    it("counts the aircraft's own flights, not the year's", () => {
+      // Two flights without a registration (a Charterware export) are in
+      // the year total but belong to no aircraft
+      const stats: YearStats = {
+        ...yearStats,
+        total_flights: 4,
+        aircraft_list: [{ registration: "D-EAGJ", type: "DA40", flights: 2 }],
+      };
+
+      const facts = generateFunFacts(stats);
+
+      const fact = facts.find((f) => f.category === "aircraft");
+      expect(fact?.text).toBe(
+        "<strong>D-EAGJ</strong> took you on 2 flights in this DA40.",
+      );
+      expect(fact?.text).not.toContain("Loyal");
+    });
+
+    it("escapes the registration and model of the single aircraft", () => {
+      const stats: YearStats = {
+        ...yearStats,
+        total_flights: 1,
+        aircraft_list: [
+          { registration: "D-<b>", model: "C172 & co", flights: 1 },
+        ],
+      };
+
+      const facts = generateFunFacts(stats);
+
+      expect(facts.find((f) => f.category === "aircraft")?.text).toBe(
+        "Loyal to <strong>D-&lt;b&gt;</strong> - all 1 flight in this C172 &amp; co!",
+      );
     });
 
     it("generates country fact for 3+ countries", () => {

@@ -1,11 +1,14 @@
 import { test, expect, type Locator, type Page } from "./fixtures";
 import {
+  expectHeatUnderPaths,
   findSegmentFarFromAirports,
   gotoApp,
   expectOpenaipTiles,
   hasOpenaipKey,
   openaipTiles,
+  setAircraftFilter,
   toggleLayer,
+  waitForAircraftFilter,
   waitForPathData,
 } from "./helpers";
 
@@ -312,6 +315,58 @@ test.describe("Layers", () => {
         !document.getElementById("map")?.classList.contains("zoom-hide-labels"),
       { timeout: 5000 },
     );
+  });
+
+  test("the colour layers follow the filter while the heatmap is off (regression)", async ({
+    page,
+  }) => {
+    await waitForPathData(page);
+    await toggleLayer(page, "heatmap");
+    await expect(page.locator("canvas.leaflet-heatmap-layer")).toHaveCount(0);
+
+    // An aircraft that flew fewer than all the loaded flights
+    const aircraft = await page.evaluate(() => {
+      const info = window.mapApp!.fullPathInfo!;
+      const counts = new Map<string, number>();
+      for (const path of info) {
+        const registration = path.aircraft_registration;
+        if (registration) {
+          counts.set(registration, (counts.get(registration) ?? 0) + 1);
+        }
+      }
+      for (const [registration, count] of counts) {
+        if (count < info.length) return registration;
+      }
+      return null;
+    });
+    test.skip(aircraft === null, "the site has a single aircraft");
+    const before = await page.evaluate(
+      () => window.mapApp!.altitudeLayer.getLayers().length,
+    );
+
+    await setAircraftFilter(page, aircraft!);
+    await waitForAircraftFilter(page, aircraft!);
+
+    // The heat layer off the map threw on its new points, and the
+    // altitude layer kept every polyline of the previous filter
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.mapApp!.altitudeLayer.getLayers().length),
+      )
+      .toBeLessThan(before);
+  });
+
+  test("the heat canvas stays under the paths across a heatmap toggle", async ({
+    page,
+  }) => {
+    await waitForPathData(page);
+    await expectHeatUnderPaths(page);
+
+    await toggleLayer(page, "heatmap");
+    await toggleLayer(page, "heatmap");
+
+    // Re-added, the heat canvas is the last child of the pane
+    await expectHeatUnderPaths(page);
   });
 
   test.describe("Heatmap emphasis", () => {

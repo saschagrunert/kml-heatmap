@@ -195,6 +195,39 @@ test.describe("Path Selection", () => {
       .toEqual(airport!.pathIds);
   });
 
+  test("Enter on a focused airport marker selects its paths", async ({
+    page,
+  }) => {
+    await waitForPathData(page);
+
+    const airport = await page.evaluate(() => {
+      const app = window.mapApp!;
+      const name = Object.keys(app.airportToPaths)[0];
+      const marker = name ? app.airportMarkers[name] : undefined;
+      if (!name || !marker) return null;
+      app.map!.setView(marker.getLatLng(), 12, { animate: false });
+      marker.getElement()!.focus();
+      return {
+        name,
+        pathIds: [...app.airportToPaths[name]!].sort((a, b) => a - b),
+      };
+    });
+    expect(airport).not.toBeNull();
+    expect(airport!.pathIds.length).toBeGreaterThan(0);
+
+    // Leaflet reports Enter as keypress, not click: the popup opened but
+    // nothing was selected
+    await page.keyboard.press("Enter");
+
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          [...window.mapApp!.selectedPathIds].sort((a, b) => a - b),
+        ),
+      )
+      .toEqual(airport!.pathIds);
+  });
+
   test("clicking a path shows its altitude data and selects it", async ({
     page,
   }) => {

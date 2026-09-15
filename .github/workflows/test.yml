@@ -164,7 +164,9 @@ jobs:
             echo "$asset shipped: $result"
             test "$result" = "True"
           done
-          # Source maps carry the full TypeScript sources and must stay out
+          # The bundle is the shipped artifact; its source map (mappings and
+          # file names, build.js keeps the sources out) stays with the site
+          # and the container and out of the wheel
           maps=$("$RUNNER_TEMP/wheel-venv/bin/python" -c "import importlib.resources as r, kml_heatmap; print(any(p.name.endswith('.map') for p in r.files(kml_heatmap).joinpath('static').iterdir()))")
           echo "source maps shipped: $maps"
           test "$maps" = "False"
@@ -300,12 +302,23 @@ jobs:
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
       # The same gitleaks release as the pre-commit hook, whose rev Dependabot
-      # bumps. The config's [[allowlists]] needs gitleaks 8.25 or newer.
+      # bumps, pulled by digest like every other image and action here. The
+      # digest is the multi-arch index of the tag; a bump of the hook rev has
+      # to update it by hand (`docker manifest inspect -v` or the registry's
+      # Docker-Content-Digest header), and the step fails until it does. The
+      # config's [[allowlists]] needs gitleaks 8.25 or newer.
       - name: Scan the commit history for secrets
+        env:
+          GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
         run: |
           version=$(awk '$3 == "https://github.com/gitleaks/gitleaks" { found = 1; next } found && $1 == "rev:" { print $2; exit }' .pre-commit-config.yaml)
           test -n "$version" || { echo "::error::no gitleaks rev in .pre-commit-config.yaml"; exit 1; }
-          docker run --rm -v "$PWD:/repo:ro" "ghcr.io/gitleaks/gitleaks:$version" \
+          pulled=$(docker run --rm "$GITLEAKS_IMAGE" version)
+          test "${pulled#v}" = "${version#v}" || {
+            echo "::error::the pinned gitleaks image is $pulled, the pre-commit hook $version; update the digest in test.yml"
+            exit 1
+          }
+          docker run --rm -v "$PWD:/repo:ro" "$GITLEAKS_IMAGE" \
             git --redact --verbose --config /repo/.gitleaks.toml /repo
 
   container:
@@ -334,6 +347,23 @@ jobs:
           done
           # Still the fixture, and without a network nothing else was fetched
           cmp tests/fixtures/airports.csv "$smoke/cache/airports.csv"
+      # The same run as the image's own user (USER app, no home directory),
+      # which the --user flag above bypasses. The mounts are world-writable
+      # because that user exists only inside the image.
+      - name: Generate a site as the image user
+        run: |
+          smoke="$RUNNER_TEMP/smoke-app"
+          mkdir -p "$smoke/input" "$smoke/site" "$smoke/cache"
+          cp tests/fixtures/airports.csv "$smoke/cache/"
+          kml=(data/*.kml)
+          cp "${kml[@]:0:3}" "$smoke/input/"
+          chmod -R a+rwX "$smoke"
+          docker run --rm --network none \
+            -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
+            kml-heatmap input --output-dir site
+          for file in index.html map_config.js mapApp.bundle.js data/metadata.js; do
+            test -s "$smoke/site/$file" || { echo "::error::$file was not generated as the image user"; exit 1; }
+          done
 
   obfuscation:
     if: github.event_name != 'schedule'

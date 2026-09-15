@@ -58,7 +58,6 @@ export const MAX_FRAME_DELTA_MS = 100;
 export class ReplayManager {
   private app: MapApp;
   private renderer: ReplayRenderer;
-  private markerClickHandler: ((e: Event) => void) | null = null;
   /** Pending colour layer redraws scheduled by restoreLayerVisibility */
   private redrawTimers: ReturnType<typeof setTimeout>[] = [];
   /** Inline opacity of the controls replay disabled, put back afterwards */
@@ -209,11 +208,6 @@ export class ReplayManager {
 
     // Remove airplane marker when closing replay completely
     if (this.state.airplaneMarker) {
-      const el = this.state.airplaneMarker.getElement();
-      if (el && this.markerClickHandler) {
-        el.removeEventListener("click", this.markerClickHandler);
-        this.markerClickHandler = null;
-      }
       if (this.app.map) {
         this.app.map.removeLayer(this.state.airplaneMarker);
       }
@@ -440,6 +434,14 @@ export class ReplayManager {
       title: "Aircraft position",
       alt: "Aircraft position",
     });
+    // Bound from the start: Leaflet toggles a bound popup on click and on
+    // Enter on the focused marker alike, where a popup bound on the first
+    // click left the keyboard without one. The content is the position at
+    // the moment it opens (see ReplayRenderer.updateAirplanePopup).
+    this.state.airplaneMarker.bindPopup("", { autoPan: !this.state.playing });
+    this.state.airplaneMarker.on("popupopen", () =>
+      this.updateReplayAirplanePopup(),
+    );
     this.state.airplaneMarker.addTo(this.app.map);
 
     // The rotation transition lives on the inner icon (see styles.css);
@@ -448,17 +450,6 @@ export class ReplayManager {
     if (markerElement) {
       markerElement.style.cursor = "pointer";
       markerElement.style.pointerEvents = "auto";
-
-      this.markerClickHandler = (e: Event) => {
-        e.stopPropagation();
-        if (!this.state.airplaneMarker) return;
-        if (this.state.airplaneMarker.isPopupOpen()) {
-          this.state.airplaneMarker.closePopup();
-        } else {
-          this.updateReplayAirplanePopup();
-        }
-      };
-      markerElement.addEventListener("click", this.markerClickHandler);
     }
 
     return true;
@@ -508,15 +499,9 @@ export class ReplayManager {
   restoreLayerVisibility(): void {
     if (!this.app.map) return;
 
-    if (this.app.heatmapLayer && this.app.heatmapVisible) {
-      this.app.map.addLayer(this.app.heatmapLayer);
-      if (this.app.heatmapLayer._canvas) {
-        this.app.heatmapLayer._canvas.style.pointerEvents = "none";
-      }
-      // Adding the layer builds a new canvas, which has lost the dimming
-      // it had under a colour layer
-      this.app.dataManager.applyHeatmapEmphasis();
-    }
+    // With the points of the filter changes made during the replay, and
+    // the dimming under a colour layer, which the new canvas has lost
+    if (this.app.heatmapVisible) this.app.dataManager.showHeatmap();
 
     // Redraw once after the layer is back on the map so click handlers work
     // on mobile Safari. A redraw still pending from an earlier close is

@@ -24,8 +24,8 @@ except ImportError:
     # Windows doesn't have fcntl
     HAS_FCNTL = False
 
-from .cache import CACHE_DIR
-from .constants import ICAO_REGION_PREFIXES
+from .cache import CACHE_DIR, REGULAR_FILE_MODE
+from .constants import FEET_TO_METERS, ICAO_REGION_PREFIXES
 from .exceptions import AirportDatabaseError
 from .helpers import DATE_PATTERN
 from .logger import logger
@@ -46,6 +46,7 @@ __all__ = [
     "load_airport_database",
     "lookup_airport_coordinates",
     "lookup_airport_country",
+    "lookup_airport_elevation",
     "split_route_name",
     "standardize_airport_name",
     "standardize_airport_names",
@@ -72,7 +73,16 @@ REQUIRED_COLUMNS = ("ident", "name", "latitude_deg", "longitude_deg")
 # Set to "1" to fail instead of running without airport names (CI, deploys)
 REQUIRE_DATABASE_ENV = "KML_HEATMAP_REQUIRE_AIRPORT_DB"
 
-AirportRecord = tuple[float, float, str, str]
+
+class AirportRecord(NamedTuple):
+    """One airport of the database; the elevation is missing for some."""
+
+    lat: float
+    lon: float
+    name: str
+    country: str
+    elevation_m: float | None = None
+
 
 # Global cache for parsed airport data
 _airport_cache: dict[str, AirportRecord] | None = None
@@ -183,6 +193,9 @@ def _fetch_airport_database(cache_dir: Path) -> bool:
             logger.warning("✗ Downloaded airport database is empty or invalid")
             return False
 
+        # NamedTemporaryFile creates the file with mode 0600; a shared cache
+        # directory (a build container, a CI runner) needs it readable
+        os.chmod(tmp_path, REGULAR_FILE_MODE)
         os.replace(tmp_path, CACHE_FILE)
         tmp_path = None
         logger.info("✓ Downloaded %.1f MB airport database", len(data) / 1024 / 1024)
@@ -254,8 +267,14 @@ def _read_airport_csv(path: Path) -> dict[str, AirportRecord]:
                 continue
             name = (row.get("name") or "").strip()
             country = (row.get("iso_country") or "").strip()
+            try:
+                elevation_m: float | None = (
+                    float(row.get("elevation_ft") or "") * FEET_TO_METERS
+                )
+            except ValueError:
+                elevation_m = None
             if name:
-                airports[icao] = (lat, lon, name, country)
+                airports[icao] = AirportRecord(lat, lon, name, country, elevation_m)
     return airports
 
 
@@ -294,9 +313,13 @@ def _ensure_cache_file() -> None:
             try:
                 if HAS_FCNTL:
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-                lock_file.close()
             except OSError:
                 pass
+            finally:
+                # Closing releases the lock as well; a failed unlock must not
+                # leak the descriptor
+                with contextlib.suppress(OSError):
+                    lock_file.close()
 
 
 def _database_required() -> bool:
@@ -375,9 +398,15 @@ def lookup_airport_coordinates(icao_code: str) -> tuple[float, float, str] | Non
 
     icao_upper = icao_code.upper()
     if icao_upper in airports:
-        lat, lon, name, _ = airports[icao_upper]
-        logger.debug("Found airport %s: %s at (%s, %s)", icao_upper, name, lat, lon)
-        return (lat, lon, name)
+        record = airports[icao_upper]
+        logger.debug(
+            "Found airport %s: %s at (%s, %s)",
+            icao_upper,
+            record.name,
+            record.lat,
+            record.lon,
+        )
+        return (record.lat, record.lon, record.name)
 
     logger.debug("Airport %s not found in database", icao_upper)
     return None
@@ -392,10 +421,18 @@ def lookup_airport_country(icao_code: str) -> str | None:
 
     icao_upper = icao_code.upper()
     if icao_upper in airports:
-        _, _, _, country = airports[icao_upper]
+        country = airports[icao_upper].country
         return country if country else None
 
     return None
+
+
+def lookup_airport_elevation(icao_code: str | None) -> float | None:
+    """The field elevation of an airport in meters, None when unknown."""
+    if not icao_code or len(icao_code) != 4:
+        return None
+    record = load_airport_database().get(icao_code.upper())
+    return record.elevation_m if record is not None else None
 
 
 def extract_icao_codes_from_name(airport_name: str | None) -> list[str]:

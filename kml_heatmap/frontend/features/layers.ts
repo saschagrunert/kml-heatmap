@@ -5,7 +5,11 @@
  */
 
 import type { PathInfo, PathSegment } from "../types";
-import type { Range } from "../state/store";
+import {
+  DEFAULT_AIRSPEED_RANGE,
+  DEFAULT_ALTITUDE_RANGE,
+  type Range,
+} from "../state/store";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 import { formatNumber } from "../utils/formatters";
 import { altitudeRangeFt } from "../calculations/statistics";
@@ -20,8 +24,7 @@ export interface SegmentProperties {
   isSelected: boolean;
 }
 
-export const DEFAULT_ALTITUDE_RANGE: Range = { min: 0, max: 10000 };
-export const DEFAULT_AIRSPEED_RANGE: Range = { min: 0, max: 200 };
+export { DEFAULT_ALTITUDE_RANGE, DEFAULT_AIRSPEED_RANGE };
 
 /**
  * Altitude colour range (feet) of the given segments, falling back to

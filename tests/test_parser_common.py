@@ -39,7 +39,10 @@ class TestExtractYearFromTimestamp:
             ("2000-01-01T00:00:00Z", 2000),
             ("not-a-date", None),
             ("03 Mar", None),
-            ("2025-99-99T99:99:99Z", None),
+            # No ISO timestamp, but the year is there
+            ("2025-99-99T99:99:99Z", 2025),
+            ("Takeoff: 03 Mar 2025 08:58 Z", 2025),
+            ("Takeoff T", None),
             ("", None),
             (None, None),
         ],
@@ -430,14 +433,30 @@ class TestBuildPathMetadataDict:
         assert "route" not in result
         assert "aircraft_type" not in result
 
-    def test_charterware_keeps_icao_name(self):
+    @pytest.mark.parametrize("name", ["LOAV", "LOAV V\u00f6slau-Kottingbrunn"])
+    def test_charterware_route_wins_over_a_single_airport_name(self, name):
+        """A single airport, raw or standardized, says nothing about the arrival."""
         result = self._build(
             "2026-01-12_1513h_OE-AKI_EDDF-EDDM.kml",
             TrackPoint(50.0, 8.5, 100.0),
-            self._meta(airport_name="LOAV"),
+            self._meta(airport_name=name),
         )
-        assert result["airport_name"] == "LOAV"
-        assert result["start_airport"] is None
+        assert result["airport_name"] == "EDDF Frankfurt Main - EDDM Munich"
+        assert result["start_airport"] == "EDDF Frankfurt Main"
+
+    def test_charterware_keeps_a_route_placemark_name(self):
+        result = self._build(
+            "2026-01-12_1513h_OE-AKI_EDDF-EDDM.kml",
+            TrackPoint(50.0, 8.5, 100.0),
+            self._meta(
+                airport_name="LOAV V\u00f6slau - LOWW Wien",
+                start_airport="LOAV V\u00f6slau",
+                end_airport="LOWW Wien",
+            ),
+        )
+        assert result["airport_name"] == "LOAV V\u00f6slau - LOWW Wien"
+        assert result["start_airport"] == "LOAV V\u00f6slau"
+        assert result["end_airport"] == "LOWW Wien"
 
     def test_route_airports_are_carried_over(self):
         result = self._build(

@@ -63,6 +63,20 @@ function deleteNavigatorProperty(name: string): void {
   Reflect.deleteProperty(navigator, name);
 }
 
+/**
+ * A stand-in for document.head.appendChild that hands the appended script to
+ * the test instead of the DOM; the return type of the real method is generic,
+ * which the lint rules cannot follow through a mock
+ */
+function appendChildStub(
+  onAppend: (script: HTMLScriptElement) => void,
+): typeof document.head.appendChild {
+  return ((node: Node) => {
+    onAppend(node as HTMLScriptElement);
+    return node;
+  }) as typeof document.head.appendChild;
+}
+
 describe("UIToggles export and share", () => {
   let uiToggles: UIToggles;
   let app: MockApp;
@@ -109,12 +123,15 @@ describe("UIToggles export and share", () => {
     it("injects the script with SRI and resolves once it loads", async () => {
       const lib = { toJpeg: vi.fn() } as unknown as DomToImage;
       let script: HTMLScriptElement | null = null;
-      vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
-        script = node as HTMLScriptElement;
-        window.domtoimage = lib;
-        queueMicrotask(() => script?.onload?.(new Event("load")));
-        return node;
-      });
+      vi.spyOn(document.head, "appendChild").mockImplementation(
+        appendChildStub((node) => {
+          script = node;
+          window.domtoimage = lib;
+          queueMicrotask(() => {
+            script?.onload?.(new Event("load"));
+          });
+        }),
+      );
 
       await expect(loadDomToImage()).resolves.toBe(lib);
       expect(script!.src).toBe(DOM_TO_IMAGE_URL);
@@ -143,12 +160,13 @@ describe("UIToggles export and share", () => {
     it("resolves null and allows a retry when the script fails", async () => {
       const appendSpy = vi
         .spyOn(document.head, "appendChild")
-        .mockImplementation((node) => {
-          queueMicrotask(() =>
-            (node as HTMLScriptElement).onerror?.(new Event("error")),
-          );
-          return node;
-        });
+        .mockImplementation(
+          appendChildStub((node) => {
+            queueMicrotask(() => {
+              node.onerror?.(new Event("error"));
+            });
+          }),
+        );
 
       await expect(loadDomToImage()).resolves.toBeNull();
       await expect(loadDomToImage()).resolves.toBeNull();
@@ -390,12 +408,15 @@ describe("UIToggles export and share", () => {
       await finishExport();
 
       // A fixed 1x left a 3x phone with an image a third of its resolution
+      const scaledStyle: unknown = expect.objectContaining({
+        transform: "scale(3)",
+      });
       expect(toJpeg).toHaveBeenCalledWith(
         el("map"),
         expect.objectContaining({
           width: 2400,
           height: 1800,
-          style: expect.objectContaining({ transform: "scale(3)" }),
+          style: scaledStyle,
         }),
       );
     });
@@ -512,12 +533,13 @@ describe("UIToggles export and share", () => {
     });
 
     it("shows an error toast and re-enables the button when dom-to-image is unavailable", async () => {
-      vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
-        queueMicrotask(() =>
-          (node as HTMLScriptElement).onerror?.(new Event("error")),
-        );
-        return node;
-      });
+      vi.spyOn(document.head, "appendChild").mockImplementation(
+        appendChildStub((node) => {
+          queueMicrotask(() => {
+            node.onerror?.(new Event("error"));
+          });
+        }),
+      );
       const btn = el("export-btn") as HTMLButtonElement;
 
       uiToggles.exportMap();

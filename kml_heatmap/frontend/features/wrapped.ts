@@ -225,26 +225,27 @@ export function generateFunFacts(
 
   // Aircraft facts
   const numAircraft = yearStats.aircraft_list.length;
-  if (numAircraft === 1) {
-    const aircraft = yearStats.aircraft_list[0];
+  const [onlyAircraft] = yearStats.aircraft_list;
+  if (numAircraft === 1 && onlyAircraft) {
+    // The list only has registered aircraft; flights without a registration
+    // (some exports carry none) count in the year total but not here
     const model = escapeHtml(
-      aircraft?.model || aircraft?.type || aircraft?.registration || "Unknown",
+      onlyAircraft.model || onlyAircraft.type || onlyAircraft.registration,
     );
-    const flights = yearStats.total_flights;
-    const registration = aircraft?.registration
-      ? escapeHtml(aircraft.registration)
-      : "";
-    if (registration) {
+    const registration = escapeHtml(onlyAircraft.registration);
+    const flights = onlyAircraft.flights;
+    const plural = flights !== 1 ? "s" : "";
+    if (flights === yearStats.total_flights) {
       facts.push({
         icon: "✈️",
-        text: `Loyal to <strong>${registration}</strong> - all ${flights} flight${flights !== 1 ? "s" : ""} in this ${model}!`,
+        text: `Loyal to <strong>${registration}</strong> - all ${flights} flight${plural} in this ${model}!`,
         category: "aircraft",
         priority: 9,
       });
     } else {
       facts.push({
-        icon: "💙",
-        text: `Loyal to one aircraft: ${model}`,
+        icon: "✈️",
+        text: `<strong>${registration}</strong> took you on ${flights} flight${plural} in this ${model}.`,
         category: "aircraft",
         priority: 7,
       });

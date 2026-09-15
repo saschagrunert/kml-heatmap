@@ -44,7 +44,7 @@ GOLDEN = {
     "available_years": [2025, 2026],
     "distance_km": {2025: 387.5, 2026: 1176.2},
     "flight_seconds": {2025: 12338.5, 2026: 23987.6},
-    "groundspeed_knots": (0.1, 166.3),
+    "groundspeed_knots": (0.1, 165.7),
     "path_count": 8,
     "path_ids": {
         2025: [411100833082, 642456146975, 336383306180, 68245584272],

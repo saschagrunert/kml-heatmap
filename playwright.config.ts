@@ -12,6 +12,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
+  // The retry keeps the trace of the first attempt; a test that only passes
+  // on the retry is still a failure, not a green run
+  failOnFlakyTests: isCI,
   ...(isCI ? { workers: "100%" } : {}),
   // The console reporter Playwright would pick anyway, plus the HTML report
   // that CI uploads with the traces when a run fails

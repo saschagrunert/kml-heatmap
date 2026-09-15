@@ -196,12 +196,8 @@ export class UIToggles {
       (v) => {
         this.app.heatmapVisible = v;
       },
-      () => {
-        if (this.app.heatmapLayer?._canvas) {
-          this.app.heatmapLayer._canvas.style.pointerEvents = "none";
-        }
-        this.app.dataManager.applyHeatmapEmphasis();
-      },
+      // Feeds the layer the points of the filter changes it missed while off
+      () => this.app.dataManager.showHeatmap(),
     );
   }
 
@@ -241,8 +237,16 @@ export class UIToggles {
 
     // The buttons and the legends follow the store keys written below
     if (isVisible) {
-      if (this.app.replayManager.state.active && !otherVisible) return;
-      this.app.map.removeLayer(layer);
+      if (this.app.replayManager.state.active) {
+        // The layer is off the map for the replay already. The trail keeps
+        // its altitude colours without a colour layer, so only a speed
+        // trail changes (see ReplayManager.updateTrailLegend for the scale)
+        if (mode === "airspeed") {
+          this.app.replayManager.redrawReplayPath("altitude");
+        }
+      } else {
+        this.app.map.removeLayer(layer);
+      }
       setVisible(false);
     } else {
       if (otherVisible) {

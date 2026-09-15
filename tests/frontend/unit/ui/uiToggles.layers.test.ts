@@ -73,15 +73,19 @@ describe("UIToggles layers", () => {
       expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("true");
     });
 
-    it("keeps the canvas out of the way of clicks and settles the emphasis", () => {
+    it("hands the layer to the data manager, which feeds it the points it missed", () => {
       app.heatmapVisible = false;
-      const canvas = document.createElement("canvas");
-      heatmap._canvas = canvas;
 
       uiToggles.toggleHeatmap();
 
-      expect(canvas.style.pointerEvents).toBe("none");
-      expect(app.dataManager.applyHeatmapEmphasis).toHaveBeenCalled();
+      expect(app.dataManager.showHeatmap).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not hand the layer over when hiding it", () => {
+      uiToggles.toggleHeatmap();
+
+      expect(app.heatmapVisible).toBe(false);
+      expect(app.dataManager.showHeatmap).not.toHaveBeenCalled();
     });
 
     it("does nothing without a map", () => {
@@ -147,14 +151,17 @@ describe("UIToggles layers", () => {
       expect(app.altitudeVisible).toBe(false);
     });
 
-    it("prevents hiding altitude during replay if airspeed is also hidden", () => {
+    it("during replay turns altitude off without touching the hidden layer", () => {
       app.altitudeVisible = true;
       app.replayManager.state.active = true;
 
       uiToggles.toggleAltitude();
 
-      expect(app.altitudeVisible).toBe(true);
+      // The trail is drawn by altitude either way, so no redraw
+      expect(app.altitudeVisible).toBe(false);
       expect(app.map!.removeLayer).not.toHaveBeenCalled();
+      expect(app.replayManager.redrawReplayPath).not.toHaveBeenCalled();
+      expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("false");
     });
 
     it("during replay does not add the layer but updates the state", () => {
@@ -247,14 +254,17 @@ describe("UIToggles layers", () => {
       expect(app.airspeedVisible).toBe(false);
     });
 
-    it("prevents hiding airspeed during replay if altitude is also hidden", () => {
+    it("during replay turns airspeed off and the trail falls back to altitude", () => {
       app.airspeedVisible = true;
       app.replayManager.state.active = true;
 
       uiToggles.toggleAirspeed();
 
-      expect(app.airspeedVisible).toBe(true);
+      expect(app.airspeedVisible).toBe(false);
       expect(app.map!.removeLayer).not.toHaveBeenCalled();
+      expect(app.replayManager.redrawReplayPath).toHaveBeenCalledWith(
+        "altitude",
+      );
     });
 
     it("during replay does not add the layer but updates the state", () => {

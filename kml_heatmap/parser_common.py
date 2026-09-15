@@ -41,22 +41,24 @@ def extract_year_from_timestamp(timestamp: str | None) -> int | None:
     if not timestamp:
         return None
 
-    try:
-        # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z").
-        # The obfuscator anchors on the UTC date, so this is the UTC year:
-        # 2025-01-01T00:30:00+02:00 belongs to 2024 before and after it.
-        if "T" in timestamp:
+    # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z").
+    # The obfuscator anchors on the UTC date, so this is the UTC year:
+    # 2025-01-01T00:30:00+02:00 belongs to 2024 before and after it.
+    if "T" in timestamp:
+        try:
             parsed = datetime.fromisoformat(timestamp)
+        except ValueError as e:
+            logger.debug("Could not parse timestamp '%s': %s", timestamp, e)
+        else:
             if parsed.tzinfo is not None:
                 parsed = parsed.astimezone(UTC)
             return parsed.year
-        # Try to extract year from date string (e.g., "03 Mar 2025" or "2025-03-03")
-        year_match = YEAR_PATTERN.search(timestamp)
-        if year_match:
-            return int(year_match.group(1))
-    except (ValueError, AttributeError, TypeError) as e:
-        logger.debug("Could not parse timestamp '%s': %s", timestamp, e)
 
+    # A date string ("03 Mar 2025", "2025-03-03"), also one that holds a "T"
+    # without being an ISO timestamp ("Takeoff: 03 Mar 2025 08:58 Z")
+    year_match = YEAR_PATTERN.search(timestamp)
+    if year_match:
+        return int(year_match.group(1))
     return None
 
 
@@ -87,9 +89,14 @@ def validate_and_normalize_coordinate(
 
 
 def parse_coordinate_point(
-    point: str, kml_file: str
+    point: str, filename: str
 ) -> tuple[float, float, float | None] | None:
-    """Parse a single coordinate point from KML format (lon,lat[,alt])."""
+    """Parse a single coordinate point from KML format (lon,lat[,alt]).
+
+    ``filename`` only names the file in log messages. It is a plain string
+    because this runs once per coordinate: building a ``Path`` here took
+    most of the time of parsing a large LineString.
+    """
     point = point.strip()
     if not point:
         return None
@@ -106,7 +113,7 @@ def parse_coordinate_point(
         logger.debug("Failed to parse coordinate '%s': %s", point, e)
         return None
 
-    return validate_and_normalize_coordinate(lat, lon, alt, Path(kml_file).name)
+    return validate_and_normalize_coordinate(lat, lon, alt, filename)
 
 
 def find_xml_element(
@@ -245,17 +252,21 @@ def _build_path_metadata_dict(
     start_airport = placemark_meta["start_airport"]
     end_airport = placemark_meta["end_airport"]
 
-    # For Charterware files, use route information for airport name
-    # Route format: DEPARTURE-ARRIVAL (e.g., LOAV-LOAV or EDDF-EDDM)
+    # For Charterware files, use the route of the file name (DEPARTURE-ARRIVAL,
+    # such as LOAV-LOAV or EDDF-EDDM) unless the placemark name is a route
+    # itself. Charterware names its placemarks after the aircraft, and even
+    # a name that is a single airport says nothing about the arrival.
     route = aircraft_info.get("route")
-    if aircraft_info.get("format") == "charterware" and route and "-" in route:
+    if (
+        aircraft_info.get("format") == "charterware"
+        and route
+        and "-" in route
+        and start_airport is None
+    ):
         departure_airport, arrival_airport = route.split("-", 1)
-        # Use route as airport_name if name is empty or not an ICAO code
-        # (ICAO codes are exactly 4 uppercase letters, registrations have hyphens)
-        if not airport_name or len(airport_name) != 4:
-            airport_name, start_airport, end_airport = standardize_route(
-                departure_airport, arrival_airport
-            )
+        airport_name, start_airport, end_airport = standardize_route(
+            departure_airport, arrival_airport
+        )
 
     start_point = [path_start.lat, path_start.lon]
     if path_start.alt is not None:

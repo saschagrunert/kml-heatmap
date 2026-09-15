@@ -41,6 +41,8 @@ dev = [
     "mypy>=1.20.1",
     "bandit>=1.9.4",
     "pip-audit>=2.9.0",
+    # scripts/check_locks.py
+    "packaging>=26.0",
 ]
 
 [project.urls]
@@ -77,6 +79,9 @@ addopts = [
     "--tb=short",
     "--strict-markers",
 ]
+# A deprecation in lxml or the next Python release fails the suite instead
+# of scrolling past
+filterwarnings = ["error"]
 markers = [
     "slow: Slow running tests",
 ]

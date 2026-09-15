@@ -73,6 +73,7 @@ export interface MockManagers {
     showLoading: Mock;
     hideLoading: Mock;
     applyHeatmapEmphasis: Mock;
+    showHeatmap: Mock;
   };
   layerManager: {
     redrawAltitudePaths: Mock;
@@ -132,6 +133,7 @@ export interface MockManagers {
   wrappedManager: {
     showWrapped: Mock;
     closeWrapped: Mock;
+    userMapView: Mock;
     destroy: Mock;
   };
   uiToggles: {
@@ -190,6 +192,7 @@ function createMockManagers(): MockManagers {
       showLoading: vi.fn(),
       hideLoading: vi.fn(),
       applyHeatmapEmphasis: vi.fn(),
+      showHeatmap: vi.fn(),
     },
     layerManager: {
       redrawAltitudePaths: vi.fn(),
@@ -249,6 +252,7 @@ function createMockManagers(): MockManagers {
     wrappedManager: {
       showWrapped: vi.fn(),
       closeWrapped: vi.fn(),
+      userMapView: vi.fn(() => null),
       destroy: vi.fn(),
     },
     uiToggles: {

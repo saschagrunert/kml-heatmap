@@ -29,22 +29,44 @@ export function isValidYear(year: string): boolean {
 }
 
 /**
+ * How long a data file may take to load. The largest year file is a few MB,
+ * so this leaves room for a slow connection; a request that neither loads
+ * nor errors within it (a stalled connection) is given up on, so the year
+ * can be requested again instead of staying in flight forever.
+ */
+export const SCRIPT_LOAD_TIMEOUT_MS = 120_000;
+
+/**
  * Load JavaScript file dynamically (supports both file:// and https://)
  * @param url - URL to load
+ * @param timeoutMs - Time after which the load is given up on
  * @returns Promise that resolves when script is loaded
  */
-export function loadScript(url: string): Promise<void> {
+export function loadScript(
+  url: string,
+  timeoutMs: number = SCRIPT_LOAD_TIMEOUT_MS,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = url;
-    script.onload = () => {
+    const settle = (): void => {
+      clearTimeout(timer);
+      script.onload = null;
+      script.onerror = null;
       script.remove();
+    };
+    script.onload = () => {
+      settle();
       resolve();
     };
     script.onerror = () => {
-      script.remove();
+      settle();
       reject(new Error("Failed to load script: " + url));
     };
+    const timer = setTimeout(() => {
+      settle();
+      reject(new Error("Timed out loading script: " + url));
+    }, timeoutMs);
     document.head.appendChild(script);
   });
 }

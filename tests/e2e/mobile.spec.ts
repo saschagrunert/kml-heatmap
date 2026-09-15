@@ -331,6 +331,38 @@ test.describe("Mobile bar", () => {
       await expect(row.locator(".sheet-row-value")).toHaveText(year);
     });
 
+    test("shows the year that is on the map when the new one fails to load", async ({
+      page,
+    }) => {
+      const years = await knownYears(page);
+      const source = page.locator("#year-select");
+      const current = await source.inputValue();
+      const other = years.find((year) => year !== current);
+      test.skip(other === undefined, "the site has a single year");
+      await page.route(`**/data/${other}/data.js`, (route) => route.abort());
+
+      await openMobileSheet(page, "filter");
+      const row = page.locator('.sheet-row[data-row="year"]');
+      await chooseSheetOption(row.locator("select"), other!);
+
+      await expect(
+        page.getByText(`Failed to load flight data for ${other}`),
+      ).toBeVisible();
+      // The page put its dropdown back; the row used to keep the failed
+      // choice, and picking the current year again changed nothing
+      await expect(source).toHaveValue(current);
+      await expect(row.locator("select")).toHaveValue(current);
+      await expect(row.locator(".sheet-row-value")).toHaveText(current);
+
+      // The failed load is the point of this test; the page logs it, and
+      // the browser logs the aborted request
+      errors.consoleErrors = errors.consoleErrors.filter(
+        (text) =>
+          !text.includes(`data/${other}/data.js`) &&
+          !text.includes("net::ERR_FAILED"),
+      );
+    });
+
     test("changing the aircraft writes back to the page dropdown", async ({
       page,
     }) => {
@@ -506,6 +538,23 @@ test.describe("Mobile bar", () => {
       await expect(sheet).toBeHidden();
       await expect(tab).toBeFocused();
       await expect(tab).not.toHaveClass(/\bactive\b/);
+    });
+
+    test("swapping sheets returns focus to the tab that swapped them", async ({
+      page,
+    }) => {
+      const sheet = page.locator("#mobile-sheet");
+      await page.locator("#mobile-tab-layers").click();
+      await expect(sheet).toBeVisible();
+
+      // The opener was read after the Layers sheet had closed, which had
+      // already put focus back on the Layers tab
+      await page.locator("#mobile-tab-filter").click();
+      await expect(sheet).toBeVisible();
+      await page.keyboard.press("Escape");
+
+      await expect(sheet).toBeHidden();
+      await expect(page.locator("#mobile-tab-filter")).toBeFocused();
     });
 
     test("Tab stays inside the open sheet", async ({ page }) => {

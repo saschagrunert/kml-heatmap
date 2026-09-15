@@ -79,11 +79,23 @@ describe("htmlGenerators (Wrapped sections)", () => {
       expect(html).toContain('<div class="stat-label">Max Groundspeed</div>');
     });
 
-    it("handles null statistics", () => {
+    it("leaves out the altitude card without statistics", () => {
       const html = generateStatsHtml(mockYearStats, null, false);
 
       expect(html).toContain("42");
-      expect(html).toContain('0 <span class="stat-unit">ft</span>');
+      expect(html).not.toContain("Max Altitude");
+      expect(html).not.toContain('<span class="stat-unit">ft</span>');
+    });
+
+    it("leaves out the altitude card when no path has an altitude", () => {
+      const withoutAltitude: FilteredStatistics = {
+        ...mockFilteredStats,
+        max_altitude_m: undefined,
+      };
+
+      const html = generateStatsHtml(mockYearStats, withoutAltitude, false);
+
+      expect(html).not.toContain("Max Altitude");
     });
 
     it("handles missing max_groundspeed_knots", () => {
@@ -163,20 +175,22 @@ describe("htmlGenerators (Wrapped sections)", () => {
       expect(html).not.toContain("fun-fact-text");
     });
 
-    it("escapes HTML in fact text", () => {
+    it("renders fact text as trusted markup and escapes the category", () => {
       const funFacts: FunFact[] = [
         {
-          category: "test",
+          category: 'a"b',
           icon: "🔥",
-          text: "Test <script>alert('xss')</script>",
+          text: "Flew <strong>far</strong>",
           priority: 1,
         },
       ];
 
       const html = generateFunFactsHtml(funFacts);
 
-      // The HTML contains the raw text (data comes from trusted Python-generated files)
-      expect(html).toContain("Test <script>alert('xss')</script>");
+      // The text is markup the generator built from escaped values; the
+      // category lands in an attribute and is escaped here
+      expect(html).toContain("Flew <strong>far</strong>");
+      expect(html).toContain('data-category="a&quot;b"');
     });
   });
 

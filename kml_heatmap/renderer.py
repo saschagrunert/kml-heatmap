@@ -369,8 +369,18 @@ def _export_site(
     )
     extent = _map_extent(all_path_groups)
 
-    logger.info("\nProcessing %d start points...", len(all_path_metadata))
-    unique_airports = deduplicate_airports(all_path_metadata, all_path_groups)
+    # Only exported paths contribute airports: a path that gets no id and no
+    # segments (a single point, a recording that never moved) would still
+    # publish its location and name through the airport list
+    exported = [
+        (path, metadata)
+        for path, metadata in zip(all_path_groups, all_path_metadata, strict=True)
+        if is_exportable_path(path)
+    ]
+    logger.info("\nProcessing %d start points...", len(exported))
+    unique_airports = deduplicate_airports(
+        [metadata for _, metadata in exported], [path for path, _ in exported]
+    )
     logger.info("  Found %d unique airports", len(unique_airports))
 
     data_dir_name = data_dir.name
@@ -520,9 +530,19 @@ def create_progressive_heatmap(
     """
     aircraft_files = aircraft_files or []
 
-    # Stage 0: Refuse output directories that overlap with the inputs, and a
-    # run that could only produce a page without its application
-    is_safe, error_msg = validate_output_dir(data_dir, [*kml_files, *aircraft_files])
+    # Stage 0: Refuse output directories that overlap with the inputs, a data
+    # directory the page could not reach, and a run that could only produce a
+    # page without its application
+    output_dir = Path(output_file).resolve().parent
+    if Path(data_dir).resolve().parent != output_dir:
+        logger.error(
+            "The data directory %s must be directly inside the output directory "
+            "%s, where the page looks for it",
+            data_dir,
+            output_dir,
+        )
+        return False
+    is_safe, error_msg = validate_output_dir(output_dir, [*kml_files, *aircraft_files])
     if not is_safe:
         logger.error("%s", error_msg)
         return False

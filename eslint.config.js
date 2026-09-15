@@ -87,14 +87,6 @@ export default tseslint.config(
     rules: {
       // Allow unbound methods in tests (common pattern with mocks/spies)
       "@typescript-eslint/unbound-method": "off",
-
-      // Relax type safety rules for test files - mocking often requires type flexibility
-      "@typescript-eslint/no-explicit-any": "off", // Mocks often need any
-      "@typescript-eslint/no-unsafe-assignment": "off", // Mock data assignments
-      "@typescript-eslint/no-unsafe-call": "off", // Calling mocked functions
-      "@typescript-eslint/no-unsafe-member-access": "off", // Accessing mock properties
-      "@typescript-eslint/no-unsafe-argument": "off", // Passing mock arguments
-      "@typescript-eslint/no-unsafe-return": "off", // Returning mock values
     },
   },
   {

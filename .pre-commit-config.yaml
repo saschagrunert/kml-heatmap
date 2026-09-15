@@ -17,19 +17,23 @@ repos:
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Keep in sync with the ruff version in requirements-test.lock
-    rev: v0.16.7
+    # (scripts/check_locks.py fails when the two differ)
+    rev: v0.16.4
     hooks:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
 
   - repo: https://github.com/rbubley/mirrors-prettier
-    # Keep in sync with the prettier version in package.json
+    # Keep in sync with the prettier version in package-lock.json
+    # (scripts/check_locks.py fails when the two differ)
     rev: v3.9.6
     hooks:
       - id: prettier
 
   - repo: https://github.com/crate-ci/typos
+    # Keep in sync with the typos action in .github/workflows/test.yml
+    # (scripts/check_locks.py fails when the two differ)
     rev: v1.50.1
     hooks:
       - id: typos

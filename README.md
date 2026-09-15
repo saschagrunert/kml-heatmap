@@ -52,8 +52,7 @@
 
 ### Requirements
 
-- Python 3.14 (see `.python-version`) and Node.js 26 (see `.nvmrc`; 24.15 or a
-  later 24.x release works as well)
+- Python 3.14 (see `.python-version`) and Node.js 26 or newer (see `.nvmrc`)
 - podman or docker for `make build`/`serve` (auto-detected, podman first)
 
 ### Quick Start
@@ -174,7 +173,7 @@ Files will still be processed and paths will be displayed, but:
 ### Multiple Directories
 
 You can process KML files from several files and directories at once.
-Directories are scanned non-recursively:
+Directories are scanned with their subdirectories:
 
 ```bash
 python -m kml_heatmap data/ data-new/ extra_flight.kml --output-dir combined
@@ -311,13 +310,14 @@ wrapper.
 kml-heatmap [--output-dir DIR] [--debug] [--version] path [path ...]
 ```
 
-- `path` - KML files and/or directories. Directories are scanned
-  non-recursively for `.kml` files (case-insensitive) and processed in numeric
-  order. `aircraft.json` is looked up in every input directory. A path that
-  does not exist is an error.
+- `path` - KML files and/or directories. Directories are scanned with their
+  subdirectories for `.kml` files (case-insensitive) and processed in numeric
+  order per directory. `aircraft.json` is looked up in every input directory.
+  A path that does not exist is an error.
 - `--output-dir DIR` - Output directory (default: `docs`). The tool refuses to
-  run if the output `data/` directory would be an input directory or contain
-  one. An output directory below the input directory is fine, so
+  run if the output directory is the directory of an input file or contains
+  one, or is a directory it must never clean out (`/`, the home directory).
+  An output directory below the input directory is fine, so
   `kml-heatmap flight.kml` in the file's directory writes to `./docs/`.
 - `--debug` - Show debug output
 - `--version` - Show the version and exit
@@ -656,7 +656,8 @@ keep their traces in `test-results/`, and every run writes an HTML report to
 - **Production**: Minified bundle for optimal performance; the build fails
   when it exceeds the size budget in `build.js`
 - **Development**: Unminified for debugging
-- Both write a source map next to the bundle
+- Both write a source map next to the bundle; it holds the mappings and file
+  names only, not the TypeScript sources
 
 The bundle in `kml_heatmap/static/` (`mapApp.bundle.js` and its `.map` file)
 is gitignored and created by `npm run build`.

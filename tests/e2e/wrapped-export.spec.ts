@@ -3,8 +3,10 @@ import {
   gotoApp,
   knownYears,
   openWrapped,
+  readSavedState,
   settleAnimations,
   waitForAircraftFilter,
+  waitForAppReady,
   waitForYearFilter,
 } from "./helpers";
 
@@ -182,6 +184,55 @@ test.describe("Wrapped and Export", () => {
     await expect(mapEl).toBeVisible();
     await expect(mapEl).toHaveClass(/leaflet-container/);
     await expect(page.locator("#wrapped-map-container #map")).toHaveCount(0);
+  });
+
+  test("a reload with the dialog open keeps the user's view (regression)", async ({
+    page,
+  }) => {
+    const view = await page.evaluate(() => {
+      const map = window.mapApp!.map!;
+      map.setView([48.1, 11.6], 13, { animate: false });
+      return { center: map.getCenter(), zoom: map.getZoom() };
+    });
+    await expect
+      .poll(async () => (await readSavedState(page))["zoom"])
+      .toBe(view.zoom);
+
+    await openWrapped(page);
+
+    // The fitted overview is on the map, but the saved view is the user's:
+    // saved as it was, a reload reopened the dialog over the overview and
+    // closing it landed there
+    await expect
+      .poll(async () => (await readSavedState(page))["wrappedVisible"])
+      .toBe(true);
+    const saved = (await readSavedState(page)) as {
+      center: { lat: number; lng: number };
+      zoom: number;
+    };
+    expect(saved.zoom).toBe(view.zoom);
+    // Pixel-snapped by Leaflet, so close rather than equal
+    expect(saved.center.lat).toBeCloseTo(view.center.lat, 3);
+    expect(saved.center.lng).toBeCloseTo(view.center.lng, 3);
+
+    await page.reload();
+    await waitForAppReady(page);
+    const modal = page.locator("#wrapped-modal");
+    await expect(modal).toBeVisible({ timeout: 5000 });
+    await modal.locator(".close-btn").click();
+    await expect(modal).toBeHidden();
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const map = window.mapApp!.map!;
+          return { center: map.getCenter(), zoom: map.getZoom() };
+        }),
+      )
+      .toMatchObject({ zoom: view.zoom });
+    const after = await page.evaluate(() => window.mapApp!.map!.getCenter());
+    expect(after.lat).toBeCloseTo(view.center.lat, 3);
+    expect(after.lng).toBeCloseTo(view.center.lng, 3);
   });
 
   test("wrapped panel updates when year filter changes", async ({ page }) => {

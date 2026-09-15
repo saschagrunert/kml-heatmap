@@ -175,6 +175,23 @@ describe("appInitializer", () => {
       expect(app.pathSelection.selectPathsByAirport).toHaveBeenCalledTimes(1);
     });
 
+    it("selects the airport's paths on Enter, which Leaflet reports as keypress", () => {
+      createAirportMarkers(asMapApp(app), airports);
+      const marker = vi.mocked(L.marker).mock.results[0]!
+        .value as unknown as MockMarker;
+      const keypress = marker.on.mock.calls.find(
+        (c) => c[0] === "keypress",
+      )![1] as (e: unknown) => void;
+
+      keypress({ originalEvent: { key: "a" } });
+      expect(app.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
+
+      keypress({ originalEvent: { key: "Enter" } });
+      expect(app.pathSelection.selectPathsByAirport).toHaveBeenCalledWith(
+        "Frankfurt EDDF",
+      );
+    });
+
     it("handles an empty list and missing names", () => {
       createAirportMarkers(asMapApp(app), []);
       expect(L.marker).not.toHaveBeenCalled();

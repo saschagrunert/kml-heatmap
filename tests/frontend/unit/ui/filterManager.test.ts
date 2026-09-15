@@ -9,6 +9,9 @@ import {
   type MockApp,
 } from "../../testHelpers";
 
+const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
+vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
+
 describe("FilterManager", () => {
   let filterManager: FilterManager;
   let mockApp: MockApp;
@@ -82,6 +85,7 @@ describe("FilterManager", () => {
     mockApp = createMockApp({ currentData: allYearsData() });
     mockApp.dataManager.loadData.mockResolvedValue(allYearsData());
     filterManager = new FilterManager(asMapApp(mockApp));
+    toastMock.showToast.mockClear();
   });
 
   afterEach(() => {
@@ -141,6 +145,33 @@ describe("FilterManager", () => {
 
       expect(mockApp.selectedAircraft).toBe("all");
       expect(aircraftSelect().value).toBe("all");
+      // Said out loud: the recipient of a shared link would otherwise see
+      // every aircraft without knowing that the link's filter was dropped
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "D-NONEXISTENT has no flights in the loaded years, showing all aircraft",
+        "info",
+      );
+    });
+
+    it("names the year the aircraft did not fly in", () => {
+      mockApp.selectedYear = "2024";
+      mockApp.selectedAircraft = "D-EFGH";
+
+      filterManager.updateAircraftDropdown();
+
+      expect(mockApp.selectedAircraft).toBe("all");
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "D-EFGH has no flights in 2024, showing all aircraft",
+        "info",
+      );
+    });
+
+    it("says nothing when the selection is kept or was 'all'", () => {
+      filterManager.updateAircraftDropdown();
+      mockApp.selectedAircraft = "D-ABCD";
+      filterManager.updateAircraftDropdown();
+
+      expect(toastMock.showToast).not.toHaveBeenCalled();
     });
 
     it("preserves current selection if it exists in filtered list", () => {
@@ -290,6 +321,8 @@ describe("FilterManager", () => {
       mockApp.dataManager.loadData.mockResolvedValue(null);
       const listener = vi.fn();
       mockApp.store.subscribe("selectedYear", listener);
+      const sheet = { refresh: vi.fn() };
+      mockApp.mobileBar = { sheet } as unknown as MockApp["mobileBar"];
 
       await filterManager.filterByYear();
 
@@ -299,6 +332,9 @@ describe("FilterManager", () => {
       expect(mockApp.currentData).toBe(previous);
       expect(listener).not.toHaveBeenCalled();
       expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
+      // The Filter sheet mirrors the dropdown, not the store, which did not
+      // change; without this it kept showing the year that failed
+      expect(sheet.refresh).toHaveBeenCalledTimes(1);
     });
 
     it("discards stale completions when a newer year change arrives", async () => {

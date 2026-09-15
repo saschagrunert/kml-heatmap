@@ -212,6 +212,18 @@ describe("statistics calculations", () => {
       ]);
     });
 
+    it("takes the type from a later path when the first has none", () => {
+      const aircraft = aggregateAircraft([
+        { id: 1, aircraft_registration: "D-EAGJ" },
+        { id: 2, aircraft_registration: "D-EAGJ", aircraft_type: "DA40" },
+        { id: 3, aircraft_registration: "D-EAGJ", aircraft_type: "DA42" },
+      ]);
+
+      expect(aircraft).toHaveLength(1);
+      expect(aircraft[0]!.type).toBe("DA40");
+      expect(aircraft[0]!.flights).toBe(3);
+    });
+
     it("handles paths without aircraft and empty input", () => {
       expect(aggregateAircraft([{ id: 1 }, { id: 2 }])).toHaveLength(0);
       expect(aggregateAircraft([])).toHaveLength(0);

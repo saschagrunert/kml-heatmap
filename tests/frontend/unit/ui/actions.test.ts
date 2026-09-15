@@ -20,13 +20,11 @@ const BUTTON_ACTIONS = [
   "shareLink",
   "showWrapped",
   "closeWrapped",
-  "closeWrappedBackdrop",
   "toggleIsolateSelection",
   "playReplay",
   "pauseReplay",
   "stopReplay",
   "toggleAutoZoom",
-  "stopPropagation",
   "unknownAction",
 ];
 
@@ -131,28 +129,15 @@ describe("bindActions", () => {
   it("binds the Wrapped dialog", () => {
     elements["showWrapped"]!.click();
     elements["closeWrapped"]!.click();
-    elements["closeWrappedBackdrop"]!.click();
 
     expect(app.wrappedManager.showWrapped).toHaveBeenCalledTimes(1);
-    expect(app.wrappedManager.closeWrapped).toHaveBeenCalledTimes(2);
-    expect(app.wrappedManager.closeWrapped).toHaveBeenLastCalledWith(
-      expect.any(MouseEvent),
-    );
+    expect(app.wrappedManager.closeWrapped).toHaveBeenCalledTimes(1);
   });
 
   it("binds the isolate toggle", () => {
     elements["toggleIsolateSelection"]!.click();
 
     expect(app.pathSelection.toggleIsolateSelection).toHaveBeenCalledTimes(1);
-  });
-
-  it("stops propagation for stopPropagation actions", () => {
-    const event = new MouseEvent("click", { bubbles: true });
-    const stop = vi.spyOn(event, "stopPropagation");
-
-    elements["stopPropagation"]!.dispatchEvent(event);
-
-    expect(stop).toHaveBeenCalled();
   });
 
   it("ignores unknown actions", () => {

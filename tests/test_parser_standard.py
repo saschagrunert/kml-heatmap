@@ -34,12 +34,32 @@ class TestProcessStandardCoordinates:
     def test_empty_text_skipped(self):
         assert _run([_elem("   ")]) == ([], [], [])
 
-    def test_single_point(self):
+    def test_single_point_is_no_path(self):
+        """A waypoint would otherwise register an airport at its position."""
         coordinates, path_groups, path_metadata = _run([_elem("8.5,50.0,100.0")])
         assert coordinates == [TrackPoint(50.0, 8.5, 100.0, None)]
-        assert path_groups == [[TrackPoint(50.0, 8.5, 100.0, None)]]
+        assert path_groups == []
+        assert path_metadata == []
+
+    def test_two_points_form_a_path(self):
+        coordinates, path_groups, path_metadata = _run(
+            [_elem("8.5,50.0,100.0 8.6,50.1,150.0")]
+        )
+        assert path_groups == [coordinates]
         assert path_metadata[0]["start_point"] == [50.0, 8.5, 100.0]
         assert path_metadata[0]["filename"] == "test.kml"
+
+    def test_space_after_comma_is_tolerated(self):
+        """Google Earth accepts "lon, lat, alt" tuples; the split must not tear them."""
+        coordinates, path_groups, _ = _run(
+            [_elem("8.5, 50.0, 100.0\n8.6, 50.1,\t150.0 8.7,50.2,200.0")]
+        )
+        assert [(p.lat, p.lon, p.alt) for p in coordinates] == [
+            (50.0, 8.5, 100.0),
+            (50.1, 8.6, 150.0),
+            (50.2, 8.7, 200.0),
+        ]
+        assert path_groups == [coordinates]
 
     def test_multi_point_path(self):
         coordinates, path_groups, _ = _run(
@@ -50,13 +70,16 @@ class TestProcessStandardCoordinates:
 
     def test_invalid_coordinates_skipped(self):
         coordinates, path_groups, _ = _run(
-            [_elem("invalid 8.5,50.0,100.0 also-invalid")]
+            [_elem("invalid 8.5,50.0,100.0 also-invalid 8.6,50.1,150.0")]
         )
-        assert coordinates == [TrackPoint(50.0, 8.5, 100.0, None)]
+        assert coordinates == [
+            TrackPoint(50.0, 8.5, 100.0, None),
+            TrackPoint(50.1, 8.6, 150.0, None),
+        ]
         assert len(path_groups) == 1
 
     def test_metadata_lookup(self):
-        elem = _elem("8.5,50.0,100.0")
+        elem = _elem("8.5,50.0,100.0 8.6,50.1,150.0")
         metadata = {
             id(elem): {
                 "airport_name": "EDDS",
@@ -73,7 +96,7 @@ class TestProcessStandardCoordinates:
         assert path_metadata[0]["year"] == 2025
 
     def test_missing_metadata_uses_empty_defaults(self):
-        _, _, path_metadata = _run([_elem("8.5,50.0,100.0")])
+        _, _, path_metadata = _run([_elem("8.5,50.0,100.0 8.6,50.1,150.0")])
         empty = empty_placemark_metadata()
         assert path_metadata[0]["airport_name"] == ""
         assert path_metadata[0]["timestamp"] == empty["timestamp"]
@@ -85,7 +108,10 @@ class TestProcessStandardCoordinates:
 
     def test_multiple_elements(self):
         _, path_groups, path_metadata = _run(
-            [_elem("8.5,50.0,100.0"), _elem("9.0,51.0,200.0")]
+            [
+                _elem("8.5,50.0,100.0 8.6,50.1,150.0"),
+                _elem("9.0,51.0,200.0 9.1,51.1,250.0"),
+            ]
         )
         assert len(path_groups) == 2
         assert len(path_metadata) == 2
@@ -112,7 +138,7 @@ class TestProcessStandardCoordinates:
     def test_aircraft_info_of_the_file_is_used(self):
         coordinates, path_groups, path_metadata = [], [], []
         process_standard_coordinates(
-            [_elem("8.5,50.0,100.0")],
+            [_elem("8.5,50.0,100.0 8.6,50.1,150.0")],
             {},
             "whatever.kml",
             coordinates,
@@ -123,11 +149,13 @@ class TestProcessStandardCoordinates:
         assert path_metadata[0]["aircraft_registration"] == "D-EAGJ"
         assert path_metadata[0]["aircraft_type"] == "DA20"
 
-    def test_invalid_altitude_point_excluded_from_path(self):
+    def test_invalid_altitude_point_excluded_from_path(self, capsys):
         coordinates, path_groups, _ = _run([_elem("8.5,50.0,999999 8.6,50.1,150.0")])
         assert len(coordinates) == 2
         assert coordinates[0].alt is None
-        assert path_groups == [[TrackPoint(50.1, 8.6, 150.0, None)]]
+        # One usable altitude is no path, and the line is reported as ignored
+        assert path_groups == []
+        assert "1 line(s) without usable altitudes" in capsys.readouterr().err
 
     def test_negative_altitude_kept(self):
         _, path_groups, _ = _run([_elem("8.5,50.0,-50 8.6,50.1,150.0")])

@@ -218,6 +218,8 @@ export function aggregateAircraft(
       };
       aircraftMap[reg] = entry;
       entry.flights += 1;
+      // Mixed sources: a later path may carry the type the first one lacks
+      entry.type ??= path.aircraft_type;
     }
   }
 

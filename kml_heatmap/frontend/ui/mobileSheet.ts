@@ -167,13 +167,19 @@ export class MobileSheet {
    * sheet and returns to the opener when it closes.
    */
   openWith(title: string, rows: SheetRow[], onClose?: () => void): void {
+    // Read before a previous sheet closes, which hands focus to that
+    // sheet's own opener. A tap that left focus inside the sheet (the tabs
+    // stay reachable while it is open) keeps that earlier opener.
+    const active = document.activeElement;
+    const opener =
+      active instanceof HTMLElement && !this.root.contains(active)
+        ? active
+        : this.returnFocusTo;
     if (this.open) this.close();
     this.titleEl.textContent = title;
     this.renderRows(rows);
     this.closeCallback = onClose ?? null;
-
-    const active = document.activeElement;
-    this.returnFocusTo = active instanceof HTMLElement ? active : null;
+    this.returnFocusTo = opener;
 
     this.scrim.hidden = false;
     this.root.hidden = false;
@@ -382,9 +388,13 @@ export class MobileSheet {
   private applySelect(spec: SheetSelectRow, select: HTMLSelectElement): void {
     const source = document.getElementById(spec.sourceId);
     if (!(source instanceof HTMLSelectElement)) return;
-    if (source.value === select.value) return;
-    source.value = select.value;
-    source.dispatchEvent(new Event("change", { bubbles: true }));
+    if (source.value !== select.value) {
+      source.value = select.value;
+      source.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    // Read back either way: the row may still show a choice the page put
+    // back (a year that failed to load), and picking the page's value again
+    // is how the user corrects it
     this.refresh();
   }
 

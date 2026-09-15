@@ -7,8 +7,8 @@ from pathlib import Path
 
 from . import __version__
 from .exceptions import KMLHeatmapError
-from .helpers import numeric_filename_key
 from .logger import logger, set_debug_mode
+from .validation import find_kml_files
 
 # Obfuscation violations listed per file before the rest are summarized
 MAX_REPORTED_VIOLATIONS = 5
@@ -23,10 +23,12 @@ def _fatal(message: str) -> None:
 def _collect_kml_files(paths: list[str]) -> list[str]:
     """Resolve KML files from file and directory arguments.
 
-    A file named more than once (directly, or through its directory) is
-    processed once; it would otherwise be counted twice in every statistic.
-    Paths are normalized but symlinks are not followed: a symlink is rejected
-    by the validation later and must not shadow its target here.
+    A directory is searched with its subdirectories (see ``find_kml_files``,
+    which the obfuscation check uses as well). A file named more than once
+    (directly, or through its directory) is processed once; it would otherwise
+    be counted twice in every statistic. Paths are normalized but symlinks are
+    not followed: a symlink is rejected by the validation later and must not
+    shadow its target here.
     """
     kml_files: list[str] = []
     seen: set[str] = set()
@@ -42,10 +44,7 @@ def _collect_kml_files(paths: list[str]) -> list[str]:
     for path in paths:
         p = Path(path)
         if p.is_dir():
-            dir_kml_files = sorted(
-                (str(p / f.name) for f in p.iterdir() if f.suffix.lower() == ".kml"),
-                key=numeric_filename_key,
-            )
+            dir_kml_files = [str(f) for f in find_kml_files(p)]
             if dir_kml_files:
                 for kml_file in dir_kml_files:
                     add(kml_file)
@@ -120,7 +119,7 @@ def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
         if not violations:
             continue
         failed = True
-        logger.error("Still contains real dates: %s", path)
+        logger.error("Not obfuscated: %s", path)
         for violation in violations[:MAX_REPORTED_VIOLATIONS]:
             logger.error("  %s", violation)
         if len(violations) > MAX_REPORTED_VIOLATIONS:
@@ -156,7 +155,7 @@ def _generate(paths: list[str], output_dir: Path) -> None:
 
     # Both are checked again inside create_progressive_heatmap, which is
     # public API; checking here stops before the inputs are rewritten
-    is_safe, error_msg = validate_output_dir(data_dir, [*kml_files, *aircraft_files])
+    is_safe, error_msg = validate_output_dir(output_dir, [*kml_files, *aircraft_files])
     if not is_safe:
         _fatal(error_msg or "Unsafe output directory")
     if not BUNDLE_FILE.is_file():
@@ -199,10 +198,11 @@ replaced. Charterware files are renamed to January 1st as well
 (2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml becomes 2026-01-01_0000h_...). Keep a
 copy of the originals if you need the real dates.
 
-The output data directory (<output-dir>/data) must not be the directory of
-an input file, or contain one. An output directory below the input directory
-(such as the default, docs) is fine. A run that fails while generating the
-site leaves the previous site in the output directory untouched.
+The output directory must not be the directory of an input file, or contain
+one: the tool replaces and removes its own files in there. An output
+directory below the input directory (such as the default, docs) is fine. A
+run that fails while generating the site leaves the previous site in the
+output directory untouched.
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

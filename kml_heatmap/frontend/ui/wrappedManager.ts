@@ -115,6 +115,16 @@ export class WrappedManager {
   private savedView: { center: LatLng; zoom: number } | null = null;
   private unsubscribeData: () => void;
 
+  /**
+   * The user's own map view while the dialog holds the map fitted to all
+   * the data, null otherwise. The state manager saves this one: with the
+   * fitted view in the URL and in storage, a reload or a shared link landed
+   * on the overview once the dialog was closed.
+   */
+  userMapView(): { center: LatLng; zoom: number } | null {
+    return this.savedView;
+  }
+
   constructor(app: MapApp) {
     this.app = app;
     this.originalMapParent = null;
@@ -462,62 +472,60 @@ export class WrappedManager {
     this.inertObserver = null;
   }
 
-  closeWrapped(event?: MouseEvent): void {
-    if (!event || (event.target as HTMLElement).id === "wrapped-modal") {
-      this.cancelPendingMapTimers();
-      this.cardsScrollCleanup?.();
-      this.cardsScrollCleanup = null;
-      // Move map back to original position
-      const mapContainer = domCache.get("map");
-      if (!mapContainer) return;
+  closeWrapped(): void {
+    this.cancelPendingMapTimers();
+    this.cardsScrollCleanup?.();
+    this.cardsScrollCleanup = null;
+    // Move map back to original position
+    const mapContainer = domCache.get("map");
+    if (!mapContainer) return;
 
-      if (this.originalMapParent && this.originalMapIndex !== null) {
-        const children = Array.from(this.originalMapParent.children);
-        if (this.originalMapIndex >= children.length) {
-          this.originalMapParent.appendChild(mapContainer);
-        } else {
-          const refChild = children[this.originalMapIndex];
-          if (refChild) {
-            this.originalMapParent.insertBefore(mapContainer, refChild);
-          }
+    if (this.originalMapParent && this.originalMapIndex !== null) {
+      const children = Array.from(this.originalMapParent.children);
+      if (this.originalMapIndex >= children.length) {
+        this.originalMapParent.appendChild(mapContainer);
+      } else {
+        const refChild = children[this.originalMapIndex];
+        if (refChild) {
+          this.originalMapParent.insertBefore(mapContainer, refChild);
         }
-
-        // Restore map styling
-        mapContainer.style.width = "";
-        mapContainer.style.height = "";
-        mapContainer.style.borderRadius = "";
-        mapContainer.style.overflow = "";
-
-        // Restore controls to their pre-wrapped display states
-        restoreControls(this.savedControlDisplays);
-        this.savedControlDisplays.clear();
-
-        // Force map to recalculate size once it is back in the page layout,
-        // then put the user's view back. The move this fires is what saves
-        // the view to the URL again.
-        this.mapRestoreTimer = setTimeout(() => {
-          this.mapRestoreTimer = null;
-          const view = this.savedView;
-          this.savedView = null;
-          if (!this.app.map) return;
-          this.app.map.invalidateSize();
-          if (view) {
-            this.app.map.setView(view.center, view.zoom, { animate: false });
-          }
-        }, MAP_RESTORE_DELAY_MS);
       }
 
-      const modal = domCache.get("wrapped-modal");
-      if (modal) modal.style.display = "none";
-      this.setWrappedVisible(false);
+      // Restore map styling
+      mapContainer.style.width = "";
+      mapContainer.style.height = "";
+      mapContainer.style.borderRadius = "";
+      mapContainer.style.overflow = "";
 
-      // Remove Escape key handler
-      if (this.escapeHandler) {
-        document.removeEventListener("keydown", this.escapeHandler);
-        this.escapeHandler = null;
-      }
+      // Restore controls to their pre-wrapped display states
+      restoreControls(this.savedControlDisplays);
+      this.savedControlDisplays.clear();
 
-      this.releaseFocus();
+      // Force map to recalculate size once it is back in the page layout,
+      // then put the user's view back. The move this fires is what saves
+      // the view to the URL again.
+      this.mapRestoreTimer = setTimeout(() => {
+        this.mapRestoreTimer = null;
+        const view = this.savedView;
+        this.savedView = null;
+        if (!this.app.map) return;
+        this.app.map.invalidateSize();
+        if (view) {
+          this.app.map.setView(view.center, view.zoom, { animate: false });
+        }
+      }, MAP_RESTORE_DELAY_MS);
     }
+
+    const modal = domCache.get("wrapped-modal");
+    if (modal) modal.style.display = "none";
+    this.setWrappedVisible(false);
+
+    // Remove Escape key handler
+    if (this.escapeHandler) {
+      document.removeEventListener("keydown", this.escapeHandler);
+      this.escapeHandler = null;
+    }
+
+    this.releaseFocus();
   }
 }

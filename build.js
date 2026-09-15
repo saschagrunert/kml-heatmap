@@ -28,8 +28,11 @@ const buildBanner = makeBanner(sourceHash);
 const sharedBuildOptions = {
   bundle: true,
   format: "iife",
-  // Always emit a .map file next to the bundle (linked via sourceMappingURL)
+  // Always emit a .map file next to the bundle (linked via sourceMappingURL).
+  // It carries the mappings and file names only: the TypeScript sources
+  // stay out of the site, the container and the wheel alike.
   sourcemap: "linked",
+  sourcesContent: false,
   target: ["es2022"],
   platform: "browser",
   logLevel: "info",
@@ -171,7 +174,8 @@ function analyzeBundleSizes() {
   } catch (error) {
     console.error("  ❌ Could not analyze the bundle size:", error.message);
     console.log("─".repeat(60));
-    return true; // Don't fail on missing files
+    // A bundle that cannot be measured cannot be within budget either
+    return false;
   }
 }
 

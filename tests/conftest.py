@@ -14,6 +14,14 @@ import time
 from pathlib import Path
 
 import pytest
+from hypothesis import settings
+
+# The functions under property tests take microseconds, but a GC pause or a
+# busy CI runner (the suite runs under xdist) can still trip the default
+# 200 ms deadline and report a flaky test; without it Hypothesis only
+# reports failing examples.
+settings.register_profile("no-deadline", deadline=None)
+settings.load_profile("no-deadline")
 
 _TEST_CACHE_DIR: Path | None = None
 

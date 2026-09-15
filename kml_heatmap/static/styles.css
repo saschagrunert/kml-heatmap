@@ -563,6 +563,14 @@ body {
   opacity: var(--heatmap-dimmed-opacity);
 }
 
+/* The heat canvas shares the overlay pane with the canvas the coloured paths
+   are drawn on, and Leaflet gives both the same z-index, so the one added
+   last would paint on top: after a heatmap toggle or a replay the bloom
+   covered the paths. The heat canvas stays underneath. */
+.leaflet-overlay-pane .leaflet-heatmap-layer {
+  z-index: 99;
+}
+
 /* Set by AirportManager.declutterLabels() on the labels that would be drawn
    over an already placed one. The marker dot stays; only the code is hidden. */
 .airport-label-crowded {

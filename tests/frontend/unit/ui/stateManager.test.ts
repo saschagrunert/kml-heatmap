@@ -207,6 +207,23 @@ describe("StateManager", () => {
   });
 
   describe("saveMapState", () => {
+    it("saves the user's own view while Wrapped has the map fitted", () => {
+      // With the fitted overview saved, a reload or a shared link landed on
+      // the overview once the dialog was closed
+      mockApp.wrappedManager.userMapView.mockReturnValue({
+        center: { lat: 48.1, lng: 11.6 },
+        zoom: 13,
+      });
+
+      stateManager.saveMapState();
+
+      expect(savedState()).toMatchObject({
+        center: { lat: 48.1, lng: 11.6 },
+        zoom: 13,
+      });
+      expect(mockApp.map!.getCenter).not.toHaveBeenCalled();
+    });
+
     it("saves current state to localStorage and the URL", () => {
       mockApp.selectedYear = "2025";
       mockApp.selectedPathIds.add(1);

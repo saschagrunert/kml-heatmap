@@ -273,7 +273,9 @@ describe("MapApp", () => {
         app as unknown as {
           wrappedRestoreTimer: ReturnType<typeof setTimeout> | null;
         }
-      ).wrappedRestoreTimer = setTimeout(() => showWrapped(), 500);
+      ).wrappedRestoreTimer = setTimeout(() => {
+        showWrapped();
+      }, 500);
 
       app.destroy();
       vi.advanceTimersByTime(1000);

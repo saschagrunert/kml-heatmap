@@ -559,6 +559,32 @@ describe("MobileBar", () => {
       expect(hint.textContent).toBe("Select one flight with timing data");
     });
 
+    it("repeats what the map's attribution control says", () => {
+      // The control is hidden below the breakpoint, and the OpenAIP credit
+      // comes and goes with its layer
+      const control = document.createElement("div");
+      control.className = "leaflet-control-attribution";
+      control.innerHTML =
+        '&copy; OpenStreetMap contributors, &copy; CARTO, &copy; <a href="#">OpenAIP</a>';
+      document.body.append(control);
+      dismissSheet();
+      tab("more").click();
+
+      const hint = document.querySelector<HTMLElement>(
+        '[data-row="attribution"] .sheet-row-hint',
+      )!;
+      expect(hint.textContent).toBe(
+        "© OpenStreetMap contributors, © CARTO, © OpenAIP",
+      );
+    });
+
+    it("credits the base map when there is no attribution control", () => {
+      const hint = document.querySelector<HTMLElement>(
+        '[data-row="attribution"] .sheet-row-hint',
+      )!;
+      expect(hint.textContent).toBe("© OpenStreetMap contributors, © CARTO");
+    });
+
     it("starts replay from the sheet", () => {
       document.querySelector<HTMLElement>('[data-row="replay"]')!.click();
 
