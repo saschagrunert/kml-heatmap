@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Check that the hashed lock files still satisfy pyproject.toml, and that the
-pre-commit hooks run the tool versions the lock files and CI pin.
+"""Check that the hashed lock files still satisfy pyproject.toml, that the
+pre-commit hooks run the tool versions the lock files and CI pin, and that the
+package version is the same on both sides of the project.
 
 Dependabot raises the ranges in pyproject.toml but cannot recompile the
 lock files, and CI installs the lock files. Without this check such a pull
 request passes CI while testing the old versions. The ruff, prettier and
 typos hooks in .pre-commit-config.yaml mirror requirements-test.lock,
 package-lock.json and the typos action in the test workflow; a hook that
-drifts ahead rewrites files CI then rejects, or the other way round. Run by
+drifts ahead rewrites files CI then rejects, or the other way round. The
+version in kml_heatmap/__init__.py is what `--version` and the wheel report
+and the one in package.json what the npm side carries; nothing reads both, so
+they drift apart unnoticed until a release says two different things. Run by
 `make lint` and the CI lint job.
 """
 
@@ -28,6 +32,8 @@ HOOK_REV = re.compile(
 )
 # "uses: crate-ci/typos@<sha> # v1.2.3": the version is the comment
 TYPOS_ACTION = re.compile(r"uses:\s*crate-ci/typos@\S+\s*#\s*v?(\S+)")
+# The __version__ assignment at the top of kml_heatmap/__init__.py
+PACKAGE_VERSION = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
 
 HOOKS = {
     "https://github.com/astral-sh/ruff-pre-commit": "ruff",
@@ -55,6 +61,36 @@ def read_typos_action_version() -> str | None:
     text = (ROOT / ".github/workflows/test.yml").read_text(encoding="utf-8")
     match = TYPOS_ACTION.search(text)
     return match.group(1) if match else None
+
+
+def read_python_version() -> str | None:
+    """The version kml_heatmap/__init__.py declares."""
+    text = (ROOT / "kml_heatmap/__init__.py").read_text(encoding="utf-8")
+    match = PACKAGE_VERSION.search(text)
+    return match.group(1) if match else None
+
+
+def read_package_json_version() -> str | None:
+    """The version package.json declares."""
+    with open(ROOT / "package.json", encoding="utf-8") as f:
+        version = json.load(f).get("version")
+    return str(version) if version else None
+
+
+def version_mismatches() -> list[str]:
+    """Describe a package version that differs between Python and npm."""
+    python_version = read_python_version()
+    npm_version = read_package_json_version()
+    if python_version is None:
+        return ["kml_heatmap/__init__.py declares no __version__"]
+    if npm_version is None:
+        return ["package.json declares no version"]
+    if python_version != npm_version:
+        mismatch = (
+            f"kml_heatmap/__init__.py is {python_version}, package.json {npm_version}"
+        )
+        return [mismatch]
+    return []
 
 
 def hook_mismatches(test_pins: dict[str, str]) -> list[str]:
@@ -127,11 +163,15 @@ def main() -> int:
     ]
 
     hook_problems = hook_mismatches(test_pins)
+    version_problems = version_mismatches()
 
-    if not problems and not hook_problems:
-        print("The lock files satisfy pyproject.toml and the hooks match them.")
+    if not problems and not hook_problems and not version_problems:
+        print(
+            "The lock files satisfy pyproject.toml, the hooks match them and "
+            "the package version agrees."
+        )
         return 0
-    for problem in problems + hook_problems:
+    for problem in problems + hook_problems + version_problems:
         print(f"error: {problem}", file=sys.stderr)
     if problems:
         print(
@@ -143,6 +183,11 @@ def main() -> int:
         print(
             "Set the rev of each hook in .pre-commit-config.yaml to the version "
             "its source pins.",
+            file=sys.stderr,
+        )
+    if version_problems:
+        print(
+            "Set the same version in kml_heatmap/__init__.py and package.json.",
             file=sys.stderr,
         )
     return 1

@@ -317,7 +317,7 @@ describe("statistics calculations", () => {
       expect(stats.gain).toBeCloseTo(500, 6);
     });
 
-    it("resets the altitude gain at path boundaries (backend parity)", () => {
+    it("resets the altitude gain at path boundaries", () => {
       const segments: PathSegment[] = [
         { path_id: 1, altitude_ft: FT(1000) },
         { path_id: 1, altitude_ft: FT(1200) }, // +200

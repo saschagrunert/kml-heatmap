@@ -36,8 +36,8 @@ container is involved:
 ```bash
 make lint            # lock and hook pins, ruff (check and format), mypy, bandit, tsc (frontend and tests), eslint, prettier, typos
 make format          # ruff format, prettier
-make test            # vitest and pytest with coverage; pytest flags are in README.md
-npm run test:e2e     # Playwright: desktop, mobile and WebKit (see README.md)
+make test            # vitest and pytest with coverage; pytest flags are in DEVELOPMENT.md
+npm run test:e2e     # Playwright: desktop, mobile and WebKit (see DEVELOPMENT.md)
 make check-obfuscation
 make lock            # regenerates the Python lock files after changing pyproject.toml
 ```

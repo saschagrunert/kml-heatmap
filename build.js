@@ -141,6 +141,8 @@ function analyzeBundleComposition(metafile, bundleName) {
 // Size budget of the minified bundle in bytes. Every production build checks
 // it, so every CI job that builds the bundle enforces it. Raise it on purpose
 // when a change needs the room, not to make a build pass.
+// The stylesheet has a budget of its own, in tests/test_asset_budget.py: it is
+// minified by the Python side, not here.
 const BUDGET_APP = 115 * 1024;
 
 /**
