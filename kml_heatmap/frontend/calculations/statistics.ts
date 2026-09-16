@@ -566,8 +566,9 @@ export function calculateFilteredStatistics(options: {
     return seg.altitude_ft - groundLevelFt > CRUISE_ALTITUDE_THRESHOLD_FT;
   });
 
-  // Calculate weighted average speed (distance/time) instead of simple average
-  // This matches the Python backend calculation
+  // Weighted by distance (total distance over total time) rather than a
+  // plain mean of the segment speeds: segments differ in length, and a
+  // mean would let a burst of short ones outweigh the rest of the cruise
   let cruiseSpeed: number | undefined;
   if (cruiseSegments.length > 0) {
     let totalDistanceNm = 0;
@@ -592,8 +593,8 @@ export function calculateFilteredStatistics(options: {
       totalTimeHours > 0 ? totalDistanceNm / totalTimeHours : undefined;
   }
 
-  // Calculate most common cruise altitude
-  // Use 100ft bins to match Python backend
+  // Most common cruise altitude, in 100 ft bins: that is the precision the
+  // exported segment altitudes carry (see export_pipeline.py)
   let mostCommonCruiseAltitudeFt: number | undefined;
   let mostCommonCruiseAltitudeM: number | undefined;
   if (cruiseSegments.length > 0) {
@@ -606,7 +607,8 @@ export function calculateFilteredStatistics(options: {
         altitudeBuckets[bucketFt] = (altitudeBuckets[bucketFt] || 0) + 1;
       }
     }
-    // Most frequent bin wins; ties resolve to the lowest bin (backend parity)
+    // Most frequent bin wins; ties resolve to the lowest bin, so the figure
+    // does not move with the iteration order of the bins
     const mostCommonBucket = Object.entries(altitudeBuckets).sort(
       (a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0]),
     )[0];

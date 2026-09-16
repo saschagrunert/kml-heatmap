@@ -68,6 +68,12 @@ the ranges in `pyproject.toml` and agree on the shared pins. Dependabot bumps
 request with a hint to run `make lock`. `make lint` and the CI lint job run
 it.
 
+It also checks the versions that are written down in two places: the ruff,
+prettier and typos revs in `.pre-commit-config.yaml` against the lock files,
+`package-lock.json` and the typos action in the test workflow, and
+`__version__` in `kml_heatmap/__init__.py` against `version` in
+`package.json`.
+
 ## source-hash.js
 
 The content hash of `kml_heatmap/frontend/`. `build.js` writes it into the
