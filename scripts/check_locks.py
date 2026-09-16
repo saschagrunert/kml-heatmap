@@ -9,17 +9,19 @@ request passes CI while testing the old versions. The ruff, prettier and
 typos hooks in .pre-commit-config.yaml mirror requirements-test.lock,
 package-lock.json and the typos action in the test workflow; a hook that
 drifts ahead rewrites files CI then rejects, or the other way round. The
-version in kml_heatmap/__init__.py is what `--version` and the wheel report
-and the one in package.json what the npm side carries; nothing reads both, so
-they drift apart unnoticed until a release says two different things. Run by
-`make lint` and the CI lint job.
+version in kml_heatmap/__init__.py is what `--version` and the wheel report,
+and package.json and package-lock.json carry it again for the npm side;
+nothing reads all of them, so they drift apart unnoticed until a release says
+two different things. Run by `make lint` and the CI lint job.
 """
 
+import functools
 import json
 import re
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
@@ -48,10 +50,18 @@ def read_hook_revs() -> dict[str, str]:
     return {HOOKS[repo]: rev for repo, rev in HOOK_REV.findall(text) if repo in HOOKS}
 
 
+@functools.cache
+def read_package_lock() -> dict[str, Any]:
+    """package-lock.json, parsed once. Two checks below read it, and it is
+    the largest file this script opens. Callers only read the result."""
+    with open(ROOT / "package-lock.json", encoding="utf-8") as f:
+        lock: dict[str, Any] = json.load(f)
+    return lock
+
+
 def read_npm_version(name: str) -> str | None:
     """The version of a package pinned in package-lock.json."""
-    with open(ROOT / "package-lock.json", encoding="utf-8") as f:
-        packages = json.load(f)["packages"]
+    packages = read_package_lock()["packages"]
     version = packages.get(f"node_modules/{name}", {}).get("version")
     return str(version) if version else None
 
@@ -70,27 +80,44 @@ def read_python_version() -> str | None:
     return match.group(1) if match else None
 
 
-def read_package_json_version() -> str | None:
-    """The version package.json declares."""
+def npm_versions() -> dict[str, str | None]:
+    """The package version the npm files declare, by where it is written.
+
+    package-lock.json carries it twice, at the top level and in the entry of
+    the root package. npm writes both, so a bump by hand that only edits
+    package.json leaves them behind until the next install rewrites the lock,
+    where the change then turns up as noise in an unrelated pull request.
+    """
     with open(ROOT / "package.json", encoding="utf-8") as f:
-        version = json.load(f).get("version")
-    return str(version) if version else None
+        package = json.load(f)
+    lock = read_package_lock()
+    root_entry = lock.get("packages", {}).get("", {})
+    return {
+        "package.json": package.get("version"),
+        'package-lock.json "version"': lock.get("version"),
+        'package-lock.json packages[""]': root_entry.get("version"),
+    }
 
 
 def version_mismatches() -> list[str]:
-    """Describe a package version that differs between Python and npm."""
-    python_version = read_python_version()
-    npm_version = read_package_json_version()
-    if python_version is None:
+    """Describe every place the package version differs from __init__.py.
+
+    kml_heatmap/__init__.py is the one pyproject.toml reads (its version is
+    dynamic), so it is what the others have to agree with.
+    """
+    expected = read_python_version()
+    if expected is None:
         return ["kml_heatmap/__init__.py declares no __version__"]
-    if npm_version is None:
-        return ["package.json declares no version"]
-    if python_version != npm_version:
-        mismatch = (
-            f"kml_heatmap/__init__.py is {python_version}, package.json {npm_version}"
-        )
-        return [mismatch]
-    return []
+
+    problems = []
+    for source, version in npm_versions().items():
+        if version is None:
+            problems.append(f"{source} declares no version")
+        elif version != expected:
+            problems.append(
+                f"kml_heatmap/__init__.py is {expected}, {source} {version}"
+            )
+    return problems
 
 
 def hook_mismatches(test_pins: dict[str, str]) -> list[str]:
@@ -187,7 +214,8 @@ def main() -> int:
         )
     if version_problems:
         print(
-            "Set the same version in kml_heatmap/__init__.py and package.json.",
+            "Set the same version in kml_heatmap/__init__.py and package.json, "
+            "then run `npm install` to carry it into package-lock.json.",
             file=sys.stderr,
         )
     return 1
