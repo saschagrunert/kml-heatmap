@@ -191,7 +191,7 @@ export interface KMLDataset {
 /**
  * Map center coordinates
  */
-export interface MapCenter {
+interface MapCenter {
   lat: number;
   lng: number;
 }

@@ -176,7 +176,7 @@ const STROKE_FOR_SIZE: Record<number, string> = {
   24: "1.45",
 };
 
-export const ICON_SIZES = [16, 20, 24] as const;
+const ICON_SIZES = [16, 20, 24] as const;
 export type IconSize = (typeof ICON_SIZES)[number];
 
 /** Icon size of the dense desktop control rows */

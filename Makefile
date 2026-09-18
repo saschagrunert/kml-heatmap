@@ -1,5 +1,5 @@
 .PHONY: all build serve serve-build test lint format lock clean help
-.PHONY: check-obfuscation require-runtime
+.PHONY: check-obfuscation obfuscate require-runtime
 
 # API keys are read from the environment (or the make command line) and passed
 # into the build container by name only, so their values never show up in the
@@ -62,7 +62,7 @@ require-runtime:
 	  echo "error: no container runtime found; install podman or docker, or set CONTAINER_RUNTIME"; \
 	  exit 1; }
 
-build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR (obfuscates the input KML files in place)
+build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR (leaves the input KML files alone)
 	@test -d "$(INPUT_DIR)" || { \
 	  echo "error: input directory '$(INPUT_DIR)' not found; put your KML files there or run 'make build INPUT_DIR=path'"; \
 	  exit 1; }
@@ -96,6 +96,14 @@ serve: require-runtime ## Serve OUTPUT_DIR on http://HOST_BIND:PORT (run 'make b
 serve-build: build ## Run build, then serve
 	$(MAKE) serve
 
+# The generated site never carries a date finer than the year, so this is
+# about the KML files themselves: this repository commits the ones in data/,
+# and they must not carry real dates. Run it after adding new flights; the
+# pre-commit hook, `make check-obfuscation` and the `obfuscation` CI job fail
+# if you forget.
+obfuscate: ## Rewrite the KML files in INPUT_DIR in place so they carry no real dates (IRREVERSIBLE)
+	python -m kml_heatmap.obfuscate "$(INPUT_DIR)"
+
 check-obfuscation: ## Check that the KML files in INPUT_DIR are obfuscated
 	python -m kml_heatmap.obfuscate "$(INPUT_DIR)" --check
 
@@ -108,6 +116,7 @@ lint: ## Run the same linters, formatters (check only) and type checkers as the 
 	npm run typecheck
 	npm run typecheck:tests
 	npm run lint
+	npm run lint:unused
 	npm run format:check
 	@if command -v typos >/dev/null 2>&1; then typos; else \
 	  echo "note: typos is not installed, skipping the spell check (CI runs it)"; fi

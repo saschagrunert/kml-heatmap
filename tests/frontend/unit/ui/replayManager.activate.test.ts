@@ -829,6 +829,85 @@ describe("ReplayManager activation", () => {
     });
   });
 
+  describe("toggleAutoZoom", () => {
+    /** A replay in progress, with the aircraft away from the start */
+    function replayInProgress(position = { lat: 47.5, lng: 15.5 }) {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.initializeReplay();
+      replayManager.state.autoZoom = false;
+      replayManager.state.airplaneMarker = {
+        getLatLng: () => position,
+      } as unknown as typeof replayManager.state.airplaneMarker;
+      vi.mocked(mockApp.map!.setView).mockClear();
+      return position;
+    }
+
+    it("goes to the aircraft at the follow zoom when switched on", () => {
+      // The renderer only ever zooms out, so without this the control did
+      // nothing to the map until the flight left the viewport
+      const position = replayInProgress();
+
+      replayManager.toggleAutoZoom();
+
+      expect(mockApp.map!.setView).toHaveBeenCalledWith(
+        position,
+        16,
+        expect.objectContaining({ animate: true }),
+      );
+    });
+
+    it("arrives where a replay that started with it on would be", () => {
+      // Same zoom as initializeReplay uses, so the two agree
+      const zoomOfFirstSetView = (): unknown =>
+        vi.mocked(mockApp.map!.setView).mock.calls[0]?.[1];
+
+      replayInProgress();
+      replayManager.toggleAutoZoom();
+      const switchedOn = zoomOfFirstSetView();
+
+      replayManager.state.autoZoom = true;
+      vi.mocked(mockApp.map!.setView).mockClear();
+      replayManager.initializeReplay();
+
+      expect(switchedOn).toBe(zoomOfFirstSetView());
+    });
+
+    it("leaves the map alone when switched off", () => {
+      replayInProgress();
+      replayManager.toggleAutoZoom();
+      vi.mocked(mockApp.map!.setView).mockClear();
+
+      replayManager.toggleAutoZoom();
+
+      expect(replayManager.state.autoZoom).toBe(false);
+      expect(mockApp.map!.setView).not.toHaveBeenCalled();
+    });
+
+    it("does not animate for reduced motion", () => {
+      replayInProgress();
+      vi.spyOn(motion, "prefersReducedMotion").mockReturnValue(true);
+
+      replayManager.toggleAutoZoom();
+
+      expect(mockApp.map!.setView).toHaveBeenCalledWith(
+        expect.anything(),
+        16,
+        expect.objectContaining({ animate: false }),
+      );
+    });
+
+    it("does nothing without an aircraft on the map", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.state.airplaneMarker = null;
+      vi.mocked(mockApp.map!.setView).mockClear();
+
+      replayManager.toggleAutoZoom();
+
+      expect(replayManager.state.autoZoom).toBe(true);
+      expect(mockApp.map!.setView).not.toHaveBeenCalled();
+    });
+  });
+
   describe("hideOtherLayersDuringReplay", () => {
     it("does nothing without a map", () => {
       const map = mockApp.map!;

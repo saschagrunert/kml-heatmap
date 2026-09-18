@@ -21,7 +21,7 @@ import { MAX_ZOOM, MIN_ZOOM } from "../utils/constants";
 export const STATE_SCHEMA_VERSION = 4;
 
 /** The versions whose ids this build understands, newest last */
-export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [3, 4];
+const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [3, 4];
 
 /** The radix each supported version writes its path ids in */
 const PATH_ID_RADIX = new Map([
@@ -43,7 +43,7 @@ export function isSupportedSchemaVersion(version: unknown): boolean {
 }
 
 /** A path id as written in a link, or null when it is not one */
-export function parsePathId(text: string, radix: number): number | null {
+function parsePathId(text: string, radix: number): number | null {
   if (!text) return null;
   // parseInt stops at the first invalid digit, so the shape is checked first
   const valid = radix === 36 ? /^[0-9a-z]+$/ : /^[0-9]+$/;

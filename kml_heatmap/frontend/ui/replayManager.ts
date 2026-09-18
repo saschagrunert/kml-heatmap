@@ -25,9 +25,9 @@ import {
   updateReplayButtonState,
 } from "./replayButton";
 
-// Kept exported here: they were part of this module's surface before the
-// button state moved to replayButton.ts
-export { REPLAY_BUTTON_LABEL, REPLAY_PRECONDITION_MESSAGE };
+// Kept exported here: it was part of this module's surface before the button
+// state moved to replayButton.ts
+export { REPLAY_PRECONDITION_MESSAGE };
 
 const REPLAY_BUTTON_ACTIVE_LABEL = "Stop replay";
 const REPLAY_BUTTON_TEXT = "Replay";
@@ -53,6 +53,17 @@ export const REPLAY_PANEL_HEIGHT_VAR = "--replay-panel-h";
 
 /** Delay before the colour layers are redrawn after replay ends (ms) */
 const LAYER_REDRAW_DELAY_MS = 50;
+
+/**
+ * Zoom auto-zoom follows the aircraft at: close enough to read the ground it
+ * is over, far enough that the pan keeps up at the faster speeds. Used both
+ * when a replay opens with auto-zoom already on and when it is switched on
+ * part way through, so the two arrive at the same view.
+ */
+const AUTO_ZOOM_FOLLOW = 16;
+
+/** Seconds the view takes to reach the aircraft when auto-zoom is switched on */
+const AUTO_ZOOM_PAN_S = 0.8;
 
 /**
  * Longest wall-clock step a single frame may advance the replay by (ms).
@@ -493,14 +504,14 @@ export class ReplayManager {
 
     const animate = !prefersReducedMotion();
     if (this.state.autoZoom) {
-      this.app.map.setView([startCoords[0], startCoords[1]], 16, {
+      this.app.map.setView([startCoords[0], startCoords[1]], AUTO_ZOOM_FOLLOW, {
         animate,
-        duration: 0.8,
+        duration: AUTO_ZOOM_PAN_S,
       });
     } else {
       this.app.map.panTo([startCoords[0], startCoords[1]], {
         animate,
-        duration: 0.8,
+        duration: AUTO_ZOOM_PAN_S,
       });
     }
   }
@@ -730,6 +741,26 @@ export class ReplayManager {
   toggleAutoZoom(): void {
     this.state.autoZoom = !this.state.autoZoom;
     this.updateAutoZoomButton();
+    if (this.state.autoZoom) this.zoomToAircraft();
+  }
+
+  /**
+   * Go to the aircraft at the follow zoom, the view a replay that opened with
+   * auto-zoom already on starts at.
+   *
+   * Switching it on used to do nothing to the map. The renderer only ever
+   * zooms out, to catch an aircraft the pan has lost, so the control stayed
+   * silent until the flight left the viewport and then only widened the view:
+   * the one thing "auto-zoom" does not suggest. Turning it on now arrives at
+   * the same place as starting with it on, whatever the map was showing.
+   */
+  private zoomToAircraft(): void {
+    const position = this.state.airplaneMarker?.getLatLng();
+    if (!position || !this.app.map) return;
+    this.app.map.setView(position, AUTO_ZOOM_FOLLOW, {
+      animate: !prefersReducedMotion(),
+      duration: AUTO_ZOOM_PAN_S,
+    });
   }
 
   redrawReplayPath(mode: "altitude" | "airspeed"): void {

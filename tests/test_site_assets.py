@@ -231,7 +231,10 @@ class TestStaleBundleWarning:
         (frontend / "mapApp.ts").write_text("export {};")
         (frontend / "ui" / "a.ts").write_text("export const a = 1;")
         for name in assets_module.BUILD_HASH_FILES:
-            (tmp_path / name).write_text("{}")
+            # Some of them sit in subdirectories (the stylesheets)
+            path = tmp_path / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}")
         (tmp_path / "package-lock.json").write_text(
             json.dumps({"packages": {"node_modules/esbuild": {"version": "0.28.2"}}})
         )
@@ -275,12 +278,20 @@ class TestStaleBundleWarning:
 
         assert capsys.readouterr().err == ""
 
-    def test_the_build_files_are_part_of_the_hash(self, tmp_path, monkeypatch, bundle):
-        """A rebuild is needed when build.js or tsconfig.json changed, too."""
+    @pytest.mark.parametrize("name", assets_module.BUILD_HASH_FILES)
+    def test_the_build_files_are_part_of_the_hash(
+        self, tmp_path, monkeypatch, bundle, name
+    ):
+        """Every file outside the sources that shapes a built site counts.
+
+        The stylesheets are in there because the site renders them: without
+        them a stylesheet-only change left a built `docs/` looking current,
+        and the visual snapshots compared the old one.
+        """
         self._frontend(tmp_path, monkeypatch)
         before = assets_module._frontend_source_hash()
 
-        (tmp_path / "build.js").write_text("// a different build script")
+        (tmp_path / name).write_text("/* something else */")
 
         assert assets_module._frontend_source_hash() != before
 

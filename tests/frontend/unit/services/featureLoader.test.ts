@@ -1,12 +1,15 @@
 /**
- * The lazily loaded feature bundle.
+ * The lazily loaded feature bundle and the stylesheet that goes with it.
  *
  * Replay and Wrapped are a quarter of the frontend and most visits open
  * neither, so they are fetched on first use. A failure has to leave the rest
  * of the map working, and two callers arriving at once must not fetch twice.
+ * Both files have to arrive: a panel drawn without its stylesheet is worse
+ * than the toast a failed load produces.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
+  FEATURES_CSS_URL,
   FEATURES_URL,
   loadFeatures,
   resetFeatureLoader,
@@ -19,37 +22,83 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
 }));
 
 const loadScript = vi.hoisted(() => vi.fn());
+const loadStylesheet = vi.hoisted(() => vi.fn());
 vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
   loadScript,
+  loadStylesheet,
 }));
 
 const features = { ReplayManager: vi.fn(), WrappedManager: vi.fn() };
+
+/** A script load that publishes the bundle's exports, as the real one does */
+function bundleArrives(): void {
+  loadScript.mockImplementation(() => {
+    window.KMLFeatures = features;
+    return Promise.resolve();
+  });
+}
 
 describe("loadFeatures", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetFeatureLoader();
     delete window.KMLFeatures;
+    loadStylesheet.mockResolvedValue(undefined);
   });
 
   it("fetches the bundle next to the page and returns its exports", async () => {
-    loadScript.mockImplementation(() => {
-      window.KMLFeatures = features;
-      return Promise.resolve();
-    });
+    bundleArrives();
 
     await expect(loadFeatures()).resolves.toBe(features);
     expect(loadScript).toHaveBeenCalledWith(FEATURES_URL, expect.any(Number));
-    // A relative URL, so the page works from file:// too
+    // Relative URLs, so the page works from file:// too
     expect(FEATURES_URL.startsWith("./")).toBe(true);
+    expect(FEATURES_CSS_URL.startsWith("./")).toBe(true);
   });
 
-  it("does not fetch again once the bundle is there", async () => {
-    window.KMLFeatures = features;
+  it("fetches the stylesheet alongside the bundle", async () => {
+    bundleArrives();
+
+    await loadFeatures();
+
+    expect(loadStylesheet).toHaveBeenCalledWith(
+      FEATURES_CSS_URL,
+      expect.any(Number),
+    );
+  });
+
+  it("does not fetch again once both have arrived", async () => {
+    bundleArrives();
+    await loadFeatures();
+    vi.clearAllMocks();
 
     await expect(loadFeatures()).resolves.toBe(features);
 
     expect(loadScript).not.toHaveBeenCalled();
+    expect(loadStylesheet).not.toHaveBeenCalled();
+  });
+
+  it("resolves with null and reports when the stylesheet cannot be loaded", async () => {
+    bundleArrives();
+    loadStylesheet.mockRejectedValue(new Error("offline"));
+
+    await expect(loadFeatures()).resolves.toBeNull();
+
+    expect(logError).toHaveBeenCalled();
+  });
+
+  it("fetches both again when only the stylesheet failed", async () => {
+    // The script ran, so window.KMLFeatures is set even though the load as a
+    // whole failed; the next attempt must not take that for a finished load
+    bundleArrives();
+    loadStylesheet.mockRejectedValueOnce(new Error("offline"));
+    await expect(loadFeatures()).resolves.toBeNull();
+    expect(window.KMLFeatures).toBe(features);
+
+    await expect(loadFeatures()).resolves.toBe(features);
+
+    expect(loadScript).toHaveBeenCalledTimes(2);
+    expect(loadStylesheet).toHaveBeenCalledTimes(2);
   });
 
   it("shares one request between callers that arrive together", async () => {
@@ -89,10 +138,7 @@ describe("loadFeatures", () => {
     loadScript.mockRejectedValueOnce(new Error("offline"));
     await expect(loadFeatures()).resolves.toBeNull();
 
-    loadScript.mockImplementation(() => {
-      window.KMLFeatures = features;
-      return Promise.resolve();
-    });
+    bundleArrives();
 
     await expect(loadFeatures()).resolves.toBe(features);
     expect(loadScript).toHaveBeenCalledTimes(2);

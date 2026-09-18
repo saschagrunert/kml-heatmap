@@ -30,7 +30,7 @@ import type {
  * memoised on the segment. The value only depends on `coords`, which the
  * data loader never changes after expansion.
  */
-export function segmentDistance(segment: PathSegment): number {
+function segmentDistance(segment: PathSegment): number {
   const cached = segment.distance_km;
   if (cached !== undefined) return cached;
 
@@ -73,7 +73,7 @@ export function perPathSeconds(
 }
 
 /** Half-open index range `[start, end)` of one path within a segment array */
-export type SegmentRange = [start: number, end: number];
+type SegmentRange = [start: number, end: number];
 
 /** Path id to its range; null when the array is not grouped by path */
 export type SegmentRanges = Map<number, SegmentRange> | null;

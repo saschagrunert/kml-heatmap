@@ -318,6 +318,69 @@ class TestAircraftFiles:
         assert mock_create.call_args.kwargs["aircraft_files"] == []
 
 
+class TestInputsAreLeftAloneByDefault:
+    """Without --obfuscate-inputs the user's KML files are never written to.
+
+    The rewrite cannot be undone, and the generated site carries no date finer
+    than the year either way (tests/test_pipeline_golden.py pins that), so it
+    has to be asked for.
+    """
+
+    def test_input_file_is_not_rewritten(self, tmp_path):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        kml = input_dir / "flight.kml"
+        original = (
+            "<kml><Placemark><gx:Track>"
+            "<when>2025-03-03T08:25:15Z</when><gx:coord>12.0 51.5 100</gx:coord>"
+            "</gx:Track></Placemark></kml>"
+        )
+        kml.write_text(original)
+
+        _run([str(kml), "--output-dir", str(tmp_path / "out")])
+
+        assert kml.read_text() == original
+
+    def test_charterware_file_is_not_renamed(self, tmp_path):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        kml = input_dir / "2025-03-03_0825h_OE-AKI_LOAV-LOAV.kml"
+        kml.write_text(
+            "<kml><Placemark><gx:Track>"
+            "<when>2025-03-03T08:25:15Z</when><gx:coord>12.0 51.5 100</gx:coord>"
+            "</gx:Track></Placemark></kml>"
+        )
+
+        mock_create = _run([str(input_dir), "--output-dir", str(tmp_path / "out")])
+
+        assert kml.exists()
+        assert mock_create.call_args.args[0] == [str(kml)]
+
+    def test_obfuscation_is_not_even_attempted(self, workspace):
+        _, kml, out = workspace
+
+        with patch("kml_heatmap.obfuscate.obfuscate_kml_files") as mock_obfuscate:
+            _run([str(kml), "--output-dir", str(out)])
+
+        mock_obfuscate.assert_not_called()
+
+    def test_a_file_that_keeps_its_dates_does_not_fail_the_run(self, tmp_path):
+        """The fail-closed check belongs to the rewrite, not to the export."""
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        # A date in a place the rewrite does not reach, which would abort a
+        # run with --obfuscate-inputs (see TestObfuscationFailsClosed)
+        kml = input_dir / "2024-03-14 EDAQ.kml"
+        kml.write_text(
+            '<?xml version="1.0"?><kml><when>2024-03-14T10:00:00Z</when></kml>',
+            encoding="utf-8",
+        )
+
+        mock_create = _run([str(kml), "--output-dir", str(tmp_path / "out")])
+
+        assert mock_create.called
+
+
 class TestObfuscateFlag:
     def test_obfuscate_runs_before_processing(self, workspace):
         _, kml, out = workspace
@@ -328,7 +391,13 @@ class TestObfuscateFlag:
         with (
             patch(
                 "sys.argv",
-                ["kml-heatmap", str(kml), "--output-dir", str(out)],
+                [
+                    "kml-heatmap",
+                    "--obfuscate-inputs",
+                    str(kml),
+                    "--output-dir",
+                    str(out),
+                ],
             ),
             patch("kml_heatmap.renderer.create_progressive_heatmap", mock_create),
             patch(
@@ -349,6 +418,7 @@ class TestObfuscateFlag:
         with patch("kml_heatmap.obfuscate.obfuscate_kml_files") as mock_obfuscate:
             _run(
                 [
+                    "--obfuscate-inputs",
                     str(link),
                     str(empty),
                     str(kml),
@@ -369,7 +439,7 @@ class TestObfuscateFlag:
             "</gx:Track></Placemark></kml>"
         )
 
-        _run([str(kml), "--output-dir", str(tmp_path / "out")])
+        _run(["--obfuscate-inputs", str(kml), "--output-dir", str(tmp_path / "out")])
 
         assert "2025-01-01T08:25:15Z" in kml.read_text()
 
@@ -385,7 +455,14 @@ class TestObfuscateFlag:
             "</gx:Track></Placemark></kml>"
         )
 
-        mock_create = _run([str(input_dir), "--output-dir", str(tmp_path / "out")])
+        mock_create = _run(
+            [
+                "--obfuscate-inputs",
+                str(input_dir),
+                "--output-dir",
+                str(tmp_path / "out"),
+            ]
+        )
 
         renamed = input_dir / "2025-01-01_0000h_OE-AKI_LOAV-LOAV.kml"
         assert not kml.exists()
@@ -406,7 +483,14 @@ class TestMissingBundle:
         kml.write_text(original)
 
         with pytest.raises(SystemExit) as excinfo:
-            _run([str(input_dir), "--output-dir", str(tmp_path / "out")])
+            _run(
+                [
+                    "--obfuscate-inputs",
+                    str(input_dir),
+                    "--output-dir",
+                    str(tmp_path / "out"),
+                ]
+            )
 
         assert excinfo.value.code == 1
         assert "npm run build" in capsys.readouterr().err
@@ -428,7 +512,9 @@ class TestObfuscationFailsClosed:
         monkeypatch.setattr("kml_heatmap.obfuscate.obfuscate_kml_files", lambda _: 0)
 
         with pytest.raises(SystemExit) as excinfo:
-            _run([str(kml), "--output-dir", str(tmp_path / "out")])
+            _run(
+                ["--obfuscate-inputs", str(kml), "--output-dir", str(tmp_path / "out")]
+            )
         assert excinfo.value.code == 1
 
     def test_names_the_dates_it_could_not_remove(self, tmp_path, capsys):
@@ -442,7 +528,9 @@ class TestObfuscationFailsClosed:
         )
 
         with pytest.raises(SystemExit):
-            _run([str(kml), "--output-dir", str(tmp_path / "out")])
+            _run(
+                ["--obfuscate-inputs", str(kml), "--output-dir", str(tmp_path / "out")]
+            )
 
         err = capsys.readouterr().err
         assert "Not obfuscated: " in err
@@ -461,7 +549,9 @@ class TestObfuscationFailsClosed:
         )
 
         with pytest.raises(SystemExit):
-            _run([str(kml), "--output-dir", str(tmp_path / "out")])
+            _run(
+                ["--obfuscate-inputs", str(kml), "--output-dir", str(tmp_path / "out")]
+            )
 
         err = capsys.readouterr().err
         assert "2024-03-14" in err

@@ -142,7 +142,7 @@ export function createFlightHistory() {
 }
 
 /** The model names metadata.js carries for the aircraft of the history */
-export const aircraftModels = {
+const aircraftModels = {
   "D-ABCD": "Diamond DA40",
   "D-EFGH": "Cessna 172",
 };

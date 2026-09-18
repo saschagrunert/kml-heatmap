@@ -6,6 +6,11 @@
  * import it from here so the two can never hash differently. The build
  * script, the compiler options and the esbuild version shape the bundle as
  * much as the sources do, so they are part of the hash.
+ *
+ * The stylesheets are in it as well. They are not part of any bundle, but
+ * they are part of what a built site renders, and the visual snapshots
+ * compare exactly that: without them a stylesheet-only change left `docs/`
+ * stale and nothing said so.
  */
 
 import { createHash } from "node:crypto";
@@ -15,10 +20,13 @@ import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FRONTEND_DIR = join(REPO_ROOT, "kml_heatmap/frontend");
-/** Files outside the sources that change the bundle */
-const BUILD_FILES = ["build.js", "tsconfig.json"].map((name) =>
-  join(REPO_ROOT, name),
-);
+/** Files outside the sources that change what a built site renders */
+const BUILD_FILES = [
+  "build.js",
+  "tsconfig.json",
+  "kml_heatmap/static/styles.css",
+  "kml_heatmap/static/features.css",
+].map((name) => join(REPO_ROOT, name));
 
 /**
  * The esbuild version package-lock.json pins

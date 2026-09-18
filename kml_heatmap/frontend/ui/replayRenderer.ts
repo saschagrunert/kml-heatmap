@@ -123,7 +123,7 @@ export function zoomOutSteps(
  * Colour of one replay segment. Segments without a groundspeed fall back to
  * the altitude colour, so both draw paths cover exactly the same segments.
  */
-export function replaySegmentColor(
+function replaySegmentColor(
   state: ReplayState,
   segment: PathSegment,
   useAirspeedColors: boolean,

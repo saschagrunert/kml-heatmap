@@ -7,6 +7,7 @@ internally consistent.
 """
 
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 from pprint import pformat
 
@@ -14,6 +15,7 @@ import pytest
 
 from kml_heatmap.data_exporter import PATH_ID_BITS
 from kml_heatmap.geometry import haversine_distance
+from kml_heatmap.obfuscate import obfuscate_kml_files
 from kml_heatmap.renderer import create_progressive_heatmap
 from kml_heatmap.segment_codec import (
     COORDINATE_SCALE,
@@ -29,6 +31,11 @@ SEGMENT_MAX_LEN = 5
 
 
 PER_YEAR = 4
+
+# How far test_real_dates_export_exactly_like_obfuscated_ones moves the sample
+# flights off January 1st. Any whole number of days that stays inside the year
+# does; 137 is far enough that a date leaking into the export would be obvious.
+DATE_SHIFT_DAYS = 137
 
 # What the subset of data/ picked by _select_input_files exports, with the
 # fixture airport database of the tests. After an intended change to the
@@ -87,7 +94,8 @@ def _select_input_files(per_year=PER_YEAR):
 def _build_site(out, inputs):
     """Run the pipeline on ``inputs`` into ``out / "site"``.
 
-    Only the CLI obfuscates the input files, so data/ is safe to read here.
+    The pipeline never writes to its inputs (only the CLI does, and only with
+    --obfuscate-inputs), so data/ is safe to read here.
     """
     # The pipeline requires the bundle, which the Python tests do not build
     bundle = out / "static" / "mapApp.bundle.js"
@@ -281,3 +289,55 @@ def test_ids_survive_removing_an_input_file(golden_output, tmp_path):
     after = _observed_values(tmp_path / "site" / "data")["path_ids"]
     first_year = min(before)
     assert after == {**before, first_year: before[first_year][1:]}
+
+
+def _with_real_dates(source_files, destination):
+    """Copies of ``source_files`` with their dates moved off January 1st.
+
+    The committed files are obfuscated, so this undoes that for the test: it
+    shifts every flight by the same whole number of days, which is what a
+    recording with real dates looks like to the parser (the year and the time
+    of day are kept, and so are the intervals between the points).
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    shifted = []
+    for path in source_files:
+        text = path.read_text(encoding="utf-8")
+        moved = re.sub(
+            r"(\d{4})-01-01T(\d{2}:\d{2}:\d{2})",
+            lambda m: (
+                datetime.fromisoformat(f"{m.group(1)}-01-01T{m.group(2)}")
+                + timedelta(days=DATE_SHIFT_DAYS)
+            ).strftime("%Y-%m-%dT%H:%M:%S"),
+            text,
+        )
+        assert moved != text, f"no timestamp to shift in {path.name}"
+        copy = destination / path.name
+        copy.write_text(moved, encoding="utf-8")
+        shifted.append(copy)
+    return shifted
+
+
+def test_real_dates_export_exactly_like_obfuscated_ones(tmp_path):
+    """The site is the same whether or not the inputs were rewritten.
+
+    This is why ``--obfuscate-inputs`` is off by default: rewriting the user's
+    files in place buys the published site nothing, because the export drops
+    every absolute timestamp anyway. If this ever stops holding, the default
+    has to be reconsidered, not the assertion.
+    """
+    inputs, _ = _select_input_files()
+    with_dates = _with_real_dates(inputs, tmp_path / "with-dates")
+    obfuscated = _with_real_dates(inputs, tmp_path / "obfuscated")
+
+    assert _build_site(tmp_path / "a", with_dates) is True
+    assert obfuscate_kml_files(obfuscated) == len(obfuscated)
+    assert _build_site(tmp_path / "b", obfuscated) is True
+
+    def data_files(root):
+        return {
+            path.relative_to(root): path.read_bytes()
+            for path in sorted((root / "site" / "data").rglob("*.js"))
+        }
+
+    assert data_files(tmp_path / "a") == data_files(tmp_path / "b")

@@ -63,9 +63,15 @@ BUNDLE_FILES = (BUNDLE_FILE, FEATURES_BUNDLE_FILE)
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 # First line of the bundle; the group is the source hash (scripts/source-hash.js)
 BUNDLE_BANNER = re.compile(rb"/\* kml-heatmap build ([0-9a-f]{12}) \*/")
-# Files outside the sources that change the bundle, hashed after them and in
-# this order. Keep in step with BUILD_FILES in scripts/source-hash.js.
-BUILD_HASH_FILES = ("build.js", "tsconfig.json")
+# Files outside the sources that change what a built site renders, hashed
+# after them and in this order. Keep in step with BUILD_FILES in
+# scripts/source-hash.js; TestSourceHashParity checks that they agree.
+BUILD_HASH_FILES = (
+    "build.js",
+    "tsconfig.json",
+    "kml_heatmap/static/styles.css",
+    "kml_heatmap/static/features.css",
+)
 FAVICON_FILES = (
     "favicon.svg",
     "favicon.ico",
@@ -90,11 +96,16 @@ VENDOR_FILES = (
     "images/marker-icon-2x.png",
     "images/marker-shadow.png",
 )
+# The stylesheets, in the order the page applies them: styles.css is linked in
+# the head, features.css is fetched with the feature bundle the first time
+# replay or Wrapped is opened (see services/featureLoader.ts). The order
+# matters to the cascade, so it is the order they are written in.
+CSS_FILES = ("styles.css", "features.css")
 # The files the tool owns next to the page. Any of them that a run does not
 # produce (the source map of a bundle built without one) is removed.
 SITE_FILES = (
     "map_config.js",
-    "styles.css",
+    *CSS_FILES,
     *(bundle.name for bundle in BUNDLE_FILES),
     *(f"{bundle.name}.map" for bundle in BUNDLE_FILES),
     *FAVICON_FILES,
@@ -141,7 +152,8 @@ def _frontend_source_hash() -> str | None:
     the path relative to the repository and the content, and finally the
     pinned esbuild version. The build script, the compiler options and the
     bundler shape the bundle as much as the sources do, so a change to any of
-    them has to invalidate the hash as well.
+    them has to invalidate the hash as well, and so do the stylesheets: they
+    are not in a bundle, but they are part of what a built site renders.
 
     The two implementations have to agree or the staleness check below is
     meaningless; TestSourceHashParity in tests/test_site_assets.py runs
@@ -294,19 +306,16 @@ def _copy_javascript_bundle(output_dir: Path, bundle: Path) -> None:
 
 
 def _copy_and_minify_css(output_dir: Path, static_dir: Path) -> None:
-    """Copy and minify CSS to output directory."""
-    styles_css_src = static_dir / "styles.css"
-    styles_css_dst = output_dir / "styles.css"
+    """Copy and minify every stylesheet to the output directory."""
+    for name in CSS_FILES:
+        with open(static_dir / name, encoding="utf-8") as f:
+            content = f.read()
 
-    with open(styles_css_src, encoding="utf-8") as f:
-        styles_css_content = f.read()
+        destination = output_dir / name
+        minified: str = rcssmin.cssmin(content)
+        atomic_text_write(destination, minified)
 
-    styles_css_minified: str = rcssmin.cssmin(styles_css_content)
-
-    atomic_text_write(styles_css_dst, styles_css_minified)
-
-    styles_css_size = styles_css_dst.stat().st_size
-    logger.info("CSS copied: %s (%.1f KB)", styles_css_dst.name, styles_css_size / 1024)
+        logger.info("CSS copied: %s (%.1f KB)", name, destination.stat().st_size / 1024)
 
 
 def _copy_vendor_files(output_dir: Path, static_dir: Path) -> None:

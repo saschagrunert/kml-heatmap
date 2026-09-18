@@ -39,10 +39,11 @@ from your virtual environment and `node_modules`, the same way CI does, so no
 container is involved:
 
 ```bash
-make lint            # lock files and version pins, ruff (check and format), mypy, bandit, tsc (frontend and tests), eslint, prettier, typos
+make lint            # lock files and version pins, ruff (check and format), mypy, bandit, tsc (frontend and tests), eslint, knip, prettier, typos
 make format          # ruff format, prettier
 make test            # vitest and pytest with coverage; pytest flags are in DEVELOPMENT.md
 npm run test:e2e     # Playwright: desktop, mobile and WebKit (see DEVELOPMENT.md)
+make obfuscate       # after adding flights to data/; rewrites them in place, irreversibly
 make check-obfuscation
 make lock            # regenerates the Python lock files after changing pyproject.toml
 ```
@@ -65,10 +66,13 @@ parentheses back is undone on the next `make format`.
   e2e jobs test one with dummy tile API keys and one without. The
   repository's Pages source has to be "GitHub Actions" (Settings > Pages).
   Set it by hand: the workflow token is not allowed to change it.
-- **Never commit un-obfuscated KML files.** Every run rewrites the files in
-  `data/` in place; the pre-commit hook, `make check-obfuscation` and the
-  `obfuscation` CI job verify that every committed file is obfuscated. Only
-  the hook runs before the dates would be public.
+- **Never commit un-obfuscated KML files.** Generating a site no longer
+  rewrites them: run `make obfuscate` after adding flights to `data/` (or
+  pass `--obfuscate-inputs`). The pre-commit hook, `make check-obfuscation`
+  and the `obfuscation` CI job verify that every committed file is
+  obfuscated, and only the hook runs before the dates would be public. The
+  published site carries no date finer than the year either way; this is
+  about the KML files this repository commits.
 - The frontend build output in `kml_heatmap/static/` is gitignored: both
   bundles (`mapApp.bundle.js`, `features.bundle.js`) with their `.map` files
   and `vendor/`, the third-party code copied out of `node_modules`. It is

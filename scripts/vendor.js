@@ -24,14 +24,14 @@ import { dirname, join } from "node:path";
 import { REPO_ROOT } from "./source-hash.js";
 
 const NODE_MODULES = join(REPO_ROOT, "node_modules");
-export const VENDOR_DIR = join(REPO_ROOT, "kml_heatmap/static/vendor");
+const VENDOR_DIR = join(REPO_ROOT, "kml_heatmap/static/vendor");
 
 /**
  * Country flags, kept apart from the vendored files above because the page
  * never loads all of them: the Python side publishes only the countries an
  * export actually visited, and the rest never leave the checkout.
  */
-export const FLAG_DIR = join(REPO_ROOT, "kml_heatmap/static/flags");
+const FLAG_DIR = join(REPO_ROOT, "kml_heatmap/static/flags");
 const FLAG_SOURCE = join(NODE_MODULES, "flag-icons/flags/4x3");
 
 /**

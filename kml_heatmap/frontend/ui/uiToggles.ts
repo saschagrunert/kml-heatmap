@@ -266,9 +266,6 @@ export class UIToggles {
       setVisible(true);
     }
 
-    // The heatmap underneath steps back so the colour scale reads
-    this.app.dataManager.applyHeatmapEmphasis();
-
     if (
       this.app.replayState.active &&
       this.app.replayState.airplaneMarker &&

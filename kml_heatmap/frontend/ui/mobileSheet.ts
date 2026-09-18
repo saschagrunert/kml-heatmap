@@ -23,7 +23,7 @@ const FOCUSABLE_SELECTOR = [
 ].join(", ");
 
 /** Gradient chips a layer row can carry */
-export type SheetChip = "altitude" | "speed";
+type SheetChip = "altitude" | "speed";
 
 /**
  * Shown for the unfiltered option. The dropdowns name the filter in that
@@ -44,7 +44,7 @@ interface SheetRowBase {
 }
 
 /** A layer toggle: the control is a switch */
-export interface SheetSwitchRow extends SheetRowBase {
+interface SheetSwitchRow extends SheetRowBase {
   kind: "switch";
   isOn: () => boolean;
   isDisabled?: () => boolean;
@@ -66,7 +66,7 @@ export interface SheetSelectRow extends SheetRowBase {
  * something, and these fire where they stand. Only a row that really does
  * leave the page declares a `trailing` glyph to say so.
  */
-export interface SheetActionRow extends SheetRowBase {
+interface SheetActionRow extends SheetRowBase {
   kind: "action";
   onSelect: () => void;
   /** Close the sheet before running the action (default true) */
