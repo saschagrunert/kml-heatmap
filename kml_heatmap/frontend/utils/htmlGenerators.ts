@@ -150,10 +150,11 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
  * One tile of the Wrapped stat grid. The unit is a separate element so it can
  * be typeset smaller than the display figure it belongs to.
  *
- * No space between the two: the unit is set small and muted directly against
- * its figure, the way markFlightTimeUnits sets the h and m of a flight time.
- * A lead figure that reads "5,118.2 nm" beside one that reads "51h 38m" is
- * two different treatments of the same thing.
+ * No space between the two in the markup: `.stat-unit` opens the gap with a
+ * margin instead, one hairline of `--unit-gap` rather than a word space. The
+ * h and m that markFlightTimeUnits marks up carry the same class and so get
+ * the same gap, which is the point: "5,118.2 nm" beside "51h 38m" was two
+ * treatments of the same thing.
  */
 function statCard(value: string, unit: string, label: string): string {
   const unitHtml = unit
