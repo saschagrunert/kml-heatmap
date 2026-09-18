@@ -27,6 +27,7 @@ import { prefersReducedMotion } from "./utils/motion";
 import { MAX_ZOOM, MIN_ZOOM } from "./utils/constants";
 import { AppStore, defineStoreAccessors } from "./state/store";
 import { ReplayState } from "./ui/replayState";
+import { watchScrollEnd, type ScrollEndWatcher } from "./utils/scrollFade";
 import { loadFeatures } from "./services/featureLoader";
 import type { FeatureModule } from "./features";
 import { updateReplayButtonState } from "./ui/replayButton";
@@ -172,6 +173,9 @@ export class MapApp {
   /** Pending reopening of a Wrapped panel that was open when state was saved */
   private wrappedRestoreTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Scroll-end watchers of the two control columns */
+  private columnScrollWatchers: ScrollEndWatcher[] = [];
+
   /** Path info of the loaded dataset (single source of truth: currentData) */
   get fullPathInfo(): PathInfo[] | null {
     return this.currentData?.path_info ?? null;
@@ -265,6 +269,8 @@ export class MapApp {
     this.replayManager?.destroy();
     this.wrappedManager?.destroy();
     this.mobileBar?.destroy();
+    for (const watcher of this.columnScrollWatchers) watcher.stop();
+    this.columnScrollWatchers = [];
   }
 
   /**
@@ -496,6 +502,7 @@ export class MapApp {
     this.mobileBar = MobileBar.mountFor(this);
     this.followReplayAvailability();
     this.followHeatmapEmphasis();
+    this.followColumnScrollEnd();
   }
 
   togglePathSelection(pathId: string): void {
@@ -522,6 +529,22 @@ export class MapApp {
     this.store.subscribe("selectedPathIds", refresh);
     this.store.subscribe("hasTimingData", refresh);
     refresh();
+  }
+
+  /**
+   * Fade the bottom of a control column that has more below the fold.
+   *
+   * The columns are fixed, so in a window shorter than they are they scroll
+   * themselves rather than with the page. The same treatment the statistics
+   * panel gets: without it the column simply stops at the bottom of the
+   * screen, as often as not through the middle of a row, and nothing says
+   * the last control is still down there.
+   */
+  private followColumnScrollEnd(): void {
+    for (const id of ["left-buttons", "right-buttons"]) {
+      const column = domCache.get(id);
+      if (column) this.columnScrollWatchers.push(watchScrollEnd(column));
+    }
   }
 
   /**

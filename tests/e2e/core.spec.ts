@@ -124,6 +124,36 @@ test.describe("Core", () => {
     await expect(page.locator("#replay-controls")).toBeHidden();
   });
 
+  test("the focus ring of a row on a group's corner is not clipped", async ({
+    page,
+    isMobile,
+  }) => {
+    // A group clips its children to its own radius, so a row sitting against
+    // one of its ends needs the matching radius or the ring drawn around it
+    // runs into the rounded corner and comes back square.
+    test.skip(isMobile, "the columns are replaced by the bar below 768px");
+
+    const corners = await page.evaluate(() =>
+      [...document.querySelectorAll(".control-group")].map((group) => {
+        const rows = [...group.querySelectorAll(":scope > .control-row")];
+        const last = rows.at(-1);
+        if (!last) return null;
+        const style = getComputedStyle(last);
+        return {
+          bottomLeft: style.borderBottomLeftRadius,
+          bottomRight: style.borderBottomRightRadius,
+        };
+      }),
+    );
+
+    const measured = corners.filter((corner) => corner !== null);
+    expect(measured.length).toBeGreaterThan(0);
+    for (const corner of measured) {
+      expect(corner.bottomLeft).not.toBe("0px");
+      expect(corner.bottomRight).not.toBe("0px");
+    }
+  });
+
   test("loading indicator is a status region and hidden after initialization", async ({
     page,
   }) => {

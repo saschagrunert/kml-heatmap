@@ -51,12 +51,12 @@ describe("htmlGenerators (Wrapped sections)", () => {
       expect(html).toContain('<div class="stat-value">10</div>');
       expect(html).toContain('<div class="stat-label">Airports</div>');
       expect(html).toContain(
-        '<div class="stat-value">12,345.7 <span class="stat-unit">nm</span></div>',
+        '<div class="stat-value">12,345.7<span class="stat-unit">nm</span></div>',
       );
       expect(html).toContain('<div class="stat-label">Distance</div>');
       // 11000 m in feet, grouped, with the unit in its own element
       expect(html).toContain(
-        '<div class="stat-value">36,089 <span class="stat-unit">ft</span></div>',
+        '<div class="stat-value">36,089<span class="stat-unit">ft</span></div>',
       );
       expect(html).toContain(
         '<div class="stat-label">Max Altitude (MSL)</div>',
@@ -75,7 +75,7 @@ describe("htmlGenerators (Wrapped sections)", () => {
       );
       expect(html).toContain('<div class="stat-label">Flight Time</div>');
       expect(html).toContain(
-        '<div class="stat-value">450 <span class="stat-unit">kt</span></div>',
+        '<div class="stat-value">450<span class="stat-unit">kt</span></div>',
       );
       expect(html).toContain('<div class="stat-label">Max Groundspeed</div>');
     });
@@ -111,7 +111,7 @@ describe("htmlGenerators (Wrapped sections)", () => {
         true,
       );
 
-      expect(html).toContain('0 <span class="stat-unit">kt</span>');
+      expect(html).toContain('0<span class="stat-unit">kt</span>');
     });
 
     it("formats distance like the statistics panel", () => {

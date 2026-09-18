@@ -278,13 +278,13 @@ describe("StatsManager", () => {
         "Flights",
         "Airports",
       ]);
-      expect(leadValue(statsPanel, "Distance")).toBe("2,700.0 nm");
+      expect(leadValue(statsPanel, "Distance")).toBe("2,700.0nm");
       expect(leadValue(statsPanel, "Total Flight Time")).toBe("25h 30m");
       expect(leadValue(statsPanel, "Flights")).toBe("50");
       expect(leadValue(statsPanel, "Airports")).toBe("3");
       // The metric equivalent of the distance stays on the lead figure
       expect(statsPanel.querySelector(".kh-stats-lead-alt")!.textContent).toBe(
-        "5,000.4 km",
+        "5,000.4km",
       );
     });
 
@@ -331,28 +331,24 @@ describe("StatsManager", () => {
       statsManager.updateStatsPanel(mockStats, false);
 
       expect(metricRow(statsPanel, "Average Distance per Trip")).toBe(
-        "54.0 nm (100.0 km)",
+        "54.0nm (100.0km)",
       );
-      expect(metricRow(statsPanel, "Longest Flight")).toBe(
-        "270.0 nm (500.0 km)",
-      );
+      expect(metricRow(statsPanel, "Longest Flight")).toBe("270.0nm (500.0km)");
       expect(metricRow(statsPanel, "Average Groundspeed")).toBe(
-        "120 kt (222 km/h)",
+        "120kt (222km/h)",
       );
       expect(metricRow(statsPanel, "Cruise Speed (> 1000 ft AGL)")).toBe(
-        "125 kt (232 km/h)",
+        "125kt (232km/h)",
       );
-      expect(metricRow(statsPanel, "Max Groundspeed")).toBe(
-        "150 kt (278 km/h)",
-      );
+      expect(metricRow(statsPanel, "Max Groundspeed")).toBe("150kt (278km/h)");
       expect(metricRow(statsPanel, "Max Altitude (MSL)")).toBe(
-        "10,000 ft (3,048 m)",
+        "10,000ft (3,048m)",
       );
       expect(metricRow(statsPanel, "Elevation Gain")).toBe(
-        "50,000 ft (15,240 m)",
+        "50,000ft (15,240m)",
       );
       expect(metricRow(statsPanel, "Most Common Cruise Altitude (AGL)")).toBe(
-        "5,500 ft (1,676 m)",
+        "5,500ft (1,676m)",
       );
     });
 
@@ -550,7 +546,7 @@ describe("StatsManager", () => {
       statsManager.updateStatsPanel(minimal, false);
       const text = statsPanel.textContent;
 
-      expect(leadValue(statsPanel, "Distance")).toBe("0.0 nm");
+      expect(leadValue(statsPanel, "Distance")).toBe("0.0nm");
       // The four lead figures always stand, the sections below them do not
       expect(statsPanel.querySelectorAll(".kh-stats-lead-item")).toHaveLength(
         4,
@@ -571,8 +567,8 @@ describe("StatsManager", () => {
         false,
       );
 
-      expect(metricRow(statsPanel, "Max Altitude (MSL)")).toContain("0 ft");
-      expect(metricRow(statsPanel, "Elevation Gain")).toContain("0 ft");
+      expect(metricRow(statsPanel, "Max Altitude (MSL)")).toContain("0ft");
+      expect(metricRow(statsPanel, "Elevation Gain")).toContain("0ft");
     });
 
     it("does nothing if the panel element is missing", () => {

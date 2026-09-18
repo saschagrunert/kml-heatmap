@@ -589,6 +589,7 @@
   font-size: var(--text-base);
   font-weight: 500;
   -webkit-text-fill-color: rgba(var(--color-accent-cyan-rgb), 0.8);
+  margin-left: var(--unit-gap);
 }
 
 /* The four card headings share one shape: icon, then label */
@@ -858,7 +859,7 @@
   flex-shrink: 0;
   width: 18px;
   height: 14px;
-  border-radius: 2px;
+  border-radius: var(--radius-bar);
   box-shadow: 0 0 0 1px rgba(var(--color-text-rgb), 0.35);
 }
 .wrapped-square-card .country-code {
@@ -915,7 +916,7 @@
   align-items: center;
   gap: 2px;
   padding: 6px var(--space-base);
-  border-radius: 20px;
+  border-radius: var(--radius-card);
   background: linear-gradient(
     135deg,
     rgba(var(--color-accent-pink-rgb), 0.2) 0%,

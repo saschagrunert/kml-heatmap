@@ -238,7 +238,7 @@ export function generateFunFacts(
     if (flights === yearStats.total_flights) {
       facts.push({
         icon: "aircraft",
-        text: `Loyal to <strong>${registration}</strong> - all ${flights} flight${plural} in this ${model}!`,
+        text: `Loyal to <strong>${registration}</strong>, all ${flights} flight${plural} in this ${model}!`,
         category: "aircraft",
         priority: 9,
       });
@@ -294,7 +294,7 @@ export function generateFunFacts(
       if (filteredStats?.cruise_speed_knots) {
         facts.push({
           icon: "speed",
-          text: `Cruising at <strong>${formatNumber(filteredStats.cruise_speed_knots)} kt</strong>, averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip`,
+          text: `Cruising at <strong>${formatNumber(filteredStats.cruise_speed_knots)} kt</strong>, averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip.`,
           category: "distance",
           priority: 8,
         });
@@ -302,7 +302,7 @@ export function generateFunFacts(
         // Show distance-only fact when speed data unavailable
         facts.push({
           icon: "ruler",
-          text: `Averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip`,
+          text: `Averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip.`,
           category: "distance",
           priority: 8,
         });
@@ -319,11 +319,11 @@ export function generateFunFacts(
       const longestNm = filteredStats.longest_flight_nm;
       const reference = findClosestReferenceDistance(longestNm);
       const comparison = reference
-        ? ` - about the distance from ${reference.label}!`
+        ? `, about the distance from ${reference.label}`
         : "";
       facts.push({
         icon: "milestone",
-        text: `Your longest journey: <strong>${formatNumber(longestNm, 1)} nm</strong>${comparison}`,
+        text: `Your longest journey: <strong>${formatNumber(longestNm, 1)} nm</strong>${comparison}.`,
         category: "distance",
         priority: 8,
       });
@@ -334,7 +334,7 @@ export function generateFunFacts(
       const totalGainFt = filteredStats.total_altitude_gain_ft;
       facts.push({
         icon: "climb",
-        text: `Total elevation gain: <strong>${formatNumber(totalGainFt)} ft</strong>`,
+        text: `Total elevation gain: <strong>${formatNumber(totalGainFt)} ft</strong>.`,
         category: "altitude",
         priority: 8,
       });
@@ -362,7 +362,7 @@ export function generateFunFacts(
       const cruiseAltM = filteredStats.most_common_cruise_altitude_m;
       facts.push({
         icon: "ruler",
-        text: `Most common cruise: <strong>${formatNumber(cruiseAltFt)} ft</strong> AGL (<strong>${formatNumber(cruiseAltM)} m</strong>)`,
+        text: `Most common cruise: <strong>${formatNumber(cruiseAltFt)} ft</strong> AGL (<strong>${formatNumber(cruiseAltM)} m</strong>).`,
         category: "altitude",
         priority: 7,
       });
@@ -388,7 +388,7 @@ export function generateFunFacts(
     if (filteredStats.cruise_speed_knots) {
       facts.push({
         icon: "speed",
-        text: `Average cruise speed: <strong>${formatNumber(filteredStats.cruise_speed_knots)} knots</strong>`,
+        text: `Average cruise speed: <strong>${formatNumber(filteredStats.cruise_speed_knots)} knots</strong>.`,
         category: "speed",
         priority: 3,
       });

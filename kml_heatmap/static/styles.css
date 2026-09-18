@@ -98,6 +98,11 @@
   --radius-pill: 999px;
 
   /* Icons: three sizes, each with the stroke weight it is drawn at */
+  /* Between a lead figure and the small unit set against it ("5,118.2 nm",
+     "51h 38m"). A word space was too wide for type that size and made the
+     unit read as a separate word; em, so it follows the unit's own size. */
+  --unit-gap: 0.18em;
+
   --icon-sm: 16px;
   --icon-md: 20px;
   --icon-lg: 24px;
@@ -105,7 +110,6 @@
   /* Height reserved for the Leaflet attribution bar on small screens */
   --attribution-h: 20px;
   --btn-min-height: 36px;
-  /* Icon-only target in a compacted control column */
   /* Statistics rail: the map is inset by exactly this much beside it */
   --stats-rail-w: 316px;
   /* Mobile chrome: the bottom bar and the rows inside the sheet */
@@ -353,6 +357,20 @@ body {
   );
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* Shorter than the column, it scrolls, and it used to stop dead at the
+     bottom of the screen with nothing to say the last control was still
+     below. The same fade the statistics panel carries; MapApp drops
+     `is-at-end` on the class once there is no more (utils/scrollFade.ts).
+     The markup ships with that class, so the fade appears when the column
+     is measured and found too tall rather than on every first paint. */
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--space-md)),
+    transparent 100%
+  );
+}
+.control-column.is-at-end {
+  mask-image: none;
 }
 #left-buttons {
   left: calc(var(--edge-gap) + var(--safe-left));
@@ -446,9 +464,16 @@ body {
 .control-group {
   display: flex;
   flex-direction: column;
+  /* Keep the natural height in the column's scroll area. As a flex item a
+     group shrinks by default, and `overflow: hidden` below then clips the
+     rows that no longer fit instead of letting the column scroll to them:
+     in a 300px-tall window the Aviation toggle was drawn past the bottom
+     of the screen with nothing able to reach it. */
+  flex-shrink: 0;
   background-color: rgba(var(--color-bg-secondary-rgb), 0.92);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
+  /* Rows run the full width of the group, so the corners have to clip them */
   overflow: hidden;
   box-shadow: var(--shadow-panel);
   box-sizing: border-box;
@@ -500,6 +525,21 @@ body {
   .control-row:hover:not(:has(> .control-btn:disabled)) {
     background-color: var(--color-bg-hover);
   }
+}
+/* The group clips its children to its own radius, which cut the corners off
+   the focus ring of whichever row sits against an end: the ring ran into the
+   rounded corner and came back square. A row on a corner carries the
+   matching radius, so the ring follows it. The group's 1px border makes the
+   inside of that curve one pixel tighter than the outside. In a compacted
+   column the group titles are taken out of the flow, so the first row is on
+   a corner there even though a title precedes it in the markup. */
+.control-group > .control-row:first-of-type {
+  border-top-left-radius: calc(var(--radius-panel) - 1px);
+  border-top-right-radius: calc(var(--radius-panel) - 1px);
+}
+.control-group > .control-row:last-child {
+  border-bottom-left-radius: calc(var(--radius-panel) - 1px);
+  border-bottom-right-radius: calc(var(--radius-panel) - 1px);
 }
 .control-row:has(> .control-btn:focus-visible) {
   outline: 2px solid var(--color-accent-blue);
@@ -1930,6 +1970,7 @@ body.stats-open #left-buttons {
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-text-muted);
+  margin-left: var(--unit-gap);
 }
 .kh-stats-lead-alt {
   font-family: var(--font-mono);
@@ -2024,6 +2065,20 @@ body.stats-open #left-buttons {
   color: var(--color-text-muted);
   white-space: nowrap;
 }
+/* The unit of a metric row or of the line under a lead figure. The same
+   hairline the lead units get, which matters more here: these are set in the
+   monospace face, whose word space is a full character wide and left the
+   unit reading as a word of its own.
+
+   Muted, like `.kh-stats-lead-unit`: throughout the panel the unit is a step
+   quieter than the figure it belongs to, so the number is what the eye lands
+   on. A metric row drew its unit at full strength and was the one figure in
+   the panel that did. The two conversion lines are muted throughout, so
+   there the unit simply matches. */
+.kh-stats-unit {
+  margin-left: var(--unit-gap);
+  color: var(--color-text-muted);
+}
 
 /* Aircraft rows put a registration over its type */
 .kh-stats-aircraft .kh-stats-metric-label {
@@ -2074,7 +2129,7 @@ body.stats-open #left-buttons {
   flex-shrink: 0;
   width: 16px;
   height: 12px;
-  border-radius: 2px;
+  border-radius: var(--radius-bar);
   /* The rim is what gives a flag its box on a dark panel: without it the
      black band of a German or Belgian flag merges into the surface and the
      colours below it read as sitting low beside the label. */
