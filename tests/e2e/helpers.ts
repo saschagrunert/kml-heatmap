@@ -128,6 +128,22 @@ export async function settleAnimations(target: Page | Locator): Promise<void> {
   );
 }
 
+/**
+ * Hide everything the map draws, leaving the page's own chrome.
+ *
+ * For a screenshot comparison: the tiles, the heat canvas, the paths and the
+ * airport markers are live data, and comparing them would make a snapshot
+ * flaky for reasons that have nothing to do with the stylesheet. Masking
+ * them is not an option, because every Leaflet pane fills the viewport, so a
+ * mask over one covers the controls as well. The map keeps its own
+ * background, so the layout below it is unchanged.
+ */
+export async function hideMapData(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: ".leaflet-pane { visibility: hidden !important; }",
+  });
+}
+
 /** Open the app and wait until initialization (data loading) has finished */
 export async function gotoApp(page: Page, path = "/"): Promise<void> {
   await page.goto(path);

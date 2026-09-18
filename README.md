@@ -408,9 +408,10 @@ output-dir/
 │   ├── leaflet-heat.js
 │   ├── dom-to-image.min.js
 │   └── images/            # The marker and layer icons leaflet.css asks for
+├── flags/                 # One SVG per country the flights touched
 └── data/
     ├── airports.js        # window.KML_AIRPORTS: airport markers
-    ├── metadata.js        # window.KML_METADATA: years, file sizes, speed range, models
+    ├── metadata.js        # window.KML_METADATA: years, file sizes, speed range, models, flags
     ├── 2025/
     │   └── data.js        # window.KML_DATA_2025
     └── 2026/
@@ -460,8 +461,12 @@ the `file://` protocol. It is organized by year and loaded on demand.
 ### Layers
 
 - **Density Heatmap** (toggle) - Shows frequently visited locations
-- **Altitude** (toggle) - Color-coded paths by elevation
-- **Speed** (toggle) - Color-coded paths by groundspeed
+- **Altitude** (toggle) - Paths coloured by elevation, on a scale that runs
+  purple through magenta to orange
+- **Speed** (toggle) - Paths coloured by groundspeed, on a scale that runs
+  blue through green to yellow. The two scales share no hue, so a map or an
+  exported image says which of them is drawn without its legend; both
+  brighten from end to end, so they survive being printed in grey
 - **Airports** (toggle) - Airport markers with ICAO codes
 - **Aviation Data** (toggle, requires OpenAIP API key) - Airspaces, airports, navaids, and reporting points from OpenAIP
 
@@ -471,15 +476,15 @@ the `file://` protocol. It is organized by year and loaded on demand.
 - **Export** - Save the current map view as a JPG image
 - **Copy link** - Share the current URL (native share dialog where available, otherwise copied to the clipboard)
 - **Wrapped** - View the year-in-review summary; Escape closes it
-- **Replay** - Animate one flight with adjustable speed (default 50x) and an auto-zoom button that follows the airplane. Replay needs exactly one selected flight with timing data; a toast explains why it is unavailable otherwise
-- A visible map attribution. There are no zoom buttons: use the scroll wheel, pinch, double click, or the keyboard once the map has focus
+- **Replay** - Animate one flight with adjustable speed (default 50x) and an auto-zoom button that follows the airplane. The whole track is drawn dimmed and the flown part paints over it in the colours of the active scale. Replay needs exactly one selected flight with timing data; a toast explains why it is unavailable otherwise
+- A map attribution, on the map at every width; it steps aside only while a sheet or the statistics panel covers the map it credits. There are no zoom buttons: use the scroll wheel, pinch, double click, or the keyboard once the map has focus
 - Below 768 px the two control columns are replaced by a bottom bar with five tabs. Layers, Filter and More open a sheet; Stats and Wrapped open their panel directly. Escape closes an open sheet, and Tab stays inside it. Replay takes over the bottom edge and the bar steps aside until it ends
 
 ### Filtering
 
 - **Year Filter** - View flights from specific years or all years combined
 - **Aircraft Filter** - Filter by aircraft registration to see flights per aircraft
-- **Path Selection** - Click paths to highlight and view detailed statistics
+- **Path Selection** - Click paths to highlight and view detailed statistics. A chip at the top of the map says how many flights are selected and clears them again, which is also the only sign of a selection at the zoom levels that draw the heatmap alone
 - **Airport Selection** - Click an airport marker to select all flights that visited it; click the map to clear the selection
 - **Solo Mode** - Isolate selected paths, hiding all other paths and heatmap data
 

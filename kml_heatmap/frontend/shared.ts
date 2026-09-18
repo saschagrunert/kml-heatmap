@@ -24,6 +24,7 @@ import * as utilsHtmlGenerators from "./utils/htmlGenerators";
 import * as utilsIcons from "./utils/icons";
 import * as utilsLogger from "./utils/logger";
 import * as utilsMotion from "./utils/motion";
+import * as utilsScrollFade from "./utils/scrollFade";
 import * as utilsToast from "./utils/toast";
 
 /** Keyed by the module path relative to this directory, as the build spells it */
@@ -44,6 +45,7 @@ export const sharedModules: Record<string, unknown> = {
   "utils/icons": utilsIcons,
   "utils/logger": utilsLogger,
   "utils/motion": utilsMotion,
+  "utils/scrollFade": utilsScrollFade,
   "utils/toast": utilsToast,
 };
 

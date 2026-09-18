@@ -9,7 +9,7 @@
  * Rows follow one shape: a 24 px icon, the label and a right-aligned
  * control. Layers get a switch, filters mirror one of the page's own
  * `<select>` elements so the existing filter pipeline stays the single
- * source of truth, and actions get a chevron.
+ * source of truth, and actions get nothing unless they navigate away.
  */
 import { icon, type IconName } from "../utils/icons";
 
@@ -61,12 +61,20 @@ export interface SheetSelectRow extends SheetRowBase {
   sourceId: string;
 }
 
-/** A one-shot command: the control is a chevron */
+/**
+ * A one-shot command. It carries no chevron: a chevron says the row opens
+ * something, and these fire where they stand. Only a row that really does
+ * leave the page declares a `trailing` glyph to say so.
+ */
 export interface SheetActionRow extends SheetRowBase {
   kind: "action";
   onSelect: () => void;
   /** Close the sheet before running the action (default true) */
   closeOnSelect?: boolean;
+  /** Trailing glyph, for a row that navigates away */
+  trailing?: IconName;
+  /** Unavailable right now: the row dims and stops taking taps */
+  isDisabled?: () => boolean;
 }
 
 export type SheetRow = SheetSwitchRow | SheetSelectRow | SheetActionRow;
@@ -236,9 +244,20 @@ export class MobileSheet {
       // `aria-checked` carries the semantics; the stylesheet keys the row
       // highlight off the project's `active` class
       row.element.classList.toggle("active", on);
-      if (row.element instanceof HTMLButtonElement) {
-        row.element.disabled = spec.isDisabled?.() ?? false;
-      }
+    }
+
+    if (spec.kind === "switch" && row.element instanceof HTMLButtonElement) {
+      row.element.disabled = spec.isDisabled?.() ?? false;
+    }
+
+    // An action that cannot run dims like a switch that cannot: the Replay
+    // row used to read as available while its own hint said it was not,
+    // beside an isolate row that dimmed correctly. It stays a live control
+    // rather than a disabled one, because tapping it is what explains the
+    // precondition, and a disabled button is not even reachable by keyboard.
+    if (spec.kind === "action") {
+      const unavailable = spec.isDisabled?.() ?? false;
+      row.element.setAttribute("aria-disabled", String(unavailable));
     }
 
     if (spec.kind === "select" && row.select) {
@@ -305,8 +324,8 @@ export class MobileSheet {
         this.refresh();
       });
     } else if (spec.kind === "action") {
-      if (spec.closeOnSelect !== false) {
-        control.append(createChevron("chevronRight"));
+      if (spec.trailing) {
+        control.append(createChevron(spec.trailing));
       }
       element.addEventListener("click", () => {
         if (spec.closeOnSelect !== false) this.close();

@@ -421,7 +421,6 @@ describe("MobileBar", () => {
         "export",
         "share",
         "github",
-        "attribution",
       ]);
     });
   });
@@ -571,30 +570,35 @@ describe("MobileBar", () => {
       expect(hint.textContent).toBe("Select one flight with timing data");
     });
 
-    it("repeats what the map's attribution control says", () => {
-      // The control is hidden below the breakpoint, and the OpenAIP credit
-      // comes and goes with its layer
-      const control = document.createElement("div");
-      control.className = "leaflet-control-attribution";
-      control.innerHTML =
-        '&copy; OpenStreetMap contributors, &copy; CARTO, &copy; <a href="#">OpenAIP</a>';
-      document.body.append(control);
+    it("does not repeat the tile credit, which the map itself carries", () => {
+      // The sheet used to hold the only copy of the attribution below the
+      // breakpoint, two taps from the map it credits
+      expect(document.querySelector('[data-row="attribution"]')).toBeNull();
+    });
+
+    it("dims the replay row while no single flight is selected", () => {
+      const replayRow = (): HTMLButtonElement =>
+        document.querySelector<HTMLButtonElement>('[data-row="replay"]')!;
+      expect(replayRow().getAttribute("aria-disabled")).toBe("false");
+
+      // It used to keep a full strength label and a chevron next to its own
+      // hint saying it could not run. It stays reachable and tappable, which
+      // is what explains the precondition; only the look changes.
+      app.canReplay.mockReturnValue(false);
       dismissSheet();
       tab("more").click();
 
-      const hint = document.querySelector<HTMLElement>(
-        '[data-row="attribution"] .sheet-row-hint',
-      )!;
-      expect(hint.textContent).toBe(
-        "© OpenStreetMap contributors, © CARTO, © OpenAIP",
-      );
+      expect(replayRow().getAttribute("aria-disabled")).toBe("true");
+      expect(replayRow().disabled).toBe(false);
     });
 
-    it("credits the base map when there is no attribution control", () => {
-      const hint = document.querySelector<HTMLElement>(
-        '[data-row="attribution"] .sheet-row-hint',
-      )!;
-      expect(hint.textContent).toBe("© OpenStreetMap contributors, © CARTO");
+    it("marks only the row that navigates away with a trailing glyph", () => {
+      const trailing = (row: string): boolean =>
+        !!document.querySelector(`[data-row="${row}"] .sheet-row-chevron`);
+
+      expect(trailing("github")).toBe(true);
+      expect(trailing("export")).toBe(false);
+      expect(trailing("share")).toBe(false);
     });
 
     it("starts replay from the sheet", async () => {

@@ -412,14 +412,42 @@ describe("wrapped feature", () => {
       expect(facts.some((f) => f.category === "achievement")).toBe(true);
     });
 
-    it("includes icon and text for each fact", () => {
+    it("includes text, category and priority for each fact", () => {
       const facts = generateFunFacts(yearStats);
 
       facts.forEach((fact) => {
-        expect(fact.icon).toBeDefined();
         expect(fact.text).toBeDefined();
         expect(fact.category).toBeDefined();
         expect(fact.priority).toBeDefined();
+      });
+    });
+
+    it("draws a different mark for facts that share a category", () => {
+      // Three of them are about distance, and the category alone drew the
+      // same route icon three times in one card
+      const facts = generateFunFacts(yearStats, {
+        cruise_speed_knots: 110,
+        longest_flight_nm: 380,
+        total_altitude_gain_ft: 90000,
+      });
+      const distance = facts.filter((fact) => fact.category === "distance");
+
+      expect(distance.length).toBeGreaterThan(1);
+      expect(new Set(distance.map((fact) => fact.icon)).size).toBe(
+        distance.length,
+      );
+    });
+
+    it("carries no emoji of its own; the category names the icon", () => {
+      const facts = generateFunFacts(yearStats, {
+        cruise_speed_knots: 110,
+        total_altitude_gain_ft: 90000,
+        total_flight_time_seconds: 7200,
+      });
+
+      expect(facts.length).toBeGreaterThan(0);
+      facts.forEach((fact) => {
+        expect(fact.text).not.toMatch(/\p{Extended_Pictographic}/u);
       });
     });
 
@@ -618,13 +646,13 @@ describe("wrapped feature", () => {
 
   describe("selectDiverseFacts", () => {
     const allFacts: FunFact[] = [
-      { category: "distance", priority: 10, text: "Fact 1", icon: "1" },
-      { category: "distance", priority: 9, text: "Fact 2", icon: "2" },
-      { category: "distance", priority: 8, text: "Fact 3", icon: "3" },
-      { category: "altitude", priority: 9, text: "Fact 4", icon: "4" },
-      { category: "altitude", priority: 7, text: "Fact 5", icon: "5" },
-      { category: "time", priority: 8, text: "Fact 6", icon: "6" },
-      { category: "speed", priority: 7, text: "Fact 7", icon: "7" },
+      { category: "distance", priority: 10, text: "Fact 1" },
+      { category: "distance", priority: 9, text: "Fact 2" },
+      { category: "distance", priority: 8, text: "Fact 3" },
+      { category: "altitude", priority: 9, text: "Fact 4" },
+      { category: "altitude", priority: 7, text: "Fact 5" },
+      { category: "time", priority: 8, text: "Fact 6" },
+      { category: "speed", priority: 7, text: "Fact 7" },
     ];
 
     it("selects up to 6 facts", () => {
@@ -646,7 +674,7 @@ describe("wrapped feature", () => {
     it("limits facts per category to 3", () => {
       const manyDistance: FunFact[] = [
         ...allFacts,
-        { category: "distance", priority: 6, text: "Fact 8", icon: "8" },
+        { category: "distance", priority: 6, text: "Fact 8" },
       ];
 
       const selected = selectDiverseFacts(manyDistance);
@@ -670,8 +698,8 @@ describe("wrapped feature", () => {
 
     it("handles fewer than 4 facts", () => {
       const fewFacts: FunFact[] = [
-        { category: "distance", priority: 10, text: "Fact 1", icon: "1" },
-        { category: "altitude", priority: 9, text: "Fact 2", icon: "2" },
+        { category: "distance", priority: 10, text: "Fact 1" },
+        { category: "altitude", priority: 9, text: "Fact 2" },
       ];
 
       expect(selectDiverseFacts(fewFacts)).toHaveLength(2);

@@ -9,7 +9,7 @@ import {
 } from "../calculations/statistics";
 import {
   countryDisplayName,
-  countryFlag,
+  countryFlagSrc,
   groupByCountry,
 } from "../features/airports";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
@@ -24,6 +24,7 @@ import {
 import { icon, type IconName } from "../utils/icons";
 import { domCache } from "../utils/domCache";
 import { datasetIndex } from "../calculations/datasetIndex";
+import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
 
 /** Panel element the statistics are rendered into */
 const PANEL_ID = "stats-panel";
@@ -157,19 +158,31 @@ function airportSummary(numAirports: number, numCountries: number): string {
   return airports + " in " + pluralize(numCountries, "country", "countries");
 }
 
+/**
+ * The mark beside a country's name: its flag where the site carries one,
+ * otherwise the ISO code as a chip. Emoji flags are not an option, whatever
+ * the platform: Windows has no glyphs for them at all.
+ */
+function countryMark(code: string): string {
+  const src = countryFlagSrc(code);
+  return src
+    ? '<img class="kh-stats-group-flag" src="' +
+        escapeHtml(src) +
+        '" alt="" width="16" height="12" loading="lazy">'
+    : '<span class="kh-stats-group-code" aria-hidden="true">' +
+        escapeHtml(code) +
+        "</span>";
+}
+
 /** Airport list grouped by country, every entry with its code and name */
 function airportGroups(grouped: Map<string, string[]>): string {
   let html = "";
   for (const [code, airports] of grouped) {
-    const flag = code !== "Other" ? countryFlag(code) : "";
-    const label = code === "Other" ? "Other" : countryDisplayName(code);
+    const isCountry = code !== "Other";
+    const label = isCountry ? countryDisplayName(code) : "Other";
     html +=
       '<div class="kh-stats-group">' +
-      (flag
-        ? '<span class="kh-stats-group-flag" aria-hidden="true">' +
-          escapeHtml(flag) +
-          "</span>"
-        : "") +
+      (isCountry ? countryMark(code) : "") +
       '<span class="kh-stats-group-name">' +
       escapeHtml(label) +
       "</span>" +
@@ -346,6 +359,8 @@ export class StatsManager {
   private app: MapApp;
   /** Markup of the last render; an identical result is not written again */
   private lastHtml: string | null = null;
+  /** Keeps the panel's bottom fade in step with what it holds */
+  private scrollWatcher: ScrollEndWatcher | null = null;
   /** What the last statistics were computed from; identical inputs skip it */
   private lastInputs: StatsInputs | null = null;
 
@@ -363,8 +378,18 @@ export class StatsManager {
     // through the same key. Opening it renders whatever changed while it was
     // closed; lastInputs skips the work when nothing did.
     app.store.subscribe("statsPanelVisible", (visible) => {
-      if (visible) this.updateStatsForSelection();
+      if (!visible) return;
+      this.updateStatsForSelection();
+      // A closed rail measures zero, so whatever the panel was told about
+      // its own overflow while it was hidden was "everything fits". The
+      // next frame is the first one that can measure it.
+      requestAnimationFrame(() => this.scrollWatcher?.update());
     });
+
+    // The rail holds around twice its own height of content on a phone, and
+    // it used to end in a row sliced in half wherever the panel stopped
+    const panel = domCache.get(PANEL_ID);
+    if (panel) this.scrollWatcher = watchScrollEnd(panel);
   }
 
   /** The inputs of the current state, in a shape that compares cheaply */
@@ -502,6 +527,8 @@ export class StatsManager {
     if (html === this.lastHtml && panel.firstChild !== null) return;
     this.lastHtml = html;
     panel.innerHTML = html;
+    // New content, so whether there is more of it below has changed too
+    this.scrollWatcher?.update();
   }
 
   /**

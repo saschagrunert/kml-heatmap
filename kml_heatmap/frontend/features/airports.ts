@@ -12,6 +12,9 @@ import { filterPaths } from "../calculations/statistics";
  * @param name - Airport name (ICAO code is extracted from it)
  * @param isHomeBase - Whether the airport is the current home base
  */
+/** Side of the square a marker offers a pointer, in pixels */
+const MARKER_TARGET_PX = 24;
+
 export function createAirportIcon(
   name: string,
   isHomeBase: boolean,
@@ -30,11 +33,15 @@ export function createAirportIcon(
     icao +
     "</div></div>";
 
+  // 24px square around a dot a third that size: the dot is what is drawn,
+  // the square is what a finger has to hit. WCAG asks for 24, and at these
+  // zoom levels neighbouring airports are nowhere near far enough apart to
+  // earn the spacing exemption.
   return L.divIcon({
     html: markerHtml,
-    iconSize: [12, 12],
-    iconAnchor: [6, 6],
-    popupAnchor: [0, -6],
+    iconSize: [MARKER_TARGET_PX, MARKER_TARGET_PX],
+    iconAnchor: [MARKER_TARGET_PX / 2, MARKER_TARGET_PX / 2],
+    popupAnchor: [0, -MARKER_TARGET_PX / 2],
     className: "",
   });
 }
@@ -77,13 +84,18 @@ export function countryDisplayName(code: string): string {
   }
 }
 
-export function countryFlag(code: string): string {
-  if (code.length !== 2) return "";
-  const offset = 0x1f1e6 - 65;
-  const first = code.charCodeAt(0);
-  const second = code.charCodeAt(1);
-  if (first < 65 || first > 90 || second < 65 || second > 90) return "";
-  return String.fromCodePoint(first + offset, second + offset);
+/**
+ * Path to a country's flag, relative to the page, or null when this site
+ * does not carry it.
+ *
+ * The export lists what it published: the flags are copied per site for the
+ * countries actually visited, and a build without them (the wheel leaves
+ * them out) lists none, which is the caller's cue to fall back to the code.
+ */
+export function countryFlagSrc(code: string): string | null {
+  const available = window.KML_METADATA?.available_flags;
+  const lower = code.toLowerCase();
+  return available?.includes(lower) ? `flags/${lower}.svg` : null;
 }
 
 export function countCountries(airportNames: string[]): Set<string> {

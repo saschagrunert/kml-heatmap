@@ -2,7 +2,11 @@
 
 import pytest
 
-from kml_heatmap.export_writers import export_airports_data, export_metadata
+from kml_heatmap.export_writers import (
+    export_airports_data,
+    export_metadata,
+    exported_country_codes,
+)
 
 
 def _airport(name, lat=48.6899, lon=9.2220, timestamps=None, is_at_path_end=False):
@@ -139,6 +143,7 @@ class TestExportMetadata:
             "available_years": [2024, 2025],
             "year_file_bytes": {"2024": 10, "2025": 20},
             "aircraft_models": {"D-EAGJ": "Katana", "D-EHYL": "Diamond Star"},
+            "available_flags": [],
         }
         # The frontend computes the statistics itself
         assert "stats" not in data
@@ -174,3 +179,19 @@ class TestExportMetadata:
         data = parse_js(tmp_path / "metadata.js", "KML_METADATA")
         assert data["min_groundspeed_knots"] == 55.7
         assert data["max_groundspeed_knots"] == 199.1
+
+
+class TestExportedCountryCodes:
+    """Which countries an export visited, for the flags the site publishes."""
+
+    def test_lists_each_country_once_sorted(self):
+        airports = [
+            _airport("EDDF Frankfurt"),
+            _airport("EDDM Munich"),
+            _airport("LOWW Vienna"),
+        ]
+
+        assert exported_country_codes(airports) == ["AT", "DE"]
+
+    def test_skips_what_no_country_is_known_for(self):
+        assert exported_country_codes([_airport("Some Field")]) == []

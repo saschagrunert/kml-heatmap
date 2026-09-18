@@ -32,6 +32,21 @@ function interpolateGradient(
   });
 }
 
+/**
+ * Altitude: plasma, sampled between 0.15 and 0.75 of the ramp.
+ *
+ * A rainbow was the obvious ramp and the wrong one. Its lightness is not
+ * monotone, so equal steps in altitude read as unequal jumps, and its
+ * green-yellow-red half is exactly where red-green colour blindness
+ * collapses. Plasma rises steadily in lightness from end to end, which also
+ * means an exported image survives being printed in grey.
+ *
+ * Plasma rather than viridis because of where the flying sits: a light
+ * aircraft spends nearly all of its time between about 2,000 and 5,000 ft of
+ * a scale that runs to ten thousand, and viridis crosses that band as
+ * teal into green, which barely travels. Plasma crosses it as magenta into
+ * orange, so two flights a thousand feet apart are two colours.
+ */
 const ALTITUDE_STOPS: [
   ColorStop,
   ColorStop,
@@ -40,14 +55,27 @@ const ALTITUDE_STOPS: [
   ColorStop,
   ColorStop,
 ] = [
-  { r: 80, g: 160, b: 255 },
-  { r: 0, g: 255, b: 255 },
-  { r: 0, g: 255, b: 0 },
-  { r: 255, g: 255, b: 0 },
-  { r: 255, g: 165, b: 0 },
-  { r: 255, g: 66, b: 66 },
+  { r: 86, g: 2, b: 162 },
+  { r: 132, g: 9, b: 165 },
+  { r: 174, g: 39, b: 146 },
+  { r: 206, g: 74, b: 118 },
+  { r: 230, g: 110, b: 91 },
+  { r: 247, g: 149, b: 64 },
 ];
 
+/**
+ * Groundspeed: viridis, from 0.25 to the top of the ramp.
+ *
+ * A second ramp has a second job beyond ordering its own values: it has to
+ * say which quantity the map is drawing. The two ramps used to differ only
+ * in their first and last stop, so a speed-coloured map and an
+ * altitude-coloured one were indistinguishable, chips and legend included.
+ * These two are never closer than 115 of 765 in RGB, and the ends are held
+ * apart on purpose: plasma stops at orange rather than climbing into the
+ * yellow viridis ends on. Each also passes through three stations a reader
+ * can name rather than two: purple, magenta, orange for altitude, and blue,
+ * green, yellow for groundspeed.
+ */
 const AIRSPEED_STOPS: [
   ColorStop,
   ColorStop,
@@ -56,12 +84,12 @@ const AIRSPEED_STOPS: [
   ColorStop,
   ColorStop,
 ] = [
-  { r: 0, g: 128, b: 255 },
-  { r: 0, g: 255, b: 255 },
-  { r: 0, g: 255, b: 0 },
-  { r: 255, g: 255, b: 0 },
-  { r: 255, g: 128, b: 0 },
-  { r: 255, g: 0, b: 0 },
+  { r: 56, g: 88, b: 140 },
+  { r: 38, g: 130, b: 142 },
+  { r: 42, g: 170, b: 129 },
+  { r: 110, g: 206, b: 88 },
+  { r: 202, g: 224, b: 34 },
+  { r: 253, g: 231, b: 37 },
 ];
 
 /** CSS `linear-gradient(...)` spelling of a stop list, evenly spaced */

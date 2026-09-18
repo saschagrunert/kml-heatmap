@@ -212,6 +212,29 @@ describe("StatsManager", () => {
       most_common_cruise_altitude_m: 1676,
     };
 
+    it("says when the panel has more below it than it can show", () => {
+      // The fade at the bottom edge is what says so; it has to go once the
+      // panel is scrolled to the end, and the class it keys off is set
+      // before any content exists
+      Object.defineProperty(statsPanel, "scrollHeight", {
+        configurable: true,
+        value: 2000,
+      });
+      Object.defineProperty(statsPanel, "clientHeight", {
+        configurable: true,
+        value: 800,
+      });
+
+      statsManager.updateStatsPanel(mockStats, false);
+
+      expect(statsPanel.classList.contains("is-at-end")).toBe(false);
+
+      statsPanel.scrollTop = 1200;
+      statsPanel.dispatchEvent(new Event("scroll"));
+
+      expect(statsPanel.classList.contains("is-at-end")).toBe(true);
+    });
+
     it("renders headings and sections with kh- classes", () => {
       statsManager.updateStatsPanel(mockStats, false);
 
@@ -428,12 +451,12 @@ describe("StatsManager", () => {
         (group) => ({
           name: group.querySelector(".kh-stats-group-name")!.textContent,
           count: group.querySelector(".kh-stats-group-count")!.textContent,
-          flag: group.querySelector(".kh-stats-group-flag")!.textContent,
+          code: group.querySelector(".kh-stats-group-code")!.textContent,
         }),
       );
       expect(groups).toEqual([
-        { name: "Germany", count: "2", flag: "\u{1F1E9}\u{1F1EA}" },
-        { name: "Austria", count: "1", flag: "\u{1F1E6}\u{1F1F9}" },
+        { name: "Germany", count: "2", code: "DE" },
+        { name: "Austria", count: "1", code: "AT" },
       ]);
 
       // Each group lists its own airports

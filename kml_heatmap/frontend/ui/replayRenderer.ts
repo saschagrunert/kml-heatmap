@@ -314,7 +314,7 @@ export class ReplayRenderer {
       speedMin: state.colorMinSpeed,
       speedMax: state.colorMaxSpeed,
       title: "Current Position",
-      icon: "✈️",
+      icon: "aircraftTop",
     });
 
     const popup = state.airplaneMarker.getPopup();
@@ -448,10 +448,12 @@ export class ReplayRenderer {
     }
 
     // Update rotation using hardware-accelerated transforms; the same
-    // heading as last frame is not written again
+    // heading as last frame is not written again. The marker is drawn nose
+    // up, so the rotation is the track itself: the old emoji pointed
+    // north-east and needed the difference taken out of the bearing.
     const iconDiv = this.airplaneIcon(marker);
     if (iconDiv) {
-      this.rotation = unwrapRotation(this.rotation, bearing - 45);
+      this.rotation = unwrapRotation(this.rotation, bearing);
       const transform = "translate3d(0,0,0) rotate(" + this.rotation + "deg)";
       if (transform !== this.lastTransform) {
         this.lastTransform = transform;

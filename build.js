@@ -13,7 +13,7 @@ import {
   buildBanner as makeBanner,
   computeSourceHash,
 } from "./scripts/source-hash.js";
-import { copyVendorAssets } from "./scripts/vendor.js";
+import { copyCountryFlags, copyVendorAssets } from "./scripts/vendor.js";
 import { SHARED_GLOBAL, SHARED_MODULES } from "./scripts/shared-modules.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -180,7 +180,11 @@ function analyzeBundleComposition(metafile, bundleName) {
 // when a change needs the room, not to make a build pass.
 // The stylesheet has a budget of its own, in tests/test_asset_budget.py: it is
 // minified by the Python side, not here.
-const BUDGET_APP = 90 * 1024;
+// Raised from 90 KB for the visual review of 2026-09-18: the selection chip,
+// the scroll-fade watcher, and the icon set moving to Lucide, whose shapes
+// carry more detail than the hand drawn paths they replaced (33 of them for
+// about 4 KB more). The split of #250 had left it at 86 KB.
+const BUDGET_APP = 96 * 1024;
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.
@@ -277,6 +281,11 @@ async function build() {
       .map(([name, version]) => `${name} ${version}`)
       .join(", ");
     console.log(`📥 Vendored ${vendored.count} third-party files: ${pinned}`);
+
+    const flags = copyCountryFlags();
+    console.log(
+      `🏳️  Copied ${flags.count} country flags (flag-icons ${flags.version})`,
+    );
 
     if (isWatch) {
       console.log("👀 Watching for changes...");

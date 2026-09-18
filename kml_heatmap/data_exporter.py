@@ -55,9 +55,14 @@ from .aircraft import resolve_aircraft_models
 from .cache import atomic_write
 from .exceptions import KMLHeatmapError
 from .export_pipeline import build_path_info, path_metrics, process_path_segments
-from .export_writers import export_airports_data, export_metadata
+from .export_writers import (
+    export_airports_data,
+    export_metadata,
+    exported_country_codes,
+)
 from .logger import logger
 from .segment_codec import FORMAT_VERSION, encode_rows, encode_start
+from .site_assets import available_country_flags
 from .types import COORDINATE_DECIMALS
 from .validation import protected_directories
 from .workers import init_worker
@@ -160,6 +165,9 @@ class ExportResult:
     """Everything ``export_all_data`` produced."""
 
     years: list[int]
+    #: ISO codes of the countries the exported airports are in, for the
+    #: flags the site publishes
+    countries: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -831,6 +839,7 @@ def export_all_data(
 
     years = [result.year for result in year_results]
     _, airports_bytes = export_airports_data(unique_airports, str(output_path))
+    countries = exported_country_codes(unique_airports)
     _, metadata_bytes = export_metadata(
         groundspeed.min_knots or 0.0,
         groundspeed.max_knots,
@@ -838,9 +847,10 @@ def export_all_data(
         year_file_bytes,
         aircraft_models,
         str(output_path),
+        available_country_flags(countries),
     )
 
     total_size = airports_bytes + metadata_bytes + sum(year_file_bytes.values())
     logger.info("  Total data size: %.1f KB", total_size / 1024)
 
-    return ExportResult(years=years)
+    return ExportResult(years=years, countries=countries)

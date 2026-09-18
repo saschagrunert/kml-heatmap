@@ -341,7 +341,7 @@ export class MobileBar {
         kind: "switch",
         id: "aviation",
         icon: "aviation",
-        label: "Aviation data",
+        label: "Aviation",
         isOn: () => app.aviationVisible,
         onToggle: () => app.uiToggles.toggleAviation(),
       });
@@ -379,6 +379,7 @@ export class MobileBar {
         label: "Replay flight",
         hint: () =>
           app.canReplay() ? null : "Select one flight with timing data",
+        isDisabled: () => !app.canReplay(),
         onSelect: () => {
           void app.loadReplay().then((manager) => manager?.toggleReplay());
         },
@@ -396,14 +397,14 @@ export class MobileBar {
         kind: "action",
         id: "export",
         icon: "export",
-        label: "Export map",
+        label: "Export image",
         onSelect: () => app.uiToggles.exportMap(),
       },
       {
         kind: "action",
         id: "share",
         icon: "share",
-        label: "Share link",
+        label: "Copy link",
         onSelect: () => {
           void app.uiToggles.shareLink();
         },
@@ -413,6 +414,7 @@ export class MobileBar {
         id: "github",
         icon: "github",
         label: "Source code",
+        trailing: "externalLink",
         onSelect: () => {
           window.open(
             "https://github.com/saschagrunert/kml-heatmap",
@@ -420,21 +422,6 @@ export class MobileBar {
             "noopener",
           );
         },
-      },
-      {
-        kind: "action",
-        id: "attribution",
-        icon: "info",
-        label: "Map tiles",
-        // What the map's own attribution control says, which the stylesheet
-        // hides below the breakpoint; the OpenAIP credit comes and goes
-        // with its layer, so it is read rather than repeated here
-        hint: () =>
-          document
-            .querySelector(".leaflet-control-attribution")
-            ?.textContent?.trim() || "© OpenStreetMap contributors, © CARTO",
-        onSelect: () => {},
-        closeOnSelect: false,
       },
     ];
   }

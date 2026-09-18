@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
 
 type AirportsModule =
@@ -208,18 +208,29 @@ describe("airports feature", () => {
     });
   });
 
-  describe("countryFlag", () => {
-    it("converts ISO code to flag emoji", () => {
-      expect(mod.countryFlag("DE")).toBe("🇩🇪");
-      expect(mod.countryFlag("US")).toBe("🇺🇸");
-      expect(mod.countryFlag("CH")).toBe("🇨🇭");
+  describe("countryFlagSrc", () => {
+    afterEach(() => {
+      delete window.KML_METADATA;
     });
 
-    it("returns empty string for invalid codes", () => {
-      expect(mod.countryFlag("")).toBe("");
-      expect(mod.countryFlag("X")).toBe("");
-      expect(mod.countryFlag("abc")).toBe("");
-      expect(mod.countryFlag("d1")).toBe("");
+    it("points at the flag the site published", () => {
+      window.KML_METADATA = { available_flags: ["de", "at"] } as never;
+
+      expect(mod.countryFlagSrc("DE")).toBe("flags/de.svg");
+      expect(mod.countryFlagSrc("at")).toBe("flags/at.svg");
+    });
+
+    it("has none for a country the site did not publish", () => {
+      window.KML_METADATA = { available_flags: ["de"] } as never;
+
+      expect(mod.countryFlagSrc("FR")).toBeNull();
+    });
+
+    it("has none at all without the list", () => {
+      // A site built from a wheel, which leaves the flag files out
+      window.KML_METADATA = {} as never;
+
+      expect(mod.countryFlagSrc("DE")).toBeNull();
     });
   });
 
@@ -324,10 +335,12 @@ describe("airports feature", () => {
       expect(html).toContain(">EDDF<");
       expect(html).toContain("airport-marker airport-marker-home");
       expect(html).toContain("airport-label airport-label-home");
+      // The dot is drawn small; the square around it is the 24px a finger
+      // needs, which the airports are too close together to earn by spacing
       expect(options).toMatchObject({
-        iconSize: [12, 12],
-        iconAnchor: [6, 6],
-        popupAnchor: [0, -6],
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+        popupAnchor: [0, -12],
         className: "",
       });
     });

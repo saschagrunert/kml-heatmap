@@ -21,7 +21,7 @@ import {
 } from "./constants";
 import { formatNumber } from "./formatters";
 import { calculateBearing, ddToDms } from "./geometry";
-import { icon } from "./icons";
+import { icon, type IconName } from "./icons";
 
 export type { YearStats } from "../types";
 
@@ -125,7 +125,7 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
   return `
     <div class="popup-container kh-popup-airport">
         <div class="popup-header kh-popup-header-airport">
-            <span class="popup-header-icon kh-popup-icon-lg">&#x1F6EB;</span>
+            <span class="popup-header-icon">${icon("airport", 20)}</span>
             <span>${escapeHtml(params.name || "Unknown")}</span>
             ${homeBadge}
         </div>
@@ -135,8 +135,8 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
                target="_blank"
                rel="noopener noreferrer"
                class="kh-popup-link">
-                <span>&#x1F4CD;</span>
                 <span>${params.latDms}<br>${params.lonDms}</span>
+                ${icon("externalLink", 16, "Opens Google Maps in a new tab")}
             </a>
         </div>
         <div class="popup-metric kh-popup-metric-flights">
@@ -255,10 +255,26 @@ export function generateStatsHtml(
  * Generate fun facts HTML. The fact text is trusted markup (see FunFact);
  * only the category, which ends up in an attribute, is escaped here.
  */
+/**
+ * Icon for a fact that names none of its own. The facts used to carry an
+ * emoji each, which put a second icon family (and a platform-dependent one)
+ * inside a dialog that is otherwise drawn from `utils/icons`.
+ */
+const FACT_ICONS: Record<string, IconName> = {
+  distance: "distance",
+  aircraft: "aircraft",
+  countries: "globe",
+  altitude: "altitude",
+  time: "clock",
+  speed: "speed",
+  achievement: "trophy",
+};
+
 export function generateFunFactsHtml(funFacts: FunFact[]): string {
   let html = wrappedSectionTitle("fun-facts-title", "wrapped", "Facts");
   for (const fact of funFacts) {
-    html += `<div class="fun-fact" data-category="${escapeHtml(fact.category)}"><span class="fun-fact-icon" aria-hidden="true">${fact.icon}</span><span class="fun-fact-text">${fact.text}</span></div>`;
+    const factIcon = fact.icon ?? FACT_ICONS[fact.category] ?? "wrapped";
+    html += `<div class="fun-fact" data-category="${escapeHtml(fact.category)}"><span class="fun-fact-icon">${icon(factIcon, 20)}</span><span class="fun-fact-text">${fact.text}</span></div>`;
   }
   return html;
 }
@@ -368,7 +384,7 @@ export interface SegmentPopupParams {
   speedMin: number;
   speedMax: number;
   title?: string;
-  icon?: string;
+  icon?: IconName;
 }
 
 /**
@@ -379,7 +395,7 @@ export interface SegmentPopupParams {
 export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   const { segment } = params;
   const title = params.title || "Segment Data";
-  const icon = params.icon || "📍";
+  const headerIcon = params.icon ?? "airport";
 
   const altFt = segment.altitude_ft || 0;
   const altFtRounded = Math.round(altFt / 50) * 50;
@@ -411,7 +427,7 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   return `
     <div class="popup-container">
         <div class="popup-header kh-popup-header-segment">
-            <span class="popup-header-icon">${icon}</span>
+            <span class="popup-header-icon">${icon(headerIcon, 20)}</span>
             <span>${escapeHtml(title)}</span>
         </div>
         <div class="popup-coords kh-popup-block">
@@ -437,8 +453,8 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
 export interface DestinationsOptions {
   /** Resolve a country code to its display name */
   countryName: (code: string) => string;
-  /** Resolve a country code to its flag */
-  flag: (code: string) => string;
+  /** Resolve a country code to its flag, or null when the site has none */
+  flagSrc: (code: string) => string | null;
   /** Airport that carries the home base accent */
   homeBase?: string | null;
   /** Airport furthest from the home base; carries the second accent */
@@ -478,7 +494,7 @@ export function generateDestinationsHtml(
 ): string {
   if (grouped.size === 0) return "";
 
-  const { countryName, flag, homeBase, furthest } = options;
+  const { countryName, flagSrc, homeBase, furthest } = options;
   let html = wrappedSectionTitle(
     "airports-grid-title",
     "airport",
@@ -487,20 +503,27 @@ export function generateDestinationsHtml(
 
   let groupIndex = 0;
   for (const [code, airports] of grouped) {
-    const f = code !== "Other" ? flag(code) : "";
-    const label = code === "Other" ? "Other" : countryName(code);
-    const flagHtml = f
-      ? '<span class="country-flag" aria-hidden="true">' +
-        escapeHtml(f) +
-        "</span>"
-      : "";
+    const isCountry = code !== "Other";
+    const label = isCountry ? countryName(code) : "Other";
+    const flag = isCountry ? flagSrc(code) : null;
+    // A flag where the site carries one, the ISO code where it does not.
+    // Never an emoji flag: Windows ships no glyphs for them.
+    const codeHtml = !isCountry
+      ? ""
+      : flag
+        ? '<img class="country-flag" src="' +
+          escapeHtml(flag) +
+          '" alt="" width="18" height="14" loading="lazy">'
+        : '<span class="country-code" aria-hidden="true">' +
+          escapeHtml(code) +
+          "</span>";
     const delay = (groupIndex * 0.1).toFixed(1);
     html +=
       '<div class="country-group" style="animation-delay: ' +
       delay +
       's">' +
       '<div class="country-group-title">' +
-      flagHtml +
+      codeHtml +
       '<span class="country-name">' +
       escapeHtml(label) +
       "</span>" +

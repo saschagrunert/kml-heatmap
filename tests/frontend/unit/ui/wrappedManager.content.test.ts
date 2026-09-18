@@ -55,7 +55,10 @@ describe("WrappedManager content", () => {
   it("titles a single year as the year in flight", () => {
     wrappedManager.showWrapped();
 
-    expect(el("wrapped-title").textContent).toBe("✨ Your Year in Flight");
+    // The card is titled by its words alone; the mark that used to open the
+    // line sat low beside type this size
+    expect(el("wrapped-title").textContent).toBe("Your Year in Flight");
+    expect(el("wrapped-title").querySelector("svg")).toBeNull();
     expect(el("wrapped-year").textContent).toBe("2024");
   });
 
@@ -64,7 +67,7 @@ describe("WrappedManager content", () => {
 
     wrappedManager.showWrapped();
 
-    expect(el("wrapped-title").textContent).toBe("✨ Your Flight History");
+    expect(el("wrapped-title").textContent).toBe("Your Flight History");
     expect(el("wrapped-year").textContent).toBe("All Years");
   });
 

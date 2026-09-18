@@ -4,8 +4,10 @@
 import type { MapApp } from "../mapApp";
 import { applyToggleButtonState } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
+import { pluralFlights } from "../utils/htmlGenerators";
 import { invalidateMapAfterTransition } from "../utils/mapHelpers";
 import { logError } from "../utils/logger";
+import { announceStatus } from "../utils/toast";
 
 export class PathSelection {
   private app: MapApp;
@@ -15,10 +17,17 @@ export class PathSelection {
 
     // The isolate button reads two keys, so it cannot use syncToggleButton;
     // this is its only writer
-    const refresh = (): void => this.updateIsolateButton();
+    const refresh = (): void => {
+      this.updateIsolateButton();
+      this.updateSelectionChip();
+    };
     app.store.subscribe("selectedPathIds", refresh);
     app.store.subscribe("isolateSelection", refresh);
     refresh();
+
+    domCache
+      .get("selection-clear-btn")
+      ?.addEventListener("click", () => this.clearSelection());
   }
 
   togglePathSelection(pathId: number): void {
@@ -99,6 +108,32 @@ export class PathSelection {
     if (this.app.altitudeVisible || this.app.airspeedVisible) {
       invalidateMapAfterTransition(this.app.map);
     }
+  }
+
+  /**
+   * Say what is selected, and offer the way out.
+   *
+   * The selection is drawn on the paths, and the paths are only drawn once
+   * the map is zoomed in far enough for them, so at the zoom levels that
+   * show the heat bloom alone a selection was invisible. It is also what
+   * Isolate, Replay and a shared link all act on, and none of them said how
+   * much that was.
+   */
+  private updateSelectionChip(): void {
+    const chip = domCache.get("selection-chip");
+    const count = domCache.get("selection-chip-count");
+    if (!chip || !count) return;
+
+    const selected = this.app.selectedPathIds.size;
+    const text = selected > 0 ? pluralFlights(selected) + " selected" : "";
+    const changed = count.textContent !== text;
+    count.textContent = text;
+    chip.hidden = selected === 0;
+
+    // The polite region rather than a live chip: the count changes on every
+    // click on a path, and a live region that replaces its own text is read
+    // once things settle rather than once per click
+    if (changed && selected > 0) announceStatus(text);
   }
 
   /**

@@ -377,3 +377,49 @@ class TestSourceHashParity:
         assert tuple(re.findall(r'"([^"]+)"', listed.group(1))) == (
             assets_module.BUILD_HASH_FILES
         )
+
+
+class TestCountryFlags:
+    """Publishing a flag per country the export visited, and no other."""
+
+    @pytest.fixture
+    def flags(self, tmp_path, monkeypatch):
+        """A checkout whose static/flags holds two of the three asked for"""
+        static = tmp_path / "static"
+        (static / assets_module.FLAGS_DIR_NAME).mkdir(parents=True)
+        for code in ("de", "at"):
+            (static / assets_module.FLAGS_DIR_NAME / f"{code}.svg").write_text(
+                f'<svg xmlns="http://www.w3.org/2000/svg" data-code="{code}"/>'
+            )
+        monkeypatch.setattr(assets_module, "STATIC_DIR", static)
+        return static
+
+    def test_lists_only_the_flags_the_checkout_has(self, flags):
+        assert assets_module.available_country_flags(["DE", "AT", "XX"]) == [
+            "at",
+            "de",
+        ]
+
+    def test_lists_nothing_without_the_directory(self, tmp_path, monkeypatch):
+        # A wheel leaves the flags out; the frontend falls back to the code
+        monkeypatch.setattr(assets_module, "STATIC_DIR", tmp_path)
+        assert assets_module.available_country_flags(["DE"]) == []
+
+    def test_publishes_the_flags_of_the_countries_given(self, flags, tmp_path):
+        output = tmp_path / "site"
+        output.mkdir()
+
+        assets_module._copy_country_flags(output, ["DE", "XX"])
+
+        published = sorted(
+            path.name for path in (output / assets_module.FLAGS_DIR_NAME).iterdir()
+        )
+        assert published == ["de.svg"]
+
+    def test_writes_no_directory_when_nothing_matches(self, flags, tmp_path):
+        output = tmp_path / "site"
+        output.mkdir()
+
+        assets_module._copy_country_flags(output, ["XX"])
+
+        assert not (output / assets_module.FLAGS_DIR_NAME).exists()

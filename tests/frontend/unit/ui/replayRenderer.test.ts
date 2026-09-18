@@ -509,17 +509,17 @@ describe("ReplayRenderer", () => {
 
       bearing.mockReturnValue(350);
       callUpdateDisplay();
-      expect(iconDiv.style.transform).toContain("rotate(305deg)");
+      expect(iconDiv.style.transform).toContain("rotate(350deg)");
 
-      // 350 to 10 degrees is a 20 degree turn: 325, not a transition back
-      // through 180 to -35
+      // 350 to 10 degrees is a 20 degree turn: 370, not a transition back
+      // through 180 to 10
       bearing.mockReturnValue(10);
       callUpdateDisplay();
-      expect(iconDiv.style.transform).toContain("rotate(325deg)");
+      expect(iconDiv.style.transform).toContain("rotate(370deg)");
 
       bearing.mockReturnValue(340);
       callUpdateDisplay();
-      expect(iconDiv.style.transform).toContain("rotate(295deg)");
+      expect(iconDiv.style.transform).toContain("rotate(340deg)");
     });
 
     it("keeps the last bearing when no smoothed bearing is available", () => {

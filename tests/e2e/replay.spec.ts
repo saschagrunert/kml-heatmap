@@ -194,7 +194,10 @@ test.describe("Replay", () => {
 
     const airplaneIcon = page.locator(".replay-airplane-icon");
     await expect(airplaneIcon).toBeAttached();
-    await expect(airplaneIcon).toHaveText("✈️");
+    // Drawn from the icon family, nose up, so the marker's rotation is the
+    // track: the emoji it replaced pointed north-east on some platforms and
+    // somewhere else on others
+    await expect(airplaneIcon.locator("svg")).toBeAttached();
   });
 
   test("replay time display updates during playback", async ({ page }) => {

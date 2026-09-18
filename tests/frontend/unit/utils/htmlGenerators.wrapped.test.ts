@@ -13,6 +13,7 @@ import type {
   FilteredStatistics,
   FunFact,
 } from "../../../../kml_heatmap/frontend/types";
+import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
 
 describe("htmlGenerators (Wrapped sections)", () => {
   describe("generateStatsHtml", () => {
@@ -131,13 +132,11 @@ describe("htmlGenerators (Wrapped sections)", () => {
       const funFacts: FunFact[] = [
         {
           category: "distance",
-          icon: "✈️",
           text: "You flew 10,000 miles!",
           priority: 1,
         },
         {
           category: "altitude",
-          icon: "⬆️",
           text: "Reached 35,000 feet",
           priority: 2,
         },
@@ -150,15 +149,16 @@ describe("htmlGenerators (Wrapped sections)", () => {
         '<span class="section-title-text">Facts</span></h3>',
       );
       expect(html).toContain('<div class="fun-fact" data-category="distance">');
+      // The category names the icon, drawn from the one icon family
       expect(html).toContain(
-        '<span class="fun-fact-icon" aria-hidden="true">✈️</span>',
+        '<span class="fun-fact-icon">' + icon("distance", 20) + "</span>",
       );
       expect(html).toContain(
         '<span class="fun-fact-text">You flew 10,000 miles!</span>',
       );
       expect(html).toContain('data-category="altitude"');
       expect(html).toContain(
-        '<span class="fun-fact-icon" aria-hidden="true">⬆️</span>',
+        '<span class="fun-fact-icon">' + icon("altitude", 20) + "</span>",
       );
       expect(html).toContain(
         '<span class="fun-fact-text">Reached 35,000 feet</span>',
@@ -179,7 +179,6 @@ describe("htmlGenerators (Wrapped sections)", () => {
       const funFacts: FunFact[] = [
         {
           category: 'a"b',
-          icon: "🔥",
           text: "Flew <strong>far</strong>",
           priority: 1,
         },
@@ -489,8 +488,8 @@ describe("htmlGenerators (Wrapped sections)", () => {
 
   describe("generateDestinationsHtml", () => {
     const identity = (code: string) => code;
-    const noFlag = () => "";
-    const plain = { countryName: identity, flag: noFlag };
+    const noFlags = () => null;
+    const plain = { countryName: identity, flagSrc: noFlags };
 
     it("generates grouped destinations HTML", () => {
       const grouped = new Map([
@@ -616,21 +615,35 @@ describe("htmlGenerators (Wrapped sections)", () => {
       expect(html).toBe("");
     });
 
-    it("uses countryName and flag functions for display", () => {
+    it("shows the country's flag where the site carries one", () => {
+      const grouped = new Map([["DE", ["EDDF Frankfurt"]]]);
+
+      const html = generateDestinationsHtml(grouped, {
+        countryName: () => "Germany",
+        flagSrc: (code) => `flags/${code.toLowerCase()}.svg`,
+      });
+
+      expect(html).toContain('<img class="country-flag" src="flags/de.svg"');
+      expect(html).toContain('alt=""');
+      expect(html).not.toContain("country-code");
+    });
+
+    it("labels a group with the ISO code and the country name", () => {
       const grouped = new Map([["DE", ["EDDF Frankfurt"]]]);
       const displayName = (code: string) => (code === "DE" ? "Germany" : code);
-      const flag = (code: string) => (code === "DE" ? "🇩🇪" : "");
 
       const html = generateDestinationsHtml(grouped, {
         countryName: displayName,
-        flag,
+        flagSrc: () => null,
       });
 
+      // A code chip rather than a flag emoji: Windows renders no flags
       expect(html).toContain(
-        '<span class="country-flag" aria-hidden="true">🇩🇪</span>',
+        '<span class="country-code" aria-hidden="true">DE</span>',
       );
       expect(html).toContain('<span class="country-name">Germany</span>');
       expect(html).toContain("EDDF");
+      expect(html).not.toMatch(/\p{Extended_Pictographic}/u);
     });
 
     it("escapes country and airport names", () => {
@@ -638,7 +651,7 @@ describe("htmlGenerators (Wrapped sections)", () => {
 
       const html = generateDestinationsHtml(grouped, {
         countryName: () => "<b>Country</b>",
-        flag: noFlag,
+        flagSrc: () => null,
       });
 
       expect(html).toContain("&lt;b&gt;Country&lt;/b&gt;");

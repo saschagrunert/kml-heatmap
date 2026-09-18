@@ -122,7 +122,14 @@ the second one (`scripts/shared-modules.js` and
 has to be a single instance; the build fails when a module ends up in both.
 The same command copies Leaflet, leaflet.heat and dom-to-image out of
 `node_modules` into `kml_heatmap/static/vendor/`, which is what the published
-page loads them from. All of it is gitignored.
+page loads them from, and the country flags of `flag-icons` into
+`kml_heatmap/static/flags/`. All of it is gitignored.
+
+The flags are the one asset the wheel leaves out: 271 of them are two
+megabytes, and any one export visits a handful, so `site_assets.py` publishes
+only the countries the flights touched and lists them in `metadata.js`. A
+site generated from a `pip install`, which has no `static/flags/`, publishes
+none and the statistics rail falls back to the ISO country code.
 
 **Architecture:**
 
@@ -132,7 +139,13 @@ page loads them from. All of it is gitignored.
   - `services/` - Data loading and caching
   - `state/` - URL state management
   - `ui/` - UI managers for controls and interactions
-  - `utils/` - Formatters, colors, geometry helpers
+  - `utils/` - Formatters, colour scales, geometry helpers and the icon set.
+    Every mark in the interface is an inline SVG: an icon font is out (the
+    page's CSP allows no external font and it has to work from `file://`),
+    and emoji render at a different weight, colour and baseline on every
+    platform. The shapes come from Lucide, imported by name so the bundler
+    keeps only the ones the page draws; the GitHub mark and the top-down
+    aircraft are drawn in `utils/icons.ts` because Lucide carries neither
 - **Tests**
   - Unit tests: `tests/frontend/unit/` (Vitest)
   - E2E tests: `tests/e2e/` (Playwright)

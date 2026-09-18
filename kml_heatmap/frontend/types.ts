@@ -3,6 +3,7 @@
  */
 
 import type { Coordinate } from "./utils/geometry";
+import type { IconName } from "./utils/icons";
 
 /**
  * Path information from KML data.
@@ -167,6 +168,12 @@ export interface Metadata {
    * hold in its cache next to a newer bundle
    */
   aircraft_models?: AircraftModels;
+  /**
+   * ISO codes of the countries this site carries a flag for. A site built
+   * without the flag files (a pip install, which leaves them out) publishes
+   * none, and the country code is shown instead. Missing from older exports.
+   */
+  available_flags?: string[];
 }
 
 /**
@@ -226,8 +233,14 @@ export type SavedState = AppState;
  * Fun fact for wrapped/year-in-review feature
  */
 export interface FunFact {
+  /** The diversity bucket, and the icon when the fact names none */
   category: string;
-  icon: string;
+  /**
+   * The mark drawn beside the text. Several facts share a category (three
+   * of them are about distance), so the category alone would draw the same
+   * icon three times in one card.
+   */
+  icon?: IconName;
   /**
    * Trusted markup, rendered as is. The generator escapes every value it
    * takes from the data (registrations, models) before building the text.

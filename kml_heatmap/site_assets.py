@@ -7,6 +7,8 @@ template, the stylesheet, the favicons and the vendored third-party files in
 one place, the way ``export_writers`` holds the data files.
 """
 
+from __future__ import annotations
+
 import hashlib
 import html
 import json
@@ -15,6 +17,7 @@ import re
 import shutil
 import string
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import minify_html as mh
 import rcssmin
@@ -24,12 +27,17 @@ from .cache import atomic_text_write
 from .exceptions import KMLHeatmapError
 from .logger import logger
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
 __all__ = [
     "BUNDLE_FILE",
     "BUNDLE_FILES",
     "FEATURES_BUNDLE_FILE",
+    "FLAGS_DIR_NAME",
     "SITE_FILES",
     "STATIC_DIR",
+    "available_country_flags",
     "bundle_is_available",
     "load_template",
     "minify_html",
@@ -37,6 +45,9 @@ __all__ = [
     "render_html",
     "warn_about_a_stale_bundle",
 ]
+
+#: Where the flags live, in the checkout and in a published site alike
+FLAGS_DIR_NAME = "flags"
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -334,10 +345,42 @@ def _copy_favicon_files(output_dir: Path, static_dir: Path) -> None:
     logger.info("Favicon files copied")
 
 
+def available_country_flags(codes: Iterable[str]) -> list[str]:
+    """The given country codes that this checkout can publish a flag for.
+
+    `npm run build` fills ``static/flags/`` from node_modules, and the wheel
+    leaves it out: two megabytes of flags for the handful of countries any
+    one export visits would be a poor trade. A site built without them shows
+    the country code instead, so this returns what is actually there rather
+    than what was asked for.
+    """
+    flag_dir = STATIC_DIR / FLAGS_DIR_NAME
+    return sorted(
+        {code.lower() for code in codes if (flag_dir / f"{code.lower()}.svg").is_file()}
+    )
+
+
+def _copy_country_flags(output_dir: Path, codes: Iterable[str]) -> None:
+    """Publish the flag of every country the export visited, and no other."""
+    published = available_country_flags(codes)
+    if not published:
+        return
+
+    destination = output_dir / FLAGS_DIR_NAME
+    destination.mkdir(parents=True, exist_ok=True)
+    total = 0
+    for code in published:
+        target = destination / f"{code}.svg"
+        shutil.copy2(STATIC_DIR / FLAGS_DIR_NAME / f"{code}.svg", target)
+        total += target.stat().st_size
+    logger.info("Country flags copied: %d (%.1f KB)", len(published), total / 1024)
+
+
 def package_assets(
     output_dir: Path,
     bounds: dict[str, float],
     data_dir_name: str,
+    country_codes: Iterable[str] = (),
 ) -> None:
     """Generate config and copy static assets (pre-built JS bundles, CSS, icons)."""
     _generate_map_config(output_dir, bounds, data_dir_name)
@@ -346,3 +389,4 @@ def package_assets(
     _copy_and_minify_css(output_dir, STATIC_DIR)
     _copy_vendor_files(output_dir, STATIC_DIR)
     _copy_favicon_files(output_dir, STATIC_DIR)
+    _copy_country_flags(output_dir, country_codes)

@@ -248,7 +248,7 @@ test.describe("Wrapped and Export", () => {
 
     await expect(page.locator("#wrapped-year")).toHaveText(year);
     await expect(page.locator("#wrapped-title")).toHaveText(
-      "✨ Your Year in Flight",
+      "Your Year in Flight",
     );
   });
 
@@ -287,7 +287,7 @@ test.describe("Wrapped and Export", () => {
 
     await expect(page.locator("#wrapped-year")).toHaveText("All Years");
     await expect(page.locator("#wrapped-title")).toHaveText(
-      "✨ Your Flight History",
+      "Your Flight History",
     );
   });
 
