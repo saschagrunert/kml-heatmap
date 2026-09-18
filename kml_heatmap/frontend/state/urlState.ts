@@ -12,16 +12,54 @@ import { MAX_ZOOM, MIN_ZOOM } from "../utils/constants";
  * applied. Version 3 ids are derived from the flight content instead of its
  * position in the export, so they stay valid across re-exports; an id whose
  * flight was removed is dropped once the data has loaded.
+ *
+ * Version 4 names the very same flights and only writes them differently: in
+ * base 36 rather than in decimal, which takes about a third off a link that
+ * carries a large selection. Both versions are therefore still read, so
+ * links and saved states from before the change keep working.
  */
-export const STATE_SCHEMA_VERSION = 3;
+export const STATE_SCHEMA_VERSION = 4;
+
+/** The versions whose ids this build understands, newest last */
+export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [3, 4];
+
+/** The radix each supported version writes its path ids in */
+const PATH_ID_RADIX = new Map([
+  [3, 10],
+  [4, 36],
+]);
+
+/** Path ids are 40-bit content hashes (PATH_ID_BITS in data_exporter.py) */
+const PATH_ID_LIMIT = 2 ** 40;
+
+/**
+ * Whether a saved selection was written by a version this build can read.
+ * Used for the URL and for the localStorage copy alike.
+ */
+export function isSupportedSchemaVersion(version: unknown): boolean {
+  return (
+    typeof version === "number" && SUPPORTED_SCHEMA_VERSIONS.includes(version)
+  );
+}
+
+/** A path id as written in a link, or null when it is not one */
+export function parsePathId(text: string, radix: number): number | null {
+  if (!text) return null;
+  // parseInt stops at the first invalid digit, so the shape is checked first
+  const valid = radix === 36 ? /^[0-9a-z]+$/ : /^[0-9]+$/;
+  if (!valid.test(text)) return null;
+  const id = parseInt(text, radix);
+  return Number.isInteger(id) && id >= 0 && id < PATH_ID_LIMIT ? id : null;
+}
 
 /**
  * Parse URL parameters into state object
  * URL parameter schema:
  *   y - selectedYear (string: 'all' or year like '2024')
  *   a - selectedAircraft (string: 'all' or aircraft identifier)
- *   p - selectedPathIds (comma-separated integers: '1,5,12')
- *   sv - schema version of p (missing or older means p is ignored)
+ *   p - selectedPathIds (comma-separated, base 36 from schema 4 on:
+ *       'a5,1x,3kf'; decimal in schema 3)
+ *   sv - schema version of p (an unknown one means p is ignored)
  *   v - layer visibility (9-char binary string: '100100000')
  *   lat, lng - map center coordinates
  *   z - map zoom level
@@ -61,16 +99,18 @@ export function parseUrlParams(
     }
   }
 
-  // Selected paths, only when they were written with the current id scheme
+  // Selected paths, only when they were written with an id scheme this
+  // build reads. The radix follows the version: decimal up to 3, base 36
+  // from 4 on.
   const schemaVersion = parseInt(urlParams.get("sv") ?? "", 10);
-  if (urlParams.has("p") && schemaVersion === STATE_SCHEMA_VERSION) {
+  const radix = PATH_ID_RADIX.get(schemaVersion);
+  if (urlParams.has("p") && radix !== undefined) {
     const pathStr = urlParams.get("p");
     if (pathStr) {
       state.selectedPathIds = pathStr
         .split(",")
-        .filter((id) => id.trim().length > 0)
-        .map((id) => parseInt(id, 10))
-        .filter((id) => !isNaN(id));
+        .map((id) => parsePathId(id.trim(), radix))
+        .filter((id): id is number => id !== null);
     }
   }
 
@@ -175,7 +215,12 @@ export function encodeStateToUrl(state: AppState): string {
   }
 
   if (state.selectedPathIds && state.selectedPathIds.length > 0) {
-    params.set("p", state.selectedPathIds.join(","));
+    // Base 36 keeps a large selection out of the length limits proxies and
+    // chat clients put on a link
+    params.set(
+      "p",
+      state.selectedPathIds.map((id) => id.toString(36)).join(","),
+    );
     params.set("sv", String(STATE_SCHEMA_VERSION));
   }
 

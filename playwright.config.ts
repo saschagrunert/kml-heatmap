@@ -1,6 +1,19 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const isCI = !!process.env["CI"];
+/**
+ * Pixel comparisons only mean anything where the rendering is fixed, so the
+ * visual project exists only inside the Playwright image the snapshots were
+ * generated in (see CONTRIBUTING.md). Elsewhere it is left out entirely, so
+ * a plain `npx playwright test` does not fail on font rendering that was
+ * never going to match. The image sets PLAYWRIGHT_BROWSERS_PATH;
+ * VISUAL_SNAPSHOTS=1 forces it on for anyone with an equivalent setup. Not
+ * VISUAL: that is the standard variable naming a user's editor, and it is
+ * already set on most Unix systems.
+ */
+const runsVisual =
+  process.env["PLAYWRIGHT_BROWSERS_PATH"] === "/ms-playwright" ||
+  !!process.env["VISUAL_SNAPSHOTS"];
 const chromiumPath = process.env["CHROMIUM_PATH"];
 const launchOptions = chromiumPath
   ? { launchOptions: { executablePath: chromiumPath } }
@@ -36,8 +49,9 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
-      // The bar and sheet only exist below the breakpoint
-      testIgnore: /mobile\.spec\.ts$/,
+      // The bar and sheet only exist below the breakpoint; the visual
+      // snapshots have a project of their own
+      testIgnore: /(mobile|visual)\.spec\.ts$/,
       use: {
         ...devices["Desktop Chrome"],
         ...launchOptions,
@@ -57,6 +71,27 @@ export default defineConfig({
         ...launchOptions,
       },
     },
+    ...(runsVisual
+      ? [
+          {
+            name: "visual",
+            testMatch: /visual\.spec\.ts$/,
+            retries: 0,
+            use: {
+              ...devices["Desktop Chrome"],
+              ...launchOptions,
+            },
+            expect: {
+              toHaveScreenshot: {
+                // Antialiasing differs by a pixel here and there even on
+                // identical rendering stacks; a real layout change moves far
+                // more than this
+                maxDiffPixelRatio: 0.01,
+              },
+            },
+          },
+        ]
+      : []),
     {
       name: "webkit",
       // The page targets iOS and leans on :has(), @starting-style and dvh,

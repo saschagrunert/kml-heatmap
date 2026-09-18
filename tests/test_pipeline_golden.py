@@ -15,6 +15,11 @@ import pytest
 from kml_heatmap.data_exporter import PATH_ID_BITS
 from kml_heatmap.geometry import haversine_distance
 from kml_heatmap.renderer import create_progressive_heatmap
+from kml_heatmap.segment_codec import (
+    COORDINATE_SCALE,
+    FORMAT_VERSION,
+    decode_rows,
+)
 from tests.conftest import parse_js as _load_js
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -89,7 +94,7 @@ def _build_site(out, inputs):
     bundle.parent.mkdir(parents=True)
     bundle.write_text("/* test bundle */", encoding="utf-8")
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("kml_heatmap.renderer.BUNDLE_FILE", bundle)
+        monkeypatch.setattr("kml_heatmap.site_assets.BUNDLE_FILE", bundle)
         return create_progressive_heatmap(
             [str(p) for p in inputs],
             str(out / "site" / "index.html"),
@@ -111,16 +116,19 @@ def _observed_values(data_dir):
         path_ids[year] = [info["id"] for info in data["path_info"]]
         entries = data["segments"].values()
         segment_rows[year] = sum(len(entry["rows"]) for entry in entries)
-        # The rows chain from the start point; the time column is relative to
-        # the start of the flight, the way the frontend reads both
+        # The rows are scaled integers stored as differences; decoding them
+        # here is a second implementation of what the frontend does, so the
+        # numbers below are the ones a visitor sees. They were pinned before
+        # the format changed and did not move with it.
         distance = 0.0
         seconds = 0.0
         for entry in entries:
-            previous = entry["start"]
-            for row in entry["rows"]:
+            rows = decode_rows(entry["start"], entry["rows"])
+            previous = [value / COORDINATE_SCALE for value in entry["start"]]
+            for row in rows:
                 distance += haversine_distance(*previous[:2], *row[:2])
                 previous = row
-            times = [row[4] for row in entry["rows"] if len(row) > 4]
+            times = [row[4] for row in rows if len(row) > 4]
             if times:
                 seconds += max(times) - min(times)
         distance_km[year] = round(distance, 1)
@@ -215,7 +223,14 @@ def test_year_data_shape_and_unique_ids(golden_output):
     registrations = set()
     for year in metadata["available_years"]:
         data = _load_js(data_dir / str(year) / "data.js", f"KML_DATA_{year}")
-        assert list(data) == ["year", "original_points", "path_info", "segments"]
+        assert list(data) == [
+            "format",
+            "year",
+            "original_points",
+            "path_info",
+            "segments",
+        ]
+        assert data["format"] == FORMAT_VERSION
         assert data["year"] == year
 
         ids = [info["id"] for info in data["path_info"]]
@@ -238,12 +253,15 @@ def test_year_data_shape_and_unique_ids(golden_output):
             registrations.add(info.get("aircraft_registration"))
 
         for entry in data["segments"].values():
-            rows = entry["rows"]
-            assert rows
+            encoded = entry["rows"]
+            assert encoded
             assert len(entry["start"]) == 2
-            for row in rows:
+            # Everything on disk is an integer, which is the point of the format
+            assert all(isinstance(value, int) for value in entry["start"])
+            for row in encoded:
                 assert SEGMENT_MIN_LEN <= len(row) <= SEGMENT_MAX_LEN
-                assert all(isinstance(v, int | float) for v in row)
+                assert all(isinstance(value, int) for value in row)
+            for row in decode_rows(entry["start"], encoded):
                 assert row[2] % 100 == 0
                 assert row[3] >= 0
 

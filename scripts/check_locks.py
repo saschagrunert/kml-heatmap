@@ -36,6 +36,10 @@ HOOK_REV = re.compile(
 TYPOS_ACTION = re.compile(r"uses:\s*crate-ci/typos@\S+\s*#\s*v?(\S+)")
 # The __version__ assignment at the top of kml_heatmap/__init__.py
 PACKAGE_VERSION = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
+# "image: mcr.microsoft.com/playwright:v1.2.3-noble" in the test workflow
+PLAYWRIGHT_IMAGE = re.compile(
+    r"image:\s*mcr\.microsoft\.com/playwright:v(\S+?)-[a-z]+\s*$", re.MULTILINE
+)
 
 HOOKS = {
     "https://github.com/astral-sh/ruff-pre-commit": "ruff",
@@ -120,6 +124,31 @@ def version_mismatches() -> list[str]:
     return problems
 
 
+def playwright_image_mismatches() -> list[str]:
+    """Check the Playwright container against the pinned @playwright/test.
+
+    The visual job compares screenshots inside that image, and the committed
+    snapshots were generated in it. An image a version ahead of the library
+    renders differently, which reads as a page regression rather than as the
+    version drift it is.
+    """
+    text = (ROOT / ".github/workflows/test.yml").read_text(encoding="utf-8")
+    match = PLAYWRIGHT_IMAGE.search(text)
+    if match is None:
+        return [".github/workflows/test.yml runs no Playwright image"]
+    pinned = read_npm_version("@playwright/test")
+    if pinned is None:
+        return ["package-lock.json does not pin @playwright/test"]
+    if match.group(1) != pinned:
+        return [
+            (
+                f".github/workflows/test.yml runs the Playwright image "
+                f"v{match.group(1)}, package-lock.json pins {pinned}"
+            )
+        ]
+    return []
+
+
 def hook_mismatches(test_pins: dict[str, str]) -> list[str]:
     """Describe every pre-commit hook whose version differs from its source."""
     hooks = read_hook_revs()
@@ -189,7 +218,7 @@ def main() -> int:
         if test_pins.get(name) != version
     ]
 
-    hook_problems = hook_mismatches(test_pins)
+    hook_problems = hook_mismatches(test_pins) + playwright_image_mismatches()
     version_problems = version_mismatches()
 
     if not problems and not hook_problems and not version_problems:

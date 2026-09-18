@@ -11,13 +11,13 @@ import { FilterManager } from "./ui/filterManager";
 import { StatsManager } from "./ui/statsManager";
 import { PathSelection } from "./ui/pathSelection";
 import { AirportManager } from "./ui/airportManager";
-import { ReplayManager } from "./ui/replayManager";
-import { WrappedManager } from "./ui/wrappedManager";
+
 import { UIToggles } from "./ui/uiToggles";
 import { MobileBar } from "./ui/mobileBar";
 import { bindActions } from "./ui/actions";
 import { loadInitialData } from "./appInitializer";
 import { logError } from "./utils/logger";
+import { showToast } from "./utils/toast";
 import { domCache } from "./utils/domCache";
 import { syncLegend, syncToggleButton } from "./utils/buttonState";
 import { applyGradientTokens } from "./utils/colors";
@@ -26,11 +26,20 @@ import { invalidateMapAfterTransition } from "./utils/mapHelpers";
 import { prefersReducedMotion } from "./utils/motion";
 import { MAX_ZOOM, MIN_ZOOM } from "./utils/constants";
 import { AppStore, defineStoreAccessors } from "./state/store";
+import { ReplayState } from "./ui/replayState";
+import { loadFeatures } from "./services/featureLoader";
+import type { FeatureModule } from "./features";
+import { updateReplayButtonState } from "./ui/replayButton";
+// Publishes the modules the feature bundle resolves against; imported for
+// that side effect, before any feature can be loaded
+import "./shared";
 import {
   datasetIndex,
   type PathIdsByAirport,
 } from "./calculations/datasetIndex";
 import type { StoreAccessors } from "./state/store";
+import type { ReplayManager } from "./ui/replayManager";
+import type { WrappedManager } from "./ui/wrappedManager";
 import type { HeatmapLayer } from "./globals";
 import type { PathInfo, PathSegment, Airport, AppState } from "./types";
 
@@ -67,6 +76,15 @@ export interface OpenAIPLayersMap {
 /** Delay before a Wrapped panel restored from state opens again */
 const WRAPPED_RESTORE_DELAY_MS = 500;
 
+/**
+ * Said when the feature bundle cannot be fetched. Without it a click on
+ * Replay or Wrapped would do nothing at all and look like a dead control;
+ * the export button says the same kind of thing when dom-to-image is
+ * missing.
+ */
+export const FEATURES_UNAVAILABLE_MESSAGE =
+  "Replay and Wrapped are unavailable: their code could not be loaded";
+
 export class MapApp {
   // Observable state store
   readonly store: AppStore;
@@ -95,6 +113,8 @@ export class MapApp {
   // Non-store state
   allAirportsData: Airport[];
   isInitializing: boolean;
+  /** Set by destroy(), so work that was already in flight can stand down */
+  private destroyed = false;
 
   // Map and layers
   map: L.Map | null;
@@ -111,6 +131,13 @@ export class MapApp {
   // OpenAIP layer
   openaipLayers: OpenAIPLayersMap;
 
+  /**
+   * Replay state. It lives here rather than in the replay manager because
+   * the app reads it on every map click and layer redraw, which must not
+   * depend on whether the feature bundle has been fetched.
+   */
+  readonly replayState: ReplayState;
+
   // Saved state
   savedState: AppState | null;
   restoredYearFromState: boolean;
@@ -123,8 +150,14 @@ export class MapApp {
   statsManager!: StatsManager;
   pathSelection!: PathSelection;
   airportManager!: AirportManager;
-  replayManager!: ReplayManager;
-  wrappedManager!: WrappedManager;
+  /**
+   * Replay and Wrapped live in the lazily loaded feature bundle, so these
+   * are undefined until the user first opens one. Reach them through
+   * `loadReplay()` / `loadWrapped()`; read them directly only where the
+   * feature must already be open for the code to run at all.
+   */
+  replayManager?: ReplayManager | undefined;
+  wrappedManager?: WrappedManager | undefined;
   uiToggles!: UIToggles;
   mobileBar!: MobileBar | null;
 
@@ -176,6 +209,8 @@ export class MapApp {
     // OpenAIP layer
     this.openaipLayers = {};
 
+    this.replayState = new ReplayState();
+
     // Saved state
     this.savedState = null;
     this.restoredYearFromState = false;
@@ -201,7 +236,10 @@ export class MapApp {
     if (this.savedState && this.savedState.wrappedVisible) {
       this.wrappedRestoreTimer = setTimeout(() => {
         this.wrappedRestoreTimer = null;
-        this.wrappedManager.showWrapped();
+        void this.loadWrapped().then((manager) => {
+          // The bundle may arrive after the app was torn down
+          if (!this.destroyed) manager?.showWrapped();
+        });
       }, WRAPPED_RESTORE_DELAY_MS);
     }
 
@@ -211,6 +249,7 @@ export class MapApp {
 
   /** Cancel pending work and detach the chrome built at runtime */
   destroy(): void {
+    this.destroyed = true;
     if (this.wrappedRestoreTimer !== null) {
       clearTimeout(this.wrappedRestoreTimer);
       this.wrappedRestoreTimer = null;
@@ -445,10 +484,9 @@ export class MapApp {
     this.statsManager = new StatsManager(this);
     this.pathSelection = new PathSelection(this);
     this.airportManager = new AirportManager(this);
-    this.replayManager = new ReplayManager(this);
-    this.wrappedManager = new WrappedManager(this);
     this.uiToggles = new UIToggles(this);
     this.mobileBar = MobileBar.mountFor(this);
+    this.followReplayAvailability();
   }
 
   togglePathSelection(pathId: string): void {
@@ -456,7 +494,62 @@ export class MapApp {
   }
 
   seekReplay(value: string): void {
-    this.replayManager.seekReplay(value);
+    // Only reachable from the replay panel, which exists once replay is on
+    this.replayManager?.seekReplay(value);
+  }
+
+  /** Whether the current selection can be replayed */
+  canReplay(): boolean {
+    return this.selectedPathIds.size === 1 && this.hasTimingData;
+  }
+
+  /**
+   * Keep the replay control showing whether replay is available. It has to
+   * say so from the first paint, so the app owns it rather than the replay
+   * manager, which is only fetched once someone opens replay.
+   */
+  private followReplayAvailability(): void {
+    const refresh = (): void => updateReplayButtonState(this.canReplay());
+    this.store.subscribe("selectedPathIds", refresh);
+    this.store.subscribe("hasTimingData", refresh);
+    refresh();
+  }
+
+  /**
+   * The feature bundle, or null when it could not be fetched. A failure is
+   * reported here rather than at each call site, so every way into Replay
+   * or Wrapped says the same thing instead of doing nothing.
+   */
+  private async loadFeatureBundle(): Promise<FeatureModule | null> {
+    const features = await loadFeatures();
+    if (!features) showToast(FEATURES_UNAVAILABLE_MESSAGE, "error");
+    return features;
+  }
+
+  /**
+   * The replay manager, fetching the feature bundle on first use. Resolves
+   * with undefined when the bundle cannot be loaded.
+   */
+  async loadReplay(): Promise<ReplayManager | undefined> {
+    if (!this.replayManager) {
+      const features = await this.loadFeatureBundle();
+      // Another caller may have finished the same load in the meantime
+      this.replayManager ??= features
+        ? new features.ReplayManager(this)
+        : undefined;
+    }
+    return this.replayManager;
+  }
+
+  /** The Wrapped manager, fetching the feature bundle on first use */
+  async loadWrapped(): Promise<WrappedManager | undefined> {
+    if (!this.wrappedManager) {
+      const features = await this.loadFeatureBundle();
+      this.wrappedManager ??= features
+        ? new features.WrappedManager(this)
+        : undefined;
+    }
+    return this.wrappedManager;
   }
 
   private setupEventHandlers(): void {
@@ -470,13 +563,13 @@ export class MapApp {
 
     this.map.on("click", (_e: L.LeafletMouseEvent) => {
       if (
-        this.replayManager.state.active &&
-        this.replayManager.state.airplaneMarker &&
-        this.replayManager.state.airplaneMarker.isPopupOpen()
+        this.replayState.active &&
+        this.replayState.airplaneMarker &&
+        this.replayState.airplaneMarker.isPopupOpen()
       ) {
-        this.replayManager.state.airplaneMarker.closePopup();
+        this.replayState.airplaneMarker.closePopup();
       }
-      if (!this.replayManager.state.active && this.selectedPathIds.size > 0) {
+      if (!this.replayState.active && this.selectedPathIds.size > 0) {
         this.pathSelection.clearSelection();
       }
     });

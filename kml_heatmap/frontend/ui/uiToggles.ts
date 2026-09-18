@@ -9,11 +9,13 @@ import { showToast } from "../utils/toast";
 
 type ColorLayerMode = "altitude" | "airspeed";
 
-/** dom-to-image is only needed for export, so it is loaded on first use */
-export const DOM_TO_IMAGE_URL =
-  "https://cdn.jsdelivr.net/npm/dom-to-image@2.6.0/dist/dom-to-image.min.js";
-export const DOM_TO_IMAGE_INTEGRITY =
-  "sha384-zESinL+vR3OR5XGFqKjneclbVKOL8SfP+fKKO3K9BHAaPtboci56Vu3g5flevHk9";
+/**
+ * dom-to-image is only needed for export, so it is loaded on first use.
+ * It is served from the site next to the page (see scripts/vendor.js), so
+ * there is no integrity hash to pin: same-origin and already covered by the
+ * page's own CSP.
+ */
+export const DOM_TO_IMAGE_URL = "./vendor/dom-to-image.min.js";
 
 const MOBILE_BREAKPOINT_PX = 768;
 /** Largest canvas iOS Safari will draw into (16.7 million pixels) */
@@ -27,7 +29,7 @@ let domToImagePromise: Promise<DomToImage | null> | null = null;
 
 /**
  * Load dom-to-image on demand. Resolves with null when the script cannot be
- * loaded (offline, blocked by CSP, integrity mismatch).
+ * loaded (a site published without the vendor directory, blocked by CSP).
  */
 export function loadDomToImage(): Promise<DomToImage | null> {
   if (window.domtoimage) return Promise.resolve(window.domtoimage);
@@ -36,8 +38,6 @@ export function loadDomToImage(): Promise<DomToImage | null> {
   domToImagePromise = new Promise((resolve) => {
     const script = document.createElement("script");
     script.src = DOM_TO_IMAGE_URL;
-    script.integrity = DOM_TO_IMAGE_INTEGRITY;
-    script.crossOrigin = "anonymous";
     script.onload = () => resolve(window.domtoimage ?? null);
     script.onerror = () => {
       script.remove();
@@ -237,12 +237,12 @@ export class UIToggles {
 
     // The buttons and the legends follow the store keys written below
     if (isVisible) {
-      if (this.app.replayManager.state.active) {
+      if (this.app.replayState.active) {
         // The layer is off the map for the replay already. The trail keeps
         // its altitude colours without a colour layer, so only a speed
         // trail changes (see ReplayManager.updateTrailLegend for the scale)
         if (mode === "airspeed") {
-          this.app.replayManager.redrawReplayPath("altitude");
+          this.app.replayManager?.redrawReplayPath("altitude");
         }
       } else {
         this.app.map.removeLayer(layer);
@@ -250,17 +250,17 @@ export class UIToggles {
       setVisible(false);
     } else {
       if (otherVisible) {
-        if (!this.app.replayManager.state.active) {
+        if (!this.app.replayState.active) {
           this.app.map.removeLayer(otherLayer);
         }
         setOtherVisible(false);
       }
 
-      if (!this.app.replayManager.state.active) {
+      if (!this.app.replayState.active) {
         redraw();
         this.app.map.addLayer(layer);
       } else {
-        this.app.replayManager.redrawReplayPath(mode);
+        this.app.replayManager?.redrawReplayPath(mode);
       }
 
       setVisible(true);
@@ -270,11 +270,11 @@ export class UIToggles {
     this.app.dataManager.applyHeatmapEmphasis();
 
     if (
-      this.app.replayManager.state.active &&
-      this.app.replayManager.state.airplaneMarker &&
-      this.app.replayManager.state.airplaneMarker.isPopupOpen()
+      this.app.replayState.active &&
+      this.app.replayState.airplaneMarker &&
+      this.app.replayState.airplaneMarker.isPopupOpen()
     ) {
-      this.app.replayManager.updateReplayAirplanePopup();
+      this.app.replayManager?.updateReplayAirplanePopup();
     }
   }
 

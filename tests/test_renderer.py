@@ -1,11 +1,10 @@
-"""Tests for renderer module."""
+"""Tests for the generation pipeline in the renderer module."""
 
 import errno
 import json
 import os
 import re
 import shutil
-import string
 import subprocess
 import sys
 from concurrent.futures import Future
@@ -16,27 +15,20 @@ from unittest.mock import patch
 import pytest
 
 import kml_heatmap.data_exporter as exporter_module
-import kml_heatmap.renderer as renderer_module
 from kml_heatmap.data_exporter import STAGING_PREFIX
 from kml_heatmap.exceptions import KMLHeatmapError
 from kml_heatmap.renderer import (
     CoordinateExtent,
     ParsedFile,
-    _copy_javascript_bundle,
     _drop_paths_without_year,
-    _escape_js_string,
     _export_site,
     _map_extent,
-    _package_assets,
     _parse_kml_files,
     _parse_with_error_handling,
-    _render_html,
     create_progressive_heatmap,
-    load_template,
-    minify_html,
 )
 from kml_heatmap.types import TrackPoint
-from tests.conftest import FIXTURE_AIRPORTS_CSV
+from tests.conftest import FIXTURE_AIRPORTS_CSV, decoded_segments
 
 BOUNDS = {
     "center_lat": 51.0,
@@ -101,31 +93,15 @@ def bundle(tmp_path_factory, monkeypatch):
     The Python tests run without `npm run build`, and the pipeline refuses to
     generate a site without the bundle.
     """
-    bundle = tmp_path_factory.mktemp("static") / "mapApp.bundle.js"
+    static = tmp_path_factory.mktemp("static")
+    bundle = static / "mapApp.bundle.js"
     bundle.write_text("/* test bundle */", encoding="utf-8")
-    monkeypatch.setattr("kml_heatmap.renderer.BUNDLE_FILE", bundle)
+    features = static / "features.bundle.js"
+    features.write_text("/* test features */", encoding="utf-8")
+    monkeypatch.setattr("kml_heatmap.site_assets.BUNDLE_FILE", bundle)
+    monkeypatch.setattr("kml_heatmap.site_assets.FEATURES_BUNDLE_FILE", features)
+    monkeypatch.setattr("kml_heatmap.site_assets.BUNDLE_FILES", (bundle, features))
     return bundle
-
-
-class TestEscapeJsString:
-    def test_plain_string_unchanged(self):
-        assert _escape_js_string("hello") == "hello"
-
-    def test_escapes_quotes_backslash_and_control_chars(self):
-        assert _escape_js_string('say "hi"') == 'say \\"hi\\"'
-        assert _escape_js_string("it's") == "it\\'s"
-        assert _escape_js_string("path\\to") == "path\\\\to"
-        assert _escape_js_string("line1\nline2") == "line1\\nline2"
-        assert _escape_js_string("col1\tcol2") == "col1\\tcol2"
-
-    def test_xss_payload_neutralized(self):
-        result = _escape_js_string("'; alert('xss'); //")
-        assert "\\'" in result
-        assert "'" not in result.replace("\\'", "")
-
-    def test_empty_and_unicode(self):
-        assert _escape_js_string("") == ""
-        assert "M\\u00fcnchen" in _escape_js_string("Flughafen München")
 
 
 class TestCoordinateExtent:
@@ -159,42 +135,6 @@ class TestMapExtent:
     def test_nothing_to_export_raises(self):
         with pytest.raises(KMLHeatmapError, match="No flight paths"):
             _map_extent([[TrackPoint(40.0, -3.0, 1.0)]])
-
-
-class TestLoadTemplate:
-    def test_template_content(self):
-        template = load_template()
-        assert "<html" in template.lower()
-        assert "</html>" in template.lower()
-        assert "$data_dir_name" in template
-
-    def test_template_has_no_inline_styles_or_scripts(self):
-        """minify_html only minifies the markup."""
-        template = load_template()
-        assert "<style" not in template
-        assert all(
-            'src="' in tag for tag in re.findall(r"<script[^>]*>", template, re.DOTALL)
-        )
-
-
-class TestMinifyHtml:
-    def test_minifies_markup(self):
-        html = """<html>
-          <body>
-            <div id="test">   Content   </div>
-          </body>
-        </html>"""
-        minified = minify_html(html)
-        assert "Content" in minified
-        assert len(minified) < len(html)
-
-    def test_keeps_script_sources(self):
-        minified = minify_html(
-            '<script src="a.js" defer></script>\n<script src="b.js" defer></script>'
-        )
-        assert minified.count("<script") == 2
-        assert "a.js" in minified
-        assert "b.js" in minified
 
 
 class TestParseWithErrorHandling:
@@ -513,77 +453,6 @@ class TestExportSite:
         assert not out.exists()
 
 
-class TestRenderHtml:
-    def test_renders_minified_html_with_data_dir(self, tmp_path):
-        output_file = tmp_path / "index.html"
-        _render_html(output_file, "my_data_dir")
-        content = output_file.read_text()
-        assert "<!doctype html>" in content.lower()
-        assert "my_data_dir" in content
-        assert "$data_dir_name" not in content
-        substituted = string.Template(load_template()).substitute(
-            data_dir_name="my_data_dir"
-        )
-        assert len(content) < len(substituted)
-
-    def test_data_dir_name_is_html_escaped(self, tmp_path):
-        """A quote in the name must not end the src attribute early."""
-        from lxml import html as lxml_html
-
-        output_file = tmp_path / "index.html"
-        _render_html(output_file, 'da"ta<x>')
-        content = output_file.read_text()
-        assert 'src="da"' not in content
-        sources = [
-            script.get("src")
-            for script in lxml_html.fromstring(content).iter("script")
-            if script.get("src")
-        ]
-        assert 'da"ta<x>/metadata.js' in sources
-        assert 'da"ta<x>/airports.js' in sources
-
-    def test_output_is_world_readable(self, tmp_path):
-        previous = os.umask(0o022)
-        try:
-            output_file = tmp_path / "index.html"
-            _render_html(output_file, "data")
-            assert oct(output_file.stat().st_mode & 0o777) == "0o644"
-        finally:
-            os.umask(previous)
-
-
-class TestPackageAssets:
-    def test_generates_config_css_and_favicons(self, tmp_path, bundle):
-        with patch.dict(
-            os.environ, {"CARTO_API_KEY": "test-carto", "OPENAIP_API_KEY": "it's"}
-        ):
-            _package_assets(tmp_path, BOUNDS, "data")
-
-        config = (tmp_path / "map_config.js").read_text()
-        assert "51.0" in config
-        assert "test-carto" in config
-        assert "it\\'s" in config
-        assert "$center_lat" not in config
-        assert (tmp_path / "styles.css").stat().st_size > 0
-        assert (tmp_path / "mapApp.bundle.js").read_text() == bundle.read_text()
-        assert not (tmp_path / "mapApp.bundle.js.map").exists()
-        for fname in ("favicon.svg", "manifest.json"):
-            assert (tmp_path / fname).exists()
-        # The library bundle was removed; it must not reappear in the output
-        assert not (tmp_path / "bundle.js").exists()
-
-    def test_bundle_and_source_map_are_copied(self, tmp_path):
-        static_dir = tmp_path / "static"
-        static_dir.mkdir()
-        (static_dir / "mapApp.bundle.js").write_text("bundle")
-        (static_dir / "mapApp.bundle.js.map").write_text("{}")
-        out = tmp_path / "out"
-        out.mkdir()
-        _copy_javascript_bundle(out, static_dir / "mapApp.bundle.js")
-        assert (out / "mapApp.bundle.js").read_text() == "bundle"
-        assert (out / "mapApp.bundle.js.map").read_text() == "{}"
-
-
 class TestCreateProgressiveHeatmap:
     def test_refuses_overlapping_output_dir(self, tmp_path, capsys):
         kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
@@ -612,9 +481,9 @@ class TestCreateProgressiveHeatmap:
         )
 
     def test_missing_bundle_fails_before_any_work(self, tmp_path, capsys, monkeypatch):
-        monkeypatch.setattr(
-            "kml_heatmap.renderer.BUNDLE_FILE", tmp_path / "static" / "missing.js"
-        )
+        missing = tmp_path / "static" / "missing.js"
+        monkeypatch.setattr("kml_heatmap.site_assets.BUNDLE_FILE", missing)
+        monkeypatch.setattr("kml_heatmap.site_assets.BUNDLE_FILES", (missing,))
         kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
         out = tmp_path / "out"
 
@@ -786,7 +655,7 @@ class TestCreateProgressiveHeatmap:
 
         other = _write_kml(tmp_path / "input" / "2_DEAGJ_DA20.kml", 2026)
         with patch(
-            "kml_heatmap.renderer._package_assets",
+            "kml_heatmap.renderer.package_assets",
             side_effect=PermissionError(errno.EACCES, "Permission denied"),
         ):
             ok = create_progressive_heatmap(
@@ -830,6 +699,7 @@ class TestCreateProgressiveHeatmap:
 
         assert not (out / "mapApp.bundle.js.map").exists()
         assert (out / "mapApp.bundle.js").exists()
+        assert (out / "features.bundle.js").exists()
         assert (out / "CNAME").read_text() == "maps.example.org"
 
     @pytest.mark.usefixtures("bundle")
@@ -886,7 +756,8 @@ class TestCreateProgressiveHeatmap:
             ids = {}
             for data_file in sorted((out / "data").glob("*/data.js")):
                 for path_id, entry in parse_js(data_file)["segments"].items():
-                    ids[entry["rows"][0][1]] = int(path_id)
+                    _, rows = decoded_segments(entry)
+                    ids[rows[0][1]] = int(path_id)
             return ids
 
         everything = tmp_path / "all"
@@ -905,49 +776,3 @@ class TestCreateProgressiveHeatmap:
         assert removed.endswith("1_DEAGJ_DA20.kml")
         del before[12.1]
         assert after == before
-
-
-class TestStaleBundleWarning:
-    def _frontend(self, tmp_path, monkeypatch):
-        frontend = tmp_path / "kml_heatmap" / "frontend"
-        (frontend / "ui").mkdir(parents=True)
-        (frontend / "mapApp.ts").write_text("export {};")
-        (frontend / "ui" / "a.ts").write_text("export const a = 1;")
-        monkeypatch.setattr(renderer_module, "FRONTEND_DIR", frontend)
-
-    def test_warns_about_a_bundle_of_other_sources(
-        self, tmp_path, monkeypatch, bundle, capsys
-    ):
-        self._frontend(tmp_path, monkeypatch)
-        bundle.write_text("/* kml-heatmap build 000000000000 */\n")
-
-        renderer_module._warn_about_a_stale_bundle()
-
-        assert "npm run build" in capsys.readouterr().err
-
-    def test_quiet_for_a_current_bundle(self, tmp_path, monkeypatch, bundle, capsys):
-        self._frontend(tmp_path, monkeypatch)
-        current = renderer_module._frontend_source_hash()
-        bundle.write_text(f"/* kml-heatmap build {current} */\n")
-
-        renderer_module._warn_about_a_stale_bundle()
-
-        assert capsys.readouterr().err == ""
-
-    def test_quiet_without_the_sources(self, tmp_path, monkeypatch, bundle, capsys):
-        monkeypatch.setattr(renderer_module, "FRONTEND_DIR", tmp_path / "missing")
-        bundle.write_text("no banner")
-
-        renderer_module._warn_about_a_stale_bundle()
-
-        assert capsys.readouterr().err == ""
-
-    def test_quiet_when_the_bundle_cannot_be_read(
-        self, tmp_path, monkeypatch, bundle, capsys
-    ):
-        self._frontend(tmp_path, monkeypatch)
-        bundle.unlink()
-
-        renderer_module._warn_about_a_stale_bundle()
-
-        assert capsys.readouterr().err == ""

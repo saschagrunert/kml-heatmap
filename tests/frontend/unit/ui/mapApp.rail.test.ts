@@ -3,7 +3,12 @@
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import * as L from "leaflet";
-import { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
+import {
+  FEATURES_UNAVAILABLE_MESSAGE,
+  MapApp,
+} from "../../../../kml_heatmap/frontend/mapApp";
+import { showToast } from "../../../../kml_heatmap/frontend/utils/toast";
+import { loadFeatures } from "../../../../kml_heatmap/frontend/services/featureLoader";
 import { invalidateMapAfterTransition } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
@@ -76,6 +81,20 @@ vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
     return m.mockWrappedManagerInstance;
   }),
 }));
+vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
+  // Replay and Wrapped come from the lazily loaded feature bundle; here they
+  // are the doubles the module mocks above return
+  loadFeatures: vi.fn(() =>
+    Promise.resolve({
+      ReplayManager: vi.fn(function () {
+        return m.mockReplayManagerInstance;
+      }),
+      WrappedManager: vi.fn(function () {
+        return m.mockWrappedManagerInstance;
+      }),
+    }),
+  ),
+}));
 vi.mock("../../../../kml_heatmap/frontend/ui/uiToggles", () => ({
   UIToggles: vi.fn(function () {
     return m.mockUITogglesInstance;
@@ -91,7 +110,6 @@ const {
   initializeApp,
   mockAirportManagerInstance,
   mockPathSelectionInstance,
-  mockReplayManagerInstance,
   mockStateManagerInstance,
   mockStatsManagerInstance,
   resetManagerMocks,
@@ -118,6 +136,48 @@ describe("MapApp controls and map", () => {
   });
 
   describe("store-driven buttons", () => {
+    // Replay lives in the lazily loaded feature bundle, so the app itself
+    // keeps its control showing whether replay is available; it has to say
+    // so from the first paint, before anyone has opened replay
+    it("dims the replay control until one timed flight is selected", async () => {
+      await initializeApp(app);
+      const btn = document.getElementById("replay-btn") as HTMLButtonElement;
+
+      expect(btn.style.opacity).toBe("0.5");
+      expect(btn.title).toBe(
+        "Select exactly one flight with timing data to replay",
+      );
+
+      app.selectedPathIds.add(1);
+      app.store.notifyMutation("selectedPathIds");
+
+      expect(btn.style.opacity).toBe("1");
+      expect(btn.title).toBe("Replay selected flight path");
+    });
+
+    it("follows the timing data of the loaded metadata", async () => {
+      await initializeApp(app);
+      app.selectedPathIds.add(1);
+      app.store.notifyMutation("selectedPathIds");
+      const btn = document.getElementById("replay-btn") as HTMLButtonElement;
+      expect(btn.style.opacity).toBe("1");
+
+      app.hasTimingData = false;
+
+      expect(btn.style.opacity).toBe("0.5");
+    });
+
+    it("reflects a selection restored before the first paint", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({
+        selectedPathIds: [1],
+      });
+
+      await initializeApp(app);
+
+      const btn = document.getElementById("replay-btn") as HTMLButtonElement;
+      expect(btn.style.opacity).toBe("1");
+    });
+
     it("reflects the restored visibility state in the toggle buttons", async () => {
       mockStateManagerInstance.loadState.mockReturnValue({
         heatmapVisible: false,
@@ -283,6 +343,45 @@ describe("MapApp controls and map", () => {
     });
   });
 
+  describe("the lazily loaded features", () => {
+    it("says so when the bundle cannot be fetched", async () => {
+      await initializeApp(app);
+      vi.mocked(loadFeatures).mockResolvedValueOnce(null);
+
+      const manager = await app.loadReplay();
+
+      // Not a dead control: a click that loads nothing has to explain itself
+      expect(manager).toBeUndefined();
+      expect(showToast).toHaveBeenCalledWith(
+        FEATURES_UNAVAILABLE_MESSAGE,
+        "error",
+      );
+    });
+
+    it("hands both callers the same manager and builds it once", async () => {
+      await initializeApp(app);
+
+      const [first, second] = await Promise.all([
+        app.loadReplay(),
+        app.loadReplay(),
+      ]);
+
+      expect(first).toBe(second);
+      expect(first).toBeDefined();
+    });
+
+    it("keeps the manager once it has been built", async () => {
+      await initializeApp(app);
+      const first = await app.loadWrapped();
+
+      vi.mocked(loadFeatures).mockClear();
+      const second = await app.loadWrapped();
+
+      expect(second).toBe(first);
+      expect(loadFeatures).not.toHaveBeenCalled();
+    });
+  });
+
   describe("map event handlers", () => {
     function handler(event: string): (e?: unknown) => void {
       const on = vi.mocked(app.map!.on) as unknown as {
@@ -325,11 +424,11 @@ describe("MapApp controls and map", () => {
       await initializeApp(app);
       app.selectedPathIds.add(1);
       const closePopup = vi.fn();
-      mockReplayManagerInstance.state.active = true;
-      mockReplayManagerInstance.state.airplaneMarker = {
+      app.replayState.active = true;
+      app.replayState.airplaneMarker = {
         isPopupOpen: () => true,
         closePopup,
-      };
+      } as unknown as L.Marker;
 
       handler("click")({});
 

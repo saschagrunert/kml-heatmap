@@ -100,7 +100,7 @@ describe("bindActions", () => {
     expect(app.statsManager.toggleStats).toHaveBeenCalledTimes(1);
   });
 
-  it("binds the replay transport", () => {
+  it("binds the replay transport", async () => {
     elements["toggleReplay"]!.click();
     elements["playReplay"]!.click();
     elements["pauseReplay"]!.click();
@@ -109,7 +109,11 @@ describe("bindActions", () => {
     elements["changeReplaySpeed"]!.dispatchEvent(new Event("change"));
     elements["toggleAutoZoom"]!.click();
 
-    expect(app.replayManager.toggleReplay).toHaveBeenCalledTimes(1);
+    // Replay comes from the lazily loaded feature bundle, so the first
+    // click reaches the manager a microtask later
+    await vi.waitFor(() =>
+      expect(app.replayManager.toggleReplay).toHaveBeenCalledTimes(1),
+    );
     expect(app.replayManager.playReplay).toHaveBeenCalledTimes(1);
     expect(app.replayManager.pauseReplay).toHaveBeenCalledTimes(1);
     expect(app.replayManager.stopReplay).toHaveBeenCalledTimes(1);
@@ -126,11 +130,13 @@ describe("bindActions", () => {
     expect(app.filterManager.filterByAircraft).toHaveBeenCalledTimes(1);
   });
 
-  it("binds the Wrapped dialog", () => {
+  it("binds the Wrapped dialog", async () => {
     elements["showWrapped"]!.click();
     elements["closeWrapped"]!.click();
 
-    expect(app.wrappedManager.showWrapped).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() =>
+      expect(app.wrappedManager.showWrapped).toHaveBeenCalledTimes(1),
+    );
     expect(app.wrappedManager.closeWrapped).toHaveBeenCalledTimes(1);
   });
 

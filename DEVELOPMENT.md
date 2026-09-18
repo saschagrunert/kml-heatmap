@@ -63,10 +63,12 @@ filters, statistics panel, wrapped modal, airport markers and replay. The
 `desktop` project runs every spec but `mobile.spec.ts` in Chromium. The
 `mobile` project runs `mobile.spec.ts` and the viewport independent specs
 (`core`, `layers`, `state`) on a phone viewport, and the `webkit` project runs
-`core` and `mobile` on an emulated iPhone. Every page is scanned for
-accessibility violations with axe. The suite does not reach the network:
-Leaflet, leaflet.heat and dom-to-image are served from the pinned copies in
-`node_modules` and every map tile is answered locally (see
+`core` and `mobile` on an emulated iPhone. The `visual` project compares
+screenshots and only exists inside the Playwright image, so a plain run leaves
+it out (see CONTRIBUTING.md). Every page is scanned for accessibility
+violations with axe. The suite does not reach the network: the page carries
+its own JavaScript and CSS, every map tile is answered locally, and any other
+cross-origin request fails the test that made it (see
 `tests/e2e/fixtures.ts`). A few specs depend on whether the site was built
 with `CARTO_API_KEY` and `OPENAIP_API_KEY` (any value works) and skip
 otherwise; CI tests a site with dummy keys and one without.
@@ -102,14 +104,22 @@ keep their traces in `test-results/`, and every run writes an HTML report to
 
 - **Format**: IIFE (Immediately Invoked Function Expression)
 - **Protocol**: Compatible with `file://` protocol - open index.html directly in browser
-- **Production**: Minified bundle for optimal performance; the build fails
-  when it exceeds the size budget in `build.js`
+- **Production**: Minified bundles for optimal performance; the build fails
+  when either exceeds its size budget in `build.js`
 - **Development**: Unminified for debugging
 - Both write a source map next to the bundle; it holds the mappings and file
   names only, not the TypeScript sources
 
-The bundle in `kml_heatmap/static/` (`mapApp.bundle.js` and its `.map` file)
-is gitignored and created by `npm run build`.
+`npm run build` produces two bundles. `mapApp.bundle.js` is the map itself,
+and `features.bundle.js` holds Replay and Wrapped, which the page fetches the
+first time one of them is opened; most visits never do. The modules both use
+are resolved to a global the main bundle publishes rather than copied into
+the second one (`scripts/shared-modules.js` and
+`kml_heatmap/frontend/shared.ts`), because several of them hold state that
+has to be a single instance; the build fails when a module ends up in both.
+The same command copies Leaflet, leaflet.heat and dom-to-image out of
+`node_modules` into `kml_heatmap/static/vendor/`, which is what the published
+page loads them from. All of it is gitignored.
 
 **Architecture:**
 
@@ -123,7 +133,8 @@ is gitignored and created by `npm run build`.
 - **Tests**
   - Unit tests: `tests/frontend/unit/` (Vitest)
   - E2E tests: `tests/e2e/` (Playwright)
-- **Build output** in `kml_heatmap/static/` (mapApp.bundle.js)
+- **Build output** in `kml_heatmap/static/` (`mapApp.bundle.js`,
+  `features.bundle.js` and `vendor/`)
 
 ## Backend (Python)
 

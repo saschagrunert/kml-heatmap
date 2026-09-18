@@ -57,6 +57,7 @@ from .exceptions import KMLHeatmapError
 from .export_pipeline import build_path_info, path_metrics, process_path_segments
 from .export_writers import export_airports_data, export_metadata
 from .logger import logger
+from .segment_codec import FORMAT_VERSION, encode_rows, encode_start
 from .types import COORDINATE_DECIMALS
 from .validation import protected_directories
 from .workers import init_worker
@@ -287,7 +288,11 @@ def process_year_chunk(
             # the C implementation, dumping to a file uses the Python one
             separator = "," if path_count else ""
             info_out.write(separator + json.dumps(info, separators=JSON_SEPARATORS))
-            segments = {"start": start, "rows": rows}
+            # Scaled to integers and stored as differences, see segment_codec
+            segments = {
+                "start": encode_start(start),
+                "rows": encode_rows(start, rows),
+            }
             segments_out.write(
                 f'{separator}"{path_id}":'
                 + json.dumps(segments, separators=JSON_SEPARATORS)
@@ -338,7 +343,7 @@ def _assemble_year_file(
 
     def write(out: IO[str]) -> None:
         out.write(
-            f'window.KML_DATA_{year} = {{"year":{year},'
+            f'window.KML_DATA_{year} = {{"format":{FORMAT_VERSION},"year":{year},'
             f'"original_points":{original_points},"path_info":['
         )
         _copy_fragments(
@@ -707,8 +712,9 @@ class SiteOutput:
     ) -> None:
         """Prepare the output of a site.
 
-        ``site_files`` are the names the tool owns in ``output_dir``; the
-        ones a run does not produce are removed when it is published.
+        ``site_files`` are the paths the tool owns in ``output_dir``, each
+        relative to it and with forward slashes; the ones a run does not
+        produce are removed when it is published.
         """
         self.output_dir = Path(output_dir).resolve()
         self.data_dir = Path(data_dir).resolve()
@@ -770,7 +776,9 @@ class SiteOutput:
             target.parent.mkdir(parents=True, exist_ok=True)
             os.replace(stage / relative, target)
 
-        produced = {relative.name for relative in site_files}
+        # Compared as relative paths, not base names: the vendored files sit
+        # in a subdirectory, and two of them could share a name
+        produced = {relative.as_posix() for relative in site_files}
         for name in self.site_files:
             if name not in produced:
                 _remove_stale_file(self.output_dir / name)

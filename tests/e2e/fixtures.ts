@@ -1,31 +1,20 @@
 /**
  * Hermetic Playwright test fixture.
  *
- * The generated page loads Leaflet, leaflet.heat and dom-to-image from CDNs
- * and its base map from the CARTO and OpenAIP tile servers. An outage of any
- * of them used to fail the whole suite, and a slow tile server made timings
- * unpredictable. The `hermetic` fixture answers those requests locally: the
- * CDN files come from the identically versioned npm packages in
- * node_modules (the same bytes, so the subresource integrity hashes in the
- * template still match) and every tile is a transparent pixel.
+ * The page carries its own JavaScript and CSS (see scripts/vendor.js), so
+ * the only third parties left are the CARTO and OpenAIP tile servers. An
+ * outage of either used to fail the whole suite and a slow one made timings
+ * unpredictable, so every tile is answered with a transparent pixel.
+ *
+ * Any other cross-origin request fails the test that made it. The page is
+ * meant to work offline and from `file://`; a dependency that creeps back
+ * onto a CDN would otherwise only show up as a blank map for visitors.
  *
  * Every spec imports `test` and `expect` from here instead of
  * "@playwright/test" so the fixture is active everywhere.
  */
 import { test as base, expect } from "@playwright/test";
-import { existsSync, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, resolve, sep } from "node:path";
 import type { BrowserContext, Route } from "@playwright/test";
-
-const require = createRequire(import.meta.url);
-
-/** Version pins of the packages the template loads, from package.json */
-const PACKAGE_VERSIONS: Record<string, string> = (
-  JSON.parse(
-    readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-  ) as { devDependencies: Record<string, string> }
-).devDependencies;
 
 /** A 1x1 transparent PNG, served for every map tile */
 const TRANSPARENT_PNG = Buffer.from(
@@ -33,90 +22,62 @@ const TRANSPARENT_PNG = Buffer.from(
   "base64",
 );
 
-const CONTENT_TYPES: Record<string, string> = {
-  ".js": "application/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-};
+/** The origins the page is allowed to reach, tiles only */
+const TILE_HOSTS = [
+  /^[a-d]\.basemaps\.cartocdn\.com$/,
+  /^[a-z]\.api\.tiles\.openaip\.net$/,
+];
 
-/** Root directory of an installed npm package */
-function packageRoot(name: string): string {
-  const manifest = require.resolve(`${name}/package.json`);
-  return dirname(manifest);
+/** The site under test, served by the webServer in playwright.config.ts */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function isTile(url: URL): boolean {
+  return TILE_HOSTS.some((host) => host.test(url.hostname));
 }
 
-/**
- * Map a CDN URL such as
- *   https://unpkg.com/leaflet@1.9.4/dist/leaflet.js
- *   https://cdn.jsdelivr.net/npm/dom-to-image@2.6.0/dist/dom-to-image.min.js
- * to the same file inside node_modules. Returns null for anything that is
- * not a pinned package file, so the request fails loudly instead of quietly
- * going to the network.
- */
-function localFileForCdnUrl(url: URL): string | null {
-  const path = url.pathname.replace(/^\/npm\//, "/");
-  const match = /^\/((?:@[^/]+\/)?[^@/]+)@([^/]+)\/(.+)$/.exec(path);
-  if (!match) return null;
-  const [name, version, file] = match.slice(1) as [string, string, string];
-  if (PACKAGE_VERSIONS[name] !== version) {
-    throw new Error(
-      `${url.href} asks for ${name}@${version} but package.json pins ` +
-        `${PACKAGE_VERSIONS[name] ?? "nothing"}; keep the template and the ` +
-        "devDependencies in step",
-    );
-  }
-  const root = packageRoot(name);
-  const candidate = resolve(root, file);
-  // Stay inside the package directory
-  if (!candidate.startsWith(root + sep)) return null;
-  return existsSync(candidate) ? candidate : null;
-}
-
-async function serveFromNodeModules(route: Route): Promise<void> {
-  const url = new URL(route.request().url());
-  const file = localFileForCdnUrl(url);
-  if (!file) {
-    await route.abort("blockedbyclient");
-    return;
-  }
-  const extension = file.slice(file.lastIndexOf("."));
-  await route.fulfill({
-    path: file,
-    contentType: CONTENT_TYPES[extension] ?? "application/octet-stream",
-    // The template loads the scripts with crossorigin="anonymous"
-    headers: { "access-control-allow-origin": "*" },
-  });
+function isSite(url: URL): boolean {
+  // file:// has an empty hostname; the file-protocol spec loads the page
+  // straight off disk
+  return url.protocol === "file:" || LOCAL_HOSTS.has(url.hostname);
 }
 
 async function serveTransparentTile(route: Route): Promise<void> {
   await route.fulfill({ body: TRANSPARENT_PNG, contentType: "image/png" });
 }
 
-/** Install the routes on a browser context */
+/**
+ * Install the routes on a browser context.
+ *
+ * Returns the list that collects forbidden requests, so a caller can assert
+ * on it; the fixture below fails the test when it is not empty. The two
+ * predicates are mutually exclusive, so it does not matter in which order
+ * Playwright matches them.
+ */
 export async function installHermeticRoutes(
   context: BrowserContext,
-): Promise<void> {
-  await context.route(/^https:\/\/unpkg\.com\//, serveFromNodeModules);
+): Promise<string[]> {
+  const offSite: string[] = [];
+  await context.route(isTile, serveTransparentTile);
   await context.route(
-    /^https:\/\/cdn\.jsdelivr\.net\/npm\//,
-    serveFromNodeModules,
+    (url) => !isSite(url) && !isTile(url),
+    async (route) => {
+      offSite.push(route.request().url());
+      await route.abort("blockedbyclient");
+    },
   );
-  await context.route(
-    /^https:\/\/[a-d]\.basemaps\.cartocdn\.com\//,
-    serveTransparentTile,
-  );
-  await context.route(
-    /^https:\/\/[a-z]\.api\.tiles\.openaip\.net\//,
-    serveTransparentTile,
-  );
+  return offSite;
 }
 
 export const test = base.extend<{ hermetic: void }>({
   hermetic: [
     async ({ context }, use) => {
-      await installHermeticRoutes(context);
+      const offSite = await installHermeticRoutes(context);
       await use();
+      expect(
+        offSite,
+        "the page requested a third-party URL; it is meant to carry its " +
+          "own assets and work offline",
+      ).toEqual([]);
     },
     { auto: true },
   ],

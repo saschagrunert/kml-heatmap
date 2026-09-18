@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self' file:; script-src 'self' file: https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' file: 'unsafe-inline' https://unpkg.com; img-src 'self' file: data: blob: https://*.basemaps.cartocdn.com https://*.api.tiles.openaip.net https://unpkg.com; connect-src 'self' file: https://*.basemaps.cartocdn.com https://*.api.tiles.openaip.net; font-src 'self' file:; base-uri 'none'; form-action 'none'"
+      content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob: https://*.basemaps.cartocdn.com https://*.api.tiles.openaip.net; connect-src 'self' file: https://*.basemaps.cartocdn.com https://*.api.tiles.openaip.net; font-src 'self' file:; base-uri 'none'; form-action 'none'"
     />
     <meta
       name="viewport"
@@ -24,8 +24,6 @@
     />
     <meta name="apple-mobile-web-app-title" content="KML Heatmap" />
     <title>KML Heatmap</title>
-    <link rel="preconnect" href="https://unpkg.com" crossorigin />
-    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
     <link rel="preconnect" href="https://a.basemaps.cartocdn.com" />
     <link rel="preconnect" href="https://b.basemaps.cartocdn.com" />
     <link rel="preconnect" href="https://c.basemaps.cartocdn.com" />
@@ -54,12 +52,7 @@
       href="./apple-touch-icon.png"
     />
     <link rel="manifest" href="./manifest.json" />
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
-      crossorigin="anonymous"
-    />
+    <link rel="stylesheet" href="./vendor/leaflet.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -573,19 +566,11 @@
 
     <!-- Scripts are deferred and execute in document order: Leaflet, data,
          config, application bundle. dom-to-image is loaded on the first
-         export. -->
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
-      crossorigin="anonymous"
-      defer
-    ></script>
-    <script
-      src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"
-      integrity="sha384-mFKkGiGvT5vo1fEyGCD3hshDdKmW3wzXW/x+fWriYJArD0R3gawT6lMvLboM22c0"
-      crossorigin="anonymous"
-      defer
-    ></script>
+         export. Everything is served from the site itself (vendor/ is copied
+         out of node_modules by scripts/vendor.js), so the page needs no
+         third-party origin and works offline. -->
+    <script src="./vendor/leaflet.js" defer></script>
+    <script src="./vendor/leaflet-heat.js" defer></script>
 
     <!-- Preload essential data files (works with both file:// and https://) -->
     <script src="$data_dir_name/metadata.js" defer></script>

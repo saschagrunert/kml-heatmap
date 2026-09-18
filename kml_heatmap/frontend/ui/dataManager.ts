@@ -227,7 +227,7 @@ export class DataManager {
     }
 
     // Only add to map if heatmap is visible AND not in replay mode
-    if (this.app.heatmapVisible && !this.app.replayManager.state.active) {
+    if (this.app.heatmapVisible && !this.app.replayState.active) {
       this.showHeatmap();
     }
 

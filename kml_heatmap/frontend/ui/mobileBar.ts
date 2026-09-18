@@ -254,7 +254,7 @@ export class MobileBar {
       case "wrapped":
         this.closeSheet();
         this.tabs.get(id)?.focus();
-        this.app.wrappedManager.showWrapped();
+        void this.app.loadWrapped().then((manager) => manager?.showWrapped());
         break;
     }
     this.syncTabs();
@@ -378,10 +378,10 @@ export class MobileBar {
         icon: "play",
         label: "Replay flight",
         hint: () =>
-          app.replayManager.canReplay()
-            ? null
-            : "Select one flight with timing data",
-        onSelect: () => app.replayManager.toggleReplay(),
+          app.canReplay() ? null : "Select one flight with timing data",
+        onSelect: () => {
+          void app.loadReplay().then((manager) => manager?.toggleReplay());
+        },
       },
       {
         kind: "switch",

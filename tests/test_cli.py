@@ -29,7 +29,7 @@ def bundle(tmp_path, monkeypatch):
     path = tmp_path / "static" / "mapApp.bundle.js"
     path.parent.mkdir()
     path.write_text("/* bundle */")
-    monkeypatch.setattr("kml_heatmap.renderer.BUNDLE_FILE", path)
+    monkeypatch.setattr("kml_heatmap.site_assets.BUNDLE_FILE", path)
     return path
 
 

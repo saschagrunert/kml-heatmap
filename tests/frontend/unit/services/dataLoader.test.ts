@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import {
   combineYearData,
+  DATA_FORMAT_VERSION,
   expandYearData,
   getGlobalVarName,
   isValidYear,
@@ -22,12 +23,34 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
 
 type MockWindow = Window & typeof globalThis & Record<string, unknown>;
 
-/** One path's exported segments: a start point and its end-point rows */
+/**
+ * Column scales of the wire format, mirroring _SCALES in
+ * kml_heatmap/segment_codec.py. The helpers below take rows in the units a
+ * reader thinks in and encode them, so a test says what it means and the
+ * decoder is still checked against an independent encoder.
+ */
+const SCALES = [1e5, 1e5, 1, 10, 10];
+
+/** One path's exported segments, given as plain `[lat, lon, ft, kt, s?]` rows */
 function path(
   start: [number, number],
-  rows: RawSegment[],
+  rows: number[][],
 ): RawYearData["segments"][string] {
-  return { start, rows };
+  const scaledStart = [
+    Math.round(start[0] * SCALES[0]!),
+    Math.round(start[1] * SCALES[1]!),
+  ];
+  const running = [scaledStart[0]!, scaledStart[1]!, 0, 0, 0];
+  const encoded = rows.map((row) => {
+    const delta = row.map((value, column) => {
+      const scaled = Math.round(value * SCALES[column]!);
+      const difference = scaled - running[column]!;
+      running[column] = scaled;
+      return difference;
+    });
+    return delta as unknown as RawSegment;
+  });
+  return { start: scaledStart, rows: encoded };
 }
 
 function rawYear(
@@ -37,6 +60,7 @@ function rawYear(
   originalPoints = 0,
 ): RawYearData {
   return {
+    format: DATA_FORMAT_VERSION,
     year,
     original_points: originalPoints,
     path_info: pathInfo,
@@ -356,17 +380,66 @@ describe("expandYearData", () => {
   });
 
   it("defaults missing path_info and original_points", () => {
-    const data = expandYearData({ year: 2025, segments: {} } as RawYearData);
+    const data = expandYearData({
+      format: DATA_FORMAT_VERSION,
+      year: 2025,
+      segments: {},
+    } as RawYearData);
     expect(data.path_info).toEqual([]);
     expect(data.original_points).toBe(0);
     expect(data.path_segments).toEqual([]);
   });
 
-  it("throws for invalid input (e.g. legacy file format)", () => {
+  it("throws for invalid input", () => {
     expect(() => expandYearData(null as unknown as RawYearData)).toThrow();
     expect(() =>
-      expandYearData({ path_segments: [] } as unknown as RawYearData),
+      expandYearData({
+        format: DATA_FORMAT_VERSION,
+        path_segments: [],
+      } as unknown as RawYearData),
     ).toThrow("segments");
+  });
+
+  it.each([undefined, 1, 3, "2"])(
+    "refuses a year file written in format %s",
+    (format) => {
+      expect(() =>
+        expandYearData({
+          format,
+          year: 2025,
+          segments: {},
+        } as unknown as RawYearData),
+      ).toThrow("another release");
+    },
+  );
+
+  it("decodes the scaled differences back to plain values", () => {
+    const data = expandYearData(
+      rawYear(2025, {
+        "1": path(
+          [50, 8],
+          [
+            [50.1, 8.1, 500, 1.5, 2],
+            [50.2, 8.2, 600, 2.5, 4],
+          ],
+        ),
+      }),
+    );
+
+    expect(data.path_segments[0]!.coords).toEqual([
+      [50, 8],
+      [50.1, 8.1],
+    ]);
+    expect(data.path_segments[0]!.altitude_ft).toBe(500);
+    expect(data.path_segments[0]!.groundspeed_knots).toBe(1.5);
+    expect(data.path_segments[0]!.time).toBe(2);
+    expect(data.path_segments[1]!.coords).toEqual([
+      [50.1, 8.1],
+      [50.2, 8.2],
+    ]);
+    expect(data.path_segments[1]!.altitude_ft).toBe(600);
+    expect(data.path_segments[1]!.groundspeed_knots).toBe(2.5);
+    expect(data.path_segments[1]!.time).toBe(4);
   });
 });
 

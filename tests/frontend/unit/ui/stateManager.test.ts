@@ -232,7 +232,7 @@ describe("StateManager", () => {
       stateManager.saveMapState();
 
       expect(savedState()).toEqual({
-        schemaVersion: 3,
+        schemaVersion: 4,
         center: { lat: 50, lng: 8 },
         zoom: 10,
         heatmapVisible: true,
@@ -250,7 +250,7 @@ describe("StateManager", () => {
       expect(history.replaceState).toHaveBeenCalledWith(
         null,
         "",
-        "?y=2025&p=1%2C2&sv=3&lat=50.000000&lng=8.000000&z=10.00",
+        "?y=2025&p=1%2C2&sv=4&lat=50.000000&lng=8.000000&z=10.00",
       );
     });
 

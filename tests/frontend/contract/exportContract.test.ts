@@ -18,11 +18,15 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cwd, env } from "node:process";
-import { expandYearData } from "../../../kml_heatmap/frontend/services/dataLoader";
+import {
+  DATA_FORMAT_VERSION,
+  expandYearData,
+} from "../../../kml_heatmap/frontend/services/dataLoader";
 import type {
   Airport,
   Metadata,
   PathInfo,
+  RawPathSegments,
   RawSegment,
   RawYearData,
 } from "../../../kml_heatmap/frontend/types";
@@ -128,16 +132,15 @@ export function isPathInfo(value: unknown): value is PathInfo {
   );
 }
 
+/**
+ * One encoded row: the per-column difference to the row before it. Every
+ * value is a scaled integer, which is what makes the format compact; a
+ * float here would mean the exporter stopped scaling a column.
+ */
 export function isRawSegment(value: unknown): value is RawSegment {
   if (!Array.isArray(value)) return false;
   if (value.length !== 4 && value.length !== 5) return false;
-  if (!value.every(isFiniteNumber)) return false;
-  const [lat, lon, , groundspeed] = value;
-  return (
-    isCoordinatePair([lat, lon]) &&
-    groundspeed !== undefined &&
-    groundspeed >= 0
-  );
+  return value.every(isInteger);
 }
 
 export function isRawPathSegments(value: unknown): boolean {
@@ -146,12 +149,19 @@ export function isRawPathSegments(value: unknown): boolean {
   if (!Array.isArray(rows) || !rows.every(isRawSegment)) return false;
   const start = value["start"];
   if (!Array.isArray(start)) return false;
-  // A path with rows has to say where its first row starts
-  return rows.length === 0 ? start.length === 0 : isCoordinatePair(start);
+  // A path with rows has to say where its first row starts, as a scaled
+  // coordinate pair
+  if (rows.length === 0) return start.length === 0;
+  return (
+    start.length === 2 &&
+    start.every(isInteger) &&
+    isCoordinatePair(start.map((v: number) => v / 1e5))
+  );
 }
 
 export function isRawYearData(value: unknown): value is RawYearData {
   if (!isRecord(value)) return false;
+  if (value["format"] !== DATA_FORMAT_VERSION) return false;
   if (!isInteger(value["year"])) return false;
   if (!isInteger(value["original_points"]) || value["original_points"] < 0)
     return false;
@@ -229,6 +239,35 @@ export function isMetadata(value: unknown): value is Metadata {
 
 // ---- inline sample (new format) ----
 
+/**
+ * Column scales of the wire format, mirroring _SCALES in
+ * kml_heatmap/segment_codec.py. The sample is written in the units a reader
+ * thinks in and encoded here, so the guards and the loader are checked
+ * against an encoder that is not the one under test.
+ */
+const SCALES = [1e5, 1e5, 1, 10, 10];
+
+function encodePath(
+  start: [number, number],
+  rows: number[][],
+): RawPathSegments {
+  const scaledStart = [
+    Math.round(start[0] * SCALES[0]!),
+    Math.round(start[1] * SCALES[1]!),
+  ];
+  const running = [scaledStart[0]!, scaledStart[1]!, 0, 0, 0];
+  const encoded = rows.map(
+    (row) =>
+      row.map((value, column) => {
+        const scaled = Math.round(value * SCALES[column]!);
+        const difference = scaled - running[column]!;
+        running[column] = scaled;
+        return difference;
+      }) as unknown as RawSegment,
+  );
+  return { start: scaledStart, rows: encoded };
+}
+
 const sampleMetadata = {
   min_groundspeed_knots: 0.1,
   max_groundspeed_knots: 120,
@@ -250,6 +289,7 @@ const sampleAirports = {
 };
 
 const sampleYear2025: RawYearData = {
+  format: DATA_FORMAT_VERSION,
   year: 2025,
   original_points: 3,
   path_info: [
@@ -268,14 +308,14 @@ const sampleYear2025: RawYearData = {
     { id: 5, year: 2025 },
   ],
   segments: {
-    "840108108563": {
-      start: [50.03, 8.57],
-      rows: [
+    "840108108563": encodePath(
+      [50.03, 8.57],
+      [
         [49.5, 9.5, 3000, 110, 0],
         [48.35, 11.79, 4000, 120, 1800],
       ],
-    },
-    "5": { start: [48.35, 11.79], rows: [[48.4, 11.8, 1000, 60]] },
+    ),
+    "5": encodePath([48.35, 11.79], [[48.4, 11.8, 1000, 60]]),
   },
 };
 
@@ -537,6 +577,77 @@ describe("export contract (docs/data)", () => {
         expect(data.path_segments.length).toBe(
           Object.values(raw.segments).reduce((n, e) => n + e.rows.length, 0),
         );
+
+        // The decoded values have to be the ones the exporter put in. The
+        // row columns are scaled by kml_heatmap/segment_codec.py and
+        // unscaled here, so a disagreement between the two sides would show
+        // as physically impossible numbers rather than as a parse error.
+        // metadata.js carries the groundspeed range, which the Python side
+        // measured before encoding: every decoded speed has to fall inside
+        // it, which no wrong scale factor would manage.
+        // One pass, collecting what is wrong rather than asserting per
+        // segment: a year holds tens of thousands of them, and an expect()
+        // each would dominate the run time of the whole suite.
+        const bad: string[] = [];
+        const seen = new Map<number, { min: number; max: number }>();
+        for (const segment of data.path_segments) {
+          const coords = segment.coords;
+          const altitude = segment.altitude_ft;
+          const speed = segment.groundspeed_knots;
+          if (
+            coords === undefined ||
+            altitude === undefined ||
+            speed === undefined
+          ) {
+            bad.push(`path ${segment.path_id}: incomplete segment`);
+            continue;
+          }
+          const [lat, lon] = coords[1];
+          if (!Number.isFinite(lat) || Math.abs(lat) > 90) {
+            bad.push(`path ${segment.path_id}: latitude ${lat}`);
+          }
+          if (!Number.isFinite(lon) || Math.abs(lon) > 180) {
+            bad.push(`path ${segment.path_id}: longitude ${lon}`);
+          }
+          // process_path_segments quantises altitude to 100 ft.
+          // Math.abs, because -0 % 100 is -0 and a negative altitude is legal
+          if (Math.abs(altitude % 100) !== 0) {
+            bad.push(`path ${segment.path_id}: altitude ${altitude}`);
+          }
+          // metadata.js carries the groundspeed range, which the Python side
+          // measured before encoding: every decoded speed has to fall inside
+          // it, which no wrong scale factor would manage
+          if (
+            speed > 0 &&
+            (speed < metadata.min_groundspeed_knots ||
+              speed > metadata.max_groundspeed_knots)
+          ) {
+            bad.push(`path ${segment.path_id}: groundspeed ${speed}`);
+          }
+
+          const range = seen.get(segment.path_id);
+          if (range === undefined) {
+            seen.set(segment.path_id, { min: altitude, max: altitude });
+          } else {
+            range.min = Math.min(range.min, altitude);
+            range.max = Math.max(range.max, altitude);
+          }
+        }
+        expect(bad.slice(0, 5), `${year}: decoded values out of range`).toEqual(
+          [],
+        );
+
+        // path_info pins the altitude range of each path, measured on the
+        // unrounded metres before the rows were quantised and encoded
+        for (const info of raw.path_info) {
+          if (info.min_altitude_ft === undefined) continue;
+          const range = seen.get(info.id);
+          expect(range, `path ${info.id} has no segments`).toBeDefined();
+          // The rows are quantised to 100 ft, so they may sit one step
+          // outside the exact range that path_info reports
+          expect(range!.min).toBeGreaterThanOrEqual(info.min_altitude_ft - 100);
+          expect(range!.max).toBeLessThanOrEqual(info.max_altitude_ft! + 100);
+        }
       }
 
       // Models are only exported for aircraft that fly in the year files

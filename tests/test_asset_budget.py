@@ -2,7 +2,7 @@
 
 The JavaScript bundle has its budget in build.js, which every production
 build enforces. The stylesheet is minified by the Python side instead (see
-``renderer._copy_and_minify_css``), and failing a user's site generation over
+``site_assets._copy_and_minify_css``), and failing a user's site generation over
 a project policy would be the wrong place for it, so its budget is a test:
 it fails in CI on a regression and leaves ``kml-heatmap`` itself alone.
 
@@ -14,7 +14,7 @@ Raise the budget on purpose when a change needs the room, not to make the
 suite pass.
 """
 
-from kml_heatmap.renderer import STATIC_DIR, _copy_and_minify_css
+from kml_heatmap.site_assets import STATIC_DIR, _copy_and_minify_css
 
 # Bytes of the minified stylesheet as the renderer writes it into a site.
 STYLESHEET_BUDGET_BYTES = 64 * 1024

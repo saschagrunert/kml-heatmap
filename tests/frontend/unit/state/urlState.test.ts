@@ -76,6 +76,11 @@ describe("URL state management", () => {
     });
 
     it("parses path IDs when the schema version matches", () => {
+      expect(parseUrlParams("p=5&sv=4")).toEqual({ selectedPathIds: [5] });
+      expect(parseUrlParams("p=a5,1x&sv=4")).toEqual({
+        selectedPathIds: [365, 69],
+      });
+      // Schema 3 named the same flights in decimal and is still read
       expect(parseUrlParams("p=5&sv=3")).toEqual({ selectedPathIds: [5] });
       expect(parseUrlParams("p=1,5,12,25&sv=3")).toEqual({
         selectedPathIds: [1, 5, 12, 25],
@@ -235,13 +240,29 @@ describe("URL state management", () => {
       ).toBe("y=2025");
     });
 
-    it("encodes path IDs and omits an empty list", () => {
+    it("encodes path IDs in base 36 and omits an empty list", () => {
       expect(
         encodeStateToUrl({ selectedYear: "all", selectedPathIds: [1, 5, 12] }),
-      ).toBe("y=all&p=1%2C5%2C12&sv=3");
+      ).toBe("y=all&p=1%2C5%2Cc&sv=4");
       expect(
         encodeStateToUrl({ selectedYear: "all", selectedPathIds: [] }),
       ).toBe("y=all");
+    });
+
+    it("keeps a large selection far shorter than decimal would", () => {
+      // 40-bit content hashes: 13 digits each in decimal, 8 in base 36
+      const ids = Array.from(
+        { length: 200 },
+        (_, i) => 2 ** 39 + i * 1234567891,
+      );
+
+      const encoded = encodeStateToUrl({ selectedPathIds: ids });
+
+      const decimal = ids.join(",").length;
+      const written = new URLSearchParams(encoded).get("p")!.length;
+      expect(written).toBeLessThan(decimal * 0.7);
+      // and it still round-trips
+      expect(parseUrlParams(encoded)?.selectedPathIds).toEqual(ids);
     });
 
     it("encodes visibility flags", () => {

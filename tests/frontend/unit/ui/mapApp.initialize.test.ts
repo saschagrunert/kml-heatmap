@@ -75,6 +75,20 @@ vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
     return m.mockWrappedManagerInstance;
   }),
 }));
+vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
+  // Replay and Wrapped come from the lazily loaded feature bundle; here they
+  // are the doubles the module mocks above return
+  loadFeatures: vi.fn(() =>
+    Promise.resolve({
+      ReplayManager: vi.fn(function () {
+        return m.mockReplayManagerInstance;
+      }),
+      WrappedManager: vi.fn(function () {
+        return m.mockWrappedManagerInstance;
+      }),
+    }),
+  ),
+}));
 vi.mock("../../../../kml_heatmap/frontend/ui/uiToggles", () => ({
   UIToggles: vi.fn(function () {
     return m.mockUITogglesInstance;
@@ -574,7 +588,8 @@ describe("MapApp.initialize", () => {
       await initializeApp(app);
 
       expect(mockWrappedManagerInstance.showWrapped).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(500);
+      // The timer fetches the feature bundle first, so let the promise settle
+      await vi.advanceTimersByTimeAsync(500);
       expect(mockWrappedManagerInstance.showWrapped).toHaveBeenCalledTimes(1);
     });
 
@@ -586,11 +601,13 @@ describe("MapApp.initialize", () => {
 
       await initializeApp(app);
       app.destroy();
-      vi.advanceTimersByTime(500);
+      await vi.advanceTimersByTimeAsync(500);
 
       expect(mockWrappedManagerInstance.showWrapped).not.toHaveBeenCalled();
-      expect(mockReplayManagerInstance.destroy).toHaveBeenCalled();
-      expect(mockWrappedManagerInstance.destroy).toHaveBeenCalled();
+      // Neither feature was ever opened, so neither manager exists; destroy
+      // has to cope with that rather than reach through an undefined
+      expect(mockReplayManagerInstance.destroy).not.toHaveBeenCalled();
+      expect(mockWrappedManagerInstance.destroy).not.toHaveBeenCalled();
     });
 
     it("restores the map view from saved center and zoom", async () => {

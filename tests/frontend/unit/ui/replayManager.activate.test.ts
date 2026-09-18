@@ -88,35 +88,15 @@ describe("ReplayManager activation", () => {
     });
   });
 
-  describe("store subscriptions", () => {
-    it("marks the button ready as soon as one timed flight is selected", () => {
+  describe("the replay button", () => {
+    it("shows availability again after the manager asks it to", () => {
       const btn = el("replay-btn") as HTMLButtonElement;
-      expect(btn.style.opacity).toBe("0.5");
-
       mockApp.selectedPathIds.add(1);
-      mockApp.store.notifyMutation("selectedPathIds");
+
+      replayManager.updateReplayButtonState();
 
       expect(btn.style.opacity).toBe("1");
       expect(btn.title).toBe("Replay selected flight path");
-    });
-
-    it("follows the timing data of the loaded metadata", () => {
-      mockApp.selectedPathIds = new Set([1]);
-      const btn = el("replay-btn") as HTMLButtonElement;
-      expect(btn.style.opacity).toBe("1");
-
-      mockApp.hasTimingData = false;
-
-      expect(btn.style.opacity).toBe("0.5");
-    });
-
-    it("reflects a selection restored before the manager existed", () => {
-      const app = createReplayMockApp();
-      app.selectedPathIds.add(1);
-
-      createReplayManager(app);
-
-      expect((el("replay-btn") as HTMLButtonElement).style.opacity).toBe("1");
     });
   });
 
