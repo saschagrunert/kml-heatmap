@@ -80,9 +80,10 @@ def _find_aircraft_files(kml_files: list[str]) -> list[Path]:
 def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
     """Rename and rewrite the (validated) input KML files in place for privacy.
 
-    Returns ``kml_files`` with the new path of every renamed Charterware file.
-    Exits with an error when a file cannot be rewritten: publishing data that
-    still carries real dates would be worse than not publishing at all.
+    Only runs with ``--obfuscate-inputs``; see ``_generate``. Returns
+    ``kml_files`` with the new path of every renamed Charterware file. Exits
+    with an error when a file cannot be rewritten: leaving a file the user
+    asked to scrub with its real dates would be worse than not running at all.
     """
     from .obfuscate import (
         check_kml_obfuscated,
@@ -135,8 +136,15 @@ def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
     return [new_names.get(kml_file, kml_file) for kml_file in kml_files]
 
 
-def _generate(paths: list[str], output_dir: Path) -> None:
-    """Obfuscate the inputs and generate the site into ``output_dir``."""
+def _generate(paths: list[str], output_dir: Path, obfuscate_inputs: bool) -> None:
+    """Generate the site into ``output_dir``.
+
+    The generated site never carries a date finer than the year, whatever the
+    inputs hold: the exported paths keep their year, their relative timing and
+    nothing else (see ``data_exporter``). Rewriting the inputs is therefore
+    not needed to publish safely and is not done unless ``obfuscate_inputs``
+    asks for it, because it cannot be undone.
+    """
     kml_files = _collect_kml_files(paths)
 
     if not kml_files:
@@ -155,7 +163,7 @@ def _generate(paths: list[str], output_dir: Path) -> None:
     from .validation import validate_output_dir
 
     # Both are checked again inside create_progressive_heatmap, which is
-    # public API; checking here stops before the inputs are rewritten
+    # public API; checking here stops before --obfuscate-inputs rewrites them
     is_safe, error_msg = validate_output_dir(output_dir, [*kml_files, *aircraft_files])
     if not is_safe:
         _fatal(error_msg or "Unsafe output directory")
@@ -167,7 +175,8 @@ def _generate(paths: list[str], output_dir: Path) -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    kml_files = _obfuscate_inputs(kml_files)
+    if obfuscate_inputs:
+        kml_files = _obfuscate_inputs(kml_files)
 
     success = create_progressive_heatmap(
         kml_files, output_file, data_dir, aircraft_files=aircraft_files
@@ -191,13 +200,22 @@ examples:
   %(prog)s ./my_flights/ --output-dir out
   %(prog)s *.kml --output-dir mymap
   %(prog)s --debug problematic.kml --output-dir out
+  %(prog)s --obfuscate-inputs ./my_flights/ --output-dir out
 
-The input KML files are rewritten IN PLACE before processing: all timestamps
-and dates are shifted so that every flight starts on January 1st of its year
-(time of day and intervals are preserved) and the creator attribute is
-replaced. Charterware files are renamed to January 1st as well
-(2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml becomes 2026-01-01_0000h_...). Keep a
-copy of the originals if you need the real dates.
+The input KML files are read and left alone. The generated site never carries
+a date finer than the year in the first place: a flight keeps its year and the
+intervals between its points, and every absolute timestamp is dropped on
+export.
+
+--obfuscate-inputs additionally rewrites the input files THEMSELVES, IN PLACE
+and IRREVERSIBLY, so that the files on disk carry no real dates either (useful
+before committing or sharing them). All timestamps and dates are shifted so
+that every flight starts on January 1st of its year (time of day and intervals
+are preserved) and the creator attribute is replaced. Charterware files are
+renamed to January 1st as well (2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml becomes
+2026-01-01_0000h_...). Keep a copy of the originals if you need the real
+dates. The same rewrite is available on its own, without generating a site, as
+`python -m kml_heatmap.obfuscate <path>`.
 
 The output directory must not be the directory of an input file, or contain
 one: the tool replaces and removes its own files in there. An output
@@ -224,6 +242,15 @@ output directory untouched.
         help="enable debug output to diagnose parsing issues",
     )
     parser.add_argument(
+        "--obfuscate-inputs",
+        action="store_true",
+        help=(
+            "also rewrite the input KML files in place, irreversibly, so that "
+            "they carry no real dates either (the generated site never does); "
+            "keep a copy of the originals first"
+        ),
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -235,7 +262,7 @@ output directory untouched.
         set_debug_mode(True)
 
     try:
-        _generate(args.paths, Path(args.output_dir))
+        _generate(args.paths, Path(args.output_dir), args.obfuscate_inputs)
     except (KMLHeatmapError, OSError) as e:
         # Expected failures (an unwritable output directory, a missing airport
         # database) end in one line instead of a traceback

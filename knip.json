@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "kml_heatmap/frontend/mapApp.ts",
+    "kml_heatmap/frontend/features.ts",
+    "scripts/*.js",
+    "tests/**/*.test.ts",
+    "tests/e2e/*.spec.ts"
+  ],
+  "project": [
+    "kml_heatmap/frontend/**/*.ts",
+    "tests/**/*.ts",
+    "*.js",
+    "scripts/*.js"
+  ],
+  "ignoreDependencies": ["dom-to-image", "leaflet.heat", "flag-icons"]
+}

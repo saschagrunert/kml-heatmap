@@ -65,7 +65,7 @@ export function createSegment(
 }
 
 /** Mocked manager set attached to a mock app */
-export interface MockManagers {
+interface MockManagers {
   dataManager: {
     loadData: Mock;
     loadAirports: Mock;

@@ -107,8 +107,14 @@ export class MapApp {
   declare altitudeRange: StoreAccessors["altitudeRange"];
   declare airspeedRange: StoreAccessors["airspeedRange"];
 
+  // Every manager is handed the whole app, so whatever stays writable below
+  // is writable from all of them. The fields that nothing reassigns after
+  // the constructor say so, which leaves the compiler enforcing a mutable
+  // surface of the map, the two fields the managers do write, and the
+  // managers themselves.
+
   // Configuration
-  config: MapConfig;
+  readonly config: MapConfig;
 
   // Non-store state
   allAirportsData: Airport[];
@@ -121,17 +127,17 @@ export class MapApp {
   /** The base map. Wrapped waits on its `load` before showing the map. */
   baseLayer: L.TileLayer | null = null;
   heatmapLayer: HeatmapLayer | null;
-  altitudeLayer: L.LayerGroup;
-  airspeedLayer: L.LayerGroup;
-  airportLayer: L.LayerGroup;
+  readonly altitudeLayer: L.LayerGroup;
+  readonly airspeedLayer: L.LayerGroup;
+  readonly airportLayer: L.LayerGroup;
   /** Shared canvas renderer for altitude/airspeed polylines */
-  pathRenderer: L.Canvas;
+  readonly pathRenderer: L.Canvas;
 
   // Airport markers (non-store)
-  airportMarkers: AirportMarkersMap;
+  readonly airportMarkers: AirportMarkersMap;
 
   // OpenAIP layer
-  openaipLayers: OpenAIPLayersMap;
+  readonly openaipLayers: OpenAIPLayersMap;
 
   /**
    * Replay state. It lives here rather than in the replay manager because
@@ -489,6 +495,7 @@ export class MapApp {
     this.uiToggles = new UIToggles(this);
     this.mobileBar = MobileBar.mountFor(this);
     this.followReplayAvailability();
+    this.followHeatmapEmphasis();
   }
 
   togglePathSelection(pathId: string): void {
@@ -515,6 +522,23 @@ export class MapApp {
     this.store.subscribe("selectedPathIds", refresh);
     this.store.subscribe("hasTimingData", refresh);
     refresh();
+  }
+
+  /**
+   * Keep the heatmap stepped back while a colour layer is drawn over it.
+   *
+   * Which of the two reads first follows from the layer flags alone, so it
+   * follows the store rather than every place that writes them: a toggle, a
+   * restored link and the start and end of a replay all set the same keys.
+   * DataManager applies it once more when it builds the heat layer, which is
+   * the one moment the canvas this styles does not exist yet.
+   */
+  private followHeatmapEmphasis(): void {
+    const apply = (): void => this.dataManager.applyHeatmapEmphasis();
+    this.store.subscribeKeys(["altitudeVisible", "airspeedVisible"], apply);
+    // State restored from a link is written before this runs, so the current
+    // value gets the same treatment as every later one
+    apply();
   }
 
   /**

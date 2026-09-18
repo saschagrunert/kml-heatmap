@@ -54,6 +54,7 @@ npm run typecheck        # Type-check the frontend
 npm run typecheck:tests  # Type-check the unit and e2e tests
 npm run lint             # Lint TypeScript code
 npm run lint:fix         # Auto-fix linting issues
+npm run lint:unused      # Files, exports and dependencies nothing reaches (knip)
 npm run format           # Format code with Prettier
 npm run format:check     # Check code formatting
 ```
@@ -115,7 +116,13 @@ keep their traces in `test-results/`, and every run writes an HTML report to
 
 `npm run build` produces two bundles. `mapApp.bundle.js` is the map itself,
 and `features.bundle.js` holds Replay and Wrapped, which the page fetches the
-first time one of them is opened; most visits never do. The modules both use
+first time one of them is opened; most visits never do. Their styles are split
+the same way and travel with them: `kml_heatmap/static/styles.css` is linked
+in the page, `features.css` is fetched alongside the feature bundle (see
+`services/featureLoader.ts`), and each has its own budget in
+`tests/test_asset_budget.py`. A rule belongs in `features.css` when its
+selector names replay or Wrapped; the two file headers spell out the rest,
+including the one-way dependency between them. The modules both use
 are resolved to a global the main bundle publishes rather than copied into
 the second one (`scripts/shared-modules.js` and
 `kml_heatmap/frontend/shared.ts`), because several of them hold state that
@@ -149,6 +156,7 @@ none and the statistics rail falls back to the ISO country code.
 - **Tests**
   - Unit tests: `tests/frontend/unit/` (Vitest)
   - E2E tests: `tests/e2e/` (Playwright)
+- **Stylesheets** in `kml_heatmap/static/` (`styles.css` and `features.css`)
 - **Build output** in `kml_heatmap/static/` (`mapApp.bundle.js`,
   `features.bundle.js` and `vendor/`)
 

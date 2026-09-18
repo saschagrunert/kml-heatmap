@@ -53,7 +53,7 @@ async function serveTransparentTile(route: Route): Promise<void> {
  * predicates are mutually exclusive, so it does not matter in which order
  * Playwright matches them.
  */
-export async function installHermeticRoutes(
+async function installHermeticRoutes(
   context: BrowserContext,
 ): Promise<string[]> {
   const offSite: string[] = [];
@@ -84,4 +84,4 @@ export const test = base.extend<{ hermetic: void }>({
 });
 
 export { expect };
-export type { BrowserContext, Locator, Page } from "@playwright/test";
+export type { Locator, Page } from "@playwright/test";

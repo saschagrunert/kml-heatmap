@@ -74,9 +74,11 @@ directory; run `make build` (or `make serve-build`) to regenerate it first.
 `docs/` is a local build output and is not committed: the published site is
 built from the sources in CI once all tests pass (see [Development](#development)).
 
-**Warning:** the tool rewrites the KML files in `data/` in place to remove
-flight dates (see [Privacy](#privacy)). Keep a copy of the originals if you
-need the real timestamps.
+Your KML files are read and left alone. The generated site carries no date
+finer than the year whatever they contain, so nothing has to be stripped from
+them first (see [Privacy](#privacy)). To scrub the files themselves as well,
+pass `--obfuscate-inputs` or run `make obfuscate`; that rewrites them in place
+and cannot be undone, so keep a copy of the originals.
 
 ### KML File Naming Convention
 
@@ -121,7 +123,7 @@ Where:
 The flight date used for the year filter is taken from the `<description>`
 element of the file, not from the filename.
 
-Obfuscation renames these files (see [Privacy](#privacy)): the date becomes
+Obfuscating the files renames them (see [Privacy](#privacy)): the date becomes
 January 1st of the same year and the time slot a sequence number per year and
 directory, written as a time (`0000h`, `0001h`, ..., `0059h`, `0100h`). The
 example becomes `2026-01-01_0000h_OE-AKI_LOAV-LOAV.kml`, and the next flight of
@@ -223,28 +225,31 @@ Variables:
 
 Targets (`make help` prints this list with the current variable values):
 
-- `build` - Build the image and generate `OUTPUT_DIR` from `INPUT_DIR` (obfuscates the input KML files in place)
+- `build` - Build the image and generate `OUTPUT_DIR` from `INPUT_DIR` (leaves the input KML files alone)
 - `serve` - Serve `OUTPUT_DIR` on `http://HOST_BIND:PORT` (run `make build` first)
 - `serve-build` - Run `build`, then `serve`
 - `test` - Run the JavaScript and Python test suites with coverage
 - `lint` - Run linters and type checkers
 - `format` - Run formatters
 - `lock` - Regenerate `requirements.lock` and `requirements-test.lock` from `pyproject.toml` with pip-compile
+- `obfuscate` - Rewrite the KML files in `INPUT_DIR` in place so they carry no real dates (irreversible)
 - `check-obfuscation` - Check that the KML files in `INPUT_DIR` are obfuscated
 - `clean` - Remove the container image (when a runtime is available) and local build artifacts
 - `help` - Show available targets and variables
 
 Only `build`, `serve` and `clean` need podman or docker. The rest (`test`,
-`lint`, `format`, `lock`, `help`) run locally. With docker the
+`lint`, `format`, `lock`, `obfuscate`, `check-obfuscation`, `help`) run
+locally. With docker the
 containers run as your user id so that generated files are not owned by root;
 with rootless podman the Makefile adds `--userns=keep-id` so that the same user
 id works inside the container.
 
 ### Docker Usage
 
-If you prefer using Docker directly. Input files are obfuscated in place. Mount
-the OurAirports cache so it is not downloaded on every run, and run as your user
-id so the output is owned by you (add `--userns=keep-id` with rootless podman):
+If you prefer using Docker directly. Input files are read and left alone (pass
+`--obfuscate-inputs` to rewrite them too). Mount the OurAirports cache so it is
+not downloaded on every run, and run as your user id so the output is owned by
+you (add `--userns=keep-id` with rootless podman):
 
 ```bash
 # Build the image
@@ -304,7 +309,7 @@ wrapper.
 ### Command-Line Options
 
 ```
-kml-heatmap [--output-dir DIR] [--debug] [--version] path [path ...]
+kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--version] path [path ...]
 ```
 
 - `path` - KML files and/or directories. Directories are scanned with their
@@ -317,6 +322,11 @@ kml-heatmap [--output-dir DIR] [--debug] [--version] path [path ...]
   An output directory below the input directory is fine, so
   `kml-heatmap flight.kml` in the file's directory writes to `./docs/`.
 - `--debug` - Show debug output
+- `--obfuscate-inputs` - Also rewrite the input KML files themselves, in place
+  and irreversibly, so that the files on disk carry no real dates either. Off
+  by default: the generated site never carries a date finer than the year
+  whatever the inputs hold (see [Privacy](#privacy)), so this is about the KML
+  files, not about what gets published. Keep a copy of the originals first.
 - `--version` - Show the version and exit
 
 Every file is written into a hidden staging directory inside the output first
@@ -337,13 +347,26 @@ year, or an error such as an unwritable output directory.
 
 ## Privacy
 
-**The tool rewrites your input KML files in place** (atomically, after
-validation) so that the files committed to this repository never contain real
-flight dates. Timestamps are shifted to January 1st of their year while keeping
-the intervals between points; a file holding flights on several dates moves
-each of them to January 1st of its own year. Date-bearing names, descriptions,
-Charterware file names and the creator field are replaced. Read-only files and
-symlinks are reported instead of rewritten.
+**The generated site carries no date finer than the year.** Flight paths keep
+only relative seconds since the start of each flight, which is enough for the
+replay and the speed colours; a flight keeps its year, and nothing else. That
+holds whatever the input files contain, so nothing has to be done to them
+before generating a site. The site shows where you have been and how much you
+have flown, but not when.
+
+**Your input files are read and left alone** unless you pass
+`--obfuscate-inputs`, which cannot be undone.
+
+### Obfuscating the KML files themselves
+
+That is a separate need: this repository commits the files in `data/`, and
+they must not carry real dates. `--obfuscate-inputs`, or
+`python -m kml_heatmap.obfuscate <dir>` on its own, rewrites them in place
+(atomically, after validation). Timestamps are shifted to January 1st of their
+year while keeping the intervals between points; a file holding flights on
+several dates moves each of them to January 1st of its own year. Date-bearing
+names, descriptions, Charterware file names and the creator field are
+replaced. Read-only files and symlinks are reported instead of rewritten.
 Obfuscated KML files still contain:
 
 - The year of each flight
@@ -358,12 +381,10 @@ midnight runs into. Timestamps within one Placemark, or no more than 12 hours
 apart, count as one flight and are never split; a recording that runs longer
 than those days fails the check rather than being cut in two. When a date
 cannot be removed (in a file name, say, or an element the tool does not
-rewrite), the generator lists it and stops.
+rewrite), the rewrite lists it and stops rather than leaving a file half
+scrubbed.
 
-The generated site in `docs/` contains no absolute timestamps at all. Flight
-paths carry only relative seconds since the start of each flight, which is
-enough for the replay and speed features. The site shows where you have been
-and how much you have flown, but not when.
+### What reaches the site
 
 Kept in the site:
 
@@ -395,7 +416,8 @@ output-dir/
 ├── features.bundle.js     # Replay and Wrapped, fetched on first use
 ├── features.bundle.js.map
 ├── map_config.js          # Map defaults and the tile API keys
-├── styles.css
+├── styles.css             # Linked in the page
+├── features.css           # Replay and Wrapped, fetched with their bundle
 ├── manifest.json
 ├── favicon.svg
 ├── favicon.ico

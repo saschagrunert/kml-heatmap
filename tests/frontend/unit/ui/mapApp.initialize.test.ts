@@ -426,6 +426,30 @@ describe("MapApp.initialize", () => {
       );
     });
 
+    it("steps the heatmap back for a restored colour layer", async () => {
+      // Nothing toggled anything here: the emphasis follows the store keys,
+      // not the control that usually writes them
+      mockStateManagerInstance.loadState.mockReturnValue({
+        altitudeVisible: true,
+      });
+
+      await initializeApp(app);
+
+      expect(mockDataManagerInstance.applyHeatmapEmphasis).toHaveBeenCalled();
+    });
+
+    it("steps it back again when a colour layer is switched off", async () => {
+      await initializeApp(app);
+      mockDataManagerInstance.applyHeatmapEmphasis.mockClear();
+
+      app.altitudeVisible = true;
+      app.altitudeVisible = false;
+
+      expect(
+        mockDataManagerInstance.applyHeatmapEmphasis,
+      ).toHaveBeenCalledTimes(2);
+    });
+
     it("adds the airspeed layer and shows its legend", async () => {
       mockStateManagerInstance.loadState.mockReturnValue({
         airspeedVisible: true,

@@ -2,15 +2,17 @@
  * Replay and Wrapped are fetched only when they are used.
  *
  * They are a quarter of the frontend and most visits open neither, so they
- * are built into a second bundle the page loads on demand. The saving is
- * only real if a first visit does not fetch it, and the features only work
- * if it arrives when one of them is opened, so both halves are checked here.
+ * are built into a second bundle, and their styles into a second stylesheet,
+ * that the page loads on demand. The saving is only real if a first visit
+ * fetches neither, and the features only work if both arrive when one of them
+ * is opened, so both halves are checked here.
  */
 import { test, expect } from "./fixtures";
 import { gotoApp, openWrapped, waitForAppReady } from "./helpers";
 import type { Page } from "./fixtures";
 
 const FEATURES = "features.bundle.js";
+const FEATURES_CSS = "features.css";
 
 /** The feature bundle requests the page made so far */
 function trackFeatureRequests(page: Page): string[] {
@@ -21,11 +23,22 @@ function trackFeatureRequests(page: Page): string[] {
   return requested;
 }
 
+/** The feature stylesheet requests the page made so far */
+function trackFeatureCssRequests(page: Page): string[] {
+  const requested: string[] = [];
+  page.on("request", (request) => {
+    // features.bundle.js contains the other name, so match the end
+    if (request.url().endsWith(FEATURES_CSS)) requested.push(request.url());
+  });
+  return requested;
+}
+
 test.describe("the feature bundle", () => {
   test("is not fetched by a visit that opens neither feature", async ({
     page,
   }) => {
     const requested = trackFeatureRequests(page);
+    const css = trackFeatureCssRequests(page);
 
     await gotoApp(page);
     await waitForAppReady(page);
@@ -34,6 +47,7 @@ test.describe("the feature bundle", () => {
     await page.locator("#airports-btn").click();
 
     expect(requested).toEqual([]);
+    expect(css).toEqual([]);
     // ... and the replay control still says whether replay is possible,
     // which is what the main bundle has to answer on its own
     await expect(page.locator("#replay-btn")).toHaveAttribute(
@@ -79,5 +93,29 @@ test.describe("the feature bundle", () => {
 
     expect(shared.published).toBeGreaterThan(10);
     expect(shared.hasDomCache).toBe(true);
+  });
+
+  test("brings its stylesheet with it, and neither panel shows before", async ({
+    page,
+  }) => {
+    const css = trackFeatureCssRequests(page);
+    await gotoApp(page);
+    await waitForAppReady(page);
+
+    // Both panels are in the markup from the first paint. Their layout is in
+    // features.css, so styles.css has to hide them on its own until it lands
+    await expect(page.locator("#replay-controls")).toBeHidden();
+    await expect(page.locator("#wrapped-modal")).toBeHidden();
+    expect(css).toEqual([]);
+
+    const dialog = await openWrapped(page);
+    await expect(dialog).toBeVisible();
+
+    expect(css).toHaveLength(1);
+    // Applied, not merely fetched: this display only exists in features.css
+    const styled = await page
+      .locator("#wrapped-container")
+      .evaluate((el) => getComputedStyle(el).display);
+    expect(styled).toBe("flex");
   });
 });

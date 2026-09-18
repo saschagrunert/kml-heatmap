@@ -137,11 +137,10 @@ describe("UIToggles layers", () => {
       expect(app.layerManager.redrawAltitudePaths).toHaveBeenCalled();
     });
 
-    it("steps the heatmap back under the colour scale", () => {
-      uiToggles.toggleAltitude();
-
-      expect(app.dataManager.applyHeatmapEmphasis).toHaveBeenCalledTimes(1);
-    });
+    // The heatmap steps back under a colour layer, but the toggle does not
+    // do it: MapApp.followHeatmapEmphasis() follows the two layer keys, so
+    // a restored link and a replay get the same treatment for free. Covered
+    // in mapApp.initialize.test.ts.
 
     it("does nothing without a map", () => {
       app.map = null;
