@@ -17,6 +17,25 @@ import { generateAirportPopupHtml } from "../utils/htmlGenerators";
 /** Padding added around a label box before two are called overlapping */
 const LABEL_GAP_PX = 2;
 
+/**
+ * Chrome that sits over the map. A label underneath one of these is not
+ * hidden by it, it is half hidden by it: the panels are translucent in
+ * places and the label slides under an edge. They are fed to the declutter
+ * pass as space that is already taken.
+ */
+const CHROME_SELECTORS = [
+  "#left-buttons",
+  "#right-buttons",
+  "#stats-rail",
+  "#mobile-bar",
+  "#replay-controls",
+  "#selection-chip",
+  "#mobile-sheet",
+  "#github-footer",
+  ".color-legend",
+  ".leaflet-control-attribution",
+] as const;
+
 /** Store keys that change the popup counts and the home base */
 const POPUP_KEYS = ["currentData", "selectedYear", "selectedAircraft"] as const;
 
@@ -181,6 +200,9 @@ export class AirportManager {
    * a whole country the codes of neighbouring airports overlap and neither is
    * readable. Busier airports are placed first, so the ones a reader is most
    * likely looking for keep their label; the marker dot itself always stays.
+   *
+   * The page's own panels count as taken space for the same reason, so a
+   * label pans behind the control column instead of sliding half under it.
    */
   declutterLabels(): void {
     const counts = this.airportFlightCounts();
@@ -206,6 +228,7 @@ export class AirportManager {
       label.classList.remove("airport-label-crowded");
     }
     const boxes = labels.map(({ label }) => label.getBoundingClientRect());
+    placed.push(...chromeBoxes());
 
     labels.forEach(({ label }, index) => {
       const box = boxes[index]!;
@@ -227,4 +250,20 @@ export class AirportManager {
       }
     });
   }
+}
+
+/** Boxes of the chrome currently drawn over the map */
+function chromeBoxes(): DOMRect[] {
+  const boxes: DOMRect[] = [];
+  for (const selector of CHROME_SELECTORS) {
+    for (const element of document.querySelectorAll<HTMLElement>(selector)) {
+      // `display: none` already measures as an empty box; `visibility` does
+      // not, and replay hides the legends, the GitHub link and the
+      // statistics sheet that way rather than relayouting around them
+      if (getComputedStyle(element).visibility === "hidden") continue;
+      const box = element.getBoundingClientRect();
+      if (box.width > 0 && box.height > 0) boxes.push(box);
+    }
+  }
+  return boxes;
 }

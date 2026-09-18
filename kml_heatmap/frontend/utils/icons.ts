@@ -1,15 +1,53 @@
 /**
  * Inline SVG icon set.
  *
- * One family drawn on a 24px grid with round caps and joins. The stroke
- * weight lifts as the icon shrinks so that density reads evenly:
- * 24px at 1.7, 20px at 1.8, 16px at 1.9.
+ * The shapes come from Lucide (ISC, https://lucide.dev), imported by name so
+ * the bundler keeps only the ones this page draws. Two are drawn here
+ * instead: Lucide carries no brand marks, and the replay marker needs an
+ * aircraft seen from above, which no general purpose set has.
  *
- * Icons are inlined rather than drawn from an icon font: the content security
+ * They are inlined rather than drawn from an icon font: the content security
  * policy allows no external font (`font-src 'self' file:`), and the page has
- * to work straight off the filesystem. They use `currentColor` so a single
- * colour rule drives them.
+ * to work straight off the filesystem. Every shape uses `currentColor`, so
+ * one colour rule drives them, and one family on a 24px grid means one
+ * stroke weight per size: 24px at 1.45, 20px at 1.5, 16px at 1.6.
  */
+import {
+  ArrowUpFromLine,
+  Calendar,
+  Camera,
+  ChartNoAxesColumn,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Crosshair,
+  Earth,
+  Ellipsis,
+  ExternalLink,
+  Flame,
+  Gauge,
+  Globe,
+  Info,
+  Layers,
+  Link2,
+  MapPin,
+  Menu,
+  Milestone,
+  Mountain,
+  Navigation,
+  Pause,
+  Play,
+  Route,
+  Ruler,
+  SlidersHorizontal,
+  Square,
+  Star,
+  Trophy,
+  X,
+  ZoomIn,
+  type IconNode,
+} from "lucide";
 import { logError } from "./logger";
 
 export type IconName =
@@ -38,58 +76,104 @@ export type IconName =
   | "calendar"
   | "more"
   | "github"
-  | "info";
+  | "info"
+  | "globe"
+  | "clock"
+  | "trophy"
+  | "externalLink"
+  | "earth"
+  | "milestone"
+  | "ruler"
+  | "climb"
+  | "aircraftTop";
 
-/** Path geometry only; the wrapper supplies size, stroke and colour. */
-const PATHS: Record<IconName, string> = {
-  stats:
-    '<path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M13 16V8"/><path d="M18 16v-3"/>',
-  export:
-    '<path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.7l1.2-1.8h6.2L15.8 6h2.7A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/><circle cx="12" cy="12" r="3.4"/>',
-  share:
-    '<path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.3 1.3"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 0 0 5.7 5.7l1.3-1.3"/>',
-  wrapped:
-    '<path d="M12 3.5l1.9 4.4 4.6.4-3.5 3.1 1.1 4.6L12 13.6l-4.1 2.4 1.1-4.6-3.5-3.1 4.6-.4z"/>',
-  play: '<path d="M8 5.5l10 6.5-10 6.5z"/>',
-  pause:
-    '<rect x="7" y="6" width="3.4" height="12" rx="1"/><rect x="13.6" y="6" width="3.4" height="12" rx="1"/>',
-  stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="1.6"/>',
-  isolate:
-    '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.2" stroke-dasharray="2.6 3.4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2"/>',
-  heatmap:
-    '<path d="M12 3.5c2.6 3 4 5.6 4 7.8a4 4 0 0 1-8 0c0-2.2 1.4-4.8 4-7.8z"/><path d="M6.5 14.5c-1.4 1.4-2.2 2.7-2.2 3.7a2.2 2.2 0 0 0 4.4 0"/><path d="M17.5 14.5c1.4 1.4 2.2 2.7 2.2 3.7a2.2 2.2 0 0 1-4.4 0"/>',
-  airport:
-    '<path d="M12 21s6.5-5.4 6.5-10.2A6.5 6.5 0 0 0 5.5 10.8C5.5 15.6 12 21 12 21z"/><circle cx="12" cy="10.6" r="2.4"/>',
-  altitude: '<path d="M3 18l5.5-8 3.5 4.5 3-4 6 7.5z"/><path d="M3 18h18"/>',
-  speed:
-    '<path d="M3.5 8.5h9"/><path d="M3.5 12.5h13"/><path d="M3.5 16.5h7"/><path d="M17 6.6l3.4 5.9-3.4 5.9"/>',
-  distance:
-    '<circle cx="5.6" cy="18.4" r="2.3"/><circle cx="18.4" cy="5.6" r="2.3"/><path d="M7.5 16.9a9.2 9.2 0 0 1 9.4-9.4" stroke-dasharray="2.6 3"/>',
-  aviation:
-    '<path d="M12 3.2l8.4 4.3-8.4 4.3-8.4-4.3z"/><path d="M3.6 12l8.4 4.3 8.4-4.3"/><path d="M3.6 16.4l8.4 4.3 8.4-4.3"/>',
-  layers: '<path d="M4 9.5h16"/><path d="M4 14.5h16"/>',
-  filter: '<path d="M4 6.5h16"/><path d="M7.5 12h9"/><path d="M10.5 17.5h3"/>',
-  chevronDown: '<path d="M6 9.5l6 6 6-6"/>',
-  chevronRight: '<path d="M9.5 6l6 6-6 6"/>',
-  collapse: '<path d="M14.5 6l-6 6 6 6"/>',
-  autoZoom:
-    '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20"/><path d="M8.5 11h5"/><path d="M11 8.5v5"/>',
-  close: '<path d="M6.5 6.5l11 11"/><path d="M17.5 6.5l-11 11"/>',
-  aircraft:
-    '<path d="M20.5 3.5L11 13"/><path d="M20.5 3.5l-6.2 17-3.3-7.5-7.5-3.3z"/>',
-  calendar:
-    '<rect x="3.8" y="5.2" width="16.4" height="15" rx="2.2"/><path d="M3.8 9.6h16.4"/><path d="M8.2 3.4v3.6"/><path d="M15.8 3.4v3.6"/>',
-  more: '<circle cx="12" cy="12" r="1.7"/><circle cx="18.6" cy="12" r="1.7"/><circle cx="5.4" cy="12" r="1.7"/>',
+/**
+ * The two shapes Lucide does not carry. The GitHub mark is a brand, which
+ * the set dropped on purpose; the aircraft is drawn nose up and solid, so
+ * the replay marker's rotation is the track itself and the silhouette holds
+ * together over live map data.
+ */
+const OWN_PATHS = {
   github:
     '<path d="M12 2.5A9.5 9.5 0 0 0 9 21.2c.5.1.7-.2.7-.5v-1.7C7.1 19.6 6.5 18 6.5 18a2.5 2.5 0 0 0-1-1.4c-.8-.6.1-.6.1-.6a2 2 0 0 1 1.4 1 2 2 0 0 0 2.7.8 2 2 0 0 1 .6-1.3c-2-.2-4.2-1-4.2-4.7a3.6 3.6 0 0 1 1-2.5 3.4 3.4 0 0 1 .1-2.5s.8-.3 2.7 1a9.2 9.2 0 0 1 4.8 0c1.9-1.3 2.7-1 2.7-1a3.4 3.4 0 0 1 .1 2.5 3.6 3.6 0 0 1 1 2.5c0 3.7-2.2 4.5-4.2 4.7a2.3 2.3 0 0 1 .6 1.7v2.5c0 .3.2.6.7.5A9.5 9.5 0 0 0 12 2.5z"/>',
-  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 16v-4.5"/><circle cx="12" cy="8" r=".8"/>',
+  aircraftTop:
+    '<path d="M12 2.6c1.1 0 1.8 1.3 1.8 2.8v3.1l6.7 3.9v2.2l-6.7-2v4.2l2.2 1.6v1.6L12 19.3l-4 .7v-1.6l2.2-1.6v-4.2l-6.7 2v-2.2l6.7-3.9V5.4c0-1.5.7-2.8 1.8-2.8z"/>',
+} as const;
+
+/** What each name in the interface is drawn as */
+const NODES: Record<Exclude<IconName, keyof typeof OWN_PATHS>, IconNode> = {
+  stats: ChartNoAxesColumn,
+  export: Camera,
+  share: Link2,
+  wrapped: Star,
+  play: Play,
+  pause: Pause,
+  stop: Square,
+  isolate: Crosshair,
+  heatmap: Flame,
+  airport: MapPin,
+  altitude: Mountain,
+  speed: Gauge,
+  distance: Route,
+  aviation: Layers,
+  layers: Menu,
+  filter: SlidersHorizontal,
+  chevronDown: ChevronDown,
+  chevronRight: ChevronRight,
+  collapse: ChevronLeft,
+  autoZoom: ZoomIn,
+  close: X,
+  aircraft: Navigation,
+  calendar: Calendar,
+  more: Ellipsis,
+  info: Info,
+  globe: Globe,
+  clock: Clock,
+  trophy: Trophy,
+  externalLink: ExternalLink,
+  earth: Earth,
+  milestone: Milestone,
+  ruler: Ruler,
+  climb: ArrowUpFromLine,
 };
 
-/** Stroke weight paired with each size, so density reads evenly */
+/** One Lucide node list as the markup that goes inside an `<svg>` */
+function nodesToMarkup(nodes: IconNode): string {
+  return nodes
+    .map(([tag, attrs]) => {
+      const written = Object.entries(attrs)
+        .map(([attribute, value]) => `${attribute}="${String(value)}"`)
+        .join(" ");
+      return `<${tag} ${written}/>`;
+    })
+    .join("");
+}
+
+/** Geometry only; the wrapper supplies size, stroke and colour. */
+const PATHS: Record<IconName, string> = {
+  ...OWN_PATHS,
+  ...(Object.fromEntries(
+    Object.entries(NODES).map(([name, nodes]) => [name, nodesToMarkup(nodes)]),
+  ) as Record<Exclude<IconName, keyof typeof OWN_PATHS>, string>),
+};
+
+/**
+ * How an icon is painted. The family is an outline family; `solid` exists for
+ * the one place an outline loses, a marker drawn over live map data.
+ */
+export type IconVariant = "outline" | "solid";
+
+/**
+ * Stroke weight paired with each size, so density reads evenly.
+ *
+ * A hair under a pixel and a half at the largest size, lifting as the icon
+ * shrinks and the same stroke would start to look faint. They were a step
+ * heavier, which read as solid rather than drawn beside 13px text.
+ */
 const STROKE_FOR_SIZE: Record<number, string> = {
-  16: "1.9",
-  20: "1.8",
-  24: "1.7",
+  16: "1.6",
+  20: "1.5",
+  24: "1.45",
 };
 
 export const ICON_SIZES = [16, 20, 24] as const;
@@ -133,24 +217,31 @@ function escapeAttribute(value: string): string {
  * @param name - Icon to draw
  * @param size - One of the three sizes on the scale
  * @param title - Accessible name; omit for icons beside a text label
+ * @param variant - `solid` for a marker over map data, outline everywhere else
  */
 export function icon(
   name: IconName,
   size: IconSize = 20,
   title?: string,
+  variant: IconVariant = "outline",
 ): string {
   const stroke = STROKE_FOR_SIZE[size] ?? "1.8";
   const label = title
     ? ' role="img" aria-label="' + escapeAttribute(title) + '"'
     : ' aria-hidden="true" focusable="false"';
+  const paint =
+    variant === "solid"
+      ? ' fill="currentColor" stroke="none"'
+      : ' fill="none" stroke="currentColor" stroke-width="' +
+        stroke +
+        '" stroke-linecap="round" stroke-linejoin="round"';
   return (
     '<svg class="icon" width="' +
     size +
     '" height="' +
     size +
-    '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' +
-    stroke +
-    '" stroke-linecap="round" stroke-linejoin="round"' +
+    '" viewBox="0 0 24 24"' +
+    paint +
     label +
     ">" +
     PATHS[name] +

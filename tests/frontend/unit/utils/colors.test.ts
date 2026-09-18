@@ -20,36 +20,44 @@ function parseRgb(rgbString: string): { r: number; g: number; b: number } {
   };
 }
 
+/**
+ * WCAG relative luminance of a colour string. Both ramps are perceptually
+ * uniform, which in practice means this rises from one end to the other; the
+ * tests assert that rather than naming hues, so a later ramp swap that keeps
+ * the property keeps passing.
+ */
+function luminance(rgbString: string): number {
+  const { r, g, b } = parseRgb(rgbString);
+  const channel = (value: number): number => {
+    const v = value / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
 describe("color utilities", () => {
   describe("getColorForAltitude", () => {
-    it("returns light blue for minimum altitude", () => {
-      const color = getColorForAltitude(0, 0, 10000);
-      const { r, g, b } = parseRgb(color);
+    it("darkens towards the bottom of the range and lightens to the top", () => {
+      const low = getColorForAltitude(0, 0, 10000);
+      const high = getColorForAltitude(10000, 0, 10000);
 
-      // Should be light blue (low red, medium-high green, high blue)
-      expect(r).toBeLessThan(100);
-      expect(g).toBeGreaterThan(150);
-      expect(b).toBe(255);
+      expect(luminance(low)).toBeLessThan(luminance(high));
     });
 
-    it("returns light red for maximum altitude", () => {
-      const color = getColorForAltitude(10000, 0, 10000);
-      const { r, g, b } = parseRgb(color);
-
-      // Should be light red (high red, low green, some blue)
-      expect(r).toBe(255);
-      expect(g).toBeLessThan(100);
-      expect(b).toBeGreaterThan(0);
+    it("rises in lightness at every step, so equal steps read as equal", () => {
+      for (let alt = 0; alt < 10000; alt += 500) {
+        const here = luminance(getColorForAltitude(alt, 0, 10000));
+        const next = luminance(getColorForAltitude(alt + 500, 0, 10000));
+        expect(next).toBeGreaterThan(here);
+      }
     });
 
-    it("returns green for mid-range altitude", () => {
-      const color = getColorForAltitude(5000, 0, 10000);
-      const { r, g, b } = parseRgb(color);
-
-      // Mid-range should be green-yellow range
-      expect(r).toBeGreaterThan(0);
-      expect(g).toBe(255);
-      expect(b).toBeLessThan(50);
+    it("stays clear of the basemap at its darkest end", () => {
+      // #141414, the page background under the tiles
+      const background = 0.0144;
+      expect(luminance(getColorForAltitude(0, 0, 10000))).toBeGreaterThan(
+        background * 3,
+      );
     });
 
     it("clamps values below minimum to minimum color", () => {
@@ -93,32 +101,33 @@ describe("color utilities", () => {
   });
 
   describe("getColorForAirspeed", () => {
-    it("returns blue for minimum speed", () => {
-      const color = getColorForAirspeed(0, 0, 200);
-      const { r, g, b } = parseRgb(color);
-
-      // Should be blue (low red, medium green, high blue)
-      expect(r).toBe(0);
-      expect(g).toBeGreaterThan(100);
-      expect(b).toBe(255);
+    it("rises in lightness at every step", () => {
+      for (let speed = 0; speed < 200; speed += 10) {
+        const here = luminance(getColorForAirspeed(speed, 0, 200));
+        const next = luminance(getColorForAirspeed(speed + 10, 0, 200));
+        expect(next).toBeGreaterThan(here);
+      }
     });
 
-    it("returns red for maximum speed", () => {
-      const color = getColorForAirspeed(200, 0, 200);
-      const { r, g, b } = parseRgb(color);
-
-      // Should be red (high red, low green, no blue)
-      expect(r).toBe(255);
-      expect(g).toBeLessThan(50);
-      expect(b).toBe(0);
+    it("stays clear of the basemap at its darkest end", () => {
+      const background = 0.0144;
+      expect(luminance(getColorForAirspeed(0, 0, 200))).toBeGreaterThan(
+        background * 3,
+      );
     });
 
-    it("returns green-yellow for mid-range speed", () => {
-      const color = getColorForAirspeed(100, 0, 200);
-      const { r: _r, g, b: _b } = parseRgb(color);
-
-      // Mid-range should be green-yellow
-      expect(g).toBe(255);
+    it("shares no hue with the altitude ramp", () => {
+      // The two ramps have to say which quantity is on the map, not only
+      // order their own values. They used to differ by one stop at each end.
+      for (let t = 0; t <= 1.0001; t += 0.1) {
+        const altitude = parseRgb(getColorForAltitude(t, 0, 1));
+        const speed = parseRgb(getColorForAirspeed(t, 0, 1));
+        const distance =
+          Math.abs(altitude.r - speed.r) +
+          Math.abs(altitude.g - speed.g) +
+          Math.abs(altitude.b - speed.b);
+        expect(distance).toBeGreaterThan(90);
+      }
     });
 
     it("clamps values below minimum", () => {
@@ -186,10 +195,10 @@ describe("color utilities", () => {
       expect(altitude).toContain("linear-gradient(to right,");
       expect(speed).toContain("linear-gradient(to right,");
       // First and last stop of each ramp, at the ends of the scale
-      expect(altitude).toContain("rgb(80,160,255) 0%");
-      expect(altitude).toContain("rgb(255,66,66) 100%");
-      expect(speed).toContain("rgb(0,128,255) 0%");
-      expect(speed).toContain("rgb(255,0,0) 100%");
+      expect(altitude).toContain("rgb(86,2,162) 0%");
+      expect(altitude).toContain("rgb(247,149,64) 100%");
+      expect(speed).toContain("rgb(56,88,140) 0%");
+      expect(speed).toContain("rgb(253,231,37) 100%");
     });
 
     it("matches the colours the paths are drawn with", () => {

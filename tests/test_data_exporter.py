@@ -1057,7 +1057,7 @@ class TestExportAllData:
 
         result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
 
-        assert result == ExportResult(years=[2025, 2026])
+        assert result == ExportResult(years=[2025, 2026], countries=[])
         meta = parse_js(tmp_path / "metadata.js", "KML_METADATA")
         data_2025 = parse_js(tmp_path / "2025" / "data.js")
         data_2026 = parse_js(tmp_path / "2026" / "data.js")
@@ -1067,6 +1067,7 @@ class TestExportAllData:
         speeds = [row[3] for row in rows_2026]
         assert meta == {
             "aircraft_models": {},
+            "available_flags": [],
             "available_years": [2025, 2026],
             "max_groundspeed_knots": max(speeds),
             "min_groundspeed_knots": min(speeds),
@@ -1130,6 +1131,7 @@ class TestExportAllData:
         assert result.years == []
         assert parse_js(tmp_path / "metadata.js") == {
             "aircraft_models": {},
+            "available_flags": [],
             "available_years": [],
             "max_groundspeed_knots": 0.0,
             "min_groundspeed_knots": 0.0,

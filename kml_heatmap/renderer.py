@@ -302,7 +302,12 @@ def _export_site(
             aircraft_data=aircraft_data,
         )
         render_html(site.site_stage / output_file.name, data_dir_name)
-        package_assets(site.site_stage, extent.as_map_bounds(), data_dir_name)
+        package_assets(
+            site.site_stage,
+            extent.as_map_bounds(),
+            data_dir_name,
+            result.countries,
+        )
 
         logger.info("\nPublishing the site to %s", output_file.parent)
         site.publish(result.years)

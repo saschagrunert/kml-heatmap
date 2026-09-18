@@ -14,6 +14,7 @@ import {
   getColorForAltitude,
   rgbToRgba,
 } from "../../../../kml_heatmap/frontend/utils/colors";
+import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
 
 describe("htmlGenerators", () => {
   describe("escapeHtml", () => {
@@ -218,20 +219,23 @@ describe("htmlGenerators", () => {
       const html = generateSegmentPopupHtml(fullParams);
 
       expect(html).toContain("Segment Data");
-      expect(html).toContain("📍");
+      // Drawn from the icon family rather than an emoji, which renders at a
+      // different weight and baseline on every platform
+      expect(html).toContain("<svg");
+      expect(html).not.toMatch(/\p{Extended_Pictographic}/u);
     });
 
     it("uses custom title and icon when provided", () => {
       const html = generateSegmentPopupHtml({
         ...fullParams,
         title: "Current Position",
-        icon: "✈️",
+        icon: "aircraftTop",
       });
 
       expect(html).toContain("Current Position");
-      expect(html).toContain("✈️");
+      expect(html).toContain(icon("aircraftTop", 20));
       expect(html).not.toContain("Segment Data");
-      expect(html).not.toContain("📍");
+      expect(html).not.toContain(icon("airport", 20));
     });
 
     it("defaults altitude and groundspeed to 0 when missing", () => {

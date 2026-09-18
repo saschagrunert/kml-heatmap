@@ -351,6 +351,25 @@
       </div>
     </div>
 
+    <!-- What is selected, and the way out of it. A selection is only drawn
+         on the map where the paths themselves are drawn; at the zoom levels
+         that show the heat bloom alone it had no representation at all, and
+         nothing anywhere said how many flights Isolate and the shared link
+         would carry. Filled by ui/pathSelection.ts. -->
+    <div id="selection-chip" hidden>
+      <span id="selection-chip-count"></span>
+      <button
+        type="button"
+        id="selection-clear-btn"
+        class="btn-surface"
+        data-icon="close"
+        title="Clear the selection"
+        aria-label="Clear the selection"
+      >
+        <span class="control-label">Clear</span>
+      </button>
+    </div>
+
     <!-- Toast announcements. Present from the start, so screen readers track
          them before utils/toast.ts writes a message into one. -->
     <div

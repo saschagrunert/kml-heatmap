@@ -31,7 +31,8 @@
   "dependencies": {
     "dom-to-image": "2.6.0",
     "leaflet": "1.9.4",
-    "leaflet.heat": "0.2.0"
+    "leaflet.heat": "0.2.0",
+    "lucide": "1.47.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
@@ -43,6 +44,7 @@
     "@vitest/ui": "^5.0.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.10.0",
+    "flag-icons": "^7.5.0",
     "jsdom": "^30.0.1",
     "prettier": "^3.9.6",
     "typescript": "^6.0.3",

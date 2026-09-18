@@ -418,6 +418,45 @@ describe("AirportManager", () => {
     it("skips markers that are not on the map", () => {
       expect(() => airportManager.declutterLabels()).not.toThrow();
     });
+
+    it("hides a label that would sit under the control column", () => {
+      // The panels are over the map, and a label that slid under one used
+      // to stay visible, half covered by its edge
+      const panel = document.createElement("div");
+      panel.id = "left-buttons";
+      panel.getBoundingClientRect = () => ({
+        left: 0,
+        top: 0,
+        right: 250,
+        bottom: 400,
+        width: 250,
+        height: 400,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+      document.body.appendChild(panel);
+
+      const covered = withLabel("EDDF", {
+        left: 200,
+        top: 100,
+        width: 40,
+        height: 14,
+      });
+      const clear = withLabel("EDDM", {
+        left: 600,
+        top: 100,
+        width: 40,
+        height: 14,
+      });
+
+      airportManager.declutterLabels();
+
+      expect(covered.classList.contains("airport-label-crowded")).toBe(true);
+      expect(clear.classList.contains("airport-label-crowded")).toBe(false);
+
+      panel.remove();
+    });
   });
 
   describe("declutterLabels after icon changes", () => {

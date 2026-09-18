@@ -13,12 +13,26 @@
  * committed) and the Python side publishes that directory next to the page.
  */
 
-import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { REPO_ROOT } from "./source-hash.js";
 
 const NODE_MODULES = join(REPO_ROOT, "node_modules");
 export const VENDOR_DIR = join(REPO_ROOT, "kml_heatmap/static/vendor");
+
+/**
+ * Country flags, kept apart from the vendored files above because the page
+ * never loads all of them: the Python side publishes only the countries an
+ * export actually visited, and the rest never leave the checkout.
+ */
+export const FLAG_DIR = join(REPO_ROOT, "kml_heatmap/static/flags");
+const FLAG_SOURCE = join(NODE_MODULES, "flag-icons/flags/4x3");
 
 /**
  * Published path inside vendor/ -> path inside node_modules.
@@ -76,4 +90,26 @@ export function copyVendorAssets() {
     versions[name] = pinnedVersion(name);
   }
   return { count: Object.keys(VENDOR_FILES).length, versions };
+}
+
+/**
+ * Copy the country flags into kml_heatmap/static/flags/.
+ *
+ * All of them, because which ones a site needs depends on the flights it is
+ * built from; `kml_heatmap/site_assets.py` publishes the handful an export
+ * touched. Like vendor/, the directory is generated, gitignored and left out
+ * of the wheel, so a copy installed from PyPI falls back to the country
+ * code rather than shipping two megabytes of flags nobody asked for.
+ * @returns {{count: number, version: string}}
+ */
+export function copyCountryFlags() {
+  rmSync(FLAG_DIR, { recursive: true, force: true });
+  mkdirSync(FLAG_DIR, { recursive: true });
+  const flags = readdirSync(FLAG_SOURCE).filter((name) =>
+    name.endsWith(".svg"),
+  );
+  for (const name of flags) {
+    copyFileSync(join(FLAG_SOURCE, name), join(FLAG_DIR, name));
+  }
+  return { count: flags.length, version: pinnedVersion("flag-icons") };
 }

@@ -6,6 +6,7 @@ import {
   asMapApp,
   type MockApp,
 } from "../../testHelpers";
+import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 
 const mapHelpers = vi.hoisted(() => ({
   invalidateMapAfterTransition: vi.fn(),
@@ -16,12 +17,25 @@ describe("PathSelection", () => {
   let pathSelection: PathSelection;
   let mockApp: MockApp;
   let btn: HTMLButtonElement;
+  let chip: HTMLElement;
+  let chipCount: HTMLElement;
+  let clearBtn: HTMLButtonElement;
 
   beforeEach(() => {
     vi.clearAllMocks();
     btn = document.createElement("button");
     btn.id = "isolate-btn";
     document.body.appendChild(btn);
+
+    chip = document.createElement("div");
+    chip.id = "selection-chip";
+    chip.hidden = true;
+    chipCount = document.createElement("span");
+    chipCount.id = "selection-chip-count";
+    clearBtn = document.createElement("button");
+    clearBtn.id = "selection-clear-btn";
+    chip.append(chipCount, clearBtn);
+    document.body.appendChild(chip);
 
     mockApp = createMockApp({
       airportToPaths: {
@@ -34,6 +48,8 @@ describe("PathSelection", () => {
 
   afterEach(() => {
     btn.remove();
+    chip.remove();
+    domCache.clear();
   });
 
   async function flush(): Promise<void> {
@@ -259,6 +275,42 @@ describe("PathSelection", () => {
 
       expect(mockApp.isolateSelection).toBe(false);
       expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("selection chip", () => {
+    it("stays out of the way while nothing is selected", () => {
+      expect(chip.hidden).toBe(true);
+      expect(chipCount.textContent).toBe("");
+    });
+
+    it("counts the selection", () => {
+      // A selection is only drawn where the paths are, so at the zoom
+      // levels that show the heat bloom alone this is all there is to see
+      pathSelection.togglePathSelection(1);
+
+      expect(chip.hidden).toBe(false);
+      expect(chipCount.textContent).toBe("1 flight selected");
+
+      pathSelection.togglePathSelection(2);
+
+      expect(chipCount.textContent).toBe("2 flights selected");
+    });
+
+    it("goes away with the selection", () => {
+      pathSelection.togglePathSelection(1);
+      pathSelection.togglePathSelection(1);
+
+      expect(chip.hidden).toBe(true);
+    });
+
+    it("clears the selection from its own control", () => {
+      pathSelection.togglePathSelection(1);
+
+      clearBtn.click();
+
+      expect(mockApp.selectedPathIds.size).toBe(0);
+      expect(chip.hidden).toBe(true);
     });
   });
 

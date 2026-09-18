@@ -13,7 +13,7 @@ import {
 } from "../utils/toast";
 import {
   countryDisplayName,
-  countryFlag,
+  countryFlagSrc,
   findHomeBase,
   groupByCountry,
 } from "../features/airports";
@@ -32,6 +32,7 @@ import {
   generateHomeBaseHtml,
   generateDestinationsHtml,
 } from "../utils/htmlGenerators";
+import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
 
 /**
  * Elements that stay out of the inert set while the dialog is open: the
@@ -48,28 +49,27 @@ const NON_INERT_IDS = new Set([
 /** Delay before the map is remeasured after moving back out of the dialog */
 const MAP_RESTORE_DELAY_MS = 100;
 
+/**
+ * Longest the map panel holds its placeholder waiting for tiles. The base
+ * layer says when they have landed; this covers the case where it never
+ * does, offline or with the tiles already in place.
+ */
+const MAP_REVEAL_TIMEOUT_MS = 1200;
+
 /** Padding around the data when the dialog fits the map to it */
 const FIT_PADDING: [number, number] = [80, 80];
 
 /**
- * Write the heading as a sparkle plus its words.
+ * Write the heading.
  *
- * The heading paints its text with a gradient through `background-clip`, and
- * an emoji inside that ignores the clip and keeps its own colours, so the two
- * halves of one line ended up looking unrelated. The sparkle gets its own
- * element that the gradient rule does not apply to.
+ * It used to open with a sparkle, an emoji that ignored the gradient the
+ * heading is painted with and came out differently on every platform, and
+ * then with the same star drawn from the icon set, which at 24px beside
+ * 36px type sat low and read as a stray mark. The card is titled by its
+ * words alone.
  */
 function setWrappedTitle(titleEl: HTMLElement, text: string): void {
-  titleEl.replaceChildren();
-
-  const spark = document.createElement("span");
-  spark.className = "wrapped-title-spark";
-  spark.setAttribute("aria-hidden", "true");
-  // The space is part of the text rather than a margin, so the heading reads
-  // and copies as one line and the gap is an ordinary word space
-  spark.textContent = "✨ ";
-
-  titleEl.append(spark, text);
+  titleEl.textContent = text;
 }
 
 const coordinatesByAirports = new WeakMap<Airport[], Map<string, Coordinate>>();
@@ -106,7 +106,10 @@ export class WrappedManager {
   private mapMoveTimer: ReturnType<typeof setTimeout> | null = null;
   private mapResizeTimer: ReturnType<typeof setTimeout> | null = null;
   private mapRestoreTimer: ReturnType<typeof setTimeout> | null = null;
-  private cardsScrollCleanup: (() => void) | null = null;
+  private mapRevealTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Drops the map panel's placeholder; held so a close can run it early */
+  private revealMap: (() => void) | null = null;
+  private cardsScroll: ScrollEndWatcher | null = null;
   /**
    * The map view from before the dialog fitted it to the data. Kept until
    * the close has put it back, so a reopening in between does not take the
@@ -152,21 +155,38 @@ export class WrappedManager {
     // The column keeps its scroll position between openings, so without this
     // reopening Wrapped lands mid-card instead of on the title
     column.scrollTop = 0;
+    this.cardsScroll = watchScrollEnd(column);
+  }
 
-    const update = (): void => {
-      const atEnd =
-        column.scrollTop + column.clientHeight >= column.scrollHeight - 1;
-      column.classList.toggle("is-at-end", atEnd);
+  /**
+   * Hold the placeholder until the map has something to show.
+   *
+   * Moving the map in takes two frames; its tiles take as long as the
+   * network does, and the panel showed a black rectangle for all of it.
+   */
+  private revealMapWhenPainted(container: HTMLElement): void {
+    const reveal = (): void => {
+      if (this.mapRevealTimer !== null) {
+        clearTimeout(this.mapRevealTimer);
+        this.mapRevealTimer = null;
+      }
+      this.app.baseLayer?.off("load", reveal);
+      this.revealMap = null;
+      container.classList.remove("is-awaiting-map");
     };
-    column.addEventListener("scroll", update, { passive: true });
-    // A resize can make everything fit, and then the fade would sit over
-    // nothing until the next scroll that can no longer happen
-    window.addEventListener("resize", update, { passive: true });
-    this.cardsScrollCleanup = () => {
-      column.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
-    };
-    update();
+
+    if (!this.app.baseLayer) {
+      reveal();
+      return;
+    }
+
+    // `load` lands when the last tile of the fitted view has, which is the
+    // first moment the panel has anything to show. Counting the tiles that
+    // are still in flight instead would read zero, because the fit that
+    // asks for them is animated and has not asked yet.
+    this.revealMap = reveal;
+    this.app.baseLayer.on("load", reveal);
+    this.mapRevealTimer = setTimeout(reveal, MAP_REVEAL_TIMEOUT_MS);
   }
 
   /** Fit options for the overview, without the animation for reduced motion */
@@ -235,6 +255,12 @@ export class WrappedManager {
     };
     document.addEventListener("keydown", this.escapeHandler);
 
+    // The map is moved in two frames from now, and its tiles land after
+    // that. Until then the panel would be an empty rectangle taking up most
+    // of the dialog, so it holds a placeholder of its own surface and the
+    // map fades in over it.
+    wrappedMapContainer.classList.add("is-awaiting-map");
+
     // Wait for modal to render and have dimensions. The handles are cleared
     // on close so that a quick close cannot move the map into a hidden dialog.
     this.mapMoveTimer = setTimeout(() => {
@@ -258,6 +284,7 @@ export class WrappedManager {
         if (!this.app.map || !this.app.store.get("wrappedVisible")) return;
         this.app.map.invalidateSize();
         this.app.map.fitBounds(this.app.config.bounds, this.fitOptions());
+        this.revealMapWhenPainted(wrappedMapContainer);
       }, 100);
     }, 50);
   }
@@ -369,13 +396,18 @@ export class WrappedManager {
 
         const destinationsHtml = generateDestinationsHtml(grouped, {
           countryName: countryDisplayName,
-          flag: countryFlag,
+          flagSrc: countryFlagSrc,
           homeBase,
           furthest,
         });
         if (gridEl) gridEl.innerHTML = destinationsHtml;
       }
     }
+
+    // The cards were just rewritten, which is neither a scroll nor a
+    // resize: without this the fade at the bottom of the column keeps
+    // whatever verdict the previous set of cards left behind
+    this.cardsScroll?.update();
   }
 
   /**
@@ -456,14 +488,16 @@ export class WrappedManager {
       clearTimeout(this.mapRestoreTimer);
       this.mapRestoreTimer = null;
     }
+    // Takes the placeholder down and drops the tile listener with it
+    this.revealMap?.();
   }
 
   /** Drop every pending timer and listener; the dialog stays as it is */
   destroy(): void {
     this.unsubscribeData();
     this.cancelPendingMapTimers();
-    this.cardsScrollCleanup?.();
-    this.cardsScrollCleanup = null;
+    this.cardsScroll?.stop();
+    this.cardsScroll = null;
     if (this.escapeHandler) {
       document.removeEventListener("keydown", this.escapeHandler);
       this.escapeHandler = null;
@@ -474,8 +508,8 @@ export class WrappedManager {
 
   closeWrapped(): void {
     this.cancelPendingMapTimers();
-    this.cardsScrollCleanup?.();
-    this.cardsScrollCleanup = null;
+    this.cardsScroll?.stop();
+    this.cardsScroll = null;
     // Move map back to original position
     const mapContainer = domCache.get("map");
     if (!mapContainer) return;

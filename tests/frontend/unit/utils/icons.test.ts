@@ -18,9 +18,9 @@ describe("icons", () => {
   describe("icon", () => {
     it("draws at the requested size with the matching stroke weight", () => {
       expect(icon("stats", 24)).toContain('width="24"');
-      expect(icon("stats", 24)).toContain('stroke-width="1.7"');
-      expect(icon("stats", 20)).toContain('stroke-width="1.8"');
-      expect(icon("stats", 16)).toContain('stroke-width="1.9"');
+      expect(icon("stats", 24)).toContain('stroke-width="1.45"');
+      expect(icon("stats", 20)).toContain('stroke-width="1.5"');
+      expect(icon("stats", 16)).toContain('stroke-width="1.6"');
     });
 
     it("hides the icon from assistive tech when it has no title", () => {

@@ -49,4 +49,5 @@ kml_heatmap/static/features.bundle.js
 kml_heatmap/static/*.map
 # Third-party files copied out of node_modules by scripts/vendor.js
 kml_heatmap/static/vendor/
+kml_heatmap/static/flags/
 .claude/

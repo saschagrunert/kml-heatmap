@@ -37,4 +37,5 @@ export const HIDEABLE_CONTROL_IDS = [
   "stats-panel",
   "altitude-legend",
   "airspeed-legend",
+  "selection-chip",
 ] as const;

@@ -10,36 +10,38 @@
  * They run in their own project so the rest of the suite keeps working
  * wherever it is run; the snapshots are generated in the Playwright
  * container, which is also where CI compares them (see CONTRIBUTING.md).
+ *
+ * The map itself is hidden rather than masked: it is live data over stubbed
+ * tiles, so comparing it would make every one of these flaky, and a mask
+ * over a full-viewport element covers the chrome along with it.
  */
 import { test, expect } from "./fixtures";
 import {
   gotoApp,
+  hideMapData,
   openWrapped,
   settleAnimations,
   toggleStatsPanel,
   waitForAppReady,
 } from "./helpers";
-import type { Page } from "./fixtures";
-
-/**
- * The map is a canvas of flight paths over tiles the fixture stubs out; it
- * is not what a stylesheet change breaks, and comparing it would make every
- * one of these flaky. Everything around it is the point.
- */
-function mapPane(page: Page) {
-  return [page.locator("#map")];
-}
 
 test.describe("visual", () => {
   test.beforeEach(async ({ page }) => {
     await gotoApp(page);
     await waitForAppReady(page);
+    await hideMapData(page);
     await settleAnimations(page);
   });
 
   test("the control chrome at rest", async ({ page }) => {
+    // Every control has to be in the frame. An earlier version masked
+    // `#map`, which is `inset: 0` behind the whole page, so Playwright
+    // painted its mask over the entire viewport and the snapshot was 1280
+    // by 720 pixels of solid magenta: it passed for any stylesheet at all.
+    await expect(page.locator("#left-buttons")).toBeVisible();
+    await expect(page.locator("#right-buttons")).toBeVisible();
+
     await expect(page).toHaveScreenshot("chrome-at-rest.png", {
-      mask: mapPane(page),
       animations: "disabled",
     });
   });
@@ -57,11 +59,15 @@ test.describe("visual", () => {
 
   test("the Wrapped dialog", async ({ page }) => {
     const dialog = await openWrapped(page);
+    // The map panel holds a placeholder until its tiles land, and that
+    // placeholder shimmers forever, so `settleAnimations` does not wait for
+    // it. Without this the snapshot races the reveal.
+    await expect(
+      page.locator("#wrapped-map-container:not(.is-awaiting-map)"),
+    ).toBeAttached();
     await settleAnimations(dialog);
 
     await expect(dialog).toHaveScreenshot("wrapped-dialog.png", {
-      // The dialog takes the map into itself while it is open
-      mask: mapPane(page),
       animations: "disabled",
     });
   });

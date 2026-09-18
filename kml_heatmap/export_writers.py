@@ -35,6 +35,24 @@ def _exported_airports(
     return exported
 
 
+def exported_country_codes(unique_airports: list[AirportData]) -> list[str]:
+    """The countries the exported airports are in, as ISO codes.
+
+    The same lookup ``export_airports_data`` writes into each airport, kept
+    here so the site can publish a flag for each of them without reading its
+    own export back.
+    """
+    codes: set[str] = set()
+    for _, airport_name in _exported_airports(unique_airports):
+        icao_codes = extract_icao_codes_from_name(airport_name)
+        if not icao_codes:
+            continue
+        country = lookup_airport_country(icao_codes[0])
+        if country:
+            codes.add(country)
+    return sorted(codes)
+
+
 def export_airports_data(
     unique_airports: list[AirportData],
     output_dir: str,
@@ -81,13 +99,14 @@ def export_metadata(
     year_file_bytes: dict[str, int],
     aircraft_models: Mapping[str, str],
     output_dir: str,
+    available_flags: list[str] | None = None,
 ) -> tuple[str, int]:
     """Export metadata.js (window.KML_METADATA).
 
     No statistics: the frontend computes them from the year files for every
     filter. It needs the years and their file sizes before loading any year,
-    the groundspeed range for the speed scale and the aircraft models, which
-    only aircraft.json knows.
+    the groundspeed range for the speed scale, the aircraft models, which
+    only aircraft.json knows, and the flags the site was able to publish.
     """
     if not math.isfinite(min_groundspeed_knots):
         min_groundspeed_knots = 0.0
@@ -100,6 +119,9 @@ def export_metadata(
         "available_years": sorted(available_years),
         "year_file_bytes": year_file_bytes,
         "aircraft_models": dict(aircraft_models),
+        # Which countries the site carries a flag for. A build without the
+        # flag files publishes none, and the frontend falls back to the code.
+        "available_flags": list(available_flags or []),
     }
 
     meta_file = Path(output_dir) / "metadata.js"

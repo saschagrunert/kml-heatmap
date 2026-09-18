@@ -35,5 +35,6 @@ export const SHARED_MODULES = [
   "utils/icons",
   "utils/logger",
   "utils/motion",
+  "utils/scrollFade",
   "utils/toast",
 ];

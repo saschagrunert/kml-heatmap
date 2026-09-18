@@ -25,6 +25,8 @@ import {
   relevantConsoleErrors,
   selectPathForReplay,
   settleAnimations,
+  toggleLayer,
+  toggleStatsPanel,
   waitForAircraftFilter,
   waitForYearFilter,
   type ErrorCollector,
@@ -474,9 +476,15 @@ test.describe("Mobile bar", () => {
     }) => {
       await openMobileSheet(page, "more");
 
-      // The row stays actionable so tapping it can explain itself
+      // The row stays a live control so tapping it can explain itself, and
+      // is marked unavailable so it does not read as ready while its own
+      // hint says it is not
       const replay = page.locator('.sheet-row[data-row="replay"]');
-      await expect(replay).toBeEnabled();
+      await expect(replay).toHaveAttribute("aria-disabled", "true");
+      expect(
+        await replay.evaluate((el) => (el as HTMLButtonElement).disabled),
+        "a disabled button would not be reachable by keyboard",
+      ).toBe(false);
       await expect(replay.locator(".sheet-row-hint")).toHaveText(
         "Select one flight with timing data",
       );
@@ -697,15 +705,55 @@ test.describe("Mobile bar", () => {
     await expect(page.locator("#mobile-bar")).toBeVisible();
   });
 
-  test("attribution and github are in the More sheet", async ({ page }) => {
-    await openMobileSheet(page, "more");
+  test("the map keeps its attribution and github moves into More", async ({
+    page,
+  }) => {
+    // Tile credit belongs on the map it credits, not inside a sheet
+    const attribution = page.locator(".leaflet-control-attribution");
+    await expect(attribution).toBeVisible();
+    await expect(attribution).toContainText("OpenStreetMap");
     await expect(
       page.locator('.sheet-row[data-row="attribution"]'),
-    ).toBeVisible();
+    ).toHaveCount(0);
+
+    await openMobileSheet(page, "more");
     await expect(page.locator('.sheet-row[data-row="github"]')).toBeVisible();
-    // The map attribution and footer are hidden on mobile
-    await expect(page.locator(".leaflet-control-attribution")).toBeHidden();
     await expect(page.locator("#github-footer")).toBeHidden();
+  });
+
+  test("the tile credit stands down while a sheet covers the map", async ({
+    page,
+  }) => {
+    const attribution = page.locator(".leaflet-control-attribution");
+    await expect(attribution).toBeVisible();
+
+    await openMobileSheet(page, "more");
+    // It is drawn above every panel so that nothing can bury it, which over
+    // an open sheet would put it on top of the sheet's own rows
+    await expect(attribution).toBeHidden();
+
+    await closeMobileSheet(page);
+    await expect(attribution).toBeVisible();
+
+    await toggleStatsPanel(page);
+    await expect(attribution).toBeHidden();
+
+    await toggleStatsPanel(page);
+    await expect(attribution).toBeVisible();
+  });
+
+  test("the legend clears the attribution and the bar", async ({ page }) => {
+    await toggleLayer(page, "altitude");
+    const legend = page.locator("#altitude-legend");
+    await expect(legend).toBeVisible();
+
+    const legendBox = (await legend.boundingBox())!;
+    const attributionBox = (await page
+      .locator(".leaflet-control-attribution")
+      .boundingBox())!;
+    expect(legendBox.y + legendBox.height).toBeLessThanOrEqual(
+      attributionBox.y,
+    );
   });
 
   test.describe("Accessibility", () => {

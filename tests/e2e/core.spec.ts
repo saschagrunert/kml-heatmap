@@ -138,11 +138,24 @@ test.describe("Core", () => {
     await expect(page.locator(".leaflet-control-zoom")).toHaveCount(0);
   });
 
-  test("the attribution is shown on desktop", async ({ page }) => {
-    test.skip(
-      await usesMobileBar(page),
-      "The More sheet carries the attribution; see mobile.spec.ts",
-    );
+  test("a country group carries the flag the site published", async ({
+    page,
+  }) => {
+    await toggleStatsPanel(page);
+    const group = page.locator(".kh-stats-group").first();
+    await expect(group).toBeVisible();
+
+    // The site publishes an SVG per country it visited, so the mark is the
+    // same on every platform, Windows included
+    const flag = group.locator("img.kh-stats-group-flag");
+    await expect(flag).toHaveAttribute("src", /^flags\/[a-z]{2}\.svg$/);
+    const src = await flag.getAttribute("src");
+    const response = await page.request.get(new URL(src!, page.url()).href);
+    expect(response.status()).toBe(200);
+    expect(await response.text()).toContain("<svg");
+  });
+
+  test("the attribution is shown at every width", async ({ page }) => {
     const attribution = page.locator(".leaflet-control-attribution");
     await expect(attribution).toBeVisible();
     await expect(attribution).toContainText("OpenStreetMap");

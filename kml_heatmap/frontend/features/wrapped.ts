@@ -209,14 +209,14 @@ export function generateFunFacts(
   if (distanceNm > earthCircumferenceNm * 0.5) {
     const ratio = (distanceNm / earthCircumferenceNm).toFixed(1);
     facts.push({
-      icon: "🌍",
+      icon: "earth",
       text: `You flew <strong>${ratio}x</strong> around the Earth!`,
       category: "distance",
       priority: 10,
     });
   } else if (distanceNm > 1000) {
     facts.push({
-      icon: "✈️",
+      icon: "distance",
       text: `You covered <strong>${formatNumber(distanceNm, 1)} nautical miles</strong> this year!`,
       category: "distance",
       priority: 8,
@@ -237,14 +237,14 @@ export function generateFunFacts(
     const plural = flights !== 1 ? "s" : "";
     if (flights === yearStats.total_flights) {
       facts.push({
-        icon: "✈️",
+        icon: "aircraft",
         text: `Loyal to <strong>${registration}</strong> - all ${flights} flight${plural} in this ${model}!`,
         category: "aircraft",
         priority: 9,
       });
     } else {
       facts.push({
-        icon: "✈️",
+        icon: "aircraft",
         text: `<strong>${registration}</strong> took you on ${flights} flight${plural} in this ${model}.`,
         category: "aircraft",
         priority: 7,
@@ -252,14 +252,14 @@ export function generateFunFacts(
     }
   } else if (numAircraft === 2) {
     facts.push({
-      icon: "✈️",
+      icon: "aircraft",
       text: `You flew <strong>${numAircraft} different aircraft</strong> this year.`,
       category: "aircraft",
       priority: 7,
     });
   } else if (numAircraft >= 3) {
     facts.push({
-      icon: "🛩️",
+      icon: "aircraft",
       text: `Aircraft explorer! You flew <strong>${numAircraft} different aircraft</strong>.`,
       category: "aircraft",
       priority: 8,
@@ -272,14 +272,14 @@ export function generateFunFacts(
     : 0;
   if (numCountries >= 3) {
     facts.push({
-      icon: "🌍",
+      icon: "globe",
       text: `You flew to airports in <strong>${numCountries} countries</strong>.`,
       category: "countries",
       priority: 9,
     });
   } else if (numCountries === 2) {
     facts.push({
-      icon: "🌍",
+      icon: "globe",
       text: `You crossed borders, visiting <strong>2 countries</strong>.`,
       category: "countries",
       priority: 7,
@@ -293,7 +293,7 @@ export function generateFunFacts(
       // Only show cruise speed if timing data is available
       if (filteredStats?.cruise_speed_knots) {
         facts.push({
-          icon: "✈️",
+          icon: "speed",
           text: `Cruising at <strong>${formatNumber(filteredStats.cruise_speed_knots)} kt</strong>, averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip`,
           category: "distance",
           priority: 8,
@@ -301,7 +301,7 @@ export function generateFunFacts(
       } else {
         // Show distance-only fact when speed data unavailable
         facts.push({
-          icon: "✈️",
+          icon: "ruler",
           text: `Averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip`,
           category: "distance",
           priority: 8,
@@ -322,7 +322,7 @@ export function generateFunFacts(
         ? ` - about the distance from ${reference.label}!`
         : "";
       facts.push({
-        icon: "🛫",
+        icon: "milestone",
         text: `Your longest journey: <strong>${formatNumber(longestNm, 1)} nm</strong>${comparison}`,
         category: "distance",
         priority: 8,
@@ -333,7 +333,7 @@ export function generateFunFacts(
     if (filteredStats.total_altitude_gain_ft) {
       const totalGainFt = filteredStats.total_altitude_gain_ft;
       facts.push({
-        icon: "⬆️",
+        icon: "climb",
         text: `Total elevation gain: <strong>${formatNumber(totalGainFt)} ft</strong>`,
         category: "altitude",
         priority: 8,
@@ -345,7 +345,7 @@ export function generateFunFacts(
           filteredStats.total_altitude_gain_ft / everestFt
         ).toFixed(1);
         facts.push({
-          icon: "🏔️",
+          icon: "altitude",
           text: `You climbed <strong>${ratio}x</strong> Mount Everest in altitude!`,
           category: "altitude",
           priority: 9,
@@ -361,7 +361,7 @@ export function generateFunFacts(
       const cruiseAltFt = filteredStats.most_common_cruise_altitude_ft;
       const cruiseAltM = filteredStats.most_common_cruise_altitude_m;
       facts.push({
-        icon: "⬆️",
+        icon: "ruler",
         text: `Most common cruise: <strong>${formatNumber(cruiseAltFt)} ft</strong> AGL (<strong>${formatNumber(cruiseAltM)} m</strong>)`,
         category: "altitude",
         priority: 7,
@@ -377,7 +377,7 @@ export function generateFunFacts(
           ? `${formatNumber(Math.floor(seconds / 3600))} hours`
           : formatFlightTime(seconds);
       facts.push({
-        icon: "⏱️",
+        icon: "clock",
         text: `Total flight time: <strong>${duration}</strong> in the air!`,
         category: "time",
         priority: 4,
@@ -387,7 +387,7 @@ export function generateFunFacts(
     // Speed facts (lower priority - speed is included in other facts)
     if (filteredStats.cruise_speed_knots) {
       facts.push({
-        icon: "⚡",
+        icon: "speed",
         text: `Average cruise speed: <strong>${formatNumber(filteredStats.cruise_speed_knots)} knots</strong>`,
         category: "speed",
         priority: 3,
@@ -400,7 +400,7 @@ export function generateFunFacts(
       filteredStats.max_altitude_ft > 40000
     ) {
       facts.push({
-        icon: "🚀",
+        icon: "trophy",
         text: `High altitude achievement: <strong>${formatNumber(filteredStats.max_altitude_ft)} feet</strong>!`,
         category: "achievement",
         priority: 9,

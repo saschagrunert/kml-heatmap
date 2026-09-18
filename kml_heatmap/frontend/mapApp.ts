@@ -118,6 +118,8 @@ export class MapApp {
 
   // Map and layers
   map: L.Map | null;
+  /** The base map. Wrapped waits on its `load` before showing the map. */
+  baseLayer: L.TileLayer | null = null;
   heatmapLayer: HeatmapLayer | null;
   altitudeLayer: L.LayerGroup;
   airspeedLayer: L.LayerGroup;
@@ -376,7 +378,7 @@ export class MapApp {
     const cartoUrl = this.config.cartoApiKey
       ? `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${this.config.cartoApiKey}`
       : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
-    L.tileLayer(cartoUrl, {
+    this.baseLayer = L.tileLayer(cartoUrl, {
       attribution: "&copy; OpenStreetMap contributors, &copy; CARTO",
       maxZoom: MAX_ZOOM,
     })

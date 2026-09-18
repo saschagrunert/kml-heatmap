@@ -12,12 +12,13 @@ import {
   applyToggleButtonState,
   setControlLabel,
 } from "../utils/buttonState";
-import { setControlIcon } from "../utils/icons";
+import { icon, setControlIcon } from "../utils/icons";
 import { prefersReducedMotion } from "../utils/motion";
 import { prepareReplaySegments } from "../features/replay";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { ReplayRenderer, drawReplaySegment } from "./replayRenderer";
 import type { ReplayState } from "./replayState";
+import type { PathSegment } from "../types";
 import {
   REPLAY_BUTTON_LABEL,
   REPLAY_PRECONDITION_MESSAGE,
@@ -402,11 +403,39 @@ export class ReplayManager {
     );
   }
 
+  /**
+   * Clear the replay layer and lay the route back down.
+   *
+   * Replay used to open on an empty map: the heat bloom and the paths are
+   * hidden while it runs, so at 0:00 there was an aircraft over nothing,
+   * with no way to see where it was about to go. The whole track is drawn
+   * dimmed underneath, and the flown part paints over it in the colours of
+   * the active scale.
+   */
+  private resetReplayLayer(): void {
+    if (!this.state.layer) return;
+    this.state.layer.clearLayers();
+
+    const coords = routeCoordinates(this.state.segments);
+    if (coords.length < 2) return;
+
+    L.polyline(coords, {
+      color: routeOutlineColor(),
+      weight: 2,
+      opacity: 0.5,
+      interactive: false,
+      // The canvas the paths themselves are drawn on, rather than a second
+      // one of its own: the flown segments go on the map's own renderer,
+      // which paints over this one
+      renderer: this.app.pathRenderer,
+    }).addTo(this.state.layer);
+  }
+
   private createReplayMarker(): boolean {
     if (!this.state.layer) {
       this.state.layer = L.layerGroup();
     }
-    this.state.layer.clearLayers();
+    this.resetReplayLayer();
     if (this.app.map) {
       this.state.layer.addTo(this.app.map);
     }
@@ -417,7 +446,10 @@ export class ReplayManager {
     }
 
     const airplaneIcon = L.divIcon({
-      html: '<div class="replay-airplane-icon">✈️</div>',
+      html:
+        '<div class="replay-airplane-icon">' +
+        icon("aircraftTop", 24, undefined, "solid") +
+        "</div>",
       iconSize: [32, 32],
       iconAnchor: [16, 16],
       className: "",
@@ -567,7 +599,7 @@ export class ReplayManager {
 
     if (this.state.currentTime >= this.state.maxTime) {
       this.state.resetDrawState();
-      if (this.state.layer) this.state.layer.clearLayers();
+      this.resetReplayLayer();
 
       if (this.state.airplaneMarker && this.state.segments.length > 0) {
         const firstSeg = this.state.segments[0];
@@ -660,9 +692,7 @@ export class ReplayManager {
   stopReplay(announce = true): void {
     this.pauseReplay(false);
     this.state.resetDrawState();
-    if (this.state.layer) {
-      this.state.layer.clearLayers();
-    }
+    this.resetReplayLayer();
     if (this.state.airplaneMarker && this.state.segments.length > 0) {
       const firstSeg = this.state.segments[0];
       const startCoords = firstSeg?.coords?.[0];
@@ -706,7 +736,7 @@ export class ReplayManager {
     if (!this.state.layer) return;
     const savedTime = this.state.currentTime;
     const savedIndex = this.state.lastDrawnIndex;
-    this.state.layer.clearLayers();
+    this.resetReplayLayer();
     // The drawn polylines are gone, so the trim stack has to be rebuilt too;
     // stale entries would make a backward seek remove nothing visible
     this.state.drawnLayers = [];
@@ -749,4 +779,31 @@ function setTransportState(playing: boolean): void {
   if (playBtn) playBtn.hidden = playing;
   if (pauseBtn) pauseBtn.hidden = !playing;
   if (hadFocus) showing?.focus();
+}
+
+/**
+ * The flight's whole track as one list of points: the start of every
+ * segment, plus the end of the last one.
+ */
+function routeCoordinates(segments: PathSegment[]): L.LatLngExpression[] {
+  const coords: L.LatLngExpression[] = [];
+  for (const segment of segments) {
+    const start = segment.coords?.[0];
+    if (start) coords.push([start[0], start[1]]);
+  }
+  const last = segments[segments.length - 1]?.coords?.[1];
+  if (last) coords.push([last[0], last[1]]);
+  return coords;
+}
+
+/**
+ * Colour of the dimmed route. The paths are drawn on a canvas, where the
+ * stylesheet cannot reach them, so the token is read from the document.
+ */
+function routeOutlineColor(): string {
+  return (
+    getComputedStyle(document.documentElement)
+      .getPropertyValue("--color-text-dim")
+      .trim() || "#6f6f6f"
+  );
 }

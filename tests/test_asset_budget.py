@@ -17,7 +17,10 @@ suite pass.
 from kml_heatmap.site_assets import STATIC_DIR, _copy_and_minify_css
 
 # Bytes of the minified stylesheet as the renderer writes it into a site.
-STYLESHEET_BUDGET_BYTES = 64 * 1024
+# Raised from 64 KB for the visual review of 2026-09-18, which spent all but
+# 52 bytes of the old one: the selection chip, the compact tablet columns,
+# the scroll fades, the placeholder and the raised-contrast block.
+STYLESHEET_BUDGET_BYTES = 68 * 1024
 
 
 def test_stylesheet_is_within_budget(tmp_path):

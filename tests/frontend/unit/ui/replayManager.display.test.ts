@@ -44,9 +44,23 @@ describe("ReplayManager display", () => {
     vi.mocked(L.polyline).mockClear();
   });
 
-  /** Colours of the polylines drawn since the last mockClear, in order */
+  /**
+   * Colours of the polylines drawn for flown segments. The first line on the
+   * layer is the dimmed route outline, which is not one of them.
+   */
   function drawnColors(): unknown[] {
-    return vi.mocked(L.polyline).mock.calls.map((call) => call[1]?.["color"]);
+    return vi
+      .mocked(L.polyline)
+      .mock.calls.filter((call) => call[1]?.["interactive"] !== false)
+      .map((call) => call[1]?.["color"]);
+  }
+
+  /** Options the dimmed route outline was drawn with, if it was drawn */
+  function routeOutline(): Record<string, unknown> | undefined {
+    const call = vi
+      .mocked(L.polyline)
+      .mock.calls.find((entry) => entry[1]?.["interactive"] === false);
+    return call?.[1] as Record<string, unknown> | undefined;
   }
 
   afterEach(() => {
@@ -81,6 +95,21 @@ describe("ReplayManager display", () => {
         getColorForAirspeed(100, 100, 130),
         getColorForAirspeed(120, 100, 130),
       ]);
+    });
+
+    it("lays the whole route back down under the flown segments", () => {
+      // Replay hides the heat bloom and the paths, so without this the map
+      // is empty ahead of the aircraft
+      replayManager.redrawReplayPath("altitude");
+
+      const outline = routeOutline();
+      expect(outline).toBeDefined();
+      expect(outline!["weight"]).toBe(2);
+      const coords = vi
+        .mocked(L.polyline)
+        .mock.calls.find((entry) => entry[1]?.["interactive"] === false)![0];
+      // One point per segment, plus the end of the last one
+      expect(coords).toHaveLength(replayManager.state.segments.length + 1);
     });
 
     it("rebuilds the trim stack so a later backward seek still works", () => {
@@ -467,7 +496,8 @@ describe("ReplayManager display", () => {
       replayManager.updateReplayDisplay();
 
       expect(replayManager.state.lastBearing).toBe(45);
-      expect(iconDiv.style.transform).toContain("rotate(0deg)");
+      // The marker is drawn nose up, so the rotation is the bearing itself
+      expect(iconDiv.style.transform).toContain("rotate(45deg)");
     });
 
     it("auto-zooms out when too many recenters happen", () => {
@@ -591,7 +621,7 @@ describe("ReplayManager display", () => {
           altMax: 5000,
           speedMin: 100,
           speedMax: 130,
-          icon: "✈️",
+          icon: "aircraftTop",
         }),
       );
       // The popup is bound when the marker is created (so that Enter on the

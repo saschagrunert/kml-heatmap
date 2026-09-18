@@ -186,6 +186,7 @@ def test_top_level_data_files(golden_output):
     # No statistics: the frontend computes them from the year files
     assert set(metadata) == {
         "aircraft_models",
+        "available_flags",
         "min_groundspeed_knots",
         "max_groundspeed_knots",
         "available_years",
