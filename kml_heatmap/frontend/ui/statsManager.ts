@@ -65,11 +65,12 @@ interface Metric {
 }
 
 /**
- * A number with its unit set against it: one hairline of space rather than a
- * word space, the same treatment the lead figures and the h and m of a flight
- * time get. The two arrive separately rather than as one formatted string
- * because most callers of the formatters want plain text, for a title or an
- * aria-label, and only the places that typeset a figure want the split.
+ * A number with its unit set against it: the stylesheet opens one hairline of
+ * space rather than the word space this used to carry, the same treatment the
+ * lead figures and the h and m of a flight time get. The two arrive
+ * separately rather than as one formatted string because most callers of the
+ * formatters want plain text, for a title or an aria-label, and only the
+ * places that typeset a figure want the split.
  */
 function figure(value: string, unit: string): string {
   return (
@@ -81,14 +82,15 @@ function figure(value: string, unit: string): string {
 /**
  * One lead figure at the top of the panel.
  *
- * The unit sits directly against the figure, no space, the way
- * markFlightTimeUnits sets the h and m of the flight time beside it.
+ * No space in the markup: `.kh-stats-lead-unit` opens one hairline of
+ * `--unit-gap` with a margin. The h and m that markFlightTimeUnits marks up
+ * carry the same class and so are set the same way, which is the point.
  */
 function leadItem(
   value: string,
   unit: string,
   label: string,
-  alt?: string,
+  altHtml?: string,
 ): string {
   return leadItemHtml(
     escapeHtml(value) +
@@ -96,18 +98,29 @@ function leadItem(
         ? '<span class="kh-stats-lead-unit">' + escapeHtml(unit) + "</span>"
         : ""),
     label,
-    alt,
+    altHtml,
   );
 }
 
-/** A lead figure whose value is already marked up (see markFlightTimeUnits) */
-function leadItemHtml(valueHtml: string, label: string, alt?: string): string {
+/**
+ * A lead figure whose value is already marked up (see markFlightTimeUnits).
+ *
+ * Both `valueHtml` and `altHtml` are inserted as markup, so a caller escapes
+ * whatever it puts in them, or builds them with `figure`, which escapes. They
+ * are named for it: everything else in this module takes plain text and
+ * escapes it here.
+ */
+function leadItemHtml(
+  valueHtml: string,
+  label: string,
+  altHtml?: string,
+): string {
   return (
     '<div class="kh-stats-lead-item">' +
     '<span class="kh-stats-lead-value">' +
     valueHtml +
     "</span>" +
-    (alt ? '<span class="kh-stats-lead-alt">' + alt + "</span>" : "") +
+    (altHtml ? '<span class="kh-stats-lead-alt">' + altHtml + "</span>" : "") +
     '<span class="kh-stats-lead-label">' +
     escapeHtml(label) +
     "</span>" +

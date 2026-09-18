@@ -135,22 +135,29 @@ test.describe("Core", () => {
 
     const corners = await page.evaluate(() =>
       [...document.querySelectorAll(".control-group")].map((group) => {
-        const rows = [...group.querySelectorAll(":scope > .control-row")];
-        const last = rows.at(-1);
-        if (!last) return null;
-        const style = getComputedStyle(last);
-        return {
-          bottomLeft: style.borderBottomLeftRadius,
-          bottomRight: style.borderBottomRightRadius,
-        };
+        // The row that is *shown* last, not the one written last: the Layers
+        // group ends with the Aviation row, which stays hidden unless the
+        // site was built with an OpenAIP key, and reading that one let the
+        // radius look present while the row on the corner had none
+        const shown = [...group.querySelectorAll(":scope > .control-row")]
+          .filter((row) => row.checkVisibility())
+          .map((row) => {
+            const style = getComputedStyle(row);
+            return {
+              id: row.querySelector("button, .filter-dropdown")?.id ?? "?",
+              bottomLeft: style.borderBottomLeftRadius,
+              bottomRight: style.borderBottomRightRadius,
+            };
+          });
+        return shown.at(-1) ?? null;
       }),
     );
 
     const measured = corners.filter((corner) => corner !== null);
     expect(measured.length).toBeGreaterThan(0);
     for (const corner of measured) {
-      expect(corner.bottomLeft).not.toBe("0px");
-      expect(corner.bottomRight).not.toBe("0px");
+      expect(corner.bottomLeft, corner.id).not.toBe("0px");
+      expect(corner.bottomRight, corner.id).not.toBe("0px");
     }
   });
 

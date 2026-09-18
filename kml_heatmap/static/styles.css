@@ -98,14 +98,13 @@
   --radius-pill: 999px;
 
   /* Icons: three sizes, each with the stroke weight it is drawn at */
-  /* Between a lead figure and the small unit set against it ("5,118.2 nm",
-     "51h 38m"). A word space was too wide for type that size and made the
-     unit read as a separate word; em, so it follows the unit's own size. */
-  --unit-gap: 0.18em;
-
   --icon-sm: 16px;
   --icon-md: 20px;
   --icon-lg: 24px;
+  /* Between a figure and the small unit set against it ("5,118.2 nm",
+     "51h 38m"). A word space was too wide for type that size and made the
+     unit read as a separate word; em, so it follows the unit's own size. */
+  --unit-gap: 0.18em;
   --edge-gap: 10px;
   /* Height reserved for the Leaflet attribution bar on small screens */
   --attribution-h: 20px;
@@ -527,17 +526,25 @@ body {
   }
 }
 /* The group clips its children to its own radius, which cut the corners off
-   the focus ring of whichever row sits against an end: the ring ran into the
-   rounded corner and came back square. A row on a corner carries the
-   matching radius, so the ring follows it. The group's 1px border makes the
-   inside of that curve one pixel tighter than the outside. In a compacted
-   column the group titles are taken out of the flow, so the first row is on
-   a corner there even though a title precedes it in the markup. */
-.control-group > .control-row:first-of-type {
-  border-top-left-radius: calc(var(--radius-panel) - 1px);
-  border-top-right-radius: calc(var(--radius-panel) - 1px);
-}
-.control-group > .control-row:last-child {
+   the focus ring of the row sitting against its bottom: the ring ran into
+   the rounded corner and came back square. That row carries the matching
+   radius, so the ring follows it. The group's 1px border makes the inside of
+   that curve one pixel tighter than the outside.
+
+   Which row that is depends on what is *shown*, not on what comes last in
+   the markup: the Layers group ends with the Aviation row, which stays
+   `initially-hidden` unless the site was built with an OpenAIP key, and
+   `:last-child` handed the radius to it while the Speed row visibly on the
+   corner kept its ring clipped. A row with no visible row after it is the
+   one on the corner; the hidden row matching too costs nothing, it draws
+   nothing.
+
+   Only the bottom corner needs this. At full width the group title sits
+   above the first row, and in a compacted column, where the title is taken
+   out of the flow, the group picks up 4px of padding instead: measured with
+   a keyboard focus ring at 900px, the first row sits 5px inside the group
+   and its ring is drawn complete. */
+.control-group > .control-row:not(:has(~ .control-row:not(.initially-hidden))) {
   border-bottom-left-radius: calc(var(--radius-panel) - 1px);
   border-bottom-right-radius: calc(var(--radius-panel) - 1px);
 }
