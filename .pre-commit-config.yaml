@@ -3,10 +3,10 @@
 # Input data (data/) is excluded from the fixers; the generated site (docs/)
 # is not tracked at all. Dependabot bumps the two revs below.
 #
-# The linters and formatters run from the project environment (`repo: local`,
-# `language: system`), not from a pinned mirror, so there is no hook revision
-# that can drift from the version CI installs. They need the virtual
-# environment and `npm install`; see CONTRIBUTING.md.
+# The linters and formatters are local hooks (`repo: local`, `language: system`)
+# rather than pinned mirrors, so no hook revision of their own can drift. They
+# resolve from $PATH and node_modules instead, which is what CI installs only
+# with the virtual environment active and `npm ci` run; see CONTRIBUTING.md.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -27,7 +27,8 @@ repos:
 
   - repo: local
     hooks:
-      # ruff comes from requirements-test.lock, which CI installs as well.
+      # ruff is resolved off $PATH, so it is the requirements-test.lock
+      # version CI installs as long as the virtual environment is active.
       # --force-exclude makes it honour the excludes in pyproject.toml even
       # though pre-commit passes the file names explicitly.
       - id: ruff-check
@@ -43,11 +44,11 @@ repos:
         types_or: [python, pyi]
         require_serial: true
 
-      # prettier comes from node_modules, so it is the version package-lock.json
-      # pins and `npm run format:check` runs in CI
+      # prettier is taken straight out of node_modules, so it is the version
+      # package-lock.json pins and `npm run format:check` runs in CI
       - id: prettier
         name: prettier
-        entry: npx --no-install prettier --write --ignore-unknown
+        entry: node_modules/.bin/prettier --write --ignore-unknown
         language: system
         types: [text]
 
@@ -58,7 +59,7 @@ repos:
         name: typos
         entry: sh -c 'command -v typos >/dev/null 2>&1 || exit 0; exec typos --force-exclude "$@"' typos
         language: system
-        pass_filenames: true
+        types: [text]
 
       # The obfuscation CI job only runs once the dates are already pushed to
       # the public repository. Needs Python 3.14 as `python`, such as the

@@ -188,8 +188,8 @@ def main() -> int:
         )
     if image_problems:
         print(
-            "Set the Playwright image in .github/workflows/test.yml to the "
-            "version package-lock.json pins.",
+            "The Playwright image in .github/workflows/test.yml and the "
+            "@playwright/test version in package-lock.json have to agree.",
             file=sys.stderr,
         )
     if version_problems:

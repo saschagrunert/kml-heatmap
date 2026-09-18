@@ -20,8 +20,9 @@ local `make build`.
 Install the pre-commit hooks (ruff, prettier, typos, gitleaks, whitespace
 fixers and, for commits that touch `data/`, the obfuscation check) with
 `pip install pre-commit && pre-commit install`. All but gitleaks and the
-whitespace fixers run from the virtual environment and `node_modules`, so they
-are the versions CI installs. See
+whitespace fixers run from your own environment rather than a pinned mirror, so
+activate the virtual environment and run `npm ci` to get the versions CI
+installs. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and commit conventions.
 
 ## Frontend (TypeScript)
