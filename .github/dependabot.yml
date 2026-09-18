@@ -119,18 +119,16 @@ updates:
           - "version-update:semver-major"
           - "version-update:semver-minor"
 
-  # pre-commit hook revisions. The CI security job runs the gitleaks release
-  # the hook pins, so its bump moves CI along. The ruff and prettier hooks
-  # mirror requirements-test.lock and package.json, which the lock workflow
-  # and the npm entry above bump, so they are left to be synced by hand.
+  # pre-commit hook revisions. Only the two pinned repos are left in
+  # .pre-commit-config.yaml; the linters and formatters run from the project
+  # environment, so nothing here can drift from what CI installs. The CI
+  # security job reads the gitleaks release the hook pins, so its bump moves
+  # CI along.
   - package-ecosystem: "pre-commit"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
-    ignore:
-      - dependency-name: "astral-sh/ruff-pre-commit"
-      - dependency-name: "rbubley/mirrors-prettier"
     labels:
       - "dependencies"
       - "ci"

@@ -1,7 +1,12 @@
 ---
 # Install with: pip install pre-commit && pre-commit install
 # Input data (data/) is excluded from the fixers; the generated site (docs/)
-# is not tracked at all. Dependabot bumps the revs below.
+# is not tracked at all. Dependabot bumps the two revs below.
+#
+# The linters and formatters run from the project environment (`repo: local`,
+# `language: system`), not from a pinned mirror, so there is no hook revision
+# that can drift from the version CI installs. They need the virtual
+# environment and `npm install`; see CONTRIBUTING.md.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -15,31 +20,6 @@ repos:
       - id: check-toml
       - id: check-yaml
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Keep in sync with the ruff version in requirements-test.lock
-    # (scripts/check_locks.py fails when the two differ)
-    rev: v0.16.4
-    hooks:
-      - id: ruff-check
-        args: [--fix]
-      - id: ruff-format
-
-  - repo: https://github.com/rbubley/mirrors-prettier
-    # Keep in sync with the prettier version in package-lock.json
-    # (scripts/check_locks.py fails when the two differ)
-    rev: v3.9.6
-    hooks:
-      - id: prettier
-
-  - repo: https://github.com/crate-ci/typos
-    # Keep in sync with the typos action in .github/workflows/test.yml
-    # (scripts/check_locks.py fails when the two differ)
-    rev: v1.50.1
-    hooks:
-      - id: typos
-        # Default args also carry --write-changes, which must not run in a hook
-        args: [--force-exclude]
-
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
     hooks:
@@ -47,6 +27,39 @@ repos:
 
   - repo: local
     hooks:
+      # ruff comes from requirements-test.lock, which CI installs as well.
+      # --force-exclude makes it honour the excludes in pyproject.toml even
+      # though pre-commit passes the file names explicitly.
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check --force-exclude --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      # prettier comes from node_modules, so it is the version package-lock.json
+      # pins and `npm run format:check` runs in CI
+      - id: prettier
+        name: prettier
+        entry: npx --no-install prettier --write --ignore-unknown
+        language: system
+        types: [text]
+
+      # typos is not part of either lock file, so it is whatever is installed.
+      # Like `make lint`, skip it when the binary is missing; the CI typos job
+      # is the one that has to pass.
+      - id: typos
+        name: typos
+        entry: sh -c 'command -v typos >/dev/null 2>&1 || exit 0; exec typos --force-exclude "$@"' typos
+        language: system
+        pass_filenames: true
+
       # The obfuscation CI job only runs once the dates are already pushed to
       # the public repository. Needs Python 3.14 as `python`, such as the
       # project's virtual environment (see CONTRIBUTING.md).
