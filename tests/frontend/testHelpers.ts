@@ -10,6 +10,7 @@ import type {
   KMLDataset,
 } from "../../kml_heatmap/frontend/types";
 import { datasetIndex } from "../../kml_heatmap/frontend/calculations/datasetIndex";
+import { ReplayState } from "../../kml_heatmap/frontend/ui/replayState";
 import {
   AppStore,
   defineStoreAccessors,
@@ -115,8 +116,17 @@ export interface MockManagers {
     loadMapState: Mock;
     updateUrl: Mock;
   };
+  /**
+   * The replay state the app owns. `replayManager.state` is the very same
+   * object, the way it is in the app, so a test may set either. A real
+   * ReplayState, because the real ReplayManager works on it.
+   */
+  replayState: ReplayState;
+  canReplay: Mock;
+  loadReplay: Mock;
+  loadWrapped: Mock;
   replayManager: {
-    state: { active: boolean; airplaneMarker: null };
+    state: ReplayState;
     canReplay: Mock;
     updateReplayButtonState: Mock;
     toggleReplay: Mock;
@@ -183,6 +193,29 @@ export interface MockAppOverrides extends Partial<StoreState> {
 }
 
 function createMockManagers(): MockManagers {
+  // The app owns the replay state and the manager works on the same object
+  const replayState = new ReplayState();
+  const replayManager = {
+    state: replayState,
+    canReplay: vi.fn(() => false), // replaced below once the app exists
+    updateReplayButtonState: vi.fn(),
+    toggleReplay: vi.fn(),
+    playReplay: vi.fn(),
+    pauseReplay: vi.fn(),
+    stopReplay: vi.fn(),
+    seekReplay: vi.fn(),
+    changeReplaySpeed: vi.fn(),
+    toggleAutoZoom: vi.fn(),
+    redrawReplayPath: vi.fn(),
+    updateReplayAirplanePopup: vi.fn(),
+    destroy: vi.fn(),
+  };
+  const wrappedManager = {
+    showWrapped: vi.fn(),
+    closeWrapped: vi.fn(),
+    userMapView: vi.fn(() => null),
+    destroy: vi.fn(),
+  };
   return {
     dataManager: {
       loadData: vi.fn().mockResolvedValue(null),
@@ -234,27 +267,17 @@ function createMockManagers(): MockManagers {
       loadMapState: vi.fn(() => null),
       updateUrl: vi.fn(),
     },
-    replayManager: {
-      state: { active: false, airplaneMarker: null },
-      canReplay: vi.fn(() => false),
-      updateReplayButtonState: vi.fn(),
-      toggleReplay: vi.fn(),
-      playReplay: vi.fn(),
-      pauseReplay: vi.fn(),
-      stopReplay: vi.fn(),
-      seekReplay: vi.fn(),
-      changeReplaySpeed: vi.fn(),
-      toggleAutoZoom: vi.fn(),
-      redrawReplayPath: vi.fn(),
-      updateReplayAirplanePopup: vi.fn(),
-      destroy: vi.fn(),
-    },
-    wrappedManager: {
-      showWrapped: vi.fn(),
-      closeWrapped: vi.fn(),
-      userMapView: vi.fn(() => null),
-      destroy: vi.fn(),
-    },
+    replayState,
+    // The real predicate: MapApp.canReplay reads exactly these two
+    canReplay: vi.fn(function (this: MockApp) {
+      return this.selectedPathIds.size === 1 && this.hasTimingData;
+    }),
+    // Replay and Wrapped are fetched on demand in the app; the stubs are
+    // already there, so the loaders hand them straight back
+    loadReplay: vi.fn(() => Promise.resolve(replayManager)),
+    loadWrapped: vi.fn(() => Promise.resolve(wrappedManager)),
+    replayManager,
+    wrappedManager,
     uiToggles: {
       toggleHeatmap: vi.fn(),
       toggleAltitude: vi.fn(),
@@ -351,7 +374,13 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
   };
   defineStoreAccessors(app);
 
-  return app as unknown as MockApp;
+  const mockApp = app as unknown as MockApp;
+  // The stub manager answers the way the real one does: by asking the app
+  mockApp.replayManager.canReplay.mockImplementation((): boolean =>
+    Boolean(mockApp.canReplay()),
+  );
+
+  return mockApp;
 }
 
 /**

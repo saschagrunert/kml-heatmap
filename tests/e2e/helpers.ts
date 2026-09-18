@@ -460,10 +460,12 @@ export async function firstPathId(page: Page): Promise<number> {
 
 /**
  * The query parameters of a link that selects `pathIds`, with the schema
- * version the app requires before it applies them
+ * version the app requires before it applies them. Schema 4 spells the ids
+ * in base 36.
  */
 export function selectionParams(...pathIds: number[]): string {
-  return `p=${pathIds.join(",")}&sv=${STATE_SCHEMA_VERSION}`;
+  const ids = pathIds.map((id) => id.toString(36)).join(",");
+  return `p=${ids}&sv=${STATE_SCHEMA_VERSION}`;
 }
 
 /**
@@ -581,10 +583,9 @@ async function startReplay(page: Page): Promise<void> {
 export async function playUntilProgress(page: Page): Promise<void> {
   await page.locator("#replay-play-btn").click();
   await expect(page.locator("#replay-pause-btn")).toBeVisible();
-  await page.waitForFunction(
-    () => window.mapApp!.replayManager.state.currentTime > 0,
-    { timeout: 5000 },
-  );
+  await page.waitForFunction(() => window.mapApp!.replayState.currentTime > 0, {
+    timeout: 5000,
+  });
 }
 
 const A11Y_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];

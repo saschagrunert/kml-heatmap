@@ -276,9 +276,10 @@ test.describe("State Persistence", () => {
       expect(
         await page.evaluate(() => [...window.mapApp!.selectedPathIds]),
       ).toEqual([pathId]);
+      // The link spells ids in base 36 (schema 4)
       await expect
         .poll(() => new URL(page.url()).searchParams.get("p"))
-        .toBe(String(pathId));
+        .toBe(pathId.toString(36));
     });
 
     test("localStorage is used when no URL params present", async ({

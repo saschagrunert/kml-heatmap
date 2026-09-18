@@ -55,6 +55,8 @@ function setWidth(width: number): void {
 
 function createMockApp() {
   const store = new AppStore();
+  const wrappedManager = { showWrapped: vi.fn() };
+  const replayManager = { canReplay: vi.fn(() => true), toggleReplay: vi.fn() };
   return {
     store,
     config: { openaipApiKey: undefined as string | undefined },
@@ -68,9 +70,14 @@ function createMockApp() {
       shareLink: vi.fn(() => Promise.resolve()),
     },
     statsManager: { toggleStats: vi.fn() },
-    wrappedManager: { showWrapped: vi.fn() },
+    wrappedManager,
     pathSelection: { toggleIsolateSelection: vi.fn() },
-    replayManager: { canReplay: vi.fn(() => true), toggleReplay: vi.fn() },
+    replayManager,
+    // Replay and Wrapped come from the lazily loaded feature bundle; the
+    // bar asks the app for them and for whether replay is possible at all
+    canReplay: vi.fn(() => true),
+    loadReplay: vi.fn(() => Promise.resolve(replayManager)),
+    loadWrapped: vi.fn(() => Promise.resolve(wrappedManager)),
     get heatmapVisible() {
       return store.get("heatmapVisible");
     },
@@ -344,9 +351,11 @@ describe("MobileBar", () => {
       expect(tab("stats").getAttribute("aria-pressed")).toBe("true");
     });
 
-    it("opens the wrapped card and follows its state", () => {
+    it("opens the wrapped card and follows its state", async () => {
       tab("wrapped").click();
-      expect(app.wrappedManager.showWrapped).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() =>
+        expect(app.wrappedManager.showWrapped).toHaveBeenCalledTimes(1),
+      );
 
       app.store.set("wrappedVisible", true);
       expect(tab("wrapped").classList.contains("active")).toBe(true);
@@ -364,7 +373,7 @@ describe("MobileBar", () => {
       expect(app.statsManager.toggleStats).toHaveBeenCalledTimes(1);
     });
 
-    it("closes an open sheet before opening Wrapped", () => {
+    it("closes an open sheet before opening Wrapped", async () => {
       tab("layers").click();
       expect(bar!.sheet.isOpen()).toBe(true);
 
@@ -372,7 +381,9 @@ describe("MobileBar", () => {
 
       expect(bar!.sheet.isOpen()).toBe(false);
       expect(tab("layers").classList.contains("active")).toBe(false);
-      expect(app.wrappedManager.showWrapped).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() =>
+        expect(app.wrappedManager.showWrapped).toHaveBeenCalledTimes(1),
+      );
     });
 
     it.each([
@@ -380,7 +391,7 @@ describe("MobileBar", () => {
       ["stats", "filter"],
     ] as const)(
       "hands focus to the %s tab before opening it over the %s sheet",
-      (target, sheet) => {
+      async (target, sheet) => {
         let focusedOnOpen: Element | null = null;
         const record = (): void => {
           focusedOnOpen = document.activeElement;
@@ -394,8 +405,9 @@ describe("MobileBar", () => {
         tab(target).click();
 
         // Closing the sheet returned focus to its own tab, and Wrapped took
-        // that as its opener: Escape then landed on the wrong tab
-        expect(focusedOnOpen).toBe(tab(target));
+        // that as its opener: Escape then landed on the wrong tab. Wrapped
+        // opens after its bundle has loaded, so wait for the call.
+        await vi.waitFor(() => expect(focusedOnOpen).toBe(tab(target)));
       },
     );
 
@@ -548,7 +560,7 @@ describe("MobileBar", () => {
     });
 
     it("explains why replay is unavailable", () => {
-      app.replayManager.canReplay.mockReturnValue(false);
+      app.canReplay.mockReturnValue(false);
       dismissSheet();
       tab("more").click();
 
@@ -585,10 +597,12 @@ describe("MobileBar", () => {
       expect(hint.textContent).toBe("© OpenStreetMap contributors, © CARTO");
     });
 
-    it("starts replay from the sheet", () => {
+    it("starts replay from the sheet", async () => {
       document.querySelector<HTMLElement>('[data-row="replay"]')!.click();
 
-      expect(app.replayManager.toggleReplay).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() =>
+        expect(app.replayManager.toggleReplay).toHaveBeenCalledTimes(1),
+      );
     });
 
     it("keeps isolate disabled without a selection", () => {

@@ -35,7 +35,13 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
     toggleAirspeed: () => app.uiToggles.toggleAirspeed(),
     toggleAirports: () => app.uiToggles.toggleAirports(),
     toggleAviation: () => app.uiToggles.toggleAviation(),
-    toggleReplay: () => app.replayManager.toggleReplay(),
+    // Replay and Wrapped live in the lazily loaded feature bundle. Only
+    // these two can be the first thing a visitor touches; the rest are on
+    // chrome that exists only once the feature is open, so they find the
+    // manager already there.
+    toggleReplay: () => {
+      void app.loadReplay().then((manager) => manager?.toggleReplay());
+    },
     filterByYear: () => {
       app.filterManager.filterByYear().catch(logError);
     },
@@ -46,16 +52,18 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
     shareLink: () => {
       void app.uiToggles.shareLink();
     },
-    showWrapped: () => app.wrappedManager.showWrapped(),
-    closeWrapped: () => app.wrappedManager.closeWrapped(),
+    showWrapped: () => {
+      void app.loadWrapped().then((manager) => manager?.showWrapped());
+    },
+    closeWrapped: () => app.wrappedManager?.closeWrapped(),
     toggleIsolateSelection: () => app.pathSelection.toggleIsolateSelection(),
-    playReplay: () => app.replayManager.playReplay(),
-    pauseReplay: () => app.replayManager.pauseReplay(),
-    stopReplay: () => app.replayManager.stopReplay(),
+    playReplay: () => app.replayManager?.playReplay(),
+    pauseReplay: () => app.replayManager?.pauseReplay(),
+    stopReplay: () => app.replayManager?.stopReplay(),
     seekReplay: (e) =>
-      app.replayManager.seekReplay((e.target as HTMLInputElement).value),
-    changeReplaySpeed: () => app.replayManager.changeReplaySpeed(),
-    toggleAutoZoom: () => app.replayManager.toggleAutoZoom(),
+      app.replayManager?.seekReplay((e.target as HTMLInputElement).value),
+    changeReplaySpeed: () => app.replayManager?.changeReplaySpeed(),
+    toggleAutoZoom: () => app.replayManager?.toggleAutoZoom(),
   };
 }
 

@@ -47,11 +47,16 @@ export interface PathSegment {
  * The coordinate is the segment's END point. Its start is the end of the
  * previous row, and the first row continues from `RawPathSegments.start`.
  */
+/**
+ * One encoded segment row: the difference to the row before it, per column,
+ * each scaled to an integer (see kml_heatmap/segment_codec.py). A row of
+ * four columns carries no relative time.
+ */
 export type RawSegment =
   [number, number, number, number] | [number, number, number, number, number];
 
 /**
- * Exported segments of one path: the first point and the rows after it.
+ * Exported segments of one path: the scaled first point and the rows after it.
  */
 export interface RawPathSegments {
   start: number[];
@@ -62,6 +67,8 @@ export interface RawPathSegments {
  * Per-year data file contents (window.KML_DATA_<YEAR>)
  */
 export interface RawYearData {
+  /** Wire format of the rows, DATA_FORMAT_VERSION in services/dataLoader.ts */
+  format: number;
   year: number;
   original_points: number;
   path_info: PathInfo[];

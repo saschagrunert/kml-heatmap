@@ -7,12 +7,14 @@
 
 import * as esbuild from "esbuild";
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { dirname, join, relative, resolve } from "path";
 import { statSync } from "fs";
 import {
   buildBanner as makeBanner,
   computeSourceHash,
 } from "./scripts/source-hash.js";
+import { copyVendorAssets } from "./scripts/vendor.js";
+import { SHARED_GLOBAL, SHARED_MODULES } from "./scripts/shared-modules.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -62,6 +64,31 @@ const leafletGlobalPlugin = {
   },
 };
 
+const FRONTEND_DIR = join(__dirname, "kml_heatmap/frontend");
+
+/**
+ * Resolve the shared modules to the global the main bundle publishes them on,
+ * instead of bundling a second copy into the feature bundle. Several of them
+ * hold state (the DOM cache, the toast live region), so a second copy would
+ * be a correctness problem and not only dead weight.
+ */
+const sharedGlobalPlugin = {
+  name: "shared-global",
+  setup(build) {
+    build.onResolve({ filter: /^\.\.?\// }, (args) => {
+      if (!args.importer) return null;
+      const absolute = resolve(dirname(args.importer), args.path);
+      const name = relative(FRONTEND_DIR, absolute).replace(/\.ts$/, "");
+      if (!SHARED_MODULES.includes(name)) return null;
+      return { path: name, namespace: "shared-global" };
+    });
+    build.onLoad({ filter: /.*/, namespace: "shared-global" }, (args) => ({
+      contents: `module.exports = window.${SHARED_GLOBAL}[${JSON.stringify(args.path)}];`,
+      loader: "js",
+    }));
+  },
+};
+
 // Build MapApp
 const appBuildOptions = {
   ...sharedBuildOptions,
@@ -69,6 +96,16 @@ const appBuildOptions = {
   globalName: "MapAppModule",
   outfile: join(__dirname, "kml_heatmap/static/mapApp.bundle.js"),
   plugins: [leafletGlobalPlugin],
+};
+
+// The feature bundle: replay and Wrapped, fetched the first time one of them
+// is opened. It shares everything else with the main bundle through the
+// plugin above.
+const featuresBuildOptions = {
+  ...sharedBuildOptions,
+  entryPoints: [join(__dirname, "kml_heatmap/frontend/features.ts")],
+  outfile: join(__dirname, "kml_heatmap/static/features.bundle.js"),
+  plugins: [leafletGlobalPlugin, sharedGlobalPlugin],
 };
 
 /**
@@ -143,7 +180,11 @@ function analyzeBundleComposition(metafile, bundleName) {
 // when a change needs the room, not to make a build pass.
 // The stylesheet has a budget of its own, in tests/test_asset_budget.py: it is
 // minified by the Python side, not here.
-const BUDGET_APP = 115 * 1024;
+const BUDGET_APP = 90 * 1024;
+// The feature bundle is fetched only when replay or Wrapped is opened, so it
+// is not part of what a first visit downloads; it still gets a budget so it
+// cannot grow without anyone noticing.
+const BUDGET_FEATURES = 40 * 1024;
 
 /**
  * Print bundle size analysis and check it against the budget
@@ -153,31 +194,75 @@ function analyzeBundleSizes() {
   console.log("\n📦 Bundle Size Analysis:");
   console.log("─".repeat(60));
 
-  const appBundlePath = join(__dirname, "kml_heatmap/static/mapApp.bundle.js");
+  const bundles = [
+    ["🗺️  MapApp Bundle", "mapApp.bundle.js", BUDGET_APP],
+    ["✨ Features Bundle", "features.bundle.js", BUDGET_FEATURES],
+  ];
 
-  try {
-    const appBundleSize = statSync(appBundlePath).size;
-
-    console.log(
-      `  🗺️  MapApp Bundle:      ${formatBytes(appBundleSize).padStart(10)}`,
-    );
-
-    let budgetExceeded = false;
-
-    if (appBundleSize > BUDGET_APP) {
-      console.log(
-        `  ⚠️  MapApp bundle exceeds budget (${formatBytes(appBundleSize)} > ${formatBytes(BUDGET_APP)})`,
-      );
+  let budgetExceeded = false;
+  for (const [label, name, budget] of bundles) {
+    try {
+      const size = statSync(join(__dirname, "kml_heatmap/static", name)).size;
+      console.log(`  ${label}:  ${formatBytes(size).padStart(10)}`);
+      if (size > budget) {
+        console.log(
+          `  ⚠️  ${name} exceeds budget (${formatBytes(size)} > ${formatBytes(budget)})`,
+        );
+        budgetExceeded = true;
+      }
+    } catch (error) {
+      console.error(`  ❌ Could not measure ${name}:`, error.message);
+      // A bundle that cannot be measured cannot be within budget either
       budgetExceeded = true;
     }
+  }
 
-    console.log("─".repeat(60));
-    return !budgetExceeded;
-  } catch (error) {
-    console.error("  ❌ Could not analyze the bundle size:", error.message);
-    console.log("─".repeat(60));
-    // A bundle that cannot be measured cannot be within budget either
-    return false;
+  console.log("─".repeat(60));
+  return !budgetExceeded;
+}
+
+/**
+ * The frontend modules a bundle carries, by their path below frontend/
+ * @param {import("esbuild").Metafile | undefined} metafile
+ * @returns {Set<string>}
+ */
+function bundledModules(metafile) {
+  // By entryPoint, not by having `inputs`: every output has that property
+  // and the source map's is an empty object, which is truthy. Picking the
+  // map would compare an empty set and never report anything.
+  const output = Object.values(metafile?.outputs ?? {}).find(
+    (o) => o.entryPoint,
+  );
+  return new Set(
+    Object.keys(output?.inputs ?? {})
+      .filter((file) => file.startsWith("kml_heatmap/frontend/"))
+      .map((file) =>
+        file.replace(/^kml_heatmap\/frontend\//, "").replace(/\.ts$/, ""),
+      ),
+  );
+}
+
+/**
+ * Fail the build when a module ended up inside both bundles.
+ *
+ * A second copy is not only dead weight: several of these modules hold
+ * state, and two instances of `domCache` or of the toast live region
+ * disagree in ways nothing would report at runtime. The plugin resolves
+ * everything in SHARED_MODULES to the global, so a module in both bundles
+ * means that list has fallen behind what the features import. Comparing the
+ * two bundles catches that, which checking against the list alone cannot.
+ */
+function assertNoSharedCopies(appMetafile, featuresMetafile) {
+  const inApp = bundledModules(appMetafile);
+  const duplicated = [...bundledModules(featuresMetafile)].filter((name) =>
+    inApp.has(name),
+  );
+  if (duplicated.length > 0) {
+    throw new Error(
+      `features.bundle.js bundled a second copy of ${duplicated.join(", ")}; ` +
+        "add them to SHARED_MODULES in scripts/shared-modules.js and to " +
+        "kml_heatmap/frontend/shared.ts so both bundles use one instance",
+    );
   }
 }
 
@@ -187,13 +272,23 @@ async function build() {
     console.log(`📦 Build mode: ${mode} (minify: ${minify})`);
     console.log(`🔖 ${buildBanner}`);
 
+    const vendored = copyVendorAssets();
+    const pinned = Object.entries(vendored.versions)
+      .map(([name, version]) => `${name} ${version}`)
+      .join(", ");
+    console.log(`📥 Vendored ${vendored.count} third-party files: ${pinned}`);
+
     if (isWatch) {
       console.log("👀 Watching for changes...");
-      const appCtx = await esbuild.context(appBuildOptions);
-      await appCtx.watch();
+      for (const options of [appBuildOptions, featuresBuildOptions]) {
+        const ctx = await esbuild.context(options);
+        await ctx.watch();
+      }
     } else {
-      console.log("🔨 Building the JavaScript bundle...");
+      console.log("🔨 Building the JavaScript bundles...");
       const appResult = await esbuild.build(appBuildOptions);
+      const featuresResult = await esbuild.build(featuresBuildOptions);
+      assertNoSharedCopies(appResult.metafile, featuresResult.metafile);
 
       console.log("✅ Build complete!");
 
@@ -202,6 +297,9 @@ async function build() {
 
       if (appResult.metafile) {
         analyzeBundleComposition(appResult.metafile, "MapApp Bundle");
+      }
+      if (featuresResult.metafile) {
+        analyzeBundleComposition(featuresResult.metafile, "Features Bundle");
       }
 
       // A production bundle over budget fails the build wherever it runs;

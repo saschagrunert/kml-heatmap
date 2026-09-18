@@ -150,7 +150,8 @@ def _generate(paths: list[str], output_dir: Path) -> None:
 
     aircraft_files = _find_aircraft_files(kml_files)
 
-    from .renderer import BUNDLE_FILE, create_progressive_heatmap
+    from .renderer import create_progressive_heatmap
+    from .site_assets import BUNDLE_FILE
     from .validation import validate_output_dir
 
     # Both are checked again inside create_progressive_heatmap, which is

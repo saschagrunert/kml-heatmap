@@ -84,6 +84,22 @@ export function getGlobalVarName(year: string): YearDataGlobal {
 }
 
 /**
+ * Wire format of the year files this build reads (kml_heatmap/segment_codec.py).
+ * A file written by another release is refused rather than misread.
+ */
+export const DATA_FORMAT_VERSION = 2;
+
+/**
+ * Column scales of an encoded row, the mirror of _SCALES in segment_codec.py.
+ * Every value the exporter writes is rounded to a fixed number of decimals,
+ * so scaling it by the matching power of ten makes it an exact integer.
+ */
+const COORDINATE_SCALE = 1e5;
+const ALTITUDE_SCALE = 1;
+const SPEED_SCALE = 10;
+const TIME_SCALE = 10;
+
+/**
  * Expand the compact per-year file format into the in-memory dataset shape.
  *
  * Each path stores a start point and rows of
@@ -93,12 +109,24 @@ export function getGlobalVarName(year: string): YearDataGlobal {
  * start point plus the last end point of each path, and neighbouring segments
  * share the very same coordinate array. Arrays are preallocated and each
  * segment creates exactly one object.
+ *
+ * The rows arrive scaled to integers and stored as differences to the row
+ * before (the start point seeds the two coordinate columns), which is what
+ * keeps a year file a third of the size it would otherwise be. A row of four
+ * columns carries no relative time; the running time then stays where the
+ * last row that had one left it.
  * @param raw - Contents of window.KML_DATA_<YEAR>
  * @returns Expanded dataset
  */
 export function expandYearData(raw: RawYearData): KMLDataset {
   if (typeof raw !== "object" || raw === null) {
     throw new Error("Invalid year data: expected an object");
+  }
+  if (raw.format !== DATA_FORMAT_VERSION) {
+    throw new Error(
+      `Invalid year data: format ${String(raw.format)}, expected ` +
+        `${DATA_FORMAT_VERSION}; the data was written by another release`,
+    );
   }
   const segmentsByPath = raw.segments;
   if (typeof segmentsByPath !== "object" || segmentsByPath === null) {
@@ -139,18 +167,38 @@ export function expandYearData(raw: RawYearData): KMLDataset {
     }
     const pathId = Number(id);
 
-    let previous: Coordinate = [startPoint[0]!, startPoint[1]!];
+    // Running totals of the encoded columns; the coordinates start at the
+    // path's start point, the rest at zero
+    let latScaled = startPoint[0]!;
+    let lonScaled = startPoint[1]!;
+    let altitudeScaled = 0;
+    let speedScaled = 0;
+    let timeScaled = 0;
+
+    let previous: Coordinate = [
+      latScaled / COORDINATE_SCALE,
+      lonScaled / COORDINATE_SCALE,
+    ];
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
-      const end: Coordinate = [row[0], row[1]];
+      latScaled += row[0];
+      lonScaled += row[1];
+      altitudeScaled += row[2];
+      speedScaled += row[3];
+      const end: Coordinate = [
+        latScaled / COORDINATE_SCALE,
+        lonScaled / COORDINATE_SCALE,
+      ];
       const segment: PathSegment = {
         path_id: pathId,
         coords: [previous, end],
-        altitude_ft: row[2],
-        groundspeed_knots: row[3],
+        altitude_ft: altitudeScaled / ALTITUDE_SCALE,
+        groundspeed_knots: speedScaled / SPEED_SCALE,
       };
-      if (row.length > 4) {
-        segment.time = row[4];
+      const timeDelta = row[4];
+      if (timeDelta !== undefined) {
+        timeScaled += timeDelta;
+        segment.time = timeScaled / TIME_SCALE;
       }
       path_segments[segmentIndex++] = segment;
       coordinates[coordinateIndex++] = previous;

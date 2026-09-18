@@ -210,7 +210,7 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
     });
 
     const select = (): void => {
-      if (!app.replayManager.state.active) {
+      if (!app.replayState.active) {
         app.pathSelection.selectPathsByAirport(airport.name);
       }
     };

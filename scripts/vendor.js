@@ -1,0 +1,79 @@
+/**
+ * The third-party files the published page loads.
+ *
+ * They used to come from unpkg and jsdelivr with subresource integrity
+ * hashes. Serving them from the site instead means the map still works
+ * during a CDN outage, no visitor's IP reaches a third party, `file://`
+ * is genuinely offline, and the page's CSP needs no foreign origin. The
+ * copies are taken straight from node_modules, so package-lock.json stays
+ * the single place their versions are pinned and Dependabot can bump them
+ * like any other dependency.
+ *
+ * build.js copies them into kml_heatmap/static/vendor/ (generated, not
+ * committed) and the Python side publishes that directory next to the page.
+ */
+
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { REPO_ROOT } from "./source-hash.js";
+
+const NODE_MODULES = join(REPO_ROOT, "node_modules");
+export const VENDOR_DIR = join(REPO_ROOT, "kml_heatmap/static/vendor");
+
+/**
+ * Published path inside vendor/ -> path inside node_modules.
+ *
+ * leaflet.css asks for `images/layers.png` and `images/marker-icon.png`
+ * relative to itself, and L.Icon.Default builds marker-icon-2x.png and
+ * marker-shadow.png from JavaScript, so the whole image set comes along.
+ * kml_heatmap/renderer.py mirrors this list to clean up stale files; the
+ * test suite checks the two agree.
+ * @type {Record<string, string>}
+ */
+export const VENDOR_FILES = {
+  "leaflet.js": "leaflet/dist/leaflet.js",
+  "leaflet.css": "leaflet/dist/leaflet.css",
+  "leaflet-heat.js": "leaflet.heat/dist/leaflet-heat.js",
+  "dom-to-image.min.js": "dom-to-image/dist/dom-to-image.min.js",
+  "images/layers.png": "leaflet/dist/images/layers.png",
+  "images/layers-2x.png": "leaflet/dist/images/layers-2x.png",
+  "images/marker-icon.png": "leaflet/dist/images/marker-icon.png",
+  "images/marker-icon-2x.png": "leaflet/dist/images/marker-icon-2x.png",
+  "images/marker-shadow.png": "leaflet/dist/images/marker-shadow.png",
+};
+
+/**
+ * The version package-lock.json pins for a vendored package
+ * @param {string} name
+ * @returns {string}
+ */
+function pinnedVersion(name) {
+  const lock = JSON.parse(
+    readFileSync(join(REPO_ROOT, "package-lock.json"), "utf8"),
+  );
+  const entry = lock.packages[`node_modules/${name}`];
+  if (!entry) throw new Error(`package-lock.json does not pin ${name}`);
+  return String(entry.version);
+}
+
+/**
+ * Copy the vendored files into kml_heatmap/static/vendor/.
+ *
+ * The directory is replaced rather than written over, so a file dropped
+ * from the list above does not linger in a checkout and get published.
+ * @returns {{count: number, versions: Record<string, string>}}
+ */
+export function copyVendorAssets() {
+  rmSync(VENDOR_DIR, { recursive: true, force: true });
+  for (const [published, source] of Object.entries(VENDOR_FILES)) {
+    const destination = join(VENDOR_DIR, published);
+    mkdirSync(dirname(destination), { recursive: true });
+    copyFileSync(join(NODE_MODULES, source), destination);
+  }
+  /** @type {Record<string, string>} */
+  const versions = {};
+  for (const name of ["leaflet", "leaflet.heat", "dom-to-image"]) {
+    versions[name] = pinnedVersion(name);
+  }
+  return { count: Object.keys(VENDOR_FILES).length, versions };
+}

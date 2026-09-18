@@ -64,9 +64,10 @@ parentheses back is undone on the next `make format`.
   `data/` in place; the pre-commit hook, `make check-obfuscation` and the
   `obfuscation` CI job verify that every committed file is obfuscated. Only
   the hook runs before the dates would be public.
-- The frontend bundle in `kml_heatmap/static/` (`mapApp.bundle.js` and its
-  `.map` file) is gitignored. It is built by `npm run build` and, for the
-  images, inside the Dockerfile.
+- The frontend build output in `kml_heatmap/static/` is gitignored: both
+  bundles (`mapApp.bundle.js`, `features.bundle.js`) with their `.map` files
+  and `vendor/`, the third-party code copied out of `node_modules`. It is
+  built by `npm run build` and, for the images, inside the Dockerfile.
 - The Python dependencies are declared once, in `pyproject.toml` (runtime
   dependencies plus the `test` and `dev` extras). `requirements.lock` and
   `requirements-test.lock` are compiled from it with `make lock` (pip-compile
@@ -77,10 +78,11 @@ parentheses back is undone on the next `make format`.
   "Allow GitHub Actions to create and approve pull requests" (Settings >
   Actions > General), and a pull request opened by the workflow token does
   not start CI: close and reopen it to run the checks.
-- The e2e suite serves Leaflet, leaflet.heat and dom-to-image from
-  `node_modules` in place of the CDN copies the page loads. Their versions in
-  `package.json` have to match the URLs and integrity hashes in
-  `kml_heatmap/templates/map_template.html`; bump both together.
+- The published page carries Leaflet, leaflet.heat and dom-to-image itself:
+  `scripts/vendor.js` copies them out of `node_modules` at build time, so
+  `package-lock.json` is the only place their versions are pinned and
+  Dependabot can bump them like anything else. Nothing loads from a CDN, and
+  the e2e fixture fails any test whose page reaches a third-party origin.
 - AI assistant files (`AGENTS.md`, `.claude/`) are ignored by git and the
   container build context; keep them local.
 
@@ -96,3 +98,35 @@ parentheses back is undone on the next `make format`.
   issue or pull request numbers in the commit message; GitHub links them in the
   pull request.
 - Write in a plain, direct style. Do not use em dashes or en dashes.
+
+## Visual snapshots
+
+`tests/e2e/visual.spec.ts` compares the page's chrome against committed
+screenshots. Pixel comparisons only mean anything where the rendering is
+fixed, so they run inside the Playwright image rather than against whatever
+browser is on the machine, in CI and locally alike. The project only exists
+there, so a plain `npm run test:e2e` leaves it out instead of failing on font
+rendering that was never going to match:
+
+```sh
+podman run --rm --network host --userns=keep-id --user "$(id -u):$(id -g)" \
+  --security-opt label=disable -v "$PWD:/work" -w /work -e HOME=/tmp \
+  mcr.microsoft.com/playwright:v1.63.0-noble \
+  npx playwright test --project=visual
+```
+
+Build the site first (`npm run build && python -m kml_heatmap data
+--output-dir docs`). When a change is meant to alter the look, add
+`--update-snapshots` to that command and commit the new screenshots; the
+diff of a failing run is in the `visual-diff` artifact. The image tag has to match the
+`@playwright/test` version in `package-lock.json`, which
+`scripts/check_locks.py` checks.
+
+## Releasing
+
+The version is declared once, in `kml_heatmap/__init__.py`; `package.json`
+and `package-lock.json` repeat it and `scripts/check_locks.py` fails the lint
+job when the three disagree. To cut a release: set the version in
+`kml_heatmap/__init__.py` and `package.json`, run `npm install` so the lock
+file follows, and tag the merged commit `vX.Y.Z`. The tag's release notes
+are generated from the commits, so there is no changelog file to keep.

@@ -383,14 +383,17 @@ the deployed site only.
 
 ## Output
 
-The output directory contains the page, the frontend bundle with its source
-map, static assets and a `data/` directory with one file per year:
+The output directory contains the page, the frontend bundles with their
+source maps, the third-party code the page loads, static assets and a `data/`
+directory with one file per year:
 
 ```
 output-dir/
 ├── index.html
 ├── mapApp.bundle.js
 ├── mapApp.bundle.js.map
+├── features.bundle.js     # Replay and Wrapped, fetched on first use
+├── features.bundle.js.map
 ├── map_config.js          # Map defaults and the tile API keys
 ├── styles.css
 ├── manifest.json
@@ -399,6 +402,12 @@ output-dir/
 ├── favicon-192.png
 ├── favicon-512.png
 ├── apple-touch-icon.png
+├── vendor/                # Leaflet, leaflet.heat, dom-to-image
+│   ├── leaflet.js
+│   ├── leaflet.css
+│   ├── leaflet-heat.js
+│   ├── dom-to-image.min.js
+│   └── images/            # The marker and layer icons leaflet.css asks for
 └── data/
     ├── airports.js        # window.KML_AIRPORTS: airport markers
     ├── metadata.js        # window.KML_METADATA: years, file sizes, speed range, models
@@ -408,14 +417,15 @@ output-dir/
         └── data.js        # window.KML_DATA_2026
 ```
 
-Each year file sets `window.KML_DATA_<YEAR>` to an object with `year`,
-`original_points`, `path_info` and `segments`. `path_info` lists the flights in
-input order, each with its id, year, airports, aircraft and exact altitude
-range; where a flight starts and ends is read from its segments. `segments`
-maps a path id to
-`{"start": [lat, lon], "rows": [...]}`, where each row is
-`[lat, lon, altitude_ft, groundspeed_knots, time]` and `time` (relative
-seconds) is only present for files with timestamps.
+Each year file sets `window.KML_DATA_<YEAR>` to an object with `format`,
+`year`, `original_points`, `path_info` and `segments`. `format` is the wire
+format of the rows, which the page checks before reading them so a file
+written by another release is refused rather than misread. `path_info` lists
+the flights in input order, each with its id, year, airports, aircraft and
+exact altitude range; where a flight starts and ends is read from its
+segments. `segments` maps a path id to `{"start": [lat, lon], "rows": [...]}`,
+where each row is `[lat, lon, altitude_ft, groundspeed_knots, time]` and
+`time` (relative seconds) is only present for files with timestamps.
 
 The coordinate in a row is the segment's **end** point. Its start is the end
 of the previous row, and the first row continues from `start`, so a shared
@@ -423,6 +433,14 @@ point is stored once instead of twice. Coordinates are rounded to five
 decimals (about 1 m), and the only segments the exporter drops are the ones
 whose two endpoints round to the same coordinate (standing still), which keeps
 the rows contiguous.
+
+Every value above is written as an integer difference to the row before it
+rather than as the number itself (`kml_heatmap/segment_codec.py`, mirrored by
+`expandYearData` in `services/dataLoader.ts`). The exporter has already
+rounded each column to a fixed number of decimals, so scaling it by that
+power of ten is exact, and neighbouring rows barely differ: the encoding is
+lossless and roughly halves a year file. The numbers the page works with are
+the ones described above; only the file is written this way.
 
 `metadata.js` lists the available years, the size of each year file
 (`year_file_bytes`) so the frontend can show loading progress, the groundspeed

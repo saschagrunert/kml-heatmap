@@ -30,7 +30,12 @@ test.describe("Core", () => {
       .locator('meta[http-equiv="Content-Security-Policy"]')
       .getAttribute("content");
     expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("script-src 'self' file: https://unpkg.com");
+    // Scripts and styles come from the site itself; the map tiles are the
+    // only third party the page is allowed to reach
+    expect(csp).toContain("script-src 'self' file:;");
+    expect(csp).toContain("style-src 'self' file: 'unsafe-inline';");
+    expect(csp).not.toContain("unpkg.com");
+    expect(csp).not.toContain("jsdelivr");
     expect(csp).toContain("base-uri 'none'");
   });
 

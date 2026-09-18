@@ -19,7 +19,9 @@ RUN npm ci
 # dropped here rather than in .dockerignore, which would hide them from this
 # stage as well.
 COPY build.js tsconfig.json ./
-COPY scripts/source-hash.js ./scripts/
+# The whole directory, not the one file build.js used to need: it imports
+# the vendoring and the shared-module list from here as well
+COPY scripts/ ./scripts/
 COPY kml_heatmap/ ./kml_heatmap/
 RUN npm run build && rm -rf kml_heatmap/frontend
 

@@ -178,7 +178,7 @@ export class WrappedManager {
     if (!this.app.map || this.savedControlDisplays.size > 0) return;
     // Replay owns the map while it runs; its control is disabled then, and
     // this covers every other way in (the mobile tab, a restored state)
-    if (this.app.replayManager.state.active) return;
+    if (this.app.replayState.active) return;
 
     // A close that is still settling must not remeasure a map that is about
     // to move back into the dialog

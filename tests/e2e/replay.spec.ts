@@ -86,9 +86,9 @@ test.describe("Replay", () => {
     await expect(page.locator("#replay-pause-btn")).toBeVisible();
     await expect(page.locator("#replay-play-btn")).toBeHidden();
 
-    expect(
-      await page.evaluate(() => window.mapApp!.replayManager.state.playing),
-    ).toBe(true);
+    expect(await page.evaluate(() => window.mapApp!.replayState.playing)).toBe(
+      true,
+    );
     await expect(page.locator("#replay-live")).toHaveText("Replay playing");
   });
 
@@ -103,9 +103,9 @@ test.describe("Replay", () => {
     await expect(page.locator("#replay-play-btn")).toBeVisible();
     await expect(page.locator("#replay-pause-btn")).toBeHidden();
 
-    expect(
-      await page.evaluate(() => window.mapApp!.replayManager.state.playing),
-    ).toBe(false);
+    expect(await page.evaluate(() => window.mapApp!.replayState.playing)).toBe(
+      false,
+    );
     await expect(page.locator("#replay-live")).toHaveText(/^Replay paused at/);
   });
 
@@ -116,9 +116,7 @@ test.describe("Replay", () => {
     await page.locator("#replay-stop-btn").click();
 
     await expect
-      .poll(() =>
-        page.evaluate(() => window.mapApp!.replayManager.state.currentTime),
-      )
+      .poll(() => page.evaluate(() => window.mapApp!.replayState.currentTime))
       .toBe(0);
     await expect(page.locator("#replay-slider")).toHaveValue("0");
     await expect(page.locator("#replay-play-btn")).toBeVisible();
@@ -132,7 +130,7 @@ test.describe("Replay", () => {
     await activateReplay(page);
 
     const maxTime = await page.evaluate(
-      () => window.mapApp!.replayManager.state.maxTime,
+      () => window.mapApp!.replayState.maxTime,
     );
     const midpoint = Math.floor(maxTime / 2);
 
@@ -142,7 +140,7 @@ test.describe("Replay", () => {
     );
 
     expect(
-      await page.evaluate(() => window.mapApp!.replayManager.state.currentTime),
+      await page.evaluate(() => window.mapApp!.replayState.currentTime),
     ).toBe(midpoint);
     await expect(page.locator("#replay-slider")).toHaveValue(String(midpoint));
     await expect(page.locator("#replay-slider")).toHaveAttribute(
@@ -150,23 +148,21 @@ test.describe("Replay", () => {
       /^\d+(:\d{2}){1,2} of \d+(:\d{2}){1,2}$/,
     );
     expect(
-      await page.evaluate(
-        () => window.mapApp!.replayManager.state.lastDrawnIndex,
-      ),
+      await page.evaluate(() => window.mapApp!.replayState.lastDrawnIndex),
     ).toBeGreaterThanOrEqual(0);
   });
 
   test("changeReplaySpeed updates speed", async ({ page }) => {
     await activateReplay(page);
 
-    expect(
-      await page.evaluate(() => window.mapApp!.replayManager.state.speed),
-    ).toBe(50);
+    expect(await page.evaluate(() => window.mapApp!.replayState.speed)).toBe(
+      50,
+    );
 
     await page.locator("#replay-speed").selectOption("100");
 
     await expect
-      .poll(() => page.evaluate(() => window.mapApp!.replayManager.state.speed))
+      .poll(() => page.evaluate(() => window.mapApp!.replayState.speed))
       .toBe(100);
   });
 
@@ -181,16 +177,16 @@ test.describe("Replay", () => {
     await autoZoomBtn.click();
     await expect(autoZoomBtn).toHaveCSS("opacity", "1");
     await expect(autoZoomBtn).toHaveAttribute("aria-pressed", "true");
-    expect(
-      await page.evaluate(() => window.mapApp!.replayManager.state.autoZoom),
-    ).toBe(true);
+    expect(await page.evaluate(() => window.mapApp!.replayState.autoZoom)).toBe(
+      true,
+    );
 
     await autoZoomBtn.click();
     await expect(autoZoomBtn).toHaveCSS("opacity", "0.5");
     await expect(autoZoomBtn).toHaveAttribute("aria-pressed", "false");
-    expect(
-      await page.evaluate(() => window.mapApp!.replayManager.state.autoZoom),
-    ).toBe(false);
+    expect(await page.evaluate(() => window.mapApp!.replayState.autoZoom)).toBe(
+      false,
+    );
   });
 
   test("airplane marker appears during replay", async ({ page }) => {
@@ -208,7 +204,7 @@ test.describe("Replay", () => {
     await page.locator("#replay-pause-btn").click();
 
     const currentTime = await page.evaluate(
-      () => window.mapApp!.replayManager.state.currentTime,
+      () => window.mapApp!.replayState.currentTime,
     );
     expect(currentTime).toBeGreaterThan(0);
     await expect(page.locator("#replay-time-display")).not.toHaveText(
@@ -379,7 +375,7 @@ test.describe("Replay", () => {
 
     // Close popup programmatically (Leaflet popup tip intercepts DOM clicks)
     await page.evaluate(() => {
-      window.mapApp!.replayManager.state.airplaneMarker!.closePopup();
+      window.mapApp!.replayState.airplaneMarker!.closePopup();
     });
     await expect(popup).toBeHidden();
   });

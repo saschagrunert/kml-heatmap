@@ -17,12 +17,17 @@ import { prefersReducedMotion } from "../utils/motion";
 import { prepareReplaySegments } from "../features/replay";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { ReplayRenderer, drawReplaySegment } from "./replayRenderer";
-import { ReplayState } from "./replayState";
+import type { ReplayState } from "./replayState";
+import {
+  REPLAY_BUTTON_LABEL,
+  REPLAY_PRECONDITION_MESSAGE,
+  updateReplayButtonState,
+} from "./replayButton";
 
-export const REPLAY_PRECONDITION_MESSAGE =
-  "Select exactly one flight with timing data to replay";
+// Kept exported here: they were part of this module's surface before the
+// button state moved to replayButton.ts
+export { REPLAY_BUTTON_LABEL, REPLAY_PRECONDITION_MESSAGE };
 
-const REPLAY_BUTTON_LABEL = "Replay selected flight path";
 const REPLAY_BUTTON_ACTIVE_LABEL = "Stop replay";
 const REPLAY_BUTTON_TEXT = "Replay";
 const REPLAY_EXIT_LABEL = "Close replay";
@@ -69,12 +74,17 @@ export class ReplayManager {
     // would count all the hidden time; start timing afresh instead
     if (document.hidden) this.state.lastFrameTime = null;
   };
-  state: ReplayState;
+  /**
+   * The replay state, owned by the app. The map click handler and the layer
+   * redraws read it on paths that must not wait for this bundle to load, so
+   * it lives in the main bundle and this manager works on the same object.
+   */
+  readonly state: ReplayState;
 
   constructor(app: MapApp) {
     this.app = app;
     this.renderer = new ReplayRenderer(app);
-    this.state = new ReplayState();
+    this.state = app.replayState;
 
     document.addEventListener("visibilitychange", this.onVisibilityChange);
 
@@ -86,11 +96,10 @@ export class ReplayManager {
       });
     }
 
-    // Whether replay is available follows the selection and the timing data
-    const refresh = (): void => this.updateReplayButtonState();
-    app.store.subscribe("selectedPathIds", refresh);
-    app.store.subscribe("hasTimingData", refresh);
-    refresh();
+    // Whether replay is available follows the selection and the timing
+    // data, which MapApp watches: the control has to say so before this
+    // bundle is ever fetched. This manager only nudges the button after an
+    // activation changes it.
   }
 
   /** Cancel every pending timer; the panel itself stays as it is */
@@ -109,9 +118,9 @@ export class ReplayManager {
     this.redrawTimers = [];
   }
 
-  /** Whether the current selection can be replayed */
+  /** Whether the current selection can be replayed; the app decides */
   canReplay(): boolean {
-    return this.app.selectedPathIds.size === 1 && this.app.hasTimingData;
+    return this.app.canReplay();
   }
 
   toggleReplay(): void {
@@ -244,17 +253,7 @@ export class ReplayManager {
   }
 
   updateReplayButtonState(): void {
-    const btn = domCache.get("replay-btn", HTMLButtonElement);
-    if (!btn) return;
-
-    // The button stays enabled so it can explain why replay is unavailable
-    const ready = this.canReplay();
-    btn.style.opacity = ready ? "1.0" : "0.5";
-    // No aria-disabled: assistive tech would skip the button, and clicking it
-    // is how the user learns why replay is unavailable
-    btn.title = ready
-      ? "Replay selected flight path"
-      : "Select exactly one flight with timing data to replay";
+    updateReplayButtonState(this.canReplay());
   }
 
   /**

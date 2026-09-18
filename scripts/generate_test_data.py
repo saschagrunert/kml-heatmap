@@ -24,6 +24,8 @@ import datetime
 import random
 from pathlib import Path
 
+Coordinate = tuple[float, float]
+
 # Airport coordinates (major airports in Europe)
 AIRPORTS = {
     "EDDF": (50.0379, 8.5622),  # Frankfurt
@@ -47,12 +49,14 @@ AIRCRAFT = [
 ]
 
 
-def generate_flight_path(start_coords, end_coords, num_points=50):
+def generate_flight_path(
+    start_coords: Coordinate, end_coords: Coordinate, num_points: int = 50
+) -> list[tuple[float, float, float]]:
     """Generate a curved flight path between two coordinates with altitude."""
     lat1, lon1 = start_coords
     lat2, lon2 = end_coords
 
-    coords = []
+    coords: list[tuple[float, float, float]] = []
 
     # Generate cruise altitude (2000-10000 ft)
     cruise_alt = random.randint(2000, 10000)
@@ -91,8 +95,13 @@ def generate_flight_path(start_coords, end_coords, num_points=50):
 
 
 def generate_kml_file(
-    flight_id, start_airport, end_airport, aircraft_reg, aircraft_type, output_dir
-):
+    flight_id: int,
+    start_airport: str,
+    end_airport: str,
+    aircraft_reg: str,
+    aircraft_type: str,
+    output_dir: Path,
+) -> str:
     """Generate a single KML file for a flight."""
     coords = generate_flight_path(AIRPORTS[start_airport], AIRPORTS[end_airport])
 
@@ -135,12 +144,12 @@ def generate_kml_file(
 
     # Documented filename format: N_REGISTRATION_TYPE.kml (registration without hyphen)
     filename = f"{flight_id}_{aircraft_reg.replace('-', '')}_{aircraft_type}.kml"
-    (Path(output_dir) / filename).write_text(kml_content, encoding="utf-8")
+    (output_dir / filename).write_text(kml_content, encoding="utf-8")
 
     return filename
 
 
-def main():
+def main() -> None:
     """Generate test KML files."""
     parser = argparse.ArgumentParser(
         description="Generate realistic test KML files with curved flight paths",
@@ -176,8 +185,8 @@ Examples:
     args = parser.parse_args()
 
     num_files = args.count
-    output_dir = args.output or f"kml_test_{num_files}"
-    Path(output_dir).mkdir(exist_ok=True)
+    output_dir = Path(args.output or f"kml_test_{num_files}")
+    output_dir.mkdir(exist_ok=True)
 
     print(f"Generating {num_files:,} KML files in {output_dir}/")
     # Measured: 50 points per flight come to about 3.4 KB per file
@@ -203,12 +212,12 @@ Examples:
     print(f"  make build INPUT_DIR={output_dir}")
     # --user: the image's own user cannot write to host directories.
     # --output-dir: only a mounted directory reaches the host.
-    name = Path(output_dir).resolve().name
+    name = output_dir.resolve().name
     print("\nOr with Docker (writes the site to out/):")
     print("  mkdir -p out ~/.cache/kml-heatmap")
     print(
         '  docker run --rm --user "$(id -u):$(id -g)" '
-        f'-v "{Path(output_dir).resolve()}:/data/{name}" '
+        f'-v "{output_dir.resolve()}:/data/{name}" '
         '-v "$PWD/out:/data/out" -v ~/.cache/kml-heatmap:/cache '
         f"kml-heatmap {name} --output-dir out"
     )

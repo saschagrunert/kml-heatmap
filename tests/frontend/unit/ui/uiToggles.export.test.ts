@@ -3,7 +3,6 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  DOM_TO_IMAGE_INTEGRITY,
   DOM_TO_IMAGE_URL,
   MAX_CANVAS_PIXELS,
   UIToggles,
@@ -120,7 +119,7 @@ describe("UIToggles export and share", () => {
       expect(appendSpy).not.toHaveBeenCalled();
     });
 
-    it("injects the script with SRI and resolves once it loads", async () => {
+    it("injects the vendored script and resolves once it loads", async () => {
       const lib = { toJpeg: vi.fn() } as unknown as DomToImage;
       let script: HTMLScriptElement | null = null;
       vi.spyOn(document.head, "appendChild").mockImplementation(
@@ -134,9 +133,12 @@ describe("UIToggles export and share", () => {
       );
 
       await expect(loadDomToImage()).resolves.toBe(lib);
-      expect(script!.src).toBe(DOM_TO_IMAGE_URL);
-      expect(script!.integrity).toBe(DOM_TO_IMAGE_INTEGRITY);
-      expect(script!.crossOrigin).toBe("anonymous");
+      // A relative src, so the element resolves it against the page
+      expect(script!.getAttribute("src")).toBe(DOM_TO_IMAGE_URL);
+      expect(new URL(script!.src).origin).toBe(window.location.origin);
+      // Same-origin now, so neither attribute is set any more
+      expect(script!.hasAttribute("integrity")).toBe(false);
+      expect(script!.hasAttribute("crossorigin")).toBe(false);
     });
 
     it("shares one in-flight load between callers", async () => {

@@ -32,7 +32,9 @@ from kml_heatmap.data_exporter import (
 )
 from kml_heatmap.exceptions import KMLHeatmapError
 from kml_heatmap.helpers import parse_timestamp_epoch
+from kml_heatmap.segment_codec import FORMAT_VERSION
 from kml_heatmap.types import TrackPoint
+from tests.conftest import decoded_segments
 
 skip_as_root = pytest.mark.skipif(
     os.geteuid() == 0, reason="root ignores directory permissions"
@@ -76,7 +78,8 @@ def _ids_by_start(output_dir, parse_js):
     ids = {}
     for data_file in sorted(output_dir.glob("*/data.js")):
         for path_id, entry in parse_js(data_file)["segments"].items():
-            ids[tuple(entry["start"])] = int(path_id)
+            start, _ = decoded_segments(entry)
+            ids[tuple(start)] = int(path_id)
     return ids
 
 
@@ -98,7 +101,13 @@ class TestYearFile:
         content = (tmp_path / "2025" / "data.js").read_text()
         assert content.startswith("window.KML_DATA_2025 = {")
         data = parse_js(tmp_path / "2025" / "data.js", "KML_DATA_2025")
-        assert list(data) == ["year", "original_points", "path_info", "segments"]
+        assert list(data) == [
+            "format",
+            "year",
+            "original_points",
+            "path_info",
+            "segments",
+        ]
         assert data["year"] == 2025
         assert data["original_points"] == 3
         assert data["path_info"] == [
@@ -121,10 +130,14 @@ class TestYearFile:
             "min_altitude_ft",
             "max_altitude_ft",
         ]
+        assert data["format"] == FORMAT_VERSION
         assert list(data["segments"]) == ["7"]
         entry = data["segments"]["7"]
-        assert entry["start"] == [50.0, 8.0]
-        rows = entry["rows"]
+        # On disk: scaled integers, each row the difference to the one before
+        assert entry["start"] == [5000000, 800000]
+        assert entry["rows"][0][:2] == [10000, 10000]
+        start, rows = decoded_segments(entry)
+        assert start == [50.0, 8.0]
         assert len(rows) == 2
         assert rows[0][:2] == [50.1, 8.1]
         assert rows[0][2] == 500
@@ -170,6 +183,7 @@ class TestYearFile:
         result = _write_year(2025, [], [], [], tmp_path)
         data = parse_js(tmp_path / "2025" / "data.js")
         assert data == {
+            "format": FORMAT_VERSION,
             "year": 2025,
             "original_points": 0,
             "path_info": [],
@@ -188,7 +202,8 @@ class TestYearFile:
         ]
         _write_year(2025, [path], metadata, [0], tmp_path)
 
-        rows = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]["rows"]
+        entry = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        _, rows = decoded_segments(entry)
         assert all(row[3] > 0 for row in rows)
         assert all(len(row) == 4 for row in rows)
 
@@ -199,8 +214,9 @@ class TestYearFile:
         entry = data["segments"]["0"]
         assert len(entry["rows"]) == 1
         # Dropping a zero-length segment keeps the chain contiguous
-        assert entry["start"] == [50.0, 8.0]
-        assert entry["rows"][0][:2] == [50.1, 8.1]
+        start, rows = decoded_segments(entry)
+        assert start == [50.0, 8.0]
+        assert rows[0][:2] == [50.1, 8.1]
 
     def test_unrealistic_groundspeed_filtered(self, tmp_path, parse_js):
         path = _path(
@@ -208,7 +224,8 @@ class TestYearFile:
             (51.0, 9.0, 100.0, "2025-01-01T10:00:01.000Z"),
         )
         result = _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
-        rows = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]["rows"]
+        entry = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        _, rows = decoded_segments(entry)
         assert rows[0][3] == 0.0
         # A row without a speed does not pull the range down to zero
         assert result.groundspeed == GroundspeedRange()
@@ -374,7 +391,13 @@ class TestAssembleYearFile:
         result = _assemble_year_file(2025, [second, empty, first], str(tmp_path))
 
         data = parse_js(tmp_path / "2025" / "data.js", "KML_DATA_2025")
-        assert list(data) == ["year", "original_points", "path_info", "segments"]
+        assert list(data) == [
+            "format",
+            "year",
+            "original_points",
+            "path_info",
+            "segments",
+        ]
         assert [info["id"] for info in data["path_info"]] == [0, 1]
         assert list(data["segments"]) == ["0", "1"]
         assert data["original_points"] == 4
@@ -1038,10 +1061,10 @@ class TestExportAllData:
         meta = parse_js(tmp_path / "metadata.js", "KML_METADATA")
         data_2025 = parse_js(tmp_path / "2025" / "data.js")
         data_2026 = parse_js(tmp_path / "2026" / "data.js")
-        speeds = [
-            row[3]
-            for row in data_2026["segments"][str(path_content_id(paths[0]))]["rows"]
-        ]
+        _, rows_2026 = decoded_segments(
+            data_2026["segments"][str(path_content_id(paths[0]))]
+        )
+        speeds = [row[3] for row in rows_2026]
         assert meta == {
             "aircraft_models": {},
             "available_years": [2025, 2026],

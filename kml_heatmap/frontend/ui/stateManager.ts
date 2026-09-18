@@ -5,6 +5,7 @@ import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
 import type { SavedState } from "../types";
 import {
+  isSupportedSchemaVersion,
   STATE_SCHEMA_VERSION,
   encodeStateToUrl,
   parseUrlParams,
@@ -75,12 +76,14 @@ export function sanitizeSavedState(candidate: unknown): SavedState {
       result[key] = value;
     }
   }
-  // Path ids are only meaningful when they were written with the current
-  // id scheme; older payloads refer to different flights (see urlState)
+  // Path ids are only meaningful when they were written with an id scheme
+  // this build reads; older payloads refer to different flights. Schema 4
+  // only changed how a link spells the ids, so a selection saved as 3 still
+  // names the same flights and is kept (see urlState).
   const pathIds = candidate["selectedPathIds"];
   if (
     Array.isArray(pathIds) &&
-    candidate["schemaVersion"] === STATE_SCHEMA_VERSION
+    isSupportedSchemaVersion(candidate["schemaVersion"])
   ) {
     result.selectedPathIds = pathIds.filter(
       (id: unknown): id is number => typeof id === "number" && isFinite(id),
@@ -144,8 +147,10 @@ export class StateManager {
     if (!this.app.map) return;
 
     // While Wrapped has the map fitted to all the data, the view worth
-    // keeping is the one the user had before
-    const view = this.app.wrappedManager.userMapView() ?? {
+    // keeping is the one the user had before. The `?.` is for Wrapped
+    // living in the lazily loaded feature bundle: before it has ever been
+    // opened there is no saved view either way.
+    const view = this.app.wrappedManager?.userMapView() ?? {
       center: this.app.map.getCenter(),
       zoom: this.app.map.getZoom(),
     };

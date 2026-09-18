@@ -55,12 +55,6 @@ updates:
       # typescript-eslint does not support the next TypeScript major yet
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
-      # The e2e tests serve these from node_modules in place of the CDN
-      # copies the page loads, so they have to stay at the versions pinned
-      # (with integrity hashes) in the HTML template
-      - dependency-name: "leaflet"
-      - dependency-name: "leaflet.heat"
-      - dependency-name: "dom-to-image"
     # A dependency joins the first group it matches, so the named groups come
     # before the catch-all for the remaining minor and patch updates
     groups:

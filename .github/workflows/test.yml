@@ -115,6 +115,15 @@ jobs:
         run: python -m kml_heatmap data --output-dir docs
         env:
           KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
+      # The visual job compares this very site inside the Playwright image,
+      # where the package's own Python is not available
+      - name: Upload the generated site
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: generated-site
+          path: docs
+          if-no-files-found: error
+          retention-days: 1
       - name: Run JavaScript tests with coverage
         run: npm run test:coverage
       # Also enforces fail_under from pyproject.toml
@@ -184,7 +193,8 @@ jobs:
           cp "${kml[@]:0:3}" smoke/input/
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" smoke/input --output-dir smoke/site
-          for file in index.html map_config.js mapApp.bundle.js data/metadata.js; do
+          for file in index.html map_config.js mapApp.bundle.js \
+            features.bundle.js vendor/leaflet.js data/metadata.js; do
             test -s "smoke/site/$file" || { echo "::error::smoke/site/$file was not generated"; exit 1; }
           done
           # Still the fixture, so nothing was downloaded
@@ -273,6 +283,49 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Pixel comparisons are only meaningful where the rendering is fixed, so
+  # this one runs inside the Playwright image, which is also what the
+  # snapshots were generated in (see CONTRIBUTING.md). It compares the site
+  # the unit job built rather than building its own: the package needs a
+  # Python the image does not carry. The image tag has to match the
+  # @playwright/test version package-lock.json pins; scripts/check_locks.py
+  # fails the lint job when the two drift apart.
+  visual:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install npm dependencies
+        run: npm ci
+      # The bundles come with it, so global-setup can check them against the
+      # sources in this checkout
+      - name: Download the generated site
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: generated-site
+          path: docs
+      - name: Compare the page against the committed snapshots
+        run: npx playwright test --project=visual
+      # The report carries the expected, actual and diff images side by side
+      - name: Upload the visual diff
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: visual-diff
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -342,7 +395,8 @@ jobs:
           docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
             kml-heatmap input --output-dir site
-          for file in index.html map_config.js mapApp.bundle.js data/metadata.js; do
+          for file in index.html map_config.js mapApp.bundle.js \
+            features.bundle.js vendor/leaflet.js data/metadata.js; do
             test -s "$smoke/site/$file" || { echo "::error::$file was not generated"; exit 1; }
           done
           # Still the fixture, and without a network nothing else was fetched
@@ -361,7 +415,8 @@ jobs:
           docker run --rm --network none \
             -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
             kml-heatmap input --output-dir site
-          for file in index.html map_config.js mapApp.bundle.js data/metadata.js; do
+          for file in index.html map_config.js mapApp.bundle.js \
+            features.bundle.js vendor/leaflet.js data/metadata.js; do
             test -s "$smoke/site/$file" || { echo "::error::$file was not generated as the image user"; exit 1; }
           done
 
@@ -394,7 +449,7 @@ jobs:
   # new advisory for a test dependency must not hold back new flights, and
   # the weekly run reports it anyway.
   publishable:
-    needs: [lint, unit, packaging, e2e, container, obfuscation, typos]
+    needs: [lint, unit, packaging, e2e, visual, container, obfuscation, typos]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5
