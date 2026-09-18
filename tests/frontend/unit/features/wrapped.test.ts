@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { cwd } from "node:process";
 import {
   REFERENCE_DISTANCES,
   calculateYearStats,
@@ -451,6 +454,29 @@ describe("wrapped feature", () => {
       });
     });
 
+    it("ends every fact with a full stop or an exclamation mark", () => {
+      // The facts are stacked in one card and read down the page, so one that
+      // simply stops reads as unfinished beside the ones that do not.
+      //
+      // Read from the source rather than from a generated set: selectDiverseFacts
+      // returns at most six of them, by priority, so no set of inputs puts every
+      // string in front of an assertion. The strings are all written in one
+      // place, so that is where the rule is checked.
+      const source = readFileSync(
+        join(cwd(), "kml_heatmap/frontend/features/wrapped.ts"),
+        "utf8",
+      );
+      const texts = [...source.matchAll(/^\s*text: `(.*)`,$/gm)].map(
+        (match) => match[1]!,
+      );
+
+      // Every `text:` in the file, not just the handful a run happens to pick
+      expect(texts.length).toBeGreaterThan(12);
+      for (const text of texts) {
+        expect(text, text).toMatch(/[.!]$/);
+      }
+    });
+
     it("generates around Earth fact for high distance", () => {
       const facts = generateFunFacts({
         ...yearStats,
@@ -474,7 +500,7 @@ describe("wrapped feature", () => {
       const longest = facts.find((f) => f.text.includes("longest journey"));
       expect(longest?.text).toContain("<strong>280.0 nm</strong>");
       expect(longest?.text).toContain(
-        "about the distance from Berlin to Munich!",
+        "about the distance from Berlin to Munich.",
       );
     });
 
@@ -483,7 +509,7 @@ describe("wrapped feature", () => {
 
       const longest = facts.find((f) => f.text.includes("longest journey"));
       expect(longest?.text).toBe(
-        "Your longest journey: <strong>30.0 nm</strong>",
+        "Your longest journey: <strong>30.0 nm</strong>.",
       );
     });
 
@@ -498,7 +524,7 @@ describe("wrapped feature", () => {
 
       const loyal = facts.find((f) => f.category === "aircraft");
       expect(loyal?.text).toBe(
-        "Loyal to <strong>D-EAGJ</strong> - all 10 flights in this DA40!",
+        "Loyal to <strong>D-EAGJ</strong>, all 10 flights in this DA40!",
       );
     });
 
@@ -532,7 +558,7 @@ describe("wrapped feature", () => {
       const facts = generateFunFacts(stats);
 
       expect(facts.find((f) => f.category === "aircraft")?.text).toBe(
-        "Loyal to <strong>D-&lt;b&gt;</strong> - all 1 flight in this C172 &amp; co!",
+        "Loyal to <strong>D-&lt;b&gt;</strong>, all 1 flight in this C172 &amp; co!",
       );
     });
 

@@ -175,4 +175,48 @@ test.describe("Mobile breakpoint", () => {
     await page.locator("#mobile-tab-layers").click();
     await expect(page.locator("#mobile-sheet")).toBeVisible();
   });
+
+  /**
+   * Above the breakpoint but shorter than the control columns: a landscape
+   * phone, a short laptop window, a split screen, or 400% browser zoom, which
+   * WCAG 1.4.10 puts at 320x256 CSS pixels.
+   *
+   * The columns are fixed, so the page cannot scroll them into view and they
+   * have to scroll themselves. They carry `max-height` and `overflow-y: auto`
+   * for it, which did nothing for a long time: the groups inside shrank to
+   * fit instead of overflowing, and their own `overflow: hidden` clipped the
+   * rows that no longer fitted. The column then had nothing to scroll and the
+   * last control was drawn off screen with no way to reach it.
+   */
+  test("every control stays reachable in a viewport shorter than the column", async ({
+    page,
+  }) => {
+    await gotoApp(page);
+    await waitForAppReady(page);
+
+    const column = page.locator("#right-buttons");
+    await expect(column).toBeVisible();
+
+    // Measured rather than assumed: the column is a row shorter without an
+    // OpenAIP key, which hides the Aviation toggle, and a hard-coded height
+    // would only overflow in one of the two builds
+    const natural = await column.evaluate((el) => el.scrollHeight);
+    await page.setViewportSize({
+      width: 1280,
+      height: Math.round(natural / 2),
+    });
+
+    await expect
+      .poll(() => column.evaluate((el) => el.scrollHeight > el.clientHeight), {
+        message: "the column has to scroll to what it cannot show",
+      })
+      .toBe(true);
+
+    // Whatever the build put last in the column is what fell off the bottom
+    const last = column.locator(".control-row:visible").last();
+    await last.scrollIntoViewIfNeeded();
+    await expect(last).toBeInViewport();
+    // Actionability: visible, stable and not covered by anything
+    await last.click();
+  });
 });

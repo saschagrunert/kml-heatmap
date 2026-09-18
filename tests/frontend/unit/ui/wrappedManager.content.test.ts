@@ -78,8 +78,8 @@ describe("WrappedManager content", () => {
     expect(cards["Flights"]).toBe("3");
     expect(cards["Airports"]).toBe("3");
     expect(cards["Flight Time"]).toBe("3h 0m");
-    expect(cards["Max Groundspeed"]).toBe("120 kt");
-    expect(cards["Distance"]).toMatch(/^\d[\d,]*\.\d nm$/);
+    expect(cards["Max Groundspeed"]).toBe("120kt");
+    expect(cards["Distance"]).toMatch(/^\d[\d,]*\.\dnm$/);
   });
 
   it("reuses the statistics the panel computed for the same filter", () => {

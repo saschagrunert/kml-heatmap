@@ -54,13 +54,36 @@ const MISSING_VALUE = "—";
 interface Metric {
   /** Plain-text label, escaped at render */
   label: string;
-  /** Primary value including its unit */
+  /** Primary value, without its unit */
   value: string;
-  /** Same measurement in the other unit system */
+  /** Unit of `value`, set against it at render (see `figure`) */
+  unit: string;
+  /** Same measurement in the other unit system, without its unit */
   alt?: string;
+  /** Unit of `alt` */
+  altUnit?: string;
 }
 
-/** One lead figure at the top of the panel */
+/**
+ * A number with its unit set against it: one hairline of space rather than a
+ * word space, the same treatment the lead figures and the h and m of a flight
+ * time get. The two arrive separately rather than as one formatted string
+ * because most callers of the formatters want plain text, for a title or an
+ * aria-label, and only the places that typeset a figure want the split.
+ */
+function figure(value: string, unit: string): string {
+  return (
+    escapeHtml(value) +
+    (unit ? '<span class="kh-stats-unit">' + escapeHtml(unit) + "</span>" : "")
+  );
+}
+
+/**
+ * One lead figure at the top of the panel.
+ *
+ * The unit sits directly against the figure, no space, the way
+ * markFlightTimeUnits sets the h and m of the flight time beside it.
+ */
 function leadItem(
   value: string,
   unit: string,
@@ -70,7 +93,7 @@ function leadItem(
   return leadItemHtml(
     escapeHtml(value) +
       (unit
-        ? ' <span class="kh-stats-lead-unit">' + escapeHtml(unit) + "</span>"
+        ? '<span class="kh-stats-lead-unit">' + escapeHtml(unit) + "</span>"
         : ""),
     label,
     alt,
@@ -84,9 +107,7 @@ function leadItemHtml(valueHtml: string, label: string, alt?: string): string {
     '<span class="kh-stats-lead-value">' +
     valueHtml +
     "</span>" +
-    (alt
-      ? '<span class="kh-stats-lead-alt">' + escapeHtml(alt) + "</span>"
-      : "") +
+    (alt ? '<span class="kh-stats-lead-alt">' + alt + "</span>" : "") +
     '<span class="kh-stats-lead-label">' +
     escapeHtml(label) +
     "</span>" +
@@ -103,11 +124,11 @@ function metricRow(metric: Metric): string {
     "</span>" +
     '<span class="kh-stats-metric-values">' +
     '<span class="kh-stats-metric-value">' +
-    escapeHtml(metric.value) +
+    figure(metric.value, metric.unit) +
     "</span>" +
     (metric.alt
       ? '<span class="kh-stats-metric-alt">' +
-        escapeHtml(metric.alt) +
+        figure(metric.alt, metric.altUnit ?? "") +
         "</span>"
       : "") +
     "</span>" +
@@ -282,16 +303,20 @@ function distanceMetrics(stats: FilteredStatistics): Metric[] {
     const avgDistanceNm = stats.total_distance_nm / stats.num_paths;
     metrics.push({
       label: "Average Distance per Trip",
-      value: formatNumber(avgDistanceNm, 1) + " nm",
-      alt: formatNumber(avgDistanceNm * NAUTICAL_MILES_TO_KM, 1) + " km",
+      value: formatNumber(avgDistanceNm, 1),
+      unit: "nm",
+      alt: formatNumber(avgDistanceNm * NAUTICAL_MILES_TO_KM, 1),
+      altUnit: "km",
     });
   }
 
   if (stats.longest_flight_nm && stats.longest_flight_nm > 0) {
     metrics.push({
       label: "Longest Flight",
-      value: formatNumber(stats.longest_flight_nm, 1) + " nm",
-      alt: formatNumber(stats.longest_flight_km || 0, 1) + " km",
+      value: formatNumber(stats.longest_flight_nm, 1),
+      unit: "nm",
+      alt: formatNumber(stats.longest_flight_km || 0, 1),
+      altUnit: "km",
     });
   }
 
@@ -311,8 +336,10 @@ function speedMetrics(stats: FilteredStatistics): Metric[] {
     if (knots && knots > 0) {
       metrics.push({
         label,
-        value: formatNumber(knots) + " kt",
-        alt: formatNumber(knots * NAUTICAL_MILES_TO_KM) + " km/h",
+        value: formatNumber(knots),
+        unit: "kt",
+        alt: formatNumber(knots * NAUTICAL_MILES_TO_KM),
+        altUnit: "km/h",
       });
     }
   }
@@ -328,15 +355,19 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
   if (stats.max_altitude_ft !== undefined) {
     metrics.push({
       label: "Max Altitude (MSL)",
-      value: formatNumber(stats.max_altitude_ft) + " ft",
-      alt: formatNumber(stats.max_altitude_ft * FEET_TO_METERS) + " m",
+      value: formatNumber(stats.max_altitude_ft),
+      unit: "ft",
+      alt: formatNumber(stats.max_altitude_ft * FEET_TO_METERS),
+      altUnit: "m",
     });
 
     if (stats.total_altitude_gain_ft !== undefined) {
       metrics.push({
         label: "Elevation Gain",
-        value: formatNumber(stats.total_altitude_gain_ft) + " ft",
-        alt: formatNumber(stats.total_altitude_gain_ft * FEET_TO_METERS) + " m",
+        value: formatNumber(stats.total_altitude_gain_ft),
+        unit: "ft",
+        alt: formatNumber(stats.total_altitude_gain_ft * FEET_TO_METERS),
+        altUnit: "m",
       });
     }
   }
@@ -347,8 +378,10 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
   ) {
     metrics.push({
       label: "Most Common Cruise Altitude (AGL)",
-      value: formatNumber(stats.most_common_cruise_altitude_ft) + " ft",
-      alt: formatNumber(stats.most_common_cruise_altitude_m || 0) + " m",
+      value: formatNumber(stats.most_common_cruise_altitude_ft),
+      unit: "ft",
+      alt: formatNumber(stats.most_common_cruise_altitude_m || 0),
+      altUnit: "m",
     });
   }
 
@@ -492,7 +525,7 @@ export class StatsManager {
         formatNumber(stats.total_distance_nm, 1),
         "nm",
         "Distance",
-        formatNumber(distanceKm, 1) + " km",
+        figure(formatNumber(distanceKm, 1), "km"),
       ) +
       // Kept even without timing data so the grid always reads as four cells
       leadItemHtml(
