@@ -24,8 +24,11 @@ pip install pre-commit && pre-commit install
 
 The pre-commit hooks run ruff (check and format), prettier, typos, gitleaks and
 the whitespace fixers on every commit. When a commit touches `data/`, they also
-check that the KML files are obfuscated; that hook runs `python -m
-kml_heatmap.obfuscate`, so commit with the virtual environment active.
+check that the KML files are obfuscated. Apart from gitleaks and the whitespace
+fixers, the hooks run the tools from your virtual environment and
+`node_modules` rather than from a pinned mirror, so there is no hook version
+that can drift from the one CI installs; commit with the virtual environment
+active and after `npm ci`.
 
 ## Checks
 
@@ -34,7 +37,7 @@ from your virtual environment and `node_modules`, the same way CI does, so no
 container is involved:
 
 ```bash
-make lint            # lock and hook pins, ruff (check and format), mypy, bandit, tsc (frontend and tests), eslint, prettier, typos
+make lint            # lock files and version pins, ruff (check and format), mypy, bandit, tsc (frontend and tests), eslint, prettier, typos
 make format          # ruff format, prettier
 make test            # vitest and pytest with coverage; pytest flags are in DEVELOPMENT.md
 npm run test:e2e     # Playwright: desktop, mobile and WebKit (see DEVELOPMENT.md)

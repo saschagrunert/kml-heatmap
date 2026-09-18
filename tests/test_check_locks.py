@@ -1,7 +1,7 @@
 """Tests for scripts/check_locks.py.
 
 The script is a CI gate: it is the thing that notices when the lock files,
-the pre-commit hooks and the package version drift apart. A gate that
+the Playwright image and the package version drift apart. A gate that
 silently stops checking fails open, and every check below therefore starts
 from a consistent fixture repository and breaks exactly one thing.
 """
@@ -31,8 +31,6 @@ check_locks = _load_module()
 
 VERSION = "1.0.0"
 RUFF = "0.16.4"
-PRETTIER = "3.9.6"
-TYPOS = "1.50.1"
 PLAYWRIGHT = "1.63.0"
 
 
@@ -56,17 +54,6 @@ def repo(tmp_path, monkeypatch):
         f"ruff=={RUFF} \\\n    --hash=sha256:ghi\n",
         encoding="utf-8",
     )
-    (tmp_path / ".pre-commit-config.yaml").write_text(
-        "repos:\n"
-        "  - repo: https://github.com/astral-sh/ruff-pre-commit\n"
-        f"    rev: v{RUFF}\n"
-        "  - repo: https://github.com/rbubley/mirrors-prettier\n"
-        f"    rev: v{PRETTIER}\n"
-        "  - repo: https://github.com/crate-ci/typos\n"
-        "    # a comment between the repo and its rev\n"
-        f"    rev: v{TYPOS}\n",
-        encoding="utf-8",
-    )
     (tmp_path / "package.json").write_text(
         json.dumps({"name": "kml-heatmap", "version": VERSION}), encoding="utf-8"
     )
@@ -77,7 +64,6 @@ def repo(tmp_path, monkeypatch):
                 "version": VERSION,
                 "packages": {
                     "": {"name": "kml-heatmap", "version": VERSION},
-                    "node_modules/prettier": {"version": PRETTIER},
                     "node_modules/@playwright/test": {"version": PLAYWRIGHT},
                 },
             }
@@ -87,7 +73,6 @@ def repo(tmp_path, monkeypatch):
     workflow = tmp_path / ".github" / "workflows"
     workflow.mkdir(parents=True)
     (workflow / "test.yml").write_text(
-        f"      - uses: crate-ci/typos@0123456789abcdef # v{TYPOS}\n"
         f"      image: mcr.microsoft.com/playwright:v{PLAYWRIGHT}-noble\n",
         encoding="utf-8",
     )
@@ -184,66 +169,6 @@ class TestLockFiles:
         assert check_locks.main() == 0
 
 
-class TestPreCommitHooks:
-    def test_a_hook_behind_its_source_fails(self, repo, capsys):
-        config = repo / ".pre-commit-config.yaml"
-        config.write_text(
-            config.read_text(encoding="utf-8").replace(f"v{RUFF}", "v0.16.0"),
-            encoding="utf-8",
-        )
-
-        assert check_locks.main() == 1
-
-        err = capsys.readouterr().err
-        assert "pins ruff v0.16.0, requirements-test.lock ruff 0.16.4" in err
-        assert ".pre-commit-config.yaml" in err
-
-    def test_a_prettier_hook_that_drifted_from_the_npm_lock_fails(self, repo, capsys):
-        config = repo / ".pre-commit-config.yaml"
-        config.write_text(
-            config.read_text(encoding="utf-8").replace(f"v{PRETTIER}", "v3.0.0"),
-            encoding="utf-8",
-        )
-
-        assert check_locks.main() == 1
-
-        assert "pins prettier v3.0.0" in capsys.readouterr().err
-
-    def test_a_typos_hook_that_drifted_from_the_workflow_fails(self, repo, capsys):
-        config = repo / ".pre-commit-config.yaml"
-        config.write_text(
-            config.read_text(encoding="utf-8").replace(f"v{TYPOS}", "v1.0.0"),
-            encoding="utf-8",
-        )
-
-        assert check_locks.main() == 1
-
-        assert "pins typos v1.0.0" in capsys.readouterr().err
-
-    def test_a_missing_hook_fails(self, repo, capsys):
-        (repo / ".pre-commit-config.yaml").write_text("repos:\n", encoding="utf-8")
-
-        assert check_locks.main() == 1
-
-        err = capsys.readouterr().err
-        for tool in ("ruff", "prettier", "typos"):
-            assert f"has no {tool} hook" in err
-
-    def test_a_source_that_pins_nothing_fails(self, repo, capsys):
-        (repo / ".github/workflows/test.yml").write_text("jobs:\n", encoding="utf-8")
-        edit_json(
-            repo / "package-lock.json",
-            packages={"": {"version": VERSION}},
-        )
-        check_locks.read_package_lock.cache_clear()
-
-        assert check_locks.main() == 1
-
-        err = capsys.readouterr().err
-        assert "test.yml does not pin typos" in err
-        assert "package-lock.json does not pin prettier" in err
-
-
 class TestPlaywrightImage:
     def test_an_image_ahead_of_the_library_fails(self, repo, capsys):
         path = repo / ".github/workflows/test.yml"
@@ -263,9 +188,7 @@ class TestPlaywrightImage:
 
     def test_a_workflow_without_the_image_fails(self, repo, capsys):
         path = repo / ".github/workflows/test.yml"
-        path.write_text(
-            f"      - uses: crate-ci/typos@abc # v{TYPOS}\n", encoding="utf-8"
-        )
+        path.write_text("jobs:\n", encoding="utf-8")
 
         assert check_locks.main() == 1
 

@@ -19,7 +19,9 @@ local `make build`.
 
 Install the pre-commit hooks (ruff, prettier, typos, gitleaks, whitespace
 fixers and, for commits that touch `data/`, the obfuscation check) with
-`pip install pre-commit && pre-commit install`. See
+`pip install pre-commit && pre-commit install`. All but gitleaks and the
+whitespace fixers run from the virtual environment and `node_modules`, so they
+are the versions CI installs. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and commit conventions.
 
 ## Frontend (TypeScript)
@@ -170,7 +172,7 @@ Property-based tests use [Hypothesis](https://hypothesis.readthedocs.io/).
 **Checks:**
 
 ```bash
-python scripts/check_locks.py           # Lock files match pyproject.toml
+python scripts/check_locks.py           # Lock files, Playwright image and version pins
 ruff check . && ruff format --check .   # Lint and formatting
 mypy .                                  # Type checking
 bandit -r kml_heatmap -ll               # Security scan
