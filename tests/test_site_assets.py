@@ -6,14 +6,18 @@ import re
 import shutil
 import string
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 import kml_heatmap.site_assets as assets_module
 from kml_heatmap.site_assets import (
+    BuildCommit,
     _copy_javascript_bundle,
     _escape_js_string,
+    build_commit,
+    build_timestamp,
     load_template,
     minify_html,
     package_assets,
@@ -168,6 +172,9 @@ class TestPackageAssets:
         assert "test-carto" in config
         assert "it\\'s" in config
         assert "$center_lat" not in config
+        assert re.search(r"builtAt:'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z'", config)
+        assert re.search(r"commit:'([0-9a-f]{7})?'", config)
+        assert re.search(r"commitUrl:'(https://[^']+)?'", config)
         assert (tmp_path / "styles.css").stat().st_size > 0
         assert (tmp_path / "mapApp.bundle.js").read_text() == bundle.read_text()
         assert not (tmp_path / "mapApp.bundle.js.map").exists()
@@ -189,6 +196,159 @@ class TestPackageAssets:
         _copy_javascript_bundle(out, static_dir / "mapApp.bundle.js")
         assert (out / "mapApp.bundle.js").read_text() == "bundle"
         assert (out / "mapApp.bundle.js.map").read_text() == "{}"
+
+
+class TestBuildTimestamp:
+    def test_is_the_current_time_in_utc(self, monkeypatch):
+        monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z", build_timestamp())
+
+    def test_honours_source_date_epoch(self, monkeypatch):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
+        assert build_timestamp() == "2026-09-21T14:13Z"
+
+    def test_ignores_a_source_date_epoch_that_is_not_one(self, monkeypatch):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "yesterday")
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z", build_timestamp())
+
+
+COMMIT_ENV = (
+    "KML_HEATMAP_COMMIT",
+    "KML_HEATMAP_REPOSITORY",
+    "GITHUB_SHA",
+    "GITHUB_REPOSITORY",
+    "GITHUB_SERVER_URL",
+)
+PACKAGE_ROOT = str(Path(assets_module.__file__).parent.parent)
+
+
+@pytest.fixture
+def no_commit_env(monkeypatch):
+    for name in COMMIT_ENV:
+        monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+def _fake_git(**outputs):
+    """subprocess.run answering each git command from ``outputs``.
+
+    Keys are the git arguments joined with underscores; a missing key or an
+    exception value fails the command.
+    """
+
+    def run(args, **_kwargs):
+        answer = outputs.get("_".join(args[1:]).replace("-", "_"))
+        if answer is None:
+            raise subprocess.CalledProcessError(128, args)
+        if isinstance(answer, BaseException):
+            raise answer
+        return subprocess.CompletedProcess(args, 0, stdout=answer + "\n")
+
+    return run
+
+
+@pytest.fixture
+def fake_git(no_commit_env):
+    """Installs a git on PATH that answers from the given outputs."""
+
+    def install(**outputs):
+        no_commit_env.setattr(
+            "kml_heatmap.site_assets.shutil.which", lambda _name: "/usr/bin/git"
+        )
+        no_commit_env.setattr(
+            "kml_heatmap.site_assets.subprocess.run", _fake_git(**outputs)
+        )
+
+    return install
+
+
+class TestBuildCommit:
+    def test_prefers_the_explicit_commit(self, no_commit_env):
+        no_commit_env.setenv("KML_HEATMAP_COMMIT", "5B3AB4048d1c")
+        no_commit_env.setenv("KML_HEATMAP_REPOSITORY", "git@github.com:me/kmls.git")
+        no_commit_env.setenv("GITHUB_SHA", "a" * 40)
+        no_commit_env.setenv("GITHUB_REPOSITORY", "someone/else")
+        assert build_commit() == BuildCommit(
+            "5b3ab40", "https://github.com/me/kmls/commit/5b3ab4048d1c"
+        )
+
+    @pytest.mark.parametrize(
+        "remote",
+        [
+            "git@github.com:me/kmls.git",
+            "git@github.com:me/kmls",
+            "https://github.com/me/kmls.git",
+            "https://github.com/me/kmls/",
+            "ssh://git@github.com/me/kmls.git",
+        ],
+    )
+    def test_links_github_remotes(self, no_commit_env, remote):
+        no_commit_env.setenv("KML_HEATMAP_COMMIT", "c" * 40)
+        no_commit_env.setenv("KML_HEATMAP_REPOSITORY", remote)
+        assert build_commit().url == f"https://github.com/me/kmls/commit/{'c' * 40}"
+
+    @pytest.mark.parametrize(
+        "remote",
+        ["", "git@gitlab.com:me/kmls.git", "https://github.com.evil/me/kmls"],
+    )
+    def test_does_not_link_other_remotes(self, no_commit_env, remote):
+        no_commit_env.setenv("KML_HEATMAP_COMMIT", "c" * 40)
+        no_commit_env.setenv("KML_HEATMAP_REPOSITORY", remote)
+        assert build_commit() == BuildCommit("ccccccc", "")
+
+    def test_links_github_sha_to_the_repository_the_workflow_runs_in(
+        self, no_commit_env
+    ):
+        no_commit_env.setenv("GITHUB_SHA", "b" * 40)
+        no_commit_env.setenv("GITHUB_REPOSITORY", "someone/their-flights")
+        no_commit_env.setenv("GITHUB_SERVER_URL", "https://github.com")
+        assert build_commit() == BuildCommit(
+            "bbbbbbb", f"https://github.com/someone/their-flights/commit/{'b' * 40}"
+        )
+
+    def test_does_not_link_an_unexpected_server(self, no_commit_env):
+        no_commit_env.setenv("GITHUB_SHA", "b" * 40)
+        no_commit_env.setenv("GITHUB_REPOSITORY", "me/kmls")
+        no_commit_env.setenv("GITHUB_SERVER_URL", "javascript:alert(1)//")
+        assert build_commit() == BuildCommit("bbbbbbb", "")
+
+    def test_asks_git_in_the_checkout_of_the_package(self, fake_git):
+        fake_git(
+            rev_parse___show_toplevel=PACKAGE_ROOT,
+            rev_parse_HEAD="c" * 40,
+            remote_get_url_origin="https://github.com/me/kmls.git",
+        )
+        assert build_commit() == BuildCommit(
+            "ccccccc", f"https://github.com/me/kmls/commit/{'c' * 40}"
+        )
+
+    def test_shows_the_hash_of_a_checkout_without_a_remote(self, fake_git):
+        fake_git(rev_parse___show_toplevel=PACKAGE_ROOT, rev_parse_HEAD="c" * 40)
+        assert build_commit() == BuildCommit("ccccccc", "")
+
+    def test_ignores_a_repository_the_package_is_merely_inside(
+        self, fake_git, tmp_path
+    ):
+        # A virtual environment inside someone else's checkout
+        fake_git(rev_parse___show_toplevel=str(tmp_path), rev_parse_HEAD="c" * 40)
+        assert build_commit() == BuildCommit()
+
+    def test_is_empty_without_git(self, no_commit_env):
+        no_commit_env.setattr("kml_heatmap.site_assets.shutil.which", lambda _: None)
+        assert build_commit() == BuildCommit()
+
+    @pytest.mark.parametrize(
+        "error", [PermissionError(), subprocess.CalledProcessError(128, "git")]
+    )
+    def test_is_empty_outside_a_repository(self, fake_git, error):
+        fake_git(rev_parse___show_toplevel=error)
+        assert build_commit() == BuildCommit()
+
+    @pytest.mark.parametrize("value", ["abc", "'; alert(1)//", "zzzzzzzz"])
+    def test_rejects_anything_that_is_not_a_hash(self, no_commit_env, value):
+        no_commit_env.setenv("KML_HEATMAP_COMMIT", value)
+        no_commit_env.setenv("KML_HEATMAP_REPOSITORY", "git@github.com:me/kmls.git")
+        assert build_commit() == BuildCommit()
 
 
 class TestBundleIsAvailable:

@@ -41,7 +41,8 @@
 - Flight replay with animated airplane marker
 - Year-in-review "Wrapped" summary
 - Shareable URLs that encode the exact map state
-- Privacy protection: absolute timestamps never reach the generated site
+- Privacy protection: no flight date finer than the year reaches the
+  generated site
 - Mobile-friendly with year-based data organization
 - Export map as JPG image
 
@@ -74,9 +75,9 @@ directory; run `make build` (or `make serve-build`) to regenerate it first.
 `docs/` is a local build output and is not committed: the published site is
 built from the sources in CI once all tests pass (see [Development](#development)).
 
-Your KML files are read and left alone. The generated site carries no date
-finer than the year whatever they contain, so nothing has to be stripped from
-them first (see [Privacy](#privacy)). To scrub the files themselves as well,
+Your KML files are read and left alone. The generated site carries no flight
+date finer than the year whatever they contain, so nothing has to be stripped
+from them first (see [Privacy](#privacy)). To scrub the files themselves as well,
 pass `--obfuscate-inputs` or run `make obfuscate`; that rewrites them in place
 and cannot be undone, so keep a copy of the originals.
 
@@ -324,9 +325,9 @@ kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--version] path [
 - `--debug` - Show debug output
 - `--obfuscate-inputs` - Also rewrite the input KML files themselves, in place
   and irreversibly, so that the files on disk carry no real dates either. Off
-  by default: the generated site never carries a date finer than the year
-  whatever the inputs hold (see [Privacy](#privacy)), so this is about the KML
-  files, not about what gets published. Keep a copy of the originals first.
+  by default: the generated site never carries a flight date finer than the
+  year whatever the inputs hold (see [Privacy](#privacy)), so this is about the
+  KML files, not about what gets published. Keep a copy of the originals first.
 - `--version` - Show the version and exit
 
 Every file is written into a hidden staging directory inside the output first
@@ -347,12 +348,22 @@ year, or an error such as an unwritable output directory.
 
 ## Privacy
 
-**The generated site carries no date finer than the year.** Flight paths keep
-only relative seconds since the start of each flight, which is enough for the
-replay and the speed colours; a flight keeps its year, and nothing else. That
-holds whatever the input files contain, so nothing has to be done to them
-before generating a site. The site shows where you have been and how much you
-have flown, but not when.
+**The generated site carries no flight date finer than the year.** Flight
+paths keep only relative seconds since the start of each flight, which is
+enough for the replay and the speed colours; a flight keeps its year, and
+nothing else. That holds whatever the input files contain, so nothing has to be
+done to them before generating a site. The site shows where you have been and
+how much you have flown, but not when.
+
+The one full date it does carry is when it was built: `map_config.js` holds
+the build time (UTC, to the minute) and the short hash of the commit it was
+built from, and the statistics panel shows both. A site built right after a
+flight therefore hints at when that flight was. Set `SOURCE_DATE_EPOCH` to
+stamp a different time. The commit is `KML_HEATMAP_COMMIT` (with its remote in
+`KML_HEATMAP_REPOSITORY`, which `make build` sets from your checkout), else
+`GITHUB_SHA` on GitHub Actions, else `HEAD` of the checkout the tool runs
+from. The hash links to the commit on GitHub only when the repository is
+known.
 
 **Your input files are read and left alone** unless you pass
 `--obfuscate-inputs`, which cannot be undone.
@@ -415,7 +426,7 @@ output-dir/
 ├── mapApp.bundle.js.map
 ├── features.bundle.js     # Replay and Wrapped, fetched on first use
 ├── features.bundle.js.map
-├── map_config.js          # Map defaults and the tile API keys
+├── map_config.js          # Map defaults, tile API keys and the build stamp
 ├── styles.css             # Linked in the page
 ├── features.css           # Replay and Wrapped, fetched with their bundle
 ├── manifest.json

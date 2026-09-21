@@ -8,6 +8,14 @@ CARTO_API_KEY ?=
 OPENAIP_API_KEY ?=
 export CARTO_API_KEY OPENAIP_API_KEY
 
+# The commit the site is stamped with and the remote it is in; the image
+# carries no .git to ask. Evaluated once, not for every recipe line.
+ifndef KML_HEATMAP_COMMIT
+KML_HEATMAP_COMMIT := $(shell git rev-parse HEAD 2>/dev/null)
+KML_HEATMAP_REPOSITORY := $(shell git remote get-url origin 2>/dev/null)
+endif
+export KML_HEATMAP_COMMIT KML_HEATMAP_REPOSITORY
+
 # Container runtime: podman is preferred, docker is the fallback.
 CONTAINER_RUNTIME ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
 INPUT_DIR ?= data
@@ -79,6 +87,7 @@ build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR
 	mkdir -p "$(CACHE_DIR)" "$(OUTPUT_DIR)"
 	$(CONTAINER_RUNTIME) run --rm $(RUN_AS_USER) -e HOME=/tmp \
 	  -e CARTO_API_KEY -e OPENAIP_API_KEY \
+	  -e KML_HEATMAP_COMMIT -e KML_HEATMAP_REPOSITORY -e SOURCE_DATE_EPOCH \
 	  -v "$(abspath $(INPUT_DIR)):$(INPUT_MOUNT)" \
 	  -v "$(abspath $(OUTPUT_DIR)):$(OUTPUT_MOUNT)" \
 	  -v "$(CACHE_DIR):/cache" \
@@ -96,11 +105,11 @@ serve: require-runtime ## Serve OUTPUT_DIR on http://HOST_BIND:PORT (run 'make b
 serve-build: build ## Run build, then serve
 	$(MAKE) serve
 
-# The generated site never carries a date finer than the year, so this is
-# about the KML files themselves: this repository commits the ones in data/,
-# and they must not carry real dates. Run it after adding new flights; the
-# pre-commit hook, `make check-obfuscation` and the `obfuscation` CI job fail
-# if you forget.
+# The generated site never carries a flight date finer than the year, so this
+# is about the KML files themselves: this repository commits the ones in
+# data/, and they must not carry real dates. Run it after adding new flights;
+# the pre-commit hook, `make check-obfuscation` and the `obfuscation` CI job
+# fail if you forget.
 obfuscate: ## Rewrite the KML files in INPUT_DIR in place so they carry no real dates (IRREVERSIBLE)
 	python -m kml_heatmap.obfuscate "$(INPUT_DIR)"
 

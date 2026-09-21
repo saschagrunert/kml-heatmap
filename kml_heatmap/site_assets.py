@@ -16,6 +16,9 @@ import os
 import re
 import shutil
 import string
+import subprocess  # nosec B404
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,7 +40,10 @@ __all__ = [
     "FLAGS_DIR_NAME",
     "SITE_FILES",
     "STATIC_DIR",
+    "BuildCommit",
     "available_country_flags",
+    "build_commit",
+    "build_timestamp",
     "bundle_is_available",
     "load_template",
     "minify_html",
@@ -256,6 +262,116 @@ def render_html(output_file: Path, data_dir_name: str) -> None:
     )
 
 
+def build_timestamp() -> str:
+    """When the site was built, in UTC to the minute.
+
+    Honours SOURCE_DATE_EPOCH so that a build can be reproduced exactly.
+    """
+    epoch = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    try:
+        built_at = datetime.fromtimestamp(int(epoch), UTC) if epoch else None
+    except ValueError, OverflowError, OSError:
+        logger.warning("Ignoring SOURCE_DATE_EPOCH=%r: not a Unix timestamp", epoch)
+        built_at = None
+    if built_at is None:
+        built_at = datetime.now(UTC)
+    return built_at.strftime("%Y-%m-%dT%H:%MZ")
+
+
+# A commit hash as git prints it, and the parts of a repository address
+_COMMIT_HASH = re.compile(r"[0-9a-f]{7,40}")
+_GITHUB_REMOTE = re.compile(
+    r"(?:https://|ssh://git@|git@)github\.com[:/]"
+    r"(?P<repository>[\w.-]+/[\w.-]+?)(?:\.git)?/?"
+)
+_SERVER_URL = re.compile(r"https://[\w.-]+(?::\d+)?")
+_REPOSITORY_NAME = re.compile(r"[\w.-]+/[\w.-]+")
+
+
+@dataclass(frozen=True)
+class BuildCommit:
+    """The commit a site was built from and where it can be looked at."""
+
+    #: Short hash, "" when unknown
+    hash: str = ""
+    #: The commit's page, "" when it is not known which repository it is in
+    url: str = ""
+
+
+def _build_commit(commit: str, repository_url: str) -> BuildCommit:
+    commit = commit.strip().lower()
+    if not _COMMIT_HASH.fullmatch(commit):
+        return BuildCommit()
+    url = f"{repository_url}/commit/{commit}" if repository_url else ""
+    return BuildCommit(commit[:7], url)
+
+
+def _github_repository_url(remote: str) -> str:
+    """The web address of a GitHub remote, "" for any other remote."""
+    match = _GITHUB_REMOTE.fullmatch(remote.strip())
+    if match is None:
+        return ""
+    return f"https://github.com/{match['repository']}"
+
+
+def _git(git: str, *args: str) -> str:
+    """Run git in the package directory and return what it printed."""
+    return subprocess.run(  # noqa: S603 # nosec B603
+        [git, *args],
+        cwd=Path(__file__).parent,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=True,
+    ).stdout.strip()
+
+
+def _commit_from_git() -> BuildCommit:
+    """HEAD of the checkout the package runs from, if it runs from one.
+
+    Only a repository whose top level holds this package counts: an
+    installed package can sit in a virtual environment inside some other
+    checkout, whose HEAD says nothing about this build.
+    """
+    git = shutil.which("git")
+    if git is None:
+        return BuildCommit()
+    try:
+        toplevel = _git(git, "rev-parse", "--show-toplevel")
+        if Path(toplevel).resolve() != Path(__file__).parent.parent.resolve():
+            return BuildCommit()
+        commit = _git(git, "rev-parse", "HEAD")
+    except OSError, subprocess.SubprocessError:
+        return BuildCommit()
+    try:
+        remote = _git(git, "remote", "get-url", "origin")
+    except OSError, subprocess.SubprocessError:
+        remote = ""
+    return _build_commit(commit, _github_repository_url(remote))
+
+
+def build_commit() -> BuildCommit:
+    """The commit the site was built from.
+
+    KML_HEATMAP_COMMIT wins, with KML_HEATMAP_REPOSITORY as the remote it is
+    in (the container has no .git, so `make build` passes both). Then
+    GITHUB_SHA on Actions, in the repository the workflow runs in, which is
+    not necessarily this project's. Then git, if the package runs from a
+    checkout. The hash is only linked when the repository is known.
+    """
+    explicit = os.environ.get("KML_HEATMAP_COMMIT", "")
+    if explicit:
+        remote = os.environ.get("KML_HEATMAP_REPOSITORY", "")
+        return _build_commit(explicit, _github_repository_url(remote))
+    sha = os.environ.get("GITHUB_SHA", "")
+    repository = os.environ.get("GITHUB_REPOSITORY", "")
+    if sha and repository:
+        server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+        known = _SERVER_URL.fullmatch(server) and _REPOSITORY_NAME.fullmatch(repository)
+        return _build_commit(sha, f"{server}/{repository}" if known else "")
+    return _commit_from_git()
+
+
 def _generate_map_config(
     output_dir: Path,
     bounds: dict[str, float],
@@ -271,10 +387,14 @@ def _generate_map_config(
     with open(map_config_template_path, encoding="utf-8") as f:
         map_config_raw = f.read()
 
+    commit = build_commit()
     config_vars = {
         "carto_api_key": _escape_js_string(carto_api_key),
         "openaip_api_key": _escape_js_string(openaip_api_key),
         "data_dir_name": _escape_js_string(data_dir_name),
+        "built_at": build_timestamp(),
+        "commit": commit.hash,
+        "commit_url": _escape_js_string(commit.url),
         "center_lat": str(bounds["center_lat"]),
         "center_lon": str(bounds["center_lon"]),
         "min_lat": str(bounds["min_lat"]),
