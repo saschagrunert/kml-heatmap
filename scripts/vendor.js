@@ -7,7 +7,8 @@
  * page's CSP needs no foreign origin. The
  * copies are taken straight from node_modules, so package-lock.json stays
  * the single place their versions are pinned and Dependabot can bump them
- * like any other dependency.
+ * like any other dependency. The one thing left off a copy is the closing
+ * comment that names a source map the site does not carry.
  *
  * build.js copies them into kml_heatmap/static/vendor/ (generated, not
  * committed) and the Python side publishes that directory next to the page.
@@ -19,8 +20,9 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { REPO_ROOT } from "./source-hash.js";
 
 const NODE_MODULES = join(REPO_ROOT, "node_modules");
@@ -71,6 +73,45 @@ function pinnedVersion(name) {
 }
 
 /**
+ * The `//# sourceMappingURL=` line or block comment that closes a file, with
+ * the name it points at. It has to stand on a line of its own and be the
+ * last thing in the file, so the same words inside a string literal, or
+ * inside another comment, are never taken for it. The name ends at plain
+ * white space and not at `\s`: the bytes are read as latin1, where the second
+ * byte of many UTF-8 characters is the no-break space that `\s` matches.
+ */
+const SOURCE_MAP_COMMENT =
+  /(?:^|\n)[ \t]*(?:\/\/[#@] ?sourceMappingURL=([^ \t\r\n]+)|\/\*[#@] ?sourceMappingURL=([^ \t\r\n]+?) ?\*\/)[ \t\r\n]*$/;
+
+/**
+ * A vendored file without the closing comment that names its source map.
+ *
+ * The packages ship their maps next to the files, and MapLibre's come to
+ * five megabytes, so they are not vendored. Left in, the comment makes every
+ * DevTools session on the published site ask for a map and get a 404. A
+ * comment whose map is vendored is kept: the name is resolved against the
+ * directory the file is published in, as a browser would. Every other byte
+ * stays: the content is matched as latin1, one character per byte, so
+ * nothing is decoded and written back differently and a binary file passes
+ * through.
+ * @param {Buffer} content
+ * @param {string} [published] - Path of the file inside vendor/
+ * @returns {Buffer}
+ */
+export function stripSourceMapComment(content, published = "") {
+  const match = SOURCE_MAP_COMMENT.exec(content.toString("latin1"));
+  if (!match) return content;
+  const map = posix.normalize(
+    posix.join(posix.dirname(published), match[1] ?? match[2] ?? ""),
+  );
+  // Not `in`: that also finds what every object inherits ("constructor")
+  if (Object.hasOwn(VENDOR_FILES, map)) return content;
+  // The line break before the comment belongs to the code above it
+  const start = match[0].startsWith("\n") ? match.index + 1 : match.index;
+  return content.subarray(0, start);
+}
+
+/**
  * Copy the vendored files into kml_heatmap/static/vendor/.
  *
  * The directory is replaced rather than written over, so a file dropped
@@ -82,7 +123,13 @@ export function copyVendorAssets() {
   for (const [published, source] of Object.entries(VENDOR_FILES)) {
     const destination = join(VENDOR_DIR, published);
     mkdirSync(dirname(destination), { recursive: true });
-    copyFileSync(join(NODE_MODULES, source), destination);
+    writeFileSync(
+      destination,
+      stripSourceMapComment(
+        readFileSync(join(NODE_MODULES, source)),
+        published,
+      ),
+    );
   }
   /** @type {Record<string, string>} */
   const versions = {};

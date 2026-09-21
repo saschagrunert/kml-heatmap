@@ -4,9 +4,10 @@
  * build.js stamps it into the bundle banner, and the e2e global setup reads
  * the banner back to refuse a site that was built from other sources. Both
  * import it from here so the two can never hash differently. The build
- * script, the compiler options, the esbuild version and the version of every package bundled into the
- * page (only Lucide: MapLibre is vendored next to the bundles) shape the bundle as much as the
- * sources do, so they are part of the hash.
+ * script, the vendoring script, the compiler options and the versions of
+ * esbuild, of the one package bundled into the page (Lucide) and of the
+ * packages vendored next to the bundles (MapLibre, html-to-image) shape a
+ * built site as much as the sources do, so they are part of the hash.
  *
  * The stylesheets are in it as well. They are not part of any bundle, but
  * they are part of what a built site renders, and the visual snapshots
@@ -24,16 +25,27 @@ const FRONTEND_DIR = join(REPO_ROOT, "kml_heatmap/frontend");
 /** Files outside the sources that change what a built site renders */
 const BUILD_FILES = [
   "build.js",
+  "scripts/vendor.js",
   "tsconfig.json",
   "kml_heatmap/static/styles.css",
   "kml_heatmap/static/features.css",
 ].map((name) => join(REPO_ROOT, name));
 
 /**
- * Packages whose pinned version changes the bundles: the bundler and what
- * it bundles from node_modules. Hashed in this order, after the files.
+ * Packages whose pinned version changes a built site: the bundler, what it
+ * bundles from node_modules, and what scripts/vendor.js copies into the site
+ * as it is (the map library, the export library and the country flags). The
+ * vendored ones are no part of any bundle, but a site that still carries the
+ * MapLibre of before a bump is as stale as one with an old bundle, and
+ * nothing else would say so. Hashed in this order, after the files.
  */
-const BUILD_PACKAGES = ["esbuild", "lucide"];
+const BUILD_PACKAGES = [
+  "esbuild",
+  "lucide",
+  "maplibre-gl",
+  "html-to-image",
+  "flag-icons",
+];
 
 /**
  * The version package-lock.json pins for each of BUILD_PACKAGES

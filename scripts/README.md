@@ -98,9 +98,10 @@ cannot run the check. It needs nothing beyond Python; `--no-verify` skips it.
 
 The content hash of everything that shapes a built site: the TypeScript
 sources in `kml_heatmap/frontend/`, the files in `BUILD_FILES` (`build.js`,
-`tsconfig.json` and the two stylesheets) and
-the versions `package-lock.json` pins for `BUILD_PACKAGES` (esbuild and
-Lucide, the one package bundled into the page). `build.js` writes it into
+`scripts/vendor.js`, `tsconfig.json` and the two stylesheets) and the
+versions `package-lock.json` pins for `BUILD_PACKAGES` (esbuild, Lucide as
+the one package bundled into the page, and MapLibre, html-to-image and
+flag-icons, which are vendored next to the bundles). `build.js` writes it into
 the first line of every bundle. The Playwright global setup
 (`tests/e2e/global-setup.ts`) compares that line in `docs/mapApp.bundle.js`
 with the checkout, so the e2e tests refuse to run against a stale site, and
@@ -117,7 +118,10 @@ of MapLibre GL JS with its stylesheet, and html-to-image) out of
 `kml_heatmap/static/vendor/`, and every country flag of `flag-icons` into
 `kml_heatmap/static/flags/`. Both directories are generated and gitignored,
 and each build replaces them, so a file dropped from the list does not
-linger. Serving the files from the site keeps the page working during a CDN
+linger. A copy differs from its original only in the closing
+`sourceMappingURL` comment, left off because the maps (five megabytes for
+MapLibre) are not shipped and every DevTools session would ask for them and
+get a 404. Serving the files from the site keeps the page working during a CDN
 outage, keeps visitors' addresses away from CDNs and leaves
 `package-lock.json` as the one place their versions are pinned.
 `kml_heatmap/site_assets.py` keeps its own list of the files it publishes,
