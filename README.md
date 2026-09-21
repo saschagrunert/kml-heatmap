@@ -65,16 +65,15 @@ flights, see [Adding New Flights](#adding-new-flights)), then:
 # Build the container image and generate docs/ from data/
 make
 
-# Option 1: open directly in the browser (file:// works)
-open docs/index.html
-
-# Option 2: serve over HTTP (does not rebuild)
+# Serve it over HTTP (does not rebuild)
 make serve
 # Then open http://127.0.0.1:8000/
 ```
 
-Both methods work equally well. `make serve` only serves the existing `docs/`
-directory; run `make build` (or `make serve-build`) to regenerate it first.
+The page loads its code as ES modules and its data with `fetch()`, so it has
+to be served over HTTP; opening `docs/index.html` from disk shows an empty
+map. `make serve` only serves the existing `docs/` directory; run
+`make build` (or `make serve-build`) to regenerate it first.
 `docs/` is a local build output and is not committed: the published site is
 built from the sources in CI once all tests pass (see [Development](#development)).
 
@@ -431,7 +430,6 @@ make build        # builds the container image and generates docs/ from data/
 make serve        # http://127.0.0.1:8000/
 ```
 
-`docs/index.html` also works when opened directly from disk (`file://`).
 Without podman or docker, build from the checkout instead:
 
 ```bash
@@ -648,8 +646,10 @@ output-dir/
 ├── index.html
 ├── mapApp.bundle.js
 ├── mapApp.bundle.js.map
-├── features.bundle.js     # Replay and Wrapped, fetched on first use
+├── features.bundle.js     # Replay and Wrapped, imported on first use
 ├── features.bundle.js.map
+├── shared.bundle.js       # The modules both of the above import
+├── shared.bundle.js.map
 ├── map_config.js          # Map defaults, tile API key and the build stamp
 ├── styles.css             # Linked in the page
 ├── features.css           # Replay and Wrapped, fetched with their bundle
@@ -667,15 +667,15 @@ output-dir/
 │   └── images/            # The marker and layer icons leaflet.css asks for
 ├── flags/                 # One SVG per country the flights touched
 └── data/
-    ├── airports.js        # window.KML_AIRPORTS: airport markers
-    ├── metadata.js        # window.KML_METADATA: years, file sizes, speed range, models, flags
+    ├── airports.json      # Airport markers
+    ├── metadata.json      # Years, file sizes, speed range, models, flags
     ├── 2025/
-    │   └── data.js        # window.KML_DATA_2025
+    │   └── data.json
     └── 2026/
-        └── data.js        # window.KML_DATA_2026
+        └── data.json
 ```
 
-Each year file sets `window.KML_DATA_<YEAR>` to an object with `format`,
+Each year file holds an object with `format`,
 `year`, `original_points`, `path_info` and `segments`. `format` is the wire
 format of the rows, which the page checks before reading them so a file
 written by another release is refused rather than misread. `path_info` lists
@@ -707,7 +707,7 @@ works with are the ones described above; only the file is written this way.
 The page skips the rest of a path, with a warning in the console, from the
 first value that is not a number.
 
-`metadata.js` lists the available years, the size of each year file
+`metadata.json` lists the available years, the size of each year file
 (`year_file_bytes`) so the frontend can show loading progress, the groundspeed
 range of the speed scale and the model names `aircraft.json` knows for the
 exported aircraft (`aircraft_models`). It carries no statistics: the frontend
@@ -717,10 +717,11 @@ an "unknown" year, and the map bounds in `map_config.js` cover only the
 exported flights. Airport entries carry no flight count: the frontend derives
 one per airport from the active year and aircraft filter.
 
-Data is exported as JavaScript files (instead of JSON) for compatibility with
-the `file://` protocol. It is organized by year and loaded on demand. The
-page preloads the latest year's file, which it opens with, so the download
-starts together with the bundles rather than after them.
+The data is plain JSON, organized by year and fetched on demand. The page
+preloads the two index files and the latest year's file, which it opens with,
+so the downloads start together with the bundles rather than after them.
+Regenerating a site written by an earlier version, which loaded the same data
+as scripts (`data.js`, `metadata.js`, `airports.js`), removes those files.
 
 ## Map Features
 

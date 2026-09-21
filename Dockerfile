@@ -13,7 +13,7 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Build the TypeScript sources into an IIFE bundle (kml_heatmap/static/*.js).
+# Build the TypeScript sources into the bundles (kml_heatmap/static/*.bundle.js).
 # The whole package comes along, so a new module or subpackage reaches the
 # runtime image without a Dockerfile change. The TypeScript sources are
 # dropped here rather than in .dockerignore, which would hide them from this

@@ -20,7 +20,7 @@ def _airport(name, lat=48.6899, lon=9.2220, timestamps=None, is_at_path_end=Fals
 
 
 class TestExportAirportsData:
-    def test_names_of_routes_and_markers(self, tmp_path, parse_js):
+    def test_names_of_routes_and_markers(self, tmp_path, parse_data):
         airports = [
             _airport("EDDS Stuttgart - EDDP Leipzig"),
             _airport("EDDS Stuttgart - EDDP Leipzig", is_at_path_end=True),
@@ -28,17 +28,17 @@ class TestExportAirportsData:
             _airport(None),
         ]
         export_airports_data(airports, str(tmp_path))
-        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        data = parse_data(tmp_path / "airports.json")
         names = [airport["name"] for airport in data["airports"]]
         assert names == ["EDDS Stuttgart", "EDDP Leipzig"]
 
-    def test_valid_airport_with_country(self, tmp_path, parse_js):
+    def test_valid_airport_with_country(self, tmp_path, parse_data):
         airports = [_airport("EDDS Stuttgart", timestamps=["t1"])]
         filepath, size = export_airports_data(airports, str(tmp_path))
 
-        assert filepath == str(tmp_path / "airports.js")
-        assert size == (tmp_path / "airports.js").stat().st_size
-        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        assert filepath == str(tmp_path / "airports.json")
+        assert size == (tmp_path / "airports.json").stat().st_size
+        data = parse_data(tmp_path / "airports.json")
         assert data == {
             "airports": [
                 {
@@ -50,30 +50,30 @@ class TestExportAirportsData:
             ]
         }
 
-    def test_timestamps_never_exported(self, tmp_path, parse_js):
+    def test_timestamps_never_exported(self, tmp_path, parse_data):
         export_airports_data(
             [_airport("EDDS Stuttgart", timestamps=["t1"])], str(tmp_path)
         )
-        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        data = parse_data(tmp_path / "airports.json")
         assert "timestamps" not in data["airports"][0]
         assert "icao" not in data["airports"][0]
 
-    def test_country_of_an_airport_name_with_dash(self, tmp_path, parse_js):
+    def test_country_of_an_airport_name_with_dash(self, tmp_path, parse_data):
         """The deduplicator stores one airport, not "EDAQ ... - LFBN ..."."""
         airports = [
             _airport("LFBN Niort - Marais Poitevin", lat=46.31, is_at_path_end=True)
         ]
         export_airports_data(airports, str(tmp_path))
-        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        data = parse_data(tmp_path / "airports.json")
         assert data["airports"][0]["name"] == "LFBN Niort - Marais Poitevin"
         assert data["airports"][0]["country"] == "FR"
 
-    def test_unknown_icao_has_no_country(self, tmp_path, parse_js):
+    def test_unknown_icao_has_no_country(self, tmp_path, parse_data):
         export_airports_data([_airport("ZZZZ Nowhere")], str(tmp_path))
-        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        data = parse_data(tmp_path / "airports.json")
         assert "country" not in data["airports"][0]
 
-    def test_route_name_uses_position(self, tmp_path, parse_js):
+    def test_route_name_uses_position(self, tmp_path, parse_data):
         airports = [
             _airport("EDDS Stuttgart - EDDP Leipzig", is_at_path_end=False),
             _airport(
@@ -84,38 +84,38 @@ class TestExportAirportsData:
             ),
         ]
         export_airports_data(airports, str(tmp_path))
-        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        data = parse_data(tmp_path / "airports.json")
         assert [a["name"] for a in data["airports"]] == [
             "EDDS Stuttgart",
             "EDDP Leipzig",
         ]
 
     @pytest.mark.parametrize("name", ["", "Unknown", "Log Start: 03 Mar 2025", None])
-    def test_invalid_names_filtered(self, tmp_path, name, parse_js):
+    def test_invalid_names_filtered(self, tmp_path, name, parse_data):
         export_airports_data([_airport(name)], str(tmp_path))
-        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        data = parse_data(tmp_path / "airports.json")
         assert data["airports"] == []
 
-    def test_every_deduplicated_airport_is_written(self, tmp_path, parse_js):
+    def test_every_deduplicated_airport_is_written(self, tmp_path, parse_data):
         """Merging nearby airports is the deduplicator's job, not the writer's."""
         airports = [
             _airport("EDDS Stuttgart", timestamps=["t1"]),
             _airport("EDDS Stuttgart", lat=48.68991, lon=9.22201, timestamps=["t2"]),
         ]
         export_airports_data(airports, str(tmp_path))
-        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        data = parse_data(tmp_path / "airports.json")
         assert len(data["airports"]) == 2
 
-    def test_flight_count_never_exported(self, tmp_path, parse_js):
+    def test_flight_count_never_exported(self, tmp_path, parse_data):
         """The frontend counts flights per active filter; see export_writers."""
         airports = [_airport("EDDS Stuttgart", timestamps=["t1", "t2", "t3"])]
         export_airports_data(airports, str(tmp_path))
-        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        data = parse_data(tmp_path / "airports.json")
         assert "flight_count" not in data["airports"][0]
 
-    def test_empty_list(self, tmp_path, parse_js):
+    def test_empty_list(self, tmp_path, parse_data):
         export_airports_data([], str(tmp_path))
-        data = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")
+        data = parse_data(tmp_path / "airports.json")
         assert data == {"airports": []}
 
 
@@ -132,11 +132,11 @@ class TestExportMetadata:
         kwargs.update(overrides)
         return export_metadata(**kwargs)
 
-    def test_d2_shape(self, tmp_path, parse_js):
+    def test_d2_shape(self, tmp_path, parse_data):
         filepath, size = self._export(tmp_path)
-        assert filepath == str(tmp_path / "metadata.js")
-        assert size == (tmp_path / "metadata.js").stat().st_size
-        data = parse_js(tmp_path / "metadata.js", "KML_METADATA")
+        assert filepath == str(tmp_path / "metadata.json")
+        assert size == (tmp_path / "metadata.json").stat().st_size
+        data = parse_data(tmp_path / "metadata.json")
         assert data == {
             "min_groundspeed_knots": 50.0,
             "max_groundspeed_knots": 180.0,
@@ -148,7 +148,7 @@ class TestExportMetadata:
         # The frontend computes the statistics itself
         assert "stats" not in data
         # Written with sorted keys, so a re-export is byte identical
-        content = (tmp_path / "metadata.js").read_text()
+        content = (tmp_path / "metadata.json").read_text()
         assert content.index('"D-EAGJ"') < content.index('"D-EHYL"')
         assert list(data) == sorted(data)
 
@@ -163,20 +163,20 @@ class TestExportMetadata:
         ids=["inf-min", "nan-both", "neg-inf-both", "inf-max"],
     )
     def test_non_finite_speeds_become_zero(
-        self, tmp_path, min_speed, max_speed, expected_min, expected_max, parse_js
+        self, tmp_path, min_speed, max_speed, expected_min, expected_max, parse_data
     ):
         self._export(
             tmp_path, min_groundspeed_knots=min_speed, max_groundspeed_knots=max_speed
         )
-        data = parse_js(tmp_path / "metadata.js", "KML_METADATA")
+        data = parse_data(tmp_path / "metadata.json")
         assert data["min_groundspeed_knots"] == expected_min
         assert data["max_groundspeed_knots"] == expected_max
 
-    def test_groundspeed_rounding(self, tmp_path, parse_js):
+    def test_groundspeed_rounding(self, tmp_path, parse_data):
         self._export(
             tmp_path, min_groundspeed_knots=55.678, max_groundspeed_knots=199.123
         )
-        data = parse_js(tmp_path / "metadata.js", "KML_METADATA")
+        data = parse_data(tmp_path / "metadata.json")
         assert data["min_groundspeed_knots"] == 55.7
         assert data["max_groundspeed_knots"] == 199.1
 

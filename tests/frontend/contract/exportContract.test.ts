@@ -1,8 +1,8 @@
 /**
  * Contract test for the data files written by the Python exporter.
  *
- * Validates `docs/data/metadata.js`, `docs/data/airports.js` and each
- * `docs/data/<year>/data.js` against hand-written runtime guards derived from
+ * Validates `docs/data/metadata.json`, `docs/data/airports.json` and each
+ * `docs/data/<year>/data.json` against hand-written runtime guards derived from
  * `kml_heatmap/frontend/types.ts` (decisions D1/D2/D3). A second test runs the
  * same guards against an inline sample so the guards are verified on their own.
  *
@@ -51,18 +51,9 @@ const REMOVED_METADATA_KEYS = [
 
 type Json = Record<string, unknown>;
 
-/**
- * Strip the `window.X = ` prefix and trailing `;` and parse the JSON body
- */
-export function parseDataFile(source: string, globalName: string): unknown {
-  const prefix = `window.${globalName} = `;
-  const trimmed = source.trim();
-  if (!trimmed.startsWith(prefix)) {
-    throw new Error(`Expected file to start with "${prefix}"`);
-  }
-  let body = trimmed.slice(prefix.length);
-  if (body.endsWith(";")) body = body.slice(0, -1);
-  return JSON.parse(body) as unknown;
+/** The contents of a data file, which the page reads with response.json() */
+function parseDataFile(source: string): unknown {
+  return JSON.parse(source) as unknown;
 }
 
 // ---- runtime guards ----
@@ -335,29 +326,18 @@ const sampleYear2025: RawYearData = {
   },
 };
 
-function serialize(globalName: string, value: unknown): string {
-  return `window.${globalName} = ${JSON.stringify(value)};\n`;
+function serialize(value: unknown): string {
+  return JSON.stringify(value);
 }
 
 describe("export contract (inline new-format sample)", () => {
-  it("parses the window.X = ...; file format", () => {
-    expect(
-      parseDataFile(serialize("KML_METADATA", { a: 1 }), "KML_METADATA"),
-    ).toEqual({ a: 1 });
-    expect(() => parseDataFile("var x = 1;", "KML_METADATA")).toThrow(
-      "Expected file",
-    );
+  it("refuses the script format of earlier versions", () => {
+    expect(parseDataFile(serialize({ a: 1 }))).toEqual({ a: 1 });
+    expect(() => parseDataFile("window.KML_METADATA = {};")).toThrow();
   });
 
-  it("accepts a valid metadata.js", () => {
-    expect(
-      isMetadata(
-        parseDataFile(
-          serialize("KML_METADATA", sampleMetadata),
-          "KML_METADATA",
-        ),
-      ),
-    ).toBe(true);
+  it("accepts a valid metadata.json", () => {
+    expect(isMetadata(parseDataFile(serialize(sampleMetadata)))).toBe(true);
   });
 
   it("rejects metadata with removed keys or null fields", () => {
@@ -397,7 +377,7 @@ describe("export contract (inline new-format sample)", () => {
     ).toBe(false);
   });
 
-  it("accepts a valid airports.js and rejects icao", () => {
+  it("accepts a valid airports.json and rejects icao", () => {
     expect(isAirportsFile(sampleAirports)).toBe(true);
     expect(
       isAirportsFile({
@@ -409,11 +389,8 @@ describe("export contract (inline new-format sample)", () => {
     );
   });
 
-  it("accepts a valid per-year data.js", () => {
-    const parsed = parseDataFile(
-      serialize("KML_DATA_2025", sampleYear2025),
-      "KML_DATA_2025",
-    );
+  it("accepts a valid per-year data.json", () => {
+    const parsed = parseDataFile(serialize(sampleYear2025));
     expect(isRawYearData(parsed)).toBe(true);
   });
 
@@ -528,7 +505,7 @@ describe("export contract (inline new-format sample)", () => {
 });
 
 describe("export contract (docs/data)", () => {
-  const available = existsSync(join(DATA_DIR, "metadata.js"));
+  const available = existsSync(join(DATA_DIR, "metadata.json"));
 
   // Locally the site may simply not have been built yet. In CI the unit job
   // builds it before running vitest, so a missing build is a broken job,
@@ -540,10 +517,9 @@ describe("export contract (docs/data)", () => {
     ).toBe(true);
   });
 
-  it.skipIf(!available)("metadata.js matches the Metadata contract", () => {
+  it.skipIf(!available)("metadata.json matches the Metadata contract", () => {
     const parsed = parseDataFile(
-      readFileSync(join(DATA_DIR, "metadata.js"), "utf8"),
-      "KML_METADATA",
+      readFileSync(join(DATA_DIR, "metadata.json"), "utf8"),
     );
     expect(isMetadata(parsed)).toBe(true);
     for (const key of REMOVED_METADATA_KEYS) {
@@ -555,20 +531,19 @@ describe("export contract (docs/data)", () => {
     );
     for (const year of metadata.available_years) {
       expect(metadata.year_file_bytes).toHaveProperty(String(year));
-      expect(existsSync(join(DATA_DIR, String(year), "data.js"))).toBe(true);
+      expect(existsSync(join(DATA_DIR, String(year), "data.json"))).toBe(true);
     }
   });
 
-  it.skipIf(!available)("airports.js matches the Airport contract", () => {
+  it.skipIf(!available)("airports.json matches the Airport contract", () => {
     const parsed = parseDataFile(
-      readFileSync(join(DATA_DIR, "airports.js"), "utf8"),
-      "KML_AIRPORTS",
+      readFileSync(join(DATA_DIR, "airports.json"), "utf8"),
     );
     expect(isAirportsFile(parsed)).toBe(true);
   });
 
   it.skipIf(!available)(
-    "every <year>/data.js matches the per-year contract with unique path ids",
+    "every <year>/data.json matches the per-year contract with unique path ids",
     () => {
       const years = readdirSync(DATA_DIR, { withFileTypes: true })
         .filter((e) => e.isDirectory() && /^\d{4}$/.test(e.name))
@@ -577,17 +552,15 @@ describe("export contract (docs/data)", () => {
       expect(years.length).toBeGreaterThan(0);
 
       const metadata = parseDataFile(
-        readFileSync(join(DATA_DIR, "metadata.js"), "utf8"),
-        "KML_METADATA",
+        readFileSync(join(DATA_DIR, "metadata.json"), "utf8"),
       ) as Metadata;
       const seenIds = new Set<number>();
       const registrations = new Set<string>();
       for (const year of years) {
         const parsed = parseDataFile(
-          readFileSync(join(DATA_DIR, year, "data.js"), "utf8"),
-          `KML_DATA_${year}`,
+          readFileSync(join(DATA_DIR, year, "data.json"), "utf8"),
         );
-        expect(isRawYearData(parsed), `docs/data/${year}/data.js`).toBe(true);
+        expect(isRawYearData(parsed), `docs/data/${year}/data.json`).toBe(true);
         const raw = parsed as RawYearData;
         expect(raw.year).toBe(Number(year));
         expect("coordinates" in raw).toBe(false);
@@ -635,7 +608,7 @@ describe("export contract (docs/data)", () => {
         // row columns are scaled by kml_heatmap/segment_codec.py and
         // unscaled here, so a disagreement between the two sides would show
         // as physically impossible numbers rather than as a parse error.
-        // metadata.js carries the groundspeed range, which the Python side
+        // metadata.json carries the groundspeed range, which the Python side
         // measured before encoding: every decoded speed has to fall inside
         // it, which no wrong scale factor would manage.
         // One pass, collecting what is wrong rather than asserting per
@@ -667,7 +640,7 @@ describe("export contract (docs/data)", () => {
           if (Math.abs(altitude % 100) !== 0) {
             bad.push(`path ${segment.path_id}: altitude ${altitude}`);
           }
-          // metadata.js carries the groundspeed range, which the Python side
+          // metadata.json carries the groundspeed range, which the Python side
           // measured before encoding: every decoded speed has to fall inside
           // it, which no wrong scale factor would manage
           if (

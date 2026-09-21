@@ -135,20 +135,19 @@ class TestRenderHtml:
         assert len(content) < len(substituted)
 
     def test_data_dir_name_is_html_escaped(self, tmp_path):
-        """A quote in the name must not end the src attribute early."""
+        """A quote in the name must not end the href attribute early."""
         from lxml import html as lxml_html
 
         output_file = tmp_path / "index.html"
         render_html(output_file, 'da"ta<x>')
         content = output_file.read_text()
-        assert 'src="da"' not in content
-        sources = [
-            script.get("src")
-            for script in lxml_html.fromstring(content).iter("script")
-            if script.get("src")
+        assert 'href="da"' not in content
+        preloads = [
+            link.get("href")
+            for link in lxml_html.fromstring(content).iter("link")
+            if link.get("rel") == "preload"
         ]
-        assert 'da"ta<x>/metadata.js' in sources
-        assert 'da"ta<x>/airports.js' in sources
+        assert preloads == ['da"ta<x>/metadata.json', 'da"ta<x>/airports.json']
 
     def test_preloads_the_latest_year(self, tmp_path):
         """The first year the page shows starts downloading with the page."""
@@ -157,19 +156,39 @@ class TestRenderHtml:
         output_file = tmp_path / "index.html"
         render_html(output_file, 'da"ta', 2026)
         preloads = [
-            (link.get("as"), link.get("href"))
+            (link.get("as"), link.get("crossorigin"), link.get("href"))
             for link in lxml_html.fromstring(output_file.read_text()).iter("link")
             if link.get("rel") == "preload"
         ]
-        # The same URL the loader requests, so the preload is what it gets
-        assert preloads == [("script", 'da"ta/2026/data.js')]
+        # The same URL and the same mode the loader's fetch requests, so the
+        # preload is what it gets
+        assert preloads[-1] == ("fetch", "", 'da"ta/2026/data.json')
+        assert {preload[:2] for preload in preloads} == {("fetch", "")}
 
-    def test_preloads_nothing_without_a_year(self, tmp_path):
+    def test_preloads_no_year_without_one(self, tmp_path):
         output_file = tmp_path / "index.html"
         render_html(output_file, "data")
         content = output_file.read_text()
-        assert "preload" not in content
+        assert "/data.json" not in content
         assert "$year_preload" not in content
+
+    def test_loads_the_bundle_as_a_module(self, tmp_path):
+        """The bundles are ES modules, and the shared chunk is on its way
+        before the app bundle asks for it."""
+        from lxml import html as lxml_html
+
+        output_file = tmp_path / "index.html"
+        render_html(output_file, "data")
+        page = lxml_html.fromstring(output_file.read_text())
+        modules = [
+            s.get("src") for s in page.iter("script") if s.get("type") == "module"
+        ]
+        assert modules == ["./mapApp.bundle.js"]
+        assert [
+            link.get("href")
+            for link in page.iter("link")
+            if link.get("rel") == "modulepreload"
+        ] == ["./shared.bundle.js"]
 
     def test_output_is_world_readable(self, tmp_path):
         previous = os.umask(0o022)

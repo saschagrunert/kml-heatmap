@@ -38,6 +38,7 @@ __all__ = [
     "BUNDLE_FILES",
     "FEATURES_BUNDLE_FILE",
     "FLAGS_DIR_NAME",
+    "SHARED_BUNDLE_FILE",
     "SITE_FILES",
     "SITE_FILE_PATTERNS",
     "STATIC_DIR",
@@ -61,11 +62,13 @@ STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 # Built by `npm run build` and not committed
 BUNDLE_FILE = STATIC_DIR / "mapApp.bundle.js"
-# Replay and Wrapped, fetched by the page the first time one of them is
+# Replay and Wrapped, imported by the page the first time one of them is
 # opened (frontend/services/featureLoader.ts). Built by the same `npm run
 # build`, so a site without it is a site built wrong rather than a choice.
 FEATURES_BUNDLE_FILE = STATIC_DIR / "features.bundle.js"
-BUNDLE_FILES = (BUNDLE_FILE, FEATURES_BUNDLE_FILE)
+# The modules the two above have in common, which both of them import
+SHARED_BUNDLE_FILE = STATIC_DIR / "shared.bundle.js"
+BUNDLE_FILES = (BUNDLE_FILE, FEATURES_BUNDLE_FILE, SHARED_BUNDLE_FILE)
 # The sources of the bundle; only present in a checkout, not in the image
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 # First line of the bundle; the group is the source hash (scripts/source-hash.js)
@@ -75,7 +78,6 @@ BUNDLE_BANNER = re.compile(rb"/\* kml-heatmap build ([0-9a-f]{12}) \*/")
 # scripts/source-hash.js; TestSourceHashParity checks that they agree.
 BUILD_HASH_FILES = (
     "build.js",
-    "scripts/shared-modules.js",
     "tsconfig.json",
     "kml_heatmap/static/styles.css",
     "kml_heatmap/static/features.css",
@@ -263,7 +265,8 @@ def render_html(
 
     data_dir = html.escape(data_dir_name)
     year_preload = (
-        f'<link rel="preload" as="script" href="{data_dir}/{latest_year}/data.js" />'
+        f'<link rel="preload" as="fetch" crossorigin '
+        f'href="{data_dir}/{latest_year}/data.json" />'
         if latest_year is not None
         else ""
     )

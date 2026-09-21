@@ -474,7 +474,7 @@ def create_progressive_heatmap(
         return False
 
     logger.info(
-        "  Open %s in a web browser (works with file:// or serve via HTTP)", output_file
+        "  Serve %s over HTTP to view it (e.g. python -m http.server)", output_file
     )
 
     return True

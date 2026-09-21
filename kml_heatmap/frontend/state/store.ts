@@ -25,7 +25,7 @@ export interface StoreState {
   /** Wrapped modal visibility */
   wrappedVisible: boolean;
   currentData: KMLDataset | null;
-  /** Whether the exported flights carry groundspeeds (metadata.js) */
+  /** Whether the exported flights carry groundspeeds (metadata.json) */
   hasTimingData: boolean;
 }
 

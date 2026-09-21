@@ -326,7 +326,7 @@ test.describe("Mobile bar", () => {
       const current = await source.inputValue();
       const other = years.find((year) => year !== current);
       test.skip(other === undefined, "the site has a single year");
-      await page.route(`**/data/${other}/data.js`, (route) => route.abort());
+      await page.route(`**/data/${other}/data.json`, (route) => route.abort());
 
       await openMobileSheet(page, "filter");
       const row = page.locator('.sheet-row[data-row="year"]');
@@ -345,7 +345,7 @@ test.describe("Mobile bar", () => {
       // the browser logs the aborted request
       errors.consoleErrors = errors.consoleErrors.filter(
         (text) =>
-          !text.includes(`data/${other}/data.js`) &&
+          !text.includes(`data/${other}/data.json`) &&
           !text.includes("net::ERR_FAILED"),
       );
     });

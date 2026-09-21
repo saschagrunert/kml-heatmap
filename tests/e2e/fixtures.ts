@@ -8,7 +8,7 @@
  * pixel.
  *
  * Any other cross-origin request fails the test that made it. The page is
- * meant to work offline and from `file://`; a dependency that creeps back
+ * meant to need nothing but its own host; a dependency that creeps back
  * onto a CDN would otherwise only show up as a blank map for visitors.
  *
  * Every spec imports `test` and `expect` from here instead of
@@ -37,9 +37,7 @@ function isTile(url: URL): boolean {
 }
 
 function isSite(url: URL): boolean {
-  // file:// has an empty hostname; the file-protocol spec loads the page
-  // straight off disk
-  return url.protocol === "file:" || LOCAL_HOSTS.has(url.hostname);
+  return LOCAL_HOSTS.has(url.hostname);
 }
 
 async function serveTransparentTile(route: Route): Promise<void> {

@@ -74,18 +74,18 @@ def _write_year(year, paths, metadata, path_ids, output_dir):
     return _assemble_year_file(year, [chunk], str(output_dir))
 
 
-def _ids_by_start(output_dir, parse_js):
+def _ids_by_start(output_dir, parse_data):
     """Path id by the start point of its segments, over every year file."""
     ids = {}
-    for data_file in sorted(output_dir.glob("*/data.js")):
-        for path_id, entry in parse_js(data_file)["segments"].items():
+    for data_file in sorted(output_dir.glob("*/data.json")):
+        for path_id, entry in parse_data(data_file)["segments"].items():
             start, _ = decoded_segments(entry)
             ids[tuple(start)] = int(path_id)
     return ids
 
 
 class TestYearFile:
-    def test_writes_d1_shaped_file(self, tmp_path, parse_js):
+    def test_writes_d1_shaped_file(self, tmp_path, parse_data):
         metadata = [
             {
                 "year": 2025,
@@ -99,9 +99,9 @@ class TestYearFile:
 
         result = _write_year(2025, [_timed_path()], metadata, [7], tmp_path)
 
-        content = (tmp_path / "2025" / "data.js").read_text()
-        assert content.startswith("window.KML_DATA_2025 = {")
-        data = parse_js(tmp_path / "2025" / "data.js", "KML_DATA_2025")
+        content = (tmp_path / "2025" / "data.json").read_text()
+        assert content.startswith('{"format":')
+        data = parse_data(tmp_path / "2025" / "data.json")
         assert list(data) == [
             "format",
             "year",
@@ -123,8 +123,8 @@ class TestYearFile:
                 "aircraft_type": "C172",
             }
         ]
-        # The key order is part of the format: it is what the file:// site
-        # has always shipped and what the chunk assembly reproduces
+        # The key order is part of the format: it is what the site has
+        # always shipped and what the chunk assembly reproduces
         assert list(data["path_info"][0])[:4] == [
             "id",
             "year",
@@ -154,16 +154,16 @@ class TestYearFile:
         assert result.year == 2025
         assert result.path_count == 1
         assert result.original_points == 3
-        assert result.file_bytes == (tmp_path / "2025" / "data.js").stat().st_size
+        assert result.file_bytes == (tmp_path / "2025" / "data.json").stat().st_size
         speeds = [row[3] for row in rows]
         assert result.groundspeed == GroundspeedRange(min(speeds), max(speeds))
         assert _leftover_parts(tmp_path) == []
 
-    def test_omits_none_valued_keys(self, tmp_path, parse_js):
+    def test_omits_none_valued_keys(self, tmp_path, parse_data):
         path = _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0))
         _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
 
-        data = parse_js(tmp_path / "2025" / "data.js")
+        data = parse_data(tmp_path / "2025" / "data.json")
         info = data["path_info"][0]
         assert "start_airport" not in info
         assert "aircraft_registration" not in info
@@ -171,7 +171,7 @@ class TestYearFile:
         # Without relative times there is no time column at all
         assert len(data["segments"]["0"]["columns"]) == 4
 
-    def test_paths_without_an_id_are_skipped_but_counted(self, tmp_path, parse_js):
+    def test_paths_without_an_id_are_skipped_but_counted(self, tmp_path, parse_data):
         paths = [
             _path((50.0, 8.0, 100.0)),
             _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0)),
@@ -180,14 +180,14 @@ class TestYearFile:
 
         result = _write_year(2025, paths, metadata, [None, 3], tmp_path)
 
-        data = parse_js(tmp_path / "2025" / "data.js")
+        data = parse_data(tmp_path / "2025" / "data.json")
         assert data["original_points"] == 3
         assert [info["id"] for info in data["path_info"]] == [3]
         assert result.path_count == 1
 
-    def test_empty_year(self, tmp_path, parse_js):
+    def test_empty_year(self, tmp_path, parse_data):
         result = _write_year(2025, [], [], [], tmp_path)
-        data = parse_js(tmp_path / "2025" / "data.js")
+        data = parse_data(tmp_path / "2025" / "data.json")
         assert data == {
             "format": FORMAT_VERSION,
             "year": 2025,
@@ -197,7 +197,7 @@ class TestYearFile:
         }
         assert result.groundspeed == GroundspeedRange()
 
-    def test_fallback_groundspeed_from_metadata_duration(self, tmp_path, parse_js):
+    def test_fallback_groundspeed_from_metadata_duration(self, tmp_path, parse_data):
         path = _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0), (50.2, 8.2, 300.0))
         metadata = [
             {
@@ -208,15 +208,15 @@ class TestYearFile:
         ]
         _write_year(2025, [path], metadata, [0], tmp_path)
 
-        entry = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        entry = parse_data(tmp_path / "2025" / "data.json")["segments"]["0"]
         _, rows = decoded_segments(entry)
         assert all(row[3] > 0 for row in rows)
         assert all(len(row) == 4 for row in rows)
 
-    def test_zero_length_segments_excluded(self, tmp_path, parse_js):
+    def test_zero_length_segments_excluded(self, tmp_path, parse_data):
         path = _path((50.0, 8.0, 100.0), (50.0, 8.0, 100.0), (50.1, 8.1, 200.0))
         _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
-        data = parse_js(tmp_path / "2025" / "data.js")
+        data = parse_data(tmp_path / "2025" / "data.json")
         entry = data["segments"]["0"]
         assert len(entry["columns"][0]) == 1
         # Dropping a zero-length segment keeps the chain contiguous
@@ -224,20 +224,20 @@ class TestYearFile:
         assert start == [50.0, 8.0]
         assert rows[0][:2] == [50.1, 8.1]
 
-    def test_unrealistic_groundspeed_filtered(self, tmp_path, parse_js):
+    def test_unrealistic_groundspeed_filtered(self, tmp_path, parse_data):
         path = _path(
             (50.0, 8.0, 100.0, "2025-01-01T10:00:00.000Z"),
             (51.0, 9.0, 100.0, "2025-01-01T10:00:01.000Z"),
         )
         result = _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
-        entry = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        entry = parse_data(tmp_path / "2025" / "data.json")["segments"]["0"]
         _, rows = decoded_segments(entry)
         assert rows[0][3] == 0.0
         # A row without a speed does not pull the range down to zero
         assert result.groundspeed == GroundspeedRange()
 
     @pytest.mark.slow
-    def test_large_single_path(self, tmp_path, parse_js):
+    def test_large_single_path(self, tmp_path, parse_data):
         count = 50_001
         path = [
             TrackPoint(50.0 + i * 0.0001, 8.0 + i * 0.0001, 100.0 + i % 50, None)
@@ -245,7 +245,7 @@ class TestYearFile:
         ]
         result = _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
         assert result.original_points == count
-        entry = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
+        entry = parse_data(tmp_path / "2025" / "data.json")["segments"]["0"]
         assert len(entry["columns"][0]) == count - 1
 
 
@@ -325,7 +325,7 @@ class TestPathIds:
             2: 1,
         }
 
-    def test_removing_a_path_keeps_the_ids_of_the_others(self, tmp_path, parse_js):
+    def test_removing_a_path_keeps_the_ids_of_the_others(self, tmp_path, parse_data):
         paths = [_timed_path(offset) for offset in range(5)]
         metadata = [{"year": 2025}, {"year": 2026}, {"year": 2025}] + [
             {"year": 2026}
@@ -334,15 +334,15 @@ class TestPathIds:
         del paths[2], metadata[2]
         export_all_data(paths, metadata, [], output_dir=str(tmp_path / "fewer"))
 
-        before = _ids_by_start(tmp_path / "all", parse_js)
-        after = _ids_by_start(tmp_path / "fewer", parse_js)
+        before = _ids_by_start(tmp_path / "all", parse_data)
+        after = _ids_by_start(tmp_path / "fewer", parse_data)
         assert len(before) == 5
         del before[(52.0, 8.0)]
         assert after == before
 
 
 class TestAirportEndpoints:
-    def test_ends_without_a_marker_are_not_exported(self, tmp_path, parse_js):
+    def test_ends_without_a_marker_are_not_exported(self, tmp_path, parse_data):
         """An end counts as an airport if and only if it has a marker."""
         paths = [_timed_path()]
         metadata = [
@@ -358,8 +358,8 @@ class TestAirportEndpoints:
             {"name": "Aunt Martha", "lat": 50.2, "lon": 8.2, "is_at_path_end": True},
         ]
         export_all_data(paths, metadata, airports, output_dir=str(tmp_path))
-        markers = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")["airports"]
-        info = parse_js(tmp_path / "2025" / "data.js", "KML_DATA_2025")["path_info"]
+        markers = parse_data(tmp_path / "airports.json")["airports"]
+        info = parse_data(tmp_path / "2025" / "data.json")["path_info"]
         assert [marker["name"] for marker in markers] == ["Aunt Martha"]
         assert "start_airport" not in info[0]
         assert info[0]["end_airport"] == "Aunt Martha"
@@ -367,7 +367,7 @@ class TestAirportEndpoints:
 
 class TestDropDuplicatePaths:
     def test_same_flight_under_two_names_is_exported_once(
-        self, tmp_path, parse_js, capsys
+        self, tmp_path, parse_data, capsys
     ):
         paths = [_timed_path(), _timed_path(1.0), _timed_path()]
         metadata = [
@@ -376,7 +376,7 @@ class TestDropDuplicatePaths:
             {"year": 2025, "filename": "copy of 1_DEAGJ_DA20.kml"},
         ]
         export_all_data(paths, metadata, [], output_dir=str(tmp_path))
-        year = parse_js(tmp_path / "2025" / "data.js", "KML_DATA_2025")
+        year = parse_data(tmp_path / "2025" / "data.json")
         assert [info["id"] for info in year["path_info"]] == [
             path_content_id(paths[0]),
             path_content_id(paths[1]),
@@ -449,7 +449,7 @@ class TestProcessYearChunk:
 
 
 class TestAssembleYearFile:
-    def test_concatenates_chunks_in_index_order(self, tmp_path, parse_js):
+    def test_concatenates_chunks_in_index_order(self, tmp_path, parse_data):
         second = process_year_chunk(
             2025, [_two_point_path(1)], [{"year": 2025}], [1], str(tmp_path), index=1
         )
@@ -460,7 +460,7 @@ class TestAssembleYearFile:
 
         result = _assemble_year_file(2025, [second, empty, first], str(tmp_path))
 
-        data = parse_js(tmp_path / "2025" / "data.js", "KML_DATA_2025")
+        data = parse_data(tmp_path / "2025" / "data.json")
         assert list(data) == [
             "format",
             "year",
@@ -503,8 +503,8 @@ class TestAssembleYearFile:
         ]
         result = _assemble_year_file(2025, chunks, str(chunked))
 
-        assert (chunked / "2025" / "data.js").read_bytes() == (
-            whole / "2025" / "data.js"
+        assert (chunked / "2025" / "data.json").read_bytes() == (
+            whole / "2025" / "data.json"
         ).read_bytes()
         assert result.path_count == 7
 
@@ -518,7 +518,7 @@ class TestAssembleYearFile:
         ):
             _assemble_year_file(2025, [chunk], str(tmp_path))
         assert _leftover_parts(tmp_path) == []
-        assert not (tmp_path / "2025" / "data.js").exists()
+        assert not (tmp_path / "2025" / "data.json").exists()
 
 
 class TestGroupPathsByYear:
@@ -669,7 +669,7 @@ class _CountingPool:
 
 
 class TestExportChunks:
-    def test_single_chunk_runs_without_a_pool(self, tmp_path, parse_js):
+    def test_single_chunk_runs_without_a_pool(self, tmp_path, parse_data):
         paths = [_two_point_path(0), _two_point_path(1)]
         metadata = [{"year": 2025}, {"year": 2025}]
         plans = _plan_chunks({2025: [0, 1]}, {0: 0, 1: 1}, max_workers=4)
@@ -679,10 +679,10 @@ class TestExportChunks:
 
         pool.assert_not_called()
         assert [r.year for r in results] == [2025]
-        data = parse_js(tmp_path / "2025/data.js")
+        data = parse_data(tmp_path / "2025/data.json")
         assert [p["id"] for p in data["path_info"]] == [0, 1]
 
-    def test_results_sorted_by_year_with_their_ids(self, tmp_path, parse_js):
+    def test_results_sorted_by_year_with_their_ids(self, tmp_path, parse_data):
         paths = [_two_point_path(0), _two_point_path(1), _two_point_path(2)]
         metadata = [{"year": 2026}, {"year": 2025}, {"year": 2025}]
         ids = {0: 30, 1: 20, 2: 10}
@@ -691,14 +691,18 @@ class TestExportChunks:
         results = _export_chunks(plans, paths, metadata, str(tmp_path), 4)
 
         assert [r.year for r in results] == [2025, 2026]
-        ids_2025 = [p["id"] for p in parse_js(tmp_path / "2025/data.js")["path_info"]]
-        ids_2026 = [p["id"] for p in parse_js(tmp_path / "2026/data.js")["path_info"]]
+        ids_2025 = [
+            p["id"] for p in parse_data(tmp_path / "2025/data.json")["path_info"]
+        ]
+        ids_2026 = [
+            p["id"] for p in parse_data(tmp_path / "2026/data.json")["path_info"]
+        ]
         assert ids_2025 == [20, 10]
         assert ids_2026 == [30]
         assert _leftover_parts(tmp_path) == []
 
     def test_chunked_year_matches_the_unchunked_file(
-        self, tmp_path, monkeypatch, parse_js
+        self, tmp_path, monkeypatch, parse_data
     ):
         paths = [_two_point_path(i) for i in range(6)]
         metadata = [{"year": 2025}] * 6
@@ -718,8 +722,8 @@ class TestExportChunks:
         assert len(plans) == 3
         results = _export_chunks(plans, paths, metadata, str(chunked), 3)
 
-        assert (chunked / "2025/data.js").read_bytes() == (
-            whole / "2025/data.js"
+        assert (chunked / "2025/data.json").read_bytes() == (
+            whole / "2025/data.json"
         ).read_bytes()
         assert results[0].path_count == 6
         assert _leftover_parts(chunked) == []
@@ -778,7 +782,7 @@ class TestExportChunks:
         assert _export_chunks([], [], [], str(tmp_path), 4) == []
 
     def test_chunks_are_handed_to_the_pool_a_few_at_a_time(
-        self, tmp_path, monkeypatch, parse_js
+        self, tmp_path, monkeypatch, parse_data
     ):
         """Submitting every chunk at once would pickle the whole dataset into
         the executor's queue while the main process still holds it."""
@@ -802,16 +806,16 @@ class TestExportChunks:
         assert pool.max_in_flight <= 2 * exporter_module.MAX_QUEUED_CHUNKS_PER_WORKER
         assert _leftover_parts(tmp_path) == []
         for year in years:
-            assert len(parse_js(tmp_path / f"{year}/data.js")["path_info"]) == 1
+            assert len(parse_data(tmp_path / f"{year}/data.json")["path_info"]) == 1
 
 
 def _stage_site(site, years=(2025,), version="new"):
     """Write a minimal site into the staging directories of ``site``."""
     for year in years:
         (site.data_stage / str(year)).mkdir()
-        (site.data_stage / str(year) / "data.js").write_text(f"{version} {year}")
-    (site.data_stage / "airports.js").write_text(f"{version} airports")
-    (site.data_stage / "metadata.js").write_text(f"{version} metadata")
+        (site.data_stage / str(year) / "data.json").write_text(f"{version} {year}")
+    (site.data_stage / "airports.json").write_text(f"{version} airports")
+    (site.data_stage / "metadata.json").write_text(f"{version} metadata")
     (site.site_stage / "index.html").write_text(f"{version} page")
     (site.site_stage / "manifest.json").write_text(f"{version} manifest")
 
@@ -852,10 +856,10 @@ class TestSiteOutput:
             site.publish([2025, 2026])
 
         assert _tree(out) == {
-            "data/2025/data.js": "new 2025",
-            "data/2026/data.js": "new 2026",
-            "data/airports.js": "new airports",
-            "data/metadata.js": "new metadata",
+            "data/2025/data.json": "new 2025",
+            "data/2026/data.json": "new 2026",
+            "data/airports.json": "new airports",
+            "data/metadata.json": "new metadata",
             "index.html": "new page",
             "manifest.json": "new manifest",
         }
@@ -916,6 +920,26 @@ class TestSiteOutput:
         assert _tree(out) == previous
         assert _stages(out) == []
 
+    def test_script_data_of_earlier_versions_is_removed(self, tmp_path):
+        """A site from when the page loaded its data with script tags."""
+        out = tmp_path / "out"
+        _publish_site(out, years=(2019, 2025))
+        data = out / "data"
+        for legacy in ("airports.js", "metadata.js", "2019/data.js", "2025/data.js"):
+            (data / legacy).write_text("window.KML = {};")
+
+        with SiteOutput(out, data) as site:
+            _stage_site(site)
+            site.publish([2025])
+
+        assert _tree(out) == {
+            "data/2025/data.json": "new 2025",
+            "data/airports.json": "new airports",
+            "data/metadata.json": "new metadata",
+            "index.html": "new page",
+            "manifest.json": "new manifest",
+        }
+
     def test_stale_outputs_are_removed_and_foreign_files_kept(self, tmp_path, capsys):
         out = tmp_path / "out"
         _publish_site(out, years=(2019, 2025))
@@ -923,9 +947,9 @@ class TestSiteOutput:
         (data / "2019" / ".data.0.info.part").write_text("fragment")
         (data / "2025" / ".data.1.segments.part").write_text("fragment")
         (data / "unknown").mkdir()
-        (data / "unknown" / "data.js").write_text("old versions")
+        (data / "unknown" / "data.json").write_text("old versions")
         (data / "2018").mkdir()
-        (data / "2018" / "data.js").write_text("old")
+        (data / "2018" / "data.json").write_text("old")
         (data / "2018" / "notes.txt").write_text("keep me")
         (data / "notes.txt").write_text("keep me")
         (out / "CNAME").write_text("keep me")
@@ -938,9 +962,9 @@ class TestSiteOutput:
         assert _tree(out) == {
             "CNAME": "keep me",
             "data/2018/notes.txt": "keep me",
-            "data/2025/data.js": "new 2025",
-            "data/airports.js": "new airports",
-            "data/metadata.js": "new metadata",
+            "data/2025/data.json": "new 2025",
+            "data/airports.json": "new airports",
+            "data/metadata.json": "new metadata",
             "data/notes.txt": "keep me",
             "index.html": "new page",
         }
@@ -952,7 +976,7 @@ class TestSiteOutput:
         "sabotage",
         [
             pytest.param(
-                lambda out, victim: (out / "data" / "metadata.js").symlink_to(victim),
+                lambda out, victim: (out / "data" / "metadata.json").symlink_to(victim),
                 id="symlinked-metadata",
             ),
             pytest.param(
@@ -968,7 +992,7 @@ class TestSiteOutput:
                 id="file-in-place-of-a-year-dir",
             ),
             pytest.param(
-                lambda out, victim: (out / "data" / "2026" / "data.js").mkdir(
+                lambda out, victim: (out / "data" / "2026" / "data.json").mkdir(
                     parents=True
                 ),
                 id="directory-in-place-of-a-file",
@@ -979,8 +1003,8 @@ class TestSiteOutput:
         out = tmp_path / "out"
         _publish_site(out)
         (out / "manifest.json").unlink()
-        (out / "data" / "metadata.js").unlink()
-        victim = tmp_path / "victim" / "data.js"
+        (out / "data" / "metadata.json").unlink()
+        victim = tmp_path / "victim" / "data.json"
         victim.parent.mkdir()
         victim.write_text("precious")
         sabotage(out, victim)
@@ -999,19 +1023,19 @@ class TestSiteOutput:
         out = tmp_path / "out"
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
-        (elsewhere / "data.js").write_text("precious")
+        (elsewhere / "data.json").write_text("precious")
         (out / "data" / "2020").mkdir(parents=True)
         (out / "data" / "2019").symlink_to(elsewhere)
-        (out / "data" / "2020" / "data.js").symlink_to(elsewhere / "data.js")
-        (out / "mapApp.bundle.js.map").symlink_to(elsewhere / "data.js")
+        (out / "data" / "2020" / "data.json").symlink_to(elsewhere / "data.json")
+        (out / "mapApp.bundle.js.map").symlink_to(elsewhere / "data.json")
 
         with SiteOutput(out, out / "data", ("mapApp.bundle.js.map",)) as site:
             _stage_site(site)
             site.publish([2025])
 
-        assert (elsewhere / "data.js").read_text() == "precious"
+        assert (elsewhere / "data.json").read_text() == "precious"
         assert (out / "data" / "2019").is_symlink()
-        assert (out / "data" / "2020" / "data.js").is_symlink()
+        assert (out / "data" / "2020" / "data.json").is_symlink()
         assert (out / "mapApp.bundle.js.map").is_symlink()
         assert "Leaving symlink in output directory" in capsys.readouterr().err
 
@@ -1087,8 +1111,8 @@ class TestSiteOutput:
         finally:
             (out / "data" / "2019").chmod(0o755)
 
-        assert (out / "data" / "2019" / "data.js").exists()
-        assert (out / "data" / "2025" / "data.js").read_text() == "new 2025"
+        assert (out / "data" / "2019" / "data.json").exists()
+        assert (out / "data" / "2025" / "data.json").read_text() == "new 2025"
         assert "Could not remove stale output" in capsys.readouterr().err
 
     def test_stages_of_killed_runs_are_removed(self, tmp_path):
@@ -1152,7 +1176,7 @@ class TestSiteOutput:
 
 
 class TestExportAllData:
-    def test_multi_year_export_is_consistent(self, tmp_path, parse_js):
+    def test_multi_year_export_is_consistent(self, tmp_path, parse_data):
         paths = [
             _timed_path(),
             _path((51.0, 9.0, 700.0), (51.1, 9.1, 800.0)),
@@ -1173,9 +1197,9 @@ class TestExportAllData:
         result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
 
         assert result == ExportResult(years=[2025, 2026], countries=[])
-        meta = parse_js(tmp_path / "metadata.js", "KML_METADATA")
-        data_2025 = parse_js(tmp_path / "2025" / "data.js")
-        data_2026 = parse_js(tmp_path / "2026" / "data.js")
+        meta = parse_data(tmp_path / "metadata.json")
+        data_2025 = parse_data(tmp_path / "2025" / "data.json")
+        data_2026 = parse_data(tmp_path / "2026" / "data.json")
         _, rows_2026 = decoded_segments(
             data_2026["segments"][str(path_content_id(paths[0]))]
         )
@@ -1187,8 +1211,8 @@ class TestExportAllData:
             "max_groundspeed_knots": max(speeds),
             "min_groundspeed_knots": min(speeds),
             "year_file_bytes": {
-                "2025": (tmp_path / "2025" / "data.js").stat().st_size,
-                "2026": (tmp_path / "2026" / "data.js").stat().st_size,
+                "2025": (tmp_path / "2025" / "data.json").stat().st_size,
+                "2026": (tmp_path / "2026" / "data.json").stat().st_size,
             },
         }
         assert [p["id"] for p in data_2025["path_info"]] == [path_content_id(paths[1])]
@@ -1196,7 +1220,7 @@ class TestExportAllData:
         assert data_2025["original_points"] == 3
         assert _leftover_parts(tmp_path) == []
 
-    def test_aircraft_models_of_the_exported_paths(self, tmp_path, parse_js):
+    def test_aircraft_models_of_the_exported_paths(self, tmp_path, parse_data):
         paths = [_timed_path(), _path((52.0, 10.0, 1.0)), _timed_path(1.0)]
         metadata = [
             {"year": 2025, "aircraft_registration": "D-EAGJ"},
@@ -1213,10 +1237,10 @@ class TestExportAllData:
             aircraft_data={"D-EAGJ": "Katana", "D-EHYL": "Star", "D-XXXX": "Other"},
         )
 
-        meta = parse_js(tmp_path / "metadata.js", "KML_METADATA")
+        meta = parse_data(tmp_path / "metadata.json")
         assert meta["aircraft_models"] == {"D-EAGJ": "Katana"}
 
-    def test_paths_without_year_are_excluded(self, tmp_path, parse_js):
+    def test_paths_without_year_are_excluded(self, tmp_path, parse_data):
         paths = [_timed_path(), _path((51.0, 9.0, 700.0), (51.1, 9.1, 800.0))]
         metadata = [{"year": 2025}, {"year": None}]
 
@@ -1224,27 +1248,27 @@ class TestExportAllData:
 
         assert sorted(p.name for p in tmp_path.iterdir()) == [
             "2025",
-            "airports.js",
-            "metadata.js",
+            "airports.json",
+            "metadata.json",
         ]
-        data = parse_js(tmp_path / "2025" / "data.js")
+        data = parse_data(tmp_path / "2025" / "data.json")
         assert [info["id"] for info in data["path_info"]] == [path_content_id(paths[0])]
         assert data["original_points"] == 3
 
-    def test_year_with_only_point_markers_is_not_exported(self, tmp_path, parse_js):
+    def test_year_with_only_point_markers_is_not_exported(self, tmp_path, parse_data):
         paths = [_path((51.5, 12.0, 20.0)), _path((51.5, 12.0, 20.0)), _timed_path()]
         metadata = [{"year": 2024}, {"year": 2024}, {"year": 2025}]
 
         result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
 
         assert result.years == [2025]
-        assert parse_js(tmp_path / "metadata.js")["available_years"] == [2025]
+        assert parse_data(tmp_path / "metadata.json")["available_years"] == [2025]
         assert not (tmp_path / "2024").exists()
 
-    def test_no_paths_produces_empty_metadata(self, tmp_path, parse_js):
+    def test_no_paths_produces_empty_metadata(self, tmp_path, parse_data):
         result = export_all_data([], [], [], output_dir=str(tmp_path))
         assert result.years == []
-        assert parse_js(tmp_path / "metadata.js") == {
+        assert parse_data(tmp_path / "metadata.json") == {
             "aircraft_models": {},
             "available_flags": [],
             "available_years": [],
@@ -1286,9 +1310,9 @@ class TestExportAllData:
             )
 
         assert sorted(trees[0]) == [
-            "2025/data.js",
-            "2026/data.js",
-            "airports.js",
-            "metadata.js",
+            "2025/data.json",
+            "2026/data.json",
+            "airports.json",
+            "metadata.json",
         ]
         assert trees[0] == trees[1]

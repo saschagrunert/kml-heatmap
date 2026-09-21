@@ -443,7 +443,7 @@ class TestDropPathsWithoutYear:
 
 @pytest.mark.usefixtures("bundle")
 class TestExportSite:
-    def test_exports_and_excludes_yearless_paths(self, tmp_path, parse_js):
+    def test_exports_and_excludes_yearless_paths(self, tmp_path, parse_data):
         coords = [
             TrackPoint(50.0, 8.0, 100.0),
             TrackPoint(51.0, 9.0, 200.0),
@@ -474,25 +474,25 @@ class TestExportSite:
         # The map is fitted to the exported path only
         assert _map_bounds(out) == [[50.0, 8.0], [51.0, 9.0]]
         assert result.years == [2025]
-        metadata = parse_js(out / "data" / "metadata.js")
+        metadata = parse_data(out / "data" / "metadata.json")
         assert metadata["aircraft_models"] == {"D-EAGJ": "Katana"}
-        year = parse_js(out / "data" / "2025" / "data.js")
+        year = parse_data(out / "data" / "2025" / "data.json")
         assert len(year["path_info"]) == 1
         assert year["original_points"] == 2
-        airports = parse_js(out / "data" / "airports.js")["airports"]
+        airports = parse_data(out / "data" / "airports.json")["airports"]
         assert [airport["name"] for airport in airports] == [
             "EDDF Frankfurt Main",
             "EDDK Cologne Bonn",
         ]
         assert sorted(p.name for p in (out / "data").iterdir()) == [
             "2025",
-            "airports.js",
-            "metadata.js",
+            "airports.json",
+            "metadata.json",
         ]
         assert (out / "index.html").exists()
         assert _stages(out) == []
 
-    def test_airports_leave_out_excluded_paths(self, tmp_path, parse_js):
+    def test_airports_leave_out_excluded_paths(self, tmp_path, parse_data):
         """A path without an export must not publish its location either."""
         paths = [
             [TrackPoint(50.0, 8.0, 100.0), TrackPoint(51.0, 9.0, 200.0)],
@@ -522,7 +522,7 @@ class TestExportSite:
 
         _export_site(paths, metadata, out / "index.html", out / "data")
 
-        airports = parse_js(out / "data" / "airports.js")["airports"]
+        airports = parse_data(out / "data" / "airports.json")["airports"]
         assert [airport["name"] for airport in airports] == [
             "EDDF Frankfurt Main",
             "EDDK Cologne Bonn",
@@ -549,7 +549,7 @@ class TestCreateProgressiveHeatmap:
             is False
         )
         assert "Refusing" in capsys.readouterr().err
-        assert not (tmp_path / "airports.js").exists()
+        assert not (tmp_path / "airports.json").exists()
 
     def test_refuses_when_aircraft_json_dir_overlaps(self, tmp_path):
         input_dir = tmp_path / "input"
@@ -713,7 +713,7 @@ class TestCreateProgressiveHeatmap:
         real_atomic_write = exporter_module.atomic_write
 
         def atomic_write(path, write):
-            if path.name == "data.js":
+            if path.name == "data.json":
                 raise OSError(errno.ENOSPC, "No space left on device")
             return real_atomic_write(path, write)
 
@@ -769,7 +769,7 @@ class TestCreateProgressiveHeatmap:
         assert "symlink" in capsys.readouterr().err
         assert victim.read_text() == "precious"
         assert not (out / "index.html").exists()
-        assert not (out / "data" / "metadata.js").exists()
+        assert not (out / "data" / "metadata.json").exists()
 
     @pytest.mark.usefixtures("bundle")
     def test_stale_bundle_source_map_is_removed(self, tmp_path):
@@ -799,10 +799,10 @@ class TestCreateProgressiveHeatmap:
             )
             is True
         )
-        assert (out / "data" / "2025" / "data.js").exists()
+        assert (out / "data" / "2025" / "data.json").exists()
 
     @pytest.mark.usefixtures("bundle")
-    def test_end_to_end_with_aircraft_data(self, tmp_path, parse_js):
+    def test_end_to_end_with_aircraft_data(self, tmp_path, parse_data):
         input_dir = tmp_path / "input"
         input_dir.mkdir()
         kml_file = _write_kml(input_dir / "1_DEAGJ_DA20.kml")
@@ -819,14 +819,16 @@ class TestCreateProgressiveHeatmap:
         )
 
         assert (out / "index.html").exists()
-        meta = parse_js(out / "data" / "metadata.js", "KML_METADATA")
+        meta = parse_data(out / "data" / "metadata.json")
         assert meta["available_years"] == [2025]
         assert meta["aircraft_models"] == {"D-EAGJ": "Diamond Katana"}
-        year = parse_js(out / "data" / "2025" / "data.js", "KML_DATA_2025")
+        year = parse_data(out / "data" / "2025" / "data.json")
         assert len(year["path_info"]) == 1
 
     @pytest.mark.usefixtures("bundle")
-    def test_removing_an_input_file_keeps_the_other_path_ids(self, tmp_path, parse_js):
+    def test_removing_an_input_file_keeps_the_other_path_ids(
+        self, tmp_path, parse_data
+    ):
         """Path ids end up in shared links, which must keep their flights."""
         # Every file flies through a different waypoint
         kml_files = [
@@ -840,8 +842,8 @@ class TestCreateProgressiveHeatmap:
 
         def ids_by_waypoint(out):
             ids = {}
-            for data_file in sorted((out / "data").glob("*/data.js")):
-                for path_id, entry in parse_js(data_file)["segments"].items():
+            for data_file in sorted((out / "data").glob("*/data.json")):
+                for path_id, entry in parse_data(data_file)["segments"].items():
                     _, rows = decoded_segments(entry)
                     ids[rows[0][1]] = int(path_id)
             return ids

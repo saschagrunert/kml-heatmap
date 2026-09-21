@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file:; img-src 'self' file: data: blob: https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; connect-src 'self' file: https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; font-src 'self' file:; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; connect-src 'self' https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; font-src 'self'; base-uri 'none'; form-action 'none'"
     />
     <meta
       name="viewport"
@@ -54,10 +54,25 @@
     <link rel="manifest" href="./manifest.json" />
     <link rel="stylesheet" href="./vendor/leaflet.css" />
     <link rel="stylesheet" href="./styles.css" />
-    <!-- The latest year is what the page shows first. Requesting it here
-         overlaps its download with Leaflet and the bundle instead of
-         starting it once they have run; the loader's script tag for the
-         same URL is then served from this preload. -->
+    <!-- What the app asks for as soon as it runs: the chunk its bundle
+         imports, the two index files, and the latest year, which is what the
+         page shows first. Requesting them here overlaps their download with
+         Leaflet and the bundle instead of starting it once they have run;
+         the loader's fetch for the same URL is then served from the preload
+         (crossorigin is what makes the two requests match). -->
+    <link rel="modulepreload" href="./shared.bundle.js" />
+    <link
+      rel="preload"
+      as="fetch"
+      crossorigin
+      href="$data_dir_name/metadata.json"
+    />
+    <link
+      rel="preload"
+      as="fetch"
+      crossorigin
+      href="$data_dir_name/airports.json"
+    />
     $year_preload
   </head>
   <body>
@@ -590,22 +605,18 @@
       </a>
     </div>
 
-    <!-- Scripts are deferred and execute in document order: Leaflet, data,
+    <!-- Deferred scripts and modules execute in document order: Leaflet,
          config, application bundle. html-to-image is loaded on the first
          export. Everything is served from the site itself (vendor/ is copied
          out of node_modules by scripts/vendor.js), so the page needs no
-         third-party origin and works offline. -->
+         third-party origin. -->
     <script src="./vendor/leaflet.js" defer></script>
     <script src="./vendor/leaflet-heat.js" defer></script>
-
-    <!-- Preload essential data files (works with both file:// and https://) -->
-    <script src="$data_dir_name/metadata.js" defer></script>
-    <script src="$data_dir_name/airports.js" defer></script>
 
     <!-- Configuration with template variables -->
     <script src="./map_config.js" defer></script>
 
     <!-- Main application -->
-    <script src="./mapApp.bundle.js" defer></script>
+    <script type="module" src="./mapApp.bundle.js"></script>
   </body>
 </html>

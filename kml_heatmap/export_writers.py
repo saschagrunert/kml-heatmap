@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from .airport_lookup import extract_icao_codes_from_name, lookup_airport_country
 from .airports import extract_airport_name
-from .cache import atomic_js_write
+from .cache import atomic_data_write
 from .logger import logger
 
 if TYPE_CHECKING:
@@ -67,7 +67,7 @@ def export_airports_data(
     unique_airports: list[AirportData],
     output_dir: str,
 ) -> tuple[str, int]:
-    """Export airport data to airports.js (window.KML_AIRPORTS)."""
+    """Export airport data to airports.json."""
     valid_airports = []
 
     for apt, airport_name in _exported_airports(unique_airports):
@@ -88,10 +88,8 @@ def export_airports_data(
 
         valid_airports.append(airport_data)
 
-    airports_file = Path(output_dir) / "airports.js"
-    atomic_js_write(
-        airports_file, "KML_AIRPORTS", {"airports": valid_airports}, sort_keys=True
-    )
+    airports_file = Path(output_dir) / "airports.json"
+    atomic_data_write(airports_file, {"airports": valid_airports}, sort_keys=True)
 
     file_size = airports_file.stat().st_size
 
@@ -111,7 +109,7 @@ def export_metadata(
     output_dir: str,
     available_flags: list[str] | None = None,
 ) -> tuple[str, int]:
-    """Export metadata.js (window.KML_METADATA).
+    """Export metadata.json.
 
     No statistics: the frontend computes them from the year files for every
     filter. It needs the years and their file sizes before loading any year,
@@ -134,8 +132,8 @@ def export_metadata(
         "available_flags": list(available_flags or []),
     }
 
-    meta_file = Path(output_dir) / "metadata.js"
-    atomic_js_write(meta_file, "KML_METADATA", meta_data, sort_keys=True)
+    meta_file = Path(output_dir) / "metadata.json"
+    atomic_data_write(meta_file, meta_data, sort_keys=True)
 
     file_size = meta_file.stat().st_size
 

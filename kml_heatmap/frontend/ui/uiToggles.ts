@@ -321,8 +321,8 @@ export class UIToggles {
       // The canvas is the map's CSS size times this; the clone keeps the
       // map's own layout
       pixelRatio: scale,
-      // The page has no web fonts to inline. Looking for them reads every
-      // stylesheet, which a file:// page is not allowed to.
+      // The page has no web fonts to inline, so there is no point in
+      // reading every stylesheet to look for them
       skipFonts: true,
       backgroundColor:
         getComputedStyle(document.documentElement)

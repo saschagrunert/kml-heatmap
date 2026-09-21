@@ -4,8 +4,7 @@
  * build.js stamps it into the bundle banner, and the e2e global setup reads
  * the banner back to refuse a site that was built from other sources. Both
  * import it from here so the two can never hash differently. The build
- * script, the list of modules the two bundles share, the compiler options,
- * the esbuild version and the version of every package bundled into the
+ * script, the compiler options, the esbuild version and the version of every package bundled into the
  * page (only Lucide: Leaflet is a global) shape the bundle as much as the
  * sources do, so they are part of the hash.
  *
@@ -25,7 +24,6 @@ const FRONTEND_DIR = join(REPO_ROOT, "kml_heatmap/frontend");
 /** Files outside the sources that change what a built site renders */
 const BUILD_FILES = [
   "build.js",
-  "scripts/shared-modules.js",
   "tsconfig.json",
   "kml_heatmap/static/styles.css",
   "kml_heatmap/static/features.css",

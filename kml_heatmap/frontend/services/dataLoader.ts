@@ -31,44 +31,39 @@ export function isValidYear(year: string): boolean {
 /**
  * How long a data file may take to load. The largest year file is a few MB,
  * so this leaves room for a slow connection; a request that neither loads
- * nor errors within it (a stalled connection) is given up on, so the year
- * can be requested again instead of staying in flight forever.
+ * nor errors within it (a stalled connection) is aborted, so the year can be
+ * requested again instead of staying in flight forever.
  */
-const SCRIPT_LOAD_TIMEOUT_MS = 120_000;
+const LOAD_TIMEOUT_MS = 120_000;
 
 /**
- * Load JavaScript file dynamically (supports both file:// and https://)
+ * Fetch and parse a JSON file of the site
  * @param url - URL to load
- * @param timeoutMs - Time after which the load is given up on
- * @returns Promise that resolves when script is loaded
+ * @param timeoutMs - Time after which the request is aborted
+ * @returns The parsed contents
  */
-export function loadScript(
+export async function fetchJson(
   url: string,
-  timeoutMs: number = SCRIPT_LOAD_TIMEOUT_MS,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = url;
-    const settle = (): void => {
-      clearTimeout(timer);
-      script.onload = null;
-      script.onerror = null;
-      script.remove();
-    };
-    script.onload = () => {
-      settle();
-      resolve();
-    };
-    script.onerror = () => {
-      settle();
-      reject(new Error("Failed to load script: " + url));
-    };
-    const timer = setTimeout(() => {
-      settle();
-      reject(new Error("Timed out loading script: " + url));
-    }, timeoutMs);
-    document.head.appendChild(script);
-  });
+  timeoutMs: number = LOAD_TIMEOUT_MS,
+): Promise<unknown> {
+  const controller = new AbortController();
+  // The timer spans the body as well: a response whose headers arrived can
+  // still stall halfway through a year file
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    const reason = controller.signal.aborted
+      ? "Timed out loading"
+      : "Failed to load";
+    throw new Error(`${reason} ${url}`, { cause: error });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -79,10 +74,10 @@ export function loadScript(
 const stylesheetRequests = new Map<string, Promise<void>>();
 
 /**
- * Load a stylesheet the same way, and leave it in the document.
+ * Load a stylesheet, and leave it in the document.
  *
- * Unlike a script, a link keeps applying only as long as it is in the head,
- * so this one is not removed once it has loaded. Callers asking for the same
+ * A link keeps applying only as long as it is in the head, so this one is
+ * not removed once it has loaded. Callers asking for the same
  * URL share one request: dedupe on the link already being in the head was
  * wrong twice over, because a link that is still in flight had not applied
  * yet, and because the attempt that appended it removes it on its own
@@ -95,7 +90,7 @@ const stylesheetRequests = new Map<string, Promise<void>>();
  */
 export function loadStylesheet(
   url: string,
-  timeoutMs: number = SCRIPT_LOAD_TIMEOUT_MS,
+  timeoutMs: number = LOAD_TIMEOUT_MS,
 ): Promise<void> {
   const inFlight = stylesheetRequests.get(url);
   if (inFlight) return inFlight;
@@ -141,18 +136,6 @@ export function resetStylesheetLoader(): void {
   stylesheetRequests.clear();
 }
 
-/** Name of the global a per-year data file defines */
-export type YearDataGlobal = `KML_DATA_${string}`;
-
-/**
- * Generate global variable name for a per-year data file
- * @param year - Year string
- * @returns Global variable name (window.KML_DATA_<YEAR>)
- */
-export function getGlobalVarName(year: string): YearDataGlobal {
-  return `KML_DATA_${year}`;
-}
-
 /**
  * Wire format of the year files this build reads (kml_heatmap/segment_codec.py).
  * A file written by another release is refused rather than misread.
@@ -190,7 +173,7 @@ const TIME_SCALE = 10;
  * which Leaflet throws on. Since every value is a difference, nothing after
  * it can be trusted either, so the path is cut short there with a warning
  * instead, and left out when that is its first row.
- * @param raw - Contents of window.KML_DATA_<YEAR>
+ * @param raw - Contents of <year>/data.json
  * @returns Expanded dataset
  */
 export function expandYearData(raw: RawYearData): KMLDataset {
@@ -360,7 +343,10 @@ export class DataLoader {
   private cache: Map<string, KMLDataset>;
   private inflight: Map<string, Promise<KMLDataset | null>>;
   private loadingDepth: number;
-  private scriptLoader: (url: string) => Promise<void>;
+  private fetchJson: (url: string) => Promise<unknown>;
+  /** The request in flight, so that concurrent callers share it */
+  private airportsRequest: Promise<{ airports: Airport[] }> | null = null;
+  private metadataRequest: Promise<Metadata> | null = null;
   private showLoading: (info: LoadingInfo) => void;
   private hideLoading: () => void;
   private getWindow: () => Window & typeof globalThis;
@@ -371,7 +357,7 @@ export class DataLoader {
     this.cache = new Map();
     this.inflight = new Map();
     this.loadingDepth = 0;
-    this.scriptLoader = options.scriptLoader || loadScript;
+    this.fetchJson = options.fetchJson || fetchJson;
     this.showLoading = options.showLoading || (() => {});
     this.hideLoading = options.hideLoading || (() => {});
     this.getWindow = options.getWindow || (() => window);
@@ -454,22 +440,13 @@ export class DataLoader {
   private async loadYear(year: string): Promise<KMLDataset | null> {
     this.beginLoading(year);
     try {
-      const globalVarName = getGlobalVarName(year);
-      const win = this.getWindow();
-
-      if (!win[globalVarName]) {
-        logDebug("Loading data (" + year + ")...");
-        await this.scriptLoader(this.dataDir + "/" + year + "/data.js");
-      }
-
-      const raw = win[globalVarName];
-      if (!raw) {
-        throw new Error("Global " + globalVarName + " was not defined");
-      }
-
-      const data = expandYearData(raw);
-      // Drop the raw global so the data is not held twice in memory
-      delete win[globalVarName];
+      logDebug("Loading data (" + year + ")...");
+      // The template preloads the latest year, so this request is usually
+      // answered by one that is already under way
+      const raw = await this.fetchJson(
+        this.dataDir + "/" + year + "/data.json",
+      );
+      const data = expandYearData(raw as RawYearData);
 
       this.cache.set(year, data);
       logDebug(
@@ -539,36 +516,48 @@ export class DataLoader {
   }
 
   /**
-   * Load airports data
+   * Load airports data. The list is published on window.KML_AIRPORTS, which
+   * is where the code that needs it without a loader at hand reads it from
+   * (features/airports.ts, the Wrapped card).
    * @returns Array of airport objects
    */
   async loadAirports(): Promise<Airport[]> {
     try {
       const win = this.getWindow();
       if (!win.KML_AIRPORTS) {
-        await this.scriptLoader(this.dataDir + "/airports.js");
+        this.airportsRequest ??= this.fetchJson(
+          this.dataDir + "/airports.json",
+        ) as Promise<{ airports: Airport[] }>;
+        win.KML_AIRPORTS = await this.airportsRequest;
       }
       return win.KML_AIRPORTS?.airports || [];
     } catch (error) {
       logError("Error loading airports:", error);
       return [];
+    } finally {
+      this.airportsRequest = null;
     }
   }
 
   /**
-   * Load metadata
+   * Load metadata, published on window.KML_METADATA like the airports
    * @returns Metadata object or null on error
    */
   async loadMetadata(): Promise<Metadata | null> {
     try {
       const win = this.getWindow();
       if (!win.KML_METADATA) {
-        await this.scriptLoader(this.dataDir + "/metadata.js");
+        this.metadataRequest ??= this.fetchJson(
+          this.dataDir + "/metadata.json",
+        ) as Promise<Metadata>;
+        win.KML_METADATA = await this.metadataRequest;
       }
       return win.KML_METADATA || null;
     } catch (error) {
       logError("Error loading metadata:", error);
       return null;
+    } finally {
+      this.metadataRequest = null;
     }
   }
 }

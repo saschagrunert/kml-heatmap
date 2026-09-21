@@ -38,8 +38,7 @@ current.
 ## Content Security Policy
 
 The generated page carries a CSP in a `<meta>` tag. Scripts, styles, fonts
-and images load only from the site itself (or from disk, for `file://`) and
-from the tile servers; there is no `'unsafe-inline'` for scripts or styles.
+and images load only from the site itself and from the tile servers; there is no `'unsafe-inline'` for scripts or styles.
 Colours computed at runtime are applied through the CSSOM, and a test fails
 on any CSP violation the page reports. A meta CSP cannot set
 `frame-ancestors`, and GitHub Pages sends no such header, so the site can be

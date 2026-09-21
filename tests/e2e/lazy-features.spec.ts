@@ -3,12 +3,18 @@
  *
  * They are a quarter of the frontend and most visits open neither, so they
  * are built into a second bundle, and their styles into a second stylesheet,
- * that the page loads on demand. The saving is only real if a first visit
+ * that the page imports on demand. The saving is only real if a first visit
  * fetches neither, and the features only work if both arrive when one of them
  * is opened, so both halves are checked here.
  */
 import { test, expect } from "./fixtures";
-import { gotoApp, openWrapped, waitForAppReady } from "./helpers";
+import {
+  attachErrorCollectors,
+  gotoApp,
+  openWrapped,
+  usesMobileBar,
+  waitForAppReady,
+} from "./helpers";
 import type { Page } from "./fixtures";
 
 const FEATURES = "features.bundle.js";
@@ -77,22 +83,51 @@ test.describe("the feature bundle", () => {
   test("shares one copy of the modules with the main bundle", async ({
     page,
   }) => {
+    const shared: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/shared.bundle.js")) {
+        shared.push(request.url());
+      }
+    });
     await gotoApp(page);
     await waitForAppReady(page);
     await openWrapped(page);
 
     // The DOM cache is a singleton the app invalidates; a second copy inside
-    // the feature bundle would quietly hold stale elements
-    const shared = await page.evaluate(() => {
-      const registry = window.__kmlShared;
-      return {
-        published: registry ? Object.keys(registry).length : 0,
-        hasDomCache: Boolean(registry?.["utils/domCache"]),
-      };
+    // the feature bundle would quietly hold stale elements. A module is
+    // instantiated once per URL, so the feature bundle importing the chunk
+    // the app already loaded is what gives both the same instance.
+    const features = await page.request.get(new URL(FEATURES, page.url()).href);
+    expect(await features.text()).toContain('"./shared.bundle.js"');
+    expect(shared).toHaveLength(1);
+  });
+
+  test("loads on the next try after a failed one", async ({ page }) => {
+    const errors = await attachErrorCollectors(page);
+    const requested = trackFeatureRequests(page);
+    await gotoApp(page);
+    await waitForAppReady(page);
+    // A network blip, or a deploy replacing the file, on the first request
+    let failed = false;
+    await page.route(`**/${FEATURES}*`, (route) => {
+      if (failed) return route.continue();
+      failed = true;
+      return route.abort();
     });
 
-    expect(shared.published).toBeGreaterThan(10);
-    expect(shared.hasDomCache).toBe(true);
+    const mobile = await usesMobileBar(page);
+    await page.locator(mobile ? "#mobile-tab-wrapped" : "#wrapped-btn").click();
+    await expect(
+      page.getByText("their code could not be loaded"),
+    ).toBeVisible();
+
+    // A browser may keep the failure of that URL for the life of the page;
+    // the retry must reach the server anyway
+    await expect(await openWrapped(page)).toBeVisible();
+    expect(requested).toHaveLength(2);
+    expect(requested[1]).not.toBe(requested[0]);
+
+    expect(errors.pageErrors).toEqual([]);
   });
 
   test("brings its stylesheet with it, and neither panel shows before", async ({

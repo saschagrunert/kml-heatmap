@@ -1,10 +1,10 @@
 """Data export functionality for flight heatmaps.
 
 Exports flight data to JS files for the browser frontend:
-- <year>/data.js: per-year path info and segments (window.KML_DATA_<year>)
-- airports.js: deduplicated airport locations (window.KML_AIRPORTS)
-- metadata.js: years, year file sizes, the groundspeed range and the aircraft
-  models (window.KML_METADATA)
+- <year>/data.json: per-year path info and segments
+- airports.json: deduplicated airport locations
+- metadata.json: years, year file sizes, the groundspeed range and the aircraft
+  models
 
 The frontend computes every flight statistic from the year files, so the
 export keeps no statistics of its own beyond the groundspeed range.
@@ -97,14 +97,19 @@ __all__ = [
 ]
 
 YEAR_DIR_PATTERN = re.compile(r"^\d{4}$")
-TOOL_OWNED_FILES = ("airports.js", "metadata.js")
-# Fragments written by the chunk workers, assembled into data.js afterwards
+YEAR_FILE = "data.json"
+TOOL_OWNED_FILES = ("airports.json", "metadata.json")
+# Written by the versions whose page loaded its data with script tags, and
+# removed when such a site is regenerated
+LEGACY_DATA_FILES = ("airports.js", "metadata.js")
+LEGACY_YEAR_FILE = "data.js"
+# Fragments written by the chunk workers, assembled into the year file afterwards
 PART_PATTERN = re.compile(r"^\.data\.\d+\.(info|segments)\.part$")
 # Hidden directories a run writes its files into before publishing them
 STAGING_PREFIX = ".kml-heatmap-staging-"
 # Published last: they reference the other files, so a page loaded while the
 # files are moved never points at one that is not in place yet
-ENTRY_POINT_FILES = ("metadata.js", "index.html")
+ENTRY_POINT_FILES = ("metadata.json", "index.html")
 # A year is not split below this many paths per chunk: a worker process only
 # pays off when it has real work to do
 MIN_PATHS_PER_CHUNK = 50
@@ -396,14 +401,14 @@ def _remove_parts(output_dir: str, year: int, indices: list[int]) -> None:
 def _assemble_year_file(
     year: int, chunks: list[ChunkResult], output_dir: str
 ) -> YearExportResult:
-    """Write <output_dir>/<year>/data.js from the chunk fragments."""
+    """Write <output_dir>/<year>/data.json from the chunk fragments."""
     chunks = sorted(chunks, key=lambda chunk: chunk.index)
     original_points = sum(chunk.original_points for chunk in chunks)
-    output_file = Path(output_dir) / str(year) / "data.js"
+    output_file = Path(output_dir) / str(year) / YEAR_FILE
 
     def write(out: IO[str]) -> None:
         out.write(
-            f'window.KML_DATA_{year} = {{"format":{FORMAT_VERSION},"year":{year},'
+            f'{{"format":{FORMAT_VERSION},"year":{year},'
             f'"original_points":{original_points},"path_info":['
         )
         _copy_fragments(
@@ -413,7 +418,7 @@ def _assemble_year_file(
         _copy_fragments(
             out, [_part_paths(output_dir, year, chunk.index)[1] for chunk in chunks]
         )
-        out.write("}};")
+        out.write("}}")
 
     try:
         atomic_write(output_file, write)
@@ -694,6 +699,9 @@ def _remove_stale_data(data_dir: Path, years: set[str]) -> None:
     for child in sorted(data_dir.iterdir()):
         if child.name in TOOL_OWNED_FILES or child.name.startswith(STAGING_PREFIX):
             continue
+        if child.name in LEGACY_DATA_FILES:
+            _remove_stale_file(child)
+            continue
         # "unknown" is the year-less directory written by older versions
         if (
             child.is_dir()
@@ -704,7 +712,11 @@ def _remove_stale_data(data_dir: Path, years: set[str]) -> None:
             for item in sorted(child.iterdir()):
                 # Fragments are left behind by interrupted older versions,
                 # which wrote them into the output directory itself
-                if (stale and item.name == "data.js") or PART_PATTERN.match(item.name):
+                if (
+                    (stale and item.name == YEAR_FILE)
+                    or item.name == LEGACY_YEAR_FILE
+                    or PART_PATTERN.match(item.name)
+                ):
                     _remove_stale_file(item)
             if stale:
                 try:
@@ -829,7 +841,7 @@ class SiteOutput:
         """
         for stage, required in (
             (self.site_stage, "index.html"),
-            (self.data_stage, "metadata.js"),
+            (self.data_stage, "metadata.json"),
         ):
             # A stage that lost its page or metadata is a bug or a stage
             # removed from under the run; publishing it would break the site

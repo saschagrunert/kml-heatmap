@@ -98,7 +98,7 @@ class TestBuildPathInfo:
         assert "start_airport" not in info
         assert "end_airport" not in info
 
-    def test_names_match_the_exported_airports(self, tmp_path, parse_js):
+    def test_names_match_the_exported_airports(self, tmp_path, parse_data):
         """The frontend counts a path for an airport by comparing these names."""
         from kml_heatmap.airports import deduplicate_airports
         from kml_heatmap.export_writers import export_airports_data
@@ -121,7 +121,7 @@ class TestBuildPathInfo:
 
         info = build_path_info(paths[0], metadata[0], 0, 2025)
         export_airports_data(deduplicate_airports(metadata, paths), str(tmp_path))
-        airports = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")["airports"]
+        airports = parse_data(tmp_path / "airports.json")["airports"]
         names = [airport["name"] for airport in airports]
 
         assert names == [info["start_airport"], info["end_airport"]]

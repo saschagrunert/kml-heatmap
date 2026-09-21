@@ -84,10 +84,12 @@ describe("the page loads nothing from a third party", () => {
         .map((part) => part.trim())
         .find((part) => part.startsWith(name));
 
-    expect(directive("script-src")).toBe("script-src 'self' file:");
+    expect(directive("script-src")).toBe("script-src 'self'");
     // No 'unsafe-inline': the page sets its data-driven colours through the
     // CSSOM, which the policy does not govern, never through style attributes
-    expect(directive("style-src")).toBe("style-src 'self' file:");
+    expect(directive("style-src")).toBe("style-src 'self'");
+    // Nothing is read from disk: the page is served, never opened as a file
+    expect(csp).not.toContain("file:");
     // The map tiles are the only third party left
     expect(csp).not.toContain("unpkg.com");
     expect(csp).not.toContain("jsdelivr");
