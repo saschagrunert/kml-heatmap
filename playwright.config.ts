@@ -14,6 +14,21 @@ const isCI = !!process.env["CI"];
 const runsVisual =
   process.env["PLAYWRIGHT_BROWSERS_PATH"] === "/ms-playwright" ||
   !!process.env["VISUAL_SNAPSHOTS"];
+/**
+ * The port the site under test is served on. A second checkout (a git
+ * worktree, another branch being tested at the same time) cannot share the
+ * default with the first: with `reuseExistingServer` it would quietly test
+ * the other checkout's site. E2E_PORT gives each its own. Nothing else
+ * would notice: the global setup checks docs/ on disk, not what the server
+ * on the port answers. An empty value counts as unset, since wrappers tend
+ * to pass the variable on whether or not it is set.
+ */
+const port = Number(process.env["E2E_PORT"] || 8000);
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  throw new Error(
+    `E2E_PORT must be a port number, not "${process.env["E2E_PORT"]}"`,
+  );
+}
 const chromiumPath = process.env["CHROMIUM_PATH"];
 const launchOptions = chromiumPath
   ? { launchOptions: { executablePath: chromiumPath } }
@@ -35,7 +50,7 @@ export default defineConfig({
   // Fails fast when docs/ is stale; see the file for why
   globalSetup: "./tests/e2e/global-setup.ts",
   use: {
-    baseURL: "http://localhost:8000",
+    baseURL: `http://localhost:${port}`,
     headless: true,
     // The page honours prefers-reduced-motion, so the entry animations and
     // slide transitions are skipped and a scan never catches a half-faded
@@ -111,8 +126,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "python3 -m http.server 8000 -d docs",
-    port: 8000,
+    command: `python3 -m http.server ${port} -d docs`,
+    port,
     reuseExistingServer: !isCI,
     // http.server logs every request to stderr
     stderr: "ignore",
