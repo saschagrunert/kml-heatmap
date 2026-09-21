@@ -1,8 +1,8 @@
 # Scripts
 
-The build helpers `build.js` imports, the repository consistency check and
-the test data generator. The JavaScript files are type-checked with
-`tsconfig.node.json` (`npm run typecheck`).
+The build helpers `build.js` imports, the repository consistency check, the
+pre-push hook and the test data generator. The JavaScript files are
+type-checked with `tsconfig.node.json` (`npm run typecheck`).
 
 ## generate_test_data.py
 
@@ -86,6 +86,13 @@ nothing else reads together:
 The pre-commit hook revisions are not checked: the linters and formatters
 run from the project environment, so they have no revision of their own to
 drift. `make lint` and the CI lint job run it.
+
+## pre_push.py
+
+The pre-push hook, installed once per clone with `make hooks`. It runs the
+obfuscation check on every KML file that the commits about to be pushed add
+or change, and refuses the push when one carries a real date or when it
+cannot run the check. It needs nothing beyond Python; `--no-verify` skips it.
 
 ## source-hash.js
 

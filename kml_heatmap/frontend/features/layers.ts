@@ -165,7 +165,7 @@ function distanceToSegmentSquared(
 
 /**
  * Find the segment closest to a geographic point. Used to show per-segment
- * tooltip data on polylines that were merged from several segments.
+ * tooltip data on lines that were merged from several segments.
  * @param segments - Candidate segments (must have coords)
  * @param lat - Latitude of the point
  * @param lng - Longitude of the point

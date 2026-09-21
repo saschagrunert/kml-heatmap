@@ -104,7 +104,7 @@ export class PathSelection {
    * Apply a selection change to the drawn paths: when isolate mode is active
    * before or after the change the layers are rebuilt (isolate mode draws
    * only the selected paths, so both entering and leaving it changes which
-   * paths exist), otherwise the drawn polylines are restyled in place.
+   * paths exist), otherwise the drawn paths are restyled in place.
    *
    * Statistics, airport visibility and the replay button follow the store on
    * their own.

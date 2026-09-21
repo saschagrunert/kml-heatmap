@@ -9,9 +9,9 @@
  * template and the generator are not part of the bundle; a site older than
  * any of them is refused too.
  *
- * CI builds one site with dummy tile API keys and one without, and says
- * which through E2E_API_KEYS ("dummy" or "none"). A build that lost its keys
- * fails here instead of quietly skipping the specs for the keyed layers.
+ * CI builds one site with a dummy tile API key and one without, and says
+ * which through E2E_API_KEYS ("dummy" or "none"). A build that lost its key
+ * fails here instead of quietly skipping the specs that need one.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -49,8 +49,8 @@ function checkBuildHash(): void {
 
 /**
  * Files the generator copies or renders into the site, besides the bundle,
- * and the dependency lock: a bumped Leaflet or esbuild changes what the
- * fixture serves and what the bundle contains
+ * and the dependency lock: a bumped MapLibre or esbuild changes what the
+ * site serves and what the bundle contains
  */
 function generatorSources(): string[] {
   const packageDir = join(REPO_ROOT, "kml_heatmap");

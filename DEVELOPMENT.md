@@ -65,25 +65,34 @@ npm run format:check     # Check code formatting
 End-to-end tests use [Playwright](https://playwright.dev/). They verify the
 full map rendering pipeline including map initialization, layer toggles,
 filters, statistics panel, wrapped modal, airport markers and replay. The
-`desktop` project runs every spec but `mobile.spec.ts` and `visual.spec.ts`
-in Chromium. The
-`mobile` project runs `mobile.spec.ts` and the viewport independent specs
-(`core`, `layers`, `state`) on a phone viewport, and the `webkit` project runs
-`core` and `mobile` on an emulated iPhone. The `visual` project compares
-screenshots and only exists inside the Playwright image, so a plain run leaves
-it out (see CONTRIBUTING.md). Every page is scanned for accessibility
-violations with axe. The suite does not reach the network: the page carries
-its own JavaScript and CSS, every map tile is answered locally, and any other
-cross-origin request fails the test that made it (see
-`tests/e2e/fixtures.ts`). A few specs depend on whether the site was built
-with `CARTO_API_KEY` (any value works) and skip otherwise; CI tests a site
-with a dummy key and one without.
+`desktop` project runs every spec but `mobile.spec.ts` and `visual.spec.ts` in
+Chromium. The `mobile` project runs `mobile.spec.ts` and the viewport
+independent specs (`core`, `layers`, `state`) on a phone viewport, and the
+`webkit` project runs `core` and `mobile` on an emulated iPhone. The `visual`
+project compares screenshots and only exists inside the Playwright image (or
+with `VISUAL_SNAPSHOTS=1`), so a plain run leaves it out (see
+CONTRIBUTING.md). Every page is scanned for accessibility violations with axe.
+The suite does not reach the network: the page carries its own JavaScript and
+CSS, CARTO's base style is answered with a stub that draws a background and
+asks for no glyphs or sprite, every map tile with a transparent pixel, and any
+other cross-origin request fails the test that made it (see
+`tests/e2e/fixtures.ts`, which every spec imports `test` and `expect` from).
+What the specs know about the map library is in `tests/e2e/map.ts`: a spec
+asks it for the map's locators, zoom, layers and popups instead of naming a
+`.maplibregl-*` class or reaching into `window.mapApp.map`. Its zoom levels
+are the ones of shared links, one higher than MapLibre's own (see
+`ZOOM_OFFSET` in `utils/constants.ts`). A few specs depend on whether the site
+was built with `CARTO_API_KEY` (any value works) and skip otherwise; CI tests
+a site with a dummy key and one without.
 
 The tests run against `docs/`, which must be built from the current sources
 first. The global setup compares the build hash in `docs/mapApp.bundle.js`
 with the checkout (the frontend sources, the stylesheets, the build
 configuration and the pinned esbuild and Lucide versions, see
-`scripts/README.md`) and stops with a hint when they differ:
+`scripts/README.md`) and stops with a hint when they differ. It also stops
+when `docs/index.html` is older than the Python package, its templates and
+static assets or `package-lock.json`, and when `E2E_API_KEYS` (`dummy` or
+`none`, set by CI) does not match whether `docs/map_config.js` carries a key:
 
 ```bash
 # Install Playwright browsers (first time only)
@@ -112,9 +121,11 @@ keep their traces in `test-results/`, and every run writes an HTML report to
 **Build Output:**
 
 - **Format**: ES modules with code splitting; the page has to be served
-  over HTTP (`make serve`), it does not work when opened from disk
+  over HTTP (`make serve`), it does not work when opened from disk, and the
+  map needs WebGL
 - **Production**: Minified bundles for optimal performance; the build fails
-  when either exceeds its size budget in `build.js`
+  when `mapApp.bundle.js` and `shared.bundle.js` together, or
+  `features.bundle.js`, exceed their size budget in `build.js`
 - **Development**: Unminified for debugging
 - Both write a source map next to the bundle; it holds the mappings and file
   names only, not the TypeScript sources
@@ -166,7 +177,8 @@ none and the statistics rail falls back to the ISO country code.
   - E2E tests: `tests/e2e/` (Playwright)
 - **Stylesheets** in `kml_heatmap/static/` (`styles.css` and `features.css`)
 - **Build output** in `kml_heatmap/static/` (`mapApp.bundle.js`,
-  `features.bundle.js`, their source maps, `vendor/` and `flags/`)
+  `features.bundle.js`, `shared.bundle.js`, their source maps, `vendor/` and
+  `flags/`)
 - **Build scripts** `build.js` and `scripts/*.js`, plain JavaScript with
   JSDoc types that `tsconfig.node.json` checks (`npm run typecheck`)
 

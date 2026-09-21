@@ -4,7 +4,7 @@
 # Dependabot bumps the two together and the version stays readable in the FROM
 # line itself. Do not restate the tag in a comment: it drifts silently.
 
-# Stage 1: build the JavaScript bundle
+# Stage 1: build the JavaScript bundles
 FROM docker.io/library/node:26-slim@sha256:65f816afd401c1c4de3293acc46dce115398152af4bdcd73c103b096988922d7 AS js-builder
 
 WORKDIR /build
@@ -40,8 +40,8 @@ RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock
 ENV PATH="/opt/venv/bin:$PATH"
 
-# The Python package with its templates, static assets and the built bundle
-# (and its source map), without the TypeScript sources
+# The Python package with its templates, static assets and the built bundles
+# (and their source maps), without the TypeScript sources
 COPY --from=js-builder /build/kml_heatmap/ ./kml_heatmap/
 COPY serve.py ./
 

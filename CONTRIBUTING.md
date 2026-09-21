@@ -70,7 +70,7 @@ parentheses back is undone on the next `make format`.
   GitHub Pages, in its `site` and `deploy` jobs, which only start once every
   test job has passed and only while the commit is still the head of `main`
   (a re-run of an older run does not publish). The `unit` and `e2e` jobs
-  build their own copies; the e2e jobs test one with dummy tile API keys and
+  build their own copies; the e2e jobs test one with a dummy tile API key and
   one without. The repository's Pages source has to be "GitHub Actions"
   (Settings > Pages). Set it by hand: the workflow token is not allowed to
   change it.
@@ -83,11 +83,12 @@ parentheses back is undone on the next `make format`.
   pushed, needs nothing beyond Python 3.14 and refuses the push when it
   cannot check. The published site carries no flight date finer than the
   year either way; this is about the KML files this repository commits.
-- The frontend build output in `kml_heatmap/static/` is gitignored: both
-  bundles (`mapApp.bundle.js`, `features.bundle.js`) with their `.map` files,
-  `vendor/` (the third-party code copied out of `node_modules`) and `flags/`
-  (the country flags of `flag-icons`). It is built by `npm run build` and,
-  for the image, inside the Dockerfile; `make clean` removes it.
+- The frontend build output in `kml_heatmap/static/` is gitignored: the three
+  bundles (`mapApp.bundle.js`, `features.bundle.js`, `shared.bundle.js`) with
+  their `.map` files, `vendor/` (the third-party code copied out of
+  `node_modules`) and `flags/` (the country flags of `flag-icons`). It is
+  built by `npm run build` and, for the image, inside the Dockerfile;
+  `make clean` removes it.
 - The Python dependencies are declared once, in `pyproject.toml` (runtime
   dependencies plus the `test` and `dev` extras). `requirements.lock` and
   `requirements-test.lock` are compiled from it with `make lock` (pip-compile
@@ -135,8 +136,9 @@ parentheses back is undone on the next `make format`.
 screenshots. Pixel comparisons only mean anything where the rendering is
 fixed, so they run inside the Playwright image rather than against whatever
 browser is on the machine, in CI and locally alike. The project only exists
-there, so a plain `npm run test:e2e` leaves it out instead of failing on font
-rendering that was never going to match:
+there (or with `VISUAL_SNAPSHOTS=1`, for an equivalent setup), so a plain
+`npm run test:e2e` leaves it out instead of failing on font rendering that
+was never going to match:
 
 ```sh
 podman run --rm --network host --userns=keep-id --user "$(id -u):$(id -g)" \
