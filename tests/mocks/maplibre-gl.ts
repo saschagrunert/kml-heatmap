@@ -290,6 +290,7 @@ export class Map
       | "getStyle"
       | "setStyle"
       | "isStyleLoaded"
+      | "isSourceLoaded"
       | "loaded"
       | "getZoom"
       | "setZoom"
@@ -514,6 +515,13 @@ export class Map
     this.loadStyle(style);
     return this;
   });
+
+  /**
+   * Whether a source has taken in its last `setData` and cut the tiles in
+   * view from it. The fake has no worker, so it always has; a test of the
+   * time in between says otherwise with `mockReturnValue`.
+   */
+  isSourceLoaded = vi.fn((id: string) => this.source(id) !== undefined);
 
   isStyleLoaded = vi.fn(() => this.styleLoaded);
   loaded = vi.fn(() => this.styleLoaded);

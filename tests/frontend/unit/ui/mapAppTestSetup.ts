@@ -44,6 +44,7 @@ export const mockAirportManagerInstance = {
   updateAirportPopups: vi.fn(),
   updateAirportOpacity: vi.fn(),
   updateAirportMarkerSizes: vi.fn(),
+  closePopup: vi.fn(),
 };
 
 export const mockReplayManagerInstance = {
@@ -72,6 +73,7 @@ export const mockLayerManagerInstance = {
   clearLayer: vi.fn(),
   hitTest: vi.fn(),
   onPathClick: vi.fn(),
+  closeSegmentPopup: vi.fn(),
   destroy: vi.fn(),
 };
 

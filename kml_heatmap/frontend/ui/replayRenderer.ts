@@ -27,12 +27,7 @@ import {
   NAUTICAL_MILES_TO_KM,
 } from "../utils/constants";
 import { icon } from "../utils/icons";
-import {
-  fromLngLat,
-  keepMarkerClickFromMap,
-  panPopupIntoView,
-  toLngLat,
-} from "../utils/mapHelpers";
+import { fromLngLat, panPopupIntoView, toLngLat } from "../utils/mapHelpers";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
 import { calculateSmoothedBearing } from "../features/replay";
@@ -285,9 +280,8 @@ export class AirplaneMarker implements ReplayAirplane {
       '<div class="replay-airplane-icon">' +
       icon("aircraftTop", 24, undefined, "solid") +
       "</div>";
-    // MapLibre fires a map click for a click on a marker as well; kept
-    // from it like the airports' (the app's handler looks away by itself)
-    keepMarkerClickFromMap(element);
+    // MapLibre fires a map click for a click on a marker as well; the
+    // app's handler tells it by its target and leaves the popup alone
     element.addEventListener("click", () => {
       if (this.isPopupOpen()) this.closePopup();
       else onActivate();
@@ -367,7 +361,6 @@ interface TransportCache {
 class UserMapMovement {
   private pressed = false;
   private moving = false;
-  private readonly container: HTMLElement;
   /** Removes the DOM listeners */
   private readonly listening = new AbortController();
 
@@ -375,14 +368,24 @@ class UserMapMovement {
     if (e.originalEvent) this.moving = true;
   };
 
-  private readonly onMoveEnd = (): void => {
-    this.moving = false;
+  /**
+   * Only the end of a movement of the user ends it. MapLibre hands the DOM
+   * event of a gesture, a key or a glide on to the `moveend` that closes
+   * it, also when a camera move of the app cuts it short; the `moveend` of
+   * such an app move carries none and says nothing about the user.
+   */
+  private readonly onMoveEnd = (e: { originalEvent?: unknown }): void => {
+    if (e.originalEvent) this.moving = false;
   };
 
-  constructor(readonly map: MapLibreMap) {
-    this.container = map.getCanvasContainer();
+  constructor(private readonly map: MapLibreMap) {
+    const container = map.getCanvasContainer();
     const signal = this.listening.signal;
-    const press = (): void => {
+    const press = (e: Event): void => {
+      // The primary button only. Any other moves nothing (rotating is off),
+      // and the context menu of a right click swallows the `mouseup` on
+      // Linux and macOS, which would leave the press on for good.
+      if (e instanceof MouseEvent && e.button !== 0) return;
       this.pressed = true;
     };
     const release = (e: Event): void => {
@@ -391,13 +394,17 @@ class UserMapMovement {
       if ("touches" in e && (e as TouchEvent).touches.length > 0) return;
       this.pressed = false;
     };
-    this.container.addEventListener("mousedown", press, { signal });
-    this.container.addEventListener("touchstart", press, {
-      signal,
-      passive: true,
-    });
-    // A button let go beside the map is still let go
-    for (const type of ["mouseup", "touchend", "touchcancel", "blur"]) {
+    container.addEventListener("mousedown", press, { signal });
+    container.addEventListener("touchstart", press, { signal, passive: true });
+    // A button let go beside the map is still let go, and a menu that opens
+    // (a long press, the menu key) takes the release with it
+    for (const type of [
+      "mouseup",
+      "touchend",
+      "touchcancel",
+      "contextmenu",
+      "blur",
+    ]) {
       window.addEventListener(type, release, { signal });
     }
     map.on("movestart", this.onMoveStart);
@@ -406,6 +413,8 @@ class UserMapMovement {
   }
 
   isActive(): boolean {
+    // Should an end ever go missing, a map at rest is proof enough
+    if (this.moving && !this.map.isMoving()) this.moving = false;
     // The wheel has neither a press nor, before the frame that follows its
     // first event, a move; its handler is active from that event on
     return this.pressed || this.moving || this.map.scrollZoom.isActive();
@@ -618,6 +627,16 @@ export class ReplayRenderer {
     this.trailFrameId = null;
   }
 
+  /**
+   * Start following the user's hand on the map. Called as a replay opens
+   * and not on the first frame that pans: a press that began before that
+   * frame would never be seen.
+   */
+  watchUser(): void {
+    const map = this.app.map;
+    if (map) this.userMovement ??= new UserMapMovement(map);
+  }
+
   /** Stop listening for the user's map gestures; the replay is closing */
   stopWatchingUser(): void {
     this.userMovement?.stop();
@@ -826,11 +845,7 @@ export class ReplayRenderer {
     // The same goes for the user's hand on the map: a camera move resets
     // every gesture, so a pan on each frame would end a drag or a pinch the
     // moment it starts. The follow pan picks up again once they let go.
-    if (this.userMovement?.map !== map) {
-      this.stopWatchingUser();
-      this.userMovement = new UserMapMovement(map);
-    }
-    if (this.userMovement.isActive()) return;
+    if (this.userMovement?.isActive()) return;
 
     const container = map.getContainer();
     const mapSize = { x: container.clientWidth, y: container.clientHeight };

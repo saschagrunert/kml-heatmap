@@ -5,7 +5,6 @@ import {
   firstSymbolLayerId,
   fromLngLat,
   isOnMarker,
-  keepMarkerClickFromMap,
   keepMarkerTapsFromZoom,
   MAP_STILL_TIMEOUT_MS,
   mapZoomToState,
@@ -229,42 +228,17 @@ describe("mapHelpers", () => {
     });
   });
 
-  describe("keepMarkerClickFromMap", () => {
-    it("stops the click and lets everything else through", () => {
-      const parent = document.createElement("div");
-      const element = document.createElement("button");
-      parent.append(element);
-      const seen: string[] = [];
-      const types = [
-        "click",
-        "mousemove",
-        "dblclick",
-        "mousedown",
-        "touchstart",
-      ];
-      for (const type of types) {
-        parent.addEventListener(type, () => seen.push(type));
-      }
-
-      keepMarkerClickFromMap(element);
-      for (const type of types) {
-        element.dispatchEvent(new Event(type, { bubbles: true }));
-      }
-
-      expect(seen).toEqual([
-        "mousemove",
-        "dblclick",
-        "mousedown",
-        "touchstart",
-      ]);
-    });
-  });
-
   describe("keepMarkerTapsFromZoom", () => {
     function mapWithMarker(): {
       map: MapLibreMap & MockMap;
-      onMarker: (type: string) => { originalEvent: Event };
-      onCanvas: (type: string) => { originalEvent: Event };
+      onMarker: (
+        type: string,
+        fingersLeft?: number,
+      ) => { originalEvent: Event };
+      onCanvas: (
+        type: string,
+        fingersLeft?: number,
+      ) => { originalEvent: Event };
     } {
       const map = mapStub();
       const marker = document.createElement("button");
@@ -272,8 +246,11 @@ describe("mapHelpers", () => {
       map.getCanvasContainer().append(marker);
       const aimedAt =
         (target: Element) =>
-        (type: string): { originalEvent: Event } => {
-          const originalEvent = new Event(type, { bubbles: true });
+        (type: string, fingersLeft = 0): { originalEvent: Event } => {
+          const originalEvent = Object.assign(
+            new Event(type, { bubbles: true }),
+            { touches: new Array<object>(fingersLeft).fill({}) },
+          );
           target.dispatchEvent(originalEvent);
           return { originalEvent };
         };
@@ -309,6 +286,11 @@ describe("mapHelpers", () => {
       expect(map.doubleClickZoom.isEnabled()).toBe(false);
       // The pan is not touched: a drag that starts on a marker moves the map
       expect(map.dragPan.disable).not.toHaveBeenCalled();
+
+      // A second finger that lifts leaves the one on the marker down, and
+      // the recogniser stays out of the rest of the gesture
+      map.emit("touchend", onCanvas("touchend", 1));
+      expect(map.doubleClickZoom.isEnabled()).toBe(false);
 
       map.emit("touchend", onMarker("touchend"));
       expect(map.doubleClickZoom.isEnabled()).toBe(true);

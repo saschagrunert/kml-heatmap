@@ -5,7 +5,10 @@ import { resolve } from "node:path";
 /**
  * The airplane and the popups share one stacking context on the map, and the
  * stylesheets own their order. An airplane above an open airport popup
- * covers it and takes the clicks meant for its buttons.
+ * covers it and takes the clicks meant for its buttons. This is the order
+ * of the tokens only; that the rules use them, and that nothing between them
+ * and the map makes a stacking context of its own, is asked of the page as
+ * it is laid out (replay.spec.ts).
  */
 function sheet(name: string): string {
   return readFileSync(
@@ -20,15 +23,8 @@ function token(css: string, name: string): number {
   return Number(match![1]);
 }
 
-function rule(css: string, selector: string): string {
-  const start = css.indexOf(`\n${selector} {`);
-  expect(start, selector).toBeGreaterThanOrEqual(0);
-  return css.slice(start, css.indexOf("}", start));
-}
-
 describe("stacking on the map", () => {
   const styles = sheet("styles.css");
-  const features = sheet("features.css");
 
   it("puts a popup above the airplane", () => {
     expect(token(styles, "--z-map-popup")).toBeGreaterThan(
@@ -39,15 +35,6 @@ describe("stacking on the map", () => {
   it("keeps both below the chrome around the map", () => {
     expect(token(styles, "--z-map-popup")).toBeLessThan(
       token(styles, "--z-legend"),
-    );
-  });
-
-  it("stacks the popup and the airplane through the tokens", () => {
-    expect(rule(styles, ".maplibregl-popup")).toContain(
-      "z-index: var(--z-map-popup);",
-    );
-    expect(rule(features, ".replay-airplane-root")).toContain(
-      "z-index: var(--z-map-airplane);",
     );
   });
 });

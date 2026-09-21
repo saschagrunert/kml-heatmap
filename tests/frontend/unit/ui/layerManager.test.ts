@@ -786,33 +786,40 @@ describe("LayerManager", () => {
       expect(features(AIRSPEED)).toEqual([]);
     });
 
-    it("stops waiting for a map that never gets ready", async () => {
+    it("logs what goes wrong once the map is ready, and rejects nothing", async () => {
       layerManager.destroy();
       mockControl.autoLoadStyle = false;
       const map = new MockMap({ container: document.createElement("div") });
       mockControl.autoLoadStyle = true;
-      let fail!: (reason: unknown) => void;
-      mockApp = createMockApp({ map, currentData: mockApp.currentData });
-      const mapReady = new Promise<MapLibreMap>(
-        (_resolve, reject) => (fail = reject),
+      let ready!: (map: MapLibreMap) => void;
+      mockApp = createMockApp({
+        map,
+        currentData: mockApp.currentData,
+        altitudeRange: { min: 0, max: 5000 },
+      });
+      (mockApp as { mapReady: Promise<MapLibreMap> }).mapReady = new Promise(
+        (resolve) => (ready = resolve),
       );
-      (mockApp as { mapReady: Promise<MapLibreMap> }).mapReady = mapReady;
       layerManager = new LayerManager(asMapApp(mockApp));
       layerManager.redrawAltitudePaths();
-      const then = vi.spyOn(mapReady, "then");
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
-      // Asked again while waiting, it rides on the wait that is under way
-      layerManager.redrawAirspeedPaths();
-      expect(then).not.toHaveBeenCalled();
-
-      fail(new Error("layer refused"));
+      // The sources are there, and one of them refuses its data: a source
+      // that went missing in a style swap throws the same way
+      map.finishStyleLoad();
+      addDataLayers(map as unknown as MapLibreMap);
+      map.source(ALTITUDE).setData.mockImplementation(() => {
+        throw new Error("source is gone");
+      });
+      ready(map as unknown as MapLibreMap);
       await Promise.resolve();
       await Promise.resolve();
 
-      // The failure is reported by `initialize()`, not thrown around here,
-      // and the next draw does not take the old wait for its own
-      layerManager.redrawAltitudePaths();
-      expect(then).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining("Path layers"),
+        expect.objectContaining({ message: "source is gone" }),
+      );
+      error.mockRestore();
     });
 
     it("works on the run tables alone in an app without a map", async () => {
@@ -1242,6 +1249,70 @@ describe("LayerManager", () => {
       }
     });
 
+    it("takes a flight across the antimeridian from the copy drawn under the pointer", () => {
+      // Two flights either side of 180 degrees, drawn next to each other:
+      // the eastern one in the pointer's copy of the world, the western one
+      // in the next. One offset for both put the second a world away.
+      const east = createSegment({
+        path_id: 1,
+        altitude_ft: 3000,
+        coords: [
+          [10, 179.9],
+          [10.1, 179.95],
+        ],
+      });
+      const west = createSegment({
+        path_id: 2,
+        altitude_ft: 1000,
+        coords: [
+          [10, -179.98],
+          [10.1, -179.9],
+        ],
+      });
+      mockApp.currentData = createDataset(
+        [
+          { id: 1, year: 2025 },
+          { id: 2, year: 2025 },
+        ],
+        [east, west],
+      );
+      mockApp.map!.setCenter([179.97, 10]);
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE, { r: 0, g: 1 }),
+        rendered(ALTITUDE, { r: 1, g: 1 }),
+      ];
+
+      // The pointer stands at 179.97, in the primary world, 0.01 degrees
+      // from where the western flight is drawn (180.02) and 0.02 from the
+      // eastern one
+      expect(layerManager.hitTest(pointAt(10, 179.99))).toMatchObject({
+        pathId: 2,
+      });
+      expect(layerManager.hitTest(pointAt(10, 179.92))).toMatchObject({
+        pathId: 1,
+      });
+    });
+
+    it("cannot tell while a source has not taken in its last data", () => {
+      // The tiles of before have nothing here, where the new data may well
+      // have a flight: a filter change that adds flights
+      drawMergedRun();
+      mockApp.map!.isSourceLoaded.mockImplementation(
+        (id: string) => id !== ALTITUDE,
+      );
+
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBe("stale");
+
+      // Nor when all the tiles had were features nobody can place
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 7, g: 1 })];
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBe("stale");
+
+      mockApp.map!.isSourceLoaded.mockImplementation(() => true);
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBeNull();
+    });
+
     it("drops features whose run is not in the table", () => {
       drawMergedRun();
       mockApp.map!.renderedFeatures = [
@@ -1579,6 +1650,8 @@ describe("LayerManager", () => {
       // has a close button, and a tap through it would hit the flight below
       expect(popup.options).toMatchObject({
         className: "segment-details segment-popup",
+        // MapLibre would close it on a click the dispatcher ignores as well
+        closeOnClick: false,
       });
       expect(String(popup.options["className"])).not.toContain(
         "segment-tooltip",
@@ -1665,6 +1738,26 @@ describe("LayerManager", () => {
     });
   });
 
+  describe("a hover the tiles cannot answer yet", () => {
+    it("looks again on idle, also when the pointer came after the redraw", () => {
+      mockApp.altitudeLayer.setVisible(true);
+      // The pointer is off the map, so the redraw asks for no look on idle
+      layerManager.redrawAltitudePaths();
+      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+      mockApp.map!.isSourceLoaded.mockReturnValue(false);
+
+      moveTo(pointAt(48.5, 16.5));
+      expect(tooltips()).toHaveLength(0);
+      expect(mockApp.map!.listenerCount("idle")).toBe(1);
+
+      mockApp.map!.isSourceLoaded.mockReturnValue(true);
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+      mockApp.map!.emit("idle");
+
+      expect(tooltips().filter((popup) => popup.isOpen())).toHaveLength(1);
+    });
+  });
+
   describe("while the Wrapped dialog shows the map as its overview", () => {
     beforeEach(() => {
       mockApp.altitudeLayer.setVisible(true);
@@ -1675,6 +1768,9 @@ describe("LayerManager", () => {
     it("shows no tooltip for a flight under the pointer", () => {
       mockApp.store.set("wrappedVisible", true);
 
+      mockApp.map!.emit("mousemove", { point: pointAt(48.5, 16.5) });
+      // Not even a frame that would find nothing to do
+      expect(frames.size).toBe(0);
       moveTo(pointAt(48.5, 16.5));
 
       expect(tooltips()).toHaveLength(0);

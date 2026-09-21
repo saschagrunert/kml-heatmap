@@ -226,6 +226,7 @@ export class ReplayManager {
       panel.offsetHeight + "px",
     );
     this.state.active = true;
+    this.renderer.watchUser();
     // The panel takes the bottom edge; the bar steps aside instead of
     // stacking under it
     this.app.mobileBar?.setReplayActive(true);

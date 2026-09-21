@@ -68,13 +68,15 @@ export class AirportManager {
    * through `marker.setPopup`, whose own click and key handling would toggle
    * it a second time. MapLibre would focus the first control inside and
    * narrow it to 240px; the app decides about focus and the stylesheet about
-   * the width.
+   * the width. It would also close it on every click on the map, the click
+   * on the marker that opens it included; MapApp's click dispatcher, which
+   * can tell the two apart, closes it instead.
    */
   private readonly popup = new Popup({
     focusAfterOpen: false,
     maxWidth: "none",
     offset: POPUP_OFFSET_PX,
-    closeOnClick: true,
+    closeOnClick: false,
   });
   /** The airport the popup is open for */
   private openAirport: string | null = null;

@@ -1,7 +1,6 @@
 /**
  * State Manager - Handles state persistence (localStorage, URL)
  */
-import { LngLat } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
 import type { MapCenter, SavedState } from "../types";
@@ -183,14 +182,10 @@ export class StateManager {
       zoom: this.app.map.getZoom(),
     };
     // Panning across the antimeridian takes the longitude past 180. The
-    // wrapped one is the same place, and what a link is expected to carry
-    // (a reader wraps one that is not, as builds before this one saved it).
-    // Only then: the wrap adds rounding noise to any value.
-    const { lat, lng } = view.center;
-    const center: MapCenter =
-      Math.abs(lng) > 180
-        ? { lat, lng: new LngLat(lng, lat).wrap().lng }
-        : { lat, lng };
+    // wrapped one is the same place, and what a link is expected to carry;
+    // wrapped by the rule a saved centre is read back with. The map's own
+    // centre always passes it.
+    const center: MapCenter = toMapCenter(view.center) ?? view.center;
     const state: SavedState = {
       schemaVersion: STATE_SCHEMA_VERSION,
       center,

@@ -397,6 +397,18 @@ export async function openWrapped(page: Page): Promise<Locator> {
 }
 
 /**
+ * Wait until the open Wrapped dialog shows its map. The panel holds a
+ * placeholder until the map's tiles have landed: it lies over the map and
+ * takes the pointer, and it shimmers forever, so `settleAnimations` does
+ * not wait for it.
+ */
+export async function waitForWrappedMap(page: Page): Promise<void> {
+  await expect(
+    page.locator("#wrapped-map-container:not(.is-awaiting-map)"),
+  ).toBeAttached();
+}
+
+/**
  * The id of the first path of the loaded data set. Ids are content hashes,
  * so this is whatever id the first flight has, not a small number.
  */
