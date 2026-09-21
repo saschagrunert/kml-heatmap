@@ -55,6 +55,7 @@ function loading(overrides: Partial<LoadingState> = {}): LoadingState {
   return {
     all: false,
     years: ["2026"],
+    fileBytes: undefined,
     loadedBytes: 0,
     totalBytes: undefined,
     ...overrides,
@@ -172,15 +173,10 @@ describe("DataManager", () => {
       bar.id = "loading-progress";
       bar.hidden = true;
       loadingEl.append(textEl, bar);
-
-      vi.useFakeTimers({
-        toFake: ["setTimeout", "clearTimeout", "performance"],
-      });
       frames = stubAnimationFrames();
     });
 
     afterEach(() => {
-      vi.useRealTimers();
       vi.unstubAllGlobals();
     });
 
@@ -190,11 +186,24 @@ describe("DataManager", () => {
       frames.run();
     };
 
-    /** Bring the indicator up and let the grace period of the bar pass */
-    const showPastGrace = (): void => {
-      draw(loading({ loadedBytes: 0, totalBytes: 1000 }));
-      vi.advanceTimersByTime(150);
-      frames.run();
+    /** Every text the label is given from here on */
+    const watchLabel = (): string[] => {
+      const written: string[] = [];
+      const descriptor = Object.getOwnPropertyDescriptor(
+        Node.prototype,
+        "textContent",
+      )!;
+      Object.defineProperty(textEl, "textContent", {
+        configurable: true,
+        get(this: Node) {
+          return descriptor.get!.call(this) as string | null;
+        },
+        set(this: Node, value: string | null) {
+          written.push(`${loadingEl.style.display}: ${value}`);
+          descriptor.set!.call(this, value);
+        },
+      });
+      return written;
     };
 
     const share = (): string =>
@@ -207,53 +216,73 @@ describe("DataManager", () => {
       expect(loadingEl.style.display).toBe("none");
     });
 
-    it("describes what is loading", () => {
-      draw(loading({ years: ["2026"], totalBytes: 1.1 * 1024 * 1024 }));
-      expect(textEl.textContent).toBe("Loading 2026 flights (1.1 MB)…");
-
-      draw(loading({ all: true, totalBytes: 24 * 1024 * 1024 }));
-      expect(textEl.textContent).toBe("Loading all flights (24 MB)…");
-
-      draw(loading({ years: ["2025"] }));
-      expect(textEl.textContent).toBe("Loading 2025 flights…");
-
-      draw(loading({ years: ["2025", "2024"], totalBytes: 2048 }));
-      expect(textEl.textContent).toBe("Loading 2025, 2024 flights (2.0 KB)…");
-
-      draw(loading({ all: true, years: [] }));
-      expect(textEl.textContent).toBe("Loading all flights…");
+    it.each([
+      [
+        { years: ["2026"], fileBytes: 1.1 * 1024 * 1024 },
+        "2026 flights (1.1 MB)",
+      ],
+      [{ all: true, fileBytes: 24 * 1024 * 1024 }, "all flights (24 MB)"],
+      [{ years: ["2025"] }, "2025 flights"],
+      [
+        { years: ["2025", "2024"], fileBytes: 2048 },
+        "2025, 2024 flights (2.0 KB)",
+      ],
+      [{ all: true, years: [] }, "all flights"],
+    ])("describes what is loading: %j", (state, label) => {
+      dataManager.showLoading(loading(state));
+      expect(textEl.textContent).toBe(`Loading ${label}…`);
     });
 
-    it("shows the indicator before writing its text, so the live region announces it", () => {
-      const displayWhenWritten: string[] = [];
-      const descriptor = Object.getOwnPropertyDescriptor(
-        Node.prototype,
-        "textContent",
-      )!;
-      Object.defineProperty(textEl, "textContent", {
-        configurable: true,
-        get(this: Node) {
-          return descriptor.get!.call(this) as string | null;
-        },
-        set(this: Node, value: string | null) {
-          displayWhenWritten.push(loadingEl.style.display);
-          descriptor.set!.call(this, value);
-        },
-      });
+    it("writes the label with the indicator, displayed first so the live region announces it", () => {
+      const written = watchLabel();
 
       dataManager.showLoading(loading({ years: ["2026"] }));
-      expect(loadingEl.style.display).toBe("block");
-      frames.run();
-      // The same label again is not written again
-      draw(loading({ years: ["2026"] }));
 
-      expect(displayWhenWritten).toEqual(["block"]);
-      expect(textEl.textContent).toBe("Loading 2026 flights…");
+      // No frame has run: they are held back while the page is busy
+      expect(frames.pending()).toBe(1);
+      expect(written).toEqual(["block: Loading 2026 flights…"]);
+    });
+
+    it("does not show the label of the last load", () => {
+      draw(loading({ years: ["2025"] }));
+      dataManager.hideLoading();
+
+      dataManager.showLoading(loading({ years: ["2024"] }));
+
+      expect(textEl.textContent).toBe("Loading 2024 flights…");
+    });
+
+    it("leaves the label alone while only the numbers behind the bar change", () => {
+      const written = watchLabel();
+      const state = { years: ["2025", "2024"], fileBytes: 4096 };
+
+      draw(loading({ ...state, loadedBytes: 0, totalBytes: 4096 }));
+      draw(loading({ ...state, loadedBytes: 2048, totalBytes: 4096 }));
+      // A new operation: the bar starts over, the files are the same
+      draw(loading({ ...state, loadedBytes: 0, totalBytes: 1000 }));
+      // One of them failed, which its own toast reports
+      draw(loading({ years: ["2024"], fileBytes: 2048, totalBytes: 500 }));
+
+      expect(written).toEqual(["block: Loading 2025, 2024 flights (4.0 KB)…"]);
+    });
+
+    it("writes the label again for a year it does not name, and for all of them", () => {
+      const written = watchLabel();
+
+      draw(loading({ years: ["2025"] }));
+      draw(loading({ years: ["2025", "2024"] }));
+      draw(loading({ all: true, years: ["2025", "2024", "2023"] }));
+      draw(loading({ all: true, years: ["2023"] }));
+
+      expect(written).toEqual([
+        "block: Loading 2025 flights…",
+        "block: Loading 2025, 2024 flights…",
+        "block: Loading all flights…",
+      ]);
     });
 
     describe("download progress", () => {
-      it("draws label and bar once per frame, from the latest state", () => {
-        showPastGrace();
+      it("draws the bar once per frame, from the latest state", () => {
         const setProperty = vi.spyOn(bar.style, "setProperty");
 
         for (const loadedBytes of [100, 250, 370]) {
@@ -261,6 +290,7 @@ describe("DataManager", () => {
         }
 
         expect(frames.pending()).toBe(1);
+        expect(bar.hidden).toBe(true);
         frames.run();
         expect(setProperty).toHaveBeenCalledExactlyOnceWith(
           "--loading-progress",
@@ -269,8 +299,18 @@ describe("DataManager", () => {
         expect(bar.hidden).toBe(false);
       });
 
+      it("looks the indicator up once per load, not once per chunk", () => {
+        const getElementById = vi.spyOn(document, "getElementById");
+
+        dataManager.showLoading(loading({ loadedBytes: 1, totalBytes: 1000 }));
+        const lookups = getElementById.mock.calls.length;
+        dataManager.showLoading(loading({ loadedBytes: 2, totalBytes: 1000 }));
+        dataManager.showLoading(loading({ loadedBytes: 3, totalBytes: 1000 }));
+
+        expect(getElementById.mock.calls.length).toBe(lookups);
+      });
+
       it("moves the accessible value in steps of ten", () => {
-        showPastGrace();
         const setAttribute = vi.spyOn(bar, "setAttribute");
 
         // 300 of 1000 is the one that 0.3 * 10 would get wrong as a float
@@ -282,62 +322,39 @@ describe("DataManager", () => {
           setAttribute.mock.calls
             .filter(([name]) => name === "aria-valuenow")
             .map(([, value]) => value),
-        ).toEqual(["10", "20", "30", "100"]);
+        ).toEqual(["0", "10", "20", "30", "100"]);
       });
 
-      it("shows no bar for a load that is over within the grace period", () => {
-        draw(loading({ loadedBytes: 0, totalBytes: 1000 }));
-        vi.advanceTimersByTime(40);
-        draw(loading({ loadedBytes: 600, totalBytes: 1000 }));
-        draw(loading({ loadedBytes: 1000, totalBytes: 1000 }));
-        expect(bar.hidden).toBe(true);
+      it("displays the bar anew for a new operation, so its delay runs again", () => {
+        draw(loading({ loadedBytes: 900, totalBytes: 1000 }));
+        const hidden = vi.spyOn(bar, "hidden", "set");
 
-        dataManager.hideLoading();
-        vi.advanceTimersByTime(1000);
-        frames.run();
+        draw(loading({ loadedBytes: 950, totalBytes: 1000 }));
+        expect(hidden.mock.calls).toEqual([[false]]);
+        hidden.mockClear();
 
-        expect(bar.hidden).toBe(true);
-        expect(vi.getTimerCount()).toBe(0);
+        draw(loading({ loadedBytes: 0, totalBytes: 400 }));
+        expect(hidden.mock.calls).toEqual([[true], [false]]);
+        expect(share()).toBe("0");
       });
 
-      it("shows the bar of a stalled load once the grace period is over", () => {
-        draw(loading({ loadedBytes: 550, totalBytes: 1000 }));
-        expect(bar.hidden).toBe(true);
+      it("keeps the bar up, full, when nothing is left to download", () => {
+        draw(loading({ loadedBytes: 900, totalBytes: 1000 }));
+        const hidden = vi.spyOn(bar, "hidden", "set");
 
-        vi.advanceTimersByTime(149);
-        frames.run();
-        expect(bar.hidden).toBe(true);
-        vi.advanceTimersByTime(1);
-        frames.run();
+        draw(loading({ loadedBytes: 3000, totalBytes: 3000 }));
 
-        expect(bar.hidden).toBe(false);
-        expect(share()).toBe("0.55");
-        expect(bar.getAttribute("aria-valuenow")).toBe("50");
-      });
-
-      it("does not bring the bar up for a load that is already complete", () => {
-        draw(loading({ loadedBytes: 0, totalBytes: 1000 }));
-        vi.advanceTimersByTime(500);
-        draw(loading({ loadedBytes: 1000, totalBytes: 1000 }));
-
-        expect(bar.hidden).toBe(true);
-      });
-
-      it("keeps a bar that is up until the load ends, full included", () => {
-        showPastGrace();
-        draw(loading({ loadedBytes: 1000, totalBytes: 1000 }));
-
-        expect(bar.hidden).toBe(false);
+        expect(hidden.mock.calls).toEqual([[false]]);
         expect(share()).toBe("1");
         expect(bar.getAttribute("aria-valuenow")).toBe("100");
       });
 
       it("hides the bar without a total, and touches it only once", () => {
-        showPastGrace();
+        draw(loading({ loadedBytes: 400, totalBytes: 1000 }));
         const removeAttribute = vi.spyOn(bar, "removeAttribute");
 
-        draw(loading({ loadedBytes: 400 }));
-        draw(loading({ loadedBytes: 500 }));
+        draw(loading());
+        draw(loading());
 
         expect(bar.hidden).toBe(true);
         expect(bar.hasAttribute("aria-valuenow")).toBe(false);
@@ -346,7 +363,6 @@ describe("DataManager", () => {
       });
 
       it("hiding the indicator drops the bar and the frame it was waiting for", () => {
-        showPastGrace();
         draw(loading({ loadedBytes: 500, totalBytes: 1000 }));
         dataManager.showLoading(
           loading({ loadedBytes: 1000, totalBytes: 1000 }),
@@ -360,17 +376,8 @@ describe("DataManager", () => {
         expect(share()).toBe("");
       });
 
-      it("gives the next load a grace period of its own", () => {
-        showPastGrace();
-        dataManager.hideLoading();
-
-        draw(loading({ loadedBytes: 900, totalBytes: 1000 }));
-
-        expect(bar.hidden).toBe(true);
-      });
-
       it("draws nothing once the app is destroyed", () => {
-        showPastGrace();
+        draw(loading({ loadedBytes: 0, totalBytes: 1000 }));
         dataManager.showLoading(
           loading({ loadedBytes: 500, totalBytes: 1000 }),
         );
@@ -383,15 +390,6 @@ describe("DataManager", () => {
 
         expect(frames.pending()).toBe(0);
         expect(share()).toBe("0");
-      });
-
-      it("drops the grace timer when the app is destroyed", () => {
-        draw(loading({ loadedBytes: 500, totalBytes: 1000 }));
-        expect(vi.getTimerCount()).toBe(1);
-
-        dataManager.destroy();
-
-        expect(vi.getTimerCount()).toBe(0);
       });
 
       it("works without the bar in the template", () => {

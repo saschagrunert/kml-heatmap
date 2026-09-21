@@ -23,7 +23,10 @@ import {
   resetStylesheetLoader,
   DataLoader,
 } from "../../../../kml_heatmap/frontend/services/dataLoader";
-import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
+import {
+  logDebug,
+  logError,
+} from "../../../../kml_heatmap/frontend/utils/logger";
 import type {
   DataLoaderOptions,
   KMLDataset,
@@ -1124,6 +1127,7 @@ describe("DataLoader", () => {
       expect(mockShowLoading).toHaveBeenCalledExactlyOnceWith({
         all: false,
         years: ["2025"],
+        fileBytes: 2048,
         loadedBytes: 0,
         totalBytes: 2048,
       });
@@ -1137,6 +1141,7 @@ describe("DataLoader", () => {
       expect(mockShowLoading).toHaveBeenCalledExactlyOnceWith({
         all: false,
         years: ["2025"],
+        fileBytes: undefined,
         loadedBytes: 0,
         totalBytes: undefined,
       });
@@ -1246,6 +1251,7 @@ describe("DataLoader", () => {
       expect(mockShowLoading).toHaveBeenCalledWith({
         all: true,
         years: ["2024", "2025"],
+        fileBytes: 2148,
         loadedBytes: 0,
         totalBytes: 2148,
       });
@@ -1375,11 +1381,12 @@ describe("DataLoader", () => {
     const request = (year: number): (typeof requests)[string] =>
       requests[`test-data/${year}/data.json`]!;
 
-    /** What the indicator was told, as "years loaded/total" */
+    /** What the indicator was told, as "years (size) loaded/total" */
     const shown = (): string[] =>
       mockShowLoading.mock.calls.map(
-        ([{ all, years, loadedBytes, totalBytes }]) =>
-          `${all ? "all:" : ""}${years.join("+")} ${loadedBytes}/${totalBytes}`,
+        ([{ all, years, fileBytes, loadedBytes, totalBytes }]) =>
+          `${all ? "all:" : ""}${years.join("+")} (${fileBytes}) ` +
+          `${loadedBytes}/${totalBytes}`,
       );
 
     /** Let the promise chains of settled requests run */
@@ -1400,9 +1407,9 @@ describe("DataLoader", () => {
       // Nothing is reported for the file having settled: the indicator goes
       // away instead
       expect(shown()).toEqual([
-        "2025 0/1000",
-        "2025 400/1000",
-        "2025 1000/1000",
+        "2025 (1000) 0/1000",
+        "2025 (1000) 400/1000",
+        "2025 (1000) 1000/1000",
       ]);
       expect(mockHideLoading).toHaveBeenCalledOnce();
     });
@@ -1420,9 +1427,18 @@ describe("DataLoader", () => {
       await loading;
 
       expect(shown()).toEqual([
-        "2025 0/1000",
-        "2025 600/1000",
-        "2025 1000/1000",
+        "2025 (1000) 0/1000",
+        "2025 (1000) 600/1000",
+        "2025 (1000) 1000/1000",
+        "2025 (1000) 1000/1000",
+      ]);
+      // Said once, not for every chunk past the size
+      expect(
+        vi
+          .mocked(logDebug)
+          .mock.calls.filter(([message]) => String(message).includes("larger")),
+      ).toEqual([
+        ["Year file is larger than metadata.year_file_bytes says:", 1000],
       ]);
     });
 
@@ -1442,7 +1458,7 @@ describe("DataLoader", () => {
         "test-data/2025/data.json",
         undefined,
       );
-      expect(shown()).toEqual(["2025 0/undefined"]);
+      expect(shown()).toEqual(["2025 (undefined) 0/undefined"]);
     });
 
     it("sums the years of 'all' into one share", async () => {
@@ -1460,16 +1476,15 @@ describe("DataLoader", () => {
       request(2025).settle();
       await loading;
 
+      // The years join as one: the indicator comes up knowing all of them
       expect(shown()).toEqual([
-        "all: 0/undefined",
-        "all:2024 0/100",
-        "all:2024+2025 0/400",
-        "all:2024+2025 150/400",
-        "all:2024+2025 210/400",
+        "all:2024+2025 (400) 0/400",
+        "all:2024+2025 (400) 150/400",
+        "all:2024+2025 (400) 210/400",
         // Arrived, so it counts in full whatever was counted on the way
-        "all:2024+2025 250/400",
-        "all:2024+2025 400/400",
-        "all:2024+2025 400/400",
+        "all:2024+2025 (400) 250/400",
+        "all:2024+2025 (400) 400/400",
+        "all:2024+2025 (400) 400/400",
       ]);
     });
 
@@ -1486,12 +1501,9 @@ describe("DataLoader", () => {
       request(2025).settle();
       await loading;
 
-      expect(shown().slice(2)).toEqual([
-        "all:2024+2025 0/undefined",
-        "all:2024+2025 50/undefined",
-        "all:2024+2025 100/undefined",
-        "all:2024+2025 100/undefined",
-      ]);
+      expect(new Set(shown())).toEqual(
+        new Set(["all:2024+2025 (undefined) 0/undefined"]),
+      );
     });
 
     it("starts over without a year that failed, counting no bytes that never arrived", async () => {
@@ -1511,13 +1523,14 @@ describe("DataLoader", () => {
       await loading;
 
       expect(shown()).toEqual([
-        "all:2023+2024+2025 150/500",
-        "all:2023+2024+2025 170/500",
-        // What is left: 80 bytes of 2024 and the half of 2025 still to come
-        "all:2024+2025 0/230",
-        "all:2025 0/150",
-        "all:2025 75/150",
-        "all:2025 150/150",
+        "all:2023+2024+2025 (500) 150/500",
+        "all:2023+2024+2025 (500) 170/500",
+        // What is left: 80 bytes of 2024 and the half of 2025 still to come.
+        // The size is that of the whole files, as the label names them.
+        "all:2024+2025 (400) 0/230",
+        "all:2025 (300) 0/150",
+        "all:2025 (300) 75/150",
+        "all:2025 (300) 150/150",
       ]);
       expect(onLoadError).toHaveBeenCalledWith(["2023", "2024"]);
     });
@@ -1538,14 +1551,14 @@ describe("DataLoader", () => {
       await second;
 
       expect(shown()).toEqual([
-        "2025 0/300",
-        "2025 270/300",
-        // Not 270 of 400: the bar and the size in the label are about the
-        // 130 bytes that the two files still have to deliver
-        "2025+2024 0/130",
-        "2025+2024 15/130",
-        "2025+2024 30/130",
-        "2025+2024 80/130",
+        "2025 (300) 0/300",
+        "2025 (300) 270/300",
+        // Not 270 of 400: the bar is about the 130 bytes that the two files
+        // still have to deliver, the label about the files
+        "2025+2024 (400) 0/130",
+        "2025+2024 (400) 15/130",
+        "2025+2024 (400) 30/130",
+        "2025+2024 (400) 80/130",
       ]);
       expect(mockHideLoading).toHaveBeenCalledOnce();
     });
@@ -1567,7 +1580,7 @@ describe("DataLoader", () => {
       request(2023).settle();
       await Promise.all([second, third]);
 
-      expect(shown()[0]).toBe("2024+2023 0/150");
+      expect(shown()[0]).toBe("2024+2023 (150) 0/150");
     });
 
     it("leaves a cached year out of label and bar alike", async () => {
@@ -1586,10 +1599,9 @@ describe("DataLoader", () => {
       await loading;
 
       expect(shown()).toEqual([
-        "all: 0/undefined",
-        "all:2025 0/300",
-        "all:2025 150/300",
-        "all:2025 300/300",
+        "all:2025 (300) 0/300",
+        "all:2025 (300) 150/300",
+        "all:2025 (300) 300/300",
       ]);
     });
 
@@ -1622,6 +1634,76 @@ describe("DataLoader", () => {
         );
       },
     );
+
+    it("keeps the bar full when a failure leaves nothing to download", async () => {
+      withSizes({ "2024": 100, "2025": 300 });
+      defineYear(2025);
+
+      const loading = loader.loadAndCombineAllYears();
+      await vi.waitFor(() => expect(Object.keys(requests)).toHaveLength(2));
+      mockShowLoading.mockClear();
+      // All of 2025 is in and is being read when 2024 fails
+      request(2025).read(300);
+      request(2024).settle(false);
+      await settled();
+      request(2025).settle();
+      await loading;
+
+      expect(shown()).toEqual([
+        "all:2024+2025 (400) 300/400",
+        "all:2025 (300) 300/300",
+        "all:2025 (300) 300/300",
+      ]);
+    });
+
+    it("ignores bytes reported for a download that is over", async () => {
+      withSizes({ "2024": 100, "2025": 300 });
+      defineYear(2025);
+
+      const first = loader.loadData("2024");
+      const second = loader.loadData("2025");
+      request(2024).settle(false);
+      await first;
+      mockShowLoading.mockClear();
+      // What a request that timed out may still do
+      request(2024).read(80);
+      request(2025).settle();
+      await second;
+      request(2025).read(400);
+
+      expect(shown()).toEqual([]);
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+    });
+
+    it("says so when a file came out smaller than its recorded size", async () => {
+      withSizes({ "2025": 1000 });
+      defineYear(2025);
+
+      const loading = loader.loadData("2025");
+      request(2025).read(700);
+      request(2025).settle();
+      await loading;
+
+      expect(logDebug).toHaveBeenCalledWith(
+        "Year file is smaller than metadata.year_file_bytes says:",
+        { size: 1000, received: 700 },
+      );
+    });
+
+    it("has nothing to say about a file of the recorded size", async () => {
+      withSizes({ "2025": 1000 });
+      defineYear(2025);
+
+      const loading = loader.loadData("2025");
+      request(2025).read(1000);
+      request(2025).settle();
+      await loading;
+
+      expect(logDebug).not.toHaveBeenCalledWith(
+        expect.stringContaining("year_file_bytes"),
+        expect.anything(),
+      );
+    });
 
     it("asks for no progress on the index files", async () => {
       files["test-data/metadata.json"] = { available_years: [] };

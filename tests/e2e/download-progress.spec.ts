@@ -107,4 +107,16 @@ test("the indicator fills while the year file arrives", async ({
     () => window.mapApp!.currentData?.path_segments.length ?? 0,
   );
   expect(segments).toBeGreaterThan(0);
+
+  // The stylesheet holds a bar back for a moment after it is displayed, so
+  // that a load that is over at once shows none. Read in the task that
+  // displays it: a second round trip could take longer than the delay.
+  const atFirst = await page.evaluate(() => {
+    document.getElementById("loading")!.style.display = "block";
+    const element = document.getElementById("loading-progress")!;
+    element.hidden = false;
+    return getComputedStyle(element).visibility;
+  });
+  expect(atFirst).toBe("hidden");
+  await expect(bar).toBeVisible();
 });
