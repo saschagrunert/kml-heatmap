@@ -3,10 +3,11 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { AIRPORTS_HIDDEN_CLASS } from "../../../kml_heatmap/frontend/mapLayers";
+import { HEATMAP_RADIUS_PX } from "../../../kml_heatmap/frontend/ui/dataManager";
 import {
-  HEATMAP_BANDS,
-  HEATMAP_LAYER_IDS,
+  HEATMAP_CLUSTER,
   MAP_LAYERS,
+  MAP_MIN_ZOOM,
   MAP_SOURCES,
 } from "../../../kml_heatmap/frontend/utils/constants";
 import { createMockApp } from "../testHelpers";
@@ -58,43 +59,51 @@ describe("layer handles", () => {
     expect(app.altitudeLayer.setVisible).toHaveBeenCalledTimes(2);
   });
 
-  it("draw the heat source with one layer per level of detail, below the paths", () => {
+  it("draw the heat source, which clusters the fixes, with one layer below the paths", () => {
     const app = createMockApp();
     const map = app.map!;
 
-    // The full detail first: the e2e driver reads the heatmap off `ids[0]`
-    expect(app.heatmapLayer.ids).toEqual(HEATMAP_LAYER_IDS);
-    expect(app.heatmapLayer.ids[0]).toBe(MAP_LAYERS.heat);
-    for (const band of HEATMAP_BANDS) {
-      const layer = map.layer(band.layer);
-      expect(layer.type).toBe("heatmap");
-      expect(layer.source).toBe(MAP_SOURCES.heat);
-      expect(layer.minzoom).toBe(band.minzoom);
-      expect(layer.maxzoom).toBe(band.maxzoom);
-      expect(layer.filter).toEqual(["==", ["get", "detail"], band.detail]);
-    }
+    // The e2e driver reads the heatmap off `ids[0]`
+    expect(app.heatmapLayer.ids).toEqual([MAP_LAYERS.heat]);
+    expect(map.source(MAP_SOURCES.heat).spec).toMatchObject({
+      type: "geojson",
+      cluster: true,
+      clusterRadius: HEATMAP_CLUSTER.radius,
+      clusterMaxZoom: HEATMAP_CLUSTER.maxZoom,
+    });
+    const layer = map.layer(MAP_LAYERS.heat);
+    expect(layer.type).toBe("heatmap");
+    expect(layer.source).toBe(MAP_SOURCES.heat);
+    // One layer for every zoom: a second one could not show the tiles of
+    // the level before while its own still load
+    expect(layer.minzoom).toBeUndefined();
+    expect(layer.maxzoom).toBeUndefined();
+    expect(layer.filter).toBeUndefined();
 
     const order = map.getLayersOrder();
-    const heat = HEATMAP_LAYER_IDS.map((id) => order.indexOf(id));
-    // One block, where the single heat layer was
-    expect(heat).toEqual(heat.map((_, i) => heat[0]! + i));
-    expect(order[heat[0]! - 1]).toBe(MAP_LAYERS.aviation);
-    expect(order[heat[heat.length - 1]! + 1]).toBe(MAP_LAYERS.replayRoute);
-    expect(Math.max(...heat)).toBeLessThan(
-      order.indexOf(MAP_LAYERS.pathsAltitude),
-    );
+    const heat = order.indexOf(MAP_LAYERS.heat);
+    expect(order[heat - 1]).toBe(MAP_LAYERS.aviation);
+    expect(order[heat + 1]).toBe(MAP_LAYERS.replayRoute);
+    expect(heat).toBeLessThan(order.indexOf(MAP_LAYERS.pathsAltitude));
   });
 
-  it("switch every level of detail of the heatmap together", () => {
+  it("keep the clusters finer than the reach of a point", () => {
+    // A cluster radius near the reach of a point turns tracks into beads
+    expect(HEATMAP_CLUSTER.radius).toBeGreaterThan(0);
+    expect(HEATMAP_CLUSTER.radius * 2).toBeLessThan(HEATMAP_RADIUS_PX);
+    expect(HEATMAP_CLUSTER.maxZoom).toBeGreaterThanOrEqual(MAP_MIN_ZOOM);
+  });
+
+  it("switch the heatmap on and off, and nothing else", () => {
     const app = createMockApp();
     const map = app.map!;
-    const visibilities = (): unknown[] =>
-      HEATMAP_LAYER_IDS.map((id) => map.layer(id).layout["visibility"]);
+    const visibility = (): unknown =>
+      map.layer(MAP_LAYERS.heat).layout["visibility"];
 
     app.heatmapLayer.setVisible(true);
 
     expect(app.heatmapLayer.isVisible()).toBe(true);
-    expect(visibilities()).toEqual(HEATMAP_LAYER_IDS.map(() => "visible"));
+    expect(visibility()).toBe("visible");
     expect(map.layer(MAP_LAYERS.pathsAltitude).layout["visibility"]).toBe(
       "none",
     );
@@ -102,7 +111,7 @@ describe("layer handles", () => {
     app.heatmapLayer.setVisible(false);
 
     expect(app.heatmapLayer.isVisible()).toBe(false);
-    expect(visibilities()).toEqual(HEATMAP_LAYER_IDS.map(() => "none"));
+    expect(visibility()).toBe("none");
   });
 
   it("hide the airport markers through a class on the map container", () => {

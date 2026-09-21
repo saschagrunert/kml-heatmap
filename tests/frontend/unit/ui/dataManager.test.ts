@@ -4,10 +4,10 @@ import {
   heatmapCoordinates,
   heatmapFeatures,
   heatmapPaint,
+  HEATMAP_LEAST_CONTRIBUTION,
 } from "../../../../kml_heatmap/frontend/ui/dataManager";
 import {
-  HEATMAP_BANDS,
-  HEATMAP_LAYER_IDS,
+  HEATMAP_CLUSTER,
   MAP_LAYERS,
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
@@ -69,13 +69,12 @@ describe("DataManager", () => {
   const heatLayer = (): MockLayer => mockApp.map!.layer(MAP_LAYERS.heat);
   /** The `[lng, lat]` points the heat source holds, in full detail */
   const heatPoints = (): [number, number][] => {
-    const data = heatSource()
-      .data as GeoJSON.FeatureCollection<GeoJSON.MultiPoint>;
+    const data = heatSource().data as GeoJSON.FeatureCollection<GeoJSON.Point>;
     expect(data.type).toBe("FeatureCollection");
-    const full = data.features.find((f) => f.properties?.["detail"] === 0);
-    if (!full) return [];
-    expect(full.geometry.type).toBe("MultiPoint");
-    return full.geometry.coordinates as [number, number][];
+    return data.features.map((feature) => {
+      expect(feature.geometry.type).toBe("Point");
+      return feature.geometry.coordinates as [number, number];
+    });
   };
   /** How often a paint property of a heat layer was set */
   const paintCalls = (name: string, layer: string): unknown[][] =>
@@ -513,26 +512,19 @@ describe("DataManager", () => {
       expect(heatPoints()[0]).toEqual([8.0, 50.0]);
     });
 
-    it("gives every heat layer its paint on first use", async () => {
-      for (const id of HEATMAP_LAYER_IDS) {
-        expect(mockApp.map!.layer(id).paint).toEqual({});
-      }
+    it("gives the heat layer its paint on first use", async () => {
+      expect(heatLayer().paint).toEqual({});
 
       await dataManager.updateLayers(baseData());
 
-      for (const band of HEATMAP_BANDS) {
-        const paint = mockApp.map!.layer(band.layer).paint;
-        expect(paint).toEqual(heatmapPaint(band.stride));
-        expect(paint["heatmap-radius"]).toBe(22);
-        expect(paint["heatmap-weight"]).toBe(1);
-      }
       expect(heatLayer().paint).toEqual(heatmapPaint());
+      expect(heatLayer().paint["heatmap-radius"]).toBe(22);
     });
 
     it("sets the paint once, not with every new set of points", async () => {
       mockApp.heatmapVisible = false;
       await dataManager.updateLayers(baseData());
-      await dataManager.updateLayers();
+      await dataManager.updateLayers(baseData());
       dataManager.showHeatmap();
 
       expect(heatSource().setData).toHaveBeenCalledTimes(2);
@@ -542,9 +534,7 @@ describe("DataManager", () => {
         "heatmap-intensity",
         "heatmap-color",
       ]) {
-        for (const id of HEATMAP_LAYER_IDS) {
-          expect(paintCalls(name, id)).toHaveLength(1);
-        }
+        expect(paintCalls(name, MAP_LAYERS.heat)).toHaveLength(1);
       }
     });
 
@@ -684,7 +674,49 @@ describe("DataManager", () => {
 
       expect(loaderMocks.loadData).not.toHaveBeenCalled();
       expect(mockApp.currentData).toBe(data);
+    });
+
+    it("does not send the heat source the points it already holds", async () => {
+      // A feature per fix is costly to hand to the worker
+      const data = baseData();
+      await dataManager.updateLayers(data);
+      const held = heatPoints();
+
+      // The whole dataset again, and a selection that isolates nothing
+      await dataManager.updateLayers();
+      mockApp.selectedPathIds = new Set([1]);
+      await dataManager.updateLayers();
+      expect(heatSource().setData).toHaveBeenCalledTimes(1);
+
+      // Filtered points are a new array each time, of the same coordinates
+      mockApp.selectedYear = "2025";
+      await dataManager.updateLayers();
+      await dataManager.updateLayers();
       expect(heatSource().setData).toHaveBeenCalledTimes(2);
+      expect(heatPoints()).not.toEqual(held);
+    });
+
+    it("sends the points again once a filter or the isolation changes them", async () => {
+      const data = baseData();
+      await dataManager.updateLayers(data);
+
+      mockApp.selectedPathIds = new Set([2]);
+      mockApp.isolateSelection = true;
+      await dataManager.updateLayers();
+      expect(heatSource().setData).toHaveBeenCalledTimes(2);
+      expect(heatPoints()).toEqual([
+        [10.0, 52.0],
+        [11.0, 53.0],
+      ]);
+
+      mockApp.isolateSelection = false;
+      await dataManager.updateLayers();
+      expect(heatSource().setData).toHaveBeenCalledTimes(3);
+      expect(heatPoints()).toHaveLength(data.coordinates.length);
+
+      // The same points of another dataset are other points
+      await dataManager.updateLayers(baseData());
+      expect(heatSource().setData).toHaveBeenCalledTimes(4);
     });
 
     it("does not retry and report a partial load on every redraw (regression)", async () => {
@@ -823,11 +855,7 @@ describe("DataManager", () => {
     it("paints a layer that is shown before it got any points", () => {
       dataManager.showHeatmap();
 
-      for (const band of HEATMAP_BANDS) {
-        expect(mockApp.map!.layer(band.layer).paint).toEqual(
-          heatmapPaint(band.stride),
-        );
-      }
+      expect(heatLayer().paint).toEqual(heatmapPaint());
     });
 
     it("does nothing without a map", () => {
@@ -838,7 +866,7 @@ describe("DataManager", () => {
     });
 
     it("leaves a map alone whose style has no heat source yet", async () => {
-      for (const id of HEATMAP_LAYER_IDS) mockApp.map!.removeLayer(id);
+      mockApp.map!.removeLayer(MAP_LAYERS.heat);
       mockApp.map!.removeSource(MAP_SOURCES.heat);
       mockApp.altitudeVisible = true;
 
@@ -877,39 +905,90 @@ describe("DataManager", () => {
       expect(i2).toBe(i1);
     });
 
-    it("scales the intensity of a layer by the stride it draws at", () => {
-      const full = (paint["heatmap-intensity"] as unknown[]).slice(3);
-      for (const { stride } of HEATMAP_BANDS) {
-        const scaled = heatmapPaint(stride);
-        const intensity = scaled["heatmap-intensity"] as unknown[];
-        expect(intensity.slice(0, 3)).toEqual([
-          "interpolate",
-          ["exponential", 2],
-          ["zoom"],
-        ]);
-        // Same zooms, every intensity times the stride
-        expect(intensity.slice(3)).toEqual(
-          full.map((value, i) =>
-            i % 2 === 0 ? value : (value as number) * stride,
-          ),
+    /** What the intensity comes to at `zoom`, by the rule of the expression */
+    const intensityAt = (zoom: number): number => {
+      const [z0, i0, z1, i1] = (paint["heatmap-intensity"] as unknown[]).slice(
+        3,
+      ) as [number, number, number, number];
+      return zoom >= z1 ? i1 : i0 * 2 ** (zoom - z0);
+    };
+
+    /**
+     * What the weight comes to for a feature with these properties. Only the
+     * shape heatmapWeight builds is understood: an interpolation over the
+     * zoom whose outputs are the count or `["max", count, floor]`.
+     */
+    const weightAt = (
+      zoom: number,
+      properties: { point_count?: number },
+    ): number => {
+      const weight = paint["heatmap-weight"] as unknown[];
+      expect(weight.slice(0, 3)).toEqual([
+        "interpolate",
+        ["exponential", 0.5],
+        ["zoom"],
+      ]);
+      const count = properties.point_count ?? 1;
+      const output = (value: unknown): number => {
+        const countExpression = ["coalesce", ["get", "point_count"], 1];
+        if (JSON.stringify(value) === JSON.stringify(countExpression)) {
+          return count;
+        }
+        const [operator, first, floor] = value as [string, unknown, number];
+        expect(operator).toBe("max");
+        expect(first).toEqual(countExpression);
+        return Math.max(count, floor);
+      };
+      const stops = weight.slice(3);
+      const zooms = stops.filter((_, i) => i % 2 === 0) as number[];
+      const outputs = stops.filter((_, i) => i % 2 === 1).map(output);
+      if (zoom <= zooms[0]!) return outputs[0]!;
+      const last = zooms.length - 1;
+      if (zoom >= zooms[last]!) return outputs[last]!;
+      const upper = zooms.findIndex((z) => z > zoom);
+      const [from, to] = [zooms[upper - 1]!, zooms[upper]!];
+      // MapLibre's exponential interpolation
+      const t = (0.5 ** (zoom - from) - 1) / (0.5 ** (to - from) - 1);
+      return outputs[upper - 1]! + (outputs[upper]! - outputs[upper - 1]!) * t;
+    };
+
+    it("never lets a lone fix contribute less than at the first zoom without clusters", () => {
+      // No spacing of the fixes assumed: a feature without `point_count` is
+      // a fix that found no cluster, however far out the map is
+      expect(HEATMAP_LEAST_CONTRIBUTION).toBeGreaterThanOrEqual(0.004);
+      expect(HEATMAP_LEAST_CONTRIBUTION).toBe(
+        intensityAt(HEATMAP_CLUSTER.maxZoom + 1),
+      );
+      for (let zoom = 0; zoom <= MAP_MAX_ZOOM; zoom += 0.5) {
+        const contribution = weightAt(zoom, {}) * intensityAt(zoom);
+        expect(contribution).toBeGreaterThanOrEqual(
+          HEATMAP_LEAST_CONTRIBUTION * (1 - 1e-9),
         );
-        expect({ ...scaled, "heatmap-intensity": null }).toEqual({
-          ...paint,
-          "heatmap-intensity": null,
-        });
+      }
+      expect(MAP_MIN_ZOOM).toBeGreaterThanOrEqual(0);
+    });
+
+    it("holds a lone fix at exactly the floor while clusters are drawn", () => {
+      for (let zoom = 0; zoom <= HEATMAP_CLUSTER.maxZoom + 1; zoom += 0.25) {
+        expect(weightAt(zoom, {}) * intensityAt(zoom)).toBeCloseTo(
+          HEATMAP_LEAST_CONTRIBUTION,
+          12,
+        );
       }
     });
 
-    it("keeps a point above what the density texture can hold, in every band", () => {
-      for (const { stride, minzoom } of HEATMAP_BANDS) {
-        const stops = (
-          heatmapPaint(stride)["heatmap-intensity"] as unknown[]
-        ).slice(3) as number[];
-        const [z0, i0] = stops as [number, number];
-        // The curve is i0 * 2^(zoom - z0) up to the reference zoom, and a
-        // band's faintest point is the one at its lower end
-        const faintest = i0 * 2 ** (Math.max(minzoom, MAP_MIN_ZOOM) - z0);
-        expect(faintest).toBeGreaterThanOrEqual(0.004);
+    it("weighs a fix as one where fixes are drawn, and a big cluster as its fixes", () => {
+      for (
+        let zoom = HEATMAP_CLUSTER.maxZoom + 1;
+        zoom <= MAP_MAX_ZOOM;
+        zoom++
+      ) {
+        expect(weightAt(zoom, {})).toBe(1);
+      }
+      for (let zoom = 0; zoom <= HEATMAP_CLUSTER.maxZoom; zoom += 0.5) {
+        expect(weightAt(zoom, { point_count: 100000 })).toBe(100000);
+        // The floor only ever adds
+        expect(weightAt(zoom, { point_count: 3 })).toBeGreaterThanOrEqual(3);
       }
     });
 
@@ -1016,86 +1095,29 @@ describe("DataManager", () => {
     const line = (count: number): [number, number][] =>
       Array.from({ length: count }, (_, i): [number, number] => [8 + i, 50]);
 
-    it("makes one MultiPoint per level of detail, thinned by its stride", () => {
-      const points = line(1100);
+    it("makes one Point per fix, which is what the source can cluster", () => {
+      const points = line(3);
 
-      const { type, features } = heatmapFeatures(points);
-
-      expect(type).toBe("FeatureCollection");
-      expect(features).toHaveLength(HEATMAP_BANDS.length);
-      HEATMAP_BANDS.forEach(({ detail, stride }, i) => {
-        const feature = features[i]!;
-        expect(feature.type).toBe("Feature");
-        expect(feature.properties).toEqual({ detail });
-        expect(feature.geometry.type).toBe("MultiPoint");
-        expect(feature.geometry.coordinates).toEqual(
-          points.filter((_, index) => index % stride === 0),
-        );
-        expect(feature.geometry.coordinates).toHaveLength(
-          Math.ceil(points.length / stride),
-        );
+      expect(heatmapFeatures(points)).toEqual({
+        type: "FeatureCollection",
+        features: points.map((coordinates) => ({
+          type: "Feature",
+          properties: null,
+          geometry: { type: "Point", coordinates },
+        })),
       });
-      expect(features[0]!.geometry.coordinates).toEqual(points);
-      expect(features[3]!.geometry.coordinates).toEqual([
-        [8, 50],
-        [8 + 512, 50],
-        [8 + 1024, 50],
-      ]);
     });
 
-    it("gives every level the first point when there are fewer than a stride", () => {
-      const { features } = heatmapFeatures(line(3));
-
-      expect(features.map((f) => f.geometry.coordinates)).toEqual([
-        line(3),
-        [[8, 50]],
-        [[8, 50]],
-        [[8, 50]],
-      ]);
-      expect(heatmapFeatures(line(1)).features).toHaveLength(4);
-    });
-
-    it("has no features, rather than empty ones, without any point", () => {
+    it("has no features without any point", () => {
       expect(heatmapFeatures([])).toEqual({
         type: "FeatureCollection",
         features: [],
       });
     });
-
-    it("has a band for every zoom, without gap or overlap", () => {
-      const bands = [...HEATMAP_BANDS].sort((a, b) => a.minzoom - b.minzoom);
-      expect(bands[0]!.minzoom).toBeLessThanOrEqual(MAP_MIN_ZOOM);
-      // `maxzoom` is exclusive, so the last one has to lie beyond the map's
-      expect(bands[bands.length - 1]!.maxzoom).toBeGreaterThan(MAP_MAX_ZOOM);
-      // 24 is the most MapLibre takes for a layer
-      expect(bands[bands.length - 1]!.maxzoom).toBeLessThanOrEqual(24);
-      for (let i = 1; i < bands.length; i++) {
-        expect(bands[i]!.minzoom).toBe(bands[i - 1]!.maxzoom);
-        // Further in, more detail
-        expect(bands[i]!.stride).toBeLessThan(bands[i - 1]!.stride);
-      }
-      for (const band of bands) {
-        expect(band.maxzoom).toBeGreaterThan(band.minzoom);
-      }
-      expect(new Set(bands.map((b) => b.detail)).size).toBe(bands.length);
-      expect(new Set(HEATMAP_LAYER_IDS).size).toBe(bands.length);
-      expect(HEATMAP_BANDS[0]).toMatchObject({
-        stride: 1,
-        layer: MAP_LAYERS.heat,
-      });
-      expect(HEATMAP_LAYER_IDS[0]).toBe(MAP_LAYERS.heat);
-    });
   });
 
   describe("applyHeatmapEmphasis", () => {
-    /** The opacity of the heat layers, which has to be one and the same */
-    const opacity = (): unknown => {
-      const values = HEATMAP_LAYER_IDS.map(
-        (id) => mockApp.map!.layer(id).paint["heatmap-opacity"],
-      );
-      expect(new Set(values).size).toBe(1);
-      return values[0];
-    };
+    const opacity = (): unknown => heatLayer().paint["heatmap-opacity"];
 
     it("steps the heatmap back while a colour layer is over it", async () => {
       mockApp.altitudeVisible = true;
@@ -1165,7 +1187,7 @@ describe("DataManager", () => {
     });
 
     it("does nothing without a map or before the layers exist", () => {
-      for (const id of HEATMAP_LAYER_IDS) mockApp.map!.removeLayer(id);
+      mockApp.map!.removeLayer(MAP_LAYERS.heat);
       expect(() => dataManager.applyHeatmapEmphasis()).not.toThrow();
       expect(mockApp.map!.setPaintProperty).not.toHaveBeenCalled();
 

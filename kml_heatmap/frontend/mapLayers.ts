@@ -6,7 +6,7 @@
  */
 import type { Map as MapLibreMap } from "maplibre-gl";
 import { cssVar, firstSymbolLayerId } from "./utils/mapHelpers";
-import { HEATMAP_BANDS, MAP_LAYERS, MAP_SOURCES } from "./utils/constants";
+import { HEATMAP_CLUSTER, MAP_LAYERS, MAP_SOURCES } from "./utils/constants";
 import type { LayerHandle, PathLayerEntry, PathLayerHandle } from "./types";
 
 /**
@@ -162,24 +162,25 @@ export function addDataLayers(map: MapLibreMap): void {
   );
 
   // The look of the heatmap (radius, intensity, colours) belongs to the
-  // data manager, which sets it as paint properties. One layer per level of
-  // detail: each draws its own share of the source in its own zoom range,
-  // so exactly one of them is drawn at any zoom
-  map.addSource(MAP_SOURCES.heat, { type: "geojson", data: emptyGeoJson() });
-  for (const band of HEATMAP_BANDS) {
-    map.addLayer(
-      {
-        id: band.layer,
-        type: "heatmap",
-        source: MAP_SOURCES.heat,
-        minzoom: band.minzoom,
-        maxzoom: band.maxzoom,
-        filter: ["==", ["get", "detail"], band.detail],
-        layout: hidden,
-      },
-      before,
-    );
-  }
+  // data manager, which sets it as paint properties. The source merges the
+  // fixes into clusters for the zooms at which they are too many to draw
+  // one by one (see HEATMAP_CLUSTER)
+  map.addSource(MAP_SOURCES.heat, {
+    type: "geojson",
+    data: emptyGeoJson(),
+    cluster: true,
+    clusterRadius: HEATMAP_CLUSTER.radius,
+    clusterMaxZoom: HEATMAP_CLUSTER.maxZoom,
+  });
+  map.addLayer(
+    {
+      id: MAP_LAYERS.heat,
+      type: "heatmap",
+      source: MAP_SOURCES.heat,
+      layout: hidden,
+    },
+    before,
+  );
 
   // The replay layers are always visible and empty outside a replay
   map.addSource(MAP_SOURCES.replayRoute, {
