@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./fixtures";
+import { test, expect } from "./fixtures";
 import {
   activateReplay,
   attachErrorCollectors,
@@ -16,23 +16,18 @@ import {
   type ErrorCollector,
   type LayerName,
 } from "./helpers";
+import {
+  centerOnAirport,
+  expectHeatmapPainted,
+  focusAirportMarker,
+  getZoom,
+  pathColors,
+  pathCount,
+  setZoom,
+} from "./map";
 
-/** Hex or rgb(a) as Leaflet writes it into the polyline options */
+/** Hex or rgb(a), as the app hands a colour to the map */
 const COLOR_PATTERN = /^(#[0-9a-f]{6}|rgba?\(.+\))$/i;
-
-/** Stroke colour of every polyline in a colour layer, in layer order */
-function layerColors(
-  page: Page,
-  layer: "altitudeLayer" | "airspeedLayer",
-): Promise<string[]> {
-  return page.evaluate(
-    (name) =>
-      window
-        .mapApp![name].getLayers()
-        .map((polyline) => String((polyline as L.Polyline).options.color)),
-    layer,
-  );
-}
 
 /** The layer carries a gradient of valid colours */
 function expectColorRamp(colors: string[]): void {
@@ -40,24 +35,6 @@ function expectColorRamp(colors: string[]): void {
   for (const color of colors) expect(color).toMatch(COLOR_PATTERN);
   // A ramp, not one colour for every run
   expect(new Set(colors).size).toBeGreaterThan(1);
-}
-
-/** The heatmap is on the map and its canvas has a size to paint into */
-async function expectHeatmapPainted(page: Page): Promise<void> {
-  const heat = await page.evaluate(() => {
-    const app = window.mapApp!;
-    const canvas = document.querySelector<HTMLCanvasElement>(
-      "canvas.leaflet-heatmap-layer",
-    );
-    return {
-      onMap: !!app.heatmapLayer && app.map!.hasLayer(app.heatmapLayer),
-      width: canvas?.width ?? 0,
-      height: canvas?.height ?? 0,
-    };
-  });
-  expect(heat.onMap).toBe(true);
-  expect(heat.width).toBeGreaterThan(0);
-  expect(heat.height).toBeGreaterThan(0);
 }
 
 function expectClean(errors: ErrorCollector): void {
@@ -150,13 +127,11 @@ test.describe("Error-Free Interactions", () => {
       page,
     }) => {
       await waitForPathData(page);
-      await page.evaluate(() => {
-        const app = window.mapApp!;
-        const name = Object.keys(app.airportToPaths)[0]!;
-        const marker = app.airportMarkers[name]!;
-        app.map!.setView(marker.getLatLng(), 10, { animate: false });
-        marker.getElement()!.focus();
-      });
+      const name = await page.evaluate(
+        () => Object.keys(window.mapApp!.airportToPaths)[0]!,
+      );
+      await centerOnAirport(page, name, 10);
+      await focusAirportMarker(page, name);
       await page.keyboard.press("Enter");
       await page.locator(".kh-popup-flight").first().click();
       await expect
@@ -193,17 +168,8 @@ test.describe("Error-Free Interactions", () => {
   });
 
   test.describe("Zoom Behavior", () => {
-    async function setZoom(page: Page, zoom: number): Promise<void> {
-      await page.evaluate((z) => {
-        window.mapApp!.map!.setZoom(z, { animate: false });
-      }, zoom);
-      await expect
-        .poll(() => page.evaluate(() => window.mapApp!.map!.getZoom()))
-        .toBe(zoom);
-    }
-
     test("zooming in updates heatmap without errors", async ({ page }) => {
-      const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
+      const zoom = await getZoom(page);
       await setZoom(page, zoom + 2);
 
       await expectHeatmapPainted(page);
@@ -211,7 +177,7 @@ test.describe("Error-Free Interactions", () => {
     });
 
     test("zooming out updates heatmap without errors", async ({ page }) => {
-      const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
+      const zoom = await getZoom(page);
       await setZoom(page, Math.max(1, zoom - 3));
 
       await expectHeatmapPainted(page);
@@ -221,36 +187,34 @@ test.describe("Error-Free Interactions", () => {
     test("zooming preserves altitude path colors", async ({ page }) => {
       await waitForPathData(page);
 
-      const before = await layerColors(page, "altitudeLayer");
+      const before = await pathColors(page, "altitude");
       expectColorRamp(before);
 
-      const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
+      const zoom = await getZoom(page);
       await setZoom(page, zoom + 2);
 
       expect(await page.evaluate(() => window.mapApp!.altitudeVisible)).toBe(
         true,
       );
       // Zooming must redraw the same runs in the same colours
-      expect(await layerColors(page, "altitudeLayer")).toEqual(before);
+      expect(await pathColors(page, "altitude")).toEqual(before);
       expectClean(errors);
     });
 
     test("zooming preserves airspeed path colors", async ({ page }) => {
       await toggleLayer(page, "airspeed");
-      await page.waitForFunction(
-        () => window.mapApp!.airspeedLayer.getLayers().length > 0,
-      );
+      await expect.poll(() => pathCount(page, "airspeed")).toBeGreaterThan(0);
 
-      const before = await layerColors(page, "airspeedLayer");
+      const before = await pathColors(page, "airspeed");
       expectColorRamp(before);
 
-      const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
+      const zoom = await getZoom(page);
       await setZoom(page, zoom + 2);
 
       expect(await page.evaluate(() => window.mapApp!.airspeedVisible)).toBe(
         true,
       );
-      expect(await layerColors(page, "airspeedLayer")).toEqual(before);
+      expect(await pathColors(page, "airspeed")).toEqual(before);
       expectClean(errors);
     });
 
@@ -279,7 +243,7 @@ test.describe("Error-Free Interactions", () => {
       await page.reload();
       await waitForAppReady(page);
 
-      const zoom = await page.evaluate(() => window.mapApp!.map!.getZoom());
+      const zoom = await getZoom(page);
       expect(zoom).toBe(12);
     });
   });

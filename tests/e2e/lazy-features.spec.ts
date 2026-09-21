@@ -12,6 +12,7 @@ import {
   attachErrorCollectors,
   gotoApp,
   openWrapped,
+  toastMessage,
   usesMobileBar,
   waitForAppReady,
 } from "./helpers";
@@ -118,7 +119,7 @@ test.describe("the feature bundle", () => {
     const mobile = await usesMobileBar(page);
     await page.locator(mobile ? "#mobile-tab-wrapped" : "#wrapped-btn").click();
     await expect(
-      page.getByText("their code could not be loaded"),
+      toastMessage(page, "their code could not be loaded"),
     ).toBeVisible();
 
     // A browser may keep the failure of that URL for the life of the page;

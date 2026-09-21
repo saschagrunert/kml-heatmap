@@ -18,11 +18,11 @@
 import { test, expect } from "./fixtures";
 import {
   gotoApp,
-  hideMapData,
   openWrapped,
   settleAnimations,
   toggleStatsPanel,
 } from "./helpers";
+import { hideMapData } from "./map";
 
 /**
  * The year every snapshot is taken with. Left alone, the page opens on the
