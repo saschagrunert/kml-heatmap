@@ -12,9 +12,8 @@ import {
   combineYearData,
   DATA_FORMAT_VERSION,
   expandYearData,
-  getGlobalVarName,
   isValidYear,
-  loadScript,
+  fetchJson,
   loadStylesheet,
   resetStylesheetLoader,
   DataLoader,
@@ -105,83 +104,100 @@ function dataset(
   };
 }
 
-describe("loadScript", () => {
-  it("appends script to document.head and resolves on load", async () => {
-    const appendChildSpy = vi
-      .spyOn(document.head, "appendChild")
-      .mockImplementation((node: Node) => {
-        (node as HTMLScriptElement).onload?.(new Event("load"));
-        return node;
-      });
-
-    await loadScript("test.js");
-
-    expect(appendChildSpy).toHaveBeenCalled();
-    const script = appendChildSpy.mock.calls[0]![0] as HTMLScriptElement;
-    expect(script.src).toContain("test.js");
-    expect(script.tagName).toBe("SCRIPT");
-
-    appendChildSpy.mockRestore();
-  });
-
-  it("gives up on a script that neither loads nor errors", async () => {
-    vi.useFakeTimers();
-    let script: HTMLScriptElement | undefined;
-    const appendChildSpy = vi
-      .spyOn(document.head, "appendChild")
-      .mockImplementation((node: Node) => {
-        script = node as HTMLScriptElement;
-        const remove = vi.fn();
-        script.remove = remove;
-        return node;
-      });
-
-    const pending = loadScript("stalled.js", 5000);
-    vi.advanceTimersByTime(4999);
-    expect(script!.remove).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-
-    await expect(pending).rejects.toThrow(
-      "Timed out loading script: stalled.js",
-    );
-    expect(script!.remove).toHaveBeenCalledOnce();
-    // A late load is no longer reported
-    expect(script!.onload).toBeNull();
-    expect(script!.onerror).toBeNull();
-
-    appendChildSpy.mockRestore();
+describe("fetchJson", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
-  it("does not time out a script that loaded", async () => {
-    vi.useFakeTimers();
-    const appendChildSpy = vi
-      .spyOn(document.head, "appendChild")
-      .mockImplementation((node: Node) => {
-        (node as HTMLScriptElement).onload?.(new Event("load"));
-        return node;
-      });
+  it("fetches the URL and returns the parsed body", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('{"a":1}', { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
 
-    await loadScript("fast.js", 10);
+    await expect(fetchJson("data/test.json")).resolves.toEqual({ a: 1 });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("data/test.json");
+    expect(init!.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("rejects on an error status, which says more than a script tag did", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response("", { status: 404 })),
+    );
+
+    const failure = await fetchJson("bad.json").catch((e: unknown) => e);
+
+    expect(failure).toEqual(new Error("Failed to load bad.json"));
+    expect((failure as Error).cause).toEqual(new Error("HTTP 404"));
+  });
+
+  it("rejects when the request fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockRejectedValue(new TypeError("offline")),
+    );
+
+    await expect(fetchJson("bad.json")).rejects.toThrow(
+      "Failed to load bad.json",
+    );
+  });
+
+  it("rejects on a body that is not JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response("<html>", { status: 200 })),
+    );
+
+    await expect(fetchJson("page.json")).rejects.toThrow(
+      "Failed to load page.json",
+    );
+  });
+
+  it("aborts a request that neither answers nor fails", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+        signal = init!.signal!;
+        return new Promise((_resolve, reject) => {
+          signal!.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        });
+      }),
+    );
+
+    const pending = fetchJson("stalled.json", 5000);
+    const outcome = expect(pending).rejects.toThrow(
+      "Timed out loading stalled.json",
+    );
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(signal!.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await outcome;
+    expect(signal!.aborted).toBe(true);
+  });
+
+  it("does not leave the timer running once the file has loaded", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(new Response("[]")),
+    );
+
+    await fetchJson("fast.json", 10);
+
     expect(vi.getTimerCount()).toBe(0);
-
-    appendChildSpy.mockRestore();
-    vi.useRealTimers();
-  });
-
-  it("rejects on script load error", async () => {
-    const appendChildSpy = vi
-      .spyOn(document.head, "appendChild")
-      .mockImplementation((node: Node) => {
-        (node as HTMLScriptElement).onerror?.(new Event("error"));
-        return node;
-      });
-
-    await expect(loadScript("bad.js")).rejects.toThrow(
-      "Failed to load script: bad.js",
-    );
-
-    appendChildSpy.mockRestore();
   });
 });
 
@@ -406,12 +422,6 @@ describe("isValidYear", () => {
     expect(isValidYear("../etc")).toBe(false);
     expect(isValidYear("20255")).toBe(false);
     expect(isValidYear("2025/..")).toBe(false);
-  });
-});
-
-describe("getGlobalVarName", () => {
-  it("generates the KML_DATA_<YEAR> variable name", () => {
-    expect(getGlobalVarName("2025")).toBe("KML_DATA_2025");
   });
 });
 
@@ -815,7 +825,9 @@ describe("combineYearData", () => {
 describe("DataLoader", () => {
   let loader: DataLoader;
   let mockWindow: MockWindow;
-  let mockScriptLoader: Mock<(url: string) => Promise<void>>;
+  let mockFetchJson: Mock<(url: string) => Promise<unknown>>;
+  /** What the site serves, by URL; anything else is a 404 */
+  let files: Record<string, unknown>;
   let mockShowLoading: Mock<(info: LoadingInfo) => void>;
   let mockHideLoading: Mock<() => void>;
   let onLoadError: Mock<(years: string[]) => void>;
@@ -826,7 +838,7 @@ describe("DataLoader", () => {
       "1": path([50, 8], [[50.1, 8.1, 1000, 100, 0]]),
     },
   ): void {
-    mockWindow[`KML_DATA_${year}`] = rawYear(
+    files[`test-data/${year}/data.json`] = rawYear(
       year,
       segments,
       [{ id: 1, year }],
@@ -834,17 +846,24 @@ describe("DataLoader", () => {
     );
   }
 
+  function serve(url: string): Promise<unknown> {
+    return url in files
+      ? Promise.resolve(files[url])
+      : Promise.reject(new Error("HTTP 404"));
+  }
+
   beforeEach(() => {
     mockWindow = {} as MockWindow;
-    mockScriptLoader = vi.fn<(url: string) => Promise<void>>();
-    mockScriptLoader.mockResolvedValue(undefined);
+    files = {};
+    mockFetchJson = vi.fn<(url: string) => Promise<unknown>>();
+    mockFetchJson.mockImplementation(serve);
     mockShowLoading = vi.fn();
     mockHideLoading = vi.fn();
     onLoadError = vi.fn();
 
     loader = new DataLoader({
       dataDir: "test-data",
-      scriptLoader: mockScriptLoader,
+      fetchJson: mockFetchJson,
       showLoading: mockShowLoading,
       hideLoading: mockHideLoading,
       getWindow: () => mockWindow,
@@ -857,21 +876,18 @@ describe("DataLoader", () => {
       expect(await loader.loadData("abc")).toBeNull();
       expect(await loader.loadData("../data")).toBeNull();
       expect(await loader.loadData("20255")).toBeNull();
-      expect(mockScriptLoader).not.toHaveBeenCalled();
+      expect(mockFetchJson).not.toHaveBeenCalled();
       expect(onLoadError).not.toHaveBeenCalled();
     });
   });
 
   describe("loadData", () => {
     it("loads and expands data for a specific year", async () => {
-      mockScriptLoader.mockImplementationOnce(() => {
-        defineYear(2025);
-        return Promise.resolve();
-      });
+      defineYear(2025);
 
       const result = await loader.loadData("2025");
 
-      expect(mockScriptLoader).toHaveBeenCalledWith("test-data/2025/data.js");
+      expect(mockFetchJson).toHaveBeenCalledWith("test-data/2025/data.json");
       expect(result).not.toBeNull();
       expect(result!.path_segments).toHaveLength(1);
       expect(result!.path_segments[0]!.path_id).toBe(1);
@@ -906,59 +922,37 @@ describe("DataLoader", () => {
       });
     });
 
-    it("drops the raw global after reading it", async () => {
-      defineYear(2025);
-
-      await loader.loadData("2025");
-
-      expect(mockWindow["KML_DATA_2025"]).toBeUndefined();
-    });
-
     it("uses cached data on second call", async () => {
-      mockScriptLoader.mockImplementationOnce(() => {
-        defineYear(2025);
-        return Promise.resolve();
-      });
+      defineYear(2025);
 
       const first = await loader.loadData("2025");
       const second = await loader.loadData("2025");
 
-      expect(mockScriptLoader).toHaveBeenCalledTimes(1);
+      expect(mockFetchJson).toHaveBeenCalledTimes(1);
       expect(second).toBe(first);
     });
 
-    it("skips script loading if the global already exists", async () => {
-      defineYear(2025);
-
-      const result = await loader.loadData("2025");
-
-      expect(mockScriptLoader).not.toHaveBeenCalled();
-      expect(result).not.toBeNull();
-    });
-
     it("dedupes concurrent loads of the same year", async () => {
-      let resolveScript: () => void = () => {};
-      mockScriptLoader.mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            resolveScript = () => {
-              defineYear(2025);
-              resolve();
-            };
+      defineYear(2025);
+      let answer: () => void = () => {};
+      mockFetchJson.mockImplementationOnce(
+        (url) =>
+          new Promise((resolve) => {
+            answer = () => resolve(files[url]);
           }),
       );
 
       const p1 = loader.loadData("2025");
       const p2 = loader.loadData("2025");
-      resolveScript();
+      answer();
       const [r1, r2] = await Promise.all([p1, p2]);
 
-      expect(mockScriptLoader).toHaveBeenCalledTimes(1);
+      expect(mockFetchJson).toHaveBeenCalledTimes(1);
       expect(r1).toBe(r2);
     });
 
-    it("returns null and reports the year on script error", async () => {
-      mockScriptLoader.mockRejectedValueOnce(new Error("Failed to load"));
+    it("returns null and reports the year when the file fails to load", async () => {
+      mockFetchJson.mockRejectedValueOnce(new Error("Failed to load"));
 
       const result = await loader.loadData("2025");
 
@@ -967,8 +961,11 @@ describe("DataLoader", () => {
       expect(mockHideLoading).toHaveBeenCalled();
     });
 
-    it("returns null when the global is missing after loading", async () => {
+    it("returns null when the file is not a year file", async () => {
+      files["test-data/2025/data.json"] = null;
+
       const result = await loader.loadData("2025");
+
       expect(result).toBeNull();
       expect(onLoadError).toHaveBeenCalledWith(["2025"]);
     });
@@ -984,50 +981,39 @@ describe("DataLoader", () => {
     });
 
     it("does not cache failed loads", async () => {
-      mockScriptLoader.mockRejectedValueOnce(new Error("boom"));
+      mockFetchJson.mockRejectedValueOnce(new Error("boom"));
       expect(await loader.loadData("2025")).toBeNull();
 
-      mockScriptLoader.mockImplementationOnce(() => {
-        defineYear(2025);
-        return Promise.resolve();
-      });
+      defineYear(2025);
       expect(await loader.loadData("2025")).not.toBeNull();
       // The failure was not remembered: the file was requested again
-      expect(mockScriptLoader).toHaveBeenCalledTimes(2);
+      expect(mockFetchJson).toHaveBeenCalledTimes(2);
     });
   });
 
   describe("loadAndCombineAllYears", () => {
     it("loads and combines all years in parallel", async () => {
       mockWindow.KML_METADATA = { available_years: [2024, 2025] } as never;
-      mockScriptLoader.mockImplementation((url: string) => {
-        if (url.includes("2024")) defineYear(2024);
-        if (url.includes("2025")) defineYear(2025);
-        return Promise.resolve();
-      });
+      defineYear(2024);
+      defineYear(2025);
 
       const result = await loader.loadAndCombineAllYears();
 
       expect(result).not.toBeNull();
       expect(result!.path_segments).toHaveLength(2);
       expect(result!.original_points).toBe(2);
-      expect(mockScriptLoader).toHaveBeenCalledTimes(2);
+      expect(mockFetchJson).toHaveBeenCalledTimes(2);
       expect(onLoadError).not.toHaveBeenCalled();
     });
 
     it("loads metadata first when not present", async () => {
-      mockScriptLoader.mockImplementation((url: string) => {
-        if (url.endsWith("metadata.js")) {
-          mockWindow.KML_METADATA = { available_years: [2025] } as never;
-        }
-        if (url.includes("2025")) defineYear(2025);
-        return Promise.resolve();
-      });
+      files["test-data/metadata.json"] = { available_years: [2025] };
+      defineYear(2025);
 
       const result = await loader.loadAndCombineAllYears();
 
       expect(result).not.toBeNull();
-      expect(mockScriptLoader).toHaveBeenCalledWith("test-data/metadata.js");
+      expect(mockFetchJson).toHaveBeenCalledWith("test-data/metadata.json");
     });
 
     it("reports the total size of all year files", async () => {
@@ -1035,10 +1021,8 @@ describe("DataLoader", () => {
         available_years: [2024, 2025],
         year_file_bytes: { "2024": 100, "2025": 2048 },
       } as never;
-      mockScriptLoader.mockImplementation((url: string) => {
-        defineYear(url.includes("2024") ? 2024 : 2025);
-        return Promise.resolve();
-      });
+      defineYear(2024);
+      defineYear(2025);
 
       await loader.loadAndCombineAllYears();
 
@@ -1051,14 +1035,13 @@ describe("DataLoader", () => {
 
     it("keeps the loading indicator visible until all years are loaded", async () => {
       mockWindow.KML_METADATA = { available_years: [2024, 2025] } as never;
+      defineYear(2024);
+      defineYear(2025);
       const resolvers: (() => void)[] = [];
-      mockScriptLoader.mockImplementation(
+      mockFetchJson.mockImplementation(
         (url: string) =>
-          new Promise<void>((resolve) => {
-            resolvers.push(() => {
-              defineYear(url.includes("2024") ? 2024 : 2025);
-              resolve();
-            });
+          new Promise((resolve) => {
+            resolvers.push(() => resolve(files[url]));
           }),
       );
 
@@ -1080,24 +1063,18 @@ describe("DataLoader", () => {
 
     it("uses cached combined data", async () => {
       mockWindow.KML_METADATA = { available_years: [2025] } as never;
-      mockScriptLoader.mockImplementationOnce(() => {
-        defineYear(2025);
-        return Promise.resolve();
-      });
+      defineYear(2025);
 
       const first = await loader.loadAndCombineAllYears();
       const second = await loader.loadAndCombineAllYears();
 
       expect(second).toBe(first);
-      expect(mockScriptLoader).toHaveBeenCalledTimes(1);
+      expect(mockFetchJson).toHaveBeenCalledTimes(1);
     });
 
     it("dedupes concurrent 'all' loads", async () => {
       mockWindow.KML_METADATA = { available_years: [2025] } as never;
-      mockScriptLoader.mockImplementation(() => {
-        defineYear(2025);
-        return Promise.resolve();
-      });
+      defineYear(2025);
 
       const [a, b] = await Promise.all([
         loader.loadData("all"),
@@ -1105,7 +1082,7 @@ describe("DataLoader", () => {
       ]);
 
       expect(a).toBe(b);
-      expect(mockScriptLoader).toHaveBeenCalledTimes(1);
+      expect(mockFetchJson).toHaveBeenCalledTimes(1);
     });
 
     it("returns null if metadata is missing", async () => {
@@ -1125,11 +1102,7 @@ describe("DataLoader", () => {
 
     it("returns partial data and reports the failed years", async () => {
       mockWindow.KML_METADATA = { available_years: [2024, 2025] } as never;
-      mockScriptLoader.mockImplementation((url: string) => {
-        if (url.includes("2024")) return Promise.reject(new Error("404"));
-        defineYear(2025);
-        return Promise.resolve();
-      });
+      defineYear(2025);
 
       const result = await loader.loadAndCombineAllYears();
 
@@ -1142,7 +1115,7 @@ describe("DataLoader", () => {
 
     it("returns null and lists every year when all fail", async () => {
       mockWindow.KML_METADATA = { available_years: [2024, 2025] } as never;
-      mockScriptLoader.mockRejectedValue(new Error("Network error"));
+      mockFetchJson.mockRejectedValue(new Error("Network error"));
 
       const result = await loader.loadAndCombineAllYears();
 
@@ -1151,9 +1124,9 @@ describe("DataLoader", () => {
       expect(mockHideLoading).toHaveBeenCalled();
 
       // Nothing was cached, so the next call tries the files again
-      mockScriptLoader.mockClear();
+      mockFetchJson.mockClear();
       expect(await loader.loadAndCombineAllYears()).toBeNull();
-      expect(mockScriptLoader).toHaveBeenCalledTimes(2);
+      expect(mockFetchJson).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -1164,14 +1137,11 @@ describe("DataLoader", () => {
         { name: "EDDM", lat: 48.3, lon: 11.7 },
       ];
 
-      mockScriptLoader.mockImplementationOnce(() => {
-        mockWindow.KML_AIRPORTS = { airports: mockAirports };
-        return Promise.resolve();
-      });
+      files["test-data/airports.json"] = { airports: mockAirports };
 
       const result = await loader.loadAirports();
 
-      expect(mockScriptLoader).toHaveBeenCalledWith("test-data/airports.js");
+      expect(mockFetchJson).toHaveBeenCalledWith("test-data/airports.json");
       expect(result).toBe(mockAirports);
     });
 
@@ -1181,16 +1151,38 @@ describe("DataLoader", () => {
 
       const result = await loader.loadAirports();
 
-      expect(mockScriptLoader).not.toHaveBeenCalled();
+      expect(mockFetchJson).not.toHaveBeenCalled();
       expect(result).toBe(mockAirports);
     });
 
     it("returns empty array on error", async () => {
-      mockScriptLoader.mockRejectedValueOnce(new Error("Failed"));
+      mockFetchJson.mockRejectedValueOnce(new Error("Failed"));
 
       const result = await loader.loadAirports();
 
       expect(result).toEqual([]);
+    });
+    it("publishes the list on window and shares one request", async () => {
+      const mockAirports = [{ name: "EDDF", lat: 50, lon: 8 }];
+      files["test-data/airports.json"] = { airports: mockAirports };
+
+      const [a, b] = await Promise.all([
+        loader.loadAirports(),
+        loader.loadAirports(),
+      ]);
+
+      expect(a).toBe(b);
+      expect(mockFetchJson).toHaveBeenCalledTimes(1);
+      expect(mockWindow.KML_AIRPORTS).toEqual({ airports: mockAirports });
+    });
+
+    it("asks again after a failure", async () => {
+      expect(await loader.loadAirports()).toEqual([]);
+
+      files["test-data/airports.json"] = { airports: [] };
+      await loader.loadAirports();
+
+      expect(mockFetchJson).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -1198,14 +1190,11 @@ describe("DataLoader", () => {
     it("loads metadata", async () => {
       const mockMetadata = { available_years: [2024, 2025] };
 
-      mockScriptLoader.mockImplementationOnce(() => {
-        mockWindow.KML_METADATA = mockMetadata as never;
-        return Promise.resolve();
-      });
+      files["test-data/metadata.json"] = mockMetadata;
 
       const result = await loader.loadMetadata();
 
-      expect(mockScriptLoader).toHaveBeenCalledWith("test-data/metadata.js");
+      expect(mockFetchJson).toHaveBeenCalledWith("test-data/metadata.json");
       expect(result).toBe(mockMetadata);
     });
 
@@ -1215,12 +1204,12 @@ describe("DataLoader", () => {
 
       const result = await loader.loadMetadata();
 
-      expect(mockScriptLoader).not.toHaveBeenCalled();
+      expect(mockFetchJson).not.toHaveBeenCalled();
       expect(result).toBe(mockMetadata);
     });
 
     it("returns null on error", async () => {
-      mockScriptLoader.mockRejectedValueOnce(new Error("Failed"));
+      mockFetchJson.mockRejectedValueOnce(new Error("Failed"));
 
       const result = await loader.loadMetadata();
 
@@ -1229,16 +1218,41 @@ describe("DataLoader", () => {
   });
 
   describe("default options", () => {
-    it("reads globals from window by default", async () => {
-      const defaultLoader = new DataLoader();
-      window["KML_DATA_2025"] = rawYear(2025, {
-        "1": path([50, 8], [[50.1, 8.1, 1000, 100]]),
-      });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      delete window.KML_METADATA;
+    });
 
-      const result = await defaultLoader.loadData("2025");
+    it("fetches from the data directory next to the page by default", async () => {
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify(
+              rawYear(2025, { "1": path([50, 8], [[50.1, 8.1, 1000, 100]]) }),
+            ),
+          ),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await new DataLoader().loadData("2025");
 
       expect(result!.path_segments).toHaveLength(1);
-      expect(window["KML_DATA_2025"]).toBeUndefined();
+      expect(fetchMock.mock.calls[0]![0]).toBe("data/2025/data.json");
+    });
+
+    it("publishes the metadata on window by default", async () => {
+      const metadata = { available_years: [2025] };
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(new Response(JSON.stringify(metadata))),
+      );
+
+      await expect(new DataLoader().loadMetadata()).resolves.toEqual(metadata);
+
+      expect(window.KML_METADATA).toEqual(metadata);
     });
   });
 });

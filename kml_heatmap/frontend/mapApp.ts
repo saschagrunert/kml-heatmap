@@ -38,9 +38,6 @@ import { loadFeatures } from "./services/featureLoader";
 import type { FeatureModule } from "./features";
 import { updateReplayButtonState } from "./ui/replayButton";
 import { segmentsForPathIds } from "./calculations/statistics";
-// Publishes the modules the feature bundle resolves against; imported for
-// that side effect, before any feature can be loaded
-import "./shared";
 import {
   datasetIndex,
   type PathIdsByAirport,
@@ -141,11 +138,11 @@ export class MapApp {
 
   // Plain values nothing has to follow: they are read where they are used,
   // so the store would only announce changes nobody listens to
-  /** Model names from metadata.js; empty until it has loaded */
+  /** Model names from metadata.json; empty until it has loaded */
   aircraftModels: AircraftModels = {};
   /** Colour range of the altitude layer, replaced by every layer build */
   altitudeRange: Range = { ...DEFAULT_ALTITUDE_RANGE };
-  /** Colour range of the speed layer, from metadata.js */
+  /** Colour range of the speed layer, from metadata.json */
   airspeedRange: Range = { ...DEFAULT_AIRSPEED_RANGE };
 
   // Every manager is handed the whole app, so whatever stays writable below

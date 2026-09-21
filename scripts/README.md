@@ -91,10 +91,10 @@ drift. `make lint` and the CI lint job run it.
 
 The content hash of everything that shapes a built site: the TypeScript
 sources in `kml_heatmap/frontend/`, the files in `BUILD_FILES` (`build.js`,
-`scripts/shared-modules.js`, `tsconfig.json` and the two stylesheets) and
+`tsconfig.json` and the two stylesheets) and
 the versions `package-lock.json` pins for `BUILD_PACKAGES` (esbuild and
 Lucide, the one package bundled into the page). `build.js` writes it into
-the first line of both bundles. The Playwright global setup
+the first line of every bundle. The Playwright global setup
 (`tests/e2e/global-setup.ts`) compares that line in `docs/mapApp.bundle.js`
 with the checkout, so the e2e tests refuse to run against a stale site, and
 the generator warns when the bundle it is about to publish is stale.
@@ -109,22 +109,11 @@ images, leaflet.heat and html-to-image) out of `node_modules` into
 `kml_heatmap/static/vendor/`, and every country flag of `flag-icons` into
 `kml_heatmap/static/flags/`. Both directories are generated and gitignored,
 and each build replaces them, so a file dropped from the list does not
-linger. Serving the files from the site keeps the page working offline and
-under `file://`, keeps visitors' addresses away from CDNs and leaves
+linger. Serving the files from the site keeps the page working during a CDN
+outage, keeps visitors' addresses away from CDNs and leaves
 `package-lock.json` as the one place their versions are pinned.
 `kml_heatmap/site_assets.py` keeps its own list of the files it publishes,
 in step with `VENDOR_FILES`; `tests/frontend/unit/vendor.test.ts` checks
 `VENDOR_FILES` against `node_modules`. The wheel ships `vendor/` but not
 `flags/`, and the Python side publishes only the flags of the countries an
 export visited.
-
-## shared-modules.js
-
-The list of frontend modules both bundles use. `mapApp.bundle.js` carries
-them and publishes them on `window.__kmlShared`; `build.js` resolves the
-imports of `features.bundle.js` to that global instead of bundling a second
-copy, because several of them hold state that has to be one instance (the
-DOM cache, the toast live region). `kml_heatmap/frontend/shared.ts`
-publishes exactly this list, `tests/frontend/unit/shared.test.ts` checks
-that the two agree, and the build fails when a module still ends up in both
-bundles.

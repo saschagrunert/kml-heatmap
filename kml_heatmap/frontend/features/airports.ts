@@ -52,9 +52,9 @@ let _countrySource: readonly Airport[] | undefined;
 
 /**
  * Country per airport name, from the airport list the page holds. The map
- * follows the list: airports.js may arrive after the first lookup (the
- * loader fetches it on demand when the template did not), and a list loaded
- * later replaces an earlier one.
+ * follows the list: airports.json may arrive after the first lookup (the
+ * loader fetches it while the app starts), and a list loaded later replaces
+ * an earlier one.
  */
 function getCountryByAirportMap(): Map<string, string> {
   const kmlAirports = window.KML_AIRPORTS?.airports;

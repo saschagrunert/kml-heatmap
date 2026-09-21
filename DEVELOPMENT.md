@@ -111,30 +111,29 @@ keep their traces in `test-results/`, and every run writes an HTML report to
 
 **Build Output:**
 
-- **Format**: IIFE (Immediately Invoked Function Expression)
-- **Protocol**: Compatible with `file://` protocol - open index.html directly in browser
+- **Format**: ES modules with code splitting; the page has to be served
+  over HTTP (`make serve`), it does not work when opened from disk
 - **Production**: Minified bundles for optimal performance; the build fails
   when either exceeds its size budget in `build.js`
 - **Development**: Unminified for debugging
 - Both write a source map next to the bundle; it holds the mappings and file
   names only, not the TypeScript sources
 
-`npm run build` produces two bundles. `mapApp.bundle.js` is the map itself,
+`npm run build` produces three bundles. `mapApp.bundle.js` is the map itself,
 and `features.bundle.js` holds Replay, Wrapped and the flight list of the
-airport popups, which the page fetches the first time one of them is opened.
-Code only the second bundle uses belongs in a module outside
-`scripts/shared-modules.js` (such as `utils/wrappedHtml.ts`), or the main
-bundle carries it too. Their styles are split
+airport popups, which the page imports the first time one of them is opened.
+`shared.bundle.js` is what the two have in common. Their styles are split
 the same way and travel with them: `kml_heatmap/static/styles.css` is linked
 in the page, `features.css` is fetched alongside the feature bundle (see
 `services/featureLoader.ts`), and each has its own budget in
 `tests/test_asset_budget.py`. A rule belongs in `features.css` when its
 selector names replay or Wrapped; the two file headers spell out the rest,
-including the one-way dependency between them. The modules both use
-are resolved to a global the main bundle publishes rather than copied into
-the second one (`scripts/shared-modules.js` and
-`kml_heatmap/frontend/shared.ts`), because several of them hold state that
-has to be a single instance; the build fails when a module ends up in both.
+including the one-way dependency between them. The bundler moves the
+modules both entry points use into `shared.bundle.js`, which each of them
+imports, because several of them hold state that has to be a single
+instance. Two entry points can only share one chunk, so it has a fixed name
+that the site publishes and the page preloads; the build fails if it ever
+writes another file (`assertExpectedOutputs` in `build.js`).
 The same command copies Leaflet, leaflet.heat and html-to-image out of
 `node_modules` into `kml_heatmap/static/vendor/`, which is what the published
 page loads them from, and the country flags of `flag-icons` into
@@ -143,7 +142,7 @@ and `make clean` removes it.
 
 The flags are the one asset the wheel leaves out: 271 of them are two
 megabytes, and any one export visits a handful, so `site_assets.py` publishes
-only the countries the flights touched and lists them in `metadata.js`. A
+only the countries the flights touched and lists them in `metadata.json`. A
 site generated from a `pip install`, which has no `static/flags/`, publishes
 none and the statistics rail falls back to the ISO country code.
 
@@ -157,7 +156,7 @@ none and the statistics rail falls back to the ISO country code.
   - `ui/` - UI managers for controls and interactions
   - `utils/` - Formatters, colour scales, geometry helpers and the icon set.
     Every mark in the interface is an inline SVG: an icon font is out (the
-    page's CSP allows no external font and it has to work from `file://`),
+    page's CSP allows no external font),
     and emoji render at a different weight, colour and baseline on every
     platform. The shapes come from Lucide, imported by name so the bundler
     keeps only the ones the page draws; the GitHub mark and the top-down

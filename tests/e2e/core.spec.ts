@@ -32,8 +32,9 @@ test.describe("Core", () => {
     expect(csp).toContain("default-src 'self'");
     // Scripts and styles come from the site itself; the map tiles are the
     // only third party the page is allowed to reach
-    expect(csp).toContain("script-src 'self' file:;");
-    expect(csp).toContain("style-src 'self' file:;");
+    expect(csp).toContain("script-src 'self';");
+    expect(csp).toContain("style-src 'self';");
+    expect(csp).not.toContain("file:");
     expect(csp).not.toContain("unsafe-inline");
     expect(csp).not.toContain("unpkg.com");
     expect(csp).not.toContain("jsdelivr");

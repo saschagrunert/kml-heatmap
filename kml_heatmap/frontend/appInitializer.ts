@@ -67,12 +67,13 @@ export function resolveYearSelection(
 export async function loadInitialData(app: MapApp): Promise<void> {
   colorSegmentPopups();
 
-  // Load airports
-  const airports = await app.dataManager.loadAirports();
+  // Both are preloaded by the template; asked for together so that neither
+  // waits for the other when they are not
+  const [airports, metadata] = await Promise.all([
+    app.dataManager.loadAirports(),
+    app.dataManager.loadMetadata(),
+  ]);
   app.allAirportsData = airports;
-
-  // Load metadata
-  const metadata = await app.dataManager.loadMetadata();
 
   // Populate year filter dropdown and validate the selected year
   if (metadata && metadata.available_years) {

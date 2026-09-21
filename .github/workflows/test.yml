@@ -180,6 +180,7 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           for asset in templates/map_template.html static/mapApp.bundle.js \
+            static/features.bundle.js static/shared.bundle.js \
             static/styles.css static/features.css; do
             result=$("$RUNNER_TEMP/wheel-venv/bin/python" -c "import importlib.resources as r, kml_heatmap; print(r.files(kml_heatmap).joinpath('$asset').is_file())")
             echo "$asset shipped: $result"
@@ -206,8 +207,8 @@ jobs:
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" smoke/input --output-dir smoke/site
           for file in index.html map_config.js mapApp.bundle.js \
-            features.bundle.js styles.css features.css vendor/leaflet.js \
-            data/metadata.js; do
+            features.bundle.js shared.bundle.js styles.css features.css \
+            vendor/leaflet.js data/metadata.json; do
             test -s "smoke/site/$file" || { echo "::error::smoke/site/$file was not generated"; exit 1; }
           done
           # Still the fixture, so nothing was downloaded
@@ -421,8 +422,8 @@ jobs:
             -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
             kml-heatmap input --output-dir site
           for file in index.html map_config.js mapApp.bundle.js \
-            features.bundle.js styles.css features.css vendor/leaflet.js \
-            data/metadata.js; do
+            features.bundle.js shared.bundle.js styles.css features.css \
+            vendor/leaflet.js data/metadata.json; do
             test -s "$smoke/site/$file" || { echo "::error::$file was not generated"; exit 1; }
           done
           # Still the fixture, and without a network nothing else was fetched
@@ -442,8 +443,8 @@ jobs:
             -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
             kml-heatmap input --output-dir site
           for file in index.html map_config.js mapApp.bundle.js \
-            features.bundle.js styles.css features.css vendor/leaflet.js \
-            data/metadata.js; do
+            features.bundle.js shared.bundle.js styles.css features.css \
+            vendor/leaflet.js data/metadata.json; do
             test -s "$smoke/site/$file" || { echo "::error::$file was not generated as the image user"; exit 1; }
           done
 

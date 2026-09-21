@@ -7,13 +7,13 @@
  * Both files have to arrive: a panel drawn without its stylesheet is worse
  * than the toast a failed load produces.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   FEATURES_CSS_URL,
-  FEATURES_URL,
   loadFeatures,
   resetFeatureLoader,
 } from "../../../../kml_heatmap/frontend/services/featureLoader";
+import type { FeatureModule } from "../../../../kml_heatmap/frontend/features";
 import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
@@ -21,10 +21,8 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
   logDebug: vi.fn(),
 }));
 
-const loadScript = vi.hoisted(() => vi.fn());
 const loadStylesheet = vi.hoisted(() => vi.fn());
 vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
-  loadScript,
   loadStylesheet,
 }));
 
@@ -32,58 +30,51 @@ const features = {
   ReplayManager: vi.fn(),
   WrappedManager: vi.fn(),
   listFlights: vi.fn(),
-};
+} as unknown as FeatureModule;
 
-/** A script load that publishes the bundle's exports, as the real one does */
-function bundleArrives(): void {
-  loadScript.mockImplementation(() => {
-    window.KMLFeatures = features;
-    return Promise.resolve();
-  });
-}
+/** Stands in for `import("../features")` */
+const importFeatures =
+  vi.fn<(failedImports: number) => Promise<FeatureModule>>();
 
 describe("loadFeatures", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetFeatureLoader();
-    delete window.KMLFeatures;
+    resetFeatureLoader(importFeatures);
+    importFeatures.mockResolvedValue(features);
     loadStylesheet.mockResolvedValue(undefined);
   });
 
-  it("fetches the bundle next to the page and returns its exports", async () => {
-    bundleArrives();
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
+  it("imports the bundle and returns its exports", async () => {
     await expect(loadFeatures()).resolves.toBe(features);
-    expect(loadScript).toHaveBeenCalledWith(FEATURES_URL, expect.any(Number));
-    // Relative URLs, so the page works from file:// too
-    expect(FEATURES_URL.startsWith("./")).toBe(true);
-    expect(FEATURES_CSS_URL.startsWith("./")).toBe(true);
+    expect(importFeatures).toHaveBeenCalledTimes(1);
   });
 
   it("fetches the stylesheet alongside the bundle", async () => {
-    bundleArrives();
-
     await loadFeatures();
 
     expect(loadStylesheet).toHaveBeenCalledWith(
       FEATURES_CSS_URL,
       expect.any(Number),
     );
+    // Relative to the page, which is not at the root of its host
+    expect(FEATURES_CSS_URL.startsWith("./")).toBe(true);
   });
 
   it("does not fetch again once both have arrived", async () => {
-    bundleArrives();
     await loadFeatures();
     vi.clearAllMocks();
 
     await expect(loadFeatures()).resolves.toBe(features);
 
-    expect(loadScript).not.toHaveBeenCalled();
+    expect(importFeatures).not.toHaveBeenCalled();
     expect(loadStylesheet).not.toHaveBeenCalled();
   });
 
   it("resolves with null and reports when the stylesheet cannot be loaded", async () => {
-    bundleArrives();
     loadStylesheet.mockRejectedValue(new Error("offline"));
 
     await expect(loadFeatures()).resolves.toBeNull();
@@ -92,28 +83,23 @@ describe("loadFeatures", () => {
   });
 
   it("fetches both again when only the stylesheet failed", async () => {
-    // The script ran, so window.KMLFeatures is set even though the load as a
-    // whole failed; the next attempt must not take that for a finished load
-    bundleArrives();
+    // The import succeeded even though the load as a whole failed; the next
+    // attempt must not take that for a finished load
     loadStylesheet.mockRejectedValueOnce(new Error("offline"));
     await expect(loadFeatures()).resolves.toBeNull();
-    expect(window.KMLFeatures).toBe(features);
 
     await expect(loadFeatures()).resolves.toBe(features);
 
-    expect(loadScript).toHaveBeenCalledTimes(2);
+    expect(importFeatures).toHaveBeenCalledTimes(2);
     expect(loadStylesheet).toHaveBeenCalledTimes(2);
   });
 
   it("shares one request between callers that arrive together", async () => {
     let settle: () => void = () => {};
-    loadScript.mockImplementation(
+    importFeatures.mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          settle = () => {
-            window.KMLFeatures = features;
-            resolve();
-          };
+        new Promise<FeatureModule>((resolve) => {
+          settle = () => resolve(features);
         }),
     );
 
@@ -121,30 +107,59 @@ describe("loadFeatures", () => {
     settle();
 
     expect(await both).toEqual([features, features]);
-    expect(loadScript).toHaveBeenCalledTimes(1);
+    expect(importFeatures).toHaveBeenCalledTimes(1);
   });
 
   it("resolves with null and reports when the bundle cannot be loaded", async () => {
-    loadScript.mockRejectedValue(new Error("offline"));
+    importFeatures.mockRejectedValue(new Error("offline"));
 
     await expect(loadFeatures()).resolves.toBeNull();
 
     expect(logError).toHaveBeenCalled();
   });
 
-  it("resolves with null when the bundle defines no exports", async () => {
-    loadScript.mockResolvedValue(undefined);
+  it("gives up on an import that never settles", async () => {
+    vi.useFakeTimers();
+    importFeatures.mockImplementation(() => new Promise(() => {}));
 
-    await expect(loadFeatures()).resolves.toBeNull();
+    const result = loadFeatures();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    await expect(result).resolves.toBeNull();
+    expect(logError).toHaveBeenCalled();
   });
 
-  it("tries again after a failure instead of caching it", async () => {
-    loadScript.mockRejectedValueOnce(new Error("offline"));
+  it("tries again after a failure, under a URL the browser has not failed on", async () => {
+    // A browser may answer a second import() of a URL that failed with the
+    // same failure, so every retry has to say how many went wrong before
+    importFeatures.mockRejectedValueOnce(new Error("offline"));
+    importFeatures.mockRejectedValueOnce(new Error("still offline"));
+    await expect(loadFeatures()).resolves.toBeNull();
     await expect(loadFeatures()).resolves.toBeNull();
 
-    bundleArrives();
+    await expect(loadFeatures()).resolves.toBe(features);
+
+    expect(importFeatures.mock.calls).toEqual([[0], [1], [2]]);
+  });
+
+  it("asks for the same URL again after a timeout, which may yet finish", async () => {
+    vi.useFakeTimers();
+    importFeatures.mockImplementationOnce(() => new Promise(() => {}));
+    const first = loadFeatures();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(first).resolves.toBeNull();
 
     await expect(loadFeatures()).resolves.toBe(features);
-    expect(loadScript).toHaveBeenCalledTimes(2);
+
+    expect(importFeatures.mock.calls).toEqual([[0], [0]]);
+  });
+
+  it("does not count a failed stylesheet as a failed import", async () => {
+    loadStylesheet.mockRejectedValueOnce(new Error("offline"));
+    await expect(loadFeatures()).resolves.toBeNull();
+
+    await loadFeatures();
+
+    expect(importFeatures.mock.calls).toEqual([[0], [0]]);
   });
 });

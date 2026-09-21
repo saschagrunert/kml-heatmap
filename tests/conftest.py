@@ -93,24 +93,15 @@ def reset_airport_cache():
     airport_lookup_module._clear_download_failure()
 
 
-def parse_js(path, variable=None):
-    """Parse a ``window.<variable> = <json>;`` file and return the payload.
-
-    With ``variable`` the exact prefix is checked, otherwise any window
-    variable is accepted.
-    """
-    content = Path(path).read_text(encoding="utf-8")
-    prefix = f"window.{variable} = " if variable else "window."
-    assert content.startswith(prefix), f"{path} does not start with {prefix!r}"
-    assert content.endswith(";"), f"{path} does not end with a semicolon"
-    start = len(prefix) if variable else content.index("=") + 1
-    return json.loads(content[start:-1].strip())
+def parse_data(path):
+    """The payload of a data file of the site."""
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-@pytest.fixture(name="parse_js")
-def parse_js_fixture():
-    """The ``parse_js`` helper as a fixture."""
-    return parse_js
+@pytest.fixture(name="parse_data")
+def parse_data_fixture():
+    """The ``parse_data`` helper as a fixture."""
+    return parse_data
 
 
 def decoded_segments(entry):

@@ -3,8 +3,8 @@
  *
  * They used to come from unpkg and jsdelivr with subresource integrity
  * hashes. Serving them from the site instead means the map still works
- * during a CDN outage, no visitor's IP reaches a third party, `file://`
- * is genuinely offline, and the page's CSP needs no foreign origin. The
+ * during a CDN outage, no visitor's IP reaches a third party, and the
+ * page's CSP needs no foreign origin. The
  * copies are taken straight from node_modules, so package-lock.json stays
  * the single place their versions are pinned and Dependabot can bump them
  * like any other dependency.

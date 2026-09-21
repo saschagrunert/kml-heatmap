@@ -59,7 +59,7 @@ def build_path_info(
     a name holding an ICAO code or of more than one word, at a real start
     or landing. None keeps every name (for callers without airports).
     """
-    # The names match the airport markers of airports.js exactly
+    # The names match the airport markers of airports.json exactly
     start_airport, end_airport = route_airports(metadata)
     if airport_names is not None:
         start_airport = start_airport if start_airport in airport_names else None

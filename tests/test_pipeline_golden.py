@@ -23,7 +23,7 @@ from kml_heatmap.segment_codec import (
     FORMAT_VERSION,
     decode_rows,
 )
-from tests.conftest import parse_js as _load_js
+from tests.conftest import parse_data as _load_js
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 # Row: [lat, lon, altitude_ft, groundspeed_knots] plus an optional time
@@ -114,14 +114,14 @@ def _build_site(out, inputs):
 
 def _observed_values(data_dir):
     """The values GOLDEN pins, read from a generated data directory."""
-    metadata = _load_js(data_dir / "metadata.js", "KML_METADATA")
-    airports = _load_js(data_dir / "airports.js", "KML_AIRPORTS")["airports"]
+    metadata = _load_js(data_dir / "metadata.json")
+    airports = _load_js(data_dir / "airports.json")["airports"]
     path_ids = {}
     segment_rows = {}
     distance_km = {}
     flight_seconds = {}
     for year in metadata["available_years"]:
-        data = _load_js(data_dir / str(year) / "data.js", f"KML_DATA_{year}")
+        data = _load_js(data_dir / str(year) / "data.json")
         path_ids[year] = [info["id"] for info in data["path_info"]]
         entries = data["segments"].values()
         segment_rows[year] = sum(len(entry["columns"][0]) for entry in entries)
@@ -190,21 +190,25 @@ def test_index_html_preloads_the_latest_year(golden_output):
     """The year the page opens on, at the URL the loader requests it by."""
     out, _ = golden_output
     page = lxml_html.fromstring((out / "index.html").read_text(encoding="utf-8"))
-    latest = max(_load_js(out / "data" / "metadata.js")["available_years"])
+    latest = max(_load_js(out / "data" / "metadata.json")["available_years"])
     preloads = [
         (link.get("as"), link.get("href"))
         for link in page.iter("link")
         if link.get("rel") == "preload"
     ]
-    assert preloads == [("script", f"data/{latest}/data.js")]
-    assert (out / "data" / str(latest) / "data.js").exists()
+    assert preloads == [
+        ("fetch", "data/metadata.json"),
+        ("fetch", "data/airports.json"),
+        ("fetch", f"data/{latest}/data.json"),
+    ]
+    assert (out / "data" / str(latest) / "data.json").exists()
 
 
 def test_top_level_data_files(golden_output):
     out, _ = golden_output
     data_dir = out / "data"
-    metadata = _load_js(data_dir / "metadata.js", "KML_METADATA")
-    airports = _load_js(data_dir / "airports.js", "KML_AIRPORTS")
+    metadata = _load_js(data_dir / "metadata.json")
+    airports = _load_js(data_dir / "airports.json")
 
     # No statistics: the frontend computes them from the year files
     assert set(metadata) == {
@@ -227,26 +231,26 @@ def test_top_level_data_files(golden_output):
 def test_year_files_match_available_years(golden_output):
     out, _ = golden_output
     data_dir = out / "data"
-    metadata = _load_js(data_dir / "metadata.js", "KML_METADATA")
+    metadata = _load_js(data_dir / "metadata.json")
     year_dirs = sorted(int(p.name) for p in data_dir.iterdir() if p.is_dir())
 
     assert metadata["available_years"] == year_dirs
     assert len(year_dirs) >= 2
     for year in year_dirs:
-        data_file = data_dir / str(year) / "data.js"
-        assert [p.name for p in (data_dir / str(year)).iterdir()] == ["data.js"]
+        data_file = data_dir / str(year) / "data.json"
+        assert [p.name for p in (data_dir / str(year)).iterdir()] == ["data.json"]
         assert metadata["year_file_bytes"][str(year)] == data_file.stat().st_size
 
 
 def test_year_data_shape_and_unique_ids(golden_output):
     out, inputs = golden_output
     data_dir = out / "data"
-    metadata = _load_js(data_dir / "metadata.js", "KML_METADATA")
+    metadata = _load_js(data_dir / "metadata.json")
 
     all_ids = []
     registrations = set()
     for year in metadata["available_years"]:
-        data = _load_js(data_dir / str(year) / "data.js", f"KML_DATA_{year}")
+        data = _load_js(data_dir / str(year) / "data.json")
         assert list(data) == [
             "format",
             "year",

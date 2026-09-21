@@ -66,7 +66,7 @@ export interface RawPathSegments {
 }
 
 /**
- * Per-year data file contents (window.KML_DATA_<YEAR>)
+ * Per-year data file contents (<year>/data.json)
  */
 export interface RawYearData {
   /** Wire format of the rows, DATA_FORMAT_VERSION in services/dataLoader.ts */
@@ -138,7 +138,7 @@ export interface FilteredStatistics {
 }
 
 /**
- * Airport information (airports.js)
+ * Airport information (airports.json)
  */
 export interface Airport {
   name: string;
@@ -151,7 +151,7 @@ export interface Airport {
 export type AircraftModels = Readonly<Record<string, string>>;
 
 /**
- * Metadata exported by the backend (metadata.js). The exporter writes every
+ * Metadata exported by the backend (metadata.json). The exporter writes every
  * field and none is ever null; the statistics are computed from the year
  * files instead.
  */
@@ -277,7 +277,7 @@ export interface LoadingInfo {
  */
 export interface DataLoaderOptions {
   dataDir?: string;
-  scriptLoader?: (url: string) => Promise<void>;
+  fetchJson?: (url: string) => Promise<unknown>;
   showLoading?: (info: LoadingInfo) => void;
   hideLoading?: () => void;
   getWindow?: () => Window & typeof globalThis;
@@ -289,11 +289,10 @@ export interface DataLoaderOptions {
 }
 
 /**
- * Global window extensions for data files
+ * Where the data loader publishes airports.json and metadata.json
  */
 declare global {
   interface Window {
-    [key: `KML_DATA_${string}`]: RawYearData | undefined;
     KML_AIRPORTS?: {
       airports: Airport[];
     };

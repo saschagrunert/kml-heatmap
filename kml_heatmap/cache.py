@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CACHE_DIR",
     "REGULAR_FILE_MODE",
-    "atomic_js_write",
+    "atomic_data_write",
     "atomic_json_write",
     "atomic_text_write",
     "atomic_write",
@@ -84,19 +84,12 @@ def atomic_text_write(path: Path, content: str) -> None:
     atomic_write(path, lambda tmp: tmp.write(content))
 
 
-def atomic_js_write(
-    path: Path, var_name: str, data: Any, *, sort_keys: bool = False
-) -> None:
-    """Write ``window.<var_name> = <json>;`` atomically."""
-
-    def write(tmp: IO[str]) -> None:
-        tmp.write(f"window.{var_name} = ")
-        # One dumps call uses the C encoder; dump streams through the much
-        # slower pure-Python one
-        tmp.write(json.dumps(data, separators=(",", ":"), sort_keys=sort_keys))
-        tmp.write(";")
-
-    atomic_write(path, write)
+def atomic_data_write(path: Path, data: Any, *, sort_keys: bool = False) -> None:
+    """Write a data file of the site as compact JSON atomically."""
+    # One dumps call uses the C encoder; dump streams through the much
+    # slower pure-Python one
+    content = json.dumps(data, separators=(",", ":"), sort_keys=sort_keys)
+    atomic_write(path, lambda tmp: tmp.write(content))
 
 
 def atomic_json_write(path: Path, data: Any) -> None:

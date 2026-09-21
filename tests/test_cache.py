@@ -12,7 +12,7 @@ import pytest
 import kml_heatmap.cache as cache_module
 from kml_heatmap.cache import (
     CACHE_DIR,
-    atomic_js_write,
+    atomic_data_write,
     atomic_json_write,
     atomic_text_write,
     atomic_write,
@@ -118,37 +118,37 @@ class TestAtomicWrite:
         assert [p.name for p in tmp_path.iterdir()] == ["file.txt"]
 
 
-class TestAtomicJsWrite:
-    def test_writes_window_variable_format(self, tmp_path):
-        path = tmp_path / "data.js"
-        atomic_js_write(path, "FLIGHT_DATA", {"key": "value"})
+class TestAtomicDataWrite:
+    def test_writes_compact_json(self, tmp_path):
+        path = tmp_path / "data.json"
+        atomic_data_write(path, {"key": "value"})
 
         content = path.read_text()
-        assert content == 'window.FLIGHT_DATA = {"key":"value"};'
+        assert content == '{"key":"value"}'
 
     def test_sort_keys(self, tmp_path):
-        path = tmp_path / "data.js"
-        atomic_js_write(path, "X", {"b": 2, "a": 1}, sort_keys=True)
+        path = tmp_path / "data.json"
+        atomic_data_write(path, {"b": 2, "a": 1}, sort_keys=True)
 
         content = path.read_text()
-        assert content == 'window.X = {"a":1,"b":2};'
+        assert content == '{"a":1,"b":2}'
 
     def test_no_temp_files_left_behind(self, tmp_path):
-        atomic_js_write(tmp_path / "data.js", "X", [1, 2])
-        assert [p.name for p in tmp_path.iterdir()] == ["data.js"]
+        atomic_data_write(tmp_path / "data.json", [1, 2])
+        assert [p.name for p in tmp_path.iterdir()] == ["data.json"]
 
     def test_readable_by_others(self, tmp_path, umask_022):
-        path = tmp_path / "data.js"
-        atomic_js_write(path, "X", [1])
+        path = tmp_path / "data.json"
+        atomic_data_write(path, [1])
         assert path.stat().st_mode & 0o044 == 0o044
 
     def test_cleans_up_temp_on_replace_failure(self, tmp_path):
-        path = tmp_path / "data.js"
+        path = tmp_path / "data.json"
         with (
             patch("kml_heatmap.cache.os.replace", side_effect=OSError("boom")),
             contextlib.suppress(OSError),
         ):
-            atomic_js_write(path, "X", {"a": 1})
+            atomic_data_write(path, {"a": 1})
 
         assert not path.exists()
         assert list(tmp_path.iterdir()) == []
