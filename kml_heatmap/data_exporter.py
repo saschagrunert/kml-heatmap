@@ -54,10 +54,11 @@ from typing import IO, TYPE_CHECKING, Self
 from .aircraft import resolve_aircraft_models
 from .cache import atomic_write
 from .exceptions import KMLHeatmapError
-from .export_pipeline import build_path_info, path_metrics, process_path_segments
+from .export_pipeline import build_path_info, path_duration, process_path_segments
 from .export_writers import (
     export_airports_data,
     export_metadata,
+    exported_airport_names,
     exported_country_codes,
 )
 from .logger import logger
@@ -88,6 +89,7 @@ __all__ = [
     "SiteOutput",
     "YearExportResult",
     "assign_path_ids",
+    "drop_duplicate_paths",
     "export_all_data",
     "is_exportable_path",
     "path_content_id",
@@ -199,6 +201,16 @@ def is_exportable_path(path: FlightPath) -> bool:
     )
 
 
+def _path_content(path: FlightPath) -> bytes:
+    """The coordinates, rounded the way they are exported, and altitudes."""
+    values: list[float] = []
+    for point in path:
+        values.append(round(point.lat, COORDINATE_DECIMALS))
+        values.append(round(point.lon, COORDINATE_DECIMALS))
+        values.append(math.nan if point.alt is None else round(point.alt, 1))
+    return struct.pack(f"<{len(values)}d", *values)
+
+
 def path_content_id(path: FlightPath) -> int:
     """The id a path gets unless an earlier path already holds it.
 
@@ -207,14 +219,54 @@ def path_content_id(path: FlightPath) -> int:
     and the renaming of Charterware files, none of which a position in the
     input or a file name would.
     """
-    values: list[float] = []
-    for point in path:
-        values.append(round(point.lat, COORDINATE_DECIMALS))
-        values.append(round(point.lon, COORDINATE_DECIMALS))
-        values.append(math.nan if point.alt is None else round(point.alt, 1))
-    packed = struct.pack(f"<{len(values)}d", *values)
-    digest = hashlib.blake2b(packed, digest_size=8).digest()
+    digest = hashlib.blake2b(_path_content(path), digest_size=8).digest()
     return int.from_bytes(digest, "big") >> (64 - PATH_ID_BITS)
+
+
+def drop_duplicate_paths(
+    paths_by_year: Mapping[int, list[int]],
+    all_path_groups: FlightPathGroup,
+    all_path_metadata: Sequence[PathMetadata],
+) -> dict[int, list[int]]:
+    """Leave out every exported path that repeats an earlier one exactly.
+
+    The same recording under two file names (a copy, a renamed export)
+    would otherwise count twice in every statistic. Paths are compared by
+    their exported content itself, not by its hash, so two different
+    flights that share a hash both stay. The first one in input order is
+    kept and a warning names both files. A year left without an exported
+    path is left out.
+    """
+    first_by_content: dict[bytes, int] = {}
+    duplicates: set[int] = set()
+    exported = sorted(
+        index
+        for indices in paths_by_year.values()
+        for index in indices
+        if is_exportable_path(all_path_groups[index])
+    )
+    for index in exported:
+        first = first_by_content.setdefault(
+            _path_content(all_path_groups[index]), index
+        )
+        if first != index:
+            duplicates.add(index)
+            logger.warning(
+                "Skipping a flight in %s: the same flight as in %s",
+                all_path_metadata[index].get("filename") or f"path {index}",
+                all_path_metadata[first].get("filename") or f"path {first}",
+            )
+    if not duplicates:
+        return dict(paths_by_year)
+    kept = {
+        year: [index for index in indices if index not in duplicates]
+        for year, indices in paths_by_year.items()
+    }
+    return {
+        year: indices
+        for year, indices in kept.items()
+        if any(is_exportable_path(all_path_groups[i]) for i in indices)
+    }
 
 
 def assign_path_ids(
@@ -223,9 +275,9 @@ def assign_path_ids(
     """The id of every exported path, keyed by its index in the input.
 
     A path whose content id an earlier path (in input order) already holds,
-    a duplicate recording or a real collision, takes the next free id. The
-    ids therefore only depend on the paths and their order, never on the
-    chunking or the number of workers.
+    a real collision (``drop_duplicate_paths`` removes exact duplicates
+    before), takes the next free id. The ids therefore only depend on the
+    paths and their order, never on the chunking or the number of workers.
     """
     exported = sorted(
         index
@@ -259,11 +311,13 @@ def process_year_chunk(
     path_ids: Sequence[int | None],
     output_dir: str,
     index: int = 0,
+    airport_names: frozenset[str] | None = None,
 ) -> ChunkResult:
     """Export a chunk of a year's paths into JSON fragments.
 
     ``path_ids`` holds the id of each path, None for the paths that are not
-    exported (see ``assign_path_ids``). Writes
+    exported (see ``assign_path_ids``). ``airport_names`` are the exported
+    airport markers (see ``export_pipeline.build_path_info``). Writes
     ``<output_dir>/<year>/.data.<index>.info.part`` (the path_info entries,
     comma separated) and ``.data.<index>.segments.part`` (the
     ``"<id>":{...}`` entries of the segments object, comma separated). The
@@ -286,20 +340,18 @@ def process_year_chunk(
             if path_id is None:
                 continue
 
-            path_duration_seconds, path_distance_km = path_metrics(path, metadata)
-            start, rows = process_path_segments(
-                path, path_distance_km, path_duration_seconds
-            )
-            info = build_path_info(path, metadata, path_id, year)
+            start, rows = process_path_segments(path, path_duration(metadata))
+            info = build_path_info(path, metadata, path_id, year, airport_names)
 
             # json.dumps rather than json.dump: only the one-shot encoder is
             # the C implementation, dumping to a file uses the Python one
             separator = "," if path_count else ""
             info_out.write(separator + json.dumps(info, separators=JSON_SEPARATORS))
-            # Scaled to integers and stored as differences, see segment_codec
+            # Scaled to integers, stored as differences and written column
+            # by column, see segment_codec
             segments = {
                 "start": encode_start(start),
-                "rows": encode_rows(start, rows),
+                "columns": encode_rows(start, rows),
             }
             segments_out.write(
                 f'{separator}"{path_id}":'
@@ -445,6 +497,7 @@ def _run_chunk(
     all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
     output_dir: str,
+    airport_names: frozenset[str] | None,
 ) -> ChunkResult:
     return process_year_chunk(
         plan.year,
@@ -453,6 +506,7 @@ def _run_chunk(
         plan.path_ids,
         output_dir,
         plan.index,
+        airport_names,
     )
 
 
@@ -462,6 +516,7 @@ def _export_chunks(
     all_path_metadata: list[PathMetadata],
     output_dir: str,
     max_workers: int,
+    airport_names: frozenset[str] | None = None,
 ) -> list[YearExportResult]:
     """Run the chunks (in a process pool when there are several) and assemble
     the year files. Returns the results sorted by year."""
@@ -496,7 +551,9 @@ def _export_chunks(
     if len(plans) == 1:
         plan = plans[0]
         try:
-            result = _run_chunk(plan, all_path_groups, all_path_metadata, output_dir)
+            result = _run_chunk(
+                plan, all_path_groups, all_path_metadata, output_dir, airport_names
+            )
         except Exception as exc:
             raise fail(plan, exc) from exc
         chunk_results.append(result)
@@ -529,6 +586,7 @@ def _export_chunks(
                             plan.path_ids,
                             output_dir,
                             plan.index,
+                            airport_names,
                         )
                     ] = plan
 
@@ -717,12 +775,17 @@ class SiteOutput:
         output_dir: str | Path,
         data_dir: str | Path,
         site_files: Iterable[str] = (),
+        site_patterns: Iterable[str] = (),
     ) -> None:
         """Prepare the output of a site.
 
         ``site_files`` are the paths the tool owns in ``output_dir``, each
         relative to it and with forward slashes; the ones a run does not
-        produce are removed when it is published.
+        produce are removed when it is published. ``site_patterns`` are glob
+        patterns of owned files whose names are not known in advance, such
+        as the flag of each country visited: every match that a run does
+        not produce is removed as well, or a flight removed from the input
+        would still give away its country.
         """
         self.output_dir = Path(output_dir).resolve()
         self.data_dir = Path(data_dir).resolve()
@@ -733,6 +796,7 @@ class SiteOutput:
             if resolved in protected_directories():
                 raise ValueError(f"Refusing to use dangerous output directory: {given}")
         self.site_files = tuple(site_files)
+        self.site_patterns = tuple(site_patterns)
         self._cleanup = contextlib.ExitStack()
 
     def __enter__(self) -> Self:
@@ -790,7 +854,27 @@ class SiteOutput:
         for name in self.site_files:
             if name not in produced:
                 _remove_stale_file(self.output_dir / name)
+        for pattern in self.site_patterns:
+            self._remove_stale_matches(pattern, produced)
         _remove_stale_data(self.data_dir, {str(year) for year in years})
+
+    def _remove_stale_matches(self, pattern: str, produced: set[str]) -> None:
+        """Remove the files matching ``pattern`` that were not produced.
+
+        A directory on the way that is a symlink is somebody else's and not
+        searched; one that ends up empty is removed.
+        """
+        directory = self.output_dir
+        for part in Path(pattern).parent.parts:
+            directory = directory / part
+            if directory.is_symlink() or not directory.is_dir():
+                return
+        for match in sorted(directory.glob(Path(pattern).name)):
+            if match.relative_to(self.output_dir).as_posix() not in produced:
+                _remove_stale_file(match)
+        if directory != self.output_dir:
+            with contextlib.suppress(OSError):
+                directory.rmdir()
 
 
 def export_all_data(
@@ -811,7 +895,11 @@ def export_all_data(
 
     logger.info("\n  Exporting data to JS files...")
 
-    paths_by_year = _group_paths_by_year(all_path_groups, all_path_metadata)
+    paths_by_year = drop_duplicate_paths(
+        _group_paths_by_year(all_path_groups, all_path_metadata),
+        all_path_groups,
+        all_path_metadata,
+    )
     logger.info("\n  Splitting data by year: %s", sorted(paths_by_year))
 
     path_ids = assign_path_ids(paths_by_year, all_path_groups)
@@ -822,7 +910,12 @@ def export_all_data(
         "\n  Processing %d year(s) in %d chunk(s)...", len(paths_by_year), len(plans)
     )
     year_results = _export_chunks(
-        plans, all_path_groups, all_path_metadata, str(output_path), max_workers
+        plans,
+        all_path_groups,
+        all_path_metadata,
+        str(output_path),
+        max_workers,
+        exported_airport_names(unique_airports),
     )
 
     groundspeed = GroundspeedRange()

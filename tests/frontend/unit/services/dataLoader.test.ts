@@ -6,6 +6,7 @@ import {
   beforeEach,
   vi,
   type Mock,
+  type MockInstance,
 } from "vitest";
 import {
   combineYearData,
@@ -21,7 +22,8 @@ import {
 import type {
   KMLDataset,
   LoadingInfo,
-  RawSegment,
+  RawColumns,
+  RawPathSegments,
   RawYearData,
 } from "../../../../kml_heatmap/frontend/types";
 
@@ -34,33 +36,36 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
 type MockWindow = Window & typeof globalThis & Record<string, unknown>;
 
 /**
- * Column scales of the wire format, mirroring _SCALES in
- * kml_heatmap/segment_codec.py. The helpers below take rows in the units a
- * reader thinks in and encode them, so a test says what it means and the
- * decoder is still checked against an independent encoder.
+ * Column scales of the wire format, mirroring kml_heatmap/segment_codec.py
+ * (the altitude column counts hundreds of feet). The helpers below take rows
+ * in the units a reader thinks in and encode them, so a test says what it
+ * means and the decoder is still checked against an independent encoder.
  */
-const SCALES = [1e5, 1e5, 1, 10, 10];
+const SCALES = [1e5, 1e5, 1 / 100, 10, 10];
 
 /** One path's exported segments, given as plain `[lat, lon, ft, kt, s?]` rows */
-function path(
-  start: [number, number],
-  rows: number[][],
-): RawYearData["segments"][string] {
+function path(start: [number, number], rows: number[][]): RawPathSegments {
   const scaledStart = [
     Math.round(start[0] * SCALES[0]!),
     Math.round(start[1] * SCALES[1]!),
   ];
   const running = [scaledStart[0]!, scaledStart[1]!, 0, 0, 0];
-  const encoded = rows.map((row) => {
-    const delta = row.map((value, column) => {
-      const scaled = Math.round(value * SCALES[column]!);
-      const difference = scaled - running[column]!;
-      running[column] = scaled;
-      return difference;
+  // The time column is only written when some row has a time
+  const columns: (number | null)[][] = [[], [], [], []];
+  if (rows.some((row) => row.length > 4)) columns.push([]);
+  for (const row of rows) {
+    columns.forEach((column, index) => {
+      const value = row[index];
+      if (value === undefined) {
+        column.push(null);
+        return;
+      }
+      const scaled = Math.round(value * SCALES[index]!);
+      column.push(scaled - running[index]!);
+      running[index] = scaled;
     });
-    return delta as unknown as RawSegment;
-  });
-  return { start: scaledStart, rows: encoded };
+  }
+  return { start: scaledStart, columns: columns as RawColumns };
 }
 
 function rawYear(
@@ -583,14 +588,129 @@ describe("expandYearData", () => {
     );
   });
 
-  it("throws when a path with rows carries no start point", () => {
-    expect(() =>
-      expandYearData(
-        rawYear(2025, {
-          "1": { start: [], rows: [[50.1, 8.1, 1, 1]] },
-        }),
-      ),
-    ).toThrow("start point");
+  describe("malformed paths", () => {
+    let warn: MockInstance<typeof console.warn>;
+    beforeEach(() => {
+      warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
+
+    const good = (): RawPathSegments => path([51, 9], [[51.1, 9.1, 500, 80]]);
+
+    /** Expand path "1" next to a good path "2" */
+    function expandWith(bad: unknown): KMLDataset {
+      return expandYearData(
+        rawYear(2025, { "1": bad as RawPathSegments, "2": good() }),
+      );
+    }
+
+    /** Only the good path made it, and it has no holes or NaN in it */
+    function expectOnlyTheGoodPath(data: KMLDataset): void {
+      expect(data.path_segments.map((s) => s.path_id)).toEqual([2]);
+      expect(data.coordinates).toEqual([
+        [51, 9],
+        [51.1, 9.1],
+      ]);
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]![0]).toContain("Path 1");
+    }
+
+    it.each([
+      ["no start point", { ...good(), start: [] }],
+      ["a start point that is not numeric", { ...good(), start: ["x", 1] }],
+      [
+        "a missing column",
+        { start: [0, 0], columns: [[1], [1], [1], undefined] },
+      ],
+      ["columns that are not an array", { start: [0, 0], columns: {} }],
+      ["no columns at all", { start: [0, 0] }],
+    ])("leaves out a path with %s and warns", (_, bad) => {
+      expectOnlyTheGoodPath(expandWith(bad));
+    });
+
+    it.each([NaN, Infinity, "1", undefined, {}])(
+      "cuts a path short at a row holding %s, keeping the rows before it",
+      (value) => {
+        const raw = path(
+          [50, 8],
+          [
+            [50.1, 8.1, 500, 80, 0],
+            [50.2, 8.2, 500, 80, 1],
+            [50.3, 8.3, 500, 80, 2],
+          ],
+        );
+        (raw.columns[1] as unknown[])[1] = value;
+
+        const data = expandWith(raw);
+
+        // A difference is lost, so nothing after it has a known position
+        expect(data.path_segments.map((s) => s.path_id)).toEqual([1, 2]);
+        expect(data.coordinates).toEqual([
+          [50, 8],
+          [50.1, 8.1],
+          [51, 9],
+          [51.1, 9.1],
+        ]);
+        // Every slot is filled: the preallocated arrays are trimmed
+        expect(data.path_segments.every(Boolean)).toBe(true);
+        expect(warn).toHaveBeenCalledOnce();
+      },
+    );
+
+    it("cuts a path short where a column ends early", () => {
+      const data = expandWith({
+        start: [0, 0],
+        columns: [[1, 2], [1], [1], [1]],
+      });
+
+      expect(data.path_segments.map((s) => s.path_id)).toEqual([1, 2]);
+      expect(warn).toHaveBeenCalledOnce();
+    });
+
+    it.each([2, 3])("checks column %i as well", (column) => {
+      const raw = path([50, 8], [[50.1, 8.1, 500, 80]]);
+      (raw.columns[column] as unknown[])[0] = "high";
+
+      expectOnlyTheGoodPath(expandWith(raw));
+    });
+
+    it("rejects a time that is present but not numeric", () => {
+      const raw = path([50, 8], [[50.1, 8.1, 500, 80, 0]]);
+      (raw.columns[4] as unknown[])[0] = "soon";
+
+      expectOnlyTheGoodPath(expandWith(raw));
+    });
+
+    it("reads a time column that ends early as rows without a time", () => {
+      const data = expandWith({
+        start: [0, 0],
+        columns: [[1], [1], [1], [1], []],
+      });
+
+      expect(data.path_segments.map((s) => s.time)).toEqual([
+        undefined,
+        undefined,
+      ]);
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
+  it("reads a null time as a row without one", () => {
+    const data = expandYearData(
+      rawYear(2025, {
+        "1": path(
+          [50, 8],
+          [
+            [50.1, 8.1, 500, 80, 10],
+            [50.2, 8.2, 500, 80],
+            [50.3, 8.3, 500, 80, 30],
+          ],
+        ),
+      }),
+    );
+
+    expect(data.path_segments.map((s) => s.time)).toEqual([10, undefined, 30]);
+    expect("time" in data.path_segments[1]!).toBe(false);
   });
 
   it("defaults missing path_info and original_points", () => {
@@ -614,7 +734,7 @@ describe("expandYearData", () => {
     ).toThrow("segments");
   });
 
-  it.each([undefined, 1, 3, "2"])(
+  it.each([undefined, 2, 4, "3"])(
     "refuses a year file written in format %s",
     (format) => {
       expect(() =>

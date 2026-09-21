@@ -43,7 +43,6 @@ export const mockAirportManagerInstance = {
   updateAirportPopups: vi.fn(),
   updateAirportOpacity: vi.fn(),
   updateAirportMarkerSizes: vi.fn(),
-  calculateAirportFlightCounts: vi.fn(),
 };
 
 export const mockReplayManagerInstance = {
@@ -70,6 +69,7 @@ export const mockLayerManagerInstance = {
   redrawAltitudePaths: vi.fn(),
   redrawAirspeedPaths: vi.fn(),
   clearLayer: vi.fn(),
+  destroy: vi.fn(),
 };
 
 export const mockStateManagerInstance = {
@@ -77,6 +77,7 @@ export const mockStateManagerInstance = {
   saveMapState: vi.fn(),
   scheduleSave: vi.fn(),
   flush: vi.fn(),
+  cancelSave: vi.fn(),
 };
 
 export const mockWrappedManagerInstance = {
@@ -174,7 +175,11 @@ export const defaultMetadata: Metadata = {
 
 export const defaultData: KMLDataset = {
   coordinates: [[50, 8]],
-  path_segments: [{ path_id: 1, altitude_ft: 5000 }],
+  // Timed, so the one flight can be replayed
+  path_segments: [
+    { path_id: 1, altitude_ft: 5000, time: 0 },
+    { path_id: 1, altitude_ft: 5500, time: 60 },
+  ],
   path_info: [
     {
       id: 1,

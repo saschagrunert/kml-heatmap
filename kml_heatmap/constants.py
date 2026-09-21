@@ -12,7 +12,10 @@ KM_TO_NAUTICAL_MILES = 1.0 / NAUTICAL_MILES_TO_KM
 SECONDS_PER_HOUR = 3600
 
 # === Groundspeed Calculations ===
-MAX_GROUNDSPEED_KNOTS = 200  # Reasonable max for typical general aviation
+# Above this a groundspeed is a position or clock glitch rather than a
+# measurement: faster than any piston or turboprop aircraft with a good
+# tailwind, and than most light jets. Such a speed counts as unknown.
+MAX_GROUNDSPEED_KNOTS = 600
 MIN_SEGMENT_TIME_SECONDS = 0.1  # Avoid division by very small time differences
 SPEED_WINDOW_SECONDS = 120  # 2 minute rolling average window for speed calculation
 

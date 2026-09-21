@@ -2,14 +2,17 @@
 
 Python 3.14 starts workers with the ``forkserver`` method, so the parent's
 logging configuration is not inherited. The initializer restores the debug
-log level. The airport database is not preloaded: the export workers never
-look up an airport, and parse workers with a warm parse cache do not either.
-Lookups load it on first use.
+log level. The export workers never look up an airport and do not get the
+airport database; the parse workers get the one the parent loaded, which
+takes a tenth of the time of reading the CSV again in every worker.
 """
 
+import contextlib
 import os
+import pickle  # nosec B403
 from typing import TYPE_CHECKING
 
+from .airport_lookup import use_airport_database
 from .logger import set_debug_mode
 
 if TYPE_CHECKING:
@@ -23,13 +26,21 @@ PARSE_BYTES_PER_FILE_BYTE = 15
 WORKER_BASE_BYTES = 100 * 1024 * 1024
 
 
-def init_worker(debug: bool) -> None:
-    """Configure a worker process (log level).
+def init_worker(debug: bool, airport_database: bytes | None = None) -> None:
+    """Configure a worker process (log level, airport database).
+
+    ``airport_database`` is the parent's database, pickled once by the
+    parent: handing the pool the dictionary itself would pickle it again
+    for every worker, in the parent, one after the other.
 
     Any failure here would terminate the worker and break the whole pool,
-    so it does nothing that can fail.
+    so nothing may escape: without the database the worker loads it itself.
     """
     set_debug_mode(debug)
+    if airport_database is not None:
+        with contextlib.suppress(Exception):
+            database = pickle.loads(airport_database)  # noqa: S301  # nosec B301
+            use_airport_database(database)
 
 
 CGROUP_DIR = "/sys/fs/cgroup"

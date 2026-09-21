@@ -26,6 +26,7 @@ from kml_heatmap.data_exporter import (
     _part_paths,
     _plan_chunks,
     assign_path_ids,
+    drop_duplicate_paths,
     export_all_data,
     path_content_id,
     process_year_chunk,
@@ -133,9 +134,13 @@ class TestYearFile:
         assert data["format"] == FORMAT_VERSION
         assert list(data["segments"]) == ["7"]
         entry = data["segments"]["7"]
-        # On disk: scaled integers, each row the difference to the one before
+        # On disk: scaled integers, each row the difference to the one
+        # before, written column by column
         assert entry["start"] == [5000000, 800000]
-        assert entry["rows"][0][:2] == [10000, 10000]
+        lats, lons, altitudes, _, times = entry["columns"]
+        assert (lats[0], lons[0]) == (10000, 10000)
+        assert altitudes[0] == 5
+        assert times == [0, 3000]
         start, rows = decoded_segments(entry)
         assert start == [50.0, 8.0]
         assert len(rows) == 2
@@ -163,7 +168,8 @@ class TestYearFile:
         assert "start_airport" not in info
         assert "aircraft_registration" not in info
         assert None not in info.values()
-        assert all(len(row) == 4 for row in data["segments"]["0"]["rows"])
+        # Without relative times there is no time column at all
+        assert len(data["segments"]["0"]["columns"]) == 4
 
     def test_paths_without_an_id_are_skipped_but_counted(self, tmp_path, parse_js):
         paths = [
@@ -212,7 +218,7 @@ class TestYearFile:
         _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
         data = parse_js(tmp_path / "2025" / "data.js")
         entry = data["segments"]["0"]
-        assert len(entry["rows"]) == 1
+        assert len(entry["columns"][0]) == 1
         # Dropping a zero-length segment keeps the chain contiguous
         start, rows = decoded_segments(entry)
         assert start == [50.0, 8.0]
@@ -240,7 +246,7 @@ class TestYearFile:
         result = _write_year(2025, [path], [{"year": 2025}], [0], tmp_path)
         assert result.original_points == count
         entry = parse_js(tmp_path / "2025" / "data.js")["segments"]["0"]
-        assert len(entry["rows"]) == count - 1
+        assert len(entry["columns"][0]) == count - 1
 
 
 class TestGroundspeedRange:
@@ -299,7 +305,7 @@ class TestPathIds:
             2: path_content_id(paths[2]),
         }
 
-    def test_a_duplicate_takes_the_next_free_id_in_input_order(self):
+    def test_a_taken_id_moves_to_the_next_free_one_in_input_order(self):
         paths = [_two_point_path(1), _two_point_path(0), _two_point_path(0)]
         # The later year comes first in the input: input order decides
         ids = assign_path_ids({2026: [1, 2], 2025: [0]}, paths)
@@ -333,6 +339,70 @@ class TestPathIds:
         assert len(before) == 5
         del before[(52.0, 8.0)]
         assert after == before
+
+
+class TestAirportEndpoints:
+    def test_ends_without_a_marker_are_not_exported(self, tmp_path, parse_js):
+        """An end counts as an airport if and only if it has a marker."""
+        paths = [_timed_path()]
+        metadata = [
+            {
+                "year": 2025,
+                "airport_name": "Home - Aunt Martha",
+                "start_airport": "Home",
+                "end_airport": "Aunt Martha",
+            }
+        ]
+        airports = [
+            {"name": "Home", "lat": 50.0, "lon": 8.0},
+            {"name": "Aunt Martha", "lat": 50.2, "lon": 8.2, "is_at_path_end": True},
+        ]
+        export_all_data(paths, metadata, airports, output_dir=str(tmp_path))
+        markers = parse_js(tmp_path / "airports.js", "KML_AIRPORTS")["airports"]
+        info = parse_js(tmp_path / "2025" / "data.js", "KML_DATA_2025")["path_info"]
+        assert [marker["name"] for marker in markers] == ["Aunt Martha"]
+        assert "start_airport" not in info[0]
+        assert info[0]["end_airport"] == "Aunt Martha"
+
+
+class TestDropDuplicatePaths:
+    def test_same_flight_under_two_names_is_exported_once(
+        self, tmp_path, parse_js, capsys
+    ):
+        paths = [_timed_path(), _timed_path(1.0), _timed_path()]
+        metadata = [
+            {"year": 2025, "filename": "1_DEAGJ_DA20.kml"},
+            {"year": 2025, "filename": "2_DEAGJ_DA20.kml"},
+            {"year": 2025, "filename": "copy of 1_DEAGJ_DA20.kml"},
+        ]
+        export_all_data(paths, metadata, [], output_dir=str(tmp_path))
+        year = parse_js(tmp_path / "2025" / "data.js", "KML_DATA_2025")
+        assert [info["id"] for info in year["path_info"]] == [
+            path_content_id(paths[0]),
+            path_content_id(paths[1]),
+        ]
+        assert year["original_points"] == 6
+        err = capsys.readouterr().err
+        assert "copy of 1_DEAGJ_DA20.kml" in err
+        assert "same flight as in 1_DEAGJ_DA20.kml" in err
+
+    def test_content_is_compared_not_the_hash(self, monkeypatch):
+        """Two flights that share a hash are still two flights."""
+        monkeypatch.setattr(exporter_module, "path_content_id", lambda path: 7)
+        paths = [_two_point_path(0), _two_point_path(1)]
+        kept = drop_duplicate_paths({2025: [0, 1]}, paths, [{}, {}])
+        assert kept == {2025: [0, 1]}
+        assert assign_path_ids(kept, paths) == {0: 7, 1: 8}
+
+    def test_across_years_the_first_in_input_order_is_kept(self):
+        paths = [_two_point_path(0), _two_point_path(0)]
+        kept = drop_duplicate_paths({2026: [0], 2025: [1]}, paths, [{}, {}])
+        assert kept == {2026: [0]}
+
+    def test_paths_that_are_not_exported_are_left_alone(self):
+        paths = [_path((52.0, 10.0, 1.0)), _path((52.0, 10.0, 1.0)), _two_point_path(0)]
+        kept = drop_duplicate_paths({2025: [0, 1, 2]}, paths, [{}] * 3)
+        assert kept == {2025: [0, 1, 2]}
 
 
 class TestProcessYearChunk:
@@ -944,6 +1014,51 @@ class TestSiteOutput:
         assert (out / "data" / "2020" / "data.js").is_symlink()
         assert (out / "mapApp.bundle.js.map").is_symlink()
         assert "Leaving symlink in output directory" in capsys.readouterr().err
+
+    def test_flags_of_countries_no_longer_visited_are_removed(self, tmp_path):
+        """A stale flag would give away the country of a removed flight."""
+        out = tmp_path / "out"
+        (out / "flags").mkdir(parents=True)
+        for code in ("de", "fr"):
+            (out / "flags" / f"{code}.svg").write_text("old")
+        (out / "flags" / "notes.txt").write_text("mine")
+
+        with SiteOutput(out, out / "data", (), ("flags/*.svg",)) as site:
+            _stage_site(site)
+            (site.site_stage / "flags").mkdir()
+            (site.site_stage / "flags" / "de.svg").write_text("new")
+            site.publish([2025])
+
+        assert sorted(p.name for p in (out / "flags").iterdir()) == [
+            "de.svg",
+            "notes.txt",
+        ]
+        assert (out / "flags" / "de.svg").read_text() == "new"
+
+    def test_empty_flags_directory_is_removed(self, tmp_path):
+        out = tmp_path / "out"
+        (out / "flags").mkdir(parents=True)
+        (out / "flags" / "de.svg").write_text("old")
+
+        with SiteOutput(out, out / "data", (), ("flags/*.svg",)) as site:
+            _stage_site(site)
+            site.publish([2025])
+
+        assert not (out / "flags").exists()
+
+    def test_symlinked_flags_directory_is_not_searched(self, tmp_path):
+        out = tmp_path / "out"
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "de.svg").write_text("precious")
+        out.mkdir()
+        (out / "flags").symlink_to(elsewhere)
+
+        with SiteOutput(out, out / "data", (), ("flags/*.svg",)) as site:
+            _stage_site(site)
+            site.publish([2025])
+
+        assert (elsewhere / "de.svg").read_text() == "precious"
 
     @skip_as_root
     def test_unwritable_directory_is_refused_before_anything_is_moved(self, tmp_path):

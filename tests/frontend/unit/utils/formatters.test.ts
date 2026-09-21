@@ -5,6 +5,7 @@ import {
   formatSpeed,
   formatFileSize,
   formatBuildTime,
+  formatTrack,
 } from "../../../../kml_heatmap/frontend/utils/formatters";
 
 describe("formatter utilities", () => {
@@ -120,5 +121,19 @@ describe("formatter utilities", () => {
       expect(formatBuildTime("2026-09-21T14:03:00Z")).toBeNull();
       expect(formatBuildTime("<b>")).toBeNull();
     });
+  });
+});
+
+describe("formatTrack", () => {
+  it("pads to three digits", () => {
+    expect(formatTrack(7)).toBe("007°");
+    expect(formatTrack(72.4)).toBe("072°");
+    expect(formatTrack(359.6)).toBe("000°");
+  });
+
+  it("normalises into 0-359", () => {
+    expect(formatTrack(-45)).toBe("315°");
+    expect(formatTrack(400)).toBe("040°");
+    expect(formatTrack(360)).toBe("000°");
   });
 });

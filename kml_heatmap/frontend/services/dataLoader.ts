@@ -72,7 +72,6 @@ export function loadScript(
 }
 
 /**
-/**
  * The request per stylesheet URL, so that callers share one rather than
  * racing. Keyed on the URL as given; a failed one is dropped so the next
  * attempt starts over.
@@ -158,34 +157,39 @@ export function getGlobalVarName(year: string): YearDataGlobal {
  * Wire format of the year files this build reads (kml_heatmap/segment_codec.py).
  * A file written by another release is refused rather than misread.
  */
-export const DATA_FORMAT_VERSION = 2;
+export const DATA_FORMAT_VERSION = 3;
 
 /**
- * Column scales of an encoded row, the mirror of _SCALES in segment_codec.py.
- * Every value the exporter writes is rounded to a fixed number of decimals,
- * so scaling it by the matching power of ten makes it an exact integer.
+ * How the encoded columns become values again, the mirror of
+ * segment_codec.py. Every value the exporter writes is rounded to a fixed
+ * step, so the columns hold exact integers counted in that step.
  */
 const COORDINATE_SCALE = 1e5;
-const ALTITUDE_SCALE = 1;
+const ALTITUDE_STEP = 100;
 const SPEED_SCALE = 10;
 const TIME_SCALE = 10;
 
 /**
  * Expand the compact per-year file format into the in-memory dataset shape.
  *
- * Each path stores a start point and rows of
- * `[lat, lon, altitude_ft, groundspeed_knots, time?]`, where the coordinate is
- * the row's END point: consecutive rows are contiguous, so the start of a row
- * is the end of the one before it. Heatmap coordinates are every segment's
- * start point plus the last end point of each path, and neighbouring segments
- * share the very same coordinate array. Arrays are preallocated and each
- * segment creates exactly one object.
+ * Each path stores a start point and, column by column, the rows of
+ * `[lat, lon, altitude_ft, groundspeed_knots, time?]`, where the coordinate
+ * is the row's END point: consecutive rows are contiguous, so the start of a
+ * row is the end of the one before it. Heatmap coordinates are every
+ * segment's start point plus the last end point of each path, and
+ * neighbouring segments share the very same coordinate array: each segment
+ * creates exactly one object.
  *
- * The rows arrive scaled to integers and stored as differences to the row
- * before (the start point seeds the two coordinate columns), which is what
- * keeps a year file a third of the size it would otherwise be. A row of four
- * columns carries no relative time; the running time then stays where the
- * last row that had one left it.
+ * Every column holds integers scaled to the step the exporter rounded to,
+ * stored as differences to the row before (the start point seeds the two
+ * coordinate columns). A path without a time column carries no relative
+ * times, and a null in it marks a row without one; the running time then
+ * stays where the last row that had one left it.
+ *
+ * A value that is not a finite number would turn into a NaN coordinate,
+ * which Leaflet throws on. Since every value is a difference, nothing after
+ * it can be trusted either, so the path is cut short there with a warning
+ * instead, and left out when that is its first row.
  * @param raw - Contents of window.KML_DATA_<YEAR>
  * @returns Expanded dataset
  */
@@ -213,35 +217,28 @@ export function expandYearData(raw: RawYearData): KMLDataset {
   for (const id of Object.keys(segmentsByPath)) listed.add(id);
   const pathIds = [...listed];
 
-  let totalSegments = 0;
-  let pathsWithSegments = 0;
-  for (const id of pathIds) {
-    const count = segmentsByPath[id]?.rows?.length ?? 0;
-    totalSegments += count;
-    if (count > 0) pathsWithSegments++;
-  }
+  // Filled with push: arrays preallocated with new Array(n) have holes
+  // until they are full, which V8 keeps treating as the slower kind
+  const path_segments: PathSegment[] = [];
+  const coordinates: Coordinate[] = [];
 
-  const path_segments: PathSegment[] = new Array<PathSegment>(totalSegments);
-  const coordinates: Coordinate[] = new Array<Coordinate>(
-    totalSegments + pathsWithSegments,
-  );
-
-  let segmentIndex = 0;
-  let coordinateIndex = 0;
   for (const id of pathIds) {
     const entry = segmentsByPath[id];
-    const rows = entry?.rows;
-    if (!entry || !rows || rows.length === 0) continue;
-    const startPoint = entry.start;
-    if (!startPoint || startPoint.length < 2) {
-      throw new Error(`Invalid year data: path ${id} has no start point`);
-    }
+    // A listed path without segments is legal, and has nothing to draw
+    if (!entry) continue;
+    // Columns that are missing altogether read as one row that is not
+    // numeric, so the path is reported like any other broken one
+    const [lats = [NaN], lons, altitudes, speeds, times] = Array.isArray(
+      entry.columns,
+    )
+      ? entry.columns
+      : [];
     const pathId = Number(id);
 
     // Running totals of the encoded columns; the coordinates start at the
     // path's start point, the rest at zero
-    let latScaled = startPoint[0]!;
-    let lonScaled = startPoint[1]!;
+    let latScaled = entry.start?.[0] ?? NaN;
+    let lonScaled = entry.start?.[1] ?? NaN;
     let altitudeScaled = 0;
     let speedScaled = 0;
     let timeScaled = 0;
@@ -250,12 +247,27 @@ export function expandYearData(raw: RawYearData): KMLDataset {
       latScaled / COORDINATE_SCALE,
       lonScaled / COORDINATE_SCALE,
     ];
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i]!;
-      latScaled += row[0];
-      lonScaled += row[1];
-      altitudeScaled += row[2];
-      speedScaled += row[3];
+    let row = 0;
+    for (; row < lats.length; row++) {
+      latScaled += lats[row]!;
+      lonScaled += lons?.[row] as number;
+      altitudeScaled += altitudes?.[row] as number;
+      speedScaled += speeds?.[row] as number;
+      const timeDelta = times?.[row] ?? null;
+      // A missing value makes the sum NaN and a string makes it a string,
+      // so one check covers every column, the start point included
+      if (
+        !Number.isFinite(
+          latScaled +
+            lonScaled +
+            altitudeScaled +
+            speedScaled +
+            (timeDelta ?? 0),
+        )
+      ) {
+        console.warn(`Path ${id}: row ${row} is not numeric, dropped the rest`);
+        break;
+      }
       const end: Coordinate = [
         latScaled / COORDINATE_SCALE,
         lonScaled / COORDINATE_SCALE,
@@ -263,20 +275,19 @@ export function expandYearData(raw: RawYearData): KMLDataset {
       const segment: PathSegment = {
         path_id: pathId,
         coords: [previous, end],
-        altitude_ft: altitudeScaled / ALTITUDE_SCALE,
+        altitude_ft: altitudeScaled * ALTITUDE_STEP,
         groundspeed_knots: speedScaled / SPEED_SCALE,
       };
-      const timeDelta = row[4];
-      if (timeDelta !== undefined) {
+      if (timeDelta !== null) {
         timeScaled += timeDelta;
         segment.time = timeScaled / TIME_SCALE;
       }
-      path_segments[segmentIndex++] = segment;
-      coordinates[coordinateIndex++] = previous;
+      path_segments.push(segment);
+      coordinates.push(previous);
       previous = end;
     }
 
-    coordinates[coordinateIndex++] = previous;
+    if (row > 0) coordinates.push(previous);
   }
 
   return {
@@ -421,16 +432,22 @@ export class DataLoader {
    * Cached and de-duplicated single-year load
    */
   private getYear(year: string): Promise<KMLDataset | null> {
-    const cached = this.cache.get(year);
+    return this.shared(year, () => this.loadYear(year));
+  }
+
+  /** The cached dataset of `key`, or else the one request for it in flight */
+  private shared(
+    key: string,
+    load: () => Promise<KMLDataset | null>,
+  ): Promise<KMLDataset | null> {
+    const cached = this.cache.get(key);
     if (cached) return Promise.resolve(cached);
 
-    const pending = this.inflight.get(year);
-    if (pending) return pending;
-
-    const promise = this.loadYear(year).finally(() => {
-      this.inflight.delete(year);
-    });
-    this.inflight.set(year, promise);
+    let promise = this.inflight.get(key);
+    if (!promise) {
+      promise = load().finally(() => this.inflight.delete(key));
+      this.inflight.set(key, promise);
+    }
     return promise;
   }
 
@@ -475,17 +492,7 @@ export class DataLoader {
    * @returns Combined data object or null on error
    */
   loadAndCombineAllYears(): Promise<KMLDataset | null> {
-    const cached = this.cache.get("all");
-    if (cached) return Promise.resolve(cached);
-
-    const pending = this.inflight.get("all");
-    if (pending) return pending;
-
-    const promise = this.loadAllYears().finally(() => {
-      this.inflight.delete("all");
-    });
-    this.inflight.set("all", promise);
-    return promise;
+    return this.shared("all", () => this.loadAllYears());
   }
 
   private async loadAllYears(): Promise<KMLDataset | null> {

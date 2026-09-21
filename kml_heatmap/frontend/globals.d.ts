@@ -29,25 +29,14 @@ declare global {
     ): HeatmapLayer;
   }
 
-  // dom-to-image library types
-  interface DomToImageOptions {
-    width?: number;
-    height?: number;
-    quality?: number;
-    bgcolor?: string;
-    style?: Record<string, string>;
-  }
-
-  interface DomToImage {
-    toJpeg(node: HTMLElement, options?: DomToImageOptions): Promise<string>;
-    toPng(node: HTMLElement, options?: DomToImageOptions): Promise<string>;
-    toBlob(node: HTMLElement, options?: DomToImageOptions): Promise<Blob>;
-  }
+  // html-to-image, loaded on the first export; its UMD build publishes the
+  // same API the package's module entry point types
+  type HtmlToImage = typeof import("html-to-image");
 
   interface Window {
     initMapApp?: (config: MapConfig) => Promise<MapApp>;
     mapApp?: MapApp;
-    domtoimage?: DomToImage;
+    htmlToImage?: HtmlToImage;
 
     // Map configuration
     MAP_CONFIG?: MapConfig;

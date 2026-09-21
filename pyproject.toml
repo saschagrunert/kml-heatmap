@@ -99,7 +99,7 @@ source = ["kml_heatmap"]
 # One to three points below what the suite reaches, so a real regression fails
 # the build while a new defensive branch does not (see vitest.config.js for the
 # same policy on the frontend side). Codecov enforces patch coverage on top.
-fail_under = 96
+fail_under = 97
 exclude_also = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",

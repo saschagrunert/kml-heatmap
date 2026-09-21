@@ -33,7 +33,8 @@ test.describe("Core", () => {
     // Scripts and styles come from the site itself; the map tiles are the
     // only third party the page is allowed to reach
     expect(csp).toContain("script-src 'self' file:;");
-    expect(csp).toContain("style-src 'self' file: 'unsafe-inline';");
+    expect(csp).toContain("style-src 'self' file:;");
+    expect(csp).not.toContain("unsafe-inline");
     expect(csp).not.toContain("unpkg.com");
     expect(csp).not.toContain("jsdelivr");
     expect(csp).toContain("base-uri 'none'");
@@ -93,6 +94,29 @@ test.describe("Core", () => {
     }
   });
 
+  test("every labelled control is named by its label (WCAG 2.5.3)", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "The columns are hidden below the breakpoint");
+    // Speech input users say what they see: "click Airports" found nothing
+    // in "Toggle airport markers"
+    const controls = await page
+      .locator(".control-btn:has(> .control-label)")
+      .evaluateAll((buttons) =>
+        buttons.map((button) => ({
+          label: (
+            button.querySelector(".control-label")?.textContent ?? ""
+          ).trim(),
+          name: button.getAttribute("aria-label") ?? "",
+        })),
+      );
+    expect(controls.length).toBeGreaterThan(5);
+    for (const { label, name } of controls) {
+      expect(name, label).toMatch(new RegExp(`\\b${label}\\b`, "i"));
+    }
+  });
+
   test("heatmap is active by default", async ({ page }) => {
     const btn = page.locator("#heatmap-btn");
     await expect(btn).toHaveAttribute("aria-pressed", "true");
@@ -117,6 +141,8 @@ test.describe("Core", () => {
       "title",
       "Select exactly one flight with timing data to replay",
     );
+    // Announced as unavailable, but still in the tab order
+    await expect(replayBtn).toHaveAttribute("aria-disabled", "true");
     await expect(replayBtn).toHaveAttribute("aria-pressed", "false");
   });
 

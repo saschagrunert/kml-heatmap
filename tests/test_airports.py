@@ -645,3 +645,69 @@ class TestAirportDeduplicator:
         )
         assert idx == 0
         assert deduplicator.unique_airports[0]["name"] is None
+
+
+class TestIcaoCodesNeverMerge:
+    def _add(self, deduplicator, lat, lon, name):
+        return deduplicator.add_or_update_airport(
+            lat=lat, lon=lon, name=name, path_index=0, is_at_path_end=False
+        )
+
+    def test_different_codes_stay_apart_however_close(self):
+        """EDTX and EDTY are 0.7 km apart and two airports all the same."""
+        deduplicator = AirportDeduplicator()
+        first = self._add(deduplicator, 49.2, 9.5, "ZZTX Field")
+        second = self._add(deduplicator, 49.2, 9.5097, "ZZTY Other Field")
+        assert haversine_distance(49.2, 9.5, 49.2, 9.5097) < 0.8
+        assert first != second
+        assert [a["name"] for a in deduplicator.unique_airports] == [
+            "ZZTX Field",
+            "ZZTY Other Field",
+        ]
+
+    def test_same_code_merges_at_any_distance(self):
+        deduplicator = AirportDeduplicator()
+        first = self._add(deduplicator, 49.2, 9.5, "ZZTX Field")
+        second = self._add(deduplicator, 49.3, 9.6, "ZZTX Field")
+        assert first == second
+
+    def test_entry_without_a_code_merges_by_proximity(self):
+        deduplicator = AirportDeduplicator()
+        first = self._add(deduplicator, 49.2, 9.5, "ZZTX Field")
+        second = self._add(deduplicator, 49.2, 9.501, "Aunt Martha")
+        assert first == second
+        assert deduplicator.unique_airports[0]["name"] == "ZZTX Field"
+
+    @pytest.mark.parametrize("coded_first", [True, False])
+    def test_code_wins_whatever_the_order(self, coded_first):
+        """The coded entry must not lose its marker to a nearby plain name."""
+        coded = {
+            "start_point": [49.2, 9.5, 200.0],
+            "airport_name": "ZZTX Field",
+            "start_airport": None,
+            "end_airport": None,
+        }
+        plain = {**coded, "airport_name": "Aunt Martha"}
+        plain["start_point"] = [49.2, 9.501, 200.0]
+        path = _path((49.2, 9.5, 200.0), (49.3, 9.6, 200.0))
+        metadata = [coded, plain] if coded_first else [plain, coded]
+        result = deduplicate_airports(metadata, [path, path])
+        assert [a["name"] for a in result] == ["ZZTX Field"]
+
+
+class TestAntimeridian:
+    def test_fields_across_the_antimeridian_merge(self):
+        deduplicator = AirportDeduplicator()
+        for lon in (179.9995, -179.9995):
+            deduplicator.add_or_update_airport(
+                lat=-16.0, lon=lon, name=None, path_index=0, is_at_path_end=False
+            )
+        assert haversine_distance(-16.0, 179.9995, -16.0, -179.9995) < 0.2
+        assert len(deduplicator.unique_airports) == 1
+
+    def test_grid_wraps(self):
+        deduplicator = AirportDeduplicator()
+        east = deduplicator._get_grid_key(0.0, 179.999)[1]
+        west = deduplicator._get_grid_key(0.0, -180.0)[1]
+        assert west == 0
+        assert (east + 1) % deduplicator._lon_cell_count == west

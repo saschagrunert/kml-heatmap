@@ -48,9 +48,9 @@ __all__ = [
     "lookup_airport_country",
     "lookup_airport_elevation",
     "split_route_name",
-    "standardize_airport_name",
     "standardize_airport_names",
     "standardize_route",
+    "use_airport_database",
 ]
 
 # OurAirports database URL
@@ -374,18 +374,43 @@ def load_airport_database() -> dict[str, AirportRecord]:
         return _airport_cache
 
 
+def use_airport_database(airports: dict[str, AirportRecord]) -> None:
+    """Use a database another process loaded instead of loading it here."""
+    global _airport_cache
+    _airport_cache = airports
+
+
+# The last fingerprint computed in this process, keyed by the file's path
+# and stat: hashing the database takes a few milliseconds, and the parse
+# cache asks for the fingerprint once per KML file
+_fingerprint_memo: tuple[tuple[str, int, int, int], str] | None = None
+
+
 def database_fingerprint() -> str:
     """A short token that changes whenever the cached airport database does.
+
+    A hash of the content: the database is downloaded again every
+    ``CACHE_MAX_AGE_DAYS``, and a download with the same bytes must not
+    invalidate every parse cache entry, as its new modification time would.
 
     Returns ``"nodb"`` while there is no cached database, so results computed
     without one are told apart from results computed with it.
     """
+    global _fingerprint_memo
     try:
         stat = CACHE_FILE.stat()
     except OSError:
         return "nodb"
-    token = f"{stat.st_size}:{stat.st_mtime_ns}".encode()
-    return hashlib.sha256(token).hexdigest()[:8]
+    key = (str(CACHE_FILE), stat.st_size, stat.st_mtime_ns, stat.st_ino)
+    if _fingerprint_memo is not None and _fingerprint_memo[0] == key:
+        return _fingerprint_memo[1]
+    try:
+        with open(CACHE_FILE, "rb") as database:
+            digest = hashlib.file_digest(database, "sha256").hexdigest()[:8]
+    except OSError:
+        return "nodb"
+    _fingerprint_memo = (key, digest)
+    return digest
 
 
 def lookup_airport_coordinates(icao_code: str) -> tuple[float, float, str] | None:
@@ -570,8 +595,3 @@ def standardize_airport_names(airport_name: str | None) -> AirportNames:
 
     single = _ROUTE_DATE_SUFFIX.sub("", airport_name).strip() or airport_name
     return AirportNames(_standardize_single_airport(single))
-
-
-def standardize_airport_name(airport_name: str | None) -> str | None:
-    """Standardize an airport or route name using the OurAirports database."""
-    return standardize_airport_names(airport_name).name

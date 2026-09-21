@@ -138,17 +138,24 @@ describe("MapApp", () => {
       expect(app.airportToPaths["EDDM"]).toEqual(new Set([2]));
     });
 
-    it("the metadata values and the ranges delegate to store", () => {
-      const models = { "D-EAGJ": "Katana" };
-      app.aircraftModels = models;
+    it("hasTimingData delegates to store", () => {
       app.hasTimingData = true;
-      app.altitudeRange = { min: 100, max: 5000 };
-      app.airspeedRange = { min: 50, max: 150 };
 
-      expect(app.store.get("aircraftModels")).toBe(models);
       expect(app.store.get("hasTimingData")).toBe(true);
-      expect(app.store.get("altitudeRange")).toEqual({ min: 100, max: 5000 });
-      expect(app.store.get("airspeedRange")).toEqual({ min: 50, max: 150 });
+    });
+
+    it("keeps the metadata models and the ranges as plain fields", () => {
+      // Nothing follows them, so they stay out of the store
+      expect(app.aircraftModels).toEqual({});
+      expect(app.altitudeRange).toEqual({ min: 0, max: 10000 });
+      expect(app.airspeedRange).toEqual({ min: 0, max: 200 });
+      expect(STORE_ACCESSOR_KEYS).not.toContain("altitudeRange");
+
+      app.altitudeRange = { min: 100, max: 5000 };
+
+      expect(app.altitudeRange).toEqual({ min: 100, max: 5000 });
+      // A fresh copy per app, not the shared default
+      expect(new MapApp(config).altitudeRange).toEqual({ min: 0, max: 10000 });
     });
   });
 

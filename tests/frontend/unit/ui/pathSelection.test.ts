@@ -278,6 +278,33 @@ describe("PathSelection", () => {
     });
   });
 
+  describe("while replay runs", () => {
+    beforeEach(() => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.replayState.active = true;
+    });
+
+    it("keeps the selection the replay is playing", () => {
+      const onChange = vi.fn();
+      mockApp.store.subscribe("selectedPathIds", onChange);
+
+      clearBtn.click();
+      pathSelection.clearSelection();
+
+      expect([...mockApp.selectedPathIds]).toEqual([1]);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
+      expect(mockApp.layerManager.updateSelectionStyles).not.toHaveBeenCalled();
+    });
+
+    it("ignores Isolate", () => {
+      pathSelection.toggleIsolateSelection();
+
+      expect(mockApp.isolateSelection).toBe(false);
+      expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
+    });
+  });
+
   describe("selection chip", () => {
     it("stays out of the way while nothing is selected", () => {
       expect(chip.hidden).toBe(true);
@@ -315,6 +342,18 @@ describe("PathSelection", () => {
   });
 
   describe("isolate button", () => {
+    it("is announced as unavailable without a selection, and stays focusable", () => {
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
+      expect(btn.disabled).toBe(false);
+
+      mockApp.selectedPathIds.add(1);
+      mockApp.store.notifyMutation("selectedPathIds");
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
+
+      mockApp.isolateSelection = true;
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
+    });
+
     it("is dimmed and not pressed at construction without a selection", () => {
       expect(btn.style.opacity).toBe("0.5");
       expect(btn.getAttribute("aria-pressed")).toBe("false");

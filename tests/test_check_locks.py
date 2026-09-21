@@ -32,6 +32,8 @@ check_locks = _load_module()
 VERSION = "1.0.0"
 RUFF = "0.16.4"
 PLAYWRIGHT = "1.63.0"
+DIGEST = "sha256:" + "ab" * 32
+IMAGE = f"mcr.microsoft.com/playwright:v{PLAYWRIGHT}-noble@{DIGEST}"
 
 
 @pytest.fixture
@@ -73,7 +75,7 @@ def repo(tmp_path, monkeypatch):
     workflow = tmp_path / ".github" / "workflows"
     workflow.mkdir(parents=True)
     (workflow / "test.yml").write_text(
-        f"      image: mcr.microsoft.com/playwright:v{PLAYWRIGHT}-noble\n",
+        f"      image: {IMAGE}\n",
         encoding="utf-8",
     )
     package = tmp_path / "kml_heatmap"
@@ -185,6 +187,49 @@ class TestPlaywrightImage:
             "runs the Playwright image v1.70.0, package-lock.json pins 1.63.0"
             in capsys.readouterr().err
         )
+
+    def test_an_image_without_a_digest_fails(self, repo, capsys):
+        path = repo / ".github/workflows/test.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(f"@{DIGEST}", ""),
+            encoding="utf-8",
+        )
+
+        assert check_locks.main() == 1
+
+        assert "by its @sha256 digest" in capsys.readouterr().err
+
+    def test_a_malformed_digest_is_no_digest(self, repo, capsys):
+        path = repo / ".github/workflows/test.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(DIGEST, "sha256:abc"),
+            encoding="utf-8",
+        )
+
+        assert check_locks.main() == 1
+
+        assert "runs no Playwright image" in capsys.readouterr().err
+
+    def test_a_document_quoting_the_same_image_passes(self, repo):
+        (repo / "CONTRIBUTING.md").write_text(
+            f"```sh\npodman run {IMAGE} npx playwright test\n```\n",
+            encoding="utf-8",
+        )
+
+        assert check_locks.main() == 0
+
+    def test_a_document_quoting_another_image_fails(self, repo, capsys):
+        stale = f"mcr.microsoft.com/playwright:v{PLAYWRIGHT}-noble"
+        (repo / "DEVELOPMENT.md").write_text(
+            f"Run `podman run {stale} npx playwright test`.\n", encoding="utf-8"
+        )
+
+        assert check_locks.main() == 1
+
+        assert (
+            f"DEVELOPMENT.md quotes the Playwright image {stale}, "
+            f".github/workflows/test.yml runs {IMAGE}"
+        ) in capsys.readouterr().err
 
     def test_a_workflow_without_the_image_fails(self, repo, capsys):
         path = repo / ".github/workflows/test.yml"

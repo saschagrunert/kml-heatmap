@@ -24,15 +24,12 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .airport_lookup import database_fingerprint
 from .cache import CACHE_DIR, atomic_json_write
 from .logger import logger
 from .types import FlightPath, FlightPathGroup, PathMetadata, TrackPoint
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
 __all__ = [
     "CACHE_FORMAT_VERSION",
@@ -156,9 +153,7 @@ def _is_stale(entry: Path, now: float) -> bool:
     return age_seconds > CACHE_MAX_AGE_DAYS * 24 * 3600
 
 
-def prune_stale_cache_entries(
-    kml_files: Iterable[str] = (), cache_dir: Path | None = None
-) -> int:
+def prune_stale_cache_entries(cache_dir: Path | None = None) -> int:
     """Remove the cache entries that are no longer useful in one directory pass.
 
     An entry goes when no current key can produce it (a legacy name, another
@@ -166,11 +161,7 @@ def prune_stale_cache_entries(
     for ``CACHE_MAX_AGE_DAYS``, like a temp file an interrupted write left.
     Reading an entry renews it. Other files are left alone. Returns the
     number of removed entries.
-
-    ``kml_files`` is not needed any more: content keys cannot be matched to
-    input paths without hashing every input again.
     """
-    del kml_files
     if cache_dir is None:
         cache_dir = KML_CACHE_DIR
 

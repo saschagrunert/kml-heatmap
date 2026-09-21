@@ -28,7 +28,6 @@ from kml_heatmap.airport_lookup import (
     lookup_airport_country,
     lookup_airport_elevation,
     split_route_name,
-    standardize_airport_name,
     standardize_airport_names,
 )
 from kml_heatmap.cache import REGULAR_FILE_MODE
@@ -407,6 +406,27 @@ class TestDatabaseFingerprint:
         assert first != second
         assert len(first) == 8
 
+    def test_same_content_downloaded_again_keeps_the_fingerprint(self, tmp_path):
+        """The monthly download must not invalidate every parse cache entry."""
+        database = tmp_path / "airports.csv"
+        with patch.object(lookup_module, "CACHE_FILE", database):
+            database.write_bytes(VALID_CSV)
+            os.utime(database, ns=(1_000_000_000, 1_000_000_000))
+            first = database_fingerprint()
+            database.unlink()
+            database.write_bytes(VALID_CSV)
+            assert database_fingerprint() == first
+
+    def test_same_size_and_time_with_other_content_differs(self, tmp_path):
+        database = tmp_path / "airports.csv"
+        with patch.object(lookup_module, "CACHE_FILE", database):
+            database.write_bytes(VALID_CSV)
+            first = database_fingerprint()
+            other = tmp_path / "other.csv"
+            other.write_bytes(VALID_CSV.replace(b"TEST", b"TSET"))
+            with patch.object(lookup_module, "CACHE_FILE", other):
+                assert database_fingerprint() != first
+
 
 class TestReadAirportCsv:
     def test_skips_non_numeric_coordinates(self, tmp_path):
@@ -676,39 +696,39 @@ class TestStandardizeAirportNames:
         )
 
 
-class TestStandardizeAirportName:
+class TestStandardizedDisplayName:
     def test_single_airport_from_fixture(self):
-        assert standardize_airport_name("EDDP") == "EDDP Leipzig/Halle"
+        assert standardize_airport_names("EDDP").name == "EDDP Leipzig/Halle"
 
     def test_route_from_fixture(self):
         assert (
-            standardize_airport_name("EDDF - EDDM")
+            standardize_airport_names("EDDF - EDDM").name
             == "EDDF Frankfurt Main - EDDM Munich"
         )
 
     def test_airfield_suffix_stripped(self):
-        assert standardize_airport_name("LOAV") == "LOAV Vöslau-Kottingbrunn"
+        assert standardize_airport_names("LOAV").name == "LOAV Vöslau-Kottingbrunn"
 
     def test_no_icao_codes_returns_original(self):
-        assert standardize_airport_name("Some Airport") == "Some Airport"
+        assert standardize_airport_names("Some Airport").name == "Some Airport"
 
     @pytest.mark.parametrize("value", [None, ""])
     def test_empty_returns_input(self, value):
-        assert standardize_airport_name(value) == value
+        assert standardize_airport_names(value).name == value
 
     def test_only_first_airport_found(self):
-        result = standardize_airport_name("EDAQ Halle - ZZZZ SomePlace")
+        result = standardize_airport_names("EDAQ Halle - ZZZZ SomePlace").name
         assert result == "EDAQ Halle-Oppin - ZZZZ SomePlace"
 
     def test_only_second_airport_found(self):
-        result = standardize_airport_name("ZZZZ SomePlace - EDMV Vilsh")
+        result = standardize_airport_names("ZZZZ SomePlace - EDMV Vilsh").name
         assert result == "ZZZZ SomePlace - EDMV Vilshofen"
 
     def test_unknown_single_airport_returns_original(self):
-        assert standardize_airport_name("ZZZZ Nowhere") == "ZZZZ Nowhere"
+        assert standardize_airport_names("ZZZZ Nowhere").name == "ZZZZ Nowhere"
 
     def test_route_with_unknown_airports_returns_original(self):
-        assert standardize_airport_name("ZZZZ - YYYY") == "ZZZZ - YYYY"
+        assert standardize_airport_names("ZZZZ - YYYY").name == "ZZZZ - YYYY"
 
 
 class TestStripAirportSuffix:

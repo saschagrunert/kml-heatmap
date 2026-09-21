@@ -25,10 +25,6 @@ import {
   updateReplayButtonState,
 } from "./replayButton";
 
-// Kept exported here: it was part of this module's surface before the button
-// state moved to replayButton.ts
-export { REPLAY_PRECONDITION_MESSAGE };
-
 const REPLAY_BUTTON_ACTIVE_LABEL = "Stop replay";
 const REPLAY_BUTTON_TEXT = "Replay";
 const REPLAY_EXIT_LABEL = "Close replay";
@@ -37,7 +33,9 @@ const REPLAY_EXIT_LABEL = "Close replay";
  * Controls that stay disabled while replay runs. Wrapped is one of them: it
  * takes the map into its dialog, where the running replay kept panning it
  * with no way to pause, and the end of the replay zoomed the overview to
- * the single flight.
+ * the single flight. Isolate and the selection chip's clear button would
+ * change the selection the replay is playing (PathSelection ignores them
+ * then as well).
  */
 const REPLAY_DISABLED_CONTROL_IDS = [
   "heatmap-btn",
@@ -46,10 +44,39 @@ const REPLAY_DISABLED_CONTROL_IDS = [
   "wrapped-btn",
   "year-select",
   "aircraft-select",
+  "isolate-btn",
+  "selection-clear-btn",
 ];
 
 /** Custom property holding the replay panel's height, read by styles.css */
 export const REPLAY_PANEL_HEIGHT_VAR = "--replay-panel-h";
+
+/**
+ * How far a key moves the timeline, as a share of the flight. The native
+ * step is one second, which on a three hour flight took over ten thousand
+ * presses end to end.
+ */
+const SLIDER_KEY_STEPS: Partial<Record<string, number>> = {
+  ArrowRight: 0.01,
+  ArrowUp: 0.01,
+  ArrowLeft: -0.01,
+  ArrowDown: -0.01,
+  PageUp: 0.1,
+  PageDown: -0.1,
+};
+
+/**
+ * Where a key step lands: at least one second on, and never past either
+ * end of the flight
+ */
+function sliderTarget(
+  state: Pick<ReplayState, "currentTime" | "maxTime">,
+  step: number,
+): number {
+  const seconds = Math.max(1, Math.round(Math.abs(step) * state.maxTime));
+  const target = state.currentTime + Math.sign(step) * seconds;
+  return Math.min(state.maxTime, Math.max(0, target));
+}
 
 /** Delay before the colour layers are redrawn after replay ends (ms) */
 const LAYER_REDRAW_DELAY_MS = 50;
@@ -103,9 +130,23 @@ export class ReplayManager {
     // Announce the final position once a slider drag ends (not per frame)
     const slider = domCache.get("replay-slider");
     if (slider) {
-      slider.addEventListener("change", () => {
-        this.announce("Moved to " + formatTime(this.state.currentTime));
-      });
+      slider.addEventListener(
+        "change",
+        () => this.announce("Moved to " + formatTime(this.state.currentTime)),
+        // The slider outlives this manager; the app's signal ends with it
+        { signal: app.signal },
+      );
+      slider.addEventListener(
+        "keydown",
+        (event) => {
+          const step = SLIDER_KEY_STEPS[event.key];
+          if (step) {
+            event.preventDefault();
+            this.seekReplay(String(sliderTarget(this.state, step)));
+          }
+        },
+        { signal: app.signal },
+      );
     }
 
     // Whether replay is available follows the selection and the timing
@@ -360,7 +401,10 @@ export class ReplayManager {
       this.app.fullPathSegments,
       pathId,
     );
-    return this.state.segments.length > 0;
+    // A flight whose times are all 0 would finish the moment it started
+    // without drawing anything (see MapApp.canReplay)
+    const last = this.state.segments[this.state.segments.length - 1];
+    return (last?.time ?? 0) > 0;
   }
 
   private calculateColorRanges(pathId: number): void {

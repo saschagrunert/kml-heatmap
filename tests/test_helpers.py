@@ -6,6 +6,7 @@ import pytest
 
 from kml_heatmap.helpers import (
     calculate_duration_seconds,
+    normalize_timestamp_text,
     numeric_filename_key,
     parse_iso_timestamp,
     parse_timestamp_epoch,
@@ -40,6 +41,33 @@ class TestParseIsoTimestamp:
     )
     def test_invalid_returns_none(self, value):
         assert parse_iso_timestamp(value) is None
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "2025-03-03 08:58:01Z",
+            "2025-03-03T08:58:01z",
+            "2025-03-03 08:58:01z",
+            " 2025-03-03T08:58:01Z ",
+        ],
+    )
+    def test_loose_forms_the_obfuscator_accepts(self, value):
+        assert parse_iso_timestamp(value) == datetime(2025, 3, 3, 8, 58, 1, tzinfo=UTC)
+
+
+class TestNormalizeTimestampText:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("2025-03-03 08:58:01Z", "2025-03-03T08:58:01Z"),
+            ("2025-03-03T08:58:01z", "2025-03-03T08:58:01Z"),
+            ("2025-03-03T08:58:01Z", "2025-03-03T08:58:01Z"),
+            ("2025-03-03", "2025-03-03"),
+            ("Log Start: 03 Mar 2025", "Log Start: 03 Mar 2025"),
+        ],
+    )
+    def test_canonical_form(self, value, expected):
+        assert normalize_timestamp_text(value) == expected
 
 
 class TestParseTimestampEpoch:

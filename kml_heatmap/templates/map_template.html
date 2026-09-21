@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob: https://*.basemaps.cartocdn.com https://*.api.tiles.openaip.net; connect-src 'self' file: https://*.basemaps.cartocdn.com https://*.api.tiles.openaip.net; font-src 'self' file:; base-uri 'none'; form-action 'none'"
+      content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file:; img-src 'self' file: data: blob: https://*.basemaps.cartocdn.com https://*.api.tiles.openaip.net; connect-src 'self' file: https://*.basemaps.cartocdn.com https://*.api.tiles.openaip.net; font-src 'self' file:; base-uri 'none'; form-action 'none'"
     />
     <meta
       name="viewport"
@@ -54,6 +54,11 @@
     <link rel="manifest" href="./manifest.json" />
     <link rel="stylesheet" href="./vendor/leaflet.css" />
     <link rel="stylesheet" href="./styles.css" />
+    <!-- The latest year is what the page shows first. Requesting it here
+         overlaps its download with Leaflet and the bundle instead of
+         starting it once they have run; the loader's script tag for the
+         same URL is then served from this preload. -->
+    $year_preload
   </head>
   <body>
     <noscript>
@@ -97,8 +102,8 @@
             class="btn-surface control-btn"
             data-action="showWrapped"
             data-icon="wrapped"
-            title="Show year in review summary"
-            aria-label="Show year in review summary"
+            title="Wrapped: your year in review"
+            aria-label="Wrapped: your year in review"
           >
             <span class="control-label">Wrapped</span>
           </button>
@@ -112,6 +117,7 @@
             data-icon="play"
             title="Select exactly one flight with timing data to replay"
             aria-label="Replay selected flight path"
+            aria-disabled="true"
             aria-pressed="false"
           >
             <span class="control-label">Replay</span>
@@ -125,6 +131,7 @@
             data-icon="isolate"
             title="Isolate selected paths"
             aria-label="Isolate selected paths"
+            aria-disabled="true"
             aria-pressed="false"
           >
             <span class="control-label">Isolate</span>
@@ -230,8 +237,8 @@
             class="btn-surface control-btn active"
             data-action="toggleAirports"
             data-icon="airport"
-            title="Toggle airport markers"
-            aria-label="Toggle airport markers"
+            title="Airports: show airport markers"
+            aria-label="Airports: show airport markers"
             aria-pressed="true"
           >
             <span class="control-label">Airports</span>
@@ -259,8 +266,8 @@
             data-action="toggleAirspeed"
             data-icon="speed"
             disabled
-            title="Toggle groundspeed color visualization"
-            aria-label="Toggle groundspeed color visualization"
+            title="Speed: color paths by groundspeed"
+            aria-label="Speed: color paths by groundspeed"
             aria-pressed="false"
           >
             <span class="control-label">Speed</span>
@@ -584,7 +591,7 @@
     </div>
 
     <!-- Scripts are deferred and execute in document order: Leaflet, data,
-         config, application bundle. dom-to-image is loaded on the first
+         config, application bundle. html-to-image is loaded on the first
          export. Everything is served from the site itself (vendor/ is copied
          out of node_modules by scripts/vendor.js), so the page needs no
          third-party origin and works offline. -->

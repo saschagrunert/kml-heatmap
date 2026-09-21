@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   escapeHtml,
   generateAirportPopupHtml,
+  applyMetricColors,
   generateSegmentPopupHtml,
   markFlightTimeUnits,
   pluralFlights,
@@ -15,6 +16,7 @@ import {
   rgbToRgba,
 } from "../../../../kml_heatmap/frontend/utils/colors";
 import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
+import { ddToDms } from "../../../../kml_heatmap/frontend/utils/geometry";
 
 describe("htmlGenerators", () => {
   describe("escapeHtml", () => {
@@ -178,7 +180,7 @@ describe("htmlGenerators", () => {
       speedMax: 200,
     };
 
-    it("renders altitude and groundspeed with colour custom properties", () => {
+    it("renders altitude and groundspeed with their colours as data", () => {
       const html = generateSegmentPopupHtml(fullParams);
 
       expect(html).toContain("3,000 ft");
@@ -191,14 +193,27 @@ describe("htmlGenerators", () => {
       const altColor = getColorForAltitude(3000, 0, 5000);
       const speedColor = getColorForAirspeed(120, 0, 200);
       expect(html).toContain(
-        `class="popup-metric kh-popup-metric-colored" style="--kh-metric-color: ${altColor}; --kh-metric-bg: ${rgbToRgba(altColor, 0.15)};"`,
+        `class="popup-metric kh-popup-metric-colored" data-metric-color="${altColor}"`,
       );
       expect(html).toContain(
-        `class="popup-metric kh-popup-metric-colored" style="--kh-metric-color: ${speedColor}; --kh-metric-bg: ${rgbToRgba(speedColor, 0.15)};"`,
+        `class="popup-metric kh-popup-metric-colored" data-metric-color="${speedColor}"`,
       );
-      // No other inline styles
-      expect(html.match(/style="/g)).toHaveLength(2);
+      // The CSP would block a style attribute
+      expect(html).not.toContain("style=");
       expect(html).toContain('class="popup-header kh-popup-header-segment"');
+    });
+
+    it("applyMetricColors carries the colours into custom properties", () => {
+      const host = document.createElement("div");
+      host.innerHTML = generateSegmentPopupHtml(fullParams);
+      applyMetricColors(host);
+
+      const altColor = getColorForAltitude(3000, 0, 5000);
+      const metric = host.querySelector<HTMLElement>("[data-metric-color]")!;
+      expect(metric.style.getPropertyValue("--kh-metric-color")).toBe(altColor);
+      expect(metric.style.getPropertyValue("--kh-metric-bg")).toBe(
+        rgbToRgba(altColor, 0.15),
+      );
     });
 
     it("rounds altitude to 50 ft steps", () => {
@@ -249,7 +264,7 @@ describe("htmlGenerators", () => {
       expect(html).toContain("0 kt");
       expect(html).toContain("0 km/h");
       expect(html).toContain(
-        `--kh-metric-color: ${getColorForAltitude(0, 0, 5000)}`,
+        `data-metric-color="${getColorForAltitude(0, 0, 5000)}"`,
       );
     });
 
@@ -258,6 +273,34 @@ describe("htmlGenerators", () => {
 
       expect(html).toContain('<span class="kh-popup-track">Track: 033°</span>');
       expect(html).not.toContain("N/A");
+    });
+
+    it("never reads a track just short of north as 360", () => {
+      // Due north but a hair west of it: 359.6 degrees used to round to 360
+      const html = generateSegmentPopupHtml({
+        ...fullParams,
+        segment: {
+          ...fullParams.segment,
+          coords: [
+            [48.0, 11.0],
+            [49.0, 10.992],
+          ],
+        },
+      });
+
+      expect(html).toContain("Track: 000°");
+      expect(html).not.toContain("360°");
+    });
+
+    it("shows the given position instead of the segment's end", () => {
+      const html = generateSegmentPopupHtml({
+        ...fullParams,
+        position: [48.5, 11.5],
+      });
+
+      expect(html).toContain(ddToDms(48.5, true));
+      expect(html).toContain(ddToDms(11.5, false));
+      expect(html).not.toContain(ddToDms(49.0, true));
     });
 
     it("shows N/A for track and position when coords are missing", () => {

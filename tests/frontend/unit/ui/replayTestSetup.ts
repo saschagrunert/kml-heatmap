@@ -141,6 +141,8 @@ const PAGE_CHROME: FixtureNode[] = [
   { id: "wrapped-btn", tag: "button" },
   { id: "year-select", tag: "select" },
   { id: "aircraft-select", tag: "select" },
+  { id: "isolate-btn", tag: "button" },
+  { id: "selection-clear-btn", tag: "button" },
 ];
 
 function buildFixtureNode(node: FixtureNode): HTMLElement {

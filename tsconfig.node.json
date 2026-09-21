@@ -1,0 +1,32 @@
+{
+  "//": "The JavaScript that runs in Node.js: the build script, its helpers in scripts/ and the tool configs. JSDoc types, checked like the TypeScript sources; `npm run typecheck` runs it.",
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "build.js",
+    "scripts/*.js",
+    "vitest.config.js",
+    "eslint.config.js"
+  ]
+}

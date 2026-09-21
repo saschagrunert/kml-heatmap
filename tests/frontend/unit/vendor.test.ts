@@ -1,10 +1,10 @@
 /**
  * The published page carries its third-party code itself.
  *
- * Leaflet, leaflet.heat and dom-to-image used to be loaded from unpkg and
- * jsdelivr with subresource integrity hashes. Nothing could check those
- * against the real CDN: the e2e fixture answers from node_modules, so a
- * moved path or changed bytes only showed up as a blank map for visitors.
+ * Leaflet, leaflet.heat and the image export library used to be loaded from
+ * unpkg and jsdelivr with subresource integrity hashes. Nothing could check
+ * those against the real CDN: the e2e fixture answers from node_modules, so
+ * a moved path or changed bytes only showed up as a blank map for visitors.
  * scripts/vendor.js copies the files out of node_modules instead, which
  * makes the question a local one these tests can actually answer.
  */
@@ -12,7 +12,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { VENDOR_FILES } from "../../../scripts/vendor.js";
-import { DOM_TO_IMAGE_URL } from "../../../kml_heatmap/frontend/ui/uiToggles";
+import { HTML_TO_IMAGE_URL } from "../../../kml_heatmap/frontend/ui/uiToggles";
 
 const REPO_ROOT = join(__dirname, "../../..");
 const VENDOR_DIR = join(REPO_ROOT, "kml_heatmap/static/vendor");
@@ -85,15 +85,15 @@ describe("the page loads nothing from a third party", () => {
         .find((part) => part.startsWith(name));
 
     expect(directive("script-src")).toBe("script-src 'self' file:");
-    expect(directive("style-src")).toBe(
-      "style-src 'self' file: 'unsafe-inline'",
-    );
+    // No 'unsafe-inline': the page sets its data-driven colours through the
+    // CSSOM, which the policy does not govern, never through style attributes
+    expect(directive("style-src")).toBe("style-src 'self' file:");
     // The map tiles are the only third party left
     expect(csp).not.toContain("unpkg.com");
     expect(csp).not.toContain("jsdelivr");
   });
 
-  it("dom-to-image is loaded from the site, not from a CDN", () => {
-    expect(DOM_TO_IMAGE_URL).toBe("./vendor/dom-to-image.min.js");
+  it("html-to-image is loaded from the site, not from a CDN", () => {
+    expect(HTML_TO_IMAGE_URL).toBe("./vendor/html-to-image.js");
   });
 });

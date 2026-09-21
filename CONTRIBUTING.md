@@ -33,6 +33,12 @@ so commit with the virtual environment active and after `npm ci` to get the
 versions CI installs. typos is in neither lock file; the hook skips it when it
 is not installed and the CI job is the one that has to pass.
 
+npm 11 skips the install scripts of dependencies that `allowScripts` in
+`package.json` does not list. esbuild is the only dependency with one, and it
+is listed, so `npm ci` runs it and prints no warning. A new dependency that
+needs its install script has to be added there on purpose
+(`npm install-scripts approve <pkg>`).
+
 ## Checks
 
 Run the same checks as CI before opening a pull request. They use the tools
@@ -40,11 +46,11 @@ from your virtual environment and `node_modules`, the same way CI does, so no
 container is involved:
 
 ```bash
-make lint            # lock files and version pins, ruff (check and format), mypy, bandit, tsc (frontend and tests), eslint, knip, prettier, typos
+make lint            # lock files and version pins, ruff (check and format), mypy, bandit, tsc (frontend, build scripts, tests), eslint, knip, prettier, typos
 make format          # ruff format, prettier
 make test            # vitest and pytest with coverage; pytest flags are in DEVELOPMENT.md
 npm run test:e2e     # Playwright: desktop, mobile and WebKit (see DEVELOPMENT.md)
-make obfuscate       # after adding flights to data/; rewrites them in place, irreversibly
+make obfuscate       # after adding flights to data/ (see README.md); rewrites them in place, irreversibly
 make check-obfuscation
 make lock            # regenerates the Python lock files after changing pyproject.toml
 ```
@@ -63,10 +69,11 @@ parentheses back is undone on the next `make format`.
   workflow builds the site from the sources and `data/` and publishes it to
   GitHub Pages, in its `site` and `deploy` jobs, which only start once every
   test job has passed and only while the commit is still the head of `main`
-  (a re-run of an older run does not publish). The `unit` and `e2e` jobs build their own copies; the
-  e2e jobs test one with dummy tile API keys and one without. The
-  repository's Pages source has to be "GitHub Actions" (Settings > Pages).
-  Set it by hand: the workflow token is not allowed to change it.
+  (a re-run of an older run does not publish). The `unit` and `e2e` jobs
+  build their own copies; the e2e jobs test one with dummy tile API keys and
+  one without. The repository's Pages source has to be "GitHub Actions"
+  (Settings > Pages). Set it by hand: the workflow token is not allowed to
+  change it.
 - **Never commit un-obfuscated KML files.** Generating a site no longer
   rewrites them: run `make obfuscate` after adding flights to `data/` (or
   pass `--obfuscate-inputs`). The pre-commit hook, `make check-obfuscation`
@@ -77,20 +84,31 @@ parentheses back is undone on the next `make format`.
   cannot check. The published site carries no flight date finer than the
   year either way; this is about the KML files this repository commits.
 - The frontend build output in `kml_heatmap/static/` is gitignored: both
-  bundles (`mapApp.bundle.js`, `features.bundle.js`) with their `.map` files
-  and `vendor/`, the third-party code copied out of `node_modules`. It is
-  built by `npm run build` and, for the images, inside the Dockerfile.
+  bundles (`mapApp.bundle.js`, `features.bundle.js`) with their `.map` files,
+  `vendor/` (the third-party code copied out of `node_modules`) and `flags/`
+  (the country flags of `flag-icons`). It is built by `npm run build` and,
+  for the image, inside the Dockerfile; `make clean` removes it.
 - The Python dependencies are declared once, in `pyproject.toml` (runtime
   dependencies plus the `test` and `dev` extras). `requirements.lock` and
   `requirements-test.lock` are compiled from it with `make lock` (pip-compile
   with hashes). Edit `pyproject.toml`, then regenerate the locks; the CI lint
   job fails while the locks no longer satisfy `pyproject.toml`, which is what
-  a Dependabot `pip` pull request needs `make lock` for. The weekly `lock`
-  workflow regenerates them as well and opens a pull request. That needs
-  "Allow GitHub Actions to create and approve pull requests" (Settings >
-  Actions > General), and a pull request opened by the workflow token does
-  not start CI: close and reopen it to run the checks.
-- The published page carries Leaflet, leaflet.heat and dom-to-image itself:
+  a Dependabot `pip` pull request needs `make lock` for. `make lock`
+  compiles the test lock with the runtime lock as a constraint, so the pins
+  both files share cannot drift apart. The weekly `lock` workflow
+  regenerates them as well and opens a pull request, which needs one of two
+  one-time setups. With neither, its pull-request job fails with "GitHub
+  Actions is not permitted to create or approve pull requests".
+  - Preferred: a `LOCK_PR_TOKEN` repository secret (Settings > Secrets and
+    variables > Actions) holding a fine-grained personal access token, or a
+    GitHub App token, for this repository only, with read and write access
+    to "Contents" and "Pull requests". A pull request opened with it starts
+    CI like any other.
+  - Or: enable "Allow GitHub Actions to create and approve pull requests"
+    (Settings > Actions > General). Without the secret the workflow falls
+    back to its own token, and a pull request opened with that one does not
+    start CI: close and reopen it to run the checks.
+- The published page carries Leaflet, leaflet.heat and html-to-image itself:
   `scripts/vendor.js` copies them out of `node_modules` at build time, so
   `package-lock.json` is the only place their versions are pinned and
   Dependabot can bump them like anything else. Nothing loads from a CDN, and
@@ -123,22 +141,37 @@ rendering that was never going to match:
 ```sh
 podman run --rm --network host --userns=keep-id --user "$(id -u):$(id -g)" \
   --security-opt label=disable -v "$PWD:/work" -w /work -e HOME=/tmp \
-  mcr.microsoft.com/playwright:v1.63.0-noble \
+  mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27 \
   npx playwright test --project=visual
 ```
 
 Build the site first (`npm run build && python -m kml_heatmap data
 --output-dir docs`). When a change is meant to alter the look, add
 `--update-snapshots` to that command and commit the new screenshots; the
-diff of a failing run is in the `visual-diff` artifact. The image tag has to match the
-`@playwright/test` version in `package-lock.json`, which
-`scripts/check_locks.py` checks.
+diff of a failing run is in the `visual-diff` artifact.
 
-## Releasing
+The image is pinned by tag and digest, in the `visual` job of
+`.github/workflows/test.yml` and in the command above alike. The tag has to
+match the `@playwright/test` version in `package-lock.json`, and
+`scripts/check_locks.py` fails the lint job when the workflow, this file,
+`DEVELOPMENT.md` and the lock file disagree. Dependabot opens the
+`@playwright/test` bump as a pull request of its own and does not touch the
+image: on that branch, set the new tag with the digest of its multi-arch
+index in all three places. The registry returns the digest in the
+`Docker-Content-Digest` header:
 
-The version is declared once, in `kml_heatmap/__init__.py`; `package.json`
-and `package-lock.json` repeat it and `scripts/check_locks.py` fails the lint
-job when the three disagree. To cut a release: set the version in
-`kml_heatmap/__init__.py` and `package.json`, run `npm install` so the lock
-file follows, and tag the merged commit `vX.Y.Z`. The tag's release notes
-are generated from the commits, so there is no changelog file to keep.
+```sh
+curl -sI -H "Accept: application/vnd.oci.image.index.v1+json" \
+  https://mcr.microsoft.com/v2/playwright/manifests/v1.64.0-noble |
+  grep -i docker-content-digest
+```
+
+A new image may render differently; regenerate the snapshots on that
+branch if the visual job says so.
+
+## Version
+
+There are no releases: the site is deployed from `main` (see the `site` and
+`deploy` jobs of `.github/workflows/test.yml`). The version is declared once,
+in `kml_heatmap/__init__.py`; `package.json` and `package-lock.json` repeat it
+and `scripts/check_locks.py` fails the lint job when the three disagree.

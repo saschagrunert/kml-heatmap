@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check that the hashed lock files still satisfy pyproject.toml, that the
-Playwright image matches the pinned library, and that the package version is
-the same on both sides of the project.
+Playwright image is pinned by digest and matches the pinned library (in the
+workflow and in the commands the documentation quotes), and that the package
+version is the same on both sides of the project.
 
 Dependabot raises the ranges in pyproject.toml but cannot recompile the
 lock files, and CI installs the lock files. Without this check such a pull
@@ -29,10 +30,19 @@ ROOT = Path(__file__).resolve().parent.parent
 PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\;]+)", re.MULTILINE)
 # The __version__ assignment at the top of kml_heatmap/__init__.py
 PACKAGE_VERSION = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
-# "image: mcr.microsoft.com/playwright:v1.2.3-noble" in the test workflow
+# The Playwright image of the test workflow, as a tag and a digest
+# (v1.2.3-noble@sha256:...). The groups are the whole reference, the version
+# and the digest; the digest is optional here so that a missing one is
+# reported as such rather than as a workflow without the image.
 PLAYWRIGHT_IMAGE = re.compile(
-    r"image:\s*mcr\.microsoft\.com/playwright:v(\S+?)-[a-z]+\s*$", re.MULTILINE
+    r"image:\s*(mcr\.microsoft\.com/playwright:v(\S+?)-[a-z]+"
+    r"(?:@(sha256:[0-9a-f]{64}))?)\s*$",
+    re.MULTILINE,
 )
+# Any reference to the Playwright image, such as in a documented command
+PLAYWRIGHT_IMAGE_REFERENCE = re.compile(r"mcr\.microsoft\.com/playwright:[^\s`]+")
+# The documents that quote the image for running the visual tests locally
+PLAYWRIGHT_IMAGE_DOCS = ("CONTRIBUTING.md", "DEVELOPMENT.md")
 
 
 @functools.cache
@@ -110,17 +120,37 @@ def playwright_image_mismatches() -> list[str]:
     match = PLAYWRIGHT_IMAGE.search(text)
     if match is None:
         return [".github/workflows/test.yml runs no Playwright image"]
+    image, version, digest = match.groups()
+    problems = []
+    # A tag alone can be moved to another build; the digest cannot
+    if digest is None:
+        problems.append(
+            ".github/workflows/test.yml does not pin the Playwright image "
+            "by its @sha256 digest"
+        )
     pinned = read_npm_version("@playwright/test")
     if pinned is None:
-        return ["package-lock.json does not pin @playwright/test"]
-    if match.group(1) != pinned:
-        return [
-            (
-                f".github/workflows/test.yml runs the Playwright image "
-                f"v{match.group(1)}, package-lock.json pins {pinned}"
+        problems.append("package-lock.json does not pin @playwright/test")
+    elif version != pinned:
+        problems.append(
+            f".github/workflows/test.yml runs the Playwright image "
+            f"v{version}, package-lock.json pins {pinned}"
+        )
+    # The documented commands are how the snapshots get regenerated, so an
+    # image other than the one CI compares in produces snapshots that fail
+    for name in PLAYWRIGHT_IMAGE_DOCS:
+        path = ROOT / name
+        if not path.is_file():
+            continue
+        problems.extend(
+            f"{name} quotes the Playwright image {quoted}, "
+            f".github/workflows/test.yml runs {image}"
+            for quoted in PLAYWRIGHT_IMAGE_REFERENCE.findall(
+                path.read_text(encoding="utf-8")
             )
-        ]
-    return []
+            if quoted != image
+        )
+    return problems
 
 
 def read_pins(lock: str) -> dict[str, str]:
@@ -188,8 +218,9 @@ def main() -> int:
         )
     if image_problems:
         print(
-            "The Playwright image in .github/workflows/test.yml and the "
-            "@playwright/test version in package-lock.json have to agree.",
+            "The Playwright image in .github/workflows/test.yml (tag and "
+            "digest), the image CONTRIBUTING.md and DEVELOPMENT.md quote and "
+            "the @playwright/test version in package-lock.json have to agree.",
             file=sys.stderr,
         )
     if version_problems:

@@ -30,7 +30,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
-from .helpers import parse_iso_timestamp
+from .helpers import normalize_timestamp_text, parse_iso_timestamp
 from .logger import logger
 from .validation import find_kml_files as _find_kml_files
 
@@ -57,9 +57,6 @@ TIMESTAMP_PATTERN = re.compile(
     r"((?:<!\[CDATA\[.*?\]\]>|[^<])*)(</\2\s*>)"
 )
 CDATA_PATTERN = re.compile(r"^\s*<!\[CDATA\[(.*?)\]\]>\s*$", re.DOTALL)
-# "2024-03-14 09:12:00" and a lowercase "z" are read by the parsers of some
-# tools, so they are read here too; the rewrite emits the canonical form
-LOOSE_TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d)")
 FRACTION_PATTERN = re.compile(r"\.\d+")
 UTC_OFFSET_PATTERN = re.compile(r"[+-]\d{2}:?\d{2}$")
 # Valid KML timestamps without a time: xsd:date and xsd:gYearMonth
@@ -162,10 +159,10 @@ def _timestamp_text(raw: str) -> str:
     cdata = CDATA_PATTERN.match(text)
     if cdata:
         text = cdata.group(1).strip()
-    text = LOOSE_TIMESTAMP_PATTERN.sub(r"\1T\2", text, count=1)
-    if text.endswith("z"):
-        text = text[:-1] + "Z"
-    return text
+    # "2024-03-14 09:12:00" and a lowercase "z" are read by the parsers of
+    # some tools, so they are read here too (the same rule as the parser's);
+    # the rewrite emits the canonical form
+    return normalize_timestamp_text(text)
 
 
 def _parse_full_timestamp(ts_str: str) -> datetime | None:

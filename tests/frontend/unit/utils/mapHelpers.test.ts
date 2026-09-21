@@ -72,12 +72,15 @@ describe("mapHelpers", () => {
       expect(mockMap.invalidateSize).toHaveBeenCalledOnce();
     });
 
-    it("does not call invalidateSize if map is null", () => {
+    it("schedules nothing and listens to nothing without a map", () => {
+      const el = document.createElement("div");
+      const listen = vi.spyOn(el, "addEventListener");
+
+      invalidateMapAfterTransition(null, el);
       invalidateMapAfterTransition(null);
 
-      vi.advanceTimersByTime(350);
-
-      expect(true).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(listen).not.toHaveBeenCalled();
     });
 
     it("ignores transitionend from child elements", () => {

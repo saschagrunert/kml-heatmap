@@ -137,10 +137,15 @@ export async function settleAnimations(target: Page | Locator): Promise<void> {
  * them is not an option, because every Leaflet pane fills the viewport, so a
  * mask over one covers the controls as well. The map keeps its own
  * background, so the layout below it is unchanged.
+ *
+ * Through a constructed stylesheet rather than a <style> tag: the page's CSP
+ * allows no inline style, and CSSOM stylesheets are not inline.
  */
 export async function hideMapData(page: Page): Promise<void> {
-  await page.addStyleTag({
-    content: ".leaflet-pane { visibility: hidden !important; }",
+  await page.evaluate(() => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(".leaflet-pane { visibility: hidden !important; }");
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
   });
 }
 

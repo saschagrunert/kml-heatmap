@@ -20,7 +20,6 @@ _LAZY_EXPORTS = {
     "deduplicate_airports": ".airports",
     "extract_airport_name": ".airports",
     "haversine_distance": ".geometry",
-    "lookup_aircraft_model": ".aircraft",
     "obfuscate_kml_files": ".obfuscate",
     "parse_aircraft_from_filename": ".aircraft",
     "parse_kml_coordinates": ".parser",

@@ -29,6 +29,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -64,7 +66,7 @@ jobs:
       - name: Run mypy
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: mypy .
-      - name: Type-check the frontend
+      - name: Type-check the frontend and the build scripts
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: npm run typecheck
       - name: Type-check the unit and e2e tests
@@ -85,6 +87,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -149,6 +153,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -227,6 +233,8 @@ jobs:
             browser: webkit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -296,15 +304,23 @@ jobs:
   # the unit job built rather than building its own: the package needs a
   # Python the image does not carry. The image tag has to match the
   # @playwright/test version package-lock.json pins; scripts/check_locks.py
-  # fails the lint job when the two drift apart.
+  # fails the lint job when the two drift apart. Dependabot does not bump
+  # the image: with every @playwright/test bump set the new tag here, with
+  # the digest of its multi-arch index (the Docker-Content-Digest header of
+  # https://mcr.microsoft.com/v2/playwright/manifests/<tag>), and the same
+  # reference in CONTRIBUTING.md and DEVELOPMENT.md (check_locks.py checks
+  # those as well). A digest left behind keeps pulling the old image,
+  # whatever the tag next to it says.
   visual:
     needs: unit
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -341,6 +357,7 @@ jobs:
         with:
           # gitleaks scans the whole commit history
           fetch-depth: 0
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -387,6 +404,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # The image itself is not published
       - name: Build the container image
         run: docker build -t kml-heatmap .
@@ -435,6 +454,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -452,6 +473,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: crate-ci/typos@512fc24f32f44ab01972217aaaf3dc86ec234d53 # v1.50.2
 
   # Publishing waits for every test job. The security job is not a gate: a

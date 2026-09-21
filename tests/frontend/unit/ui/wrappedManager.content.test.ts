@@ -216,6 +216,17 @@ describe("WrappedManager content", () => {
     ]);
   });
 
+  it("staggers the country groups through the CSSOM", () => {
+    wrappedManager.showWrapped();
+
+    const delays = [
+      ...el("wrapped-airports-grid").querySelectorAll<HTMLElement>(
+        ".country-group",
+      ),
+    ].map((group) => group.style.animationDelay);
+    expect(delays).toEqual(["0s", "0.1s"]);
+  });
+
   it("marks no destination as furthest without airport coordinates", () => {
     delete window.KML_AIRPORTS;
 

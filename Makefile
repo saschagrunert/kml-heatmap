@@ -155,6 +155,9 @@ test: ## Run the JavaScript and Python test suites with coverage
 # rather than added to the extras, so it cannot drift into what the lock
 # files pin. Its own version is pinned too, so the unattended lock workflow
 # does not install whatever pip-tools release happens to be the newest.
+# The test lock is compiled against the runtime lock as a constraint, so a
+# dependency both of them pin gets the same version in each: CI installs
+# requirements-test.lock alone where it needs both.
 PIP_TOOLS_VERSION := 7.6.1
 
 lock: ## Regenerate requirements.lock and requirements-test.lock from pyproject.toml with pip-compile
@@ -166,11 +169,13 @@ lock: ## Regenerate requirements.lock and requirements-test.lock from pyproject.
 	    --output-file=requirements.lock pyproject.toml && \
 	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
 	    --generate-hashes --strip-extras --upgrade --extra test --extra dev \
+	    --constraint requirements.lock \
 	    --output-file=requirements-test.lock pyproject.toml; \
 	  status=$$?; rm -rf "$$tmp"; exit $$status
 
-clean: ## Remove the container image (when a runtime is available) and local build artifacts
+clean: ## Remove the container image (when a runtime is available) and local build artifacts, including the frontend build output in kml_heatmap/static/
 	-@test -z "$(CONTAINER_RUNTIME)" || $(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) 2>/dev/null
 	rm -rf htmlcov coverage coverage.xml .coverage .coverage.* test-results playwright-report \
 	  dist build *.egg-info .mypy_cache .ruff_cache .pytest_cache .hypothesis \
-	  kml_heatmap/static/mapApp.bundle.js kml_heatmap/static/mapApp.bundle.js.map
+	  kml_heatmap/static/*.bundle.js kml_heatmap/static/*.map \
+	  kml_heatmap/static/vendor kml_heatmap/static/flags

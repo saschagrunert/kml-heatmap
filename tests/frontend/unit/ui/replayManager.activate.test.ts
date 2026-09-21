@@ -3,10 +3,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
-import {
-  REPLAY_PANEL_HEIGHT_VAR,
-  REPLAY_PRECONDITION_MESSAGE,
-} from "../../../../kml_heatmap/frontend/ui/replayManager";
+import { REPLAY_PANEL_HEIGHT_VAR } from "../../../../kml_heatmap/frontend/ui/replayManager";
+import { REPLAY_PRECONDITION_MESSAGE } from "../../../../kml_heatmap/frontend/ui/replayButton";
 import {
   LIVE_REGION_DELAY_MS,
   TOAST_STATUS_ID,
@@ -22,7 +20,8 @@ import {
   mountReplayDom,
   unmountReplayDom,
 } from "./replayTestSetup";
-import { createDataset, type MockApp } from "../../testHelpers";
+import { createDataset, createMockApp, type MockApp } from "../../testHelpers";
+import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
@@ -71,6 +70,23 @@ describe("ReplayManager activation", () => {
       el("replay-slider").dispatchEvent(new Event("change"));
 
       expect(liveRegionText()).toBe("Moved to 1:05");
+    });
+
+    it("stops listening to the slider once the app is gone", () => {
+      // A fresh panel, so only the manager of the ended app listens to it
+      unmountReplayDom();
+      domCache.clear();
+      mountReplayDom();
+      const lifetime = new AbortController();
+      const manager = createReplayManager(
+        createMockApp({ signal: lifetime.signal }),
+      );
+      manager.state.currentTime = 65;
+
+      lifetime.abort();
+      el("replay-slider").dispatchEvent(new Event("change"));
+
+      expect(liveRegionText()).toBe("");
     });
   });
 
@@ -125,6 +141,29 @@ describe("ReplayManager activation", () => {
       replayManager.toggleReplay();
 
       expect(replayManager.state.active).toBe(false);
+      expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
+    });
+
+    it("shows an explanatory toast for a flight that takes no time", () => {
+      // A single timed segment: replay would finish the moment it started
+      mockApp.currentData = createDataset(
+        [{ id: 1 }],
+        createSegments().slice(0, 1),
+      );
+      mockApp.selectedPathIds = new Set([1]);
+
+      replayManager.toggleReplay();
+
+      expect(replayManager.state.active).toBe(false);
+      expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
+    });
+
+    it("refuses to initialize a flight whose times are all 0", () => {
+      const segments = createSegments().map((s) => ({ ...s, time: 0 }));
+      mockApp.currentData = createDataset([{ id: 1 }], segments);
+      mockApp.selectedPathIds = new Set([1]);
+
+      expect(replayManager.initializeReplay()).toBe(false);
       expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
     });
 
@@ -970,6 +1009,24 @@ describe("ReplayManager activation", () => {
       expect((el("aircraft-select") as HTMLSelectElement).disabled).toBe(true);
     });
 
+    it("disables the controls that would change the selection", () => {
+      // Clearing it dimmed the running replay's Stop button and switched
+      // the statistics to another view
+      replayManager.hideOtherLayersDuringReplay();
+
+      expect((el("isolate-btn") as HTMLButtonElement).disabled).toBe(true);
+      expect((el("selection-clear-btn") as HTMLButtonElement).disabled).toBe(
+        true,
+      );
+
+      replayManager.restoreLayerVisibility();
+
+      expect((el("isolate-btn") as HTMLButtonElement).disabled).toBe(false);
+      expect((el("selection-clear-btn") as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    });
+
     it("disables Wrapped, which would take the map away from the replay", () => {
       replayManager.hideOtherLayersDuringReplay();
 
@@ -1097,7 +1154,7 @@ describe("ReplayManager activation", () => {
       const btn = el("replay-btn") as HTMLButtonElement;
       expect(btn.style.opacity).toBe("1");
       expect(btn.disabled).toBe(false);
-      expect(btn.getAttribute("aria-disabled")).toBeNull();
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
       expect(btn.title).toBe("Replay selected flight path");
     });
 
@@ -1109,7 +1166,7 @@ describe("ReplayManager activation", () => {
       const btn = el("replay-btn") as HTMLButtonElement;
       expect(btn.style.opacity).toBe("0.5");
       expect(btn.disabled).toBe(false);
-      expect(btn.getAttribute("aria-disabled")).toBeNull();
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.title).toBe(
         "Select exactly one flight with timing data to replay",
       );
@@ -1123,7 +1180,7 @@ describe("ReplayManager activation", () => {
 
       const btn = el("replay-btn") as HTMLButtonElement;
       expect(btn.style.opacity).toBe("0.5");
-      expect(btn.getAttribute("aria-disabled")).toBeNull();
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.title).toBe(
         "Select exactly one flight with timing data to replay",
       );

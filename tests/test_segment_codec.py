@@ -24,38 +24,40 @@ coordinates = st.floats(-180, 180).map(lambda v: round(v, COORDINATE_DECIMALS))
 altitudes = st.integers(-1_000, 60_000).map(lambda v: float(v * 100))
 speeds = st.floats(0, 1000).map(lambda v: round(v, 1))
 times = st.floats(0, 100_000).map(lambda v: round(v, 1))
+starts = st.tuples(coordinates, coordinates).map(list)
 
 
 @st.composite
-def rows(draw, with_time=None):
-    """A list of rows the way process_path_segments builds them."""
-    timed = draw(st.booleans()) if with_time is None else with_time
-    row = st.tuples(coordinates, coordinates, altitudes, speeds).map(list)
-    if timed:
-        row = st.tuples(coordinates, coordinates, altitudes, speeds, times).map(list)
-    return draw(st.lists(row, max_size=30))
+def rows(draw):
+    """A list of rows the way process_path_segments builds them.
+
+    Each row has a relative time or not, independently of the others.
+    """
+    untimed = st.tuples(coordinates, coordinates, altitudes, speeds).map(list)
+    timed = st.tuples(coordinates, coordinates, altitudes, speeds, times).map(list)
+    return draw(st.lists(st.one_of(untimed, timed), max_size=30))
 
 
 class TestRoundTrip:
-    @given(start=st.tuples(coordinates, coordinates).map(list), path_rows=rows())
+    @given(start=starts, path_rows=rows())
     def test_decoding_gives_the_rows_back(self, start, path_rows):
         encoded = encode_rows(start, path_rows)
 
         assert decode_rows(encode_start(start), encoded) == path_rows
 
-    @given(start=st.tuples(coordinates, coordinates).map(list), path_rows=rows())
+    @given(start=starts, path_rows=rows())
     def test_everything_written_is_an_integer(self, start, path_rows):
         """Integers are the point: floats would undo the size win."""
         assert all(isinstance(value, int) for value in encode_start(start))
-        for row in encode_rows(start, path_rows):
-            assert all(isinstance(value, int) for value in row)
+        for column in encode_rows(start, path_rows):
+            assert all(isinstance(value, int | None) for value in column)
 
-    @given(start=st.tuples(coordinates, coordinates).map(list), path_rows=rows())
-    def test_the_row_width_is_kept(self, path_rows, start):
-        """A row without a relative time stays four columns wide."""
-        encoded = encode_rows(start, path_rows)
+    @given(start=starts, path_rows=rows())
+    def test_every_column_has_a_value_per_row(self, start, path_rows):
+        columns = encode_rows(start, path_rows)
 
-        assert [len(row) for row in encoded] == [len(row) for row in path_rows]
+        assert len(columns) in (4, 5)
+        assert all(len(column) == len(path_rows) for column in columns)
 
 
 class TestEncoding:
@@ -63,15 +65,26 @@ class TestEncoding:
         start = [50.0, 8.0]
         encoded = encode_rows(start, [[50.00001, 8.00002, 500.0, 1.5, 2.0]])
 
-        assert encoded == [[1, 2, 500, 15, 20]]
+        assert encoded == [[1], [2], [5], [15], [20]]
+
+    def test_rows_are_written_column_by_column(self):
+        """A column of repeating differences is what gzip compresses best."""
+        path_rows = [
+            [50.00001, 8.0, 500.0, 90.0, 1.0],
+            [50.00002, 8.0, 600.0, 90.0, 2.0],
+            [50.00003, 8.0, 700.0, 90.0, 3.0],
+        ]
+
+        encoded = encode_rows([50.0, 8.0], path_rows)
+
+        assert encoded == [[1, 1, 1], [0, 0, 0], [5, 1, 1], [900, 0, 0], [10] * 3]
 
     def test_a_still_aircraft_encodes_to_zeros(self):
         """Repetition is what makes the format small."""
         row = [50.1, 8.1, 500.0, 0.0, 10.0]
         encoded = encode_rows([50.1, 8.1], [row, row, row])
 
-        assert encoded[1] == [0, 0, 0, 0, 0]
-        assert encoded[2] == [0, 0, 0, 0, 0]
+        assert [column[1:] for column in encoded] == [[0, 0]] * 5
 
     def test_the_start_is_scaled_to_integers(self):
         assert encode_start([50.0, 8.0]) == [
@@ -79,9 +92,15 @@ class TestEncoding:
             8 * COORDINATE_SCALE,
         ]
 
-    def test_an_empty_path_encodes_to_nothing(self):
-        assert encode_rows([], []) == []
+    def test_an_empty_path_encodes_to_empty_columns(self):
+        assert encode_rows([], []) == [[], [], [], []]
         assert encode_start([]) == []
+        assert decode_rows([], [[], [], [], []]) == []
+
+    def test_without_relative_times_there_is_no_time_column(self):
+        encoded = encode_rows([50.0, 8.0], [[50.1, 8.1, 500.0, 1.0]])
+
+        assert len(encoded) == 4
 
     def test_a_gap_in_the_time_column_does_not_shift_the_rows_after_it(self):
         """A row without a time keeps the running time where it was."""
@@ -92,7 +111,13 @@ class TestEncoding:
         ]
         encoded = encode_rows([50.0, 8.0], path_rows)
 
+        assert encoded[4] == [100, None, 200]
         assert decode_rows(encode_start([50.0, 8.0]), encoded) == path_rows
+
+    def test_an_altitude_off_the_100_ft_grid_is_refused(self):
+        """The altitude column is written in hundreds of feet."""
+        with pytest.raises(ValueError, match="multiple of 100"):
+            encode_rows([50.0, 8.0], [[50.1, 8.1, 550.0, 1.0]])
 
     @pytest.mark.parametrize("value", [0.0, -0.00001, 179.99999, -179.99999])
     def test_coordinate_extremes_survive(self, value):
@@ -105,4 +130,4 @@ class TestEncoding:
 
 def test_the_format_version_is_pinned():
     """Bumping it is a deliberate act; the frontend checks the same number."""
-    assert FORMAT_VERSION == 2
+    assert FORMAT_VERSION == 3

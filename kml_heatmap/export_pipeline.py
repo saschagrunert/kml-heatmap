@@ -9,24 +9,22 @@ from .helpers import calculate_duration_seconds
 from .logger import logger
 from .segment_calculator import (
     SegmentSpeed,
-    build_time_indexed_segments,
+    SpeedWindow,
     calculate_fallback_groundspeed,
-    calculate_path_distance,
-    calculate_windowed_groundspeed,
     extract_segment_speeds,
 )
 from .types import COORDINATE_DECIMALS
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from .types import FlightPath, PathInfo, PathMetadata, SegmentRow
 
 
-def path_metrics(path: FlightPath, metadata: PathMetadata) -> tuple[float, float]:
-    """The duration (from the metadata timestamps) and distance of a path.
+def path_duration(metadata: PathMetadata) -> float:
+    """The duration of a path in seconds, from the metadata timestamps.
 
-    Returns:
-        Tuple of (path_duration_seconds, path_distance_km); the duration is 0
-        when the metadata carries no usable start and end timestamp.
+    0 when the metadata carries no usable start and end timestamp.
     """
     path_duration_seconds = 0.0
     start_ts = metadata.get("timestamp")
@@ -37,7 +35,7 @@ def path_metrics(path: FlightPath, metadata: PathMetadata) -> tuple[float, float
         if path_duration_seconds == 0:
             logger.debug("  Could not parse timestamps '%s' -> '%s'", start_ts, end_ts)
 
-    return path_duration_seconds, calculate_path_distance(path)
+    return path_duration_seconds
 
 
 def build_path_info(
@@ -45,13 +43,27 @@ def build_path_info(
     metadata: PathMetadata,
     path_id: int,
     year: int,
+    airport_names: Collection[str] | None = None,
 ) -> PathInfo:
     """Build the path info entry of an exported path.
 
     Keys without a value are omitted from the entry.
+
+    ``airport_names`` are the names of the exported airport markers. An end
+    of a path counts as an airport if and only if it has a marker: the
+    frontend counts the airports of the path info in its statistics and
+    shows the markers of the names it finds there, so a name without a
+    marker ("Home", "Aunt Martha" when the path never landed there) would
+    count as an airport nobody can see. The marker rules are those of
+    ``airports.deduplicate_airports`` and ``airports.extract_airport_name``:
+    a name holding an ICAO code or of more than one word, at a real start
+    or landing. None keeps every name (for callers without airports).
     """
     # The names match the airport markers of airports.js exactly
     start_airport, end_airport = route_airports(metadata)
+    if airport_names is not None:
+        start_airport = start_airport if start_airport in airport_names else None
+        end_airport = end_airport if end_airport in airport_names else None
 
     info: PathInfo = {"id": path_id, "year": year}
 
@@ -78,29 +90,26 @@ def build_path_info(
 
 def _segment_groundspeed(
     segment: SegmentSpeed,
-    timestamp_list: list[float],
-    time_indexed_segments: list[SegmentSpeed],
+    window: SpeedWindow,
     path_distance_km: float,
     path_duration_seconds: float,
-) -> float:
-    """Calculate the groundspeed of a single segment in knots."""
-    groundspeed_knots = 0.0
-    if segment.timestamp is not None and timestamp_list:
-        groundspeed_knots, _, _ = calculate_windowed_groundspeed(
-            segment.timestamp, timestamp_list, time_indexed_segments
-        )
+) -> float | None:
+    """The groundspeed of a single segment in knots, None when unknown.
 
-    if groundspeed_knots == 0:
-        groundspeed_knots = calculate_fallback_groundspeed(
-            segment.distance, path_distance_km, path_duration_seconds
-        )
-
-    return groundspeed_knots
+    The rolling window average where the segment is timed, the path's
+    average speed otherwise.
+    """
+    if segment.timestamp is not None:
+        groundspeed_knots = window.groundspeed(segment.timestamp)
+        if groundspeed_knots is not None:
+            return groundspeed_knots
+    return calculate_fallback_groundspeed(
+        segment.distance, path_distance_km, path_duration_seconds
+    )
 
 
 def process_path_segments(
     path: FlightPath,
-    path_distance_km: float,
     path_duration_seconds: float,
 ) -> tuple[list[float], list[SegmentRow]]:
     """Build the exported segment rows of a path.
@@ -114,7 +123,9 @@ def process_path_segments(
     start of the first row is returned separately.
 
     The groundspeeds use the unrounded geometry, which is about the aircraft
-    rather than about the export.
+    rather than about the export. A groundspeed that is unknown (no timing,
+    or only implausible values) is exported as 0, which the frontend reads
+    as "no speed" rather than as standing still.
 
     Returns:
         Tuple of (start point, segment rows). The start point is empty when
@@ -123,7 +134,8 @@ def process_path_segments(
     path_start_time = next((point.ts for point in path if point.ts is not None), None)
 
     segment_speeds = extract_segment_speeds(path, path_start_time)
-    timestamp_list, time_indexed_segments = build_time_indexed_segments(segment_speeds)
+    window = SpeedWindow(segment_speeds)
+    path_distance_km = sum(segment.distance for segment in segment_speeds)
 
     start: list[float] = []
     rows: list[SegmentRow] = []
@@ -157,11 +169,7 @@ def process_path_segments(
             logger.debug("Segment without altitude at index %d", segment.index)
 
         groundspeed_knots = _segment_groundspeed(
-            segment,
-            timestamp_list,
-            time_indexed_segments,
-            path_distance_km,
-            path_duration_seconds,
+            segment, window, path_distance_km, path_duration_seconds
         )
 
         if not rows:
@@ -171,7 +179,7 @@ def process_path_segments(
             end[0],
             end[1],
             altitude_ft,
-            round(groundspeed_knots, 1),
+            round(groundspeed_knots, 1) if groundspeed_knots is not None else 0.0,
         ]
         if segment.relative_time is not None:
             row.append(round(segment.relative_time, 1))

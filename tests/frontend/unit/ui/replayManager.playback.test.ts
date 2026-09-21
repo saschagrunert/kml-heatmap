@@ -443,6 +443,63 @@ describe("ReplayManager playback", () => {
     });
   });
 
+  describe("timeline keys", () => {
+    function press(key: string): KeyboardEvent {
+      const event = new KeyboardEvent("keydown", { key, cancelable: true });
+      el("replay-slider").dispatchEvent(event);
+      return event;
+    }
+
+    beforeEach(() => {
+      // A three hour flight: the native step of one second took over ten
+      // thousand presses end to end
+      replayManager.state.maxTime = 12000;
+      (el("replay-slider") as HTMLInputElement).max = "12000";
+      replayManager.seekReplay("6000");
+    });
+
+    it("moves a hundredth of the flight per arrow", () => {
+      expect(press("ArrowRight").defaultPrevented).toBe(true);
+      expect(replayManager.state.currentTime).toBe(6120);
+      press("ArrowUp");
+      expect(replayManager.state.currentTime).toBe(6240);
+      press("ArrowLeft");
+      press("ArrowDown");
+      expect(replayManager.state.currentTime).toBe(6000);
+    });
+
+    it("moves a tenth of the flight per page key", () => {
+      press("PageUp");
+      expect(replayManager.state.currentTime).toBe(7200);
+      press("PageDown");
+      press("PageDown");
+      expect(replayManager.state.currentTime).toBe(4800);
+      expect((el("replay-slider") as HTMLInputElement).value).toBe("4800");
+    });
+
+    it("stops at either end of the flight", () => {
+      for (let i = 0; i < 20; i++) press("PageUp");
+      expect(replayManager.state.currentTime).toBe(12000);
+      for (let i = 0; i < 20; i++) press("PageDown");
+      expect(replayManager.state.currentTime).toBe(0);
+    });
+
+    it("moves at least a second on a short flight", () => {
+      replayManager.state.maxTime = 40;
+      replayManager.seekReplay("10");
+
+      press("ArrowRight");
+
+      expect(replayManager.state.currentTime).toBe(11);
+    });
+
+    it("leaves Home, End and other keys to the browser", () => {
+      expect(press("Home").defaultPrevented).toBe(false);
+      expect(press("Tab").defaultPrevented).toBe(false);
+      expect(replayManager.state.currentTime).toBe(6000);
+    });
+  });
+
   describe("changeReplaySpeed", () => {
     it("updates speed from select element", () => {
       (el("replay-speed") as HTMLSelectElement).value = "100";

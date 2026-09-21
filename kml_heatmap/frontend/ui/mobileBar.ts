@@ -19,9 +19,10 @@ import type { MapApp } from "../mapApp";
 import type { SheetRow } from "./mobileSheet";
 import { MobileSheet } from "./mobileSheet";
 import { icon, type IconName } from "../utils/icons";
+import { MOBILE_BREAKPOINT_PX } from "../utils/constants";
 
 /** Bar and sheet exist only below this width (matches the CSS breakpoint) */
-export const MOBILE_BAR_BREAKPOINT_PX = 768;
+export const MOBILE_BAR_BREAKPOINT_PX = MOBILE_BREAKPOINT_PX;
 
 /** Control columns the bar replaces while it is mounted */
 const LEGACY_CONTROL_IDS = ["left-buttons", "right-buttons"];
@@ -85,7 +86,11 @@ export class MobileBar {
       this.root.append(tab);
     }
 
-    this.mql = window.matchMedia(`(max-width: 767.98px)`);
+    // Just under the breakpoint, like the stylesheet, so the two agree on
+    // a fractional width such as 767.5px
+    this.mql = window.matchMedia(
+      `(max-width: ${MOBILE_BAR_BREAKPOINT_PX - 0.02}px)`,
+    );
     this.onBreakpoint = (e) => this.syncBreakpoint(e.matches);
   }
 
@@ -381,7 +386,7 @@ export class MobileBar {
           app.canReplay() ? null : "Select one flight with timing data",
         isDisabled: () => !app.canReplay(),
         onSelect: () => {
-          void app.loadReplay().then((manager) => manager?.toggleReplay());
+          app.toggleReplay();
         },
       },
       {

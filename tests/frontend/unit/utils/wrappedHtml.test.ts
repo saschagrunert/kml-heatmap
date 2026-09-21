@@ -6,8 +6,10 @@ import {
   generateAircraftFleetHtml,
   generateHomeBaseHtml,
   generateDestinationsHtml,
-  type YearStats,
-  type AirportCount,
+} from "../../../../kml_heatmap/frontend/utils/wrappedHtml";
+import type {
+  YearStats,
+  AirportCount,
 } from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
 import type {
   FilteredStatistics,
@@ -15,7 +17,7 @@ import type {
 } from "../../../../kml_heatmap/frontend/types";
 import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
 
-describe("htmlGenerators (Wrapped sections)", () => {
+describe("wrappedHtml", () => {
   describe("generateStatsHtml", () => {
     const mockYearStats: YearStats = {
       total_flights: 42,
@@ -659,18 +661,13 @@ describe("htmlGenerators (Wrapped sections)", () => {
       expect(html).not.toContain("<img");
     });
 
-    it("staggers animation delays across groups", () => {
+    it("carries no style attribute, which the CSP would block", () => {
       const grouped = new Map([
         ["DE", ["EDDH Hamburg"]],
         ["AT", ["LOWW Vienna"]],
-        ["CH", ["LSZH Zurich"]],
       ]);
 
-      const html = generateDestinationsHtml(grouped, plain);
-
-      expect(html).toContain("animation-delay: 0.0s");
-      expect(html).toContain("animation-delay: 0.1s");
-      expect(html).toContain("animation-delay: 0.2s");
+      expect(generateDestinationsHtml(grouped, plain)).not.toContain("style=");
     });
 
     it("preserves airport order within groups", () => {

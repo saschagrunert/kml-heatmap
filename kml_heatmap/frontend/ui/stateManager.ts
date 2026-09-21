@@ -95,15 +95,21 @@ export function sanitizeSavedState(candidate: unknown): SavedState {
 export class StateManager {
   private app: MapApp;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Store keys that changed since the state was restored */
+  private changed = new Set<keyof StoreState>();
 
   constructor(app: MapApp) {
     this.app = app;
 
     // A change made just before the page goes away would still be waiting
     // for the debounce, and nothing runs once the page is gone
-    window.addEventListener("pagehide", () => {
-      if (this.saveTimer !== null) this.flush();
-    });
+    window.addEventListener(
+      "pagehide",
+      () => {
+        if (this.saveTimer !== null) this.flush();
+      },
+      { signal: app.signal },
+    );
 
     const persistKeys: (keyof StoreState)[] = [
       "selectedYear",
@@ -119,8 +125,33 @@ export class StateManager {
       "wrappedVisible",
     ];
     for (const key of persistKeys) {
-      app.store.subscribe(key, () => this.scheduleSave());
+      app.store.subscribe(key, () => {
+        this.changed.add(key);
+        this.scheduleSave();
+      });
     }
+  }
+
+  /** Drop the pending save, if any */
+  cancelSave(): void {
+    if (this.saveTimer !== null) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+  }
+
+  /**
+   * A panel flag as it is to be saved. The statistics reopen once the data
+   * has loaded and Wrapped half a second after that, while the restore
+   * itself already schedules a save: until the store has a say, a save (or
+   * a share, which flushes one) writes what was restored, not "closed".
+   * MapApp drops a restored flag it gave up on.
+   */
+  private panelVisible(key: "statsPanelVisible" | "wrappedVisible"): boolean {
+    return (
+      (!this.changed.has(key) && this.app.savedState?.[key] === true) ||
+      this.app.store.get(key)
+    );
   }
 
   scheduleSave(): void {
@@ -136,10 +167,7 @@ export class StateManager {
    * needs this: it reads the URL the moment the user asks for it.
    */
   flush(): void {
-    if (this.saveTimer !== null) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
+    this.cancelSave();
     this.saveMapState();
   }
 
@@ -154,9 +182,16 @@ export class StateManager {
       center: this.app.map.getCenter(),
       zoom: this.app.map.getZoom(),
     };
+    // Panning across the antimeridian takes the longitude past 180, which
+    // a link cannot carry (parseUrlParams rejects it); the wrapped one is
+    // the same place. Only then: the wrap adds rounding noise to any value.
+    const center =
+      Math.abs(view.center.lng) > 180
+        ? this.app.map.wrapLatLng(view.center)
+        : view.center;
     const state: SavedState = {
       schemaVersion: STATE_SCHEMA_VERSION,
-      center: view.center,
+      center,
       zoom: view.zoom,
       heatmapVisible: this.app.heatmapVisible,
       altitudeVisible: this.app.altitudeVisible,
@@ -166,8 +201,8 @@ export class StateManager {
       selectedYear: this.app.selectedYear,
       selectedAircraft: this.app.selectedAircraft,
       selectedPathIds: Array.from(this.app.selectedPathIds),
-      statsPanelVisible: this.app.store.get("statsPanelVisible"),
-      wrappedVisible: this.app.store.get("wrappedVisible"),
+      statsPanelVisible: this.panelVisible("statsPanelVisible"),
+      wrappedVisible: this.panelVisible("wrappedVisible"),
       isolateSelection: this.app.isolateSelection,
       // Replay state is not persisted: too complex to restore reliably
     };

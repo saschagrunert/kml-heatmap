@@ -42,26 +42,27 @@ export interface PathSegment {
 }
 
 /**
- * Raw segment row as written by the exporter:
- * [lat, lon, altitude_ft, groundspeed_knots, time?].
+ * Encoded columns of one path, as written by the exporter
+ * (kml_heatmap/segment_codec.py): latitude, longitude, altitude in hundreds
+ * of feet and groundspeed in tenths of a knot, then the relative time in
+ * tenths of a second when any row has one (null for a row without). Each
+ * entry is the difference to the row before, as a scaled integer.
  *
- * The coordinate is the segment's END point. Its start is the end of the
- * previous row, and the first row continues from `RawPathSegments.start`.
+ * Row i is the segment that ENDS at the i-th coordinate. Its start is the
+ * end of the row before, and the first row continues from
+ * `RawPathSegments.start`.
  */
-/**
- * One encoded segment row: the difference to the row before it, per column,
- * each scaled to an integer (see kml_heatmap/segment_codec.py). A row of
- * four columns carries no relative time.
- */
-export type RawSegment =
-  [number, number, number, number] | [number, number, number, number, number];
+export type RawColumns =
+  | [number[], number[], number[], number[]]
+  | [number[], number[], number[], number[], (number | null)[]];
 
 /**
- * Exported segments of one path: the scaled first point and the rows after it.
+ * Exported segments of one path: the scaled first point and the columns of
+ * the rows after it.
  */
 export interface RawPathSegments {
   start: number[];
-  rows: RawSegment[];
+  columns: RawColumns;
 }
 
 /**

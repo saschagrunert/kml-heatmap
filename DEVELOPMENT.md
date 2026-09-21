@@ -50,7 +50,8 @@ npm run test:e2e         # Run E2E tests (Playwright, all projects)
 npm run test:e2e:mobile  # Run E2E tests with the mobile project
 npm run test:e2e:webkit  # Run E2E tests with the WebKit (iPhone) project
 npm run test:e2e:ui      # Run E2E tests with interactive UI
-npm run typecheck        # Type-check the frontend
+npm run typecheck        # Type-check the frontend and the Node.js scripts
+npm run typecheck:node   # Type-check build.js, scripts/*.js and the tool configs only
 npm run typecheck:tests  # Type-check the unit and e2e tests
 npm run lint             # Lint TypeScript code
 npm run lint:fix         # Auto-fix linting issues
@@ -64,7 +65,8 @@ npm run format:check     # Check code formatting
 End-to-end tests use [Playwright](https://playwright.dev/). They verify the
 full map rendering pipeline including map initialization, layer toggles,
 filters, statistics panel, wrapped modal, airport markers and replay. The
-`desktop` project runs every spec but `mobile.spec.ts` in Chromium. The
+`desktop` project runs every spec but `mobile.spec.ts` and `visual.spec.ts`
+in Chromium. The
 `mobile` project runs `mobile.spec.ts` and the viewport independent specs
 (`core`, `layers`, `state`) on a phone viewport, and the `webkit` project runs
 `core` and `mobile` on an emulated iPhone. The `visual` project compares
@@ -79,7 +81,9 @@ otherwise; CI tests a site with dummy keys and one without.
 
 The tests run against `docs/`, which must be built from the current sources
 first. The global setup compares the build hash in `docs/mapApp.bundle.js`
-with the frontend sources and stops with a hint when they differ:
+with the checkout (the frontend sources, the stylesheets, the build
+configuration and the pinned esbuild and Lucide versions, see
+`scripts/README.md`) and stops with a hint when they differ:
 
 ```bash
 # Install Playwright browsers (first time only)
@@ -93,10 +97,11 @@ npm run test:e2e
 npm run test:e2e:mobile
 
 # On NixOS, use the system Chromium; Playwright's WebKit build does not run
-# there, but the Playwright container image carries it (use the image tag of
-# the version `npx playwright --version` prints)
+# there, but the Playwright container image carries it (the image the visual
+# job of .github/workflows/test.yml runs; scripts/check_locks.py keeps the
+# reference here in step with it)
 nix-shell -p chromium python3 --run 'CHROMIUM_PATH=$(which chromium) npm run test:e2e -- --project=desktop --project=mobile'
-podman run --rm --userns=keep-id -v "$PWD:/work" -w /work mcr.microsoft.com/playwright:v1.63.0-noble npx playwright test --project=webkit
+podman run --rm --userns=keep-id -v "$PWD:/work" -w /work mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27 npx playwright test --project=webkit
 ```
 
 Tests are located in `tests/e2e/` and configured via `playwright.config.ts`.
@@ -115,8 +120,11 @@ keep their traces in `test-results/`, and every run writes an HTML report to
   names only, not the TypeScript sources
 
 `npm run build` produces two bundles. `mapApp.bundle.js` is the map itself,
-and `features.bundle.js` holds Replay and Wrapped, which the page fetches the
-first time one of them is opened; most visits never do. Their styles are split
+and `features.bundle.js` holds Replay, Wrapped and the flight list of the
+airport popups, which the page fetches the first time one of them is opened.
+Code only the second bundle uses belongs in a module outside
+`scripts/shared-modules.js` (such as `utils/wrappedHtml.ts`), or the main
+bundle carries it too. Their styles are split
 the same way and travel with them: `kml_heatmap/static/styles.css` is linked
 in the page, `features.css` is fetched alongside the feature bundle (see
 `services/featureLoader.ts`), and each has its own budget in
@@ -127,10 +135,11 @@ are resolved to a global the main bundle publishes rather than copied into
 the second one (`scripts/shared-modules.js` and
 `kml_heatmap/frontend/shared.ts`), because several of them hold state that
 has to be a single instance; the build fails when a module ends up in both.
-The same command copies Leaflet, leaflet.heat and dom-to-image out of
+The same command copies Leaflet, leaflet.heat and html-to-image out of
 `node_modules` into `kml_heatmap/static/vendor/`, which is what the published
 page loads them from, and the country flags of `flag-icons` into
-`kml_heatmap/static/flags/`. All of it is gitignored.
+`kml_heatmap/static/flags/` (`scripts/vendor.js`). All of it is gitignored,
+and `make clean` removes it.
 
 The flags are the one asset the wheel leaves out: 271 of them are two
 megabytes, and any one export visits a handful, so `site_assets.py` publishes
@@ -158,7 +167,9 @@ none and the statistics rail falls back to the ISO country code.
   - E2E tests: `tests/e2e/` (Playwright)
 - **Stylesheets** in `kml_heatmap/static/` (`styles.css` and `features.css`)
 - **Build output** in `kml_heatmap/static/` (`mapApp.bundle.js`,
-  `features.bundle.js` and `vendor/`)
+  `features.bundle.js`, their source maps, `vendor/` and `flags/`)
+- **Build scripts** `build.js` and `scripts/*.js`, plain JavaScript with
+  JSDoc types that `tsconfig.node.json` checks (`npm run typecheck`)
 
 ## Backend (Python)
 
@@ -173,7 +184,8 @@ The dependencies are declared once, in `pyproject.toml`: the runtime
 dependencies plus the `test` and `dev` extras. The CI and the container images
 install the hashed lock files compiled from it (`requirements.lock`,
 `requirements-test.lock`) instead; regenerate them with `make lock` after
-changing the dependencies.
+changing the dependencies. The test lock is compiled with the runtime lock
+as a constraint, so a package both of them pin has the same version in each.
 
 **Testing:**
 
@@ -188,7 +200,8 @@ pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml --cov-report=term
 pytest --cov=kml_heatmap --cov-report=html      # HTML coverage report (htmlcov/)
 ```
 
-A run with `--cov` fails below the `fail_under` floor in `pyproject.toml`.
+A run with `--cov` fails below the `fail_under` floor in `pyproject.toml`,
+which is kept one to three points below what the suite reaches.
 Property-based tests use [Hypothesis](https://hypothesis.readthedocs.io/).
 
 **Checks:**

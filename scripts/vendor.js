@@ -40,15 +40,16 @@ const FLAG_SOURCE = join(NODE_MODULES, "flag-icons/flags/4x3");
  * leaflet.css asks for `images/layers.png` and `images/marker-icon.png`
  * relative to itself, and L.Icon.Default builds marker-icon-2x.png and
  * marker-shadow.png from JavaScript, so the whole image set comes along.
- * kml_heatmap/renderer.py mirrors this list to clean up stale files; the
- * test suite checks the two agree.
+ * kml_heatmap/site_assets.py keeps the list of the files it publishes in
+ * step with this one; tests/frontend/unit/vendor.test.ts checks this list
+ * against node_modules.
  * @type {Record<string, string>}
  */
 export const VENDOR_FILES = {
   "leaflet.js": "leaflet/dist/leaflet.js",
   "leaflet.css": "leaflet/dist/leaflet.css",
   "leaflet-heat.js": "leaflet.heat/dist/leaflet-heat.js",
-  "dom-to-image.min.js": "dom-to-image/dist/dom-to-image.min.js",
+  "html-to-image.js": "html-to-image/dist/html-to-image.js",
   "images/layers.png": "leaflet/dist/images/layers.png",
   "images/layers-2x.png": "leaflet/dist/images/layers-2x.png",
   "images/marker-icon.png": "leaflet/dist/images/marker-icon.png",
@@ -86,7 +87,7 @@ export function copyVendorAssets() {
   }
   /** @type {Record<string, string>} */
   const versions = {};
-  for (const name of ["leaflet", "leaflet.heat", "dom-to-image"]) {
+  for (const name of ["leaflet", "leaflet.heat", "html-to-image"]) {
     versions[name] = pinnedVersion(name);
   }
   return { count: Object.keys(VENDOR_FILES).length, versions };

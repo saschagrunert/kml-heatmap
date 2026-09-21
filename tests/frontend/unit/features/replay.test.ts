@@ -126,6 +126,47 @@ describe("replay feature", () => {
       expect(calculateSmoothedBearing(segments, 0, 1)).toBeNull();
       expect(calculateSmoothedBearing(segments, 1, 1)).toBeNull();
     });
+
+    it("keeps the track on the segment before the last one", () => {
+      // Heading east: the end of the current segment is the start of the
+      // last one, which used to give atan2(0, 0), north
+      const east: PathSegment[] = [0, 1, 2].map((i) => ({
+        path_id: 1,
+        time: i * 10,
+        coords: [
+          [50, 8 + i * 0.1],
+          [50, 8 + (i + 1) * 0.1],
+        ],
+      }));
+
+      const bearing = calculateSmoothedBearing(east, east.length - 2, 5);
+
+      expect(bearing).toBeCloseTo(90, 0);
+    });
+
+    it("returns null when the span starts and ends on the same point", () => {
+      const stationary: PathSegment[] = [
+        {
+          path_id: 1,
+          time: 0,
+          coords: [
+            [50, 8],
+            [50, 8],
+          ],
+        },
+        {
+          path_id: 1,
+          time: 10,
+          coords: [
+            [50, 8],
+            [50, 8],
+          ],
+        },
+      ];
+
+      expect(calculateSmoothedBearing(stationary, 0, 5)).toBeNull();
+      expect(calculateSmoothedBearing(stationary, 1, 5)).toBeNull();
+    });
   });
 
   describe("calculateBearing", () => {

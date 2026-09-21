@@ -456,6 +456,21 @@ test.describe("Mobile bar", () => {
       await expect(map).toBeInViewport();
     });
 
+    test("closing it from a link puts focus on the Wrapped tab", async ({
+      page,
+    }) => {
+      // Restored from the link, nothing opened it, and focus used to fall
+      // to the page once it closed
+      await gotoApp(page, "/?v=000000100");
+      const modal = page.locator("#wrapped-modal");
+      await expect(modal).toBeVisible({ timeout: 10000 });
+
+      await page.keyboard.press("Escape");
+
+      await expect(modal).toBeHidden();
+      await expect(page.locator("#mobile-tab-wrapped")).toBeFocused();
+    });
+
     test("reopening starts at the top", async ({ page }) => {
       const modal = await openWrapped(page);
       const content = page.locator("#wrapped-content");

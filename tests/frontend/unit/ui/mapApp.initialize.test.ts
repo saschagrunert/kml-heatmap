@@ -615,6 +615,8 @@ describe("MapApp.initialize", () => {
       // The timer fetches the feature bundle first, so let the promise settle
       await vi.advanceTimersByTimeAsync(500);
       expect(mockWrappedManagerInstance.showWrapped).toHaveBeenCalledTimes(1);
+      // From then on the saves write what the store says
+      expect(app.savedState).not.toHaveProperty("wrappedVisible");
     });
 
     it("does not reopen the wrapped modal once the app is destroyed", async () => {
@@ -655,6 +657,18 @@ describe("MapApp.initialize", () => {
       await initializeApp(app);
 
       expect(app.map!.setView).toHaveBeenCalledWith([50.5, 8.5], 0);
+      expect(app.map!.fitBounds).not.toHaveBeenCalled();
+    });
+
+    it("centres a link that carries no zoom at the default zoom", async () => {
+      // A hand-written or cut-short link: lat and lng, no z
+      mockStateManagerInstance.loadState.mockReturnValue({
+        center: { lat: 50.5, lng: 8.5 },
+      });
+
+      await initializeApp(app);
+
+      expect(app.map!.setView).toHaveBeenCalledWith([50.5, 8.5], 10);
       expect(app.map!.fitBounds).not.toHaveBeenCalled();
     });
 

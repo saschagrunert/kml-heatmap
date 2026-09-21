@@ -7,8 +7,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { UIToggles } from "../../../../kml_heatmap/frontend/ui/uiToggles";
 import type { HeatmapLayer } from "../../../../kml_heatmap/frontend/globals";
 import {
+  LayerManager,
+  type LayerMode,
+} from "../../../../kml_heatmap/frontend/ui/layerManager";
+import {
   asMapApp,
+  createDataset,
   createMockApp,
+  createSegment,
   el,
   mountElements,
   syncControlsWithStore,
@@ -116,6 +122,10 @@ describe("UIToggles layers", () => {
       expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("true");
       expect(el("altitude-legend").style.display).toBe("block");
       expect(app.layerManager.redrawAltitudePaths).toHaveBeenCalled();
+      // The layer it replaces lets go of its polylines
+      expect(app.layerManager.clearLayer).toHaveBeenCalledExactlyOnceWith(
+        "airspeed",
+      );
     });
 
     it("hides altitude when visible", () => {
@@ -127,6 +137,43 @@ describe("UIToggles layers", () => {
       expect(app.altitudeVisible).toBe(false);
       expect(el("altitude-btn").style.opacity).toBe("0.5");
       expect(el("altitude-legend").style.display).toBe("none");
+      // Kept, the polylines of a hidden layer held tens of MB
+      expect(app.layerManager.clearLayer).toHaveBeenCalledExactlyOnceWith(
+        "altitude",
+      );
+    });
+
+    it("rebuilds a layer that was hidden when it is shown again", () => {
+      const data = createDataset(
+        [{ id: 1, year: 2025 }],
+        [
+          createSegment({
+            coords: [
+              [48, 16],
+              [48.1, 16.1],
+            ],
+          }),
+        ],
+      );
+      app.currentData = data;
+      app.altitudeRange = { min: 0, max: 5000 };
+      const layers = new LayerManager(asMapApp(app));
+      app.layerManager.redrawAltitudePaths.mockImplementation(() =>
+        layers.redrawAltitudePaths(),
+      );
+      app.layerManager.clearLayer.mockImplementation((mode: LayerMode) =>
+        layers.clearLayer(mode),
+      );
+
+      uiToggles.toggleAltitude();
+      expect(app.altitudeLayer.layers.size).toBe(1);
+
+      uiToggles.toggleAltitude();
+      expect(app.altitudeLayer.layers.size).toBe(0);
+
+      uiToggles.toggleAltitude();
+      expect(app.altitudeLayer.layers.size).toBe(1);
+      expect(app.map!.hasLayer(app.altitudeLayer)).toBe(true);
     });
 
     it("shows altitude without airspeed conflict", () => {
@@ -159,6 +206,8 @@ describe("UIToggles layers", () => {
       // The trail is drawn by altitude either way, so no redraw
       expect(app.altitudeVisible).toBe(false);
       expect(app.map!.removeLayer).not.toHaveBeenCalled();
+      // Off the map for the replay, and not coming back until shown again
+      expect(app.layerManager.clearLayer).toHaveBeenCalledWith("altitude");
       expect(app.replayManager.redrawReplayPath).not.toHaveBeenCalled();
       expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("false");
     });
