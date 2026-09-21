@@ -596,8 +596,10 @@ describe("MapApp controls and map", () => {
 
       expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
       expect(mockLayerManagerInstance.onPathClick).not.toHaveBeenCalled();
-      // The values of a tapped flight stay: nothing else happened either
+      // An ignored click changes nothing at all: the values of a tapped
+      // flight stay, and so does the popup of an airport
       expect(mockLayerManagerInstance.closeSegmentPopup).not.toHaveBeenCalled();
+      expect(mockAirportManagerInstance.closePopup).not.toHaveBeenCalled();
     });
 
     it("does nothing for a click on the overview of the Wrapped dialog", async () => {
@@ -616,6 +618,7 @@ describe("MapApp controls and map", () => {
       expect(mockLayerManagerInstance.hitTest).not.toHaveBeenCalled();
       expect(mockLayerManagerInstance.onPathClick).not.toHaveBeenCalled();
       expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+      expect(mockAirportManagerInstance.closePopup).not.toHaveBeenCalled();
 
       app.store.set("wrappedVisible", false);
       mockMap(app).emit("click", click);
@@ -661,6 +664,7 @@ describe("MapApp controls and map", () => {
       mockMap(app).emit("click", click);
 
       expect(closePopup).toHaveBeenCalledTimes(1);
+      expect(mockAirportManagerInstance.closePopup).toHaveBeenCalledTimes(1);
       expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
       // The colour layers are hidden during a replay
       expect(mockLayerManagerInstance.hitTest).not.toHaveBeenCalled();
@@ -851,6 +855,10 @@ describe("MapApp controls and map", () => {
       await expect(pending).resolves.toBeUndefined();
       expect(map.remove).not.toHaveBeenCalled();
       expect(m.mockLayerManagerInstance.destroy).toHaveBeenCalledTimes(1);
+      // There is nobody left to show the failure to, but it is one
+      expect(logError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "layer refused" }),
+      );
     });
 
     it("stops quietly when destroyed while the style request hangs", async () => {
@@ -863,6 +871,7 @@ describe("MapApp controls and map", () => {
       // Settled without the style ever arriving, and not as a failure
       await expect(pending).resolves.toBeUndefined();
       await expect(app.mapReady).rejects.toThrow("destroyed");
+      expect(logError).not.toHaveBeenCalled();
       expect(m.mockDataManagerInstance.loadAirports).not.toHaveBeenCalled();
     });
 

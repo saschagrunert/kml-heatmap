@@ -166,9 +166,14 @@ function distanceToSegmentSquared(
 /**
  * Find the segment closest to a geographic point. Used to show per-segment
  * tooltip data on lines that were merged from several segments.
+ *
+ * The map draws copies of the world, so the longitude of the point may be
+ * any number of turns away from the one a segment is stored with, and a run
+ * that crosses the antimeridian has segments on either side of it. Each
+ * segment is measured against the point as seen from its own copy.
  * @param segments - Candidate segments (must have coords)
  * @param lat - Latitude of the point
- * @param lng - Longitude of the point
+ * @param lng - Longitude of the point, wrapped or not
  * @returns Nearest segment or undefined for an empty list
  */
 export function findNearestSegment(
@@ -181,7 +186,13 @@ export function findNearestSegment(
   for (const segment of segments) {
     const coords = segment.coords;
     if (!coords) continue;
-    const d = distanceToSegmentSquared(lat, lng, coords[0], coords[1]);
+    const turns = Math.round((coords[0][1] - lng) / 360);
+    const d = distanceToSegmentSquared(
+      lat,
+      lng + 360 * turns,
+      coords[0],
+      coords[1],
+    );
     if (d < bestDistance) {
       bestDistance = d;
       best = segment;

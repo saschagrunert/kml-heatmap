@@ -364,15 +364,22 @@ class UserMapMovement {
   /** Removes the DOM listeners */
   private readonly listening = new AbortController();
 
+  /**
+   * A start that carries a DOM event is the user's. One that carries none
+   * is a camera move of the app, and every camera move of MapLibre resets
+   * the gesture handlers first: whatever the user was doing has ended with
+   * it. That is the only word of it for a drag or a pinch, which MapLibre
+   * ends without a `moveend` when it is cut short this way.
+   */
   private readonly onMoveStart = (e: { originalEvent?: unknown }): void => {
-    if (e.originalEvent) this.moving = true;
+    this.moving = e.originalEvent !== undefined;
   };
 
   /**
-   * Only the end of a movement of the user ends it. MapLibre hands the DOM
-   * event of a gesture, a key or a glide on to the `moveend` that closes
-   * it, also when a camera move of the app cuts it short; the `moveend` of
-   * such an app move carries none and says nothing about the user.
+   * Only the end of a movement of the user ends it: a gesture let go, a
+   * key's pan or a glide that ran out, each with the DOM event behind it.
+   * The `moveend` of a camera move of the app carries none and says nothing
+   * about the user.
    */
   private readonly onMoveEnd = (e: { originalEvent?: unknown }): void => {
     if (e.originalEvent) this.moving = false;
@@ -396,17 +403,20 @@ class UserMapMovement {
     };
     container.addEventListener("mousedown", press, { signal });
     container.addEventListener("touchstart", press, { signal, passive: true });
-    // A button let go beside the map is still let go, and a menu that opens
-    // (a long press, the menu key) takes the release with it
-    for (const type of [
-      "mouseup",
-      "touchend",
-      "touchcancel",
-      "contextmenu",
-      "blur",
-    ]) {
+    // A button let go beside the map is still let go. A `contextmenu` is no
+    // release: a long press on Android fires it with the finger still down.
+    for (const type of ["mouseup", "touchend", "touchcancel", "blur"]) {
       window.addEventListener(type, release, { signal });
     }
+    // A `mouseup` that went missing (a menu that opened over the press)
+    // shows in the next move of the mouse, which knows its buttons
+    window.addEventListener(
+      "mousemove",
+      (e) => {
+        if (this.pressed && e.buttons === 0) this.pressed = false;
+      },
+      { signal, passive: true },
+    );
     map.on("movestart", this.onMoveStart);
     map.on("zoomstart", this.onMoveStart);
     map.on("moveend", this.onMoveEnd);
