@@ -329,11 +329,14 @@ export class UIToggles {
       quality: 0.95,
     };
     // html-to-image copies DOM, and the map's WebGL canvas copies blank, so
-    // the map stands still as an image of itself while it is captured
+    // the map stands still as an image of itself while it is captured,
+    // drawn at the scale of the export so it is as sharp as the page on it
     const map = this.app.map;
     const capture = (): Promise<string> =>
       htmlToImage.toJpeg(mapContainer, options);
-    const dataUrl = map ? await withMapStill(map, capture) : await capture();
+    const dataUrl = map
+      ? await withMapStill(map, capture, scale)
+      : await capture();
 
     const filename =
       "heatmap_" +

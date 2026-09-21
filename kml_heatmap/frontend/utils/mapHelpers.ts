@@ -250,32 +250,85 @@ function nextFrameAsDataUrl(map: MapLibreMap): Promise<string> {
  * handler after asking for a repaint. `preserveDrawingBuffer` would make the
  * canvas readable at any time, at a cost every frame pays. Markers and popups
  * are DOM next to the canvas and need no help.
+ *
+ * With `pixelRatio` the still is drawn at that many device pixels per CSS
+ * pixel, so an image exported at 2x from a 1x screen gets a map as sharp as
+ * the page around it instead of an enlarged one. The ratio is only ever
+ * raised: a screen denser than the export already has the better frame, and
+ * a smaller canvas would cost a redraw to make the image softer. MapLibre
+ * keeps the canvas within `maxCanvasSize` and what the GPU allocates by
+ * lowering the ratio itself, and the still keeps the canvas's CSS size, so
+ * a ratio that was not met in full needs no handling here.
+ *
+ * Changing the ratio resizes the canvas, which clears it. Nothing blank is
+ * presented: the frame asked for is drawn before the browser paints again.
+ * No tile is loaded for it (tiles do not depend on the ratio), so that one
+ * frame is complete and there is no `idle` to wait for. A resize is not free
+ * of side effects, though: MapLibre stops the camera, which resets a gesture
+ * that is just beginning, and fires `movestart`, `move` and `moveend`
+ * without a camera change, once on the way up and once on the way back. The
+ * listeners of this app take that in their stride (a saved view is written
+ * again, unchanged). That is the reason not to raise a ratio for nothing.
  */
 export async function withMapStill<T>(
   map: MapLibreMap,
   fn: () => Promise<T> | T,
+  pixelRatio?: number,
 ): Promise<T> {
   const canvas = map.getCanvas();
-  const dataUrl = await nextFrameAsDataUrl(map);
-
-  const still = document.createElement("img");
-  still.className = canvas.className;
-  still.alt = "";
-  // The canvas is sized in CSS pixels by MapLibre; its width and height
-  // attributes are device pixels and would blow the image up
-  still.width = canvas.clientWidth;
-  still.height = canvas.clientHeight;
-  still.src = dataUrl;
-  // Decoded before the swap, so the capture never sees an empty image. A
-  // failure to decode leaves a blank map in the export, which is what there
-  // was to show anyway; the swap back below must still happen.
-  await still.decode().catch(() => undefined);
-
-  canvas.replaceWith(still);
+  const screenRatio = map.getPixelRatio();
+  // Asked now and not when the ratio goes back: a browser zoom or a move to
+  // another monitor during the capture changes devicePixelRatio, and the
+  // comparison would then pin a map that had been following the screen
+  const followsScreen = screenRatio === window.devicePixelRatio;
+  // What MapLibre asks for and what the canvas has differ once the canvas
+  // hit `maxCanvasSize` or the GPU's limit. A canvas that is already held
+  // below the ratio it has cannot get any larger, and raising it would cost
+  // two resizes to take the same still.
+  const applied =
+    canvas.clientWidth > 0 ? canvas.width / canvas.clientWidth : screenRatio;
+  const clamped = applied < screenRatio * 0.99;
+  const raised =
+    pixelRatio !== undefined && pixelRatio > screenRatio && !clamped;
+  let still: HTMLImageElement | null = null;
   try {
+    if (raised) map.setPixelRatio(pixelRatio);
+    const dataUrl = await nextFrameAsDataUrl(map);
+
+    still = document.createElement("img");
+    still.className = canvas.className;
+    still.alt = "";
+    // The canvas is sized in CSS pixels by MapLibre; its width and height
+    // attributes are device pixels and would blow the image up
+    still.width = canvas.clientWidth;
+    still.height = canvas.clientHeight;
+    still.src = dataUrl;
+    // Decoded before the swap, so the capture never sees an empty image. A
+    // failure to decode leaves a blank map in the export, which is what there
+    // was to show anyway; the swap back below must still happen.
+    await still.decode().catch(() => undefined);
+
+    canvas.replaceWith(still);
     return await fn();
   } finally {
-    still.replaceWith(canvas);
+    // The ratio goes back while the still is showing, so the canvas returns
+    // at the size it had. A map that followed the screen's ratio follows it
+    // again (null lifts the override, which the typings leave out): a number
+    // would pin it, and the map would stay soft after a browser zoom.
+    try {
+      if (raised) {
+        map.setPixelRatio(
+          followsScreen ? (null as unknown as number) : screenRatio,
+        );
+      }
+    } finally {
+      // Whatever happened above: a map that was removed during the capture
+      // throws on the resize, and the page must not be left showing a still.
+      // Does nothing for a still that never made it into the page.
+      still?.replaceWith(canvas);
+      // A 2x frame of a large monitor is tens of megabytes once decoded
+      still?.removeAttribute("src");
+    }
   }
 }
 

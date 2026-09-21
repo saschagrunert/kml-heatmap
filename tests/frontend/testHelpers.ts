@@ -525,6 +525,19 @@ export function syncControlsWithStore(store: AppStore): void {
 }
 
 /**
+ * Give the window a device pixel ratio. jsdom's own value (1) is a property
+ * of the window, so a test sets it back with `setDevicePixelRatio(1)` rather
+ * than deleting it: a deleted one reads as undefined, and every comparison
+ * against it then quietly takes the other branch in whatever test runs next.
+ */
+export function setDevicePixelRatio(ratio: number): void {
+  Object.defineProperty(window, "devicePixelRatio", {
+    value: ratio,
+    configurable: true,
+  });
+}
+
+/**
  * Mount `id: tag` elements on the body. The returned function removes them
  * again.
  */
