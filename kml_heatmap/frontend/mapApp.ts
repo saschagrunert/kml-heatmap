@@ -433,6 +433,7 @@ export class MapApp {
     }
     this.mapHandlers = {};
     this.layerManager?.destroy();
+    this.dataManager?.destroy();
     this.stateManager?.cancelSave();
     this.replayManager?.destroy();
     this.wrappedManager?.destroy();

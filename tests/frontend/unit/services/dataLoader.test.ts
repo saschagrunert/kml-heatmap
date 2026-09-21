@@ -8,6 +8,11 @@ import {
   type Mock,
   type MockInstance,
 } from "vitest";
+// jsdom has no streams; Node's are the ones its Response is built on
+import {
+  ReadableStream as NodeReadableStream,
+  TransformStream as NodeTransformStream,
+} from "node:stream/web";
 import {
   combineYearData,
   DATA_FORMAT_VERSION,
@@ -18,9 +23,12 @@ import {
   resetStylesheetLoader,
   DataLoader,
 } from "../../../../kml_heatmap/frontend/services/dataLoader";
+import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
 import type {
+  DataLoaderOptions,
   KMLDataset,
-  LoadingInfo,
+  LoadingState,
+  Metadata,
   RawColumns,
   RawPathSegments,
   RawYearData,
@@ -176,7 +184,7 @@ describe("fetchJson", () => {
       }),
     );
 
-    const pending = fetchJson("stalled.json", 5000);
+    const pending = fetchJson("stalled.json", { timeoutMs: 5000 });
     const outcome = expect(pending).rejects.toThrow(
       "Timed out loading stalled.json",
     );
@@ -195,8 +203,208 @@ describe("fetchJson", () => {
       vi.fn<typeof fetch>().mockResolvedValue(new Response("[]")),
     );
 
-    await fetchJson("fast.json", 10);
+    await fetchJson("fast.json", { timeoutMs: 10 });
 
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("fetchJson with a progress callback", () => {
+  beforeEach(() => {
+    vi.stubGlobal("TransformStream", NodeTransformStream);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  const encoder = new TextEncoder();
+
+  /** A body whose source is written out by the test */
+  function streamOf(
+    start: (controller: ReadableStreamDefaultController<Uint8Array>) => void,
+  ): ReadableStream<Uint8Array> {
+    return new NodeReadableStream<Uint8Array>({
+      start,
+    }) as ReadableStream<Uint8Array>;
+  }
+
+  /** A 200 whose body arrives in the given pieces */
+  function chunked(chunks: Uint8Array[]): Response {
+    return new Response(
+      streamOf((controller) => {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      }),
+    );
+  }
+
+  function stubFetch(response: Response): void {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(response));
+  }
+
+  it("reports every chunk, ending at the size of the body", async () => {
+    const body = JSON.stringify({ name: "Zürich", values: [1, 2, 3] });
+    const bytes = encoder.encode(body);
+    // The second cut falls inside the two bytes of the ü, which only a
+    // decoder that carries state across chunks puts back together
+    const cut = bytes.indexOf(0xc3) + 1;
+    stubFetch(
+      chunked([bytes.slice(0, 5), bytes.slice(5, cut), bytes.slice(cut)]),
+    );
+    const onProgress = vi.fn<(loadedBytes: number) => void>();
+
+    const parsed = await fetchJson("data/2025/data.json", { onProgress });
+
+    expect(parsed).toEqual({ name: "Zürich", values: [1, 2, 3] });
+    const reported = onProgress.mock.calls.map(([loaded]) => loaded);
+    expect(reported).toEqual([5, cut, bytes.length]);
+    // Bytes, not characters: the ü counts twice
+    expect(bytes.length).toBe(body.length + 1);
+  });
+
+  it("reports nothing for an empty body, and fails on parsing it", async () => {
+    stubFetch(chunked([]));
+    const onProgress = vi.fn();
+
+    await expect(fetchJson("empty.json", { onProgress })).rejects.toThrow(
+      "Failed to load empty.json",
+    );
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("parses a response without a body stream, reporting nothing", async () => {
+    const response = new Response('{"a":1}');
+    Object.defineProperty(response, "body", { value: null });
+    stubFetch(response);
+    const onProgress = vi.fn();
+
+    await expect(fetchJson("a.json", { onProgress })).resolves.toEqual({
+      a: 1,
+    });
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("rejects on a body that is not JSON", async () => {
+    stubFetch(chunked([encoder.encode("<html>")]));
+
+    const failure = await fetchJson("page.json", { onProgress: vi.fn() }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(failure).toEqual(new Error("Failed to load page.json"));
+    // Thrown by the parser of Node's Response, whose SyntaxError is not
+    // the one of this realm
+    expect(((failure as Error).cause as Error).name).toBe("SyntaxError");
+  });
+
+  it("parses the body natively where streams cannot be transformed", async () => {
+    // jsdom has none of its own, so taking the stub away is enough
+    vi.unstubAllGlobals();
+    const response = chunked([encoder.encode('{"a":1}')]);
+    const json = vi.spyOn(response, "json");
+    stubFetch(response);
+    const onProgress = vi.fn();
+
+    await expect(fetchJson("a.json", { onProgress })).resolves.toEqual({
+      a: 1,
+    });
+    expect(json).toHaveBeenCalledOnce();
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("hands the body to the native parser when nobody counts", async () => {
+    const response = chunked([encoder.encode('{"a":1}')]);
+    const json = vi.spyOn(response, "json");
+    stubFetch(response);
+
+    await expect(fetchJson("a.json")).resolves.toEqual({ a: 1 });
+    expect(json).toHaveBeenCalledOnce();
+  });
+
+  it("loads the file all the same when the progress callback throws", async () => {
+    const bytes = encoder.encode('{"a":[1,2,3]}');
+    stubFetch(chunked([bytes.slice(0, 4), bytes.slice(4, 8), bytes.slice(8)]));
+    const onProgress = vi.fn<(loadedBytes: number) => void>(() => {
+      throw new Error("no such element");
+    });
+
+    await expect(fetchJson("a.json", { onProgress })).resolves.toEqual({
+      a: [1, 2, 3],
+    });
+    // Asked once, and left alone after it failed
+    expect(onProgress).toHaveBeenCalledExactlyOnceWith(4);
+    expect(logError).toHaveBeenCalledWith(
+      "Progress callback failed:",
+      new Error("no such element"),
+    );
+  });
+
+  it("rejects on an error status without reading the body", async () => {
+    stubFetch(new Response("not found", { status: 404 }));
+    const onProgress = vi.fn();
+
+    const failure = await fetchJson("bad.json", { onProgress }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(failure).toEqual(new Error("Failed to load bad.json"));
+    expect((failure as Error).cause).toEqual(new Error("HTTP 404"));
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the connection breaks halfway through the body", async () => {
+    stubFetch(
+      new Response(
+        streamOf((controller) => {
+          controller.enqueue(encoder.encode('{"a":'));
+          controller.error(new TypeError("network error"));
+        }),
+      ),
+    );
+    const onProgress = vi.fn();
+
+    await expect(fetchJson("cut.json", { onProgress })).rejects.toThrow(
+      "Failed to load cut.json",
+    );
+  });
+
+  it("aborts a body that stalls after its first chunk", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+        signal = init!.signal!;
+        return Promise.resolve(
+          new Response(
+            streamOf((controller) => {
+              controller.enqueue(encoder.encode('{"a":'));
+              // What the browser does to the body of an aborted fetch
+              signal!.addEventListener("abort", () =>
+                controller.error(new DOMException("aborted", "AbortError")),
+              );
+            }),
+          ),
+        );
+      }),
+    );
+    const onProgress = vi.fn();
+
+    const pending = fetchJson("stalled.json", {
+      timeoutMs: 5000,
+      onProgress,
+    });
+    const outcome = expect(pending).rejects.toThrow(
+      "Timed out loading stalled.json",
+    );
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(onProgress).toHaveBeenCalledExactlyOnceWith(5);
+    expect(signal!.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await outcome;
     expect(vi.getTimerCount()).toBe(0);
   });
 });
@@ -825,10 +1033,10 @@ describe("combineYearData", () => {
 describe("DataLoader", () => {
   let loader: DataLoader;
   let mockWindow: MockWindow;
-  let mockFetchJson: Mock<(url: string) => Promise<unknown>>;
+  let mockFetchJson: Mock<NonNullable<DataLoaderOptions["fetchJson"]>>;
   /** What the site serves, by URL; anything else is a 404 */
   let files: Record<string, unknown>;
-  let mockShowLoading: Mock<(info: LoadingInfo) => void>;
+  let mockShowLoading: Mock<(state: LoadingState) => void>;
   let mockHideLoading: Mock<() => void>;
   let onLoadError: Mock<(years: string[]) => void>;
 
@@ -846,6 +1054,14 @@ describe("DataLoader", () => {
     );
   }
 
+  /** Metadata that knows these sizes, and the years they belong to */
+  function withSizes(sizes: Record<string, number>): void {
+    mockWindow.KML_METADATA = {
+      available_years: Object.keys(sizes).map(Number),
+      year_file_bytes: sizes,
+    } as Metadata;
+  }
+
   function serve(url: string): Promise<unknown> {
     return url in files
       ? Promise.resolve(files[url])
@@ -855,7 +1071,7 @@ describe("DataLoader", () => {
   beforeEach(() => {
     mockWindow = {} as MockWindow;
     files = {};
-    mockFetchJson = vi.fn<(url: string) => Promise<unknown>>();
+    mockFetchJson = vi.fn<NonNullable<DataLoaderOptions["fetchJson"]>>();
     mockFetchJson.mockImplementation(serve);
     mockShowLoading = vi.fn();
     mockHideLoading = vi.fn();
@@ -887,7 +1103,10 @@ describe("DataLoader", () => {
 
       const result = await loader.loadData("2025");
 
-      expect(mockFetchJson).toHaveBeenCalledWith("test-data/2025/data.json");
+      expect(mockFetchJson).toHaveBeenCalledWith(
+        "test-data/2025/data.json",
+        undefined,
+      );
       expect(result).not.toBeNull();
       expect(result!.path_segments).toHaveLength(1);
       expect(result!.path_segments[0]!.path_id).toBe(1);
@@ -897,17 +1116,16 @@ describe("DataLoader", () => {
     });
 
     it("reports year and file size to the loading indicator", async () => {
-      mockWindow.KML_METADATA = {
-        available_years: [2024, 2025],
-        year_file_bytes: { "2024": 100, "2025": 2048 },
-      } as never;
+      withSizes({ "2024": 100, "2025": 2048 });
       defineYear(2025);
 
       await loader.loadData("2025");
 
-      expect(mockShowLoading).toHaveBeenCalledWith({
-        year: "2025",
-        bytes: 2048,
+      expect(mockShowLoading).toHaveBeenCalledExactlyOnceWith({
+        all: false,
+        years: ["2025"],
+        loadedBytes: 0,
+        totalBytes: 2048,
       });
     });
 
@@ -916,9 +1134,11 @@ describe("DataLoader", () => {
 
       await loader.loadData("2025");
 
-      expect(mockShowLoading).toHaveBeenCalledWith({
-        year: "2025",
-        bytes: undefined,
+      expect(mockShowLoading).toHaveBeenCalledExactlyOnceWith({
+        all: false,
+        years: ["2025"],
+        loadedBytes: 0,
+        totalBytes: undefined,
       });
     });
 
@@ -1017,19 +1237,17 @@ describe("DataLoader", () => {
     });
 
     it("reports the total size of all year files", async () => {
-      mockWindow.KML_METADATA = {
-        available_years: [2024, 2025],
-        year_file_bytes: { "2024": 100, "2025": 2048 },
-      } as never;
+      withSizes({ "2024": 100, "2025": 2048 });
       defineYear(2024);
       defineYear(2025);
 
       await loader.loadAndCombineAllYears();
 
-      expect(mockShowLoading).toHaveBeenCalledTimes(1);
       expect(mockShowLoading).toHaveBeenCalledWith({
-        year: "all",
-        bytes: 2148,
+        all: true,
+        years: ["2024", "2025"],
+        loadedBytes: 0,
+        totalBytes: 2148,
       });
     });
 
@@ -1057,8 +1275,11 @@ describe("DataLoader", () => {
       resolvers[1]!();
       await promise;
 
-      expect(mockShowLoading).toHaveBeenCalledTimes(1);
       expect(mockHideLoading).toHaveBeenCalledTimes(1);
+      // Nothing is shown again once the indicator is down
+      expect(mockShowLoading.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        mockHideLoading.mock.invocationCallOrder[0]!,
+      );
     });
 
     it("uses cached combined data", async () => {
@@ -1127,6 +1348,299 @@ describe("DataLoader", () => {
       mockFetchJson.mockClear();
       expect(await loader.loadAndCombineAllYears()).toBeNull();
       expect(mockFetchJson).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("download progress", () => {
+    /** Per URL: report bytes as read, and let the request succeed or fail */
+    let requests: Record<
+      string,
+      { read: (loadedBytes: number) => void; settle: (ok?: boolean) => void }
+    >;
+
+    beforeEach(() => {
+      requests = {};
+      mockFetchJson.mockImplementation((url, options) => {
+        if (!url.endsWith("/data.json")) return serve(url);
+        return new Promise((resolve, reject) => {
+          requests[url] = {
+            read: (loadedBytes) => options?.onProgress?.(loadedBytes),
+            settle: (ok = true) =>
+              ok ? resolve(files[url]) : reject(new Error("HTTP 500")),
+          };
+        });
+      });
+    });
+
+    const request = (year: number): (typeof requests)[string] =>
+      requests[`test-data/${year}/data.json`]!;
+
+    /** What the indicator was told, as "years loaded/total" */
+    const shown = (): string[] =>
+      mockShowLoading.mock.calls.map(
+        ([{ all, years, loadedBytes, totalBytes }]) =>
+          `${all ? "all:" : ""}${years.join("+")} ${loadedBytes}/${totalBytes}`,
+      );
+
+    /** Let the promise chains of settled requests run */
+    const settled = async (): Promise<void> => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+
+    it("reports the bytes of a year against its size on disk", async () => {
+      withSizes({ "2025": 1000 });
+      defineYear(2025);
+
+      const loading = loader.loadData("2025");
+      request(2025).read(400);
+      request(2025).read(1000);
+      request(2025).settle();
+      await loading;
+
+      // Nothing is reported for the file having settled: the indicator goes
+      // away instead
+      expect(shown()).toEqual([
+        "2025 0/1000",
+        "2025 400/1000",
+        "2025 1000/1000",
+      ]);
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+    });
+
+    it("counts a file no further than its expected size, and never back", async () => {
+      withSizes({ "2025": 1000 });
+      defineYear(2025);
+
+      const loading = loader.loadData("2025");
+      request(2025).read(600);
+      request(2025).read(500);
+      request(2025).read(1500);
+      request(2025).read(1600);
+      request(2025).settle();
+      await loading;
+
+      expect(shown()).toEqual([
+        "2025 0/1000",
+        "2025 600/1000",
+        "2025 1000/1000",
+      ]);
+    });
+
+    it.each([
+      ["without metadata", undefined],
+      ["for a year the metadata has no size for", { "2024": 10 }],
+      ["for a size of zero", { "2025": 0 }],
+    ])("asks for no byte counts %s", async (_name, sizes) => {
+      if (sizes) withSizes(sizes);
+      defineYear(2025);
+
+      const loading = loader.loadData("2025");
+      request(2025).settle();
+      await loading;
+
+      expect(mockFetchJson).toHaveBeenCalledExactlyOnceWith(
+        "test-data/2025/data.json",
+        undefined,
+      );
+      expect(shown()).toEqual(["2025 0/undefined"]);
+    });
+
+    it("sums the years of 'all' into one share", async () => {
+      withSizes({ "2024": 100, "2025": 300 });
+      defineYear(2024);
+      defineYear(2025);
+
+      const loading = loader.loadAndCombineAllYears();
+      await vi.waitFor(() => expect(Object.keys(requests)).toHaveLength(2));
+      request(2025).read(150);
+      request(2024).read(60);
+      request(2024).settle();
+      await settled();
+      request(2025).read(300);
+      request(2025).settle();
+      await loading;
+
+      expect(shown()).toEqual([
+        "all: 0/undefined",
+        "all:2024 0/100",
+        "all:2024+2025 0/400",
+        "all:2024+2025 150/400",
+        "all:2024+2025 210/400",
+        // Arrived, so it counts in full whatever was counted on the way
+        "all:2024+2025 250/400",
+        "all:2024+2025 400/400",
+        "all:2024+2025 400/400",
+      ]);
+    });
+
+    it("shows no share while one size of 'all' is unknown", async () => {
+      withSizes({ "2024": 100 });
+      mockWindow.KML_METADATA!.available_years = [2024, 2025];
+      defineYear(2024);
+      defineYear(2025);
+
+      const loading = loader.loadAndCombineAllYears();
+      await vi.waitFor(() => expect(Object.keys(requests)).toHaveLength(2));
+      request(2024).read(50);
+      request(2024).settle();
+      request(2025).settle();
+      await loading;
+
+      expect(shown().slice(2)).toEqual([
+        "all:2024+2025 0/undefined",
+        "all:2024+2025 50/undefined",
+        "all:2024+2025 100/undefined",
+        "all:2024+2025 100/undefined",
+      ]);
+    });
+
+    it("starts over without a year that failed, counting no bytes that never arrived", async () => {
+      withSizes({ "2023": 100, "2024": 100, "2025": 300 });
+      defineYear(2025);
+
+      const loading = loader.loadAndCombineAllYears();
+      await vi.waitFor(() => expect(Object.keys(requests)).toHaveLength(3));
+      mockShowLoading.mockClear();
+      request(2025).read(150);
+      request(2024).read(20);
+      request(2023).settle(false);
+      request(2024).settle(false);
+      await settled();
+      request(2025).read(225);
+      request(2025).settle();
+      await loading;
+
+      expect(shown()).toEqual([
+        "all:2023+2024+2025 150/500",
+        "all:2023+2024+2025 170/500",
+        // What is left: 80 bytes of 2024 and the half of 2025 still to come
+        "all:2024+2025 0/230",
+        "all:2025 0/150",
+        "all:2025 75/150",
+        "all:2025 150/150",
+      ]);
+      expect(onLoadError).toHaveBeenCalledWith(["2023", "2024"]);
+    });
+
+    it("starts over when another year joins, with what is still to come", async () => {
+      withSizes({ "2024": 100, "2025": 300 });
+      defineYear(2024);
+      defineYear(2025);
+
+      const first = loader.loadData("2025");
+      request(2025).read(270);
+      const second = loader.loadData("2024");
+      request(2025).read(285);
+      request(2025).settle();
+      await first;
+      request(2024).read(50);
+      request(2024).settle();
+      await second;
+
+      expect(shown()).toEqual([
+        "2025 0/300",
+        "2025 270/300",
+        // Not 270 of 400: the bar and the size in the label are about the
+        // 130 bytes that the two files still have to deliver
+        "2025+2024 0/130",
+        "2025+2024 15/130",
+        "2025+2024 30/130",
+        "2025+2024 80/130",
+      ]);
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+    });
+
+    it("leaves a settled year out of the load that joins after it", async () => {
+      withSizes({ "2023": 50, "2024": 100, "2025": 300 });
+      defineYear(2023);
+      defineYear(2024);
+      defineYear(2025);
+
+      const first = loader.loadData("2025");
+      const second = loader.loadData("2024");
+      request(2025).read(300);
+      request(2025).settle();
+      await first;
+      mockShowLoading.mockClear();
+      const third = loader.loadData("2023");
+      request(2024).settle();
+      request(2023).settle();
+      await Promise.all([second, third]);
+
+      expect(shown()[0]).toBe("2024+2023 0/150");
+    });
+
+    it("leaves a cached year out of label and bar alike", async () => {
+      withSizes({ "2024": 100, "2025": 300 });
+      defineYear(2024);
+      defineYear(2025);
+      const first = loader.loadData("2024");
+      request(2024).settle();
+      await first;
+      mockShowLoading.mockClear();
+
+      const loading = loader.loadAndCombineAllYears();
+      await vi.waitFor(() => expect(requests["test-data/2025/data.json"]));
+      request(2025).read(150);
+      request(2025).settle();
+      await loading;
+
+      expect(shown()).toEqual([
+        "all: 0/undefined",
+        "all:2025 0/300",
+        "all:2025 150/300",
+        "all:2025 300/300",
+      ]);
+    });
+
+    it.each(["showLoading", "hideLoading"] as const)(
+      "finishes the load when %s throws",
+      async (callback) => {
+        withSizes({ "2024": 100, "2025": 300 });
+        defineYear(2024);
+        defineYear(2025);
+        const broken =
+          callback === "showLoading" ? mockShowLoading : mockHideLoading;
+        broken.mockImplementation(() => {
+          throw new Error("no such element");
+        });
+
+        const loading = loader.loadAndCombineAllYears();
+        await vi.waitFor(() => expect(Object.keys(requests)).toHaveLength(2));
+        request(2024).read(50);
+        request(2024).settle();
+        request(2025).settle();
+
+        const data = await loading;
+        expect(data!.path_segments).toHaveLength(2);
+        expect(onLoadError).not.toHaveBeenCalled();
+        // The count of loads came out even: the indicator was taken down
+        expect(mockHideLoading).toHaveBeenCalledOnce();
+        expect(logError).toHaveBeenCalledWith(
+          "Loading indicator failed:",
+          new Error("no such element"),
+        );
+      },
+    );
+
+    it("asks for no progress on the index files", async () => {
+      files["test-data/metadata.json"] = { available_years: [] };
+      files["test-data/airports.json"] = { airports: [] };
+
+      await loader.loadMetadata();
+      await loader.loadAirports();
+
+      expect(mockFetchJson.mock.calls).toEqual([
+        ["test-data/metadata.json"],
+        ["test-data/airports.json"],
+      ]);
+      expect(mockShowLoading).not.toHaveBeenCalled();
+    });
+
+    it("takes the exported fetchJson as it is", () => {
+      // One signature: the function is a valid option, with no adapter that
+      // could put the callback where the timeout goes
+      expect(() => new DataLoader({ fetchJson })).not.toThrow();
     });
   });
 

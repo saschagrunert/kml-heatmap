@@ -199,8 +199,12 @@ test.describe("Core", () => {
   }) => {
     const loading = page.locator("#loading");
     await expect(loading).toBeHidden();
-    await expect(loading).toHaveAttribute("role", "status");
-    await expect(page.locator("#loading-text")).toBeAttached();
+    // The label is the status; the progress bar next to it is not part of
+    // the live region, which would announce every step of its value
+    const status = loading.locator('[role="status"]');
+    await expect(status.locator("#loading-text")).toBeAttached();
+    await expect(status.locator("#loading-progress")).toHaveCount(0);
+    await expect(loading.locator("#loading-progress")).toBeAttached();
   });
 
   test("the zoom control is gone", async ({ page }) => {

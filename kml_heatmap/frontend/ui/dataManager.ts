@@ -10,7 +10,7 @@ import type { MapApp } from "../mapApp";
 import type {
   KMLDataset,
   Airport,
-  LoadingInfo,
+  LoadingState,
   Metadata,
   PathSegment,
 } from "../types";
@@ -26,6 +26,7 @@ import {
 } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { formatFileSize } from "../utils/formatters";
+import { frameCoalescer } from "../utils/frameCoalescer";
 import { cssVar, toLngLat } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
 
@@ -138,6 +139,27 @@ export function heatmapPaint(
   };
 }
 
+/**
+ * How long the indicator is up before its bar may appear. The year a first
+ * visit shows is preloaded and usually complete by the time the loader asks
+ * for it, and a file from the HTTP cache is as quick: their bodies drain in
+ * one burst, and a bar that came up for them would flash from nothing to
+ * full and be gone again within a frame or two. A change that takes less
+ * than about a tenth of a second reads as immediate, so a load that is over
+ * within 150 ms gets no bar, and one that is not shows it barely late.
+ */
+const PROGRESS_GRACE_MS = 150;
+
+/** What the indicator says: "Loading 2026 flights (1.1 MB)…" */
+function loadingLabel(state: LoadingState): string {
+  const what = state.all ? "all" : state.years.join(", ");
+  const size =
+    state.totalBytes !== undefined
+      ? " (" + formatFileSize(state.totalBytes) + ")"
+      : "";
+  return "Loading " + (what ? what + " " : "") + "flights" + size + "…";
+}
+
 export class DataManager {
   private app: MapApp;
   private dataLoader: DataLoader;
@@ -149,13 +171,26 @@ export class DataManager {
   private dataYear: string | null = null;
   /** The heat layers have their paint; they are created without one */
   private heatmapPainted = false;
+  /** When the indicator came up, null while it is down */
+  private loadingSince: number | null = null;
+  /** The latest state of the load, for the draw the grace period put off */
+  private loadingState: LoadingState | null = null;
+  private graceTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Chunks arrive far more often than the screen repaints, so label and bar
+   * are written once per frame, from the latest state
+   */
+  private readonly loadingFrame = frameCoalescer<LoadingState>((state) =>
+    this.drawLoading(state),
+  );
+  private destroyed = false;
 
   constructor(app: MapApp) {
     this.app = app;
 
     this.dataLoader = new DataLoader({
       dataDir: app.config.dataDir,
-      showLoading: (info) => this.showLoading(info),
+      showLoading: (state) => this.showLoading(state),
       hideLoading: () => this.hideLoading(),
       onLoadError: (failedYears) => {
         this.loadErrorReported = true;
@@ -168,32 +203,97 @@ export class DataManager {
   }
 
   /**
-   * Show the loading indicator. When the template provides `#loading-text`
-   * it describes what is loading, e.g. "Loading 2026 flights (1.1 MB)…".
+   * Show the loading indicator, or bring it up to date: the loader calls
+   * this on every change of what it is loading, down to every chunk.
    *
-   * The indicator is a live region, and a live region only announces text
-   * that changes while it is displayed, so it is shown before it is written.
+   * The label is announced by a live region, and a live region only
+   * announces text that changes while it is displayed, so the indicator is
+   * shown here and written a frame later.
    */
-  showLoading(info?: LoadingInfo): void {
+  showLoading(state: LoadingState): void {
+    // A request that outlives the app still reports
+    if (this.destroyed) return;
     const loadingEl = domCache.get("loading");
     if (!loadingEl) return;
 
-    loadingEl.style.display = "block";
-
-    const textEl = domCache.get("loading-text");
-    if (textEl && info) {
-      const what = info.year === "all" ? "all flights" : info.year + " flights";
-      const size =
-        info.bytes !== undefined && info.bytes > 0
-          ? " (" + formatFileSize(info.bytes) + ")"
-          : "";
-      textEl.textContent = "Loading " + what + size + "…";
+    if (this.loadingSince === null) {
+      this.loadingSince = performance.now();
+      loadingEl.style.display = "block";
     }
+    this.loadingState = state;
+    this.loadingFrame.schedule(state);
   }
 
   hideLoading(): void {
+    this.cancelLoadingDraws();
+    this.loadingSince = null;
     const loadingEl = domCache.get("loading");
     if (loadingEl) loadingEl.style.display = "none";
+    const bar = domCache.get("loading-progress");
+    if (bar) hideProgressBar(bar);
+  }
+
+  /** Stop drawing: the page the app drew into is no longer its own */
+  destroy(): void {
+    this.destroyed = true;
+    this.cancelLoadingDraws();
+  }
+
+  private cancelLoadingDraws(): void {
+    this.loadingFrame.cancel();
+    this.loadingState = null;
+    if (this.graceTimer !== null) {
+      clearTimeout(this.graceTimer);
+      this.graceTimer = null;
+    }
+  }
+
+  private drawLoading(state: LoadingState): void {
+    const textEl = domCache.get("loading-text");
+    const label = loadingLabel(state);
+    if (textEl && textEl.textContent !== label) textEl.textContent = label;
+
+    const bar = domCache.get("loading-progress");
+    if (!bar) return;
+    const { loadedBytes, totalBytes } = state;
+    // Without a total there is no share to draw: the spinner already says
+    // that something is loading, which is all that is known then
+    if (totalBytes === undefined) {
+      hideProgressBar(bar);
+      return;
+    }
+    if (bar.hidden && !this.mayShowProgress(loadedBytes < totalBytes)) return;
+
+    bar.hidden = false;
+    // The CSP allows no style attribute in the markup; the CSSOM is fine
+    bar.style.setProperty(
+      "--loading-progress",
+      String(loadedBytes / totalBytes),
+    );
+    // In steps of ten: a screen reader that follows the value would
+    // otherwise have something new to say on every frame. Worked out on the
+    // byte counts, which are whole numbers and land on a step exactly.
+    const step = String(Math.floor((loadedBytes * 10) / totalBytes) * 10);
+    if (bar.getAttribute("aria-valuenow") !== step) {
+      bar.setAttribute("aria-valuenow", step);
+    }
+  }
+
+  /**
+   * Whether the bar may come up, see PROGRESS_GRACE_MS. A load that is
+   * complete has nothing left to show; one that is still young is looked at
+   * again when the grace period ends, since a connection that stalls sends
+   * no further chunk to draw on.
+   */
+  private mayShowProgress(incomplete: boolean): boolean {
+    if (!incomplete || this.loadingSince === null) return false;
+    const wait = PROGRESS_GRACE_MS - (performance.now() - this.loadingSince);
+    if (wait <= 0) return true;
+    this.graceTimer ??= setTimeout(() => {
+      this.graceTimer = null;
+      if (this.loadingState) this.loadingFrame.schedule(this.loadingState);
+    }, wait);
+    return false;
   }
 
   /**
@@ -398,6 +498,17 @@ export function heatmapFeatures(
       },
     })),
   };
+}
+
+/**
+ * Back to the state without a known share: no bar, no value. Cheap when the
+ * bar is hidden already, which it is for every frame of a load without sizes.
+ */
+function hideProgressBar(bar: HTMLElement): void {
+  if (bar.hidden) return;
+  bar.hidden = true;
+  bar.removeAttribute("aria-valuenow");
+  bar.style.removeProperty("--loading-progress");
 }
 
 /**
