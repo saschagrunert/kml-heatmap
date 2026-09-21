@@ -1,15 +1,22 @@
 """Tests for parser_gx_track module."""
 
+from datetime import UTC, datetime, timedelta
+
 from lxml import etree
 
 from kml_heatmap.aircraft import parse_aircraft_from_filename
 from kml_heatmap.constants import KML_NAMESPACES
 from kml_heatmap.helpers import parse_timestamp_epoch
-from kml_heatmap.parser_gx_track import local_name, parse_gx_track, process_gx_track
+from kml_heatmap.parser_common import local_name
+from kml_heatmap.parser_gx_track import parse_gx_track, process_gx_track
 from kml_heatmap.types import TrackPoint
 
 KML_NS = KML_NAMESPACES["kml"]
 GX_NS = KML_NAMESPACES["gx"]
+
+
+def _iso(moment):
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _document():
@@ -179,6 +186,66 @@ class TestParseGxTrack:
             "2025-03-01T10:05:00Z",
             "2025-03-01T10:10:00Z",
         ]
+
+    def test_single_stamp_from_the_future_is_dropped_alone(self):
+        """One forward glitch must not cost every later point its time."""
+        base = datetime(2025, 6, 1, 10, 0, tzinfo=UTC)
+        whens = [_iso(base + timedelta(seconds=10 * i)) for i in range(300)]
+        whens[5] = "2031-01-01T00:00:00Z"
+        coords = [f"{8.5 + i * 0.001} 50.0 300" for i in range(300)]
+        path, kept = parse_gx_track(_track(_document(), coords, whens), "t.kml", [])
+        assert [p.ts is None for p in path].count(True) == 1
+        assert path[5].ts is None
+        assert kept[-1] == whens[-1]
+        assert len(kept) == 299
+
+    def test_near_forward_glitch_is_dropped_alone(self):
+        whens = [
+            "2025-03-01T10:00:00Z",
+            "2025-03-01T10:00:10Z",
+            "2025-03-01T11:00:00Z",
+            "2025-03-01T10:00:20Z",
+            "2025-03-01T10:00:30Z",
+        ]
+        coords = [f"{8.5 + i * 0.01} 50.0 300" for i in range(5)]
+        path, kept = parse_gx_track(_track(_document(), coords, whens), "t.kml", [])
+        assert [p.ts is not None for p in path] == [True, True, False, True, True]
+        assert kept == [whens[0], whens[1], whens[3], whens[4]]
+
+    def test_clock_before_the_gps_fix_is_dropped(self):
+        """A logger's clock sits at its default date until the GPS fix."""
+        whens = ["2000-01-01T00:00:00Z", "2000-01-01T00:00:05Z"] + [
+            f"2025-06-01T10:00:{s:02d}Z" for s in range(0, 50, 10)
+        ]
+        coords = [f"{8.5 + i * 0.01} 50.0 300" for i in range(7)]
+        path, kept = parse_gx_track(_track(_document(), coords, whens), "t.kml", [])
+        assert path[0].ts is None
+        assert path[1].ts is None
+        assert kept == whens[2:]
+
+    def test_year_is_that_of_the_majority_of_the_track(self):
+        doc = _document()
+        pm = _placemark(doc, name="EDDS")
+        whens = ["2000-01-01T00:00:00Z"] + [
+            f"2025-06-01T10:00:{s:02d}Z" for s in range(0, 50, 10)
+        ]
+        track = _track(pm, [f"{8.5 + i * 0.01} 50.0 300" for i in range(6)], whens)
+        _, _, metadata = _run([track])
+        assert metadata[0]["year"] == 2025
+        assert metadata[0]["timestamp"] == "2025-06-01T10:00:00Z"
+        assert metadata[0]["end_timestamp"] == "2025-06-01T10:00:40Z"
+
+    def test_null_island_coordinate_is_rejected(self):
+        track = _track(
+            _document(),
+            ["8.5 50.0 300", "0 0 0", "8.6 50.1 300"],
+            ["2025-03-01T10:00:00Z", "2025-03-01T10:00:05Z", "2025-03-01T10:00:10Z"],
+        )
+        coordinates = []
+        path, whens = parse_gx_track(track, "t.kml", coordinates)
+        assert [(p.lat, p.lon) for p in path] == [(50.0, 8.5), (50.1, 8.6)]
+        assert len(coordinates) == 2
+        assert whens == ["2025-03-01T10:00:00Z", "2025-03-01T10:00:10Z"]
 
     def test_ignores_comments_and_other_children(self):
         track = _track(_document(), ["8.5 50.0 300"], ["2025-03-01T10:00:00Z"])

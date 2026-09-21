@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .constants import ICAO_REGION_PREFIXES
 from .logger import logger
 
 if TYPE_CHECKING:
@@ -13,7 +14,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "load_aircraft_data",
-    "lookup_aircraft_model",
     "merge_aircraft_data",
     "normalize_registration",
     "parse_aircraft_from_filename",
@@ -56,6 +56,12 @@ REGISTRATION_PREFIXES: tuple[str, ...] = (
     "I",
 )
 
+# A registration: a nationality prefix of one or two characters (D, OE, 9A,
+# N), with or without its hyphen, then letters and digits (D-EHYL, OEAKI,
+# N12345, N123AB). In capitals, and with at least one letter: "summer" in
+# "2025_summer_trip.kml" is none.
+_REGISTRATION = re.compile(r"[A-Z0-9]{1,2}-[A-Z0-9]{1,5}|[A-Z0-9]{3,7}")
+_ICAO_CODE = re.compile(rf"[{ICAO_REGION_PREFIXES}][A-Z]{{3}}")
 _CHARTERWARE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _CHARTERWARE_TIME = re.compile(r"(?:[01]\d|2[0-3])[0-5]\dh")
 
@@ -72,7 +78,12 @@ def load_aircraft_data(aircraft_file: Path) -> dict[str, str]:
         logger.warning("Ignoring %s: expected a JSON object", aircraft_file)
         return {}
 
-    return {str(key): str(value) for key, value in data.items()}
+    # Keyed the way registrations from file names are written ("DEAGJ" is
+    # D-EAGJ); the first spelling of a registration wins
+    aircraft: dict[str, str] = {}
+    for key, value in data.items():
+        aircraft.setdefault(normalize_registration(str(key)), str(value))
+    return aircraft
 
 
 def merge_aircraft_data(aircraft_files: Iterable[Path]) -> dict[str, str]:
@@ -82,15 +93,6 @@ def merge_aircraft_data(aircraft_files: Iterable[Path]) -> dict[str, str]:
         for registration, model in load_aircraft_data(aircraft_file).items():
             merged.setdefault(registration, model)
     return merged
-
-
-def lookup_aircraft_model(
-    registration: str, aircraft_data: Mapping[str, str] | None = None
-) -> str | None:
-    """Look up an aircraft model from merged aircraft.json data."""
-    if not aircraft_data:
-        return None
-    return aircraft_data.get(registration)
 
 
 def resolve_aircraft_models(
@@ -104,7 +106,7 @@ def resolve_aircraft_models(
     """
     models: dict[str, str] = {}
     for registration in sorted({reg for reg in registrations if reg}):
-        model = lookup_aircraft_model(registration, aircraft_data)
+        model = aircraft_data.get(registration) if aircraft_data else None
         if model:
             logger.info("  ✓ %s: %s", registration, model)
             models[registration] = model
@@ -125,17 +127,45 @@ def normalize_registration(raw: str) -> str:
     return raw
 
 
+def _is_date(text: str) -> bool:
+    """Whether a leading number of a file name is a date (20250601) or year."""
+    if len(text) == 8:
+        try:
+            datetime.strptime(text, "%Y%m%d")
+        except ValueError:
+            return False
+        return True
+    return len(text) == 4 and text.isascii() and 1900 <= int(text) <= 2099
+
+
+def _is_registration(text: str, after_date: bool) -> bool:
+    """Whether the second part of a numbered file name is a registration.
+
+    After a date it must not be an ICAO airport code either:
+    "20250601_EDDS_EDDP.kml" is a route, not the aircraft EDDS.
+    """
+    if not _REGISTRATION.fullmatch(text) or not any(c.isalpha() for c in text):
+        return False
+    return not (after_date and _ICAO_CODE.fullmatch(text))
+
+
 def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
     """Parse aircraft information from KML filename.
 
     Supports two formats:
     1. Numbered: N_REGISTRATION_TYPE.kml (e.g., 1_DEHYL_DA40.kml)
     2. Charterware: YYYY-MM-DD_HHMMh_REGISTRATION_ROUTE.kml
+
+    A numbered name whose second part is no registration (see
+    ``_is_registration``) names no aircraft.
     """
     name = Path(filename).stem
     parts = name.split("_")
 
-    if len(parts) >= 3 and parts[0].isdigit():
+    if len(parts) >= 3 and parts[0].isascii() and parts[0].isdigit():
+        if not _is_registration(parts[1], _is_date(parts[0])):
+            logger.debug("No aircraft registration in filename: %s", filename)
+            return {}
         if len(parts) > 3:
             logger.warning(
                 "Ignoring extra filename parts in %s (expected N_REGISTRATION_TYPE)",

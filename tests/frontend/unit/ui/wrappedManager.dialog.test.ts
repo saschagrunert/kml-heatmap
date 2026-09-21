@@ -219,9 +219,39 @@ describe("WrappedManager dialog", () => {
 
       expect(mockApp.map!.invalidateSize).toHaveBeenCalled();
       expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(2);
+      // The 2024 flights, not the whole dataset the config bounds cover
       expect(mockApp.map!.fitBounds).toHaveBeenCalledWith(
-        mockApp.config.bounds,
+        [
+          [48, 8],
+          [51, 12],
+        ],
         { padding: [80, 80], animate: true },
+      );
+    });
+
+    it("fits the map to the whole dataset in the All Years view", () => {
+      mockApp.selectedYear = "all";
+
+      wrappedManager.showWrapped();
+      vi.advanceTimersByTime(150);
+
+      for (const call of mockApp.map!.fitBounds.mock.calls) {
+        expect(call[0]).toBe(mockApp.config.bounds);
+      }
+    });
+
+    it("fits the map to the flights of the selected aircraft", () => {
+      mockApp.selectedYear = "all";
+      mockApp.selectedAircraft = "D-EFGH";
+
+      wrappedManager.showWrapped();
+
+      expect(mockApp.map!.fitBounds).toHaveBeenCalledWith(
+        [
+          [50, 9],
+          [51, 10],
+        ],
+        expect.anything(),
       );
     });
 
@@ -345,6 +375,40 @@ describe("WrappedManager dialog", () => {
       await Promise.resolve();
 
       expect(late.hasAttribute("inert")).toBe(false);
+    });
+
+    it("focuses the Wrapped button when nothing opened it", () => {
+      // Restored from a link: focus is on the page itself
+      (document.activeElement as HTMLElement | null)?.blur();
+      openWrapped();
+
+      wrappedManager.closeWrapped();
+
+      expect(document.activeElement).toBe(el("wrapped-btn"));
+    });
+
+    it("focuses the Wrapped tab of the bar when the columns are gone", () => {
+      el("wrapped-btn").remove();
+      const tab = document.createElement("button");
+      tab.id = "mobile-tab-wrapped";
+      document.body.appendChild(tab);
+      openWrapped();
+
+      wrappedManager.closeWrapped();
+
+      expect(document.activeElement).toBe(tab);
+    });
+
+    it("takes the airport markers out of the tab order while open", () => {
+      const pane = document.createElement("div");
+      pane.className = "leaflet-marker-pane";
+      el("map").appendChild(pane);
+
+      openWrapped();
+      expect(pane.hasAttribute("inert")).toBe(true);
+
+      wrappedManager.closeWrapped();
+      expect(pane.hasAttribute("inert")).toBe(false);
     });
 
     it("does not restore focus to an opener that left the document", () => {

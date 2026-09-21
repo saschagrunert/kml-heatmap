@@ -192,15 +192,52 @@ export function calculateYearStats(
 }
 
 /**
+ * The span of the latitudes and longitudes the segments touch, as Leaflet
+ * bounds, or null when none of them has coordinates.
+ */
+export function segmentBounds(
+  segments: PathSegment[],
+): [Coordinate, Coordinate] | null {
+  let minLat = Infinity;
+  let minLon = Infinity;
+  let maxLat = -Infinity;
+  let maxLon = -Infinity;
+  for (const segment of segments) {
+    for (const [lat, lon] of segment.coords ?? []) {
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+    }
+  }
+  if (minLat === Infinity) return null;
+  return [
+    [minLat, minLon],
+    [maxLat, maxLon],
+  ];
+}
+
+/**
+ * The period a fact talks about: the selected year, or all of them. "This
+ * year" read wrong in the All Years view and for any year but the current.
+ */
+function periodPhrase(year: string): string {
+  return year === "all" ? "in total" : "in " + escapeHtml(year);
+}
+
+/**
  * Generate fun facts from year statistics
  * @param yearStats - The Wrapped summary of the selected year and aircraft
  * @param filteredStats - The statistics of the same selection
+ * @param year - The selected year, or "all"
  */
 export function generateFunFacts(
   yearStats: YearStats,
   filteredStats: FunFactStats | null = null,
+  year: string = "all",
 ): FunFact[] {
   const facts: FunFact[] = [];
+  const period = periodPhrase(year);
 
   // Distance facts
   const distanceNm = yearStats.total_distance_nm;
@@ -217,7 +254,7 @@ export function generateFunFacts(
   } else if (distanceNm > 1000) {
     facts.push({
       icon: "distance",
-      text: `You covered <strong>${formatNumber(distanceNm, 1)} nautical miles</strong> this year!`,
+      text: `You covered <strong>${formatNumber(distanceNm, 1)} nautical miles</strong> ${period}!`,
       category: "distance",
       priority: 8,
     });
@@ -253,7 +290,7 @@ export function generateFunFacts(
   } else if (numAircraft === 2) {
     facts.push({
       icon: "aircraft",
-      text: `You flew <strong>${numAircraft} different aircraft</strong> this year.`,
+      text: `You flew <strong>${numAircraft} different aircraft</strong> ${period}.`,
       category: "aircraft",
       priority: 7,
     });

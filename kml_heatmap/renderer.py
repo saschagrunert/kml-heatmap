@@ -5,6 +5,8 @@ the order the stages run in and what they hand each other.
 """
 
 import logging
+import os
+import pickle  # nosec B403
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
@@ -23,9 +25,10 @@ from .data_exporter import (
 )
 from .exceptions import KMLHeatmapError, KMLParseError
 from .logger import logger
-from .parser import parse_kml_coordinates
+from .parser import load_cached_kml, parse_kml_coordinates
 from .parser_cache import prune_stale_cache_entries
 from .site_assets import (
+    SITE_FILE_PATTERNS,
     SITE_FILES,
     bundle_is_available,
     package_assets,
@@ -36,7 +39,10 @@ from .validation import validate_kml_file, validate_output_dir
 from .workers import init_worker, parse_worker_count
 
 if TYPE_CHECKING:
-    from .types import FlightPath, FlightPathGroup, PathMetadata
+    from collections.abc import Callable, Iterable
+
+    from .airport_lookup import AirportRecord
+    from .types import FlightPathGroup, PathMetadata, TrackPoint
 
 __all__ = [
     "CoordinateExtent",
@@ -44,10 +50,22 @@ __all__ = [
     "create_progressive_heatmap",
 ]
 
+# Files that are not in the parse cache are parsed in this process up to
+# this many bytes in total, and in a process pool beyond. Starting the pool
+# costs about as much as parsing 4 MB of KML, and 4 MB take about 60 MB of
+# memory to parse, which the main process can well afford.
+INLINE_PARSE_MAX_BYTES = 4 * 1024 * 1024
+
 
 @dataclass(frozen=True)
 class CoordinateExtent:
-    """Bounding box of a set of coordinates."""
+    """Bounding box of a set of coordinates.
+
+    Plain minimum and maximum, also for data on both sides of the
+    antimeridian: Leaflet draws every path, marker and heat point at its own
+    longitude and never on another copy of the world, so a box that wrapped
+    around 180 (179 to 181) would open the map on half of the flights.
+    """
 
     min_lat: float
     max_lat: float
@@ -55,26 +73,16 @@ class CoordinateExtent:
     max_lon: float
 
     @classmethod
-    def of(cls, coordinates: FlightPath) -> CoordinateExtent | None:
-        """The extent of a coordinate list, or None when it is empty."""
-        if not coordinates:
+    def of(cls, coordinates: Iterable[TrackPoint]) -> CoordinateExtent | None:
+        """The extent of the coordinates, or None when there are none."""
+        points = list(coordinates)
+        if not points:
             return None
         return cls(
-            min(point.lat for point in coordinates),
-            max(point.lat for point in coordinates),
-            min(point.lon for point in coordinates),
-            max(point.lon for point in coordinates),
-        )
-
-    def union(self, other: CoordinateExtent | None) -> CoordinateExtent:
-        """The extent covering this one and ``other``."""
-        if other is None:
-            return self
-        return CoordinateExtent(
-            min(self.min_lat, other.min_lat),
-            max(self.max_lat, other.max_lat),
-            min(self.min_lon, other.min_lon),
-            max(self.max_lon, other.max_lon),
+            min(point.lat for point in points),
+            max(point.lat for point in points),
+            min(point.lon for point in points),
+            max(point.lon for point in points),
         )
 
     def as_map_bounds(self) -> dict[str, float]:
@@ -114,43 +122,60 @@ def _parse_with_error_handling(kml_file: str) -> ParsedFile:
     return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata)
 
 
-def _parse_kml_files(
-    valid_files: list[str],
-) -> tuple[FlightPathGroup, list[PathMetadata]]:
-    """Parse KML files in parallel and merge the results in input order.
+def _load_cached(kml_file: str) -> ParsedFile | None:
+    """The parse result of a file from the parse cache, None on a miss."""
+    try:
+        cached = load_cached_kml(kml_file)
+    except OSError:
+        return None
+    if cached is None:
+        return None
+    coordinates, path_groups, path_metadata = cached
+    return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata)
 
-    The input order decides the path ids, so the merge must not depend on
-    which worker finished first or on the file names: two directories may
-    well contain files with the same name.
+
+def _parse_inline(kml_file: str) -> ParsedFile:
+    """Parse a file in this process, with the error handling of a worker."""
+    try:
+        return _parse_with_error_handling(kml_file)
+    except KMLHeatmapError:
+        raise
+    except Exception:
+        logger.exception("Unexpected error processing %s", kml_file)
+        return ParsedFile(kml_file)
+
+
+def _uncached_bytes(kml_files: list[str]) -> int:
+    total = 0
+    for kml_file in kml_files:
+        try:
+            total += os.path.getsize(kml_file)
+        except OSError:
+            continue
+    return total
+
+
+def _parse_in_pool(
+    kml_files: list[str],
+    record: Callable[[ParsedFile], None],
+    airports: dict[str, AirportRecord],
+) -> None:
+    """Parse files in a process pool, handing each result to ``record``.
+
+    The workers get the airport database the parent loaded (see
+    ``workers.init_worker``).
     """
-    parse_start = time.time()
-    # Load (and if needed download) the airport database once in the parent:
-    # the workers then find a valid cache instead of each waiting for the
-    # download, and the cache keys below see the same database as they do
-    load_airport_database()
-    prune_stale_cache_entries()
-
-    results: list[ParsedFile] = []
     debug = logger.isEnabledFor(logging.DEBUG)
-
-    def record(parsed: ParsedFile) -> None:
-        results.append(parsed)
-        logger.info(
-            "  [%d/%d] %.0f%% - %s",
-            len(results),
-            len(valid_files),
-            (len(results) / len(valid_files)) * 100,
-            Path(parsed.kml_file).name,
-        )
-
+    database = pickle.dumps(airports, protocol=pickle.HIGHEST_PROTOCOL)
+    done: set[str] = set()
     pool_broken = False
     with ProcessPoolExecutor(
-        max_workers=parse_worker_count(valid_files),
+        max_workers=parse_worker_count(kml_files),
         initializer=init_worker,
-        initargs=(debug,),
+        initargs=(debug, database),
     ) as executor:
         future_to_file = {
-            executor.submit(_parse_with_error_handling, f): f for f in valid_files
+            executor.submit(_parse_with_error_handling, f): f for f in kml_files
         }
         for future in as_completed(future_to_file):
             try:
@@ -169,11 +194,11 @@ def _parse_kml_files(
                 kml_file = future_to_file[future]
                 logger.exception("Unexpected error processing %s", kml_file)
                 parsed = ParsedFile(kml_file)
+            done.add(parsed.kml_file)
             record(parsed)
 
     if pool_broken:
-        done = {parsed.kml_file for parsed in results}
-        remaining = [f for f in valid_files if f not in done]
+        remaining = [f for f in kml_files if f not in done]
         logger.warning(
             "  A parser worker process crashed; parsing the %d remaining "
             "file(s) one at a time",
@@ -182,7 +207,7 @@ def _parse_kml_files(
         # Still in a worker: a file that is too large to parse must not take
         # the main process down with it, and one at a time names the file
         with ProcessPoolExecutor(
-            max_workers=1, initializer=init_worker, initargs=(debug,)
+            max_workers=1, initializer=init_worker, initargs=(debug, database)
         ) as executor:
             for kml_file in remaining:
                 try:
@@ -195,6 +220,54 @@ def _parse_kml_files(
                         "out of memory; run with --debug for details"
                     ) from None
                 record(parsed)
+
+
+def _parse_kml_files(
+    valid_files: list[str],
+) -> tuple[FlightPathGroup, list[PathMetadata]]:
+    """Parse KML files and merge the results in input order.
+
+    Files the parse cache holds are read from it in this process: a worker
+    pool takes longer to start than reading them does. Of the rest, a few
+    small files are parsed here as well (up to ``INLINE_PARSE_MAX_BYTES``),
+    anything more in a process pool.
+
+    The input order decides the path ids, so the merge must not depend on
+    which worker finished first or on the file names: two directories may
+    well contain files with the same name.
+    """
+    parse_start = time.time()
+    # Load (and if needed download) the airport database once in the parent:
+    # the workers get it from here instead of each reading the CSV, and the
+    # cache keys below see the same database as they do
+    airports = load_airport_database()
+    prune_stale_cache_entries()
+
+    results: list[ParsedFile] = []
+
+    def record(parsed: ParsedFile) -> None:
+        results.append(parsed)
+        logger.info(
+            "  [%d/%d] %.0f%% - %s",
+            len(results),
+            len(valid_files),
+            (len(results) / len(valid_files)) * 100,
+            Path(parsed.kml_file).name,
+        )
+
+    uncached: list[str] = []
+    for kml_file in valid_files:
+        cached = _load_cached(kml_file)
+        if cached is None:
+            uncached.append(kml_file)
+        else:
+            record(cached)
+
+    if uncached and _uncached_bytes(uncached) > INLINE_PARSE_MAX_BYTES:
+        _parse_in_pool(uncached, record, airports)
+    else:
+        for kml_file in uncached:
+            record(_parse_inline(kml_file))
 
     input_order = {kml_file: index for index, kml_file in enumerate(valid_files)}
     results.sort(key=lambda parsed: input_order[parsed.kml_file])
@@ -251,11 +324,9 @@ def _map_extent(all_path_groups: FlightPathGroup) -> CoordinateExtent:
     Only exported paths count: an excluded path would widen the map and give
     away where it was. Raises when there is nothing to export at all.
     """
-    extent: CoordinateExtent | None = None
-    for path in all_path_groups:
-        path_extent = CoordinateExtent.of(path) if is_exportable_path(path) else None
-        if path_extent is not None:
-            extent = path_extent.union(extent)
+    extent = CoordinateExtent.of(
+        point for path in all_path_groups if is_exportable_path(path) for point in path
+    )
     if extent is None:
         raise KMLHeatmapError("No flight paths with a determinable year to export")
     return extent
@@ -293,7 +364,9 @@ def _export_site(
     logger.info("  Found %d unique airports", len(unique_airports))
 
     data_dir_name = data_dir.name
-    with SiteOutput(output_file.parent, data_dir, SITE_FILES) as site:
+    with SiteOutput(
+        output_file.parent, data_dir, SITE_FILES, SITE_FILE_PATTERNS
+    ) as site:
         result = export_all_data(
             all_path_groups,
             all_path_metadata,
@@ -301,7 +374,12 @@ def _export_site(
             site.data_stage,
             aircraft_data=aircraft_data,
         )
-        render_html(site.site_stage / output_file.name, data_dir_name)
+        # The page opens on the latest year, see resolveYearSelection
+        render_html(
+            site.site_stage / output_file.name,
+            data_dir_name,
+            max(result.years, default=None),
+        )
         package_assets(
             site.site_stage,
             extent.as_map_bounds(),

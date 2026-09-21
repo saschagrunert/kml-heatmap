@@ -206,7 +206,95 @@ describe("StateManager", () => {
     });
   });
 
+  describe("teardown", () => {
+    it("stops listening for pagehide once the app is gone", () => {
+      const lifetime = new AbortController();
+      const app = createMockApp({ signal: lifetime.signal });
+      const manager = new StateManager(asMapApp(app));
+      manager.scheduleSave();
+      const flush = vi.spyOn(manager, "flush");
+
+      lifetime.abort();
+      window.dispatchEvent(new Event("pagehide"));
+
+      expect(flush).not.toHaveBeenCalled();
+      manager.cancelSave();
+    });
+
+    it("drops a pending save on cancelSave", () => {
+      vi.useFakeTimers();
+      const saveSpy = vi.spyOn(stateManager, "saveMapState");
+      mockApp.selectedYear = "2025";
+
+      stateManager.cancelSave();
+      vi.advanceTimersByTime(1000);
+
+      expect(saveSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("panels a restored state reopens later", () => {
+    beforeEach(() => {
+      // Statistics and Wrapped open in the link: v flags 6 and 7
+      setLocation("?y=2024&v=100101100&lat=50&lng=8&z=10");
+      mockApp.savedState = stateManager.loadState();
+    });
+
+    it("saves them as open while the app has not reopened them yet", () => {
+      // The restore batch schedules a save long before the data is in
+      mockApp.selectedYear = "2024";
+
+      stateManager.flush();
+
+      expect(savedState()).toMatchObject({
+        statsPanelVisible: true,
+        wrappedVisible: true,
+      });
+    });
+
+    it("hands over to the store once the panel has been reopened", () => {
+      mockApp.store.set("statsPanelVisible", true);
+      // The user closes it again right away
+      mockApp.store.set("statsPanelVisible", false);
+
+      stateManager.flush();
+
+      expect(savedState()["statsPanelVisible"]).toBe(false);
+      expect(savedState()["wrappedVisible"]).toBe(true);
+    });
+
+    it("hands over to the store once the app gave up reopening one", () => {
+      delete mockApp.savedState!.wrappedVisible;
+
+      stateManager.flush();
+
+      expect(savedState()["wrappedVisible"]).toBe(false);
+    });
+
+    it("writes the store without a restored state", () => {
+      mockApp.savedState = null;
+
+      stateManager.flush();
+
+      expect(savedState()).toMatchObject({
+        statsPanelVisible: false,
+        wrappedVisible: false,
+      });
+    });
+  });
+
   describe("saveMapState", () => {
+    it("wraps a centre panned past the antimeridian into the link", () => {
+      // Leaflet reports the unwrapped longitude after a pan across 180
+      mockApp.map!.getCenter.mockReturnValue({ lat: -17, lng: 190 });
+
+      stateManager.saveMapState();
+
+      expect(savedState()["center"]).toEqual({ lat: -17, lng: -170 });
+      const url = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
+      expect(url).toContain("lng=-170.000000");
+    });
+
     it("saves the user's own view while Wrapped has the map fitted", () => {
       // With the fitted overview saved, a reload or a shared link landed on
       // the overview once the dialog was closed

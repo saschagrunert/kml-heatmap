@@ -8,7 +8,6 @@ from hypothesis import strategies as st
 
 from kml_heatmap.aircraft import (
     load_aircraft_data,
-    lookup_aircraft_model,
     merge_aircraft_data,
     normalize_registration,
     parse_aircraft_from_filename,
@@ -128,6 +127,37 @@ class TestParseAircraftFromFilenameNumbered:
         assert result["format"] == "numbered"
 
 
+class TestNotARegistration:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "2025_summer_trip.kml",
+            "20250601_EDDS_EDDP.kml",
+            "2025_LOWW_LOWI.kml",
+            "12_12345_C172.kml",
+            "3_D-EHYLXYZ_DA40.kml",
+            "4_x_DA40.kml",
+        ],
+    )
+    def test_no_aircraft(self, name):
+        assert parse_aircraft_from_filename(name) == {}
+
+    @pytest.mark.parametrize(
+        ("name", "registration"),
+        [
+            ("1_N12345_C172.kml", "N12345"),
+            ("2_N123AB_C172.kml", "N123AB"),
+            ("3_VHABC_C172.kml", "VHABC"),
+            ("20250601_DEHYL_DA40.kml", "D-EHYL"),
+            # Only after a date does a code count as an airport
+            ("7_EDDS_C172.kml", "EDDS"),
+            ("20251399_EDDS_C172.kml", "EDDS"),
+        ],
+    )
+    def test_registrations(self, name, registration):
+        assert parse_aircraft_from_filename(name)["registration"] == registration
+
+
 class TestParseAircraftFromFilenameCharterware:
     def test_charterware_format(self):
         result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
@@ -179,6 +209,12 @@ class TestLoadAircraftData:
     def test_missing_file_returns_empty(self, tmp_path):
         assert load_aircraft_data(tmp_path / "missing.json") == {}
 
+    def test_keys_are_normalized_like_file_names(self, tmp_path):
+        """The key DEAGJ has to match D-EAGJ from 1_DEAGJ_DA20.kml."""
+        path = tmp_path / "aircraft.json"
+        path.write_text(json.dumps({"DEAGJ": "Katana", "D-EAGJ": "Other"}))
+        assert load_aircraft_data(path) == {"D-EAGJ": "Katana"}
+
     def test_non_object_returns_empty(self, tmp_path):
         path = tmp_path / "aircraft.json"
         path.write_text(json.dumps(["D-EAGJ"]))
@@ -204,19 +240,6 @@ class TestMergeAircraftData:
 
     def test_empty_input(self):
         assert merge_aircraft_data([]) == {}
-
-
-class TestLookupAircraftModel:
-    def test_lookup_found(self):
-        data = {"D-EAGJ": "Diamond DA-20A-1 Katana"}
-        assert lookup_aircraft_model("D-EAGJ", data) == "Diamond DA-20A-1 Katana"
-
-    def test_lookup_not_found(self):
-        assert lookup_aircraft_model("D-XXXX", {"D-EAGJ": "Katana"}) is None
-
-    def test_lookup_without_data(self):
-        assert lookup_aircraft_model("D-EAGJ") is None
-        assert lookup_aircraft_model("D-EAGJ", {}) is None
 
 
 class TestResolveAircraftModels:

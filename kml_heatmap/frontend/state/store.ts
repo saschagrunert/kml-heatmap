@@ -4,7 +4,7 @@
  */
 
 import { logError } from "../utils/logger";
-import type { AircraftModels, KMLDataset } from "../types";
+import type { KMLDataset } from "../types";
 
 export interface Range {
   min: number;
@@ -25,12 +25,8 @@ export interface StoreState {
   /** Wrapped modal visibility */
   wrappedVisible: boolean;
   currentData: KMLDataset | null;
-  /** Model names from metadata.js; empty until it has loaded */
-  aircraftModels: AircraftModels;
   /** Whether the exported flights carry groundspeeds (metadata.js) */
   hasTimingData: boolean;
-  altitudeRange: Range;
-  airspeedRange: Range;
 }
 
 type Listener<T> = (newVal: T, oldVal: T) => void;
@@ -41,7 +37,10 @@ type Listener<T> = (newVal: T, oldVal: T) => void;
  */
 const MAX_FLUSH_DEPTH = 10;
 
-/** Colour range defaults; features/layers.ts falls back to the same values */
+/**
+ * Colour range defaults of MapApp's plain range fields; features/layers.ts
+ * falls back to the same values
+ */
 export const DEFAULT_ALTITUDE_RANGE: Range = { min: 0, max: 10000 };
 export const DEFAULT_AIRSPEED_RANGE: Range = { min: 0, max: 200 };
 
@@ -61,10 +60,7 @@ export const STORE_ACCESSOR_KEYS = [
   "airportsVisible",
   "aviationVisible",
   "currentData",
-  "aircraftModels",
   "hasTimingData",
-  "altitudeRange",
-  "airspeedRange",
 ] as const;
 
 export type StoreAccessorKey = (typeof STORE_ACCESSOR_KEYS)[number];
@@ -109,12 +105,7 @@ export function createDefaultState(): StoreState {
     statsPanelVisible: false,
     wrappedVisible: false,
     currentData: null,
-    aircraftModels: {},
     hasTimingData: false,
-    // Copies: a range set to the shared default object would compare equal
-    // to the initial state and never be announced
-    altitudeRange: { ...DEFAULT_ALTITUDE_RANGE },
-    airspeedRange: { ...DEFAULT_AIRSPEED_RANGE },
   };
 }
 
@@ -183,6 +174,11 @@ export class AppStore {
         if (idx >= 0) list.splice(idx, 1);
       }
     };
+  }
+
+  /** Drop every listener; the owner is going away */
+  unsubscribeAll(): void {
+    this.listeners.clear();
   }
 
   /**

@@ -116,14 +116,15 @@ def parse_js_fixture():
 def decoded_segments(entry):
     """A segments entry of a year file as the frontend reads it.
 
-    The rows on disk are scaled integers stored as differences (see
+    The rows on disk are scaled integers stored as differences, column
+    by column (see
     ``kml_heatmap.segment_codec``). Tests that care about the values rather
     than the encoding go through here.
     """
     from kml_heatmap.segment_codec import COORDINATE_SCALE, decode_rows
 
     start = [value / COORDINATE_SCALE for value in entry["start"]]
-    return start, decode_rows(entry["start"], entry["rows"])
+    return start, decode_rows(entry["start"], entry["columns"])
 
 
 @pytest.fixture

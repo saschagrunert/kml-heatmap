@@ -1,6 +1,8 @@
 # Scripts
 
-Utility scripts for testing and development.
+The build helpers `build.js` imports, the repository consistency check and
+the test data generator. The JavaScript files are type-checked with
+`tsconfig.node.json` (`npm run typecheck`).
 
 ## generate_test_data.py
 
@@ -34,11 +36,15 @@ python3 scripts/generate_test_data.py --help
 
 ### Testing Generated Data
 
+Generating a site reads the KML files and leaves them alone; only
+`--obfuscate-inputs` or `make obfuscate` rewrites them. The generated files
+carry no real dates anyway.
+
 ```bash
-# Build with test data (obfuscates the generated files in place)
+# Build with test data
 make build INPUT_DIR=kml_test_10000
 
-# Or with Docker (also obfuscates the generated files in place)
+# Or with Docker
 mkdir -p out
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD/kml_test_10000:/data/kml_test_10000" -v "$PWD/out:/data/out" \
@@ -62,21 +68,63 @@ These numbers are the reference for the processing time mentioned in the main
 
 ## check_locks.py
 
-Checks that `requirements.lock` and `requirements-test.lock` still satisfy
-the ranges in `pyproject.toml` and agree on the shared pins. Dependabot bumps
-`pyproject.toml` without recompiling the locks, so this fails such a pull
-request with a hint to run `make lock`. `make lint` and the CI lint job run
-it.
+Checks the versions that are written down in more than one place, which
+nothing else reads together:
 
-It also checks the versions that are written down in two places: the ruff,
-prettier and typos revs in `.pre-commit-config.yaml` against the lock files,
-`package-lock.json` and the typos action in the test workflow, and
-`__version__` in `kml_heatmap/__init__.py` against `version` in
-`package.json`.
+- `requirements.lock` and `requirements-test.lock` still satisfy the ranges
+  in `pyproject.toml`, and the two agree on every package both pin (CI
+  installs `requirements-test.lock` alone where it needs both). Dependabot
+  bumps `pyproject.toml` without recompiling the locks, so this fails such a
+  pull request with a hint to run `make lock`.
+- The Playwright image of the `visual` job in `.github/workflows/test.yml`
+  is pinned by its `@sha256` digest, its tag matches the `@playwright/test`
+  version in `package-lock.json`, and `CONTRIBUTING.md` and `DEVELOPMENT.md`
+  quote exactly the same image reference.
+- `__version__` in `kml_heatmap/__init__.py` matches `version` in
+  `package.json` and both version fields of `package-lock.json`.
+
+The pre-commit hook revisions are not checked: the linters and formatters
+run from the project environment, so they have no revision of their own to
+drift. `make lint` and the CI lint job run it.
 
 ## source-hash.js
 
-The content hash of `kml_heatmap/frontend/`. `build.js` writes it into the
-first line of the bundle, and the Playwright global setup
+The content hash of everything that shapes a built site: the TypeScript
+sources in `kml_heatmap/frontend/`, the files in `BUILD_FILES` (`build.js`,
+`scripts/shared-modules.js`, `tsconfig.json` and the two stylesheets) and
+the versions `package-lock.json` pins for `BUILD_PACKAGES` (esbuild and
+Lucide, the one package bundled into the page). `build.js` writes it into
+the first line of both bundles. The Playwright global setup
 (`tests/e2e/global-setup.ts`) compares that line in `docs/mapApp.bundle.js`
-with the sources, so the e2e tests refuse to run against a stale site.
+with the checkout, so the e2e tests refuse to run against a stale site, and
+the generator warns when the bundle it is about to publish is stale.
+`kml_heatmap/site_assets.py` mirrors the hash in Python;
+`TestSourceHashParity` in `tests/test_site_assets.py` checks that both
+implementations agree.
+
+## vendor.js
+
+Copies the third-party files the published page loads (Leaflet with its
+images, leaflet.heat and html-to-image) out of `node_modules` into
+`kml_heatmap/static/vendor/`, and every country flag of `flag-icons` into
+`kml_heatmap/static/flags/`. Both directories are generated and gitignored,
+and each build replaces them, so a file dropped from the list does not
+linger. Serving the files from the site keeps the page working offline and
+under `file://`, keeps visitors' addresses away from CDNs and leaves
+`package-lock.json` as the one place their versions are pinned.
+`kml_heatmap/site_assets.py` keeps its own list of the files it publishes,
+in step with `VENDOR_FILES`; `tests/frontend/unit/vendor.test.ts` checks
+`VENDOR_FILES` against `node_modules`. The wheel ships `vendor/` but not
+`flags/`, and the Python side publishes only the flags of the countries an
+export visited.
+
+## shared-modules.js
+
+The list of frontend modules both bundles use. `mapApp.bundle.js` carries
+them and publishes them on `window.__kmlShared`; `build.js` resolves the
+imports of `features.bundle.js` to that global instead of bundling a second
+copy, because several of them hold state that has to be one instance (the
+DOM cache, the toast live region). `kml_heatmap/frontend/shared.ts`
+publishes exactly this list, `tests/frontend/unit/shared.test.ts` checks
+that the two agree, and the build fails when a module still ends up in both
+bundles.

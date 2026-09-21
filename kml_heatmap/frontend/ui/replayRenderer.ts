@@ -8,7 +8,12 @@ import type { ReplayState } from "./replayState";
 import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
-import { formatNumber, formatSpeed, formatTime } from "../utils/formatters";
+import {
+  formatNumber,
+  formatSpeed,
+  formatTime,
+  formatTrack,
+} from "../utils/formatters";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
@@ -55,12 +60,6 @@ const READOUT_ALT_CELLS: (string | null)[] = [
   "replay-readout-speed-alt",
   null,
 ];
-
-/** Compass track for a bearing, normalised and zero padded ("072°") */
-export function formatTrack(bearing: number): string {
-  const normalised = ((Math.round(bearing) % 360) + 360) % 360;
-  return String(normalised).padStart(3, "0") + "°";
-}
 
 /**
  * Find the index of the last segment whose time is at or before currentTime.
@@ -307,8 +306,12 @@ export class ReplayRenderer {
     if (!currentSegment) return;
     this.popupIndex = idx;
 
+    // The marker is where the aircraft is now, part way along the segment;
+    // the segment's own end point is where it will be
+    const position = state.airplaneMarker.getLatLng();
     const popupContent = generateSegmentPopupHtml({
       segment: currentSegment,
+      position: [position.lat, position.lng],
       altMin: state.colorMinAlt,
       altMax: state.colorMaxAlt,
       speedMin: state.colorMinSpeed,

@@ -9,11 +9,11 @@ from hypothesis import strategies as st
 from kml_heatmap.export_pipeline import (
     _segment_groundspeed,
     build_path_info,
-    path_metrics,
+    path_duration,
     process_path_segments,
 )
 from kml_heatmap.helpers import parse_timestamp_epoch
-from kml_heatmap.segment_calculator import SegmentSpeed
+from kml_heatmap.segment_calculator import SegmentSpeed, SpeedWindow
 from kml_heatmap.types import TrackPoint
 
 
@@ -25,20 +25,18 @@ def _make_path(count=10, alt=1000.0, timed=False):
     return path
 
 
-class TestPathMetrics:
-    def test_duration_and_distance(self):
+class TestPathDuration:
+    def test_duration(self):
         metadata = {
             "timestamp": "2025-03-03T08:00:00Z",
             "end_timestamp": "2025-03-03T09:30:00Z",
         }
-        duration, distance = path_metrics(_make_path(), metadata)
-        assert duration == pytest.approx(5400.0)
-        assert distance == pytest.approx(11.9, abs=0.5)
+        assert path_duration(metadata) == pytest.approx(5400.0)
 
     def test_missing_or_invalid_timestamps_give_zero_duration(self):
-        assert path_metrics(_make_path(), {})[0] == 0.0
+        assert path_duration({}) == 0.0
         metadata = {"timestamp": "invalid", "end_timestamp": "also-invalid"}
-        assert path_metrics(_make_path(), metadata)[0] == 0.0
+        assert path_duration(metadata) == 0.0
 
 
 class TestBuildPathInfo:
@@ -129,6 +127,22 @@ class TestBuildPathInfo:
         assert names == [info["start_airport"], info["end_airport"]]
         assert names == ["EDAQ Halle-Oppin", "LFBN Niort - Marais Poitevin"]
 
+    def test_an_end_without_a_marker_is_no_airport(self):
+        """A "Home" end gets no marker, so it must not count as an airport."""
+        metadata = {
+            "airport_name": "Home - EDDP",
+            "start_airport": "Home",
+            "end_airport": "EDDP",
+        }
+        info = build_path_info(_make_path(), metadata, 0, 2025, frozenset({"EDDP"}))
+        assert "start_airport" not in info
+        assert info["end_airport"] == "EDDP"
+
+    def test_without_marker_names_every_end_is_kept(self):
+        metadata = {"airport_name": "Home - Away", "start_airport": "Home"}
+        info = build_path_info(_make_path(), metadata, 0, 2025)
+        assert info["start_airport"] == "Home"
+
     def test_aircraft_metadata_included(self):
         metadata = {"aircraft_registration": "D-EAGJ", "aircraft_type": "C172"}
         info = build_path_info(_make_path(), metadata, 0, 2025)
@@ -148,23 +162,27 @@ class TestBuildPathInfo:
 
 class TestSegmentGroundspeed:
     def test_windowed_speed_used_when_available(self):
-        seg = SegmentSpeed(0, 1000.0, 0.0, 100.0, 1.0, 30.0)
-        speed = _segment_groundspeed(seg, [1000.0], [seg], 10.0, 0.0)
+        seg = SegmentSpeed(0, 1000.0, 0.0, 100.0, 1.0, 30.0, valid=True)
+        speed = _segment_groundspeed(seg, SpeedWindow([seg]), 10.0, 0.0)
         assert speed == pytest.approx(1.0 / 1.852 / 30.0 * 3600, rel=1e-6)
 
     def test_fallback_when_no_timestamp(self):
-        seg = SegmentSpeed(0, None, None, 0.0, 1.0, 0.0)
-        speed = _segment_groundspeed(seg, [], [], 10.0, 600.0)
-        assert speed == pytest.approx(10.0 / 1.852 / 600.0 * 3600, rel=1e-6)
+        seg = SegmentSpeed(0, None, None, None, 1.0, 0.0)
+        speed = _segment_groundspeed(seg, SpeedWindow([]), 10.0, 600.0)
+        assert speed == pytest.approx(1.0 / 1.852 / 60.0 * 3600, rel=1e-6)
 
-    def test_zero_when_nothing_known(self):
-        seg = SegmentSpeed(0, None, None, 0.0, 1.0, 0.0)
-        assert _segment_groundspeed(seg, [], [], 10.0, 0.0) == 0.0
+    def test_unknown_when_nothing_known(self):
+        seg = SegmentSpeed(0, None, None, None, 1.0, 0.0)
+        assert _segment_groundspeed(seg, SpeedWindow([]), 10.0, 0.0) is None
+
+    def test_measured_standstill_is_not_replaced_by_the_average(self):
+        seg = SegmentSpeed(0, 1000.0, 0.0, 0.0, 0.0, 60.0, valid=True)
+        assert _segment_groundspeed(seg, SpeedWindow([seg]), 10.0, 600.0) == 0.0
 
 
 class TestProcessPathSegments:
     def test_generates_rows_with_time(self):
-        start, rows = process_path_segments(_make_path(timed=True), 10.0, 540.0)
+        start, rows = process_path_segments(_make_path(timed=True), 540.0)
         assert start == [50.0, 8.5]
         assert len(rows) == 9
         assert all(len(row) == 5 for row in rows)
@@ -172,12 +190,12 @@ class TestProcessPathSegments:
         assert rows[1][4] == 60.0
 
     def test_rows_without_time(self):
-        _, rows = process_path_segments(_make_path(count=3), 10.0, 600.0)
+        _, rows = process_path_segments(_make_path(count=3), 600.0)
         assert all(len(row) == 4 for row in rows)
 
     def test_rows_are_contiguous(self):
         """Each row starts where the previous one ended, so only ends are stored."""
-        start, rows = process_path_segments(_make_path(count=5), 10.0, 600.0)
+        start, rows = process_path_segments(_make_path(count=5), 600.0)
         path = _make_path(count=5)
         assert start == [round(path[0].lat, 5), round(path[0].lon, 5)]
         for row, point in zip(rows, path[1:], strict=True):
@@ -188,7 +206,7 @@ class TestProcessPathSegments:
             TrackPoint(50.123456789, 8.987654321, 1000.0, None),
             TrackPoint(50.223456789, 8.887654321, 1000.0, None),
         ]
-        start, rows = process_path_segments(path, 5.0, 60.0)
+        start, rows = process_path_segments(path, 60.0)
         assert start == [50.12346, 8.98765]
         assert rows[0][:2] == [50.22346, 8.88765]
 
@@ -198,7 +216,7 @@ class TestProcessPathSegments:
             TrackPoint(50.0, 8.5, 1100.0, None),
             TrackPoint(50.1, 8.6, 1200.0, None),
         ]
-        start, rows = process_path_segments(path, 5.0, 120.0)
+        start, rows = process_path_segments(path, 120.0)
         assert len(rows) == 1
         # The dropped segment had zero length, so the chain stays contiguous
         assert start == [50.0, 8.5]
@@ -213,7 +231,7 @@ class TestProcessPathSegments:
             TrackPoint(50.1, 8.6, 1200.0, 60.0),
             TrackPoint(50.100003, 8.600001, 1200.0, 61.0),
         ]
-        start, rows = process_path_segments(path, 5.0, 61.0)
+        start, rows = process_path_segments(path, 61.0)
         assert start == [50.0, 8.5]
         assert [row[:2] for row in rows] == [[50.1, 8.6]]
         # The kept row is the segment that starts at the last standstill point
@@ -224,13 +242,13 @@ class TestProcessPathSegments:
             TrackPoint(50.0, 8.5, 1523.5, None),
             TrackPoint(50.1, 8.6, 1523.5, None),
         ]
-        _, rows = process_path_segments(path, 5.0, 60.0)
+        _, rows = process_path_segments(path, 60.0)
         assert rows[0][2] == 5000
         assert rows[0][2] % 100 == 0
 
     def test_missing_altitude_on_one_end_uses_the_other(self):
         path = [TrackPoint(50.0, 8.5, None, None), TrackPoint(50.1, 8.6, 304.8, None)]
-        _, rows = process_path_segments(path, 5.0, 60.0)
+        _, rows = process_path_segments(path, 60.0)
         assert rows[0][2] == 1000
 
     def test_missing_altitude_on_both_ends_keeps_the_segment(self):
@@ -240,14 +258,14 @@ class TestProcessPathSegments:
             TrackPoint(50.1, 8.6, None, None),
             TrackPoint(50.2, 8.7, 100.0, None),
         ]
-        start, rows = process_path_segments(path, 5.0, 60.0)
+        start, rows = process_path_segments(path, 60.0)
         assert start == [50.0, 8.5]
         assert [row[:2] for row in rows] == [[50.1, 8.6], [50.2, 8.7]]
         assert rows[0][2] == 0.0  # no altitude known yet
         assert rows[1][2] == 300  # 100 m rounded to the nearest 100 ft
 
     def test_groundspeed_rounded(self):
-        _, rows = process_path_segments(_make_path(timed=True), 10.0, 540.0)
+        _, rows = process_path_segments(_make_path(timed=True), 540.0)
         for row in rows:
             assert row[3] == round(row[3], 1)
             assert row[3] > 0
@@ -258,13 +276,29 @@ class TestProcessPathSegments:
             TrackPoint(50.1, 8.6, 100.0, 1000.0 + 61.26),
             TrackPoint(50.2, 8.7, 100.0, 1000.0 + 120.0),
         ]
-        _, rows = process_path_segments(path, 20.0, 120.0)
+        _, rows = process_path_segments(path, 120.0)
         assert rows[1][4] == 61.3
 
+    def test_fast_aircraft_keeps_its_speed(self):
+        """Over 200 kt used to export as 0, which hid the flight's speed."""
+        step_km = 280 * 1.852 / 60  # a minute at 280 kt
+        path = [
+            TrackPoint(50.0 + i * step_km / 111.195, 8.5, 3000.0, 60.0 * i)
+            for i in range(10)
+        ]
+        _, rows = process_path_segments(path, 540.0)
+        assert all(row[3] == pytest.approx(280.0, abs=0.5) for row in rows)
+
+    def test_unknown_speed_is_exported_as_zero(self):
+        """The frontend reads 0 as "no speed" (see process_path_segments)."""
+        path = [TrackPoint(50.0, 8.5, 100.0, None), TrackPoint(50.1, 8.6, 100.0, None)]
+        _, rows = process_path_segments(path, 0.0)
+        assert rows[0][3] == 0.0
+
     def test_empty_path_has_no_start(self):
-        _, rows = process_path_segments([], 0.0, 0.0)
+        _, rows = process_path_segments([], 0.0)
         assert rows == []
-        start, _ = process_path_segments([], 0.0, 0.0)
+        start, _ = process_path_segments([], 0.0)
         assert start == []
 
 
@@ -292,7 +326,7 @@ class TestProcessPathSegmentsProperties:
             TrackPoint(lat, lon, alt, float(i) if timed else None)
             for i, (lat, lon, alt) in enumerate(points)
         ]
-        start, rows = process_path_segments(path, 1.0, 60.0)
+        start, rows = process_path_segments(path, 60.0)
 
         assert len(start) == (2 if rows else 0)
         for row in rows:

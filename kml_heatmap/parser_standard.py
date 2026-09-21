@@ -13,6 +13,8 @@ from .parser_common import (
 from .types import TrackPoint
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from lxml import etree
 
     from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
@@ -28,12 +30,16 @@ def process_standard_coordinates(
     path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
     aircraft_info: dict[str, str | None],
+    unknown_altitude: Collection[int] = frozenset(),
 ) -> None:
     """Process standard KML <coordinates> elements.
 
     A flight path needs at least two points: a lone ``<Point>`` (a waypoint,
     a home field) is kept in ``coordinates`` but is no path, so it neither
     gets exported nor registers an airport.
+
+    ``unknown_altitude`` holds the ids of the elements whose altitudes are to
+    be ignored (the caller has said why); they form no path either.
     """
     lines_without_altitude = 0
     # Once per file: parse_coordinate_point runs once per coordinate
@@ -59,6 +65,7 @@ def process_standard_coordinates(
 
         current_path: FlightPath = []
         element_coords = 0
+        altitude_known = id(coord_elem) not in unknown_altitude
 
         for point_text in coord_text.split():
             parsed = parse_coordinate_point(point_text, filename)
@@ -66,6 +73,8 @@ def process_standard_coordinates(
                 continue
 
             lat, lon, alt = parsed
+            if not altitude_known:
+                alt = None
             point = TrackPoint(lat, lon, alt, None)
             coordinates.append(point)
 
@@ -84,7 +93,7 @@ def process_standard_coordinates(
                     kml_file, current_path[0], metadata, aircraft_info
                 )
             )
-        elif element_coords > 1:
+        elif element_coords > 1 and altitude_known:
             lines_without_altitude += 1
 
         if element_coords > 0:

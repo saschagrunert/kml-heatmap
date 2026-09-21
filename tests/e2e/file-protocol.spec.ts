@@ -35,3 +35,34 @@ test("the site works when opened from disk", async ({ page }) => {
   expect(errors.cspViolations).toEqual([]);
   expect(relevantConsoleErrors(errors)).toEqual([]);
 });
+
+for (const origin of ["disk", "server"] as const) {
+  test(`the latest year is preloaded and fetched once (${origin})`, async ({
+    page,
+  }) => {
+    // The page asks for the year it opens on before Leaflet and the bundle
+    // have run; the loader's script tag then has to take that response
+    // instead of downloading the largest file of the page a second time
+    const requested: string[] = [];
+    page.on("request", (request) => {
+      if (/\/data\/\d{4}\/data\.js$/.test(request.url())) {
+        requested.push(request.url().split("/data/")[1]!);
+      }
+    });
+
+    await page.goto(
+      origin === "disk"
+        ? pathToFileURL(join(SITE_DIR, "index.html")).href
+        : "/index.html",
+    );
+    await waitForPathData(page);
+
+    const latest = await page.evaluate(() =>
+      Math.max(...window.KML_METADATA!.available_years),
+    );
+    await expect(
+      page.locator('link[rel="preload"][as="script"]'),
+    ).toHaveAttribute("href", `data/${latest}/data.js`);
+    expect(requested).toEqual([`${latest}/data.js`]);
+  });
+}

@@ -1,14 +1,18 @@
 """Segment calculation for path data with groundspeed and altitude analysis.
 
 Groundspeed uses a two-pass approach: instantaneous speeds for all segments,
-then rolling window averages for smoothing. The windowing system uses binary
-search on sorted timestamps for O(log n) lookups. Timestamps are Unix epoch
-seconds that were parsed once by the KML parser.
+then rolling window averages for smoothing. The window keeps running totals
+of distance and time over the segments sorted by time, so each lookup is a
+binary search and two subtractions, whatever the width of the window.
+Timestamps are Unix epoch seconds that were parsed once by the KML parser.
+
+A groundspeed that cannot be measured, or that is implausible, is None
+(unknown), never 0: a 0 would read as standing still.
 """
 
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
-from itertools import pairwise
+from itertools import accumulate, pairwise
 from typing import TYPE_CHECKING
 
 from .constants import (
@@ -25,10 +29,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SegmentSpeed",
-    "build_time_indexed_segments",
+    "SpeedWindow",
     "calculate_fallback_groundspeed",
-    "calculate_path_distance",
-    "calculate_windowed_groundspeed",
     "extract_segment_speeds",
 ]
 
@@ -41,37 +43,32 @@ class SegmentSpeed:
     timed, the time delta is usable and the speed plausible. Only valid
     segments enter the rolling window, including the ones where the aircraft
     stood still (speed 0), because their time counts toward the average.
+    ``speed`` is None for every other segment.
     """
 
     index: int
     timestamp: float | None
     relative_time: float | None
-    speed: float
+    speed: float | None
     distance: float
     time_delta: float
     valid: bool = False
 
 
-def calculate_path_distance(path: FlightPath) -> float:
-    """Calculate total distance along a path in kilometers."""
-    if len(path) < 2:
-        return 0.0
-
-    return sum(
-        haversine_distance(p1.lat, p1.lon, p2.lat, p2.lon) for p1, p2 in pairwise(path)
-    )
-
-
 def extract_segment_speeds(
     path: FlightPath, path_start_time: float | None
 ) -> list[SegmentSpeed]:
-    """Calculate instantaneous speeds for all segments in a path."""
+    """Calculate instantaneous speeds for all segments in a path.
+
+    The distances of the segments add up to the length of the path, so a
+    caller that needs it sums them instead of computing each one twice.
+    """
     segment_speeds: list[SegmentSpeed] = []
 
     for i, (p1, p2) in enumerate(pairwise(path)):
         segment_distance_km = haversine_distance(p1.lat, p1.lon, p2.lat, p2.lon)
 
-        instant_speed = 0.0
+        instant_speed: float | None = None
         timestamp = None
         time_delta = 0.0
         relative_time = None
@@ -86,11 +83,11 @@ def extract_segment_speeds(
 
             if time_delta >= MIN_SEGMENT_TIME_SECONDS:
                 segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
-                instant_speed = (segment_distance_nm / time_delta) * SECONDS_PER_HOUR
-                valid = instant_speed <= MAX_GROUNDSPEED_KNOTS
-
-                if not valid:
-                    instant_speed = 0.0  # Ignore unrealistic speeds
+                speed = (segment_distance_nm / time_delta) * SECONDS_PER_HOUR
+                # An implausible speed (a position jump) is no measurement
+                valid = speed <= MAX_GROUNDSPEED_KNOTS
+                if valid:
+                    instant_speed = speed
 
         segment_speeds.append(
             SegmentSpeed(
@@ -107,74 +104,89 @@ def extract_segment_speeds(
     return segment_speeds
 
 
-def build_time_indexed_segments(
-    segment_speeds: list[SegmentSpeed],
-) -> tuple[list[float], list[SegmentSpeed]]:
-    """Build time-sorted lists for efficient window queries.
+class SpeedWindow:
+    """Rolling window averages of groundspeed over the valid segments.
 
     Only valid segments take part (see ``SegmentSpeed``). A segment where
     the aircraft stood still is valid: leaving it out made the window
     average the speed of the moving time only, so a minute of holding
     followed by a minute at 100 kt averaged to 100 kt instead of 50.
+
+    The segments are sorted by time and their distances and durations kept
+    as running totals, so the sums over any window are two subtractions.
+    Summing each window anew took time proportional to its width for every
+    segment.
     """
-    timed = sorted(
-        (seg for seg in segment_speeds if seg.valid and seg.timestamp is not None),
-        key=lambda seg: seg.timestamp or 0.0,
-    )
-    timestamp_list = [seg.timestamp for seg in timed if seg.timestamp is not None]
-    return timestamp_list, timed
 
+    __slots__ = ("_distance_totals", "_time_totals", "timestamps")
 
-def calculate_windowed_groundspeed(
-    current_timestamp: float,
-    timestamp_list: list[float],
-    time_indexed_segments: list[SegmentSpeed],
-) -> tuple[float, float, float]:
-    """Calculate rolling average groundspeed using a time window.
+    def __init__(self, segment_speeds: list[SegmentSpeed]) -> None:
+        """Index the valid, timed segments of a path."""
+        timed = sorted(
+            (seg for seg in segment_speeds if seg.valid and seg.timestamp is not None),
+            key=lambda seg: seg.timestamp or 0.0,
+        )
+        self.timestamps = [seg.timestamp for seg in timed if seg.timestamp is not None]
+        self._distance_totals = list(
+            accumulate((seg.distance for seg in timed), initial=0.0)
+        )
+        self._time_totals = list(
+            accumulate((seg.time_delta for seg in timed), initial=0.0)
+        )
 
-    Returns:
-        Tuple of (groundspeed_knots, window_distance_km, window_time_seconds)
-    """
-    if not timestamp_list:
-        return 0.0, 0.0, 0.0
+    def __len__(self) -> int:
+        """The number of segments in the window index."""
+        return len(self.timestamps)
 
-    window_distance = 0.0
-    window_time = 0.0
-    half_window = SPEED_WINDOW_SECONDS / 2
+    def totals(self, current_timestamp: float) -> tuple[float, float]:
+        """Distance (km) and time (s) of the segments around a timestamp.
 
-    start_idx = bisect_left(timestamp_list, current_timestamp - half_window)
-    end_idx = bisect_right(timestamp_list, current_timestamp + half_window)
+        The window is ``SPEED_WINDOW_SECONDS`` wide and centered on
+        ``current_timestamp``; it holds the segments that start within it.
+        """
+        half_window = SPEED_WINDOW_SECONDS / 2
+        start = bisect_left(self.timestamps, current_timestamp - half_window)
+        end = bisect_right(self.timestamps, current_timestamp + half_window)
+        return (
+            self._distance_totals[end] - self._distance_totals[start],
+            self._time_totals[end] - self._time_totals[start],
+        )
 
-    for j in range(start_idx, end_idx):
-        seg = time_indexed_segments[j]
-        window_distance += seg.distance
-        window_time += seg.time_delta
+    def groundspeed(self, current_timestamp: float) -> float | None:
+        """The average groundspeed in knots around a timestamp.
 
-    if window_time >= MIN_SEGMENT_TIME_SECONDS:
+        None (unknown) when the window holds too little time or its average
+        is implausible.
+        """
+        if not self.timestamps:
+            return None
+        window_distance, window_time = self.totals(current_timestamp)
+        if window_time < MIN_SEGMENT_TIME_SECONDS:
+            return None
         window_distance_nm = window_distance * KM_TO_NAUTICAL_MILES
         groundspeed_knots = (window_distance_nm / window_time) * SECONDS_PER_HOUR
-
         if groundspeed_knots > MAX_GROUNDSPEED_KNOTS:
-            return 0.0, 0.0, 0.0
-
-        return groundspeed_knots, window_distance, window_time
-
-    return 0.0, 0.0, 0.0
+            return None
+        return groundspeed_knots
 
 
 def calculate_fallback_groundspeed(
     segment_distance_km: float, path_distance_km: float, path_duration_seconds: float
-) -> float:
-    """Calculate groundspeed from path averages when timestamps are unavailable."""
+) -> float | None:
+    """Groundspeed from path averages when timestamps are unavailable.
+
+    None (unknown) when the path has no duration or distance, or the result
+    would be implausible.
+    """
     if path_duration_seconds <= 0 or path_distance_km <= 0:
-        return 0.0
+        return None
 
     segment_time_seconds = (
         segment_distance_km / path_distance_km
     ) * path_duration_seconds
 
     if segment_time_seconds < MIN_SEGMENT_TIME_SECONDS:
-        return 0.0
+        return None
 
     segment_distance_nm = segment_distance_km * KM_TO_NAUTICAL_MILES
     calculated_speed = (segment_distance_nm / segment_time_seconds) * SECONDS_PER_HOUR
@@ -182,4 +194,4 @@ def calculate_fallback_groundspeed(
     if 0 < calculated_speed <= MAX_GROUNDSPEED_KNOTS:
         return calculated_speed
 
-    return 0.0
+    return None

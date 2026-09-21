@@ -6,10 +6,18 @@
 # pull-request job can write, and it runs nothing from the repository or
 # from PyPI: it takes the two lock files from the artifact and commits them.
 #
-# Needs "Allow GitHub Actions to create and approve pull requests" under
-# Settings > Actions > General; without it the pull-request job fails with a
-# 403. A pull request opened with GITHUB_TOKEN does not trigger the test
-# workflow either, so close and reopen it to run CI (see CONTRIBUTING.md).
+# Opening the pull request needs one of two one-time setups (see
+# CONTRIBUTING.md), or the job fails with "GitHub Actions is not permitted to
+# create or approve pull requests":
+#
+# - a LOCK_PR_TOKEN repository secret: a fine-grained personal access token
+#   (or a GitHub App token) for this repository with read and write access
+#   to "Contents" and "Pull requests". A pull request opened with it starts
+#   the test workflow like any other.
+# - without that secret the job falls back to GITHUB_TOKEN, which needs
+#   "Allow GitHub Actions to create and approve pull requests" under
+#   Settings > Actions > General. A pull request opened with GITHUB_TOKEN
+#   does not start the test workflow, so close and reopen it to run CI.
 name: lock
 on:
   schedule:
@@ -75,3 +83,6 @@ jobs:
           add-paths: |
             requirements.lock
             requirements-test.lock
+          # The secret when it is set, the workflow token otherwise (see the
+          # comment at the top)
+          token: ${{ secrets.LOCK_PR_TOKEN || github.token }}

@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && npm run typecheck:node",
+    "typecheck:node": "tsc -p tsconfig.node.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint .",
     "lint:unused": "knip",
@@ -30,7 +31,7 @@
   },
   "//dependencies": "Vendored into the page by scripts/vendor.js and published with the site",
   "dependencies": {
-    "dom-to-image": "2.6.0",
+    "html-to-image": "1.11.13",
     "leaflet": "1.9.4",
     "leaflet.heat": "0.2.0",
     "lucide": "1.47.0"
@@ -57,5 +58,9 @@
     "typescript-eslint": {
       "eslint": "$eslint"
     }
+  },
+  "//allowScripts": "npm 11 skips dependency install scripts unless listed here. esbuild's postinstall checks its platform binary; esbuild runs the whole build anyway, so its script is trusted by name rather than pinned to one version that Dependabot bumps past",
+  "allowScripts": {
+    "esbuild": true
   }
 }

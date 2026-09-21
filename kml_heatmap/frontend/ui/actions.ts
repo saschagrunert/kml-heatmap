@@ -39,9 +39,7 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
     // these two can be the first thing a visitor touches; the rest are on
     // chrome that exists only once the feature is open, so they find the
     // manager already there.
-    toggleReplay: () => {
-      void app.loadReplay().then((manager) => manager?.toggleReplay());
-    },
+    toggleReplay: () => app.toggleReplay(),
     filterByYear: () => {
       app.filterManager.filterByYear().catch(logError);
     },
@@ -87,12 +85,12 @@ export function bindActions(app: MapApp): void {
       }
       fn(e);
     };
-    if (el.tagName === "SELECT") {
-      el.addEventListener("change", handler);
-    } else if (el.tagName === "INPUT") {
-      el.addEventListener("input", handler);
-    } else {
-      el.addEventListener("click", handler);
-    }
+    const type =
+      el.tagName === "SELECT"
+        ? "change"
+        : el.tagName === "INPUT"
+          ? "input"
+          : "click";
+    el.addEventListener(type, handler, { signal: app.signal });
   });
 }

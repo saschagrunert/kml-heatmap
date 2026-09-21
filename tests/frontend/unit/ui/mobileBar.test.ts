@@ -8,6 +8,7 @@ import {
   MobileBar,
   MOBILE_BAR_BREAKPOINT_PX,
 } from "../../../../kml_heatmap/frontend/ui/mobileBar";
+import { MOBILE_BREAKPOINT_PX } from "../../../../kml_heatmap/frontend/utils/constants";
 
 const PHONE_WIDTH = 390;
 const DESKTOP_WIDTH = 1200;
@@ -77,6 +78,9 @@ function createMockApp() {
     // bar asks the app for them and for whether replay is possible at all
     canReplay: vi.fn(() => true),
     loadReplay: vi.fn(() => Promise.resolve(replayManager)),
+    toggleReplay: vi.fn(() => {
+      replayManager.toggleReplay();
+    }),
     loadWrapped: vi.fn(() => Promise.resolve(wrappedManager)),
     get heatmapVisible() {
       return store.get("heatmapVisible");
@@ -193,6 +197,14 @@ describe("MobileBar", () => {
       create();
 
       expect(document.querySelector(".mobile-bar")).not.toBeNull();
+    });
+
+    it("asks for the one breakpoint the whole app uses", () => {
+      create();
+
+      // Just under it, like the stylesheet's max-width queries
+      expect(MOBILE_BAR_BREAKPOINT_PX).toBe(MOBILE_BREAKPOINT_PX);
+      expect(window.matchMedia).toHaveBeenCalledWith("(max-width: 767.98px)");
     });
 
     it("stays out of the document above the breakpoint", () => {

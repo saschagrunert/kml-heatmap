@@ -5,6 +5,7 @@
 
 import { calculateBearing } from "../utils/geometry";
 import { segmentsForPathIds } from "../calculations/statistics";
+import type { Coordinate } from "../utils/geometry";
 import type { PathSegment } from "../types";
 
 /**
@@ -28,11 +29,21 @@ export function prepareReplaySegments(
 }
 
 /**
+ * Bearing from one point to another, or null when the two are the same
+ * point: atan2(0, 0) is 0, which would turn the aircraft to north.
+ */
+function bearingBetween(from: Coordinate, to: Coordinate): number | null {
+  if (from[0] === to[0] && from[1] === to[1]) return null;
+  return calculateBearing(from[0], from[1], to[0], to[1]);
+}
+
+/**
  * Calculate smoothed bearing from multiple future segments
  * @param segments - All segments
  * @param currentIdx - Current segment index
  * @param lookAhead - Number of segments to look ahead
- * @returns Bearing in degrees or null
+ * @returns Bearing in degrees, or null when there is no direction to take
+ *   (the caller keeps the previous heading then)
  */
 export function calculateSmoothedBearing(
   segments: PathSegment[],
@@ -46,30 +57,13 @@ export function calculateSmoothedBearing(
   const currentSeg = segments[currentIdx]!;
   const futureIdx = Math.min(currentIdx + lookAhead, segments.length - 1);
   const futureSeg = segments[futureIdx]!;
-
-  if (currentIdx === futureIdx) {
-    // At end, use current segment's direction
-    const coords = currentSeg.coords;
-    if (coords && coords.length === 2) {
-      return calculateBearing(
-        coords[0][0],
-        coords[0][1],
-        coords[1][0],
-        coords[1][1],
-      );
-    }
-    return null;
-  }
-
-  // Calculate bearing from current position to future position
   if (!currentSeg.coords || !futureSeg.coords) {
     return null;
   }
 
-  return calculateBearing(
-    currentSeg.coords[1][0],
-    currentSeg.coords[1][1],
-    futureSeg.coords[0][0],
-    futureSeg.coords[0][1],
-  );
+  // From the start of the current segment to the end of the future one, so
+  // the span always covers at least the current segment. Measured from the
+  // current segment's end, the segment right before the last one looked
+  // ahead to the start of the last, which is the very same point.
+  return bearingBetween(currentSeg.coords[0], futureSeg.coords[1]);
 }

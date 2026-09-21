@@ -14,7 +14,12 @@ if TYPE_CHECKING:
 
     from .types import AirportData
 
-__all__ = ["export_airports_data", "export_metadata"]
+__all__ = [
+    "export_airports_data",
+    "export_metadata",
+    "exported_airport_names",
+    "exported_country_codes",
+]
 
 
 def _exported_airports(
@@ -33,6 +38,11 @@ def _exported_airports(
         if airport_name:
             exported.append((apt, airport_name))
     return exported
+
+
+def exported_airport_names(unique_airports: list[AirportData]) -> frozenset[str]:
+    """The names of the airport markers ``export_airports_data`` writes."""
+    return frozenset(name for _, name in _exported_airports(unique_airports))
 
 
 def exported_country_codes(unique_airports: list[AirportData]) -> list[str]:

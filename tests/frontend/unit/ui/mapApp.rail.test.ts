@@ -370,6 +370,33 @@ describe("MapApp controls and map", () => {
       expect(first).toBeDefined();
     });
 
+    it("opens replay once for quick clicks while the bundle loads", async () => {
+      await initializeApp(app);
+      let deliver: () => void = () => {};
+      const bundle = await loadFeatures();
+      vi.mocked(loadFeatures).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = () => resolve(bundle);
+          }),
+      );
+      m.mockReplayManagerInstance.toggleReplay.mockClear();
+
+      // Each click used to queue a toggle; two of them opened replay and
+      // closed it again as soon as the bundle arrived
+      app.toggleReplay();
+      app.toggleReplay();
+      deliver();
+      await vi.waitFor(() => expect(app.replayManager).toBeDefined());
+      await Promise.resolve();
+
+      expect(m.mockReplayManagerInstance.toggleReplay).toHaveBeenCalledTimes(1);
+
+      // Once it is there, every click toggles
+      app.toggleReplay();
+      expect(m.mockReplayManagerInstance.toggleReplay).toHaveBeenCalledTimes(2);
+    });
+
     it("keeps the manager once it has been built", async () => {
       await initializeApp(app);
       const first = await app.loadWrapped();
@@ -382,13 +409,90 @@ describe("MapApp controls and map", () => {
     });
   });
 
+  describe("replay availability", () => {
+    function replayButton(): HTMLButtonElement {
+      return document.getElementById("replay-btn") as HTMLButtonElement;
+    }
+
+    it("is not offered for a flight whose times are all 0", async () => {
+      await initializeApp(app, m.defaultAirports, m.defaultMetadata, {
+        ...m.defaultData,
+        path_segments: [{ path_id: 1, altitude_ft: 5000, time: 0 }],
+      });
+
+      app.selectedPathIds.add(1);
+      app.store.notifyMutation("selectedPathIds");
+
+      // It would finish the moment it started, with nothing drawn
+      expect(app.canReplay()).toBe(false);
+      expect(replayButton().style.opacity).toBe("0.5");
+    });
+
+    it("leaves the button to a running replay", async () => {
+      await initializeApp(app);
+      app.selectedPathIds.add(1);
+      app.store.notifyMutation("selectedPathIds");
+      replayButton().title = "Stop replay";
+      app.replayState.active = true;
+
+      app.selectedPathIds.clear();
+      app.store.notifyMutation("selectedPathIds");
+
+      expect(replayButton().style.opacity).toBe("1");
+      expect(replayButton().title).toBe("Stop replay");
+    });
+  });
+
+  describe("destroy", () => {
+    it("takes down the listeners it set up", async () => {
+      await initializeApp(app);
+      const map = app.map!;
+      const [handlers] = vi.mocked(map.on).mock.calls[0] as [
+        Record<string, () => void>,
+      ];
+      const statsListener = vi.fn();
+      app.store.subscribe("statsPanelVisible", statsListener);
+      const signal = app.signal;
+
+      app.destroy();
+
+      expect(signal.aborted).toBe(true);
+      expect(Object.keys(handlers)).toEqual(["moveend", "zoomend", "click"]);
+      expect(map.off).toHaveBeenCalledWith(handlers);
+      expect(mockStateManagerInstance.cancelSave).toHaveBeenCalled();
+      app.store.set("statsPanelVisible", true);
+      expect(statsListener).not.toHaveBeenCalled();
+    });
+
+    it("drops a Replay click still waiting for the bundle", async () => {
+      await initializeApp(app);
+      let deliver: () => void = () => {};
+      const bundle = await loadFeatures();
+      vi.mocked(loadFeatures).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = () => resolve(bundle);
+          }),
+      );
+      m.mockReplayManagerInstance.toggleReplay.mockClear();
+
+      app.toggleReplay();
+      app.destroy();
+      deliver();
+      await vi.waitFor(() => expect(app.replayManager).toBeDefined());
+      await Promise.resolve();
+
+      expect(m.mockReplayManagerInstance.toggleReplay).not.toHaveBeenCalled();
+    });
+  });
+
   describe("map event handlers", () => {
     function handler(event: string): (e?: unknown) => void {
-      const on = vi.mocked(app.map!.on) as unknown as {
-        mock: { calls: unknown[][] };
-      };
-      const call = on.mock.calls.find((c) => c[0] === event);
-      return call![1] as (e?: unknown) => void;
+      // Registered all at once, as a map of event to handler
+      const [handlers] = vi.mocked(app.map!.on).mock.calls[0] as [
+        Record<string, (e?: unknown) => void>,
+      ];
+      return handlers[event]!;
     }
 
     it("schedules a state save on move and zoom", async () => {

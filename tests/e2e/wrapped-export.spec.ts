@@ -292,14 +292,14 @@ test.describe("Wrapped and Export", () => {
   });
 
   test("export button triggers download", async ({ page }) => {
-    // Mock dom-to-image for reliable headless testing
+    // Mock html-to-image for reliable headless testing
     await page.evaluate(() => {
-      window.domtoimage = {
+      window.htmlToImage = {
         toJpeg: () =>
           Promise.resolve(
             "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA",
           ),
-      } as unknown as DomToImage;
+      } as unknown as HtmlToImage;
     });
 
     const downloadPromise = page.waitForEvent("download", {
@@ -318,17 +318,17 @@ test.describe("Wrapped and Export", () => {
     await expect(page.locator("#replay-btn")).toBeVisible();
   });
 
-  test("export loads dom-to-image on demand and reports when unavailable", async ({
+  test("export loads html-to-image on demand and reports when unavailable", async ({
     page,
   }) => {
     // The library is not part of the initial page load
     expect(
       await page.evaluate(
-        () => document.querySelector('script[src*="dom-to-image"]') !== null,
+        () => document.querySelector('script[src*="html-to-image"]') !== null,
       ),
     ).toBe(false);
 
-    await page.route("**/dom-to-image*", (route) => route.abort());
+    await page.route("**/html-to-image*", (route) => route.abort());
     await page.locator("#export-btn").click();
 
     await expect(page.locator(".toast-notification")).toHaveText(

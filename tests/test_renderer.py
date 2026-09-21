@@ -112,11 +112,19 @@ class TestCoordinateExtent:
         extent = CoordinateExtent.of([TrackPoint(50.0, 8.0), TrackPoint(52.0, 7.0)])
         assert extent == CoordinateExtent(50.0, 52.0, 7.0, 8.0)
 
-    def test_union(self):
-        a = CoordinateExtent(50.0, 51.0, 8.0, 9.0)
-        b = CoordinateExtent(49.0, 50.5, 8.5, 10.0)
-        assert a.union(b) == CoordinateExtent(49.0, 51.0, 8.0, 10.0)
-        assert a.union(None) == a
+    def test_across_the_antimeridian_keeps_every_flight_in_view(self):
+        """Fiji: Leaflet draws 179°W at -179, so the box has to reach it.
+
+        A box that wrapped around 180 (178.5 to 181) would open the map on
+        the flights east of the antimeridian and leave the others 358° away.
+        """
+        extent = CoordinateExtent.of(
+            [TrackPoint(-17.0, 178.5), TrackPoint(-16.0, -179.0), TrackPoint(-18, 179)]
+        )
+        assert extent == CoordinateExtent(-18.0, -16.0, -179.0, 179.0)
+        bounds = extent.as_map_bounds()
+        assert -180 <= bounds["min_lon"] < bounds["max_lon"] <= 180
+        assert bounds["center_lon"] == pytest.approx(0.0)
 
     def test_map_bounds_with_center(self):
         bounds = CoordinateExtent(48.0, 54.0, 9.0, 17.0).as_map_bounds()
@@ -135,6 +143,79 @@ class TestMapExtent:
     def test_nothing_to_export_raises(self):
         with pytest.raises(KMLHeatmapError, match="No flight paths"):
             _map_extent([[TrackPoint(40.0, -3.0, 1.0)]])
+
+
+class _NoPool:
+    def __init__(self, *args, **kwargs):
+        raise AssertionError("no process pool expected")
+
+
+class TestParseWithoutAPool:
+    def test_small_files_are_parsed_inline(self, tmp_path):
+        files = [
+            _write_kml(tmp_path / "10_DEAGJ_DA20.kml", 2026),
+            _write_kml(tmp_path / "2_DEAGJ_DA20.kml", 2025),
+        ]
+        with patch("kml_heatmap.renderer.ProcessPoolExecutor", _NoPool):
+            _, metadata = _parse_kml_files(files)
+        assert [m["year"] for m in metadata] == [2026, 2025]
+
+    def test_cached_files_are_read_here_and_only_the_rest_goes_to_the_pool(
+        self, tmp_path, monkeypatch
+    ):
+        cached = _write_kml(tmp_path / "1_DEAGJ_DA20.kml", 2025)
+        _parse_kml_files([cached])
+        fresh = _write_kml(tmp_path / "2_DEAGJ_DA20.kml", 2026)
+        monkeypatch.setattr("kml_heatmap.renderer.INLINE_PARSE_MAX_BYTES", -1)
+        pool = _InlineExecutor()
+        submitted = []
+        real_submit = pool.submit
+
+        def submit(fn, *args):
+            submitted.extend(args)
+            return real_submit(fn, *args)
+
+        pool.submit = submit
+        with patch("kml_heatmap.renderer.ProcessPoolExecutor", pool):
+            _, metadata = _parse_kml_files([cached, fresh])
+        assert submitted == [fresh]
+        assert [m["year"] for m in metadata] == [2025, 2026]
+
+    def test_warm_cache_needs_no_pool(self, tmp_path, monkeypatch):
+        files = [_write_kml(tmp_path / f"{i}_DEAGJ_DA20.kml", 2025) for i in (1, 2)]
+        first = _parse_kml_files(files)
+        monkeypatch.setattr("kml_heatmap.renderer.INLINE_PARSE_MAX_BYTES", -1)
+        with patch("kml_heatmap.renderer.ProcessPoolExecutor", _NoPool):
+            assert _parse_kml_files(files) == first
+
+    def test_unreadable_cache_is_a_miss(self, tmp_path):
+        kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
+        with patch("kml_heatmap.renderer.load_cached_kml", side_effect=OSError):
+            _, metadata = _parse_kml_files([kml_file])
+        assert len(metadata) == 1
+
+    def test_pipeline_error_inline_stops_the_run(self, tmp_path):
+        kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
+        with (
+            patch(
+                "kml_heatmap.renderer._parse_with_error_handling",
+                side_effect=KMLHeatmapError("Airport database unavailable"),
+            ),
+            pytest.raises(KMLHeatmapError, match="Airport database unavailable"),
+        ):
+            _parse_kml_files([kml_file])
+
+    def test_unexpected_error_inline_is_logged(self, tmp_path, capsys):
+        kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
+        with (
+            patch(
+                "kml_heatmap.renderer._parse_with_error_handling",
+                side_effect=RuntimeError("unexpected"),
+            ),
+            pytest.raises(KMLHeatmapError, match="No coordinates"),
+        ):
+            _parse_kml_files([kml_file])
+        assert "Unexpected error processing" in capsys.readouterr().err
 
 
 class TestParseWithErrorHandling:
@@ -195,6 +276,11 @@ class _InlineExecutor(_FakeExecutor):
 
 
 class TestParseKmlFiles:
+    @pytest.fixture(autouse=True)
+    def _in_a_pool(self, monkeypatch):
+        """These files are small enough to be parsed inline; use the pool."""
+        monkeypatch.setattr("kml_heatmap.renderer.INLINE_PARSE_MAX_BYTES", -1)
+
     def test_merges_results_in_input_order(self, tmp_path):
         files = [
             _write_kml(tmp_path / "10_DEAGJ_DA20.kml", 2026),

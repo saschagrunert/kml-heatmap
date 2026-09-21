@@ -15,7 +15,7 @@ describe("createDefaultState", () => {
     expect(state.heatmapVisible).toBe(true);
     expect(state.altitudeVisible).toBe(false);
     expect(state.currentData).toBeNull();
-    expect(state.altitudeRange).toEqual({ min: 0, max: 10000 });
+    expect(state.hasTimingData).toBe(false);
   });
 
   it("returns a fresh object each call", () => {
@@ -256,15 +256,28 @@ describe("AppStore", () => {
     });
 
     it("stays quiet for an object set and set back within a batch", () => {
-      const original = { min: 0, max: 10000 };
-      const store = new AppStore({ altitudeRange: original });
+      const original = new Set([1]);
+      const store = new AppStore({ selectedPathIds: original });
       const fn = vi.fn();
-      store.subscribe("altitudeRange", fn);
+      store.subscribe("selectedPathIds", fn);
 
       store.batch(() => {
-        store.set("altitudeRange", { min: 0, max: 5000 });
-        store.set("altitudeRange", original);
+        store.set("selectedPathIds", new Set([2]));
+        store.set("selectedPathIds", original);
       });
+
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it("drops every listener on unsubscribeAll", () => {
+      const store = new AppStore();
+      const fn = vi.fn();
+      store.subscribe("selectedYear", fn);
+      store.subscribeKeys(["heatmapVisible", "altitudeVisible"], fn);
+
+      store.unsubscribeAll();
+      store.set("selectedYear", "2024");
+      store.set("heatmapVisible", false);
 
       expect(fn).not.toHaveBeenCalled();
     });

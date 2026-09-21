@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as L from "leaflet";
 import {
+  colorSegmentPopups,
   createAirportMarkers,
   dropUnknownPathIds,
   loadInitialData,
@@ -487,6 +488,31 @@ describe("appInitializer", () => {
       dropUnknownPathIds(asMapApp(app), data);
 
       expect(listener).not.toHaveBeenCalled();
+    });
+  });
+  describe("colorSegmentPopups", () => {
+    it("colours a metric as Leaflet writes it into a popup", async () => {
+      const map = document.createElement("div");
+      map.id = "map";
+      map.innerHTML = '<div class="leaflet-popup-pane"></div>';
+      document.body.appendChild(map);
+
+      colorSegmentPopups();
+      const content = document.createElement("div");
+      content.innerHTML =
+        '<div class="kh-popup-metric-colored" data-metric-color="rgb(1, 2, 3)"></div>';
+      map.firstElementChild!.appendChild(content);
+      await Promise.resolve();
+
+      const metric = content.firstElementChild as HTMLElement;
+      expect(metric.style.getPropertyValue("--kh-metric-color")).toBe(
+        "rgb(1, 2, 3)",
+      );
+      map.remove();
+    });
+
+    it("does nothing without a map", () => {
+      expect(() => colorSegmentPopups()).not.toThrow();
     });
   });
 });

@@ -27,7 +27,7 @@ import type {
   Metadata,
   PathInfo,
   RawPathSegments,
-  RawSegment,
+  RawColumns,
   RawYearData,
 } from "../../../kml_heatmap/frontend/types";
 
@@ -133,25 +133,36 @@ export function isPathInfo(value: unknown): value is PathInfo {
 }
 
 /**
- * One encoded row: the per-column difference to the row before it. Every
- * value is a scaled integer, which is what makes the format compact; a
- * float here would mean the exporter stopped scaling a column.
+ * The encoded columns of one path: four or five arrays of one length each.
+ * Every value is a scaled integer, which is what makes the format compact;
+ * a float here would mean the exporter stopped scaling a column. Only the
+ * time column may hold null, for a row without a relative time.
  */
-export function isRawSegment(value: unknown): value is RawSegment {
+export function isRawColumns(value: unknown): value is RawColumns {
   if (!Array.isArray(value)) return false;
   if (value.length !== 4 && value.length !== 5) return false;
-  return value.every(isInteger);
+  if (!value.every(Array.isArray)) return false;
+  const columns = value as unknown[][];
+  const count = columns[0]!.length;
+  return columns.every(
+    (column, index) =>
+      column.length === count &&
+      column.every(
+        (entry) => isInteger(entry) || (index === 4 && entry === null),
+      ),
+  );
 }
 
 export function isRawPathSegments(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  const rows = value["rows"];
-  if (!Array.isArray(rows) || !rows.every(isRawSegment)) return false;
+  if ("rows" in value) return false;
+  const columns = value["columns"];
+  if (!isRawColumns(columns)) return false;
   const start = value["start"];
   if (!Array.isArray(start)) return false;
   // A path with rows has to say where its first row starts, as a scaled
   // coordinate pair
-  if (rows.length === 0) return start.length === 0;
+  if (columns[0].length === 0) return start.length === 0;
   return (
     start.length === 2 &&
     start.every(isInteger) &&
@@ -240,12 +251,12 @@ export function isMetadata(value: unknown): value is Metadata {
 // ---- inline sample (new format) ----
 
 /**
- * Column scales of the wire format, mirroring _SCALES in
- * kml_heatmap/segment_codec.py. The sample is written in the units a reader
- * thinks in and encoded here, so the guards and the loader are checked
- * against an encoder that is not the one under test.
+ * Column scales of the wire format, mirroring kml_heatmap/segment_codec.py
+ * (the altitude column counts hundreds of feet). The sample is written in
+ * the units a reader thinks in and encoded here, so the guards and the
+ * loader are checked against an encoder that is not the one under test.
  */
-const SCALES = [1e5, 1e5, 1, 10, 10];
+const SCALES = [1e5, 1e5, 1 / 100, 10, 10];
 
 function encodePath(
   start: [number, number],
@@ -256,16 +267,21 @@ function encodePath(
     Math.round(start[1] * SCALES[1]!),
   ];
   const running = [scaledStart[0]!, scaledStart[1]!, 0, 0, 0];
-  const encoded = rows.map(
-    (row) =>
-      row.map((value, column) => {
-        const scaled = Math.round(value * SCALES[column]!);
-        const difference = scaled - running[column]!;
-        running[column] = scaled;
-        return difference;
-      }) as unknown as RawSegment,
-  );
-  return { start: scaledStart, rows: encoded };
+  const columns: (number | null)[][] = [[], [], [], []];
+  if (rows.some((row) => row.length > 4)) columns.push([]);
+  for (const row of rows) {
+    columns.forEach((column, index) => {
+      const value = row[index];
+      if (value === undefined) {
+        column.push(null);
+        return;
+      }
+      const scaled = Math.round(value * SCALES[index]!);
+      column.push(scaled - running[index]!);
+      running[index] = scaled;
+    });
+  }
+  return { start: scaledStart, columns: columns as RawColumns };
 }
 
 const sampleMetadata = {
@@ -399,6 +415,40 @@ describe("export contract (inline new-format sample)", () => {
       "KML_DATA_2025",
     );
     expect(isRawYearData(parsed)).toBe(true);
+  });
+
+  it("checks the encoded columns of a path", () => {
+    const valid = sampleYear2025.segments["840108108563"]!;
+    expect(isRawPathSegments(valid)).toBe(true);
+    // Row by row, as format 2 wrote it
+    expect(
+      isRawPathSegments({ start: valid.start, rows: [[1, 2, 3, 4, 5]] }),
+    ).toBe(false);
+    for (const columns of [
+      // Columns of different lengths
+      [[1, 2], [1], [1], [1]],
+      // A float: the exporter stopped scaling a column
+      [[1.5], [1], [1], [1]],
+      // null is only a missing time, never a missing coordinate
+      [[null], [1], [1], [1]],
+      // Too few columns
+      [[1], [1], [1]],
+    ]) {
+      expect(isRawPathSegments({ start: valid.start, columns })).toBe(false);
+    }
+    // A row without a relative time
+    expect(
+      isRawPathSegments({
+        start: valid.start,
+        columns: [
+          [1, 1],
+          [1, 1],
+          [1, 1],
+          [1, 1],
+          [null, 1],
+        ],
+      }),
+    ).toBe(true);
   });
 
   it("rejects legacy or malformed per-year files", () => {
@@ -564,7 +614,7 @@ describe("export contract (docs/data)", () => {
           }
           // Every exported path has at least one segment to draw
           expect(
-            raw.segments[String(info.id)]?.rows.length ?? 0,
+            raw.segments[String(info.id)]?.columns[0].length ?? 0,
             `path ${info.id} rows`,
           ).toBeGreaterThan(0);
           if (info.aircraft_registration) {
@@ -575,7 +625,10 @@ describe("export contract (docs/data)", () => {
         // the loader can expand it
         const data = expandYearData(raw);
         expect(data.path_segments.length).toBe(
-          Object.values(raw.segments).reduce((n, e) => n + e.rows.length, 0),
+          Object.values(raw.segments).reduce(
+            (n, e) => n + e.columns[0].length,
+            0,
+          ),
         );
 
         // The decoded values have to be the ones the exporter put in. The

@@ -13,10 +13,13 @@ import { datasetIndex } from "../../kml_heatmap/frontend/calculations/datasetInd
 import { ReplayState } from "../../kml_heatmap/frontend/ui/replayState";
 import {
   AppStore,
+  DEFAULT_AIRSPEED_RANGE,
+  DEFAULT_ALTITUDE_RANGE,
   defineStoreAccessors,
   STORE_ACCESSOR_KEYS,
   type StoreState,
 } from "../../kml_heatmap/frontend/state/store";
+import { segmentsForPathIds } from "../../kml_heatmap/frontend/calculations/statistics";
 import {
   syncLegend,
   syncToggleButton,
@@ -103,7 +106,6 @@ interface MockManagers {
     updateIsolateButton: Mock;
   };
   airportManager: {
-    calculateAirportFlightCounts: Mock;
     updateAirportPopups: Mock;
     updateAirportOpacity: Mock;
     updateAirportMarkerSizes: Mock;
@@ -115,6 +117,7 @@ interface MockManagers {
     loadState: Mock;
     loadMapState: Mock;
     updateUrl: Mock;
+    cancelSave: Mock;
   };
   /**
    * The replay state the app owns. `replayManager.state` is the very same
@@ -123,6 +126,7 @@ interface MockManagers {
    */
   replayState: ReplayState;
   canReplay: Mock;
+  toggleReplay: Mock;
   loadReplay: Mock;
   loadWrapped: Mock;
   replayManager: {
@@ -179,6 +183,11 @@ export type MockApp = Omit<
   };
 
 export interface MockAppOverrides extends Partial<StoreState> {
+  /** The app's lifetime signal; a test that aborts it passes its own */
+  signal?: AbortSignal;
+  aircraftModels?: MapApp["aircraftModels"];
+  altitudeRange?: MapApp["altitudeRange"];
+  airspeedRange?: MapApp["airspeedRange"];
   map?: LeafletMockMap | null;
   config?: Partial<MapApp["config"]>;
   isInitializing?: boolean;
@@ -254,7 +263,6 @@ function createMockManagers(): MockManagers {
       updateIsolateButton: vi.fn(),
     },
     airportManager: {
-      calculateAirportFlightCounts: vi.fn(() => ({})),
       updateAirportPopups: vi.fn(),
       updateAirportOpacity: vi.fn(),
       updateAirportMarkerSizes: vi.fn(),
@@ -266,11 +274,24 @@ function createMockManagers(): MockManagers {
       loadState: vi.fn(() => null),
       loadMapState: vi.fn(() => null),
       updateUrl: vi.fn(),
+      cancelSave: vi.fn(),
     },
     replayState,
-    // The real predicate: MapApp.canReplay reads exactly these two
+    // The real predicate, the way MapApp.canReplay puts it
     canReplay: vi.fn(function (this: MockApp) {
-      return this.selectedPathIds.size === 1 && this.hasTimingData;
+      const segments = this.fullPathSegments;
+      return (
+        this.selectedPathIds.size === 1 &&
+        this.hasTimingData &&
+        !!segments &&
+        segmentsForPathIds(segments, this.selectedPathIds).some(
+          (segment) => (segment.time ?? 0) > 0,
+        )
+      );
+    }),
+    // Like the app's once the manager is there: straight to it
+    toggleReplay: vi.fn(() => {
+      replayManager.toggleReplay();
     }),
     // Replay and Wrapped are fetched on demand in the app; the stubs are
     // already there, so the loaders hand them straight back
@@ -356,6 +377,10 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
     },
     airportMarkers: {},
     openaipLayers: {},
+    aircraftModels: {},
+    altitudeRange: { ...DEFAULT_ALTITUDE_RANGE },
+    airspeedRange: { ...DEFAULT_AIRSPEED_RANGE },
+    signal: new AbortController().signal,
     savedState: null,
     restoredYearFromState: false,
     mobileBar: null,

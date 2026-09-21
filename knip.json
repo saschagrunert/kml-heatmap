@@ -13,5 +13,5 @@
     "*.js",
     "scripts/*.js"
   ],
-  "ignoreDependencies": ["dom-to-image", "leaflet.heat", "flag-icons"]
+  "ignoreDependencies": ["leaflet.heat", "flag-icons"]
 }

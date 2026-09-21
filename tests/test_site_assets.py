@@ -130,7 +130,7 @@ class TestRenderHtml:
         assert "my_data_dir" in content
         assert "$data_dir_name" not in content
         substituted = string.Template(load_template()).substitute(
-            data_dir_name="my_data_dir"
+            data_dir_name="my_data_dir", year_preload=""
         )
         assert len(content) < len(substituted)
 
@@ -149,6 +149,27 @@ class TestRenderHtml:
         ]
         assert 'da"ta<x>/metadata.js' in sources
         assert 'da"ta<x>/airports.js' in sources
+
+    def test_preloads_the_latest_year(self, tmp_path):
+        """The first year the page shows starts downloading with the page."""
+        from lxml import html as lxml_html
+
+        output_file = tmp_path / "index.html"
+        render_html(output_file, 'da"ta', 2026)
+        preloads = [
+            (link.get("as"), link.get("href"))
+            for link in lxml_html.fromstring(output_file.read_text()).iter("link")
+            if link.get("rel") == "preload"
+        ]
+        # The same URL the loader requests, so the preload is what it gets
+        assert preloads == [("script", 'da"ta/2026/data.js')]
+
+    def test_preloads_nothing_without_a_year(self, tmp_path):
+        output_file = tmp_path / "index.html"
+        render_html(output_file, "data")
+        content = output_file.read_text()
+        assert "preload" not in content
+        assert "$year_preload" not in content
 
     def test_output_is_world_readable(self, tmp_path):
         previous = os.umask(0o022)
@@ -395,11 +416,21 @@ class TestStaleBundleWarning:
             path = tmp_path / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("{}")
-        (tmp_path / "package-lock.json").write_text(
-            json.dumps({"packages": {"node_modules/esbuild": {"version": "0.28.2"}}})
-        )
+        (tmp_path / "package-lock.json").write_text(json.dumps(self._lock()))
         monkeypatch.setattr(assets_module, "FRONTEND_DIR", frontend)
         return frontend
+
+    @staticmethod
+    def _lock(**versions):
+        """A package-lock.json that pins every package the hash reads"""
+        pinned = dict.fromkeys(assets_module.BUILD_HASH_PACKAGES, "1.0.0")
+        pinned.update(versions)
+        return {
+            "packages": {
+                f"node_modules/{name}": {"version": version}
+                for name, version in pinned.items()
+            }
+        }
 
     def test_warns_about_a_bundle_of_other_sources(
         self, tmp_path, monkeypatch, bundle, capsys
@@ -455,14 +486,16 @@ class TestStaleBundleWarning:
 
         assert assets_module._frontend_source_hash() != before
 
-    def test_the_esbuild_version_is_part_of_the_hash(
-        self, tmp_path, monkeypatch, bundle
+    @pytest.mark.parametrize("name", assets_module.BUILD_HASH_PACKAGES)
+    def test_the_package_versions_are_part_of_the_hash(
+        self, tmp_path, monkeypatch, bundle, name
     ):
+        """The bundler and what it bundles from node_modules shape the bundle"""
         self._frontend(tmp_path, monkeypatch)
         before = assets_module._frontend_source_hash()
 
         (tmp_path / "package-lock.json").write_text(
-            json.dumps({"packages": {"node_modules/esbuild": {"version": "0.29.0"}}})
+            json.dumps(self._lock(**{name: "2.0.0"}))
         )
 
         assert assets_module._frontend_source_hash() != before
@@ -547,6 +580,24 @@ class TestSourceHashParity:
 
         assert tuple(re.findall(r'"([^"]+)"', listed.group(1))) == (
             assets_module.BUILD_HASH_FILES
+        )
+
+    def test_covers_the_packages_the_javascript_side_covers(self):
+        """BUILD_HASH_PACKAGES and BUILD_PACKAGES in source-hash.js agree."""
+        repo_root = assets_module.FRONTEND_DIR.parent.parent
+        source_hash_js = repo_root / "scripts" / "source-hash.js"
+        if not source_hash_js.is_file():
+            pytest.skip("not running from a checkout")
+
+        listed = re.search(
+            r"const BUILD_PACKAGES = \[(.*?)\]",
+            source_hash_js.read_text(),
+            re.DOTALL,
+        )
+        assert listed is not None, "BUILD_PACKAGES is no longer a literal list"
+
+        assert tuple(re.findall(r'"([^"]+)"', listed.group(1))) == (
+            assets_module.BUILD_HASH_PACKAGES
         )
 
 

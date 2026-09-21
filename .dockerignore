@@ -26,8 +26,12 @@ coverage.xml
 
 # Node
 node_modules
-# Bundles are built inside the image; never copy stale host builds
+# Bundles, source maps, vendored files and flags are built inside the image;
+# never copy stale host builds
 kml_heatmap/static/*.bundle.js*
+kml_heatmap/static/*.map
+kml_heatmap/static/vendor
+kml_heatmap/static/flags
 
 # IDE and AI assistant files
 .vscode
@@ -37,6 +41,10 @@ kml_heatmap/static/*.bundle.js*
 **/*~
 .claude
 .playwright-mcp
+
+# Tests and type stubs: the image only runs the package
+tests
+stubs
 
 # Test and coverage output
 htmlcov

@@ -8,7 +8,22 @@ import {
   asMapApp,
   type MockApp,
 } from "../../testHelpers";
-import { marker as mockMarker, type MockMarker } from "../../../mocks/leaflet";
+import {
+  marker as mockMarker,
+  type MockBoundPopup,
+  type MockMarker,
+} from "../../../mocks/leaflet";
+
+const { loadFeatures, listFlights } = vi.hoisted(() => {
+  const listFlights = vi.fn();
+  return {
+    listFlights,
+    loadFeatures: vi.fn(() => Promise.resolve({ listFlights })),
+  };
+});
+vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
+  loadFeatures,
+}));
 
 describe("AirportManager", () => {
   let airportManager: AirportManager;
@@ -60,27 +75,6 @@ describe("AirportManager", () => {
     mockApp.airportLayer.hasLayer.mockReturnValue(true);
 
     airportManager = new AirportManager(asMapApp(mockApp));
-  });
-
-  describe("calculateAirportFlightCounts", () => {
-    it("counts flights per airport for the current filter", () => {
-      expect(airportManager.calculateAirportFlightCounts()).toEqual({
-        EDDF: 3,
-        EDDM: 2,
-        EDDK: 1,
-      });
-
-      mockApp.selectedYear = "2024";
-      expect(airportManager.calculateAirportFlightCounts()).toEqual({
-        EDDF: 1,
-        EDDK: 1,
-      });
-    });
-
-    it("returns empty counts without data", () => {
-      mockApp.currentData = null;
-      expect(airportManager.calculateAirportFlightCounts()).toEqual({});
-    });
   });
 
   describe("updateAirportPopups", () => {
@@ -583,6 +577,135 @@ describe("AirportManager", () => {
       expect(String(markers["EDDM"]!.popupContent())).toContain(
         '<span class="popup-metric-value kh-popup-accent">3</span>',
       );
+    });
+  });
+  describe("popup keyboard access", () => {
+    type Handler = (event?: unknown) => void;
+
+    /** The handler the manager registered for an event */
+    function handler(
+      target: { on: { mock: { calls: unknown[][] } } },
+      type: string,
+    ): Handler {
+      const call = target.on.mock.calls.find(([name]) => name === type);
+      expect(call, type).toBeDefined();
+      return call![1] as Handler;
+    }
+
+    /** jsdom does not track how focus arrived; say it here */
+    function focusVisible(element: HTMLElement, visible: boolean): void {
+      Object.defineProperty(element, "matches", {
+        value: (selector: string) => visible && selector === ":focus-visible",
+      });
+    }
+
+    function setUp() {
+      airportManager.updateAirportPopups();
+      const marker = markers["EDDF"]!;
+      const popup = marker.getPopup() as MockBoundPopup;
+      const markerEl = document.createElement("div");
+      markerEl.tabIndex = 0;
+      const popupEl = document.createElement("div");
+      popupEl.innerHTML =
+        '<div class="popup-container" tabindex="-1"><button>x</button></div>';
+      marker.element = markerEl;
+      popup.element = popupEl;
+      document.body.append(markerEl, popupEl);
+      return { marker, popup, markerEl, popupEl };
+    }
+
+    afterEach(() => {
+      document.body.innerHTML = "";
+      listFlights.mockClear();
+    });
+
+    it("binds the events once, with the popup", () => {
+      airportManager.updateAirportPopups();
+      airportManager.updateAirportPopups();
+
+      const types = markers["EDDF"]!.on.mock.calls.map(([type]) =>
+        String(type),
+      );
+      expect(types.filter((type) => type === "popupopen")).toHaveLength(1);
+      expect(types).toEqual(
+        expect.arrayContaining(["popupopen", "popupclose", "keydown"]),
+      );
+    });
+
+    it("lists the flights from the feature bundle whenever the content is written", async () => {
+      const { popup } = setUp();
+
+      handler(popup, "contentupdate")();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(loadFeatures).toHaveBeenCalled();
+      expect(listFlights).toHaveBeenCalledWith(mockApp, popup, "EDDF");
+    });
+
+    it("moves focus into a popup opened from the keyboard", () => {
+      const { marker, markerEl, popupEl } = setUp();
+      focusVisible(markerEl, true);
+
+      handler(marker, "popupopen")();
+
+      expect(document.activeElement).toBe(
+        popupEl.querySelector(".popup-container"),
+      );
+    });
+
+    it("leaves focus alone when the mouse opened the popup", () => {
+      const { marker, markerEl } = setUp();
+      focusVisible(markerEl, false);
+      markerEl.focus();
+
+      handler(marker, "popupopen")();
+
+      expect(document.activeElement).toBe(markerEl);
+    });
+
+    it("puts focus back on the marker when the popup had it", () => {
+      const { marker, markerEl, popupEl } = setUp();
+      popupEl.querySelector("button")!.focus();
+
+      handler(marker, "popupclose")();
+
+      expect(document.activeElement).toBe(markerEl);
+    });
+
+    it("puts focus back on the marker rather than on the page", () => {
+      const { marker, markerEl } = setUp();
+      (document.activeElement as HTMLElement | null)?.blur();
+
+      handler(marker, "popupclose")();
+
+      expect(document.activeElement).toBe(markerEl);
+    });
+
+    it("does not take focus from wherever the user went", () => {
+      const { marker } = setUp();
+      const elsewhere = document.createElement("button");
+      document.body.append(elsewhere);
+      elsewhere.focus();
+
+      handler(marker, "popupclose")();
+
+      expect(document.activeElement).toBe(elsewhere);
+    });
+
+    it("closes the popup on Escape from the marker", () => {
+      const { marker } = setUp();
+      const keydown = handler(marker, "keydown");
+
+      keydown({
+        originalEvent: new KeyboardEvent("keydown", { key: "Enter" }),
+      });
+      expect(marker.closePopup).not.toHaveBeenCalled();
+
+      keydown({
+        originalEvent: new KeyboardEvent("keydown", { key: "Escape" }),
+      });
+      expect(marker.closePopup).toHaveBeenCalledTimes(1);
     });
   });
 });

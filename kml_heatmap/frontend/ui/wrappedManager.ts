@@ -1,7 +1,7 @@
 /**
  * Wrapped Manager - Handles year-in-review/wrapped feature
  */
-import type { FitBoundsOptions, LatLng } from "leaflet";
+import type { FitBoundsOptions, LatLng, LatLngBoundsExpression } from "leaflet";
 import type { MapApp } from "../mapApp";
 import type { Airport } from "../types";
 import { domCache, hideControls, restoreControls } from "../utils/domCache";
@@ -21,6 +21,7 @@ import {
   calculateYearStats,
   findFurthestAirport,
   generateFunFacts,
+  segmentBounds,
 } from "../features/wrapped";
 import type { Coordinate } from "../utils/geometry";
 import { calculateFilteredStatistics } from "../calculations/statistics";
@@ -31,7 +32,7 @@ import {
   generateAircraftFleetHtml,
   generateHomeBaseHtml,
   generateDestinationsHtml,
-} from "../utils/htmlGenerators";
+} from "../utils/wrappedHtml";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
 
 /**
@@ -189,6 +190,26 @@ export class WrappedManager {
     this.mapRevealTimer = setTimeout(reveal, MAP_REVEAL_TIMEOUT_MS);
   }
 
+  /**
+   * What the dialog fits the map to: the flights it describes. The exported
+   * bounds cover the whole dataset, so a single year or aircraft used to be
+   * shown as a speck in the middle of every flight ever made.
+   */
+  private fitTarget(): LatLngBoundsExpression {
+    const { selectedYear, selectedAircraft, currentData } = this.app;
+    if (
+      (selectedYear === "all" && selectedAircraft === "all") ||
+      !currentData
+    ) {
+      return this.app.config.bounds;
+    }
+    const view = datasetIndex(currentData).filter(
+      selectedYear,
+      selectedAircraft,
+    );
+    return segmentBounds(view.segments()) ?? this.app.config.bounds;
+  }
+
   /** Fit options for the overview, without the animation for reduced motion */
   private fitOptions(): FitBoundsOptions {
     return { padding: FIT_PADDING, animate: !prefersReducedMotion() };
@@ -227,7 +248,8 @@ export class WrappedManager {
       center: this.app.map.getCenter(),
       zoom: this.app.map.getZoom(),
     };
-    this.app.map.fitBounds(this.app.config.bounds, this.fitOptions());
+    const fitTarget = this.fitTarget();
+    this.app.map.fitBounds(fitTarget, this.fitOptions());
 
     // Hide controls in wrapped view FIRST
     this.savedControlDisplays = hideControls();
@@ -283,7 +305,7 @@ export class WrappedManager {
         this.mapResizeTimer = null;
         if (!this.app.map || !this.app.store.get("wrappedVisible")) return;
         this.app.map.invalidateSize();
-        this.app.map.fitBounds(this.app.config.bounds, this.fitOptions());
+        this.app.map.fitBounds(fitTarget, this.fitOptions());
         this.revealMapWhenPainted(wrappedMapContainer);
       }, 100);
     }, 50);
@@ -350,7 +372,7 @@ export class WrappedManager {
     if (statsEl) statsEl.innerHTML = statsHtml;
 
     // Build fun facts section with dynamic, varied facts
-    const funFacts = generateFunFacts(yearStats, filteredStats);
+    const funFacts = generateFunFacts(yearStats, filteredStats, year);
 
     const funFactsHtml = generateFunFactsHtml(funFacts);
 
@@ -400,7 +422,16 @@ export class WrappedManager {
           homeBase,
           furthest,
         });
-        if (gridEl) gridEl.innerHTML = destinationsHtml;
+        if (gridEl) {
+          gridEl.innerHTML = destinationsHtml;
+          // The groups fade in one after another. Set here rather than in
+          // the markup: the CSP allows no style attributes.
+          gridEl
+            .querySelectorAll<HTMLElement>(".country-group")
+            .forEach((group, index) => {
+              group.style.animationDelay = index / 10 + "s";
+            });
+        }
       }
     }
 
@@ -419,10 +450,16 @@ export class WrappedManager {
    * the dialog is open mounts the mobile bar onto the body, and without the
    * observer its five tabs joined the dialog's tab cycle and stayed operable,
    * so a keyboard user could open a sheet behind the modal.
+   *
+   * The map comes along, and with it the airport markers, which are
+   * tabbable. The overview map is not meant to be worked in, so they are
+   * taken out of the tab cycle until the dialog closes.
    */
   private trapFocus(modal: HTMLElement): void {
     const active = document.activeElement;
-    this.previouslyFocused = active instanceof HTMLElement ? active : null;
+    // Opened from a link or a restored state, focus is on the body
+    this.previouslyFocused =
+      active instanceof HTMLElement && active !== document.body ? active : null;
 
     const makeInert = (el: Element): void => {
       if (
@@ -438,6 +475,9 @@ export class WrappedManager {
 
     this.inertElements = [];
     Array.from(document.body.children).forEach(makeInert);
+    document
+      .querySelectorAll("#map .leaflet-marker-pane, #map .leaflet-popup-pane")
+      .forEach(makeInert);
 
     this.inertObserver = new MutationObserver((records) => {
       for (const record of records) {
@@ -467,7 +507,15 @@ export class WrappedManager {
       if (document.activeElement === opener) return;
     }
 
-    // No opener to return to: do not leave focus inside the hidden dialog
+    // No opener to return to: the control that opens the dialog is where
+    // it would have been opened from, on either layout
+    for (const id of ["wrapped-btn", "mobile-tab-wrapped"]) {
+      const control = document.getElementById(id);
+      control?.focus();
+      if (control && document.activeElement === control) return;
+    }
+
+    // Not even that: do not leave focus inside the hidden dialog
     const active = document.activeElement;
     if (active instanceof HTMLElement && active.closest("#wrapped-modal")) {
       active.blur();

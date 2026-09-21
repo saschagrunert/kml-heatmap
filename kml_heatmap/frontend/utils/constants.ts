@@ -5,6 +5,12 @@ export const KM_TO_NAUTICAL_MILES = 1.0 / NAUTICAL_MILES_TO_KM;
 /** AGL threshold for cruise statistics */
 export const CRUISE_ALTITUDE_THRESHOLD_FT = 1000;
 
+/**
+ * Widths below this get the phone layout: the mobile bar in place of the
+ * control columns, and a phone-sized export (matches styles.css)
+ */
+export const MOBILE_BREAKPOINT_PX = 768;
+
 /** Zoom limits of the map (tile layers and URL state share these) */
 export const MIN_ZOOM = 1;
 export const MAX_ZOOM = 20;

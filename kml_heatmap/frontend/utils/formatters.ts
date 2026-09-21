@@ -52,6 +52,16 @@ export function formatSpeed(knots: number): string {
 }
 
 /**
+ * Compass track for a bearing, normalised and zero padded ("072°"). The
+ * rounding comes first, so 359.6 degrees reads 000, never 360.
+ * @param bearing - Bearing in degrees, any range
+ */
+export function formatTrack(bearing: number): string {
+  const normalised = ((Math.round(bearing) % 360) + 360) % 360;
+  return String(normalised).padStart(3, "0") + "°";
+}
+
+/**
  * Format seconds into flight time string (e.g., "2h 30m")
  * @param seconds - Total seconds
  * @returns Formatted flight time

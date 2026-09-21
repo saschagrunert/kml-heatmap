@@ -1,6 +1,7 @@
 """Tests for workers module."""
 
 import logging
+import pickle
 from unittest.mock import mock_open, patch
 
 import kml_heatmap.airport_lookup as lookup_module
@@ -26,6 +27,24 @@ class TestInitWorker:
     def test_does_not_load_the_airport_database(self):
         """Export workers never look up airports; lookups load it lazily."""
         init_worker(False)
+        assert lookup_module._airport_cache is None
+
+    def test_uses_the_database_of_the_parent(self, monkeypatch):
+        """Parse workers must not read the 86,000 row CSV again."""
+        monkeypatch.setattr(lookup_module, "_airport_cache", None)
+        record = lookup_module.AirportRecord(1.0, 2.0, "Parent Field", "DE")
+        init_worker(False, pickle.dumps({"ZZZZ": record}))
+        with patch.object(lookup_module, "_read_airport_csv") as read_csv:
+            assert lookup_module.lookup_airport_coordinates("ZZZZ") == (
+                1.0,
+                2.0,
+                "Parent Field",
+            )
+        read_csv.assert_not_called()
+
+    def test_a_broken_database_is_loaded_lazily(self, monkeypatch):
+        monkeypatch.setattr(lookup_module, "_airport_cache", None)
+        init_worker(False, b"not a pickle")
         assert lookup_module._airport_cache is None
 
 

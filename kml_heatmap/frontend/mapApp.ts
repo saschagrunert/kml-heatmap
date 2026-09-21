@@ -25,12 +25,19 @@ import { renderControlIcons } from "./utils/icons";
 import { invalidateMapAfterTransition } from "./utils/mapHelpers";
 import { prefersReducedMotion } from "./utils/motion";
 import { MAX_ZOOM, MIN_ZOOM } from "./utils/constants";
-import { AppStore, defineStoreAccessors } from "./state/store";
+import {
+  AppStore,
+  DEFAULT_AIRSPEED_RANGE,
+  DEFAULT_ALTITUDE_RANGE,
+  defineStoreAccessors,
+  type Range,
+} from "./state/store";
 import { ReplayState } from "./ui/replayState";
 import { watchScrollEnd, type ScrollEndWatcher } from "./utils/scrollFade";
 import { loadFeatures } from "./services/featureLoader";
 import type { FeatureModule } from "./features";
 import { updateReplayButtonState } from "./ui/replayButton";
+import { segmentsForPathIds } from "./calculations/statistics";
 // Publishes the modules the feature bundle resolves against; imported for
 // that side effect, before any feature can be loaded
 import "./shared";
@@ -42,7 +49,13 @@ import type { StoreAccessors } from "./state/store";
 import type { ReplayManager } from "./ui/replayManager";
 import type { WrappedManager } from "./ui/wrappedManager";
 import type { HeatmapLayer } from "./globals";
-import type { PathInfo, PathSegment, Airport, AppState } from "./types";
+import type {
+  AircraftModels,
+  PathInfo,
+  PathSegment,
+  Airport,
+  AppState,
+} from "./types";
 
 /**
  * Map configuration passed to constructor
@@ -84,9 +97,15 @@ export interface OpenAIPLayersMap {
 const WRAPPED_RESTORE_DELAY_MS = 500;
 
 /**
+ * Zoom of a view that names no zoom of its own: the map's first view, and
+ * a link that carries a centre without `z`
+ */
+const DEFAULT_ZOOM = 10;
+
+/**
  * Said when the feature bundle cannot be fetched. Without it a click on
  * Replay or Wrapped would do nothing at all and look like a dead control;
- * the export button says the same kind of thing when dom-to-image is
+ * the export button says the same kind of thing when html-to-image is
  * missing.
  */
 export const FEATURES_UNAVAILABLE_MESSAGE =
@@ -109,10 +128,16 @@ export class MapApp {
   declare airportsVisible: StoreAccessors["airportsVisible"];
   declare aviationVisible: StoreAccessors["aviationVisible"];
   declare currentData: StoreAccessors["currentData"];
-  declare aircraftModels: StoreAccessors["aircraftModels"];
   declare hasTimingData: StoreAccessors["hasTimingData"];
-  declare altitudeRange: StoreAccessors["altitudeRange"];
-  declare airspeedRange: StoreAccessors["airspeedRange"];
+
+  // Plain values nothing has to follow: they are read where they are used,
+  // so the store would only announce changes nobody listens to
+  /** Model names from metadata.js; empty until it has loaded */
+  aircraftModels: AircraftModels = {};
+  /** Colour range of the altitude layer, replaced by every layer build */
+  altitudeRange: Range = { ...DEFAULT_ALTITUDE_RANGE };
+  /** Colour range of the speed layer, from metadata.js */
+  airspeedRange: Range = { ...DEFAULT_AIRSPEED_RANGE };
 
   // Every manager is handed the whole app, so whatever stays writable below
   // is writable from all of them. The fields that nothing reassigns after
@@ -128,6 +153,15 @@ export class MapApp {
   isInitializing: boolean;
   /** Set by destroy(), so work that was already in flight can stand down */
   private destroyed = false;
+  /**
+   * Aborted by destroy(). DOM listeners the app and its managers add for
+   * as long as the app lives pass its signal, so one call removes them all.
+   */
+  private readonly lifetime = new AbortController();
+  /** Set while a click on Replay waits for the feature bundle */
+  private pendingReplayToggle: Promise<void> | null = null;
+  /** The map events setupEventHandlers() listens to, kept to remove them */
+  private mapHandlers: L.LeafletEventHandlerFnMap = {};
 
   // Map and layers
   map: L.Map | null;
@@ -181,6 +215,11 @@ export class MapApp {
 
   /** Scroll-end watchers of the two control columns */
   private columnScrollWatchers: ScrollEndWatcher[] = [];
+
+  /** Aborts once the app is destroyed; for listeners that live as long */
+  get signal(): AbortSignal {
+    return this.lifetime.signal;
+  }
 
   /** Path info of the loaded dataset (single source of truth: currentData) */
   get fullPathInfo(): PathInfo[] | null {
@@ -251,12 +290,17 @@ export class MapApp {
     this.isInitializing = false;
 
     // Restore wrapped panel state if it was open
-    if (this.savedState && this.savedState.wrappedVisible) {
+    const state = this.savedState;
+    if (state && state.wrappedVisible) {
       this.wrappedRestoreTimer = setTimeout(() => {
         this.wrappedRestoreTimer = null;
         void this.loadWrapped().then((manager) => {
           // The bundle may arrive after the app was torn down
-          if (!this.destroyed) manager?.showWrapped();
+          if (this.destroyed) return;
+          manager?.showWrapped();
+          // Opened or not, the restore is done: saves stop writing the
+          // flag it had (see StateManager.panelVisible)
+          delete state.wrappedVisible;
         });
       }, WRAPPED_RESTORE_DELAY_MS);
     }
@@ -265,18 +309,28 @@ export class MapApp {
     await this.applyPendingFilterChanges();
   }
 
-  /** Cancel pending work and detach the chrome built at runtime */
+  /**
+   * Cancel pending work and take down everything the app set up: the DOM
+   * listeners (through the lifetime signal), the map events, every store
+   * subscription and the chrome built at runtime. The map itself and the
+   * layers on it stay as they are.
+   */
   destroy(): void {
     this.destroyed = true;
     if (this.wrappedRestoreTimer !== null) {
       clearTimeout(this.wrappedRestoreTimer);
       this.wrappedRestoreTimer = null;
     }
+    this.lifetime.abort();
+    this.map?.off(this.mapHandlers);
+    this.layerManager?.destroy();
+    this.stateManager?.cancelSave();
     this.replayManager?.destroy();
     this.wrappedManager?.destroy();
     this.mobileBar?.destroy();
     for (const watcher of this.columnScrollWatchers) watcher.stop();
     this.columnScrollWatchers = [];
+    this.store.unsubscribeAll();
   }
 
   /**
@@ -372,7 +426,7 @@ export class MapApp {
     const animate = !prefersReducedMotion();
     this.map = L.map("map", {
       center: this.config.center,
-      zoom: 10,
+      zoom: DEFAULT_ZOOM,
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
       zoomSnap: 0.25,
@@ -405,15 +459,14 @@ export class MapApp {
       })
       .addTo(this.map);
 
-    // A saved zoom of 0 is a view like any other, not a missing one
-    if (
-      this.savedState &&
-      this.savedState.center &&
-      this.savedState.zoom !== undefined
-    ) {
+    // A saved zoom of 0 is a view like any other, not a missing one. A
+    // link may carry a centre alone (written by hand, or cut short); it is
+    // still where the reader was sent, so it gets the default zoom.
+    const center = this.savedState?.center;
+    if (center) {
       this.map.setView(
-        [this.savedState.center.lat, this.savedState.center.lng],
-        this.savedState.zoom,
+        [center.lat, center.lng],
+        this.savedState?.zoom ?? DEFAULT_ZOOM,
       );
     } else {
       this.map.fitBounds(this.config.bounds, { padding: [30, 30] });
@@ -520,9 +573,40 @@ export class MapApp {
     this.replayManager?.seekReplay(value);
   }
 
-  /** Whether the current selection can be replayed */
+  /**
+   * Whether the current selection can be replayed: one flight with a
+   * segment timed after its start. Replay runs from 0 to the latest segment
+   * time, so a flight whose times are all 0 (a single timed segment, or
+   * points logged at the same second) finished the moment it started and
+   * drew nothing.
+   */
   canReplay(): boolean {
-    return this.selectedPathIds.size === 1 && this.hasTimingData;
+    const segments = this.fullPathSegments;
+    return (
+      this.selectedPathIds.size === 1 &&
+      this.hasTimingData &&
+      !!segments &&
+      segmentsForPathIds(segments, this.selectedPathIds).some(
+        (segment) => (segment.time ?? 0) > 0,
+      )
+    );
+  }
+
+  /**
+   * Open or close replay, fetching the feature bundle on first use. Clicks
+   * that land while the bundle is still on its way are dropped: each one
+   * queued a toggle of its own, and two quick ones opened replay and closed
+   * it again the moment the bundle arrived.
+   */
+  toggleReplay(): void {
+    if (this.replayManager) {
+      this.replayManager.toggleReplay();
+      return;
+    }
+    this.pendingReplayToggle ??= this.loadReplay().then((manager) => {
+      this.pendingReplayToggle = null;
+      if (!this.destroyed) manager?.toggleReplay();
+    });
   }
 
   /**
@@ -531,9 +615,15 @@ export class MapApp {
    * manager, which is only fetched once someone opens replay.
    */
   private followReplayAvailability(): void {
-    const refresh = (): void => updateReplayButtonState(this.canReplay());
-    this.store.subscribe("selectedPathIds", refresh);
-    this.store.subscribe("hasTimingData", refresh);
+    // A running replay owns the button (it reads Stop), and puts it back
+    // in step with the selection when it closes
+    const refresh = (): void => {
+      if (!this.replayState.active) updateReplayButtonState(this.canReplay());
+    };
+    this.store.subscribeKeys(
+      ["selectedPathIds", "hasTimingData", "currentData"],
+      refresh,
+    );
     refresh();
   }
 
@@ -610,24 +700,26 @@ export class MapApp {
   private setupEventHandlers(): void {
     if (!this.map) return;
 
-    this.map.on("moveend", () => this.stateManager.scheduleSave());
-    this.map.on("zoomend", () => {
-      this.stateManager.scheduleSave();
-      this.airportManager.updateAirportMarkerSizes();
-    });
-
-    this.map.on("click", (_e: L.LeafletMouseEvent) => {
-      if (
-        this.replayState.active &&
-        this.replayState.airplaneMarker &&
-        this.replayState.airplaneMarker.isPopupOpen()
-      ) {
-        this.replayState.airplaneMarker.closePopup();
-      }
-      if (!this.replayState.active && this.selectedPathIds.size > 0) {
-        this.pathSelection.clearSelection();
-      }
-    });
+    this.mapHandlers = {
+      moveend: () => this.stateManager.scheduleSave(),
+      zoomend: () => {
+        this.stateManager.scheduleSave();
+        this.airportManager.updateAirportMarkerSizes();
+      },
+      click: () => {
+        if (
+          this.replayState.active &&
+          this.replayState.airplaneMarker &&
+          this.replayState.airplaneMarker.isPopupOpen()
+        ) {
+          this.replayState.airplaneMarker.closePopup();
+        }
+        if (!this.replayState.active && this.selectedPathIds.size > 0) {
+          this.pathSelection.clearSelection();
+        }
+      },
+    };
+    this.map.on(this.mapHandlers);
   }
 }
 

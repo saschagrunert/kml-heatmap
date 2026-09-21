@@ -2,11 +2,11 @@
 
 from datetime import UTC, datetime
 from typing import ClassVar
-from xml.etree import ElementTree as ET
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from lxml import etree
 
 from kml_heatmap.aircraft import parse_aircraft_from_filename
 from kml_heatmap.constants import ALT_MAX_M, ALT_MIN_M
@@ -159,17 +159,17 @@ class TestFindXmlElement:
     NS: ClassVar[dict[str, str]] = NS
 
     def test_namespaced_found(self):
-        root = ET.fromstring(
+        root = etree.fromstring(
             '<root xmlns:kml="http://www.opengis.net/kml/2.2"><kml:name>T</kml:name></root>'
         )
         assert find_xml_element(root, "kml:name", "name", self.NS).text == "T"
 
     def test_fallback_found(self):
-        root = ET.fromstring("<root><name>T</name></root>")
+        root = etree.fromstring("<root><name>T</name></root>")
         assert find_xml_element(root, "kml:name", "name", self.NS).text == "T"
 
     def test_neither_found(self):
-        root = ET.fromstring("<root><other>T</other></root>")
+        root = etree.fromstring("<root><other>T</other></root>")
         assert find_xml_element(root, "kml:name", "name", self.NS) is None
 
 
@@ -177,7 +177,7 @@ class TestFindXmlElements:
     NS: ClassVar[dict[str, str]] = NS
 
     def test_namespaced_elements(self):
-        root = ET.fromstring(
+        root = etree.fromstring(
             '<root xmlns:kml="http://www.opengis.net/kml/2.2">'
             "<kml:when>1</kml:when><kml:when>2</kml:when></root>"
         )
@@ -186,13 +186,13 @@ class TestFindXmlElements:
         ] == ["1", "2"]
 
     def test_fallback_elements(self):
-        root = ET.fromstring(
+        root = etree.fromstring(
             "<root><when>t1</when><when>t2</when><when>t3</when></root>"
         )
         assert len(find_xml_elements(root, "kml:when", "when", self.NS)) == 3
 
     def test_empty_result(self):
-        root = ET.fromstring("<root><other>T</other></root>")
+        root = etree.fromstring("<root><other>T</other></root>")
         assert find_xml_elements(root, "kml:when", "when", self.NS) == []
 
 
@@ -248,7 +248,7 @@ class TestExtractCharterwareTimestamp:
 
 class TestExtractPlacemarkMetadata:
     def test_name_and_timestamps(self):
-        placemark = ET.fromstring(
+        placemark = etree.fromstring(
             '<Placemark xmlns:kml="http://www.opengis.net/kml/2.2">'
             "<kml:name>EDDS</kml:name>"
             "<kml:when>2025-03-03T08:58:01Z</kml:when>"
@@ -264,7 +264,7 @@ class TestExtractPlacemarkMetadata:
         }
 
     def test_timestamp_element(self):
-        placemark = ET.fromstring(
+        placemark = etree.fromstring(
             "<Placemark><name>Test Airport</name>"
             "<TimeStamp><when>2025-06-15T12:00:00Z</when></TimeStamp></Placemark>"
         )
@@ -275,7 +275,7 @@ class TestExtractPlacemarkMetadata:
         assert result["year"] == 2025
 
     def test_date_in_name_fallback(self):
-        placemark = ET.fromstring(
+        placemark = etree.fromstring(
             "<Placemark><name>EDDS to EDDP - 16 Aug 2026</name></Placemark>"
         )
         result = extract_placemark_metadata(placemark, NS)
@@ -284,7 +284,7 @@ class TestExtractPlacemarkMetadata:
 
     def test_route_airports_are_kept_apart(self):
         """LFBN is "Niort - Marais Poitevin"; the display name cannot be split."""
-        placemark = ET.fromstring(
+        placemark = etree.fromstring(
             "<Placemark><name>EDAQ Halle-Oppin - LFBN Niort</name></Placemark>"
         )
         result = extract_placemark_metadata(placemark, NS)
@@ -295,7 +295,7 @@ class TestExtractPlacemarkMetadata:
         assert result["end_airport"] == "LFBN Niort - Marais Poitevin"
 
     def test_route_date_is_not_an_airport(self):
-        placemark = ET.fromstring(
+        placemark = etree.fromstring(
             "<Placemark><name>EDDS to EDZZ - 16 Aug 2026</name></Placemark>"
         )
         result = extract_placemark_metadata(placemark, NS)
@@ -304,7 +304,7 @@ class TestExtractPlacemarkMetadata:
         assert result["end_airport"] == "EDZZ"
 
     def test_log_start_name(self):
-        placemark = ET.fromstring(
+        placemark = etree.fromstring(
             "<Placemark><name>Log Start: 03 Mar 2025 08:58 Z</name></Placemark>"
         )
         result = extract_placemark_metadata(placemark, NS)
@@ -313,7 +313,7 @@ class TestExtractPlacemarkMetadata:
         assert result["year"] == 2025
 
     def test_charterware_description_fallback(self):
-        placemark = ET.fromstring(
+        placemark = etree.fromstring(
             "<Placemark><name>Route</name>"
             "<description>Flight Jan 12 2026 03:01PM path of OE-AKI</description>"
             "</Placemark>"
@@ -324,7 +324,7 @@ class TestExtractPlacemarkMetadata:
 
     def test_timespan_without_when(self):
         """A LineString placemark dated only by a TimeSpan keeps its year."""
-        placemark = ET.fromstring(
+        placemark = etree.fromstring(
             '<Placemark xmlns:kml="http://www.opengis.net/kml/2.2">'
             "<kml:name>EDDS</kml:name><kml:TimeSpan>"
             "<kml:begin>2025-06-15T12:00:00Z</kml:begin>"
@@ -337,7 +337,7 @@ class TestExtractPlacemarkMetadata:
         assert result["year"] == 2025
 
     def test_timespan_without_namespace_and_without_end(self):
-        placemark = ET.fromstring(
+        placemark = etree.fromstring(
             "<Placemark><TimeSpan><begin>2024-02-01T08:00:00Z</begin></TimeSpan>"
             "</Placemark>"
         )
@@ -347,7 +347,7 @@ class TestExtractPlacemarkMetadata:
         assert result["year"] == 2024
 
     def test_when_wins_over_timespan(self):
-        placemark = ET.fromstring(
+        placemark = etree.fromstring(
             "<Placemark><TimeSpan><begin>2024-02-01T08:00:00Z</begin></TimeSpan>"
             "<TimeStamp><when>2025-06-15T12:00:00Z</when></TimeStamp></Placemark>"
         )
@@ -355,7 +355,7 @@ class TestExtractPlacemarkMetadata:
 
     def test_no_metadata(self):
         assert (
-            extract_placemark_metadata(ET.fromstring("<Placemark/>"), NS)
+            extract_placemark_metadata(etree.fromstring("<Placemark/>"), NS)
             == empty_placemark_metadata()
         )
 
@@ -467,3 +467,103 @@ class TestBuildPathMetadataDict:
             ),
         )
         assert (result["start_airport"], result["end_airport"]) == ("A - B", "C")
+
+    def test_unparsable_when_leaves_the_date_in_the_name(self):
+        """A broken <when> must not hide the date the name still holds."""
+        placemark = etree.fromstring(
+            "<Placemark><name>EDDS to EDDP - 16 Aug 2026</name>"
+            "<TimeStamp><when>not a time</when></TimeStamp></Placemark>"
+        )
+        result = extract_placemark_metadata(placemark, NS)
+        assert result["timestamp"] == "16 Aug 2026"
+        assert result["year"] == 2026
+
+    def test_unparsable_whens_are_skipped(self):
+        placemark = etree.fromstring(
+            "<Placemark><when>garbage</when><when>2025-06-15 12:00:00z</when>"
+            "<when>2025-06-15T13:00:00Z</when><when>also garbage</when>"
+            "</Placemark>"
+        )
+        result = extract_placemark_metadata(placemark, NS)
+        assert result["timestamp"] == "2025-06-15 12:00:00z"
+        assert result["end_timestamp"] == "2025-06-15T13:00:00Z"
+        assert result["year"] == 2025
+
+    def test_date_only_when_is_usable(self):
+        placemark = etree.fromstring(
+            "<Placemark><TimeStamp><when>2024-05</when></TimeStamp></Placemark>"
+        )
+        assert extract_placemark_metadata(placemark, NS)["year"] == 2024
+
+    @pytest.mark.parametrize(
+        ("container_time", "timestamp", "end_timestamp"),
+        [
+            (
+                "<TimeStamp><when>2024-07-01T10:00:00Z</when></TimeStamp>",
+                "2024-07-01T10:00:00Z",
+                None,
+            ),
+            (
+                "<TimeSpan><begin>2024-07-01</begin><end>2024-07-03</end></TimeSpan>",
+                "2024-07-01",
+                "2024-07-03",
+            ),
+        ],
+    )
+    def test_time_of_the_container_is_inherited(
+        self, container_time, timestamp, end_timestamp
+    ):
+        root = etree.fromstring(
+            f"<Document>{container_time}<Folder><name>Trip</name>"
+            "<Placemark><name>Home</name></Placemark></Folder></Document>"
+        )
+        result = extract_placemark_metadata(root.find(".//Placemark"), NS)
+        assert result["timestamp"] == timestamp
+        assert result["end_timestamp"] == end_timestamp
+        assert result["year"] == 2024
+
+    def test_nearest_container_wins(self):
+        root = etree.fromstring(
+            "<Document><TimeStamp><when>2023</when></TimeStamp>"
+            "<Folder><TimeStamp><when>2024</when></TimeStamp>"
+            "<Placemark><name>Home</name></Placemark></Folder></Document>"
+        )
+        assert extract_placemark_metadata(root.find(".//Placemark"), NS)["year"] == 2024
+
+    def test_time_of_a_sibling_is_not_inherited(self):
+        root = etree.fromstring(
+            "<Document><Placemark><TimeStamp><when>2024-07-01</when></TimeStamp>"
+            "</Placemark><Placemark><name>Home</name></Placemark></Document>"
+        )
+        placemark = root.findall("Placemark")[1]
+        assert extract_placemark_metadata(placemark, NS)["year"] is None
+
+    def test_own_time_wins_over_the_container(self):
+        root = etree.fromstring(
+            "<Folder><TimeStamp><when>2023</when></TimeStamp><Placemark>"
+            "<TimeStamp><when>2024-07-01T10:00:00Z</when></TimeStamp>"
+            "</Placemark></Folder>"
+        )
+        assert extract_placemark_metadata(root.find("Placemark"), NS)["year"] == 2024
+
+
+class TestNullIsland:
+    def test_zero_zero_is_rejected(self):
+        assert validate_and_normalize_coordinate(0.0, 0.0, 100.0, "f") is None
+
+    @pytest.mark.parametrize(("lat", "lon"), [(0.0, 8.5), (50.0, 0.0)])
+    def test_equator_and_prime_meridian_are_valid(self, lat, lon):
+        assert validate_and_normalize_coordinate(lat, lon, 100.0, "f") == (
+            lat,
+            lon,
+            100.0,
+        )
+
+
+class TestExtractYearLooseTimestamps:
+    @pytest.mark.parametrize(
+        "timestamp",
+        ["2024-12-31 23:30:00-02:00", "2024-12-31T23:30:00-02:00"],
+    )
+    def test_space_separated_timestamp_is_read_in_utc(self, timestamp):
+        assert extract_year_from_timestamp(timestamp) == 2025

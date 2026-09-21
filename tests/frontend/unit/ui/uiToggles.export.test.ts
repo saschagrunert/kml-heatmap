@@ -1,16 +1,16 @@
 /**
- * UIToggles: image export, the dom-to-image loader and link sharing.
+ * UIToggles: image export, the html-to-image loader and link sharing.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  DOM_TO_IMAGE_URL,
+  HTML_TO_IMAGE_URL,
   MAX_CANVAS_PIXELS,
   UIToggles,
   dataUrlToBlob,
   exportScale,
   isSmallDevice,
-  loadDomToImage,
-  resetDomToImageLoader,
+  loadHtmlToImage,
+  resetHtmlToImageLoader,
 } from "../../../../kml_heatmap/frontend/ui/uiToggles";
 import {
   asMapApp,
@@ -98,8 +98,8 @@ describe("UIToggles export and share", () => {
   afterEach(() => {
     unmount();
     document.querySelectorAll(".toast-notification").forEach((e) => e.remove());
-    delete window.domtoimage;
-    resetDomToImageLoader();
+    delete window.htmlToImage;
+    resetHtmlToImageLoader();
     setInnerWidth(1024);
     Reflect.deleteProperty(window, "devicePixelRatio");
     deleteNavigatorProperty("share");
@@ -109,32 +109,32 @@ describe("UIToggles export and share", () => {
     vi.useRealTimers();
   });
 
-  describe("loadDomToImage", () => {
-    it("resolves immediately when dom-to-image is already loaded", async () => {
-      const lib = { toJpeg: vi.fn() } as unknown as DomToImage;
-      window.domtoimage = lib;
+  describe("loadHtmlToImage", () => {
+    it("resolves immediately when html-to-image is already loaded", async () => {
+      const lib = { toJpeg: vi.fn() } as unknown as HtmlToImage;
+      window.htmlToImage = lib;
       const appendSpy = vi.spyOn(document.head, "appendChild");
 
-      await expect(loadDomToImage()).resolves.toBe(lib);
+      await expect(loadHtmlToImage()).resolves.toBe(lib);
       expect(appendSpy).not.toHaveBeenCalled();
     });
 
     it("injects the vendored script and resolves once it loads", async () => {
-      const lib = { toJpeg: vi.fn() } as unknown as DomToImage;
+      const lib = { toJpeg: vi.fn() } as unknown as HtmlToImage;
       let script: HTMLScriptElement | null = null;
       vi.spyOn(document.head, "appendChild").mockImplementation(
         appendChildStub((node) => {
           script = node;
-          window.domtoimage = lib;
+          window.htmlToImage = lib;
           queueMicrotask(() => {
             script?.onload?.(new Event("load"));
           });
         }),
       );
 
-      await expect(loadDomToImage()).resolves.toBe(lib);
+      await expect(loadHtmlToImage()).resolves.toBe(lib);
       // A relative src, so the element resolves it against the page
-      expect(script!.getAttribute("src")).toBe(DOM_TO_IMAGE_URL);
+      expect(script!.getAttribute("src")).toBe(HTML_TO_IMAGE_URL);
       expect(new URL(script!.src).origin).toBe(window.location.origin);
       // Same-origin now, so neither attribute is set any more
       expect(script!.hasAttribute("integrity")).toBe(false);
@@ -150,8 +150,8 @@ describe("UIToggles export and share", () => {
           return node;
         });
 
-      const first = loadDomToImage();
-      const second = loadDomToImage();
+      const first = loadHtmlToImage();
+      const second = loadHtmlToImage();
       expect(first).toBe(second);
       expect(appendSpy).toHaveBeenCalledTimes(1);
 
@@ -170,8 +170,8 @@ describe("UIToggles export and share", () => {
           }),
         );
 
-      await expect(loadDomToImage()).resolves.toBeNull();
-      await expect(loadDomToImage()).resolves.toBeNull();
+      await expect(loadHtmlToImage()).resolves.toBeNull();
+      await expect(loadHtmlToImage()).resolves.toBeNull();
       expect(appendSpy).toHaveBeenCalledTimes(2);
     });
   });
@@ -288,12 +288,12 @@ describe("UIToggles export and share", () => {
       Reflect.deleteProperty(URL, "revokeObjectURL");
     });
 
-    function installDomToImage(
+    function installHtmlToImage(
       toJpeg: AnyMock = vi
         .fn()
         .mockResolvedValue("data:image/jpeg;base64,aGVsbG8="),
     ): AnyMock {
-      window.domtoimage = { toJpeg } as unknown as DomToImage;
+      window.htmlToImage = { toJpeg } as unknown as HtmlToImage;
       return toJpeg;
     }
 
@@ -305,7 +305,7 @@ describe("UIToggles export and share", () => {
 
     it("does nothing if the export button is missing", async () => {
       el("export-btn").remove();
-      const toJpeg = installDomToImage();
+      const toJpeg = installHtmlToImage();
 
       uiToggles.exportMap();
       await finishExport();
@@ -315,7 +315,7 @@ describe("UIToggles export and share", () => {
 
     it("does nothing if the map container is missing", async () => {
       el("map").remove();
-      const toJpeg = installDomToImage();
+      const toJpeg = installHtmlToImage();
       const btn = el("export-btn") as HTMLButtonElement;
 
       uiToggles.exportMap();
@@ -326,7 +326,7 @@ describe("UIToggles export and share", () => {
     });
 
     it("disables the button while exporting and leaves the other controls alone", () => {
-      installDomToImage();
+      installHtmlToImage();
       const btn = el("export-btn") as HTMLButtonElement;
 
       uiToggles.exportMap();
@@ -341,7 +341,7 @@ describe("UIToggles export and share", () => {
     });
 
     it("captures the map right away instead of waiting for a repaint", async () => {
-      const toJpeg = installDomToImage();
+      const toJpeg = installHtmlToImage();
 
       uiToggles.exportMap();
       await vi.advanceTimersByTimeAsync(0);
@@ -350,7 +350,7 @@ describe("UIToggles export and share", () => {
     });
 
     it("changes only the label so the button keeps its icon", async () => {
-      installDomToImage();
+      installHtmlToImage();
       const btn = el("export-btn") as HTMLButtonElement;
       btn.innerHTML =
         '<svg class="icon"></svg><span class="control-label">Export image</span>';
@@ -367,7 +367,7 @@ describe("UIToggles export and share", () => {
     });
 
     it("ignores a second click while an export is running", async () => {
-      const toJpeg = installDomToImage();
+      const toJpeg = installHtmlToImage();
 
       uiToggles.exportMap();
       uiToggles.exportMap();
@@ -377,7 +377,7 @@ describe("UIToggles export and share", () => {
     });
 
     it("exports at 2x on desktop, downloads a blob and shows a success toast", async () => {
-      const toJpeg = installDomToImage();
+      const toJpeg = installHtmlToImage();
       const btn = el("export-btn") as HTMLButtonElement;
 
       uiToggles.exportMap();
@@ -385,7 +385,7 @@ describe("UIToggles export and share", () => {
 
       expect(toJpeg).toHaveBeenCalledWith(
         el("map"),
-        expect.objectContaining({ width: 1600, height: 1200, quality: 0.95 }),
+        expect.objectContaining({ pixelRatio: 2, quality: 0.95 }),
       );
       expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
       const link = clickedLink();
@@ -404,22 +404,15 @@ describe("UIToggles export and share", () => {
     it("exports at the pixel density of a phone", async () => {
       setInnerWidth(500);
       setDevicePixelRatio(3);
-      const toJpeg = installDomToImage();
+      const toJpeg = installHtmlToImage();
 
       uiToggles.exportMap();
       await finishExport();
 
       // A fixed 1x left a 3x phone with an image a third of its resolution
-      const scaledStyle: unknown = expect.objectContaining({
-        transform: "scale(3)",
-      });
       expect(toJpeg).toHaveBeenCalledWith(
         el("map"),
-        expect.objectContaining({
-          width: 2400,
-          height: 1800,
-          style: scaledStyle,
-        }),
+        expect.objectContaining({ pixelRatio: 3 }),
       );
     });
 
@@ -429,7 +422,7 @@ describe("UIToggles export and share", () => {
         configurable: true,
         writable: true,
       });
-      installDomToImage();
+      installHtmlToImage();
 
       uiToggles.exportMap();
       await finishExport();
@@ -446,7 +439,7 @@ describe("UIToggles export and share", () => {
         "canShare",
         vi.fn(() => true),
       );
-      installDomToImage();
+      installHtmlToImage();
 
       uiToggles.exportMap();
       await finishExport();
@@ -469,7 +462,7 @@ describe("UIToggles export and share", () => {
         "canShare",
         vi.fn(() => false),
       );
-      installDomToImage();
+      installHtmlToImage();
 
       uiToggles.exportMap();
       await finishExport();
@@ -486,7 +479,7 @@ describe("UIToggles export and share", () => {
         "canShare",
         vi.fn(() => true),
       );
-      installDomToImage();
+      installHtmlToImage();
 
       uiToggles.exportMap();
       await finishExport();
@@ -505,7 +498,7 @@ describe("UIToggles export and share", () => {
         "canShare",
         vi.fn(() => true),
       );
-      installDomToImage();
+      installHtmlToImage();
 
       uiToggles.exportMap();
       await finishExport();
@@ -523,7 +516,7 @@ describe("UIToggles export and share", () => {
         "canShare",
         vi.fn(() => true),
       );
-      installDomToImage();
+      installHtmlToImage();
       const btn = el("export-btn") as HTMLButtonElement;
 
       uiToggles.exportMap();
@@ -534,7 +527,7 @@ describe("UIToggles export and share", () => {
       expect(btn.disabled).toBe(false);
     });
 
-    it("shows an error toast and re-enables the button when dom-to-image is unavailable", async () => {
+    it("shows an error toast and re-enables the button when html-to-image is unavailable", async () => {
       vi.spyOn(document.head, "appendChild").mockImplementation(
         appendChildStub((node) => {
           queueMicrotask(() => {
@@ -554,8 +547,8 @@ describe("UIToggles export and share", () => {
       expect(clickSpy).not.toHaveBeenCalled();
     });
 
-    it("re-enables the button and shows a toast on dom-to-image failure", async () => {
-      installDomToImage(vi.fn().mockRejectedValue(new Error("Export failed")));
+    it("re-enables the button and shows a toast on html-to-image failure", async () => {
+      installHtmlToImage(vi.fn().mockRejectedValue(new Error("Export failed")));
       const btn = el("export-btn") as HTMLButtonElement;
 
       uiToggles.exportMap();

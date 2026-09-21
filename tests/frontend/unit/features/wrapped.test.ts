@@ -8,6 +8,7 @@ import {
   findClosestReferenceDistance,
   findFurthestAirport,
   generateFunFacts,
+  segmentBounds,
   selectDiverseFacts,
 } from "../../../../kml_heatmap/frontend/features/wrapped";
 import * as airports from "../../../../kml_heatmap/frontend/features/airports";
@@ -598,6 +599,45 @@ describe("wrapped feature", () => {
       vi.restoreAllMocks();
     });
 
+    it("names the selected year rather than this year", () => {
+      const twoAircraft: YearStats = {
+        ...yearStats,
+        total_distance_nm: 2000,
+        aircraft_list: yearStats.aircraft_list.slice(0, 2),
+      };
+
+      const texts = generateFunFacts(twoAircraft, null, "2023").map(
+        (f) => f.text,
+      );
+
+      expect(texts).toContain(
+        "You covered <strong>2,000.0 nautical miles</strong> in 2023!",
+      );
+      expect(texts).toContain(
+        "You flew <strong>2 different aircraft</strong> in 2023.",
+      );
+      expect(texts.join(" ")).not.toContain("this year");
+    });
+
+    it("talks about the total in the All Years view", () => {
+      const twoAircraft: YearStats = {
+        ...yearStats,
+        total_distance_nm: 2000,
+        aircraft_list: yearStats.aircraft_list.slice(0, 2),
+      };
+
+      const texts = generateFunFacts(twoAircraft, null, "all").map(
+        (f) => f.text,
+      );
+
+      expect(texts).toContain(
+        "You covered <strong>2,000.0 nautical miles</strong> in total!",
+      );
+      expect(texts).toContain(
+        "You flew <strong>2 different aircraft</strong> in total.",
+      );
+    });
+
     it("generates explorer fact for many aircraft", () => {
       const manyAircraftStats: YearStats = {
         ...yearStats,
@@ -806,6 +846,38 @@ describe("wrapped feature", () => {
       expect(
         findFurthestAirport("ZZZZ Unknown", ["EDDM Munich"], coordinates),
       ).toBeNull();
+    });
+  });
+
+  describe("segmentBounds", () => {
+    it("spans every point of the segments", () => {
+      expect(
+        segmentBounds([
+          {
+            path_id: 1,
+            coords: [
+              [50, 8],
+              [51, 7],
+            ],
+          },
+          { path_id: 2 },
+          {
+            path_id: 3,
+            coords: [
+              [49, 9],
+              [50.5, 8.5],
+            ],
+          },
+        ]),
+      ).toEqual([
+        [49, 7],
+        [51, 9],
+      ]);
+    });
+
+    it("returns null without coordinates", () => {
+      expect(segmentBounds([])).toBeNull();
+      expect(segmentBounds([{ path_id: 1 }])).toBeNull();
     });
   });
 });

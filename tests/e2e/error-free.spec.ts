@@ -146,6 +146,41 @@ test.describe("Error-Free Interactions", () => {
       expectClean(errors);
     });
 
+    test("no errors picking a flight from an airport popup", async ({
+      page,
+    }) => {
+      await waitForPathData(page);
+      await page.evaluate(() => {
+        const app = window.mapApp!;
+        const name = Object.keys(app.airportToPaths)[0]!;
+        const marker = app.airportMarkers[name]!;
+        app.map!.setView(marker.getLatLng(), 10, { animate: false });
+        marker.getElement()!.focus();
+      });
+      await page.keyboard.press("Enter");
+      await page.locator(".kh-popup-flight").first().click();
+      await expect
+        .poll(() => page.evaluate(() => window.mapApp!.selectedPathIds.size))
+        .toBe(1);
+
+      expectClean(errors);
+    });
+
+    test("no errors exporting an image with the real library", async ({
+      page,
+    }) => {
+      const download = page.waitForEvent("download", { timeout: 20000 });
+      await page.locator("#export-btn").click();
+
+      expect((await download).suggestedFilename()).toMatch(/^heatmap_.*\.jpg$/);
+      await expect(page.locator(".toast-notification")).toHaveText(
+        "Map exported",
+      );
+      // The library clones the map into an SVG image; none of that may
+      // trip the CSP, which allows no inline styles
+      expectClean(errors);
+    });
+
     test("no errors during stats panel toggle", async ({ page }) => {
       await page.locator("#stats-btn").click();
       await expect(page.locator("#stats-panel")).toBeVisible();

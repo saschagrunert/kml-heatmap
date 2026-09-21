@@ -251,7 +251,7 @@ class TestPruneStaleCacheEntries:
         old_tmp = _entry(cache_dir, ".x.json.abc.tmp", CACHE_MAX_AGE_DAYS + 1)
         new_tmp = _entry(cache_dir, ".y.json.abc.tmp")
 
-        assert prune_stale_cache_entries([], cache_dir=cache_dir) == 2
+        assert prune_stale_cache_entries(cache_dir=cache_dir) == 2
         assert fresh.exists()
         assert new_tmp.exists()
         assert not old.exists()
@@ -286,7 +286,7 @@ class TestPruneStaleCacheEntries:
     def test_default_directory(self, tmp_path):
         with patch.object(parser_cache_module, "KML_CACHE_DIR", tmp_path):
             _entry(tmp_path, "legacy_0123456789ab_v2_1_2.json")
-            assert prune_stale_cache_entries([str(tmp_path / "x.kml")]) == 1
+            assert prune_stale_cache_entries() == 1
 
     def test_vanished_entry_is_ignored(self, tmp_path):
         cache_dir = tmp_path / "cache"

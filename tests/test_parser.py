@@ -359,13 +359,96 @@ class TestTimeSpanPlacemark:
 
     def test_timespan_gives_year_and_duration(self, tmp_path):
         """The obfuscator shifts TimeSpan dates; the parser must read them too."""
-        from kml_heatmap.export_pipeline import path_metrics
+        from kml_heatmap.export_pipeline import path_duration
 
         kml_file = _write(tmp_path, "1_DEAGJ_DA20.kml", self.KML)
-        _, paths, metadata = parse_kml_coordinates(kml_file)
+        _, _, metadata = parse_kml_coordinates(kml_file)
 
         assert metadata[0]["year"] == 2025
         assert metadata[0]["timestamp"] == "2025-06-15T12:00:00Z"
         assert metadata[0]["end_timestamp"] == "2025-06-15T13:30:00Z"
-        duration, _ = path_metrics(paths[0], metadata[0])
+        duration = path_duration(metadata[0])
         assert duration == 5400.0
+
+
+def _line(geometry, mode=None):
+    mode_elem = f"<altitudeMode>{mode}</altitudeMode>" if mode else ""
+    return (
+        f"{KML_HEADER}<Document><Placemark><name>EDDS - EDDP</name>"
+        f"<TimeStamp><when>2025-03-15T10:00:00Z</when></TimeStamp>{geometry}"
+        f"</Placemark></Document></kml>"
+    ).replace("MODE", mode_elem)
+
+
+LINE = (
+    "<LineString>MODE<coordinates>8.5,50.0,300 9.0,51.0,400</coordinates></LineString>"
+)
+
+
+class TestGeometryTypes:
+    def test_polygon_is_no_flight_path(self, tmp_path, capsys):
+        kml = _line(
+            "<Polygon><outerBoundaryIs><LinearRing><coordinates>"
+            "8.5,50.0,300 9.0,51.0,400 9.0,50.0,400 8.5,50.0,300"
+            "</coordinates></LinearRing></outerBoundaryIs></Polygon>"
+        )
+        coords, paths, _ = parse_kml_coordinates(_write(tmp_path, "p.kml", kml))
+        assert paths == []
+        assert coords == []
+        assert "outside of a LineString or Point" in capsys.readouterr().err
+
+    def test_empty_coordinates_in_a_track_are_no_polygon(self, tmp_path, capsys):
+        """SkyDemon writes an empty <coordinates /> into every gx:Track."""
+        kml = GX_TRACK_KML.replace("<gx:Track>", "<gx:Track><coordinates />")
+        _, paths, _ = parse_kml_coordinates(_write(tmp_path, "e.kml", kml))
+        assert len(paths) == 1
+        assert "outside of a LineString" not in capsys.readouterr().err
+
+    def test_multi_geometry_of_lines(self, tmp_path):
+        kml = _line(
+            f"<MultiGeometry>{LINE}{LINE.replace('8.5', '7.5')}</MultiGeometry>"
+        )
+        _, paths, _ = parse_kml_coordinates(_write(tmp_path, "m.kml", kml))
+        assert len(paths) == 2
+
+    @pytest.mark.parametrize("mode", [None, "absolute"])
+    def test_absolute_altitudes_are_kept(self, tmp_path, mode):
+        _, paths, _ = parse_kml_coordinates(
+            _write(tmp_path, "a.kml", _line(LINE, mode))
+        )
+        assert [p.alt for p in paths[0]] == [300.0, 400.0]
+
+    @pytest.mark.parametrize(
+        "mode", ["clampToGround", "relativeToGround", "clampToSeaFloor"]
+    )
+    def test_line_without_sea_level_altitudes_is_no_path(self, tmp_path, capsys, mode):
+        coords, paths, _ = parse_kml_coordinates(
+            _write(tmp_path, "c.kml", _line(LINE, mode))
+        )
+        assert paths == []
+        assert [p.alt for p in coords] == [None, None]
+        err = capsys.readouterr().err
+        assert f"altitudeMode {mode} ignored" in err
+        assert "without usable altitudes" not in err
+
+    def test_gx_altitude_mode_on_a_track(self, tmp_path, capsys):
+        kml = GX_TRACK_KML.replace(
+            "<gx:Track>", "<gx:Track><gx:altitudeMode>clampToSeaFloor</gx:altitudeMode>"
+        )
+        coords, paths, _ = parse_kml_coordinates(_write(tmp_path, "t.kml", kml))
+        assert paths == []
+        assert len(coords) == 2
+        assert "altitudeMode clampToSeaFloor ignored" in capsys.readouterr().err
+
+
+class TestInheritedTime:
+    def test_folder_time_dates_a_line_string(self, tmp_path):
+        kml = (
+            f"{KML_HEADER}<Document><Folder>"
+            "<TimeSpan><begin>2024-07-01</begin></TimeSpan>"
+            f"<Placemark><name>EDDS - EDDP</name>{LINE.replace('MODE', '')}"
+            "</Placemark></Folder></Document></kml>"
+        )
+        _, paths, metadata = parse_kml_coordinates(_write(tmp_path, "f.kml", kml))
+        assert len(paths) == 1
+        assert metadata[0]["year"] == 2024

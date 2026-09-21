@@ -247,6 +247,16 @@ test.describe("Path Selection", () => {
     await expect(details).toBeVisible({ timeout: 5000 });
     await expect(details).toContainText(/Altitude/);
     await expect(details).toContainText(/ft/);
+    // The colour reaches the metric through the CSSOM, since the CSP
+    // blocks the style attribute it used to be written in
+    const colored = details.locator(".kh-popup-metric-colored").first();
+    await expect
+      .poll(() =>
+        colored.evaluate((el) =>
+          (el as HTMLElement).style.getPropertyValue("--kh-metric-color"),
+        ),
+      )
+      .toMatch(/^rgb/);
     await page.waitForFunction(
       () => window.mapApp!.selectedPathIds.size === 1,
       { timeout: 5000 },

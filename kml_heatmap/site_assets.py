@@ -39,6 +39,7 @@ __all__ = [
     "FEATURES_BUNDLE_FILE",
     "FLAGS_DIR_NAME",
     "SITE_FILES",
+    "SITE_FILE_PATTERNS",
     "STATIC_DIR",
     "BuildCommit",
     "available_country_flags",
@@ -74,10 +75,14 @@ BUNDLE_BANNER = re.compile(rb"/\* kml-heatmap build ([0-9a-f]{12}) \*/")
 # scripts/source-hash.js; TestSourceHashParity checks that they agree.
 BUILD_HASH_FILES = (
     "build.js",
+    "scripts/shared-modules.js",
     "tsconfig.json",
     "kml_heatmap/static/styles.css",
     "kml_heatmap/static/features.css",
 )
+# Packages whose pinned version changes the bundles, hashed after the files
+# and in this order. Keep in step with BUILD_PACKAGES in the same script.
+BUILD_HASH_PACKAGES = ("esbuild", "lucide")
 FAVICON_FILES = (
     "favicon.svg",
     "favicon.ico",
@@ -95,7 +100,7 @@ VENDOR_FILES = (
     "leaflet.js",
     "leaflet.css",
     "leaflet-heat.js",
-    "dom-to-image.min.js",
+    "html-to-image.js",
     "images/layers.png",
     "images/layers-2x.png",
     "images/marker-icon.png",
@@ -116,7 +121,13 @@ SITE_FILES = (
     *(f"{bundle.name}.map" for bundle in BUNDLE_FILES),
     *FAVICON_FILES,
     *(f"vendor/{name}" for name in VENDOR_FILES),
+    # Published by earlier versions and produced by none now: listed so that
+    # regenerating an existing site takes them away
+    "vendor/dom-to-image.min.js",
 )
+# Owned files whose names depend on the flights: the flag of every country
+# the export visited. The ones a run does not publish are removed.
+SITE_FILE_PATTERNS = (f"{FLAGS_DIR_NAME}/*.svg",)
 
 
 def _escape_js_string(value: str) -> str:
@@ -143,11 +154,15 @@ def minify_html(html_content: str) -> str:
     return minified
 
 
-def _pinned_esbuild_version(package_lock: Path) -> str:
-    """The esbuild version package-lock.json pins, as source-hash.js reads it."""
+def _pinned_build_versions(package_lock: Path) -> list[str]:
+    """The versions package-lock.json pins for BUILD_HASH_PACKAGES, as
+    source-hash.js reads and writes them ("esbuild 0.28.2")."""
     with package_lock.open(encoding="utf-8") as lock_file:
         lock = json.load(lock_file)
-    return str(lock["packages"]["node_modules/esbuild"]["version"])
+    return [
+        f"{name} {lock['packages'][f'node_modules/{name}']['version']}"
+        for name in BUILD_HASH_PACKAGES
+    ]
 
 
 def _frontend_source_hash() -> str | None:
@@ -156,10 +171,11 @@ def _frontend_source_hash() -> str | None:
     Mirrors scripts/source-hash.js: every .ts file under the frontend
     directory in path order and then each file in BUILD_HASH_FILES, both as
     the path relative to the repository and the content, and finally the
-    pinned esbuild version. The build script, the compiler options and the
-    bundler shape the bundle as much as the sources do, so a change to any of
-    them has to invalidate the hash as well, and so do the stylesheets: they
-    are not in a bundle, but they are part of what a built site renders.
+    pinned version of each package in BUILD_HASH_PACKAGES. The build script,
+    the compiler options, the bundler and what it bundles from node_modules
+    shape the bundle as much as the sources do, so a change to any of them
+    has to invalidate the hash as well, and so do the stylesheets: they are
+    not in a bundle, but they are part of what a built site renders.
 
     The two implementations have to agree or the staleness check below is
     meaningless; TestSourceHashParity in tests/test_site_assets.py runs
@@ -170,7 +186,7 @@ def _frontend_source_hash() -> str | None:
     root = FRONTEND_DIR.parent.parent
     digest = hashlib.sha1(usedforsecurity=False)
     try:
-        esbuild_version = _pinned_esbuild_version(root / "package-lock.json")
+        package_versions = _pinned_build_versions(root / "package-lock.json")
         sources = sorted(FRONTEND_DIR.rglob("*.ts"), key=str)
         for path in [*sources, *(root / name for name in BUILD_HASH_FILES)]:
             digest.update(path.relative_to(root).as_posix().encode())
@@ -181,8 +197,9 @@ def _frontend_source_hash() -> str | None:
         # Not a checkout the bundle could be rebuilt from, so there is
         # nothing to compare the bundle against
         return None
-    digest.update(f"esbuild {esbuild_version}".encode())
-    digest.update(b"\0")
+    for version in package_versions:
+        digest.update(version.encode())
+        digest.update(b"\0")
     return digest.hexdigest()[:12]
 
 
@@ -234,12 +251,24 @@ def warn_about_a_stale_bundle() -> None:
         )
 
 
-def render_html(output_file: Path, data_dir_name: str) -> None:
-    """Render and minify the HTML template."""
+def render_html(
+    output_file: Path, data_dir_name: str, latest_year: int | None = None
+) -> None:
+    """Render and minify the HTML template.
+
+    ``latest_year`` is the year the page opens on, whose data file is
+    preloaded; None preloads nothing.
+    """
     logger.info("\nGenerating progressive HTML...")
 
+    data_dir = html.escape(data_dir_name)
+    year_preload = (
+        f'<link rel="preload" as="script" href="{data_dir}/{latest_year}/data.js" />'
+        if latest_year is not None
+        else ""
+    )
     tmpl = string.Template(load_template())
-    html_content = tmpl.substitute(data_dir_name=html.escape(data_dir_name))
+    html_content = tmpl.substitute(data_dir_name=data_dir, year_preload=year_preload)
 
     logger.info("\nMinifying HTML...")
     minified_html = minify_html(html_content)

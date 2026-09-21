@@ -88,6 +88,21 @@ describe("bindActions", () => {
     expect(app.uiToggles.exportMap).toHaveBeenCalledTimes(1);
   });
 
+  it("unbinds every control once the app is gone", () => {
+    const lifetime = new AbortController();
+    const ended = createMockApp({ signal: lifetime.signal });
+    bindActions(asMapApp(ended));
+
+    lifetime.abort();
+    elements["toggleHeatmap"]!.click();
+    elements["filterByYear"]!.dispatchEvent(new Event("change"));
+
+    expect(ended.uiToggles.toggleHeatmap).not.toHaveBeenCalled();
+    expect(ended.filterManager.filterByYear).not.toHaveBeenCalled();
+    // The app bound in beforeEach still lives
+    expect(app.uiToggles.toggleHeatmap).toHaveBeenCalledTimes(1);
+  });
+
   it("binds the share button like every other control", () => {
     elements["shareLink"]!.click();
 

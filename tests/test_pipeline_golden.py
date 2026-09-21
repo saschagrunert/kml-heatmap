@@ -12,6 +12,7 @@ from pathlib import Path
 from pprint import pformat
 
 import pytest
+from lxml import html as lxml_html
 
 from kml_heatmap.data_exporter import PATH_ID_BITS
 from kml_heatmap.geometry import haversine_distance
@@ -26,8 +27,8 @@ from tests.conftest import parse_js as _load_js
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 # Row: [lat, lon, altitude_ft, groundspeed_knots] plus an optional time
-SEGMENT_MIN_LEN = 4
-SEGMENT_MAX_LEN = 5
+SEGMENT_MIN_COLUMNS = 4
+SEGMENT_MAX_COLUMNS = 5
 
 
 PER_YEAR = 4
@@ -56,7 +57,7 @@ GOLDEN = {
     "available_years": [2025, 2026],
     "distance_km": {2025: 387.5, 2026: 1176.2},
     "flight_seconds": {2025: 12338.5, 2026: 23987.6},
-    "groundspeed_knots": (0.1, 165.7),
+    "groundspeed_knots": (0.1, 167.4),
     "path_count": 8,
     "path_ids": {
         2025: [411100833082, 642456146975, 336383306180, 68245584272],
@@ -123,7 +124,7 @@ def _observed_values(data_dir):
         data = _load_js(data_dir / str(year) / "data.js", f"KML_DATA_{year}")
         path_ids[year] = [info["id"] for info in data["path_info"]]
         entries = data["segments"].values()
-        segment_rows[year] = sum(len(entry["rows"]) for entry in entries)
+        segment_rows[year] = sum(len(entry["columns"][0]) for entry in entries)
         # The rows are scaled integers stored as differences; decoding them
         # here is a second implementation of what the frontend does, so the
         # numbers below are the ones a visitor sees. They were pinned before
@@ -131,7 +132,7 @@ def _observed_values(data_dir):
         distance = 0.0
         seconds = 0.0
         for entry in entries:
-            rows = decode_rows(entry["start"], entry["rows"])
+            rows = decode_rows(entry["start"], entry["columns"])
             previous = [value / COORDINATE_SCALE for value in entry["start"]]
             for row in rows:
                 distance += haversine_distance(*previous[:2], *row[:2])
@@ -183,6 +184,20 @@ def test_index_html_references_bundles(golden_output):
     assert "./bundle.js" not in html
     assert (out / "map_config.js").exists()
     assert (out / "styles.css").exists()
+
+
+def test_index_html_preloads_the_latest_year(golden_output):
+    """The year the page opens on, at the URL the loader requests it by."""
+    out, _ = golden_output
+    page = lxml_html.fromstring((out / "index.html").read_text(encoding="utf-8"))
+    latest = max(_load_js(out / "data" / "metadata.js")["available_years"])
+    preloads = [
+        (link.get("as"), link.get("href"))
+        for link in page.iter("link")
+        if link.get("rel") == "preload"
+    ]
+    assert preloads == [("script", f"data/{latest}/data.js")]
+    assert (out / "data" / str(latest) / "data.js").exists()
 
 
 def test_top_level_data_files(golden_output):
@@ -262,14 +277,15 @@ def test_year_data_shape_and_unique_ids(golden_output):
             registrations.add(info.get("aircraft_registration"))
 
         for entry in data["segments"].values():
-            encoded = entry["rows"]
-            assert encoded
+            encoded = entry["columns"]
+            assert encoded[0]
             assert len(entry["start"]) == 2
             # Everything on disk is an integer, which is the point of the format
             assert all(isinstance(value, int) for value in entry["start"])
-            for row in encoded:
-                assert SEGMENT_MIN_LEN <= len(row) <= SEGMENT_MAX_LEN
-                assert all(isinstance(value, int) for value in row)
+            assert SEGMENT_MIN_COLUMNS <= len(encoded) <= SEGMENT_MAX_COLUMNS
+            for column in encoded:
+                assert len(column) == len(encoded[0])
+                assert all(isinstance(value, int) for value in column)
             for row in decode_rows(entry["start"], encoded):
                 assert row[2] % 100 == 0
                 assert row[3] >= 0

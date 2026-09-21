@@ -6,6 +6,7 @@
 import * as L from "leaflet";
 import { createAirportIcon } from "./features/airports";
 import { domCache } from "./utils/domCache";
+import { applyMetricColors } from "./utils/htmlGenerators";
 import { showToast } from "./utils/toast";
 import { datasetIndex } from "./calculations/datasetIndex";
 import type { MapApp } from "./mapApp";
@@ -64,6 +65,8 @@ export function resolveYearSelection(
  * @param app - The MapApp instance to operate on
  */
 export async function loadInitialData(app: MapApp): Promise<void> {
+  colorSegmentPopups();
+
   // Load airports
   const airports = await app.dataManager.loadAirports();
   app.allAirportsData = airports;
@@ -164,6 +167,20 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   if (app.savedState && app.savedState.statsPanelVisible) {
     app.statsManager.setStatsPanelVisible(true);
   }
+}
+
+/**
+ * Colour the segment popups and tooltips as Leaflet writes them into the
+ * map. They carry their colours as data, since the CSP allows no style
+ * attribute (see applyMetricColors); the observer runs before the next
+ * paint, so they never show uncoloured.
+ */
+export function colorSegmentPopups(): void {
+  const container = domCache.get("map");
+  if (!container) return;
+  new MutationObserver((records) => {
+    for (const { target } of records) applyMetricColors(target as Element);
+  }).observe(container, { childList: true, subtree: true });
 }
 
 /**

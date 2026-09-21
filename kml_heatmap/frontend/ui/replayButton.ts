@@ -20,9 +20,10 @@ export function updateReplayButtonState(ready: boolean): void {
   const btn = domCache.get("replay-btn", HTMLButtonElement);
   if (!btn) return;
 
-  // The button stays enabled so it can explain why replay is unavailable
+  // The button stays enabled so it can explain why replay is unavailable:
+  // aria-disabled says so without taking it out of the tab order, which
+  // the disabled attribute would
   btn.style.opacity = ready ? "1.0" : "0.5";
-  // No aria-disabled: assistive tech would skip the button, and clicking it
-  // is how the user learns why replay is unavailable
+  btn.setAttribute("aria-disabled", String(!ready));
   btn.title = ready ? REPLAY_BUTTON_LABEL : REPLAY_PRECONDITION_MESSAGE;
 }

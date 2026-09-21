@@ -5,14 +5,17 @@
  * either, so they are built into a second IIFE that the app fetches the
  * first time one of them is used (see services/featureLoader.ts). Everything
  * they share with the main bundle is resolved to window.__kmlShared by the
- * build, so this file adds only the two features themselves.
+ * build, so this file adds only the two features themselves, and the
+ * flight list of the airport popups, which the first of them fetches.
  */
+import { listFlights } from "./ui/airportFlights";
 import { ReplayManager } from "./ui/replayManager";
 import { WrappedManager } from "./ui/wrappedManager";
 
 export interface FeatureModule {
   ReplayManager: typeof ReplayManager;
   WrappedManager: typeof WrappedManager;
+  listFlights: typeof listFlights;
 }
 
 declare global {
@@ -21,4 +24,4 @@ declare global {
   }
 }
 
-window.KMLFeatures = { ReplayManager, WrappedManager };
+window.KMLFeatures = { ReplayManager, WrappedManager, listFlights };

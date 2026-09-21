@@ -236,6 +236,21 @@ test.describe("Replay", () => {
     await expect(page.locator("#aircraft-select")).toBeDisabled();
   });
 
+  test("replay keeps the selection it is playing", async ({ page }) => {
+    await activateReplay(page);
+
+    // Clearing it dimmed the Stop button and switched the statistics
+    await expect(page.locator("#isolate-btn")).toBeDisabled();
+    await expect(page.locator("#selection-clear-btn")).toBeDisabled();
+    await expect(page.locator("#selection-chip-count")).toHaveText(
+      "1 flight selected",
+    );
+    await expect(page.locator("#replay-btn")).toHaveAttribute(
+      "title",
+      "Stop replay",
+    );
+  });
+
   test("replay slider shows time labels", async ({ page }) => {
     await activateReplay(page);
 

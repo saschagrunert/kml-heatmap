@@ -39,11 +39,15 @@ describe("updateReplayButtonState", () => {
 
   it("leaves the button clickable either way", () => {
     // Clicking it is how the user learns why replay is unavailable, so it
-    // must not be disabled or hidden from assistive tech
+    // must not be disabled: aria-disabled says so and keeps it focusable
     updateReplayButtonState(false);
 
     expect(button().disabled).toBe(false);
-    expect(button().hasAttribute("aria-disabled")).toBe(false);
+    expect(button().getAttribute("aria-disabled")).toBe("true");
+
+    updateReplayButtonState(true);
+
+    expect(button().getAttribute("aria-disabled")).toBe("false");
   });
 
   it("does nothing when the control is not on the page", () => {

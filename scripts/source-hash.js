@@ -4,8 +4,10 @@
  * build.js stamps it into the bundle banner, and the e2e global setup reads
  * the banner back to refuse a site that was built from other sources. Both
  * import it from here so the two can never hash differently. The build
- * script, the compiler options and the esbuild version shape the bundle as
- * much as the sources do, so they are part of the hash.
+ * script, the list of modules the two bundles share, the compiler options,
+ * the esbuild version and the version of every package bundled into the
+ * page (only Lucide: Leaflet is a global) shape the bundle as much as the
+ * sources do, so they are part of the hash.
  *
  * The stylesheets are in it as well. They are not part of any bundle, but
  * they are part of what a built site renders, and the visual snapshots
@@ -23,20 +25,30 @@ const FRONTEND_DIR = join(REPO_ROOT, "kml_heatmap/frontend");
 /** Files outside the sources that change what a built site renders */
 const BUILD_FILES = [
   "build.js",
+  "scripts/shared-modules.js",
   "tsconfig.json",
   "kml_heatmap/static/styles.css",
   "kml_heatmap/static/features.css",
 ].map((name) => join(REPO_ROOT, name));
 
 /**
- * The esbuild version package-lock.json pins
- * @returns {string}
+ * Packages whose pinned version changes the bundles: the bundler and what
+ * it bundles from node_modules. Hashed in this order, after the files.
  */
-function esbuildVersion() {
+const BUILD_PACKAGES = ["esbuild", "lucide"];
+
+/**
+ * The version package-lock.json pins for each of BUILD_PACKAGES
+ * @returns {string[]}
+ */
+function buildPackageVersions() {
   const lock = JSON.parse(
     readFileSync(join(REPO_ROOT, "package-lock.json"), "utf8"),
   );
-  return String(lock.packages["node_modules/esbuild"].version);
+  return BUILD_PACKAGES.map(
+    (name) =>
+      `${name} ${String(lock.packages[`node_modules/${name}`].version)}`,
+  );
 }
 
 /** First line of every bundle; the capture group is the source hash */
@@ -75,8 +87,10 @@ export function computeSourceHash() {
     hash.update(readFileSync(file));
     hash.update("\0");
   }
-  hash.update(`esbuild ${esbuildVersion()}`);
-  hash.update("\0");
+  for (const version of buildPackageVersions()) {
+    hash.update(version);
+    hash.update("\0");
+  }
   return hash.digest("hex").slice(0, 12);
 }
 

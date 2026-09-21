@@ -10,14 +10,14 @@ import { showToast } from "../utils/toast";
 type ColorLayerMode = "altitude" | "airspeed";
 
 /**
- * dom-to-image is only needed for export, so it is loaded on first use.
+ * html-to-image is only needed for export, so it is loaded on first use.
  * It is served from the site next to the page (see scripts/vendor.js), so
  * there is no integrity hash to pin: same-origin and already covered by the
  * page's own CSP.
  */
-export const DOM_TO_IMAGE_URL = "./vendor/dom-to-image.min.js";
+export const HTML_TO_IMAGE_URL = "./vendor/html-to-image.js";
 
-const MOBILE_BREAKPOINT_PX = 768;
+import { MOBILE_BREAKPOINT_PX } from "../utils/constants";
 /** Largest canvas iOS Safari will draw into (16.7 million pixels) */
 export const MAX_CANVAS_PIXELS = 16_777_216;
 /** Phones get their pixel density up to this factor */
@@ -25,33 +25,33 @@ const MAX_PHONE_EXPORT_SCALE = 3;
 const EXPORT_BUTTON_LABEL = "Export image";
 const EXPORT_BUTTON_BUSY_LABEL = "Exporting…";
 
-let domToImagePromise: Promise<DomToImage | null> | null = null;
+let htmlToImagePromise: Promise<HtmlToImage | null> | null = null;
 
 /**
- * Load dom-to-image on demand. Resolves with null when the script cannot be
+ * Load html-to-image on demand. Resolves with null when the script cannot be
  * loaded (a site published without the vendor directory, blocked by CSP).
  */
-export function loadDomToImage(): Promise<DomToImage | null> {
-  if (window.domtoimage) return Promise.resolve(window.domtoimage);
-  if (domToImagePromise) return domToImagePromise;
+export function loadHtmlToImage(): Promise<HtmlToImage | null> {
+  if (window.htmlToImage) return Promise.resolve(window.htmlToImage);
+  if (htmlToImagePromise) return htmlToImagePromise;
 
-  domToImagePromise = new Promise((resolve) => {
+  htmlToImagePromise = new Promise((resolve) => {
     const script = document.createElement("script");
-    script.src = DOM_TO_IMAGE_URL;
-    script.onload = () => resolve(window.domtoimage ?? null);
+    script.src = HTML_TO_IMAGE_URL;
+    script.onload = () => resolve(window.htmlToImage ?? null);
     script.onerror = () => {
       script.remove();
-      domToImagePromise = null;
+      htmlToImagePromise = null;
       resolve(null);
     };
     document.head.appendChild(script);
   });
-  return domToImagePromise;
+  return htmlToImagePromise;
 }
 
 /** Reset the cached loader (used by tests) */
-export function resetDomToImageLoader(): void {
-  domToImagePromise = null;
+export function resetHtmlToImageLoader(): void {
+  htmlToImagePromise = null;
 }
 
 /** Small viewport or touch device */
@@ -210,34 +210,16 @@ export class UIToggles {
   }
 
   private toggleColorLayer(mode: ColorLayerMode): void {
-    if (!this.app.map) return;
+    const map = this.app.map;
+    if (!map) return;
 
     const other: ColorLayerMode = mode === "altitude" ? "airspeed" : "altitude";
-    const isVisible =
-      mode === "altitude" ? this.app.altitudeVisible : this.app.airspeedVisible;
-    const otherVisible =
-      mode === "altitude" ? this.app.airspeedVisible : this.app.altitudeVisible;
-    const layer =
-      mode === "altitude" ? this.app.altitudeLayer : this.app.airspeedLayer;
-    const otherLayer =
-      mode === "altitude" ? this.app.airspeedLayer : this.app.altitudeLayer;
-    const redraw =
-      mode === "altitude"
-        ? () => this.app.layerManager.redrawAltitudePaths()
-        : () => this.app.layerManager.redrawAirspeedPaths();
-
-    const setVisible = (value: boolean) => {
-      if (mode === "altitude") this.app.altitudeVisible = value;
-      else this.app.airspeedVisible = value;
-    };
-    const setOtherVisible = (value: boolean) => {
-      if (other === "altitude") this.app.altitudeVisible = value;
-      else this.app.airspeedVisible = value;
-    };
+    const replay = this.app.replayState.active;
+    const layers = this.app.layerManager;
 
     // The buttons and the legends follow the store keys written below
-    if (isVisible) {
-      if (this.app.replayState.active) {
+    if (this.app[`${mode}Visible`]) {
+      if (replay) {
         // The layer is off the map for the replay already. The trail keeps
         // its altitude colours without a colour layer, so only a speed
         // trail changes (see ReplayManager.updateTrailLegend for the scale)
@@ -245,32 +227,31 @@ export class UIToggles {
           this.app.replayManager?.redrawReplayPath("altitude");
         }
       } else {
-        this.app.map.removeLayer(layer);
+        map.removeLayer(this.app[`${mode}Layer`]);
       }
-      setVisible(false);
+      this.app[`${mode}Visible`] = false;
+      // A hidden layer is rebuilt when it is shown again; kept, its
+      // polylines and their segment lists held tens of MB for nothing
+      layers.clearLayer(mode);
     } else {
-      if (otherVisible) {
-        if (!this.app.replayState.active) {
-          this.app.map.removeLayer(otherLayer);
-        }
-        setOtherVisible(false);
+      if (this.app[`${other}Visible`]) {
+        if (!replay) map.removeLayer(this.app[`${other}Layer`]);
+        this.app[`${other}Visible`] = false;
+        layers.clearLayer(other);
       }
 
-      if (!this.app.replayState.active) {
-        redraw();
-        this.app.map.addLayer(layer);
+      if (!replay) {
+        if (mode === "altitude") layers.redrawAltitudePaths();
+        else layers.redrawAirspeedPaths();
+        map.addLayer(this.app[`${mode}Layer`]);
       } else {
         this.app.replayManager?.redrawReplayPath(mode);
       }
 
-      setVisible(true);
+      this.app[`${mode}Visible`] = true;
     }
 
-    if (
-      this.app.replayState.active &&
-      this.app.replayState.airplaneMarker &&
-      this.app.replayState.airplaneMarker.isPopupOpen()
-    ) {
+    if (replay && this.app.replayState.airplaneMarker?.isPopupOpen()) {
       this.app.replayManager?.updateReplayAirplanePopup();
     }
   }
@@ -330,8 +311,8 @@ export class UIToggles {
   }
 
   private async runExport(mapContainer: HTMLElement): Promise<void> {
-    const domtoimage = await loadDomToImage();
-    if (!domtoimage) {
+    const htmlToImage = await loadHtmlToImage();
+    if (!htmlToImage) {
       showToast("Export unavailable", "error");
       return;
     }
@@ -340,15 +321,14 @@ export class UIToggles {
       mapContainer.offsetWidth,
       mapContainer.offsetHeight,
     );
-    const dataUrl = await domtoimage.toJpeg(mapContainer, {
-      width: Math.round(mapContainer.offsetWidth * scale),
-      height: Math.round(mapContainer.offsetHeight * scale),
-      // width/height only resize the canvas; the clone has to be scaled too
-      style: {
-        transform: "scale(" + scale + ")",
-        transformOrigin: "top left",
-      },
-      bgcolor:
+    const dataUrl = await htmlToImage.toJpeg(mapContainer, {
+      // The canvas is the map's CSS size times this; the clone keeps the
+      // map's own layout
+      pixelRatio: scale,
+      // The page has no web fonts to inline. Looking for them reads every
+      // stylesheet, which a file:// page is not allowed to.
+      skipFonts: true,
+      backgroundColor:
         getComputedStyle(document.documentElement)
           .getPropertyValue("--color-bg-primary")
           .trim() || "#1a1a1a",

@@ -12,17 +12,21 @@ from .exceptions import KMLParseError
 from .logger import logger
 from .parser_cache import get_cache_key, load_cached_parse, save_to_cache
 from .parser_common import (
+    NON_MSL_ALTITUDE_MODES,
+    altitude_mode,
     extract_placemark_metadata,
     find_xml_element,
     find_xml_elements,
+    local_name,
 )
-from .parser_gx_track import local_name, process_gx_track
+from .parser_gx_track import process_gx_track
 from .parser_standard import process_standard_coordinates
 
 if TYPE_CHECKING:
     from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
 
 __all__ = [
+    "load_cached_kml",
     "parse_kml_coordinates",
 ]
 
@@ -168,6 +172,49 @@ def _build_coord_metadata_map(
     return coord_to_metadata, track_fallback_lines
 
 
+def _select_line_coordinates(
+    coord_elements: list[etree._Element], kml_file: str
+) -> tuple[list[etree._Element], set[int]]:
+    """The <coordinates> that are parsed, and the lines without altitudes.
+
+    Only a LineString (on its own or in a MultiGeometry) is a flight path. A
+    Point is kept: it is counted, but a single position never forms a path.
+    Everything else, the rings of a Polygon above all, is an area rather than
+    a flight and is skipped. The second value holds the ids of the lines
+    whose altitudes are not above sea level (see NON_MSL_ALTITUDE_MODES).
+    """
+    selected: list[etree._Element] = []
+    unknown_altitude: set[int] = set()
+    skipped = 0
+    for elem in coord_elements:
+        parent = elem.getparent()
+        kind = local_name(parent.tag) if parent is not None else ""
+        if parent is not None and kind == "LineString":
+            mode = altitude_mode(parent)
+            if mode in NON_MSL_ALTITUDE_MODES:
+                logger.warning(
+                    "%s: LineString with altitudeMode %s ignored: its altitudes "
+                    "are not above sea level",
+                    Path(kml_file).name,
+                    mode,
+                )
+                unknown_altitude.add(id(elem))
+        elif kind != "Point":
+            # SkyDemon writes an empty <coordinates /> into its gx:Track
+            if elem.text and elem.text.strip():
+                skipped += 1
+            continue
+        selected.append(elem)
+    if skipped:
+        logger.warning(
+            "%s: %d <coordinates> outside of a LineString or Point (such as a "
+            "Polygon) ignored",
+            Path(kml_file).name,
+            skipped,
+        )
+    return selected, unknown_altitude
+
+
 def _log_parse_result(
     kml_file: str,
     coordinates: FlightPath,
@@ -187,16 +234,32 @@ def _log_parse_result(
         )
 
 
+def _read_cache(
+    kml_file: str, cache_path: Path | None, cache_valid: bool
+) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]] | None:
+    if not (cache_valid and cache_path):
+        return None
+    cached_result = load_cached_parse(cache_path)
+    if cached_result:
+        _log_parse_result(kml_file, cached_result[0], cached_result[1], cached=True)
+    return cached_result
+
+
+def load_cached_kml(
+    kml_file: str,
+) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]] | None:
+    """The cached parse result of a KML file, None when there is none."""
+    return _read_cache(kml_file, *get_cache_key(kml_file))
+
+
 def parse_kml_coordinates(
     kml_file: str,
 ) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]]:
     """Extract coordinates from a KML file."""
     cache_path, cache_valid = get_cache_key(kml_file)
-    if cache_valid and cache_path:
-        cached_result = load_cached_parse(cache_path)
-        if cached_result:
-            _log_parse_result(kml_file, cached_result[0], cached_result[1], cached=True)
-            return cached_result
+    cached_result = _read_cache(kml_file, cache_path, cache_valid)
+    if cached_result:
+        return cached_result
 
     coordinates: FlightPath = []
     path_groups: FlightPathGroup = []
@@ -215,6 +278,9 @@ def parse_kml_coordinates(
         coord_elements = [
             elem for elem in coord_elements if id(elem) not in track_fallback_lines
         ]
+    coord_elements, unknown_altitude = _select_line_coordinates(
+        coord_elements, kml_file
+    )
 
     # Once per file: it logs its complaints about the name on every call
     aircraft_info = parse_aircraft_from_filename(Path(kml_file).name)
@@ -227,6 +293,7 @@ def parse_kml_coordinates(
         path_groups,
         path_metadata,
         aircraft_info,
+        unknown_altitude,
     )
 
     process_gx_track(

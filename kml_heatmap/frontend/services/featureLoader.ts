@@ -3,7 +3,7 @@
  *
  * Replay and Wrapped are a quarter of the frontend and most visits open
  * neither, so they are built into features.bundle.js and loaded the first
- * time one of them is used. The same pattern as loadDomToImage() in
+ * time one of them is used. The same pattern as loadHtmlToImage() in
  * ui/uiToggles.ts: a script tag, one shared promise, and a failure that
  * resolves rather than throws so the caller can say something useful.
  *

@@ -1,9 +1,9 @@
 /**
  * Airport Manager - Handles airport markers and popups
  */
+import type * as L from "leaflet";
 import type { MapApp } from "../mapApp";
 import {
-  calculateAirportFlightCounts,
   calculateVisibleAirports,
   createAirportIcon,
   findHomeBase,
@@ -13,6 +13,7 @@ import { datasetIndex } from "../calculations/datasetIndex";
 import type { PathInfo } from "../types";
 import { ddToDms } from "../utils/geometry";
 import { generateAirportPopupHtml } from "../utils/htmlGenerators";
+import { loadFeatures } from "../services/featureLoader";
 
 /** Padding added around a label box before two are called overlapping */
 const LABEL_GAP_PX = 2;
@@ -68,17 +69,9 @@ export class AirportManager {
     });
   }
 
-  // Calculate airport flight counts based on current filters
-  calculateAirportFlightCounts(): AirportCounts {
-    return calculateAirportFlightCounts(
-      this.app.fullPathInfo ?? [],
-      this.app.selectedYear,
-      this.app.selectedAircraft,
-    );
-  }
-
   /**
-   * The same counts, kept with the dataset for as long as the filter stays.
+   * Flights per airport under the current filter, kept with the dataset for
+   * as long as the filter stays.
    *
    * declutterLabels() needs them to decide which label wins, and it runs on
    * every zoom, where nothing about the counts can have changed.
@@ -127,6 +120,7 @@ export class AirportManager {
         marker.setPopupContent(popup);
       } else {
         marker.bindPopup(popup, { autoPanPadding: [50, 50] });
+        this.bindPopupEvents(marker, airport.name);
       }
 
       if ((this.homeIconState.get(airport.name) ?? false) !== isHomeBase) {
@@ -139,6 +133,42 @@ export class AirportManager {
     // A new icon is a new element, so whatever declutterLabels() decided
     // about the old one went with it
     if (iconsRecreated) this.declutterLabels();
+  }
+
+  /**
+   * Keyboard access to an airport popup and the flights it lists.
+   *
+   * The list is what lets a keyboard pick a single flight, and with it
+   * replay: otherwise only a click on a path does. It lives in the feature
+   * bundle, which the first popup fetches. A popup opened from the keyboard
+   * takes focus, and closing it puts focus back on the marker instead of
+   * dropping it on the page. Leaflet closes one on Escape only while the
+   * map itself has focus.
+   */
+  private bindPopupEvents(marker: L.Marker, name: string): void {
+    const popup = marker.getPopup()!;
+    popup.on("contentupdate", () => {
+      void loadFeatures().then((features) =>
+        features?.listFlights(this.app, popup, name),
+      );
+    });
+    marker.on("popupopen", () => {
+      if (marker.getElement()?.matches(":focus-visible")) {
+        popup
+          .getElement()
+          ?.querySelector<HTMLElement>(".popup-container")
+          ?.focus();
+      }
+    });
+    marker.on("popupclose", () => {
+      const active = document.activeElement;
+      if (active === document.body || popup.getElement()?.contains(active)) {
+        marker.getElement()?.focus();
+      }
+    });
+    marker.on("keydown", (event: L.LeafletKeyboardEvent) => {
+      if (event.originalEvent.key === "Escape") marker.closePopup();
+    });
   }
 
   updateAirportOpacity(): void {

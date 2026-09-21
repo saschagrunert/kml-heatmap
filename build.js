@@ -27,6 +27,7 @@ const sourceHash = computeSourceHash();
 const buildBanner = makeBanner(sourceHash);
 
 // Shared build options for IIFE format bundles (file:// protocol compatible)
+/** @type {import("esbuild").BuildOptions} */
 const sharedBuildOptions = {
   bundle: true,
   format: "iife",
@@ -50,6 +51,7 @@ const sharedBuildOptions = {
 };
 
 // Plugin to replace Leaflet import with global L variable
+/** @type {import("esbuild").Plugin} */
 const leafletGlobalPlugin = {
   name: "leaflet-global",
   setup(build) {
@@ -71,6 +73,7 @@ const FRONTEND_DIR = join(__dirname, "kml_heatmap/frontend");
  * instead of bundling a second copy into the feature bundle. Several of them
  * hold state (the DOM cache, the toast live region), so a second copy would
  * be a correctness problem and not only dead weight.
+ * @type {import("esbuild").Plugin}
  */
 const sharedGlobalPlugin = {
   name: "shared-global",
@@ -90,6 +93,7 @@ const sharedGlobalPlugin = {
 };
 
 // Build MapApp
+/** @type {import("esbuild").BuildOptions} */
 const appBuildOptions = {
   ...sharedBuildOptions,
   entryPoints: [join(__dirname, "kml_heatmap/frontend/mapApp.ts")],
@@ -101,6 +105,7 @@ const appBuildOptions = {
 // The feature bundle: replay and Wrapped, fetched the first time one of them
 // is opened. It shares everything else with the main bundle through the
 // plugin above.
+/** @type {import("esbuild").BuildOptions} */
 const featuresBuildOptions = {
   ...sharedBuildOptions,
   entryPoints: [join(__dirname, "kml_heatmap/frontend/features.ts")],
@@ -110,6 +115,8 @@ const featuresBuildOptions = {
 
 /**
  * Format bytes to human-readable size
+ * @param {number} bytes
+ * @returns {string}
  */
 function formatBytes(bytes) {
   if (bytes === 0) return "0 B";
@@ -121,6 +128,8 @@ function formatBytes(bytes) {
 
 /**
  * Analyze bundle composition from metafile
+ * @param {import("esbuild").Metafile} metafile
+ * @param {string} bundleName
  */
 function analyzeBundleComposition(metafile, bundleName) {
   console.log(`\n📊 ${bundleName} Composition:`);
@@ -134,6 +143,7 @@ function analyzeBundleComposition(metafile, bundleName) {
   }
 
   // Group imports by type
+  /** @type {Record<string, number>} */
   const composition = {};
   const totalBytes = outputs.bytes;
 
@@ -198,6 +208,7 @@ function analyzeBundleSizes() {
   console.log("\n📦 Bundle Size Analysis:");
   console.log("─".repeat(60));
 
+  /** @type {[label: string, name: string, budget: number][]} */
   const bundles = [
     ["🗺️  MapApp Bundle", "mapApp.bundle.js", BUDGET_APP],
     ["✨ Features Bundle", "features.bundle.js", BUDGET_FEATURES],
@@ -215,7 +226,10 @@ function analyzeBundleSizes() {
         budgetExceeded = true;
       }
     } catch (error) {
-      console.error(`  ❌ Could not measure ${name}:`, error.message);
+      console.error(
+        `  ❌ Could not measure ${name}:`,
+        error instanceof Error ? error.message : error,
+      );
       // A bundle that cannot be measured cannot be within budget either
       budgetExceeded = true;
     }
@@ -255,6 +269,8 @@ function bundledModules(metafile) {
  * everything in SHARED_MODULES to the global, so a module in both bundles
  * means that list has fallen behind what the features import. Comparing the
  * two bundles catches that, which checking against the list alone cannot.
+ * @param {import("esbuild").Metafile | undefined} appMetafile
+ * @param {import("esbuild").Metafile | undefined} featuresMetafile
  */
 function assertNoSharedCopies(appMetafile, featuresMetafile) {
   const inApp = bundledModules(appMetafile);

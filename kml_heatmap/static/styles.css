@@ -1875,6 +1875,43 @@ body.stats-open #left-buttons {
   justify-content: space-between;
   align-items: center;
 }
+/* One button per flight, the keyboard's way to a single flight. A busy
+   airport lists hundreds, so the list scrolls instead of the popup
+   growing past the map. */
+.kh-popup-flights-label {
+  margin-top: var(--space-sm);
+}
+.kh-popup-flights {
+  display: grid;
+  gap: 2px;
+  max-height: 9.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.kh-popup-flight {
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-control);
+  padding: 3px var(--space-xs);
+  cursor: pointer;
+}
+.kh-popup-flight:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.kh-popup-flight[aria-pressed="true"] {
+  background: rgba(var(--color-accent-blue-rgb), 0.15);
+  color: var(--color-accent-blue);
+}
+.kh-popup-flight:focus-visible,
+.kh-popup-airport:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: -2px;
+}
 /* The same label as `.popup-section-label` above it: the popup had two
    label idioms in four rows, one uppercase and muted, one sentence case */
 .kh-popup-metric-label {

@@ -5,7 +5,6 @@ import {
   ReplayRenderer,
   SEEK_PAN_THROTTLE_MS,
   findSegmentIndexAtTime,
-  formatTrack,
   unwrapRotation,
   zoomOutSteps,
 } from "../../../../kml_heatmap/frontend/ui/replayRenderer";
@@ -65,20 +64,6 @@ describe("findSegmentIndexAtTime", () => {
   it("returns -1 before the first segment or for empty input", () => {
     expect(findSegmentIndexAtTime(segments, -1)).toBe(-1);
     expect(findSegmentIndexAtTime([], 5)).toBe(-1);
-  });
-});
-
-describe("formatTrack", () => {
-  it("pads to three digits", () => {
-    expect(formatTrack(7)).toBe("007°");
-    expect(formatTrack(72.4)).toBe("072°");
-    expect(formatTrack(359.6)).toBe("000°");
-  });
-
-  it("normalises into 0-359", () => {
-    expect(formatTrack(-45)).toBe("315°");
-    expect(formatTrack(400)).toBe("040°");
-    expect(formatTrack(360)).toBe("000°");
   });
 });
 
@@ -211,6 +196,21 @@ describe("ReplayRenderer", () => {
       );
       expect(markerObj.bindPopup).toHaveBeenCalled();
       expect(markerObj.openPopup).toHaveBeenCalled();
+    });
+
+    it("shows where the aircraft is, not where its segment ends", () => {
+      mockReplayManager.state.active = true;
+      const markerObj = L.marker([0, 0]);
+      mockReplayManager.state.airplaneMarker = markerObj;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+      // Part way along the segment, as the frame loop leaves it
+      markerObj.setLatLng([50.25, 8.25]);
+
+      renderer.updateAirplanePopup(manager());
+
+      expect(generateSegmentPopupHtml).toHaveBeenCalledWith(
+        expect.objectContaining({ position: [50.25, 8.25] }),
+      );
     });
 
     it("uses the given index instead of searching", () => {

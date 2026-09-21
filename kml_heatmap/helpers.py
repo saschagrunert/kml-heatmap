@@ -7,6 +7,7 @@ from pathlib import Path
 __all__ = [
     "DATE_PATTERN",
     "calculate_duration_seconds",
+    "normalize_timestamp_text",
     "numeric_filename_key",
     "parse_iso_timestamp",
     "parse_timestamp_epoch",
@@ -14,15 +15,41 @@ __all__ = [
 
 # A date as flight logs write it into names: "16 Aug 2026" or "2026-08-16"
 DATE_PATTERN = re.compile(r"(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
+# "2024-03-14 09:12:00": a space instead of the "T", which some tools write
+# and others read
+_LOOSE_TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d)")
+
+
+def normalize_timestamp_text(text: str) -> str:
+    """The canonical form of a loosely written ISO timestamp.
+
+    A space between date and time becomes the "T" and a lowercase "z" the
+    "Z"; anything else is left as it is. The parser and the obfuscator both
+    read timestamps through this, so they accept the same ones.
+    """
+    text = text.strip()
+    # Checked first: the parser runs this for every <when> of a track
+    if text[10:11] == " ":
+        text = _LOOSE_TIMESTAMP_PATTERN.sub(r"\1T\2", text, count=1)
+    if text.endswith("z"):
+        text = text[:-1] + "Z"
+    return text
 
 
 def parse_iso_timestamp(timestamp_str: str | None) -> datetime | None:
-    """Parse ISO format timestamp string to datetime object."""
-    if not timestamp_str or "T" not in timestamp_str:
+    """Parse ISO format timestamp string to datetime object.
+
+    Only a timestamp with a time is accepted: a date on its own is not a
+    point in time. See ``normalize_timestamp_text`` for the loose forms.
+    """
+    if not timestamp_str:
+        return None
+    text = normalize_timestamp_text(timestamp_str)
+    if "T" not in text:
         return None
 
     try:
-        return datetime.fromisoformat(timestamp_str)
+        return datetime.fromisoformat(text)
     except ValueError, TypeError:
         return None
 

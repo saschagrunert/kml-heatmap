@@ -2,12 +2,17 @@
 
 Uses a spatial grid approach for O(1) proximity lookups: divides the map into
 ~2km grid cells and checks the cells within the merge distance for nearby
-airports, avoiding O(n^2) pairwise distance checks.
+airports, avoiding O(n^2) pairwise distance checks. The grid wraps around the
+antimeridian, so fields on either side of it are neighbors too.
+
+An entry whose name holds an ICAO code only ever merges with entries of the
+same code: EDTX and EDTY are 0.7 km apart and two airports all the same. Only
+entries without a code merge by proximity (see ``AirportDeduplicator``).
 """
 
 import math
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from .airport_lookup import (
     airport_icao_code,
@@ -218,17 +223,33 @@ def extract_airport_name(full_name: str, is_at_path_end: bool = False) -> str | 
 
 
 class AirportDeduplicator:
-    """Efficiently deduplicate airports using spatial grid indexing."""
+    """Efficiently deduplicate airports using spatial grid indexing.
+
+    An entry named with an ICAO code merges with the earlier entry of the
+    same code, wherever that is, and with nothing else. An entry without a
+    code merges with any entry within ``AIRPORT_DISTANCE_THRESHOLD_KM``.
+    ``deduplicate_airports`` adds the entries with a code first, so an
+    entry without one joins the coded airport it belongs to rather than
+    the other way round.
+    """
 
     def __init__(self, grid_size: float = AIRPORT_GRID_SIZE_DEGREES):
         """Initialize the airport deduplicator."""
         self.grid_size = grid_size
         self.unique_airports: list[AirportData] = []
         self.spatial_grid: dict[tuple[int, int], list[int]] = {}
+        self._by_code: dict[str, int] = {}
+        # Longitude cells around the globe; the last one may be narrower
+        self._lon_cell_count = math.ceil(360 / grid_size)
 
     def _get_grid_key(self, lat: float, lon: float) -> tuple[int, int]:
-        """Get grid cell key for a coordinate."""
-        return (math.floor(lat / self.grid_size), math.floor(lon / self.grid_size))
+        """Get grid cell key for a coordinate.
+
+        Longitude cells are counted from the antimeridian and wrap, so the
+        cell east of the last one is the first.
+        """
+        lon_cell = math.floor((lon + 180) / self.grid_size) % self._lon_cell_count
+        return (math.floor(lat / self.grid_size), lon_cell)
 
     def _search_cells(self, lat: float) -> tuple[int, int]:
         """How many cells around a point, per axis, can hold a nearby airport.
@@ -242,7 +263,7 @@ class AirportDeduplicator:
         lat_cells = math.ceil(AIRPORT_DISTANCE_THRESHOLD_KM / cell_km)
         edge_lat = min(90.0, abs(lat) + lat_cells * self.grid_size)
         lon_cell_km = cell_km * math.cos(math.radians(edge_lat))
-        max_lon_cells = math.ceil(360 / self.grid_size)
+        max_lon_cells = self._lon_cell_count
         if lon_cell_km * max_lon_cells <= AIRPORT_DISTANCE_THRESHOLD_KM:
             return lat_cells, max_lon_cells
         lon_cells = math.ceil(AIRPORT_DISTANCE_THRESHOLD_KM / lon_cell_km)
@@ -252,9 +273,15 @@ class AirportDeduplicator:
         """Find airport within threshold using spatial grid."""
         grid_key = self._get_grid_key(lat, lon)
         lat_cells, lon_cells = self._search_cells(lat)
+        # Wrapped around the antimeridian; near a pole the search can cover
+        # every cell of a row, which must not be visited twice
+        lon_keys = dict.fromkeys(
+            (grid_key[1] + dlon) % self._lon_cell_count
+            for dlon in range(-lon_cells, lon_cells + 1)
+        )
         for dlat in range(-lat_cells, lat_cells + 1):
-            for dlon in range(-lon_cells, lon_cells + 1):
-                neighbor_key = (grid_key[0] + dlat, grid_key[1] + dlon)
+            for lon_key in lon_keys:
+                neighbor_key = (grid_key[0] + dlat, lon_key)
                 for apt_idx in self.spatial_grid.get(neighbor_key, ()):
                     airport = self.unique_airports[apt_idx]
                     dist = haversine_distance(lat, lon, airport["lat"], airport["lon"])
@@ -275,29 +302,37 @@ class AirportDeduplicator:
         path_index: int,
         is_at_path_end: bool,
     ) -> int:
-        """Add new airport or update existing one."""
-        # If name contains ICAO code, use OurAirports coordinates
-        # so all references to the same code merge at the right spot
+        """Add new airport or update existing one.
+
+        An entry with an ICAO code merges with the entry of the same code
+        and never by proximity; see the class documentation.
+        """
         corrected_lat = lat
         corrected_lon = lon
+        icao_code = (
+            airport_icao_code(_airport_at(name, is_at_path_end)) if name else None
+        )
 
-        if name:
-            icao_code = airport_icao_code(_airport_at(name, is_at_path_end))
-            if icao_code:
-                coords = lookup_airport_coordinates(icao_code)
-                if coords:
-                    corrected_lat, corrected_lon, _ = coords
-                    logger.debug(
-                        "Using OurAirports coordinates for %s: "
-                        "(%.6f, %.6f) instead of KML (%.6f, %.6f)",
-                        icao_code,
-                        corrected_lat,
-                        corrected_lon,
-                        lat,
-                        lon,
-                    )
-
-        apt_idx = self._find_nearby_airport(corrected_lat, corrected_lon)
+        if icao_code:
+            # Two fields with different codes are two airports however close
+            # they are (EDTX and EDTY are 0.7 km apart)
+            apt_idx = self._by_code.get(icao_code)
+            # The OurAirports coordinates put every reference to the code at
+            # the same spot
+            coords = lookup_airport_coordinates(icao_code) if apt_idx is None else None
+            if coords:
+                corrected_lat, corrected_lon, _ = coords
+                logger.debug(
+                    "Using OurAirports coordinates for %s: "
+                    "(%.6f, %.6f) instead of KML (%.6f, %.6f)",
+                    icao_code,
+                    corrected_lat,
+                    corrected_lon,
+                    lat,
+                    lon,
+                )
+        else:
+            apt_idx = self._find_nearby_airport(corrected_lat, corrected_lon)
 
         if apt_idx is not None:
             airport = self.unique_airports[apt_idx]
@@ -323,6 +358,8 @@ class AirportDeduplicator:
             }
         )
         self._add_to_grid(corrected_lat, corrected_lon, new_idx)
+        if icao_code:
+            self._by_code[icao_code] = new_idx
         return new_idx
 
     def get_unique_airports(self) -> list[AirportData]:
@@ -330,8 +367,18 @@ class AirportDeduplicator:
         return self.unique_airports
 
 
+class _Entry(NamedTuple):
+    """One airport a path starts or ends at, before deduplication."""
+
+    lat: float
+    lon: float
+    name: str
+    path_index: int
+    is_at_path_end: bool
+
+
 def _add_departures(
-    deduplicator: AirportDeduplicator,
+    entries: list[_Entry],
     all_path_metadata: list[PathMetadata],
     all_path_groups: FlightPathGroup,
 ) -> None:
@@ -372,17 +419,11 @@ def _add_departures(
             logger.debug("Skipping mid-flight start '%s'", airport_name)
             continue
 
-        deduplicator.add_or_update_airport(
-            lat=start_lat,
-            lon=start_lon,
-            name=name,
-            path_index=idx,
-            is_at_path_end=False,
-        )
+        entries.append(_Entry(start_lat, start_lon, name, idx, False))
 
 
 def _add_arrivals(
-    deduplicator: AirportDeduplicator,
+    entries: list[_Entry],
     all_path_metadata: list[PathMetadata],
     all_path_groups: FlightPathGroup,
 ) -> None:
@@ -407,13 +448,7 @@ def _add_arrivals(
 
         reference = reference_altitude(path, airport_elevation(end_airport, True))
         if is_valid_landing(path, end.alt, reference):
-            deduplicator.add_or_update_airport(
-                lat=end.lat,
-                lon=end.lon,
-                name=end_airport,
-                path_index=idx,
-                is_at_path_end=True,
-            )
+            entries.append(_Entry(end.lat, end.lon, end_airport, idx, True))
             logger.debug(
                 "Processed arrival airport for '%s' at %sm altitude",
                 route_name,
@@ -427,11 +462,27 @@ def deduplicate_airports(
 ) -> list[AirportData]:
     """Deduplicate airports by location using spatial grid indexing.
 
-    Two passes feed the deduplicator: the start point of every path, then the
-    end point of the paths whose name is a route. Entries that land within
-    ``AIRPORT_DISTANCE_THRESHOLD_KM`` of each other merge.
+    Two passes collect the entries: the start point of every path, then the
+    end point of the paths whose name is a route. Entries of the same ICAO
+    code merge, and an entry without a code merges with any airport within
+    ``AIRPORT_DISTANCE_THRESHOLD_KM``. The entries with a code are added
+    first, so an entry without one joins the coded airport next to it
+    whichever came first in the input; the airports are then returned in
+    the order the input first mentions them.
     """
+    entries: list[_Entry] = []
+    _add_departures(entries, all_path_metadata, all_path_groups)
+    _add_arrivals(entries, all_path_metadata, all_path_groups)
+
+    def has_code(entry: _Entry) -> bool:
+        return (
+            airport_icao_code(_airport_at(entry.name, entry.is_at_path_end)) is not None
+        )
+
     deduplicator = AirportDeduplicator()
-    _add_departures(deduplicator, all_path_metadata, all_path_groups)
-    _add_arrivals(deduplicator, all_path_metadata, all_path_groups)
-    return deduplicator.get_unique_airports()
+    first_mention: dict[int, int] = {}
+    for order in sorted(range(len(entries)), key=lambda i: not has_code(entries[i])):
+        apt_idx = deduplicator.add_or_update_airport(*entries[order])
+        first_mention[apt_idx] = min(first_mention.get(apt_idx, order), order)
+    airports = deduplicator.get_unique_airports()
+    return [airports[i] for i in sorted(first_mention, key=first_mention.__getitem__)]

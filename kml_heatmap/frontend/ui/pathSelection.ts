@@ -27,7 +27,9 @@ export class PathSelection {
 
     domCache
       .get("selection-clear-btn")
-      ?.addEventListener("click", () => this.clearSelection());
+      ?.addEventListener("click", () => this.clearSelection(), {
+        signal: app.signal,
+      });
   }
 
   togglePathSelection(pathId: number): void {
@@ -64,7 +66,14 @@ export class PathSelection {
     this.afterSelectionChange();
   }
 
+  /**
+   * Clearing and Isolate leave the selection alone while replay runs: it
+   * plays the one selected flight, and a change dimmed the replay's own
+   * Stop button and switched the statistics to another view mid-flight.
+   * Their controls are disabled then as well.
+   */
   clearSelection(): void {
+    if (this.app.replayState.active) return;
     const wasIsolating = this.app.isolateSelection;
 
     this.app.store.batch(() => {
@@ -81,7 +90,9 @@ export class PathSelection {
   }
 
   toggleIsolateSelection(): void {
-    if (this.app.selectedPathIds.size === 0) return;
+    if (this.app.replayState.active || this.app.selectedPathIds.size === 0) {
+      return;
+    }
 
     this.app.isolateSelection = !this.app.isolateSelection;
 
@@ -146,8 +157,11 @@ export class PathSelection {
     if (!btn) return;
 
     applyToggleButtonState(btn, this.app.isolateSelection);
+    const empty = this.app.selectedPathIds.size === 0;
+    // Still focusable, like the replay button, but announced as unavailable
+    btn.setAttribute("aria-disabled", String(empty));
     if (!this.app.isolateSelection) {
-      btn.style.opacity = this.app.selectedPathIds.size > 0 ? "1.0" : "0.5";
+      btn.style.opacity = empty ? "0.5" : "1.0";
     }
   }
 }

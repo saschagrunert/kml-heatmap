@@ -28,7 +28,11 @@ vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
   loadStylesheet,
 }));
 
-const features = { ReplayManager: vi.fn(), WrappedManager: vi.fn() };
+const features = {
+  ReplayManager: vi.fn(),
+  WrappedManager: vi.fn(),
+  listFlights: vi.fn(),
+};
 
 /** A script load that publishes the bundle's exports, as the real one does */
 function bundleArrives(): void {

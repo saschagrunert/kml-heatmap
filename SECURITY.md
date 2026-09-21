@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-Only the `main` branch is supported. There are no maintained release branches;
-fixes land on `main` and are deployed with the next site build.
+Only the `main` branch is supported. There are no releases or release
+branches; fixes land on `main` and are deployed with the next site build.
 
 ## Reporting a vulnerability
 
@@ -29,5 +29,18 @@ these keys being visible on the site are not security issues.
 
 Every pull request and push runs bandit, `pip-audit` against the hashed lock
 files, `npm audit`, and a gitleaks scan of the whole commit history, and the
-same job runs weekly so new advisories show up without a push. Dependabot and
-the weekly `lock` workflow keep the dependencies current.
+same job runs weekly so new advisories show up without a push. Every
+GitHub Action is pinned by commit SHA and every container image by digest,
+and every job that checks out the repository leaves no credentials in the
+checkout. Dependabot and the weekly `lock` workflow keep the dependencies
+current.
+
+## Content Security Policy
+
+The generated page carries a CSP in a `<meta>` tag. Scripts, styles, fonts
+and images load only from the site itself (or from disk, for `file://`) and
+from the tile servers; there is no `'unsafe-inline'` for scripts or styles.
+Colours computed at runtime are applied through the CSSOM, and a test fails
+on any CSP violation the page reports. A meta CSP cannot set
+`frame-ancestors`, and GitHub Pages sends no such header, so the site can be
+framed; it holds no state an embedding page could change.
