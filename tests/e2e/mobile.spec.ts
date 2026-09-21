@@ -412,8 +412,15 @@ test.describe("Mobile bar", () => {
         "the stacked dialog has nothing to scroll",
       ).toBeGreaterThan(0);
       await content.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+      // Scrolling brings the map into view, and the browser then draws it
+      // for the first time at this size. Without a GPU that is software
+      // WebGL at the phone's pixel ratio, which on a CI runner keeps the
+      // page busy for several seconds: the scroll had worked, but the read
+      // below took 7.5 s to come back and the default 5 s ran out first.
       await expect
-        .poll(() => content.evaluate((el) => el.scrollTop))
+        .poll(() => content.evaluate((el) => el.scrollTop), {
+          timeout: 20_000,
+        })
         .toBeGreaterThan(0);
     }
 
