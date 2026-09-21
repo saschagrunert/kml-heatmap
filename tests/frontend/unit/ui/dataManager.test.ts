@@ -16,13 +16,16 @@ import {
 import type {
   DataLoaderOptions,
   KMLDataset,
+  LoadingState,
 } from "../../../../kml_heatmap/frontend/types";
 import {
   createMockApp,
   createDataset,
   createSegment,
   asMapApp,
+  stubAnimationFrames,
   type MockApp,
+  type StubbedAnimationFrames,
 } from "../../testHelpers";
 import type { MockLayer, MockSource } from "../../../mocks/maplibre-gl";
 
@@ -46,6 +49,17 @@ vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
 
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
+
+/** A state of the loader, one year of unknown size unless said otherwise */
+function loading(overrides: Partial<LoadingState> = {}): LoadingState {
+  return {
+    all: false,
+    years: ["2026"],
+    loadedBytes: 0,
+    totalBytes: undefined,
+    ...overrides,
+  };
+}
 
 describe("DataManager", () => {
   let dataManager: DataManager;
@@ -129,7 +143,7 @@ describe("DataManager", () => {
 
     it("wires show/hide loading callbacks to the loading element", () => {
       const loadingEl = document.getElementById("loading")!;
-      loaderMocks.options!.showLoading!({ year: "2025" });
+      loaderMocks.options!.showLoading!(loading({ years: ["2025"] }));
       expect(loadingEl.style.display).toBe("block");
       loaderMocks.options!.hideLoading!();
       expect(loadingEl.style.display).toBe("none");
@@ -145,40 +159,73 @@ describe("DataManager", () => {
   });
 
   describe("showLoading/hideLoading", () => {
+    let loadingEl: HTMLElement;
+    let textEl: HTMLElement;
+    let bar: HTMLElement;
+    let frames: StubbedAnimationFrames;
+
+    beforeEach(() => {
+      loadingEl = document.getElementById("loading")!;
+      textEl = document.createElement("span");
+      textEl.id = "loading-text";
+      textEl.textContent = "Loading data…";
+      bar = document.createElement("div");
+      bar.id = "loading-progress";
+      bar.hidden = true;
+      loadingEl.append(textEl, bar);
+
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "performance"],
+      });
+      frames = stubAnimationFrames();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    /** Show a state and let the frame that draws it run */
+    const draw = (state: LoadingState): void => {
+      dataManager.showLoading(state);
+      frames.run();
+    };
+
+    /** Bring the indicator up and let the grace period of the bar pass */
+    const showPastGrace = (): void => {
+      draw(loading({ loadedBytes: 0, totalBytes: 1000 }));
+      vi.advanceTimersByTime(150);
+      frames.run();
+    };
+
+    const share = (): string =>
+      bar.style.getPropertyValue("--loading-progress");
+
     it("toggles the loading element", () => {
-      const loadingEl = document.getElementById("loading")!;
-      dataManager.showLoading();
+      dataManager.showLoading(loading());
       expect(loadingEl.style.display).toBe("block");
       dataManager.hideLoading();
       expect(loadingEl.style.display).toBe("none");
     });
 
-    it("describes what is loading when #loading-text exists", () => {
-      const loadingEl = document.getElementById("loading")!;
-      const textEl = document.createElement("span");
-      textEl.id = "loading-text";
-      textEl.textContent = "Loading data…";
-      loadingEl.appendChild(textEl);
-
-      dataManager.showLoading({ year: "2026", bytes: 1.1 * 1024 * 1024 });
+    it("describes what is loading", () => {
+      draw(loading({ years: ["2026"], totalBytes: 1.1 * 1024 * 1024 }));
       expect(textEl.textContent).toBe("Loading 2026 flights (1.1 MB)…");
 
-      dataManager.showLoading({ year: "all", bytes: 24 * 1024 * 1024 });
+      draw(loading({ all: true, totalBytes: 24 * 1024 * 1024 }));
       expect(textEl.textContent).toBe("Loading all flights (24 MB)…");
 
-      dataManager.showLoading({ year: "2025" });
+      draw(loading({ years: ["2025"] }));
       expect(textEl.textContent).toBe("Loading 2025 flights…");
 
-      dataManager.showLoading();
-      expect(textEl.textContent).toBe("Loading 2025 flights…");
-      expect(loadingEl.style.display).toBe("block");
+      draw(loading({ years: ["2025", "2024"], totalBytes: 2048 }));
+      expect(textEl.textContent).toBe("Loading 2025, 2024 flights (2.0 KB)…");
+
+      draw(loading({ all: true, years: [] }));
+      expect(textEl.textContent).toBe("Loading all flights…");
     });
 
     it("shows the indicator before writing its text, so the live region announces it", () => {
-      const loadingEl = document.getElementById("loading")!;
-      const textEl = document.createElement("span");
-      textEl.id = "loading-text";
-      loadingEl.appendChild(textEl);
       const displayWhenWritten: string[] = [];
       const descriptor = Object.getOwnPropertyDescriptor(
         Node.prototype,
@@ -195,23 +242,178 @@ describe("DataManager", () => {
         },
       });
 
-      dataManager.showLoading({ year: "2026" });
+      dataManager.showLoading(loading({ years: ["2026"] }));
+      expect(loadingEl.style.display).toBe("block");
+      frames.run();
+      // The same label again is not written again
+      draw(loading({ years: ["2026"] }));
 
       expect(displayWhenWritten).toEqual(["block"]);
       expect(textEl.textContent).toBe("Loading 2026 flights…");
     });
 
+    describe("download progress", () => {
+      it("draws label and bar once per frame, from the latest state", () => {
+        showPastGrace();
+        const setProperty = vi.spyOn(bar.style, "setProperty");
+
+        for (const loadedBytes of [100, 250, 370]) {
+          dataManager.showLoading(loading({ loadedBytes, totalBytes: 1000 }));
+        }
+
+        expect(frames.pending()).toBe(1);
+        frames.run();
+        expect(setProperty).toHaveBeenCalledExactlyOnceWith(
+          "--loading-progress",
+          "0.37",
+        );
+        expect(bar.hidden).toBe(false);
+      });
+
+      it("moves the accessible value in steps of ten", () => {
+        showPastGrace();
+        const setAttribute = vi.spyOn(bar, "setAttribute");
+
+        // 300 of 1000 is the one that 0.3 * 10 would get wrong as a float
+        for (const loadedBytes of [10, 99, 100, 199, 299, 300, 305, 1000]) {
+          draw(loading({ loadedBytes, totalBytes: 1000 }));
+        }
+
+        expect(
+          setAttribute.mock.calls
+            .filter(([name]) => name === "aria-valuenow")
+            .map(([, value]) => value),
+        ).toEqual(["10", "20", "30", "100"]);
+      });
+
+      it("shows no bar for a load that is over within the grace period", () => {
+        draw(loading({ loadedBytes: 0, totalBytes: 1000 }));
+        vi.advanceTimersByTime(40);
+        draw(loading({ loadedBytes: 600, totalBytes: 1000 }));
+        draw(loading({ loadedBytes: 1000, totalBytes: 1000 }));
+        expect(bar.hidden).toBe(true);
+
+        dataManager.hideLoading();
+        vi.advanceTimersByTime(1000);
+        frames.run();
+
+        expect(bar.hidden).toBe(true);
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it("shows the bar of a stalled load once the grace period is over", () => {
+        draw(loading({ loadedBytes: 550, totalBytes: 1000 }));
+        expect(bar.hidden).toBe(true);
+
+        vi.advanceTimersByTime(149);
+        frames.run();
+        expect(bar.hidden).toBe(true);
+        vi.advanceTimersByTime(1);
+        frames.run();
+
+        expect(bar.hidden).toBe(false);
+        expect(share()).toBe("0.55");
+        expect(bar.getAttribute("aria-valuenow")).toBe("50");
+      });
+
+      it("does not bring the bar up for a load that is already complete", () => {
+        draw(loading({ loadedBytes: 0, totalBytes: 1000 }));
+        vi.advanceTimersByTime(500);
+        draw(loading({ loadedBytes: 1000, totalBytes: 1000 }));
+
+        expect(bar.hidden).toBe(true);
+      });
+
+      it("keeps a bar that is up until the load ends, full included", () => {
+        showPastGrace();
+        draw(loading({ loadedBytes: 1000, totalBytes: 1000 }));
+
+        expect(bar.hidden).toBe(false);
+        expect(share()).toBe("1");
+        expect(bar.getAttribute("aria-valuenow")).toBe("100");
+      });
+
+      it("hides the bar without a total, and touches it only once", () => {
+        showPastGrace();
+        const removeAttribute = vi.spyOn(bar, "removeAttribute");
+
+        draw(loading({ loadedBytes: 400 }));
+        draw(loading({ loadedBytes: 500 }));
+
+        expect(bar.hidden).toBe(true);
+        expect(bar.hasAttribute("aria-valuenow")).toBe(false);
+        expect(share()).toBe("");
+        expect(removeAttribute).toHaveBeenCalledOnce();
+      });
+
+      it("hiding the indicator drops the bar and the frame it was waiting for", () => {
+        showPastGrace();
+        draw(loading({ loadedBytes: 500, totalBytes: 1000 }));
+        dataManager.showLoading(
+          loading({ loadedBytes: 1000, totalBytes: 1000 }),
+        );
+
+        dataManager.hideLoading();
+
+        expect(frames.pending()).toBe(0);
+        expect(bar.hidden).toBe(true);
+        expect(bar.hasAttribute("aria-valuenow")).toBe(false);
+        expect(share()).toBe("");
+      });
+
+      it("gives the next load a grace period of its own", () => {
+        showPastGrace();
+        dataManager.hideLoading();
+
+        draw(loading({ loadedBytes: 900, totalBytes: 1000 }));
+
+        expect(bar.hidden).toBe(true);
+      });
+
+      it("draws nothing once the app is destroyed", () => {
+        showPastGrace();
+        dataManager.showLoading(
+          loading({ loadedBytes: 500, totalBytes: 1000 }),
+        );
+
+        dataManager.destroy();
+        frames.run();
+        dataManager.showLoading(
+          loading({ loadedBytes: 700, totalBytes: 1000 }),
+        );
+
+        expect(frames.pending()).toBe(0);
+        expect(share()).toBe("0");
+      });
+
+      it("drops the grace timer when the app is destroyed", () => {
+        draw(loading({ loadedBytes: 500, totalBytes: 1000 }));
+        expect(vi.getTimerCount()).toBe(1);
+
+        dataManager.destroy();
+
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it("works without the bar in the template", () => {
+        bar.remove();
+
+        expect(() => {
+          draw(loading({ loadedBytes: 1, totalBytes: 2 }));
+          dataManager.hideLoading();
+        }).not.toThrow();
+      });
+    });
+
     it("works without #loading-text", () => {
-      const loadingEl = document.getElementById("loading")!;
-      expect(() =>
-        dataManager.showLoading({ year: "2026", bytes: 10 }),
-      ).not.toThrow();
+      textEl.remove();
+      expect(() => draw(loading({ totalBytes: 10 }))).not.toThrow();
       expect(loadingEl.style.display).toBe("block");
     });
 
     it("handles a missing loading element", () => {
-      document.getElementById("loading")?.remove();
-      expect(() => dataManager.showLoading()).not.toThrow();
+      loadingEl.remove();
+      expect(() => draw(loading())).not.toThrow();
       expect(() => dataManager.hideLoading()).not.toThrow();
     });
   });

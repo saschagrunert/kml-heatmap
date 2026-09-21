@@ -28,12 +28,17 @@ export const SITE_DIR = join(REPO_ROOT, "docs");
 const REBUILD_HINT =
   "rebuild it with `npm run build && python -m kml_heatmap data --output-dir docs`";
 
-function readSiteFile(name: string): string {
+/** A file of the site; one that is missing says how to build the site */
+export function readSiteBytes(name: string): Buffer {
   try {
-    return readFileSync(join(SITE_DIR, name), "utf8");
+    return readFileSync(join(SITE_DIR, name));
   } catch {
     throw new Error(`docs/${name} is missing; ${REBUILD_HINT}`);
   }
+}
+
+export function readSiteFile(name: string): string {
+  return readSiteBytes(name).toString("utf8");
 }
 
 function checkBuildHash(): void {

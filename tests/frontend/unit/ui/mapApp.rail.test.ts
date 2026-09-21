@@ -484,6 +484,7 @@ describe("MapApp controls and map", () => {
         expect(map.listenerCount(type)).toBe(0);
       }
       expect(mockStateManagerInstance.cancelSave).toHaveBeenCalled();
+      expect(m.mockDataManagerInstance.destroy).toHaveBeenCalled();
       app.store.set("statsPanelVisible", true);
       expect(statsListener).not.toHaveBeenCalled();
       // The map itself stays as it is

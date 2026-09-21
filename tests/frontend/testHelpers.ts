@@ -81,6 +81,7 @@ interface MockManagers {
     updateLayers: Mock;
     showLoading: Mock;
     hideLoading: Mock;
+    destroy: Mock;
     applyHeatmapEmphasis: Mock;
     showHeatmap: Mock;
   };
@@ -253,6 +254,7 @@ function createMockManagers(): MockManagers {
       updateLayers: vi.fn().mockResolvedValue(undefined),
       showLoading: vi.fn(),
       hideLoading: vi.fn(),
+      destroy: vi.fn(),
       applyHeatmapEmphasis: vi.fn(),
       showHeatmap: vi.fn(),
     },
@@ -547,4 +549,40 @@ export function el(id: string): HTMLElement {
   const element = document.getElementById(id);
   if (!element) throw new Error(`Missing test element #${id}`);
   return element;
+}
+
+/** The animation frames a test has stubbed, run by hand */
+export interface StubbedAnimationFrames {
+  /** Run the frames asked for so far; ones they ask for wait for the next run */
+  run(): void;
+  /** How many frames are waiting */
+  pending(): number;
+}
+
+/**
+ * Replace requestAnimationFrame and cancelAnimationFrame with a queue the
+ * test runs itself. Undone by `vi.unstubAllGlobals()`.
+ */
+export function stubAnimationFrames(): StubbedAnimationFrames {
+  const frames = new Map<number, FrameRequestCallback>();
+  let handle = 0;
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn((callback: FrameRequestCallback) => {
+      frames.set(++handle, callback);
+      return handle;
+    }),
+  );
+  vi.stubGlobal(
+    "cancelAnimationFrame",
+    vi.fn((id: number) => frames.delete(id)),
+  );
+  return {
+    run() {
+      const due = [...frames.values()];
+      frames.clear();
+      for (const frame of due) frame(0);
+    },
+    pending: () => frames.size,
+  };
 }

@@ -373,13 +373,41 @@ export interface YearStats {
 }
 
 /**
- * What is being loaded (for the loading indicator text)
+ * The loading operation the indicator is up for. The loader derives one of
+ * these from its model on every change, and the indicator draws its label
+ * and its bar from that one object, so the two cannot disagree.
  */
-export interface LoadingInfo {
-  /** Year being loaded or 'all' */
-  year: string;
-  /** Size of the file(s) in bytes when known from metadata.year_file_bytes */
-  bytes?: number | undefined;
+export interface LoadingState {
+  /** Every year is wanted; the label says so instead of naming the years */
+  all: boolean;
+  /**
+   * The years whose files the operation downloads, in the order they joined.
+   * A year that is already cached is not downloaded and is not listed.
+   */
+  years: readonly string[];
+  /** Bytes of those files that have arrived; never more than `totalBytes` */
+  loadedBytes: number;
+  /**
+   * Bytes the operation has to download: the sizes on disk from
+   * metadata.year_file_bytes, which is what the decoded bodies add up to.
+   * Undefined when the size of a file is unknown or there is nothing to
+   * take a share of; never zero.
+   */
+  totalBytes: number | undefined;
+}
+
+/**
+ * Options of fetchJson
+ */
+export interface FetchJsonOptions {
+  /** Time after which the request is aborted, headers and body together */
+  timeoutMs?: number;
+  /**
+   * Called with the bytes of the body read so far. Never called where the
+   * browser cannot count a body as it streams; the caller then has nothing
+   * to show but that the file is loading.
+   */
+  onProgress?: (loadedBytes: number) => void;
 }
 
 /**
@@ -387,8 +415,10 @@ export interface LoadingInfo {
  */
 export interface DataLoaderOptions {
   dataDir?: string;
-  fetchJson?: (url: string) => Promise<unknown>;
-  showLoading?: (info: LoadingInfo) => void;
+  /** `onProgress` is given for year files of a known size, the ones a bar is drawn for */
+  fetchJson?: (url: string, options?: FetchJsonOptions) => Promise<unknown>;
+  /** Invoked whenever the loading operation changes, see LoadingState */
+  showLoading?: (state: LoadingState) => void;
   hideLoading?: () => void;
   getWindow?: () => Window & typeof globalThis;
   /**

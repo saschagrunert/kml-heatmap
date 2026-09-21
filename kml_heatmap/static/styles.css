@@ -924,6 +924,8 @@ body.stats-open #left-buttons {
   font-weight: 600;
   white-space: nowrap;
   box-shadow: var(--shadow-panel);
+  /* Rounds the ends of the progress bar off with the panel's own corners */
+  overflow: hidden;
   display: none;
 }
 .loading-spinner {
@@ -936,6 +938,22 @@ body.stats-open #left-buttons {
   border-top-color: var(--color-accent-blue);
   border-radius: var(--radius-pill);
   animation: spin 0.8s linear infinite;
+}
+/* A thin bar along the bottom edge of the indicator, so that a download with
+   a known size adds no height and moves no text. The fill is a background
+   sized by --loading-progress (0 to 1), which the data manager sets once per
+   frame; a transition on top of that would be retargeted every frame and
+   leave the bar trailing the download. */
+#loading-progress {
+  position: absolute;
+  inset: auto 0 0;
+  height: 3px;
+  background: linear-gradient(
+      var(--color-accent-blue),
+      var(--color-accent-blue)
+    )
+    no-repeat rgba(var(--color-accent-blue-rgb), 0.2);
+  background-size: calc(var(--loading-progress, 0) * 100%) 100%;
 }
 @keyframes spin {
   to {

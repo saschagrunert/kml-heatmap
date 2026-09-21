@@ -418,9 +418,21 @@
     ></div>
 
     <!-- Loading indicator (shown/hidden by the data manager, text is updatable) -->
-    <div id="loading" role="status" aria-live="polite">
-      <span class="loading-spinner" aria-hidden="true"></span>
-      <span id="loading-text">Loading data…</span>
+    <div id="loading">
+      <div role="status" aria-live="polite">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <span id="loading-text">Loading data…</span>
+      </div>
+      <!-- Filled while year files of a known size download. Outside the live
+           region, which would otherwise announce every step of the value -->
+      <div
+        id="loading-progress"
+        role="progressbar"
+        aria-label="Download progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        hidden
+      ></div>
     </div>
 
     <!-- Replay Controls -->

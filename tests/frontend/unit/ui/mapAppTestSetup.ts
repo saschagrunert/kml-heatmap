@@ -23,6 +23,7 @@ export const mockDataManagerInstance = {
   updateLayers: vi.fn(),
   showLoading: vi.fn(),
   hideLoading: vi.fn(),
+  destroy: vi.fn(),
   applyHeatmapEmphasis: vi.fn(),
 };
 
