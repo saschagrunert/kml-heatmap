@@ -150,6 +150,13 @@ Build the site first (`npm run build && python -m kml_heatmap data
 `--update-snapshots` to that command and commit the new screenshots; the
 diff of a failing run is in the `visual-diff` artifact.
 
+The control chrome is compared exactly: nothing in it comes from the flights,
+and the pinned image renders it the same on every run. The statistics rail and
+the Wrapped dialog show the flights of `data/`, so they are allowed to differ
+by 1% of their pixels. That lets new flights through, and a change to their
+look smaller than a collapsed or moved panel as well; regenerate them when
+such a change is intended, since the comparison will not ask for it.
+
 The image is pinned by tag and digest, in the `visual` job of
 `.github/workflows/test.yml` and in the command above alike. The tag has to
 match the `@playwright/test` version in `package-lock.json`, and

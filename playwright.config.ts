@@ -83,9 +83,13 @@ export default defineConfig({
             },
             expect: {
               toHaveScreenshot: {
-                // Antialiasing differs by a pixel here and there even on
-                // identical rendering stacks; a real layout change moves far
-                // more than this
+                // The statistics rail and the Wrapped dialog show the
+                // flights of data/, so every new flight changes a few
+                // digits in them. This lets those through and still fails
+                // on a panel that collapsed or moved. It is far too loose
+                // for anything smaller: a whole control row going missing
+                // is about 145 pixels, 0.016% of the page. Snapshots
+                // without flight data set their own limit (visual.spec.ts).
                 maxDiffPixelRatio: 0.01,
               },
             },
