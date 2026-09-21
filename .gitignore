@@ -1,5 +1,7 @@
 *.kml
 !data/*.kml
+# The flights the visual snapshots are taken with (scripts/build_visual_site.py)
+!tests/fixtures/visual/*.kml
 # Temp files of an interrupted obfuscation run hold the original dates
 data/.*.tmp
 /index.html
@@ -7,11 +9,13 @@ AGENTS.md
 .playwright-mcp
 
 # Generated sites, never committed: docs/ is the default OUTPUT_DIR of
-# `make build`, out/ the output of the README examples and site/ the one the
-# deploy job publishes.
+# `make build`, out/ the output of the README examples, site/ the one the
+# deploy job publishes and visual-site/ the one the visual snapshots are
+# compared against.
 /docs/
 /out/
 /site/
+/visual-site/
 
 # Python
 __pycache__

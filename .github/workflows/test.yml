@@ -124,13 +124,18 @@ jobs:
         run: python -m kml_heatmap data --output-dir docs
         env:
           KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
-      # The visual job compares this very site inside the Playwright image,
-      # where the package's own Python is not available
-      - name: Upload the generated site
+      # The visual job compares this site inside the Playwright image, where
+      # the package's own Python is not available (actions/setup-python
+      # installs one there that cannot start: its scripts point at the tool
+      # cache path of the runner, which the container mounts elsewhere). The
+      # script keeps the build offline and its build stamp fixed.
+      - name: Build the fixture site of the visual snapshots
+        run: python scripts/build_visual_site.py
+      - name: Upload the fixture site
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: generated-site
-          path: docs
+          name: visual-site
+          path: visual-site
           if-no-files-found: error
           retention-days: 1
       - name: Run JavaScript tests with coverage
@@ -286,7 +291,7 @@ jobs:
       - name: Run E2E tests (${{ matrix.project }}, ${{ matrix.api-keys }} API key)
         run: npx playwright test --project=${{ matrix.project }}
         env:
-          # Checked against docs/map_config.js by tests/e2e/global-setup.ts
+          # Checked against docs/map_config.js by tests/e2e/site-check.ts
           E2E_API_KEYS: ${{ matrix.api-keys }}
       - name: Upload Playwright results
         if: failure()
@@ -301,9 +306,14 @@ jobs:
 
   # Pixel comparisons are only meaningful where the rendering is fixed, so
   # this one runs inside the Playwright image, which is also what the
-  # snapshots were generated in (see CONTRIBUTING.md). It compares the site
-  # the unit job built rather than building its own: the package needs a
-  # Python the image does not carry. The image tag has to match the
+  # snapshots were generated in (see CONTRIBUTING.md). The snapshots allow no
+  # differing pixel, so the site is not the one of data/, whose figures move
+  # with every flight, but the fixture site of scripts/build_visual_site.py:
+  # a few committed flights, the airport fixture in place of the OurAirports
+  # download and a fixed build stamp. The unit job builds it, since the
+  # package needs a Python the image does not carry.
+  #
+  # The image tag has to match the
   # @playwright/test version package-lock.json pins; scripts/check_locks.py
   # fails the lint job when the two drift apart. Dependabot does not bump
   # the image: with every @playwright/test bump set the new tag here, with
@@ -329,13 +339,13 @@ jobs:
           cache: npm
       - name: Install npm dependencies
         run: npm ci
-      # The bundles come with it, so global-setup can check them against the
-      # sources in this checkout
-      - name: Download the generated site
+      # The bundles come with it, so tests/e2e/site-check.ts can check them
+      # against the sources in this checkout
+      - name: Download the fixture site
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: generated-site
-          path: docs
+          name: visual-site
+          path: visual-site
       - name: Compare the page against the committed snapshots
         run: npx playwright test --project=visual
       # The report carries the expected, actual and diff images side by side
@@ -467,6 +477,9 @@ jobs:
         run: pip install --require-hashes -r requirements.lock
       - name: Check that the KML files are obfuscated
         run: python -m kml_heatmap.obfuscate data/ --check
+      # Copies of flights from data/, and as public as they are
+      - name: Check that the fixture flights of the visual snapshots are obfuscated
+        run: python -m kml_heatmap.obfuscate tests/fixtures/visual/ --check
 
   typos:
     if: github.event_name != 'schedule'

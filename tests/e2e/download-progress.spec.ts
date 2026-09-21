@@ -14,8 +14,9 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Locator } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { readSiteBytes, readSiteFile } from "./global-setup";
 import { waitForAppReady } from "./helpers";
+import { readSiteBytes, readSiteFile } from "./site-check";
+import { SITES } from "./sites";
 
 /** Share of the file sent before the hold; the bar shows the step below it */
 const SHARE_SENT = 0.55;
@@ -37,13 +38,20 @@ test.afterEach(async () => {
   server = undefined;
 });
 
-test("the indicator fills while the year file arrives", async ({ page }) => {
-  const metadata = JSON.parse(readSiteFile("data/metadata.json")) as {
+test("the indicator fills while the year file arrives", async ({
+  page,
+  site,
+}) => {
+  // The files on disk of the very site the project serves
+  const siteFiles = SITES[site];
+  const metadata = JSON.parse(
+    readSiteFile(siteFiles, "data/metadata.json"),
+  ) as {
     available_years: number[];
     year_file_bytes: Record<string, number>;
   };
   const latest = Math.max(...metadata.available_years);
-  const file = readSiteBytes(`data/${latest}/data.json`);
+  const file = readSiteBytes(siteFiles, `data/${latest}/data.json`);
   // The total the bar is measured against is the size on disk
   expect(metadata.year_file_bytes[String(latest)]).toBe(file.length);
 

@@ -112,8 +112,12 @@ serve-build: build ## Run build, then serve
 obfuscate: ## Rewrite the KML files in INPUT_DIR in place so they carry no real dates (IRREVERSIBLE)
 	python -m kml_heatmap.obfuscate "$(INPUT_DIR)"
 
-check-obfuscation: ## Check that the KML files in INPUT_DIR are obfuscated
+# The flights of the visual snapshots are committed copies of real ones, so
+# they are checked along with INPUT_DIR. `make obfuscate` leaves them alone:
+# rewriting them would change the snapshots.
+check-obfuscation: ## Check that the KML files in INPUT_DIR and the fixture flights of the visual snapshots are obfuscated
 	python -m kml_heatmap.obfuscate "$(INPUT_DIR)" --check
+	python -m kml_heatmap.obfuscate tests/fixtures/visual --check
 
 # The obfuscation CI job only sees a real date once it is public; the hook
 # refuses the push before. Linked rather than copied, so it stays current.

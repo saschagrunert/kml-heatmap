@@ -11,6 +11,13 @@
  * wherever it is run; the snapshots are generated in the Playwright
  * container, which is also where CI compares them (see CONTRIBUTING.md).
  *
+ * That project drives visual-site/, built from the fixture flights of
+ * tests/fixtures/visual/ with a fixed build stamp, and not docs/: the rail
+ * and Wrapped print figures computed from the flights, and every snapshot
+ * here is compared without any tolerance. With 1% of the pixels allowed to
+ * differ, which the flights of data/ needed, a missing control row passed
+ * and so did three stale snapshots.
+ *
  * The map itself is hidden rather than masked: it is live data over stubbed
  * tiles, so comparing it would make every one of these flaky, and a mask
  * over a full-viewport element covers the chrome along with it.
@@ -25,13 +32,19 @@ import {
 import { hideMapData } from "./map";
 
 /**
- * The year every snapshot is taken with. Left alone, the page opens on the
- * latest year of data/, so the first flight of a new year would change the
- * year dropdown in the chrome, and every flight of the running year moves
- * the figures of the rail and of Wrapped. A year that is over only changes
- * when an old flight is added late.
+ * The year every snapshot is taken with. The fixture has a later year as
+ * well, which the page would open on, so that the snapshots also cover a
+ * year picked through the URL and a dropdown with more than one entry.
  */
 const PINNED_YEAR = 2025;
+
+/**
+ * The pinned image renders the same page identically run after run, and the
+ * fixture site never changes on its own, so any differing pixel is a change
+ * to the look. Spelled out, although it is Playwright's default, so that the
+ * next tolerance somebody needs is an exception made here, in plain sight.
+ */
+const EXACT = { animations: "disabled", maxDiffPixels: 0 } as const;
 
 test.describe("visual", () => {
   test.beforeEach(async ({ page }) => {
@@ -51,15 +64,7 @@ test.describe("visual", () => {
     await expect(page.locator("#left-buttons")).toBeVisible();
     await expect(page.locator("#right-buttons")).toBeVisible();
 
-    // With the year pinned, the only thing in this frame that comes from
-    // the flights is the label of the year dropdown, and the pinned image
-    // renders it identically run after run, so any difference is a change
-    // to the chrome. The project-wide ratio would let a whole control row
-    // disappear; the smaller of the two limits applies.
-    await expect(page).toHaveScreenshot("chrome-at-rest.png", {
-      animations: "disabled",
-      maxDiffPixels: 0,
-    });
+    await expect(page).toHaveScreenshot("chrome-at-rest.png", EXACT);
   });
 
   test("the statistics rail", async ({ page }) => {
@@ -68,9 +73,7 @@ test.describe("visual", () => {
     await expect(rail).toBeVisible();
     await settleAnimations(page);
 
-    await expect(rail).toHaveScreenshot("stats-rail.png", {
-      animations: "disabled",
-    });
+    await expect(rail).toHaveScreenshot("stats-rail.png", EXACT);
   });
 
   test("the Wrapped dialog", async ({ page }) => {
@@ -83,8 +86,6 @@ test.describe("visual", () => {
     ).toBeAttached();
     await settleAnimations(dialog);
 
-    await expect(dialog).toHaveScreenshot("wrapped-dialog.png", {
-      animations: "disabled",
-    });
+    await expect(dialog).toHaveScreenshot("wrapped-dialog.png", EXACT);
   });
 });

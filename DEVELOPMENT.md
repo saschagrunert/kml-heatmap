@@ -69,11 +69,11 @@ filters, statistics panel, wrapped modal, airport markers and replay. The
 Chromium. The `mobile` project runs `mobile.spec.ts` and the viewport
 independent specs (`core`, `layers`, `state`) on a phone viewport, and the
 `webkit` project runs `core` and `mobile` on an emulated iPhone. The `visual`
-project compares screenshots and only exists inside the Playwright image (or
-with `VISUAL_SNAPSHOTS=1`), so a plain run leaves it out (see
-CONTRIBUTING.md). Every page is scanned for accessibility violations with axe.
-The suite does not reach the network: the page carries its own JavaScript and
-CSS, CARTO's base style is answered with a stub that draws a background and
+project compares screenshots of a fixture site and only exists inside the
+Playwright image (or with `VISUAL_SNAPSHOTS=1`), so a plain run leaves it out
+(see CONTRIBUTING.md). Every page is scanned for accessibility violations with
+axe. The suite does not reach the network: the page carries its own JavaScript
+and CSS, CARTO's base style is answered with a stub that draws a background and
 asks for no glyphs or sprite, every map tile with a transparent pixel, and any
 other cross-origin request fails the test that made it (see
 `tests/e2e/fixtures.ts`, which every spec imports `test` and `expect` from).
@@ -85,14 +85,16 @@ are the ones of shared links, one higher than MapLibre's own (see
 was built with `CARTO_API_KEY` (any value works) and skip otherwise; CI tests
 a site with a dummy key and one without.
 
-The tests run against `docs/`, which must be built from the current sources
-first. The global setup compares the build hash in `docs/mapApp.bundle.js`
-with the checkout (the frontend sources, the stylesheets, the build
-configuration and the pinned esbuild and Lucide versions, see
-`scripts/README.md`) and stops with a hint when they differ. It also stops
-when `docs/index.html` is older than the Python package, its templates and
-static assets or `package-lock.json`, and when `E2E_API_KEYS` (`dummy` or
-`none`, set by CI) does not match whether `docs/map_config.js` carries a key:
+The tests run against `docs/` (the `visual` project against `visual-site/`,
+with the same checks), which must be built from the current sources first. A
+fixture every spec gets (`tests/e2e/site-check.ts`) compares the build hash
+in `docs/mapApp.bundle.js` with the checkout (the frontend sources, the
+stylesheets, the build configuration and the pinned esbuild and Lucide
+versions, see `scripts/README.md`) and fails the tests with a hint when they
+differ. It also fails them when `docs/index.html` is older than the Python
+package, its templates and static assets or `package-lock.json`, and when
+`E2E_API_KEYS` (`dummy` or `none`, set by CI) does not match whether
+`docs/map_config.js` carries a key:
 
 ```bash
 # Install Playwright browsers (first time only)
@@ -115,7 +117,8 @@ podman run --rm --userns=keep-id -v "$PWD:/work" -w /work mcr.microsoft.com/play
 
 Tests are located in `tests/e2e/` and configured via `playwright.config.ts`.
 The test server starts `python3 -m http.server` serving `docs/` on port 8000,
-or on `E2E_PORT` when that is set: two checkouts tested at the same time (git
+or on `E2E_PORT` when that is set, and the fixture site of the visual project
+on the port after it: two checkouts tested at the same time (git
 worktrees, for one) need a port each, or the second would reuse the first
 one's server and test the wrong site. The visual project runs in a
 container; with `--network host`, as in CONTRIBUTING.md, it shares the host's

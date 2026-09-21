@@ -1,8 +1,9 @@
 # Scripts
 
 The build helpers `build.js` imports, the repository consistency check, the
-pre-push hook and the test data generator. The JavaScript files are
-type-checked with `tsconfig.node.json` (`npm run typecheck`).
+pre-push hook, the test data generator and the builder of the site the visual
+snapshots use. The JavaScript files are type-checked with
+`tsconfig.node.json` (`npm run typecheck`).
 
 ## generate_test_data.py
 
@@ -94,6 +95,20 @@ obfuscation check on every KML file that the commits about to be pushed add
 or change, and refuses the push when one carries a real date or when it
 cannot run the check. It needs nothing beyond Python; `--no-verify` skips it.
 
+## build_visual_site.py
+
+Builds `visual-site/`, the site the visual snapshots are compared against
+(see the "Visual snapshots" section of `CONTRIBUTING.md`), from the fixture
+flights in `tests/fixtures/visual/`. The snapshots allow no differing pixel,
+so the script pins what would otherwise vary from build to build: the build
+time and commit the statistics panel prints, the airport database
+(`tests/fixtures/airports.csv` in a throwaway cache directory, so nothing is
+downloaded) and the tile API key. Run `npm run build` first.
+
+```bash
+python scripts/build_visual_site.py
+```
+
 ## source-hash.js
 
 The content hash of everything that shapes a built site: the TypeScript
@@ -102,9 +117,10 @@ sources in `kml_heatmap/frontend/`, the files in `BUILD_FILES` (`build.js`,
 versions `package-lock.json` pins for `BUILD_PACKAGES` (esbuild, Lucide as
 the one package bundled into the page, and MapLibre, html-to-image and
 flag-icons, which are vendored next to the bundles). `build.js` writes it into
-the first line of every bundle. The Playwright global setup
-(`tests/e2e/global-setup.ts`) compares that line in `docs/mapApp.bundle.js`
-with the checkout, so the e2e tests refuse to run against a stale site, and
+the first line of every bundle. A Playwright fixture
+(`tests/e2e/site-check.ts`) compares that line in the `mapApp.bundle.js` of
+the site under test (`docs/`, or `visual-site/` for the snapshots) with the
+checkout, so the e2e tests refuse to run against a stale site, and
 the generator warns when the bundle it is about to publish is stale.
 `kml_heatmap/site_assets.py` mirrors the hash in Python;
 `TestSourceHashParity` in `tests/test_site_assets.py` checks that both

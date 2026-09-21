@@ -63,10 +63,12 @@ repos:
 
       # The obfuscation CI job only runs once the dates are already pushed to
       # the public repository. Needs Python 3.14 as `python`, such as the
-      # project's virtual environment (see CONTRIBUTING.md).
+      # project's virtual environment (see CONTRIBUTING.md). The flights of
+      # the visual snapshots are copies of real ones, so they are checked too;
+      # the tool takes one directory at a time.
       - id: check-obfuscation
         name: check that the KML files are obfuscated
-        entry: python -m kml_heatmap.obfuscate data --check
+        entry: sh -c 'python -m kml_heatmap.obfuscate data --check && python -m kml_heatmap.obfuscate tests/fixtures/visual --check'
         language: system
-        files: (?i)^data/.*\.kml$
+        files: (?i)^(data|tests/fixtures/visual)/.*\.kml$
         pass_filenames: false

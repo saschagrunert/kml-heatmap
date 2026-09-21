@@ -147,24 +147,35 @@ podman run --rm --network host --userns=keep-id --user "$(id -u):$(id -g)" \
   npx playwright test --project=visual
 ```
 
-Build the site first (`npm run build && python -m kml_heatmap data
---output-dir docs`). When a change is meant to alter the look, add
-`--update-snapshots` to that command and commit the new screenshots; the
-diff of a failing run is in the `visual-diff` artifact.
+The snapshots are not taken of `docs/`. The statistics rail and the Wrapped
+dialog print figures computed from the flights, and `data/` grows all the
+time, so the project has a site of its own: `visual-site/`, built from the
+few flights in `tests/fixtures/visual/` (obfuscated like the ones in `data/`,
+which the hooks, `make check-obfuscation` and the `obfuscation` job check
+too), with `tests/fixtures/airports.csv` in place of the OurAirports download
+and a fixed build time and commit. Build it before running the command above,
+outside the container, since the image has no Python the package runs on:
 
-Every snapshot is taken with the year pinned to one that is over
-(`PINNED_YEAR` in the spec), so that new flights do not change the year
-dropdown or the figures; if that year ever leaves `data/`, the spec says so,
-and the fix is to move the pin and regenerate with `--update-snapshots=all`.
-The control chrome is compared exactly: with the year pinned nothing in it
-follows the flights, and the pinned image renders it the same on every run.
-The statistics rail and the Wrapped dialog show the flights of that year,
-which still change when an old flight is added late, so they are allowed to
-differ by 1% of their pixels. That also lets through a change to their look
-smaller than a collapsed or moved panel; regenerate them when such a change is
-intended, since the comparison will not ask for it. Use
-`--update-snapshots=all` for that: the plain flag only rewrites a snapshot
-that fails, and these two pass with up to 1% of stale pixels.
+```sh
+npm run build && python scripts/build_visual_site.py
+```
+
+The run refuses a `visual-site/` that is older than the sources, the
+fixture or that script, and names this command.
+
+Nothing in that site changes on its own and the pinned image renders it the
+same on every run, so every snapshot is compared exactly (`maxDiffPixels: 0`).
+An earlier tolerance of 1% for the rail and the dialog let a missing control
+row and three stale snapshots pass. `PINNED_YEAR` in the spec picks the
+earlier of the fixture's two years through the URL.
+
+When a change is meant to alter the look, or the fixture changes, add
+`--update-snapshots=all` to the command above and commit the new screenshots.
+The plain `--update-snapshots` only rewrites a snapshot whose comparison
+fails, and the comparison still ignores a small difference in the colour of a
+pixel (Playwright's `threshold`), so a snapshot can be stale and pass; `=all`
+rewrites every snapshot that is not identical. The diff of a failing CI run
+is in the `visual-diff` artifact.
 
 The image is pinned by tag and digest, in the `visual` job of
 `.github/workflows/test.yml` and in the command above alike. The tag has to
