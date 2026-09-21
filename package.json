@@ -32,15 +32,14 @@
   "//dependencies": "Vendored into the page by scripts/vendor.js and published with the site",
   "dependencies": {
     "html-to-image": "1.11.13",
-    "leaflet": "1.9.4",
-    "leaflet.heat": "0.2.0",
-    "lucide": "1.47.0"
+    "lucide": "1.47.0",
+    "maplibre-gl": "6.10.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
-    "@types/leaflet": "^1.9.22",
+    "@types/geojson": "7946.0.16",
     "@types/node": "^26.6.1",
     "@vitest/coverage-v8": "^5.0.1",
     "@vitest/ui": "^5.0.0",

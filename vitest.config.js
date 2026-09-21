@@ -32,8 +32,8 @@ export default defineConfig({
       },
     },
     alias: {
-      leaflet: fileURLToPath(
-        new URL("./tests/mocks/leaflet.ts", import.meta.url),
+      "maplibre-gl": fileURLToPath(
+        new URL("./tests/mocks/maplibre-gl.ts", import.meta.url),
       ),
     },
   },

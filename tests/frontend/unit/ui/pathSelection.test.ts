@@ -9,9 +9,13 @@ import {
 import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 
 const mapHelpers = vi.hoisted(() => ({
-  invalidateMapAfterTransition: vi.fn(),
+  resizeMapAfterTransition: vi.fn(),
 }));
-vi.mock("../../../../kml_heatmap/frontend/utils/mapHelpers", () => mapHelpers);
+// Partial: the mock app builds its map with the real helpers
+vi.mock(
+  import("../../../../kml_heatmap/frontend/utils/mapHelpers"),
+  async (importOriginal) => ({ ...(await importOriginal()), ...mapHelpers }),
+);
 
 describe("PathSelection", () => {
   let pathSelection: PathSelection;
@@ -75,7 +79,7 @@ describe("PathSelection", () => {
       expect(mockApp.selectedPathIds.has(1)).toBe(false);
     });
 
-    it("restyles polylines in place and leaves the rest to the store", () => {
+    it("restyles the drawn paths in place and leaves the rest to the store", () => {
       mockApp.altitudeVisible = true;
       const listener = vi.fn();
       mockApp.store.subscribe("selectedPathIds", listener);
@@ -86,7 +90,7 @@ describe("PathSelection", () => {
         1,
       );
       expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
-      expect(mapHelpers.invalidateMapAfterTransition).toHaveBeenCalledWith(
+      expect(mapHelpers.resizeMapAfterTransition).toHaveBeenCalledWith(
         mockApp.map,
       );
       expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
@@ -103,10 +107,10 @@ describe("PathSelection", () => {
       ).not.toHaveBeenCalled();
     });
 
-    it("does not invalidate the map when no colour layer is visible", () => {
+    it("does not resize the map when no colour layer is visible", () => {
       pathSelection.togglePathSelection(1);
 
-      expect(mapHelpers.invalidateMapAfterTransition).not.toHaveBeenCalled();
+      expect(mapHelpers.resizeMapAfterTransition).not.toHaveBeenCalled();
     });
 
     it("rebuilds layers in isolate mode", () => {

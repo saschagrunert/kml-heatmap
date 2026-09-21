@@ -62,7 +62,7 @@ function parsePathId(text: string, radix: number): number | null {
  *   sv - schema version of p (an unknown one means p is ignored)
  *   v - layer visibility (9-char binary string: '100100000')
  *   lat, lng - map center coordinates
- *   z - map zoom level
+ *   z - zoom level, in state units (one above the map's, see ZOOM_OFFSET)
  * @param params - URLSearchParams object or search string
  * @returns Parsed state or null if no params
  */
@@ -176,7 +176,7 @@ export function parseUrlParams(
     if (zoomStr) {
       const zoom = parseFloat(zoomStr);
       if (!isNaN(zoom)) {
-        // Clamp zoom to the map's zoom range
+        // Clamp zoom to the map's zoom range, in the unit of the link
         state.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
       }
     }

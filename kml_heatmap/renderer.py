@@ -62,9 +62,10 @@ class CoordinateExtent:
     """Bounding box of a set of coordinates.
 
     Plain minimum and maximum, also for data on both sides of the
-    antimeridian: Leaflet draws every path, marker and heat point at its own
-    longitude and never on another copy of the world, so a box that wrapped
-    around 180 (179 to 181) would open the map on half of the flights.
+    antimeridian: the map draws every path, marker and heat point at its own
+    longitude, not where it would be nearest to the others, so a box that
+    wrapped around 180 (179 to 181) would open the map on half of the
+    flights.
     """
 
     min_lat: float

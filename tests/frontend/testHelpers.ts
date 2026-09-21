@@ -24,13 +24,18 @@ import {
   syncLegend,
   syncToggleButton,
 } from "../../kml_heatmap/frontend/utils/buttonState";
+import { Map as MockMapLibreMap, mockControl } from "../mocks/maplibre-gl";
 import {
-  layerGroup,
-  map as createMockMap,
-  canvas,
-  type MockLayerGroup,
-  type MockMap as LeafletMockMap,
-} from "../mocks/leaflet";
+  addDataLayers,
+  AirportLayerHandle,
+  MapLayerHandle,
+  MapPathLayerHandle,
+} from "../../kml_heatmap/frontend/mapLayers";
+import {
+  HEATMAP_LAYER_IDS,
+  MAP_LAYERS,
+} from "../../kml_heatmap/frontend/utils/constants";
+import type { Map as MapLibreMap } from "maplibre-gl";
 
 /**
  * Build a dataset from path info and segments
@@ -86,6 +91,9 @@ interface MockManagers {
     updateSelectionStyles: Mock;
     updateAltitudeLegend: Mock;
     updateAirspeedLegend: Mock;
+    hitTest: Mock;
+    onPathClick: Mock;
+    closeSegmentPopup: Mock;
   };
   filterManager: {
     updateAircraftDropdown: Mock;
@@ -109,6 +117,9 @@ interface MockManagers {
     updateAirportPopups: Mock;
     updateAirportOpacity: Mock;
     updateAirportMarkerSizes: Mock;
+    openPopup: Mock;
+    closePopup: Mock;
+    isPopupOpen: Mock;
   };
   stateManager: {
     saveMapState: Mock;
@@ -161,25 +172,33 @@ interface MockManagers {
   };
 }
 
+/** A layer handle whose methods are spies over the real behaviour */
+type SpiedHandle<T> = T & { isVisible: Mock; setVisible: Mock };
+
 /**
  * Fully mocked MapApp: a real AppStore behind the store-backed accessors,
- * Leaflet mock objects for map/layers and vi.fn() stubs for every manager.
+ * the mock map with its style loaded and every source and layer of MAP_SOURCES and
+ * MAP_LAYERS on it, the real layer handles attached to that map (spied, so
+ * a test may assert on the call or on `map.layer(id).layout`), a resolved
+ * `mapReady` and vi.fn() stubs for every manager.
  */
 export type MockApp = Omit<
   MapApp,
   | keyof MockManagers
   | "map"
+  | "heatmapLayer"
+  | "aviationLayer"
   | "altitudeLayer"
   | "airspeedLayer"
   | "airportLayer"
-  | "pathRenderer"
 > &
   MockManagers & {
-    map: LeafletMockMap | null;
-    altitudeLayer: MockLayerGroup;
-    airspeedLayer: MockLayerGroup;
-    airportLayer: MockLayerGroup;
-    pathRenderer: ReturnType<typeof canvas>;
+    map: MockMapLibreMap | null;
+    heatmapLayer: SpiedHandle<MapLayerHandle>;
+    aviationLayer: SpiedHandle<MapLayerHandle>;
+    altitudeLayer: SpiedHandle<MapPathLayerHandle> & { getLayers: Mock };
+    airspeedLayer: SpiedHandle<MapPathLayerHandle> & { getLayers: Mock };
+    airportLayer: SpiedHandle<AirportLayerHandle>;
   };
 
 export interface MockAppOverrides extends Partial<StoreState> {
@@ -188,7 +207,6 @@ export interface MockAppOverrides extends Partial<StoreState> {
   aircraftModels?: MapApp["aircraftModels"];
   altitudeRange?: MapApp["altitudeRange"];
   airspeedRange?: MapApp["airspeedRange"];
-  map?: LeafletMockMap | null;
   config?: Partial<MapApp["config"]>;
   isInitializing?: boolean;
   allAirportsData?: Airport[];
@@ -199,6 +217,8 @@ export interface MockAppOverrides extends Partial<StoreState> {
   managers?: {
     [K in keyof MockManagers]?: Partial<MockManagers[K]>;
   };
+  /** A map of the test's own, or null for an app without one */
+  map?: MockMapLibreMap | null;
 }
 
 function createMockManagers(): MockManagers {
@@ -243,6 +263,9 @@ function createMockManagers(): MockManagers {
       updateSelectionStyles: vi.fn(),
       updateAltitudeLegend: vi.fn(),
       updateAirspeedLegend: vi.fn(),
+      hitTest: vi.fn(() => null),
+      onPathClick: vi.fn(),
+      closeSegmentPopup: vi.fn(),
     },
     filterManager: {
       updateAircraftDropdown: vi.fn(),
@@ -266,6 +289,9 @@ function createMockManagers(): MockManagers {
       updateAirportPopups: vi.fn(),
       updateAirportOpacity: vi.fn(),
       updateAirportMarkerSizes: vi.fn(),
+      openPopup: vi.fn(),
+      closePopup: vi.fn(),
+      isPopupOpen: vi.fn(() => false),
     },
     stateManager: {
       saveMapState: vi.fn(),
@@ -319,14 +345,39 @@ const STORE_KEYS: readonly (keyof StoreState)[] = [
 ];
 
 /**
- * Create a mock MapApp with store-backed accessors, mocked Leaflet objects
- * and mocked managers. Store keys can be seeded through `overrides`.
- *
- * The accessors come from the same `defineStoreAccessors` the real MapApp
- * uses, so the double cannot drift from it.
+ * A mock MapLibre map the way the app leaves it once `mapReady` resolves:
+ * style loaded, every source and layer created and empty. Built at once, so
+ * a test does not have to wait for the style first.
  */
-export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
-  const { map: mapOverride, config, managers, ...rest } = overrides;
+export function createMapLibreMock(
+  options: Record<string, unknown> = {},
+): MockMapLibreMap {
+  const autoLoadStyle = mockControl.autoLoadStyle;
+  mockControl.autoLoadStyle = false;
+  let map: MockMapLibreMap;
+  try {
+    map = new MockMapLibreMap({
+      container:
+        document.getElementById("map") ?? document.createElement("div"),
+      style: "https://example.test/style.json",
+      ...options,
+    });
+  } finally {
+    mockControl.autoLoadStyle = autoLoadStyle;
+  }
+  map.finishStyleLoad();
+  addDataLayers(map as unknown as MapLibreMap);
+  return map;
+}
+
+/** The map and layer fields; everything else is built here */
+type MapFields = Record<string, unknown> & { map: unknown };
+
+function buildMockApp(
+  overrides: Omit<MockAppOverrides, "map">,
+  mapFields: MapFields,
+): unknown {
+  const { config, managers, ...rest } = overrides;
   const initial: Partial<StoreState> = {};
   const other: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(rest)) {
@@ -361,12 +412,9 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
     },
     allAirportsData: [],
     isInitializing: false,
-    map: mapOverride === undefined ? createMockMap() : mapOverride,
-    heatmapLayer: null,
-    altitudeLayer: layerGroup(),
-    airspeedLayer: layerGroup(),
-    airportLayer: layerGroup(),
-    pathRenderer: canvas(),
+    ...mapFields,
+    // Like the app's after initialize(): the map, with its layers on it
+    mapReady: Promise.resolve(mapFields.map),
     // Derived like MapApp's getter; an override replaces it with fixed data
     get airportToPaths(): MapApp["airportToPaths"] {
       const data = store.get("currentData");
@@ -376,7 +424,6 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
         .pathIdsByAirport();
     },
     airportMarkers: {},
-    aviationLayer: null,
     aircraftModels: {},
     altitudeRange: { ...DEFAULT_ALTITUDE_RANGE },
     airspeedRange: { ...DEFAULT_AIRSPEED_RANGE },
@@ -406,6 +453,54 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
   );
 
   return mockApp;
+}
+
+/** Wrap the methods tests assert on in spies that keep the real behaviour */
+function spied<T extends MapLayerHandle>(handle: T): SpiedHandle<T> {
+  const base: MapLayerHandle = handle;
+  vi.spyOn(base, "isVisible");
+  vi.spyOn(base, "setVisible");
+  if (handle instanceof MapPathLayerHandle) vi.spyOn(handle, "getLayers");
+  return handle as SpiedHandle<T>;
+}
+
+/**
+ * Create a mock MapApp, see `MockApp`. Store keys can be seeded through
+ * `overrides`. The handles start out like the app's own (everything hidden
+ * but the airports) and are attached to the map, so `setVisible` shows on the
+ * mock's layers.
+ *
+ * The accessors come from the same `defineStoreAccessors` the real MapApp
+ * uses, so the double cannot drift from it.
+ */
+export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
+  const { map: mapOverride, ...rest } = overrides;
+  const map = mapOverride === undefined ? createMapLibreMock() : mapOverride;
+  const handles = {
+    heatmapLayer: spied(new MapLayerHandle(HEATMAP_LAYER_IDS)),
+    aviationLayer: spied(new MapLayerHandle([MAP_LAYERS.aviation])),
+    altitudeLayer: spied(
+      new MapPathLayerHandle([
+        MAP_LAYERS.pathsAltitude,
+        MAP_LAYERS.pathsAltitudeSelected,
+      ]),
+    ),
+    airspeedLayer: spied(
+      new MapPathLayerHandle([
+        MAP_LAYERS.pathsAirspeed,
+        MAP_LAYERS.pathsAirspeedSelected,
+      ]),
+    ),
+    airportLayer: spied(new AirportLayerHandle()),
+  };
+  if (map) {
+    for (const handle of Object.values(handles)) {
+      handle.attach(map as unknown as MapLibreMap);
+      // Attaching is setup, not something the code under test did
+      handle.setVisible.mockClear();
+    }
+  }
+  return buildMockApp(rest, { map, ...handles }) as MockApp;
 }
 
 /**

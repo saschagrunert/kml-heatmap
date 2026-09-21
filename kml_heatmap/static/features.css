@@ -34,6 +34,20 @@
   min-width: 400px;
   box-sizing: border-box;
 }
+/* The aircraft marker is a button, like the airport markers: see
+   `.airport-marker-root` in styles.css. No `position` or `transform` here,
+   both are MapLibre's. */
+.replay-airplane-root {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
 .replay-airplane-icon {
   /* One step above the largest chrome icon */
   --replay-icon-size: calc(var(--icon-lg) + var(--space-sm));
@@ -45,7 +59,7 @@
      around a point outside itself on every change of heading. */
   filter: drop-shadow(0 3px 6px var(--shadow-color-strong))
     drop-shadow(0 0 5px rgba(var(--color-accent-blue-rgb), 0.8));
-  /* Rotation is animated here; the marker root is positioned by Leaflet */
+  /* Rotation is animated here; the marker root is positioned by MapLibre */
   transform-origin: center center;
   will-change: transform;
   transition: transform var(--duration-fast) linear;

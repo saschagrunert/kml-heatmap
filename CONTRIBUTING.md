@@ -108,7 +108,7 @@ parentheses back is undone on the next `make format`.
     (Settings > Actions > General). Without the secret the workflow falls
     back to its own token, and a pull request opened with that one does not
     start CI: close and reopen it to run the checks.
-- The published page carries Leaflet, leaflet.heat and html-to-image itself:
+- The published page carries MapLibre GL JS and html-to-image itself:
   `scripts/vendor.js` copies them out of `node_modules` at build time, so
   `package-lock.json` is the only place their versions are pinned and
   Dependabot can bump them like anything else. Nothing loads from a CDN, and

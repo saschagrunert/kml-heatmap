@@ -72,10 +72,12 @@ make serve
 
 The page loads its code as ES modules and its data with `fetch()`, so it has
 to be served over HTTP; opening `docs/index.html` from disk shows an empty
-map. `make serve` only serves the existing `docs/` directory; run
-`make build` (or `make serve-build`) to regenerate it first.
-`docs/` is a local build output and is not committed: the published site is
-built from the sources in CI once all tests pass (see [Development](#development)).
+map. The map is drawn with WebGL, which every current browser has; one that
+has it switched off shows the controls over an empty map. `make serve` only
+serves the existing `docs/` directory; run `make build` (or
+`make serve-build`) to regenerate it first. `docs/` is a local build output
+and is not committed: the published site is built from the sources in CI once
+all tests pass (see [Development](#development)).
 
 Your KML files are read and left alone. The generated site carries no flight
 date finer than the year whatever they contain, so nothing has to be stripped
@@ -191,7 +193,11 @@ The tool detects the format of each file and processes them accordingly.
 
 ### With an API Key (Optional)
 
-**CARTO** - A CARTO API key avoids watermarked base map tiles.
+**CARTO** - The base map is CARTO's vector style, drawn by MapLibre GL JS.
+It is free within CARTO's fair use limit and works without a key today, but
+CARTO asks everyone to get one and may require it for vector tiles as it
+already does for raster ones. The key goes on the style request and on every
+tile, glyph and sprite request that follows from it.
 
 ```bash
 # Pass the key on the command line or export it in the environment
@@ -659,12 +665,12 @@ output-dir/
 ├── favicon-192.png
 ├── favicon-512.png
 ├── apple-touch-icon.png
-├── vendor/                # Leaflet, leaflet.heat, html-to-image
-│   ├── leaflet.js
-│   ├── leaflet.css
-│   ├── leaflet-heat.js
-│   ├── html-to-image.js
-│   └── images/            # The marker and layer icons leaflet.css asks for
+├── vendor/                # MapLibre GL JS, html-to-image
+│   ├── maplibre-gl.mjs
+│   ├── maplibre-gl-shared.mjs   # Imported by the two around it
+│   ├── maplibre-gl-worker.mjs   # Started by maplibre-gl.mjs as a module worker
+│   ├── maplibre-gl.css
+│   └── html-to-image.js
 ├── flags/                 # One SVG per country the flights touched
 └── data/
     ├── airports.json      # Airport markers

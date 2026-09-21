@@ -1,8 +1,8 @@
 /**
  * The flight list of an airport popup: the keyboard's way to one flight.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import type * as L from "leaflet";
+import { describe, it, expect, beforeEach } from "vitest";
+import type { Popup } from "maplibre-gl";
 import { listFlights } from "../../../../kml_heatmap/frontend/ui/airportFlights";
 import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
 import {
@@ -11,6 +11,7 @@ import {
   createMockApp,
   type MockApp,
 } from "../../testHelpers";
+import { Popup as MockPopup } from "../../../mocks/maplibre-gl";
 
 const pathInfo: PathInfo[] = [
   {
@@ -35,42 +36,39 @@ const pathInfo: PathInfo[] = [
   },
 ];
 
-interface FakePopup {
-  popup: L.Popup;
+interface OpenPopup {
+  popup: Popup;
+  mock: MockPopup;
   container: HTMLElement;
-  close: ReturnType<typeof vi.fn>;
-  setLatLng: ReturnType<typeof vi.fn>;
-  open: { value: boolean };
-}
-
-/** A popup as Leaflet leaves it once the airport content is written */
-function fakePopup(): FakePopup {
-  const container = document.createElement("div");
-  container.innerHTML =
-    '<div class="leaflet-popup-content"><div class="popup-container kh-popup-airport" tabindex="-1"></div></div>';
-  document.body.appendChild(container);
-  const open = { value: true };
-  const close = vi.fn();
-  const setLatLng = vi.fn();
-  const popup = {
-    getElement: () => container,
-    isOpen: () => open.value,
-    close,
-    setLatLng,
-    getLatLng: () => ({ lat: 51, lng: 12 }),
-  } as unknown as L.Popup;
-  return { popup, container, close, setLatLng, open };
-}
-
-function buttons(container: HTMLElement): HTMLButtonElement[] {
-  return [...container.querySelectorAll<HTMLButtonElement>(".kh-popup-flight")];
 }
 
 describe("listFlights", () => {
   let mockApp: MockApp;
 
+  /** The popup as AirportManager leaves it once the content is written */
+  function openPopup(): OpenPopup {
+    const mock = new MockPopup({ focusAfterOpen: false });
+    mock
+      .setLngLat([12, 51])
+      .setHTML(
+        '<div class="popup-container kh-popup-airport" tabindex="-1"></div>',
+      )
+      .addTo(mockApp.map!);
+    return {
+      popup: mock as unknown as Popup,
+      mock,
+      container: mock.getElement(),
+    };
+  }
+
+  function buttons(container: HTMLElement): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(".kh-popup-flight"),
+    ];
+  }
+
   beforeEach(() => {
-    document.body.innerHTML = "";
+    document.body.innerHTML = '<div id="map"></div>';
     mockApp = createMockApp({
       currentData: createDataset(pathInfo),
       selectedYear: "all",
@@ -78,7 +76,7 @@ describe("listFlights", () => {
   });
 
   it("names each flight by route, aircraft and year only", () => {
-    const { popup, container } = fakePopup();
+    const { popup, container } = openPopup();
 
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
 
@@ -96,32 +94,38 @@ describe("listFlights", () => {
 
   it("lists only the flights the filter keeps", () => {
     mockApp.selectedYear = "2024";
-    const { popup, container } = fakePopup();
+    const { popup, container } = openPopup();
 
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
 
     expect(buttons(container)).toHaveLength(1);
   });
 
-  it("pans the popup again at its full height", () => {
-    const { popup, setLatLng } = fakePopup();
+  it("leaves the layout and the pan to its caller", () => {
+    const { popup, mock } = openPopup();
+    mock.setLngLat.mockClear();
 
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
 
-    expect(setLatLng).toHaveBeenCalledWith({ lat: 51, lng: 12 });
+    expect(mock.setLngLat).not.toHaveBeenCalled();
+    expect(mockApp.map!.panBy).not.toHaveBeenCalled();
   });
 
   it("adds nothing to a popup that closed while the bundle loaded", () => {
-    const { popup, container, open } = fakePopup();
-    open.value = false;
+    const { popup, mock, container } = openPopup();
+    mock.remove();
+    // MapLibre drops the element of a closed popup; the mock keeps its own
+    mock.getElement.mockReturnValue(undefined as unknown as HTMLDivElement);
 
-    listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
+    expect(() =>
+      listFlights(asMapApp(mockApp), popup, "EDDP Leipzig"),
+    ).not.toThrow();
 
     expect(buttons(container)).toHaveLength(0);
   });
 
   it("does not list twice for the same content", () => {
-    const { popup, container } = fakePopup();
+    const { popup, container } = openPopup();
 
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
@@ -130,7 +134,7 @@ describe("listFlights", () => {
   });
 
   it("adds no list to an airport without flights", () => {
-    const { popup, container } = fakePopup();
+    const { popup, container } = openPopup();
 
     listFlights(asMapApp(mockApp), popup, "LOWW Vienna");
 
@@ -138,7 +142,7 @@ describe("listFlights", () => {
   });
 
   it("selects just the flight, and nothing when it is the selection", () => {
-    const { popup, container } = fakePopup();
+    const { popup, container } = openPopup();
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
     const selection = mockApp.pathSelection;
 
@@ -156,7 +160,7 @@ describe("listFlights", () => {
   });
 
   it("leaves the selection alone while replay runs", () => {
-    const { popup, container } = fakePopup();
+    const { popup, container } = openPopup();
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
     mockApp.replayState.active = true;
 
@@ -167,7 +171,7 @@ describe("listFlights", () => {
 
   it("marks the selected flights and follows the selection", () => {
     mockApp.selectedPathIds = new Set([11, 12]);
-    const { popup, container } = fakePopup();
+    const { popup, container } = openPopup();
 
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
 
@@ -181,16 +185,19 @@ describe("listFlights", () => {
   });
 
   it("closes on Escape from anywhere inside the popup", () => {
-    const { popup, container, close } = fakePopup();
+    const { popup, mock, container } = openPopup();
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
+    const flight = buttons(container)[0]!;
 
-    buttons(container)[0]!.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    );
-    buttons(container)[0]!.dispatchEvent(
+    flight.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
     );
+    expect(mock.isOpen()).toBe(true);
 
-    expect(close).toHaveBeenCalledTimes(1);
+    flight.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect(mock.isOpen()).toBe(false);
+    expect(mock.remove).toHaveBeenCalledTimes(1);
   });
 });

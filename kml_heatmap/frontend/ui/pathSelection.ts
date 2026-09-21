@@ -5,7 +5,7 @@ import type { MapApp } from "../mapApp";
 import { applyToggleButtonState } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
 import { pluralFlights } from "../utils/htmlGenerators";
-import { invalidateMapAfterTransition } from "../utils/mapHelpers";
+import { resizeMapAfterTransition } from "../utils/mapHelpers";
 import { logError } from "../utils/logger";
 import { announceStatus } from "../utils/toast";
 
@@ -117,7 +117,7 @@ export class PathSelection {
 
     this.app.layerManager.updateSelectionStyles();
     if (this.app.altitudeVisible || this.app.airspeedVisible) {
-      invalidateMapAfterTransition(this.app.map);
+      resizeMapAfterTransition(this.app.map);
     }
   }
 

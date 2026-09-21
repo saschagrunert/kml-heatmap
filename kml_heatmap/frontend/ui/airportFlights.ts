@@ -9,9 +9,9 @@
  *
  * It is part of the feature bundle, which the first airport popup fetches;
  * AirportManager adds it whenever the popup content is written (see
- * bindPopupEvents).
+ * writePopupContent), and lays the popup out again afterwards.
  */
-import type * as L from "leaflet";
+import type { Popup } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { escapeHtml, splitAirportName } from "../utils/htmlGenerators";
@@ -27,20 +27,21 @@ function airportCode(label = "?"): string {
 /**
  * Add the flight list to an airport popup whose content was just written.
  * @param app - The app whose flights and selection are listed
- * @param popup - The airport's popup, open on the map
- * @param name - The airport the popup belongs to
+ * @param popup - The airports' popup, open on the map for this airport
+ * @param name - The airport the popup is open for
  */
-export function listFlights(app: MapApp, popup: L.Popup, name: string): void {
-  const container = popup.getElement();
+export function listFlights(app: MapApp, popup: Popup, name: string): void {
+  // A closed popup has no element at all
+  const container = popup.isOpen() ? popup.getElement() : undefined;
   const host = container?.querySelector(".kh-popup-airport");
   const data = app.currentData;
   // The content can be rewritten or the popup closed while the bundle loads
-  if (!popup.isOpen() || !container || !host || !data) return;
+  if (!container || !host || !data) return;
   if (host.querySelector(".kh-popup-flights")) return;
 
-  // Leaflet closes a popup on Escape only while the map itself has focus
+  // MapLibre closes a popup on a click, never on a key
   container.onkeydown = (event) => {
-    if (event.key === "Escape") popup.close();
+    if (event.key === "Escape") popup.remove();
   };
 
   const byId = datasetIndex(data).pathInfoById;
@@ -73,9 +74,6 @@ export function listFlights(app: MapApp, popup: L.Popup, name: string): void {
   list.setAttribute("aria-label", "Select a flight");
   list.innerHTML = html;
   host.append(title, list);
-  // Leaflet placed and panned the popup before the list was there; setting
-  // the same position again pans it in view at its full height
-  popup.setLatLng(popup.getLatLng()!);
 
   list.addEventListener("click", (event) => {
     const button = (event.target as Element).closest<HTMLElement>(

@@ -3,47 +3,67 @@
  * Pure helpers for airport data, flight counting and visibility
  */
 
-import * as L from "leaflet";
 import type { Airport, PathInfo } from "../types";
 import { filterPaths } from "../calculations/statistics";
 
+/** Class of the element MapLibre positions; the stylesheet resets it */
+export const AIRPORT_MARKER_CLASS = "airport-marker-root";
+
 /**
- * Build the divIcon for an airport marker
+ * Build the element of an airport marker: a real button, so the marker
+ * takes focus, and Enter and Space reach it as a click.
+ *
+ * The container inside is a 24px square around a dot a third that size: the
+ * dot is what is drawn, the square is what a finger has to hit. WCAG asks
+ * for 24, and at these zoom levels neighbouring airports are nowhere near
+ * far enough apart to earn the spacing exemption. The stylesheet sizes it.
  * @param name - Airport name (ICAO code is extracted from it)
  * @param isHomeBase - Whether the airport is the current home base
  */
-/** Side of the square a marker offers a pointer, in pixels */
-const MARKER_TARGET_PX = 24;
-
-export function createAirportIcon(
+export function createAirportElement(
   name: string,
-  isHomeBase: boolean,
-): L.DivIcon {
+  isHomeBase = false,
+): HTMLButtonElement {
   const icaoMatch = name ? name.match(/\b([A-Z]{4})\b/) : null;
-  const icao = icaoMatch ? icaoMatch[1] : "APT";
-  const homeClass = isHomeBase ? " airport-marker-home" : "";
-  const homeLabelClass = isHomeBase ? " airport-label-home" : "";
+  const icao = icaoMatch ? icaoMatch[1]! : "APT";
 
-  const markerHtml =
-    '<div class="airport-marker-container"><div class="airport-marker' +
-    homeClass +
-    '"></div><div class="airport-label' +
-    homeLabelClass +
-    '">' +
-    icao +
-    "</div></div>";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = AIRPORT_MARKER_CLASS;
+  // The name a pointer reads and the name a screen reader announces; the
+  // label inside is only the code
+  button.title = name;
+  button.setAttribute("aria-label", name);
 
-  // 24px square around a dot a third that size: the dot is what is drawn,
-  // the square is what a finger has to hit. WCAG asks for 24, and at these
-  // zoom levels neighbouring airports are nowhere near far enough apart to
-  // earn the spacing exemption.
-  return L.divIcon({
-    html: markerHtml,
-    iconSize: [MARKER_TARGET_PX, MARKER_TARGET_PX],
-    iconAnchor: [MARKER_TARGET_PX / 2, MARKER_TARGET_PX / 2],
-    popupAnchor: [0, -MARKER_TARGET_PX / 2],
-    className: "",
-  });
+  const container = document.createElement("div");
+  container.className = "airport-marker-container";
+  const dot = document.createElement("div");
+  dot.className = "airport-marker";
+  const label = document.createElement("div");
+  label.className = "airport-label";
+  label.textContent = icao;
+  container.append(dot, label);
+  button.append(container);
+
+  if (isHomeBase) setAirportElementHome(button, true);
+  return button;
+}
+
+/**
+ * Style a marker element as the home base, or as any other airport. The
+ * element stays the same, so its focus, its listeners and what the label
+ * declutter decided about it all survive a change of home base.
+ */
+export function setAirportElementHome(
+  element: HTMLElement,
+  isHomeBase: boolean,
+): void {
+  element
+    .querySelector(".airport-marker")
+    ?.classList.toggle("airport-marker-home", isHomeBase);
+  element
+    .querySelector(".airport-label")
+    ?.classList.toggle("airport-label-home", isHomeBase);
 }
 
 let _countryByAirport: Map<string, string> | null = null;

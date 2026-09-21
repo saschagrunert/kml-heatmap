@@ -104,8 +104,9 @@ implementations agree.
 
 ## vendor.js
 
-Copies the third-party files the published page loads (Leaflet with its
-images, leaflet.heat and html-to-image) out of `node_modules` into
+Copies the third-party files the published page loads (the three modules
+of MapLibre GL JS with its stylesheet, and html-to-image) out of
+`node_modules` into
 `kml_heatmap/static/vendor/`, and every country flag of `flag-icons` into
 `kml_heatmap/static/flags/`. Both directories are generated and gitignored,
 and each build replaces them, so a file dropped from the list does not

@@ -10,7 +10,9 @@ import {
   showToast,
 } from "../../../../kml_heatmap/frontend/utils/toast";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
+import { LngLat, Popup } from "../../../mocks/maplibre-gl";
 import { asMapApp, type MockApp } from "../../testHelpers";
+import type { AirportMarker } from "../../../../kml_heatmap/frontend/types";
 import {
   createFlightHistory,
   createWrappedMockApp,
@@ -179,7 +181,7 @@ describe("WrappedManager dialog", () => {
 
       expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(2);
       for (const call of mockApp.map!.fitBounds.mock.calls) {
-        expect(call[1]).toMatchObject({ animate: false });
+        expect((call as unknown[])[1]).toMatchObject({ animate: false });
       }
     });
 
@@ -217,15 +219,19 @@ describe("WrappedManager dialog", () => {
 
       vi.advanceTimersByTime(150);
 
-      expect(mockApp.map!.invalidateSize).toHaveBeenCalled();
+      expect(mockApp.map!.resize).toHaveBeenCalled();
       expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(2);
-      // The 2024 flights, not the whole dataset the config bounds cover
+      // The 2024 flights, not the whole dataset the config bounds cover,
+      // and longitude first the way the map wants its corners
       expect(mockApp.map!.fitBounds).toHaveBeenCalledWith(
         [
-          [48, 8],
-          [51, 12],
+          [8, 48],
+          [12, 51],
         ],
-        { padding: [80, 80], animate: true },
+        { padding: 80, animate: true },
+      );
+      expect(mockApp.map!.resize.mock.invocationCallOrder[0]!).toBeLessThan(
+        mockApp.map!.fitBounds.mock.invocationCallOrder[1]!,
       );
     });
 
@@ -235,8 +241,12 @@ describe("WrappedManager dialog", () => {
       wrappedManager.showWrapped();
       vi.advanceTimersByTime(150);
 
+      expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(2);
       for (const call of mockApp.map!.fitBounds.mock.calls) {
-        expect(call[0]).toBe(mockApp.config.bounds);
+        expect(call[0]).toEqual([
+          [8, 50],
+          [10, 52],
+        ]);
       }
     });
 
@@ -248,8 +258,8 @@ describe("WrappedManager dialog", () => {
 
       expect(mockApp.map!.fitBounds).toHaveBeenCalledWith(
         [
-          [50, 9],
-          [51, 10],
+          [9, 50],
+          [10, 51],
         ],
         expect.anything(),
       );
@@ -398,16 +408,56 @@ describe("WrappedManager dialog", () => {
       expect(document.activeElement).toBe(tab);
     });
 
-    it("takes the airport markers out of the tab order while open", () => {
-      const pane = document.createElement("div");
-      pane.className = "leaflet-marker-pane";
-      el("map").appendChild(pane);
+    it("takes the canvas and the airport markers out of the tab order while open", () => {
+      // MapLibre keeps the markers inside the canvas container, so the one
+      // attribute covers the canvas (tabbable itself) and every marker
+      const canvasContainer = mockApp.map!.getCanvasContainer();
+      const marker = document.createElement("button");
+      marker.className = "maplibregl-marker";
+      canvasContainer.appendChild(marker);
+      expect(el("map").contains(canvasContainer)).toBe(true);
 
       openWrapped();
-      expect(pane.hasAttribute("inert")).toBe(true);
+      expect(canvasContainer.hasAttribute("inert")).toBe(true);
+      expect(marker.closest("[inert]")).toBe(canvasContainer);
+      expect(el("map").hasAttribute("inert")).toBe(false);
 
       wrappedManager.closeWrapped();
-      expect(pane.hasAttribute("inert")).toBe(false);
+      expect(canvasContainer.hasAttribute("inert")).toBe(false);
+    });
+
+    it("closes an open airport popup before the dialog covers the map", () => {
+      let open = true;
+      const airport = {
+        isPopupOpen: vi.fn(() => open),
+        closePopup: vi.fn(() => {
+          open = false;
+        }),
+      };
+      const closed = { isPopupOpen: vi.fn(() => false), closePopup: vi.fn() };
+      mockApp.airportMarkers["EDDF Frankfurt"] =
+        airport as unknown as AirportMarker;
+      mockApp.airportMarkers["EDDM Munich"] =
+        closed as unknown as AirportMarker;
+
+      openWrapped();
+
+      expect(airport.closePopup).toHaveBeenCalledTimes(1);
+      expect(closed.closePopup).not.toHaveBeenCalled();
+    });
+
+    it("makes a popup that stays on the map inert while open", () => {
+      // The segment tooltip belongs to no airport; popups are children of
+      // the map itself, outside the canvas container
+      const popup = new Popup().setLngLat([8, 50]).addTo(mockApp.map!);
+      const popupEl = popup.getElement();
+      expect(popupEl.parentElement).toBe(el("map"));
+
+      openWrapped();
+      expect(popupEl.hasAttribute("inert")).toBe(true);
+
+      wrappedManager.closeWrapped();
+      expect(popupEl.hasAttribute("inert")).toBe(false);
     });
 
     it("does not restore focus to an opener that left the document", () => {
@@ -420,56 +470,56 @@ describe("WrappedManager dialog", () => {
     });
 
     it("puts the user's view back once the map is back in the page", () => {
-      const center = { lat: 48.1, lng: 11.6 };
-      mockApp.map!.getCenter.mockReturnValue(center);
-      mockApp.map!.getZoom.mockReturnValue(13);
+      mockApp.map!.getCenter.mockReturnValue(new LngLat(11.6, 48.1));
+      mockApp.map!.getZoom.mockReturnValue(12);
       openWrapped();
       vi.advanceTimersByTime(100);
 
       wrappedManager.closeWrapped();
-      expect(mockApp.map!.setView).not.toHaveBeenCalled();
+      expect(mockApp.map!.jumpTo).not.toHaveBeenCalled();
       vi.advanceTimersByTime(100);
 
-      // After the remeasure, so the view is fitted to the page-sized map
-      const remeasured =
-        mockApp.map!.invalidateSize.mock.invocationCallOrder.at(-1)!;
-      expect(mockApp.map!.setView).toHaveBeenCalledTimes(1);
-      expect(mockApp.map!.setView).toHaveBeenCalledWith(center, 13, {
-        animate: false,
+      // After the remeasure, so the view is fitted to the page-sized map.
+      // Longitude first, and the zoom as the map gave it: no state unit here.
+      const remeasured = mockApp.map!.resize.mock.invocationCallOrder.at(-1)!;
+      expect(mockApp.map!.jumpTo).toHaveBeenCalledTimes(1);
+      expect(mockApp.map!.jumpTo).toHaveBeenCalledWith({
+        center: [11.6, 48.1],
+        zoom: 12,
       });
-      expect(mockApp.map!.setView.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      expect(mockApp.map!.jumpTo.mock.invocationCallOrder[0]!).toBeGreaterThan(
         remeasured,
       );
     });
 
     it("keeps the user's view through a reopening before it was put back", () => {
-      const center = { lat: 48.1, lng: 11.6 };
-      mockApp.map!.getCenter.mockReturnValue(center);
-      mockApp.map!.getZoom.mockReturnValue(13);
+      mockApp.map!.getCenter.mockReturnValue(new LngLat(11.6, 48.1));
+      mockApp.map!.getZoom.mockReturnValue(12);
       openWrapped();
       wrappedManager.closeWrapped();
 
       // Reopened before the restore ran: the map still shows the fitted view
-      mockApp.map!.getCenter.mockReturnValue({ lat: 51, lng: 9 });
-      mockApp.map!.getZoom.mockReturnValue(7.75);
+      mockApp.map!.getCenter.mockReturnValue(new LngLat(9, 51));
+      mockApp.map!.getZoom.mockReturnValue(6.75);
       openWrapped();
       wrappedManager.closeWrapped();
       vi.advanceTimersByTime(100);
 
-      expect(mockApp.map!.setView).toHaveBeenCalledTimes(1);
-      expect(mockApp.map!.setView).toHaveBeenCalledWith(center, 13, {
-        animate: false,
+      expect(mockApp.map!.jumpTo).toHaveBeenCalledTimes(1);
+      expect(mockApp.map!.jumpTo).toHaveBeenCalledWith({
+        center: [11.6, 48.1],
+        zoom: 12,
       });
     });
 
     it("remeasures the map once it is back in the page", () => {
       openWrapped();
-      mockApp.map!.invalidateSize.mockClear();
+      mockApp.map!.resize.mockClear();
 
       wrappedManager.closeWrapped();
       vi.advanceTimersByTime(100);
 
-      expect(mockApp.map!.invalidateSize).toHaveBeenCalled();
+      expect(mockApp.map!.resize).toHaveBeenCalled();
     });
 
     it("leaves the dialog open when the map container is missing", () => {
@@ -500,20 +550,20 @@ describe("WrappedManager dialog", () => {
     it("does not remeasure a map that is gone by the time the timer fires", () => {
       openWrapped();
       vi.advanceTimersByTime(150);
-      const invalidateSize = mockApp.map!.invalidateSize;
-      invalidateSize.mockClear();
+      const resize = mockApp.map!.resize;
+      resize.mockClear();
 
       wrappedManager.closeWrapped();
       mockApp.map = null;
 
       expect(() => vi.advanceTimersByTime(100)).not.toThrow();
-      expect(invalidateSize).not.toHaveBeenCalled();
+      expect(resize).not.toHaveBeenCalled();
     });
 
     it("drops the pending remeasure when the dialog reopens at once", () => {
       openWrapped();
       vi.advanceTimersByTime(150);
-      mockApp.map!.invalidateSize.mockClear();
+      mockApp.map!.resize.mockClear();
 
       wrappedManager.closeWrapped();
       wrappedManager.showWrapped();
@@ -521,27 +571,111 @@ describe("WrappedManager dialog", () => {
 
       // Only the reopening's own timers may run; the close timer would have
       // remeasured a map that is already inside the dialog again
-      expect(mockApp.map!.invalidateSize).not.toHaveBeenCalled();
+      expect(mockApp.map!.resize).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("map placeholder", () => {
+    const awaiting = (): boolean =>
+      el("wrapped-map-container").classList.contains("is-awaiting-map");
+
+    /** Open with a map that still has tiles of the fitted view in flight */
+    function openWithBusyMap(): void {
+      mockApp.map!.loaded.mockReturnValue(false);
+      openWrapped();
+      vi.advanceTimersByTime(100);
+    }
+
+    it("holds the placeholder from the opening on", () => {
+      wrappedManager.showWrapped();
+
+      expect(awaiting()).toBe(true);
+    });
+
+    it("reveals the map once it comes to rest with its tiles drawn", () => {
+      openWithBusyMap();
+      expect(awaiting()).toBe(true);
+      expect(mockApp.map!.listenerCount("idle")).toBe(1);
+
+      mockApp.map!.emit("idle");
+
+      expect(awaiting()).toBe(false);
+      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+    });
+
+    it("reveals at once a map that is already at rest", () => {
+      // No frame is coming for such a map, so neither is an `idle`
+      openWrapped();
+      expect(awaiting()).toBe(true);
+
+      vi.advanceTimersByTime(100);
+
+      expect(awaiting()).toBe(false);
+      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+    });
+
+    it("waits for a loaded map that is still moving into the fit", () => {
+      mockApp.map!.isMoving.mockReturnValue(true);
+      openWrapped();
+      vi.advanceTimersByTime(100);
+
+      expect(awaiting()).toBe(true);
+
+      mockApp.map!.emit("idle");
+      expect(awaiting()).toBe(false);
+    });
+
+    it("gives up waiting for a map that never comes to rest", () => {
+      openWithBusyMap();
+
+      vi.advanceTimersByTime(1199);
+      expect(awaiting()).toBe(true);
+      vi.advanceTimersByTime(1);
+
+      expect(awaiting()).toBe(false);
+      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+    });
+
+    it("drops the listener and the placeholder on close", () => {
+      openWithBusyMap();
+
+      wrappedManager.closeWrapped();
+
+      expect(awaiting()).toBe(false);
+      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+      expect(mockApp.map!.off).toHaveBeenCalledWith(
+        "idle",
+        expect.any(Function),
+      );
+    });
+
+    it("drops the listener on destroy", () => {
+      openWithBusyMap();
+
+      wrappedManager.destroy();
+
+      expect(mockApp.map!.listenerCount("idle")).toBe(0);
     });
   });
 
   describe("userMapView", () => {
     it("offers the user's view while the map is fitted, until it is put back", () => {
       const center = { lat: 48.1, lng: 11.6 };
-      mockApp.map!.getCenter.mockReturnValue(center);
-      mockApp.map!.getZoom.mockReturnValue(13);
+      mockApp.map!.getCenter.mockReturnValue(new LngLat(11.6, 48.1));
+      mockApp.map!.getZoom.mockReturnValue(12);
       expect(wrappedManager.userMapView()).toBeNull();
 
       openWrapped();
       // The map shows the fitted overview now
-      mockApp.map!.getCenter.mockReturnValue({ lat: 51, lng: 9 });
-      mockApp.map!.getZoom.mockReturnValue(7.75);
-      expect(wrappedManager.userMapView()).toEqual({ center, zoom: 13 });
+      mockApp.map!.getCenter.mockReturnValue(new LngLat(9, 51));
+      mockApp.map!.getZoom.mockReturnValue(6.75);
+      // The app's shape of a position, and the zoom in the map's own unit
+      expect(wrappedManager.userMapView()).toEqual({ center, zoom: 12 });
 
       wrappedManager.closeWrapped();
       // Still the user's until the close has put it back, so a save that
       // runs in between (the dialog state changed) keeps it
-      expect(wrappedManager.userMapView()).toEqual({ center, zoom: 13 });
+      expect(wrappedManager.userMapView()).toEqual({ center, zoom: 12 });
       vi.advanceTimersByTime(100);
       expect(wrappedManager.userMapView()).toBeNull();
     });

@@ -99,15 +99,11 @@ FAVICON_FILES = (
 # that list against node_modules and tests/test_site_assets.py that a
 # missing file is caught before a run does any work.
 VENDOR_FILES = (
-    "leaflet.js",
-    "leaflet.css",
-    "leaflet-heat.js",
+    "maplibre-gl.mjs",
+    "maplibre-gl-shared.mjs",
+    "maplibre-gl-worker.mjs",
+    "maplibre-gl.css",
     "html-to-image.js",
-    "images/layers.png",
-    "images/layers-2x.png",
-    "images/marker-icon.png",
-    "images/marker-icon-2x.png",
-    "images/marker-shadow.png",
 )
 # The stylesheets, in the order the page applies them: styles.css is linked in
 # the head, features.css is fetched with the feature bundle the first time
@@ -126,10 +122,19 @@ SITE_FILES = (
     # Published by earlier versions and produced by none now: listed so that
     # regenerating an existing site takes them away
     "vendor/dom-to-image.min.js",
+    # Leaflet, which the map was drawn with before MapLibre
+    "vendor/leaflet.js",
+    "vendor/leaflet.css",
+    "vendor/leaflet-heat.js",
 )
 # Owned files whose names depend on the flights: the flag of every country
 # the export visited. The ones a run does not publish are removed.
-SITE_FILE_PATTERNS = (f"{FLAGS_DIR_NAME}/*.svg",)
+SITE_FILE_PATTERNS = (
+    f"{FLAGS_DIR_NAME}/*.svg",
+    # Leaflet's marker and layer icons: no run produces any, so a site that
+    # still has them loses them, and the directory with them
+    "vendor/images/*.png",
+)
 
 
 def _escape_js_string(value: str) -> str:

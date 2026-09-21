@@ -1,17 +1,17 @@
 /**
  * Shared fixtures for the ReplayManager test files.
  *
- * The app double is the shared `createMockApp`: a real store behind the
- * accessors, the Leaflet mock for the map and the layers, and stubs for the
- * other managers. The real domCache and the real pure helpers (formatTime,
+ * The app double is the shared `createMockApp`: a real store behind
+ * the accessors, the MapLibre fake with its sources and layer handles, and
+ * stubs for the other managers. The real domCache and the real pure helpers (formatTime,
  * colors, bearing) are used.
  */
-import { vi, type Mock } from "vitest";
-import type { HeatmapLayer } from "../../../../kml_heatmap/frontend/globals";
+import { vi } from "vitest";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
 import { LIVE_REGION_DELAY_MS } from "../../../../kml_heatmap/frontend/utils/toast";
 import { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
+import { MAP_SOURCES } from "../../../../kml_heatmap/frontend/utils/constants";
 import {
   asMapApp,
   createDataset,
@@ -19,8 +19,9 @@ import {
   syncControlsWithStore,
   type MockApp,
 } from "../../testHelpers";
+import type { MockSource } from "../../../mocks/maplibre-gl";
 
-export { el } from "../../testHelpers";
+export { el, type MockApp } from "../../testHelpers";
 
 /** Three consecutive segments of path 1 at t = 0, 60 and 120 seconds */
 export function createSegments(): PathSegment[] {
@@ -68,13 +69,32 @@ export function createReplayMockApp(): MockApp {
     currentData: createDataset([{ id: 1 }], createSegments()),
     hasTimingData: true,
   });
-  app.heatmapLayer = {
-    addTo: vi.fn(),
-    remove: vi.fn(),
-    setLatLngs: vi.fn(),
-  } as unknown as HeatmapLayer;
+  // jsdom lays nothing out, so the map is given a size: the follow logic
+  // measures the airplane against it
+  const container = app.map!.getContainer();
+  Object.defineProperty(container, "clientWidth", { value: 800 });
+  Object.defineProperty(container, "clientHeight", { value: 600 });
   syncControlsWithStore(app.store);
   return app;
+}
+
+/** The route and the trail source of the app's map */
+export function replaySources(app: MockApp): {
+  route: MockSource;
+  trail: MockSource;
+} {
+  return {
+    route: app.map!.source(MAP_SOURCES.replayRoute),
+    trail: app.map!.source(MAP_SOURCES.replayTrail),
+  };
+}
+
+/** The features a replay source holds right now */
+export function featuresOf(source: MockSource): {
+  properties: Record<string, unknown>;
+  geometry: { type: string; coordinates: [number, number][] };
+}[] {
+  return (source.data as { features: never[] }).features;
 }
 
 /** One element of the replay DOM fixture */
@@ -171,11 +191,6 @@ function buildFixtureNode(node: FixtureNode): HTMLElement {
     element.appendChild(buildFixtureNode(child));
   }
   return element;
-}
-
-/** The map's closePopup spy */
-export function closePopupSpy(app: MockApp): Mock {
-  return app.map!.closePopup;
 }
 
 export function mountReplayDom(): void {

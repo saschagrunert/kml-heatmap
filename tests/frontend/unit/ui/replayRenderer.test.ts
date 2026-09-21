@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  AUTO_ZOOM_DURATION_MS,
   AUTO_ZOOM_SETTLE_MS,
-  RECENTER_PAN_DURATION_S,
+  AirplaneMarker,
+  RECENTER_PAN_DURATION_MS,
   ReplayRenderer,
   SEEK_PAN_THROTTLE_MS,
+  appendTrailSegment,
   findSegmentIndexAtTime,
+  trailFeatureCollection,
+  truncateTrail,
   unwrapRotation,
   zoomOutSteps,
 } from "../../../../kml_heatmap/frontend/ui/replayRenderer";
@@ -19,13 +24,18 @@ import {
 } from "../../../../kml_heatmap/frontend/utils/colors";
 import * as replayFeature from "../../../../kml_heatmap/frontend/features/replay";
 import { generateSegmentPopupHtml } from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
-import * as L from "leaflet";
+import * as mapHelpers from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import {
+  AUTO_ZOOM_MIN,
+  MAP_SOURCES,
+} from "../../../../kml_heatmap/frontend/utils/constants";
+import type { Map as MapLibreMap } from "maplibre-gl";
+import { createMapLibreMock } from "../../testHelpers";
+import type { Map as MockMapLibreMap } from "../../../mocks/maplibre-gl";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateSegmentPopupHtml: vi.fn(() => "<div>popup</div>"),
 }));
-
-type AnyMock = ReturnType<typeof vi.fn>;
 
 function makeSegment(overrides: Partial<PathSegment> = {}): PathSegment {
   return {
@@ -97,7 +107,7 @@ describe("zoomOutSteps", () => {
     expect(zoomOutSteps({ x: 2200, y: 300 }, size)).toBe(3);
   });
 
-  it("stays within the four levels Leaflet animates", () => {
+  it("stays within four levels", () => {
     expect(zoomOutSteps({ x: 400, y: -100_000 }, size)).toBe(4);
   });
 
@@ -106,17 +116,310 @@ describe("zoomOutSteps", () => {
   });
 });
 
+/** Consecutive segments that join end to start, 10 s apart */
+function makeChain(altitudes: number[]): PathSegment[] {
+  return altitudes.map((altitude_ft, i) =>
+    makeSegment({
+      time: i * 10,
+      altitude_ft,
+      coords: [
+        [50 + i * 0.01, 8 + i * 0.01],
+        [50 + (i + 1) * 0.01, 8 + (i + 1) * 0.01],
+      ],
+    }),
+  );
+}
+
+describe("trail runs", () => {
+  function stateWith(segments: PathSegment[]): ReplayState {
+    const state = new ReplayState();
+    state.segments = segments;
+    return state;
+  }
+
+  it("extends the last run while the colour stays the same", () => {
+    const state = stateWith(makeChain([3000, 3000, 3000]));
+
+    appendTrailSegment(state, 0, false);
+    appendTrailSegment(state, 1, false);
+    appendTrailSegment(state, 2, false);
+
+    expect(state.trailRuns).toHaveLength(1);
+    expect(state.trailRuns[0]).toMatchObject({ firstIndex: 0, lastIndex: 2 });
+    // One vertex more than segments, longitude first
+    expect(state.trailRuns[0]!.coords).toEqual([
+      [8, 50],
+      [8.01, 50.01],
+      [8.02, 50.02],
+      [8.03, 50.03],
+    ]);
+    expect(state.lastDrawnIndex).toBe(2);
+    expect(state.trailDirty).toBe(true);
+  });
+
+  it("starts a run where the colour changes", () => {
+    const state = stateWith(makeChain([0, 0, 10000]));
+
+    for (let i = 0; i < 3; i++) appendTrailSegment(state, i, false);
+
+    expect(state.trailRuns.map((run) => run.color)).toEqual([
+      getColorForAltitude(0, 0, 10000),
+      getColorForAltitude(10000, 0, 10000),
+    ]);
+    expect(state.trailRuns[1]).toMatchObject({ firstIndex: 2, lastIndex: 2 });
+  });
+
+  it("starts a run where the flight does not join up", () => {
+    const segments = makeChain([3000, 3000]);
+    segments[1]!.coords = [
+      [51, 9],
+      [51.01, 9.01],
+    ];
+    const state = stateWith(segments);
+
+    appendTrailSegment(state, 0, false);
+    appendTrailSegment(state, 1, false);
+
+    expect(state.trailRuns).toHaveLength(2);
+  });
+
+  it("counts a segment without coordinates as drawn but draws nothing", () => {
+    const segments = makeChain([3000]);
+    delete segments[0]!.coords;
+    const state = stateWith(segments);
+
+    appendTrailSegment(state, 0, false);
+
+    expect(state.trailRuns).toEqual([]);
+    expect(state.lastDrawnIndex).toBe(0);
+    expect(state.trailDirty).toBe(false);
+  });
+
+  it("colours by groundspeed when asked to", () => {
+    const state = stateWith([makeSegment({ groundspeed_knots: 150 })]);
+
+    appendTrailSegment(state, 0, true);
+
+    expect(state.trailRuns[0]!.color).toBe(
+      getColorForAirspeed(150, state.colorMinSpeed, state.colorMaxSpeed),
+    );
+  });
+
+  it("cuts the last run on a backward seek and drops the runs after it", () => {
+    const state = stateWith(makeChain([0, 0, 0, 10000, 10000]));
+    for (let i = 0; i < 5; i++) appendTrailSegment(state, i, false);
+    state.trailDirty = false;
+
+    // Back to 15 s: segments 0 and 1 remain
+    truncateTrail(state, 15);
+
+    expect(state.lastDrawnIndex).toBe(1);
+    expect(state.trailRuns).toHaveLength(1);
+    expect(state.trailRuns[0]).toMatchObject({ firstIndex: 0, lastIndex: 1 });
+    expect(state.trailRuns[0]!.coords).toHaveLength(3);
+    expect(state.trailDirty).toBe(true);
+  });
+
+  it("extends a cut run again when the replay moves on", () => {
+    const state = stateWith(makeChain([0, 0, 0]));
+    for (let i = 0; i < 3; i++) appendTrailSegment(state, i, false);
+
+    truncateTrail(state, 5);
+    appendTrailSegment(state, 1, false);
+
+    expect(state.trailRuns).toHaveLength(1);
+    expect(state.trailRuns[0]!.coords).toHaveLength(3);
+  });
+
+  it("empties the trail on a seek before the first segment", () => {
+    const state = stateWith(makeChain([0, 10000]));
+    state.segments[0]!.time = 5;
+    for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
+
+    truncateTrail(state, 1);
+
+    expect(state.trailRuns).toEqual([]);
+    expect(state.lastDrawnIndex).toBe(-1);
+  });
+
+  it("leaves a trail that needs no cutting clean", () => {
+    const state = stateWith(makeChain([0, 0]));
+    for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
+    state.trailDirty = false;
+
+    truncateTrail(state, 15);
+
+    expect(state.trailDirty).toBe(false);
+    expect(state.lastDrawnIndex).toBe(1);
+  });
+
+  it("turns the runs into one coloured line each", () => {
+    const state = stateWith(makeChain([0, 10000]));
+    for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
+
+    const data = trailFeatureCollection(state.trailRuns);
+
+    expect(data.type).toBe("FeatureCollection");
+    expect(data.features).toHaveLength(2);
+    expect(data.features[0]).toEqual({
+      type: "Feature",
+      properties: { color: getColorForAltitude(0, 0, 10000) },
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [8, 50],
+          [8.01, 50.01],
+        ],
+      },
+    });
+  });
+});
+
+describe("AirplaneMarker", () => {
+  let map: MockMapLibreMap;
+  let onActivate: ReturnType<typeof vi.fn<() => void>>;
+  let airplane: AirplaneMarker;
+
+  beforeEach(() => {
+    map = createMapLibreMock();
+    onActivate = vi.fn<() => void>();
+    airplane = new AirplaneMarker(
+      map as unknown as MapLibreMap,
+      [48, 16],
+      onActivate,
+    );
+  });
+
+  afterEach(() => airplane.remove());
+
+  it("is a button on the map, centred on the position, above the airports", () => {
+    const element = airplane.getElement();
+
+    expect(element.tagName).toBe("BUTTON");
+    expect(element.type).toBe("button");
+    expect(element.className).toContain("replay-airplane-root");
+    expect(element.getAttribute("aria-label")).toBe("Aircraft position");
+    expect(element.style.zIndex).toBe("1000");
+    expect(element.querySelector(".replay-airplane-icon svg")).not.toBeNull();
+    expect(map.getCanvasContainer().contains(element)).toBe(true);
+    expect(
+      (airplane.marker as unknown as { options: unknown }).options,
+    ).toMatchObject({ anchor: "center" });
+    expect(airplane.getLatLng()).toEqual([48, 16]);
+  });
+
+  it("creates a popup the map's clicks and focus leave alone", () => {
+    expect(
+      (airplane.popup as unknown as { options: unknown }).options,
+    ).toMatchObject({
+      maxWidth: "none",
+      closeOnClick: false,
+      focusAfterOpen: false,
+    });
+    expect(airplane.marker.getPopup()).toBeFalsy();
+  });
+
+  it("asks for the popup on a click and keeps the click from the map", () => {
+    const mapClick = vi.fn();
+    map.getCanvasContainer().addEventListener("click", mapClick);
+
+    airplane.getElement().click();
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    expect(mapClick).not.toHaveBeenCalled();
+  });
+
+  it("opens from the keyboard: Enter on a focused button is a click", () => {
+    // Focus needs the map to be part of the document
+    document.body.append(map.getContainer());
+    const element = airplane.getElement();
+    element.focus();
+    expect(document.activeElement).toBe(element);
+    map.getContainer().remove();
+
+    // jsdom does not turn the key into the click a browser makes of it
+    element.click();
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes an open popup on the next click", () => {
+    airplane.openPopup();
+    expect(airplane.isPopupOpen()).toBe(true);
+
+    airplane.getElement().click();
+
+    expect(airplane.isPopupOpen()).toBe(false);
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+
+  it("opens the popup at the marker", () => {
+    airplane.setPopupContent("<p>here</p>");
+    airplane.openPopup();
+
+    expect(airplane.popup.getLngLat()).toMatchObject({ lng: 16, lat: 48 });
+    expect(airplane.popup.getElement().innerHTML).toContain("<p>here</p>");
+    expect(map.getContainer().contains(airplane.popup.getElement())).toBe(true);
+  });
+
+  it("takes an open popup along, and leaves a closed one alone", () => {
+    airplane.setLatLng([48.5, 16.5]);
+    expect(airplane.popup.setLngLat).not.toHaveBeenCalled();
+
+    airplane.openPopup();
+    airplane.setLatLng([49, 17]);
+
+    expect(airplane.getLatLng()).toEqual([49, 17]);
+    expect(airplane.popup.getLngLat()).toMatchObject({ lng: 17, lat: 49 });
+  });
+
+  it("takes the marker and the popup off the map", () => {
+    airplane.openPopup();
+
+    airplane.remove();
+
+    expect(airplane.isPopupOpen()).toBe(false);
+    expect(map.getCanvasContainer().contains(airplane.getElement())).toBe(
+      false,
+    );
+  });
+});
+
 describe("ReplayRenderer", () => {
   let renderer: ReplayRenderer;
+  let map: MockMapLibreMap;
   let mockApp: {
-    map: ReturnType<typeof L.map>;
+    map: MockMapLibreMap;
     altitudeVisible: boolean;
     airspeedVisible: boolean;
   };
   let mockReplayManager: { state: ReplayState };
-  let mockMap: Record<string, AnyMock>;
+  let frames: FrameRequestCallback[];
 
   const manager = () => mockReplayManager as unknown as ReplayManager;
+
+  /** An airplane on the mock map; a click on it refreshes its popup */
+  function makeAirplane(): AirplaneMarker {
+    return new AirplaneMarker(map as unknown as MapLibreMap, [0, 0], () =>
+      renderer.updateAirplanePopup(manager()),
+    );
+  }
+
+  /** Where the map says the airplane is, in pixels of an 800 x 600 map */
+  function airplaneAt(x: number, y: number): void {
+    map.project.mockReturnValue({ x, y });
+  }
+
+  /** Run the animation frames asked for so far */
+  function runFrame(): void {
+    const due = frames;
+    frames = [];
+    due.forEach((callback) => callback(performance.now()));
+  }
+
+  function trailSource() {
+    return map.source(MAP_SOURCES.replayTrail);
+  }
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -130,12 +433,24 @@ describe("ReplayRenderer", () => {
     sliderStart.id = "replay-slider-start";
     document.body.append(timeDisplay, slider, sliderStart);
 
-    const leafletMap = L.map("map");
-    mockMap = leafletMap as unknown as Record<string, AnyMock>;
-    mockMap["hasLayer"]!.mockReturnValue(true);
+    frames = [];
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation(() => {
+      frames = [];
+    });
+
+    map = createMapLibreMock();
+    // jsdom lays nothing out, so the container is given its size
+    const container = map.getContainer();
+    Object.defineProperty(container, "clientWidth", { value: 800 });
+    Object.defineProperty(container, "clientHeight", { value: 600 });
+    airplaneAt(400, 300);
 
     mockApp = {
-      map: leafletMap,
+      map,
       altitudeVisible: true,
       airspeedVisible: false,
     };
@@ -148,6 +463,7 @@ describe("ReplayRenderer", () => {
   });
 
   afterEach(() => {
+    mockReplayManager.state.airplaneMarker?.remove();
     ["replay-time-display", "replay-slider", "replay-slider-start"].forEach(
       (id) => document.getElementById(id)?.remove(),
     );
@@ -168,19 +484,19 @@ describe("ReplayRenderer", () => {
 
     it("skips when not active", () => {
       mockReplayManager.state.active = false;
-      const markerObj = L.marker([0, 0]);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [makeSegment()];
 
       renderer.updateAirplanePopup(manager());
 
-      expect(markerObj.openPopup).not.toHaveBeenCalled();
+      expect(airplane.isPopupOpen()).toBe(false);
     });
 
     it("finds current segment by time", () => {
       mockReplayManager.state.active = true;
-      const markerObj = L.marker([0, 0]);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 15;
       const segments = [
         makeSegment({ time: 0 }),
@@ -194,17 +510,29 @@ describe("ReplayRenderer", () => {
       expect(generateSegmentPopupHtml).toHaveBeenCalledWith(
         expect.objectContaining({ segment: segments[1] }),
       );
-      expect(markerObj.bindPopup).toHaveBeenCalled();
-      expect(markerObj.openPopup).toHaveBeenCalled();
+      expect(airplane.popup.setHTML).toHaveBeenCalledWith("<div>popup</div>");
+      expect(airplane.isPopupOpen()).toBe(true);
+    });
+
+    it("opens on a click on the airplane", () => {
+      mockReplayManager.state.active = true;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+
+      airplane.getElement().click();
+
+      expect(airplane.isPopupOpen()).toBe(true);
+      expect(airplane.popup.getElement().innerHTML).toContain("popup");
     });
 
     it("shows where the aircraft is, not where its segment ends", () => {
       mockReplayManager.state.active = true;
-      const markerObj = L.marker([0, 0]);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
       // Part way along the segment, as the frame loop leaves it
-      markerObj.setLatLng([50.25, 8.25]);
+      airplane.setLatLng([50.25, 8.25]);
 
       renderer.updateAirplanePopup(manager());
 
@@ -215,7 +543,7 @@ describe("ReplayRenderer", () => {
 
     it("uses the given index instead of searching", () => {
       mockReplayManager.state.active = true;
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.currentTime = 25;
       const segments = [
         makeSegment({ time: 0 }),
@@ -233,8 +561,8 @@ describe("ReplayRenderer", () => {
 
     it("falls back to first segment when currentTime is before all", () => {
       mockReplayManager.state.active = true;
-      const markerObj = L.marker([0, 0]);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 0;
       const segments = [makeSegment({ time: 5 }), makeSegment({ time: 10 })];
       mockReplayManager.state.segments = segments;
@@ -244,33 +572,49 @@ describe("ReplayRenderer", () => {
       expect(generateSegmentPopupHtml).toHaveBeenCalledWith(
         expect.objectContaining({ segment: segments[0] }),
       );
-      expect(markerObj.openPopup).toHaveBeenCalled();
+      expect(airplane.isPopupOpen()).toBe(true);
     });
 
     it("skips when no segments", () => {
       mockReplayManager.state.active = true;
-      const markerObj = L.marker([0, 0]);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [];
 
       renderer.updateAirplanePopup(manager());
 
-      expect(markerObj.openPopup).not.toHaveBeenCalled();
+      expect(airplane.isPopupOpen()).toBe(false);
     });
 
-    it("updates existing popup instead of creating new", () => {
+    it("refills an open popup without opening it again", () => {
       mockReplayManager.state.active = true;
-      const markerObj = L.marker([0, 0]);
-      const mockPopup = { setContent: vi.fn() };
-      (markerObj.getPopup as AnyMock).mockReturnValue(mockPopup);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
       mockReplayManager.state.currentTime = 5;
+      airplane.openPopup();
+      vi.mocked(airplane.popup.addTo).mockClear();
 
       renderer.updateAirplanePopup(manager());
 
-      expect(mockPopup.setContent).toHaveBeenCalledWith("<div>popup</div>");
-      expect(markerObj.bindPopup).not.toHaveBeenCalled();
+      expect(airplane.popup.setHTML).toHaveBeenCalledWith("<div>popup</div>");
+      expect(airplane.popup.addTo).not.toHaveBeenCalled();
+    });
+
+    it("pans the popup into view while paused, and never while playing", () => {
+      const pan = vi.spyOn(mapHelpers, "panPopupIntoView");
+      mockReplayManager.state.active = true;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+
+      mockReplayManager.state.playing = true;
+      renderer.updateAirplanePopup(manager());
+      expect(pan).not.toHaveBeenCalled();
+
+      mockReplayManager.state.playing = false;
+      renderer.updateAirplanePopup(manager());
+      expect(pan).toHaveBeenCalledWith(map, airplane.popup, undefined, true);
     });
   });
 
@@ -336,48 +680,164 @@ describe("ReplayRenderer", () => {
     });
 
     it("draws segments incrementally", () => {
-      const layer = L.layerGroup();
-      mockReplayManager.state.layer = layer;
+      mockReplayManager.state.layerActive = true;
       mockReplayManager.state.lastDrawnIndex = -1;
       mockReplayManager.state.currentTime = 15;
-      mockReplayManager.state.segments = [
-        makeSegment({ time: 0 }),
-        makeSegment({ time: 10 }),
-        makeSegment({ time: 20 }),
-      ];
+      mockReplayManager.state.segments = makeChain([3000, 3000, 3000]);
 
       callUpdateDisplay();
 
-      expect(L.polyline).toHaveBeenCalledTimes(2);
       expect(mockReplayManager.state.lastDrawnIndex).toBe(1);
       expect(mockReplayManager.state.currentIndex).toBe(1);
+      expect(mockReplayManager.state.trailRuns).toHaveLength(1);
+      expect(mockReplayManager.state.trailRuns[0]!.coords).toHaveLength(3);
+    });
+
+    it("draws nothing while the replay layer is not set up", () => {
+      mockReplayManager.state.currentTime = 15;
+      mockReplayManager.state.segments = makeChain([3000, 3000]);
+
+      callUpdateDisplay();
+      runFrame();
+
+      expect(mockReplayManager.state.trailRuns).toEqual([]);
+      expect(trailSource().setData).not.toHaveBeenCalled();
     });
 
     it("does not draw segments at time 0", () => {
-      mockReplayManager.state.layer = L.layerGroup();
+      mockReplayManager.state.layerActive = true;
       mockReplayManager.state.currentTime = 0;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay();
+      runFrame();
 
-      expect(L.polyline).not.toHaveBeenCalled();
+      expect(mockReplayManager.state.trailRuns).toEqual([]);
       expect(mockReplayManager.state.lastDrawnIndex).toBe(-1);
+      expect(trailSource().setData).not.toHaveBeenCalled();
     });
 
     it("starts drawing after the last drawn index", () => {
-      mockReplayManager.state.layer = L.layerGroup();
+      mockReplayManager.state.layerActive = true;
       mockReplayManager.state.lastDrawnIndex = 1;
       mockReplayManager.state.currentTime = 30;
-      mockReplayManager.state.segments = [
-        makeSegment({ time: 0 }),
-        makeSegment({ time: 10 }),
-        makeSegment({ time: 20 }),
-      ];
+      mockReplayManager.state.segments = makeChain([3000, 3000, 3000]);
 
       callUpdateDisplay();
 
-      expect(L.polyline).toHaveBeenCalledTimes(1);
+      expect(mockReplayManager.state.trailRuns).toHaveLength(1);
+      expect(mockReplayManager.state.trailRuns[0]).toMatchObject({
+        firstIndex: 2,
+        lastIndex: 2,
+      });
       expect(mockReplayManager.state.lastDrawnIndex).toBe(2);
+    });
+
+    it("hands the trail to the map once per frame, however often it grew", () => {
+      const state = mockReplayManager.state;
+      state.layerActive = true;
+      state.segments = makeChain([0, 0, 10000, 10000]);
+
+      // A drag of the slider: several positions before the next frame
+      state.currentTime = 5;
+      callUpdateDisplay(true);
+      state.currentTime = 15;
+      callUpdateDisplay(true);
+      state.currentTime = 25;
+      callUpdateDisplay(true);
+      expect(trailSource().setData).not.toHaveBeenCalled();
+
+      runFrame();
+
+      expect(trailSource().setData).toHaveBeenCalledTimes(1);
+      expect(trailSource().data).toEqual(
+        trailFeatureCollection(state.trailRuns),
+      );
+      expect(
+        (trailSource().data as { features: unknown[] }).features,
+      ).toHaveLength(2);
+      expect(state.trailDirty).toBe(false);
+    });
+
+    it("writes nothing for frames that drew no new segment", () => {
+      const state = mockReplayManager.state;
+      state.layerActive = true;
+      state.segments = makeChain([0, 0]);
+      state.currentTime = 5;
+      callUpdateDisplay();
+      runFrame();
+      expect(trailSource().setData).toHaveBeenCalledTimes(1);
+
+      // Still on segment 0: the airplane moves, the trail does not
+      for (const time of [6, 7, 8]) {
+        state.currentTime = time;
+        callUpdateDisplay();
+        runFrame();
+      }
+      expect(trailSource().setData).toHaveBeenCalledTimes(1);
+
+      state.currentTime = 12;
+      callUpdateDisplay();
+      runFrame();
+      expect(trailSource().setData).toHaveBeenCalledTimes(2);
+    });
+
+    it("cuts the trail on a backward seek and tells the map", () => {
+      const state = mockReplayManager.state;
+      state.layerActive = true;
+      state.segments = makeChain([0, 0, 0]);
+      state.currentTime = 25;
+      callUpdateDisplay();
+      runFrame();
+
+      renderer.removeSegmentsAfter(manager(), 5);
+      runFrame();
+
+      expect(state.lastDrawnIndex).toBe(0);
+      expect(trailSource().setData).toHaveBeenCalledTimes(2);
+      expect(trailSource().data).toMatchObject({
+        features: [
+          {
+            geometry: {
+              coordinates: [
+                [8, 50],
+                [8.01, 50.01],
+              ],
+            },
+          },
+        ],
+      });
+    });
+
+    it("writes the emptied trail after a reset", () => {
+      const state = mockReplayManager.state;
+      state.layerActive = true;
+      state.segments = makeChain([0, 0]);
+      state.currentTime = 15;
+      callUpdateDisplay();
+      runFrame();
+
+      state.resetDrawState();
+      callUpdateDisplay();
+      runFrame();
+
+      expect(trailSource().data).toEqual({
+        type: "FeatureCollection",
+        features: [],
+      });
+    });
+
+    it("drops a pending write when asked to", () => {
+      const state = mockReplayManager.state;
+      state.layerActive = true;
+      state.segments = makeChain([0]);
+      state.currentTime = 5;
+      callUpdateDisplay();
+
+      renderer.cancelTrailFlush();
+      runFrame();
+
+      expect(trailSource().setData).not.toHaveBeenCalled();
     });
 
     it("scans forward from the previous index while playing", () => {
@@ -411,21 +871,39 @@ describe("ReplayRenderer", () => {
     });
 
     it("positions airplane marker at segment end", () => {
-      const markerObj = L.marker([0, 0]);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay();
 
-      expect(markerObj.setLatLng).toHaveBeenCalledWith([50.01, 8.51]);
+      expect(airplane.getLatLng()).toEqual([50.01, 8.51]);
+      // Longitude first on its way to the map
+      expect(airplane.marker.setLngLat).toHaveBeenLastCalledWith([8.51, 50.01]);
+    });
+
+    it("moves the airplane along its segment between two times", () => {
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [
+        makeSegment({ time: 0 }),
+        makeSegment({ time: 10 }),
+      ];
+
+      callUpdateDisplay();
+
+      const [lat, lon] = airplane.getLatLng();
+      expect(lat).toBeCloseTo(50.005);
+      expect(lon).toBeCloseTo(8.505);
     });
 
     it("draws with airspeed colors when airspeed is visible and altitude is not", () => {
       mockApp.airspeedVisible = true;
       mockApp.altitudeVisible = false;
 
-      mockReplayManager.state.layer = L.layerGroup();
+      mockReplayManager.state.layerActive = true;
       mockReplayManager.state.lastDrawnIndex = -1;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [
@@ -435,16 +913,16 @@ describe("ReplayRenderer", () => {
       callUpdateDisplay();
 
       const { colorMinSpeed, colorMaxSpeed } = mockReplayManager.state;
-      expect(vi.mocked(L.polyline).mock.calls[0]![1]).toMatchObject({
-        color: getColorForAirspeed(150, colorMinSpeed, colorMaxSpeed),
-      });
+      expect(mockReplayManager.state.trailRuns[0]!.color).toBe(
+        getColorForAirspeed(150, colorMinSpeed, colorMaxSpeed),
+      );
     });
 
     it("falls back to altitude colors for segments without groundspeed", () => {
       mockApp.airspeedVisible = true;
       mockApp.altitudeVisible = false;
 
-      mockReplayManager.state.layer = L.layerGroup();
+      mockReplayManager.state.layerActive = true;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [
         makeSegment({ time: 0, groundspeed_knots: 0 }),
@@ -452,14 +930,14 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(vi.mocked(L.polyline).mock.calls[0]![1]).toMatchObject({
-        color: getColorForAltitude(3000, 0, 10000),
-      });
+      expect(mockReplayManager.state.trailRuns[0]!.color).toBe(
+        getColorForAltitude(3000, 0, 10000),
+      );
     });
 
     it("falls back to first segment coords when no lastSegment", () => {
-      const markerObj = L.marker([0, 0]);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 0;
       mockReplayManager.state.segments = [
         makeSegment({
@@ -473,18 +951,15 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(markerObj.setLatLng).toHaveBeenCalledWith([51.0, 9.0]);
+      expect(airplane.getLatLng()).toEqual([51.0, 9.0]);
     });
 
     it("applies rotation transform to airplane icon", () => {
-      const iconDiv = document.createElement("div");
-      iconDiv.className = "replay-airplane-icon";
-      const iconElement = document.createElement("div");
-      iconElement.appendChild(iconDiv);
-
-      const markerObj = L.marker([0, 0]);
-      (markerObj.getElement as AnyMock).mockReturnValue(iconElement);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      const iconDiv = airplane
+        .getElement()
+        .querySelector<HTMLElement>(".replay-airplane-icon")!;
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
@@ -493,16 +968,16 @@ describe("ReplayRenderer", () => {
       expect(iconDiv.style.transform).toContain("rotate(");
       expect(iconDiv.style.transform).toContain("translate3d(0,0,0)");
       expect(mockReplayManager.state.lastBearing).not.toBeNull();
+      // The marker itself is never rotated: MapLibre positions it
+      expect(airplane.marker.setRotation).not.toHaveBeenCalled();
     });
 
     it("turns the icon the short way when the heading crosses north", () => {
-      const iconDiv = document.createElement("div");
-      iconDiv.className = "replay-airplane-icon";
-      const iconElement = document.createElement("div");
-      iconElement.appendChild(iconDiv);
-      const markerObj = L.marker([0, 0]);
-      (markerObj.getElement as AnyMock).mockReturnValue(iconElement);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      const iconDiv = airplane
+        .getElement()
+        .querySelector<HTMLElement>(".replay-airplane-icon")!;
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
       const bearing = vi.spyOn(replayFeature, "calculateSmoothedBearing");
@@ -522,10 +997,31 @@ describe("ReplayRenderer", () => {
       expect(iconDiv.style.transform).toContain("rotate(340deg)");
     });
 
+    it("starts the rotation afresh for the airplane of another replay", () => {
+      const bearing = vi.spyOn(replayFeature, "calculateSmoothedBearing");
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+      const first = makeAirplane();
+      mockReplayManager.state.airplaneMarker = first;
+      bearing.mockReturnValue(725);
+      callUpdateDisplay();
+      first.remove();
+
+      const second = makeAirplane();
+      mockReplayManager.state.airplaneMarker = second;
+      bearing.mockReturnValue(10);
+      callUpdateDisplay();
+
+      expect(
+        second.getElement().querySelector<HTMLElement>(".replay-airplane-icon")!
+          .style.transform,
+      ).toContain("rotate(10deg)");
+    });
+
     it("keeps the last bearing when no smoothed bearing is available", () => {
       vi.spyOn(replayFeature, "calculateSmoothedBearing").mockReturnValue(null);
       mockReplayManager.state.lastBearing = 90;
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
@@ -535,49 +1031,90 @@ describe("ReplayRenderer", () => {
     });
 
     it("auto-pans when airplane is near viewport edge during playback", () => {
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
+      airplaneAt(10, 10);
 
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.playing = true;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay();
 
-      expect(mockMap["panTo"]).toHaveBeenCalledWith(
-        [50.01, 8.51],
-        expect.objectContaining({ animate: true, noMoveStart: true }),
-      );
+      expect(map.project).toHaveBeenCalledWith([8.51, 50.01]);
+      // Milliseconds, where Leaflet counted seconds
+      expect(RECENTER_PAN_DURATION_MS).toBe(500);
+      expect(map.easeTo).toHaveBeenCalledWith({
+        center: [8.51, 50.01],
+        duration: RECENTER_PAN_DURATION_MS,
+        easing: expect.any(Function) as unknown,
+        animate: true,
+      });
       expect(mockReplayManager.state.recenterTimestamps).toHaveLength(1);
     });
 
-    it("does not pan while playing when the airplane is inside the margins", () => {
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 400, y: 300 });
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+    it("eases the pan out, so restarting it every frame still moves the map", () => {
+      airplaneAt(10, 10);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.playing = true;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay();
 
-      expect(mockMap["panTo"]).not.toHaveBeenCalled();
+      const { easing } = map.easeTo.mock.calls[0]![0] as unknown as {
+        easing: (t: number) => number;
+      };
+      expect(easing(0)).toBe(0);
+      expect(easing(1)).toBe(1);
+      // One frame of a 500 ms pan covers a tenth of the way
+      expect(easing(16 / 500)).toBeGreaterThan(0.1);
+    });
+
+    it("does not pan while playing when the airplane is inside the margins", () => {
+      airplaneAt(400, 300);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
+      mockReplayManager.state.playing = true;
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+
+      callUpdateDisplay();
+
+      expect(map.easeTo).not.toHaveBeenCalled();
+      expect(map.jumpTo).not.toHaveBeenCalled();
     });
 
     it("does not pan when paused and not seeking", () => {
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      airplaneAt(10, 10);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.playing = false;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay(false);
 
-      expect(mockMap["panTo"]).not.toHaveBeenCalled();
+      expect(map.easeTo).not.toHaveBeenCalled();
+      expect(map.jumpTo).not.toHaveBeenCalled();
+    });
+
+    it("leaves the camera alone while the map is zooming", () => {
+      // A camera move ends the one before it, so a pan would stop the zoom
+      airplaneAt(10, 10);
+      map.isZooming.mockReturnValue(true);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
+      mockReplayManager.state.playing = true;
+      mockReplayManager.state.autoZoom = true;
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+
+      callUpdateDisplay();
+
+      expect(map.easeTo).not.toHaveBeenCalled();
+      expect(mockReplayManager.state.recenterTimestamps).toEqual([]);
     });
 
     it("uses binary search on manual seek with multiple segments", () => {
-      const markerObj = L.marker([0, 0]);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.lastDrawnIndex = 5;
       mockReplayManager.state.currentIndex = 3;
       mockReplayManager.state.currentTime = 15;
@@ -587,47 +1124,47 @@ describe("ReplayRenderer", () => {
         makeSegment({ time: 20 }),
         makeSegment({ time: 30 }),
       ];
+      vi.mocked(airplane.marker.setLngLat).mockClear();
 
       callUpdateDisplay(true);
 
       expect(mockReplayManager.state.currentIndex).toBe(1);
-      expect(markerObj.setLatLng).toHaveBeenCalled();
+      expect(airplane.marker.setLngLat).toHaveBeenCalled();
     });
 
     it("does not recenter on manual seek while the airplane stays in view", () => {
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 400, y: 300 });
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      airplaneAt(400, 300);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay(true);
 
-      expect(mockMap["panTo"]).not.toHaveBeenCalled();
+      expect(map.jumpTo).not.toHaveBeenCalled();
     });
 
     it("pans without animation on manual seek near the edge, throttled to 250 ms", () => {
       vi.useFakeTimers();
       vi.setSystemTime(10_000);
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 300 });
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      airplaneAt(10, 300);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay(true);
-      expect(mockMap["panTo"]).toHaveBeenCalledTimes(1);
-      expect(mockMap["panTo"]).toHaveBeenCalledWith([50.01, 8.51], {
-        animate: false,
-      });
+      expect(map.jumpTo).toHaveBeenCalledTimes(1);
+      expect(map.jumpTo).toHaveBeenCalledWith({ center: [8.51, 50.01] });
+      expect(map.easeTo).not.toHaveBeenCalled();
 
       // A second seek shortly after is throttled
       vi.advanceTimersByTime(SEEK_PAN_THROTTLE_MS - 50);
       callUpdateDisplay(true);
-      expect(mockMap["panTo"]).toHaveBeenCalledTimes(1);
+      expect(map.jumpTo).toHaveBeenCalledTimes(1);
 
       // After the throttle window the map follows again
       vi.advanceTimersByTime(100);
       callUpdateDisplay(true);
-      expect(mockMap["panTo"]).toHaveBeenCalledTimes(2);
+      expect(map.jumpTo).toHaveBeenCalledTimes(2);
       // Manual seeks do not feed the auto-zoom recenter counter
       expect(mockReplayManager.state.recenterTimestamps).toHaveLength(0);
     });
@@ -635,26 +1172,33 @@ describe("ReplayRenderer", () => {
     it("pans immediately on manual seek when the airplane left the viewport", () => {
       vi.useFakeTimers();
       vi.setSystemTime(10_000);
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 300 });
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      airplaneAt(10, 300);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay(true);
-      expect(mockMap["panTo"]).toHaveBeenCalledTimes(1);
+      expect(map.jumpTo).toHaveBeenCalledTimes(1);
 
       // Outside the viewport: the throttle does not apply
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: -50, y: 300 });
+      airplaneAt(-50, 300);
       vi.advanceTimersByTime(10);
       callUpdateDisplay(true);
-      expect(mockMap["panTo"]).toHaveBeenCalledTimes(2);
+      expect(map.jumpTo).toHaveBeenCalledTimes(2);
     });
 
-    it("auto-zooms out after frequent recenters", () => {
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
-      mockMap["getZoom"]!.mockReturnValue(12);
+    /** The zoom-outs among the camera moves; the pans carry no zoom */
+    function zoomOuts(): { zoom: number }[] {
+      return map.easeTo.mock.calls
+        .map(([options]) => options as { zoom?: number })
+        .filter((options): options is { zoom: number } => "zoom" in options);
+    }
 
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+    it("auto-zooms out after frequent recenters", () => {
+      airplaneAt(10, 10);
+      map.getZoom.mockReturnValue(12);
+
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.playing = true;
       mockReplayManager.state.autoZoom = true;
       mockReplayManager.state.currentTime = 5;
@@ -669,23 +1213,23 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      // Around the airplane: Leaflet puts the view back on the point it
-      // zoomed around once the animation ends
-      expect(mockMap["setView"]).toHaveBeenCalledWith(
-        [50.01, 8.51],
-        11,
-        expect.objectContaining({ animate: true }),
-      );
-      expect(mockMap["setZoom"]).not.toHaveBeenCalled();
+      // Onto the airplane: no pan runs while the map zooms
+      expect(map.easeTo).toHaveBeenLastCalledWith({
+        center: [8.51, 50.01],
+        zoom: 11,
+        duration: AUTO_ZOOM_DURATION_MS,
+        animate: true,
+      });
+      expect(map.setZoom).not.toHaveBeenCalled();
       expect(mockReplayManager.state.recenterTimestamps).toEqual([]);
     });
 
     it("zooms out from the map's own zoom, which the user may have changed", () => {
-      // Replay opened with auto-zoom at 16, then the user zoomed out to 12.5:
-      // a remembered 16 made "zoom out" set 15
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
-      mockMap["getZoom"]!.mockReturnValue(12.5);
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      // Replay opened with auto-zoom at 15, then the user zoomed out to 12.5:
+      // a remembered 15 made "zoom out" set 14
+      airplaneAt(10, 10);
+      map.getZoom.mockReturnValue(12.5);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.playing = true;
       mockReplayManager.state.autoZoom = true;
       mockReplayManager.state.currentTime = 5;
@@ -695,18 +1239,14 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(mockMap["setView"]).toHaveBeenCalledWith(
-        [50.01, 8.51],
-        11.5,
-        expect.anything(),
-      );
+      expect(zoomOuts()).toEqual([expect.objectContaining({ zoom: 11.5 })]);
     });
 
     it("counts one recenter per pan, not one per frame of it", () => {
       vi.useFakeTimers();
       vi.setSystemTime(10_000);
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      airplaneAt(10, 10);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.playing = true;
       mockReplayManager.state.autoZoom = true;
       mockReplayManager.state.currentTime = 5;
@@ -719,21 +1259,21 @@ describe("ReplayRenderer", () => {
         callUpdateDisplay();
         vi.advanceTimersByTime(16);
       }
-      expect(mockMap["panTo"]).toHaveBeenCalledTimes(20);
+      expect(map.easeTo).toHaveBeenCalledTimes(20);
       expect(mockReplayManager.state.recenterTimestamps).toHaveLength(1);
-      expect(mockMap["setView"]).not.toHaveBeenCalled();
+      expect(zoomOuts()).toEqual([]);
 
       // Once a pan has had its time, still being at the edge is a new one
-      vi.advanceTimersByTime(RECENTER_PAN_DURATION_S * 1000);
+      vi.advanceTimersByTime(RECENTER_PAN_DURATION_MS);
       callUpdateDisplay();
       expect(mockReplayManager.state.recenterTimestamps).toHaveLength(2);
     });
 
     it("pans without animation for reduced motion", () => {
       vi.spyOn(motion, "prefersReducedMotion").mockReturnValue(true);
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
-      mockMap["getZoom"]!.mockReturnValue(12);
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      airplaneAt(10, 10);
+      map.getZoom.mockReturnValue(12);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.playing = true;
       mockReplayManager.state.autoZoom = true;
       mockReplayManager.state.currentTime = 5;
@@ -743,19 +1283,19 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(mockMap["panTo"]).toHaveBeenCalledWith(
-        [50.01, 8.51],
-        expect.objectContaining({ animate: false }),
-      );
-      expect(mockMap["setView"]).toHaveBeenCalledWith([50.01, 8.51], 11, {
-        animate: false,
-      });
+      expect(map.easeTo).toHaveBeenCalledTimes(2);
+      for (const [options] of map.easeTo.mock.calls) {
+        expect(options).toMatchObject({ animate: false });
+      }
+      expect(zoomOuts()).toEqual([expect.objectContaining({ zoom: 11 })]);
     });
 
-    it("does not zoom out below zoom level 9", () => {
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 10, y: 10 });
-      mockMap["getZoom"]!.mockReturnValue(9);
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+    it("does not zoom out below the auto-zoom minimum", () => {
+      // Map units: what was 9 under Leaflet
+      expect(AUTO_ZOOM_MIN).toBe(8);
+      airplaneAt(10, 10);
+      map.getZoom.mockReturnValue(AUTO_ZOOM_MIN);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.playing = true;
       mockReplayManager.state.autoZoom = true;
       mockReplayManager.state.currentTime = 5;
@@ -769,92 +1309,125 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(mockMap["setView"]).not.toHaveBeenCalled();
+      expect(zoomOuts()).toEqual([]);
     });
 
-    it("zooms out at once when the airplane has left the map", () => {
-      // At 200x the pan fell behind at zoom 16, and waiting for three
-      // recenters left the airplane above the map for over a second
-      vi.useFakeTimers();
-      vi.setSystemTime(10_000);
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 400, y: -20 });
-      mockMap["getZoom"]!.mockReturnValue(16);
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+    it("stops at the auto-zoom minimum when the steps would pass it", () => {
+      airplaneAt(400, -100_000);
+      map.getZoom.mockReturnValue(AUTO_ZOOM_MIN + 1.5);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.playing = true;
       mockReplayManager.state.autoZoom = true;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay();
-      expect(mockMap["setView"]).toHaveBeenCalledTimes(1);
-      expect(mockMap["setView"]).toHaveBeenCalledWith(
-        [50.01, 8.51],
-        15,
-        expect.objectContaining({ animate: true }),
-      );
 
-      // Still outside while Leaflet animates that zoom: no second call,
-      // which Leaflet would drop
-      mockMap["getZoom"]!.mockReturnValue(15);
+      expect(zoomOuts()).toEqual([
+        expect.objectContaining({ zoom: AUTO_ZOOM_MIN }),
+      ]);
+    });
+
+    it("zooms out at once when the airplane has left the map", () => {
+      // At 200x the pan fell behind at the follow zoom, and waiting for
+      // three recenters left the airplane above the map for over a second
+      vi.useFakeTimers();
+      vi.setSystemTime(10_000);
+      airplaneAt(400, -20);
+      map.getZoom.mockReturnValue(15);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
+      mockReplayManager.state.playing = true;
+      mockReplayManager.state.autoZoom = true;
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+
+      callUpdateDisplay();
+      expect(zoomOuts()).toEqual([expect.objectContaining({ zoom: 14 })]);
+
+      // Still outside while that zoom has not settled: no second one
+      map.getZoom.mockReturnValue(14);
       vi.advanceTimersByTime(AUTO_ZOOM_SETTLE_MS - 50);
       callUpdateDisplay();
-      expect(mockMap["setView"]).toHaveBeenCalledTimes(1);
+      expect(zoomOuts()).toHaveLength(1);
 
-      // Once it has ended, further out takes more than one level
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: 400, y: -700 });
+      // Once it has, further out takes more than one level
+      airplaneAt(400, -700);
       vi.advanceTimersByTime(50);
       callUpdateDisplay();
-      expect(mockMap["setView"]).toHaveBeenCalledTimes(2);
-      expect(mockMap["setView"]).toHaveBeenLastCalledWith(
-        [50.01, 8.51],
-        13,
-        expect.anything(),
-      );
+      expect(zoomOuts()).toHaveLength(2);
+      expect(zoomOuts()[1]).toMatchObject({ center: [8.51, 50.01], zoom: 12 });
     });
 
     it("leaves the zoom alone off the map when auto-zoom is off", () => {
-      mockMap["latLngToContainerPoint"]!.mockReturnValue({ x: -50, y: 300 });
-      mockReplayManager.state.airplaneMarker = L.marker([0, 0]);
+      airplaneAt(-50, 300);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.playing = true;
       mockReplayManager.state.currentTime = 5;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay();
 
-      expect(mockMap["panTo"]).toHaveBeenCalled();
-      expect(mockMap["setView"]).not.toHaveBeenCalled();
-    });
-
-    it("adds marker to map if missing", () => {
-      mockMap["hasLayer"]!.mockReturnValue(false);
-
-      const markerObj = L.marker([0, 0]);
-      mockReplayManager.state.airplaneMarker = markerObj;
-      mockReplayManager.state.currentTime = 5;
-      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
-
-      callUpdateDisplay();
-
-      expect(markerObj.addTo).toHaveBeenCalledWith(mockApp.map);
+      expect(map.easeTo).toHaveBeenCalledTimes(1);
+      expect(zoomOuts()).toEqual([]);
     });
 
     it("refreshes an open popup with the current segment index", () => {
       mockReplayManager.state.active = true;
-      const markerObj = L.marker([0, 0]);
-      const mockPopup = { setContent: vi.fn() };
-      (markerObj.getPopup as AnyMock).mockReturnValue(mockPopup);
-      (markerObj.isPopupOpen as AnyMock).mockReturnValue(true);
-      mockReplayManager.state.airplaneMarker = markerObj;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 15;
       const segments = [makeSegment({ time: 0 }), makeSegment({ time: 10 })];
       mockReplayManager.state.segments = segments;
+      airplane.openPopup();
 
       callUpdateDisplay();
 
       expect(generateSegmentPopupHtml).toHaveBeenCalledWith(
         expect.objectContaining({ segment: segments[1] }),
       );
-      expect(mockPopup.setContent).toHaveBeenCalledWith("<div>popup</div>");
+      expect(airplane.popup.setHTML).toHaveBeenCalledWith("<div>popup</div>");
+      // The popup went along with the airplane
+      expect(airplane.popup.getLngLat()).toMatchObject({
+        lng: 8.51,
+        lat: 50.01,
+      });
+    });
+
+    it("rebuilds an open popup only when the airplane reaches another segment", () => {
+      mockReplayManager.state.active = true;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
+      mockReplayManager.state.segments = [
+        makeSegment({ time: 0 }),
+        makeSegment({ time: 10 }),
+      ];
+      mockReplayManager.state.currentTime = 2;
+      renderer.updateAirplanePopup(manager());
+      vi.mocked(generateSegmentPopupHtml).mockClear();
+
+      mockReplayManager.state.currentTime = 4;
+      callUpdateDisplay();
+      expect(generateSegmentPopupHtml).not.toHaveBeenCalled();
+
+      mockReplayManager.state.currentTime = 12;
+      callUpdateDisplay();
+      expect(generateSegmentPopupHtml).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves a closed popup closed as the airplane moves on", () => {
+      mockReplayManager.state.active = true;
+      const airplane = makeAirplane();
+      mockReplayManager.state.airplaneMarker = airplane;
+      mockReplayManager.state.currentTime = 15;
+      mockReplayManager.state.segments = [
+        makeSegment({ time: 0 }),
+        makeSegment({ time: 10 }),
+      ];
+
+      callUpdateDisplay();
+
+      expect(airplane.isPopupOpen()).toBe(false);
+      expect(generateSegmentPopupHtml).not.toHaveBeenCalled();
     });
   });
 });

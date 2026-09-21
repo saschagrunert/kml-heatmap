@@ -2,7 +2,7 @@
  * Shared fixtures for the MapApp initialization test files.
  *
  * Every manager is replaced by a mock instance so the tests see exactly
- * what MapApp itself does with them; the store, the Leaflet mock and the
+ * what MapApp itself does with them; the store, the MapLibre mock and the
  * DOM are real. This module imports nothing from the application, so a
  * test file can load it through `vi.hoisted` before it registers the
  * module mocks whose factories hand out these instances.
@@ -69,6 +69,8 @@ export const mockLayerManagerInstance = {
   redrawAltitudePaths: vi.fn(),
   redrawAirspeedPaths: vi.fn(),
   clearLayer: vi.fn(),
+  hitTest: vi.fn(),
+  onPathClick: vi.fn(),
   destroy: vi.fn(),
 };
 

@@ -1,10 +1,11 @@
 /**
  * Wrapped Manager - Handles year-in-review/wrapped feature
  */
-import type { FitBoundsOptions, LatLng, LatLngBoundsExpression } from "leaflet";
+import type { FitBoundsOptions, LngLatBoundsLike } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
-import type { Airport } from "../types";
+import type { Airport, MapCenter } from "../types";
 import { domCache, hideControls, restoreControls } from "../utils/domCache";
+import { toBounds, toLngLat } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import {
   TOAST_ALERT_ID,
@@ -51,14 +52,20 @@ const NON_INERT_IDS = new Set([
 const MAP_RESTORE_DELAY_MS = 100;
 
 /**
- * Longest the map panel holds its placeholder waiting for tiles. The base
- * layer says when they have landed; this covers the case where it never
- * does, offline or with the tiles already in place.
+ * Longest the map panel holds its placeholder waiting for tiles. The map
+ * says when they have landed; this covers the case where it never does:
+ * offline, or in a tab that is hidden and renders no frames.
  */
 const MAP_REVEAL_TIMEOUT_MS = 1200;
 
-/** Padding around the data when the dialog fits the map to it */
-const FIT_PADDING: [number, number] = [80, 80];
+/** Padding in pixels around the data when the dialog fits the map to it */
+const FIT_PADDING = 80;
+
+/** The user's map view: app-shaped center, zoom in the map's own unit */
+export interface UserMapView {
+  center: MapCenter;
+  zoom: number;
+}
 
 /**
  * Write the heading.
@@ -116,16 +123,17 @@ export class WrappedManager {
    * the close has put it back, so a reopening in between does not take the
    * fitted view for the user's.
    */
-  private savedView: { center: LatLng; zoom: number } | null = null;
+  private savedView: UserMapView | null = null;
   private unsubscribeData: () => void;
 
   /**
    * The user's own map view while the dialog holds the map fitted to all
    * the data, null otherwise. The state manager saves this one: with the
    * fitted view in the URL and in storage, a reload or a shared link landed
-   * on the overview once the dialog was closed.
+   * on the overview once the dialog was closed. The zoom is the map's own;
+   * the state manager converts it like any other.
    */
-  userMapView(): { center: LatLng; zoom: number } | null {
+  userMapView(): UserMapView | null {
     return this.savedView;
   }
 
@@ -166,27 +174,31 @@ export class WrappedManager {
    * network does, and the panel showed a black rectangle for all of it.
    */
   private revealMapWhenPainted(container: HTMLElement): void {
+    const map = this.app.map;
     const reveal = (): void => {
       if (this.mapRevealTimer !== null) {
         clearTimeout(this.mapRevealTimer);
         this.mapRevealTimer = null;
       }
-      this.app.baseLayer?.off("load", reveal);
+      map?.off("idle", reveal);
       this.revealMap = null;
       container.classList.remove("is-awaiting-map");
     };
 
-    if (!this.app.baseLayer) {
+    // Nothing in flight and nothing moving: no `idle` is coming, because the
+    // map only fires it at the end of a frame and has no reason to draw one
+    if (!map || (map.loaded() && !map.isMoving())) {
       reveal();
       return;
     }
 
-    // `load` lands when the last tile of the fitted view has, which is the
-    // first moment the panel has anything to show. Counting the tiles that
-    // are still in flight instead would read zero, because the fit that
-    // asks for them is animated and has not asked yet.
+    // `idle` lands when the fit has come to rest and the last tile of the
+    // fitted view is drawn, which is the first moment the panel has anything
+    // to show. It is the one to wait for rather than `load`, which fires once
+    // in the life of the map, or `moveend`, which does not wait for tiles.
     this.revealMap = reveal;
-    this.app.baseLayer.on("load", reveal);
+    // `reveal` takes itself off, whichever of the three ways it is reached
+    map.on("idle", reveal);
     this.mapRevealTimer = setTimeout(reveal, MAP_REVEAL_TIMEOUT_MS);
   }
 
@@ -195,22 +207,25 @@ export class WrappedManager {
    * bounds cover the whole dataset, so a single year or aircraft used to be
    * shown as a speck in the middle of every flight ever made.
    */
-  private fitTarget(): LatLngBoundsExpression {
+  private fitTarget(): LngLatBoundsLike {
     const { selectedYear, selectedAircraft, currentData } = this.app;
     if (
       (selectedYear === "all" && selectedAircraft === "all") ||
       !currentData
     ) {
-      return this.app.config.bounds;
+      return toBounds(this.app.config.bounds);
     }
     const view = datasetIndex(currentData).filter(
       selectedYear,
       selectedAircraft,
     );
-    return segmentBounds(view.segments()) ?? this.app.config.bounds;
+    return toBounds(segmentBounds(view.segments()) ?? this.app.config.bounds);
   }
 
-  /** Fit options for the overview, without the animation for reduced motion */
+  /**
+   * Fit options for the overview, without the animation for reduced motion.
+   * No duration: the map's default carries the fit, as it always has.
+   */
   private fitOptions(): FitBoundsOptions {
     return { padding: FIT_PADDING, animate: !prefersReducedMotion() };
   }
@@ -244,10 +259,13 @@ export class WrappedManager {
     // The dialog fits the map to all the data; closing it puts the user's
     // own view back. A view still waiting to be put back by a close that is
     // settling is the user's, the current one is the fitted one.
-    this.savedView ??= {
-      center: this.app.map.getCenter(),
-      zoom: this.app.map.getZoom(),
-    };
+    if (!this.savedView) {
+      const center = this.app.map.getCenter();
+      this.savedView = {
+        center: { lat: center.lat, lng: center.lng },
+        zoom: this.app.map.getZoom(),
+      };
+    }
     const fitTarget = this.fitTarget();
     this.app.map.fitBounds(fitTarget, this.fitOptions());
 
@@ -300,11 +318,11 @@ export class WrappedManager {
       // Force a layout recalculation
       wrappedMapContainer.offsetHeight;
 
-      // Now that container has dimensions, invalidate map size
+      // Now that container has dimensions, have the map measure it
       this.mapResizeTimer = setTimeout(() => {
         this.mapResizeTimer = null;
         if (!this.app.map || !this.app.store.get("wrappedVisible")) return;
-        this.app.map.invalidateSize();
+        this.app.map.resize();
         this.app.map.fitBounds(fitTarget, this.fitOptions());
         this.revealMapWhenPainted(wrappedMapContainer);
       }, 100);
@@ -451,9 +469,12 @@ export class WrappedManager {
    * observer its five tabs joined the dialog's tab cycle and stayed operable,
    * so a keyboard user could open a sheet behind the modal.
    *
-   * The map comes along, and with it the airport markers, which are
-   * tabbable. The overview map is not meant to be worked in, so they are
-   * taken out of the tab cycle until the dialog closes.
+   * The map comes along, and with it the canvas and the airport markers,
+   * which are tabbable. The overview map is not meant to be worked in, so
+   * they are taken out of the tab cycle until the dialog closes. MapLibre
+   * puts the markers inside the canvas container, so making that one inert
+   * covers them; popups are children of the map itself and are closed, and
+   * whatever is left of them (the segment tooltip) is made inert as well.
    */
   private trapFocus(modal: HTMLElement): void {
     const active = document.activeElement;
@@ -475,8 +496,13 @@ export class WrappedManager {
 
     this.inertElements = [];
     Array.from(document.body.children).forEach(makeInert);
+    for (const marker of Object.values(this.app.airportMarkers)) {
+      if (marker.isPopupOpen()) marker.closePopup();
+    }
     document
-      .querySelectorAll("#map .leaflet-marker-pane, #map .leaflet-popup-pane")
+      .querySelectorAll(
+        "#map .maplibregl-canvas-container, #map .maplibregl-popup",
+      )
       .forEach(makeInert);
 
     this.inertObserver = new MutationObserver((records) => {
@@ -536,7 +562,7 @@ export class WrappedManager {
       clearTimeout(this.mapRestoreTimer);
       this.mapRestoreTimer = null;
     }
-    // Takes the placeholder down and drops the tile listener with it
+    // Takes the placeholder down and drops the idle listener with it
     this.revealMap?.();
   }
 
@@ -591,9 +617,12 @@ export class WrappedManager {
         const view = this.savedView;
         this.savedView = null;
         if (!this.app.map) return;
-        this.app.map.invalidateSize();
+        this.app.map.resize();
         if (view) {
-          this.app.map.setView(view.center, view.zoom, { animate: false });
+          this.app.map.jumpTo({
+            center: toLngLat([view.center.lat, view.center.lng]),
+            zoom: view.zoom,
+          });
         }
       }, MAP_RESTORE_DELAY_MS);
     }

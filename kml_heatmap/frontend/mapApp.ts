@@ -3,7 +3,13 @@
  * This is the main entry point that initializes all managers and handles the application lifecycle
  */
 
-import * as L from "leaflet";
+import {
+  AttributionControl,
+  Map as MapLibreMap,
+  type MapMouseEvent,
+  type RequestTransformFunction,
+  type StyleSpecification,
+} from "maplibre-gl";
 import { DataManager } from "./ui/dataManager";
 import { StateManager } from "./ui/stateManager";
 import { LayerManager } from "./ui/layerManager";
@@ -22,9 +28,27 @@ import { domCache } from "./utils/domCache";
 import { syncLegend, syncToggleButton } from "./utils/buttonState";
 import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
-import { invalidateMapAfterTransition } from "./utils/mapHelpers";
+import {
+  resizeMapAfterTransition,
+  stateZoomToMap,
+  toBounds,
+  toLngLat,
+  whenStyleReady,
+} from "./utils/mapHelpers";
 import { prefersReducedMotion } from "./utils/motion";
-import { MAX_ZOOM, MIN_ZOOM } from "./utils/constants";
+import {
+  DEFAULT_ZOOM,
+  HEATMAP_LAYER_IDS,
+  MAP_LAYERS,
+  MAP_MAX_ZOOM,
+  MAP_MIN_ZOOM,
+} from "./utils/constants";
+import {
+  addDataLayers,
+  AirportLayerHandle,
+  MapLayerHandle,
+  MapPathLayerHandle,
+} from "./mapLayers";
 import {
   AppStore,
   DEFAULT_AIRSPEED_RANGE,
@@ -45,10 +69,12 @@ import {
 import type { StoreAccessors } from "./state/store";
 import type { ReplayManager } from "./ui/replayManager";
 import type { WrappedManager } from "./ui/wrappedManager";
-import type { HeatmapLayer } from "./globals";
 import type {
   AircraftModels,
+  AirportMarker,
+  LayerHandle,
   PathInfo,
+  PathLayerHandle,
   PathSegment,
   Airport,
   AppState,
@@ -79,34 +105,71 @@ export type AirportToPathsMap = PathIdsByAirport;
  * Airport markers mapping
  */
 export interface AirportMarkersMap {
-  [airportName: string]: L.Marker;
+  [airportName: string]: AirportMarker;
 }
 
 /**
- * Aeronautical overlay of open flightmaps: airspaces, airfields, navaids and
- * reporting points on transparent tiles. `latest` follows the current AIRAC
- * cycle, so the URL needs no upkeep, and the tiles need no API key.
+ * The CARTO vector style that replaces the raster `dark_all` tiles. The
+ * style, its tiles, glyphs and sprite all come from hosts under
+ * basemaps.cartocdn.com.
  */
-const AVIATION_TILE_URL =
-  "https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest";
-/** The zoom levels the overlay is rendered for; above them it is upscaled */
-const AVIATION_MIN_ZOOM = 7;
-const AVIATION_MAX_NATIVE_ZOOM = 12;
+const CARTO_STYLE_URL =
+  "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+const CARTO_HOST = /(^|\.)basemaps\.cartocdn\.com$/;
+
+/** The base style, with the API key when the site was built with one */
+export function cartoStyleUrl(apiKey?: string): string {
+  return apiKey
+    ? `${CARTO_STYLE_URL}?key=${encodeURIComponent(apiKey)}`
+    : CARTO_STYLE_URL;
+}
+
 /**
- * Two levels of upscaling (16 times the area) still read as a chart. Beyond
- * that the overlay is a blur over the base map, so Leaflet hides it instead
- * of stretching a tile up to the map's own limit.
+ * Put the API key on every request to CARTO, not only on the style. CARTO
+ * documents the key for the style URL, but the requests that count against
+ * the quota are the tiles, and the style names those without it.
  */
-const AVIATION_MAX_ZOOM = 14;
+export function cartoTransformRequest(
+  apiKey?: string,
+): RequestTransformFunction | null {
+  if (!apiKey) return null;
+  return (url) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      // Relative, so one of the site's own files
+      return undefined;
+    }
+    if (!CARTO_HOST.test(parsed.hostname) || parsed.searchParams.has("key")) {
+      return undefined;
+    }
+    // Appended by hand, so the rest of the URL stays byte for byte what
+    // MapLibre asked for
+    const separator = url.includes("?") ? "&" : "?";
+    return { url: `${url}${separator}key=${encodeURIComponent(apiKey)}` };
+  };
+}
+
+/**
+ * What the map shows when the base style cannot be fetched: the page
+ * background and nothing else. It needs no network, so the flights still
+ * get a map to be drawn on; without it no source could ever be added.
+ */
+export const FALLBACK_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {},
+  layers: [
+    {
+      id: "background",
+      type: "background",
+      paint: { "background-color": "#0e0e0e" },
+    },
+  ],
+};
 
 /** Delay before a Wrapped panel restored from state opens again */
 const WRAPPED_RESTORE_DELAY_MS = 500;
-
-/**
- * Zoom of a view that names no zoom of its own: the map's first view, and
- * a link that carries a centre without `z`
- */
-const DEFAULT_ZOOM = 10;
 
 /**
  * Said when the feature bundle cannot be fetched. Without it a click on
@@ -167,24 +230,39 @@ export class MapApp {
   /** Set while a click on Replay waits for the feature bundle */
   private pendingReplayToggle: Promise<void> | null = null;
   /** The map events setupEventHandlers() listens to, kept to remove them */
-  private mapHandlers: L.LeafletEventHandlerFnMap = {};
+  private mapHandlers: {
+    moveend?: () => void;
+    zoomend?: () => void;
+    click?: (e: MapMouseEvent) => void;
+  } = {};
 
   // Map and layers
-  map: L.Map | null;
-  /** The base map. Wrapped waits on its `load` before showing the map. */
-  baseLayer: L.TileLayer | null = null;
-  heatmapLayer: HeatmapLayer | null;
-  readonly altitudeLayer: L.LayerGroup;
-  readonly airspeedLayer: L.LayerGroup;
-  readonly airportLayer: L.LayerGroup;
-  /** Shared canvas renderer for altitude/airspeed polylines */
-  readonly pathRenderer: L.Canvas;
+  map: MapLibreMap | null;
+  /**
+   * Resolves with the map once its style has loaded and every source and
+   * layer of MAP_SOURCES and MAP_LAYERS exists, empty. It always resolves:
+   * a base style that fails to load is replaced by FALLBACK_STYLE.
+   * `initialize()` waits for it before the first data is loaded, so code
+   * that runs from there on may use the sources directly; anything that can
+   * run earlier (a constructor, a click during the load) goes through this.
+   */
+  readonly mapReady: Promise<MapLibreMap>;
+  private resolveMapReady!: (map: MapLibreMap) => void;
+  /** Whether the base style, or its stand-in, has loaded */
+  private styleLoaded = false;
+
+  // Handles of the layers the map is created with. The layers are never
+  // added or removed; the handles switch their visibility.
+  readonly heatmapLayer: LayerHandle;
+  readonly aviationLayer: LayerHandle;
+  readonly altitudeLayer: PathLayerHandle;
+  readonly airspeedLayer: PathLayerHandle;
+  readonly airportLayer: LayerHandle;
+  /** The same five, for attaching them to the map in one go */
+  private readonly layerHandles: MapLayerHandle[];
 
   // Airport markers (non-store)
   readonly airportMarkers: AirportMarkersMap;
-
-  // Aviation overlay (non-store); created with the map
-  aviationLayer: L.TileLayer | null;
 
   /**
    * Replay state. It lives here rather than in the replay manager because
@@ -260,16 +338,29 @@ export class MapApp {
 
     // Map and layers
     this.map = null;
-    this.heatmapLayer = null;
-    this.altitudeLayer = L.layerGroup();
-    this.airspeedLayer = L.layerGroup();
-    this.airportLayer = L.layerGroup();
-    this.pathRenderer = L.canvas({ padding: 0.5 });
+    this.mapReady = new Promise((resolve) => {
+      this.resolveMapReady = resolve;
+    });
+    const heatmap = new MapLayerHandle(HEATMAP_LAYER_IDS);
+    const aviation = new MapLayerHandle([MAP_LAYERS.aviation]);
+    const altitude = new MapPathLayerHandle([
+      MAP_LAYERS.pathsAltitude,
+      MAP_LAYERS.pathsAltitudeSelected,
+    ]);
+    const airspeed = new MapPathLayerHandle([
+      MAP_LAYERS.pathsAirspeed,
+      MAP_LAYERS.pathsAirspeedSelected,
+    ]);
+    const airports = new AirportLayerHandle();
+    this.heatmapLayer = heatmap;
+    this.aviationLayer = aviation;
+    this.altitudeLayer = altitude;
+    this.airspeedLayer = airspeed;
+    this.airportLayer = airports;
+    this.layerHandles = [heatmap, aviation, altitude, airspeed, airports];
 
     // Airport markers (non-store)
     this.airportMarkers = {};
-
-    this.aviationLayer = null;
 
     this.replayState = new ReplayState();
 
@@ -284,6 +375,12 @@ export class MapApp {
     this.initializeManagers();
     this.setupButtonSync();
     this.setupStatsRail();
+
+    // The data goes into sources that only exist once the style has loaded.
+    // The files are preloaded by the template, so waiting here does not hold
+    // their download back.
+    await this.mapReady;
+    if (this.destroyed) return;
 
     // Load airports and metadata
     await loadInitialData(this);
@@ -327,7 +424,14 @@ export class MapApp {
       this.wrappedRestoreTimer = null;
     }
     this.lifetime.abort();
-    this.map?.off(this.mapHandlers);
+    if (this.map) {
+      const { moveend, zoomend, click } = this.mapHandlers;
+      if (moveend) this.map.off("moveend", moveend);
+      if (zoomend) this.map.off("zoomend", zoomend);
+      if (click) this.map.off("click", click);
+      this.map.off("error", this.handleMapError);
+    }
+    this.mapHandlers = {};
     this.layerManager?.destroy();
     this.stateManager?.cancelSave();
     this.replayManager?.destroy();
@@ -425,70 +529,94 @@ export class MapApp {
   }
 
   private setupMap(): void {
-    // The app passes `animate: false` to its own moves, which leaves the
-    // ones Leaflet runs itself: double click, wheel and pinch zooms, tile
-    // and marker fades and the glide after a drag
+    // MapLibre runs every camera move through easeTo or flyTo and shortens
+    // those to nothing under reduced motion, the app's own included; the
+    // glide after a drag goes with them. The tile and label fades are the
+    // one animation it would still run.
     const animate = !prefersReducedMotion();
-    this.map = L.map("map", {
-      center: this.config.center,
-      zoom: DEFAULT_ZOOM,
-      minZoom: MIN_ZOOM,
-      maxZoom: MAX_ZOOM,
-      zoomSnap: 0.25,
-      zoomDelta: 0.25,
-      wheelPxPerZoomLevel: 120,
-      preferCanvas: true,
-      // Pinch, scroll and double tap already zoom; the control only costs
-      // the bottom-right corner of the map
-      zoomControl: false,
-      attributionControl: false,
-      zoomAnimation: animate,
-      fadeAnimation: animate,
-      markerZoomAnimation: animate,
-      inertia: animate,
-    });
-
-    L.control
-      .attribution({ prefix: false, position: "bottomright" })
-      .addTo(this.map);
-
-    const cartoUrl = this.config.cartoApiKey
-      ? `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${this.config.cartoApiKey}`
-      : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
-    this.baseLayer = L.tileLayer(cartoUrl, {
-      attribution: "&copy; OpenStreetMap contributors, &copy; CARTO",
-      maxZoom: MAX_ZOOM,
-    })
-      .on("tileerror", (e: L.TileErrorEvent) => {
-        logError(`Tile load error: ${e.coords.x}/${e.coords.y}/${e.coords.z}`);
-      })
-      .addTo(this.map);
 
     // A saved zoom of 0 is a view like any other, not a missing one. A
     // link may carry a centre alone (written by hand, or cut short); it is
     // still where the reader was sent, so it gets the default zoom.
     const center = this.savedState?.center;
-    if (center) {
-      this.map.setView(
-        [center.lat, center.lng],
-        this.savedState?.zoom ?? DEFAULT_ZOOM,
-      );
-    } else {
-      this.map.fitBounds(this.config.bounds, { padding: [30, 30] });
-    }
+    const savedZoom = this.savedState?.zoom;
+    const view = center
+      ? {
+          center: toLngLat([center.lat, center.lng]),
+          // Saved state counts zoom the way Leaflet did, one level above
+          // the map's. A level below the map's range is a view from before
+          // the switch that the map can no longer show.
+          zoom:
+            savedZoom === undefined
+              ? DEFAULT_ZOOM
+              : Math.max(MAP_MIN_ZOOM, stateZoomToMap(savedZoom)),
+        }
+      : {
+          bounds: toBounds(this.config.bounds),
+          fitBoundsOptions: { padding: 30 },
+        };
 
-    this.aviationLayer = L.tileLayer(AVIATION_TILE_URL, {
-      attribution:
-        '&copy; <a href="https://www.openflightmaps.org">open flightmaps</a>',
-      maxNativeZoom: AVIATION_MAX_NATIVE_ZOOM,
-      maxZoom: AVIATION_MAX_ZOOM,
-      minZoom: AVIATION_MIN_ZOOM,
+    const map = new MapLibreMap({
+      container: "map",
+      style: cartoStyleUrl(this.config.cartoApiKey),
+      transformRequest: cartoTransformRequest(this.config.cartoApiKey),
+      ...view,
+      minZoom: MAP_MIN_ZOOM,
+      maxZoom: MAP_MAX_ZOOM,
+      // Pinch, scroll and double tap already zoom; a navigation control
+      // only costs a corner of the map. The attribution is added below,
+      // expanded: the default one collapses on a narrow map.
+      attributionControl: false,
+      // The map stays north up and flat. The flights are read against the
+      // chart overlay and the labels of the legends, which assume it, and
+      // no control would bring a rotated map back.
+      dragRotate: false,
+      pitchWithRotate: false,
+      touchPitch: false,
+      rollEnabled: false,
+      maxPitch: 0,
+      reduceMotion: !animate,
+      fadeDuration: animate ? 300 : 0,
+    });
+    // The two gestures the options above leave: a twisting pinch and
+    // shift with the arrow keys
+    map.touchZoomRotate.disableRotation();
+    map.keyboard.disableRotation();
+    map.addControl(new AttributionControl({ compact: false }), "bottom-right");
+    this.map = map;
+
+    // Registered before anything can fail. Without a listener MapLibre
+    // writes every error to the console itself.
+    map.on("error", this.handleMapError);
+
+    void whenStyleReady(map).then(() => {
+      this.styleLoaded = true;
+      addDataLayers(map);
+      for (const handle of this.layerHandles) handle.attach(map);
+      this.resolveMapReady(map);
     });
 
-    if (this.airportsVisible) {
-      this.airportLayer.addTo(this.map);
-    }
+    this.airportLayer.setVisible(this.airportsVisible);
   }
+
+  /**
+   * Report what the map could not load. A tile or a glyph that fails leaves
+   * a hole and nothing more. The base style is different: until it has
+   * loaded there is no style to add the data to, and MapLibre does not try
+   * again, so the first failure swaps in the style that cannot fail.
+   */
+  private readonly handleMapError = (e: { error?: unknown }): void => {
+    const error = e.error;
+    const message = error instanceof Error ? error.message : String(error);
+    if (this.styleLoaded || !this.map) {
+      logError(`Map error: ${message}`);
+      return;
+    }
+    logError(`Base map style failed to load: ${message}`);
+    // Set before the call: a second failure must not swap again
+    this.styleLoaded = true;
+    this.map.setStyle(FALLBACK_STYLE, { diff: false });
+  };
 
   /**
    * The store drives the toggle buttons and the colour legends: initial
@@ -512,7 +640,7 @@ export class MapApp {
   /**
    * Open and close the statistics rail. The rail turns the left column into
    * a single row of icon-only buttons and takes the space beside the map,
-   * so Leaflet is told to remeasure once the layout has changed.
+   * so the map is told to remeasure once the layout has changed.
    */
   private setupStatsRail(): void {
     const apply = (visible: boolean): void => {
@@ -520,7 +648,7 @@ export class MapApp {
       if (rail) {
         // The collapse button hides itself, so focus has to leave the rail
         // before it does; otherwise it falls back to <body>
-        if (!visible) restoreFocusFromRail(rail);
+        if (!visible) restoreFocusFromRail(rail, this.map);
         rail.hidden = !visible;
       }
 
@@ -532,7 +660,7 @@ export class MapApp {
       domCache.get("stats-btn")?.classList.toggle("active", visible);
 
       document.body.classList.toggle("stats-open", visible);
-      invalidateMapAfterTransition(this.map, document.getElementById("map"));
+      resizeMapAfterTransition(this.map, document.getElementById("map"));
     };
 
     apply(this.store.get("statsPanelVisible"));
@@ -695,20 +823,39 @@ export class MapApp {
         this.stateManager.scheduleSave();
         this.airportManager.updateAirportMarkerSizes();
       },
-      click: () => {
-        if (
-          this.replayState.active &&
-          this.replayState.airplaneMarker &&
-          this.replayState.airplaneMarker.isPopupOpen()
-        ) {
-          this.replayState.airplaneMarker.closePopup();
-        }
-        if (!this.replayState.active && this.selectedPathIds.size > 0) {
-          this.pathSelection.clearSelection();
-        }
-      },
+      click: (e) => this.handleMapClick(e),
     };
-    this.map.on(this.mapHandlers);
+    this.map.on("moveend", this.mapHandlers.moveend!);
+    this.map.on("zoomend", this.mapHandlers.zoomend!);
+    this.map.on("click", this.mapHandlers.click!);
+  }
+
+  /**
+   * The one click handler of the map. Paths are pixels of a layer, not
+   * objects with listeners of their own, so what a click means is decided
+   * here: a flight under the pointer, or the map beside every flight.
+   * Markers are DOM on top of the map and keep their clicks to themselves
+   * (they stop the event), or every click on one would arrive here as well.
+   */
+  private handleMapClick(e: MapMouseEvent): void {
+    const replay = this.replayState;
+    if (replay.active) {
+      // The colour layers are hidden during a replay; the only thing a
+      // click on the map does is put the airplane's popup away
+      if (replay.airplaneMarker?.isPopupOpen()) {
+        replay.airplaneMarker.closePopup();
+      }
+      return;
+    }
+
+    const hit = this.layerManager.hitTest(e.point);
+    if (hit) {
+      this.layerManager.onPathClick(hit, e.lngLat);
+      return;
+    }
+    if (this.selectedPathIds.size > 0) {
+      this.pathSelection.clearSelection();
+    }
   }
 }
 
@@ -720,16 +867,21 @@ defineStoreAccessors(MapApp.prototype);
  * `<body>` and the next Tab restarts at the top of the document, ahead of
  * every focusable marker on the map.
  */
-function restoreFocusFromRail(rail: HTMLElement): void {
+function restoreFocusFromRail(
+  rail: HTMLElement,
+  map: MapLibreMap | null,
+): void {
   if (!rail.contains(document.activeElement)) return;
-  // The mobile tab replaces the desktop button on small viewports, and the
-  // map is the last resort: focusable, and next to the controls in order
-  for (const id of ["stats-btn", "mobile-tab-stats", "map"]) {
+  // The mobile tab replaces the desktop button on small viewports
+  for (const id of ["stats-btn", "mobile-tab-stats"]) {
     const trigger = domCache.get(id);
     if (!trigger || rail.contains(trigger)) continue;
     trigger.focus();
     if (document.activeElement === trigger) return;
   }
+  // The map is the last resort: next to the controls in order. It is the
+  // canvas that takes focus, the container around it does not.
+  map?.getCanvas().focus();
 }
 
 /** Markup shown in place of the map when initialization fails */

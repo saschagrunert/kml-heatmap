@@ -29,7 +29,6 @@ describe("MapApp", () => {
       expect(app.selectedYear).toBe("all");
       expect(app.selectedAircraft).toBe("all");
       expect(app.map).toBeNull();
-      expect(app.heatmapLayer).toBeNull();
       expect(app.heatmapVisible).toBe(true);
       expect(app.altitudeVisible).toBe(false);
       expect(app.airspeedVisible).toBe(false);
@@ -37,7 +36,21 @@ describe("MapApp", () => {
       expect(app.aviationVisible).toBe(false);
       expect(app.isInitializing).toBe(true);
       expect(app.selectedPathIds).toEqual(new Set());
-      expect(app.pathRenderer).toBeDefined();
+      // The handles are there before the map is: every layer hidden until
+      // something shows it, the airports shown
+      expect(app.heatmapLayer.isVisible()).toBe(false);
+      expect(app.aviationLayer.isVisible()).toBe(false);
+      expect(app.altitudeLayer.isVisible()).toBe(false);
+      expect(app.airspeedLayer.isVisible()).toBe(false);
+      expect(app.airportLayer.isVisible()).toBe(true);
+      expect(app.altitudeLayer.ids).toEqual([
+        "paths-altitude",
+        "paths-altitude-selected",
+      ]);
+      expect(app.airspeedLayer.ids).toEqual([
+        "paths-airspeed",
+        "paths-airspeed-selected",
+      ]);
       expect(app.airportToPaths).toEqual({});
       expect(app.airportMarkers).toEqual({});
     });

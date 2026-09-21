@@ -30,6 +30,9 @@ const DOM: Record<string, string> = {
   map: "div",
 };
 
+/** What the map's canvas reads as while it is captured */
+const STILL_URL = "data:image/png;base64,c3RpbGw=";
+
 function toast(): HTMLElement | null {
   return document.querySelector<HTMLElement>(".toast-notification");
 }
@@ -92,11 +95,16 @@ describe("UIToggles export and share", () => {
       configurable: true,
     });
     app = createMockApp();
+    // jsdom has neither a canvas to read nor images to decode, and the
+    // capture takes a still of the map's canvas first (withMapStill)
+    vi.spyOn(app.map!.getCanvas(), "toDataURL").mockReturnValue(STILL_URL);
+    HTMLImageElement.prototype.decode = vi.fn(() => Promise.resolve());
     uiToggles = new UIToggles(asMapApp(app));
   });
 
   afterEach(() => {
     unmount();
+    delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
     document.querySelectorAll(".toast-notification").forEach((e) => e.remove());
     delete window.htmlToImage;
     resetHtmlToImageLoader();
@@ -340,13 +348,62 @@ describe("UIToggles export and share", () => {
       expect(el("stats-btn").style.display).toBe("");
     });
 
-    it("captures the map right away instead of waiting for a repaint", async () => {
+    it("captures the map in the frame it asked for, without a timer", async () => {
       const toJpeg = installHtmlToImage();
 
       uiToggles.exportMap();
       await vi.advanceTimersByTimeAsync(0);
 
+      expect(app.map!.triggerRepaint).toHaveBeenCalledTimes(1);
       expect(toJpeg).toHaveBeenCalledTimes(1);
+    });
+
+    it("captures a still of the map in place of its WebGL canvas", async () => {
+      // html-to-image copies DOM, and a WebGL canvas copies blank
+      const canvas = app.map!.getCanvas();
+      const seen: { canvas: boolean; still: string | undefined }[] = [];
+      const toJpeg = installHtmlToImage(
+        vi.fn((node: HTMLElement) => {
+          seen.push({
+            canvas: node.contains(canvas),
+            still: node.querySelector("img")?.src,
+          });
+          return Promise.resolve("data:image/jpeg;base64,aGVsbG8=");
+        }),
+      );
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(toJpeg).toHaveBeenCalledTimes(1);
+      expect(canvas.toDataURL).toHaveBeenCalledWith("image/png");
+      expect(seen).toEqual([{ canvas: false, still: STILL_URL }]);
+      // The canvas is back once the image is taken
+      expect(el("map").contains(canvas)).toBe(true);
+      expect(el("map").querySelector("img")).toBeNull();
+    });
+
+    it("puts the canvas back when the capture fails", async () => {
+      const canvas = app.map!.getCanvas();
+      installHtmlToImage(vi.fn().mockRejectedValue(new Error("tainted")));
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(toast()?.textContent).toBe("Export failed: tainted");
+      expect(el("map").contains(canvas)).toBe(true);
+      expect(el("map").querySelector("img")).toBeNull();
+    });
+
+    it("captures the page as it is when there is no map", async () => {
+      app.map = null;
+      const toJpeg = installHtmlToImage();
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(toJpeg).toHaveBeenCalledWith(el("map"), expect.anything());
+      expect(toast()?.textContent).toBe("Map exported");
     });
 
     it("changes only the label so the button keeps its icon", async () => {

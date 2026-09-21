@@ -1,10 +1,11 @@
 /**
  * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, export, share)
  */
-import type * as L from "leaflet";
 import type { MapApp } from "../mapApp";
+import type { LayerHandle } from "../types";
 import { setControlLabel } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
+import { withMapStill } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
 
 type ColorLayerMode = "altitude" | "airspeed";
@@ -168,23 +169,23 @@ export class UIToggles {
   }
 
   /**
-   * Add or remove a layer and record the result in the store. The buttons
+   * Show or hide a layer and record the result in the store. The buttons
    * and legends follow the store, so nothing here touches them.
    */
   private toggleSimpleLayer(
-    layer: L.Layer | null | undefined,
+    layer: LayerHandle,
     visible: boolean,
     setVisible: (v: boolean) => void,
-    onAdd?: () => void,
+    onShow?: () => void,
   ): void {
     if (!this.app.map) return;
 
     if (visible) {
-      if (layer) this.app.map.removeLayer(layer);
+      layer.setVisible(false);
       setVisible(false);
-    } else if (layer) {
-      this.app.map.addLayer(layer);
-      onAdd?.();
+    } else {
+      layer.setVisible(true);
+      onShow?.();
       setVisible(true);
     }
   }
@@ -196,7 +197,7 @@ export class UIToggles {
       (v) => {
         this.app.heatmapVisible = v;
       },
-      // Feeds the layer the points of the filter changes it missed while off
+      // The dimming under a colour layer comes with showing it
       () => this.app.dataManager.showHeatmap(),
     );
   }
@@ -210,8 +211,7 @@ export class UIToggles {
   }
 
   private toggleColorLayer(mode: ColorLayerMode): void {
-    const map = this.app.map;
-    if (!map) return;
+    if (!this.app.map) return;
 
     const other: ColorLayerMode = mode === "altitude" ? "airspeed" : "altitude";
     const replay = this.app.replayState.active;
@@ -220,22 +220,22 @@ export class UIToggles {
     // The buttons and the legends follow the store keys written below
     if (this.app[`${mode}Visible`]) {
       if (replay) {
-        // The layer is off the map for the replay already. The trail keeps
+        // The layer is hidden for the replay already. The trail keeps
         // its altitude colours without a colour layer, so only a speed
         // trail changes (see ReplayManager.updateTrailLegend for the scale)
         if (mode === "airspeed") {
           this.app.replayManager?.redrawReplayPath("altitude");
         }
       } else {
-        map.removeLayer(this.app[`${mode}Layer`]);
+        this.app[`${mode}Layer`].setVisible(false);
       }
       this.app[`${mode}Visible`] = false;
       // A hidden layer is rebuilt when it is shown again; kept, its
-      // polylines and their segment lists held tens of MB for nothing
+      // features and their segment lists held tens of MB for nothing
       layers.clearLayer(mode);
     } else {
       if (this.app[`${other}Visible`]) {
-        if (!replay) map.removeLayer(this.app[`${other}Layer`]);
+        if (!replay) this.app[`${other}Layer`].setVisible(false);
         this.app[`${other}Visible`] = false;
         layers.clearLayer(other);
       }
@@ -243,7 +243,7 @@ export class UIToggles {
       if (!replay) {
         if (mode === "altitude") layers.redrawAltitudePaths();
         else layers.redrawAirspeedPaths();
-        map.addLayer(this.app[`${mode}Layer`]);
+        this.app[`${mode}Layer`].setVisible(true);
       } else {
         this.app.replayManager?.redrawReplayPath(mode);
       }
@@ -267,8 +267,6 @@ export class UIToggles {
   }
 
   toggleAviation(): void {
-    if (!this.app.aviationLayer) return;
-
     this.toggleSimpleLayer(
       this.app.aviationLayer,
       this.app.aviationVisible,
@@ -317,7 +315,7 @@ export class UIToggles {
       mapContainer.offsetWidth,
       mapContainer.offsetHeight,
     );
-    const dataUrl = await htmlToImage.toJpeg(mapContainer, {
+    const options = {
       // The canvas is the map's CSS size times this; the clone keeps the
       // map's own layout
       pixelRatio: scale,
@@ -329,7 +327,13 @@ export class UIToggles {
           .getPropertyValue("--color-bg-primary")
           .trim() || "#1a1a1a",
       quality: 0.95,
-    });
+    };
+    // html-to-image copies DOM, and the map's WebGL canvas copies blank, so
+    // the map stands still as an image of itself while it is captured
+    const map = this.app.map;
+    const capture = (): Promise<string> =>
+      htmlToImage.toJpeg(mapContainer, options);
+    const dataUrl = map ? await withMapStill(map, capture) : await capture();
 
     const filename =
       "heatmap_" +

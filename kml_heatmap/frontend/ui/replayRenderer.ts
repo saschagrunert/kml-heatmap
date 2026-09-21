@@ -1,11 +1,17 @@
 /**
  * Replay Renderer - Handles rendering concerns for flight replay
  */
-import * as L from "leaflet";
+import type { FeatureCollection, LineString } from "geojson";
+import {
+  Marker,
+  Popup,
+  type GeoJSONSource,
+  type Map as MapLibreMap,
+} from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { ReplayManager } from "./replayManager";
-import type { ReplayState } from "./replayState";
-import type { PathSegment } from "../types";
+import type { ReplayAirplane, ReplayState } from "./replayState";
+import type { PathSegment, TrailRun } from "../types";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 import {
@@ -14,7 +20,14 @@ import {
   formatTime,
   formatTrack,
 } from "../utils/formatters";
-import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
+import {
+  AUTO_ZOOM_MIN,
+  FEET_TO_METERS,
+  MAP_SOURCES,
+  NAUTICAL_MILES_TO_KM,
+} from "../utils/constants";
+import { icon } from "../utils/icons";
+import { fromLngLat, panPopupIntoView, toLngLat } from "../utils/mapHelpers";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
 import { calculateSmoothedBearing } from "../features/replay";
@@ -23,23 +36,34 @@ import { prefersReducedMotion } from "../utils/motion";
 /** Minimum interval between map pans triggered by slider drags */
 export const SEEK_PAN_THROTTLE_MS = 250;
 
-/** Duration of the pan that brings the airplane back into view (seconds) */
-export const RECENTER_PAN_DURATION_S = 0.5;
-
-/** Auto-zoom does not zoom out beyond this level */
-const AUTO_ZOOM_MIN = 9;
+/** Duration of the pan that brings the airplane back into view (ms) */
+export const RECENTER_PAN_DURATION_MS = 500;
 
 /**
- * Most levels one auto zoom-out takes: Leaflet animates a zoom change of up
- * to four levels (its zoomAnimationThreshold) and jumps beyond that
+ * The pan is asked for again on every frame the airplane is near the edge,
+ * and each request starts a new animation from rest. MapLibre's default
+ * easing starts slowly, so restarted sixty times a second it hardly moved;
+ * this one covers most of the way at once and then settles.
  */
+const recenterEasing = (t: number): number => 1 - Math.pow(1 - t, 4);
+
+/** Most levels one auto zoom-out takes; beyond that the jump disorients */
 const AUTO_ZOOM_MAX_STEP = 4;
 
+/** Duration of one auto zoom-out (ms) */
+export const AUTO_ZOOM_DURATION_MS = 250;
+
 /**
- * Time before auto-zoom may zoom out again (ms). Leaflet's zoom animation
- * takes 250 ms, and a zoom asked for while it runs is dropped.
+ * Time before auto-zoom may zoom out again (ms): the zoom-out above has to
+ * end first, or the next one is measured on a map that is still moving.
  */
 export const AUTO_ZOOM_SETTLE_MS = 300;
+
+/** Pixels between the airplane's position and the tip of its popup */
+const AIRPLANE_POPUP_OFFSET = 16;
+
+/** Stacking of the airplane among the markers: above every airport */
+const AIRPLANE_Z_INDEX = "1000";
 
 /** Fraction of the viewport used as the "near edge" margin for auto-panning */
 const EDGE_MARGIN_FRACTION = 0.1;
@@ -141,25 +165,184 @@ function replaySegmentColor(
 }
 
 /**
- * Draw the segment at `index` on the replay layer and push it onto the trim
- * stack that a backward seek unwinds.
+ * Add the segment at `index` to the trail. Consecutive segments of one
+ * colour extend the last run, so the trail stays a handful of features
+ * rather than one per segment. A run holds one vertex more than it has
+ * segments, which is what lets a backward seek cut it (see truncateTrail).
  */
-export function drawReplaySegment(
+export function appendTrailSegment(
   state: ReplayState,
   index: number,
   useAirspeedColors: boolean,
 ): void {
   const segment = state.segments[index];
-  if (!segment || !state.layer) return;
-
-  const polyline = L.polyline(segment.coords ?? [], {
-    color: replaySegmentColor(state, segment, useAirspeedColors),
-    weight: 3,
-    opacity: 0.8,
-  }).addTo(state.layer);
-
-  state.drawnLayers.push(polyline);
+  if (!segment) return;
   state.lastDrawnIndex = index;
+
+  const from = segment.coords?.[0];
+  const to = segment.coords?.[1];
+  if (!from || !to) return;
+
+  const color = replaySegmentColor(state, segment, useAirspeedColors);
+  const start = toLngLat(from);
+  const last = state.trailRuns[state.trailRuns.length - 1];
+  const tail = last?.coords[last.coords.length - 1];
+  const continues =
+    last !== undefined &&
+    tail !== undefined &&
+    last.color === color &&
+    last.lastIndex === index - 1 &&
+    tail[0] === start[0] &&
+    tail[1] === start[1];
+
+  if (continues) {
+    last.coords.push(toLngLat(to));
+    last.lastIndex = index;
+  } else {
+    state.trailRuns.push({
+      color,
+      coords: [start, toLngLat(to)],
+      firstIndex: index,
+      lastIndex: index,
+    });
+  }
+  state.trailDirty = true;
+}
+
+/**
+ * Cut the trail back to the segments flown at `time`. Seeking backwards
+ * this way drops whole runs and shortens one, instead of colouring the
+ * flight again from its start.
+ */
+export function truncateTrail(state: ReplayState, time: number): void {
+  const before = state.lastDrawnIndex;
+  while (state.lastDrawnIndex >= 0) {
+    const seg = state.segments[state.lastDrawnIndex];
+    if (seg && (seg.time ?? 0) <= time) break;
+    state.lastDrawnIndex--;
+  }
+  if (state.lastDrawnIndex === before) return;
+
+  const runs = state.trailRuns;
+  while ((runs[runs.length - 1]?.firstIndex ?? -1) > state.lastDrawnIndex) {
+    runs.pop();
+  }
+  const last = runs[runs.length - 1];
+  if (last && last.lastIndex > state.lastDrawnIndex) {
+    last.lastIndex = state.lastDrawnIndex;
+    last.coords.length = last.lastIndex - last.firstIndex + 2;
+  }
+  state.trailDirty = true;
+}
+
+/** The trail as the data of its source: one line per colour run */
+export function trailFeatureCollection(
+  runs: readonly TrailRun[],
+): FeatureCollection<LineString, { color: string }> {
+  return {
+    type: "FeatureCollection",
+    features: runs.map((run) => ({
+      type: "Feature",
+      properties: { color: run.color },
+      geometry: { type: "LineString", coordinates: run.coords },
+    })),
+  };
+}
+
+/**
+ * The airplane: a marker whose element is a real button, and the popup that
+ * a click on it, or Enter and Space while it has focus, opens and closes.
+ * The browser turns those keys into a click on a button, so one listener
+ * serves both.
+ */
+export class AirplaneMarker implements ReplayAirplane {
+  readonly marker: Marker;
+  readonly popup: Popup;
+  private readonly map: MapLibreMap;
+  private readonly element: HTMLButtonElement;
+
+  /**
+   * @param onActivate - Called for a click that finds the popup closed; the
+   *   caller fills the popup with the current position and opens it
+   */
+  constructor(
+    map: MapLibreMap,
+    position: readonly [lat: number, lon: number],
+    onActivate: () => void,
+  ) {
+    this.map = map;
+
+    const element = document.createElement("button");
+    element.type = "button";
+    element.className = "replay-airplane-root";
+    element.title = "Aircraft position";
+    element.setAttribute("aria-label", "Aircraft position");
+    element.style.zIndex = AIRPLANE_Z_INDEX;
+    // The rotation transition lives on the inner icon (see features.css);
+    // MapLibre positions the root with transforms, which must not animate
+    element.innerHTML =
+      '<div class="replay-airplane-icon">' +
+      icon("aircraftTop", 24, undefined, "solid") +
+      "</div>";
+    element.addEventListener("click", (event) => {
+      // MapLibre fires a map click for a click on a marker as well, and the
+      // app's handler would close the popup this one has just opened
+      event.stopPropagation();
+      if (this.isPopupOpen()) this.closePopup();
+      else onActivate();
+    });
+    this.element = element;
+
+    // Opened by hand and not through setPopup, which toggles on the same
+    // click a second time. A click on the map closes it through the app's
+    // click handler, and the popup never takes focus from the marker.
+    this.popup = new Popup({
+      maxWidth: "none",
+      closeOnClick: false,
+      focusAfterOpen: false,
+      offset: AIRPLANE_POPUP_OFFSET,
+    });
+    this.marker = new Marker({ element, anchor: "center" })
+      .setLngLat(toLngLat(position))
+      .addTo(map);
+  }
+
+  getLatLng(): [lat: number, lon: number] {
+    return fromLngLat(this.marker.getLngLat());
+  }
+
+  setLatLng(position: readonly [lat: number, lon: number]): void {
+    const lngLat = toLngLat(position);
+    this.marker.setLngLat(lngLat);
+    // The popup is not bound to the marker, so it is taken along
+    if (this.popup.isOpen()) this.popup.setLngLat(lngLat);
+  }
+
+  getElement(): HTMLButtonElement {
+    return this.element;
+  }
+
+  setPopupContent(html: string): void {
+    this.popup.setHTML(html);
+  }
+
+  openPopup(): void {
+    if (this.popup.isOpen()) return;
+    this.popup.setLngLat(this.marker.getLngLat()).addTo(this.map);
+  }
+
+  closePopup(): void {
+    this.popup.remove();
+  }
+
+  isPopupOpen(): boolean {
+    return this.popup.isOpen();
+  }
+
+  remove(): void {
+    this.popup.remove();
+    this.marker.remove();
+  }
 }
 
 /** The last values written to the transport row, so a frame that changes
@@ -187,19 +370,20 @@ export class ReplayRenderer {
   private popupIndex = -1;
   /** Wall-clock time before which auto-zoom does not zoom out again */
   private autoZoomSettlesAt = 0;
+  /** The frame the trail is written to the map in, while one is pending */
+  private trailFrameId: number | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
   }
 
   /**
-   * The rotating icon inside the airplane marker. Leaflet builds a new
-   * element whenever the marker is (re)added to the map, so the lookup is
-   * keyed on that element rather than on the marker and only runs when it
-   * changes, not once per frame.
+   * The rotating icon inside the airplane marker. Every activation builds a
+   * new marker, so the lookup is keyed on its element and only runs when
+   * that changes, not once per frame.
    */
-  private airplaneIcon(marker: L.Marker): HTMLElement | null {
-    const root = marker.getElement() ?? null;
+  private airplaneIcon(marker: ReplayAirplane): HTMLElement | null {
+    const root = marker.getElement();
     if (root !== this.iconRoot) {
       this.iconRoot = root;
       const found = root?.querySelector(".replay-airplane-icon");
@@ -290,8 +474,8 @@ export class ReplayRenderer {
   }
 
   /**
-   * Update (or create) the airplane popup with the data of the segment at
-   * the current replay time. Pass the already known segment index to avoid
+   * Fill the airplane popup with the data of the segment at the current
+   * replay time, and open it. Pass the already known segment index to avoid
    * a second lookup when called from the frame loop.
    */
   updateAirplanePopup(replayManager: ReplayManager, index?: number): void {
@@ -308,10 +492,11 @@ export class ReplayRenderer {
 
     // The marker is where the aircraft is now, part way along the segment;
     // the segment's own end point is where it will be
-    const position = state.airplaneMarker.getLatLng();
+    const airplane = state.airplaneMarker;
+    const position = airplane.getLatLng();
     const popupContent = generateSegmentPopupHtml({
       segment: currentSegment,
-      position: [position.lat, position.lng],
+      position,
       altMin: state.colorMinAlt,
       altMax: state.colorMaxAlt,
       speedMin: state.colorMinSpeed,
@@ -320,29 +505,49 @@ export class ReplayRenderer {
       icon: "aircraftTop",
     });
 
-    const popup = state.airplaneMarker.getPopup();
-    if (!popup) {
-      state.airplaneMarker.bindPopup(popupContent, {
-        autoPan: !state.playing,
-      });
-    } else {
-      popup.setContent(popupContent);
-    }
+    // Filled before it opens, so it opens at its final size
+    airplane.setPopupContent(popupContent);
+    if (!airplane.isPopupOpen()) airplane.openPopup();
 
-    if (!state.airplaneMarker.isPopupOpen()) state.airplaneMarker.openPopup();
+    // The popup pans the map only while the replay is paused. While playing
+    // the pan would stop the one that follows the airplane each time, and
+    // the map never caught up with it. Without it when paused, though, a
+    // click on an airplane near the top edge opened the popup off the map.
+    const map = this.app.map;
+    if (map && !state.playing) {
+      panPopupIntoView(map, airplane.popup, undefined, !prefersReducedMotion());
+    }
   }
 
   /**
-   * Let the airplane popup pan the map only while the replay is paused.
-   * Leaflet's autoPan runs on every move of the marker the popup is bound
-   * to and stops the map's running pan each time, so while playing the map
-   * never caught up with the airplane. Without it when paused, though, a
-   * click on an airplane near the top edge opened the popup off the map.
+   * Hand the trail to the map in the next frame, if it changed. A drag of
+   * the slider reports many positions per frame and every `setData` sends
+   * the whole trail to the worker, so the writes are collected: one per
+   * frame at most, and none for a frame that drew nothing new.
    */
-  syncPopupAutoPan(replayManager: ReplayManager): void {
-    const state = replayManager.state;
-    const popup = state.airplaneMarker?.getPopup();
-    if (popup) popup.options.autoPan = !state.playing;
+  scheduleTrailFlush(state: ReplayState): void {
+    if (!state.trailDirty || this.trailFrameId !== null) return;
+    this.trailFrameId = requestAnimationFrame(() => {
+      this.trailFrameId = null;
+      this.flushTrail(state);
+    });
+  }
+
+  private flushTrail(state: ReplayState): void {
+    if (!state.trailDirty) return;
+    state.trailDirty = false;
+    // A replay that has ended meanwhile has emptied the source itself
+    if (!state.layerActive) return;
+    void this.app.map
+      ?.getSource<GeoJSONSource>(MAP_SOURCES.replayTrail)
+      ?.setData(trailFeatureCollection(state.trailRuns));
+  }
+
+  /** Drop a write that is still pending; the replay layer is going away */
+  cancelTrailFlush(): void {
+    if (this.trailFrameId === null) return;
+    cancelAnimationFrame(this.trailFrameId);
+    this.trailFrameId = null;
   }
 
   updateDisplay(
@@ -397,13 +602,7 @@ export class ReplayRenderer {
 
     // Update airplane marker position and rotation
     const marker = state.airplaneMarker;
-    const map = this.app.map;
-    if (!marker || !map) return;
-
-    // Ensure marker is on the map (in case it was removed during seeking/zooming)
-    if (!map.hasLayer(marker)) {
-      marker.addTo(map);
-    }
+    if (!marker || !this.app.map) return;
 
     if (!lastSegment) {
       const startCoords = segments[0]?.coords?.[0];
@@ -466,11 +665,7 @@ export class ReplayRenderer {
 
     // The popup describes a segment, so an open one is rebuilt only once the
     // airplane has reached another segment, not on every frame
-    if (
-      marker.getPopup() &&
-      marker.isPopupOpen() &&
-      currentIndex !== this.popupIndex
-    ) {
+    if (marker.isPopupOpen() && currentIndex !== this.popupIndex) {
       this.updateAirplanePopup(replayManager, currentIndex);
     }
   }
@@ -506,11 +701,13 @@ export class ReplayRenderer {
     return index;
   }
 
-  /** Draw segments that became visible since the last frame */
+  /** Add the segments flown since the last frame to the trail */
   private drawNewSegments(replayManager: ReplayManager): void {
     const state = replayManager.state;
-    const layer = state.layer;
-    if (!layer) return;
+    if (!state.layerActive) return;
+
+    // Whatever emptied or cut the trail before this call is written too
+    this.scheduleTrailFlush(state);
 
     // Nothing is drawn at time 0 (stopped/reset state)
     if (state.currentTime <= 0) return;
@@ -523,24 +720,15 @@ export class ReplayRenderer {
       const seg = segments[i];
       if (!seg) continue;
       if ((seg.time ?? 0) > state.currentTime) break;
-      drawReplaySegment(state, i, useAirspeedColors);
+      appendTrailSegment(state, i, useAirspeedColors);
     }
+    this.scheduleTrailFlush(state);
   }
 
-  /**
-   * Remove the polylines drawn past the given time. Seeking backwards this
-   * way costs one removal per undrawn segment instead of a full redraw.
-   */
+  /** Take the segments flown after the given time off the trail */
   removeSegmentsAfter(replayManager: ReplayManager, time: number): void {
-    const state = replayManager.state;
-    const layer = state.layer;
-    while (state.lastDrawnIndex >= 0) {
-      const seg = state.segments[state.lastDrawnIndex];
-      if (seg && (seg.time ?? 0) <= time) break;
-      const polyline = state.drawnLayers.pop();
-      if (polyline && layer) layer.removeLayer(polyline);
-      state.lastDrawnIndex--;
-    }
+    truncateTrail(replayManager.state, time);
+    this.scheduleTrailFlush(replayManager.state);
   }
 
   /**
@@ -557,8 +745,14 @@ export class ReplayRenderer {
     const map = this.app.map;
     if (!map) return;
 
-    const mapSize = map.getSize();
-    const point = map.latLngToContainerPoint(currentPos);
+    // A zoom in flight, auto-zoom's own or the user's, is left to finish:
+    // a camera move of MapLibre ends the one before it, and the pan would
+    // freeze the zoom half way
+    if (map.isZooming()) return;
+
+    const container = map.getContainer();
+    const mapSize = { x: container.clientWidth, y: container.clientHeight };
+    const point = map.project(toLngLat(currentPos));
     const marginX = mapSize.x * EDGE_MARGIN_FRACTION;
     const marginY = mapSize.y * EDGE_MARGIN_FRACTION;
 
@@ -577,26 +771,26 @@ export class ReplayRenderer {
       const throttled = now - state.lastSeekPanTime < SEEK_PAN_THROTTLE_MS;
       if (throttled && !outsideViewport) return;
       state.lastSeekPanTime = now;
-      map.panTo(currentPos, { animate: false });
+      map.jumpTo({ center: toLngLat(currentPos) });
       return;
     }
 
     // The pan follows the airplane on every frame it is near the edge, which
     // keeps a fast replay in view
     const animate = !prefersReducedMotion();
-    map.panTo(currentPos, {
+    map.easeTo({
+      center: toLngLat(currentPos),
+      duration: RECENTER_PAN_DURATION_MS,
+      easing: recenterEasing,
       animate,
-      duration: RECENTER_PAN_DURATION_S,
-      easeLinearity: 0.25,
-      noMoveStart: true,
     });
 
     // Those frames are one recenter, though, until a pan had its time to
     // move the map. Counted per frame, three frames in a row fired a burst
-    // of zoom-outs that Leaflet dropped during its zoom animation.
+    // of zoom-outs.
     const newRecenter = now >= state.recenterPanEndsAt;
     if (newRecenter) {
-      state.recenterPanEndsAt = now + RECENTER_PAN_DURATION_S * 1000;
+      state.recenterPanEndsAt = now + RECENTER_PAN_DURATION_MS;
       const cutoffTime = now - 30000;
       state.recenterTimestamps = state.recenterTimestamps.filter(
         (ts) => ts > cutoffTime,
@@ -621,10 +815,12 @@ export class ReplayRenderer {
     const zoom = map.getZoom();
     if (zoom <= AUTO_ZOOM_MIN) return;
     const steps = outsideViewport ? zoomOutSteps(point, mapSize) : 1;
-    // Around the airplane, not the centre: once its animation ends Leaflet
-    // puts the view back on the point it zoomed around and drops the pans
-    // made meanwhile, and the old centre had lost the airplane by then
-    map.setView(currentPos, Math.max(AUTO_ZOOM_MIN, zoom - steps), {
+    // Onto the airplane, not around the centre: no pan runs while the map
+    // zooms (see above), and the old centre had lost the airplane by then
+    map.easeTo({
+      center: toLngLat(currentPos),
+      zoom: Math.max(AUTO_ZOOM_MIN, zoom - steps),
+      duration: AUTO_ZOOM_DURATION_MS,
       animate,
     });
     state.recenterTimestamps = [];

@@ -188,7 +188,11 @@ class TestRenderHtml:
             link.get("href")
             for link in page.iter("link")
             if link.get("rel") == "modulepreload"
-        ] == ["./shared.bundle.js"]
+        ] == [
+            "./shared.bundle.js",
+            "./vendor/maplibre-gl.mjs",
+            "./vendor/maplibre-gl-shared.mjs",
+        ]
 
     def test_output_is_world_readable(self, tmp_path):
         previous = os.umask(0o022)
@@ -411,12 +415,12 @@ class TestBundleIsAvailable:
     ):
         """The page has no map without them, so they are part of the gate."""
         static = _install_vendor_files(tmp_path, monkeypatch)
-        (static / "vendor" / "leaflet.js").unlink()
+        (static / "vendor" / "maplibre-gl-worker.mjs").unlink()
 
         assert assets_module.bundle_is_available() is False
 
         err = capsys.readouterr().err
-        assert "vendor/leaflet.js" in err
+        assert "vendor/maplibre-gl-worker.mjs" in err
         assert "npm run build" in err
 
 

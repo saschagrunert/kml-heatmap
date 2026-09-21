@@ -1,7 +1,8 @@
 /**
  * Replay Manager - Handles flight replay functionality
  */
-import * as L from "leaflet";
+import type { Feature } from "geojson";
+import type { GeoJSONSource } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
@@ -12,11 +13,22 @@ import {
   applyToggleButtonState,
   setControlLabel,
 } from "../utils/buttonState";
-import { icon, setControlIcon } from "../utils/icons";
+import { setControlIcon } from "../utils/icons";
+import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
+import {
+  toBounds,
+  toLngLat,
+  type LatLon,
+  type LngLatTuple,
+} from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { prepareReplaySegments } from "../features/replay";
 import { segmentsForPathIds } from "../calculations/statistics";
-import { ReplayRenderer, drawReplaySegment } from "./replayRenderer";
+import {
+  AirplaneMarker,
+  ReplayRenderer,
+  appendTrailSegment,
+} from "./replayRenderer";
 import type { ReplayState } from "./replayState";
 import type { PathSegment } from "../types";
 import {
@@ -82,15 +94,20 @@ function sliderTarget(
 const LAYER_REDRAW_DELAY_MS = 50;
 
 /**
- * Zoom auto-zoom follows the aircraft at: close enough to read the ground it
- * is over, far enough that the pan keeps up at the faster speeds. Used both
+ * Time the view takes to reach the aircraft (ms), at AUTO_ZOOM_FOLLOW both
  * when a replay opens with auto-zoom already on and when it is switched on
- * part way through, so the two arrive at the same view.
+ * part way through, so the two arrive at the same view
  */
-const AUTO_ZOOM_FOLLOW = 16;
+const AUTO_ZOOM_PAN_MS = 800;
 
-/** Seconds the view takes to reach the aircraft when auto-zoom is switched on */
-const AUTO_ZOOM_PAN_S = 0.8;
+/** Time the view takes back to the start when a finished replay restarts (ms) */
+const RESTART_PAN_MS = 500;
+
+/** Time the view takes to show the whole flight once the replay ends (ms) */
+const FIT_BOUNDS_MS = 1000;
+
+/** Pixels kept free around the flight in that view */
+const FIT_BOUNDS_PADDING = 50;
 
 /**
  * Longest wall-clock step a single frame may advance the replay by (ms).
@@ -160,6 +177,7 @@ export class ReplayManager {
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.stopFollowingTrailLegend();
     this.cancelRedrawTimers();
+    this.renderer.cancelTrailFlush();
     if (this.state.animationFrameId) {
       cancelAnimationFrame(this.state.animationFrameId);
       this.state.animationFrameId = null;
@@ -200,7 +218,7 @@ export class ReplayManager {
     // A popup left open on the map, such as the one a tap on a path opens on
     // a phone, would otherwise stay over the replay and its controls. The
     // airplane's own popup only opens on a click later.
-    this.app.map?.closePopup();
+    this.closeOtherPopups();
 
     panel.style.display = "block";
     // The colour legend stands on top of the panel during replay (see
@@ -269,17 +287,10 @@ export class ReplayManager {
     document.body.classList.remove("replay-active");
 
     // Remove airplane marker when closing replay completely
-    if (this.state.airplaneMarker) {
-      if (this.app.map) {
-        this.app.map.removeLayer(this.state.airplaneMarker);
-      }
-      this.state.airplaneMarker = null;
-    }
+    this.state.airplaneMarker?.remove();
+    this.state.airplaneMarker = null;
 
-    // Remove replay layer from map (important for mobile Safari touch events)
-    if (this.state.layer && this.app.map) {
-      this.app.map.removeLayer(this.state.layer);
-    }
+    this.clearReplayLayer();
 
     // The layers come back the way the user left them: closing replay used
     // to switch the altitude layer on when neither colour layer was
@@ -358,6 +369,17 @@ export class ReplayManager {
   private announce(message: string): void {
     const live = domCache.get("replay-live");
     if (live) announceInRegion(live, message);
+  }
+
+  /**
+   * MapLibre keeps no list of its open popups, so each owner closes its
+   * own: the airports theirs, the layer manager the one of a tapped flight
+   */
+  private closeOtherPopups(): void {
+    for (const marker of Object.values(this.app.airportMarkers)) {
+      if (marker.isPopupOpen()) marker.closePopup();
+    }
+    this.app.layerManager.closeSegmentPopup();
   }
 
   updateReplayAirplanePopup(): void {
@@ -459,84 +481,71 @@ export class ReplayManager {
   }
 
   /**
-   * Clear the replay layer and lay the route back down.
+   * Lay the route down and start the trail afresh.
    *
    * Replay used to open on an empty map: the heat bloom and the paths are
    * hidden while it runs, so at 0:00 there was an aircraft over nothing,
    * with no way to see where it was about to go. The whole track is drawn
    * dimmed underneath, and the flown part paints over it in the colours of
-   * the active scale.
+   * the active scale. The route never changes during a replay, so its
+   * source is written here and nowhere else.
    */
-  private resetReplayLayer(): void {
-    if (!this.state.layer) return;
-    this.state.layer.clearLayers();
+  private startReplayLayer(): void {
+    const coordinates = routeCoordinates(this.state.segments);
+    this.setReplaySource(
+      MAP_SOURCES.replayRoute,
+      coordinates.length < 2
+        ? []
+        : [
+            {
+              type: "Feature",
+              properties: {},
+              geometry: { type: "LineString", coordinates },
+            },
+          ],
+    );
+    this.setReplaySource(MAP_SOURCES.replayTrail, []);
+    this.state.trailRuns = [];
+    this.state.trailDirty = false;
+    this.state.layerActive = true;
+  }
 
-    const coords = routeCoordinates(this.state.segments);
-    if (coords.length < 2) return;
+  /** Empty both replay sources; their layers stay on the map, showing nothing */
+  private clearReplayLayer(): void {
+    this.renderer.cancelTrailFlush();
+    this.state.trailDirty = false;
+    if (!this.state.layerActive) return;
+    this.state.layerActive = false;
+    this.setReplaySource(MAP_SOURCES.replayRoute, []);
+    this.setReplaySource(MAP_SOURCES.replayTrail, []);
+  }
 
-    L.polyline(coords, {
-      color: routeOutlineColor(),
-      weight: 2,
-      opacity: 0.5,
-      interactive: false,
-      // The canvas the paths themselves are drawn on, rather than a second
-      // one of its own: the flown segments go on the map's own renderer,
-      // which paints over this one
-      renderer: this.app.pathRenderer,
-    }).addTo(this.state.layer);
+  private setReplaySource(
+    id: typeof MAP_SOURCES.replayRoute | typeof MAP_SOURCES.replayTrail,
+    features: Feature[],
+  ): void {
+    void this.app.map
+      ?.getSource<GeoJSONSource>(id)
+      ?.setData({ type: "FeatureCollection", features });
   }
 
   private createReplayMarker(): boolean {
-    if (!this.state.layer) {
-      this.state.layer = L.layerGroup();
-    }
-    this.resetReplayLayer();
-    if (this.app.map) {
-      this.state.layer.addTo(this.app.map);
-    }
-
-    if (this.state.airplaneMarker && this.app.map) {
-      this.app.map.removeLayer(this.state.airplaneMarker);
-      this.state.airplaneMarker = null;
-    }
-
-    const airplaneIcon = L.divIcon({
-      html:
-        '<div class="replay-airplane-icon">' +
-        icon("aircraftTop", 24, undefined, "solid") +
-        "</div>",
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
-      className: "",
-    });
+    this.state.airplaneMarker?.remove();
+    this.state.airplaneMarker = null;
 
     const firstSegment = this.state.segments[0];
     const startCoords = firstSegment?.coords?.[0];
     if (!startCoords || !this.app.map) return false;
 
-    this.state.airplaneMarker = L.marker([startCoords[0], startCoords[1]], {
-      icon: airplaneIcon,
-      zIndexOffset: 1000,
-      title: "Aircraft position",
-      alt: "Aircraft position",
-    });
-    // Bound from the start: Leaflet toggles a bound popup on click and on
-    // Enter on the focused marker alike, where a popup bound on the first
-    // click left the keyboard without one. The content is the position at
-    // the moment it opens (see ReplayRenderer.updateAirplanePopup).
-    this.state.airplaneMarker.bindPopup("", { autoPan: !this.state.playing });
-    this.state.airplaneMarker.on("popupopen", () =>
-      this.updateReplayAirplanePopup(),
-    );
-    this.state.airplaneMarker.addTo(this.app.map);
+    this.startReplayLayer();
 
-    // The rotation transition lives on the inner icon (see styles.css);
-    // Leaflet positions the marker root with transforms, which must not animate.
-    const markerElement = this.state.airplaneMarker.getElement();
-    if (markerElement) {
-      markerElement.style.cursor = "pointer";
-      markerElement.style.pointerEvents = "auto";
-    }
+    // The content is the position at the moment the popup opens (see
+    // ReplayRenderer.updateAirplanePopup)
+    this.state.airplaneMarker = new AirplaneMarker(
+      this.app.map,
+      [startCoords[0], startCoords[1]],
+      () => this.updateReplayAirplanePopup(),
+    );
 
     return true;
   }
@@ -546,38 +555,27 @@ export class ReplayManager {
     const startCoords = firstSegment?.coords?.[0];
     if (!startCoords || !this.app.map) return;
 
-    const animate = !prefersReducedMotion();
-    if (this.state.autoZoom) {
-      this.app.map.setView([startCoords[0], startCoords[1]], AUTO_ZOOM_FOLLOW, {
-        animate,
-        duration: AUTO_ZOOM_PAN_S,
-      });
-    } else {
-      this.app.map.panTo([startCoords[0], startCoords[1]], {
-        animate,
-        duration: AUTO_ZOOM_PAN_S,
-      });
-    }
+    this.app.map.easeTo({
+      center: toLngLat(startCoords),
+      ...(this.state.autoZoom ? { zoom: AUTO_ZOOM_FOLLOW } : {}),
+      duration: AUTO_ZOOM_PAN_MS,
+      animate: !prefersReducedMotion(),
+    });
   }
 
   hideOtherLayersDuringReplay(): void {
     if (!this.app.map) return;
 
-    if (this.app.heatmapLayer && this.app.heatmapVisible) {
-      this.app.map.removeLayer(this.app.heatmapLayer);
-    }
-    // The heatmap is off the map for the replay, so its toggle must not
-    // report it as on; restoreLayerVisibility hands it back to the store
+    // What the user had switched on stays in the store, which the restore
+    // reads; only the layers themselves are hidden
+    if (this.app.heatmapVisible) this.app.heatmapLayer.setVisible(false);
+    // The heatmap is hidden for the replay, so its toggle must not report
+    // it as on; restoreLayerVisibility hands it back to the store
     const heatmapBtn = domCache.get("heatmap-btn");
     if (heatmapBtn) applyToggleButtonState(heatmapBtn, false);
 
-    if (this.app.altitudeVisible) {
-      this.app.map.removeLayer(this.app.altitudeLayer);
-    }
-
-    if (this.app.airspeedVisible) {
-      this.app.map.removeLayer(this.app.airspeedLayer);
-    }
+    if (this.app.altitudeVisible) this.app.altitudeLayer.setVisible(false);
+    if (this.app.airspeedVisible) this.app.airspeedLayer.setVisible(false);
 
     this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, true);
   }
@@ -586,20 +584,20 @@ export class ReplayManager {
     if (!this.app.map) return;
 
     // With the points of the filter changes made during the replay, and
-    // the dimming under a colour layer, which the new canvas has lost
+    // the dimming under a colour layer
     if (this.app.heatmapVisible) this.app.dataManager.showHeatmap();
 
-    // Redraw once after the layer is back on the map so click handlers work
-    // on mobile Safari. A redraw still pending from an earlier close is
-    // dropped rather than run twice.
+    // Redraw once the layer shows again: a colour layer switched on during
+    // the replay was never drawn. A redraw still pending from an earlier
+    // close is dropped rather than run twice.
     this.cancelRedrawTimers();
     if (this.app.altitudeVisible) {
-      this.app.map.addLayer(this.app.altitudeLayer);
+      this.app.altitudeLayer.setVisible(true);
       this.scheduleRedraw(() => this.app.layerManager.redrawAltitudePaths());
     }
 
     if (this.app.airspeedVisible) {
-      this.app.map.addLayer(this.app.airspeedLayer);
+      this.app.airspeedLayer.setVisible(true);
       this.scheduleRedraw(() => this.app.layerManager.redrawAirspeedPaths());
     }
 
@@ -612,7 +610,7 @@ export class ReplayManager {
     const timer = setTimeout(() => {
       this.redrawTimers = this.redrawTimers.filter((t) => t !== timer);
       redraw();
-      if (this.app.map) this.app.map.invalidateSize();
+      this.app.map?.resize();
     }, LAYER_REDRAW_DELAY_MS);
     this.redrawTimers.push(timer);
   }
@@ -654,7 +652,7 @@ export class ReplayManager {
 
     if (this.state.currentTime >= this.state.maxTime) {
       this.state.resetDrawState();
-      this.resetReplayLayer();
+      this.renderer.scheduleTrailFlush(this.state);
 
       if (this.state.airplaneMarker && this.state.segments.length > 0) {
         const firstSeg = this.state.segments[0];
@@ -663,9 +661,11 @@ export class ReplayManager {
           this.state.airplaneMarker.setLatLng([startCoords[0], startCoords[1]]);
 
           if (this.state.autoZoom) {
-            this.app.map.setView([startCoords[0], startCoords[1]], 16, {
+            this.app.map.easeTo({
+              center: toLngLat(startCoords),
+              zoom: AUTO_ZOOM_FOLLOW,
+              duration: RESTART_PAN_MS,
               animate: !prefersReducedMotion(),
-              duration: 0.5,
             });
           }
         }
@@ -673,7 +673,6 @@ export class ReplayManager {
     }
 
     this.state.playing = true;
-    this.renderer.syncPopupAutoPan(this);
     setTransportState(true);
     this.announce("Replay playing");
 
@@ -712,24 +711,18 @@ export class ReplayManager {
   private fitReplayBounds(): void {
     if (this.state.segments.length === 0 || !this.app.map) return;
 
-    const allCoords: [number, number][] = [];
-    this.state.segments.forEach((seg) => {
-      seg.coords?.forEach((coord) => allCoords.push(coord));
+    const bounds = segmentBounds(this.state.segments);
+    if (!bounds) return;
+    this.app.map.fitBounds(toBounds(bounds), {
+      padding: FIT_BOUNDS_PADDING,
+      duration: FIT_BOUNDS_MS,
+      animate: !prefersReducedMotion(),
     });
-
-    if (allCoords.length > 0) {
-      this.app.map.fitBounds(L.latLngBounds(allCoords), {
-        padding: [50, 50],
-        animate: !prefersReducedMotion(),
-        duration: 1.0,
-      });
-    }
   }
 
   pauseReplay(announce: boolean = true): void {
     const wasPlaying = this.state.playing;
     this.state.playing = false;
-    this.renderer.syncPopupAutoPan(this);
     setTransportState(false);
 
     if (this.state.animationFrameId) {
@@ -747,7 +740,6 @@ export class ReplayManager {
   stopReplay(announce = true): void {
     this.pauseReplay(false);
     this.state.resetDrawState();
-    this.resetReplayLayer();
     if (this.state.airplaneMarker && this.state.segments.length > 0) {
       const firstSeg = this.state.segments[0];
       const startCoords = firstSeg?.coords?.[0];
@@ -764,8 +756,8 @@ export class ReplayManager {
     if (!isFinite(newTime)) return;
 
     if (newTime < this.state.currentTime) {
-      // Drop only the segments after the new position; clearing the whole
-      // layer would redraw the entire flight on every drag event
+      // Drop only the segments after the new position; starting the trail
+      // over would colour the entire flight again on every drag event
       this.renderer.removeSegmentsAfter(this, newTime);
     }
 
@@ -801,27 +793,30 @@ export class ReplayManager {
   private zoomToAircraft(): void {
     const position = this.state.airplaneMarker?.getLatLng();
     if (!position || !this.app.map) return;
-    this.app.map.setView(position, AUTO_ZOOM_FOLLOW, {
+    this.app.map.easeTo({
+      center: toLngLat(position),
+      zoom: AUTO_ZOOM_FOLLOW,
+      duration: AUTO_ZOOM_PAN_MS,
       animate: !prefersReducedMotion(),
-      duration: AUTO_ZOOM_PAN_S,
     });
   }
 
   redrawReplayPath(mode: "altitude" | "airspeed"): void {
-    if (!this.state.layer) return;
+    if (!this.state.layerActive) return;
     const savedTime = this.state.currentTime;
     const savedIndex = this.state.lastDrawnIndex;
-    this.resetReplayLayer();
-    // The drawn polylines are gone, so the trim stack has to be rebuilt too;
-    // stale entries would make a backward seek remove nothing visible
-    this.state.drawnLayers = [];
+    // The runs are cut by colour, so another scale means other runs: the
+    // flown part is coloured again from the start
+    this.state.trailRuns = [];
     this.state.lastDrawnIndex = -1;
+    this.state.trailDirty = true;
 
     for (let i = 0; i <= savedIndex && i < this.state.segments.length; i++) {
       const seg = this.state.segments[i];
       if (!seg || (seg.time ?? 0) > savedTime) continue;
-      drawReplaySegment(this.state, i, mode === "airspeed");
+      appendTrailSegment(this.state, i, mode === "airspeed");
     }
+    this.renderer.scheduleTrailFlush(this.state);
   }
 
   updateReplayDisplay(isManualSeek: boolean = false): void {
@@ -857,28 +852,37 @@ function setTransportState(playing: boolean): void {
 }
 
 /**
- * The flight's whole track as one list of points: the start of every
- * segment, plus the end of the last one.
+ * The flight's whole track as one list of `[lng, lat]` points: the start of
+ * every segment, plus the end of the last one.
  */
-function routeCoordinates(segments: PathSegment[]): L.LatLngExpression[] {
-  const coords: L.LatLngExpression[] = [];
+function routeCoordinates(segments: PathSegment[]): LngLatTuple[] {
+  const coords: LngLatTuple[] = [];
   for (const segment of segments) {
     const start = segment.coords?.[0];
-    if (start) coords.push([start[0], start[1]]);
+    if (start) coords.push(toLngLat(start));
   }
   const last = segments[segments.length - 1]?.coords?.[1];
-  if (last) coords.push([last[0], last[1]]);
+  if (last) coords.push(toLngLat(last));
   return coords;
 }
 
-/**
- * Colour of the dimmed route. The paths are drawn on a canvas, where the
- * stylesheet cannot reach them, so the token is read from the document.
- */
-function routeOutlineColor(): string {
-  return (
-    getComputedStyle(document.documentElement)
-      .getPropertyValue("--color-text-dim")
-      .trim() || "#6f6f6f"
-  );
+/** South-west and north-east corner of the flight, latitude first */
+function segmentBounds(segments: PathSegment[]): [LatLon, LatLon] | null {
+  let minLat = Infinity;
+  let minLon = Infinity;
+  let maxLat = -Infinity;
+  let maxLon = -Infinity;
+  for (const segment of segments) {
+    for (const [lat, lon] of segment.coords ?? []) {
+      minLat = Math.min(minLat, lat);
+      minLon = Math.min(minLon, lon);
+      maxLat = Math.max(maxLat, lat);
+      maxLon = Math.max(maxLon, lon);
+    }
+  }
+  if (minLat > maxLat) return null;
+  return [
+    [minLat, minLon],
+    [maxLat, maxLon],
+  ];
 }

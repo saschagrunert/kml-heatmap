@@ -9,18 +9,22 @@ import {
   LIVE_REGION_DELAY_MS,
   TOAST_STATUS_ID,
 } from "../../../../kml_heatmap/frontend/utils/toast";
+import { MAP_LAYERS } from "../../../../kml_heatmap/frontend/utils/constants";
+import type { AirportMarker } from "../../../../kml_heatmap/frontend/types";
 import {
-  closePopupSpy,
   createReplayManager,
   createReplayMockApp,
   createSegments,
   el,
+  featuresOf,
   liveRegionText,
   mockAnimationFrame,
   mountReplayDom,
+  replaySources,
   unmountReplayDom,
+  type MockApp,
 } from "./replayTestSetup";
-import { createDataset, createMockApp, type MockApp } from "../../testHelpers";
+import { createDataset, createMockApp } from "../../testHelpers";
 import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
@@ -57,7 +61,8 @@ describe("ReplayManager activation", () => {
       expect(replayManager.state.currentTime).toBe(0);
       expect(replayManager.state.maxTime).toBe(0);
       expect(replayManager.state.speed).toBe(50.0);
-      expect(replayManager.state.layer).toBeNull();
+      expect(replayManager.state.layerActive).toBe(false);
+      expect(replayManager.state.trailRuns).toEqual([]);
       expect(replayManager.state.segments).toEqual([]);
       expect(replayManager.state.airplaneMarker).toBeNull();
       expect(replayManager.state.lastDrawnIndex).toBe(-1);
@@ -301,15 +306,19 @@ describe("ReplayManager activation", () => {
       mockApp.selectedPathIds = new Set([1]);
       mockApp.heatmapVisible = true;
       mockApp.altitudeVisible = true;
+      mockApp.heatmapLayer.setVisible(true);
+      mockApp.altitudeLayer.setVisible(true);
 
       replayManager.toggleReplay();
 
-      expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.heatmapLayer,
+      expect(mockApp.heatmapLayer.isVisible()).toBe(false);
+      expect(mockApp.altitudeLayer.isVisible()).toBe(false);
+      expect(mockApp.map!.layer(MAP_LAYERS.heat).layout["visibility"]).toBe(
+        "none",
       );
-      expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.altitudeLayer,
-      );
+      // What the user had on is remembered by the store, for the restore
+      expect(mockApp.heatmapVisible).toBe(true);
+      expect(mockApp.altitudeVisible).toBe(true);
     });
 
     it("deactivates replay when already active", () => {
@@ -327,23 +336,75 @@ describe("ReplayManager activation", () => {
     it("removes the airplane marker on deactivation", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.toggleReplay();
-      const marker = replayManager.state.airplaneMarker;
-      expect(marker).not.toBeNull();
+      const marker = replayManager.state.airplaneMarker!;
+      marker.openPopup();
+      const canvasContainer = mockApp.map!.getCanvasContainer();
+      expect(canvasContainer.contains(marker.getElement())).toBe(true);
 
       replayManager.toggleReplay();
 
-      expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(marker);
+      expect(canvasContainer.contains(marker.getElement())).toBe(false);
+      expect(marker.isPopupOpen()).toBe(false);
       expect(replayManager.state.airplaneMarker).toBeNull();
     });
 
-    it("removes replay layer from map on deactivation", () => {
+    it("lays the dimmed route down once, when replay opens", () => {
+      // Replay hides the heat bloom and the paths, so without the route the
+      // map is empty ahead of the aircraft
       mockApp.selectedPathIds = new Set([1]);
-      replayManager.toggleReplay();
-      const layer = replayManager.state.layer;
+      const { route, trail } = replaySources(mockApp);
 
       replayManager.toggleReplay();
 
-      expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(layer);
+      expect(route.setData).toHaveBeenCalledTimes(1);
+      // One point per segment, plus the end of the last one; longitude first
+      expect(featuresOf(route)).toHaveLength(1);
+      expect(featuresOf(route)[0]!.geometry).toEqual({
+        type: "LineString",
+        coordinates: [
+          [16.0, 48.0],
+          [16.1, 48.1],
+          [16.2, 48.2],
+          [16.3, 48.3],
+        ],
+      });
+      expect(featuresOf(trail)).toEqual([]);
+
+      // Playing, seeking and stopping never touch it again
+      replayManager.seekReplay("100");
+      replayManager.seekReplay("20");
+      replayManager.stopReplay();
+      vi.advanceTimersByTime(100);
+      expect(route.setData).toHaveBeenCalledTimes(1);
+    });
+
+    it("empties both replay sources on deactivation", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      const { route, trail } = replaySources(mockApp);
+      replayManager.toggleReplay();
+      replayManager.seekReplay("100");
+      vi.advanceTimersByTime(16);
+      expect(featuresOf(trail)).toHaveLength(2);
+
+      replayManager.toggleReplay();
+
+      expect(replayManager.state.layerActive).toBe(false);
+      expect(featuresOf(route)).toEqual([]);
+      expect(featuresOf(trail)).toEqual([]);
+    });
+
+    it("drops a trail write that was still pending when replay closed", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      const { trail } = replaySources(mockApp);
+      replayManager.toggleReplay();
+      replayManager.seekReplay("100");
+
+      replayManager.toggleReplay();
+      trail.setData.mockClear();
+      vi.advanceTimersByTime(100);
+
+      expect(trail.setData).not.toHaveBeenCalled();
+      expect(featuresOf(trail)).toEqual([]);
     });
 
     it("restores layer visibility on deactivation", () => {
@@ -371,9 +432,7 @@ describe("ReplayManager activation", () => {
       expect(mockApp.altitudeVisible).toBe(false);
       expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("false");
       expect(el("altitude-legend").style.display).toBe("none");
-      expect(mockApp.map!.addLayer).not.toHaveBeenCalledWith(
-        mockApp.altitudeLayer,
-      );
+      expect(mockApp.altitudeLayer.isVisible()).toBe(false);
       expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
     });
 
@@ -424,10 +483,23 @@ describe("ReplayManager activation", () => {
     it("closes a popup left open on the map", () => {
       mockApp.selectedPathIds = new Set([1]);
 
+      const airport = (open: boolean) =>
+        ({
+          isPopupOpen: vi.fn(() => open),
+          closePopup: vi.fn(),
+        }) as unknown as AirportMarker;
+      const open = airport(true);
+      const closed = airport(false);
+      mockApp.airportMarkers["EDDF"] = open;
+      mockApp.airportMarkers["LOWW"] = closed;
+
       replayManager.toggleReplay();
 
       // A path tapped on a phone left its popup over the replay controls
-      expect(closePopupSpy(mockApp)).toHaveBeenCalledTimes(1);
+      expect(mockApp.layerManager.closeSegmentPopup).toHaveBeenCalledTimes(1);
+      // So did an airport
+      expect(open.closePopup).toHaveBeenCalledTimes(1);
+      expect(closed.closePopup).not.toHaveBeenCalled();
     });
 
     it("leaves the legends to the layers when the speed layer colours the trail", () => {
@@ -451,7 +523,7 @@ describe("ReplayManager activation", () => {
       vi.advanceTimersByTime(500);
 
       expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalledTimes(1);
-      expect(mockApp.map!.invalidateSize).toHaveBeenCalled();
+      expect(mockApp.map!.resize).toHaveBeenCalled();
     });
 
     it("redraws airspeed paths once after deactivation when airspeed was visible", () => {
@@ -742,15 +814,14 @@ describe("ReplayManager activation", () => {
       expect(slider.getAttribute("aria-valuetext")).toBe("0:00 of 2:00");
     });
 
-    it("creates replay layer group and adds to map", () => {
+    it("sets the replay layer up with the route and an empty trail", () => {
       mockApp.selectedPathIds = new Set([1]);
 
       replayManager.initializeReplay();
 
-      expect(replayManager.state.layer).not.toBeNull();
-      expect(replayManager.state.layer!.addTo).toHaveBeenCalledWith(
-        mockApp.map,
-      );
+      expect(replayManager.state.layerActive).toBe(true);
+      expect(featuresOf(replaySources(mockApp).route)).toHaveLength(1);
+      expect(featuresOf(replaySources(mockApp).trail)).toEqual([]);
     });
 
     it("creates an accessible airplane marker at the first segment", () => {
@@ -758,10 +829,29 @@ describe("ReplayManager activation", () => {
 
       replayManager.initializeReplay();
 
-      expect(replayManager.state.airplaneMarker).not.toBeNull();
-      expect(replayManager.state.airplaneMarker!.addTo).toHaveBeenCalledWith(
-        mockApp.map,
+      const airplane = replayManager.state.airplaneMarker!;
+      expect(airplane.getLatLng()).toEqual([48.0, 16.0]);
+      const button = airplane.getElement();
+      expect(button.tagName).toBe("BUTTON");
+      expect(button.getAttribute("aria-label")).toBe("Aircraft position");
+      expect(button.classList.contains("replay-airplane-root")).toBe(true);
+      expect(button.querySelector(".replay-airplane-icon")).not.toBeNull();
+      expect(mockApp.map!.getCanvasContainer().contains(button)).toBe(true);
+    });
+
+    it("leaves the replay sources alone when there is no start to fly from", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      mockApp.currentData = createDataset(
+        [{ id: 1 }],
+        [
+          { path_id: 1, time: 0 },
+          { path_id: 1, time: 10 },
+        ],
       );
+
+      expect(replayManager.initializeReplay()).toBe(false);
+      expect(replayManager.state.layerActive).toBe(false);
+      expect(replaySources(mockApp).route.setData).not.toHaveBeenCalled();
     });
 
     it("returns false when the first segment has no coordinates", () => {
@@ -795,11 +885,13 @@ describe("ReplayManager activation", () => {
 
       replayManager.initializeReplay();
 
-      expect(mockApp.map!.setView).toHaveBeenCalledWith(
-        [48.0, 16.0],
-        16,
-        expect.objectContaining({ animate: true }),
-      );
+      // The follow zoom in map units (16 under Leaflet); 0.8 s in ms
+      expect(mockApp.map!.easeTo).toHaveBeenCalledWith({
+        center: [16.0, 48.0],
+        zoom: 15,
+        duration: 800,
+        animate: true,
+      });
     });
 
     it("moves to the start without animation for reduced motion", () => {
@@ -810,15 +902,15 @@ describe("ReplayManager activation", () => {
       replayManager.state.autoZoom = true;
       replayManager.initializeReplay();
 
-      expect(mockApp.map!.panTo).toHaveBeenCalledWith(
-        [48.0, 16.0],
-        expect.objectContaining({ animate: false }),
-      );
-      expect(mockApp.map!.setView).toHaveBeenCalledWith(
-        [48.0, 16.0],
-        16,
-        expect.objectContaining({ animate: false }),
-      );
+      const moves = mockApp.map!.easeTo.mock.calls.map(([options]) => options);
+      expect(moves).toHaveLength(2);
+      expect(moves[0]).toMatchObject({ center: [16.0, 48.0], animate: false });
+      expect(moves[0]).not.toHaveProperty("zoom");
+      expect(moves[1]).toMatchObject({
+        center: [16.0, 48.0],
+        zoom: 15,
+        animate: false,
+      });
     });
 
     it("pans to start position without changing zoom when autoZoom is disabled", () => {
@@ -827,11 +919,12 @@ describe("ReplayManager activation", () => {
 
       replayManager.initializeReplay();
 
-      expect(mockApp.map!.panTo).toHaveBeenCalledWith(
-        [48.0, 16.0],
-        expect.objectContaining({ animate: true }),
-      );
-      expect(mockApp.map!.setView).not.toHaveBeenCalled();
+      expect(mockApp.map!.easeTo).toHaveBeenCalledTimes(1);
+      expect(mockApp.map!.easeTo).toHaveBeenCalledWith({
+        center: [16.0, 48.0],
+        duration: 800,
+        animate: true,
+      });
     });
 
     it("updates altitude and airspeed legends with the replay ranges", () => {
@@ -853,12 +946,19 @@ describe("ReplayManager activation", () => {
       mockApp.selectedPathIds = new Set([1]);
 
       replayManager.initializeReplay();
-      const firstMarker = replayManager.state.airplaneMarker;
+      const firstMarker = replayManager.state.airplaneMarker!;
 
       replayManager.initializeReplay();
 
-      expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(firstMarker);
+      expect(
+        mockApp.map!.getCanvasContainer().contains(firstMarker.getElement()),
+      ).toBe(false);
       expect(replayManager.state.airplaneMarker).not.toBe(firstMarker);
+      expect(
+        mockApp
+          .map!.getCanvasContainer()
+          .querySelectorAll(".replay-airplane-root"),
+      ).toHaveLength(1);
     });
 
     it("returns true on success", () => {
@@ -870,56 +970,58 @@ describe("ReplayManager activation", () => {
 
   describe("toggleAutoZoom", () => {
     /** A replay in progress, with the aircraft away from the start */
-    function replayInProgress(position = { lat: 47.5, lng: 15.5 }) {
+    function replayInProgress(
+      position: [number, number] = [47.5, 15.5],
+    ): [number, number] {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.initializeReplay();
       replayManager.state.autoZoom = false;
-      replayManager.state.airplaneMarker = {
-        getLatLng: () => position,
-      } as unknown as typeof replayManager.state.airplaneMarker;
-      vi.mocked(mockApp.map!.setView).mockClear();
+      replayManager.state.airplaneMarker!.setLatLng(position);
+      mockApp.map!.easeTo.mockClear();
       return position;
     }
 
     it("goes to the aircraft at the follow zoom when switched on", () => {
       // The renderer only ever zooms out, so without this the control did
       // nothing to the map until the flight left the viewport
-      const position = replayInProgress();
+      const [lat, lon] = replayInProgress();
 
       replayManager.toggleAutoZoom();
 
-      expect(mockApp.map!.setView).toHaveBeenCalledWith(
-        position,
-        16,
-        expect.objectContaining({ animate: true }),
-      );
+      expect(mockApp.map!.easeTo).toHaveBeenCalledWith({
+        center: [lon, lat],
+        zoom: 15,
+        duration: 800,
+        animate: true,
+      });
     });
 
     it("arrives where a replay that started with it on would be", () => {
       // Same zoom as initializeReplay uses, so the two agree
-      const zoomOfFirstSetView = (): unknown =>
-        vi.mocked(mockApp.map!.setView).mock.calls[0]?.[1];
+      const zoomOfFirstMove = (): unknown =>
+        (mockApp.map!.easeTo.mock.calls[0]?.[0] as { zoom?: number }).zoom;
 
       replayInProgress();
       replayManager.toggleAutoZoom();
-      const switchedOn = zoomOfFirstSetView();
+      const switchedOn = zoomOfFirstMove();
+      expect(switchedOn).toBeTypeOf("number");
 
       replayManager.state.autoZoom = true;
-      vi.mocked(mockApp.map!.setView).mockClear();
+      mockApp.map!.easeTo.mockClear();
       replayManager.initializeReplay();
 
-      expect(switchedOn).toBe(zoomOfFirstSetView());
+      expect(switchedOn).toBe(zoomOfFirstMove());
     });
 
     it("leaves the map alone when switched off", () => {
       replayInProgress();
       replayManager.toggleAutoZoom();
-      vi.mocked(mockApp.map!.setView).mockClear();
+      mockApp.map!.easeTo.mockClear();
 
       replayManager.toggleAutoZoom();
 
       expect(replayManager.state.autoZoom).toBe(false);
-      expect(mockApp.map!.setView).not.toHaveBeenCalled();
+      expect(mockApp.map!.easeTo).not.toHaveBeenCalled();
     });
 
     it("does not animate for reduced motion", () => {
@@ -928,44 +1030,43 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleAutoZoom();
 
-      expect(mockApp.map!.setView).toHaveBeenCalledWith(
-        expect.anything(),
-        16,
-        expect.objectContaining({ animate: false }),
+      expect(mockApp.map!.easeTo).toHaveBeenCalledWith(
+        expect.objectContaining({ zoom: 15, animate: false }),
       );
     });
 
     it("does nothing without an aircraft on the map", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.state.airplaneMarker = null;
-      vi.mocked(mockApp.map!.setView).mockClear();
 
       replayManager.toggleAutoZoom();
 
       expect(replayManager.state.autoZoom).toBe(true);
-      expect(mockApp.map!.setView).not.toHaveBeenCalled();
+      expect(mockApp.map!.easeTo).not.toHaveBeenCalled();
     });
   });
 
   describe("hideOtherLayersDuringReplay", () => {
     it("does nothing without a map", () => {
-      const map = mockApp.map!;
       mockApp.map = null;
       mockApp.heatmapVisible = true;
 
       replayManager.hideOtherLayersDuringReplay();
 
-      expect(map.removeLayer).not.toHaveBeenCalled();
+      expect(mockApp.heatmapLayer.setVisible).not.toHaveBeenCalled();
       expect((el("year-select") as HTMLSelectElement).disabled).toBe(false);
     });
 
     it("hides heatmap when visible", () => {
       mockApp.heatmapVisible = true;
 
+      mockApp.heatmapLayer.setVisible(true);
+
       replayManager.hideOtherLayersDuringReplay();
 
-      expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.heatmapLayer,
+      expect(mockApp.heatmapLayer.setVisible).toHaveBeenLastCalledWith(false);
+      expect(mockApp.map!.layer(MAP_LAYERS.heat).layout["visibility"]).toBe(
+        "none",
       );
     });
 
@@ -974,29 +1075,49 @@ describe("ReplayManager activation", () => {
 
       replayManager.hideOtherLayersDuringReplay();
 
-      expect(mockApp.map!.removeLayer).not.toHaveBeenCalledWith(
-        mockApp.heatmapLayer,
-      );
+      expect(mockApp.heatmapLayer.setVisible).not.toHaveBeenCalled();
+    });
+
+    it("leaves the airports and the aviation chart the way they are", () => {
+      mockApp.aviationLayer.setVisible(true);
+      mockApp.aviationLayer.setVisible.mockClear();
+
+      replayManager.hideOtherLayersDuringReplay();
+
+      expect(mockApp.airportLayer.setVisible).not.toHaveBeenCalled();
+      expect(mockApp.aviationLayer.setVisible).not.toHaveBeenCalled();
+      expect(mockApp.airportLayer.isVisible()).toBe(true);
     });
 
     it("hides altitude layer when visible", () => {
       mockApp.altitudeVisible = true;
 
+      mockApp.altitudeLayer.setVisible(true);
+
       replayManager.hideOtherLayersDuringReplay();
 
-      expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.altitudeLayer,
-      );
+      expect(mockApp.altitudeLayer.isVisible()).toBe(false);
+      // The main layer and the one the selection is drawn on
+      for (const id of [
+        MAP_LAYERS.pathsAltitude,
+        MAP_LAYERS.pathsAltitudeSelected,
+      ]) {
+        expect(mockApp.map!.layer(id).layout["visibility"]).toBe("none");
+      }
+      expect(mockApp.airspeedLayer.setVisible).not.toHaveBeenCalled();
     });
 
     it("hides airspeed layer when visible", () => {
       mockApp.airspeedVisible = true;
 
+      mockApp.airspeedLayer.setVisible(true);
+
       replayManager.hideOtherLayersDuringReplay();
 
-      expect(mockApp.map!.removeLayer).toHaveBeenCalledWith(
-        mockApp.airspeedLayer,
-      );
+      expect(mockApp.airspeedLayer.isVisible()).toBe(false);
+      expect(
+        mockApp.map!.layer(MAP_LAYERS.pathsAirspeed).layout["visibility"],
+      ).toBe("none");
     });
 
     it("disables layer buttons and filters during replay", () => {
@@ -1058,14 +1179,15 @@ describe("ReplayManager activation", () => {
 
   describe("restoreLayerVisibility", () => {
     it("does nothing without a map", () => {
-      const map = mockApp.map!;
       mockApp.map = null;
       mockApp.heatmapVisible = true;
+      mockApp.altitudeVisible = true;
       (el("year-select") as HTMLSelectElement).disabled = true;
 
       replayManager.restoreLayerVisibility();
 
-      expect(map.addLayer).not.toHaveBeenCalled();
+      expect(mockApp.dataManager.showHeatmap).not.toHaveBeenCalled();
+      expect(mockApp.altitudeLayer.setVisible).not.toHaveBeenCalled();
       expect((el("year-select") as HTMLSelectElement).disabled).toBe(true);
     });
 
@@ -1083,9 +1205,31 @@ describe("ReplayManager activation", () => {
       replayManager.restoreLayerVisibility();
 
       expect(mockApp.dataManager.showHeatmap).not.toHaveBeenCalled();
-      expect(mockApp.map!.addLayer).not.toHaveBeenCalledWith(
-        mockApp.heatmapLayer,
-      );
+      expect(mockApp.heatmapLayer.setVisible).not.toHaveBeenCalled();
+    });
+
+    it("puts back exactly what replay hid", () => {
+      mockApp.altitudeVisible = true;
+      mockApp.airspeedVisible = false;
+      mockApp.altitudeLayer.setVisible(true);
+      replayManager.hideOtherLayersDuringReplay();
+
+      replayManager.restoreLayerVisibility();
+
+      expect(mockApp.altitudeLayer.isVisible()).toBe(true);
+      expect(mockApp.airspeedLayer.isVisible()).toBe(false);
+      expect(mockApp.heatmapLayer.isVisible()).toBe(false);
+    });
+
+    it("shows a colour layer that was switched on during the replay", () => {
+      mockApp.altitudeVisible = false;
+      replayManager.hideOtherLayersDuringReplay();
+      // The toggle only records the wish while replay runs
+      mockApp.altitudeVisible = true;
+
+      replayManager.restoreLayerVisibility();
+
+      expect(mockApp.altitudeLayer.isVisible()).toBe(true);
     });
 
     it("restores altitude layer when visible and redraws with delay", () => {
@@ -1093,11 +1237,14 @@ describe("ReplayManager activation", () => {
 
       replayManager.restoreLayerVisibility();
 
-      expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.altitudeLayer);
+      expect(mockApp.altitudeLayer.setVisible).toHaveBeenCalledWith(true);
+      expect(
+        mockApp.map!.layer(MAP_LAYERS.pathsAltitude).layout["visibility"],
+      ).toBe("visible");
       expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
       vi.advanceTimersByTime(100);
       expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalledTimes(1);
-      expect(mockApp.map!.invalidateSize).toHaveBeenCalled();
+      expect(mockApp.map!.resize).toHaveBeenCalled();
     });
 
     it("restores airspeed layer when visible and redraws with delay", () => {
@@ -1105,10 +1252,10 @@ describe("ReplayManager activation", () => {
 
       replayManager.restoreLayerVisibility();
 
-      expect(mockApp.map!.addLayer).toHaveBeenCalledWith(mockApp.airspeedLayer);
+      expect(mockApp.airspeedLayer.setVisible).toHaveBeenCalledWith(true);
       vi.advanceTimersByTime(100);
       expect(mockApp.layerManager.redrawAirspeedPaths).toHaveBeenCalledTimes(1);
-      expect(mockApp.map!.invalidateSize).toHaveBeenCalled();
+      expect(mockApp.map!.resize).toHaveBeenCalled();
     });
 
     it("re-enables disabled buttons and filters", () => {
