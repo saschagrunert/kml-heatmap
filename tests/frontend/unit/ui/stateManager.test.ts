@@ -50,6 +50,26 @@ describe("sanitizeSavedState", () => {
       sanitizeSavedState({ zoom: Infinity, center: { lat: NaN, lng: 8 } }),
     ).toEqual({});
   });
+
+  it("drops a centre off the globe and keeps the rest", () => {
+    // MapLibre throws for a latitude past the poles, and would on every
+    // reload: nothing clears an entry the map never got to overwrite
+    for (const center of [
+      { lat: 91, lng: 8 },
+      { lat: -90.5, lng: 8 },
+      { lat: 50, lng: Infinity },
+    ]) {
+      expect(sanitizeSavedState({ zoom: 7, center })).toEqual({ zoom: 7 });
+    }
+    // Builds that saved the map's centre as it was left a longitude like
+    // this behind after a pan across the antimeridian: a place, not damage
+    expect(
+      sanitizeSavedState({ center: { lat: 50, lng: 190 } }).center,
+    ).toEqual({ lat: 50, lng: -170 });
+    expect(
+      sanitizeSavedState({ center: { lat: -90, lng: 180 } }).center,
+    ).toEqual({ lat: -90, lng: 180 });
+  });
 });
 
 describe("storageKey", () => {
@@ -465,10 +485,39 @@ describe("StateManager", () => {
       expect(stateManager.loadMapState()).toBeNull();
     });
 
-    it("returns null if saved state lacks a map view", () => {
+    it("keeps the rest of the state when the view is unusable", () => {
+      // The map then opens on the bounds, as it does without saved state
       mockLocalStorage[KEY] = JSON.stringify({
+        schemaVersion: 3,
+        center: { lat: 95, lng: 11 },
+        zoom: 12,
+        selectedYear: "2024",
+        selectedPathIds: [1, 2],
+        airportsVisible: false,
+      });
+      expect(stateManager.loadMapState()).toEqual({
+        zoom: 12,
+        selectedYear: "2024",
+        selectedPathIds: [1, 2],
+        airportsVisible: false,
+      });
+    });
+
+    it("wraps a longitude saved from a repeated world", () => {
+      mockLocalStorage[KEY] = JSON.stringify({
+        center: { lat: 48, lng: 190 },
+        zoom: 12,
         selectedYear: "2024",
       });
+      expect(stateManager.loadMapState()).toEqual({
+        center: { lat: 48, lng: -170 },
+        zoom: 12,
+        selectedYear: "2024",
+      });
+    });
+
+    it("returns null if nothing of the saved state is usable", () => {
+      mockLocalStorage[KEY] = JSON.stringify({ evil: "<script>", zoom: "7" });
       expect(stateManager.loadMapState()).toBeNull();
     });
 

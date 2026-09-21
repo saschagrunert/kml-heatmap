@@ -10,6 +10,7 @@ import {
   getColorForAltitude,
 } from "../../../../kml_heatmap/frontend/utils/colors";
 import type {
+  PathHit,
   PathRunProperties,
   PathSegment,
 } from "../../../../kml_heatmap/frontend/types";
@@ -785,6 +786,35 @@ describe("LayerManager", () => {
       expect(features(AIRSPEED)).toEqual([]);
     });
 
+    it("stops waiting for a map that never gets ready", async () => {
+      layerManager.destroy();
+      mockControl.autoLoadStyle = false;
+      const map = new MockMap({ container: document.createElement("div") });
+      mockControl.autoLoadStyle = true;
+      let fail!: (reason: unknown) => void;
+      mockApp = createMockApp({ map, currentData: mockApp.currentData });
+      const mapReady = new Promise<MapLibreMap>(
+        (_resolve, reject) => (fail = reject),
+      );
+      (mockApp as { mapReady: Promise<MapLibreMap> }).mapReady = mapReady;
+      layerManager = new LayerManager(asMapApp(mockApp));
+      layerManager.redrawAltitudePaths();
+      const then = vi.spyOn(mapReady, "then");
+
+      // Asked again while waiting, it rides on the wait that is under way
+      layerManager.redrawAirspeedPaths();
+      expect(then).not.toHaveBeenCalled();
+
+      fail(new Error("layer refused"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // The failure is reported by `initialize()`, not thrown around here,
+      // and the next draw does not take the old wait for its own
+      layerManager.redrawAltitudePaths();
+      expect(then).toHaveBeenCalledTimes(1);
+    });
+
     it("works on the run tables alone in an app without a map", async () => {
       layerManager.destroy();
       mockApp = createMockApp({
@@ -1158,10 +1188,58 @@ describe("LayerManager", () => {
       layerManager.redrawAltitudePaths();
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
 
-      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBeNull();
+      // Not null: a flight may well be there, the tiles cannot tell yet
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBe("stale");
 
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
-      expect(layerManager.hitTest(pointAt(48.1, 16.1))).not.toBeNull();
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toMatchObject({
+        pathId: 1,
+      });
+    });
+
+    it("prefers a current feature over the stale ones beside it", () => {
+      drawMergedRun();
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE, { r: 0, g: 1 }),
+        rendered(ALTITUDE, { r: 0, g: 2 }),
+      ];
+
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toMatchObject({
+        pathId: 1,
+      });
+    });
+
+    it("finds the segment under a point in a copy of the world", () => {
+      const [slow] = drawMergedRun();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+      // One world to the east: 360 degrees further. Taken as it is, every
+      // segment is far away and the eastern one the nearest.
+      const point = pointAt(48.01, 16.01 + 360);
+
+      expect(layerManager.hitTest(point)).toEqual({ pathId: 1, segment: slow });
+    });
+
+    it("ranks the runs by their distance in the copy of the world hit", () => {
+      addSecondPath();
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE, { r: 0, g: 1 }),
+        rendered(ALTITUDE, { r: 1, g: 1 }),
+      ];
+
+      // Measured against the primary world, both runs are a world's width
+      // away and the one further east, path 1, is the nearer by as much as
+      // it lies east. The pointer is on path 2.
+      for (const worlds of [1, -1, 2]) {
+        expect(
+          layerManager.hitTest(pointAt(47.25, 15.25 + 360 * worlds)),
+        ).toMatchObject({ pathId: 2 });
+        expect(
+          layerManager.hitTest(pointAt(48.5, 16.5 + 360 * worlds)),
+        ).toMatchObject({ pathId: 1 });
+      }
     });
 
     it("drops features whose run is not in the table", () => {
@@ -1201,8 +1279,12 @@ describe("LayerManager", () => {
         rendered(ALTITUDE, { r: 1, g: 1 }),
       ];
 
-      expect(layerManager.hitTest(pointAt(47.25, 15.25))?.pathId).toBe(2);
-      expect(layerManager.hitTest(pointAt(48.5, 16.5))?.pathId).toBe(1);
+      expect(layerManager.hitTest(pointAt(47.25, 15.25))).toMatchObject({
+        pathId: 2,
+      });
+      expect(layerManager.hitTest(pointAt(48.5, 16.5))).toMatchObject({
+        pathId: 1,
+      });
     });
 
     it("lets a selected run win a tie", () => {
@@ -1240,7 +1322,9 @@ describe("LayerManager", () => {
       mockApp.map!.renderedFeatures = [
         rendered(ALTITUDE_SELECTED, { r: 0, g: 1 }),
       ];
-      expect(layerManager.hitTest(pointAt(48.5, 16.5))?.pathId).toBe(1);
+      expect(layerManager.hitTest(pointAt(48.5, 16.5))).toMatchObject({
+        pathId: 1,
+      });
     });
 
     it("queries both modes when both are shown", () => {
@@ -1250,7 +1334,9 @@ describe("LayerManager", () => {
       layerManager.redrawAirspeedPaths();
       mockApp.map!.renderedFeatures = [rendered(AIRSPEED, { r: 0, g: 1 })];
 
-      expect(layerManager.hitTest(pointAt(48.5, 16.5))?.pathId).toBe(1);
+      expect(layerManager.hitTest(pointAt(48.5, 16.5))).toMatchObject({
+        pathId: 1,
+      });
       expect(mockApp.map!.queryRenderedFeatures).toHaveBeenCalledWith(
         expect.anything(),
         {
@@ -1296,6 +1382,18 @@ describe("LayerManager", () => {
         .innerHTML;
     }
 
+    it("keeps the tooltip while the tiles only answer with stale features", () => {
+      moveTo(pointAt(48.19, 16.19));
+      const tooltip = tooltips()[0]!;
+      // Drawn again: generation 2, and the tiles still hold generation 1
+      layerManager.redrawAltitudePaths();
+
+      moveTo(pointAt(48.18, 16.18));
+
+      expect(tooltip.isOpen()).toBe(true);
+      expect(content(tooltip)).toContain("120 kt");
+    });
+
     it("opens one popup that tracks the pointer, with the segment's values", () => {
       const point = pointAt(48.19, 16.19);
       moveTo(point);
@@ -1305,7 +1403,7 @@ describe("LayerManager", () => {
       expect(tooltip.options).toMatchObject({
         closeButton: false,
         closeOnClick: false,
-        className: "segment-tooltip",
+        className: "segment-details segment-tooltip",
         maxWidth: "none",
         offset: 10,
       });
@@ -1433,7 +1531,7 @@ describe("LayerManager", () => {
       const point = pointAt(48.19, 16.19);
       moveTo(point);
       const tooltip = tooltips()[0]!;
-      const hit = layerManager.hitTest(point)!;
+      const hit = layerManager.hitTest(point) as PathHit;
       mockApp.map!.queryRenderedFeatures.mockClear();
 
       layerManager.onPathClick(hit, mockApp.map!.unproject(point) as LngLat);
@@ -1477,7 +1575,14 @@ describe("LayerManager", () => {
 
       expect(tooltips()).toHaveLength(1);
       const popup = tooltips()[0]!;
-      expect(popup.options).toMatchObject({ className: "segment-tooltip" });
+      // Not the tooltip's class, which takes no pointer events: this one
+      // has a close button, and a tap through it would hit the flight below
+      expect(popup.options).toMatchObject({
+        className: "segment-details segment-popup",
+      });
+      expect(String(popup.options["className"])).not.toContain(
+        "segment-tooltip",
+      );
       expect(popup.trackPointer).not.toHaveBeenCalled();
       expect(popup.getLngLat()).toEqual(lngLat);
       expect(popup.isOpen()).toBe(true);
@@ -1504,6 +1609,93 @@ describe("LayerManager", () => {
 
       expect(tooltips()).toHaveLength(0);
       expect(mockApp.pathSelection.togglePathSelection).toHaveBeenCalledWith(1);
+    });
+  });
+
+  describe("a pointer over a marker", () => {
+    function onMarker(): Event {
+      const marker = document.createElement("button");
+      marker.className = "maplibregl-marker";
+      const label = document.createElement("span");
+      marker.append(label);
+      mockApp.map!.getCanvasContainer().append(marker);
+      const event = new MouseEvent("mousemove", { bubbles: true });
+      // What the map reports is aimed at whatever is inside the marker
+      label.dispatchEvent(event);
+      return event;
+    }
+
+    beforeEach(() => {
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+    });
+
+    it("closes the hover's tooltip and leaves the values of a tap open", () => {
+      moveTo(pointAt(48.5, 16.5));
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
+      layerManager.onPathClick(
+        { pathId: 1, segment: mockApp.currentData!.path_segments[0]! },
+        mockApp.map!.unproject([10, 10]) as LngLat,
+      );
+      delete (window as { ontouchstart?: unknown }).ontouchstart;
+      expect(tooltips().map((popup) => popup.isOpen())).toEqual([true, true]);
+
+      // The flight runs on below the marker, so the same point would hit
+      mockApp.map!.emit("mousemove", {
+        point: pointAt(48.5, 16.5),
+        originalEvent: onMarker(),
+      });
+      runFrames();
+
+      expect(tooltips().map((popup) => popup.isOpen())).toEqual([false, true]);
+      expect(mockApp.map!.getCanvas().style.cursor).toBe("");
+    });
+
+    it("stands down a hover that was already waiting for its frame", () => {
+      mockApp.map!.emit("mousemove", { point: pointAt(48.5, 16.5) });
+
+      mockApp.map!.emit("mousemove", {
+        point: pointAt(48.5, 16.5),
+        originalEvent: onMarker(),
+      });
+      runFrames();
+
+      expect(tooltips().filter((popup) => popup.isOpen())).toHaveLength(0);
+    });
+  });
+
+  describe("while the Wrapped dialog shows the map as its overview", () => {
+    beforeEach(() => {
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+    });
+
+    it("shows no tooltip for a flight under the pointer", () => {
+      mockApp.store.set("wrappedVisible", true);
+
+      moveTo(pointAt(48.5, 16.5));
+
+      expect(tooltips()).toHaveLength(0);
+      expect(mockApp.map!.queryRenderedFeatures).not.toHaveBeenCalled();
+
+      mockApp.store.set("wrappedVisible", false);
+      moveTo(pointAt(48.5, 16.5));
+      expect(tooltips().filter((popup) => popup.isOpen())).toHaveLength(1);
+    });
+
+    it("does not bring the tooltip back when the data is drawn again", () => {
+      // The pointer rests where it was when the dialog opened
+      moveTo(pointAt(48.5, 16.5));
+      mockApp.store.set("wrappedVisible", true);
+      layerManager.closeSegmentPopup();
+
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
+      mockApp.map!.emit("idle");
+
+      expect(tooltips().filter((popup) => popup.isOpen())).toHaveLength(0);
     });
   });
 

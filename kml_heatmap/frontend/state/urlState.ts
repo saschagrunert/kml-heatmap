@@ -5,6 +5,7 @@
 
 import type { AppState } from "../types";
 import { MAX_ZOOM, MIN_ZOOM } from "../utils/constants";
+import { toMapCenter } from "../utils/geometry";
 
 /**
  * Schema version of the persisted selection. Ids saved by an older release
@@ -157,16 +158,8 @@ export function parseUrlParams(
     if (latStr && lngStr) {
       const lat = parseFloat(latStr);
       const lng = parseFloat(lngStr);
-      if (
-        !isNaN(lat) &&
-        !isNaN(lng) &&
-        lat >= -90 &&
-        lat <= 90 &&
-        lng >= -180 &&
-        lng <= 180
-      ) {
-        state.center = { lat, lng };
-      }
+      const center = toMapCenter({ lat, lng });
+      if (center) state.center = center;
     }
   }
 

@@ -263,12 +263,32 @@ describe("appInitializer", () => {
       expect(app.airportManager.openPopup).toHaveBeenCalledTimes(1);
     });
 
-    it("has a single click listener, which is also Enter and Space on a button", () => {
+    it("lets everything but the click through to the map", () => {
+      // A press goes through so a drag that starts on a marker moves the
+      // map; the map's own handlers tell a marker by the event's target
+      create();
+      const onMap = vi.fn();
+      const container = app.map!.getCanvasContainer();
+      const types = ["mousemove", "dblclick", "mousedown", "touchstart"];
+      for (const type of types) container.addEventListener(type, onMap);
+
+      for (const type of types) {
+        eddf()
+          .getElement()
+          .dispatchEvent(new MouseEvent(type, { bubbles: true }));
+      }
+
+      expect(onMap).toHaveBeenCalledTimes(types.length);
+    });
+
+    it("acts on a click alone, which is also Enter and Space on a button", () => {
       const listen = vi.spyOn(HTMLButtonElement.prototype, "addEventListener");
 
       create([airports[0]!]);
 
+      // One click acts and one stops the event; the only key is Escape
       expect(listen.mock.calls.map(([type]) => type).sort()).toEqual([
+        "click",
         "click",
         "keydown",
       ]);

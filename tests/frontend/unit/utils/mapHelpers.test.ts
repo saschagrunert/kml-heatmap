@@ -4,6 +4,10 @@ import {
   cssVar,
   firstSymbolLayerId,
   fromLngLat,
+  isOnMarker,
+  keepMarkerClickFromMap,
+  keepMarkerTapsFromZoom,
+  MAP_STILL_TIMEOUT_MS,
   mapZoomToState,
   panPopupIntoView,
   resizeMapAfterTransition,
@@ -108,15 +112,6 @@ describe("mapHelpers", () => {
       await Promise.resolve();
       expect(ready).toHaveBeenCalledWith(map);
     });
-
-    it("resolves at once for a style that has already loaded", async () => {
-      const map = mapStub();
-      await whenStyleReady(map);
-      map.once.mockClear();
-
-      await expect(whenStyleReady(map)).resolves.toBe(map);
-      expect(map.once).not.toHaveBeenCalled();
-    });
   });
 
   describe("firstSymbolLayerId", () => {
@@ -211,6 +206,144 @@ describe("mapHelpers", () => {
     });
   });
 
+  describe("isOnMarker", () => {
+    it("tells an event aimed at a marker, or inside one, from the rest", () => {
+      const container = document.createElement("div");
+      const canvas = document.createElement("canvas");
+      const marker = document.createElement("button");
+      marker.className = "maplibregl-marker airport-marker";
+      const label = document.createElement("span");
+      marker.append(label);
+      container.append(canvas, marker);
+      const aimedAt = (target: Element): { originalEvent: Event } => {
+        const originalEvent = new Event("click", { bubbles: true });
+        target.dispatchEvent(originalEvent);
+        return { originalEvent };
+      };
+
+      expect(isOnMarker(aimedAt(marker))).toBe(true);
+      expect(isOnMarker(aimedAt(label))).toBe(true);
+      expect(isOnMarker(aimedAt(canvas))).toBe(false);
+      // An event the app made up carries none
+      expect(isOnMarker({})).toBe(false);
+    });
+  });
+
+  describe("keepMarkerClickFromMap", () => {
+    it("stops the click and lets everything else through", () => {
+      const parent = document.createElement("div");
+      const element = document.createElement("button");
+      parent.append(element);
+      const seen: string[] = [];
+      const types = [
+        "click",
+        "mousemove",
+        "dblclick",
+        "mousedown",
+        "touchstart",
+      ];
+      for (const type of types) {
+        parent.addEventListener(type, () => seen.push(type));
+      }
+
+      keepMarkerClickFromMap(element);
+      for (const type of types) {
+        element.dispatchEvent(new Event(type, { bubbles: true }));
+      }
+
+      expect(seen).toEqual([
+        "mousemove",
+        "dblclick",
+        "mousedown",
+        "touchstart",
+      ]);
+    });
+  });
+
+  describe("keepMarkerTapsFromZoom", () => {
+    function mapWithMarker(): {
+      map: MapLibreMap & MockMap;
+      onMarker: (type: string) => { originalEvent: Event };
+      onCanvas: (type: string) => { originalEvent: Event };
+    } {
+      const map = mapStub();
+      const marker = document.createElement("button");
+      marker.className = "maplibregl-marker";
+      map.getCanvasContainer().append(marker);
+      const aimedAt =
+        (target: Element) =>
+        (type: string): { originalEvent: Event } => {
+          const originalEvent = new Event(type, { bubbles: true });
+          target.dispatchEvent(originalEvent);
+          return { originalEvent };
+        };
+      return {
+        map,
+        onMarker: aimedAt(marker),
+        onCanvas: aimedAt(map.getCanvas()),
+      };
+    }
+
+    it("prevents the zoom of a double click on a marker only", () => {
+      const { map, onMarker, onCanvas } = mapWithMarker();
+      keepMarkerTapsFromZoom(map);
+      const preventDefault = vi.fn();
+
+      map.emit("dblclick", { ...onCanvas("dblclick"), preventDefault });
+      expect(preventDefault).not.toHaveBeenCalled();
+
+      map.emit("dblclick", { ...onMarker("dblclick"), preventDefault });
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+    });
+
+    it("switches the tap zoom off for the length of a touch on a marker", () => {
+      const { map, onMarker, onCanvas } = mapWithMarker();
+      keepMarkerTapsFromZoom(map);
+
+      map.emit("touchstart", onCanvas("touchstart"));
+      expect(map.doubleClickZoom.isEnabled()).toBe(true);
+      map.emit("touchend", onCanvas("touchend"));
+      expect(map.doubleClickZoom.enable).not.toHaveBeenCalled();
+
+      map.emit("touchstart", onMarker("touchstart"));
+      expect(map.doubleClickZoom.isEnabled()).toBe(false);
+      // The pan is not touched: a drag that starts on a marker moves the map
+      expect(map.dragPan.disable).not.toHaveBeenCalled();
+
+      map.emit("touchend", onMarker("touchend"));
+      expect(map.doubleClickZoom.isEnabled()).toBe(true);
+    });
+
+    it("leaves a zoom that was switched off by someone else off", () => {
+      const { map, onMarker } = mapWithMarker();
+      map.doubleClickZoom.disable();
+      keepMarkerTapsFromZoom(map);
+
+      map.emit("touchstart", onMarker("touchstart"));
+      map.emit("touchcancel", onMarker("touchcancel"));
+
+      expect(map.doubleClickZoom.isEnabled()).toBe(false);
+    });
+
+    it("takes everything back, a zoom it had switched off included", () => {
+      const { map, onMarker } = mapWithMarker();
+      const release = keepMarkerTapsFromZoom(map);
+      map.emit("touchstart", onMarker("touchstart"));
+
+      release();
+
+      expect(map.doubleClickZoom.isEnabled()).toBe(true);
+      for (const type of [
+        "dblclick",
+        "touchstart",
+        "touchend",
+        "touchcancel",
+      ]) {
+        expect(map.listenerCount(type)).toBe(0);
+      }
+    });
+  });
+
   describe("withMapStill", () => {
     beforeEach(() => {
       vi.useRealTimers();
@@ -275,6 +408,55 @@ describe("mapHelpers", () => {
 
       expect(parent.contains(canvas)).toBe(true);
       expect(parent.querySelector("img")).toBeNull();
+    });
+
+    it("rejects when the canvas cannot be read, and leaves the map as it was", async () => {
+      const map = stillMap();
+      const canvas = map.getCanvas();
+      const parent = canvas.parentElement!;
+      vi.mocked(canvas.toDataURL).mockImplementation(() => {
+        throw new Error("tainted canvas");
+      });
+      const fn = vi.fn();
+
+      await expect(withMapStill(map, fn)).rejects.toThrow("tainted canvas");
+
+      expect(fn).not.toHaveBeenCalled();
+      expect(parent.contains(canvas)).toBe(true);
+      expect(map.listenerCount("render")).toBe(0);
+    });
+
+    it("rejects when the map draws no frame in time, as after a lost context", async () => {
+      vi.useFakeTimers();
+      const map = stillMap();
+      const canvas = map.getCanvas();
+      const parent = canvas.parentElement!;
+      map.triggerRepaint.mockImplementation(() => undefined);
+      const fn = vi.fn();
+
+      const pending = withMapStill(map, fn);
+      const settled = expect(pending).rejects.toThrow(
+        "the map did not draw in time",
+      );
+      await vi.advanceTimersByTimeAsync(MAP_STILL_TIMEOUT_MS);
+      await settled;
+
+      expect(fn).not.toHaveBeenCalled();
+      expect(parent.contains(canvas)).toBe(true);
+      // A frame that comes late after all finds nobody waiting
+      expect(map.listenerCount("render")).toBe(0);
+      vi.useRealTimers();
+    });
+
+    it("stops the clock once the frame is there", async () => {
+      vi.useFakeTimers();
+      const map = stillMap();
+
+      await withMapStill(map, () => undefined);
+
+      expect(vi.getTimerCount()).toBe(0);
+      expect(map.listenerCount("render")).toBe(0);
+      vi.useRealTimers();
     });
 
     it("carries on with an image that does not decode", async () => {

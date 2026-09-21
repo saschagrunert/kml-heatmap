@@ -176,8 +176,15 @@ describe("URL state management", () => {
       });
       expect(parseUrlParams("lat=91&lng=10")!.center).toBeUndefined();
       expect(parseUrlParams("lat=-91&lng=10")!.center).toBeUndefined();
-      expect(parseUrlParams("lat=45&lng=181")!.center).toBeUndefined();
-      expect(parseUrlParams("lat=45&lng=-181")!.center).toBeUndefined();
+      // A longitude of another copy of the world is the same place
+      expect(parseUrlParams("lat=45&lng=181")!.center).toEqual({
+        lat: 45,
+        lng: -179,
+      });
+      expect(parseUrlParams("lat=45&lng=-181")!.center).toEqual({
+        lat: 45,
+        lng: 179,
+      });
       expect(parseUrlParams("lat=abc&lng=10")!.center).toBeUndefined();
     });
 

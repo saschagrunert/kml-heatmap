@@ -15,14 +15,10 @@ import {
 } from "../utils/buttonState";
 import { setControlIcon } from "../utils/icons";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
-import {
-  toBounds,
-  toLngLat,
-  type LatLon,
-  type LngLatTuple,
-} from "../utils/mapHelpers";
+import { toBounds, toLngLat, type LngLatTuple } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { prepareReplaySegments } from "../features/replay";
+import { segmentBounds } from "../features/wrapped";
 import { segmentsForPathIds } from "../calculations/statistics";
 import {
   AirplaneMarker,
@@ -178,6 +174,7 @@ export class ReplayManager {
     this.stopFollowingTrailLegend();
     this.cancelRedrawTimers();
     this.renderer.cancelTrailFlush();
+    this.renderer.stopWatchingUser();
     if (this.state.animationFrameId) {
       cancelAnimationFrame(this.state.animationFrameId);
       this.state.animationFrameId = null;
@@ -291,6 +288,8 @@ export class ReplayManager {
     this.state.airplaneMarker = null;
 
     this.clearReplayLayer();
+    // No camera follows the airplane any more
+    this.renderer.stopWatchingUser();
 
     // The layers come back the way the user left them: closing replay used
     // to switch the altitude layer on when neither colour layer was
@@ -864,25 +863,4 @@ function routeCoordinates(segments: PathSegment[]): LngLatTuple[] {
   const last = segments[segments.length - 1]?.coords?.[1];
   if (last) coords.push(toLngLat(last));
   return coords;
-}
-
-/** South-west and north-east corner of the flight, latitude first */
-function segmentBounds(segments: PathSegment[]): [LatLon, LatLon] | null {
-  let minLat = Infinity;
-  let minLon = Infinity;
-  let maxLat = -Infinity;
-  let maxLon = -Infinity;
-  for (const segment of segments) {
-    for (const [lat, lon] of segment.coords ?? []) {
-      minLat = Math.min(minLat, lat);
-      minLon = Math.min(minLon, lon);
-      maxLat = Math.max(maxLat, lat);
-      maxLon = Math.max(maxLon, lon);
-    }
-  }
-  if (minLat > maxLat) return null;
-  return [
-    [minLat, minLon],
-    [maxLat, maxLon],
-  ];
 }

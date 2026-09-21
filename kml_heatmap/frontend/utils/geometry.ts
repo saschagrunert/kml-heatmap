@@ -8,6 +8,34 @@
 export type Coordinate = [number, number];
 
 /**
+ * The pair as a place a map can be centred on, or null when it is none.
+ * Links and saved state both go through here before they reach the map:
+ * MapLibre throws for a latitude past the poles, and a saved view that
+ * throws would do so on every reload with nothing to clear it. A longitude
+ * past 180 is no damage: a pan across the antimeridian leaves one behind,
+ * and older builds saved it as it was. It is the same place in another copy
+ * of the world, so it is wrapped back into range.
+ */
+export function toMapCenter(center: {
+  lat: unknown;
+  lng: unknown;
+}): { lat: number; lng: number } | null {
+  const { lat, lng } = center;
+  if (
+    typeof lat !== "number" ||
+    typeof lng !== "number" ||
+    !isFinite(lat) ||
+    !isFinite(lng) ||
+    Math.abs(lat) > 90
+  ) {
+    return null;
+  }
+  // Only out of range: the wrap adds rounding noise, and turns 180 into -180
+  if (Math.abs(lng) <= 180) return { lat, lng };
+  return { lat, lng: ((((lng + 180) % 360) + 360) % 360) - 180 };
+}
+
+/**
  * Calculate distance between two coordinates using Haversine formula
  * @param coords1 - [latitude, longitude] in decimal degrees
  * @param coords2 - [latitude, longitude] in decimal degrees

@@ -1,15 +1,26 @@
 import { test, expect, type Locator } from "./fixtures";
 import {
+  findSegmentFarFromAirports,
   gotoApp,
   knownYears,
   openWrapped,
   readSavedState,
   settleAnimations,
+  togglePathSelection,
   waitForAircraftFilter,
   waitForAppReady,
   waitForYearFilter,
 } from "./helpers";
-import { getCenter, getZoom, setView, waitForMapReady } from "./map";
+import {
+  containerPoint,
+  getCenter,
+  getZoom,
+  mapPopup,
+  segmentDetails,
+  setView,
+  waitForMapReady,
+  wheelZoomIn,
+} from "./map";
 
 /** Fail loudly if the cards no longer overflow, rather than time out */
 async function expectScrollable(column: Locator): Promise<void> {
@@ -57,6 +68,84 @@ test.describe("Wrapped and Export", () => {
     // of the dialog empty for every card after the first
     expect(after?.y).toBe(before?.y);
     await expect(map).toBeInViewport();
+  });
+
+  test("the overview map of the dialog still zooms", async ({ page }) => {
+    const modal = await openWrapped(page);
+    await expect(modal.locator("#wrapped-map-container #map")).toBeVisible();
+    // A placeholder lies over the map until its tiles have landed, and
+    // would take the wheel
+    await expect(
+      page.locator("#wrapped-map-container:not(.is-awaiting-map)"),
+    ).toBeAttached();
+    await waitForMapReady(page);
+    const before = await getZoom(page);
+
+    // The markers are inert while the dialog is open; the map itself must
+    // not be, or the overview could neither be panned nor zoomed
+    await wheelZoomIn(page);
+
+    await expect.poll(() => getZoom(page)).toBeGreaterThan(before);
+  });
+
+  test("a click on the overview map leaves the selection alone (regression)", async ({
+    page,
+  }) => {
+    // Sets the altitude layer up and finds a flight that no marker covers
+    const flight = await findSegmentFarFromAirports(page, {
+      includePathId: true,
+    });
+    expect(flight).not.toBeNull();
+    const selectedId = await page.evaluate(
+      (other) => window.mapApp!.fullPathInfo!.find((p) => p.id !== other)!.id,
+      flight!.pathId!,
+    );
+    await togglePathSelection(page, selectedId, 1);
+    const selection = (): Promise<number[]> =>
+      page.evaluate(() => [...window.mapApp!.selectedPathIds]);
+
+    const modal = await openWrapped(page);
+    await expect(
+      page.locator("#wrapped-map-container:not(.is-awaiting-map)"),
+    ).toBeAttached();
+    await waitForMapReady(page);
+
+    // The overview takes gestures so it can be moved, and with them came
+    // the clicks: one beside the flights cleared the selection behind the
+    // dialog, one on a flight toggled it, and both were saved
+    const map = page.locator("#wrapped-map-container #map");
+    // Clear of the rounded corner, which belongs to the dialog
+    await map.click({ position: { x: 40, y: 40 } });
+    const at = await containerPoint(page, [
+      flight!.coord[0]!,
+      flight!.coord[1]!,
+    ]);
+    await map.click({ position: at });
+    await map.hover({ position: at });
+    // The hover answers in the next frame
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+
+    expect(await selection()).toEqual([selectedId]);
+    // Neither the values of a tapped flight nor a hover tooltip: the first
+    // has a close button that would be a tab stop outside the dialog
+    await expect(mapPopup(page)).toHaveCount(0);
+    await expect(segmentDetails(page)).toHaveCount(0);
+
+    await modal.locator(".close-btn").click();
+    await expect(modal).toBeHidden();
+    // The close is saved; what it writes is the selection of before
+    await expect
+      .poll(async () => (await readSavedState(page))["wrappedVisible"])
+      .toBe(false);
+    expect((await readSavedState(page))["selectedPathIds"]).toEqual([
+      selectedId,
+    ]);
+    expect(await selection()).toEqual([selectedId]);
   });
 
   test("reopening starts at the top of the cards", async ({ page }) => {

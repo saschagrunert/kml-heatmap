@@ -3,7 +3,13 @@
  * The places where the app's conventions meet MapLibre's: coordinate order,
  * zoom units, style readiness and the few things Leaflet did by itself
  */
-import type { LngLatBoundsLike, Map as MapLibreMap, Popup } from "maplibre-gl";
+import type {
+  LngLatBoundsLike,
+  Map as MapLibreMap,
+  MapMouseEvent,
+  MapTouchEvent,
+  Popup,
+} from "maplibre-gl";
 import { ZOOM_OFFSET } from "./constants";
 
 /** A position the way the data files carry it: latitude first */
@@ -51,21 +57,79 @@ export function mapZoomToState(zoom: number): number {
 
 /**
  * Resolve with the map once it has a style to add sources and layers to.
- *
- * `isStyleLoaded()` is no test for that: it turns false again after every
- * `setData` until the worker has answered. `style.load` fires once per style,
- * so a map that already saw it is told apart by its style object instead.
- * A style that fails to load never fires it; the caller owns that case (see
- * MapApp, which swaps in a style that needs no network).
+ * Call it in the same turn the map is created in: it waits for `style.load`,
+ * which fires once per style, and a map that already saw it would wait for
+ * good. `isStyleLoaded()` cannot stand in for the event: it turns false
+ * again after every `setData` until the worker has answered. A style that
+ * fails to load never fires it; the caller owns that case (see MapApp, which
+ * swaps in a style that needs no network).
  */
 export function whenStyleReady(map: MapLibreMap): Promise<MapLibreMap> {
   return new Promise((resolve) => {
-    if (map.style?._loaded) {
-      resolve(map);
-      return;
-    }
     void map.once("style.load", () => resolve(map));
   });
+}
+
+/**
+ * Whether an event of the map was aimed at a marker. MapLibre listens on
+ * the container the markers sit in and does not ask: a pointer over a marker
+ * moves over the map as well, and a click on one is a click on the map. The
+ * app's own map handlers ask here, so no marker has to opt out of them.
+ */
+export function isOnMarker(e: { originalEvent?: Event | undefined }): boolean {
+  const target = e.originalEvent?.target;
+  return target instanceof Element && !!target.closest(".maplibregl-marker");
+}
+
+/**
+ * Keep a click on a marker's element from reaching the map. `isOnMarker`
+ * cannot do this part: a popup that closes on a click on the map listens to
+ * the map by itself, and would close in the click that opened it. Nothing
+ * else is stopped. The press and the touch move the map when a drag starts
+ * on a marker, as they always have.
+ */
+export function keepMarkerClickFromMap(element: HTMLElement): void {
+  element.addEventListener("click", (event) => event.stopPropagation());
+}
+
+/**
+ * Keep a double click and a double tap on a marker from zooming the map,
+ * for every marker there is or will be. Returns what takes it back.
+ *
+ * A `dblclick` of the map can be prevented, which skips the zoom. A double
+ * tap has no event to prevent: the zoom is recognised from `touchstart` and
+ * `touchend`, and preventing the map's `touchstart` would skip the pan with
+ * it, so a drag that starts on a marker would not move the map. Switched
+ * off for the length of the touch instead, the recogniser never sees a tap
+ * on a marker begin, and the pan is left alone. The map's events come before
+ * its gesture handlers see the same DOM event, so both switches are in time.
+ */
+export function keepMarkerTapsFromZoom(map: MapLibreMap): () => void {
+  let switchedOff = false;
+  const onDoubleClick = (e: MapMouseEvent): void => {
+    if (isOnMarker(e)) e.preventDefault();
+  };
+  const onTouchStart = (e: MapTouchEvent): void => {
+    if (!isOnMarker(e) || !map.doubleClickZoom.isEnabled()) return;
+    map.doubleClickZoom.disable();
+    switchedOff = true;
+  };
+  const onTouchEnd = (): void => {
+    if (!switchedOff) return;
+    switchedOff = false;
+    map.doubleClickZoom.enable();
+  };
+  map.on("dblclick", onDoubleClick);
+  map.on("touchstart", onTouchStart);
+  map.on("touchend", onTouchEnd);
+  map.on("touchcancel", onTouchEnd);
+  return () => {
+    onTouchEnd();
+    map.off("dblclick", onDoubleClick);
+    map.off("touchstart", onTouchStart);
+    map.off("touchend", onTouchEnd);
+    map.off("touchcancel", onTouchEnd);
+  };
 }
 
 /**
@@ -145,6 +209,38 @@ export function panPopupIntoView(
 }
 
 /**
+ * How long `withMapStill` waits for the frame it asked for (ms). A map draws
+ * within a frame or two; one that has lost its WebGL context never does.
+ */
+export const MAP_STILL_TIMEOUT_MS = 3000;
+
+/**
+ * The frame the map draws next, as a PNG data URL. Rejects when no frame
+ * comes in time or the canvas cannot be read: a promise that never settled
+ * would leave the caller's busy state on for good.
+ */
+function nextFrameAsDataUrl(map: MapLibreMap): Promise<string> {
+  const canvas = map.getCanvas();
+  return new Promise<string>((resolve, reject) => {
+    const onRender = (): void => {
+      map.off("render", onRender);
+      clearTimeout(timer);
+      try {
+        resolve(canvas.toDataURL("image/png"));
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+    const timer = setTimeout(() => {
+      map.off("render", onRender);
+      reject(new Error("the map did not draw in time"));
+    }, MAP_STILL_TIMEOUT_MS);
+    map.on("render", onRender);
+    map.triggerRepaint();
+  });
+}
+
+/**
  * Run `fn` while the map shows a still image of itself in place of its
  * canvas, and put the canvas back afterwards.
  *
@@ -160,10 +256,7 @@ export async function withMapStill<T>(
   fn: () => Promise<T> | T,
 ): Promise<T> {
   const canvas = map.getCanvas();
-  const dataUrl = await new Promise<string>((resolve) => {
-    void map.once("render", () => resolve(canvas.toDataURL("image/png")));
-    map.triggerRepaint();
-  });
+  const dataUrl = await nextFrameAsDataUrl(map);
 
   const still = document.createElement("img");
   still.className = canvas.className;

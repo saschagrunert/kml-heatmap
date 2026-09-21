@@ -29,6 +29,8 @@ import { syncLegend, syncToggleButton } from "./utils/buttonState";
 import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
 import {
+  isOnMarker,
+  keepMarkerTapsFromZoom,
   resizeMapAfterTransition,
   stateZoomToMap,
   toBounds,
@@ -168,8 +170,28 @@ export const FALLBACK_STYLE: StyleSpecification = {
   ],
 };
 
+/**
+ * What `mapReady` rejects with when the app is destroyed before the map got
+ * ready. Nothing failed, so `initialize()` stops without a word instead of
+ * reporting it.
+ */
+class AppDestroyedError extends Error {
+  constructor() {
+    super("the app was destroyed before the map was ready");
+    this.name = "AppDestroyedError";
+  }
+}
+
 /** Delay before a Wrapped panel restored from state opens again */
 const WRAPPED_RESTORE_DELAY_MS = 500;
+
+/**
+ * How long the base style may take before the flights are drawn without it.
+ * The style is 70 KB from a CDN and is preconnected to, so a healthy
+ * connection answers in well under a second; the limit is for the ones that
+ * never answer, and long enough for a slow phone that eventually does.
+ */
+export const STYLE_LOAD_TIMEOUT_MS = 10_000;
 
 /**
  * Said when the feature bundle cannot be fetched. Without it a click on
@@ -240,16 +262,24 @@ export class MapApp {
   map: MapLibreMap | null;
   /**
    * Resolves with the map once its style has loaded and every source and
-   * layer of MAP_SOURCES and MAP_LAYERS exists, empty. It always resolves:
-   * a base style that fails to load is replaced by FALLBACK_STYLE.
+   * layer of MAP_SOURCES and MAP_LAYERS exists, empty. A base style that
+   * fails to load does not stop it: FALLBACK_STYLE takes its place. It
+   * rejects when the layers themselves cannot be added, which fails
+   * `initialize()` and is reported like any other failure of the start-up,
+   * and when the app is destroyed first, so nothing waits on it for good.
    * `initialize()` waits for it before the first data is loaded, so code
    * that runs from there on may use the sources directly; anything that can
    * run earlier (a constructor, a click during the load) goes through this.
    */
   readonly mapReady: Promise<MapLibreMap>;
   private resolveMapReady!: (map: MapLibreMap) => void;
+  private rejectMapReady!: (reason: unknown) => void;
   /** Whether the base style, or its stand-in, has loaded */
   private styleLoaded = false;
+  /** Runs out when the base style neither loads nor fails */
+  private styleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Takes back `keepMarkerTapsFromZoom`, set with the map */
+  private releaseMarkerTaps: (() => void) | null = null;
 
   // Handles of the layers the map is created with. The layers are never
   // added or removed; the handles switch their visibility.
@@ -338,9 +368,13 @@ export class MapApp {
 
     // Map and layers
     this.map = null;
-    this.mapReady = new Promise((resolve) => {
+    this.mapReady = new Promise((resolve, reject) => {
       this.resolveMapReady = resolve;
+      this.rejectMapReady = reject;
     });
+    // Whoever waits for the map handles its failure. Destroyed before anyone
+    // does, the rejection would otherwise count as unhandled.
+    this.mapReady.catch(() => {});
     const heatmap = new MapLayerHandle(HEATMAP_LAYER_IDS);
     const aviation = new MapLayerHandle([MAP_LAYERS.aviation]);
     const altitude = new MapPathLayerHandle([
@@ -379,7 +413,18 @@ export class MapApp {
     // The data goes into sources that only exist once the style has loaded.
     // The files are preloaded by the template, so waiting here does not hold
     // their download back.
-    await this.mapReady;
+    try {
+      await this.mapReady;
+    } catch (error) {
+      if (error instanceof AppDestroyedError) return;
+      // The controls are bound by now and the managers listen to the store.
+      // None of them may go on acting on a map that has no layers, and the
+      // failure notice takes the map's place, so the map goes as well.
+      this.destroy();
+      this.map?.remove();
+      this.map = null;
+      throw error;
+    }
     if (this.destroyed) return;
 
     // Load airports and metadata
@@ -419,6 +464,11 @@ export class MapApp {
    */
   destroy(): void {
     this.destroyed = true;
+    this.clearStyleTimer();
+    // With the timer gone a style request that hangs would never settle
+    // this, and `initialize()` would wait for it forever. Nothing happens
+    // when the map was ready already.
+    this.rejectMapReady(new AppDestroyedError());
     if (this.wrappedRestoreTimer !== null) {
       clearTimeout(this.wrappedRestoreTimer);
       this.wrappedRestoreTimer = null;
@@ -431,6 +481,8 @@ export class MapApp {
       if (click) this.map.off("click", click);
       this.map.off("error", this.handleMapError);
     }
+    this.releaseMarkerTaps?.();
+    this.releaseMarkerTaps = null;
     this.mapHandlers = {};
     this.layerManager?.destroy();
     this.stateManager?.cancelSave();
@@ -584,17 +636,35 @@ export class MapApp {
     map.keyboard.disableRotation();
     map.addControl(new AttributionControl({ compact: false }), "bottom-right");
     this.map = map;
+    this.releaseMarkerTaps = keepMarkerTapsFromZoom(map);
 
     // Registered before anything can fail. Without a listener MapLibre
     // writes every error to the console itself.
     map.on("error", this.handleMapError);
 
-    void whenStyleReady(map).then(() => {
-      this.styleLoaded = true;
-      addDataLayers(map);
-      for (const handle of this.layerHandles) handle.attach(map);
-      this.resolveMapReady(map);
-    });
+    // A request that neither answers nor fails (a captive portal, a
+    // half-open connection) fires no event at all, and the flights would
+    // wait for the browser to give up on it, which takes minutes
+    this.styleTimer = setTimeout(
+      () => this.useFallbackStyle("no answer within the time limit"),
+      STYLE_LOAD_TIMEOUT_MS,
+    );
+
+    whenStyleReady(map)
+      .then(() => {
+        // A style that arrives after destroy() finds `mapReady` settled and
+        // nobody to add the layers for
+        if (this.destroyed) return;
+        this.clearStyleTimer();
+        this.styleLoaded = true;
+        addDataLayers(map);
+        for (const handle of this.layerHandles) handle.attach(map);
+        this.resolveMapReady(map);
+      })
+      // A layer the style refuses throws in here. `initialize` waits for
+      // `mapReady`, so without this it would wait forever and the page would
+      // show an empty map with no word of why.
+      .catch((error: unknown) => this.rejectMapReady(error));
 
     this.airportLayer.setVisible(this.airportsVisible);
   }
@@ -612,11 +682,29 @@ export class MapApp {
       logError(`Map error: ${message}`);
       return;
     }
-    logError(`Base map style failed to load: ${message}`);
+    this.useFallbackStyle(message);
+  };
+
+  /**
+   * Give up on the base style and draw the flights on a plain background.
+   * `setStyle` also cancels the request that is still out, so a late answer
+   * cannot replace the style the data layers were added to.
+   */
+  private useFallbackStyle(reason: string): void {
+    if (this.styleLoaded || !this.map) return;
+    logError(`Base map style failed to load: ${reason}`);
+    this.clearStyleTimer();
     // Set before the call: a second failure must not swap again
     this.styleLoaded = true;
     this.map.setStyle(FALLBACK_STYLE, { diff: false });
-  };
+  }
+
+  private clearStyleTimer(): void {
+    if (this.styleTimer !== null) {
+      clearTimeout(this.styleTimer);
+      this.styleTimer = null;
+    }
+  }
 
   /**
    * The store drives the toggle buttons and the colour legends: initial
@@ -834,10 +922,18 @@ export class MapApp {
    * The one click handler of the map. Paths are pixels of a layer, not
    * objects with listeners of their own, so what a click means is decided
    * here: a flight under the pointer, or the map beside every flight.
-   * Markers are DOM on top of the map and keep their clicks to themselves
-   * (they stop the event), or every click on one would arrive here as well.
+   * Markers are DOM on top of the map, and MapLibre reports a click on one
+   * as a click on the map. The app's markers stop theirs for the sake of
+   * their popups; one that does not is still no click on the map.
    */
   private handleMapClick(e: MapMouseEvent): void {
+    if (isOnMarker(e)) return;
+    // The overview of the Wrapped dialog is this map, and it takes gestures
+    // so it can be moved. A click there is none on the main map: it must
+    // not change the selection behind the dialog, nor open the values of a
+    // flight, whose popup would be a tab stop outside the dialog.
+    if (this.store.get("wrappedVisible")) return;
+
     const replay = this.replayState;
     if (replay.active) {
       // The colour layers are hidden during a replay; the only thing a
@@ -849,6 +945,10 @@ export class MapApp {
     }
 
     const hit = this.layerManager.hitTest(e.point);
+    // The tiles still show the data of before, so this may well be a click
+    // on a flight. Clearing the selection would throw away the user's work
+    // on a guess; doing nothing costs a second click at worst.
+    if (hit === "stale") return;
     if (hit) {
       this.layerManager.onPathClick(hit, e.lngLat);
       return;

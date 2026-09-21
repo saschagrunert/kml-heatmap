@@ -3,6 +3,7 @@ import {
   calculateDistance,
   calculateBearing,
   ddToDms,
+  toMapCenter,
   type Coordinate,
 } from "../../../../kml_heatmap/frontend/utils/geometry";
 
@@ -57,6 +58,40 @@ describe("geometry utilities", () => {
       const dist2 = calculateDistance(coord2, coord1);
 
       expect(dist1).toBeCloseTo(dist2, 6);
+    });
+  });
+
+  describe("toMapCenter", () => {
+    it("takes every place on the globe, the edges included", () => {
+      expect(toMapCenter({ lat: 50, lng: 8 })).toEqual({ lat: 50, lng: 8 });
+      expect(toMapCenter({ lat: 90, lng: -180 })).toEqual({
+        lat: 90,
+        lng: -180,
+      });
+      expect(toMapCenter({ lat: -90, lng: 180 })).toEqual({
+        lat: -90,
+        lng: 180,
+      });
+    });
+
+    it("wraps a longitude of another copy of the world", () => {
+      expect(toMapCenter({ lat: 50, lng: 190 })).toEqual({
+        lat: 50,
+        lng: -170,
+      });
+      expect(toMapCenter({ lat: 50, lng: -200 })).toEqual({
+        lat: 50,
+        lng: 160,
+      });
+      expect(toMapCenter({ lat: 50, lng: 728 })!.lng).toBeCloseTo(8, 9);
+    });
+
+    it("refuses what is off the globe or not a number", () => {
+      expect(toMapCenter({ lat: 90.01, lng: 8 })).toBeNull();
+      expect(toMapCenter({ lat: NaN, lng: 8 })).toBeNull();
+      expect(toMapCenter({ lat: 50, lng: Infinity })).toBeNull();
+      expect(toMapCenter({ lat: "50", lng: 8 })).toBeNull();
+      expect(toMapCenter({ lat: 50, lng: undefined })).toBeNull();
     });
   });
 

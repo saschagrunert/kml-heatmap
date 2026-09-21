@@ -251,13 +251,20 @@ export interface PathHit {
 }
 
 /**
+ * A flight, the empty map (null), or "stale": the only flights found under
+ * the point were cut from data that has been replaced since, and whether a
+ * flight is there cannot be told until the tiles have caught up.
+ */
+export type PathHitResult = PathHit | "stale" | null;
+
+/**
  * What MapApp's click dispatcher asks of the layer manager. Paths are pixels
  * of a map layer and have no click listeners of their own, so the map's one
  * click handler asks what is under the pointer and hands a hit back.
  */
 export interface PathHitTester {
-  /** The flight drawn at `point` (container pixels), or null */
-  hitTest(point: Point): PathHit | null;
+  /** The flight drawn at `point` (container pixels), null or "stale" */
+  hitTest(point: Point): PathHitResult;
   /** Act on a click that hit a flight; `lngLat` is where it landed */
   onPathClick(hit: PathHit, lngLat: LngLat): void;
 }

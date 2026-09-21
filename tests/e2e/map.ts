@@ -47,14 +47,34 @@ export function mapMarkers(page: Page): Locator {
   return page.locator(".maplibregl-marker");
 }
 
-/** What holds the markers, and is made inert while a dialog covers the map */
-export function markerContainer(page: Page): Locator {
-  return page.locator("#map .maplibregl-canvas-container");
+/**
+ * Whether the markers are out of reach of the keyboard and the pointer, as
+ * they are while a dialog takes the map over. Every marker has to agree, and
+ * there has to be one: a page without markers would pass either way.
+ */
+export async function expectMarkersInert(
+  page: Page,
+  inert: boolean,
+): Promise<void> {
+  const markers = page.locator("#map .maplibregl-marker");
+  expect(await markers.count(), "markers on the map").toBeGreaterThan(0);
+  await expect
+    .poll(() =>
+      markers.evaluateAll((elements) => [
+        ...new Set(elements.map((element) => element.hasAttribute("inert"))),
+      ]),
+    )
+    .toEqual([inert]);
 }
 
 /** An open popup, frame and all; the hover tooltip of a path is not one */
 export function mapPopup(page: Page): Locator {
   return page.locator(".maplibregl-popup:not(.segment-tooltip)");
+}
+
+/** The button that closes an open popup */
+export function mapPopupCloseButton(page: Page): Locator {
+  return mapPopup(page).locator(".maplibregl-popup-close-button");
 }
 
 /** The content of an open popup */
@@ -64,7 +84,7 @@ export function mapPopupContent(page: Page): Locator {
 
 /** The details of a segment: a tooltip under a mouse, a popup under a finger */
 export function segmentDetails(page: Page): Locator {
-  return page.locator(".segment-tooltip .maplibregl-popup-content");
+  return page.locator(".segment-details .maplibregl-popup-content");
 }
 
 /* ==========================================================================
@@ -116,6 +136,17 @@ export function getCenter(page: Page): Promise<{ lat: number; lng: number }> {
     const { lat, lng } = window.mapApp!.map!.getCenter();
     return { lat, lng };
   });
+}
+
+/**
+ * Turn the wheel over the middle of the map, the way a user zooms in. The
+ * zoom starts a frame later, so the caller polls `getZoom` for the answer.
+ */
+export async function wheelZoomIn(page: Page): Promise<void> {
+  const box = await mapSurface(page).boundingBox();
+  if (!box) throw new Error("the map is not on the page");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -400);
 }
 
 /** Zoom around the centre without animating, and wait until the map is there */
@@ -338,19 +369,54 @@ export function pathWeights(page: Page, layer: ColorLayer): Promise<number[]> {
   );
 }
 
-/** Whether the heatmap is on the map right now */
-export function heatmapOnMap(page: Page): Promise<boolean> {
-  return page.evaluate(() => window.mapApp!.heatmapLayer.isVisible());
+/**
+ * Whether the layers of a handle are shown, read from the map and not from
+ * the handle: a handle that wrote to the wrong layer would still call itself
+ * visible. A handle with some layers shown and some hidden is broken either
+ * way, and throws.
+ */
+function layersOnMap(
+  page: Page,
+  handle: "heatmapLayer" | "aviationLayer",
+): Promise<boolean> {
+  return page.evaluate((name) => {
+    const app = window.mapApp!;
+    const map = app.map!;
+    const ids = app[name].ids;
+    const shown = ids.filter((id) => {
+      if (!map.getLayer(id)) throw new Error(`no layer "${id}" on the map`);
+      // Unset means visible, the default of the style
+      return map.getLayoutProperty(id, "visibility") !== "none";
+    });
+    if (shown.length !== 0 && shown.length !== ids.length) {
+      throw new Error(
+        `${name}: only ${shown.join(", ")} of ${ids.join(", ")} shown`,
+      );
+    }
+    return ids.length > 0 && shown.length === ids.length;
+  }, handle);
 }
 
-/** Whether the airport markers are on the map right now */
+/** Whether the heatmap is on the map right now */
+export function heatmapOnMap(page: Page): Promise<boolean> {
+  return layersOnMap(page, "heatmapLayer");
+}
+
+/**
+ * Whether the airport markers are on the map right now. They are DOM, and
+ * what hides them all is a class on the map (AIRPORTS_HIDDEN_CLASS in
+ * mapLayers.ts), with a rule of the stylesheet behind it.
+ */
 export function airportsOnMap(page: Page): Promise<boolean> {
-  return page.evaluate(() => window.mapApp!.airportLayer.isVisible());
+  return page.evaluate(
+    () =>
+      !window.mapApp!.map!.getContainer().classList.contains("airports-hidden"),
+  );
 }
 
 /** Whether the aviation overlay is on the map right now */
 export function aviationOnMap(page: Page): Promise<boolean> {
-  return page.evaluate(() => window.mapApp!.aviationLayer.isVisible());
+  return layersOnMap(page, "aviationLayer");
 }
 
 /** How strongly the heatmap is drawn, from 0 to 1 */

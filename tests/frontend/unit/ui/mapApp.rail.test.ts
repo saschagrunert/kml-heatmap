@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import {
   cartoTransformRequest,
   FALLBACK_STYLE,
+  STYLE_LOAD_TIMEOUT_MS,
   FEATURES_UNAVAILABLE_MESSAGE,
   MapApp,
 } from "../../../../kml_heatmap/frontend/mapApp";
@@ -573,6 +574,54 @@ describe("MapApp controls and map", () => {
       expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
     });
 
+    it("leaves the selection alone while the tiles cannot tell what was clicked", async () => {
+      await initializeApp(app);
+      app.selectedPathIds.add(1);
+      mockLayerManagerInstance.hitTest.mockReturnValue("stale");
+
+      mockMap(app).emit("click", click);
+
+      expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+      expect(mockLayerManagerInstance.onPathClick).not.toHaveBeenCalled();
+    });
+
+    it("does nothing for a click on the overview of the Wrapped dialog", async () => {
+      // The dialog shows this map and leaves its gestures on, so the
+      // overview can be moved; a click there must not act behind the modal
+      await initializeApp(app);
+      app.selectedPathIds.add(1);
+      mockLayerManagerInstance.hitTest.mockReturnValue({
+        pathId: 2,
+        segment: { path_id: 2 },
+      });
+      app.store.set("wrappedVisible", true);
+
+      mockMap(app).emit("click", click);
+
+      expect(mockLayerManagerInstance.hitTest).not.toHaveBeenCalled();
+      expect(mockLayerManagerInstance.onPathClick).not.toHaveBeenCalled();
+      expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+
+      app.store.set("wrappedVisible", false);
+      mockMap(app).emit("click", click);
+      expect(mockLayerManagerInstance.onPathClick).toHaveBeenCalledTimes(1);
+    });
+
+    it("takes a click on a marker that did not stop it for none on the map", async () => {
+      await initializeApp(app);
+      app.selectedPathIds.add(1);
+      const marker = document.createElement("button");
+      marker.className = "maplibregl-marker";
+      mockMap(app).getCanvasContainer().append(marker);
+      const originalEvent = new MouseEvent("click", { bubbles: true });
+      marker.dispatchEvent(originalEvent);
+
+      mockMap(app).emit("click", { ...click, originalEvent });
+
+      expect(mockLayerManagerInstance.hitTest).not.toHaveBeenCalled();
+      expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+    });
+
     it("closes the airplane popup during replay instead of clearing", async () => {
       await initializeApp(app);
       app.selectedPathIds.add(1);
@@ -725,6 +774,70 @@ describe("MapApp controls and map", () => {
       expect(m.mockDataManagerInstance.loadAirports).toHaveBeenCalled();
     });
 
+    it("fails the start-up when a layer cannot be added, and does not hang", async () => {
+      mockControl.autoLoadStyle = false;
+      const pending = initializeApp(app);
+      await Promise.resolve();
+      mockMap(app).addLayer.mockImplementationOnce(() => {
+        throw new Error("layer refused");
+      });
+
+      mockMap(app).finishStyleLoad();
+
+      await expect(pending).rejects.toThrow("layer refused");
+      await expect(app.mapReady).rejects.toThrow("layer refused");
+      expect(m.mockDataManagerInstance.loadAirports).not.toHaveBeenCalled();
+    });
+
+    it("takes the app down when the layers cannot be added", async () => {
+      mockControl.autoLoadStyle = false;
+      const pending = initializeApp(app);
+      await Promise.resolve();
+      const map = mockMap(app);
+      map.addLayer.mockImplementationOnce(() => {
+        throw new Error("layer refused");
+      });
+      const signal = app.signal;
+
+      map.finishStyleLoad();
+      await expect(pending).rejects.toThrow("layer refused");
+
+      // The controls were bound before the start-up: none of them may go
+      // on acting on a map without layers
+      expect(signal.aborted).toBe(true);
+      expect(m.mockLayerManagerInstance.destroy).toHaveBeenCalled();
+      expect(map.remove).toHaveBeenCalledTimes(1);
+      expect(app.map).toBeNull();
+    });
+
+    it("stops quietly when destroyed while the style request hangs", async () => {
+      mockControl.autoLoadStyle = false;
+      const pending = initializeApp(app);
+      await Promise.resolve();
+
+      app.destroy();
+
+      // Settled without the style ever arriving, and not as a failure
+      await expect(pending).resolves.toBeUndefined();
+      await expect(app.mapReady).rejects.toThrow("destroyed");
+      expect(m.mockDataManagerInstance.loadAirports).not.toHaveBeenCalled();
+    });
+
+    it("adds no layers for a style that arrives after destroy", async () => {
+      mockControl.autoLoadStyle = false;
+      const pending = initializeApp(app);
+      await Promise.resolve();
+      const map = mockMap(app);
+      app.destroy();
+      await pending;
+
+      map.finishStyleLoad();
+      await Promise.resolve();
+
+      expect(map.addSource).not.toHaveBeenCalled();
+      expect(map.addLayer).not.toHaveBeenCalled();
+    });
+
     it("remembers a visibility asked for before the style has loaded", async () => {
       mockControl.autoLoadStyle = false;
       const pending = initializeApp(app);
@@ -779,6 +892,68 @@ describe("MapApp controls and map", () => {
         "aviation",
       ]);
       expect(m.mockDataManagerInstance.loadAirports).toHaveBeenCalled();
+    });
+
+    it("falls back when the base style neither loads nor fails", async () => {
+      // A captive portal or a half-open connection fires no event at all;
+      // the flights used to wait for the browser to give up on the request
+      vi.useFakeTimers();
+      try {
+        mockControl.autoLoadStyle = false;
+        const pending = initializeApp(app);
+        await Promise.resolve();
+        const map = mockMap(app);
+
+        await vi.advanceTimersByTimeAsync(STYLE_LOAD_TIMEOUT_MS - 1);
+        expect(map.setStyle).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+
+        expect(map.setStyle).toHaveBeenCalledExactlyOnceWith(FALLBACK_STYLE, {
+          diff: false,
+        });
+        expect(logError).toHaveBeenCalledWith(
+          "Base map style failed to load: no answer within the time limit",
+        );
+        // An error arriving after that must not swap a second time
+        map.emit("error", { error: new Error("Failed to fetch") });
+        expect(map.setStyle).toHaveBeenCalledTimes(1);
+
+        map.finishStyleLoad(FALLBACK_STYLE);
+        await pending;
+        expect(m.mockDataManagerInstance.loadAirports).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("leaves a style that loaded in time alone", async () => {
+      vi.useFakeTimers();
+      try {
+        await initializeApp(app);
+
+        await vi.advanceTimersByTimeAsync(STYLE_LOAD_TIMEOUT_MS * 2);
+
+        expect(mockMap(app).setStyle).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not fall back once the app is gone", async () => {
+      vi.useFakeTimers();
+      try {
+        mockControl.autoLoadStyle = false;
+        void initializeApp(app);
+        await Promise.resolve();
+        const map = mockMap(app);
+
+        app.destroy();
+        await vi.advanceTimersByTimeAsync(STYLE_LOAD_TIMEOUT_MS);
+
+        expect(map.setStyle).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("logs what fails later and keeps the style", async () => {

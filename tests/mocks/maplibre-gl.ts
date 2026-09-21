@@ -246,12 +246,22 @@ function toMockLayer(layer: Record<string, unknown>): MockLayer {
   };
 }
 
-function mockHandler(): { enable: Mock; disable: Mock; isEnabled: Mock } {
+/**
+ * A gesture handler. `isActive` answers false, no gesture being under way,
+ * until a test says otherwise with `mockReturnValue`.
+ */
+function mockHandler(): {
+  enable: Mock;
+  disable: Mock;
+  isEnabled: Mock;
+  isActive: Mock<() => boolean>;
+} {
   let enabled = true;
   return {
     enable: vi.fn(() => (enabled = true)),
     disable: vi.fn(() => (enabled = false)),
     isEnabled: vi.fn(() => enabled),
+    isActive: vi.fn(() => false),
   };
 }
 
@@ -318,10 +328,10 @@ export class Map
   readonly controls: { control: unknown; position: string | undefined }[] = [];
   /** What `queryRenderedFeatures` answers; a test sets it */
   renderedFeatures: unknown[] = [];
-  /** Mirrors the real `map.style._loaded`, which `whenStyleReady` reads */
-  style: { _loaded: boolean } = { _loaded: false };
   removed = false;
 
+  /** Whether the style has loaded; sources and layers need one */
+  private styleLoaded = false;
   private zoom: number;
   private center: LngLat;
   private readonly container: HTMLElement;
@@ -367,7 +377,7 @@ export class Map
   }
 
   private loadStyle(style: unknown): void {
-    this.style = { _loaded: false };
+    this.styleLoaded = false;
     for (const id of Object.keys(this.sources)) delete this.sources[id];
     this.layers = [];
     if (!mockControl.autoLoadStyle) return;
@@ -384,7 +394,7 @@ export class Map
           )
         : URL_STYLE_LAYERS.map((layer) => ({ ...layer }));
     this.layers = layers;
-    this.style._loaded = true;
+    this.styleLoaded = true;
     this.emit("style.load");
     this.emit("load");
   }
@@ -404,7 +414,7 @@ export class Map
   }
 
   addSource = vi.fn((id: string, spec: Record<string, unknown>) => {
-    if (!this.style._loaded) throw new Error("Style is not done loading.");
+    if (!this.styleLoaded) throw new Error("Style is not done loading.");
     if (this.sources[id]) throw new Error(`Source "${id}" already exists.`);
     const source: MockSource = {
       id,
@@ -428,7 +438,7 @@ export class Map
   });
 
   addLayer = vi.fn((layer: Record<string, unknown>, beforeId?: string) => {
-    if (!this.style._loaded) throw new Error("Style is not done loading.");
+    if (!this.styleLoaded) throw new Error("Style is not done loading.");
     const id = layer["id"] as string;
     if (this.layers.some((l) => l.id === id)) {
       throw new Error(`Layer "${id}" already exists on this map.`);
@@ -505,8 +515,8 @@ export class Map
     return this;
   });
 
-  isStyleLoaded = vi.fn(() => this.style._loaded);
-  loaded = vi.fn(() => this.style._loaded);
+  isStyleLoaded = vi.fn(() => this.styleLoaded);
+  loaded = vi.fn(() => this.styleLoaded);
 
   getZoom = vi.fn(() => this.zoom);
   setZoom = vi.fn((zoom: number) => {

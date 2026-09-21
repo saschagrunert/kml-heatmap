@@ -11,6 +11,7 @@ import {
   encodeStateToUrl,
   parseUrlParams,
 } from "../state/urlState";
+import { toMapCenter } from "../utils/geometry";
 import { mapZoomToState } from "../utils/mapHelpers";
 
 const STORAGE_KEY = "kml-heatmap-state";
@@ -62,15 +63,12 @@ export function sanitizeSavedState(candidate: unknown): SavedState {
   if (typeof zoom === "number" && isFinite(zoom)) {
     result.zoom = zoom;
   }
+  // The rule of the links (parseUrlParams): a centre the map cannot take is
+  // dropped and the rest of the state kept, here and in `loadMapState`
   const center = candidate["center"];
-  if (
-    isRecord(center) &&
-    typeof center["lat"] === "number" &&
-    isFinite(center["lat"]) &&
-    typeof center["lng"] === "number" &&
-    isFinite(center["lng"])
-  ) {
-    result.center = { lat: center["lat"], lng: center["lng"] };
+  if (isRecord(center)) {
+    const point = toMapCenter({ lat: center["lat"], lng: center["lng"] });
+    if (point) result.center = point;
   }
   for (const key of BOOLEAN_KEYS) {
     const value = candidate[key];
@@ -184,9 +182,10 @@ export class StateManager {
       center: this.app.map.getCenter(),
       zoom: this.app.map.getZoom(),
     };
-    // Panning across the antimeridian takes the longitude past 180, which
-    // a link cannot carry (parseUrlParams rejects it); the wrapped one is
-    // the same place. Only then: the wrap adds rounding noise to any value.
+    // Panning across the antimeridian takes the longitude past 180. The
+    // wrapped one is the same place, and what a link is expected to carry
+    // (a reader wraps one that is not, as builds before this one saved it).
+    // Only then: the wrap adds rounding noise to any value.
     const { lat, lng } = view.center;
     const center: MapCenter =
       Math.abs(lng) > 180
@@ -238,12 +237,11 @@ export class StateManager {
       if (saved) {
         const parsed: unknown = JSON.parse(saved);
         const state = sanitizeSavedState(parsed);
-        // A persisted map state always carries a view; treat anything else
-        // as corrupt
-        if (state.center && state.zoom !== undefined) {
-          return state;
-        }
-        return null;
+        // A view that did not survive the check is no reason to lose the
+        // year, the selection and the layers saved with it: without a centre
+        // the map opens on the bounds of the data, as it does without any
+        // saved state. Only an entry nothing is left of counts as corrupt.
+        return Object.keys(state).length > 0 ? state : null;
       }
     } catch (_e) {
       // Silently fail if localStorage is not available or data is corrupt

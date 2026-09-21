@@ -408,22 +408,50 @@ describe("WrappedManager dialog", () => {
       expect(document.activeElement).toBe(tab);
     });
 
-    it("takes the canvas and the airport markers out of the tab order while open", () => {
-      // MapLibre keeps the markers inside the canvas container, so the one
-      // attribute covers the canvas (tabbable itself) and every marker
+    it("takes the airport markers out of the tab order while open, and only them", () => {
+      // MapLibre listens on the canvas container for every drag, pinch and
+      // wheel. Inert, it would freeze the overview map of the dialog.
       const canvasContainer = mockApp.map!.getCanvasContainer();
-      const marker = document.createElement("button");
-      marker.className = "maplibregl-marker";
-      canvasContainer.appendChild(marker);
+      const markers = [0, 1].map(() => {
+        const marker = document.createElement("button");
+        marker.className = "maplibregl-marker";
+        canvasContainer.appendChild(marker);
+        return marker;
+      });
       expect(el("map").contains(canvasContainer)).toBe(true);
 
       openWrapped();
-      expect(canvasContainer.hasAttribute("inert")).toBe(true);
-      expect(marker.closest("[inert]")).toBe(canvasContainer);
+      for (const marker of markers) {
+        expect(marker.hasAttribute("inert")).toBe(true);
+      }
+      expect(canvasContainer.hasAttribute("inert")).toBe(false);
+      expect(mockApp.map!.getCanvas().closest("[inert]")).toBeNull();
       expect(el("map").hasAttribute("inert")).toBe(false);
 
       wrappedManager.closeWrapped();
-      expect(canvasContainer.hasAttribute("inert")).toBe(false);
+      for (const marker of markers) {
+        expect(marker.hasAttribute("inert")).toBe(false);
+      }
+    });
+
+    it("puts away the values a hover or a tap left on a flight", () => {
+      // The popup of a tapped flight has a close button: a tab stop below
+      // #map, which the observer of the body's children never sees
+      openWrapped();
+
+      expect(mockApp.layerManager.closeSegmentPopup).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves a marker alone that was inert before the dialog opened", () => {
+      const marker = document.createElement("button");
+      marker.className = "maplibregl-marker";
+      marker.setAttribute("inert", "");
+      mockApp.map!.getCanvasContainer().appendChild(marker);
+
+      openWrapped();
+      wrappedManager.closeWrapped();
+
+      expect(marker.hasAttribute("inert")).toBe(true);
     });
 
     it("closes an open airport popup before the dialog covers the map", () => {

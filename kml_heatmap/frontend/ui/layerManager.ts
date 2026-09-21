@@ -40,6 +40,7 @@ import type { Range } from "../state/store";
 import type {
   KMLDataset,
   PathHit,
+  PathHitResult,
   PathHitTester,
   PathInfo,
   PathLayerEntry,
@@ -51,7 +52,12 @@ import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
-import { toLngLat, type LngLatTuple } from "../utils/mapHelpers";
+import {
+  isOnMarker,
+  toLngLat,
+  type LatLon,
+  type LngLatTuple,
+} from "../utils/mapHelpers";
 import { datasetIndex } from "../calculations/datasetIndex";
 import {
   segmentRangesFor,
@@ -65,6 +71,9 @@ import {
   formatAirspeedLabel,
   formatAltitudeLabel,
 } from "../features/layers";
+
+/** The look the hover tooltip and the tapped popup share (styles.css) */
+const SEGMENT_DETAILS_CLASS = "segment-details";
 
 export type LayerMode = "altitude" | "airspeed";
 
@@ -203,16 +212,28 @@ function hiddenInMain(pathId: number, shown: ShownSelection): boolean {
   return shown.isolate || shown.selected.has(pathId);
 }
 
-/** Distance in pixels between a point of the map and a drawn segment */
+/**
+ * Distance in pixels between a point of the map and a drawn segment.
+ *
+ * `project` answers for the longitude it is given and does not wrap it, so
+ * a segment lands in the copy of the world its data names, however far from
+ * the pointer that is. `worlds` is how many copies east of it the pointer
+ * is; the segment is projected into that one, where it was hit.
+ */
 function pixelDistance(
   map: MapLibreMap,
   point: Point,
   segment: PathSegment,
+  worlds: number,
 ): number {
   const coords = segment.coords;
   if (!coords) return Infinity;
-  const a = map.project(toLngLat(coords[0]));
-  const b = map.project(toLngLat(coords[1]));
+  const inPointerWorld = (latLon: LatLon): Point => {
+    const [lng, lat] = toLngLat(latLon);
+    return map.project([lng + 360 * worlds, lat]);
+  };
+  const a = inPointerWorld(coords[0]);
+  const b = inPointerWorld(coords[1]);
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const lengthSquared = dx * dx + dy * dy;
@@ -250,6 +271,12 @@ export class LayerManager implements PathHitTester {
   private touchPopup: Popup | null = null;
 
   private readonly handleMouseMove = (e: MapMouseEvent): void => {
+    // A marker lies on top of the flights. The map reports `mouseout` as
+    // the pointer comes onto one, and goes on reporting its moves there.
+    if (isOnMarker(e)) {
+      this.handleMouseOut();
+      return;
+    }
     this.lastPoint = e.point;
     // A pointer moves many times per frame, and a query walks the tiles
     this.hoverFrame ??= requestAnimationFrame(() => {
@@ -270,10 +297,25 @@ export class LayerManager implements PathHitTester {
     if (app.map) {
       this.listen(app.map);
     } else {
-      void app.mapReady.then(() => {
-        if (!this.destroyed && app.map) this.listen(app.map);
+      this.whenMapReady(() => {
+        if (app.map) this.listen(app.map);
       });
     }
+  }
+
+  /**
+   * Run `onReady` once the map has its sources, unless the manager
+   * is gone by then. A map that never gets ready is no business of this
+   * class: `initialize()` reports it and takes the app down. `onNever` is
+   * for state that would otherwise keep waiting.
+   */
+  private whenMapReady(
+    onReady: () => void,
+    onNever: () => void = () => {},
+  ): void {
+    void this.app.mapReady.then(() => {
+      if (!this.destroyed) onReady();
+    }, onNever);
   }
 
   private listen(map: MapLibreMap): void {
@@ -363,12 +405,16 @@ export class LayerManager implements PathHitTester {
     this.pendingModes.add(mode);
     if (this.waitingForMap) return;
     this.waitingForMap = true;
-    void this.app.mapReady.then(() => {
+    const stopWaiting = (): LayerMode[] => {
       this.waitingForMap = false;
       const pending = [...this.pendingModes];
       this.pendingModes.clear();
+      return pending;
+    };
+    this.whenMapReady(() => {
+      const pending = stopWaiting();
       // Without the sources even now there is nothing to wait for
-      if (this.destroyed || !this.readyMap()) return;
+      if (!this.readyMap()) return;
       for (const pendingMode of pending) {
         if (this.state[pendingMode].segments) {
           this.redrawPaths(this.getConfig(pendingMode));
@@ -376,15 +422,17 @@ export class LayerManager implements PathHitTester {
           this.clearLayer(pendingMode);
         }
       }
-    });
+    }, stopWaiting);
   }
 
   /**
    * The flight drawn at a point of the map, or null beside every flight.
-   * Part of the contract with MapApp's click dispatcher, and what the hover
-   * runs on.
+   * Right after a `setData` the tiles may hold nothing but flights of the
+   * data before it: that is "stale", neither a flight nor the empty map,
+   * and a caller should leave things as they are. Part of the contract
+   * with MapApp's click dispatcher, and what the hover runs on.
    */
-  hitTest(point: Point): PathHit | null {
+  hitTest(point: Point): PathHitResult {
     const map = this.readyMap();
     if (!map) return null;
 
@@ -408,8 +456,15 @@ export class LayerManager implements PathHitTester {
     );
     if (features.length === 0) return null;
 
-    const lngLat = map.unproject(point);
+    // World copies are drawn, and a point in one of them is 360 degrees
+    // away from the segments, which would all be equally far. Both
+    // measures below need it: the search in degrees takes the wrapped
+    // position, the ranking in pixels the number of worlds between them.
+    const pointer = map.unproject(point);
+    const lngLat = pointer.wrap();
+    const worlds = Math.round((pointer.lng - lngLat.lng) / 360);
     const seen = new Set<Run>();
+    let stale = false;
     let best: PathHit | null = null;
     let bestDistance = Infinity;
     let bestSelected = false;
@@ -422,7 +477,11 @@ export class LayerManager implements PathHitTester {
       const { r, g } = feature.properties as Partial<PathRunProperties>;
       // Tiles cut from the data before the last `setData` still answer for
       // a while, with indices into a table that is gone
-      if (g !== table.g || r === undefined) continue;
+      if (g !== table.g) {
+        stale = true;
+        continue;
+      }
+      if (r === undefined) continue;
       const run = table.runs[r];
       // A run crossing a tile border comes back once per tile
       if (!run || seen.has(run)) continue;
@@ -446,7 +505,7 @@ export class LayerManager implements PathHitTester {
         lngLat.lng,
       );
       if (!segment) continue;
-      const distance = pixelDistance(map, point, segment);
+      const distance = pixelDistance(map, point, segment, worlds);
       const isSelected = set === "selected";
       if (
         distance < bestDistance ||
@@ -457,7 +516,7 @@ export class LayerManager implements PathHitTester {
         bestSelected = isSelected;
       }
     }
-    return best;
+    return best ?? (stale ? "stale" : null);
   }
 
   /**
@@ -471,7 +530,9 @@ export class LayerManager implements PathHitTester {
       // the next tap on the map closes them
       this.touchPopup?.remove();
       this.touchPopup = new Popup({
-        className: "segment-tooltip",
+        // Not the tooltip's class: that one takes no pointer events, and
+        // this popup has a close button to press
+        className: `${SEGMENT_DETAILS_CLASS} segment-popup`,
         maxWidth: "none",
         focusAfterOpen: false,
       })
@@ -498,10 +559,19 @@ export class LayerManager implements PathHitTester {
   private hover(): void {
     const map = this.app.map;
     const point = this.lastPoint;
+    // Not over the overview of the Wrapped dialog either: it is this map,
+    // but there to be looked at, and MapApp ignores clicks on it as well
     const hit =
-      map && point && !this.destroyed && !isTouchDevice()
+      map &&
+      point &&
+      !this.destroyed &&
+      !isTouchDevice() &&
+      !this.app.store.get("wrappedVisible")
         ? this.hitTest(point)
         : null;
+    // The flight under the pointer may well still be there; the look on
+    // idle that follows every redraw decides, with tiles that can tell
+    if (hit === "stale") return;
     if (!map || !point || !hit) {
       this.hideTooltip();
       return;
@@ -511,7 +581,7 @@ export class LayerManager implements PathHitTester {
       closeButton: false,
       closeOnClick: false,
       focusAfterOpen: false,
-      className: "segment-tooltip",
+      className: `${SEGMENT_DETAILS_CLASS} segment-tooltip`,
       maxWidth: "none",
       offset: TOOLTIP_OFFSET_PX,
     }));
