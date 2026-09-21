@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, type Locator, type Page } from "./fixtures";
 import {
   activateReplay,
   attachErrorCollectors,
@@ -10,12 +10,85 @@ import {
   usesMobileBar,
 } from "./helpers";
 import {
+  airportMarkerIsFocused,
   attributionControl,
+  centerOnAirport,
+  focusAirportMarker,
+  getZoom,
   mapMarkers,
+  mapPopup,
   mapSurface,
   waitForMapReady,
+  watchPopupRemovals,
   zoomControl,
 } from "./map";
+
+/**
+ * Two airports with flights, as far apart as the data allows, so that the
+ * popup of one never covers the marker of the other
+ */
+async function twoAirports(page: Page): Promise<[string, string]> {
+  await page.waitForFunction(
+    () => Object.keys(window.mapApp?.airportToPaths ?? {}).length > 1,
+  );
+  return page.evaluate(() => {
+    const app = window.mapApp!;
+    const names = Object.keys(app.airportToPaths).filter(
+      (name) => app.airportMarkers[name],
+    );
+    const at = (name: string) => app.airportMarkers[name]!.getLatLng();
+    const first = names[0]!;
+    const distance = (name: string) =>
+      Math.hypot(at(name).lat - at(first).lat, at(name).lng - at(first).lng);
+    const far = names.reduce((a, b) => (distance(b) > distance(a) ? b : a));
+    return [first, far];
+  });
+}
+
+/** Longer than the double tap time of Chrome (300 ms) and Safari */
+const DOUBLE_TAP_MS = 500;
+
+/**
+ * Two taps on an element that the browser counts as a double tap. Chromium
+ * is handed both at once with the times they happen at, so the gap between
+ * them is the one given and not how long the page took over the first; that
+ * made it a single tap now and then. Other engines get two taps in a row.
+ */
+async function doubleTap(
+  page: Page,
+  target: Locator,
+  browserName: string,
+): Promise<void> {
+  const box = (await target.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  if (browserName !== "chromium") {
+    await page.touchscreen.tap(x, y);
+    await page.touchscreen.tap(x, y);
+    return;
+  }
+  const cdp = await page.context().newCDPSession(page);
+  const start = Date.now() / 1000;
+  const steps = [
+    ["touchStart", 0],
+    ["touchEnd", 0.05],
+    ["touchStart", 0.15],
+    ["touchEnd", 0.2],
+  ] as const;
+  for (const [type, at] of steps) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type,
+      touchPoints: type === "touchStart" ? [{ x, y }] : [],
+      timestamp: start + at,
+    });
+  }
+  await cdp.detach();
+}
+
+/** An airport's marker, a button named after the airport */
+function airportMarker(page: Page, name: string): Locator {
+  return page.getByRole("button", { name, exact: true });
+}
 
 test.describe("Core", () => {
   test.beforeEach(async ({ page }) => {
@@ -291,6 +364,113 @@ test.describe("Core", () => {
       "https://github.com/saschagrunert/kml-heatmap",
     );
     await expect(link).toHaveAttribute("aria-label", "View on GitHub");
+  });
+
+  test.describe("Airport popup", () => {
+    /**
+     * A tap on a touch screen, a click everywhere else. The browser counts a
+     * tap that follows another within its double tap time as the second of
+     * a double tap, which the marker ignores on purpose (see the spec for
+     * it), so a tap waits that time out. It is the browser's clock the test
+     * has to get past; nothing on the page could be waited on instead.
+     */
+    async function activate(
+      page: Page,
+      marker: Locator,
+      hasTouch: boolean,
+    ): Promise<void> {
+      if (!hasTouch) {
+        await marker.click();
+        return;
+      }
+      await page.waitForTimeout(DOUBLE_TAP_MS);
+      await marker.tap();
+    }
+
+    test("a second activation of a marker closes its popup", async ({
+      page,
+      hasTouch,
+    }) => {
+      const [name] = await twoAirports(page);
+      await centerOnAirport(page, name, 10);
+      const marker = airportMarker(page, name);
+      await expect(marker).toHaveAttribute("aria-expanded", "false");
+
+      await activate(page, marker, hasTouch);
+      await expect(mapPopup(page)).toContainText(name);
+      await expect(marker).toHaveAttribute("aria-expanded", "true");
+
+      await activate(page, marker, hasTouch);
+      await expect(mapPopup(page)).toHaveCount(0);
+      await expect(marker).toHaveAttribute("aria-expanded", "false");
+    });
+
+    test("another airport takes the open popup over without closing it", async ({
+      page,
+      hasTouch,
+    }) => {
+      const [first, second] = await twoAirports(page);
+      await centerOnAirport(page, first, 10);
+      await activate(page, airportMarker(page, first), hasTouch);
+      await expect(mapPopup(page)).toContainText(first);
+      const removals = await watchPopupRemovals(page);
+
+      await centerOnAirport(page, second, 10);
+      await activate(page, airportMarker(page, second), hasTouch);
+
+      await expect(mapPopup(page)).toContainText(second);
+      expect(await removals()).toBe(0);
+      await expect(airportMarker(page, first)).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+      await expect(airportMarker(page, second)).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    });
+
+    test("a double click or double tap leaves the popup open", async ({
+      page,
+      hasTouch,
+      browserName,
+    }) => {
+      const [name] = await twoAirports(page);
+      await centerOnAirport(page, name, 10);
+      const marker = airportMarker(page, name);
+
+      if (hasTouch) {
+        await doubleTap(page, marker, browserName);
+      } else {
+        await marker.dblclick();
+      }
+
+      await expect(mapPopup(page)).toContainText(name);
+      await expect(marker).toHaveAttribute("aria-expanded", "true");
+      // Nor does it zoom the map
+      expect(await getZoom(page)).toBe(10);
+    });
+
+    test("Enter on the marker closes its popup, and focus stays there", async ({
+      page,
+    }) => {
+      const [name] = await twoAirports(page);
+      await centerOnAirport(page, name, 10);
+      await focusAirportMarker(page, name);
+      await page.keyboard.press("Enter");
+      await expect(mapPopup(page)).toContainText(name);
+
+      // Opened from the keyboard, the popup took focus; back to the marker
+      await focusAirportMarker(page, name);
+      await page.keyboard.press("Enter");
+
+      await expect(mapPopup(page)).toHaveCount(0);
+      expect(await airportMarkerIsFocused(page, name)).toBe(true);
+      await expect(airportMarker(page, name)).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
   });
 
   test.describe("Accessibility", () => {

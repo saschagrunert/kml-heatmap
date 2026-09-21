@@ -2,7 +2,11 @@
  * The layer handles, on the mock app every ported suite builds on.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { AIRPORTS_HIDDEN_CLASS } from "../../../kml_heatmap/frontend/mapLayers";
+import type { StyleSpecification } from "maplibre-gl";
+import {
+  AIRPORTS_HIDDEN_CLASS,
+  withDataLayers,
+} from "../../../kml_heatmap/frontend/mapLayers";
 import { HEATMAP_RADIUS_PX } from "../../../kml_heatmap/frontend/ui/dataManager";
 import {
   HEATMAP_CLUSTER,
@@ -133,5 +137,61 @@ describe("layer handles", () => {
     app.heatmapLayer.setVisible(true);
 
     expect(app.heatmapLayer.isVisible()).toBe(true);
+  });
+});
+
+describe("withDataLayers", () => {
+  const heat = { type: "geojson", data: "fixes", cluster: true } as const;
+  const previous: StyleSpecification = {
+    version: 8,
+    sources: { [MAP_SOURCES.heat]: heat },
+    layers: [
+      { id: "background", type: "background" },
+      { id: MAP_LAYERS.heat, type: "heatmap", source: MAP_SOURCES.heat },
+      { id: MAP_LAYERS.replayTrail, type: "line", source: MAP_SOURCES.heat },
+    ],
+  };
+
+  it("leaves a style alone that has none before it", () => {
+    const next: StyleSpecification = { version: 8, sources: {}, layers: [] };
+
+    expect(withDataLayers(undefined, next)).toBe(next);
+  });
+
+  it("goes on top of a style without labels, and leaves the old base behind", () => {
+    const next: StyleSpecification = {
+      version: 8,
+      glyphs: "https://example.test/{fontstack}/{range}.pbf",
+      sources: { base: { type: "raster", tiles: [] } },
+      layers: [{ id: "base", type: "raster", source: "base" }],
+    };
+
+    const style = withDataLayers(previous, next);
+
+    expect(style.layers.map((layer) => layer.id)).toEqual([
+      "base",
+      MAP_LAYERS.heat,
+      MAP_LAYERS.replayTrail,
+    ]);
+    expect(style.sources).toEqual({
+      base: next.sources["base"],
+      [MAP_SOURCES.heat]: heat,
+    });
+    // The source as it was, not a copy the map would take for a new one
+    expect(style.sources[MAP_SOURCES.heat]).toBe(heat);
+    expect(style.glyphs).toBe(next.glyphs);
+    expect(next.layers).toHaveLength(1);
+    expect(style.projection).toBeUndefined();
+  });
+
+  it("keeps the globe chosen before the base style arrived", () => {
+    const next: StyleSpecification = { version: 8, sources: {}, layers: [] };
+
+    const style = withDataLayers(
+      { ...previous, projection: { type: "globe" } },
+      next,
+    );
+
+    expect(style.projection).toEqual({ type: "globe" });
   });
 });

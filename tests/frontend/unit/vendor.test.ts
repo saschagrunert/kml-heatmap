@@ -13,6 +13,7 @@ import { join, posix } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   VENDOR_FILES,
+  VENDOR_MODULES,
   stripSourceMapComment,
 } from "../../../scripts/vendor.js";
 import { HTML_TO_IMAGE_URL } from "../../../kml_heatmap/frontend/ui/uiToggles";
@@ -226,7 +227,57 @@ describe("the page loads nothing from a third party", () => {
     expect(csp).not.toContain("jsdelivr");
   });
 
-  it("html-to-image is loaded from the site, not from a CDN", () => {
-    expect(HTML_TO_IMAGE_URL).toBe("./vendor/html-to-image.js");
+  it("html-to-image is imported from the site, not from a CDN", () => {
+    expect(HTML_TO_IMAGE_URL).toBe("./vendor/html-to-image.mjs");
+    expect(Object.keys(VENDOR_MODULES)).toContain(
+      posix.basename(HTML_TO_IMAGE_URL),
+    );
+  });
+});
+
+describe("vendored modules that are bundled from their package", () => {
+  const lock = JSON.parse(
+    readFileSync(join(REPO_ROOT, "package-lock.json"), "utf8"),
+  ) as { packages: Record<string, { version: string }> };
+
+  it.each(Object.entries(VENDOR_MODULES))(
+    "%s comes from a package that has a module entry point",
+    (_published, name) => {
+      const manifest = JSON.parse(
+        readFileSync(
+          join(REPO_ROOT, "node_modules", name, "package.json"),
+          "utf8",
+        ),
+      ) as { module?: string };
+
+      expect(
+        existsSync(join(REPO_ROOT, "node_modules", name, manifest.module!)),
+      ).toBe(true);
+    },
+  );
+
+  whenBuilt(
+    "each is one module that names its package, version and licence",
+    () => {
+      for (const [published, name] of Object.entries(VENDOR_MODULES)) {
+        const text = readFileSync(join(VENDOR_DIR, published), "utf8");
+        const { version } = lock.packages[`node_modules/${name}`]!;
+        expect(text.startsWith(`/* ${name} ${version}, MIT licence, `)).toBe(
+          true,
+        );
+        // One file: nothing left to import, and no map the site lacks. The
+        // lookbehind spares the CSS at-rule, which html-to-image handles.
+        expect(text).not.toMatch(/(?<![@\w.$])import\s*[{("'*]/);
+        expect(text).not.toContain("sourceMappingURL");
+      }
+    },
+  );
+
+  whenBuilt("html-to-image exports what the export uses", async () => {
+    const library = (await import(
+      /* @vite-ignore */ join(VENDOR_DIR, "html-to-image.mjs")
+    )) as Record<string, unknown>;
+
+    expect(library["toJpeg"]).toBeTypeOf("function");
   });
 });

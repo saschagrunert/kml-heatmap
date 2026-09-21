@@ -4,7 +4,8 @@
  */
 
 import { logDebug, logError } from "../utils/logger";
-import type { Coordinate } from "../utils/geometry";
+import { withTimeout } from "../utils/withTimeout";
+import type { YearDecoder } from "./yearDecoder";
 import type {
   KMLDataset,
   Airport,
@@ -12,8 +13,6 @@ import type {
   DataLoaderOptions,
   FetchJsonOptions,
   LoadingState,
-  PathSegment,
-  RawYearData,
 } from "../types";
 
 /**
@@ -84,15 +83,17 @@ function countBytes(
 }
 
 /**
- * Fetch and parse a JSON file of the site
+ * Fetch a file of the site and read its body
  * @param url - URL to load
  * @param options - Timeout and progress callback, see FetchJsonOptions
- * @returns The parsed contents
+ * @param read - Reads the body off the response, which may be a counted one
+ * @returns What `read` made of the body
  */
-export async function fetchJson(
+async function fetchBody<T>(
   url: string,
-  options: FetchJsonOptions = {},
-): Promise<unknown> {
+  options: FetchJsonOptions,
+  read: (response: Response) => Promise<T>,
+): Promise<T> {
   const { timeoutMs = LOAD_TIMEOUT_MS, onProgress } = options;
   const controller = new AbortController();
   // The timer spans the body as well: a response whose headers arrived can
@@ -105,9 +106,9 @@ export async function fetchJson(
     }
     // Counting is paid for only when somebody asked for the count
     if (!onProgress || !response.body || !("TransformStream" in globalThis)) {
-      return await response.json();
+      return await read(response);
     }
-    return await new Response(countBytes(response.body, onProgress)).json();
+    return await read(new Response(countBytes(response.body, onProgress)));
   } catch (error) {
     const reason = controller.signal.aborted
       ? "Timed out loading"
@@ -118,6 +119,59 @@ export async function fetchJson(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Fetch and parse a JSON file of the site
+ * @param url - URL to load
+ * @param options - Timeout and progress callback, see FetchJsonOptions
+ * @returns The parsed contents
+ */
+export function fetchJson(
+  url: string,
+  options: FetchJsonOptions = {},
+): Promise<unknown> {
+  return fetchBody(url, options, (response) => response.json());
+}
+
+/**
+ * Fetch a file of the site as it is. A year file is fetched this way: it is
+ * the year worker that parses it (services/yearDecoder.ts), and bytes are
+ * what can be handed to it without the main thread reading them first.
+ * @param url - URL to load
+ * @param options - Timeout and progress callback, see FetchJsonOptions
+ * @returns The bytes of the body
+ */
+export function fetchBytes(
+  url: string,
+  options: FetchJsonOptions = {},
+): Promise<ArrayBuffer> {
+  return fetchBody(url, options, (response) => response.arrayBuffer());
+}
+
+/** What build.js names the bundle of ./yearWorker, next to this one */
+const YEAR_WORKER_BUNDLE = "./yearWorker.bundle.js";
+
+/**
+ * Import what works on year data: the worker that parses and decodes the
+ * year files, and what builds the datasets from its answers. None of it is
+ * part of the app's bundles; the build resolves the specifier to
+ * yearWorker.bundle.js, which the page fetches next to the first year file.
+ * A retry names the file under a URL the page has not tried yet, because a
+ * browser may answer a failed import() from memory (see
+ * services/featureLoader.ts).
+ * @param failedImports - Imports that were rejected before this one
+ * @returns The exports of services/yearWorker.ts
+ */
+export function importYearTools(
+  failedImports: number,
+): Promise<Pick<typeof import("./yearWorker"), "createYearDecoder">> {
+  return failedImports === 0
+    ? import("./yearWorker")
+    : import(
+        new URL(`${YEAR_WORKER_BUNDLE}?retry=${failedImports}`, import.meta.url)
+          .href
+      );
 }
 
 /**
@@ -190,204 +244,6 @@ export function resetStylesheetLoader(): void {
   stylesheetRequests.clear();
 }
 
-/**
- * Wire format of the year files this build reads (kml_heatmap/segment_codec.py).
- * A file written by another release is refused rather than misread.
- */
-export const DATA_FORMAT_VERSION = 3;
-
-/**
- * How the encoded columns become values again, the mirror of
- * segment_codec.py. Every value the exporter writes is rounded to a fixed
- * step, so the columns hold exact integers counted in that step.
- */
-const COORDINATE_SCALE = 1e5;
-const ALTITUDE_STEP = 100;
-const SPEED_SCALE = 10;
-const TIME_SCALE = 10;
-
-/**
- * Expand the compact per-year file format into the in-memory dataset shape.
- *
- * Each path stores a start point and, column by column, the rows of
- * `[lat, lon, altitude_ft, groundspeed_knots, time?]`, where the coordinate
- * is the row's END point: consecutive rows are contiguous, so the start of a
- * row is the end of the one before it. Heatmap coordinates are every
- * segment's start point plus the last end point of each path, and
- * neighbouring segments share the very same coordinate array: each segment
- * creates exactly one object.
- *
- * Every column holds integers scaled to the step the exporter rounded to,
- * stored as differences to the row before (the start point seeds the two
- * coordinate columns). A path without a time column carries no relative
- * times, and a null in it marks a row without one; the running time then
- * stays where the last row that had one left it.
- *
- * A value that is not a finite number would turn into a NaN coordinate,
- * which the map cannot draw. Since every value is a difference, nothing after
- * it can be trusted either, so the path is cut short there with a warning
- * instead, and left out when that is its first row.
- * @param raw - Contents of <year>/data.json
- * @returns Expanded dataset
- */
-export function expandYearData(raw: RawYearData): KMLDataset {
-  if (typeof raw !== "object" || raw === null) {
-    throw new Error("Invalid year data: expected an object");
-  }
-  if (raw.format !== DATA_FORMAT_VERSION) {
-    throw new Error(
-      `Invalid year data: format ${String(raw.format)}, expected ` +
-        `${DATA_FORMAT_VERSION}; the data was written by another release`,
-    );
-  }
-  const segmentsByPath = raw.segments;
-  if (typeof segmentsByPath !== "object" || segmentsByPath === null) {
-    throw new Error("Invalid year data: missing 'segments' map");
-  }
-
-  // Paths in path_info order, which is the order of the input. The keys of
-  // the segments object are no substitute: ids are content hashes, and
-  // JavaScript iterates the ones below 2^32 in numeric order first.
-  const pathInfo = Array.isArray(raw.path_info) ? raw.path_info : [];
-  // A Set keeps a path listed twice from being expanded twice
-  const listed = new Set(pathInfo.map((info) => String(info.id)));
-  for (const id of Object.keys(segmentsByPath)) listed.add(id);
-  const pathIds = [...listed];
-
-  // Filled with push: arrays preallocated with new Array(n) have holes
-  // until they are full, which V8 keeps treating as the slower kind
-  const path_segments: PathSegment[] = [];
-  const coordinates: Coordinate[] = [];
-
-  for (const id of pathIds) {
-    const entry = segmentsByPath[id];
-    // A listed path without segments is legal, and has nothing to draw
-    if (!entry) continue;
-    // Columns that are missing altogether read as one row that is not
-    // numeric, so the path is reported like any other broken one
-    const [lats = [NaN], lons, altitudes, speeds, times] = Array.isArray(
-      entry.columns,
-    )
-      ? entry.columns
-      : [];
-    const pathId = Number(id);
-
-    // Running totals of the encoded columns; the coordinates start at the
-    // path's start point, the rest at zero
-    let latScaled = entry.start?.[0] ?? NaN;
-    let lonScaled = entry.start?.[1] ?? NaN;
-    let altitudeScaled = 0;
-    let speedScaled = 0;
-    let timeScaled = 0;
-
-    let previous: Coordinate = [
-      latScaled / COORDINATE_SCALE,
-      lonScaled / COORDINATE_SCALE,
-    ];
-    let row = 0;
-    for (; row < lats.length; row++) {
-      latScaled += lats[row]!;
-      lonScaled += lons?.[row] as number;
-      altitudeScaled += altitudes?.[row] as number;
-      speedScaled += speeds?.[row] as number;
-      const timeDelta = times?.[row] ?? null;
-      // A missing value makes the sum NaN and a string makes it a string,
-      // so one check covers every column, the start point included
-      if (
-        !Number.isFinite(
-          latScaled +
-            lonScaled +
-            altitudeScaled +
-            speedScaled +
-            (timeDelta ?? 0),
-        )
-      ) {
-        console.warn(`Path ${id}: row ${row} is not numeric, dropped the rest`);
-        break;
-      }
-      const end: Coordinate = [
-        latScaled / COORDINATE_SCALE,
-        lonScaled / COORDINATE_SCALE,
-      ];
-      const segment: PathSegment = {
-        path_id: pathId,
-        coords: [previous, end],
-        altitude_ft: altitudeScaled * ALTITUDE_STEP,
-        groundspeed_knots: speedScaled / SPEED_SCALE,
-      };
-      if (timeDelta !== null) {
-        timeScaled += timeDelta;
-        segment.time = timeScaled / TIME_SCALE;
-      }
-      path_segments.push(segment);
-      coordinates.push(previous);
-      previous = end;
-    }
-
-    if (row > 0) coordinates.push(previous);
-  }
-
-  return {
-    coordinates,
-    path_segments,
-    path_info: pathInfo,
-    original_points:
-      typeof raw.original_points === "number" ? raw.original_points : 0,
-  };
-}
-
-/**
- * Combine multiple year datasets into one.
- * Path ids are unique across years, so this is a plain concatenation:
- * segment and path info objects are shared, not copied.
- * @param yearDatasets - Array of year datasets (null entries are skipped)
- * @returns Combined dataset
- */
-export function combineYearData(
-  yearDatasets: (KMLDataset | null | undefined)[],
-): KMLDataset {
-  let coordinateCount = 0;
-  let segmentCount = 0;
-  let pathInfoCount = 0;
-  let originalPoints = 0;
-
-  for (const data of yearDatasets) {
-    if (!data) continue;
-    coordinateCount += data.coordinates.length;
-    segmentCount += data.path_segments.length;
-    pathInfoCount += data.path_info.length;
-    originalPoints += data.original_points || 0;
-  }
-
-  const combined: KMLDataset = {
-    coordinates: new Array<Coordinate>(coordinateCount),
-    path_segments: new Array<PathSegment>(segmentCount),
-    path_info: new Array<KMLDataset["path_info"][number]>(pathInfoCount),
-    original_points: originalPoints,
-  };
-
-  let ci = 0;
-  let si = 0;
-  let pi = 0;
-  for (const data of yearDatasets) {
-    if (!data) continue;
-    const coords = data.coordinates;
-    for (let i = 0; i < coords.length; i++) {
-      combined.coordinates[ci++] = coords[i]!;
-    }
-    const segments = data.path_segments;
-    for (let i = 0; i < segments.length; i++) {
-      combined.path_segments[si++] = segments[i]!;
-    }
-    const infos = data.path_info;
-    for (let i = 0; i < infos.length; i++) {
-      combined.path_info[pi++] = infos[i]!;
-    }
-  }
-
-  return combined;
-}
-
 /** One year file of the loading operation, see DataLoader */
 interface Download {
   /** Size of the file from the metadata; undefined when it is unknown */
@@ -431,6 +287,15 @@ export class DataLoader {
   /** Counts the operations, so that the indicator can tell them apart */
   private operation = 0;
   private fetchJson: NonNullable<DataLoaderOptions["fetchJson"]>;
+  private fetchBytes: NonNullable<DataLoaderOptions["fetchBytes"]>;
+  private importYearTools: NonNullable<DataLoaderOptions["importYearTools"]>;
+  /** Started with the first year file, see getDecoder */
+  private decoder: YearDecoder | null = null;
+  private decoderRequest: Promise<YearDecoder> | null = null;
+  /** Imports of the year tools that were rejected */
+  private failedImports = 0;
+  /** Set by destroy(); a load that ends after it has nobody to tell */
+  private destroyed = false;
   /** The year files of the loading operation; emptied with the indicator */
   private downloads = new Map<string, Download>();
   /** The request in flight, so that concurrent callers share it */
@@ -447,6 +312,8 @@ export class DataLoader {
     this.inflight = new Map();
     this.loadingDepth = 0;
     this.fetchJson = options.fetchJson || fetchJson;
+    this.fetchBytes = options.fetchBytes || fetchBytes;
+    this.importYearTools = options.importYearTools || importYearTools;
     this.showLoading = options.showLoading || (() => {});
     this.hideLoading = options.hideLoading || (() => {});
     this.getWindow = options.getWindow || (() => window);
@@ -595,10 +462,62 @@ export class DataLoader {
     }
 
     const data = await this.getYear(year);
-    if (!data) {
+    if (!data && !this.destroyed) {
       this.onLoadError([year]);
     }
     return data;
+  }
+
+  /**
+   * End the year worker. Loads that are still under way end without a
+   * dataset and without a report: the app they were for is gone.
+   */
+  destroy(): void {
+    this.destroyed = true;
+    this.decoder?.destroy();
+    this.decoder = null;
+  }
+
+  /**
+   * The year decoder, which starts the year worker. One for all years, and
+   * one import for all callers. A failed import is not kept, here or (see
+   * importYearTools) by the browser, so the next year asks the server again.
+   */
+  private getDecoder(): Promise<YearDecoder> {
+    if (this.decoder) return Promise.resolve(this.decoder);
+    this.decoderRequest ??= this.importWithTimeout()
+      .then(
+        ({ createYearDecoder }) => {
+          // Not started for an app that ended while the import was under way
+          if (this.destroyed) throw new Error("the loader was destroyed");
+          return (this.decoder = createYearDecoder());
+        },
+        (error: unknown) => {
+          throw new Error("Could not load " + YEAR_WORKER_BUNDLE, {
+            cause: error,
+          });
+        },
+      )
+      .finally(() => {
+        this.decoderRequest = null;
+      });
+    return this.decoderRequest;
+  }
+
+  /**
+   * importYearTools, given up on after as long as a year file may take: an
+   * import cannot be aborted. One that merely timed out is not counted as
+   * failed, since it may still finish, and the same URL then gets the module.
+   */
+  private importWithTimeout(): ReturnType<typeof importYearTools> {
+    return withTimeout(
+      this.importYearTools(this.failedImports).catch((error: unknown) => {
+        this.failedImports++;
+        throw error;
+      }),
+      LOAD_TIMEOUT_MS,
+      "Timed out loading " + YEAR_WORKER_BUNDLE,
+    );
   }
 
   /**
@@ -629,10 +548,16 @@ export class DataLoader {
     let arrived = false;
     try {
       logDebug("Loading data (" + year + ")...");
+      // Asked for now, so that the worker is up once the file has arrived.
+      // The rejection is met where it is awaited, below.
+      const decoder = this.getDecoder();
+      decoder.catch(() => {});
       // The template preloads the latest year, so this request is usually
-      // answered by one that is already under way. Bytes are counted only
-      // for a file whose size is known: without it no bar is drawn.
-      const raw = await this.fetchJson(
+      // answered by one that is already under way, which is why the file is
+      // fetched here and not by the worker: a preload serves the page that
+      // made it. Bytes are counted only for a file whose size is known:
+      // without it no bar is drawn.
+      const bytes = await this.fetchBytes(
         this.dataDir + "/" + year + "/data.json",
         download.size === undefined
           ? undefined
@@ -641,7 +566,7 @@ export class DataLoader {
                 this.advanceDownload(download, loadedBytes),
             },
       );
-      const data = expandYearData(raw as RawYearData);
+      const data = await (await decoder).decode(bytes);
 
       this.cache.set(year, data);
       arrived = true;
@@ -690,14 +615,14 @@ export class DataLoader {
       );
 
       const failedYears = years.filter((_, i) => !yearDatasets[i]);
-      if (failedYears.length > 0) {
+      if (failedYears.length > 0 && !this.destroyed) {
         this.onLoadError(failedYears);
       }
       if (years.length > 0 && failedYears.length === years.length) {
         return null;
       }
 
-      const combined = combineYearData(yearDatasets);
+      const combined = (await this.getDecoder()).combine(yearDatasets);
       // Caching a partial combination would make the gap permanent for the
       // rest of the session; retry the missing years on the next call
       if (failedYears.length === 0) {

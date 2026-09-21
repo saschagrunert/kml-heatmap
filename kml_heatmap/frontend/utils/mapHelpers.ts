@@ -11,6 +11,7 @@ import type {
   Popup,
 } from "maplibre-gl";
 import { ZOOM_OFFSET } from "./constants";
+import { withTimeout } from "./withTimeout";
 
 /** A position the way the data files carry it: latitude first */
 export type LatLon = readonly [lat: number, lon: number, ...rest: number[]];
@@ -62,7 +63,7 @@ export function mapZoomToState(zoom: number): number {
  * good. `isStyleLoaded()` cannot stand in for the event: it turns false
  * again after every `setData` until the worker has answered. A style that
  * fails to load never fires it; the caller owns that case (see MapApp, which
- * swaps in a style that needs no network).
+ * starts on a style that needs no network and swaps the real one in later).
  */
 export function whenStyleReady(map: MapLibreMap): Promise<MapLibreMap> {
   return new Promise((resolve) => {
@@ -287,23 +288,23 @@ export const MAP_STILL_TIMEOUT_MS = 3000;
  */
 function nextFrameAsDataUrl(map: MapLibreMap): Promise<string> {
   const canvas = map.getCanvas();
-  return new Promise<string>((resolve, reject) => {
-    const onRender = (): void => {
-      map.off("render", onRender);
-      clearTimeout(timer);
+  let onRender!: () => void;
+  const frame = new Promise<string>((resolve, reject) => {
+    onRender = (): void => {
       try {
         resolve(canvas.toDataURL("image/png"));
       } catch (error) {
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     };
-    const timer = setTimeout(() => {
-      map.off("render", onRender);
-      reject(new Error("the map did not draw in time"));
-    }, MAP_STILL_TIMEOUT_MS);
     map.on("render", onRender);
     map.triggerRepaint();
   });
+  return withTimeout(
+    frame,
+    MAP_STILL_TIMEOUT_MS,
+    "the map did not draw in time",
+  ).finally(() => map.off("render", onRender));
 }
 
 /**

@@ -25,6 +25,10 @@
   --color-bg-raised: #262626;
   --color-bg-hover: #262626;
   --color-bg-active: #2e2e2e;
+  /* Not chrome: the background layer of CARTO's dark-matter style, which
+     FALLBACK_STYLE in mapApp.ts repeats, so the map is one colour from the
+     first paint to the base style's arrival */
+  --color-map-bg: #0e0e0e;
   --color-border: #2e2e2e;
   --color-divider: #232323;
   --color-text: #f2f2f2;
@@ -213,7 +217,7 @@ body {
 #map {
   position: absolute;
   inset: 0;
-  background: var(--color-bg-primary);
+  background: var(--color-map-bg);
   overscroll-behavior: none;
   transition: left var(--duration-base) ease;
 }

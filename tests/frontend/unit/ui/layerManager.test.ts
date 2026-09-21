@@ -150,6 +150,50 @@ describe("LayerManager", () => {
     return data.features;
   }
 
+  /** Whether a feature passes a filter of the shapes the manager writes */
+  function passes(filter: unknown, properties: PathRunProperties): boolean {
+    const evaluate = (expression: unknown): unknown => {
+      if (!Array.isArray(expression)) return expression;
+      const [op, ...args] = expression as [string, ...unknown[]];
+      if (op === "literal") return args[0];
+      if (op === "get") return properties[args[0] as keyof PathRunProperties];
+      if (op === "!") return !evaluate(args[0]);
+      if (op === "in") {
+        return (evaluate(args[1]) as unknown[]).includes(evaluate(args[0]));
+      }
+      throw new Error(`unknown expression "${op}"`);
+    };
+    return filter == null || evaluate(filter) === true;
+  }
+
+  /**
+   * What the map is told to draw of a mode, in drawing order: every feature
+   * of the two sources that its layer's filter lets through, with the width
+   * and opacity of that layer's paint
+   */
+  function drawn(mode: "altitude" | "airspeed"): {
+    pathId: number;
+    options: { color: string; weight: number; opacity: number };
+  }[] {
+    const layers =
+      mode === "altitude"
+        ? [ALTITUDE, ALTITUDE_SELECTED]
+        : [AIRSPEED, AIRSPEED_SELECTED];
+    return layers.flatMap((id) => {
+      const layer = mockApp.map!.layer(id);
+      return features(id)
+        .filter((feature) => passes(layer.filter, feature.properties))
+        .map(({ properties }) => ({
+          pathId: properties.pathId,
+          options: {
+            color: properties.color,
+            weight: layer.paint["line-width"] as number,
+            opacity: layer.paint["line-opacity"] as number,
+          },
+        }));
+    });
+  }
+
   function setDataCalls(sourceId: string): number {
     return mockApp.map!.source(sourceId).setData.mock.calls.length;
   }
@@ -301,7 +345,7 @@ describe("LayerManager", () => {
 
       expect(setDataCalls(ALTITUDE)).toBe(0);
       expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
-      expect(mockApp.altitudeLayer.getLayers()).toEqual([]);
+      expect(drawn("altitude")).toEqual([]);
     });
 
     it("hands the main source one LineString per run, longitude first", () => {
@@ -326,7 +370,7 @@ describe("LayerManager", () => {
       expect(setDataCalls(AIRSPEED)).toBe(0);
       expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
       expect(mockApp.map!.layer(ALTITUDE).filter).toBeUndefined();
-      expect(mockApp.altitudeLayer.getLayers()).toEqual([
+      expect(drawn("altitude")).toEqual([
         { pathId: 1, options: { color, weight: 4, opacity: 0.85 } },
       ]);
     });
@@ -406,7 +450,7 @@ describe("LayerManager", () => {
         ],
       ]);
       expect(runs.map((f) => f.properties.r)).toEqual([0, 1, 2]);
-      expect(mockApp.altitudeLayer.getLayers()).toHaveLength(3);
+      expect(drawn("altitude")).toHaveLength(3);
     });
 
     it("draws a groundspeed that wanders within a colour step as one run", () => {
@@ -522,7 +566,7 @@ describe("LayerManager", () => {
         "!",
         ["in", ["get", "pathId"], ["literal", [1]]],
       ]);
-      expect(mockApp.altitudeLayer.getLayers()).toEqual([
+      expect(drawn("altitude")).toEqual([
         { pathId: 1, options: { color, weight: 6, opacity: 1 } },
       ]);
       expect(document.getElementById("legend-min")!.textContent).toBe(
@@ -539,13 +583,11 @@ describe("LayerManager", () => {
       expect(paint(ALTITUDE)["line-opacity"]).toBe(0.1);
       expect(paint(ALTITUDE)["line-width"]).toBe(4);
       expect(
-        mockApp.altitudeLayer
-          .getLayers()
-          .map(({ pathId, options }) => [
-            pathId,
-            options.weight,
-            options.opacity,
-          ]),
+        drawn("altitude").map(({ pathId, options }) => [
+          pathId,
+          options.weight,
+          options.opacity,
+        ]),
       ).toEqual([
         [2, 4, 0.1],
         [1, 6, 1],
@@ -633,7 +675,7 @@ describe("LayerManager", () => {
         "line-width": 4,
         "line-opacity": 0.85,
       });
-      expect(mockApp.altitudeLayer.getLayers()).toEqual([
+      expect(drawn("altitude")).toEqual([
         {
           pathId: 1,
           options: {
@@ -663,9 +705,7 @@ describe("LayerManager", () => {
       ]);
       expect(paint(ALTITUDE)["line-opacity"]).toBe(0.1);
       expect(paint(ALTITUDE_SELECTED)["line-width"]).toBe(6);
-      expect(
-        mockApp.altitudeLayer.getLayers().map((entry) => entry.pathId),
-      ).toEqual([2, 1]);
+      expect(drawn("altitude").map((entry) => entry.pathId)).toEqual([2, 1]);
 
       mockApp.selectedPathIds.clear();
       layerManager.redrawAltitudePaths();
@@ -844,7 +884,7 @@ describe("LayerManager", () => {
       error.mockRestore();
     });
 
-    it("works on the run tables alone in an app without a map", async () => {
+    it("cuts its runs without throwing in an app without a map", async () => {
       layerManager.destroy();
       mockApp = createMockApp({
         map: null,
@@ -854,13 +894,11 @@ describe("LayerManager", () => {
 
       expect(() => layerManager.redrawAltitudePaths()).not.toThrow();
       await Promise.resolve();
-
-      expect(mockApp.altitudeLayer.getLayers()).toHaveLength(1);
     });
   });
 
   describe("clearLayer", () => {
-    it("empties both sources of the mode and the list of layers", () => {
+    it("empties both sources of the mode", () => {
       mockApp.selectedPathIds.add(1);
       layerManager.redrawAltitudePaths();
       layerManager.redrawAirspeedPaths();
@@ -870,7 +908,7 @@ describe("LayerManager", () => {
 
       expect(features(ALTITUDE)).toEqual([]);
       expect(features(ALTITUDE_SELECTED)).toEqual([]);
-      expect(mockApp.altitudeLayer.getLayers()).toEqual([]);
+      expect(drawn("altitude")).toEqual([]);
       // The other mode is not touched
       expect(features(AIRSPEED)).toHaveLength(1);
     });
@@ -918,7 +956,7 @@ describe("LayerManager", () => {
         "!",
         ["in", ["get", "pathId"], ["literal", [1]]],
       ]);
-      expect(mockApp.altitudeLayer.getLayers()).toEqual([
+      expect(drawn("altitude")).toEqual([
         {
           pathId: 2,
           options: {
@@ -987,9 +1025,7 @@ describe("LayerManager", () => {
       expect(features(ALTITUDE_SELECTED)).toEqual([]);
       expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
       expect(mockApp.map!.layer(ALTITUDE).filter).toBeNull();
-      expect(
-        mockApp.altitudeLayer.getLayers().map((entry) => entry.options),
-      ).toEqual([
+      expect(drawn("altitude").map((entry) => entry.options)).toEqual([
         {
           color: stepColor(getColorForAltitude, 3000, 0, 5000),
           weight: 4,
@@ -2022,7 +2058,6 @@ describe("LayerManager", () => {
       expect(frames.size).toBe(0);
       expect(tooltips().map((popup) => popup.isOpen())).toEqual([false, false]);
       expect(mockApp.map!.getCanvas().style.cursor).toBe("");
-      expect(mockApp.altitudeLayer.getLayers()).toEqual([]);
     });
 
     it("ignores an idle that arrives afterwards", () => {

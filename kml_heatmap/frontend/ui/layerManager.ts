@@ -14,9 +14,8 @@
  *   colour is computed here and carried as a property, so the map and the
  *   legend cannot disagree.
  * - A run table per source remembers which segments of the dataset each
- *   feature stands for. It answers `getLayers()` and lets the tooltip show
- *   the exact data of the segment nearest to the cursor
- *   (`findNearestSegment`). MapLibre simplifies the geometry per tile; the
+ *   feature stands for, which lets the tooltip show the exact data of the
+ *   segment nearest to the cursor (`findNearestSegment`). MapLibre simplifies the geometry per tile; the
  *   heatmap, the replay and the statistics read the full data anyway.
  * - A selection rebuilds only the selection's source, whose runs follow the
  *   selection's colour range. The main source stays as it is: its layer is
@@ -39,18 +38,18 @@ import type { MapApp } from "../mapApp";
 import type { Range } from "../state/store";
 import type {
   KMLDataset,
+  LayerHandle,
   PathHit,
   PathHitResult,
   PathHitTester,
   PathInfo,
-  PathLayerEntry,
-  PathLayerHandle,
   PathRunProperties,
   PathSegment,
 } from "../types";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { domCache } from "../utils/domCache";
+import { frameCoalescer } from "../utils/frameCoalescer";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 import { logError } from "../utils/logger";
 import {
@@ -85,7 +84,7 @@ type RunSet = "main" | "selected";
 
 interface LayerConfig {
   mode: LayerMode;
-  handle: PathLayerHandle;
+  handle: LayerHandle;
   /** Source and layer share their id, see MAP_SOURCES and MAP_LAYERS */
   sources: Record<RunSet, string>;
   layers: Record<RunSet, string>;
@@ -220,12 +219,6 @@ function runLook(
   return { weight, opacity };
 }
 
-/** Whether the main layer's filter leaves the runs of a path out */
-function hiddenInMain(pathId: number, shown: ShownSelection): boolean {
-  if (shown.selected.size === 0) return false;
-  return shown.isolate || shown.selected.has(pathId);
-}
-
 /** A position of the data in the copy of the world nearest to `pointerLng` */
 function nearPointer(latLon: LatLon, pointerLng: number): LngLatTuple {
   const [lng, lat] = toLngLat(latLon);
@@ -278,7 +271,7 @@ export class LayerManager implements PathHitTester {
   private listeningTo: MapLibreMap | null = null;
   /** The last move of the pointer over the map; null once it is off it */
   private lastMove: MapMouseEvent | null = null;
-  private hoverFrame: number | null = null;
+  private readonly hoverFrame = frameCoalescer<void>(() => this.hover());
   private rehoverPending = false;
   /** The one tooltip, created on the first hover and reused from then on */
   private tooltip: Popup | null = null;
@@ -297,10 +290,7 @@ export class LayerManager implements PathHitTester {
     this.lastMove = e;
     // A pointer moves many times per frame, and a query walks the tiles.
     // What the pointer is on is asked in the frame as well, once.
-    this.hoverFrame ??= requestAnimationFrame(() => {
-      this.hoverFrame = null;
-      this.hover();
-    });
+    this.hoverFrame.schedule();
   };
 
   private readonly handleMouseOut = (): void => {
@@ -310,8 +300,6 @@ export class LayerManager implements PathHitTester {
 
   constructor(app: MapApp) {
     this.app = app;
-    app.altitudeLayer.setLayersProvider(() => this.layersOf("altitude"));
-    app.airspeedLayer.setLayersProvider(() => this.layersOf("airspeed"));
     if (app.map) {
       this.listen(app.map);
     } else {
@@ -355,16 +343,11 @@ export class LayerManager implements PathHitTester {
     this.listeningTo?.off("mousemove", this.handleMouseMove);
     this.listeningTo?.off("mouseout", this.handleMouseOut);
     this.listeningTo = null;
-    if (this.hoverFrame !== null) {
-      cancelAnimationFrame(this.hoverFrame);
-      this.hoverFrame = null;
-    }
+    this.hoverFrame.cancel();
     this.lastMove = null;
     this.hideTooltip();
     this.touchPopup?.remove();
     this.touchPopup = null;
-    this.app.altitudeLayer.setLayersProvider(null);
-    this.app.airspeedLayer.setLayersProvider(null);
   }
 
   private getConfig(mode: LayerMode): LayerConfig {
@@ -949,24 +932,6 @@ export class LayerManager implements PathHitTester {
       state.filterKey = filterKey;
       map.setFilter(config.layers.main, filter);
     }
-  }
-
-  /** What is drawn of a mode, one entry per run; backs `getLayers()` */
-  private layersOf(mode: LayerMode): PathLayerEntry[] {
-    const { tables, shown } = this.state[mode];
-    const entries: PathLayerEntry[] = [];
-    const add = (run: Run, isSelected: boolean): void => {
-      const { weight, opacity } = runLook(isSelected, shown);
-      entries.push({
-        pathId: run.pathId,
-        options: { color: run.color, weight, opacity },
-      });
-    };
-    for (const run of tables.main.runs) {
-      if (!hiddenInMain(run.pathId, shown)) add(run, false);
-    }
-    for (const run of tables.selected.runs) add(run, true);
-    return entries;
   }
 
   /**

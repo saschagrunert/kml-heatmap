@@ -132,13 +132,14 @@ their traces in `test-results/`, and every run writes an HTML report to
   over HTTP (`make serve`), it does not work when opened from disk, and the
   map needs WebGL
 - **Production**: Minified bundles for optimal performance; the build fails
-  when `mapApp.bundle.js` and `shared.bundle.js` together, or
-  `features.bundle.js`, exceed their size budget in `build.js`
+  when `mapApp.bundle.js` and `shared.bundle.js` together,
+  `features.bundle.js` or `yearWorker.bundle.js` exceed their size budget in
+  `build.js`
 - **Development**: Unminified for debugging
 - Both write a source map next to the bundle; it holds the mappings and file
   names only, not the TypeScript sources
 
-`npm run build` produces three bundles. `mapApp.bundle.js` is the map itself,
+`npm run build` produces four bundles. `mapApp.bundle.js` is the map itself,
 and `features.bundle.js` holds Replay, Wrapped and the flight list of the
 airport popups, which the page imports the first time one of them is opened.
 `shared.bundle.js` is what the two have in common. Their styles are split
@@ -153,9 +154,19 @@ imports, because several of them hold state that has to be a single
 instance. Two entry points can only share one chunk, so it has a fixed name
 that the site publishes and the page preloads; the build fails if it ever
 writes another file (`assertExpectedOutputs` in `build.js`).
-The same command copies MapLibre GL JS and html-to-image out of
+`yearWorker.bundle.js` is a build of its own and shares nothing with the
+others: it is everything that works on the year files. The page imports it
+next to the first year file (`services/dataLoader.ts`), and the file then
+starts itself a second time as a module worker, which parses and decodes the
+year files off the main thread and hands the columns back as typed arrays;
+the page builds its dataset from them a few milliseconds at a time
+(`services/yearDecoder.ts`, `services/yearDataset.ts`). Where the worker
+cannot be used, the same code decodes on the main thread.
+The same command takes MapLibre GL JS and html-to-image out of
 `node_modules` into `kml_heatmap/static/vendor/`, which is what the published
-page loads them from, and the country flags of `flag-icons` into
+page loads them from (html-to-image with `import()`, on the first export, as
+one module that `scripts/vendor.js` bundles from the package's own), and the
+country flags of `flag-icons` into
 `kml_heatmap/static/flags/` (`scripts/vendor.js`). All of it is gitignored,
 and `make clean` removes it.
 
@@ -185,8 +196,8 @@ none and the statistics rail falls back to the ISO country code.
   - E2E tests: `tests/e2e/` (Playwright)
 - **Stylesheets** in `kml_heatmap/static/` (`styles.css` and `features.css`)
 - **Build output** in `kml_heatmap/static/` (`mapApp.bundle.js`,
-  `features.bundle.js`, `shared.bundle.js`, their source maps, `vendor/` and
-  `flags/`)
+  `features.bundle.js`, `shared.bundle.js`, `yearWorker.bundle.js`, their
+  source maps, `vendor/` and `flags/`)
 - **Build scripts** `build.js` and `scripts/*.js`, plain JavaScript with
   JSDoc types that `tsconfig.node.json` checks (`npm run typecheck`)
 

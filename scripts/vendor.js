@@ -8,7 +8,9 @@
  * copies are taken straight from node_modules, so package-lock.json stays
  * the single place their versions are pinned and Dependabot can bump them
  * like any other dependency. The one thing left off a copy is the closing
- * comment that names a source map the site does not carry.
+ * comment that names a source map the site does not carry. html-to-image is
+ * the exception to "as it is": the package has no module in one file, so
+ * its module is bundled into one here (VENDOR_MODULES).
  *
  * build.js copies them into kml_heatmap/static/vendor/ (generated, not
  * committed) and the Python side publishes that directory next to the page.
@@ -23,6 +25,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, posix } from "node:path";
+import { buildSync } from "esbuild";
 import { REPO_ROOT } from "./source-hash.js";
 
 const NODE_MODULES = join(REPO_ROOT, "node_modules");
@@ -55,7 +58,21 @@ export const VENDOR_FILES = {
   "maplibre-gl-shared.mjs": "maplibre-gl/dist/maplibre-gl-shared.mjs",
   "maplibre-gl-worker.mjs": "maplibre-gl/dist/maplibre-gl-worker.mjs",
   "maplibre-gl.css": "maplibre-gl/dist/maplibre-gl.css",
-  "html-to-image.js": "html-to-image/dist/html-to-image.js",
+};
+
+/**
+ * Published path inside vendor/ -> package whose module entry point is
+ * bundled into that one file.
+ *
+ * The app loads html-to-image with import(), on the first export (see
+ * build.js and ui/uiToggles.ts). The package ships its ES module as a dozen
+ * files and its single file as UMD, which import() cannot take exports from,
+ * so the module is bundled here: nothing but the package's own code, under
+ * a banner that names it, its version and its licence.
+ * @type {Record<string, string>}
+ */
+export const VENDOR_MODULES = {
+  "html-to-image.mjs": "html-to-image",
 };
 
 /**
@@ -131,12 +148,33 @@ export function copyVendorAssets() {
       ),
     );
   }
+  for (const [published, name] of Object.entries(VENDOR_MODULES)) {
+    const manifest = JSON.parse(
+      readFileSync(join(NODE_MODULES, name, "package.json"), "utf8"),
+    );
+    buildSync({
+      entryPoints: [join(NODE_MODULES, name, manifest.module)],
+      outfile: join(VENDOR_DIR, published),
+      bundle: true,
+      format: "esm",
+      target: ["es2022"],
+      platform: "browser",
+      minify: true,
+      legalComments: "none",
+      banner: {
+        js: `/* ${name} ${pinnedVersion(name)}, ${manifest.license} licence, ${manifest.homepage} */`,
+      },
+      logLevel: "warning",
+    });
+  }
   /** @type {Record<string, string>} */
   const versions = {};
-  for (const name of ["maplibre-gl", "html-to-image"]) {
+  for (const name of ["maplibre-gl", ...Object.values(VENDOR_MODULES)]) {
     versions[name] = pinnedVersion(name);
   }
-  return { count: Object.keys(VENDOR_FILES).length, versions };
+  const count =
+    Object.keys(VENDOR_FILES).length + Object.keys(VENDOR_MODULES).length;
+  return { count, versions };
 }
 
 /**

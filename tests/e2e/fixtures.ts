@@ -17,7 +17,7 @@
  * reason this is where a stale site is refused (see site-check.ts).
  */
 import { test as base, expect } from "@playwright/test";
-import type { BrowserContext, Route } from "@playwright/test";
+import type { BrowserContext, Page, Route } from "@playwright/test";
 import { checkSite } from "./site-check";
 import type { SiteOptions } from "./sites";
 
@@ -30,6 +30,9 @@ const TRANSPARENT_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNgAAIAAAUAAen63NgAAAAASUVORK5CYII=",
   "base64",
 );
+
+/** The label layer of the style `holdBaseStyle` answers with */
+export const BASE_STYLE_LABELS = "place-labels";
 
 /**
  * The base style the page gets in place of CARTO's: a background and one
@@ -59,6 +62,26 @@ const STUB_STYLE = {
       paint: { "background-color": "#0e0e0e" },
     },
     { id: "base", type: "raster", source: "base" },
+  ],
+};
+
+/**
+ * The stub with a label layer on top, which the real style has and the data
+ * layers have to stay below. The layer draws nothing (no text, no icon), so
+ * it asks for no glyphs and no sprite either.
+ */
+const LABELLED_STUB_STYLE = {
+  ...STUB_STYLE,
+  sources: {
+    ...STUB_STYLE.sources,
+    places: {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    },
+  },
+  layers: [
+    ...STUB_STYLE.layers,
+    { id: BASE_STYLE_LABELS, type: "symbol", source: "places" },
   ],
 };
 
@@ -104,6 +127,29 @@ async function serveStubStyle(route: Route): Promise<void> {
     json: STUB_STYLE,
     headers: { "access-control-allow-origin": "*" },
   });
+}
+
+/**
+ * Keep the base style from arriving until the returned function is called,
+ * which answers with the labelled stub. For a page that has not been opened
+ * yet; a route of the page goes before the one of the context.
+ */
+export async function holdBaseStyle(page: Page): Promise<() => void> {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(isBaseStyle, async (route) => {
+    await held;
+    await route.fulfill({
+      json: LABELLED_STUB_STYLE,
+      headers: { "access-control-allow-origin": "*" },
+    });
+  });
+  return release;
+}
+
+/** Fail every request for the base style, the way a dead network does */
+export async function failBaseStyle(page: Page): Promise<void> {
+  await page.route(isBaseStyle, (route) => route.abort("failed"));
 }
 
 /**

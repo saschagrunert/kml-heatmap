@@ -535,10 +535,43 @@ export class Map
     layers: this.layers,
   }));
 
-  setStyle = vi.fn((style: unknown) => {
-    this.loadStyle(style);
-    return this;
-  });
+  /**
+   * With `transformStyle` on a loaded style, like the map's diff: sources
+   * and layers the next style keeps stay the objects they are, the others
+   * come and go, and `style.load` fires at once. Anything else starts over.
+   */
+  setStyle = vi.fn(
+    (
+      style: unknown,
+      options?: {
+        transformStyle?: (
+          previous: unknown,
+          next: unknown,
+        ) => {
+          sources: Record<string, Record<string, unknown>>;
+          layers: Record<string, unknown>[];
+        };
+      },
+    ) => {
+      if (!options?.transformStyle || !this.styleLoaded) {
+        this.loadStyle(style);
+        return this;
+      }
+      const next = options.transformStyle(this.getStyle(), style);
+      for (const id of Object.keys(this.sources)) {
+        if (!(id in next.sources)) delete this.sources[id];
+      }
+      for (const [id, spec] of Object.entries(next.sources)) {
+        if (!this.sources[id]) this.addSource(id, spec);
+      }
+      this.layers = next.layers.map(
+        (layer) =>
+          this.layers.find((l) => l.id === layer["id"]) ?? toMockLayer(layer),
+      );
+      this.emit("style.load");
+      return this;
+    },
+  );
 
   /**
    * Whether a source has taken in its last `setData` and cut the tiles in

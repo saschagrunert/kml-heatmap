@@ -21,7 +21,7 @@ import { cwd, env } from "node:process";
 import {
   DATA_FORMAT_VERSION,
   expandYearData,
-} from "../../../kml_heatmap/frontend/services/dataLoader";
+} from "../../../kml_heatmap/frontend/services/yearDecode";
 import type {
   Airport,
   Metadata,

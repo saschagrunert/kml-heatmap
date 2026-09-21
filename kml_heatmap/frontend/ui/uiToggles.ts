@@ -5,18 +5,19 @@ import type { MapApp } from "../mapApp";
 import type { LayerHandle } from "../types";
 import { setControlLabel } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
+import { logError } from "../utils/logger";
 import { withMapStill } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
 
 type ColorLayerMode = "altitude" | "airspeed";
 
 /**
- * html-to-image is only needed for export, so it is loaded on first use.
- * It is served from the site next to the page (see scripts/vendor.js), so
- * there is no integrity hash to pin: same-origin and already covered by the
- * page's own CSP.
+ * html-to-image is only needed for export, so it is imported on first use.
+ * It is no part of the bundles: the build points the import at the module
+ * scripts/vendor.js puts next to the page, the way it does with MapLibre
+ * (see build.js). Same-origin, so the page's CSP covers it as it is.
  */
-export const HTML_TO_IMAGE_URL = "./vendor/html-to-image.js";
+export const HTML_TO_IMAGE_URL = "./vendor/html-to-image.mjs";
 
 import { MOBILE_BREAKPOINT_PX } from "../utils/constants";
 /** Largest canvas iOS Safari will draw into (16.7 million pixels) */
@@ -26,33 +27,53 @@ const MAX_PHONE_EXPORT_SCALE = 3;
 const EXPORT_BUTTON_LABEL = "Export image";
 const EXPORT_BUTTON_BUSY_LABEL = "Exporting…";
 
-let htmlToImagePromise: Promise<HtmlToImage | null> | null = null;
+/** What the export uses of html-to-image */
+export type HtmlToImage = Pick<typeof import("html-to-image"), "toJpeg">;
 
 /**
- * Load html-to-image on demand. Resolves with null when the script cannot be
- * loaded (a site published without the vendor directory, blocked by CSP).
+ * The import itself, replaceable by tests and exported for them. A retry
+ * names the vendored module under a URL the page has not tried yet, because
+ * a browser may answer a failed import() from memory (see
+ * services/featureLoader.ts).
+ */
+export const importFromVendor = (
+  failedImports: number,
+): Promise<HtmlToImage> =>
+  failedImports === 0
+    ? import("html-to-image")
+    : (import(
+        new URL(`${HTML_TO_IMAGE_URL}?retry=${failedImports}`, import.meta.url)
+          .href
+      ) as Promise<HtmlToImage>);
+
+let importHtmlToImage = importFromVendor;
+let htmlToImagePromise: Promise<HtmlToImage | null> | null = null;
+let failedImports = 0;
+
+/**
+ * Load html-to-image on demand. Resolves with null when the module cannot be
+ * loaded (offline, a site published without the vendor directory); that is
+ * not kept, so the next export asks the server again.
  */
 export function loadHtmlToImage(): Promise<HtmlToImage | null> {
-  if (window.htmlToImage) return Promise.resolve(window.htmlToImage);
-  if (htmlToImagePromise) return htmlToImagePromise;
-
-  htmlToImagePromise = new Promise((resolve) => {
-    const script = document.createElement("script");
-    script.src = HTML_TO_IMAGE_URL;
-    script.onload = () => resolve(window.htmlToImage ?? null);
-    script.onerror = () => {
-      script.remove();
+  htmlToImagePromise ??= importHtmlToImage(failedImports).catch(
+    (error: unknown) => {
+      logError("Could not load html-to-image:", error);
+      failedImports++;
       htmlToImagePromise = null;
-      resolve(null);
-    };
-    document.head.appendChild(script);
-  });
+      return null;
+    },
+  );
   return htmlToImagePromise;
 }
 
-/** Reset the cached loader (used by tests) */
-export function resetHtmlToImageLoader(): void {
+/** Forget the cached import, and replace it (used by tests) */
+export function resetHtmlToImageLoader(
+  importer: typeof importHtmlToImage = importFromVendor,
+): void {
   htmlToImagePromise = null;
+  failedImports = 0;
+  importHtmlToImage = importer;
 }
 
 /** Small viewport or touch device */

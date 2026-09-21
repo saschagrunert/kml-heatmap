@@ -284,11 +284,12 @@ export class DataManager {
   }
 
   /**
-   * Stop drawing, and take the indicator down: a load that is still under
-   * way would otherwise leave it up with nobody to hide it
+   * Stop drawing, end the year worker, and take the indicator down: a load
+   * that is still under way would otherwise leave it up with nobody to hide it
    */
   destroy(): void {
     this.destroyed = true;
+    this.dataLoader.destroy();
     this.hideLoading();
   }
 

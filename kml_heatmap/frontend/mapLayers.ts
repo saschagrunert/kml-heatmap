@@ -4,10 +4,10 @@
  * layers that are created once, empty, when the style has loaded. This
  * module creates them and provides the handles that show and hide them.
  */
-import type { Map as MapLibreMap } from "maplibre-gl";
+import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 import { cssVar, firstSymbolLayerId } from "./utils/mapHelpers";
 import { HEATMAP_CLUSTER, MAP_LAYERS, MAP_SOURCES } from "./utils/constants";
-import type { LayerHandle, PathLayerEntry, PathLayerHandle } from "./types";
+import type { LayerHandle } from "./types";
 
 /**
  * Aeronautical overlay of open flightmaps: airspaces, airfields, navaids and
@@ -87,26 +87,6 @@ export class MapLayerHandle implements LayerHandle {
 }
 
 /**
- * Handle of a colour layer: the main layer and the one the selection is
- * drawn on. What is drawn is known to the layer manager alone, so the list
- * comes from a provider it registers.
- */
-export class MapPathLayerHandle
-  extends MapLayerHandle
-  implements PathLayerHandle
-{
-  private layersProvider: (() => PathLayerEntry[]) | null = null;
-
-  getLayers(): PathLayerEntry[] {
-    return this.layersProvider?.() ?? [];
-  }
-
-  setLayersProvider(provider: (() => PathLayerEntry[]) | null): void {
-    this.layersProvider = provider;
-  }
-}
-
-/**
  * Handle of the airport markers. They are DOM, not a map layer, so hiding
  * them is a class on the map container that the stylesheet acts on; every
  * marker follows at once and none has to be removed and added again.
@@ -130,10 +110,11 @@ function emptyGeoJson(): GeoJSON.FeatureCollection {
 
 /**
  * Create every source and layer the app draws on, empty, in drawing
- * order. They are inserted below the first label layer of the base style,
- * so place names stay readable over the flights. Doing it once and here
- * keeps the order in one place; the modules that own the content only
- * ever call `setData` and set paint properties.
+ * order. They are inserted below the first label layer of the style, so
+ * place names stay readable over the flights; the style the map starts on
+ * has none, and `withDataLayers` does the same for the one that follows.
+ * Doing it once and here keeps the order in one place; the modules that own
+ * the content only ever call `setData` and set paint properties.
  */
 export function addDataLayers(map: MapLibreMap): void {
   const before = firstSymbolLayerId(map);
@@ -261,4 +242,32 @@ export function addDataLayers(map: MapLibreMap): void {
     },
     before,
   );
+}
+
+/**
+ * A base style with the app's sources and layers of the style before it:
+ * what `setStyle` takes as `transformStyle`, which would otherwise drop
+ * them. They are carried over as the map reports them, with their data,
+ * filters, visibility and paint, in their order, and below the first label
+ * layer of the new style, where `addDataLayers` would have put them. The
+ * projection comes along too: it lives in the style, and a globe chosen
+ * before the base style arrived would otherwise turn back into Mercator.
+ */
+export function withDataLayers(
+  previous: StyleSpecification | undefined,
+  next: StyleSpecification,
+): StyleSpecification {
+  if (!previous) return next;
+  const sources = { ...next.sources };
+  for (const id of Object.values(MAP_SOURCES)) {
+    const source = previous.sources[id];
+    if (source) sources[id] = source;
+  }
+  const ids: readonly string[] = Object.values(MAP_LAYERS);
+  const own = previous.layers.filter((layer) => ids.includes(layer.id));
+  const labels = next.layers.findIndex((layer) => layer.type === "symbol");
+  const layers = [...next.layers];
+  layers.splice(labels < 0 ? layers.length : labels, 0, ...own);
+  const projection = previous.projection ?? next.projection;
+  return { ...next, sources, layers, ...(projection && { projection }) };
 }

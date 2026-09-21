@@ -429,6 +429,30 @@ describe("AirplaneMarker", () => {
     expect(onActivate).not.toHaveBeenCalled();
   });
 
+  it("keeps the popup open through a double click or a double tap", () => {
+    const element = airplane.getElement();
+    // The caller opens it; here only whether it is asked to matters
+    onActivate.mockImplementation(() => airplane.openPopup());
+
+    for (const detail of [1, 2, 3]) {
+      element.dispatchEvent(new MouseEvent("click", { bubbles: true, detail }));
+    }
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    expect(airplane.isPopupOpen()).toBe(true);
+  });
+
+  it("tells assistive technology whether its popup is open", () => {
+    const element = airplane.getElement();
+    expect(element.getAttribute("aria-expanded")).toBe("false");
+
+    airplane.openPopup();
+    expect(element.getAttribute("aria-expanded")).toBe("true");
+
+    airplane.closePopup();
+    expect(element.getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("opens the popup at the marker", () => {
     airplane.setPopupContent("<p>here</p>");
     airplane.openPopup();

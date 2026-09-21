@@ -3,15 +3,17 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  HTML_TO_IMAGE_URL,
   MAX_CANVAS_PIXELS,
   UIToggles,
   dataUrlToBlob,
   exportScale,
   isSmallDevice,
   loadHtmlToImage,
+  importFromVendor,
   resetHtmlToImageLoader,
+  type HtmlToImage,
 } from "../../../../kml_heatmap/frontend/ui/uiToggles";
+import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
 import {
   asMapApp,
   createMockApp,
@@ -59,19 +61,10 @@ function deleteNavigatorProperty(name: string): void {
   Reflect.deleteProperty(navigator, name);
 }
 
-/**
- * A stand-in for document.head.appendChild that hands the appended script to
- * the test instead of the DOM; the return type of the real method is generic,
- * which the lint rules cannot follow through a mock
- */
-function appendChildStub(
-  onAppend: (script: HTMLScriptElement) => void,
-): typeof document.head.appendChild {
-  return ((node: Node) => {
-    onAppend(node as HTMLScriptElement);
-    return node;
-  }) as typeof document.head.appendChild;
-}
+vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
+  logDebug: vi.fn(),
+  logError: vi.fn(),
+}));
 
 describe("UIToggles export and share", () => {
   let uiToggles: UIToggles;
@@ -100,7 +93,6 @@ describe("UIToggles export and share", () => {
     unmount();
     delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
     document.querySelectorAll(".toast-notification").forEach((e) => e.remove());
-    delete window.htmlToImage;
     resetHtmlToImageLoader();
     setInnerWidth(1024);
     setDevicePixelRatio(1);
@@ -112,69 +104,63 @@ describe("UIToggles export and share", () => {
   });
 
   describe("loadHtmlToImage", () => {
-    it("resolves immediately when html-to-image is already loaded", async () => {
-      const lib = { toJpeg: vi.fn() } as unknown as HtmlToImage;
-      window.htmlToImage = lib;
-      const appendSpy = vi.spyOn(document.head, "appendChild");
+    const lib: HtmlToImage = { toJpeg: vi.fn() };
 
-      await expect(loadHtmlToImage()).resolves.toBe(lib);
-      expect(appendSpy).not.toHaveBeenCalled();
-    });
-
-    it("injects the vendored script and resolves once it loads", async () => {
-      const lib = { toJpeg: vi.fn() } as unknown as HtmlToImage;
-      let script: HTMLScriptElement | null = null;
-      vi.spyOn(document.head, "appendChild").mockImplementation(
-        appendChildStub((node) => {
-          script = node;
-          window.htmlToImage = lib;
-          queueMicrotask(() => {
-            script?.onload?.(new Event("load"));
-          });
-        }),
-      );
-
-      await expect(loadHtmlToImage()).resolves.toBe(lib);
-      // A relative src, so the element resolves it against the page
-      expect(script!.getAttribute("src")).toBe(HTML_TO_IMAGE_URL);
-      expect(new URL(script!.src).origin).toBe(window.location.origin);
-      // Same-origin now, so neither attribute is set any more
-      expect(script!.hasAttribute("integrity")).toBe(false);
-      expect(script!.hasAttribute("crossorigin")).toBe(false);
-    });
-
-    it("shares one in-flight load between callers", async () => {
-      let script: HTMLScriptElement | null = null;
-      const appendSpy = vi
-        .spyOn(document.head, "appendChild")
-        .mockImplementation((node) => {
-          script = node as HTMLScriptElement;
-          return node;
-        });
+    it("imports the library on the first call, and once for all callers", async () => {
+      const importer = vi.fn(() => Promise.resolve(lib));
+      resetHtmlToImageLoader(importer);
+      expect(importer).not.toHaveBeenCalled();
 
       const first = loadHtmlToImage();
       const second = loadHtmlToImage();
-      expect(first).toBe(second);
-      expect(appendSpy).toHaveBeenCalledTimes(1);
 
-      script!.onerror?.(new Event("error"));
-      await expect(first).resolves.toBeNull();
+      expect(first).toBe(second);
+      await expect(first).resolves.toBe(lib);
+      await expect(loadHtmlToImage()).resolves.toBe(lib);
+      expect(importer.mock.calls).toEqual([[0]]);
     });
 
-    it("resolves null and allows a retry when the script fails", async () => {
-      const appendSpy = vi
-        .spyOn(document.head, "appendChild")
-        .mockImplementation(
-          appendChildStub((node) => {
-            queueMicrotask(() => {
-              node.onerror?.(new Event("error"));
-            });
-          }),
-        );
+    it("resolves null when the import fails, and says why", async () => {
+      const failure = new Error("offline");
+      resetHtmlToImageLoader(() => Promise.reject(failure));
+
+      await expect(loadHtmlToImage()).resolves.toBeNull();
+
+      expect(logError).toHaveBeenCalledWith(
+        "Could not load html-to-image:",
+        failure,
+      );
+    });
+
+    it("tries again after a failure, under a URL the browser has not failed on", async () => {
+      const importer = vi
+        .fn<(failedImports: number) => Promise<HtmlToImage>>()
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockRejectedValueOnce(new Error("still offline"))
+        .mockResolvedValue(lib);
+      resetHtmlToImageLoader(importer);
 
       await expect(loadHtmlToImage()).resolves.toBeNull();
       await expect(loadHtmlToImage()).resolves.toBeNull();
-      expect(appendSpy).toHaveBeenCalledTimes(2);
+      await expect(loadHtmlToImage()).resolves.toBe(lib);
+
+      expect(importer.mock.calls).toEqual([[0], [1], [2]]);
+    });
+
+    it("imports the package by default, which the build points at vendor/", async () => {
+      resetHtmlToImageLoader();
+
+      const library = await loadHtmlToImage();
+
+      expect(library!.toJpeg).toBeTypeOf("function");
+    });
+
+    it("names the vendored module itself on a retry", async () => {
+      // There is no vendor/ next to the sources, so this fails, and says
+      // what it asked for; the e2e suite checks the retry against a site
+      const failure = await importFromVendor(1).catch((e: unknown) => e);
+
+      expect(String(failure)).toContain("/vendor/html-to-image.mjs");
     });
   });
 
@@ -295,7 +281,9 @@ describe("UIToggles export and share", () => {
         .fn()
         .mockResolvedValue("data:image/jpeg;base64,aGVsbG8="),
     ): AnyMock {
-      window.htmlToImage = { toJpeg } as unknown as HtmlToImage;
+      resetHtmlToImageLoader(() =>
+        Promise.resolve({ toJpeg } as unknown as HtmlToImage),
+      );
       return toJpeg;
     }
 
@@ -640,13 +628,7 @@ describe("UIToggles export and share", () => {
     });
 
     it("shows an error toast and re-enables the button when html-to-image is unavailable", async () => {
-      vi.spyOn(document.head, "appendChild").mockImplementation(
-        appendChildStub((node) => {
-          queueMicrotask(() => {
-            node.onerror?.(new Event("error"));
-          });
-        }),
-      );
+      resetHtmlToImageLoader(() => Promise.reject(new Error("offline")));
       const btn = el("export-btn") as HTMLButtonElement;
 
       uiToggles.exportMap();

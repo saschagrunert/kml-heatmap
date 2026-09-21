@@ -4,8 +4,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import {
   cartoTransformRequest,
+  BASE_STYLE_RETRY_MS,
   FALLBACK_STYLE,
-  STYLE_LOAD_TIMEOUT_MS,
   FEATURES_UNAVAILABLE_MESSAGE,
   MapApp,
 } from "../../../../kml_heatmap/frontend/mapApp";
@@ -123,6 +123,7 @@ vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () => ({
 }));
 
 const {
+  fetchBaseStyle,
   initializeApp,
   mockAirportManagerInstance,
   mockLayerManagerInstance,
@@ -131,7 +132,19 @@ const {
   mockStatsManagerInstance,
   resetManagerMocks,
   setupDOM,
+  styleResponse,
 } = m;
+
+/** What CARTO answers with, cut down: one layer below the labels, one above */
+const BASE_STYLE = {
+  version: 8,
+  sources: { carto: { type: "vector", url: "https://example.test/carto" } },
+  layers: [
+    { id: "background", type: "background" },
+    { id: "water", type: "fill", source: "carto", "source-layer": "water" },
+    { id: "place-labels", type: "symbol", source: "carto" },
+  ],
+};
 
 function createApp(): MapApp {
   return new MapApp({ ...m.APP_CONFIG });
@@ -681,8 +694,7 @@ describe("MapApp controls and map", () => {
       // One below the 1 to 20 that saved state and links are clamped to
       expect(mockMap(app).options).toMatchObject({
         container: "map",
-        style:
-          "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+        style: FALLBACK_STYLE,
         minZoom: 0,
         maxZoom: 19,
         attributionControl: false,
@@ -747,9 +759,10 @@ describe("MapApp controls and map", () => {
       expect(position).toBe("bottom-right");
     });
 
-    it("creates every layer once, in drawing order below the labels", async () => {
+    it("creates every layer once, in drawing order, without the base style", async () => {
       await initializeApp(app);
 
+      expect(fetchBaseStyle).toHaveBeenCalledOnce();
       expect(mockMap(app).getLayersOrder()).toEqual([
         "background",
         "aviation",
@@ -760,7 +773,6 @@ describe("MapApp controls and map", () => {
         "paths-altitude-selected",
         "paths-airspeed-selected",
         "replay-trail",
-        "place-labels",
       ]);
       // Empty until the managers fill them
       for (const id of [
@@ -901,14 +913,14 @@ describe("MapApp controls and map", () => {
       );
     });
 
-    it("stops quietly when destroyed while the style request hangs", async () => {
+    it("stops quietly when destroyed before the style has loaded", async () => {
       mockControl.autoLoadStyle = false;
       const pending = initializeApp(app);
       await Promise.resolve();
 
       app.destroy();
 
-      // Settled without the style ever arriving, and not as a failure
+      // Settled without the style ever loading, and not as a failure
       await expect(pending).resolves.toBeUndefined();
       await expect(app.mapReady).rejects.toThrow("destroyed");
       expect(logError).not.toHaveBeenCalled();
@@ -928,6 +940,7 @@ describe("MapApp controls and map", () => {
 
       expect(map.addSource).not.toHaveBeenCalled();
       expect(map.addLayer).not.toHaveBeenCalled();
+      expect(fetchBaseStyle).not.toHaveBeenCalled();
     });
 
     it("remembers a visibility asked for before the style has loaded", async () => {
@@ -944,108 +957,188 @@ describe("MapApp controls and map", () => {
       expect(mockMap(app).layer("heat").layout["visibility"]).toBe("visible");
     });
 
-    it("lists the drawn paths through the provider the layer manager sets", () => {
-      const entry = {
-        pathId: 1,
-        options: { color: "#ff0000", weight: 4, opacity: 0.85 },
-      };
-
-      expect(app.altitudeLayer.getLayers()).toEqual([]);
-      app.altitudeLayer.setLayersProvider(() => [entry]);
-      expect(app.altitudeLayer.getLayers()).toEqual([entry]);
-      expect(app.airspeedLayer.getLayers()).toEqual([]);
-      app.altitudeLayer.setLayersProvider(null);
-      expect(app.altitudeLayer.getLayers()).toEqual([]);
-    });
-
-    it("falls back to a style that needs no network when the base style fails", async () => {
-      mockControl.autoLoadStyle = false;
-      const pending = initializeApp(app);
-      await Promise.resolve();
-      const map = mockMap(app);
-
-      map.emit("error", { error: new Error("Failed to fetch") });
-      // A second failure of the same load must not swap again
-      map.emit("error", { error: new Error("Failed to fetch") });
-
-      expect(map.setStyle).toHaveBeenCalledExactlyOnceWith(FALLBACK_STYLE, {
-        diff: false,
-      });
-      expect(logError).toHaveBeenCalledWith(
-        "Base map style failed to load: Failed to fetch",
-      );
-
-      map.finishStyleLoad(FALLBACK_STYLE);
-      await pending;
-
-      // No labels to stay below, so the data layers go on top
-      expect(map.getLayersOrder().slice(0, 2)).toEqual([
-        "background",
-        "aviation",
-      ]);
-      expect(m.mockDataManagerInstance.loadAirports).toHaveBeenCalled();
-    });
-
-    it("falls back when the base style neither loads nor fails", async () => {
-      // A captive portal or a half-open connection fires no event at all;
-      // the flights used to wait for the browser to give up on the request
-      vi.useFakeTimers();
-      try {
-        mockControl.autoLoadStyle = false;
-        const pending = initializeApp(app);
-        await Promise.resolve();
-        const map = mockMap(app);
-
-        await vi.advanceTimersByTimeAsync(STYLE_LOAD_TIMEOUT_MS - 1);
-        expect(map.setStyle).not.toHaveBeenCalled();
-        await vi.advanceTimersByTimeAsync(1);
-
-        expect(map.setStyle).toHaveBeenCalledExactlyOnceWith(FALLBACK_STYLE, {
-          diff: false,
-        });
-        expect(logError).toHaveBeenCalledWith(
-          "Base map style failed to load: no answer within the time limit",
+    describe("the base style", () => {
+      it("arrives late and goes under the flights, which stay as they are", async () => {
+        let answer!: (response: Response) => void;
+        fetchBaseStyle.mockReturnValue(
+          new Promise((resolve) => (answer = resolve)),
         );
-        // An error arriving after that must not swap a second time
-        map.emit("error", { error: new Error("Failed to fetch") });
-        expect(map.setStyle).toHaveBeenCalledTimes(1);
+        await initializeApp(app);
+        const map = mockMap(app);
+        // What the managers did while the map was on the style it starts on
+        const data = { type: "FeatureCollection", features: [{ id: 1 }] };
+        const paths = map.source("paths-altitude");
+        void paths.setData(data);
+        app.heatmapLayer.setVisible(true);
+        app.aviationLayer.setVisible(true);
+        map.setPaintProperty("paths-altitude", "line-opacity", 0.1);
+        map.setFilter("paths-airspeed", ["==", ["get", "pathId"], 7]);
+        map.addSource.mockClear();
+        map.addLayer.mockClear();
 
-        map.finishStyleLoad(FALLBACK_STYLE);
-        await pending;
-        expect(m.mockDataManagerInstance.loadAirports).toHaveBeenCalled();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+        answer(styleResponse(BASE_STYLE));
+        await vi.waitFor(() => expect(map.setStyle).toHaveBeenCalledOnce());
 
-    it("leaves a style that loaded in time alone", async () => {
-      vi.useFakeTimers();
-      try {
+        expect(map.getLayersOrder()).toEqual([
+          "background",
+          "water",
+          "aviation",
+          "heat",
+          "replay-route",
+          "paths-altitude",
+          "paths-airspeed",
+          "paths-altitude-selected",
+          "paths-airspeed-selected",
+          "replay-trail",
+          "place-labels",
+        ]);
+        // The same source, not one made again from a copy of its data: a
+        // `setData` that is on its way still lands in it
+        expect(map.source("paths-altitude")).toBe(paths);
+        expect(paths.data).toBe(data);
+        expect(map.source("heat").spec).toMatchObject({ cluster: true });
+        expect(map.source("carto")).toBeDefined();
+        expect(map.layer("heat").layout["visibility"]).toBe("visible");
+        expect(map.layer("aviation").layout["visibility"]).toBe("visible");
+        expect(map.layer("paths-altitude").paint["line-opacity"]).toBe(0.1);
+        expect(map.layer("paths-airspeed").filter).toEqual([
+          "==",
+          ["get", "pathId"],
+          7,
+        ]);
+        // The handles still reach their layers
+        app.heatmapLayer.setVisible(false);
+        expect(map.layer("heat").layout["visibility"]).toBe("none");
+        // Nothing was added by hand, and nothing was reported
+        expect(map.addLayer).not.toHaveBeenCalled();
+        expect(logError).not.toHaveBeenCalled();
+      });
+
+      it("does not hold the start-up back while it never answers", async () => {
+        vi.useFakeTimers();
+        try {
+          await initializeApp(app);
+          await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+          expect(m.mockDataManagerInstance.loadAirports).toHaveBeenCalled();
+          expect(fetchBaseStyle).toHaveBeenCalledOnce();
+          expect(mockMap(app).setStyle).not.toHaveBeenCalled();
+          expect(logError).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("is asked for once more after a failure, and then left alone", async () => {
+        vi.useFakeTimers();
+        try {
+          fetchBaseStyle.mockRejectedValue(new TypeError("Failed to fetch"));
+          await initializeApp(app);
+          await vi.advanceTimersByTimeAsync(0);
+
+          expect(logError).toHaveBeenCalledWith(
+            "Base map style failed to load: Failed to fetch",
+          );
+          expect(m.mockDataManagerInstance.loadAirports).toHaveBeenCalled();
+          await vi.advanceTimersByTimeAsync(BASE_STYLE_RETRY_MS - 1);
+          expect(fetchBaseStyle).toHaveBeenCalledTimes(1);
+          await vi.advanceTimersByTimeAsync(1);
+          expect(fetchBaseStyle).toHaveBeenCalledTimes(2);
+
+          await vi.advanceTimersByTimeAsync(BASE_STYLE_RETRY_MS * 10);
+          expect(fetchBaseStyle).toHaveBeenCalledTimes(2);
+          expect(mockMap(app).setStyle).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("takes an answer that is not a style for a failure", async () => {
+        fetchBaseStyle.mockResolvedValue(styleResponse({}, 503));
         await initializeApp(app);
 
-        await vi.advanceTimersByTimeAsync(STYLE_LOAD_TIMEOUT_MS * 2);
-
+        await vi.waitFor(() =>
+          expect(logError).toHaveBeenCalledWith(
+            "Base map style failed to load: HTTP 503",
+          ),
+        );
         expect(mockMap(app).setStyle).not.toHaveBeenCalled();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      });
 
-    it("does not fall back once the app is gone", async () => {
-      vi.useFakeTimers();
-      try {
-        mockControl.autoLoadStyle = false;
-        void initializeApp(app);
-        await Promise.resolve();
-        const map = mockMap(app);
+      it("is asked for again when the browser comes back online", async () => {
+        vi.useFakeTimers();
+        try {
+          fetchBaseStyle.mockRejectedValue(new TypeError("Failed to fetch"));
+          await initializeApp(app);
+          await vi.advanceTimersByTimeAsync(BASE_STYLE_RETRY_MS);
+          expect(fetchBaseStyle).toHaveBeenCalledTimes(2);
+
+          fetchBaseStyle.mockResolvedValue(styleResponse(BASE_STYLE));
+          window.dispatchEvent(new Event("online"));
+          await vi.advanceTimersByTimeAsync(0);
+
+          expect(fetchBaseStyle).toHaveBeenCalledTimes(3);
+          expect(mockMap(app).setStyle).toHaveBeenCalledOnce();
+          expect(mockMap(app).getLayersOrder().at(-1)).toBe("place-labels");
+
+          // Once it is there, it is there
+          window.dispatchEvent(new Event("online"));
+          await vi.advanceTimersByTimeAsync(BASE_STYLE_RETRY_MS);
+          expect(fetchBaseStyle).toHaveBeenCalledTimes(3);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("is not asked for twice while a request is out", async () => {
+        await initializeApp(app);
+
+        window.dispatchEvent(new Event("online"));
+
+        expect(fetchBaseStyle).toHaveBeenCalledOnce();
+      });
+
+      it("is given up on by destroy, and changes nothing when it answers anyway", async () => {
+        let answer!: (response: Response) => void;
+        fetchBaseStyle.mockReturnValue(
+          new Promise((resolve) => (answer = resolve)),
+        );
+        await initializeApp(app);
+        const signal = fetchBaseStyle.mock.calls[0]![1]!.signal!;
 
         app.destroy();
-        await vi.advanceTimersByTimeAsync(STYLE_LOAD_TIMEOUT_MS);
+        expect(signal.aborted).toBe(true);
+        answer(styleResponse(BASE_STYLE));
+        await new Promise((resolve) => setTimeout(resolve));
+        window.dispatchEvent(new Event("online"));
 
-        expect(map.setStyle).not.toHaveBeenCalled();
-      } finally {
-        vi.useRealTimers();
-      }
+        expect(mockMap(app).setStyle).not.toHaveBeenCalled();
+        expect(fetchBaseStyle).toHaveBeenCalledOnce();
+        expect(logError).not.toHaveBeenCalled();
+      });
+
+      it("says nothing about a request that destroy aborted", async () => {
+        fetchBaseStyle.mockImplementation(
+          (_url, init) =>
+            new Promise((_resolve, reject) => {
+              init!.signal!.addEventListener("abort", () =>
+                reject(new DOMException("aborted", "AbortError")),
+              );
+            }),
+        );
+        vi.useFakeTimers();
+        try {
+          await initializeApp(app);
+
+          app.destroy();
+          await vi.advanceTimersByTimeAsync(BASE_STYLE_RETRY_MS);
+
+          expect(logError).not.toHaveBeenCalled();
+          expect(fetchBaseStyle).toHaveBeenCalledOnce();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
     });
 
     it("logs what fails later and keeps the style", async () => {
@@ -1101,7 +1194,7 @@ describe("MapApp controls and map", () => {
 
         await initializeApp(appWithCarto);
 
-        expect(lastMap().options["style"]).toBe(
+        expect(fetchBaseStyle.mock.calls[0]![0]).toBe(
           "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json?key=carto%20key",
         );
         expect(lastMap().options["transformRequest"]).toBeTypeOf("function");

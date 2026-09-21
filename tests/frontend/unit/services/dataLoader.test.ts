@@ -6,7 +6,6 @@ import {
   beforeEach,
   vi,
   type Mock,
-  type MockInstance,
 } from "vitest";
 // jsdom has no streams; Node's are the ones its Response is built on
 import {
@@ -14,11 +13,10 @@ import {
   TransformStream as NodeTransformStream,
 } from "node:stream/web";
 import {
-  combineYearData,
-  DATA_FORMAT_VERSION,
-  expandYearData,
   isValidYear,
+  fetchBytes,
   fetchJson,
+  importYearTools,
   loadStylesheet,
   resetStylesheetLoader,
   DataLoader,
@@ -27,13 +25,12 @@ import {
   logDebug,
   logError,
 } from "../../../../kml_heatmap/frontend/utils/logger";
+import { createYearDecoder } from "../../../../kml_heatmap/frontend/services/yearDecoder";
+import { FakeYearWorker, path, rawYear, yearBytes } from "../../yearFixtures";
 import type {
   DataLoaderOptions,
-  KMLDataset,
   LoadingState,
   Metadata,
-  RawColumns,
-  RawPathSegments,
   RawYearData,
 } from "../../../../kml_heatmap/frontend/types";
 
@@ -44,76 +41,6 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
 }));
 
 type MockWindow = Window & typeof globalThis & Record<string, unknown>;
-
-/**
- * Column scales of the wire format, mirroring kml_heatmap/segment_codec.py
- * (the altitude column counts hundreds of feet). The helpers below take rows
- * in the units a reader thinks in and encode them, so a test says what it
- * means and the decoder is still checked against an independent encoder.
- */
-const SCALES = [1e5, 1e5, 1 / 100, 10, 10];
-
-/** One path's exported segments, given as plain `[lat, lon, ft, kt, s?]` rows */
-function path(start: [number, number], rows: number[][]): RawPathSegments {
-  const scaledStart = [
-    Math.round(start[0] * SCALES[0]!),
-    Math.round(start[1] * SCALES[1]!),
-  ];
-  const running = [scaledStart[0]!, scaledStart[1]!, 0, 0, 0];
-  // The time column is only written when some row has a time
-  const columns: (number | null)[][] = [[], [], [], []];
-  if (rows.some((row) => row.length > 4)) columns.push([]);
-  for (const row of rows) {
-    columns.forEach((column, index) => {
-      const value = row[index];
-      if (value === undefined) {
-        column.push(null);
-        return;
-      }
-      const scaled = Math.round(value * SCALES[index]!);
-      column.push(scaled - running[index]!);
-      running[index] = scaled;
-    });
-  }
-  return { start: scaledStart, columns: columns as RawColumns };
-}
-
-function rawYear(
-  year: number,
-  segments: RawYearData["segments"],
-  pathInfo: RawYearData["path_info"] = [],
-  originalPoints = 0,
-): RawYearData {
-  return {
-    format: DATA_FORMAT_VERSION,
-    year,
-    original_points: originalPoints,
-    path_info: pathInfo,
-    segments,
-  };
-}
-
-function dataset(
-  segmentsCount: number,
-  pathIdStart = 1,
-  originalPoints = segmentsCount,
-): KMLDataset {
-  const path_segments = Array.from({ length: segmentsCount }, (_, i) => ({
-    path_id: pathIdStart + i,
-    coords: [
-      [50, 8],
-      [50.1, 8.1],
-    ] as [[number, number], [number, number]],
-    altitude_ft: 1000,
-    groundspeed_knots: 100,
-  }));
-  return {
-    coordinates: path_segments.map((s) => s.coords[0]),
-    path_segments,
-    path_info: path_segments.map((s) => ({ id: s.path_id })),
-    original_points: originalPoints,
-  };
-}
 
 describe("fetchJson", () => {
   afterEach(() => {
@@ -265,6 +192,32 @@ describe("fetchJson with a progress callback", () => {
     expect(reported).toEqual([5, cut, bytes.length]);
     // Bytes, not characters: the ü counts twice
     expect(bytes.length).toBe(body.length + 1);
+  });
+
+  it("counts the same way for a body that is fetched as bytes", async () => {
+    const bytes = encoder.encode('{"a":1}');
+    stubFetch(chunked([bytes.slice(0, 3), bytes.slice(3)]));
+    const onProgress = vi.fn<(loadedBytes: number) => void>();
+
+    const body = await fetchBytes("data/2025/data.json", { onProgress });
+
+    expect(new Uint8Array(body)).toEqual(bytes);
+    expect(onProgress.mock.calls.map(([loaded]) => loaded)).toEqual([3, 7]);
+  });
+
+  it("fetches bytes without counting when nobody asked for the count", async () => {
+    stubFetch(new Response("{}"));
+
+    await expect(fetchBytes("a.json")).resolves.toHaveProperty("byteLength", 2);
+  });
+
+  it("fails bytes like JSON: with the URL, and the status as the cause", async () => {
+    stubFetch(new Response("", { status: 404 }));
+
+    const failure = await fetchBytes("bad.json").catch((e: unknown) => e);
+
+    expect(failure).toEqual(new Error("Failed to load bad.json"));
+    expect((failure as Error).cause).toEqual(new Error("HTTP 404"));
   });
 
   it("reports nothing for an empty body, and fails on parsing it", async () => {
@@ -636,403 +589,6 @@ describe("isValidYear", () => {
   });
 });
 
-describe("expandYearData", () => {
-  it("expands segment rows into path segments and heatmap coordinates", () => {
-    const raw = rawYear(
-      2025,
-      {
-        "4": path(
-          [50, 8],
-          [
-            [50.1, 8.1, 1000, 90, 0],
-            [50.2, 8.2, 1100, 95, 10],
-          ],
-        ),
-        "7": path([51, 9], [[51.1, 9.1, 500, 80]]),
-      },
-      [
-        { id: 4, year: 2025 },
-        { id: 7, year: 2025 },
-      ],
-      42,
-    );
-
-    const data = expandYearData(raw);
-
-    expect(data.original_points).toBe(42);
-    expect(data.path_info).toBe(raw.path_info);
-    expect(data.path_segments).toEqual([
-      {
-        path_id: 4,
-        coords: [
-          [50, 8],
-          [50.1, 8.1],
-        ],
-        altitude_ft: 1000,
-        groundspeed_knots: 90,
-        time: 0,
-      },
-      {
-        path_id: 4,
-        coords: [
-          [50.1, 8.1],
-          [50.2, 8.2],
-        ],
-        altitude_ft: 1100,
-        groundspeed_knots: 95,
-        time: 10,
-      },
-      {
-        path_id: 7,
-        coords: [
-          [51, 9],
-          [51.1, 9.1],
-        ],
-        altitude_ft: 500,
-        groundspeed_knots: 80,
-      },
-    ]);
-    // start of every segment + end of the last segment per path
-    expect(data.coordinates).toEqual([
-      [50, 8],
-      [50.1, 8.1],
-      [50.2, 8.2],
-      [51, 9],
-      [51.1, 9.1],
-    ]);
-  });
-
-  it("omits time when the row has four entries", () => {
-    const data = expandYearData(
-      rawYear(2025, { "1": path([50, 8], [[50.1, 8.1, 1000, 90]]) }),
-    );
-    expect("time" in data.path_segments[0]!).toBe(false);
-  });
-
-  it("orders paths like path_info, whatever their ids", () => {
-    // Ids are content hashes; JavaScript would list "2" before the others
-    const data = expandYearData(
-      rawYear(
-        2025,
-        {
-          "840108108563": path([50, 8], [[50.1, 8.1, 1, 1]]),
-          "10": path([50, 8], [[50.1, 8.1, 1, 1]]),
-          "2": path([50, 8], [[50.1, 8.1, 1, 1]]),
-        },
-        [
-          { id: 840108108563, year: 2025 },
-          { id: 10, year: 2025 },
-          { id: 2, year: 2025 },
-        ],
-      ),
-    );
-    expect(data.path_segments.map((s) => s.path_id)).toEqual([
-      840108108563, 10, 2,
-    ]);
-  });
-
-  it("still expands segments that path_info does not list", () => {
-    const data = expandYearData(
-      rawYear(
-        2025,
-        {
-          "10": path([50, 8], [[50.1, 8.1, 1, 1]]),
-          "2": path([50, 8], [[50.1, 8.1, 1, 1]]),
-        },
-        [{ id: 10, year: 2025 }],
-      ),
-    );
-    expect(data.path_segments.map((s) => s.path_id)).toEqual([10, 2]);
-  });
-
-  it("expands an unlisted path even when the counts match", () => {
-    const data = expandYearData(
-      rawYear(
-        2025,
-        {
-          "10": path([50, 8], [[50.1, 8.1, 1, 1]]),
-          "30": path([50, 8], [[50.1, 8.1, 1, 1]]),
-        },
-        [
-          { id: 10, year: 2025 },
-          { id: 20, year: 2025 },
-        ],
-      ),
-    );
-    expect(data.path_segments.map((s) => s.path_id)).toEqual([10, 30]);
-  });
-
-  it("expands a path listed twice once", () => {
-    const data = expandYearData(
-      rawYear(2025, { "10": path([50, 8], [[50.1, 8.1, 1, 1]]) }, [
-        { id: 10, year: 2025 },
-        { id: 10, year: 2025 },
-      ]),
-    );
-    expect(data.path_segments).toHaveLength(1);
-  });
-
-  it("skips paths without segments and has no holes in the arrays", () => {
-    const data = expandYearData(
-      rawYear(2025, {
-        "1": path([50, 8], []),
-        "2": path([50, 8], [[50.1, 8.1, 1, 1]]),
-      }),
-    );
-    expect(data.path_segments).toHaveLength(1);
-    expect(data.coordinates).toHaveLength(2);
-    expect(data.coordinates.every((c) => Array.isArray(c))).toBe(true);
-  });
-
-  it("shares the start coordinate array between segment and heatmap point", () => {
-    const data = expandYearData(
-      rawYear(2025, { "1": path([50, 8], [[50.1, 8.1, 1, 1]]) }),
-    );
-    expect(data.coordinates[0]).toBe(data.path_segments[0]!.coords![0]);
-  });
-
-  it("shares one coordinate array between neighbouring segments", () => {
-    const data = expandYearData(
-      rawYear(2025, {
-        "1": path(
-          [50, 8],
-          [
-            [50.1, 8.1, 1, 1],
-            [50.2, 8.2, 1, 1],
-          ],
-        ),
-      }),
-    );
-    // The end of a segment is the very same array as the next one's start
-    expect(data.path_segments[0]!.coords![1]).toBe(
-      data.path_segments[1]!.coords![0],
-    );
-  });
-
-  describe("malformed paths", () => {
-    let warn: MockInstance<typeof console.warn>;
-    beforeEach(() => {
-      warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    });
-    afterEach(() => warn.mockRestore());
-
-    const good = (): RawPathSegments => path([51, 9], [[51.1, 9.1, 500, 80]]);
-
-    /** Expand path "1" next to a good path "2" */
-    function expandWith(bad: unknown): KMLDataset {
-      return expandYearData(
-        rawYear(2025, { "1": bad as RawPathSegments, "2": good() }),
-      );
-    }
-
-    /** Only the good path made it, and it has no holes or NaN in it */
-    function expectOnlyTheGoodPath(data: KMLDataset): void {
-      expect(data.path_segments.map((s) => s.path_id)).toEqual([2]);
-      expect(data.coordinates).toEqual([
-        [51, 9],
-        [51.1, 9.1],
-      ]);
-      expect(warn).toHaveBeenCalledOnce();
-      expect(warn.mock.calls[0]![0]).toContain("Path 1");
-    }
-
-    it.each([
-      ["no start point", { ...good(), start: [] }],
-      ["a start point that is not numeric", { ...good(), start: ["x", 1] }],
-      [
-        "a missing column",
-        { start: [0, 0], columns: [[1], [1], [1], undefined] },
-      ],
-      ["columns that are not an array", { start: [0, 0], columns: {} }],
-      ["no columns at all", { start: [0, 0] }],
-    ])("leaves out a path with %s and warns", (_, bad) => {
-      expectOnlyTheGoodPath(expandWith(bad));
-    });
-
-    it.each([NaN, Infinity, "1", undefined, {}])(
-      "cuts a path short at a row holding %s, keeping the rows before it",
-      (value) => {
-        const raw = path(
-          [50, 8],
-          [
-            [50.1, 8.1, 500, 80, 0],
-            [50.2, 8.2, 500, 80, 1],
-            [50.3, 8.3, 500, 80, 2],
-          ],
-        );
-        (raw.columns[1] as unknown[])[1] = value;
-
-        const data = expandWith(raw);
-
-        // A difference is lost, so nothing after it has a known position
-        expect(data.path_segments.map((s) => s.path_id)).toEqual([1, 2]);
-        expect(data.coordinates).toEqual([
-          [50, 8],
-          [50.1, 8.1],
-          [51, 9],
-          [51.1, 9.1],
-        ]);
-        // Every slot is filled: the preallocated arrays are trimmed
-        expect(data.path_segments.every(Boolean)).toBe(true);
-        expect(warn).toHaveBeenCalledOnce();
-      },
-    );
-
-    it("cuts a path short where a column ends early", () => {
-      const data = expandWith({
-        start: [0, 0],
-        columns: [[1, 2], [1], [1], [1]],
-      });
-
-      expect(data.path_segments.map((s) => s.path_id)).toEqual([1, 2]);
-      expect(warn).toHaveBeenCalledOnce();
-    });
-
-    it.each([2, 3])("checks column %i as well", (column) => {
-      const raw = path([50, 8], [[50.1, 8.1, 500, 80]]);
-      (raw.columns[column] as unknown[])[0] = "high";
-
-      expectOnlyTheGoodPath(expandWith(raw));
-    });
-
-    it("rejects a time that is present but not numeric", () => {
-      const raw = path([50, 8], [[50.1, 8.1, 500, 80, 0]]);
-      (raw.columns[4] as unknown[])[0] = "soon";
-
-      expectOnlyTheGoodPath(expandWith(raw));
-    });
-
-    it("reads a time column that ends early as rows without a time", () => {
-      const data = expandWith({
-        start: [0, 0],
-        columns: [[1], [1], [1], [1], []],
-      });
-
-      expect(data.path_segments.map((s) => s.time)).toEqual([
-        undefined,
-        undefined,
-      ]);
-      expect(warn).not.toHaveBeenCalled();
-    });
-  });
-
-  it("reads a null time as a row without one", () => {
-    const data = expandYearData(
-      rawYear(2025, {
-        "1": path(
-          [50, 8],
-          [
-            [50.1, 8.1, 500, 80, 10],
-            [50.2, 8.2, 500, 80],
-            [50.3, 8.3, 500, 80, 30],
-          ],
-        ),
-      }),
-    );
-
-    expect(data.path_segments.map((s) => s.time)).toEqual([10, undefined, 30]);
-    expect("time" in data.path_segments[1]!).toBe(false);
-  });
-
-  it("defaults missing path_info and original_points", () => {
-    const data = expandYearData({
-      format: DATA_FORMAT_VERSION,
-      year: 2025,
-      segments: {},
-    } as RawYearData);
-    expect(data.path_info).toEqual([]);
-    expect(data.original_points).toBe(0);
-    expect(data.path_segments).toEqual([]);
-  });
-
-  it("throws for invalid input", () => {
-    expect(() => expandYearData(null as unknown as RawYearData)).toThrow();
-    expect(() =>
-      expandYearData({
-        format: DATA_FORMAT_VERSION,
-        path_segments: [],
-      } as unknown as RawYearData),
-    ).toThrow("segments");
-  });
-
-  it.each([undefined, 2, 4, "3"])(
-    "refuses a year file written in format %s",
-    (format) => {
-      expect(() =>
-        expandYearData({
-          format,
-          year: 2025,
-          segments: {},
-        } as unknown as RawYearData),
-      ).toThrow("another release");
-    },
-  );
-
-  it("decodes the scaled differences back to plain values", () => {
-    const data = expandYearData(
-      rawYear(2025, {
-        "1": path(
-          [50, 8],
-          [
-            [50.1, 8.1, 500, 1.5, 2],
-            [50.2, 8.2, 600, 2.5, 4],
-          ],
-        ),
-      }),
-    );
-
-    expect(data.path_segments[0]!.coords).toEqual([
-      [50, 8],
-      [50.1, 8.1],
-    ]);
-    expect(data.path_segments[0]!.altitude_ft).toBe(500);
-    expect(data.path_segments[0]!.groundspeed_knots).toBe(1.5);
-    expect(data.path_segments[0]!.time).toBe(2);
-    expect(data.path_segments[1]!.coords).toEqual([
-      [50.1, 8.1],
-      [50.2, 8.2],
-    ]);
-    expect(data.path_segments[1]!.altitude_ft).toBe(600);
-    expect(data.path_segments[1]!.groundspeed_knots).toBe(2.5);
-    expect(data.path_segments[1]!.time).toBe(4);
-  });
-});
-
-describe("combineYearData", () => {
-  it("concatenates datasets without remapping or copying objects", () => {
-    const a = dataset(2, 1, 100);
-    const b = dataset(1, 3, 200);
-
-    const result = combineYearData([a, b]);
-
-    expect(result.coordinates).toHaveLength(3);
-    expect(result.path_segments).toHaveLength(3);
-    expect(result.path_info).toHaveLength(3);
-    expect(result.original_points).toBe(300);
-    expect(result.path_segments.map((s) => s.path_id)).toEqual([1, 2, 3]);
-    // Same object references (no copies)
-    expect(result.path_segments[0]).toBe(a.path_segments[0]);
-    expect(result.path_segments[2]).toBe(b.path_segments[0]);
-    expect(result.path_info[2]).toBe(b.path_info[0]);
-    expect(result.coordinates[0]).toBe(a.coordinates[0]);
-  });
-
-  it("skips null or undefined datasets", () => {
-    const result = combineYearData([dataset(1), null, undefined]);
-    expect(result.coordinates).toHaveLength(1);
-    expect(result.original_points).toBe(1);
-  });
-
-  it("returns an empty dataset for no input", () => {
-    expect(combineYearData([])).toEqual({
-      coordinates: [],
-      path_segments: [],
-      path_info: [],
-      original_points: 0,
-    });
-  });
-});
-
 describe("DataLoader", () => {
   let loader: DataLoader;
   let mockWindow: MockWindow;
@@ -1042,6 +598,8 @@ describe("DataLoader", () => {
   let mockShowLoading: Mock<(state: LoadingState) => void>;
   let mockHideLoading: Mock<() => void>;
   let onLoadError: Mock<(years: string[]) => void>;
+  let yearWorker: FakeYearWorker;
+  let mockImportYearTools: Mock<typeof importYearTools>;
 
   function defineYear(
     year: number,
@@ -1080,9 +638,21 @@ describe("DataLoader", () => {
     mockHideLoading = vi.fn();
     onLoadError = vi.fn();
 
+    yearWorker = new FakeYearWorker();
+    mockImportYearTools = vi.fn<typeof importYearTools>(() =>
+      Promise.resolve({
+        createYearDecoder: () =>
+          createYearDecoder({ createWorker: () => yearWorker.asWorker() }),
+      }),
+    );
+
     loader = new DataLoader({
       dataDir: "test-data",
       fetchJson: mockFetchJson,
+      // The year files are served by the same mock, as the bytes of the
+      // JSON, so that a test can tell the site's files in one place
+      fetchBytes: (url, options) => mockFetchJson(url, options).then(yearBytes),
+      importYearTools: mockImportYearTools,
       showLoading: mockShowLoading,
       hideLoading: mockHideLoading,
       getWindow: () => mockWindow,
@@ -1392,9 +962,12 @@ describe("DataLoader", () => {
           `${loadedBytes}/${totalBytes}`,
       );
 
-    /** Let the promise chains of settled requests run */
+    /**
+     * Let the promise chains of settled requests run: a year has arrived
+     * once the year worker has answered and its dataset is built
+     */
     const settled = async (): Promise<void> => {
-      for (let i = 0; i < 5; i++) await Promise.resolve();
+      for (let i = 0; i < 20; i++) await Promise.resolve();
     };
 
     it("reports the bytes of a year against its size on disk", async () => {
@@ -1754,6 +1327,167 @@ describe("DataLoader", () => {
       // One signature: the function is a valid option, with no adapter that
       // could put the callback where the timeout goes
       expect(() => new DataLoader({ fetchJson })).not.toThrow();
+      expect(() => new DataLoader({ fetchBytes })).not.toThrow();
+    });
+  });
+
+  describe("year worker", () => {
+    it("decodes every year with one worker, imported once", async () => {
+      defineYear(2024);
+      defineYear(2025);
+      files["test-data/metadata.json"] = { available_years: [2024, 2025] };
+
+      const all = await loader.loadData("all");
+
+      expect(all!.path_segments).toHaveLength(2);
+      expect(mockImportYearTools).toHaveBeenCalledTimes(1);
+      expect(mockImportYearTools).toHaveBeenCalledWith(0);
+      expect(yearWorker.requests).toHaveLength(2);
+      expect(logError).not.toHaveBeenCalled();
+    });
+
+    it("asks for the worker before the year file has arrived", async () => {
+      let arrive: (raw: unknown) => void = () => {};
+      mockFetchJson.mockReturnValue(
+        new Promise((resolve) => (arrive = resolve)),
+      );
+
+      const loading = loader.loadData("2025");
+      expect(mockImportYearTools).toHaveBeenCalledTimes(1);
+
+      arrive(rawYear(2025, {}));
+      await expect(loading).resolves.toMatchObject({ path_segments: [] });
+    });
+
+    it("decodes on the main thread when the worker fails, which the caller cannot tell", async () => {
+      defineYear(2025);
+      yearWorker.answers = false;
+
+      const loading = loader.loadData("2025");
+      await vi.waitFor(() => expect(yearWorker.requests).toHaveLength(1));
+      yearWorker.emit("error", { message: "blocked" });
+
+      expect((await loading)!.path_segments).toHaveLength(1);
+      expect(onLoadError).not.toHaveBeenCalled();
+      expect(mockHideLoading).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails the year when the bundle cannot be imported, and imports it under another URL next time", async () => {
+      defineYear(2025);
+      mockImportYearTools.mockRejectedValueOnce(new Error("404"));
+
+      expect(await loader.loadData("2025")).toBeNull();
+
+      expect(onLoadError).toHaveBeenCalledWith(["2025"]);
+      expect(mockHideLoading).toHaveBeenCalledTimes(1);
+      const [, failure] = vi.mocked(logError).mock.calls[0]!;
+      expect(failure).toEqual(
+        new Error("Could not load ./yearWorker.bundle.js"),
+      );
+
+      expect((await loader.loadData("2025"))!.path_segments).toHaveLength(1);
+      expect(mockImportYearTools.mock.calls).toEqual([[0], [1]]);
+    });
+
+    it("gives up on an import that stalls, and asks for the same URL next time", async () => {
+      vi.useFakeTimers();
+      try {
+        defineYear(2025);
+        mockImportYearTools.mockReturnValueOnce(new Promise(() => {}));
+
+        const loading = loader.loadData("2025");
+        await vi.advanceTimersByTimeAsync(120_000);
+
+        expect(await loading).toBeNull();
+        expect(onLoadError).toHaveBeenCalledWith(["2025"]);
+        expect(mockHideLoading).toHaveBeenCalledTimes(1);
+        const [, failure] = vi.mocked(logError).mock.calls[0]!;
+        expect((failure as Error).cause).toEqual(
+          new Error("Timed out loading ./yearWorker.bundle.js"),
+        );
+
+        expect((await loader.loadData("2025"))!.path_segments).toHaveLength(1);
+        // Timed out is not failed: the module may still arrive under that URL
+        expect(mockImportYearTools.mock.calls).toEqual([[0], [0]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never asks the worker for a year whose download was given up on", async () => {
+      mockFetchJson.mockRejectedValue(new Error("Timed out loading"));
+
+      expect(await loader.loadData("2025")).toBeNull();
+
+      expect(yearWorker.requests).toEqual([]);
+      expect(mockHideLoading).toHaveBeenCalledTimes(1);
+    });
+
+    it("ends the worker with the loader, and reports nothing to an app that is gone", async () => {
+      defineYear(2025);
+      yearWorker.answers = false;
+      const loading = loader.loadData("2025");
+      await vi.waitFor(() => expect(yearWorker.requests).toHaveLength(1));
+
+      loader.destroy();
+
+      expect(await loading).toBeNull();
+      expect(yearWorker.terminate).toHaveBeenCalledTimes(1);
+      expect(onLoadError).not.toHaveBeenCalled();
+      // The indicator is still taken down, and the year can be asked for again
+      expect(mockHideLoading).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports no failed years of 'all' to an app that is gone", async () => {
+      defineYear(2025);
+      files["test-data/metadata.json"] = { available_years: [2025] };
+      yearWorker.answers = false;
+      const loading = loader.loadData("all");
+      await vi.waitFor(() => expect(yearWorker.requests).toHaveLength(1));
+
+      loader.destroy();
+
+      expect(await loading).toBeNull();
+      expect(onLoadError).not.toHaveBeenCalled();
+    });
+
+    it("starts no worker for a loader that ended while the bundle was imported", async () => {
+      defineYear(2025);
+      const create = vi.fn();
+      let arrive: () => void = () => {};
+      mockImportYearTools.mockReturnValue(
+        new Promise((resolve) => {
+          arrive = () => resolve({ createYearDecoder: create });
+        }),
+      );
+      const loading = loader.loadData("2025");
+
+      loader.destroy();
+      arrive();
+
+      expect(await loading).toBeNull();
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it("can be destroyed before it loaded anything", () => {
+      expect(() => loader.destroy()).not.toThrow();
+      expect(mockImportYearTools).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("importYearTools", () => {
+    it("imports the year worker's module", async () => {
+      const tools = await importYearTools(0);
+
+      expect(tools.createYearDecoder).toBe(createYearDecoder);
+    });
+
+    it("names the bundle itself after a failure, next to this module", async () => {
+      // There is no bundle next to the sources, so this fails, and says
+      // what it asked for; the e2e suite checks the retry against a site
+      const failure = await importYearTools(2).catch((e: unknown) => e);
+
+      expect(String(failure)).toContain("/yearWorker.bundle.js");
     });
   });
 

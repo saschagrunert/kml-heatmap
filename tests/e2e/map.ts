@@ -14,6 +14,7 @@
  * `setZoom` translate (see `stateZoomToMap` in utils/mapHelpers.ts).
  */
 import { expect, type Locator, type Page } from "@playwright/test";
+import type { GeoJSONSource } from "maplibre-gl";
 // Type-only import so the window.mapApp / MAP_CONFIG globals are declared
 import type {} from "../../kml_heatmap/frontend/globals";
 
@@ -485,6 +486,35 @@ export function airportMarkerCenter(
   }, name);
 }
 
+/**
+ * Count the airport popups taken out of the page from now on. Moving the
+ * open popup to another airport must not close it in between, which would
+ * flicker; the popup is the library's element, so this is watched here.
+ * Call the result for the count so far.
+ */
+export async function watchPopupRemovals(
+  page: Page,
+): Promise<() => Promise<number>> {
+  const removals = await page.evaluateHandle(() => {
+    const seen = { count: 0 };
+    new MutationObserver((records) => {
+      for (const node of records.flatMap((r) => [...r.removedNodes])) {
+        if (
+          node instanceof Element &&
+          node.matches(".maplibregl-popup:not(.segment-tooltip)")
+        ) {
+          seen.count++;
+        }
+      }
+    }).observe(window.mapApp!.map!.getContainer(), {
+      childList: true,
+      subtree: true,
+    });
+    return seen;
+  });
+  return async () => (await removals.jsonValue()).count;
+}
+
 /** Open an airport's popup the way the app does, without a pointer */
 export function openAirportPopup(page: Page, name: string): Promise<void> {
   return page.evaluate((airport) => {
@@ -537,34 +567,97 @@ export async function expectPopupAboveAirplane(page: Page): Promise<void> {
 
 export type ColorLayer = "altitude" | "airspeed";
 
+/** One piece of path as the map draws it: a feature and its layer's paint */
+interface DrawnPath {
+  color: string;
+  weight: number;
+}
+
+/**
+ * The pieces of path a colour layer draws, in drawing order, read from the
+ * map: the features of the sources of the handle's layers that the layer's
+ * filter lets through, with the colour and width of its paint. Hidden layers
+ * draw nothing. Read once the map is idle, so the sources hold what the app
+ * handed them last and the paint is applied.
+ *
+ * From the sources' data and not from `querySourceFeatures`: that answers for
+ * the tiles in view only, cut up at their edges, so the count would follow
+ * the camera. Only the filter shapes the app writes are understood; anything
+ * else throws rather than counting wrong.
+ */
+async function drawnPaths(page: Page, layer: ColorLayer): Promise<DrawnPath[]> {
+  await waitForMapIdle(page);
+  return page.evaluate(async (mode) => {
+    type Properties = Record<string, unknown>;
+    const evaluate = (expression: unknown, properties: Properties): unknown => {
+      if (!Array.isArray(expression)) return expression;
+      const [op, ...args] = expression as [string, ...unknown[]];
+      switch (op) {
+        case "literal":
+          return args[0];
+        case "get":
+          return properties[String(args[0])];
+        case "!":
+          return !evaluate(args[0], properties);
+        case "in": {
+          const list = evaluate(args[1], properties);
+          if (!Array.isArray(list)) throw new Error("`in` needs a list");
+          return list.includes(evaluate(args[0], properties));
+        }
+        default:
+          throw new Error(`the driver does not know the expression "${op}"`);
+      }
+    };
+
+    const app = window.mapApp!;
+    const map = app.map!;
+    const drawn: { color: string; weight: number }[] = [];
+    for (const id of app[`${mode}Layer`].ids) {
+      const style = map.getLayer(id);
+      if (!style) throw new Error(`no layer "${id}" on the map`);
+      if (map.getLayoutProperty(id, "visibility") === "none") continue;
+      const source = map.getSource(style.source);
+      if (source?.type !== "geojson") throw new Error(`"${id}" is not GeoJSON`);
+      const data = await (source as GeoJSONSource).getData();
+      if (data.type !== "FeatureCollection") {
+        throw new Error(`the source of "${id}" is not a FeatureCollection`);
+      }
+      const filter: unknown = map.getFilter(id);
+      const color: unknown = map.getPaintProperty(id, "line-color");
+      const weight: unknown = map.getPaintProperty(id, "line-width");
+      if (typeof weight !== "number") throw new Error(`"${id}": width`);
+      for (const feature of data.features) {
+        const properties = feature.properties ?? {};
+        if (filter != null && evaluate(filter, properties) !== true) continue;
+        drawn.push({ color: String(evaluate(color, properties)), weight });
+      }
+    }
+    return drawn;
+  }, layer);
+}
+
 /** How many pieces of path a colour layer has drawn */
-export function pathCount(page: Page, layer: ColorLayer): Promise<number> {
-  return page.evaluate(
-    (mode) => window.mapApp![`${mode}Layer`].getLayers().length,
-    layer,
-  );
+export async function pathCount(
+  page: Page,
+  layer: ColorLayer,
+): Promise<number> {
+  return (await drawnPaths(page, layer)).length;
 }
 
 /** Stroke colour of every piece of path in a colour layer, in drawing order */
-export function pathColors(page: Page, layer: ColorLayer): Promise<string[]> {
-  return page.evaluate(
-    (mode) =>
-      window
-        .mapApp![`${mode}Layer`].getLayers()
-        .map((run) => String(run.options.color)),
-    layer,
-  );
+export async function pathColors(
+  page: Page,
+  layer: ColorLayer,
+): Promise<string[]> {
+  return (await drawnPaths(page, layer)).map((path) => path.color);
 }
 
 /** Stroke width of every piece of path in a colour layer, in drawing order */
-export function pathWeights(page: Page, layer: ColorLayer): Promise<number[]> {
-  return page.evaluate(
-    (mode) =>
-      window
-        .mapApp![`${mode}Layer`].getLayers()
-        .map((run) => run.options.weight),
-    layer,
-  );
+export async function pathWeights(
+  page: Page,
+  layer: ColorLayer,
+): Promise<number[]> {
+  return (await drawnPaths(page, layer)).map((path) => path.weight);
 }
 
 /**
@@ -639,6 +732,63 @@ export async function expectHeatmapPainted(page: Page): Promise<void> {
     return app.map!.querySourceFeatures(layer.source).length;
   });
   expect(points).toBeGreaterThan(0);
+}
+
+/** What the map holds of the flights, and where among its layers */
+export interface FlightsOnMap {
+  /** Every layer of the style, bottom to top */
+  layers: string[];
+  /** The app's layers as the map reports them: layout, paint and filter */
+  looks: unknown[];
+  /** Features per GeoJSON source of the app, as handed to the map */
+  features: Record<string, number>;
+  /** Features of the heat and the altitude source in the tiles in view */
+  drawn: { heat: number; paths: number };
+}
+
+/**
+ * Read the flights back from the map itself, once it has drawn them. The
+ * sources are remembered on the first call, and a later one fails when the
+ * map has made any of them anew: a source that was replaced has lost the
+ * tiles it had and whatever `setData` was on its way to it.
+ */
+export async function flightsOnMap(page: Page): Promise<FlightsOnMap> {
+  await waitForMapIdle(page);
+  return page.evaluate(() => {
+    const app = window.mapApp!;
+    const map = app.map!;
+    const style = map.getStyle();
+    const own = [
+      ...app.aviationLayer.ids,
+      ...app.heatmapLayer.ids,
+      "replay-route",
+      ...app.altitudeLayer.ids,
+      ...app.airspeedLayer.ids,
+      "replay-trail",
+    ];
+    const kept = window as unknown as { flightSources?: unknown[] };
+    const sources = own.map((id) => map.getSource(map.getLayer(id)!.source));
+    kept.flightSources ??= sources;
+    if (kept.flightSources.some((source, i) => source !== sources[i])) {
+      throw new Error("the map has replaced a source of the flights");
+    }
+    const features: Record<string, number> = {};
+    for (const [id, source] of Object.entries(style.sources)) {
+      if (source.type !== "geojson" || typeof source.data === "string")
+        continue;
+      const data = source.data as GeoJSON.FeatureCollection;
+      if (own.includes(id)) features[id] = data.features.length;
+    }
+    return {
+      layers: style.layers.map((layer) => layer.id),
+      looks: style.layers.filter((layer) => own.includes(layer.id)),
+      features,
+      drawn: {
+        heat: map.querySourceFeatures(app.heatmapLayer.ids[0]!).length,
+        paths: map.querySourceFeatures(app.altitudeLayer.ids[0]!).length,
+      },
+    };
+  });
 }
 
 /**

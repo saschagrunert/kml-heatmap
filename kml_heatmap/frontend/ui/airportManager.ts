@@ -155,7 +155,9 @@ export class AirportManager {
 
     // Moving the open popup is no close: the focus belongs to whatever
     // asked for the new one, not to the marker that is left behind
+    if (this.openAirport !== null) this.setExpanded(this.openAirport, false);
     this.openAirport = name;
+    this.setExpanded(name, true);
     this.popup.setLngLat(marker.getLatLng());
     this.writePopupContent(name);
     if (!this.popup.isOpen()) this.popup.addTo(map);
@@ -242,11 +244,19 @@ export class AirportManager {
     const name = this.openAirport;
     this.openAirport = null;
     if (name === null) return;
+    this.setExpanded(name, false);
 
     const active = document.activeElement;
     if (active === null || active === document.body) {
       this.app.airportMarkers[name]?.getElement().focus();
     }
+  }
+
+  /** Tell assistive technology whether an airport's popup is open */
+  private setExpanded(name: string, expanded: boolean): void {
+    this.app.airportMarkers[name]
+      ?.getElement()
+      .setAttribute("aria-expanded", String(expanded));
   }
 
   updateAirportOpacity(): void {

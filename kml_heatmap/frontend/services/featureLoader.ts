@@ -14,6 +14,7 @@
  */
 import { loadStylesheet } from "./dataLoader";
 import { logError } from "../utils/logger";
+import { withTimeout } from "../utils/withTimeout";
 import type { FeatureModule } from "../features";
 
 /** Next to the page, like every other file the site ships */
@@ -45,20 +46,6 @@ let importFeatures = (failedImports: number): Promise<FeatureModule> =>
           .href
       ) as Promise<FeatureModule>);
 
-/**
- * An import cannot be aborted, so a stalled one is only given up on: the
- * caller gets its answer and the next attempt starts over.
- */
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("Timed out loading the feature bundle")),
-      timeoutMs,
-    );
-    promise.then(resolve, reject).finally(() => clearTimeout(timer));
-  });
-}
-
 let pending: Promise<FeatureModule | null> | null = null;
 /** Set once the bundle and its stylesheet have both arrived */
 let loaded: FeatureModule | null = null;
@@ -80,7 +67,13 @@ export function loadFeatures(): Promise<FeatureModule | null> {
   const bundle = importFeatures(failedImports);
   bundle.catch(() => failedImports++);
   pending = Promise.all([
-    withTimeout(bundle, FEATURES_LOAD_TIMEOUT_MS),
+    // An import cannot be aborted, so a stalled one is only given up on:
+    // the caller gets its answer and the next attempt starts over
+    withTimeout(
+      bundle,
+      FEATURES_LOAD_TIMEOUT_MS,
+      "Timed out loading the feature bundle",
+    ),
     loadStylesheet(FEATURES_CSS_URL, FEATURES_LOAD_TIMEOUT_MS),
   ])
     .then(([features]) => {

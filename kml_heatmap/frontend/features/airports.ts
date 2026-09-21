@@ -34,6 +34,8 @@ export function createAirportElement(
   // label inside is only the code
   button.title = name;
   button.setAttribute("aria-label", name);
+  // It opens and closes the airport's popup; AirportManager keeps this true
+  button.setAttribute("aria-expanded", "false");
 
   const container = document.createElement("div");
   container.className = "airport-marker-container";

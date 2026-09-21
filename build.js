@@ -26,7 +26,8 @@ const sourceHash = computeSourceHash();
 const buildBanner = makeBanner(sourceHash);
 
 /**
- * Leave MapLibre out of the bundles and import the vendored module instead.
+ * Leave MapLibre out of the bundles and import the vendored module instead,
+ * and html-to-image with it.
  *
  * It is three quarters of a megabyte that changes only when the dependency
  * is bumped, so it stays a file of its own that the browser caches apart
@@ -42,6 +43,33 @@ const maplibreVendorPlugin = {
       path: "./vendor/maplibre-gl.mjs",
       external: true,
     }));
+    // html-to-image likewise: only an export needs it, so the app imports
+    // it on the first one (ui/uiToggles.ts). Pointing the import() at the
+    // vendored module keeps it out of the bundles without making esbuild
+    // write a second chunk, which would need a name (assertExpectedOutputs).
+    build.onResolve({ filter: /^html-to-image$/ }, () => ({
+      path: "./vendor/html-to-image.mjs",
+      external: true,
+    }));
+  },
+};
+
+/**
+ * Leave the year decoder out of the bundles as well. The app decodes the
+ * year files in a worker, which is a build of its own (workerBuildOptions);
+ * where the worker cannot be used, the app imports the decoder from that
+ * same file (services/yearDecoder.ts). Without this, esbuild would write the
+ * decoder a second time, as a chunk of the app.
+ * @type {import("esbuild").Plugin}
+ */
+const yearWorkerPlugin = {
+  name: "year-worker",
+  setup(build) {
+    build.onResolve({ filter: /^\.\/yearWorker$/ }, (args) =>
+      args.kind === "dynamic-import"
+        ? { path: `./${WORKER_BUNDLE}`, external: true }
+        : undefined,
+    );
   },
 };
 
@@ -86,7 +114,19 @@ const buildOptions = {
 
   // Don't drop console statements - they are guarded by debug flags in code
   drop: isDevelopment ? [] : ["debugger"],
-  plugins: [maplibreVendorPlugin],
+  plugins: [maplibreVendorPlugin, yearWorkerPlugin],
+};
+
+// The year worker (services/yearWorker.ts). A build of its own rather than a
+// third entry point: a worker shares no module instance with the page, so a
+// chunk in common would only be one more file to fetch before it can start,
+// and splitting would name that chunk shared.bundle.js as well.
+/** @type {import("esbuild").BuildOptions} */
+const workerBuildOptions = {
+  ...buildOptions,
+  entryPoints: [join(FRONTEND_DIR, "services/yearWorker.ts")],
+  splitting: false,
+  plugins: [],
 };
 
 /**
@@ -184,8 +224,9 @@ function analyzeBundleComposition(metafile, fileName) {
 // (105.8 KB) and the fixes from the review of the MapLibre port (about 2 KB:
 // the fallback when the base style never answers, the guards that keep
 // marker and Wrapped interactions away from the map). 107.9 KB with both.
-// The room on top is small on purpose. Decoding the year files in a worker
-// will take that code out of this bundle again.
+// The room on top is small on purpose. What decodes the year files and
+// builds their datasets has since moved into the year worker's bundle, which
+// took 0.5 KB out of this one.
 // Raised from 110 KB for the map that turns, tilts and becomes a globe: 3.3 KB
 // on top of the 108.2 KB main had, which is 111.6 KB. 1.6 KB of it is the
 // compass and the globe switch (the app's own buttons rather than MapLibre's
@@ -202,9 +243,14 @@ const BUDGET_APP = 112 * 1024;
 // cannot grow without anyone noticing.
 const BUDGET_FEATURES = 40 * 1024;
 
+// The year worker's bundle is fetched by every visit, but next to the first
+// year file rather than ahead of the app, so it holds up nothing on the page.
+const BUDGET_WORKER = 6 * 1024;
+
 const APP_BUNDLE = "mapApp.bundle.js";
 const FEATURES_BUNDLE = "features.bundle.js";
 const SHARED_BUNDLE = "shared.bundle.js";
+const WORKER_BUNDLE = "yearWorker.bundle.js";
 
 /**
  * Print bundle size analysis and check it against the budget
@@ -218,6 +264,7 @@ function analyzeBundleSizes() {
   const bundles = [
     ["🗺️  First visit", [APP_BUNDLE, SHARED_BUNDLE], BUDGET_APP],
     ["✨ Features", [FEATURES_BUNDLE], BUDGET_FEATURES],
+    ["🧵 Year worker", [WORKER_BUNDLE], BUDGET_WORKER],
   ];
 
   let budgetExceeded = false;
@@ -248,20 +295,26 @@ function analyzeBundleSizes() {
 }
 
 /**
- * Fail the build when it wrote anything but the three bundles.
+ * Fail the build when it wrote anything but the four bundles.
  *
  * The site publishes them by name (SITE_FILES in kml_heatmap/site_assets.py)
  * and the page preloads the shared chunk by name. A third entry point or a
  * second dynamic import would make esbuild write further chunks, all called
  * shared.bundle.js; that has to be a decision about naming, not a surprise.
- * @param {import("esbuild").Metafile | undefined} metafile
+ * @param {(import("esbuild").Metafile | undefined)[]} metafiles
  */
-function assertExpectedOutputs(metafile) {
-  const written = Object.keys(metafile?.outputs ?? {})
+function assertExpectedOutputs(metafiles) {
+  const written = metafiles
+    .flatMap((metafile) => Object.keys(metafile?.outputs ?? {}))
     .filter((path) => path.endsWith(".js"))
     .map((path) => path.slice(path.lastIndexOf("/") + 1))
     .sort();
-  const expected = [APP_BUNDLE, FEATURES_BUNDLE, SHARED_BUNDLE].sort();
+  const expected = [
+    APP_BUNDLE,
+    FEATURES_BUNDLE,
+    SHARED_BUNDLE,
+    WORKER_BUNDLE,
+  ].sort();
   if (written.join() !== expected.join()) {
     throw new Error(
       `the build wrote ${written.join(", ")} but the site publishes ` +
@@ -289,12 +342,15 @@ async function build() {
 
     if (isWatch) {
       console.log("👀 Watching for changes...");
-      const ctx = await esbuild.context(buildOptions);
-      await ctx.watch();
+      for (const options of [buildOptions, workerBuildOptions]) {
+        const ctx = await esbuild.context(options);
+        await ctx.watch();
+      }
     } else {
       console.log("🔨 Building the JavaScript bundles...");
       const result = await esbuild.build(buildOptions);
-      assertExpectedOutputs(result.metafile);
+      const workerResult = await esbuild.build(workerBuildOptions);
+      assertExpectedOutputs([result.metafile, workerResult.metafile]);
 
       console.log("✅ Build complete!");
 
