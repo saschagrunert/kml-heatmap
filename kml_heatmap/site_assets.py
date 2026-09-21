@@ -78,13 +78,21 @@ BUNDLE_BANNER = re.compile(rb"/\* kml-heatmap build ([0-9a-f]{12}) \*/")
 # scripts/source-hash.js; TestSourceHashParity checks that they agree.
 BUILD_HASH_FILES = (
     "build.js",
+    "scripts/vendor.js",
     "tsconfig.json",
     "kml_heatmap/static/styles.css",
     "kml_heatmap/static/features.css",
 )
-# Packages whose pinned version changes the bundles, hashed after the files
-# and in this order. Keep in step with BUILD_PACKAGES in the same script.
-BUILD_HASH_PACKAGES = ("esbuild", "lucide")
+# Packages whose pinned version changes a built site (the bundler, what it
+# bundles and what is vendored as it is), hashed after the files and in this
+# order. Keep in step with BUILD_PACKAGES in the same script.
+BUILD_HASH_PACKAGES = (
+    "esbuild",
+    "lucide",
+    "maplibre-gl",
+    "html-to-image",
+    "flag-icons",
+)
 FAVICON_FILES = (
     "favicon.svg",
     "favicon.ico",
@@ -179,10 +187,12 @@ def _frontend_source_hash() -> str | None:
     directory in path order and then each file in BUILD_HASH_FILES, both as
     the path relative to the repository and the content, and finally the
     pinned version of each package in BUILD_HASH_PACKAGES. The build script,
-    the compiler options, the bundler and what it bundles from node_modules
-    shape the bundle as much as the sources do, so a change to any of them
-    has to invalidate the hash as well, and so do the stylesheets: they are
-    not in a bundle, but they are part of what a built site renders.
+    the vendoring script, the compiler options, the bundler, what it bundles
+    from node_modules and what is vendored as it is (the map library, the
+    export library, the country flags) shape a built site as much as the
+    sources do, so a change to any of them has to invalidate the hash as
+    well, and so do the stylesheets: they are not in a bundle, but they are
+    part of what a built site renders.
 
     The two implementations have to agree or the staleness check below is
     meaningless; TestSourceHashParity in tests/test_site_assets.py runs

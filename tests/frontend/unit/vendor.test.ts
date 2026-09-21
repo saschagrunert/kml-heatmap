@@ -9,9 +9,12 @@
  * makes the question a local one these tests can actually answer.
  */
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { describe, expect, it } from "vitest";
-import { VENDOR_FILES } from "../../../scripts/vendor.js";
+import {
+  VENDOR_FILES,
+  stripSourceMapComment,
+} from "../../../scripts/vendor.js";
 import { HTML_TO_IMAGE_URL } from "../../../kml_heatmap/frontend/ui/uiToggles";
 
 const REPO_ROOT = join(__dirname, "../../..");
@@ -33,12 +36,121 @@ describe("vendored third-party files", () => {
     },
   );
 
-  whenBuilt("copies every declared file byte for byte", () => {
-    for (const [published, source] of Object.entries(VENDOR_FILES)) {
-      const copied = readFileSync(join(VENDOR_DIR, published));
-      const original = readFileSync(join(REPO_ROOT, "node_modules", source));
-      expect(copied.equals(original), `${published} differs`).toBe(true);
+  whenBuilt(
+    "copies every declared file byte for byte, up to a closing source map comment",
+    () => {
+      for (const [published, source] of Object.entries(VENDOR_FILES)) {
+        const copied = readFileSync(join(VENDOR_DIR, published));
+        const original = readFileSync(join(REPO_ROOT, "node_modules", source));
+        // The helper itself says what may be left off, so the two cannot
+        // disagree about the forms a closing comment takes
+        expect(
+          copied.equals(stripSourceMapComment(original, published)),
+          `${published} differs`,
+        ).toBe(true);
+        expect(
+          original.subarray(0, copied.length).equals(copied),
+          `${published} is not a prefix of its original`,
+        ).toBe(true);
+      }
+    },
+  );
+
+  whenBuilt("no vendored file names a source map that is not shipped", () => {
+    for (const published of Object.keys(VENDOR_FILES)) {
+      if (!/\.(?:mjs|js|css)$/.test(published)) continue;
+      const text = readFileSync(join(VENDOR_DIR, published), "utf8");
+      for (const [, map] of text.matchAll(/sourceMappingURL=([^\s*"'`]+)/g)) {
+        // Resolved against the file's own directory, as a browser would
+        const shipped = posix.normalize(
+          posix.join(posix.dirname(published), map!),
+        );
+        expect(
+          Object.keys(VENDOR_FILES),
+          `${published} names ${map}`,
+        ).toContain(shipped);
+      }
     }
+  });
+
+  it("the packages still name the maps that are left out", () => {
+    // If this stops holding, stripSourceMapComment has nothing left to do
+    const entry = readFileSync(
+      join(REPO_ROOT, "node_modules", VENDOR_FILES["maplibre-gl.mjs"]!),
+    );
+    expect(stripSourceMapComment(entry).length).toBeLessThan(entry.length);
+  });
+
+  it.each([
+    ["a line comment", "code();\n//# sourceMappingURL=a.js.map", "code();\n"],
+    [
+      "a trailing newline",
+      "code();\n//# sourceMappingURL=a.js.map\n",
+      "code();\n",
+    ],
+    ["a block comment", "a{}\n/*# sourceMappingURL=a.css.map */\n", "a{}\n"],
+  ])("takes %s off the end of a file", (_name, input, expected) => {
+    expect(stripSourceMapComment(Buffer.from(input)).toString()).toBe(expected);
+  });
+
+  it("leaves a sourceMappingURL that does not close the file alone", () => {
+    const inCode =
+      'const tail = "//# sourceMappingURL=a.js.map";\nrun(tail);\n';
+    const twice = `//# sourceMappingURL=first.map\n${inCode}//# sourceMappingURL=last.map\n`;
+    expect(stripSourceMapComment(Buffer.from(inCode)).toString()).toBe(inCode);
+    expect(stripSourceMapComment(Buffer.from(twice)).toString()).toBe(
+      `//# sourceMappingURL=first.map\n${inCode}`,
+    );
+  });
+
+  it("only takes a comment that stands on a line of its own", () => {
+    // Cutting here would leave the block comment open and the file broken
+    const inBlock = "a{}\n/* built with //# sourceMappingURL=x.map*/\n";
+    expect(stripSourceMapComment(Buffer.from(inBlock)).toString()).toBe(
+      inBlock,
+    );
+    const afterCode = "run(); //# sourceMappingURL=x.map\n";
+    expect(stripSourceMapComment(Buffer.from(afterCode)).toString()).toBe(
+      afterCode,
+    );
+  });
+
+  it("does not take a name every object inherits for a vendored file", () => {
+    const input = "code();\n//# sourceMappingURL=constructor\n";
+    expect(stripSourceMapComment(Buffer.from(input)).toString()).toBe(
+      "code();\n",
+    );
+  });
+
+  it("takes a comment off whose map has a name that is not ASCII", () => {
+    const input = "code();\n//# sourceMappingURL=cart\u00e0.js.map\n";
+    expect(stripSourceMapComment(Buffer.from(input, "utf8")).toString()).toBe(
+      "code();\n",
+    );
+  });
+
+  it("resolves the map against the directory the file is published in", () => {
+    // `./` and a nested path both name the stylesheet that is vendored
+    const dotted = "code();\n//# sourceMappingURL=./maplibre-gl.css\n";
+    expect(
+      stripSourceMapComment(Buffer.from(dotted), "maplibre-gl.mjs").toString(),
+    ).toBe(dotted);
+    const nested = "code();\n//# sourceMappingURL=../maplibre-gl.css\n";
+    expect(
+      stripSourceMapComment(Buffer.from(nested), "sub/a.js").toString(),
+    ).toBe(nested);
+    expect(stripSourceMapComment(Buffer.from(nested), "a.js").toString()).toBe(
+      "code();\n",
+    );
+  });
+
+  it("keeps a comment whose map is vendored, and bytes that are not text", () => {
+    const shipped = "code();\n//# sourceMappingURL=maplibre-gl.css\n";
+    expect(stripSourceMapComment(Buffer.from(shipped)).toString()).toBe(
+      shipped,
+    );
+    const binary = Buffer.from([0xff, 0xfe, 0x00, 0x80, 0x0a]);
+    expect(stripSourceMapComment(binary).equals(binary)).toBe(true);
   });
 
   it("maplibre-gl.css needs no file beside itself", () => {
