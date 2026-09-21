@@ -47,6 +47,8 @@
   color: inherit;
   font: inherit;
   cursor: pointer;
+  /* Above every airport, below an open popup */
+  z-index: var(--z-map-airplane);
 }
 .replay-airplane-icon {
   /* One step above the largest chrome icon */

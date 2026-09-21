@@ -27,7 +27,12 @@ import {
   NAUTICAL_MILES_TO_KM,
 } from "../utils/constants";
 import { icon } from "../utils/icons";
-import { fromLngLat, panPopupIntoView, toLngLat } from "../utils/mapHelpers";
+import {
+  fromLngLat,
+  keepMarkerClickFromMap,
+  panPopupIntoView,
+  toLngLat,
+} from "../utils/mapHelpers";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
 import { calculateSmoothedBearing } from "../features/replay";
@@ -61,9 +66,6 @@ export const AUTO_ZOOM_SETTLE_MS = 300;
 
 /** Pixels between the airplane's position and the tip of its popup */
 const AIRPLANE_POPUP_OFFSET = 16;
-
-/** Stacking of the airplane among the markers: above every airport */
-const AIRPLANE_Z_INDEX = "1000";
 
 /** Fraction of the viewport used as the "near edge" margin for auto-panning */
 const EDGE_MARGIN_FRACTION = 0.1;
@@ -277,17 +279,16 @@ export class AirplaneMarker implements ReplayAirplane {
     element.className = "replay-airplane-root";
     element.title = "Aircraft position";
     element.setAttribute("aria-label", "Aircraft position");
-    element.style.zIndex = AIRPLANE_Z_INDEX;
     // The rotation transition lives on the inner icon (see features.css);
     // MapLibre positions the root with transforms, which must not animate
     element.innerHTML =
       '<div class="replay-airplane-icon">' +
       icon("aircraftTop", 24, undefined, "solid") +
       "</div>";
-    element.addEventListener("click", (event) => {
-      // MapLibre fires a map click for a click on a marker as well, and the
-      // app's handler would close the popup this one has just opened
-      event.stopPropagation();
+    // MapLibre fires a map click for a click on a marker as well; kept
+    // from it like the airports' (the app's handler looks away by itself)
+    keepMarkerClickFromMap(element);
+    element.addEventListener("click", () => {
       if (this.isPopupOpen()) this.closePopup();
       else onActivate();
     });
@@ -353,6 +354,71 @@ interface TransportCache {
   startText: string;
 }
 
+/**
+ * Whether the user moves the map right now, told from the map's own events.
+ *
+ * The gesture handlers cannot be asked: `isActive()` of a drag or a pinch
+ * only turns true past the click tolerance, and nothing answers for an
+ * arrow key or the glide after a drag. Every movement the user causes
+ * starts with a `movestart` that carries the DOM event behind it, the
+ * glide and the keys included, and the app's own camera moves carry none.
+ * The press itself is followed as well, for the time before the first move.
+ */
+class UserMapMovement {
+  private pressed = false;
+  private moving = false;
+  private readonly container: HTMLElement;
+  /** Removes the DOM listeners */
+  private readonly listening = new AbortController();
+
+  private readonly onMoveStart = (e: { originalEvent?: unknown }): void => {
+    if (e.originalEvent) this.moving = true;
+  };
+
+  private readonly onMoveEnd = (): void => {
+    this.moving = false;
+  };
+
+  constructor(readonly map: MapLibreMap) {
+    this.container = map.getCanvasContainer();
+    const signal = this.listening.signal;
+    const press = (): void => {
+      this.pressed = true;
+    };
+    const release = (e: Event): void => {
+      // One finger of a pinch that lifts leaves the other on the map
+      // (asked by property: desktop browsers may not define TouchEvent)
+      if ("touches" in e && (e as TouchEvent).touches.length > 0) return;
+      this.pressed = false;
+    };
+    this.container.addEventListener("mousedown", press, { signal });
+    this.container.addEventListener("touchstart", press, {
+      signal,
+      passive: true,
+    });
+    // A button let go beside the map is still let go
+    for (const type of ["mouseup", "touchend", "touchcancel", "blur"]) {
+      window.addEventListener(type, release, { signal });
+    }
+    map.on("movestart", this.onMoveStart);
+    map.on("zoomstart", this.onMoveStart);
+    map.on("moveend", this.onMoveEnd);
+  }
+
+  isActive(): boolean {
+    // The wheel has neither a press nor, before the frame that follows its
+    // first event, a move; its handler is active from that event on
+    return this.pressed || this.moving || this.map.scrollZoom.isActive();
+  }
+
+  stop(): void {
+    this.listening.abort();
+    this.map.off("movestart", this.onMoveStart);
+    this.map.off("zoomstart", this.onMoveStart);
+    this.map.off("moveend", this.onMoveEnd);
+  }
+}
+
 export class ReplayRenderer {
   private app: MapApp;
   private transport: TransportCache = {
@@ -372,6 +438,8 @@ export class ReplayRenderer {
   private autoZoomSettlesAt = 0;
   /** The frame the trail is written to the map in, while one is pending */
   private trailFrameId: number | null = null;
+  /** Follows the user's hand on the map while a replay follows the airplane */
+  private userMovement: UserMapMovement | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -548,6 +616,12 @@ export class ReplayRenderer {
     if (this.trailFrameId === null) return;
     cancelAnimationFrame(this.trailFrameId);
     this.trailFrameId = null;
+  }
+
+  /** Stop listening for the user's map gestures; the replay is closing */
+  stopWatchingUser(): void {
+    this.userMovement?.stop();
+    this.userMovement = null;
   }
 
   updateDisplay(
@@ -749,6 +823,14 @@ export class ReplayRenderer {
     // a camera move of MapLibre ends the one before it, and the pan would
     // freeze the zoom half way
     if (map.isZooming()) return;
+    // The same goes for the user's hand on the map: a camera move resets
+    // every gesture, so a pan on each frame would end a drag or a pinch the
+    // moment it starts. The follow pan picks up again once they let go.
+    if (this.userMovement?.map !== map) {
+      this.stopWatchingUser();
+      this.userMovement = new UserMapMovement(map);
+    }
+    if (this.userMovement.isActive()) return;
 
     const container = map.getContainer();
     const mapSize = { x: container.clientWidth, y: container.clientHeight };

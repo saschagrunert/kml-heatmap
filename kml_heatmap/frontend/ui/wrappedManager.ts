@@ -469,12 +469,22 @@ export class WrappedManager {
    * observer its five tabs joined the dialog's tab cycle and stayed operable,
    * so a keyboard user could open a sheet behind the modal.
    *
-   * The map comes along, and with it the canvas and the airport markers,
-   * which are tabbable. The overview map is not meant to be worked in, so
-   * they are taken out of the tab cycle until the dialog closes. MapLibre
-   * puts the markers inside the canvas container, so making that one inert
-   * covers them; popups are children of the map itself and are closed, and
-   * whatever is left of them (the segment tooltip) is made inert as well.
+   * The map comes along, and with it the airport markers, which are
+   * tabbable: dozens of stops that open popups over the overview. They are
+   * taken out of the tab cycle until the dialog closes, one by one. The
+   * container they sit in is the element MapLibre listens on for every
+   * drag, pinch and wheel, so making that one inert would freeze the
+   * overview map, which is there to be panned and zoomed. A snapshot is
+   * enough here: the airports are created once at start-up, before Wrapped
+   * can open, and the only other marker is replay's airplane, which cannot
+   * exist while Wrapped is open (neither starts while the other runs).
+   * Popups are closed, the values a hover or a tap left on a flight
+   * included, and whatever should be left of them is made inert as well.
+   *
+   * A container that still takes gestures also still reports clicks and
+   * pointer moves. Those select flights and show their values on the main
+   * map, which the overview is not: MapApp's click dispatcher and
+   * LayerManager's hover stand down while `wrappedVisible` is set.
    */
   private trapFocus(modal: HTMLElement): void {
     const active = document.activeElement;
@@ -499,10 +509,9 @@ export class WrappedManager {
     for (const marker of Object.values(this.app.airportMarkers)) {
       if (marker.isPopupOpen()) marker.closePopup();
     }
+    this.app.layerManager.closeSegmentPopup();
     document
-      .querySelectorAll(
-        "#map .maplibregl-canvas-container, #map .maplibregl-popup",
-      )
+      .querySelectorAll("#map .maplibregl-marker, #map .maplibregl-popup")
       .forEach(makeInert);
 
     this.inertObserver = new MutationObserver((records) => {

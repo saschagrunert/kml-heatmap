@@ -17,9 +17,9 @@ import {
 import {
   airportMarkerIsFocused,
   centerOnAirport,
+  expectMarkersInert,
   focusAirportMarker,
   mapPopup,
-  markerContainer,
   openAirportPopup,
 } from "./map";
 
@@ -166,12 +166,11 @@ test.describe("Keyboard", () => {
     const modal = await openWrapped(page);
     await expect(modal.locator("#map")).toBeAttached();
 
-    const pane = markerContainer(page);
-    await expect(pane).toHaveAttribute("inert", "");
+    await expectMarkersInert(page, true);
 
     await page.keyboard.press("Escape");
     await expect(modal).toBeHidden();
-    await expect(pane).not.toHaveAttribute("inert", "");
+    await expectMarkersInert(page, false);
     await expect(page.locator("#wrapped-btn")).toBeFocused();
   });
 });

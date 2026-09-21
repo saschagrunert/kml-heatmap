@@ -292,14 +292,15 @@ describe("AirplaneMarker", () => {
 
   afterEach(() => airplane.remove());
 
-  it("is a button on the map, centred on the position, above the airports", () => {
+  it("is a button on the map, centred on the position", () => {
     const element = airplane.getElement();
 
     expect(element.tagName).toBe("BUTTON");
     expect(element.type).toBe("button");
     expect(element.className).toContain("replay-airplane-root");
     expect(element.getAttribute("aria-label")).toBe("Aircraft position");
-    expect(element.style.zIndex).toBe("1000");
+    // The stylesheet owns the stacking: an inline value would beat it
+    expect(element.style.zIndex).toBe("");
     expect(element.querySelector(".replay-airplane-icon svg")).not.toBeNull();
     expect(map.getCanvasContainer().contains(element)).toBe(true);
     expect(
@@ -1110,6 +1111,99 @@ describe("ReplayRenderer", () => {
 
       expect(map.easeTo).not.toHaveBeenCalled();
       expect(mockReplayManager.state.recenterTimestamps).toEqual([]);
+    });
+
+    describe("while the user moves the map", () => {
+      // A camera move resets every gesture: a pan per frame would end the
+      // user's drag or pinch the moment it starts
+      beforeEach(() => {
+        airplaneAt(10, 10);
+        mockReplayManager.state.airplaneMarker = makeAirplane();
+        mockReplayManager.state.playing = true;
+        mockReplayManager.state.currentTime = 5;
+        mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+        // The first frame is what starts the watching
+        callUpdateDisplay();
+        map.easeTo.mockClear();
+        mockReplayManager.state.recenterTimestamps = [];
+      });
+
+      function expectCameraLeftAlone(): void {
+        callUpdateDisplay();
+        expect(map.easeTo).not.toHaveBeenCalled();
+        expect(map.jumpTo).not.toHaveBeenCalled();
+        expect(mockReplayManager.state.recenterTimestamps).toEqual([]);
+      }
+
+      function expectCameraFollows(): void {
+        callUpdateDisplay();
+        expect(map.easeTo).toHaveBeenCalledTimes(1);
+      }
+
+      it.each([
+        ["mousedown", "mouseup"],
+        ["touchstart", "touchend"],
+        ["touchstart", "touchcancel"],
+      ])("waits from %s to %s, before any move", (press, release) => {
+        // Inside the click tolerance no handler is active yet
+        map.getCanvasContainer().dispatchEvent(new Event(press));
+        expectCameraLeftAlone();
+
+        // Let go, wherever the pointer is by then
+        window.dispatchEvent(new Event(release));
+        expectCameraFollows();
+      });
+
+      it("keeps waiting while a finger of a pinch is still down", () => {
+        map.getCanvasContainer().dispatchEvent(new Event("touchstart"));
+        const lifted = Object.assign(new Event("touchend"), {
+          touches: [{}],
+        });
+        window.dispatchEvent(lifted);
+
+        expectCameraLeftAlone();
+      });
+
+      it.each(["movestart", "zoomstart"])(
+        "waits from a %s of the user to the moveend, a key or a glide included",
+        (start) => {
+          map.emit(start, { originalEvent: new Event("keydown") });
+          expectCameraLeftAlone();
+
+          map.emit("moveend", {});
+          expectCameraFollows();
+        },
+      );
+
+      it("does not wait for a camera move of the app", () => {
+        map.emit("movestart", {});
+
+        expectCameraFollows();
+      });
+
+      it("waits for the wheel, which moves nothing before the next frame", () => {
+        map.scrollZoom.isActive.mockReturnValue(true);
+        expectCameraLeftAlone();
+
+        map.scrollZoom.isActive.mockReturnValue(false);
+        expectCameraFollows();
+      });
+
+      it("stops listening when the replay closes", () => {
+        for (const type of ["movestart", "zoomstart", "moveend"]) {
+          expect(map.listenerCount(type)).toBe(1);
+        }
+
+        renderer.stopWatchingUser();
+
+        for (const type of ["movestart", "zoomstart", "moveend"]) {
+          expect(map.listenerCount(type)).toBe(0);
+        }
+        // A press after that is nobody's business; the next replay starts
+        // watching anew and does not know of it
+        map.getCanvasContainer().dispatchEvent(new Event("mousedown"));
+        expectCameraFollows();
+      });
     });
 
     it("uses binary search on manual seek with multiple segments", () => {

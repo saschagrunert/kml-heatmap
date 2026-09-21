@@ -14,6 +14,8 @@ import {
   expectHeatUnderPaths,
   heatmapOnMap,
   heatmapOpacity,
+  mapPopup,
+  mapPopupCloseButton,
   mapPopupContent,
   pathCount,
   setZoom,
@@ -274,6 +276,30 @@ test.describe("Layers", () => {
     await page.locator("#map").click({ position: { x: pos!.x, y: pos!.y } });
 
     await expectSegmentDetails(mapPopupContent(page).first());
+  });
+
+  test("the popup of a tapped path can be closed without touching the flight (regression)", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, "Pointer devices show a hover tooltip instead");
+    await waitForPathData(page);
+    const pos = await findSegmentFarFromAirports(page);
+    expect(pos).not.toBeNull();
+    await page.locator("#map").click({ position: { x: pos!.x, y: pos!.y } });
+    await expectSegmentDetails(mapPopupContent(page).first());
+    const selected = (): Promise<number> =>
+      page.evaluate(() => window.mapApp!.selectedPathIds.size);
+    expect(await selected()).toBe(1);
+
+    // The popup stands on the flight that was tapped. It shared the hover
+    // tooltip's rule of taking no pointer events, so a tap on its close
+    // button went through to that flight and toggled the selection off,
+    // and the button itself could not be pressed at all.
+    await mapPopupCloseButton(page).click();
+
+    await expect(mapPopup(page)).toHaveCount(0);
+    expect(await selected()).toBe(1);
   });
 
   test("airport labels hidden at low zoom", async ({ page }) => {

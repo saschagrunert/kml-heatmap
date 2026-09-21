@@ -395,6 +395,20 @@ describe("UIToggles export and share", () => {
       expect(el("map").querySelector("img")).toBeNull();
     });
 
+    it("reports a canvas that cannot be read, and takes no picture", async () => {
+      const toJpeg = installHtmlToImage();
+      vi.mocked(app.map!.getCanvas().toDataURL).mockImplementation(() => {
+        throw new Error("context lost");
+      });
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(toast()?.textContent).toBe("Export failed: context lost");
+      expect(toJpeg).not.toHaveBeenCalled();
+      expect(el("map").contains(app.map!.getCanvas())).toBe(true);
+    });
+
     it("captures the page as it is when there is no map", async () => {
       app.map = null;
       const toJpeg = installHtmlToImage();
