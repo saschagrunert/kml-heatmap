@@ -107,16 +107,92 @@ test("the indicator fills while the year file arrives", async ({
     () => window.mapApp!.currentData?.path_segments.length ?? 0,
   );
   expect(segments).toBeGreaterThan(0);
+});
 
-  // The stylesheet holds a bar back for a moment after it is displayed, so
-  // that a load that is over at once shows none. Read in the task that
-  // displays it: a second round trip could take longer than the delay.
-  const atFirst = await page.evaluate(() => {
-    document.getElementById("loading")!.style.display = "block";
-    const element = document.getElementById("loading-progress")!;
-    element.hidden = false;
-    return getComputedStyle(element).visibility;
+test("the bar starts over, after its delay, when another year joins", async ({
+  page,
+  site,
+}) => {
+  const siteFiles = SITES[site];
+  const metadata = JSON.parse(
+    readSiteFile(siteFiles, "data/metadata.json"),
+  ) as {
+    available_years: number[];
+  };
+  const [latest, other] = [...metadata.available_years].sort((a, b) => b - a);
+  test.skip(other === undefined, "takes a site with two years");
+  const files = new Map(
+    [latest, other].map((year) => [
+      `/${year}`,
+      readSiteBytes(siteFiles, `data/${year}/data.json`),
+    ]),
+  );
+  // Of each file: a bit more than half of the first, a quarter of the other
+  const cuts = new Map([
+    [`/${latest}`, SHARE_SENT],
+    [`/${other}`, 0.25],
+  ]);
+  const sent = (year: number | undefined): number =>
+    Math.ceil(files.get(`/${year}`)!.length * cuts.get(`/${year}`)!);
+
+  let release = (): void => {};
+  const released = new Promise<void>((resolve) => (release = resolve));
+  server = createServer((request, response) => {
+    const file = files.get(request.url!)!;
+    const cut = Math.ceil(file.length * cuts.get(request.url!)!);
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.write(file.subarray(0, cut));
+    void released.then(() => response.end(file.subarray(cut)));
   });
-  expect(atFirst).toBe("hidden");
+  await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  await page.route("**/data/*/data.json", (route) => {
+    const year = /data\/(\d+)\/data\.json/.exec(route.request().url())![1];
+    return route.continue({ url: `http://127.0.0.1:${port}/${year}` });
+  });
+
+  await page.goto("/index.html");
+  const bar = page.locator("#loading-progress");
+  const latestSize = files.get(`/${latest}`)!.length;
+  await expect
+    .poll(() => drawnShare(bar))
+    .toBeCloseTo(sent(latest) / latestSize, 6);
   await expect(bar).toBeVisible();
+
+  // What the page sees of the bar whenever it is taken out or put back,
+  // noted within the frame that did it: nothing here races the delay
+  await bar.evaluate((element) => {
+    const seen: string[] = [];
+    (window as unknown as { barSeen: string[] }).barSeen = seen;
+    new MutationObserver(() =>
+      seen.push(
+        `${element.hasAttribute("hidden") ? "out" : "in"}, ${getComputedStyle(element).visibility}`,
+      ),
+    ).observe(element, { attributeFilter: ["hidden"] });
+  });
+  await page.evaluate(
+    (year) => void window.mapApp!.dataManager.loadData(String(year)),
+    other,
+  );
+
+  // Displayed anew and held back by the stylesheet, not dropped in place
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as unknown as { barSeen: string[] }).barSeen),
+    )
+    .toEqual(["in, hidden"]);
+  // Then shown, as a share of what the two files still have to deliver
+  await expect(bar).toBeVisible();
+  const remaining = latestSize - sent(latest) + files.get(`/${other}`)!.length;
+  await expect
+    .poll(() => drawnShare(bar))
+    .toBeCloseTo(sent(other) / remaining, 6);
+  await expect(page.locator("#loading")).toContainText(
+    `Loading ${latest}, ${other} flights`,
+  );
+
+  release();
+  await waitForAppReady(page);
+  await expect(page.locator("#loading")).toBeHidden();
+  await expect(bar).toHaveAttribute("hidden", "");
 });
