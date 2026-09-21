@@ -197,9 +197,8 @@ test.describe("Mobile breakpoint", () => {
     const column = page.locator("#right-buttons");
     await expect(column).toBeVisible();
 
-    // Measured rather than assumed: the column is a row shorter without an
-    // OpenAIP key, which hides the Aviation toggle, and a hard-coded height
-    // would only overflow in one of the two builds
+    // Measured rather than assumed: a hard-coded height would stop
+    // overflowing as soon as the column gains or loses a row
     const natural = await column.evaluate((el) => el.scrollHeight);
     await page.setViewportSize({
       width: 1280,

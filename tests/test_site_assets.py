@@ -183,15 +183,12 @@ class TestRenderHtml:
 
 class TestPackageAssets:
     def test_generates_config_css_and_favicons(self, tmp_path, bundle):
-        with patch.dict(
-            os.environ, {"CARTO_API_KEY": "test-carto", "OPENAIP_API_KEY": "it's"}
-        ):
+        with patch.dict(os.environ, {"CARTO_API_KEY": "test-carto's"}):
             package_assets(tmp_path, BOUNDS, "data")
 
         config = (tmp_path / "map_config.js").read_text()
         assert "51.0" in config
-        assert "test-carto" in config
-        assert "it\\'s" in config
+        assert "test-carto\\'s" in config
         assert "$center_lat" not in config
         assert re.search(r"builtAt:'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z'", config)
         assert re.search(r"commit:'([0-9a-f]{7})?'", config)

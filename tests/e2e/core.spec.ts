@@ -161,10 +161,9 @@ test.describe("Core", () => {
 
     const corners = await page.evaluate(() =>
       [...document.querySelectorAll(".control-group")].map((group) => {
-        // The row that is *shown* last, not the one written last: the Layers
-        // group ends with the Aviation row, which stays hidden unless the
-        // site was built with an OpenAIP key, and reading that one let the
-        // radius look present while the row on the corner had none
+        // The row that is *shown* last, not the one written last: reading
+        // a hidden row would let the radius look present while the row on
+        // the corner had none
         const shown = [...group.querySelectorAll(":scope > .control-row")]
           .filter((row) => row.checkVisibility())
           .map((row) => {

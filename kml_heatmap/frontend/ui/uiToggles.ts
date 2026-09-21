@@ -267,14 +267,10 @@ export class UIToggles {
   }
 
   toggleAviation(): void {
-    if (
-      !this.app.config.openaipApiKey ||
-      !this.app.openaipLayers["Aviation Data"]
-    )
-      return;
+    if (!this.app.aviationLayer) return;
 
     this.toggleSimpleLayer(
-      this.app.openaipLayers["Aviation Data"],
+      this.app.aviationLayer,
       this.app.aviationVisible,
       (v) => {
         this.app.aviationVisible = v;

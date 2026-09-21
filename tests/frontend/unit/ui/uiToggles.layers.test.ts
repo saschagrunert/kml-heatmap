@@ -368,35 +368,29 @@ describe("UIToggles layers", () => {
   });
 
   describe("toggleAviation", () => {
-    it("shows the aviation layer when hidden and an API key is set", () => {
-      app.config.openaipApiKey = "test-key";
-      app.openaipLayers["Aviation Data"] = {} as never;
+    it("shows the aviation layer when hidden", () => {
+      app.aviationLayer = {} as never;
 
       uiToggles.toggleAviation();
 
-      expect(app.map!.addLayer).toHaveBeenCalledWith(
-        app.openaipLayers["Aviation Data"],
-      );
+      expect(app.map!.addLayer).toHaveBeenCalledWith(app.aviationLayer);
       expect(app.aviationVisible).toBe(true);
       expect(el("aviation-btn").getAttribute("aria-pressed")).toBe("true");
     });
 
     it("hides the aviation layer when visible", () => {
-      app.config.openaipApiKey = "test-key";
-      app.openaipLayers["Aviation Data"] = {} as never;
+      app.aviationLayer = {} as never;
       app.aviationVisible = true;
 
       uiToggles.toggleAviation();
 
-      expect(app.map!.removeLayer).toHaveBeenCalledWith(
-        app.openaipLayers["Aviation Data"],
-      );
+      expect(app.map!.removeLayer).toHaveBeenCalledWith(app.aviationLayer);
       expect(app.aviationVisible).toBe(false);
       expect(el("aviation-btn").getAttribute("aria-pressed")).toBe("false");
     });
 
-    it("does nothing when no API key is set", () => {
-      app.config.openaipApiKey = "";
+    it("does nothing before the layer exists", () => {
+      app.aviationLayer = null;
 
       uiToggles.toggleAviation();
 
@@ -406,8 +400,7 @@ describe("UIToggles layers", () => {
 
     it("does nothing without a map", () => {
       app.map = null;
-      app.config.openaipApiKey = "test-key";
-      app.openaipLayers["Aviation Data"] = {} as never;
+      app.aviationLayer = {} as never;
 
       uiToggles.toggleAviation();
 

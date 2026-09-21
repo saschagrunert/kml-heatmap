@@ -339,10 +339,9 @@ describe("appInitializer", () => {
       expect(app.map!.addLayer).not.toHaveBeenCalledWith(app.airspeedLayer);
     });
 
-    it("adds the aviation layer when configured and visible", async () => {
+    it("adds the aviation layer when visible", async () => {
       const layer = { addTo: vi.fn() };
-      app.config.openaipApiKey = "key";
-      app.openaipLayers["Aviation Data"] = layer as never;
+      app.aviationLayer = layer as never;
       app.aviationVisible = true;
 
       await loadInitialData(asMapApp(app));

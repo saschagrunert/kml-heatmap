@@ -140,8 +140,8 @@ export function setupDOM(): void {
     <button id="altitude-btn"></button>
     <button id="airspeed-btn"></button>
     <button id="airports-btn"></button>
-    <div class="control-row initially-hidden">
-      <button id="aviation-btn" class="initially-hidden"></button>
+    <div class="control-row">
+      <button id="aviation-btn"></button>
     </div>
     <div id="altitude-legend"></div>
     <div id="airspeed-legend"></div>

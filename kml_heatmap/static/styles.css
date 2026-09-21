@@ -531,20 +531,12 @@ body {
    radius, so the ring follows it. The group's 1px border makes the inside of
    that curve one pixel tighter than the outside.
 
-   Which row that is depends on what is *shown*, not on what comes last in
-   the markup: the Layers group ends with the Aviation row, which stays
-   `initially-hidden` unless the site was built with an OpenAIP key, and
-   `:last-child` handed the radius to it while the Speed row visibly on the
-   corner kept its ring clipped. A row with no visible row after it is the
-   one on the corner; the hidden row matching too costs nothing, it draws
-   nothing.
-
    Only the bottom corner needs this. At full width the group title sits
    above the first row, and in a compacted column, where the title is taken
    out of the flow, the group picks up 4px of padding instead: measured with
    a keyboard focus ring at 900px, the first row sits 5px inside the group
    and its ring is drawn complete. */
-.control-group > .control-row:not(:has(~ .control-row:not(.initially-hidden))) {
+.control-group > .control-row:last-child {
   border-bottom-left-radius: calc(var(--radius-panel) - 1px);
   border-bottom-right-radius: calc(var(--radius-panel) - 1px);
 }

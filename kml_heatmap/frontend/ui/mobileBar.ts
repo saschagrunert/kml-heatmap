@@ -303,7 +303,7 @@ export class MobileBar {
 
   private layerRows(): SheetRow[] {
     const app = this.app;
-    const rows: SheetRow[] = [
+    return [
       {
         kind: "switch",
         id: "heatmap",
@@ -339,20 +339,15 @@ export class MobileBar {
         isDisabled: () => isControlDisabled("airspeed-btn"),
         onToggle: () => app.uiToggles.toggleAirspeed(),
       },
-    ];
-
-    if (app.config.openaipApiKey) {
-      rows.push({
+      {
         kind: "switch",
         id: "aviation",
         icon: "aviation",
         label: "Aviation",
         isOn: () => app.aviationVisible,
         onToggle: () => app.uiToggles.toggleAviation(),
-      });
-    }
-
-    return rows;
+      },
+    ];
   }
 
   private filterRows(): SheetRow[] {

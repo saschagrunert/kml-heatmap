@@ -90,17 +90,14 @@ function checkApiKeys(): void {
   }
 
   const sandbox: {
-    window: { MAP_CONFIG?: { cartoApiKey?: string; openaipApiKey?: string } };
+    window: { MAP_CONFIG?: { cartoApiKey?: string } };
   } = { window: {} };
   runInNewContext(readSiteFile("map_config.js"), sandbox);
-  const config = sandbox.window.MAP_CONFIG;
-  for (const name of ["cartoApiKey", "openaipApiKey"] as const) {
-    const present = !!config?.[name];
-    if (present !== (expected === "dummy")) {
-      throw new Error(
-        `E2E_API_KEYS=${expected}, but docs/map_config.js ${present ? "carries" : "lacks"} ${name}`,
-      );
-    }
+  const present = !!sandbox.window.MAP_CONFIG?.cartoApiKey;
+  if (present !== (expected === "dummy")) {
+    throw new Error(
+      `E2E_API_KEYS=${expected}, but docs/map_config.js ${present ? "carries" : "lacks"} cartoApiKey`,
+    );
   }
 }
 

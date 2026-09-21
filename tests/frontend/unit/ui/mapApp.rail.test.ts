@@ -116,8 +116,8 @@ const {
   setupDOM,
 } = m;
 
-function createApp(openaipApiKey?: string): MapApp {
-  return new MapApp({ ...m.APP_CONFIG, openaipApiKey });
+function createApp(): MapApp {
+  return new MapApp({ ...m.APP_CONFIG });
 }
 
 describe("MapApp controls and map", () => {
@@ -543,8 +543,7 @@ describe("MapApp controls and map", () => {
 
   describe("map setup", () => {
     it("creates the map with the shared zoom limits and tile layers", async () => {
-      const appWithKey = createApp("key");
-      await initializeApp(appWithKey);
+      await initializeApp(app);
 
       expect(L.map).toHaveBeenCalledWith(
         "map",
@@ -560,11 +559,19 @@ describe("MapApp controls and map", () => {
         expect.stringContaining("basemaps.cartocdn.com"),
         expect.objectContaining({ maxZoom: 20 }),
       );
+      // The aviation overlay needs no key, and `latest` follows the AIRAC
+      // cycle, so the URL carries neither
       expect(L.tileLayer).toHaveBeenCalledWith(
-        expect.stringContaining("openaip.net"),
-        expect.objectContaining({ maxZoom: 20, maxNativeZoom: 18 }),
+        "https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest",
+        expect.objectContaining({
+          attribution: expect.stringContaining("open flightmaps") as string,
+          minZoom: 7,
+          // Not the map's 20: two levels past the native 12 is as far as
+          // the tiles stretch before they are only a blur
+          maxZoom: 14,
+          maxNativeZoom: 12,
+        }),
       );
-      appWithKey.destroy();
     });
 
     it.each([

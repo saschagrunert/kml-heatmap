@@ -14,7 +14,7 @@
   - [KML File Naming Convention](#kml-file-naming-convention)
   - [Aircraft Model Data](#aircraft-model-data)
   - [Multiple Directories](#multiple-directories)
-  - [With API Keys (Optional)](#with-api-keys-optional)
+  - [With an API Key (Optional)](#with-an-api-key-optional)
   - [Makefile Variables and Targets](#makefile-variables-and-targets)
   - [Docker Usage](#docker-usage)
   - [Python Usage](#python-usage)
@@ -190,35 +190,26 @@ python -m kml_heatmap data/ data-new/ extra_flight.kml --output-dir combined
 
 The tool detects the format of each file and processes them accordingly.
 
-### With API Keys (Optional)
-
-**OpenAIP** - Get a free API key at [openaip.net](https://www.openaip.net/) for
-the aviation data overlay (airspaces, airports, navaids). **Required** for the
-Aviation Data layer.
+### With an API Key (Optional)
 
 **CARTO** - A CARTO API key avoids watermarked base map tiles.
 
 ```bash
-# Pass the keys on the command line or export them in the environment
-make CARTO_API_KEY=your_carto_key OPENAIP_API_KEY=your_openaip_key
+# Pass the key on the command line or export it in the environment
+make CARTO_API_KEY=your_carto_key
 
 # Then serve
 make serve
 ```
 
-The keys are embedded in the generated `map_config.js`, which is published with
-the site. Treat them as public client-side keys and restrict them to your
-site's domain (referrer restriction) in the CARTO and OpenAIP dashboards. The
-`site` job of the `test` workflow reads them from the `CARTO_API_KEY` and
-`OPENAIP_API_KEY` repository secrets.
+The key is embedded in the generated `map_config.js`, which is published with
+the site. Treat it as a public client-side key and restrict it to your site's
+domain (referrer restriction) in the CARTO dashboard. The `site` job of the
+`test` workflow reads it from the `CARTO_API_KEY` repository secret.
 
-**Note:** OpenAIP tiles return 403 Forbidden without a valid API key. To verify
-your key works:
-
-```bash
-# Should return HTTP 200 with PNG image
-curl -I "https://a.api.tiles.openaip.net/api/data/openaip/8/136/85.png?apiKey=YOUR_KEY"
-```
+The Aviation Data layer needs no key: its tiles come from
+[open flightmaps](https://www.openflightmaps.org/), which covers most of
+Europe and a few other regions and is credited on the map.
 
 ### Makefile Variables and Targets
 
@@ -231,7 +222,7 @@ Variables:
 - `CACHE_DIR` - Host directory mounted as `/cache` (default: `~/.cache/kml-heatmap`)
 - `HOST_BIND` - Address `make serve` binds on the host (default: `127.0.0.1`; use `0.0.0.0` for the local network)
 - `PORT` - Host port for `make serve` (default: `8000`)
-- `CARTO_API_KEY`, `OPENAIP_API_KEY` - Tile API keys (passed by name, never printed)
+- `CARTO_API_KEY` - Tile API key (passed by name, never printed)
 
 Targets (`make help` prints this list with the current variable values):
 
@@ -275,8 +266,8 @@ docker run --rm --user "$(id -u):$(id -g)" \
   -v ~/.cache/kml-heatmap:/cache \
   kml-heatmap data --output-dir out
 
-# With API keys (inherited from the environment, values are not echoed)
-docker run --rm --user "$(id -u):$(id -g)" -e CARTO_API_KEY -e OPENAIP_API_KEY \
+# With the API key (inherited from the environment, its value is not echoed)
+docker run --rm --user "$(id -u):$(id -g)" -e CARTO_API_KEY \
   -v "$PWD/data:/data/data" -v "$PWD/out:/data/out" \
   -v ~/.cache/kml-heatmap:/cache \
   kml-heatmap data --output-dir out
@@ -449,10 +440,9 @@ python -m kml_heatmap data --output-dir docs
 python -m http.server 8000 --bind 127.0.0.1 -d docs
 ```
 
-A local build has no tile API keys unless you pass them (see
-[With API Keys](#with-api-keys-optional)), so the base map may carry a
-watermark and the Aviation Data layer stays empty. That does not affect
-the flights.
+A local build has no tile API key unless you pass one (see
+[With an API Key](#with-an-api-key-optional)), so the base map may carry a
+watermark. That does not affect the flights.
 
 ### 6. Check the result
 
@@ -642,11 +632,10 @@ Removed from the site:
 
 - Individual flight dates and times
 
-The CARTO and OpenAIP keys are public client-side tile keys. They are embedded
-in the generated `map_config.js` and published with the site by design, because
-the browser needs them to load the base map and the Aviation Data layer. The
-generated site is not committed; the keys live in the repository secrets and in
-the deployed site only.
+The CARTO key is a public client-side tile key. It is embedded in the
+generated `map_config.js` and published with the site by design, because the
+browser needs it to load the base map. The generated site is not committed;
+the key lives in the repository secrets and in the deployed site only.
 
 ## Output
 
@@ -661,7 +650,7 @@ output-dir/
 ├── mapApp.bundle.js.map
 ├── features.bundle.js     # Replay and Wrapped, fetched on first use
 ├── features.bundle.js.map
-├── map_config.js          # Map defaults, tile API keys and the build stamp
+├── map_config.js          # Map defaults, tile API key and the build stamp
 ├── styles.css             # Linked in the page
 ├── features.css           # Replay and Wrapped, fetched with their bundle
 ├── manifest.json
@@ -749,7 +738,7 @@ starts together with the bundles rather than after them.
   of a pixel). Hovering a path still shows the exact value. The heatmap,
   Replay and the statistics always use every point
 - **Airports** (toggle) - Airport markers with ICAO codes
-- **Aviation Data** (toggle, requires OpenAIP API key) - Airspaces, airports, navaids, and reporting points from OpenAIP
+- **Aviation Data** (toggle) - Airspaces, airports, navaids, and reporting points from open flightmaps, where it has coverage
 
 ### Controls
 

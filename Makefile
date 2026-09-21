@@ -1,12 +1,11 @@
 .PHONY: all build serve serve-build test lint format lock clean help
 .PHONY: check-obfuscation obfuscate hooks require-runtime
 
-# API keys are read from the environment (or the make command line) and passed
-# into the build container by name only, so their values never show up in the
-# make output or the process list.
+# The API key is read from the environment (or the make command line) and
+# passed into the build container by name only, so its value never shows up in
+# the make output or the process list.
 CARTO_API_KEY ?=
-OPENAIP_API_KEY ?=
-export CARTO_API_KEY OPENAIP_API_KEY
+export CARTO_API_KEY
 
 # The commit the site is stamped with and the remote it is in; the image
 # carries no .git to ask. Evaluated once, not for every recipe line.
@@ -63,7 +62,7 @@ help: ## Show available targets and variables
 	@echo "  CACHE_DIR=$(CACHE_DIR)"
 	@echo "  HOST_BIND=$(HOST_BIND)"
 	@echo "  PORT=$(PORT)"
-	@echo "  CARTO_API_KEY, OPENAIP_API_KEY (values are not printed)"
+	@echo "  CARTO_API_KEY (value is not printed)"
 
 require-runtime:
 	@test -n "$(CONTAINER_RUNTIME)" || { \
@@ -86,7 +85,7 @@ build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR
 	$(CONTAINER_RUNTIME) build -t $(IMAGE_NAME) .
 	mkdir -p "$(CACHE_DIR)" "$(OUTPUT_DIR)"
 	$(CONTAINER_RUNTIME) run --rm $(RUN_AS_USER) -e HOME=/tmp \
-	  -e CARTO_API_KEY -e OPENAIP_API_KEY \
+	  -e CARTO_API_KEY \
 	  -e KML_HEATMAP_COMMIT -e KML_HEATMAP_REPOSITORY -e SOURCE_DATE_EPOCH \
 	  -v "$(abspath $(INPUT_DIR)):$(INPUT_MOUNT)" \
 	  -v "$(abspath $(OUTPUT_DIR)):$(OUTPUT_MOUNT)" \

@@ -118,8 +118,8 @@ const {
   yearSelect,
 } = m;
 
-function createApp(openaipApiKey?: string): MapApp {
-  return new MapApp({ ...m.APP_CONFIG, openaipApiKey });
+function createApp(): MapApp {
+  return new MapApp({ ...m.APP_CONFIG });
 }
 
 describe("MapApp.initialize", () => {
@@ -475,46 +475,22 @@ describe("MapApp.initialize", () => {
       expect(legend.style.display).toBe("none");
     });
 
-    it("adds the aviation layer when visible and an API key is configured", async () => {
-      mockStateManagerInstance.loadState.mockReturnValue({
-        aviationVisible: true,
-      });
-      const appWithKey = createApp("test-key");
-
-      await initializeApp(appWithKey);
-
-      expect(appWithKey.openaipLayers["Aviation Data"]).toBeDefined();
-      expect(appWithKey.map!.addLayer).toHaveBeenCalledWith(
-        appWithKey.openaipLayers["Aviation Data"],
-      );
-      // Both the button and its row leave the initially hidden state
-      expect(
-        document
-          .getElementById("aviation-btn")!
-          .classList.contains("initially-hidden"),
-      ).toBe(false);
-      expect(
-        document
-          .getElementById("aviation-btn")!
-          .closest(".control-row")!
-          .classList.contains("initially-hidden"),
-      ).toBe(false);
-      appWithKey.destroy();
-    });
-
-    it("does not create the aviation layer without an API key", async () => {
+    it("adds the aviation layer when visible", async () => {
       mockStateManagerInstance.loadState.mockReturnValue({
         aviationVisible: true,
       });
 
       await initializeApp(app);
 
-      expect(app.openaipLayers["Aviation Data"]).toBeUndefined();
-      expect(
-        document
-          .getElementById("aviation-btn")!
-          .classList.contains("initially-hidden"),
-      ).toBe(true);
+      expect(app.aviationLayer).not.toBeNull();
+      expect(app.map!.addLayer).toHaveBeenCalledWith(app.aviationLayer);
+    });
+
+    it("creates the aviation layer without adding it when hidden", async () => {
+      await initializeApp(app);
+
+      expect(app.aviationLayer).not.toBeNull();
+      expect(app.map!.addLayer).not.toHaveBeenCalledWith(app.aviationLayer);
     });
 
     it("hides the airport layer when airports are not visible", async () => {
