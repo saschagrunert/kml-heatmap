@@ -150,12 +150,19 @@ Build the site first (`npm run build && python -m kml_heatmap data
 `--update-snapshots` to that command and commit the new screenshots; the
 diff of a failing run is in the `visual-diff` artifact.
 
-The control chrome is compared exactly: nothing in it comes from the flights,
-and the pinned image renders it the same on every run. The statistics rail and
-the Wrapped dialog show the flights of `data/`, so they are allowed to differ
-by 1% of their pixels. That lets new flights through, and a change to their
-look smaller than a collapsed or moved panel as well; regenerate them when
-such a change is intended, since the comparison will not ask for it.
+Every snapshot is taken with the year pinned to one that is over
+(`PINNED_YEAR` in the spec), so that new flights do not change the year
+dropdown or the figures; if that year ever leaves `data/`, the spec says so,
+and the fix is to move the pin and regenerate with `--update-snapshots=all`.
+The control chrome is compared exactly: with the year pinned nothing in it
+follows the flights, and the pinned image renders it the same on every run.
+The statistics rail and the Wrapped dialog show the flights of that year,
+which still change when an old flight is added late, so they are allowed to
+differ by 1% of their pixels. That also lets through a change to their look
+smaller than a collapsed or moved panel; regenerate them when such a change is
+intended, since the comparison will not ask for it. Use
+`--update-snapshots=all` for that: the plain flag only rewrites a snapshot
+that fails, and these two pass with up to 1% of stale pixels.
 
 The image is pinned by tag and digest, in the `visual` job of
 `.github/workflows/test.yml` and in the command above alike. The tag has to
