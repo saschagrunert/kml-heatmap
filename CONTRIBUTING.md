@@ -20,6 +20,7 @@ npm ci
 npm run build                 # frontend bundles (gitignored)
 
 pip install pre-commit && pre-commit install
+make hooks                    # pre-push check for real flight dates
 ```
 
 The pre-commit hooks run ruff (check and format), prettier, typos, gitleaks and
@@ -70,9 +71,11 @@ parentheses back is undone on the next `make format`.
   rewrites them: run `make obfuscate` after adding flights to `data/` (or
   pass `--obfuscate-inputs`). The pre-commit hook, `make check-obfuscation`
   and the `obfuscation` CI job verify that every committed file is
-  obfuscated, and only the hook runs before the dates would be public. The
-  published site carries no flight date finer than the year either way; this
-  is about the KML files this repository commits.
+  obfuscated, but only the hooks run before the dates would be public. The
+  pre-push hook (install it with `make hooks`) checks every commit being
+  pushed, needs nothing beyond Python 3.14 and refuses the push when it
+  cannot check. The published site carries no flight date finer than the
+  year either way; this is about the KML files this repository commits.
 - The frontend build output in `kml_heatmap/static/` is gitignored: both
   bundles (`mapApp.bundle.js`, `features.bundle.js`) with their `.map` files
   and `vendor/`, the third-party code copied out of `node_modules`. It is

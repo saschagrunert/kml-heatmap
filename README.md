@@ -235,11 +235,12 @@ Targets (`make help` prints this list with the current variable values):
 - `lock` - Regenerate `requirements.lock` and `requirements-test.lock` from `pyproject.toml` with pip-compile
 - `obfuscate` - Rewrite the KML files in `INPUT_DIR` in place so they carry no real dates (irreversible)
 - `check-obfuscation` - Check that the KML files in `INPUT_DIR` are obfuscated
+- `hooks` - Install the pre-push hook that refuses to push KML files with real dates
 - `clean` - Remove the container image (when a runtime is available) and local build artifacts
 - `help` - Show available targets and variables
 
 Only `build`, `serve` and `clean` need podman or docker. The rest (`test`,
-`lint`, `format`, `lock`, `obfuscate`, `check-obfuscation`, `help`) run
+`lint`, `format`, `lock`, `obfuscate`, `check-obfuscation`, `hooks`, `help`) run
 locally. With docker the
 containers run as your user id so that generated files are not owned by root;
 with rootless podman the Makefile adds `--userns=keep-id` so that the same user
