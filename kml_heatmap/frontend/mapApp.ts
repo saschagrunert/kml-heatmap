@@ -64,7 +64,6 @@ export interface MapConfig {
   center: [number, number];
   bounds: [[number, number], [number, number]];
   cartoApiKey?: string | undefined;
-  openaipApiKey?: string | undefined;
   dataDir: string;
   /** When the site was built, "YYYY-MM-DDTHH:MMZ" in UTC */
   builtAt?: string | undefined;
@@ -87,11 +86,21 @@ export interface AirportMarkersMap {
 }
 
 /**
- * OpenAIP layers mapping
+ * Aeronautical overlay of open flightmaps: airspaces, airfields, navaids and
+ * reporting points on transparent tiles. `latest` follows the current AIRAC
+ * cycle, so the URL needs no upkeep, and the tiles need no API key.
  */
-export interface OpenAIPLayersMap {
-  [layerName: string]: L.TileLayer;
-}
+const AVIATION_TILE_URL =
+  "https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest";
+/** The zoom levels the overlay is rendered for; above them it is upscaled */
+const AVIATION_MIN_ZOOM = 7;
+const AVIATION_MAX_NATIVE_ZOOM = 12;
+/**
+ * Two levels of upscaling (16 times the area) still read as a chart. Beyond
+ * that the overlay is a blur over the base map, so Leaflet hides it instead
+ * of stretching a tile up to the map's own limit.
+ */
+const AVIATION_MAX_ZOOM = 14;
 
 /** Delay before a Wrapped panel restored from state opens again */
 const WRAPPED_RESTORE_DELAY_MS = 500;
@@ -177,8 +186,8 @@ export class MapApp {
   // Airport markers (non-store)
   readonly airportMarkers: AirportMarkersMap;
 
-  // OpenAIP layer
-  readonly openaipLayers: OpenAIPLayersMap;
+  // Aviation overlay (non-store); created with the map
+  aviationLayer: L.TileLayer | null;
 
   /**
    * Replay state. It lives here rather than in the replay manager because
@@ -263,8 +272,7 @@ export class MapApp {
     // Airport markers (non-store)
     this.airportMarkers = {};
 
-    // OpenAIP layer
-    this.openaipLayers = {};
+    this.aviationLayer = null;
 
     this.replayState = new ReplayState();
 
@@ -472,32 +480,16 @@ export class MapApp {
       this.map.fitBounds(this.config.bounds, { padding: [30, 30] });
     }
 
-    if (this.config.openaipApiKey) {
-      this.openaipLayers["Aviation Data"] = L.tileLayer(
-        "https://{s}.api.tiles.openaip.net/api/data/openaip/{z}/{x}/{y}.png?apiKey=" +
-          this.config.openaipApiKey,
-        {
-          attribution: '&copy; <a href="https://www.openaip.net">OpenAIP</a>',
-          maxNativeZoom: 18,
-          maxZoom: MAX_ZOOM,
-          minZoom: 7,
-          subdomains: ["a", "b", "c"],
-        },
-      );
-    }
+    this.aviationLayer = L.tileLayer(AVIATION_TILE_URL, {
+      attribution:
+        '&copy; <a href="https://www.openflightmaps.org">open flightmaps</a>',
+      maxNativeZoom: AVIATION_MAX_NATIVE_ZOOM,
+      maxZoom: AVIATION_MAX_ZOOM,
+      minZoom: AVIATION_MIN_ZOOM,
+    });
 
     if (this.airportsVisible) {
       this.airportLayer.addTo(this.map);
-    }
-
-    if (this.config.openaipApiKey) {
-      const aviationBtn = domCache.get("aviation-btn");
-      if (aviationBtn) {
-        aviationBtn.classList.remove("initially-hidden");
-        aviationBtn
-          .closest(".control-row")
-          ?.classList.remove("initially-hidden");
-      }
     }
   }
 

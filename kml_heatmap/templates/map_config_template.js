@@ -4,7 +4,6 @@ window.MAP_CONFIG = {
     center: [$center_lat, $center_lon],
     bounds: [[$min_lat, $min_lon], [$max_lat, $max_lon]],
     cartoApiKey: '$carto_api_key',
-    openaipApiKey: '$openaip_api_key',
     dataDir: '$data_dir_name',
     builtAt: '$built_at',
     commit: '$commit',

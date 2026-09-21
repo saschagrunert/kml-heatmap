@@ -376,7 +376,7 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
         .pathIdsByAirport();
     },
     airportMarkers: {},
-    openaipLayers: {},
+    aviationLayer: null,
     aircraftModels: {},
     altitudeRange: { ...DEFAULT_ALTITUDE_RANGE },
     airspeedRange: { ...DEFAULT_AIRSPEED_RANGE },

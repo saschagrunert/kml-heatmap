@@ -408,7 +408,6 @@ def _generate_map_config(
 ) -> None:
     """Generate minified map_config.js from template."""
     carto_api_key = os.environ.get("CARTO_API_KEY", "")
-    openaip_api_key = os.environ.get("OPENAIP_API_KEY", "")
 
     map_config_template_path = TEMPLATES_DIR / "map_config_template.js"
     map_config_dst = output_dir / "map_config.js"
@@ -419,7 +418,6 @@ def _generate_map_config(
     commit = build_commit()
     config_vars = {
         "carto_api_key": _escape_js_string(carto_api_key),
-        "openaip_api_key": _escape_js_string(openaip_api_key),
         "data_dir_name": _escape_js_string(data_dir_name),
         "built_at": build_timestamp(),
         "commit": commit.hash,

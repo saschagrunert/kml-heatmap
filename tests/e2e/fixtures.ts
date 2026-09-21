@@ -2,9 +2,10 @@
  * Hermetic Playwright test fixture.
  *
  * The page carries its own JavaScript and CSS (see scripts/vendor.js), so
- * the only third parties left are the CARTO and OpenAIP tile servers. An
- * outage of either used to fail the whole suite and a slow one made timings
- * unpredictable, so every tile is answered with a transparent pixel.
+ * the only third parties left are the CARTO and open flightmaps tile
+ * servers. An outage of either used to fail the whole suite and a slow one
+ * made timings unpredictable, so every tile is answered with a transparent
+ * pixel.
  *
  * Any other cross-origin request fails the test that made it. The page is
  * meant to work offline and from `file://`; a dependency that creeps back
@@ -25,7 +26,7 @@ const TRANSPARENT_PNG = Buffer.from(
 /** The origins the page is allowed to reach, tiles only */
 const TILE_HOSTS = [
   /^[a-d]\.basemaps\.cartocdn\.com$/,
-  /^[a-z]\.api\.tiles\.openaip\.net$/,
+  /^nwy-tiles-api\.prod\.newaydata\.com$/,
 ];
 
 /** The site under test, served by the webServer in playwright.config.ts */

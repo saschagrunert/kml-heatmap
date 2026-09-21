@@ -76,8 +76,8 @@ violations with axe. The suite does not reach the network: the page carries
 its own JavaScript and CSS, every map tile is answered locally, and any other
 cross-origin request fails the test that made it (see
 `tests/e2e/fixtures.ts`). A few specs depend on whether the site was built
-with `CARTO_API_KEY` and `OPENAIP_API_KEY` (any value works) and skip
-otherwise; CI tests a site with dummy keys and one without.
+with `CARTO_API_KEY` (any value works) and skip otherwise; CI tests a site
+with a dummy key and one without.
 
 The tests run against `docs/`, which must be built from the current sources
 first. The global setup compares the build hash in `docs/mapApp.bundle.js`

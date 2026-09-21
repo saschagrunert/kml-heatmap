@@ -3,9 +3,8 @@ import {
   expectHeatUnderPaths,
   findSegmentFarFromAirports,
   gotoApp,
-  expectOpenaipTiles,
-  hasOpenaipKey,
-  openaipTiles,
+  expectAviationTiles,
+  aviationTiles,
   setAircraftFilter,
   toggleLayer,
   waitForAircraftFilter,
@@ -171,33 +170,13 @@ test.describe("Layers", () => {
     await expect(page.locator(".airport-marker").first()).toBeAttached();
   });
 
-  test("the aviation button is hidden without an OpenAIP key", async ({
+  test("the aviation button toggles the open flightmaps layer", async ({
     page,
     isMobile,
   }) => {
     test.skip(
       isMobile,
       "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
-    );
-    test.skip(
-      await hasOpenaipKey(page),
-      "The site under test was built with OPENAIP_API_KEY",
-    );
-
-    await expect(page.locator("#aviation-btn")).toBeHidden();
-  });
-
-  test("the aviation button toggles the OpenAIP layer", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(
-      isMobile,
-      "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
-    );
-    test.skip(
-      !(await hasOpenaipKey(page)),
-      "The site under test was built without OPENAIP_API_KEY",
     );
     const btn = page.locator(`${LAYERS_GROUP} #aviation-btn`);
 
@@ -210,11 +189,11 @@ test.describe("Layers", () => {
     expect(await page.evaluate(() => window.mapApp!.aviationVisible)).toBe(
       true,
     );
-    await expectOpenaipTiles(page);
+    await expectAviationTiles(page);
 
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "0.5");
-    await expect(openaipTiles(page)).toHaveCount(0);
+    await expect(aviationTiles(page)).toHaveCount(0);
   });
 
   test("the base map tiles carry the CARTO key only when there is one", async ({

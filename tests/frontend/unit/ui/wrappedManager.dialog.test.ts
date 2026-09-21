@@ -309,7 +309,6 @@ describe("WrappedManager dialog", () => {
     });
 
     it("restores the control elements to what they were", () => {
-      mockApp.config.openaipApiKey = "test-api-key";
       el("aviation-btn").style.display = "block";
       openWrapped();
       expect(el("aviation-btn").style.display).toBe("none");

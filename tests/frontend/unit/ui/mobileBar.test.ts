@@ -60,7 +60,6 @@ function createMockApp() {
   const replayManager = { canReplay: vi.fn(() => true), toggleReplay: vi.fn() };
   return {
     store,
-    config: { openaipApiKey: undefined as string | undefined },
     uiToggles: {
       toggleHeatmap: vi.fn(),
       toggleAirports: vi.fn(),
@@ -342,7 +341,13 @@ describe("MobileBar", () => {
       tab("layers").click();
 
       expect(sheetTitle()).toBe("Layers");
-      expect(sheetRows()).toEqual(["heatmap", "airports", "altitude", "speed"]);
+      expect(sheetRows()).toEqual([
+        "heatmap",
+        "airports",
+        "altitude",
+        "speed",
+        "aviation",
+      ]);
       expect(tab("layers").classList.contains("active")).toBe(true);
       expect(tab("layers").getAttribute("aria-expanded")).toBeNull();
     });
@@ -503,7 +508,6 @@ describe("MobileBar", () => {
         ["speed", "toggleAirspeed"],
         ["aviation", "toggleAviation"],
       ];
-      app.config.openaipApiKey = "key";
       create();
       tab("layers").click();
 
@@ -522,14 +526,6 @@ describe("MobileBar", () => {
         }
         vi.mocked(app.uiToggles[method]).mockClear();
       }
-    });
-
-    it("leaves the aviation row out without an OpenAIP key", () => {
-      app.config.openaipApiKey = "";
-      create();
-      tab("layers").click();
-
-      expect(sheetRows()).toEqual(["heatmap", "airports", "altitude", "speed"]);
     });
 
     it("reflects a layer change made elsewhere", () => {
@@ -553,14 +549,6 @@ describe("MobileBar", () => {
         document.querySelector<HTMLButtonElement>('[data-row="speed"]')!
           .disabled,
       ).toBe(true);
-    });
-
-    it("offers the aviation layer only with an API key", () => {
-      app.config.openaipApiKey = "key";
-      create();
-      tab("layers").click();
-
-      expect(sheetRows()).toContain("aviation");
     });
   });
 

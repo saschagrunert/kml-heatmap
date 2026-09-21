@@ -13,9 +13,8 @@ import {
   chooseSheetOption,
   closeMobileSheet,
   expectNoA11yViolations,
-  expectOpenaipTiles,
+  expectAviationTiles,
   gotoApp,
-  hasOpenaipKey,
   knownYears,
   layerButton,
   layerSwitch,
@@ -274,23 +273,9 @@ test.describe("Mobile bar", () => {
       await expect(altitudeLegend).toBeHidden();
     });
 
-    test("there is no aviation switch without an OpenAIP key", async ({
+    test("the aviation switch toggles the open flightmaps layer", async ({
       page,
     }) => {
-      test.skip(
-        await hasOpenaipKey(page),
-        "The site under test was built with OPENAIP_API_KEY",
-      );
-      await openMobileSheet(page, "layers");
-
-      await expect(layerSwitch(page, "aviation")).toHaveCount(0);
-    });
-
-    test("the aviation switch toggles the OpenAIP layer", async ({ page }) => {
-      test.skip(
-        !(await hasOpenaipKey(page)),
-        "The site under test was built without OPENAIP_API_KEY",
-      );
       await openMobileSheet(page, "layers");
       const row = layerSwitch(page, "aviation");
       await expect(row).toHaveAttribute("role", "switch");
@@ -307,7 +292,7 @@ test.describe("Mobile bar", () => {
       expect(await page.evaluate(() => window.mapApp!.aviationVisible)).toBe(
         true,
       );
-      await expectOpenaipTiles(page);
+      await expectAviationTiles(page);
     });
   });
 

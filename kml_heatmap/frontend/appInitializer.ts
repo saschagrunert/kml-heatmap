@@ -154,12 +154,8 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     if (app.airspeedVisible) {
       app.map.addLayer(app.airspeedLayer);
     }
-    if (
-      app.aviationVisible &&
-      app.config.openaipApiKey &&
-      app.openaipLayers["Aviation Data"]
-    ) {
-      app.map.addLayer(app.openaipLayers["Aviation Data"]);
+    if (app.aviationVisible && app.aviationLayer) {
+      app.map.addLayer(app.aviationLayer);
     }
   }
 

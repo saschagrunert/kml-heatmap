@@ -21,33 +21,26 @@ export async function knownYears(page: Page): Promise<string[]> {
   return years;
 }
 
-/**
- * Whether the site under test was built with an OpenAIP key. The specs for
- * either case skip in the other one rather than pass without asserting
- * anything; CI builds a site of each kind (see global-setup.ts).
- */
-export function hasOpenaipKey(page: Page): Promise<boolean> {
-  return page.evaluate(() => !!window.MAP_CONFIG?.openaipApiKey);
-}
-
-/** Tiles of the OpenAIP aviation overlay that are on the map */
-export function openaipTiles(page: Page): Locator {
-  return page.locator('.leaflet-tile-pane img[src*=".api.tiles.openaip.net/"]');
+/** Tiles of the open flightmaps aviation overlay that are on the map */
+export function aviationTiles(page: Page): Locator {
+  return page.locator(
+    '.leaflet-tile-pane img[src*="//nwy-tiles-api.prod.newaydata.com/"]',
+  );
 }
 
 /**
  * Zoom in far enough for the aviation overlay, which starts at zoom 7, and
- * wait for its tiles. They have to ask for the configured key.
+ * wait for its tiles. They have to ask for the aeronautical layer of the
+ * current AIRAC cycle.
  */
-export async function expectOpenaipTiles(page: Page): Promise<void> {
-  const key = await page.evaluate(() => {
+export async function expectAviationTiles(page: Page): Promise<void> {
+  await page.evaluate(() => {
     window.mapApp!.map!.setZoom(8, { animate: false });
-    return window.MAP_CONFIG!.openaipApiKey;
   });
-  const tile = openaipTiles(page).first();
+  const tile = aviationTiles(page).first();
   await expect(tile).toBeAttached();
   const src = new URL((await tile.getAttribute("src"))!);
-  expect(src.searchParams.get("apiKey")).toBe(key);
+  expect(src.searchParams.get("path")).toBe("latest/aero/latest");
 }
 
 interface SegmentClickPosition {

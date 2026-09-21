@@ -16,14 +16,14 @@ Include the affected component (Python pipeline, frontend, container image or
 CI), steps to reproduce and, if possible, a suggested fix. You will get a
 response within a few days.
 
-## Public tile API keys
+## Public tile API key
 
-The generated site embeds the CARTO and OpenAIP tile API keys in its
-`map_config.js`. They are public client-side keys that the browser needs to
-load the base map and the Aviation Data layer, so they are published with the
-site by design. The `site` job of the `test` workflow reads them from the
-repository secrets; the generated site itself is not committed. Reports about
-these keys being visible on the site are not security issues.
+The generated site embeds the CARTO tile API key in its `map_config.js`. It
+is a public client-side key that the browser needs to load the base map, so
+it is published with the site by design. The `site` job of the `test`
+workflow reads it from the repository secrets; the generated site itself is
+not committed. Reports about this key being visible on the site are not
+security issues. The aviation overlay (open flightmaps) needs no key.
 
 ## Automated checks
 
