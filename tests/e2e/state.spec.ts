@@ -15,6 +15,7 @@ import {
   waitForAppReady,
   waitForYearFilter,
 } from "./helpers";
+import { getCenter } from "./map";
 
 test.describe("State Persistence", () => {
   test.beforeEach(async ({ page }) => {
@@ -217,10 +218,7 @@ test.describe("State Persistence", () => {
     }) => {
       await gotoApp(page, "/?lat=48.000000&lng=11.000000&z=10.00");
 
-      const center = await page.evaluate(() => {
-        const map = window.mapApp!.map!;
-        return { lat: map.getCenter().lat, lng: map.getCenter().lng };
-      });
+      const center = await getCenter(page);
 
       expect(Math.abs(center.lat - 48.0)).toBeLessThan(1);
       expect(Math.abs(center.lng - 11.0)).toBeLessThan(1);

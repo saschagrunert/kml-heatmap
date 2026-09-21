@@ -14,6 +14,14 @@ import {
   waitForAppReady,
   waitForPathData,
 } from "./helpers";
+import {
+  airportMarkerIsFocused,
+  centerOnAirport,
+  focusAirportMarker,
+  mapPopup,
+  markerContainer,
+  openAirportPopup,
+} from "./map";
 
 /**
  * Centre the map on the airport with the most flights and focus its marker.
@@ -23,25 +31,15 @@ async function focusBusiestAirport(
   page: Page,
 ): Promise<{ name: string; flights: number }> {
   await waitForPathData(page);
-  return page.evaluate(() => {
-    const app = window.mapApp!;
-    const [name, ids] = Object.entries(app.airportToPaths).sort(
+  const airport = await page.evaluate(() => {
+    const [name, ids] = Object.entries(window.mapApp!.airportToPaths).sort(
       (a, b) => b[1].size - a[1].size,
     )[0]!;
-    const marker = app.airportMarkers[name]!;
-    app.map!.setView(marker.getLatLng(), 10, { animate: false });
-    marker.getElement()!.focus();
     return { name, flights: ids.size };
   });
-}
-
-function markerIsFocused(page: Page, name: string): Promise<boolean> {
-  return page.evaluate(
-    (airport) =>
-      document.activeElement ===
-      window.mapApp!.airportMarkers[airport]!.getElement(),
-    name,
-  );
+  await centerOnAirport(page, airport.name, 10);
+  await focusAirportMarker(page, airport.name);
+  return airport;
 }
 
 test.describe("Keyboard", () => {
@@ -56,7 +54,7 @@ test.describe("Keyboard", () => {
     await page.keyboard.press("Enter");
 
     // Opened from the keyboard, the popup takes focus
-    const popup = page.locator(".leaflet-popup");
+    const popup = mapPopup(page);
     await expect(popup).toBeVisible();
     await expect(popup.locator(".kh-popup-airport")).toBeFocused();
 
@@ -94,23 +92,19 @@ test.describe("Keyboard", () => {
     // marker instead of the page
     await page.keyboard.press("Escape");
     await expect(popup).toHaveCount(0);
-    expect(await markerIsFocused(page, airport.name)).toBe(true);
+    expect(await airportMarkerIsFocused(page, airport.name)).toBe(true);
   });
 
   test("Escape on a focused marker closes its popup", async ({ page }) => {
     const airport = await focusBusiestAirport(page);
-    await page.evaluate((name) => {
-      window.mapApp!.airportMarkers[name]!.openPopup();
-    }, airport.name);
-    await expect(page.locator(".leaflet-popup")).toBeVisible();
+    await openAirportPopup(page, airport.name);
+    await expect(mapPopup(page)).toBeVisible();
 
-    await page.evaluate((name) => {
-      window.mapApp!.airportMarkers[name]!.getElement()!.focus();
-    }, airport.name);
+    await focusAirportMarker(page, airport.name);
     await page.keyboard.press("Escape");
 
-    await expect(page.locator(".leaflet-popup")).toHaveCount(0);
-    expect(await markerIsFocused(page, airport.name)).toBe(true);
+    await expect(mapPopup(page)).toHaveCount(0);
+    expect(await airportMarkerIsFocused(page, airport.name)).toBe(true);
   });
 
   test("a popup opened with the mouse leaves focus alone", async ({ page }) => {
@@ -172,7 +166,7 @@ test.describe("Keyboard", () => {
     const modal = await openWrapped(page);
     await expect(modal.locator("#map")).toBeAttached();
 
-    const pane = page.locator("#map .leaflet-marker-pane");
+    const pane = markerContainer(page);
     await expect(pane).toHaveAttribute("inert", "");
 
     await page.keyboard.press("Escape");

@@ -1,19 +1,32 @@
 import { test, expect, type Locator, type Page } from "./fixtures";
 import {
-  expectHeatUnderPaths,
   findSegmentFarFromAirports,
   gotoApp,
-  expectAviationTiles,
-  aviationTiles,
   setAircraftFilter,
   toggleLayer,
   waitForAircraftFilter,
   waitForPathData,
 } from "./helpers";
+import {
+  aviationTiles,
+  baseMapTiles,
+  expectAviationTiles,
+  expectHeatUnderPaths,
+  heatmapSurface,
+  mapPopupContent,
+  pathCount,
+  setZoom,
+} from "./map";
 
 /** The Layers group of the right column, addressed by its own heading */
 const LAYERS_GROUP =
   '#right-buttons .control-group[aria-labelledby="layers-group-title"]';
+
+function refreshAirportMarkerSizes(page: Page): Promise<void> {
+  return page.evaluate(() => {
+    window.mapApp!.airportManager.updateAirportMarkerSizes();
+  });
+}
 
 /** Set the zoom level and refresh marker sizes, then wait for the class */
 async function zoomAndWaitForMarkerSize(
@@ -21,11 +34,8 @@ async function zoomAndWaitForMarkerSize(
   zoom: number,
   expected: string,
 ): Promise<void> {
-  await page.evaluate((z) => {
-    const app = window.mapApp!;
-    app.map!.setView(app.map!.getCenter(), z, { animate: false });
-    app.airportManager.updateAirportMarkerSizes();
-  }, zoom);
+  await setZoom(page, zoom);
+  await refreshAirportMarkerSizes(page);
 
   await page.waitForFunction(
     (size) => document.getElementById("map")?.dataset["zoomSize"] === size,
@@ -200,9 +210,7 @@ test.describe("Layers", () => {
     page,
   }) => {
     const key = await page.evaluate(() => window.MAP_CONFIG?.cartoApiKey ?? "");
-    const tile = page
-      .locator('.leaflet-tile-pane img[src*=".basemaps.cartocdn.com/"]')
-      .first();
+    const tile = baseMapTiles(page).first();
     await expect(tile).toBeAttached();
 
     const src = new URL((await tile.getAttribute("src"))!);
@@ -264,7 +272,7 @@ test.describe("Layers", () => {
 
     await page.locator("#map").click({ position: { x: pos!.x, y: pos!.y } });
 
-    await expectSegmentDetails(page.locator(".leaflet-popup-content").first());
+    await expectSegmentDetails(mapPopupContent(page).first());
   });
 
   test("airport labels hidden at low zoom", async ({ page }) => {
@@ -272,11 +280,8 @@ test.describe("Layers", () => {
       page.locator(".airport-marker-container").first(),
     ).toBeAttached({ timeout: 15000 });
 
-    await page.evaluate(() => {
-      const app = window.mapApp!;
-      app.map!.setView(app.map!.getCenter(), 4, { animate: false });
-      app.airportManager.updateAirportMarkerSizes();
-    });
+    await setZoom(page, 4);
+    await refreshAirportMarkerSizes(page);
     await page.waitForFunction(
       () =>
         document.getElementById("map")?.classList.contains("zoom-hide-labels"),
@@ -284,11 +289,8 @@ test.describe("Layers", () => {
     );
     await expect(page.locator(".airport-label").first()).toBeHidden();
 
-    await page.evaluate(() => {
-      const app = window.mapApp!;
-      app.map!.setView(app.map!.getCenter(), 8, { animate: false });
-      app.airportManager.updateAirportMarkerSizes();
-    });
+    await setZoom(page, 8);
+    await refreshAirportMarkerSizes(page);
     await page.waitForFunction(
       () =>
         !document.getElementById("map")?.classList.contains("zoom-hide-labels"),
@@ -301,7 +303,7 @@ test.describe("Layers", () => {
   }) => {
     await waitForPathData(page);
     await toggleLayer(page, "heatmap");
-    await expect(page.locator("canvas.leaflet-heatmap-layer")).toHaveCount(0);
+    await expect(heatmapSurface(page)).toHaveCount(0);
 
     // An aircraft that flew fewer than all the loaded flights
     const aircraft = await page.evaluate(() => {
@@ -319,20 +321,14 @@ test.describe("Layers", () => {
       return null;
     });
     test.skip(aircraft === null, "the site has a single aircraft");
-    const before = await page.evaluate(
-      () => window.mapApp!.altitudeLayer.getLayers().length,
-    );
+    const before = await pathCount(page, "altitude");
 
     await setAircraftFilter(page, aircraft!);
     await waitForAircraftFilter(page, aircraft!);
 
     // The heat layer off the map threw on its new points, and the
     // altitude layer kept every polyline of the previous filter
-    await expect
-      .poll(() =>
-        page.evaluate(() => window.mapApp!.altitudeLayer.getLayers().length),
-      )
-      .toBeLessThan(before);
+    await expect.poll(() => pathCount(page, "altitude")).toBeLessThan(before);
   });
 
   test("the heat canvas stays under the paths across a heatmap toggle", async ({
@@ -349,20 +345,17 @@ test.describe("Layers", () => {
   });
 
   test.describe("Heatmap emphasis", () => {
-    /** The leaflet.heat canvas, which the emphasis class lands on */
-    const HEAT_CANVAS = "canvas.leaflet-heatmap-layer";
-
     /** Opacity as the browser computes it, so the token stays the one source */
     function heatOpacity(page: Page): Promise<number> {
-      return page
-        .locator(HEAT_CANVAS)
-        .evaluate((el) => Number(getComputedStyle(el).opacity));
+      return heatmapSurface(page).evaluate((el) =>
+        Number(getComputedStyle(el).opacity),
+      );
     }
 
     test("the heatmap steps back while a colour layer is over it", async ({
       page,
     }) => {
-      const canvas = page.locator(HEAT_CANVAS);
+      const canvas = heatmapSurface(page);
       await expect(canvas).toBeVisible();
       expect(await heatOpacity(page)).toBe(1);
 
@@ -379,7 +372,7 @@ test.describe("Layers", () => {
     test("it comes back to full strength when the layer goes", async ({
       page,
     }) => {
-      const canvas = page.locator(HEAT_CANVAS);
+      const canvas = heatmapSurface(page);
       await waitForPathData(page);
       await expect(canvas).toHaveClass(/heatmap-dimmed/);
 

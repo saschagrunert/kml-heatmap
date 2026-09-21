@@ -10,6 +10,15 @@ import {
   waitForAppReady,
   waitForPathData,
 } from "./helpers";
+import {
+  airportMarkerCenter,
+  centerOnAirport,
+  focusAirportMarker,
+  pathCount,
+  pathWeights,
+  segmentDetails,
+  setZoom,
+} from "./map";
 
 /** Select a path and return the isolate button locator */
 async function selectPathAndGetIsolateBtn(page: Page) {
@@ -22,16 +31,19 @@ function selectedCount(page: Page): Promise<number> {
   return page.evaluate(() => window.mapApp!.selectedPathIds.size);
 }
 
-function altitudeLayerCount(page: Page): Promise<number> {
-  return page.evaluate(() => window.mapApp!.altitudeLayer.getLayers().length);
-}
-
-function altitudeWeights(page: Page): Promise<number[]> {
-  return page.evaluate(() =>
-    window
-      .mapApp!.altitudeLayer.getLayers()
-      .map((layer) => (layer as L.Polyline).options.weight ?? 0),
-  );
+/** The first airport the app files paths under, with those paths */
+function firstAirportWithPaths(
+  page: Page,
+): Promise<{ name: string; pathIds: number[] } | null> {
+  return page.evaluate(() => {
+    const app = window.mapApp!;
+    const name = Object.keys(app.airportToPaths)[0];
+    if (!name || !app.airportMarkers[name]) return null;
+    return {
+      name,
+      pathIds: [...app.airportToPaths[name]!].sort((a, b) => a - b),
+    };
+  });
 }
 
 test.describe("Path Selection", () => {
@@ -146,12 +158,7 @@ test.describe("Path Selection", () => {
     expect(await selectedCount(page)).toBe(1);
 
     // Zoom out so the bottom-left corner of the map shows open sea
-    await page.evaluate(() => {
-      window.mapApp!.map!.setZoom(3, { animate: false });
-    });
-    await expect
-      .poll(() => page.evaluate(() => window.mapApp!.map!.getZoom()))
-      .toBe(3);
+    await setZoom(page, 3);
 
     const mapBox = (await page.locator("#map").boundingBox())!;
     await page.mouse.click(mapBox.x + 10, mapBox.y + mapBox.height - 10);
@@ -167,24 +174,13 @@ test.describe("Path Selection", () => {
 
     // Pick an airport, centre the map on its marker and note which paths
     // the app files under it, so the click can be checked against them
-    const airport = await page.evaluate(() => {
-      const app = window.mapApp!;
-      const name = Object.keys(app.airportToPaths)[0];
-      const marker = name ? app.airportMarkers[name] : undefined;
-      if (!name || !marker) return null;
-      app.map!.setView(marker.getLatLng(), 12, { animate: false });
-      const box = marker.getElement()!.getBoundingClientRect();
-      return {
-        name,
-        pathIds: [...app.airportToPaths[name]!].sort((a, b) => a - b),
-        x: box.x + box.width / 2,
-        y: box.y + box.height / 2,
-      };
-    });
+    const airport = await firstAirportWithPaths(page);
     expect(airport).not.toBeNull();
     expect(airport!.pathIds.length).toBeGreaterThan(0);
+    await centerOnAirport(page, airport!.name, 12);
 
-    await page.mouse.click(airport!.x, airport!.y);
+    const marker = await airportMarkerCenter(page, airport!.name);
+    await page.mouse.click(marker.x, marker.y);
 
     await expect
       .poll(() =>
@@ -200,20 +196,11 @@ test.describe("Path Selection", () => {
   }) => {
     await waitForPathData(page);
 
-    const airport = await page.evaluate(() => {
-      const app = window.mapApp!;
-      const name = Object.keys(app.airportToPaths)[0];
-      const marker = name ? app.airportMarkers[name] : undefined;
-      if (!name || !marker) return null;
-      app.map!.setView(marker.getLatLng(), 12, { animate: false });
-      marker.getElement()!.focus();
-      return {
-        name,
-        pathIds: [...app.airportToPaths[name]!].sort((a, b) => a - b),
-      };
-    });
+    const airport = await firstAirportWithPaths(page);
     expect(airport).not.toBeNull();
     expect(airport!.pathIds.length).toBeGreaterThan(0);
+    await centerOnAirport(page, airport!.name, 12);
+    await focusAirportMarker(page, airport!.name);
 
     // Leaflet reports Enter as keypress, not click: the popup opened but
     // nothing was selected
@@ -241,9 +228,7 @@ test.describe("Path Selection", () => {
     });
 
     // Pointer devices get a sticky tooltip, touch devices a popup
-    const details = page
-      .locator(".segment-tooltip, .leaflet-popup-content")
-      .first();
+    const details = segmentDetails(page).first();
     await expect(details).toBeVisible({ timeout: 5000 });
     await expect(details).toContainText(/Altitude/);
     await expect(details).toContainText(/ft/);
@@ -369,7 +354,7 @@ test.describe("Solo Mode", () => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
 
     // Before solo: the selected path is drawn with weight 6
-    expect(await altitudeWeights(page)).toContain(6);
+    expect(await pathWeights(page, "altitude")).toContain(6);
 
     await isolateBtn.click();
     await expect
@@ -377,8 +362,8 @@ test.describe("Solo Mode", () => {
       .toBe(true);
 
     // In solo: only the selected path is visible with the normal weight
-    await expect.poll(() => altitudeWeights(page)).not.toContain(6);
-    const weightsInSolo = await altitudeWeights(page);
+    await expect.poll(() => pathWeights(page, "altitude")).not.toContain(6);
+    const weightsInSolo = await pathWeights(page, "altitude");
     expect(weightsInSolo.length).toBeGreaterThan(0);
     for (const w of weightsInSolo) {
       expect(w).toBe(4);
@@ -389,7 +374,7 @@ test.describe("Solo Mode", () => {
       .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
       .toBe(false);
 
-    await expect.poll(() => altitudeWeights(page)).toContain(6);
+    await expect.poll(() => pathWeights(page, "altitude")).toContain(6);
   });
 
   test("solo mode hides unselected paths from altitude layer", async ({
@@ -397,14 +382,16 @@ test.describe("Solo Mode", () => {
   }) => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
 
-    const totalBefore = await altitudeLayerCount(page);
+    const totalBefore = await pathCount(page, "altitude");
 
     await isolateBtn.click();
     await expect
       .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
       .toBe(true);
 
-    await expect.poll(() => altitudeLayerCount(page)).toBeLessThan(totalBefore);
-    expect(await altitudeLayerCount(page)).toBeGreaterThan(0);
+    await expect
+      .poll(() => pathCount(page, "altitude"))
+      .toBeLessThan(totalBefore);
+    expect(await pathCount(page, "altitude")).toBeGreaterThan(0);
   });
 });

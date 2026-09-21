@@ -9,6 +9,7 @@ import {
   waitForAppReady,
   waitForYearFilter,
 } from "./helpers";
+import { getCenter, getZoom, setView, waitForMapReady } from "./map";
 
 /** Fail loudly if the cards no longer overflow, rather than time out */
 async function expectScrollable(column: Locator): Promise<void> {
@@ -182,18 +183,15 @@ test.describe("Wrapped and Export", () => {
 
     const mapEl = page.locator("#map");
     await expect(mapEl).toBeVisible();
-    await expect(mapEl).toHaveClass(/leaflet-container/);
+    await waitForMapReady(page);
     await expect(page.locator("#wrapped-map-container #map")).toHaveCount(0);
   });
 
   test("a reload with the dialog open keeps the user's view (regression)", async ({
     page,
   }) => {
-    const view = await page.evaluate(() => {
-      const map = window.mapApp!.map!;
-      map.setView([48.1, 11.6], 13, { animate: false });
-      return { center: map.getCenter(), zoom: map.getZoom() };
-    });
+    await setView(page, [48.1, 11.6], 13);
+    const view = { center: await getCenter(page), zoom: await getZoom(page) };
     await expect
       .poll(async () => (await readSavedState(page))["zoom"])
       .toBe(view.zoom);
@@ -222,15 +220,8 @@ test.describe("Wrapped and Export", () => {
     await modal.locator(".close-btn").click();
     await expect(modal).toBeHidden();
 
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const map = window.mapApp!.map!;
-          return { center: map.getCenter(), zoom: map.getZoom() };
-        }),
-      )
-      .toMatchObject({ zoom: view.zoom });
-    const after = await page.evaluate(() => window.mapApp!.map!.getCenter());
+    await expect.poll(() => getZoom(page)).toBe(view.zoom);
+    const after = await getCenter(page);
     expect(after.lat).toBeCloseTo(view.center.lat, 3);
     expect(after.lng).toBeCloseTo(view.center.lng, 3);
   });

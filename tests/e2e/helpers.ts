@@ -1,12 +1,18 @@
 /**
  * Shared helper functions for e2e tests
  */
-/// <reference types="leaflet" />
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page } from "@playwright/test";
 // Type-only import so the window.mapApp / MAP_CONFIG globals are declared
 import type {} from "../../kml_heatmap/frontend/globals";
 import { STATE_SCHEMA_VERSION } from "../../kml_heatmap/frontend/state/urlState";
+import {
+  airportPosition,
+  containerPoint,
+  pathCount,
+  setView,
+  waitForMapReady,
+} from "./map";
 
 /**
  * The years the built site carries, as the year filter spells them. Read
@@ -19,28 +25,6 @@ export async function knownYears(page: Page): Promise<string[]> {
   );
   expect(years.length, "the site exports no years").toBeGreaterThan(0);
   return years;
-}
-
-/** Tiles of the open flightmaps aviation overlay that are on the map */
-export function aviationTiles(page: Page): Locator {
-  return page.locator(
-    '.leaflet-tile-pane img[src*="//nwy-tiles-api.prod.newaydata.com/"]',
-  );
-}
-
-/**
- * Zoom in far enough for the aviation overlay, which starts at zoom 7, and
- * wait for its tiles. They have to ask for the aeronautical layer of the
- * current AIRAC cycle.
- */
-export async function expectAviationTiles(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    window.mapApp!.map!.setZoom(8, { animate: false });
-  });
-  const tile = aviationTiles(page).first();
-  await expect(tile).toBeAttached();
-  const src = new URL((await tile.getAttribute("src"))!);
-  expect(src.searchParams.get("path")).toBe("latest/aero/latest");
 }
 
 interface SegmentClickPosition {
@@ -121,50 +105,34 @@ export async function settleAnimations(target: Page | Locator): Promise<void> {
   );
 }
 
-/**
- * Hide everything the map draws, leaving the page's own chrome.
- *
- * For a screenshot comparison: the tiles, the heat canvas, the paths and the
- * airport markers are live data, and comparing them would make a snapshot
- * flaky for reasons that have nothing to do with the stylesheet. Masking
- * them is not an option, because every Leaflet pane fills the viewport, so a
- * mask over one covers the controls as well. The map keeps its own
- * background, so the layout below it is unchanged.
- *
- * Through a constructed stylesheet rather than a <style> tag: the page's CSP
- * allows no inline style, and CSSOM stylesheets are not inline.
- */
-export async function hideMapData(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(".leaflet-pane { visibility: hidden !important; }");
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-  });
-}
-
 /** Open the app and wait until initialization (data loading) has finished */
 export async function gotoApp(page: Page, path = "/"): Promise<void> {
   await page.goto(path);
   await waitForAppReady(page);
 }
 
-/**
- * Wait for the app to finish initializing (also after a reload). Leaflet
- * ignores setZoom/setView while a zoom animation is running, so the map must
- * be idle as well. The specs run with reduced motion, which turns the map's
- * animations off; the check keeps a spec that turns it back on safe.
- */
+/** Wait for the app to finish initializing (also after a reload) */
 export async function waitForAppReady(page: Page): Promise<void> {
-  await page.waitForSelector("#map.leaflet-container", { timeout: 15000 });
+  await waitForMapReady(page);
   await page.waitForFunction(
     () => {
       const app = window.mapApp;
-      if (!app || app.isInitializing || !app.map) return false;
-      const map = app.map as unknown as { _animatingZoom?: boolean };
-      return map._animatingZoom !== true;
+      return !!app && !app.isInitializing && !!app.map;
     },
     { timeout: 20000 },
   );
+  // Initializing can zoom the map once more (a restored view, the bounds)
+  await waitForMapReady(page);
+}
+
+/**
+ * A toast on screen with the given text. Not `page.getByText`: the message
+ * is also written to a visually hidden live region a moment after the toast
+ * appears, and from then on the text matches two elements, which a strict
+ * locator refuses. Whether a spec got its answer before that was a race.
+ */
+export function toastMessage(page: Page, text: string): Locator {
+  return page.locator(".toast-notification").filter({ hasText: text });
 }
 
 /** Read the persisted app state from localStorage */
@@ -218,75 +186,40 @@ export async function findSegmentFarFromAirports(
   page: Page,
   options?: { includePathId?: boolean },
 ): Promise<SegmentClickPosition | null> {
-  const includePathId = options?.includePathId ?? false;
+  const airports = await Promise.all(
+    (await page.evaluate(() => Object.keys(window.mapApp!.airportMarkers))).map(
+      (name) => airportPosition(page, name),
+    ),
+  );
 
-  const pos = await page.evaluate((wantPathId) => {
-    const app = window.mapApp;
-    const segments = app?.currentData?.path_segments;
-    if (!app?.map || !segments || segments.length === 0) return null;
+  const best = await page.evaluate((markers) => {
+    const segments = window.mapApp?.currentData?.path_segments;
+    if (!segments || segments.length === 0) return null;
 
-    const airports: { lat: number; lon: number }[] = [];
-    for (const name of Object.keys(app.airportMarkers)) {
-      const ll = app.airportMarkers[name]!.getLatLng();
-      airports.push({ lat: ll.lat, lon: ll.lng });
-    }
-
-    let best: { pathId: number; coord: number[]; dist: number } | null = null;
+    let found: { pathId: number; coord: number[]; dist: number } | null = null;
     for (const seg of segments) {
       if (!seg.coords || seg.coords.length < 2) continue;
       const midCoord = seg.coords[Math.floor(seg.coords.length / 2)]!;
-      const minDist = airports.reduce((min, a) => {
-        const d = Math.hypot(midCoord[0] - a.lat, midCoord[1] - a.lon);
+      const minDist = markers.reduce((min, [lat, lon]) => {
+        const d = Math.hypot(midCoord[0] - lat, midCoord[1] - lon);
         return Math.min(min, d);
       }, Infinity);
-      if (!best || minDist > best.dist) {
-        best = { pathId: seg.path_id, coord: midCoord, dist: minDist };
+      if (!found || minDist > found.dist) {
+        found = { pathId: seg.path_id, coord: midCoord, dist: minDist };
       }
     }
-    if (!best) return null;
+    return found;
+  }, airports);
+  if (!best) return null;
 
-    app.map.setView(L.latLng(best.coord[0]!, best.coord[1]!), 13, {
-      animate: false,
-    });
-
-    const point = app.map.latLngToContainerPoint(
-      L.latLng(best.coord[0]!, best.coord[1]!),
-    );
-    return {
-      x: point.x,
-      y: point.y,
-      coord: best.coord,
-      pathId: wantPathId ? best.pathId : undefined,
-    };
-  }, includePathId);
-
-  if (!pos) return null;
-
-  // Wait until the view has settled on the requested position
-  await page.waitForFunction(
-    (cp) => {
-      const app = window.mapApp;
-      if (!app?.map) return false;
-      const center = app.map.getCenter();
-      return (
-        Math.abs(center.lat - cp.coord[0]!) < 1e-6 &&
-        Math.abs(center.lng - cp.coord[1]!) < 1e-6 &&
-        app.map.getZoom() === 13
-      );
-    },
-    pos,
-    { timeout: 5000 },
-  );
-
-  const settled = await page.evaluate((cp) => {
-    const app = window.mapApp!;
-    const point = app.map!.latLngToContainerPoint(
-      L.latLng(cp.coord[0]!, cp.coord[1]!),
-    );
-    return { x: point.x, y: point.y };
-  }, pos);
-
-  return { ...settled, coord: pos.coord, pathId: pos.pathId };
+  // Wait until the view has settled before asking where the point is drawn
+  const at = [best.coord[0]!, best.coord[1]!] as const;
+  await setView(page, at, 13);
+  return {
+    ...(await containerPoint(page, at)),
+    coord: best.coord,
+    pathId: options?.includePathId ? best.pathId : undefined,
+  };
 }
 
 /* ==========================================================================
@@ -513,38 +446,13 @@ export async function waitForPathData(page: Page): Promise<void> {
   await page.waitForFunction(
     () => {
       const app = window.mapApp;
-      return (
-        !!app &&
-        (app.fullPathInfo?.length ?? 0) > 0 &&
-        app.altitudeLayer.getLayers().length > 0
-      );
+      return !!app && (app.fullPathInfo?.length ?? 0) > 0;
     },
     { timeout: 15000 },
   );
-}
-
-/**
- * The heat canvas and the canvas the coloured paths are drawn on share the
- * overlay pane. Whichever was appended last would paint on top, so the
- * stylesheet pins the heat canvas underneath; this reads the result.
- */
-export async function expectHeatUnderPaths(page: Page): Promise<void> {
-  const pane = page.locator(".leaflet-overlay-pane");
-  await expect(pane.locator("canvas.leaflet-heatmap-layer")).toHaveCount(1);
-  await expect(pane.locator("canvas:not(.leaflet-heatmap-layer)")).toHaveCount(
-    1,
-  );
-  const order = await pane.evaluate((el) => {
-    const zIndex = (selector: string): number =>
-      Number(getComputedStyle(el.querySelector(selector)!).zIndex);
-    return {
-      heat: zIndex("canvas.leaflet-heatmap-layer"),
-      paths: zIndex("canvas:not(.leaflet-heatmap-layer)"),
-    };
-  });
-  expect(order.heat, "the heat canvas paints over the paths").toBeLessThan(
-    order.paths,
-  );
+  await expect
+    .poll(() => pathCount(page, "altitude"), { timeout: 15000 })
+    .toBeGreaterThan(0);
 }
 
 /** Select a single path with timing data for replay */

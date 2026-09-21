@@ -9,6 +9,13 @@ import {
   toggleStatsPanel,
   usesMobileBar,
 } from "./helpers";
+import {
+  attributionControl,
+  mapMarkers,
+  tileLayers,
+  waitForMapReady,
+  zoomControl,
+} from "./map";
 
 test.describe("Core", () => {
   test.beforeEach(async ({ page }) => {
@@ -41,14 +48,14 @@ test.describe("Core", () => {
     expect(csp).toContain("base-uri 'none'");
   });
 
-  test("map container renders with Leaflet", async ({ page }) => {
+  test("the map library takes over the map container", async ({ page }) => {
     const mapContainer = page.locator("#map");
     await expect(mapContainer).toBeVisible();
-    await expect(mapContainer).toHaveClass(/leaflet-container/);
+    await waitForMapReady(page);
   });
 
   test("map has tile pane initialized", async ({ page }) => {
-    await expect(page.locator(".leaflet-tile-pane")).toBeAttached();
+    await expect(tileLayers(page)).toBeAttached();
   });
 
   test("control buttons are present", async ({ page, isMobile }) => {
@@ -198,7 +205,7 @@ test.describe("Core", () => {
 
   test("the zoom control is gone", async ({ page }) => {
     // Pinch, scroll and double tap cover zooming
-    await expect(page.locator(".leaflet-control-zoom")).toHaveCount(0);
+    await expect(zoomControl(page)).toHaveCount(0);
   });
 
   test("a country group carries the flag the site published", async ({
@@ -219,7 +226,7 @@ test.describe("Core", () => {
   });
 
   test("the attribution is shown at every width", async ({ page }) => {
-    const attribution = page.locator(".leaflet-control-attribution");
+    const attribution = attributionControl(page);
     await expect(attribution).toBeVisible();
     await expect(attribution).toContainText("OpenStreetMap");
   });
@@ -261,7 +268,7 @@ test.describe("Core", () => {
   });
 
   test("airport markers are rendered on the map", async ({ page }) => {
-    const markers = page.locator(".leaflet-marker-icon");
+    const markers = mapMarkers(page);
     await expect(markers.first()).toBeAttached({ timeout: 15000 });
     expect(await markers.count()).toBeGreaterThan(0);
   });

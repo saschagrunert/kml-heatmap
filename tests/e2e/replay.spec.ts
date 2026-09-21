@@ -1,11 +1,11 @@
 import { test, expect } from "./fixtures";
 import {
   activateReplay,
-  expectHeatUnderPaths,
   gotoApp,
   playUntilProgress,
   waitForPathData,
 } from "./helpers";
+import { expectHeatUnderPaths, mapMarkers, mapPopupContent } from "./map";
 
 test.describe("Replay", () => {
   test.beforeEach(async ({ page }) => {
@@ -387,7 +387,7 @@ test.describe("Replay", () => {
 
     await page.locator(".replay-airplane-icon").click();
 
-    const popup = page.locator(".leaflet-popup-content");
+    const popup = mapPopupContent(page);
     await expect(popup).toBeVisible({ timeout: 3000 });
     await expect(popup).toContainText("Current Position");
 
@@ -402,7 +402,7 @@ test.describe("Replay", () => {
     page,
   }) => {
     await activateReplay(page);
-    const marker = page.locator(".leaflet-marker-icon", {
+    const marker = mapMarkers(page).filter({
       has: page.locator(".replay-airplane-icon"),
     });
 
@@ -411,7 +411,7 @@ test.describe("Replay", () => {
     await marker.focus();
     await page.keyboard.press("Enter");
 
-    const popup = page.locator(".leaflet-popup-content");
+    const popup = mapPopupContent(page);
     await expect(popup).toBeVisible({ timeout: 3000 });
     await expect(popup).toContainText("Current Position");
   });

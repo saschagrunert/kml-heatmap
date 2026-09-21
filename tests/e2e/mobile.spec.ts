@@ -13,7 +13,6 @@ import {
   chooseSheetOption,
   closeMobileSheet,
   expectNoA11yViolations,
-  expectAviationTiles,
   gotoApp,
   knownYears,
   layerButton,
@@ -29,7 +28,14 @@ import {
   waitForAircraftFilter,
   waitForYearFilter,
   type ErrorCollector,
+  toastMessage,
 } from "./helpers";
+import {
+  airportsOnMap,
+  attributionControl,
+  expectAviationTiles,
+  heatmapOnMap,
+} from "./map";
 
 /** The smallest comfortable touch target on both mobile platforms */
 const MIN_TAP_TARGET_PX = 44;
@@ -41,22 +47,6 @@ const TABS = [
   { id: "wrapped", label: "Wrapped" },
   { id: "more", label: "More" },
 ] as const;
-
-/** Whether the heatmap overlay is on the map right now */
-function heatmapOnMap(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
-    const app = window.mapApp!;
-    return !!app.heatmapLayer && app.map!.hasLayer(app.heatmapLayer);
-  });
-}
-
-/** Whether the airport marker layer is on the map right now */
-function airportsOnMap(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
-    const app = window.mapApp!;
-    return app.map!.hasLayer(app.airportLayer);
-  });
-}
 
 /** Every tap target of a locator set is big enough to hit */
 async function expectTapTargets(page: Page, selector: string): Promise<void> {
@@ -333,7 +323,7 @@ test.describe("Mobile bar", () => {
       await chooseSheetOption(row.locator("select"), other!);
 
       await expect(
-        page.getByText(`Failed to load flight data for ${other}`),
+        toastMessage(page, `Failed to load flight data for ${other}`),
       ).toBeVisible();
       // The page put its dropdown back; the row used to keep the failed
       // choice, and picking the current year again changed nothing
@@ -709,7 +699,7 @@ test.describe("Mobile bar", () => {
     page,
   }) => {
     // Tile credit belongs on the map it credits, not inside a sheet
-    const attribution = page.locator(".leaflet-control-attribution");
+    const attribution = attributionControl(page);
     await expect(attribution).toBeVisible();
     await expect(attribution).toContainText("OpenStreetMap");
     await expect(
@@ -724,7 +714,7 @@ test.describe("Mobile bar", () => {
   test("the tile credit stands down while a sheet covers the map", async ({
     page,
   }) => {
-    const attribution = page.locator(".leaflet-control-attribution");
+    const attribution = attributionControl(page);
     await expect(attribution).toBeVisible();
 
     await openMobileSheet(page, "more");
@@ -748,9 +738,7 @@ test.describe("Mobile bar", () => {
     await expect(legend).toBeVisible();
 
     const legendBox = (await legend.boundingBox())!;
-    const attributionBox = (await page
-      .locator(".leaflet-control-attribution")
-      .boundingBox())!;
+    const attributionBox = (await attributionControl(page).boundingBox())!;
     expect(legendBox.y + legendBox.height).toBeLessThanOrEqual(
       attributionBox.y,
     );
