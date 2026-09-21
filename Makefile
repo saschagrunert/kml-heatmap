@@ -1,5 +1,5 @@
 .PHONY: all build serve serve-build test lint format lock clean help
-.PHONY: check-obfuscation obfuscate require-runtime
+.PHONY: check-obfuscation obfuscate hooks require-runtime
 
 # API keys are read from the environment (or the make command line) and passed
 # into the build container by name only, so their values never show up in the
@@ -115,6 +115,17 @@ obfuscate: ## Rewrite the KML files in INPUT_DIR in place so they carry no real 
 
 check-obfuscation: ## Check that the KML files in INPUT_DIR are obfuscated
 	python -m kml_heatmap.obfuscate "$(INPUT_DIR)" --check
+
+# The obfuscation CI job only sees a real date once it is public; the hook
+# refuses the push before. Linked rather than copied, so it stays current.
+hooks: ## Install the pre-push hook that refuses to push KML files with real dates
+	@hook="$$(git rev-parse --git-path hooks/pre-push)" && \
+	  target="$(CURDIR)/scripts/pre_push.py" && \
+	  if [ -e "$$hook" ] && [ "$$(readlink "$$hook")" != "$$target" ]; then \
+	    echo "error: $$hook exists already; remove it or call $$target from it"; \
+	    exit 1; fi && \
+	  mkdir -p "$$(dirname "$$hook")" && ln -sfn "$$target" "$$hook" && \
+	  echo "Installed $$hook"
 
 lint: ## Run the same linters, formatters (check only) and type checkers as the CI lint job
 	python scripts/check_locks.py
