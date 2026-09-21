@@ -178,7 +178,15 @@ function analyzeBundleComposition(metafile, fileName) {
 // does its own hit testing for hover and click, owns the popups (there is
 // no auto pan and no bound popup) and captures the canvas for the export.
 // That is about 10 KB of code Leaflet used to carry in its 148 KB.
-const BUDGET_APP = 106 * 1024;
+// Raised from 106 KB for two changes that each fitted on their own and not
+// together, which no check saw because a pull request is only built against
+// the main branch of its day: the download progress of the year files
+// (105.8 KB) and the fixes from the review of the MapLibre port (about 2 KB:
+// the fallback when the base style never answers, the guards that keep
+// marker and Wrapped interactions away from the map). 107.9 KB with both.
+// The room on top is small on purpose. Decoding the year files in a worker
+// will take that code out of this bundle again.
+const BUDGET_APP = 110 * 1024;
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.
