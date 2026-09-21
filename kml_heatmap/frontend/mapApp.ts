@@ -40,7 +40,6 @@ import {
 import { prefersReducedMotion } from "./utils/motion";
 import {
   DEFAULT_ZOOM,
-  HEATMAP_LAYER_IDS,
   MAP_LAYERS,
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
@@ -375,7 +374,7 @@ export class MapApp {
     // Whoever waits for the map handles its failure. Destroyed before anyone
     // does, the rejection would otherwise count as unhandled.
     this.mapReady.catch(() => {});
-    const heatmap = new MapLayerHandle(HEATMAP_LAYER_IDS);
+    const heatmap = new MapLayerHandle([MAP_LAYERS.heat]);
     const aviation = new MapLayerHandle([MAP_LAYERS.aviation]);
     const altitude = new MapPathLayerHandle([
       MAP_LAYERS.pathsAltitude,

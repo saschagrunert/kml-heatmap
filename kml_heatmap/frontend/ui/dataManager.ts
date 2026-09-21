@@ -19,7 +19,7 @@ import { DataLoader } from "../services/dataLoader";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { calculateAltitudeRange } from "../features/layers";
 import {
-  HEATMAP_BANDS,
+  HEATMAP_CLUSTER,
   MAP_LAYERS,
   MAP_MAX_ZOOM,
   MAP_SOURCES,
@@ -38,9 +38,7 @@ import { showToast } from "../utils/toast";
  */
 
 /** Reach of one point in pixels; leaflet.heat's radius plus its blur was 25 */
-const HEATMAP_RADIUS_PX = 22;
-/** Every point counts the same; a track has no heavier and lighter fixes */
-const HEATMAP_WEIGHT = 1;
+export const HEATMAP_RADIUS_PX = 22;
 /**
  * The zoom at which the fixes of a track (a few hundred metres apart) are
  * about one radius apart on screen, and the intensity a point has there.
@@ -89,24 +87,88 @@ const HEATMAP_GRADIENT: readonly (readonly [number, string, number])[] = [
  * the density of a dot does not depend on the zoom. The intensity stays
  * where it is from there on, or every dot would end up red.
  *
- * A layer that draws only every `stride`-th fix (see HEATMAP_BANDS) makes
- * each of them that many times as heavy, so the density comes out the same.
- * The stops are scaled rather than the expression wrapped in a product,
- * because `zoom` may only be the input of a top-level interpolation.
+ * Clusters (see HEATMAP_CLUSTER) leave the curve as it is. The density at
+ * a pixel is the sum of weight times kernel over the points around it, and
+ * a cluster carries the weight of its fixes, only moved to their centre. No
+ * fix moves further than twice the cluster radius, about half the kernel's,
+ * and most far less, so the sum along a track is the one the fixes
+ * themselves would give.
  */
-function heatmapIntensity(stride: number): ExpressionSpecification {
-  const reference = HEATMAP_REFERENCE_INTENSITY * stride;
+function heatmapIntensity(): ExpressionSpecification {
   return [
     "interpolate",
     ["exponential", 2],
     ["zoom"],
     0,
-    reference / 2 ** HEATMAP_REFERENCE_ZOOM,
+    intensityAt(0),
     HEATMAP_REFERENCE_ZOOM,
-    reference,
+    intensityAt(HEATMAP_REFERENCE_ZOOM),
     Math.max(MAP_MAX_ZOOM, HEATMAP_REFERENCE_ZOOM + 1),
-    reference,
+    intensityAt(HEATMAP_REFERENCE_ZOOM),
   ];
+}
+
+/** What heatmapIntensity comes to at `zoom` */
+function intensityAt(zoom: number): number {
+  return (
+    HEATMAP_REFERENCE_INTENSITY /
+    2 ** Math.max(HEATMAP_REFERENCE_ZOOM - zoom, 0)
+  );
+}
+
+/**
+ * The first zoom at which the fixes are drawn as they are, and what one of
+ * them contributes there, weight times intensity. That is the least a drawn
+ * point may contribute: see heatmapWeight.
+ */
+const HEATMAP_FIXES_FROM_ZOOM = HEATMAP_CLUSTER.maxZoom + 1;
+export const HEATMAP_LEAST_CONTRIBUTION = intensityAt(HEATMAP_FIXES_FROM_ZOOM);
+
+/**
+ * Weight of a drawn point by zoom. Every fix counts the same, a track has no
+ * heavier and lighter ones, and a cluster (see HEATMAP_CLUSTER) counts as the
+ * fixes it stands for.
+ *
+ * But not every fix finds a cluster. The exporter keeps the vertices a KML
+ * has, and those of a planned route or a slow logger are kilometres apart,
+ * further than the cluster radius reaches. Such a fix stays a point of
+ * weight 1 at every zoom while the intensity keeps halving. MapLibre sizes
+ * the kernel of a point from weight times intensity: under about 0.004 the
+ * kernel shrinks, and under 0.0006 its size is not a number at all. So the
+ * weight never lets a point contribute less than a fix does at the first
+ * zoom without clusters, where it is a faint dot: at zoom z that takes a
+ * weight of intensity(first) / intensity(z), one more power of two per
+ * level out. Tried and dropped: a floor four times as high shows a sparse
+ * track as a line at every zoom, but it also lifts the clusters of a lone
+ * normal track, which then changes colour at the first zoom without them.
+ *
+ * A cluster of a normal track holds more fixes than that at every zoom (see
+ * HEATMAP_CLUSTER), so the floor leaves it alone. `zoom` may only be the
+ * input of a top-level interpolation, hence a stop per level with the floor
+ * inside. Between two levels the floor halves, which the base 1/2 follows
+ * exactly; a count above both floors is the same at both stops and stays.
+ */
+function heatmapWeight(): ExpressionSpecification {
+  const count: ExpressionSpecification = [
+    "coalesce",
+    ["get", "point_count"],
+    1,
+  ];
+  const stops: (number | ExpressionSpecification)[] = [];
+  for (let zoom = 0; zoom < HEATMAP_FIXES_FROM_ZOOM; zoom++) {
+    stops.push(zoom, [
+      "max",
+      count,
+      HEATMAP_LEAST_CONTRIBUTION / intensityAt(zoom),
+    ]);
+  }
+  stops.push(HEATMAP_FIXES_FROM_ZOOM, count);
+  return [
+    "interpolate",
+    ["exponential", 0.5],
+    ["zoom"],
+    ...stops,
+  ] as ExpressionSpecification;
 }
 
 /** Colour and opacity by density, see HEATMAP_GRADIENT */
@@ -122,18 +184,14 @@ function heatmapColor(): ExpressionSpecification {
   ] as ExpressionSpecification;
 }
 
-/**
- * The paint of a heat layer, which the map creates without any. All heat
- * layers look the same; `stride` is how many fixes one drawn point of the
- * layer stands for (1 for the layer that draws them all).
- */
-export function heatmapPaint(
-  stride = 1,
-): NonNullable<HeatmapLayerSpecification["paint"]> {
+/** The paint of the heat layer, which the map creates without any */
+export function heatmapPaint(): NonNullable<
+  HeatmapLayerSpecification["paint"]
+> {
   return {
     "heatmap-radius": HEATMAP_RADIUS_PX,
-    "heatmap-weight": HEATMAP_WEIGHT,
-    "heatmap-intensity": heatmapIntensity(stride),
+    "heatmap-weight": heatmapWeight(),
+    "heatmap-intensity": heatmapIntensity(),
     "heatmap-color": heatmapColor(),
     "heatmap-opacity": HEATMAP_OPACITY,
   };
@@ -169,8 +227,10 @@ export class DataManager {
   private loadErrorReported = false;
   /** Year the published dataset was loaded for */
   private dataYear: string | null = null;
-  /** The heat layers have their paint; they are created without one */
+  /** The heat layer has its paint; it is created without one */
   private heatmapPainted = false;
+  /** The points the heat source holds, to not send them a second time */
+  private heatmapPoints: readonly Coordinate[] | null = null;
   /** When the indicator came up, null while it is down */
   private loadingSince: number | null = null;
   /** The latest state of the load, for the draw the grace period put off */
@@ -310,41 +370,46 @@ export class DataManager {
     if (!map?.getLayer(MAP_LAYERS.heat)) return;
     const dimmed = this.app.altitudeVisible || this.app.airspeedVisible;
     const opacity = dimmed ? dimmedHeatmapOpacity() : HEATMAP_OPACITY;
-    // All of them, or the heatmap would change strength with the zoom
-    for (const band of HEATMAP_BANDS) {
-      if (map.getLayer(band.layer)) {
-        map.setPaintProperty(band.layer, "heatmap-opacity", opacity);
-      }
-    }
+    map.setPaintProperty(MAP_LAYERS.heat, "heatmap-opacity", opacity);
   }
 
   /**
-   * Give the heat layers their look, once. They are created bare (see
-   * addDataLayers), and what they look like is this module's business.
+   * Give the heat layer its look, once. It is created bare (see
+   * addDataLayers), and what it looks like is this module's business.
    */
   private paintHeatmap(): void {
     const map = this.app.map;
     if (this.heatmapPainted || !map?.getLayer(MAP_LAYERS.heat)) return;
-    for (const band of HEATMAP_BANDS) {
-      if (!map.getLayer(band.layer)) continue;
-      const paint = heatmapPaint(band.stride);
-      for (const name of Object.keys(paint) as (keyof typeof paint)[]) {
-        map.setPaintProperty(band.layer, name, paint[name]);
-      }
+    const paint = heatmapPaint();
+    for (const name of Object.keys(paint) as (keyof typeof paint)[]) {
+      map.setPaintProperty(MAP_LAYERS.heat, name, paint[name]);
     }
     this.heatmapPainted = true;
   }
 
   /**
-   * Hand the heat source its points: one MultiPoint per level of detail,
-   * each for the heat layer that filters on its `detail`. A hidden layer takes
-   * them as well as a visible one, so nothing has to wait for the layer to
-   * be shown.
+   * Hand the heat source its points. A hidden layer takes them as well as a
+   * visible one, so nothing has to wait for the layer to be shown.
+   *
+   * Not every redraw changes them: a selection without isolation, or an
+   * aircraft that flew every path of the year, leaves the same points. A
+   * feature per fix is costly to hand to the worker (about 60 ms of main
+   * thread for 135000 of them), so the same points are not sent again. The
+   * coordinates are the dataset's own arrays, never copies, so comparing
+   * them one by one by identity is both exact and cheap.
    */
-  private setHeatmapPoints(points: Coordinate[]): void {
+  private setHeatmapPoints(points: readonly Coordinate[]): void {
     const source = this.app.map?.getSource<GeoJSONSource>(MAP_SOURCES.heat);
     if (!source) return;
     this.paintHeatmap();
+    const held = this.heatmapPoints;
+    if (
+      held?.length === points.length &&
+      held.every((point, index) => point === points[index])
+    ) {
+      return;
+    }
+    this.heatmapPoints = points;
     // The promise is for the worker having taken the data. It does not
     // reject: a failure arrives as an `error` event of the map
     void source.setData(heatmapFeatures(points.map(toLngLat)));
@@ -471,31 +536,20 @@ export class DataManager {
 }
 
 /**
- * The content of the heat source: for every level of detail a MultiPoint of
- * every `stride`-th point, marked with its `detail` (see HEATMAP_BANDS).
- *
- * The points are in the order they were flown, so taking them at a stride
- * thins a track out evenly and keeps its shape. Counting from the first
- * point means every level has at least that one, however few points there
- * are: a MultiPoint without coordinates is not valid GeoJSON. With no points
- * at all there are no features either.
+ * The content of the heat source: one Point per fix. A MultiPoint of all of
+ * them would be cheaper to hand to the worker, but the source can only
+ * merge features into clusters, not the points of one feature (see
+ * HEATMAP_CLUSTER).
  */
 export function heatmapFeatures(
   points: [number, number][],
-): GeoJSON.FeatureCollection<GeoJSON.MultiPoint> {
-  if (points.length === 0) return { type: "FeatureCollection", features: [] };
+): GeoJSON.FeatureCollection<GeoJSON.Point> {
   return {
     type: "FeatureCollection",
-    features: HEATMAP_BANDS.map(({ detail, stride }) => ({
+    features: points.map((coordinates) => ({
       type: "Feature",
-      properties: { detail },
-      geometry: {
-        type: "MultiPoint",
-        coordinates:
-          stride === 1
-            ? points
-            : points.filter((_, index) => index % stride === 0),
-      },
+      properties: null,
+      geometry: { type: "Point", coordinates },
     })),
   };
 }
