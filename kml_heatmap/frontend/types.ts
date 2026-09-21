@@ -378,11 +378,18 @@ export interface YearStats {
  * and its bar from that one object, so the two cannot disagree.
  */
 export interface LoadingState {
+  /**
+   * Which operation this is. The loader counts up whenever the set of loads
+   * changes (one joins, one fails), which is when the bar starts over; the
+   * indicator is told, rather than left to guess it from the numbers.
+   */
+  operation: number;
   /** Every year is wanted; the label says so instead of naming the years */
   all: boolean;
   /**
    * The years whose files the operation downloads, in the order they joined.
-   * A year that is already cached is not downloaded and is not listed.
+   * A year that is already cached is not downloaded and is not listed, and
+   * neither is one that has failed.
    */
   years: readonly string[];
   /**
@@ -395,8 +402,9 @@ export interface LoadingState {
   /**
    * Bytes the operation has to download, which is what the bar is a share
    * of: the sizes on disk, which the decoded bodies add up to, less what had
-   * arrived when the operation began. Undefined when the size of a file is
-   * unknown or there is nothing to take a share of; never zero.
+   * arrived when the operation began. Zero when all of it had: the files
+   * are complete and still being read. Undefined when the size of a file is
+   * unknown.
    */
   totalBytes: number | undefined;
 }

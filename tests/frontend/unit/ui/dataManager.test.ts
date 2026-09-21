@@ -13,6 +13,7 @@ import {
   MAP_MIN_ZOOM,
   MAP_SOURCES,
 } from "../../../../kml_heatmap/frontend/utils/constants";
+import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import type {
   DataLoaderOptions,
   KMLDataset,
@@ -53,6 +54,7 @@ vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
 /** A state of the loader, one year of unknown size unless said otherwise */
 function loading(overrides: Partial<LoadingState> = {}): LoadingState {
   return {
+    operation: 1,
     all: false,
     years: ["2026"],
     fileBytes: undefined,
@@ -229,55 +231,54 @@ describe("DataManager", () => {
       ],
       [{ all: true, years: [] }, "all flights"],
     ])("describes what is loading: %j", (state, label) => {
-      dataManager.showLoading(loading(state));
+      draw(loading(state));
       expect(textEl.textContent).toBe(`Loading ${label}…`);
     });
 
-    it("writes the label with the indicator, displayed first so the live region announces it", () => {
-      const written = watchLabel();
-
-      dataManager.showLoading(loading({ years: ["2026"] }));
-
-      // No frame has run: they are held back while the page is busy
-      expect(frames.pending()).toBe(1);
-      expect(written).toEqual(["block: Loading 2026 flights…"]);
-    });
-
-    it("does not show the label of the last load", () => {
+    it("comes up without a label and writes it a frame later, so the live region announces it", () => {
       draw(loading({ years: ["2025"] }));
       dataManager.hideLoading();
+      const written = watchLabel();
 
       dataManager.showLoading(loading({ years: ["2024"] }));
 
-      expect(textEl.textContent).toBe("Loading 2024 flights…");
+      // No frame has run, and they are held back while the page is busy:
+      // the label of the last load is gone all the same
+      expect(frames.pending()).toBe(1);
+      expect(written).toEqual(["block: "]);
+      frames.run();
+      expect(written).toEqual(["block: ", "block: Loading 2024 flights…"]);
     });
 
     it("leaves the label alone while only the numbers behind the bar change", () => {
-      const written = watchLabel();
       const state = { years: ["2025", "2024"], fileBytes: 4096 };
-
       draw(loading({ ...state, loadedBytes: 0, totalBytes: 4096 }));
+      const written = watchLabel();
+
       draw(loading({ ...state, loadedBytes: 2048, totalBytes: 4096 }));
       // A new operation: the bar starts over, the files are the same
-      draw(loading({ ...state, loadedBytes: 0, totalBytes: 1000 }));
-      // One of them failed, which its own toast reports
-      draw(loading({ years: ["2024"], fileBytes: 2048, totalBytes: 500 }));
+      draw(loading({ ...state, operation: 2, totalBytes: 1000 }));
 
-      expect(written).toEqual(["block: Loading 2025, 2024 flights (4.0 KB)…"]);
+      expect(written).toEqual([]);
     });
 
-    it("writes the label again for a year it does not name, and for all of them", () => {
+    it("writes the label again whenever what it says has changed", () => {
       const written = watchLabel();
 
-      draw(loading({ years: ["2025"] }));
-      draw(loading({ years: ["2025", "2024"] }));
+      draw(loading({ years: ["2025"], fileBytes: 1024 }));
+      draw(loading({ years: ["2025", "2024"], fileBytes: 3072 }));
+      // "all" is asked for before its years are known
+      draw(loading({ all: true, years: ["2025", "2024"], fileBytes: 3072 }));
       draw(loading({ all: true, years: ["2025", "2024", "2023"] }));
-      draw(loading({ all: true, years: ["2023"] }));
+      // "all" gave up while a year is still loading, and 2025 failed
+      draw(loading({ years: ["2024"], fileBytes: 2048 }));
 
-      expect(written).toEqual([
-        "block: Loading 2025 flights…",
-        "block: Loading 2025, 2024 flights…",
+      expect(written.slice(1)).toEqual([
+        "block: Loading 2025 flights (1.0 KB)…",
+        "block: Loading 2025, 2024 flights (3.0 KB)…",
+        "block: Loading all flights (3.0 KB)…",
         "block: Loading all flights…",
+        "block: Loading 2024 flights (2.0 KB)…",
       ]);
     });
 
@@ -300,14 +301,15 @@ describe("DataManager", () => {
       });
 
       it("looks the indicator up once per load, not once per chunk", () => {
-        const getElementById = vi.spyOn(document, "getElementById");
+        const lookup = vi.spyOn(domCache, "get");
 
         dataManager.showLoading(loading({ loadedBytes: 1, totalBytes: 1000 }));
-        const lookups = getElementById.mock.calls.length;
+        expect(lookup).toHaveBeenCalledWith("loading");
+        lookup.mockClear();
         dataManager.showLoading(loading({ loadedBytes: 2, totalBytes: 1000 }));
         dataManager.showLoading(loading({ loadedBytes: 3, totalBytes: 1000 }));
 
-        expect(getElementById.mock.calls.length).toBe(lookups);
+        expect(lookup).not.toHaveBeenCalled();
       });
 
       it("moves the accessible value in steps of ten", () => {
@@ -326,27 +328,53 @@ describe("DataManager", () => {
       });
 
       it("displays the bar anew for a new operation, so its delay runs again", () => {
-        draw(loading({ loadedBytes: 900, totalBytes: 1000 }));
+        draw(loading({ loadedBytes: 50, totalBytes: 100 }));
         const hidden = vi.spyOn(bar, "hidden", "set");
 
-        draw(loading({ loadedBytes: 950, totalBytes: 1000 }));
+        draw(loading({ loadedBytes: 60, totalBytes: 100 }));
         expect(hidden.mock.calls).toEqual([[false]]);
         hidden.mockClear();
 
-        draw(loading({ loadedBytes: 0, totalBytes: 400 }));
+        // The same total as before: told apart by the operation alone
+        draw(loading({ operation: 2, loadedBytes: 0, totalBytes: 100 }));
         expect(hidden.mock.calls).toEqual([[true], [false]]);
         expect(share()).toBe("0");
+        hidden.mockClear();
+
+        draw(loading({ operation: 2, loadedBytes: 10, totalBytes: 100 }));
+        expect(hidden.mock.calls).toEqual([[false]]);
       });
 
-      it("keeps the bar up, full, when nothing is left to download", () => {
+      it("brings up no bar for a load whose bytes are all in", () => {
+        draw(loading({ loadedBytes: 1000, totalBytes: 1000 }));
+        draw(loading({ operation: 2, loadedBytes: 0, totalBytes: 0 }));
+
+        expect(bar.hidden).toBe(true);
+        expect(share()).toBe("");
+      });
+
+      it("keeps a bar that is up, full, when nothing is left to download", () => {
         draw(loading({ loadedBytes: 900, totalBytes: 1000 }));
         const hidden = vi.spyOn(bar, "hidden", "set");
 
-        draw(loading({ loadedBytes: 3000, totalBytes: 3000 }));
+        draw(loading({ loadedBytes: 1000, totalBytes: 1000 }));
+        draw(loading({ operation: 2, loadedBytes: 0, totalBytes: 0 }));
 
-        expect(hidden.mock.calls).toEqual([[false]]);
+        expect(hidden.mock.calls).toEqual([[false], [false]]);
         expect(share()).toBe("1");
         expect(bar.getAttribute("aria-valuenow")).toBe("100");
+      });
+
+      it("takes down a bar that another instance left behind", () => {
+        bar.hidden = false;
+        bar.setAttribute("aria-valuenow", "60");
+        bar.style.setProperty("--loading-progress", "0.6");
+
+        draw(loading());
+
+        expect(bar.hidden).toBe(true);
+        expect(bar.hasAttribute("aria-valuenow")).toBe(false);
+        expect(share()).toBe("");
       });
 
       it("hides the bar without a total, and touches it only once", () => {
@@ -376,7 +404,7 @@ describe("DataManager", () => {
         expect(share()).toBe("");
       });
 
-      it("draws nothing once the app is destroyed", () => {
+      it("takes the indicator down with the app, and draws nothing after", () => {
         draw(loading({ loadedBytes: 0, totalBytes: 1000 }));
         dataManager.showLoading(
           loading({ loadedBytes: 500, totalBytes: 1000 }),
@@ -389,7 +417,9 @@ describe("DataManager", () => {
         );
 
         expect(frames.pending()).toBe(0);
-        expect(share()).toBe("0");
+        expect(loadingEl.style.display).toBe("none");
+        expect(bar.hidden).toBe(true);
+        expect(share()).toBe("");
       });
 
       it("works without the bar in the template", () => {

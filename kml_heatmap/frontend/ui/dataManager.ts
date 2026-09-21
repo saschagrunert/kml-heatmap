@@ -220,13 +220,10 @@ export class DataManager {
   private heatmapPainted = false;
   /** The points the heat source holds, to not send them a second time */
   private heatmapPoints: readonly Coordinate[] | null = null;
-  /**
-   * What the label on screen names, null while the indicator is down: "all",
-   * or else the years
-   */
-  private labelled: readonly string[] | "all" | null = null;
-  /** The total the bar on screen is a share of, which tells operations apart */
-  private drawnTotal: number | undefined;
+  /** The indicator is up; asked on every chunk, so not asked of the DOM */
+  private loadingShown = false;
+  /** The operation the bar on screen belongs to, see LoadingState */
+  private drawnOperation: number | null = null;
   /**
    * Chunks arrive far more often than the screen repaints, so the indicator
    * is brought up to date once per frame, from the latest state
@@ -257,107 +254,90 @@ export class DataManager {
    * Show the loading indicator, or bring it up to date: the loader calls
    * this on every change of what it is loading, down to every chunk.
    *
-   * The label is there with the indicator, not a frame later: frames are
-   * held back while the page is busy setting up the map or is in the
-   * background, and the label of the last load would stand in until then.
-   * It is announced by a live region, which only announces text that changes
-   * while it is displayed, so the indicator is shown before it is written.
+   * The label is announced by a live region. One that appears with its text
+   * in place is passed over by many screen readers; what they announce is
+   * text that changes while the region is displayed. So the indicator comes
+   * up without a label, which also keeps the one of the last load from
+   * showing while frames are held back, and is written a frame later.
    */
   showLoading(state: LoadingState): void {
     // A request that outlives the app still reports
     if (this.destroyed) return;
-    if (this.labelled === null) {
+    if (!this.loadingShown) {
       const loadingEl = domCache.get("loading");
       if (!loadingEl) return;
+      this.loadingShown = true;
       loadingEl.style.display = "block";
-      this.writeLabel(state);
+      const textEl = domCache.get("loading-text");
+      if (textEl) textEl.textContent = "";
     }
     this.loadingFrame.schedule(state);
   }
 
   hideLoading(): void {
     this.loadingFrame.cancel();
-    this.labelled = null;
+    this.loadingShown = false;
     const loadingEl = domCache.get("loading");
     if (loadingEl) loadingEl.style.display = "none";
-    this.hideProgressBar();
+    const bar = domCache.get("loading-progress");
+    if (bar) hideProgressBar(bar);
   }
 
-  /** Stop drawing: the page the app drew into is no longer its own */
+  /**
+   * Stop drawing, and take the indicator down: a load that is still under
+   * way would otherwise leave it up with nobody to hide it
+   */
   destroy(): void {
     this.destroyed = true;
-    this.loadingFrame.cancel();
-  }
-
-  private writeLabel(state: LoadingState): void {
-    this.labelled = state.all ? "all" : state.years;
-    const textEl = domCache.get("loading-text");
-    if (textEl) textEl.textContent = loadingLabel(state);
+    this.hideLoading();
   }
 
   private drawLoading(state: LoadingState): void {
-    // Every new text is read out, so the label is written again only for
-    // something the user asked for since: all years, or a year it does not
-    // name. Bytes arriving are the bar's business, and a year that failed
-    // is reported by a toast of its own.
-    const labelled = this.labelled;
-    if (
-      labelled !== "all" &&
-      (state.all || state.years.some((year) => !labelled?.includes(year)))
-    ) {
-      this.writeLabel(state);
-    }
+    // Whatever changes what the label says is worth saying: another year,
+    // all of them, or one that failed and is no longer waited for
+    const textEl = domCache.get("loading-text");
+    const label = loadingLabel(state);
+    if (textEl && textEl.textContent !== label) textEl.textContent = label;
 
-    const { loadedBytes, totalBytes } = state;
+    const bar = domCache.get("loading-progress");
+    if (!bar) return;
+    const { operation, loadedBytes, totalBytes } = state;
     // Without a total there is no share to draw: the spinner already says
     // that something is loading, which is all that is known then
     if (totalBytes === undefined) {
-      this.hideProgressBar();
+      hideProgressBar(bar);
       return;
     }
-    const bar = domCache.get("loading-progress");
-    if (!bar) return;
-
-    // The stylesheet lets the bar appear a moment after it is displayed.
-    // A new operation gets that moment again, which takes the bar being
-    // taken out and the style being worked out without it; one that has
-    // nothing left to download has nothing to hold back.
-    if (
-      this.drawnTotal !== undefined &&
-      this.drawnTotal !== totalBytes &&
-      loadedBytes < totalBytes
-    ) {
+    const incomplete = loadedBytes < totalBytes;
+    // The stylesheet lets the bar appear a moment after it is displayed, so
+    // that a load that is over at once shows none. A new operation gets
+    // that moment again, or a year that joins from the HTTP cache would
+    // flash past on the bar of a slow one; that takes the bar being taken
+    // out and the style being worked out without it.
+    if (operation !== this.drawnOperation && incomplete && !bar.hidden) {
       bar.hidden = true;
       void bar.offsetWidth;
     }
-    this.drawnTotal = totalBytes;
+    this.drawnOperation = operation;
+    // A bar that is up is kept, full; none is brought up for bytes that
+    // are all in, since the delay would only put off its flash
+    if (bar.hidden && !incomplete) return;
+
     bar.hidden = false;
     // The CSP allows no style attribute in the markup; the CSSOM is fine
     bar.style.setProperty(
       "--loading-progress",
-      String(loadedBytes / totalBytes),
+      String(incomplete ? loadedBytes / totalBytes : 1),
     );
     // In steps of ten: a screen reader that follows the value would
     // otherwise have something new to say on every frame. Worked out on the
     // byte counts, which are whole numbers and land on a step exactly.
-    const step = String(Math.floor((loadedBytes * 10) / totalBytes) * 10);
+    const step = String(
+      incomplete ? Math.floor((loadedBytes * 10) / totalBytes) * 10 : 100,
+    );
     if (bar.getAttribute("aria-valuenow") !== step) {
       bar.setAttribute("aria-valuenow", step);
     }
-  }
-
-  /**
-   * Back to the state without a known share: no bar, no value. Cheap when
-   * there is no bar already, which is every frame of a load without sizes.
-   */
-  private hideProgressBar(): void {
-    if (this.drawnTotal === undefined) return;
-    this.drawnTotal = undefined;
-    const bar = domCache.get("loading-progress");
-    if (!bar) return;
-    bar.hidden = true;
-    bar.removeAttribute("aria-valuenow");
-    bar.style.removeProperty("--loading-progress");
   }
 
   /**
@@ -556,6 +536,19 @@ export function heatmapFeatures(
       geometry: { type: "Point", coordinates },
     })),
   };
+}
+
+/**
+ * Back to the state without a known share: no bar, no value. Asked of the
+ * bar itself, so that it holds for one that another instance left behind;
+ * cheap when it is hidden already, which is every frame of a load without
+ * sizes.
+ */
+function hideProgressBar(bar: HTMLElement): void {
+  if (bar.hidden) return;
+  bar.hidden = true;
+  bar.removeAttribute("aria-valuenow");
+  bar.style.removeProperty("--loading-progress");
 }
 
 /**

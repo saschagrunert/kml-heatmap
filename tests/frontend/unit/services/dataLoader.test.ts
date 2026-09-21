@@ -1125,6 +1125,7 @@ describe("DataLoader", () => {
       await loader.loadData("2025");
 
       expect(mockShowLoading).toHaveBeenCalledExactlyOnceWith({
+        operation: 1,
         all: false,
         years: ["2025"],
         fileBytes: 2048,
@@ -1139,6 +1140,7 @@ describe("DataLoader", () => {
       await loader.loadData("2025");
 
       expect(mockShowLoading).toHaveBeenCalledExactlyOnceWith({
+        operation: 1,
         all: false,
         years: ["2025"],
         fileBytes: undefined,
@@ -1249,6 +1251,7 @@ describe("DataLoader", () => {
       await loader.loadAndCombineAllYears();
 
       expect(mockShowLoading).toHaveBeenCalledWith({
+        operation: 2,
         all: true,
         years: ["2024", "2025"],
         fileBytes: 2148,
@@ -1429,7 +1432,7 @@ describe("DataLoader", () => {
       expect(shown()).toEqual([
         "2025 (1000) 0/1000",
         "2025 (1000) 600/1000",
-        "2025 (1000) 1000/1000",
+        // Once: the chunks past the size change nothing on screen
         "2025 (1000) 1000/1000",
       ]);
       // Said once, not for every chunk past the size
@@ -1476,8 +1479,10 @@ describe("DataLoader", () => {
       request(2025).settle();
       await loading;
 
-      // The years join as one: the indicator comes up knowing all of them
+      // The first three are one frame to the indicator, which draws the last
       expect(shown()).toEqual([
+        "all: (undefined) 0/undefined",
+        "all:2024 (100) 0/100",
         "all:2024+2025 (400) 0/400",
         "all:2024+2025 (400) 150/400",
         "all:2024+2025 (400) 210/400",
@@ -1501,7 +1506,7 @@ describe("DataLoader", () => {
       request(2025).settle();
       await loading;
 
-      expect(new Set(shown())).toEqual(
+      expect(new Set(shown().slice(2))).toEqual(
         new Set(["all:2024+2025 (undefined) 0/undefined"]),
       );
     });
@@ -1599,6 +1604,7 @@ describe("DataLoader", () => {
       await loading;
 
       expect(shown()).toEqual([
+        "all: (undefined) 0/undefined",
         "all:2025 (300) 0/300",
         "all:2025 (300) 150/300",
         "all:2025 (300) 300/300",
@@ -1635,6 +1641,29 @@ describe("DataLoader", () => {
       },
     );
 
+    it("counts the operations: one more for every load that joins or fails", async () => {
+      withSizes({ "2024": 100, "2025": 100 });
+      defineYear(2025);
+
+      const first = loader.loadData("2025");
+      request(2025).read(50);
+      // Y2 joins with as many bytes as Y1 still lacks: nothing but the
+      // count tells this operation from the last
+      const second = loader.loadData("2024");
+      request(2024).settle(false);
+      await second;
+      request(2025).read(60);
+      request(2025).settle();
+      await first;
+
+      expect(
+        mockShowLoading.mock.calls.map(
+          ([{ operation, loadedBytes, totalBytes }]) =>
+            `${operation}: ${loadedBytes}/${totalBytes}`,
+        ),
+      ).toEqual(["1: 0/100", "1: 50/100", "2: 0/150", "3: 0/50", "3: 10/50"]);
+    });
+
     it("keeps the bar full when a failure leaves nothing to download", async () => {
       withSizes({ "2024": 100, "2025": 300 });
       defineYear(2025);
@@ -1649,10 +1678,12 @@ describe("DataLoader", () => {
       request(2025).settle();
       await loading;
 
+      // Nothing of the new operation is left to download: a total of zero,
+      // which the indicator shows as a bar that stays full
       expect(shown()).toEqual([
         "all:2024+2025 (400) 300/400",
-        "all:2025 (300) 300/300",
-        "all:2025 (300) 300/300",
+        "all:2025 (300) 0/0",
+        "all:2025 (300) 0/0",
       ]);
     });
 

@@ -428,8 +428,8 @@ export class DataLoader {
   private loadingDepth: number;
   /** "all" is among the loads, which decides what the label calls them */
   private loadingAll = false;
-  /** The years of "all" are joining; they are reported once, together */
-  private joining = false;
+  /** Counts the operations, so that the indicator can tell them apart */
+  private operation = 0;
   private fetchJson: NonNullable<DataLoaderOptions["fetchJson"]>;
   /** The year files of the loading operation; emptied with the indicator */
   private downloads = new Map<string, Download>();
@@ -459,7 +459,6 @@ export class DataLoader {
    * and the count of loads that takes the indicator down again stays right.
    */
   private report(): void {
-    if (this.joining) return;
     try {
       if (this.loadingDepth === 0) {
         this.hideLoading();
@@ -467,11 +466,14 @@ export class DataLoader {
       }
       let loadedBytes = 0;
       let totalBytes = 0;
-      let fileBytes: number | undefined = 0;
+      let fileBytes = 0;
+      // Nothing can be a share of an unknown total: one file of unknown
+      // size, or no file yet, leaves all three numbers out
+      let sized = this.downloads.size > 0;
       for (const { size, received, before } of this.downloads.values()) {
-        if (size === undefined || fileBytes === undefined) {
-          fileBytes = undefined;
-          continue;
+        if (size === undefined) {
+          sized = false;
+          break;
         }
         fileBytes += size;
         totalBytes += size - before;
@@ -480,16 +482,11 @@ export class DataLoader {
         // another that is still missing
         loadedBytes += Math.min(received, size) - before;
       }
-      // Every byte is in and the files are still being read: the operation
-      // that began when another load failed has nothing to download. That
-      // is a full bar, not a load of unknown size.
-      if (fileBytes && totalBytes === 0) loadedBytes = totalBytes = fileBytes;
-      // Nothing can be a share of an unknown total, or of none at all
-      const sized = fileBytes !== undefined && totalBytes > 0;
       this.showLoading({
+        operation: this.operation,
         all: this.loadingAll,
         years: [...this.downloads.keys()],
-        fileBytes: fileBytes || undefined,
+        fileBytes: sized ? fileBytes : undefined,
         loadedBytes: sized ? loadedBytes : 0,
         totalBytes: sized ? totalBytes : undefined,
       });
@@ -503,6 +500,7 @@ export class DataLoader {
    * counted from where it stands now (see the class comment)
    */
   private restartOperation(): void {
+    this.operation++;
     for (const [year, download] of this.downloads) {
       if (!download.pending) this.downloads.delete(year);
       else download.before = Math.min(download.received, download.size ?? 0);
@@ -528,15 +526,24 @@ export class DataLoader {
 
   /** More of a year file has arrived */
   private advanceDownload(download: Download, fileBytes: number): void {
+    const { size, received } = download;
     // A request that was given up on may still report
-    if (!download.pending || fileBytes <= download.received) return;
-    const size = download.size ?? Infinity;
-    // Said once, when the file outgrows its size: the bar stands still at
-    // full from here on, which is otherwise hard to explain
-    if (fileBytes > size && download.received <= size) {
-      logDebug("Year file is larger than metadata.year_file_bytes says:", size);
+    if (!download.pending || size === undefined || fileBytes <= received) {
+      return;
     }
     download.received = fileBytes;
+    if (fileBytes > size) {
+      // Said once, when the file outgrows its size: the bar stands still at
+      // full from here on, which is otherwise hard to explain
+      if (received <= size) {
+        logDebug(
+          "Year file is larger than metadata.year_file_bytes says:",
+          size,
+        );
+      }
+      // Counted up to its size already, so nothing on screen changes
+      if (received >= size) return;
+    }
     this.report();
   }
 
@@ -664,9 +671,9 @@ export class DataLoader {
   private async loadAllYears(): Promise<KMLDataset | null> {
     this.loadingDepth++;
     this.loadingAll = true;
-    // With the metadata at hand the years join before anything else runs,
-    // and the indicator comes up once, knowing all of them
-    if (!this.getWindow().KML_METADATA) this.report();
+    // The years join a moment later, each with a report of its own. The
+    // indicator draws once per frame, so it shows the last of them.
+    this.report();
     try {
       const metadata = await this.loadMetadata();
       if (!metadata || !metadata.available_years) {
@@ -677,14 +684,10 @@ export class DataLoader {
       const years = metadata.available_years.map((y) => String(y));
       logDebug("Loading all years:", years);
 
-      // Load all year files in parallel (deduplicated per year). Every
-      // join begins a new operation; they are reported as the one they are,
-      // so the label is written, and announced, once.
-      this.joining = true;
-      const loads = years.map((year) => this.getYear(year));
-      this.joining = false;
-      this.report();
-      const yearDatasets = await Promise.all(loads);
+      // Load all year files in parallel (deduplicated per year)
+      const yearDatasets = await Promise.all(
+        years.map((year) => this.getYear(year)),
+      );
 
       const failedYears = years.filter((_, i) => !yearDatasets[i]);
       if (failedYears.length > 0) {
