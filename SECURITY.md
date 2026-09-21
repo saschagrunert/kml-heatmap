@@ -38,7 +38,14 @@ current.
 ## Content Security Policy
 
 The generated page carries a CSP in a `<meta>` tag. Scripts, styles, fonts
-and images load only from the site itself and from the tile servers; there is no `'unsafe-inline'` for scripts or styles.
+and workers load only from the site itself; there is no `'unsafe-inline'`
+for scripts or styles. Only `img-src` and `connect-src` name foreign hosts:
+CARTO's subdomains (`*.basemaps.cartocdn.com`) for the tiles, glyphs and
+sprite of the base map, in `connect-src` also `basemaps.cartocdn.com`
+itself, which serves the style, and the open flightmaps tile server
+(`nwy-tiles-api.prod.newaydata.com`). MapLibre GL JS is published with the
+site as ES modules and starts its worker from one of them, so
+`worker-src 'self'` is enough and no `blob:` worker is allowed.
 Colours computed at runtime are applied through the CSSOM, and a test fails
 on any CSP violation the page reports. A meta CSP cannot set
 `frame-ancestors`, and GitHub Pages sends no such header, so the site can be

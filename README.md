@@ -54,6 +54,8 @@
 
 - Python 3.14 (see `.python-version`) and Node.js 26 or newer (see `.nvmrc`)
 - podman or docker for `make build`/`serve` (auto-detected, podman first)
+- To view the site: a current browser with ES modules, `fetch()` and WebGL,
+  and an HTTP server (`make serve`); the page does not work opened from disk
 
 ### Quick Start
 
@@ -304,12 +306,12 @@ npm ci && npm run build
 pip install .                     # the runtime dependencies from pyproject.toml
 python -m kml_heatmap your_track.kml   # writes docs/; use --output-dir for another place
 
-# Option 1: open directly
-open docs/index.html
-
-# Option 2: serve over HTTP
+# Serve it over HTTP, then open http://127.0.0.1:8000/
 python -m http.server 8000 --bind 127.0.0.1 -d docs
 ```
+
+Opening `docs/index.html` from disk does not work (see
+[Quick Start](#quick-start)).
 
 `pip install .` also provides the `kml-heatmap` console script and ships the
 templates and static assets. `python kml-heatmap.py` still works as a legacy
@@ -445,8 +447,8 @@ python -m http.server 8000 --bind 127.0.0.1 -d docs
 ```
 
 A local build has no tile API key unless you pass one (see
-[With an API Key](#with-an-api-key-optional)), so the base map may carry a
-watermark. That does not affect the flights.
+[With an API Key](#with-an-api-key-optional)). The base map loads without
+one today, and the flights do not depend on it.
 
 ### 6. Check the result
 
@@ -485,7 +487,7 @@ are already public.
 Open a pull request or push to `main`. On `main`, the `test` workflow runs
 every test job against the new data, including the obfuscation check; once
 they pass, its `site` job builds the site from `data/` with the tile API
-keys from the repository secrets and its `deploy` job publishes it to
+key from the repository secrets and its `deploy` job publishes it to
 GitHub Pages. Nothing generated is committed: the local `docs/` stays out of
 git. A pull request runs the same tests but publishes nothing.
 
@@ -741,11 +743,12 @@ as scripts (`data.js`, `metadata.js`, `airports.js`), removes those files.
   exported image says which of them is drawn without its legend; both
   brighten from end to end, so they survive being printed in grey. Both
   colour layers draw 32 steps of their scale, one line per run of a path in
-  the same step, and below zoom 13 they draw simplified geometry (a quarter
+  the same step, and below zoom 15 (counted as the `z` of a
+  [shared link](#shareable-urls)) they draw simplified geometry (a quarter
   of a pixel). Hovering a path still shows the exact value. The heatmap,
   Replay and the statistics always use every point
 - **Airports** (toggle) - Airport markers with ICAO codes
-- **Aviation Data** (toggle) - Airspaces, airports, navaids, and reporting points from open flightmaps, where it has coverage
+- **Aviation Data** (toggle) - Airspaces, airports, navaids, and reporting points from open flightmaps, where it has coverage. Drawn from zoom 7 to 14 (again the `z` of a link); its charts end at zoom 12, and further in than two levels of upscaling they would only blur the base map
 
 ### Controls
 
@@ -772,17 +775,21 @@ browser's address bar or use the copy-link button:
 
 - Specific year or all years (`?y=2025` or `?y=all`)
 - Aircraft filter (`?a=D-EAGJ`)
-- Selected paths (`?p=695806902132,104044549516&sv=3`). A path id is derived
+- Selected paths (`?p=8vndgpro,1bspfs7g&sv=4`). A path id is derived
   from the flight's coordinates and altitudes, so a link keeps selecting the
   same flights after the site is regenerated with other flights added or
   removed; a flight that is no longer there is dropped from the selection.
-  `sv` is the version of the id scheme: links written before version 3, when
-  ids were positions in the export, lose their selection instead of selecting
-  different flights
+  `sv` is the version of the id scheme. Version 4 writes the ids in base 36;
+  version 3 links, which wrote the same ids in decimal
+  (`?p=695806902132,104044549516&sv=3`), still work. Links written before
+  version 3, when ids were positions in the export, lose their selection
+  instead of selecting different flights
 - Layer visibility (9 flags: heatmap, altitude, speed, airports, aviation, stats, wrapped, an unused legacy slot, isolateSelection). The 8th slot belonged to a control-visibility toggle that no longer exists; it is always written as `0` and kept so older shared links still read their isolate flag from the 9th
   - Example: `?v=100100000`
 - Map position (`?lat=51.5&lng=13.4&z=10`). A centre without `z` opens at
-  zoom 10
+  zoom 10. `z` counts in 256 pixel tiles, as links always did, which is one
+  more than MapLibre's own zoom for the same view; links shared before the
+  switch to MapLibre therefore still show the same area
 - Debug logging in the browser console (`?debug=true`)
 
 **Example URLs:**

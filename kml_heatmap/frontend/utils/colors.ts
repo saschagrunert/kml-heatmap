@@ -105,7 +105,7 @@ function gradientCss(stops: readonly ColorStop[]): string {
 
 /**
  * Publish both ramps as custom properties so the legend bar and the row chips
- * paint the very same stops the polylines are coloured with. Spelling them
+ * paint the very same stops the paths are coloured with. Spelling them
  * out in the stylesheet as well let the legend drift away from the map.
  */
 export function applyGradientTokens(root: HTMLElement): void {

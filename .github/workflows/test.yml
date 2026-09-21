@@ -223,9 +223,9 @@ jobs:
       fail-fast: false
       matrix:
         project: [desktop, mobile]
-        # The published site has tile API keys and a default build has none.
+        # The published site has a tile API key and a default build has none.
         # Both paths get tested; tests/e2e/fixtures.ts answers the tile
-        # servers locally, so the dummy keys never leave the runner.
+        # servers locally, so the dummy key never leaves the runner.
         api-keys: [dummy, none]
         browser: [chromium]
         include:
@@ -283,7 +283,7 @@ jobs:
       - name: Install Playwright system deps
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps ${{ matrix.browser }}
-      - name: Run E2E tests (${{ matrix.project }}, ${{ matrix.api-keys }} API keys)
+      - name: Run E2E tests (${{ matrix.project }}, ${{ matrix.api-keys }} API key)
         run: npx playwright test --project=${{ matrix.project }}
         env:
           # Checked against docs/map_config.js by tests/e2e/global-setup.ts
@@ -506,7 +506,7 @@ jobs:
 
   # Builds the published site from the sources and the KML files in data/.
   # Nothing generated is committed, so every deployment is exactly what the
-  # tested commit produces. Only this job sees the real tile API keys.
+  # tested commit produces. Only this job sees the real tile API key.
   site:
     needs: publishable
     if: needs.publishable.outputs.publish == 'true'

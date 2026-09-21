@@ -219,7 +219,7 @@ def _missing_vendor_files(static_dir: Path) -> list[str]:
 def bundle_is_available() -> bool:
     """Whether everything `npm run build` produces is in place.
 
-    Both bundles and the vendored third-party files: a site missing any of
+    The bundles and the vendored third-party files: a site missing any of
     them has no map at all. Checked together and before the run does any
     work, so a forgotten build costs a message rather than a full export.
 

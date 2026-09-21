@@ -1,6 +1,6 @@
 """Data export functionality for flight heatmaps.
 
-Exports flight data to JS files for the browser frontend:
+Exports flight data to JSON files for the browser frontend:
 - <year>/data.json: per-year path info and segments
 - airports.json: deduplicated airport locations
 - metadata.json: years, year file sizes, the groundspeed range and the aircraft
@@ -905,7 +905,7 @@ def export_all_data(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    logger.info("\n  Exporting data to JS files...")
+    logger.info("\n  Exporting data to JSON files...")
 
     paths_by_year = drop_duplicate_paths(
         _group_paths_by_year(all_path_groups, all_path_metadata),
