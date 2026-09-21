@@ -385,13 +385,18 @@ export interface LoadingState {
    * A year that is already cached is not downloaded and is not listed.
    */
   years: readonly string[];
-  /** Bytes of those files that have arrived; never more than `totalBytes` */
+  /**
+   * Size of those files together, from metadata.year_file_bytes, for the
+   * label; undefined when the size of one is unknown
+   */
+  fileBytes: number | undefined;
+  /** Bytes of the operation that have arrived; never more than `totalBytes` */
   loadedBytes: number;
   /**
-   * Bytes the operation has to download: the sizes on disk from
-   * metadata.year_file_bytes, which is what the decoded bodies add up to.
-   * Undefined when the size of a file is unknown or there is nothing to
-   * take a share of; never zero.
+   * Bytes the operation has to download, which is what the bar is a share
+   * of: the sizes on disk, which the decoded bodies add up to, less what had
+   * arrived when the operation began. Undefined when the size of a file is
+   * unknown or there is nothing to take a share of; never zero.
    */
   totalBytes: number | undefined;
 }
