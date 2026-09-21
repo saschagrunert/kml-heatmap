@@ -21,6 +21,8 @@ export interface StoreState {
   airspeedVisible: boolean;
   airportsVisible: boolean;
   aviationVisible: boolean;
+  /** Whether the map is drawn as a globe rather than in Mercator */
+  globeVisible: boolean;
   statsPanelVisible: boolean;
   /** Wrapped modal visibility */
   wrappedVisible: boolean;
@@ -59,6 +61,7 @@ export const STORE_ACCESSOR_KEYS = [
   "airspeedVisible",
   "airportsVisible",
   "aviationVisible",
+  "globeVisible",
   "currentData",
   "hasTimingData",
 ] as const;
@@ -102,6 +105,7 @@ export function createDefaultState(): StoreState {
     airspeedVisible: false,
     airportsVisible: true,
     aviationVisible: false,
+    globeVisible: false,
     statsPanelVisible: false,
     wrappedVisible: false,
     currentData: null,

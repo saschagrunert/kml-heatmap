@@ -70,6 +70,51 @@ describe("sanitizeSavedState", () => {
       sanitizeSavedState({ center: { lat: -90, lng: 180 } }).center,
     ).toEqual({ lat: -90, lng: 180 });
   });
+
+  it("keeps a bearing, a pitch and the globe, held to what the map takes", () => {
+    expect(
+      sanitizeSavedState({ bearing: -40.5, pitch: 35, globeVisible: true }),
+    ).toEqual({ bearing: -40.5, pitch: 35, globeVisible: true });
+    // A bearing is the same direction a full turn on, a pitch is not
+    expect(sanitizeSavedState({ bearing: 270, pitch: 85 })).toEqual({
+      bearing: -90,
+      pitch: 60,
+    });
+    expect(sanitizeSavedState({ bearing: -540, pitch: -5 })).toEqual({
+      bearing: -180,
+      pitch: 0,
+    });
+  });
+
+  it("drops an orientation that is no number and keeps the rest", () => {
+    expect(
+      sanitizeSavedState({
+        zoom: 7,
+        bearing: "90",
+        pitch: NaN,
+        globeVisible: "yes",
+      }),
+    ).toEqual({ zoom: 7 });
+    expect(sanitizeSavedState({ bearing: Infinity, pitch: null })).toEqual({});
+  });
+
+  it("reads a state saved before the map could turn as it always did", () => {
+    const saved = sanitizeSavedState({
+      schemaVersion: 4,
+      center: { lat: 50, lng: 8 },
+      zoom: 10,
+      heatmapVisible: true,
+    });
+
+    expect(saved).toEqual({
+      center: { lat: 50, lng: 8 },
+      zoom: 10,
+      heatmapVisible: true,
+    });
+    for (const key of ["bearing", "pitch", "globeVisible"]) {
+      expect(saved).not.toHaveProperty(key);
+    }
+  });
 });
 
 describe("storageKey", () => {
@@ -158,6 +203,7 @@ describe("StateManager", () => {
         "airspeedVisible",
         "airportsVisible",
         "aviationVisible",
+        "globeVisible",
         "statsPanelVisible",
         "wrappedVisible",
       ]);
@@ -352,15 +398,36 @@ describe("StateManager", () => {
       mockApp.wrappedManager.userMapView.mockReturnValue({
         center: { lat: 48.1, lng: 11.6 },
         zoom: 12,
+        bearing: 25,
+        pitch: 40,
       });
 
       stateManager.saveMapState();
 
+      // The overview itself is north up and flat
       expect(savedState()).toMatchObject({
         center: { lat: 48.1, lng: 11.6 },
         zoom: 13,
+        bearing: 25,
+        pitch: 40,
       });
       expect(mockApp.map!.getCenter).not.toHaveBeenCalled();
+      expect(mockApp.map!.getBearing).not.toHaveBeenCalled();
+    });
+
+    it("saves the bearing, the pitch and the globe, and links them", () => {
+      mockApp.map!.jumpTo({ bearing: -40.26, pitch: 35 });
+      mockApp.store.set("globeVisible", true);
+
+      stateManager.saveMapState();
+
+      expect(savedState()).toMatchObject({
+        bearing: -40.26,
+        pitch: 35,
+        globeVisible: true,
+      });
+      const url = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
+      expect(url).toContain("&b=-40.3&t=35&g=1");
     });
 
     it("saves current state to localStorage and the URL", () => {
@@ -374,6 +441,9 @@ describe("StateManager", () => {
         schemaVersion: 4,
         center: { lat: 50, lng: 8 },
         zoom: 10,
+        bearing: 0,
+        pitch: 0,
+        globeVisible: false,
         heatmapVisible: true,
         altitudeVisible: false,
         airspeedVisible: false,
@@ -386,6 +456,7 @@ describe("StateManager", () => {
         wrappedVisible: false,
         isolateSelection: false,
       });
+      // North up, flat and Mercator are the defaults and stay out of the link
       expect(history.replaceState).toHaveBeenCalledWith(
         null,
         "",

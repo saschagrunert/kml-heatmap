@@ -69,6 +69,7 @@ function createMockApp() {
       exportMap: vi.fn(),
       shareLink: vi.fn(() => Promise.resolve()),
     },
+    mapOrientation: { toggleGlobe: vi.fn() },
     statsManager: { toggleStats: vi.fn() },
     wrappedManager,
     pathSelection: { toggleIsolateSelection: vi.fn() },
@@ -95,6 +96,9 @@ function createMockApp() {
     },
     get aviationVisible() {
       return store.get("aviationVisible");
+    },
+    get globeVisible() {
+      return store.get("globeVisible");
     },
     get isolateSelection() {
       return store.get("isolateSelection");
@@ -347,6 +351,7 @@ describe("MobileBar", () => {
         "altitude",
         "speed",
         "aviation",
+        "globe",
       ]);
       expect(tab("layers").classList.contains("active")).toBe(true);
       expect(tab("layers").getAttribute("aria-expanded")).toBeNull();
@@ -526,6 +531,19 @@ describe("MobileBar", () => {
         }
         vi.mocked(app.uiToggles[method]).mockClear();
       }
+    });
+
+    it("switches the globe from its row and follows the store", () => {
+      create();
+      tab("layers").click();
+      const row = document.querySelector<HTMLElement>('[data-row="globe"]')!;
+      expect(row.getAttribute("aria-checked")).toBe("false");
+
+      row.click();
+      expect(app.mapOrientation.toggleGlobe).toHaveBeenCalledOnce();
+
+      app.store.set("globeVisible", true);
+      expect(row.getAttribute("aria-checked")).toBe("true");
     });
 
     it("reflects a layer change made elsewhere", () => {

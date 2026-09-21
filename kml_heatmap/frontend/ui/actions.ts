@@ -35,6 +35,8 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
     toggleAirspeed: () => app.uiToggles.toggleAirspeed(),
     toggleAirports: () => app.uiToggles.toggleAirports(),
     toggleAviation: () => app.uiToggles.toggleAviation(),
+    toggleGlobe: () => app.mapOrientation.toggleGlobe(),
+    resetNorth: () => app.mapOrientation.resetNorth(),
     // Replay and Wrapped live in the lazily loaded feature bundle. Only
     // these two can be the first thing a visitor touches; the rest are on
     // chrome that exists only once the feature is open, so they find the

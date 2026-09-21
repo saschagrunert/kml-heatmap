@@ -17,6 +17,7 @@ import { FilterManager } from "./ui/filterManager";
 import { StatsManager } from "./ui/statsManager";
 import { PathSelection } from "./ui/pathSelection";
 import { AirportManager } from "./ui/airportManager";
+import { MapOrientation } from "./ui/mapOrientation";
 
 import { UIToggles } from "./ui/uiToggles";
 import { MobileBar } from "./ui/mobileBar";
@@ -41,6 +42,7 @@ import { prefersReducedMotion } from "./utils/motion";
 import {
   DEFAULT_ZOOM,
   MAP_LAYERS,
+  MAP_MAX_PITCH,
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
 } from "./utils/constants";
@@ -205,6 +207,7 @@ export class MapApp {
   declare airspeedVisible: StoreAccessors["airspeedVisible"];
   declare airportsVisible: StoreAccessors["airportsVisible"];
   declare aviationVisible: StoreAccessors["aviationVisible"];
+  declare globeVisible: StoreAccessors["globeVisible"];
   declare currentData: StoreAccessors["currentData"];
   declare hasTimingData: StoreAccessors["hasTimingData"];
 
@@ -304,6 +307,7 @@ export class MapApp {
   statsManager!: StatsManager;
   pathSelection!: PathSelection;
   airportManager!: AirportManager;
+  mapOrientation!: MapOrientation;
   /**
    * Replay and Wrapped live in the lazily loaded feature bundle, so these
    * are undefined until the user first opens one. Reach them through
@@ -483,6 +487,7 @@ export class MapApp {
     this.releaseMarkerTaps = null;
     this.mapHandlers = {};
     this.layerManager?.destroy();
+    this.mapOrientation?.destroy();
     this.dataManager?.destroy();
     this.stateManager?.cancelSave();
     this.replayManager?.destroy();
@@ -569,6 +574,9 @@ export class MapApp {
       if (state.aviationVisible !== undefined) {
         this.aviationVisible = state.aviationVisible;
       }
+      if (state.globeVisible !== undefined) {
+        this.globeVisible = state.globeVisible;
+      }
       // Isolating nothing is not a state the controls can leave: a link
       // written before path ids were versioned drops its selection but still
       // carries the isolate flag
@@ -590,6 +598,7 @@ export class MapApp {
     // link may carry a centre alone (written by hand, or cut short); it is
     // still where the reader was sent, so it gets the default zoom.
     const center = this.savedState?.center;
+    const bearing = this.savedState?.bearing ?? 0;
     const savedZoom = this.savedState?.zoom;
     const view = center
       ? {
@@ -604,7 +613,8 @@ export class MapApp {
         }
       : {
           bounds: toBounds(this.config.bounds),
-          fitBoundsOptions: { padding: 30 },
+          // A fit turns the map north up unless it is told the bearing
+          fitBoundsOptions: { padding: 30, bearing },
         };
 
     const map = new MapLibreMap({
@@ -618,21 +628,16 @@ export class MapApp {
       // only costs a corner of the map. The attribution is added below,
       // expanded: the default one collapses on a narrow map.
       attributionControl: false,
-      // The map stays north up and flat. The flights are read against the
-      // chart overlay and the labels of the legends, which assume it, and
-      // no control would bring a rotated map back.
-      dragRotate: false,
-      pitchWithRotate: false,
-      touchPitch: false,
-      rollEnabled: false,
-      maxPitch: 0,
+      // The map turns and tilts by MapLibre's own gestures (right or ctrl
+      // drag, two fingers, shift with the arrow keys); the compass of
+      // MapOrientation brings it back. A view opens north up and flat
+      // unless the link or the saved state says otherwise.
+      bearing,
+      pitch: this.savedState?.pitch ?? 0,
+      maxPitch: MAP_MAX_PITCH,
       reduceMotion: !animate,
       fadeDuration: animate ? 300 : 0,
     });
-    // The two gestures the options above leave: a twisting pinch and
-    // shift with the arrow keys
-    map.touchZoomRotate.disableRotation();
-    map.keyboard.disableRotation();
     map.addControl(new AttributionControl({ compact: false }), "bottom-right");
     this.map = map;
     this.releaseMarkerTaps = keepMarkerTapsFromZoom(map);
@@ -718,6 +723,7 @@ export class MapApp {
     syncToggleButton(this.store, "airspeedVisible", "airspeed-btn");
     syncToggleButton(this.store, "airportsVisible", "airports-btn");
     syncToggleButton(this.store, "aviationVisible", "aviation-btn");
+    syncToggleButton(this.store, "globeVisible", "globe-btn");
     syncLegend(this.store, "altitudeVisible", "altitude-legend");
     syncLegend(this.store, "airspeedVisible", "airspeed-legend");
     // The isolate button depends on two keys, so PathSelection owns it
@@ -760,6 +766,7 @@ export class MapApp {
     this.statsManager = new StatsManager(this);
     this.pathSelection = new PathSelection(this);
     this.airportManager = new AirportManager(this);
+    this.mapOrientation = new MapOrientation(this);
     this.uiToggles = new UIToggles(this);
     this.mobileBar = MobileBar.mountFor(this);
     this.followReplayAvailability();

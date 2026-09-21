@@ -8,6 +8,7 @@ import {
   SEEK_PAN_THROTTLE_MS,
   appendTrailSegment,
   findSegmentIndexAtTime,
+  screenHeading,
   trailFeatureCollection,
   truncateTrail,
   unwrapRotation,
@@ -90,6 +91,65 @@ describe("unwrapRotation", () => {
 
   it("keeps turning from an angle that has already wrapped", () => {
     expect(unwrapRotation(725, 10)).toBe(730);
+  });
+});
+
+describe("screenHeading", () => {
+  let map: MockMapLibreMap;
+  const heading = (track: number): number =>
+    screenHeading(map as unknown as MapLibreMap, [0, 0], track);
+
+  beforeEach(() => {
+    map = createMapLibreMock();
+  });
+
+  it("is the track itself on a flat map that is north up", () => {
+    expect(heading(19)).toBe(19);
+    expect(heading(250)).toBe(250);
+    // Nothing to measure, so the map is not asked
+    expect(map.project).not.toHaveBeenCalled();
+  });
+
+  it("takes the bearing of a turned map off the track", () => {
+    map.jumpTo({ bearing: 120 });
+
+    expect(heading(19)).toBeCloseTo(-101, 6);
+    // East is up on this map, so north is to the left
+    map.jumpTo({ bearing: 90 });
+    expect(heading(0)).toBeCloseTo(-90, 6);
+    expect(heading(90)).toBeCloseTo(0, 6);
+  });
+
+  it("follows the foreshortening of a tilted map", () => {
+    // At 60 degrees what runs up the screen is half as long as what runs
+    // across, so a north-east track points 63 degrees off the vertical
+    map.jumpTo({ pitch: 60 });
+
+    expect(heading(45)).toBeCloseTo(63.435, 3);
+    expect(heading(0)).toBeCloseTo(0, 6);
+    expect(heading(90)).toBeCloseTo(90, 6);
+  });
+
+  it("measures on a globe even when it is north up and flat", () => {
+    map.setProjection({ type: "globe" });
+    // The airplane is 60 degrees of longitude east of the centre, where the
+    // globe of the mock draws east and west half as long as at the centre
+    // and north and south as long as ever: a north-east track points 27
+    // degrees off the vertical. The track itself, 45, would be wrong.
+    // Zoomed in, where the few pixels the heading is measured over are a
+    // short way on the ground.
+    map.jumpTo({ center: [-60, 0], zoom: 10 });
+
+    expect(heading(45)).toBeCloseTo(26.565, 1);
+    expect(heading(0)).toBeCloseTo(0, 6);
+  });
+
+  it("falls back to the track less the bearing where the map cannot tell", () => {
+    // Both ends of the probe on one pixel, as right at a pole
+    map.jumpTo({ bearing: 30 });
+    map.project.mockReturnValue({ x: 5, y: 5 });
+
+    expect(heading(100)).toBe(70);
   });
 });
 
@@ -307,6 +367,19 @@ describe("AirplaneMarker", () => {
       (airplane.marker as unknown as { options: unknown }).options,
     ).toMatchObject({ anchor: "center" });
     expect(airplane.getLatLng()).toEqual([48, 16]);
+  });
+
+  it("closes its popup once the globe has turned the airplane away", () => {
+    map.setProjection({ type: "globe" });
+    airplane.openPopup();
+
+    map.jumpTo({ center: [60, 40] });
+    map.emit("move");
+    expect(airplane.isPopupOpen()).toBe(true);
+
+    map.jumpTo({ center: [-160, 40] });
+    map.emit("move");
+    expect(airplane.isPopupOpen()).toBe(false);
   });
 
   it("creates a popup the map's clicks and focus leave alone", () => {
@@ -1000,6 +1073,60 @@ describe("ReplayRenderer", () => {
       expect(iconDiv.style.transform).toContain("rotate(340deg)");
     });
 
+    describe("on a turned map", () => {
+      let iconDiv: HTMLElement;
+
+      beforeEach(() => {
+        const airplane = makeAirplane();
+        iconDiv = airplane
+          .getElement()
+          .querySelector<HTMLElement>(".replay-airplane-icon")!;
+        mockReplayManager.state.airplaneMarker = airplane;
+        mockReplayManager.state.currentTime = 5;
+        mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+        vi.spyOn(replayFeature, "calculateSmoothedBearing").mockReturnValue(0);
+      });
+
+      const rotation = (): number =>
+        Number(/rotate\((-?[\d.]+)deg\)/.exec(iconDiv.style.transform)![1]);
+
+      it("points the icon along the track on screen, not over the ground", () => {
+        map.jumpTo({ bearing: 90 });
+
+        callUpdateDisplay();
+
+        // Flying north on a map whose top is east: to the left
+        expect(rotation()).toBeCloseTo(-90, 6);
+        // What the readout says is still where the airplane flies
+        expect(mockReplayManager.state.lastBearing).toBe(0);
+      });
+
+      it("turns the icon with the map while the replay is paused", () => {
+        callUpdateDisplay();
+        expect(rotation()).toBe(0);
+
+        // No frame of the replay comes to say so: the map's own event does
+        map.jumpTo({ bearing: 45 });
+        map.emit("move");
+
+        expect(rotation()).toBeCloseTo(-45, 6);
+      });
+
+      it("stops following the map when the replay closes", () => {
+        callUpdateDisplay();
+        expect(map.listenerCount("move")).toBe(1);
+        callUpdateDisplay();
+        expect(map.listenerCount("move")).toBe(1);
+
+        renderer.stopWatchingMap();
+
+        expect(map.listenerCount("move")).toBe(0);
+        map.jumpTo({ bearing: 45 });
+        map.emit("move");
+        expect(rotation()).toBe(0);
+      });
+    });
+
     it("starts the rotation afresh for the airplane of another replay", () => {
       const bearing = vi.spyOn(replayFeature, "calculateSmoothedBearing");
       mockReplayManager.state.currentTime = 5;
@@ -1113,6 +1240,70 @@ describe("ReplayRenderer", () => {
 
       expect(map.easeTo).not.toHaveBeenCalled();
       expect(mockReplayManager.state.recenterTimestamps).toEqual([]);
+    });
+
+    describe("behind a globe", () => {
+      // The end of the one segment, where the airplane is at this time
+      const airplane = { lat: 50.01, lng: 8.51 };
+
+      beforeEach(() => {
+        map.setProjection({ type: "globe" });
+        mockReplayManager.state.airplaneMarker = makeAirplane();
+        mockReplayManager.state.playing = true;
+        mockReplayManager.state.currentTime = 5;
+        mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+        // Far from every edge of the 800 x 600 map, which is also where the
+        // far side of a globe projects to
+        airplaneAt(400, 300);
+      });
+
+      /** What the map says is drawn where the airplane projects to */
+      function drawnThere(place: { lat: number; lng: number }): void {
+        map.unproject.mockReturnValue(
+          place as ReturnType<typeof map.unproject>,
+        );
+      }
+
+      it("leaves the camera alone while the airplane is on the near side", () => {
+        drawnThere(airplane);
+
+        callUpdateDisplay();
+
+        expect(map.easeTo).not.toHaveBeenCalled();
+      });
+
+      it("brings an airplane back that flew over the rim, though it never left the map", () => {
+        // Another part of the world is drawn there: the airplane is behind it
+        drawnThere({ lat: 50.01, lng: 151.49 });
+
+        callUpdateDisplay();
+
+        expect(map.easeTo).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ center: [airplane.lng, airplane.lat] }),
+        );
+      });
+
+      it("zooms out for it at once when auto-zoom is on, like for one that left the map", () => {
+        mockReplayManager.state.autoZoom = true;
+        map.setZoom(12);
+        drawnThere({ lat: 50.01, lng: 151.49 });
+
+        callUpdateDisplay();
+
+        expect(map.easeTo).toHaveBeenLastCalledWith(
+          expect.objectContaining({ zoom: 11 }),
+        );
+      });
+
+      it("jumps to it on a seek", () => {
+        drawnThere({ lat: 50.01, lng: 151.49 });
+
+        callUpdateDisplay(true);
+
+        expect(map.jumpTo).toHaveBeenCalledWith({
+          center: [airplane.lng, airplane.lat],
+        });
+      });
     });
 
     describe("while the user moves the map", () => {
@@ -1244,6 +1435,31 @@ describe("ReplayRenderer", () => {
         expectCameraFollows();
       });
 
+      it.each(["rotatestart", "pitchstart"])(
+        "leaves the compass to finish: waits from a %s of the app to its moveend",
+        (start) => {
+          // The compass turns the map with a camera move that carries no
+          // DOM event, and a follow pan would end it in its first frame
+          map.isMoving.mockReturnValue(true);
+          map.emit("movestart", {});
+          map.emit(start, {});
+          expectCameraLeftAlone();
+          expectCameraLeftAlone();
+
+          map.emit("moveend", {});
+          expectCameraFollows();
+        },
+      );
+
+      it("takes a map at rest for the end of a turn whose end went missing", () => {
+        map.isMoving.mockReturnValue(true);
+        map.emit("rotatestart", {});
+        expectCameraLeftAlone();
+
+        map.isMoving.mockReturnValue(false);
+        expectCameraFollows();
+      });
+
       it("waits for the wheel, which moves nothing before the next frame", () => {
         map.scrollZoom.isActive.mockReturnValue(true);
         expectCameraLeftAlone();
@@ -1253,14 +1469,21 @@ describe("ReplayRenderer", () => {
       });
 
       it("listens once however often it is asked, and stops when the replay closes", () => {
+        const types = [
+          "movestart",
+          "zoomstart",
+          "rotatestart",
+          "pitchstart",
+          "moveend",
+        ];
         renderer.watchUser();
-        for (const type of ["movestart", "zoomstart", "moveend"]) {
+        for (const type of types) {
           expect(map.listenerCount(type)).toBe(1);
         }
 
-        renderer.stopWatchingUser();
+        renderer.stopWatchingMap();
 
-        for (const type of ["movestart", "zoomstart", "moveend"]) {
+        for (const type of types) {
           expect(map.listenerCount(type)).toBe(0);
         }
         map.getCanvasContainer().dispatchEvent(new MouseEvent("mousedown"));

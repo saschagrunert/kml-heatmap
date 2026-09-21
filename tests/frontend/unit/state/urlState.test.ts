@@ -50,6 +50,10 @@ function randomState(rnd: () => number): AppState {
       lng: Math.round((rnd() * 360 - 180) * 1e6) / 1e6,
     },
     zoom: Math.round((MIN_ZOOM + rnd() * (MAX_ZOOM - MIN_ZOOM)) * 100) / 100,
+    // Half of the views are north up and flat, like most real ones
+    bearing: bool() ? 0 : Math.round((rnd() * 360 - 180) * 10) / 10,
+    pitch: bool() ? 0 : Math.round(rnd() * 600) / 10,
+    globeVisible: bool(),
   };
 }
 
@@ -224,6 +228,37 @@ describe("URL state management", () => {
       });
     });
 
+    it("parses the bearing, the pitch and the globe", () => {
+      expect(parseUrlParams("b=-40.5&t=35&g=1")).toEqual({
+        bearing: -40.5,
+        pitch: 35,
+        globeVisible: true,
+      });
+    });
+
+    it("wraps a bearing and holds a pitch to what the map tilts to", () => {
+      expect(parseUrlParams("b=270")!.bearing).toBe(-90);
+      expect(parseUrlParams("b=-190")!.bearing).toBe(170);
+      expect(parseUrlParams("b=180")!.bearing).toBe(180);
+      expect(parseUrlParams("t=85")!.pitch).toBe(60);
+      expect(parseUrlParams("t=-10")!.pitch).toBe(0);
+    });
+
+    it("ignores an orientation that is no number and a globe that is not 1", () => {
+      expect(parseUrlParams("y=2025&b=north&t=&g=yes")).toEqual({
+        selectedYear: "2025",
+      });
+      expect(parseUrlParams("b=Infinity&g=0")).toEqual({});
+    });
+
+    it("opens a link from before the map could turn north up and flat", () => {
+      const state = parseUrlParams("y=2025&lat=51.5&lng=13.4&z=10.5")!;
+
+      for (const key of ["bearing", "pitch", "globeVisible"]) {
+        expect(state).not.toHaveProperty(key);
+      }
+    });
+
     it("accepts URLSearchParams object", () => {
       expect(parseUrlParams(new URLSearchParams("y=2025&a=D-EAGJ"))).toEqual({
         selectedYear: "2025",
@@ -369,6 +404,21 @@ describe("URL state management", () => {
       expect(params.get("z")).toBe("10.50");
     });
 
+    it("encodes the bearing and the pitch to a tenth of a degree", () => {
+      expect(encodeStateToUrl({ bearing: -40.26, pitch: 35.04 })).toBe(
+        "b=-40.3&t=35",
+      );
+    });
+
+    it("keeps north up, flat and Mercator out of the link", () => {
+      expect(
+        encodeStateToUrl({ bearing: 0, pitch: 0, globeVisible: false }),
+      ).toBe("");
+      // Closer to north than a link tells apart, from either side
+      expect(encodeStateToUrl({ bearing: -0.04, pitch: 0.04 })).toBe("");
+      expect(encodeStateToUrl({ globeVisible: true })).toBe("g=1");
+    });
+
     it("returns an empty string for an empty state", () => {
       expect(encodeStateToUrl({})).toBe("");
     });
@@ -391,6 +441,9 @@ describe("URL state management", () => {
         isolateSelection: true,
         center: { lat: 51.5, lng: 13.4 },
         zoom: 10.5,
+        bearing: -135.5,
+        pitch: 42.3,
+        globeVisible: true,
       };
 
       const decoded = parseUrlParams(encodeStateToUrl(original));
@@ -410,6 +463,10 @@ describe("URL state management", () => {
         if (state.selectedAircraft === "all") delete expected.selectedAircraft;
         if (state.selectedPathIds!.length === 0)
           delete expected.selectedPathIds;
+        // The defaults are not encoded, so nothing is decoded
+        if (state.bearing === 0) delete expected.bearing;
+        if (state.pitch === 0) delete expected.pitch;
+        if (!state.globeVisible) delete expected.globeVisible;
         const flags = [
           state.heatmapVisible,
           state.altitudeVisible,

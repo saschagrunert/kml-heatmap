@@ -147,6 +147,9 @@ export function setupDOM(): void {
     <button id="airports-btn"></button>
     <div class="control-row">
       <button id="aviation-btn"></button>
+      <button id="globe-btn"></button>
+      <button id="compass-btn"></button>
+      <button id="compass-float-btn" hidden></button>
     </div>
     <div id="altitude-legend"></div>
     <div id="airspeed-legend"></div>

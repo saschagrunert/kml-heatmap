@@ -3,7 +3,9 @@ import {
   calculateDistance,
   calculateBearing,
   ddToDms,
+  toMapBearing,
   toMapCenter,
+  toMapPitch,
   type Coordinate,
 } from "../../../../kml_heatmap/frontend/utils/geometry";
 
@@ -58,6 +60,41 @@ describe("geometry utilities", () => {
       const dist2 = calculateDistance(coord2, coord1);
 
       expect(dist1).toBeCloseTo(dist2, 6);
+    });
+  });
+
+  describe("toMapBearing", () => {
+    it("keeps a bearing the map reports itself as it is", () => {
+      for (const bearing of [0, 40.5, -135, 180, -180]) {
+        expect(toMapBearing(bearing)).toBe(bearing);
+      }
+    });
+
+    it("wraps a bearing from further round into -180 to 180", () => {
+      expect(toMapBearing(270)).toBe(-90);
+      expect(toMapBearing(-190)).toBe(170);
+      expect(toMapBearing(725)).toBe(5);
+    });
+
+    it("is null for anything that is no finite number", () => {
+      for (const bearing of [NaN, Infinity, "90", null, undefined]) {
+        expect(toMapBearing(bearing)).toBeNull();
+      }
+    });
+  });
+
+  describe("toMapPitch", () => {
+    it("holds a pitch between flat and what the map tilts to", () => {
+      expect(toMapPitch(35)).toBe(35);
+      expect(toMapPitch(60)).toBe(60);
+      expect(toMapPitch(85)).toBe(60);
+      expect(toMapPitch(-5)).toBe(0);
+    });
+
+    it("is null for anything that is no finite number", () => {
+      for (const pitch of [NaN, -Infinity, "35", null, undefined]) {
+        expect(toMapPitch(pitch)).toBeNull();
+      }
     });
   });
 

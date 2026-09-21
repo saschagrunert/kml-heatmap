@@ -332,6 +332,12 @@ export interface AppState {
   center?: MapCenter;
   /** In state (legacy) units, one above the map's; see ZOOM_OFFSET */
   zoom?: number;
+  /** Degrees the map is turned from north up, -180 to 180; absent means 0 */
+  bearing?: number;
+  /** Degrees the map is tilted, 0 to MAP_MAX_PITCH; absent means flat */
+  pitch?: number;
+  /** Whether the map is drawn as a globe; absent means Mercator */
+  globeVisible?: boolean;
 }
 
 /**

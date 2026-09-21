@@ -61,10 +61,15 @@ const MAP_REVEAL_TIMEOUT_MS = 1200;
 /** Padding in pixels around the data when the dialog fits the map to it */
 const FIT_PADDING = 80;
 
-/** The user's map view: app-shaped center, zoom in the map's own unit */
+/**
+ * The user's map view: app-shaped center, zoom in the map's own unit. The
+ * projection is not part of it: the overview keeps the one the user chose.
+ */
 export interface UserMapView {
   center: MapCenter;
   zoom: number;
+  bearing: number;
+  pitch: number;
 }
 
 /**
@@ -224,10 +229,17 @@ export class WrappedManager {
 
   /**
    * Fit options for the overview, without the animation for reduced motion.
-   * No duration: the map's default carries the fit, as it always has.
+   * No duration: the map's default carries the fit, as it always has. The
+   * overview is north up and flat, whatever the user's view was: it is read
+   * next to a list of places, and a fit is only exact for a flat map.
    */
   private fitOptions(): FitBoundsOptions {
-    return { padding: FIT_PADDING, animate: !prefersReducedMotion() };
+    return {
+      padding: FIT_PADDING,
+      bearing: 0,
+      pitch: 0,
+      animate: !prefersReducedMotion(),
+    };
   }
 
   showWrapped(): void {
@@ -264,6 +276,8 @@ export class WrappedManager {
       this.savedView = {
         center: { lat: center.lat, lng: center.lng },
         zoom: this.app.map.getZoom(),
+        bearing: this.app.map.getBearing(),
+        pitch: this.app.map.getPitch(),
       };
     }
     const fitTarget = this.fitTarget();
@@ -631,6 +645,8 @@ export class WrappedManager {
           this.app.map.jumpTo({
             center: toLngLat([view.center.lat, view.center.lng]),
             zoom: view.zoom,
+            bearing: view.bearing,
+            pitch: view.pitch,
           });
         }
       }, MAP_RESTORE_DELAY_MS);

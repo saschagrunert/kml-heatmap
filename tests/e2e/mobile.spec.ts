@@ -34,7 +34,10 @@ import {
   airportsOnMap,
   attributionControl,
   expectAviationTiles,
+  getOrientation,
   heatmapOnMap,
+  setOrientation,
+  twistRotate,
 } from "./map";
 
 /** The smallest comfortable touch target on both mobile platforms */
@@ -749,6 +752,105 @@ test.describe("Mobile bar", () => {
     expect(legendBox.y + legendBox.height).toBeLessThanOrEqual(
       attributionBox.y,
     );
+  });
+
+  test.describe("Compass and globe", () => {
+    const compass = (page: Page) => page.locator("#compass-float-btn");
+
+    test("the compass floats over the map only while it is turned or tilted", async ({
+      page,
+    }) => {
+      await expect(compass(page)).toBeHidden();
+
+      await setOrientation(page, { bearing: -60, pitch: 0 });
+      await expect(compass(page)).toBeVisible();
+      await expect(compass(page)).toHaveAccessibleName(/north up/i);
+      await expectTapTargets(page, "#compass-float-btn");
+
+      await setOrientation(page, { bearing: 0, pitch: 30 });
+      await expect(compass(page)).toBeVisible();
+
+      await compass(page).tap();
+
+      await expect
+        .poll(() => getOrientation(page))
+        .toMatchObject({ bearing: 0, pitch: 0 });
+      await expect(compass(page)).toBeHidden();
+    });
+
+    test("two fingers turn the map, and the compass that shows up turns it back", async ({
+      page,
+      browserName,
+    }) => {
+      test.skip(
+        browserName !== "chromium",
+        "The touch events are sent through the devtools protocol",
+      );
+      await twistRotate(page, 40);
+
+      await expect
+        .poll(async () => Math.abs((await getOrientation(page)).bearing))
+        .toBeGreaterThan(20);
+      await expect(compass(page)).toBeVisible();
+
+      await compass(page).tap();
+
+      await expect
+        .poll(() => getOrientation(page))
+        .toMatchObject({ bearing: 0, pitch: 0 });
+    });
+
+    test("the compass keeps clear of the bar, the chip and the screen edge", async ({
+      page,
+    }) => {
+      await selectPathForReplay(page);
+      await expect(page.locator("#selection-chip")).toBeVisible();
+      await setOrientation(page, { bearing: 45, pitch: 0 });
+
+      const box = (await compass(page).boundingBox())!;
+      const viewport = page.viewportSize()!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+      for (const other of ["#selection-chip", "#mobile-bar"]) {
+        const taken = (await page.locator(other).boundingBox())!;
+        const apart =
+          box.y >= taken.y + taken.height ||
+          box.y + box.height <= taken.y ||
+          box.x >= taken.x + taken.width ||
+          box.x + box.width <= taken.x;
+        expect(apart, `the compass overlaps ${other}`).toBe(true);
+      }
+    });
+
+    test("the Layers sheet switches to the globe and back", async ({
+      page,
+    }) => {
+      await toggleLayer(page, "globe");
+      await expect
+        .poll(() => getOrientation(page))
+        .toMatchObject({ projection: "globe" });
+
+      await openMobileSheet(page, "layers");
+      await expect(layerSwitch(page, "globe")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      await closeMobileSheet(page);
+
+      await toggleLayer(page, "globe");
+      await expect
+        .poll(() => getOrientation(page))
+        .toMatchObject({ projection: "mercator" });
+    });
+
+    test("a turned map with its compass has no WCAG A/AA violations", async ({
+      page,
+    }) => {
+      await setOrientation(page, { bearing: 45, pitch: 30 });
+      await expect(compass(page)).toBeVisible();
+
+      await expectNoA11yViolations(page, "mobile compass");
+    });
   });
 
   test.describe("Accessibility", () => {

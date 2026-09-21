@@ -41,6 +41,7 @@
 - Statistics panel (distance, altitude, flight time)
 - Year and aircraft filtering
 - Flight replay with animated airplane marker
+- A map that turns and tilts, and a globe for flights that span a continent
 - Year-in-review "Wrapped" summary
 - Shareable URLs that encode the exact map state
 - Privacy protection: no flight date finer than the year reaches the
@@ -757,6 +758,8 @@ as scripts (`data.js`, `metadata.js`, `airports.js`), removes those files.
 - **Copy link** - Share the current URL (native share dialog where available, otherwise copied to the clipboard)
 - **Wrapped** - View the year-in-review summary; Escape closes it
 - **Replay** - Animate one flight with adjustable speed (default 50x) and an auto-zoom button that follows the airplane. The whole track is drawn dimmed and the flown part paints over it in the colours of the active scale. Replay needs exactly one selected flight with timing data; a toast explains why it is unavailable otherwise
+- **Globe** - Draw the map as a globe instead of in Mercator. Above zoom 12 the two look the same, which is MapLibre's doing. Airport markers on the far side are hidden, and a popup closes once the globe has turned its place away. The space around the globe is the page background; no atmosphere is drawn
+- **North up** - The map turns and tilts (up to 60 degrees) by gesture: drag with the right mouse button or with Ctrl held, twist or drag with two fingers, or hold Shift with the arrow keys once the map has focus. The needle on this button points north, and a click turns the map back north up and flat. On a phone the compass floats at the top right of the map while the map is turned or tilted, and the globe switch is in the Layers sheet. Replay keeps the orientation you chose and points the airplane along its track on screen; Wrapped shows its overview north up and flat and gives your view back when it closes
 - A map attribution, on the map at every width; it steps aside only while a sheet or the statistics panel covers the map it credits. There are no zoom buttons: use the scroll wheel, pinch, double click, or the keyboard once the map has focus
 - Below 768 px the two control columns are replaced by a bottom bar with five tabs. Layers, Filter and More open a sheet; Stats and Wrapped open their panel directly. Escape closes an open sheet, and Tab stays inside it. Replay takes over the bottom edge and the bar steps aside until it ends
 
@@ -790,6 +793,14 @@ browser's address bar or use the copy-link button:
   zoom 10. `z` counts in 256 pixel tiles, as links always did, which is one
   more than MapLibre's own zoom for the same view; links shared before the
   switch to MapLibre therefore still show the same area
+- Orientation (`?b=-40.5&t=35`): `b` is the bearing, the degrees the top of
+  the map is turned clockwise from north (any number, wrapped into -180 to
+  180), and `t` the tilt in degrees (held between 0 and 60). Both are
+  written to a tenth of a degree and left out while the map is north up and
+  flat
+- Globe (`?g=1`), left out for Mercator. A link without `b`, `t` and `g`,
+  which is every link from before the map could turn, opens north up, flat
+  and in Mercator
 - Debug logging in the browser console (`?debug=true`)
 
 **Example URLs:**
@@ -798,6 +809,7 @@ browser's address bar or use the copy-link button:
 ?y=all                                   # Show all years
 ?y=2025&v=010000000                      # 2025 with the altitude layer only
 ?y=2025&a=D-EAGJ&lat=51.5&lng=13.4&z=10  # Complete state
+?y=all&lat=48&lng=8&z=4&g=1&b=-30&t=50   # All years on a turned, tilted globe
 ```
 
 URL parameters take precedence over localStorage, allowing shared links to

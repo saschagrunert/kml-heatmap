@@ -174,7 +174,7 @@ export class ReplayManager {
     this.stopFollowingTrailLegend();
     this.cancelRedrawTimers();
     this.renderer.cancelTrailFlush();
-    this.renderer.stopWatchingUser();
+    this.renderer.stopWatchingMap();
     if (this.state.animationFrameId) {
       cancelAnimationFrame(this.state.animationFrameId);
       this.state.animationFrameId = null;
@@ -290,7 +290,7 @@ export class ReplayManager {
 
     this.clearReplayLayer();
     // No camera follows the airplane any more
-    this.renderer.stopWatchingUser();
+    this.renderer.stopWatchingMap();
 
     // The layers come back the way the user left them: closing replay used
     // to switch the altitude layer on when neither colour layer was
@@ -714,6 +714,9 @@ export class ReplayManager {
     const bounds = segmentBounds(this.state.segments);
     if (!bounds) return;
     this.app.map.fitBounds(toBounds(bounds), {
+      // A fit turns the map north up unless it is told the bearing, and
+      // the replay leaves the orientation to the user
+      bearing: this.app.map.getBearing(),
       padding: FIT_BOUNDS_PADDING,
       duration: FIT_BOUNDS_MS,
       animate: !prefersReducedMotion(),

@@ -15,7 +15,7 @@ import {
   waitForAppReady,
   waitForYearFilter,
 } from "./helpers";
-import { getCenter } from "./map";
+import { getCenter, getOrientation, setOrientation } from "./map";
 
 test.describe("State Persistence", () => {
   test.beforeEach(async ({ page }) => {
@@ -300,6 +300,80 @@ test.describe("State Persistence", () => {
       await expect
         .poll(() => new URL(page.url()).searchParams.get("v"))
         .toBe("000100000");
+    });
+
+    test("a link restores the bearing, the pitch and the globe", async ({
+      page,
+    }) => {
+      await gotoApp(page, "/?lat=50.5&lng=9.5&z=7&b=-40.5&t=35&g=1");
+
+      expect(await getOrientation(page)).toEqual({
+        bearing: -40.5,
+        pitch: 35,
+        projection: "globe",
+      });
+      await expect(layerButton(page, "globe")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    test("a link from before the map could turn opens north up, flat and in Mercator", async ({
+      page,
+    }) => {
+      // What is saved on this device must not leak into an old link
+      await setOrientation(page, { bearing: 90, pitch: 30 });
+      await toggleLayer(page, "globe");
+      await expect
+        .poll(async () => (await readSavedState(page))["bearing"])
+        .toBe(90);
+
+      await gotoApp(page, "/?lat=50.5&lng=9.5&z=7");
+
+      expect(await getOrientation(page)).toEqual({
+        bearing: 0,
+        pitch: 0,
+        projection: "mercator",
+      });
+    });
+
+    test("the link carries the orientation only while it is not the default", async ({
+      page,
+    }) => {
+      const params = (): URLSearchParams => new URL(page.url()).searchParams;
+
+      await setOrientation(page, { bearing: 120.26, pitch: 45 });
+      await toggleLayer(page, "globe");
+
+      // The globe is the change made last, and the link is written with a delay
+      await expect.poll(() => params().get("g")).toBe("1");
+      expect(params().get("b")).toBe("120.3");
+      expect(params().get("t")).toBe("45");
+
+      await setOrientation(page, { bearing: 0, pitch: 0 });
+      await toggleLayer(page, "globe");
+
+      await expect.poll(() => params().has("g")).toBe(false);
+      expect(params().has("b")).toBe(false);
+      expect(params().has("t")).toBe(false);
+    });
+
+    test("the orientation saved on this device comes back on reload", async ({
+      page,
+    }) => {
+      await setOrientation(page, { bearing: -75, pitch: 20 });
+      await toggleLayer(page, "globe");
+      await expect
+        .poll(async () => (await readSavedState(page))["globeVisible"])
+        .toBe(true);
+
+      await gotoApp(page, "/");
+
+      expect(await getOrientation(page)).toEqual({
+        bearing: -75,
+        pitch: 20,
+        projection: "globe",
+      });
     });
 
     test("combined URL params are applied together", async ({ page }) => {

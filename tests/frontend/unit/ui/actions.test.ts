@@ -15,6 +15,8 @@ const BUTTON_ACTIONS = [
   "toggleAirspeed",
   "toggleAirports",
   "toggleAviation",
+  "toggleGlobe",
+  "resetNorth",
   "toggleReplay",
   "exportMap",
   "shareLink",
@@ -86,6 +88,16 @@ describe("bindActions", () => {
     expect(app.uiToggles.toggleAirports).toHaveBeenCalledTimes(1);
     expect(app.uiToggles.toggleAviation).toHaveBeenCalledTimes(1);
     expect(app.uiToggles.exportMap).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds the globe switch and the compass, which need no data", () => {
+    app.isInitializing = true;
+
+    elements["toggleGlobe"]!.click();
+    elements["resetNorth"]!.click();
+
+    expect(app.mapOrientation.toggleGlobe).toHaveBeenCalledTimes(1);
+    expect(app.mapOrientation.resetNorth).toHaveBeenCalledTimes(1);
   });
 
   it("unbinds every control once the app is gone", () => {

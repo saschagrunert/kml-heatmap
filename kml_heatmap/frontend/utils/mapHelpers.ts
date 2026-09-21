@@ -212,7 +212,66 @@ export function panPopupIntoView(
     box.bottom - (frame.bottom - padding),
   );
   if (dx === 0 && dy === 0) return;
-  map.panBy([dx, dy], { animate });
+  if (map.getPitch() === 0 && map.getProjection()?.type !== "globe") {
+    map.panBy([dx, dy], { animate });
+    return;
+  }
+  // `panBy` moves the centre by the pixels it is given, and only on a flat
+  // map does everything else move as far: tilted by 60 degrees, a popup at
+  // the top of the map came down 44 of the 200 pixels asked for. So the
+  // place that is now drawn where the popup's own has to go takes the
+  // measure: the map moves by what lies between the two.
+  const place = popup.getLngLat();
+  const at = map.project(place);
+  const target = map.unproject([at.x - dx, at.y - dy]);
+  const center = map.getCenter();
+  map.panTo(
+    [
+      center.lng + place.lng - target.lng,
+      Math.max(-85, Math.min(85, center.lat + place.lat - target.lat)),
+    ],
+    { animate },
+  );
+}
+
+/** How far off a place may come back from the round trip of `isBehindGlobe` */
+const GLOBE_ROUND_TRIP_DEGREES = 0.01;
+
+/**
+ * Whether a place is on the far side of the globe. MapLibre knows, and
+ * tells nobody: `project` answers for such a place with a point inside the
+ * disc, where the near side is drawn. Asked what is at that point, the map
+ * names the place on the near side, so a place that does not come back from
+ * the round trip is behind the globe. Measured against MapLibre's own
+ * verdict: a place in view on the near side comes back within a hundred
+ * thousandth of a degree, and of the places behind, only those within a
+ * hundredth of a degree of the rim do. A place far outside the map may be
+ * called behind when it is not; it is out of sight either way.
+ */
+export function isBehindGlobe(
+  map: MapLibreMap,
+  place: { lng: number; lat: number },
+): boolean {
+  if (map.getProjection()?.type !== "globe") return false;
+  const back = map.unproject(map.project([place.lng, place.lat]));
+  const turn = Math.abs(back.lng - place.lng) % 360;
+  return (
+    Math.abs(back.lat - place.lat) > GLOBE_ROUND_TRIP_DEGREES ||
+    Math.min(turn, 360 - turn) > GLOBE_ROUND_TRIP_DEGREES
+  );
+}
+
+/**
+ * Close a popup once the place it points at has gone behind the globe.
+ * MapLibre leaves it open at the point the place projects to, over another
+ * part of the world, with its buttons working.
+ */
+export function closeWhenBehindGlobe(map: MapLibreMap, popup: Popup): void {
+  const check = (): void => {
+    if (isBehindGlobe(map, popup.getLngLat())) popup.remove();
+  };
+  popup.on("open", () => map.on("move", check));
+  popup.on("close", () => map.off("move", check));
 }
 
 /**

@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Map as MapLibreMap, Popup as MapLibrePopup } from "maplibre-gl";
 import {
+  closeWhenBehindGlobe,
   cssVar,
   firstSymbolLayerId,
   fromLngLat,
+  isBehindGlobe,
   isOnMarker,
   keepMarkerTapsFromZoom,
   MAP_STILL_TIMEOUT_MS,
@@ -203,6 +205,130 @@ describe("mapHelpers", () => {
       panPopupIntoView(map, popup, 16);
 
       expect(map.panBy).not.toHaveBeenCalled();
+    });
+
+    it("still pans a turned map by pixels, which is exact while it is flat", () => {
+      const map = mapStub({ bearing: 120 });
+      panPopupIntoView(map, openPopup(map, rect(-20, 6, 180, 200)), 16);
+
+      expect(map.panBy).toHaveBeenCalledWith([-36, -10], { animate: true });
+      expect(map.panTo).not.toHaveBeenCalled();
+    });
+
+    it("moves the popup's place, not the centre, by what sticks out on a tilted map", () => {
+      // In the browser a panBy of 200 px brought a popup at the top of a map
+      // tilted by 60 degrees down by 44
+      const map = mapStub({ center: [8, 50], bearing: 30, pitch: 60 });
+      panPopupIntoView(map, openPopup(map, rect(-20, 6, 180, 200)), 16, false);
+
+      expect(map.panBy).not.toHaveBeenCalled();
+      expect(map.panTo).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+        animate: false,
+      });
+      // The popup sits on [8, 50], which was in the middle of the map
+      const place = map.project([8, 50]);
+      expect(place.x).toBeCloseTo(36, 6);
+      expect(place.y).toBeCloseTo(10, 6);
+    });
+
+    it("does the same on a globe", () => {
+      const map = mapStub({ center: [8, 50] });
+      map.finishStyleLoad();
+      map.setProjection({ type: "globe" });
+      panPopupIntoView(map, openPopup(map, rect(600, 400, 820, 590)), 16);
+
+      expect(map.panBy).not.toHaveBeenCalled();
+      const place = map.project([8, 50]);
+      expect(place.x).toBeCloseTo(-36, 3);
+      expect(place.y).toBeCloseTo(-6, 3);
+    });
+  });
+
+  describe("isBehindGlobe", () => {
+    function globe(): MapLibreMap & MockMap {
+      const map = mapStub({ center: [10, 50] });
+      map.finishStyleLoad();
+      map.setProjection({ type: "globe" });
+      return map;
+    }
+
+    it("is never true on a flat map, however far away the place is", () => {
+      const map = mapStub({ center: [10, 50] });
+
+      expect(isBehindGlobe(map, { lng: -170, lat: -50 })).toBe(false);
+      // No projection means Mercator, and costs no look at the map
+      expect(map.project).not.toHaveBeenCalled();
+    });
+
+    it("tells the near side of a globe from the far side", () => {
+      const map = globe();
+
+      expect(isBehindGlobe(map, { lng: 10, lat: 50 })).toBe(false);
+      expect(isBehindGlobe(map, { lng: 95, lat: 20 })).toBe(false);
+      expect(isBehindGlobe(map, { lng: -75, lat: 20 })).toBe(false);
+      expect(isBehindGlobe(map, { lng: 105, lat: 20 })).toBe(true);
+      expect(isBehindGlobe(map, { lng: -170, lat: 50 })).toBe(true);
+    });
+
+    it("follows the globe as it turns", () => {
+      const map = globe();
+      expect(isBehindGlobe(map, { lng: -170, lat: 50 })).toBe(true);
+
+      map.jumpTo({ center: [-150, 50] });
+
+      expect(isBehindGlobe(map, { lng: -170, lat: 50 })).toBe(false);
+      expect(isBehindGlobe(map, { lng: 10, lat: 50 })).toBe(true);
+    });
+
+    it("takes a place across the antimeridian for the near one it is", () => {
+      const map = globe();
+      map.jumpTo({ center: [175, 0] });
+
+      expect(isBehindGlobe(map, { lng: -175, lat: 0 })).toBe(false);
+    });
+  });
+
+  describe("closeWhenBehindGlobe", () => {
+    function globeWithPopup(): {
+      map: MapLibreMap & MockMap;
+      popup: MockPopup;
+    } {
+      const map = mapStub({ center: [10, 50] });
+      map.finishStyleLoad();
+      map.setProjection({ type: "globe" });
+      const popup = new MockPopup();
+      closeWhenBehindGlobe(map, popup as unknown as MapLibrePopup);
+      popup.setLngLat([10, 50]).addTo(map);
+      return { map, popup };
+    }
+
+    it("leaves the popup open while its place is on the near side", () => {
+      const { map, popup } = globeWithPopup();
+
+      map.jumpTo({ center: [60, 40] });
+      map.emit("move");
+
+      expect(popup.isOpen()).toBe(true);
+    });
+
+    it("closes the popup once the globe has turned its place away", () => {
+      const { map, popup } = globeWithPopup();
+
+      map.jumpTo({ center: [-160, 40] });
+      map.emit("move");
+
+      expect(popup.isOpen()).toBe(false);
+    });
+
+    it("listens to the map only while the popup is open", () => {
+      const { map, popup } = globeWithPopup();
+      expect(map.listenerCount("move")).toBe(1);
+
+      popup.remove();
+      expect(map.listenerCount("move")).toBe(0);
+
+      popup.addTo(map);
+      expect(map.listenerCount("move")).toBe(1);
     });
   });
 

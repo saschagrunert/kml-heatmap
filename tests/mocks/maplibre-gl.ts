@@ -166,6 +166,14 @@ export class LngLatBounds {
   }
 }
 
+/** What the camera methods of the mock map take */
+interface MockCameraOptions {
+  center?: unknown;
+  zoom?: number;
+  bearing?: number;
+  pitch?: number;
+}
+
 /** `on`, `once` and `off` that keep their handlers, and `emit` to call them */
 class MockEvented {
   readonly handlers = new globalThis.Map<string, Set<Handler>>();
@@ -297,6 +305,10 @@ export class Map
       | "getCenter"
       | "setCenter"
       | "getBounds"
+      | "getBearing"
+      | "getPitch"
+      | "getProjection"
+      | "setProjection"
       | "fitBounds"
       | "jumpTo"
       | "easeTo"
@@ -337,6 +349,10 @@ export class Map
   private styleLoaded = false;
   private zoom: number;
   private center: LngLat;
+  private bearing: number;
+  private pitch: number;
+  /** Undefined until one is set, like a style that names none */
+  private projection: { type: string } | undefined;
   private readonly container: HTMLElement;
   private readonly canvasContainer: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
@@ -367,6 +383,9 @@ export class Map
     this.container.append(this.canvasContainer);
 
     this.zoom = typeof options["zoom"] === "number" ? options["zoom"] : 0;
+    this.bearing =
+      typeof options["bearing"] === "number" ? options["bearing"] : 0;
+    this.pitch = typeof options["pitch"] === "number" ? options["pitch"] : 0;
     this.center =
       options["center"] !== undefined
         ? assertLngLat(options["center"], "Map center")
@@ -551,30 +570,43 @@ export class Map
       ),
   );
 
-  fitBounds = vi.fn((bounds: unknown) => {
+  getBearing = vi.fn(() => this.bearing);
+  getPitch = vi.fn(() => this.pitch);
+
+  getProjection = vi.fn(() => this.projection);
+  /** Like MapLibre: a projection is part of the style, so it needs one */
+  setProjection = vi.fn((projection: { type: string }) => {
+    if (!this.styleLoaded) throw new Error("Style is not done loading.");
+    this.projection = projection;
+    this.emit("projectiontransition", { newProjection: projection.type });
+    return this;
+  });
+
+  /** Like MapLibre: a fit turns the map north up unless it names a bearing */
+  fitBounds = vi.fn((bounds: unknown, options: MockCameraOptions = {}) => {
     this.center = new LngLatBounds(bounds).getCenter();
+    this.bearing = options.bearing ?? 0;
+    if (options.pitch !== undefined) this.pitch = options.pitch;
     return this;
   });
 
   /** The camera moves apply at once; none of them animates or fires events */
-  private moveTo(options: { center?: unknown; zoom?: number }): this {
+  private moveTo(options: MockCameraOptions): this {
     if (options.center !== undefined) {
       this.center = assertLngLat(options.center, "camera center");
     }
     if (options.zoom !== undefined) this.zoom = options.zoom;
+    if (options.bearing !== undefined) this.bearing = options.bearing;
+    if (options.pitch !== undefined) this.pitch = options.pitch;
     return this;
   }
 
-  jumpTo = vi.fn((options: { center?: unknown; zoom?: number }) =>
-    this.moveTo(options),
+  jumpTo = vi.fn((options: MockCameraOptions) => this.moveTo(options));
+  easeTo = vi.fn((options: MockCameraOptions) => this.moveTo(options));
+  flyTo = vi.fn((options: MockCameraOptions) => this.moveTo(options));
+  panTo = vi.fn((center: unknown, _options?: object) =>
+    this.moveTo({ center }),
   );
-  easeTo = vi.fn((options: { center?: unknown; zoom?: number }) =>
-    this.moveTo(options),
-  );
-  flyTo = vi.fn((options: { center?: unknown; zoom?: number }) =>
-    this.moveTo(options),
-  );
-  panTo = vi.fn((center: unknown) => this.moveTo({ center }));
   panBy = vi.fn(() => this);
   stop = vi.fn(() => this);
   isMoving = vi.fn(() => false);
@@ -590,19 +622,58 @@ export class Map
     this.pixelRatioOverride = pixelRatio;
   });
 
-  /** One pixel per thousandth of a degree, y growing to the south */
+  /**
+   * One pixel per thousandth of a degree around the centre, y growing down
+   * the screen. The bearing turns it and the pitch foreshortens what runs up
+   * the screen, without the perspective of the real thing.
+   *
+   * A globe is one seen from far away along the equator of its centre: what
+   * lies east or west comes closer together towards the rim, 90 degrees of
+   * longitude away, and what is further round than that is behind the globe
+   * and answers with the point its mirror image is drawn at, like MapLibre.
+   */
   project = vi.fn((lngLat: unknown) => {
     const p = assertLngLat(lngLat, "project");
+    const east = this.eastOf(p.lng - this.center.lng) * 1000;
+    const north = (p.lat - this.center.lat) * 1000;
+    const { sin, cos } = this.turn();
     return new Point(
-      (p.lng - this.center.lng) * 1000,
-      (this.center.lat - p.lat) * 1000,
+      east * cos - north * sin,
+      -(east * sin + north * cos) * this.flatten(),
     );
   });
 
   unproject = vi.fn((point: Point | [number, number]) => {
     const [x, y] = Array.isArray(point) ? point : [point.x, point.y];
-    return new LngLat(this.center.lng + x / 1000, this.center.lat - y / 1000);
+    const up = -y / this.flatten();
+    const { sin, cos } = this.turn();
+    return new LngLat(
+      this.center.lng + this.degreesEast((x * cos + up * sin) / 1000),
+      this.center.lat + (up * cos - x * sin) / 1000,
+    );
   });
+
+  /** Degrees of longitude from the centre as degrees across the map */
+  private eastOf(degrees: number): number {
+    if (this.projection?.type !== "globe") return degrees;
+    return (Math.sin((degrees * Math.PI) / 180) * 180) / Math.PI;
+  }
+
+  /** The other way round; on a globe the answer is on the near side */
+  private degreesEast(across: number): number {
+    if (this.projection?.type !== "globe") return across;
+    const sine = Math.max(-1, Math.min(1, (across * Math.PI) / 180));
+    return (Math.asin(sine) * 180) / Math.PI;
+  }
+
+  private turn(): { sin: number; cos: number } {
+    const radians = (this.bearing * Math.PI) / 180;
+    return { sin: Math.sin(radians), cos: Math.cos(radians) };
+  }
+
+  private flatten(): number {
+    return Math.cos((this.pitch * Math.PI) / 180);
+  }
 
   queryRenderedFeatures = vi.fn(() => this.renderedFeatures);
 

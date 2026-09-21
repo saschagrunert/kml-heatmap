@@ -13,7 +13,11 @@ import {
 } from "../utils/constants";
 import { ddToDms } from "../utils/geometry";
 import { generateAirportPopupHtml } from "../utils/htmlGenerators";
-import { panPopupIntoView } from "../utils/mapHelpers";
+import {
+  closeWhenBehindGlobe,
+  isBehindGlobe,
+  panPopupIntoView,
+} from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { loadFeatures } from "../services/featureLoader";
 
@@ -100,6 +104,7 @@ export class AirportManager {
     });
 
     this.popup.on("close", () => this.onPopupClosed());
+    if (app.map) closeWhenBehindGlobe(app.map, this.popup);
   }
 
   /**
@@ -307,7 +312,13 @@ export class AirportManager {
     const counts = this.airportFlightCounts();
     const placed: DOMRect[] = [];
 
+    // A marker behind the globe is hidden, not gone: its label keeps a box,
+    // at the point the far side projects to, right among the visible ones.
+    // Asked of the map and not of the class MapLibre hides it by, which it
+    // sets a frame after the move this may run at the end of.
+    const map = this.app.map;
     const labels = Object.entries(this.app.airportMarkers)
+      .filter(([, marker]) => !map || !isBehindGlobe(map, marker.getLatLng()))
       .map(([name, marker]) => ({
         name,
         label: marker.getElement().querySelector<HTMLElement>(".airport-label"),
