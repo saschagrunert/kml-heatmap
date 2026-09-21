@@ -114,8 +114,13 @@ podman run --rm --userns=keep-id -v "$PWD:/work" -w /work mcr.microsoft.com/play
 ```
 
 Tests are located in `tests/e2e/` and configured via `playwright.config.ts`.
-The test server starts `python3 -m http.server` serving `docs/`. Failed tests
-keep their traces in `test-results/`, and every run writes an HTML report to
+The test server starts `python3 -m http.server` serving `docs/` on port 8000,
+or on `E2E_PORT` when that is set: two checkouts tested at the same time (git
+worktrees, for one) need a port each, or the second would reuse the first
+one's server and test the wrong site. The visual project runs in a
+container; with `--network host`, as in CONTRIBUTING.md, it shares the host's
+ports and needs the variable passed in (`-e E2E_PORT`). Failed tests keep
+their traces in `test-results/`, and every run writes an HTML report to
 `playwright-report/` (`npx playwright show-report`).
 
 **Build Output:**
