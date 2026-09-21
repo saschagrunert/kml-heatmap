@@ -1,6 +1,7 @@
 /**
  * Geometry utility functions for coordinate calculations
  */
+import { MAP_MAX_PITCH } from "./constants";
 
 /**
  * Coordinate tuple [latitude, longitude]
@@ -32,7 +33,28 @@ export function toMapCenter(center: {
   }
   // Only out of range: the wrap adds rounding noise, and turns 180 into -180
   if (Math.abs(lng) <= 180) return { lat, lng };
-  return { lat, lng: ((((lng + 180) % 360) + 360) % 360) - 180 };
+  return { lat, lng: wrapDegrees(lng) };
+}
+
+/** Degrees wrapped into -180 to 180 */
+function wrapDegrees(degrees: number): number {
+  return ((((degrees + 180) % 360) + 360) % 360) - 180;
+}
+
+/**
+ * A bearing of a link or of saved state as the map reports its own: any
+ * finite number of degrees, wrapped into -180 to 180. Null for anything else.
+ */
+export function toMapBearing(bearing: unknown): number | null {
+  if (typeof bearing !== "number" || !isFinite(bearing)) return null;
+  // Only out of range, for the reason given in toMapCenter
+  return Math.abs(bearing) <= 180 ? bearing : wrapDegrees(bearing);
+}
+
+/** A pitch of a link or of saved state, held to what the map tilts to */
+export function toMapPitch(pitch: unknown): number | null {
+  if (typeof pitch !== "number" || !isFinite(pitch)) return null;
+  return Math.max(0, Math.min(MAP_MAX_PITCH, pitch));
 }
 
 /**

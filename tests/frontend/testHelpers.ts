@@ -115,6 +115,7 @@ interface MockManagers {
     updateAirportPopups: Mock;
     updateAirportOpacity: Mock;
     updateAirportMarkerSizes: Mock;
+    declutterLabels: Mock;
     openPopup: Mock;
     closePopup: Mock;
     isPopupOpen: Mock;
@@ -158,6 +159,10 @@ interface MockManagers {
     closeWrapped: Mock;
     userMapView: Mock;
     destroy: Mock;
+  };
+  mapOrientation: {
+    toggleGlobe: Mock;
+    resetNorth: Mock;
   };
   uiToggles: {
     toggleHeatmap: Mock;
@@ -217,6 +222,8 @@ export interface MockAppOverrides extends Partial<StoreState> {
   };
   /** A map of the test's own, or null for an app without one */
   map?: MockMapLibreMap | null;
+  /** In place of the one that has resolved with the map already */
+  mapReady?: Promise<unknown>;
 }
 
 function createMockManagers(): MockManagers {
@@ -288,6 +295,7 @@ function createMockManagers(): MockManagers {
       updateAirportPopups: vi.fn(),
       updateAirportOpacity: vi.fn(),
       updateAirportMarkerSizes: vi.fn(),
+      declutterLabels: vi.fn(),
       openPopup: vi.fn(),
       closePopup: vi.fn(),
       isPopupOpen: vi.fn(() => false),
@@ -324,6 +332,10 @@ function createMockManagers(): MockManagers {
     loadWrapped: vi.fn(() => Promise.resolve(wrappedManager)),
     replayManager,
     wrappedManager,
+    mapOrientation: {
+      toggleGlobe: vi.fn(),
+      resetNorth: vi.fn(),
+    },
     uiToggles: {
       toggleHeatmap: vi.fn(),
       toggleAltitude: vi.fn(),

@@ -10,7 +10,7 @@ import {
   encodeStateToUrl,
   parseUrlParams,
 } from "../state/urlState";
-import { toMapCenter } from "../utils/geometry";
+import { toMapBearing, toMapCenter, toMapPitch } from "../utils/geometry";
 import { mapZoomToState } from "../utils/mapHelpers";
 
 const STORAGE_KEY = "kml-heatmap-state";
@@ -35,6 +35,7 @@ const BOOLEAN_KEYS = [
   "airspeedVisible",
   "airportsVisible",
   "aviationVisible",
+  "globeVisible",
   "isolateSelection",
   "statsPanelVisible",
   "wrappedVisible",
@@ -69,6 +70,12 @@ export function sanitizeSavedState(candidate: unknown): SavedState {
     const point = toMapCenter({ lat: center["lat"], lng: center["lng"] });
     if (point) result.center = point;
   }
+  // Absent from every state saved before the map could turn, which leaves
+  // those north up and flat
+  const bearing = toMapBearing(candidate["bearing"]);
+  if (bearing !== null) result.bearing = bearing;
+  const pitch = toMapPitch(candidate["pitch"]);
+  if (pitch !== null) result.pitch = pitch;
   for (const key of BOOLEAN_KEYS) {
     const value = candidate[key];
     if (typeof value === "boolean") {
@@ -120,6 +127,7 @@ export class StateManager {
       "airspeedVisible",
       "airportsVisible",
       "aviationVisible",
+      "globeVisible",
       "statsPanelVisible",
       "wrappedVisible",
     ];
@@ -180,6 +188,8 @@ export class StateManager {
     const view = this.app.wrappedManager?.userMapView() ?? {
       center: this.app.map.getCenter(),
       zoom: this.app.map.getZoom(),
+      bearing: this.app.map.getBearing(),
+      pitch: this.app.map.getPitch(),
     };
     // Panning across the antimeridian takes the longitude past 180. The
     // wrapped one is the same place, and what a link is expected to carry;
@@ -193,6 +203,9 @@ export class StateManager {
       // above the map's, so a link shared before the map library changed
       // still shows the same area. MapApp converts back on restore.
       zoom: mapZoomToState(view.zoom),
+      bearing: view.bearing,
+      pitch: view.pitch,
+      globeVisible: this.app.globeVisible,
       heatmapVisible: this.app.heatmapVisible,
       altitudeVisible: this.app.altitudeVisible,
       airspeedVisible: this.app.airspeedVisible,

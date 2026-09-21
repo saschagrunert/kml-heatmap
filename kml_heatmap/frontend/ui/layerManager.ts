@@ -54,6 +54,7 @@ import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 import { logError } from "../utils/logger";
 import {
+  closeWhenBehindGlobe,
   isInMarker,
   isOnMarker,
   toLngLat,
@@ -572,7 +573,7 @@ export class LayerManager implements PathHitTester {
       // No pointer to follow: the values stay where the finger was until
       // the next tap on the map closes them
       this.touchPopup?.remove();
-      this.touchPopup = new Popup({
+      const popup = (this.touchPopup = new Popup({
         // Not the tooltip's class: that one takes no pointer events, and
         // this popup has a close button to press
         className: `${SEGMENT_DETAILS_CLASS} segment-popup`,
@@ -583,7 +584,10 @@ export class LayerManager implements PathHitTester {
         closeOnClick: false,
         maxWidth: "none",
         focusAfterOpen: false,
-      })
+      }));
+      // Before it opens: that is the moment it starts to follow the map
+      closeWhenBehindGlobe(map, popup);
+      popup
         .setLngLat(lngLat)
         .setHTML(this.formatSegmentTooltip(hit.segment))
         .addTo(map);

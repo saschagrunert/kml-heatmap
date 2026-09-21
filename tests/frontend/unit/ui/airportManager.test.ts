@@ -157,6 +157,20 @@ describe("AirportManager", () => {
       expect(airportManager.isPopupOpen()).toBe(true);
     });
 
+    it("closes once the globe has turned its airport away", () => {
+      mockApp.map!.setProjection({ type: "globe" });
+      markers["EDDF"]!.openPopup();
+
+      mockApp.map!.jumpTo({ center: [60, 40] });
+      mockApp.map!.emit("move");
+      expect(popup.isOpen()).toBe(true);
+
+      mockApp.map!.jumpTo({ center: [-160, 40] });
+      mockApp.map!.emit("move");
+      expect(popup.isOpen()).toBe(false);
+      expect(airportManager.isPopupOpen()).toBe(false);
+    });
+
     it("writes the content when it opens, not before", () => {
       airportManager.updateAirportPopups();
 
@@ -631,6 +645,36 @@ describe("AirportManager", () => {
         height: 14,
       });
 
+      airportManager.declutterLabels();
+
+      expect(eddf.classList.contains("airport-label-crowded")).toBe(false);
+      expect(eddm.classList.contains("airport-label-crowded")).toBe(true);
+    });
+
+    it("gives a label behind the globe no say, hidden as its marker is", () => {
+      // The far side projects into the disc, so the busier EDDF, turned
+      // away, would still crowd out EDDM, which is in plain sight
+      const eddf = withLabel("EDDF", {
+        left: 100,
+        top: 100,
+        width: 40,
+        height: 14,
+      });
+      const eddm = withLabel("EDDM", {
+        left: 120,
+        top: 104,
+        width: 40,
+        height: 14,
+      });
+      mockApp.map!.setProjection({ type: "globe" });
+      mockApp.map!.jumpTo({ center: [8.67 + 91.5, 49] });
+
+      airportManager.declutterLabels();
+
+      expect(eddm.classList.contains("airport-label-crowded")).toBe(false);
+
+      // Both in sight again, the busier one wins as it always did
+      mockApp.map!.jumpTo({ center: [10, 49] });
       airportManager.declutterLabels();
 
       expect(eddf.classList.contains("airport-label-crowded")).toBe(false);

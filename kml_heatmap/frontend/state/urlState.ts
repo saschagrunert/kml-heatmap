@@ -5,7 +5,11 @@
 
 import type { AppState } from "../types";
 import { MAX_ZOOM, MIN_ZOOM } from "../utils/constants";
-import { toMapCenter } from "../utils/geometry";
+import { toMapBearing, toMapCenter, toMapPitch } from "../utils/geometry";
+
+function roundToTenth(value: number): number {
+  return Math.round(value * 10) / 10;
+}
 
 /**
  * Schema version of the persisted selection. Ids saved by an older release
@@ -64,6 +68,9 @@ function parsePathId(text: string, radix: number): number | null {
  *   v - layer visibility (9-char binary string: '100100000')
  *   lat, lng - map center coordinates
  *   z - zoom level, in state units (one above the map's, see ZOOM_OFFSET)
+ *   b - bearing in degrees, clockwise from north (absent: north up)
+ *   t - tilt (pitch) in degrees (absent: flat)
+ *   g - '1' when the map is drawn as a globe (absent: Mercator)
  * @param params - URLSearchParams object or search string
  * @returns Parsed state or null if no params
  */
@@ -175,6 +182,15 @@ export function parseUrlParams(
     }
   }
 
+  // Orientation and projection. A link from before the map could turn has
+  // none of the three and opens north up, flat and in Mercator, as it
+  // always did. `parseFloat("")` is NaN, which both checks turn away.
+  const bearing = toMapBearing(parseFloat(urlParams.get("b") ?? ""));
+  if (bearing !== null) state.bearing = bearing;
+  const pitch = toMapPitch(parseFloat(urlParams.get("t") ?? ""));
+  if (pitch !== null) state.pitch = pitch;
+  if (urlParams.get("g") === "1") state.globeVisible = true;
+
   return state;
 }
 
@@ -260,6 +276,15 @@ export function encodeStateToUrl(state: AppState): string {
   if (state.zoom !== undefined) {
     params.set("z", state.zoom.toFixed(2));
   }
+
+  // The defaults stay out of the link: most views are north up, flat and
+  // in Mercator, and their links are no longer than they were. A tenth of
+  // a degree is finer than anyone can see.
+  const bearing = roundToTenth(state.bearing ?? 0);
+  if (bearing !== 0) params.set("b", String(bearing));
+  const pitch = roundToTenth(state.pitch ?? 0);
+  if (pitch !== 0) params.set("t", String(pitch));
+  if (state.globeVisible) params.set("g", "1");
 
   return params.toString();
 }

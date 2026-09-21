@@ -694,6 +694,43 @@ body {
 }
 
 /* ==========================================================================
+   Compass
+
+   The needle is turned to where north is; the angle
+   comes from ui/mapOrientation.ts. It sits on the button because the icon
+   inside is drawn again whenever the chrome changes size.
+   ========================================================================== */
+.compass-btn .icon {
+  /* The arrow is drawn pointing north-east (see utils/icons.ts) */
+  transform: rotate(calc(var(--compass-turn, 0deg) - 45deg));
+}
+/* The phone's compass, there only while the map is turned or tilted. One
+   row below the top edge, which the selection chip spans on a narrow phone. */
+#compass-float-btn {
+  display: none;
+  position: fixed;
+  top: calc(
+    var(--edge-gap) + var(--safe-top) + var(--btn-min-height) + var(--space-sm)
+  );
+  right: calc(var(--edge-gap) + var(--safe-right));
+  z-index: var(--z-controls);
+  justify-content: center;
+  width: var(--btn-min-height);
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* A marker on the far side of the globe. MapLibre only fades it, and a
+   faded marker still takes a click and a tab stop for a place nobody sees.
+   Not the one that has focus: hidden, it would drop focus to <body> in the
+   middle of turning the globe with the keys. MapOrientation hands its focus
+   to the map once the move has ended, and then it goes like the others. */
+.maplibregl-marker-covered:not(:focus-within) {
+  visibility: hidden;
+}
+
+/* ==========================================================================
    Color legends
    ========================================================================== */
 .color-legend {
@@ -1451,6 +1488,10 @@ body.stats-open #left-buttons {
     --edge-gap: 8px;
     /* The scale bottoms out at 12px here; nothing reads smaller on mobile */
     --text-xs: 12px;
+  }
+
+  #compass-float-btn:not([hidden]) {
+    display: inline-flex;
   }
 
   /* Bottom bar */

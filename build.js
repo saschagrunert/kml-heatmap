@@ -186,7 +186,17 @@ function analyzeBundleComposition(metafile, fileName) {
 // marker and Wrapped interactions away from the map). 107.9 KB with both.
 // The room on top is small on purpose. Decoding the year files in a worker
 // will take that code out of this bundle again.
-const BUDGET_APP = 110 * 1024;
+// Raised from 110 KB for the map that turns, tilts and becomes a globe: 3.3 KB
+// on top of the 108.2 KB main had, which is 111.6 KB. 1.6 KB of it is the
+// compass and the globe switch (the app's own buttons rather than MapLibre's
+// controls, see ui/mapOrientation.ts). The rest is the bearing, the pitch and
+// the projection in the link and the saved state, the row in the mobile
+// sheet, one more icon, and what a globe needs that MapLibre does not do:
+// telling what is behind it, closing the popups there, and a pan that brings
+// a popup into view on a map where a pixel is not the same way everywhere.
+// None of it can load later: a link may open turned and as a globe, and the
+// controls are on the first paint.
+const BUDGET_APP = 112 * 1024;
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.

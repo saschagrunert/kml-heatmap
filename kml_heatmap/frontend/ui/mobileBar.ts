@@ -34,6 +34,7 @@ const SHEET_KEYS = [
   "airspeedVisible",
   "airportsVisible",
   "aviationVisible",
+  "globeVisible",
   "selectedPathIds",
   "isolateSelection",
   "selectedYear",
@@ -346,6 +347,17 @@ export class MobileBar {
         label: "Aviation",
         isOn: () => app.aviationVisible,
         onToggle: () => app.uiToggles.toggleAviation(),
+      },
+      // Not a layer, but how the layers are drawn, and this is the sheet
+      // someone looks in for it. The compass floats over the map instead
+      // (see MapOrientation): it has to be in reach while the map is turned.
+      {
+        kind: "switch",
+        id: "globe",
+        icon: "globe",
+        label: "Globe",
+        isOn: () => app.globeVisible,
+        onToggle: () => app.mapOrientation.toggleGlobe(),
       },
     ];
   }

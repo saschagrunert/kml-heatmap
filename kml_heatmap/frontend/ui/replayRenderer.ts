@@ -27,7 +27,13 @@ import {
   NAUTICAL_MILES_TO_KM,
 } from "../utils/constants";
 import { icon } from "../utils/icons";
-import { fromLngLat, panPopupIntoView, toLngLat } from "../utils/mapHelpers";
+import {
+  closeWhenBehindGlobe,
+  fromLngLat,
+  isBehindGlobe,
+  panPopupIntoView,
+  toLngLat,
+} from "../utils/mapHelpers";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
 import { calculateSmoothedBearing } from "../features/replay";
@@ -118,6 +124,44 @@ export function unwrapRotation(
   if (previous === null) return target;
   const delta = ((((target - previous) % 360) + 540) % 360) - 180;
   return previous + delta;
+}
+
+/** Pixels between the two points a heading on screen is measured from */
+const HEADING_PROBE_PX = 16;
+
+/**
+ * The angle the airplane is drawn at, clockwise from the top of the screen,
+ * for a track over the ground. On a flat map that is north up the two are
+ * the same. Turned, the map's bearing comes off; tilted, a track across the
+ * screen keeps its length while one up the screen is foreshortened; and on
+ * a globe north is not up anywhere but on the centre meridian. Measuring
+ * between the position and a point a few pixels further along the track
+ * answers for all three at once.
+ */
+export function screenHeading(
+  map: MapLibreMap,
+  position: readonly [lat: number, lon: number],
+  track: number,
+): number {
+  const globe = map.getProjection()?.type === "globe";
+  if (!globe && map.getBearing() === 0 && map.getPitch() === 0) return track;
+
+  const [lat, lon] = position;
+  // Degrees of latitude the probe spans at this zoom (512 px tiles)
+  const step = (HEADING_PROBE_PX * 360) / (512 * 2 ** map.getZoom());
+  const radians = (track * Math.PI) / 180;
+  // A degree of longitude shrinks with the latitude; held off the poles
+  const shrink = Math.max(Math.cos((lat * Math.PI) / 180), 0.01);
+  const from = map.project([lon, lat]);
+  const to = map.project([
+    lon + (step * Math.sin(radians)) / shrink,
+    Math.max(-89, Math.min(89, lat + step * Math.cos(radians))),
+  ]);
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (dx === 0 && dy === 0) return track - map.getBearing();
+  // Screen y grows downwards
+  return (Math.atan2(dx, -dy) * 180) / Math.PI;
 }
 
 /**
@@ -297,6 +341,7 @@ export class AirplaneMarker implements ReplayAirplane {
       focusAfterOpen: false,
       offset: AIRPLANE_POPUP_OFFSET,
     });
+    closeWhenBehindGlobe(map, this.popup);
     this.marker = new Marker({ element, anchor: "center" })
       .setLngLat(toLngLat(position))
       .addTo(map);
@@ -361,6 +406,8 @@ interface TransportCache {
 class UserMapMovement {
   private pressed = false;
   private moving = false;
+  /** A turn or a tilt is under way, the compass's included */
+  private turning = false;
   /** Removes the DOM listeners */
   private readonly listening = new AbortController();
 
@@ -383,14 +430,25 @@ class UserMapMovement {
    */
   private readonly onMoveEnd = (e: { originalEvent?: unknown }): void => {
     if (e.originalEvent) this.moving = false;
+    this.turning = false;
+  };
+
+  /**
+   * The compass turns the map with a camera move of the app, which carries
+   * no DOM event. A follow pan would end it in its first frame all the same,
+   * and the click would seem to do nothing. No follow pan turns or tilts, so
+   * whatever does is left to finish.
+   */
+  private readonly onTurnStart = (): void => {
+    this.turning = true;
   };
 
   constructor(private readonly map: MapLibreMap) {
     const container = map.getCanvasContainer();
     const signal = this.listening.signal;
     const press = (e: Event): void => {
-      // The primary button only. Any other moves nothing (rotating is off),
-      // and the context menu of a right click swallows the `mouseup` on
+      // The primary button only. The right one turns the map, which the
+      // `movestart` of the turn says, and the context menu of a right click swallows the `mouseup` on
       // Linux and macOS, which would leave the press on for good.
       if (e instanceof MouseEvent && e.button !== 0) return;
       this.pressed = true;
@@ -419,21 +477,30 @@ class UserMapMovement {
     );
     map.on("movestart", this.onMoveStart);
     map.on("zoomstart", this.onMoveStart);
+    map.on("rotatestart", this.onTurnStart);
+    map.on("pitchstart", this.onTurnStart);
     map.on("moveend", this.onMoveEnd);
   }
 
   isActive(): boolean {
     // Should an end ever go missing, a map at rest is proof enough
-    if (this.moving && !this.map.isMoving()) this.moving = false;
+    if (!this.map.isMoving()) this.moving = this.turning = false;
     // The wheel has neither a press nor, before the frame that follows its
     // first event, a move; its handler is active from that event on
-    return this.pressed || this.moving || this.map.scrollZoom.isActive();
+    return (
+      this.pressed ||
+      this.moving ||
+      this.turning ||
+      this.map.scrollZoom.isActive()
+    );
   }
 
   stop(): void {
     this.listening.abort();
     this.map.off("movestart", this.onMoveStart);
     this.map.off("zoomstart", this.onMoveStart);
+    this.map.off("rotatestart", this.onTurnStart);
+    this.map.off("pitchstart", this.onTurnStart);
     this.map.off("moveend", this.onMoveEnd);
   }
 }
@@ -459,6 +526,20 @@ export class ReplayRenderer {
   private trailFrameId: number | null = null;
   /** Follows the user's hand on the map while a replay follows the airplane */
   private userMovement: UserMapMovement | null = null;
+  /** The airplane, where it is and the track it flies, as last displayed */
+  private heading: {
+    marker: ReplayAirplane;
+    position: [number, number];
+    track: number;
+  } | null = null;
+  /** The map whose moves turn the icon, while a replay shows one */
+  private turningWith: MapLibreMap | null = null;
+
+  /**
+   * A map that turns under a paused airplane changes where its track
+   * points on screen, and no frame of the replay comes to say so
+   */
+  private readonly onMapMove = (): void => this.turnIcon();
 
   constructor(app: MapApp) {
     this.app = app;
@@ -647,10 +728,41 @@ export class ReplayRenderer {
     if (map) this.userMovement ??= new UserMapMovement(map);
   }
 
-  /** Stop listening for the user's map gestures; the replay is closing */
-  stopWatchingUser(): void {
+  /** Stop listening to the map and to the user's hand on it; the replay is closing */
+  stopWatchingMap(): void {
     this.userMovement?.stop();
     this.userMovement = null;
+    this.turningWith?.off("move", this.onMapMove);
+    this.turningWith = null;
+    this.heading = null;
+  }
+
+  /**
+   * Turn the icon to the track as it runs on screen. Hardware-accelerated
+   * transforms; the same angle as last time is not written again. The
+   * marker is drawn nose up, so the rotation is the heading itself: the old
+   * emoji pointed north-east and needed the difference taken out.
+   */
+  private turnIcon(): void {
+    const map = this.app.map;
+    if (!map || !this.heading) return;
+    const { marker, position, track } = this.heading;
+    const iconDiv = this.airplaneIcon(marker);
+    if (!iconDiv) return;
+    if (this.turningWith !== map) {
+      this.turningWith?.off("move", this.onMapMove);
+      map.on("move", this.onMapMove);
+      this.turningWith = map;
+    }
+    this.rotation = unwrapRotation(
+      this.rotation,
+      screenHeading(map, position, track),
+    );
+    const transform = "translate3d(0,0,0) rotate(" + this.rotation + "deg)";
+    if (transform !== this.lastTransform) {
+      this.lastTransform = transform;
+      iconDiv.style.transform = transform;
+    }
   }
 
   updateDisplay(
@@ -752,19 +864,9 @@ export class ReplayRenderer {
       this.keepAirplaneInView(replayManager, currentPos, isManualSeek);
     }
 
-    // Update rotation using hardware-accelerated transforms; the same
-    // heading as last frame is not written again. The marker is drawn nose
-    // up, so the rotation is the track itself: the old emoji pointed
-    // north-east and needed the difference taken out of the bearing.
-    const iconDiv = this.airplaneIcon(marker);
-    if (iconDiv) {
-      this.rotation = unwrapRotation(this.rotation, bearing);
-      const transform = "translate3d(0,0,0) rotate(" + this.rotation + "deg)";
-      if (transform !== this.lastTransform) {
-        this.lastTransform = transform;
-        iconDiv.style.transform = transform;
-      }
-    }
+    // After the camera, which may have moved the map under the airplane
+    this.heading = { marker, position: currentPos, track: bearing };
+    this.turnIcon();
 
     // The popup describes a segment, so an open one is rebuilt only once the
     // airplane has reached another segment, not on every frame
@@ -855,6 +957,7 @@ export class ReplayRenderer {
     // The same goes for the user's hand on the map: a camera move resets
     // every gesture, so a pan on each frame would end a drag or a pinch the
     // moment it starts. The follow pan picks up again once they let go.
+    // and so does the compass on its way north, which is a move of the app
     if (this.userMovement?.isActive()) return;
 
     const container = map.getContainer();
@@ -863,7 +966,15 @@ export class ReplayRenderer {
     const marginX = mapSize.x * EDGE_MARGIN_FRACTION;
     const marginY = mapSize.y * EDGE_MARGIN_FRACTION;
 
+    // Behind the globe the airplane projects into the disc, never off the
+    // map, while the marker is hidden: a long flight would fly over the rim
+    // and leave an empty globe behind
+    const behind = isBehindGlobe(map, {
+      lat: currentPos[0],
+      lng: currentPos[1],
+    });
     const nearEdge =
+      behind ||
       point.x < marginX ||
       point.x > mapSize.x - marginX ||
       point.y < marginY ||
@@ -871,7 +982,11 @@ export class ReplayRenderer {
     if (!nearEdge) return;
 
     const outsideViewport =
-      point.x < 0 || point.x > mapSize.x || point.y < 0 || point.y > mapSize.y;
+      behind ||
+      point.x < 0 ||
+      point.x > mapSize.x ||
+      point.y < 0 ||
+      point.y > mapSize.y;
 
     const now = Date.now();
     if (isManualSeek) {

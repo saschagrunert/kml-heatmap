@@ -30,6 +30,13 @@ export const MAP_MIN_ZOOM = MIN_ZOOM - ZOOM_OFFSET;
 export const MAP_MAX_ZOOM = MAX_ZOOM - ZOOM_OFFSET;
 
 /**
+ * How far the map tilts, in degrees. MapLibre's own default: past it a flat
+ * map shows its horizon, which needs a sky above it and tiles out to the
+ * vanishing point.
+ */
+export const MAP_MAX_PITCH = 60;
+
+/**
  * Zoom of a view that names no zoom of its own: the map's first view, and
  * a link that carries a centre without `z`. Map units.
  */

@@ -168,6 +168,20 @@ describe("ReplayManager playback", () => {
       expect(requestAnimationFrame).toHaveBeenCalledTimes(4);
     });
 
+    it("keeps the user's bearing and pitch through the fit at the end", () => {
+      // A fit of MapLibre turns the map north up unless it names a bearing
+      mockApp.map!.jumpTo({ bearing: 120, pitch: 45 });
+      replayManager.state.currentTime = replayManager.state.maxTime - 0.001;
+      replayManager.state.speed = 1000;
+
+      replayManager.playReplay();
+      vi.advanceTimersByTime(50);
+
+      expect(mockApp.map!.fitBounds).toHaveBeenCalledOnce();
+      expect(mockApp.map!.getBearing()).toBe(120);
+      expect(mockApp.map!.getPitch()).toBe(45);
+    });
+
     it("pauses, fits bounds and announces when reaching max time", () => {
       replayManager.state.currentTime = replayManager.state.maxTime - 0.001;
       replayManager.state.speed = 1000;
@@ -183,7 +197,7 @@ describe("ReplayManager playback", () => {
           [16.0, 48.0],
           [16.3, 48.3],
         ],
-        { padding: 50, duration: 1000, animate: true },
+        { bearing: 0, padding: 50, duration: 1000, animate: true },
       );
       expect(liveRegionText()).toBe("Replay finished");
       expect(el("replay-play-btn").hidden).toBe(false);

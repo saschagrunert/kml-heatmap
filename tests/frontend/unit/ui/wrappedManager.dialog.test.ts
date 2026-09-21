@@ -228,7 +228,8 @@ describe("WrappedManager dialog", () => {
           [8, 48],
           [12, 51],
         ],
-        { padding: 80, animate: true },
+        // North up and flat, whatever the user's view was
+        { padding: 80, bearing: 0, pitch: 0, animate: true },
       );
       expect(mockApp.map!.resize.mock.invocationCallOrder[0]!).toBeLessThan(
         mockApp.map!.fitBounds.mock.invocationCallOrder[1]!,
@@ -514,10 +515,33 @@ describe("WrappedManager dialog", () => {
       expect(mockApp.map!.jumpTo).toHaveBeenCalledWith({
         center: [11.6, 48.1],
         zoom: 12,
+        bearing: 0,
+        pitch: 0,
       });
       expect(mockApp.map!.jumpTo.mock.invocationCallOrder[0]!).toBeGreaterThan(
         remeasured,
       );
+    });
+
+    it("lays a turned and tilted map flat for the overview and turns it back", () => {
+      mockApp.map!.jumpTo({ center: [11.6, 48.1], bearing: 120, pitch: 45 });
+      mockApp.map!.jumpTo.mockClear();
+
+      openWrapped();
+      vi.advanceTimersByTime(200);
+
+      expect(mockApp.map!.getBearing()).toBe(0);
+      expect(mockApp.map!.getPitch()).toBe(0);
+      expect(wrappedManager.userMapView()).toMatchObject({
+        bearing: 120,
+        pitch: 45,
+      });
+
+      wrappedManager.closeWrapped();
+      vi.advanceTimersByTime(100);
+
+      expect(mockApp.map!.getBearing()).toBe(120);
+      expect(mockApp.map!.getPitch()).toBe(45);
     });
 
     it("keeps the user's view through a reopening before it was put back", () => {
@@ -537,6 +561,8 @@ describe("WrappedManager dialog", () => {
       expect(mockApp.map!.jumpTo).toHaveBeenCalledWith({
         center: [11.6, 48.1],
         zoom: 12,
+        bearing: 0,
+        pitch: 0,
       });
     });
 
@@ -688,7 +714,12 @@ describe("WrappedManager dialog", () => {
 
   describe("userMapView", () => {
     it("offers the user's view while the map is fitted, until it is put back", () => {
-      const center = { lat: 48.1, lng: 11.6 };
+      const view = {
+        center: { lat: 48.1, lng: 11.6 },
+        zoom: 12,
+        bearing: 0,
+        pitch: 0,
+      };
       mockApp.map!.getCenter.mockReturnValue(new LngLat(11.6, 48.1));
       mockApp.map!.getZoom.mockReturnValue(12);
       expect(wrappedManager.userMapView()).toBeNull();
@@ -698,12 +729,12 @@ describe("WrappedManager dialog", () => {
       mockApp.map!.getCenter.mockReturnValue(new LngLat(9, 51));
       mockApp.map!.getZoom.mockReturnValue(6.75);
       // The app's shape of a position, and the zoom in the map's own unit
-      expect(wrappedManager.userMapView()).toEqual({ center, zoom: 12 });
+      expect(wrappedManager.userMapView()).toEqual(view);
 
       wrappedManager.closeWrapped();
       // Still the user's until the close has put it back, so a save that
       // runs in between (the dialog state changed) keeps it
-      expect(wrappedManager.userMapView()).toEqual({ center, zoom: 12 });
+      expect(wrappedManager.userMapView()).toEqual(view);
       vi.advanceTimersByTime(100);
       expect(wrappedManager.userMapView()).toBeNull();
     });

@@ -187,6 +187,118 @@ export async function setView(
   await waitForMapIdle(page);
 }
 
+/** How the map is turned, tilted and projected */
+export interface MapOrientation {
+  /** Degrees the top of the map is turned from north, -180 to 180 */
+  bearing: number;
+  /** Degrees the map is tilted, 0 for flat */
+  pitch: number;
+  projection: "mercator" | "globe";
+}
+
+/**
+ * The angles come rounded to a millionth of a degree: the map keeps them in
+ * radians, and 120.26 degrees comes back as 120.26000000000002.
+ */
+export function getOrientation(page: Page): Promise<MapOrientation> {
+  return page.evaluate(() => {
+    const map = window.mapApp!.map!;
+    const rounded = (degrees: number): number =>
+      Math.round(degrees * 1e6) / 1e6 || 0;
+    return {
+      bearing: rounded(map.getBearing()),
+      pitch: rounded(map.getPitch()),
+      // A style names no projection until one is set, and means Mercator
+      projection: map.getProjection()?.type === "globe" ? "globe" : "mercator",
+    };
+  });
+}
+
+/**
+ * Turn and tilt the map without animating, the way a finished gesture leaves
+ * it, and wait until it is there. The events a gesture fires come with it.
+ */
+export async function setOrientation(
+  page: Page,
+  { bearing, pitch }: { bearing: number; pitch: number },
+): Promise<void> {
+  // Returns nothing: `jumpTo` returns the map, and Playwright would copy
+  // all of it, tiles and buffers included, out of the page (seconds on CI)
+  await page.evaluate(
+    (to) => {
+      window.mapApp!.map!.jumpTo(to);
+    },
+    { bearing, pitch },
+  );
+  await expect
+    .poll(() => getOrientation(page))
+    .toMatchObject({ bearing, pitch });
+  await waitForMapIdle(page);
+}
+
+/**
+ * Turn the map the way a mouse does: a drag with the right button. Returns
+ * once the button is up; the caller polls `getOrientation` for the answer.
+ */
+export async function dragRotate(page: Page, pixels: number): Promise<void> {
+  const box = await mapSurface(page).boundingBox();
+  if (!box) throw new Error("the map is not on the page");
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(x + pixels, y, { steps: 8 });
+  await page.mouse.up({ button: "right" });
+}
+
+/**
+ * Turn the map the way two fingers do: both on the map, a hand's width
+ * apart, twisting round the middle between them. Chromium only, which is
+ * where the touch events can be sent from (the devtools protocol).
+ */
+export async function twistRotate(page: Page, degrees: number): Promise<void> {
+  const box = await mapSurface(page).boundingBox();
+  if (!box) throw new Error("the map is not on the page");
+  const middle = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const radius = 90;
+  const fingers = (turned: number): { x: number; y: number; id: number }[] => {
+    const radians = (turned * Math.PI) / 180;
+    const dx = Math.cos(radians) * radius;
+    const dy = Math.sin(radians) * radius;
+    return [
+      { x: middle.x + dx, y: middle.y + dy, id: 0 },
+      { x: middle.x - dx, y: middle.y - dy, id: 1 },
+    ];
+  };
+  const client = await page.context().newCDPSession(page);
+  const steps = 12;
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: fingers(0),
+  });
+  for (let step = 1; step <= steps; step++) {
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: fingers((degrees * step) / steps),
+    });
+  }
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await client.detach();
+}
+
+/** The library's own compass and globe buttons, which the page does not use */
+export function libraryOrientationControls(page: Page): Locator {
+  return page.locator(".maplibregl-ctrl-compass, .maplibregl-ctrl-globe");
+}
+
+/** Markers the globe hides because they are on its far side */
+export function coveredMarkers(page: Page): Locator {
+  return page.locator(".maplibregl-marker.maplibregl-marker-covered");
+}
+
 /** Where a coordinate is drawn, in CSS pixels from the map's top left corner */
 export function containerPoint(
   page: Page,

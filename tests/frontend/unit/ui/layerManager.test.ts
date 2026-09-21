@@ -1757,6 +1757,25 @@ describe("LayerManager", () => {
       expect(mockApp.pathSelection.togglePathSelection).toHaveBeenCalledWith(1);
     });
 
+    it("closes the popup of a tap once the globe has turned its place away", () => {
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
+      mockApp.map!.setProjection({ type: "globe" });
+      const lngLat = mockApp.map!.unproject([10, 10]) as LngLat;
+      layerManager.onPathClick(
+        hitOf(mockApp.currentData!.path_segments[0]!),
+        lngLat,
+      );
+      const popup = tooltips()[0]!;
+
+      mockApp.map!.emit("move");
+      expect(popup.isOpen()).toBe(true);
+
+      // MapLibre would leave it open over whatever is drawn there now
+      mockApp.map!.jumpTo({ center: [lngLat.lng + 170, lngLat.lat] });
+      mockApp.map!.emit("move");
+      expect(popup.isOpen()).toBe(false);
+    });
+
     it("replaces the popup of the tap before", () => {
       (window as { ontouchstart?: unknown }).ontouchstart = null;
       const lngLat = mockApp.map!.unproject([10, 10]) as LngLat;

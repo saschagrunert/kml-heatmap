@@ -78,6 +78,7 @@ export type IconName =
   | "github"
   | "info"
   | "globe"
+  | "compass"
   | "clock"
   | "trophy"
   | "externalLink"
@@ -128,6 +129,11 @@ const NODES: Record<Exclude<IconName, keyof typeof OWN_PATHS>, IconNode> = {
   more: Ellipsis,
   info: Info,
   globe: Globe,
+  // An arrow rather than Lucide's compass rose: the control turns it to
+  // where north is, and the rose reads the same from every side. The arrow
+  // of the aircraft filter, which points north-east; the stylesheet turns
+  // it upright, and the set stays one shape smaller.
+  compass: Navigation,
   clock: Clock,
   trophy: Trophy,
   externalLink: ExternalLink,

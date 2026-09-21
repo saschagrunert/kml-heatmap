@@ -473,14 +473,17 @@ describe("MapApp controls and map", () => {
       const statsListener = vi.fn();
       app.store.subscribe("statsPanelVisible", statsListener);
       const signal = app.signal;
-      for (const type of ["moveend", "zoomend", "click", "error"]) {
-        expect(map.listenerCount(type)).toBe(1);
+      // `moveend` is listened to twice: the save, and the label declutter
+      // of MapOrientation, which also follows every turn and tilt
+      const types = ["moveend", "zoomend", "click", "error", "rotate", "pitch"];
+      for (const type of types) {
+        expect(map.listenerCount(type)).toBe(type === "moveend" ? 2 : 1);
       }
 
       app.destroy();
 
       expect(signal.aborted).toBe(true);
-      for (const type of ["moveend", "zoomend", "click", "error"]) {
+      for (const type of types) {
         expect(map.listenerCount(type)).toBe(0);
       }
       expect(mockStateManagerInstance.cancelSave).toHaveBeenCalled();
@@ -683,17 +686,54 @@ describe("MapApp controls and map", () => {
         minZoom: 0,
         maxZoom: 19,
         attributionControl: false,
-        dragRotate: false,
-        pitchWithRotate: false,
-        touchPitch: false,
-        rollEnabled: false,
-        maxPitch: 0,
+        bearing: 0,
+        pitch: 0,
+        maxPitch: 60,
       });
       expect(mockMap(app).options["transformRequest"]).toBeNull();
+      expect(mockMap(app).getProjection()).toBeUndefined();
+    });
+
+    it("leaves the gestures that turn and tilt the map switched on", async () => {
+      await initializeApp(app);
+
+      const options = mockMap(app).options;
+      for (const gesture of ["dragRotate", "pitchWithRotate", "touchPitch"]) {
+        expect(options).not.toHaveProperty(gesture);
+      }
       expect(
         mockMap(app).touchZoomRotate.disableRotation,
-      ).toHaveBeenCalledOnce();
-      expect(mockMap(app).keyboard.disableRotation).toHaveBeenCalledOnce();
+      ).not.toHaveBeenCalled();
+      expect(mockMap(app).keyboard.disableRotation).not.toHaveBeenCalled();
+    });
+
+    it("opens turned, tilted and as a globe when the state says so", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({
+        center: { lat: 50, lng: 10 },
+        zoom: 6,
+        bearing: -40,
+        pitch: 35,
+        globeVisible: true,
+      });
+
+      await initializeApp(app);
+
+      expect(mockMap(app).options).toMatchObject({ bearing: -40, pitch: 35 });
+      expect(mockMap(app).getProjection()).toEqual({ type: "globe" });
+      expect(
+        document.getElementById("globe-btn")!.getAttribute("aria-pressed"),
+      ).toBe("true");
+    });
+
+    it("keeps a bearing that comes without a centre through the first fit", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({ bearing: 90 });
+
+      await initializeApp(app);
+
+      expect(mockMap(app).options["fitBoundsOptions"]).toEqual({
+        padding: 30,
+        bearing: 90,
+      });
     });
 
     it("adds an attribution that stays expanded, bottom right", async () => {
