@@ -169,18 +169,6 @@ export const FALLBACK_STYLE: StyleSpecification = {
   ],
 };
 
-/**
- * What `mapReady` rejects with when the app is destroyed before the map got
- * ready. Nothing failed, so `initialize()` stops without a word instead of
- * reporting it.
- */
-class AppDestroyedError extends Error {
-  constructor() {
-    super("the app was destroyed before the map was ready");
-    this.name = "AppDestroyedError";
-  }
-}
-
 /** Delay before a Wrapped panel restored from state opens again */
 const WRAPPED_RESTORE_DELAY_MS = 500;
 
@@ -415,7 +403,10 @@ export class MapApp {
     try {
       await this.mapReady;
     } catch (error) {
-      if (error instanceof AppDestroyedError) return;
+      // Destroyed while waiting: `destroy()` settled the wait, and nothing
+      // failed. Asked of the state and not of the error, so a layer failure
+      // that races a destroy does not tear down a second time.
+      if (this.destroyed) return;
       // The controls are bound by now and the managers listen to the store.
       // None of them may go on acting on a map that has no layers, and the
       // failure notice takes the map's place, so the map goes as well.
@@ -467,7 +458,9 @@ export class MapApp {
     // With the timer gone a style request that hangs would never settle
     // this, and `initialize()` would wait for it forever. Nothing happens
     // when the map was ready already.
-    this.rejectMapReady(new AppDestroyedError());
+    this.rejectMapReady(
+      new Error("the app was destroyed before the map was ready"),
+    );
     if (this.wrappedRestoreTimer !== null) {
       clearTimeout(this.wrappedRestoreTimer);
       this.wrappedRestoreTimer = null;
@@ -678,25 +671,24 @@ export class MapApp {
   private readonly handleMapError = (e: { error?: unknown }): void => {
     const error = e.error;
     const message = error instanceof Error ? error.message : String(error);
-    if (this.styleLoaded || !this.map) {
-      logError(`Map error: ${message}`);
-      return;
-    }
-    this.useFallbackStyle(message);
+    if (!this.useFallbackStyle(message)) logError(`Map error: ${message}`);
   };
 
   /**
    * Give up on the base style and draw the flights on a plain background.
    * `setStyle` also cancels the request that is still out, so a late answer
-   * cannot replace the style the data layers were added to.
+   * cannot replace the style the data layers were added to. The one place
+   * that decides whether there is a swap to make, which it answers: once a
+   * style has loaded, or the stand-in is on its way, there is none.
    */
-  private useFallbackStyle(reason: string): void {
-    if (this.styleLoaded || !this.map) return;
+  private useFallbackStyle(reason: string): boolean {
+    if (this.styleLoaded || !this.map) return false;
     logError(`Base map style failed to load: ${reason}`);
     this.clearStyleTimer();
     // Set before the call: a second failure must not swap again
     this.styleLoaded = true;
     this.map.setStyle(FALLBACK_STYLE, { diff: false });
+    return true;
   }
 
   private clearStyleTimer(): void {
@@ -923,11 +915,15 @@ export class MapApp {
    * objects with listeners of their own, so what a click means is decided
    * here: a flight under the pointer, or the map beside every flight.
    * Markers are DOM on top of the map, and MapLibre reports a click on one
-   * as a click on the map. The app's markers stop theirs for the sake of
-   * their popups; one that does not is still no click on the map.
+   * as a click on the map: told by its target, it is none, and no marker
+   * has to keep its clicks to itself. For the same reason no popup of the
+   * app closes on a click by itself (`closeOnClick`), which would include
+   * the click on the marker that has just opened it; they are closed from
+   * here.
    */
   private handleMapClick(e: MapMouseEvent): void {
     if (isOnMarker(e)) return;
+    this.airportManager.closePopup();
     // The overview of the Wrapped dialog is this map, and it takes gestures
     // so it can be moved. A click there is none on the main map: it must
     // not change the selection behind the dialog, nor open the values of a
@@ -953,6 +949,8 @@ export class MapApp {
       this.layerManager.onPathClick(hit, e.lngLat);
       return;
     }
+    // A click on the empty map: the values a tap left go with the selection
+    this.layerManager.closeSegmentPopup();
     if (this.selectedPathIds.size > 0) {
       this.pathSelection.clearSelection();
     }

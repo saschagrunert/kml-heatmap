@@ -9,6 +9,7 @@ import {
   togglePathSelection,
   waitForAircraftFilter,
   waitForAppReady,
+  waitForWrappedMap,
   waitForYearFilter,
 } from "./helpers";
 import {
@@ -73,11 +74,7 @@ test.describe("Wrapped and Export", () => {
   test("the overview map of the dialog still zooms", async ({ page }) => {
     const modal = await openWrapped(page);
     await expect(modal.locator("#wrapped-map-container #map")).toBeVisible();
-    // A placeholder lies over the map until its tiles have landed, and
-    // would take the wheel
-    await expect(
-      page.locator("#wrapped-map-container:not(.is-awaiting-map)"),
-    ).toBeAttached();
+    await waitForWrappedMap(page);
     await waitForMapReady(page);
     const before = await getZoom(page);
 
@@ -105,9 +102,7 @@ test.describe("Wrapped and Export", () => {
       page.evaluate(() => [...window.mapApp!.selectedPathIds]);
 
     const modal = await openWrapped(page);
-    await expect(
-      page.locator("#wrapped-map-container:not(.is-awaiting-map)"),
-    ).toBeAttached();
+    await waitForWrappedMap(page);
     await waitForMapReady(page);
 
     // The overview takes gestures so it can be moved, and with them came

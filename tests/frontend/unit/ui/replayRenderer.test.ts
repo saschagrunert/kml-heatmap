@@ -320,14 +320,16 @@ describe("AirplaneMarker", () => {
     expect(airplane.marker.getPopup()).toBeFalsy();
   });
 
-  it("asks for the popup on a click and keeps the click from the map", () => {
+  it("asks for the popup on a click, which it leaves to the map as well", () => {
+    // The map's handler tells a click on a marker by its target; a marker
+    // that stops its events would be one more thing to remember
     const mapClick = vi.fn();
     map.getCanvasContainer().addEventListener("click", mapClick);
 
     airplane.getElement().click();
 
     expect(onActivate).toHaveBeenCalledTimes(1);
-    expect(mapClick).not.toHaveBeenCalled();
+    expect(mapClick).toHaveBeenCalledTimes(1);
   });
 
   it("opens from the keyboard: Enter on a focused button is a click", () => {
@@ -1122,10 +1124,8 @@ describe("ReplayRenderer", () => {
         mockReplayManager.state.playing = true;
         mockReplayManager.state.currentTime = 5;
         mockReplayManager.state.segments = [makeSegment({ time: 0 })];
-        // The first frame is what starts the watching
-        callUpdateDisplay();
-        map.easeTo.mockClear();
-        mockReplayManager.state.recenterTimestamps = [];
+        // What the manager does as a replay opens
+        renderer.watchUser();
       });
 
       function expectCameraLeftAlone(): void {
@@ -1154,6 +1154,30 @@ describe("ReplayRenderer", () => {
         expectCameraFollows();
       });
 
+      it("sees a press that began before the first frame that would pan", () => {
+        // No frame has run yet: the watching starts with the replay
+        map.getCanvasContainer().dispatchEvent(new MouseEvent("mousedown"));
+
+        expectCameraLeftAlone();
+      });
+
+      it("takes no other button for a press", () => {
+        // The context menu of a right click swallows the mouseup on Linux
+        // and macOS, and the camera would wait for it for good
+        map
+          .getCanvasContainer()
+          .dispatchEvent(new MouseEvent("mousedown", { button: 2 }));
+
+        expectCameraFollows();
+      });
+
+      it("takes a menu that opens for the end of the press", () => {
+        map.getCanvasContainer().dispatchEvent(new Event("touchstart"));
+        window.dispatchEvent(new Event("contextmenu"));
+
+        expectCameraFollows();
+      });
+
       it("keeps waiting while a finger of a pinch is still down", () => {
         map.getCanvasContainer().dispatchEvent(new Event("touchstart"));
         const lifted = Object.assign(new Event("touchend"), {
@@ -1167,13 +1191,28 @@ describe("ReplayRenderer", () => {
       it.each(["movestart", "zoomstart"])(
         "waits from a %s of the user to the moveend, a key or a glide included",
         (start) => {
+          map.isMoving.mockReturnValue(true);
           map.emit(start, { originalEvent: new Event("keydown") });
           expectCameraLeftAlone();
 
+          // A camera move of the app that ends meanwhile says nothing
+          // about the user's
           map.emit("moveend", {});
+          expectCameraLeftAlone();
+
+          map.emit("moveend", { originalEvent: new Event("keyup") });
           expectCameraFollows();
         },
       );
+
+      it("takes a map at rest for the end of a move whose end went missing", () => {
+        map.emit("movestart", { originalEvent: new Event("keydown") });
+        map.isMoving.mockReturnValue(true);
+        expectCameraLeftAlone();
+
+        map.isMoving.mockReturnValue(false);
+        expectCameraFollows();
+      });
 
       it("does not wait for a camera move of the app", () => {
         map.emit("movestart", {});
@@ -1189,7 +1228,8 @@ describe("ReplayRenderer", () => {
         expectCameraFollows();
       });
 
-      it("stops listening when the replay closes", () => {
+      it("listens once however often it is asked, and stops when the replay closes", () => {
+        renderer.watchUser();
         for (const type of ["movestart", "zoomstart", "moveend"]) {
           expect(map.listenerCount(type)).toBe(1);
         }
@@ -1199,9 +1239,7 @@ describe("ReplayRenderer", () => {
         for (const type of ["movestart", "zoomstart", "moveend"]) {
           expect(map.listenerCount(type)).toBe(0);
         }
-        // A press after that is nobody's business; the next replay starts
-        // watching anew and does not know of it
-        map.getCanvasContainer().dispatchEvent(new Event("mousedown"));
+        map.getCanvasContainer().dispatchEvent(new MouseEvent("mousedown"));
         expectCameraFollows();
       });
     });

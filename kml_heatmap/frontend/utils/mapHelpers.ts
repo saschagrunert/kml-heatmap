@@ -74,22 +74,13 @@ export function whenStyleReady(map: MapLibreMap): Promise<MapLibreMap> {
  * Whether an event of the map was aimed at a marker. MapLibre listens on
  * the container the markers sit in and does not ask: a pointer over a marker
  * moves over the map as well, and a click on one is a click on the map. The
- * app's own map handlers ask here, so no marker has to opt out of them.
+ * app's own map handlers ask here, so no marker has to opt out of them, and
+ * none stops its events: the press and the touch move the map when a drag
+ * starts on a marker, as they always have.
  */
 export function isOnMarker(e: { originalEvent?: Event | undefined }): boolean {
   const target = e.originalEvent?.target;
   return target instanceof Element && !!target.closest(".maplibregl-marker");
-}
-
-/**
- * Keep a click on a marker's element from reaching the map. `isOnMarker`
- * cannot do this part: a popup that closes on a click on the map listens to
- * the map by itself, and would close in the click that opened it. Nothing
- * else is stopped. The press and the touch move the map when a drag starts
- * on a marker, as they always have.
- */
-export function keepMarkerClickFromMap(element: HTMLElement): void {
-  element.addEventListener("click", (event) => event.stopPropagation());
 }
 
 /**
@@ -103,6 +94,13 @@ export function keepMarkerClickFromMap(element: HTMLElement): void {
  * off for the length of the touch instead, the recogniser never sees a tap
  * on a marker begin, and the pan is left alone. The map's events come before
  * its gesture handlers see the same DOM event, so both switches are in time.
+ * Only a zoom this switched off is switched on again, once the last finger
+ * has left.
+ *
+ * Left as it is: a tap followed by a press and a drag, MapLibre's zoom with
+ * one finger. Its only switch is `touchZoomRotate`, which is the pinch as
+ * well, and a pinch with a finger on a marker has to go on working. The
+ * gesture is a deliberate one and zooms where the marker is.
  */
 export function keepMarkerTapsFromZoom(map: MapLibreMap): () => void {
   let switchedOff = false;
@@ -114,17 +112,22 @@ export function keepMarkerTapsFromZoom(map: MapLibreMap): () => void {
     map.doubleClickZoom.disable();
     switchedOff = true;
   };
-  const onTouchEnd = (): void => {
+  const switchBackOn = (): void => {
     if (!switchedOff) return;
     switchedOff = false;
     map.doubleClickZoom.enable();
+  };
+  const onTouchEnd = (e: MapTouchEvent): void => {
+    // With a second finger still down the recogniser would come back in
+    // the middle of a gesture
+    if (e.originalEvent.touches.length === 0) switchBackOn();
   };
   map.on("dblclick", onDoubleClick);
   map.on("touchstart", onTouchStart);
   map.on("touchend", onTouchEnd);
   map.on("touchcancel", onTouchEnd);
   return () => {
-    onTouchEnd();
+    switchBackOn();
     map.off("dblclick", onDoubleClick);
     map.off("touchstart", onTouchStart);
     map.off("touchend", onTouchEnd);

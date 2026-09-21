@@ -240,19 +240,6 @@ describe("appInitializer", () => {
       expect(order).toEqual(["select", "open"]);
     });
 
-    it("keeps the click from the map, which would clear the selection", () => {
-      create();
-      const onMap = vi.fn();
-      app.map!.getCanvasContainer().addEventListener("click", onMap);
-      const event = new MouseEvent("click", { bubbles: true });
-      const stop = vi.spyOn(event, "stopPropagation");
-
-      eddf().getElement().dispatchEvent(event);
-
-      expect(stop).toHaveBeenCalledTimes(1);
-      expect(onMap).not.toHaveBeenCalled();
-    });
-
     it("opens the popup but leaves the selection alone while replay runs", () => {
       create();
       app.replayManager.state.active = true;
@@ -263,13 +250,13 @@ describe("appInitializer", () => {
       expect(app.airportManager.openPopup).toHaveBeenCalledTimes(1);
     });
 
-    it("lets everything but the click through to the map", () => {
+    it("stops none of its events on their way to the map", () => {
       // A press goes through so a drag that starts on a marker moves the
       // map; the map's own handlers tell a marker by the event's target
       create();
       const onMap = vi.fn();
       const container = app.map!.getCanvasContainer();
-      const types = ["mousemove", "dblclick", "mousedown", "touchstart"];
+      const types = ["click", "mousemove", "dblclick", "mousedown"];
       for (const type of types) container.addEventListener(type, onMap);
 
       for (const type of types) {
@@ -286,9 +273,8 @@ describe("appInitializer", () => {
 
       create([airports[0]!]);
 
-      // One click acts and one stops the event; the only key is Escape
+      // The only key is Escape
       expect(listen.mock.calls.map(([type]) => type).sort()).toEqual([
-        "click",
         "click",
         "keydown",
       ]);

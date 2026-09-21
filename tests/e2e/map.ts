@@ -56,7 +56,7 @@ export async function expectMarkersInert(
   page: Page,
   inert: boolean,
 ): Promise<void> {
-  const markers = page.locator("#map .maplibregl-marker");
+  const markers = mapMarkers(page);
   expect(await markers.count(), "markers on the map").toBeGreaterThan(0);
   await expect
     .poll(() =>
@@ -331,6 +331,45 @@ export function openAirportPopup(page: Page, name: string): Promise<void> {
   return page.evaluate((airport) => {
     window.mapApp!.airportMarkers[airport]!.openPopup();
   }, name);
+}
+
+/**
+ * Put replay's airplane under the close button of the open popup and expect
+ * the button to be what a pointer there reaches. The two are siblings in one
+ * stacking context; an airplane that wins covers the popup and takes the
+ * clicks meant for its controls. Asked of the page as it is laid out, so it
+ * holds whatever the stylesheets call the rules that decide it.
+ */
+export async function expectPopupAboveAirplane(page: Page): Promise<void> {
+  const button = mapPopupCloseButton(page);
+  await expect(button).toBeVisible();
+  const box = (await button.boundingBox())!;
+  const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+
+  await page.evaluate((viewportPoint) => {
+    const app = window.mapApp!;
+    const frame = app.map!.getContainer().getBoundingClientRect();
+    const { lat, lng } = app.map!.unproject([
+      viewportPoint.x - frame.left,
+      viewportPoint.y - frame.top,
+    ]);
+    app.replayState.airplaneMarker!.setLatLng([lat, lng]);
+  }, at);
+  // The airplane is where the button is, or the check below says nothing
+  const airplane = (await page.locator(".replay-airplane-root").boundingBox())!;
+  expect(airplane.x).toBeLessThan(at.x);
+  expect(airplane.x + airplane.width).toBeGreaterThan(at.x);
+  expect(airplane.y).toBeLessThan(at.y);
+  expect(airplane.y + airplane.height).toBeGreaterThan(at.y);
+
+  const reached = await page.evaluate(
+    ({ x, y }) =>
+      document.elementFromPoint(x, y)?.closest(".maplibregl-popup") !== null,
+    at,
+  );
+  expect(reached, "the popup is what a pointer on its button reaches").toBe(
+    true,
+  );
 }
 
 /* ==========================================================================

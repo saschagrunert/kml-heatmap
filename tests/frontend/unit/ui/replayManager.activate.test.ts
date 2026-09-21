@@ -502,6 +502,18 @@ describe("ReplayManager activation", () => {
       expect(closed.closePopup).not.toHaveBeenCalled();
     });
 
+    it("follows the user's hand on the map from the start to the close", () => {
+      const map = mockApp.map!;
+      mockApp.selectedPathIds = new Set([1]);
+
+      replayManager.toggleReplay();
+      // Before any frame: a press that is already down has to be seen
+      expect(map.listenerCount("movestart")).toBe(1);
+
+      replayManager.toggleReplay();
+      expect(map.listenerCount("movestart")).toBe(0);
+    });
+
     it("leaves the legends to the layers when the speed layer colours the trail", () => {
       mockApp.selectedPathIds = new Set([1]);
       mockApp.altitudeVisible = false;

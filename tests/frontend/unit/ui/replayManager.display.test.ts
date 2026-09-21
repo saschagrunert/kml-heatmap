@@ -674,15 +674,6 @@ describe("ReplayManager display", () => {
       expect(airplane().isPopupOpen()).toBe(false);
     });
 
-    it("keeps the click from the map, whose handler would close the popup", () => {
-      const mapClick = vi.fn();
-      mockApp.map!.getCanvasContainer().addEventListener("click", mapClick);
-
-      airplane().getElement().click();
-
-      expect(mapClick).not.toHaveBeenCalled();
-    });
-
     it("uses first segment when no segment has time <= currentTime", () => {
       replayManager.state.currentTime = -10;
 

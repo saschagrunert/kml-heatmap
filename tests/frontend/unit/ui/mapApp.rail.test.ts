@@ -552,6 +552,18 @@ describe("MapApp controls and map", () => {
       expect(mockPathSelectionInstance.clearSelection).toHaveBeenCalledTimes(1);
     });
 
+    it("closes the popups, none of which closes on a click by itself", async () => {
+      await initializeApp(app);
+
+      mockMap(app).emit("click", click);
+
+      // The airport's, and the values a tap left on a flight
+      expect(mockAirportManagerInstance.closePopup).toHaveBeenCalledTimes(1);
+      expect(mockLayerManagerInstance.closeSegmentPopup).toHaveBeenCalledTimes(
+        1,
+      );
+    });
+
     it("does not clear an empty selection", async () => {
       await initializeApp(app);
 
@@ -584,6 +596,8 @@ describe("MapApp controls and map", () => {
 
       expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
       expect(mockLayerManagerInstance.onPathClick).not.toHaveBeenCalled();
+      // The values of a tapped flight stay: nothing else happened either
+      expect(mockLayerManagerInstance.closeSegmentPopup).not.toHaveBeenCalled();
     });
 
     it("does nothing for a click on the overview of the Wrapped dialog", async () => {
@@ -608,9 +622,16 @@ describe("MapApp controls and map", () => {
       expect(mockLayerManagerInstance.onPathClick).toHaveBeenCalledTimes(1);
     });
 
-    it("takes a click on a marker that did not stop it for none on the map", async () => {
+    it("takes a click on a marker for none on the map", async () => {
+      // No marker stops its click, so every one of them arrives here, the
+      // one that has just opened a popup included
       await initializeApp(app);
       app.selectedPathIds.add(1);
+      const closePopup = vi.fn();
+      app.replayState.airplaneMarker = {
+        isPopupOpen: () => true,
+        closePopup,
+      } as unknown as MapApp["replayState"]["airplaneMarker"];
       const marker = document.createElement("button");
       marker.className = "maplibregl-marker";
       mockMap(app).getCanvasContainer().append(marker);
@@ -618,9 +639,13 @@ describe("MapApp controls and map", () => {
       marker.dispatchEvent(originalEvent);
 
       mockMap(app).emit("click", { ...click, originalEvent });
+      app.replayState.active = true;
+      mockMap(app).emit("click", { ...click, originalEvent });
 
       expect(mockLayerManagerInstance.hitTest).not.toHaveBeenCalled();
       expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+      expect(mockAirportManagerInstance.closePopup).not.toHaveBeenCalled();
+      expect(closePopup).not.toHaveBeenCalled();
     });
 
     it("closes the airplane popup during replay instead of clearing", async () => {
@@ -806,6 +831,26 @@ describe("MapApp controls and map", () => {
       expect(m.mockLayerManagerInstance.destroy).toHaveBeenCalled();
       expect(map.remove).toHaveBeenCalledTimes(1);
       expect(app.map).toBeNull();
+    });
+
+    it("tears down once when a destroy races the failure of the layers", async () => {
+      mockControl.autoLoadStyle = false;
+      // Registered before `initialize()` waits, so it runs between the
+      // failure and the moment `initialize()` gets to look at it
+      app.mapReady.catch(() => app.destroy());
+      const pending = initializeApp(app);
+      await Promise.resolve();
+      const map = mockMap(app);
+      map.addLayer.mockImplementationOnce(() => {
+        throw new Error("layer refused");
+      });
+
+      map.finishStyleLoad();
+
+      // Told by the state and not by which rejection won
+      await expect(pending).resolves.toBeUndefined();
+      expect(map.remove).not.toHaveBeenCalled();
+      expect(m.mockLayerManagerInstance.destroy).toHaveBeenCalledTimes(1);
     });
 
     it("stops quietly when destroyed while the style request hangs", async () => {

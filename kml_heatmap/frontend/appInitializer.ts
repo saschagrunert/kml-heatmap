@@ -10,7 +10,7 @@ import {
 } from "./features/airports";
 import { domCache } from "./utils/domCache";
 import { applyMetricColors } from "./utils/htmlGenerators";
-import { keepMarkerClickFromMap, toLngLat } from "./utils/mapHelpers";
+import { toLngLat } from "./utils/mapHelpers";
 import { showToast } from "./utils/toast";
 import { datasetIndex } from "./calculations/datasetIndex";
 import type { MapApp } from "./mapApp";
@@ -242,9 +242,6 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
       setHome: (home) => setAirportElementHome(element, home),
     };
 
-    // The marker lies on top of the map, and the popup this click opens
-    // closes on a click on the map, which the same click would be next
-    keepMarkerClickFromMap(element);
     // A button reports Enter and Space as a click, so this one listener is
     // the mouse, the finger and the keyboard
     element.addEventListener("click", () => {

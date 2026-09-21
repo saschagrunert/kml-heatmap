@@ -131,7 +131,9 @@ describe("AirportManager", () => {
         focusAfterOpen: false,
         maxWidth: "none",
         offset: 12,
-        closeOnClick: true,
+        // MapLibre would close it in the click on the marker that opened
+        // it; MapApp's click dispatcher closes it instead
+        closeOnClick: false,
       });
       // `setPopup` brings click and key handling that would toggle twice
       for (const marker of Object.values(markers)) {

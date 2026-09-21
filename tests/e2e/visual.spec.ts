@@ -28,6 +28,7 @@ import {
   openWrapped,
   settleAnimations,
   toggleStatsPanel,
+  waitForWrappedMap,
 } from "./helpers";
 import { hideMapData } from "./map";
 
@@ -78,12 +79,8 @@ test.describe("visual", () => {
 
   test("the Wrapped dialog", async ({ page }) => {
     const dialog = await openWrapped(page);
-    // The map panel holds a placeholder until its tiles land, and that
-    // placeholder shimmers forever, so `settleAnimations` does not wait for
-    // it. Without this the snapshot races the reveal.
-    await expect(
-      page.locator("#wrapped-map-container:not(.is-awaiting-map)"),
-    ).toBeAttached();
+    // Without this the snapshot races the reveal
+    await waitForWrappedMap(page);
     await settleAnimations(dialog);
 
     await expect(dialog).toHaveScreenshot("wrapped-dialog.png", EXACT);

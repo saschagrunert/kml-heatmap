@@ -5,7 +5,14 @@ import {
   playUntilProgress,
   waitForPathData,
 } from "./helpers";
-import { expectHeatUnderPaths, mapMarkers, mapPopupContent } from "./map";
+import {
+  centerOnAirport,
+  expectHeatUnderPaths,
+  expectPopupAboveAirplane,
+  mapMarkers,
+  mapPopupContent,
+  openAirportPopup,
+} from "./map";
 
 test.describe("Replay", () => {
   test.beforeEach(async ({ page }) => {
@@ -396,6 +403,19 @@ test.describe("Replay", () => {
       window.mapApp!.replayState.airplaneMarker!.closePopup();
     });
     await expect(popup).toBeHidden();
+  });
+
+  test("an open airport popup draws above the airplane (regression)", async ({
+    page,
+  }) => {
+    await activateReplay(page);
+    const airport = await page.evaluate(
+      () => Object.keys(window.mapApp!.airportMarkers)[0]!,
+    );
+    await centerOnAirport(page, airport, 10);
+    await openAirportPopup(page, airport);
+
+    await expectPopupAboveAirplane(page);
   });
 
   test("Enter on the focused airplane marker opens its popup", async ({
