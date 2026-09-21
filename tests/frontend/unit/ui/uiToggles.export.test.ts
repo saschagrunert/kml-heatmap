@@ -17,6 +17,7 @@ import {
   createMockApp,
   el,
   mountElements,
+  setDevicePixelRatio,
   type MockApp,
 } from "../../testHelpers";
 
@@ -47,13 +48,6 @@ function setInnerWidth(width: number): void {
     value: width,
     configurable: true,
     writable: true,
-  });
-}
-
-function setDevicePixelRatio(ratio: number): void {
-  Object.defineProperty(window, "devicePixelRatio", {
-    value: ratio,
-    configurable: true,
   });
 }
 
@@ -109,7 +103,7 @@ describe("UIToggles export and share", () => {
     delete window.htmlToImage;
     resetHtmlToImageLoader();
     setInnerWidth(1024);
-    Reflect.deleteProperty(window, "devicePixelRatio");
+    setDevicePixelRatio(1);
     deleteNavigatorProperty("share");
     deleteNavigatorProperty("canShare");
     deleteNavigatorProperty("clipboard");
@@ -393,6 +387,53 @@ describe("UIToggles export and share", () => {
       expect(toast()?.textContent).toBe("Export failed: tainted");
       expect(el("map").contains(canvas)).toBe(true);
       expect(el("map").querySelector("img")).toBeNull();
+    });
+
+    it("draws the map at the scale of the export on a 1x screen, then gives the ratio back", async () => {
+      setDevicePixelRatio(1);
+      const map = app.map!;
+      const ratios: number[] = [];
+      installHtmlToImage(
+        vi.fn(() => {
+          ratios.push(map.getPixelRatio());
+          return Promise.resolve("data:image/jpeg;base64,aGVsbG8=");
+        }),
+      );
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(ratios).toEqual([2]);
+      expect(map.getPixelRatio()).toBe(1);
+    });
+
+    it("draws the map no larger than the export is allowed to be", async () => {
+      setDevicePixelRatio(1);
+      Object.defineProperty(el("map"), "offsetWidth", { value: 4000 });
+      Object.defineProperty(el("map"), "offsetHeight", { value: 3000 });
+      installHtmlToImage();
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      const ratio = vi.mocked(app.map!.setPixelRatio).mock.calls[0]![0] ?? 0;
+      expect(ratio).toBeGreaterThan(1);
+      expect(4000 * ratio * (3000 * ratio)).toBeLessThanOrEqual(
+        MAX_CANVAS_PIXELS + 1,
+      );
+    });
+
+    it("gives the ratio back when the capture fails", async () => {
+      setDevicePixelRatio(1);
+      installHtmlToImage(vi.fn().mockRejectedValue(new Error("tainted")));
+      const btn = el("export-btn") as HTMLButtonElement;
+
+      uiToggles.exportMap();
+      await finishExport();
+
+      expect(app.map!.getPixelRatio()).toBe(1);
+      expect(toast()?.textContent).toBe("Export failed: tainted");
+      expect(btn.disabled).toBe(false);
     });
 
     it("reports a canvas that cannot be read, and takes no picture", async () => {

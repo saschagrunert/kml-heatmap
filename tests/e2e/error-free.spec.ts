@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { test, expect } from "./fixtures";
 import {
   activateReplay,
@@ -21,9 +22,11 @@ import {
   expectHeatmapPainted,
   focusAirportMarker,
   getZoom,
+  mapSurfaceSize,
   pathColors,
   pathCount,
   setZoom,
+  watchMapStills,
 } from "./map";
 
 /** Hex or rgb(a), as the app hands a colour to the map */
@@ -154,6 +157,40 @@ test.describe("Error-Free Interactions", () => {
       // The library clones the map into an SVG image; none of that may
       // trip the CSP, which allows no inline styles
       expectClean(errors);
+    });
+
+    test.describe("on a 1x screen", () => {
+      test.use({ deviceScaleFactor: 1 });
+
+      test("the exported map has the resolution of the image around it", async ({
+        page,
+      }) => {
+        const before = await mapSurfaceSize(page);
+        const stills = await watchMapStills(page);
+        const download = page.waitForEvent("download", { timeout: 20000 });
+        await page.locator("#export-btn").click();
+
+        const jpeg = await readFile(await (await download).path());
+        const exportedWidth = await page.evaluate(async (base64) => {
+          const image = new Image();
+          image.src = `data:image/jpeg;base64,${base64}`;
+          await image.decode();
+          return image.naturalWidth;
+        }, jpeg.toString("base64"));
+
+        // A desktop exports at 2x, and used to enlarge a 1x frame of the
+        // map for it
+        expect(exportedWidth).toBe(before.width * 2);
+        expect(await stills()).toEqual([
+          expect.objectContaining({
+            naturalWidth: exportedWidth,
+            width: before.width,
+          }),
+        ]);
+        // The map itself is back at the screen's density
+        expect(await mapSurfaceSize(page)).toEqual(before);
+        expectClean(errors);
+      });
     });
 
     test("no errors during stats panel toggle", async ({ page }) => {

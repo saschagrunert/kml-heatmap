@@ -307,6 +307,8 @@ export class Map
       | "isMoving"
       | "isZooming"
       | "resize"
+      | "getPixelRatio"
+      | "setPixelRatio"
       | "project"
       | "unproject"
       | "queryRenderedFeatures"
@@ -575,6 +577,15 @@ export class Map
   isMoving = vi.fn(() => false);
   isZooming = vi.fn(() => false);
   resize = vi.fn(() => this);
+
+  /** Follows the screen until a ratio is set, and again once null is */
+  private pixelRatioOverride: number | null = null;
+  getPixelRatio = vi.fn(
+    () => this.pixelRatioOverride ?? window.devicePixelRatio,
+  );
+  setPixelRatio = vi.fn((pixelRatio: number | null) => {
+    this.pixelRatioOverride = pixelRatio;
+  });
 
   /** One pixel per thousandth of a degree, y growing to the south */
   project = vi.fn((lngLat: unknown) => {

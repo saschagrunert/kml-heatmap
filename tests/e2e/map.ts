@@ -222,6 +222,53 @@ export async function hideMapData(page: Page): Promise<void> {
   });
 }
 
+/** An image the map put in place of its canvas, as it was when it appeared */
+export interface MapStill {
+  /** Pixels of the image itself */
+  naturalWidth: number;
+  naturalHeight: number;
+  /** CSS pixels it is laid out at */
+  width: number;
+  height: number;
+}
+
+/**
+ * Watch for the stills an export swaps in for the canvas, which are gone
+ * again by the time the download arrives. Call the result once the export is
+ * over. Seen from outside through a MutationObserver, so the app exposes
+ * nothing for it.
+ */
+export async function watchMapStills(
+  page: Page,
+): Promise<() => Promise<MapStill[]>> {
+  const stills = await page.evaluateHandle(() => {
+    const seen: MapStill[] = [];
+    const container = document.querySelector(
+      "#map .maplibregl-canvas-container",
+    );
+    if (!container) throw new Error("the map has no canvas container");
+    new MutationObserver((records) => {
+      for (const node of records.flatMap((r) => [...r.addedNodes])) {
+        if (!(node instanceof HTMLImageElement)) continue;
+        const { naturalWidth, naturalHeight, width, height } = node;
+        seen.push({ naturalWidth, naturalHeight, width, height });
+      }
+    }).observe(container, { childList: true });
+    return seen;
+  });
+  return () => stills.jsonValue();
+}
+
+/** Size of the map's drawing surface, in device pixels and in CSS pixels */
+export function mapSurfaceSize(
+  page: Page,
+): Promise<{ pixelWidth: number; width: number }> {
+  return mapSurface(page).evaluate((canvas: HTMLCanvasElement) => ({
+    pixelWidth: canvas.width,
+    width: canvas.clientWidth,
+  }));
+}
+
 /* ==========================================================================
    Requests
 
