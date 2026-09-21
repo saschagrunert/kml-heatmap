@@ -53,6 +53,12 @@ export interface MapConfig {
   cartoApiKey?: string | undefined;
   openaipApiKey?: string | undefined;
   dataDir: string;
+  /** When the site was built, "YYYY-MM-DDTHH:MMZ" in UTC */
+  builtAt?: string | undefined;
+  /** Short hash of the commit the site was built from, "" when unknown */
+  commit?: string | undefined;
+  /** The commit's page, "" when the repository it is in is unknown */
+  commitUrl?: string | undefined;
 }
 
 /**

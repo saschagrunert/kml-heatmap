@@ -13,7 +13,7 @@ import {
   groupByCountry,
 } from "../features/airports";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
-import { formatNumber } from "../utils/formatters";
+import { formatBuildTime, formatNumber } from "../utils/formatters";
 import {
   escapeHtml,
   markFlightTimeUnits,
@@ -308,6 +308,36 @@ function aircraftSection(stats: FilteredStatistics): string {
   );
 }
 
+/**
+ * When and from which commit the site was built, if map_config.js says. The
+ * hash links to its commit only when the build knew which repository that is.
+ */
+function buildInfo(config: MapApp["config"]): string {
+  const { builtAt, commit, commitUrl } = config;
+  const parts: string[] = [];
+  const time = builtAt ? formatBuildTime(builtAt) : null;
+  if (builtAt && time) {
+    parts.push(
+      '<time datetime="' + escapeHtml(builtAt) + '">' + time + "</time>",
+    );
+  }
+  if (commit) {
+    const hash = escapeHtml(commit);
+    parts.push(
+      "from " +
+        (commitUrl?.startsWith("https://")
+          ? '<a href="' +
+            escapeHtml(commitUrl) +
+            '" target="_blank" rel="noopener noreferrer">' +
+            hash +
+            "</a>"
+          : hash),
+    );
+  }
+  if (parts.length === 0) return "";
+  return '<p class="kh-stats-build">Built ' + parts.join(" ") + "</p>";
+}
+
 /** Distance rows beyond the lead figure */
 function distanceMetrics(stats: FilteredStatistics): Metric[] {
   const metrics: Metric[] = [];
@@ -565,6 +595,7 @@ export class StatsManager {
       '<p class="kh-stats-footer">' +
       pluralize(stats.total_points, "data point") +
       "</p>";
+    html += buildInfo(this.app.config);
 
     html += "</div>";
 

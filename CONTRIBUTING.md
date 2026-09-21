@@ -71,8 +71,8 @@ parentheses back is undone on the next `make format`.
   pass `--obfuscate-inputs`). The pre-commit hook, `make check-obfuscation`
   and the `obfuscation` CI job verify that every committed file is
   obfuscated, and only the hook runs before the dates would be public. The
-  published site carries no date finer than the year either way; this is
-  about the KML files this repository commits.
+  published site carries no flight date finer than the year either way; this
+  is about the KML files this repository commits.
 - The frontend build output in `kml_heatmap/static/` is gitignored: both
   bundles (`mapApp.bundle.js`, `features.bundle.js`) with their `.map` files
   and `vendor/`, the third-party code copied out of `node_modules`. It is

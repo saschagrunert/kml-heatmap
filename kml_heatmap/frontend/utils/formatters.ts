@@ -80,3 +80,33 @@ export function formatFileSize(bytes: number): string {
   const text = value < 10 ? value.toFixed(1) : String(Math.round(value));
   return `${text} ${unit}`;
 }
+
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/**
+ * Format the build time map_config.js carries (e.g., "21 Sep 2026, 14:03
+ * UTC"). Always in UTC and in English, so every viewer reads the same text.
+ * @param iso - "YYYY-MM-DDTHH:MMZ"
+ * @returns Formatted time, or null when the value is not one
+ */
+export function formatBuildTime(iso: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})Z$/.exec(iso);
+  if (!match) return null;
+  const [, year, month, day, hours, minutes] = match;
+  const monthName = MONTHS[Number(month) - 1];
+  if (!monthName) return null;
+  return `${Number(day)} ${monthName} ${year}, ${hours}:${minutes} UTC`;
+}

@@ -400,6 +400,64 @@ describe("StatsManager", () => {
       expect(leadLabels).not.toContain("Data Points");
     });
 
+    it("closes with when and from which commit the site was built", () => {
+      mockApp.config.builtAt = "2026-09-21T14:03Z";
+      mockApp.config.commit = "5b3ab40";
+      mockApp.config.commitUrl =
+        "https://github.com/saschagrunert/kml-heatmap/commit/5b3ab4048d1c";
+      statsManager.updateStatsPanel(mockStats, false);
+
+      const build = statsPanel.querySelector(".kh-stats-build")!;
+      expect(build.textContent).toBe(
+        "Built 21 Sep 2026, 14:03 UTC from 5b3ab40",
+      );
+      expect(build.querySelector("time")!.getAttribute("datetime")).toBe(
+        "2026-09-21T14:03Z",
+      );
+      const link = build.querySelector("a")!;
+      expect(link.getAttribute("href")).toBe(
+        "https://github.com/saschagrunert/kml-heatmap/commit/5b3ab4048d1c",
+      );
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    });
+
+    it("links the commit only when the build knew where it is", () => {
+      mockApp.config.builtAt = "2026-09-21T14:03Z";
+      mockApp.config.commit = "5b3ab40";
+      for (const commitUrl of [undefined, "", "javascript:alert(1)"]) {
+        mockApp.config.commitUrl = commitUrl;
+        statsManager.updateStatsPanel(mockStats, false);
+
+        const build = statsPanel.querySelector(".kh-stats-build")!;
+        expect(build.textContent).toBe(
+          "Built 21 Sep 2026, 14:03 UTC from 5b3ab40",
+        );
+        expect(build.querySelector("a")).toBeNull();
+      }
+    });
+
+    it("leaves out whatever part of the build information is unknown", () => {
+      mockApp.config.builtAt = "2026-09-21T14:03Z";
+      mockApp.config.commit = "";
+      statsManager.updateStatsPanel(mockStats, false);
+      expect(statsPanel.querySelector(".kh-stats-build")!.textContent).toBe(
+        "Built 21 Sep 2026, 14:03 UTC",
+      );
+
+      mockApp.config.builtAt = "not a time";
+      mockApp.config.commit = "5b3ab40";
+      statsManager.updateStatsPanel(mockStats, false);
+      expect(statsPanel.querySelector(".kh-stats-build")!.textContent).toBe(
+        "Built from 5b3ab40",
+      );
+
+      // A site built before the stamp existed has neither
+      mockApp.config.builtAt = undefined;
+      mockApp.config.commit = undefined;
+      statsManager.updateStatsPanel(mockStats, false);
+      expect(statsPanel.querySelector(".kh-stats-build")).toBeNull();
+    });
+
     /** Statistics for the three airports the country fixture knows */
     const namedAirports: FilteredStatistics = {
       ...mockStats,

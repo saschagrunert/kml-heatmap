@@ -321,8 +321,8 @@ class TestAircraftFiles:
 class TestInputsAreLeftAloneByDefault:
     """Without --obfuscate-inputs the user's KML files are never written to.
 
-    The rewrite cannot be undone, and the generated site carries no date finer
-    than the year either way (tests/test_pipeline_golden.py pins that), so it
+    The rewrite cannot be undone, and the generated site carries no flight date
+    finer than the year either way (tests/test_pipeline_golden.py pins that), so it
     has to be asked for.
     """
 

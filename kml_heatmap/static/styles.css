@@ -2193,6 +2193,22 @@ body.stats-open #left-buttons {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
+/* Reads as a second line of the footer, not as a section of its own: the
+   margin takes back the gap .kh-stats puts between its children */
+.kh-stats-build {
+  margin: calc(var(--space-xs) - var(--space-lg)) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.kh-stats-build a {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+.kh-stats-build a:hover,
+.kh-stats-build a:focus-visible {
+  color: var(--color-text);
+}
 .kh-init-error {
   display: flex;
   align-items: center;

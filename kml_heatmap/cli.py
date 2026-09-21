@@ -139,11 +139,11 @@ def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
 def _generate(paths: list[str], output_dir: Path, obfuscate_inputs: bool) -> None:
     """Generate the site into ``output_dir``.
 
-    The generated site never carries a date finer than the year, whatever the
-    inputs hold: the exported paths keep their year, their relative timing and
-    nothing else (see ``data_exporter``). Rewriting the inputs is therefore
-    not needed to publish safely and is not done unless ``obfuscate_inputs``
-    asks for it, because it cannot be undone.
+    The generated site never carries a flight date finer than the year,
+    whatever the inputs hold: the exported paths keep their year, their
+    relative timing and nothing else (see ``data_exporter``). Rewriting the
+    inputs is therefore not needed to publish safely and is not done unless
+    ``obfuscate_inputs`` asks for it, because it cannot be undone.
     """
     kml_files = _collect_kml_files(paths)
 
@@ -203,9 +203,9 @@ examples:
   %(prog)s --obfuscate-inputs ./my_flights/ --output-dir out
 
 The input KML files are read and left alone. The generated site never carries
-a date finer than the year in the first place: a flight keeps its year and the
-intervals between its points, and every absolute timestamp is dropped on
-export.
+a flight date finer than the year in the first place: a flight keeps its year
+and the intervals between its points, and every absolute timestamp is dropped
+on export. The only full date in it is the time the site was built.
 
 --obfuscate-inputs additionally rewrites the input files THEMSELVES, IN PLACE
 and IRREVERSIBLY, so that the files on disk carry no real dates either (useful
