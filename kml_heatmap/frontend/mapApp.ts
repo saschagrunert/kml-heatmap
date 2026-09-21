@@ -259,6 +259,10 @@ export class MapApp {
    * run earlier (a constructor, a click during the load) goes through this.
    */
   readonly mapReady: Promise<MapLibreMap>;
+  /** What `destroy()` rejects `mapReady` with, to be told from a failure */
+  private readonly destroyedReason = new Error(
+    "the app was destroyed before the map was ready",
+  );
   private resolveMapReady!: (map: MapLibreMap) => void;
   private rejectMapReady!: (reason: unknown) => void;
   /** Whether the base style, or its stand-in, has loaded */
@@ -404,9 +408,13 @@ export class MapApp {
       await this.mapReady;
     } catch (error) {
       // Destroyed while waiting: `destroy()` settled the wait, and nothing
-      // failed. Asked of the state and not of the error, so a layer failure
-      // that races a destroy does not tear down a second time.
-      if (this.destroyed) return;
+      // failed. Asked of the state, so a layer failure that races a destroy
+      // does not tear down a second time; but such a failure is one all
+      // the same, and with nobody left to show it to it is at least logged.
+      if (this.destroyed) {
+        if (error !== this.destroyedReason) logError(error);
+        return;
+      }
       // The controls are bound by now and the managers listen to the store.
       // None of them may go on acting on a map that has no layers, and the
       // failure notice takes the map's place, so the map goes as well.
@@ -458,9 +466,7 @@ export class MapApp {
     // With the timer gone a style request that hangs would never settle
     // this, and `initialize()` would wait for it forever. Nothing happens
     // when the map was ready already.
-    this.rejectMapReady(
-      new Error("the app was destroyed before the map was ready"),
-    );
+    this.rejectMapReady(this.destroyedReason);
     if (this.wrappedRestoreTimer !== null) {
       clearTimeout(this.wrappedRestoreTimer);
       this.wrappedRestoreTimer = null;
@@ -923,7 +929,6 @@ export class MapApp {
    */
   private handleMapClick(e: MapMouseEvent): void {
     if (isOnMarker(e)) return;
-    this.airportManager.closePopup();
     // The overview of the Wrapped dialog is this map, and it takes gestures
     // so it can be moved. A click there is none on the main map: it must
     // not change the selection behind the dialog, nor open the values of a
@@ -933,7 +938,8 @@ export class MapApp {
     const replay = this.replayState;
     if (replay.active) {
       // The colour layers are hidden during a replay; the only thing a
-      // click on the map does is put the airplane's popup away
+      // click on the map does is put the popups away
+      this.airportManager.closePopup();
       if (replay.airplaneMarker?.isPopupOpen()) {
         replay.airplaneMarker.closePopup();
       }
@@ -945,6 +951,9 @@ export class MapApp {
     // on a flight. Clearing the selection would throw away the user's work
     // on a guess; doing nothing costs a second click at worst.
     if (hit === "stale") return;
+    // From here on the click is acted on, and only then does it close what
+    // a click on the map closes: an ignored click changes nothing at all
+    this.airportManager.closePopup();
     if (hit) {
       this.layerManager.onPathClick(hit, e.lngLat);
       return;

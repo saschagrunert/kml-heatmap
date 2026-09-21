@@ -423,9 +423,12 @@ export class Map
       id,
       spec,
       data: spec["data"],
+      // Like a GeoJSON source: the promise settles once the worker has the
+      // data. The fake has no worker, so at once; a test of the time in
+      // between hands out a promise of its own with `mockReturnValueOnce`.
       setData: vi.fn((data: unknown) => {
         source.data = data;
-        return source;
+        return Promise.resolve();
       }),
       setTiles: vi.fn(() => source),
     };

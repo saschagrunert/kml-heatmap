@@ -53,7 +53,13 @@ import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 import { logError } from "../utils/logger";
-import { isOnMarker, toLngLat, type LngLatTuple } from "../utils/mapHelpers";
+import {
+  isInMarker,
+  isOnMarker,
+  toLngLat,
+  type LatLon,
+  type LngLatTuple,
+} from "../utils/mapHelpers";
 import { datasetIndex } from "../calculations/datasetIndex";
 import {
   segmentRangesFor,
@@ -130,6 +136,12 @@ interface RunTable {
   g: number;
   /** Whether the source holds no feature, which is how it is created */
   sourceEmpty: boolean;
+  /**
+   * How far the last `setData` has got: with the worker, with the tiles in
+   * view being cut from it, or null once the map shows it. Until then the
+   * tiles answer for the data before it.
+   */
+  landing: "worker" | "tiles" | null;
 }
 
 /** The selection a mode's layers were last styled for */
@@ -148,7 +160,12 @@ interface ModeState {
 }
 
 function emptyModeState(): ModeState {
-  const table = (): RunTable => ({ runs: [], g: 0, sourceEmpty: true });
+  const table = (): RunTable => ({
+    runs: [],
+    g: 0,
+    sourceEmpty: true,
+    landing: null,
+  });
   return {
     tables: { main: table(), selected: table() },
     segments: null,
@@ -208,6 +225,12 @@ function hiddenInMain(pathId: number, shown: ShownSelection): boolean {
   return shown.isolate || shown.selected.has(pathId);
 }
 
+/** A position of the data in the copy of the world nearest to `pointerLng` */
+function nearPointer(latLon: LatLon, pointerLng: number): LngLatTuple {
+  const [lng, lat] = toLngLat(latLon);
+  return [lng + 360 * Math.round((pointerLng - lng) / 360), lat];
+}
+
 /**
  * Distance in pixels between a point of the map and a drawn segment.
  *
@@ -226,16 +249,8 @@ function pixelDistance(
 ): number {
   const coords = segment.coords;
   if (!coords) return Infinity;
-  const [aLng, aLat] = toLngLat(coords[0]);
-  const [bLng, bLat] = toLngLat(coords[1]);
-  const a = map.project([
-    aLng + 360 * Math.round((pointerLng - aLng) / 360),
-    aLat,
-  ]);
-  const b = map.project([
-    bLng + 360 * Math.round((pointerLng - bLng) / 360),
-    bLat,
-  ]);
+  const a = map.project(nearPointer(coords[0], pointerLng));
+  const b = map.project(nearPointer(coords[1], pointerLng));
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const lengthSquared = dx * dx + dy * dy;
@@ -432,34 +447,48 @@ export class LayerManager implements PathHitTester {
 
   /**
    * The flight drawn at a point of the map, or null beside every flight.
-   * Right after a `setData` the tiles still hold the data before it, which
-   * may have flights where the new data has none, or none where the new
-   * data has one: finding nothing then is "stale", neither a flight nor
+   * Until a `setData` has landed the tiles still hold the data before it,
+   * which may have flights where the new data has none, or none where the
+   * new data has one: finding nothing then is "stale", neither a flight nor
    * the empty map, and a caller should leave things as they are. Part of
    * the contract with MapApp's click dispatcher, and what the hover runs on.
    */
   hitTest(point: Point): PathHitResult {
+    return this.look(point).result;
+  }
+
+  /** `hitTest`, and whether the tiles had any feature at the point at all */
+  private look(point: Point): { result: PathHitResult; found: boolean } {
     const map = this.readyMap();
-    if (!map) return null;
+    if (!map) return { result: null, found: false };
 
     const tableOfLayer = new Map<string, [ModeState, RunSet]>();
-    const sources: string[] = [];
+    // Told by the app's own `setData` calls and not by whether the source
+    // is loaded alone: that is false during every pan and zoom as well,
+    // and a camera move must not make a click on the empty map one to
+    // ignore
+    let landing = false;
     for (const mode of MODES) {
       const config = this.getConfig(mode);
       const state = this.state[mode];
       if (!config.handle.isVisible() || !state.segments) continue;
       tableOfLayer.set(config.layers.main, [state, "main"]);
       tableOfLayer.set(config.layers.selected, [state, "selected"]);
-      sources.push(config.sources.main, config.sources.selected);
+      for (const set of ["main", "selected"] as const) {
+        const table = state.tables[set];
+        // Asked here rather than followed through the map's events: the
+        // answer is only needed when someone looks
+        if (
+          table.landing === "tiles" &&
+          map.isSourceLoaded(config.sources[set])
+        ) {
+          table.landing = null;
+        }
+        landing ||= table.landing !== null;
+      }
     }
-    if (tableOfLayer.size === 0) return null;
-    // A source counts as loaded again once the worker has answered the
-    // last `setData` and the tiles in view are cut from it. Until then
-    // "nothing here" is the word of the tiles of before. Asked only when
-    // nothing was found; a pan that still loads tiles answers the same
-    // way, which costs a click on the empty map a second try at worst.
-    const nothing = (): PathHitResult =>
-      sources.some((id) => !map.isSourceLoaded(id)) ? "stale" : null;
+    if (tableOfLayer.size === 0) return { result: null, found: false };
+    const nothing: PathHitResult = landing ? "stale" : null;
 
     const pad = isTouchDevice() ? TOUCH_HIT_PADDING_PX : HIT_PADDING_PX;
     const features = map.queryRenderedFeatures(
@@ -469,14 +498,14 @@ export class LayerManager implements PathHitTester {
       ],
       { layers: [...tableOfLayer.keys()] },
     );
-    if (features.length === 0) return nothing();
+    if (features.length === 0) return { result: nothing, found: false };
 
     // World copies are drawn, and a point in one of them is 360 degrees
-    // away from the segments, which would all be equally far. The search
-    // in degrees takes the wrapped position; the ranking in pixels puts
-    // each segment into the copy under the pointer (see pixelDistance).
+    // away from the segments, which would all be equally far. Both the
+    // search in degrees and the ranking in pixels take the pointer as the
+    // map reports it, unwrapped, and put each segment into the copy of the
+    // world nearest to it (see findNearestSegment and pixelDistance).
     const pointer = map.unproject(point);
-    const lngLat = pointer.wrap();
     const seen = new Set<Run>();
     let stale = false;
     let best: PathHit | null = null;
@@ -515,8 +544,8 @@ export class LayerManager implements PathHitTester {
 
       const segment = findNearestSegment(
         state.segments!.slice(run.start, run.end),
-        lngLat.lat,
-        lngLat.lng,
+        pointer.lat,
+        pointer.lng,
       );
       if (!segment) continue;
       const distance = pixelDistance(map, point, pointer.lng, segment);
@@ -530,7 +559,7 @@ export class LayerManager implements PathHitTester {
         bestSelected = isSelected;
       }
     }
-    return best ?? (stale ? "stale" : nothing());
+    return { result: best ?? (stale ? "stale" : nothing), found: true };
   }
 
   /**
@@ -565,8 +594,10 @@ export class LayerManager implements PathHitTester {
   }
 
   /**
-   * Put away the values a hover or a tap left on the map. Replay calls this
-   * as it opens: MapLibre keeps no list of open popups to close them by.
+   * Put away the values a hover or a tap left on the map. MapLibre keeps
+   * no list of open popups to close them by, and the popup of a tap does
+   * not close on a click by itself: MapApp's click dispatcher calls this
+   * for a click on the empty map, and Replay and Wrapped as they open.
    */
   closeSegmentPopup(): void {
     this.hideTooltip();
@@ -575,32 +606,47 @@ export class LayerManager implements PathHitTester {
   }
 
   /** Look under the pointer and show, move on or close the tooltip */
-  private hover(): void {
+  private hover(mapHasMoved = false): void {
     const map = this.app.map;
+    const move = this.lastMove;
     // A marker lies on top of the flights. The map reports `mouseout` as
     // the pointer comes onto one, and goes on reporting its moves there:
-    // such a move is the pointer leaving, as far as the flights go.
-    if (this.lastMove && isOnMarker(this.lastMove)) this.lastMove = null;
-    const point = this.lastMove?.point;
+    // over a marker there is no flight to show, but the point is kept. A
+    // zoom may take the marker from under a pointer that rests, or bring
+    // one there, so after the map has moved the document is asked what is
+    // under the pointer now rather than the event what it was aimed at.
+    const onMarker =
+      !!move &&
+      (mapHasMoved
+        ? isInMarker(
+            document.elementFromPoint?.(
+              move.originalEvent.clientX,
+              move.originalEvent.clientY,
+            ),
+          )
+        : isOnMarker(move));
+    const point = onMarker ? undefined : move?.point;
     // Not over the overview of the Wrapped dialog either (a pointer that
     // rested on the map as the dialog opened gets here through the look on
     // idle): MapApp ignores clicks on it as well
-    const hit =
+    const { result: hit, found } =
       map &&
       point &&
       !this.destroyed &&
       !isTouchDevice() &&
       !this.app.store.get("wrappedVisible")
-        ? this.hitTest(point)
-        : null;
-    // The flight under the pointer may well still be there; a look on idle
-    // decides, with tiles that can tell. Asked for from here: the one a
-    // redraw asks for is skipped while the pointer is off the map.
+        ? this.look(point)
+        : { result: null, found: false };
+    // A look on idle decides, with tiles that can tell. Asked for from
+    // here: the one a redraw asks for is skipped while the pointer is off
+    // the map. Until then the tooltip stays only where the tiles of before
+    // have a flight, which may well still be there; over nothing at all
+    // there is nothing to go on showing.
     if (hit === "stale") {
       this.rehoverOnIdle();
-      return;
+      if (found) return;
     }
-    if (!map || !point || !hit) {
+    if (!map || !point || !hit || hit === "stale") {
       this.hideTooltip();
       return;
     }
@@ -648,7 +694,7 @@ export class LayerManager implements PathHitTester {
       if (this.destroyed) return;
       // The colour range may have changed under the same segment
       this.hovered = null;
-      this.hover();
+      this.hover(true);
     });
   }
 
@@ -809,11 +855,20 @@ export class LayerManager implements PathHitTester {
         };
       },
     );
-    // The promise never rejects: a failure arrives as the map's error event
-    void map
-      .getSource<GeoJSONSource>(config.sources[set])
-      ?.setData({ type: "FeatureCollection", features });
     table.sourceEmpty = runs.length === 0;
+    const id = config.sources[set];
+    const source = map.getSource<GeoJSONSource>(id);
+    if (!source) return;
+    table.landing = "worker";
+    // The promise never rejects: a failure arrives as the map's error
+    // event. It settles once the worker has the data of the last call,
+    // also for a call that was queued behind another; the tiles in view
+    // are cut from it after that, unless no layer in use draws the source.
+    void source.setData({ type: "FeatureCollection", features }).then(() => {
+      // A later call has taken over, and answers for itself
+      if (table.g !== g) return;
+      table.landing = map.isSourceLoaded(id) ? null : "tiles";
+    });
   }
 
   /** Draw every flight of a mode, and the selection on top of them */

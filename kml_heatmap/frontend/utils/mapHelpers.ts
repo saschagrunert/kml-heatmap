@@ -79,7 +79,11 @@ export function whenStyleReady(map: MapLibreMap): Promise<MapLibreMap> {
  * starts on a marker, as they always have.
  */
 export function isOnMarker(e: { originalEvent?: Event | undefined }): boolean {
-  const target = e.originalEvent?.target;
+  return isInMarker(e.originalEvent?.target);
+}
+
+/** Whether an element, or whatever else an event was aimed at, is part of a marker */
+export function isInMarker(target: EventTarget | null | undefined): boolean {
   return target instanceof Element && !!target.closest(".maplibregl-marker");
 }
 

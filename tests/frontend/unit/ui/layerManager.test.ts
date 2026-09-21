@@ -164,6 +164,28 @@ describe("LayerManager", () => {
     for (const callback of due) callback(0);
   }
 
+  /**
+   * Let the data of the last draw land: the fake's `setData` settles at
+   * once, and the manager hears of it a microtask later
+   */
+  function landed(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  /** A `setData` that stays with the worker until the test lets it go */
+  function holdSetData(sourceId: string): () => Promise<void> {
+    let release!: () => void;
+    mockApp
+      .map!.source(sourceId)
+      .setData.mockReturnValueOnce(
+        new Promise<void>((resolve) => (release = resolve)),
+      );
+    return async () => {
+      release();
+      await landed();
+    };
+  }
+
   /** What the map answers a query with: a feature of a drawn run */
   function rendered(layerId: string, properties: Partial<PathRunProperties>) {
     return { layer: { id: layerId }, properties };
@@ -1147,8 +1169,9 @@ describe("LayerManager", () => {
       expect(mockApp.map!.queryRenderedFeatures).not.toHaveBeenCalled();
     });
 
-    it("asks for the visible path layers in a box of 5 px around the pointer", () => {
+    it("asks for the visible path layers in a box of 5 px around the pointer", async () => {
       drawMergedRun();
+      await landed();
 
       expect(layerManager.hitTest(new Point(100, 50))).toBeNull();
 
@@ -1295,26 +1318,96 @@ describe("LayerManager", () => {
       });
     });
 
-    it("cannot tell while a source has not taken in its last data", () => {
+    it("cannot tell until the last data has landed, worker and tiles", async () => {
       // The tiles of before have nothing here, where the new data may well
       // have a flight: a filter change that adds flights
       drawMergedRun();
-      mockApp.map!.isSourceLoaded.mockImplementation(
-        (id: string) => id !== ALTITUDE,
-      );
+      await landed();
+      const workerAnswers = holdSetData(ALTITUDE);
+      layerManager.redrawAltitudePaths();
+      const point = pointAt(48.1, 16.1);
 
-      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBe("stale");
-
+      expect(layerManager.hitTest(point)).toBe("stale");
       // Nor when all the tiles had were features nobody can place
-      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 7, g: 1 })];
-      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBe("stale");
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 7, g: 2 })];
+      expect(layerManager.hitTest(point)).toBe("stale");
 
-      mockApp.map!.isSourceLoaded.mockImplementation(() => true);
+      // The worker has the data; the tiles in view are still being cut
+      mockApp.map!.isSourceLoaded.mockReturnValue(false);
+      await workerAnswers();
+      expect(layerManager.hitTest(point)).toBe("stale");
+
+      mockApp.map!.isSourceLoaded.mockReturnValue(true);
+      expect(layerManager.hitTest(point)).toBeNull();
+    });
+
+    it("takes a camera move for none of that", async () => {
+      // Tiles load during every pan and zoom, and the source is not loaded
+      // then either: a click on the empty map is still one
+      drawMergedRun();
+      await landed();
+      mockApp.map!.isSourceLoaded.mockReturnValue(false);
+
       expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBeNull();
     });
 
-    it("drops features whose run is not in the table", () => {
+    it("leaves an earlier draw that lands late to the later one", async () => {
       drawMergedRun();
+      await landed();
+      const first = holdSetData(ALTITUDE);
+      layerManager.redrawAltitudePaths();
+      const second = holdSetData(ALTITUDE);
+      layerManager.redrawAltitudePaths();
+
+      await first();
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBe("stale");
+
+      await second();
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBeNull();
+    });
+
+    it("finds the segment under the pointer in a run that crosses the antimeridian", async () => {
+      // One run of one colour step: two segments east of 180 degrees as
+      // the data has it, one west of it
+      const points: [number, number][] = [
+        [10, 178],
+        [10, 179],
+        [10, 179.9],
+        [10, -179.9],
+        [10, -179],
+      ];
+      const segments = points.slice(1).map((to, i) =>
+        createSegment({
+          path_id: 1,
+          altitude_ft: 3000,
+          coords: [points[i]!, to],
+        }),
+      );
+      mockApp.currentData = createDataset([{ id: 1, year: 2025 }], segments);
+      mockApp.map!.setCenter([180, 10]);
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      await landed();
+      expect(features(ALTITUDE)).toHaveLength(1);
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+
+      // The map reports the pointer unwrapped, east of 180 here. Searched
+      // with the wrapped longitude, every eastern segment was 358 degrees
+      // away, and searched with the unwrapped one every western one.
+      expect(layerManager.hitTest(pointAt(10, 180.5))).toMatchObject({
+        segment: segments[3],
+      });
+      expect(layerManager.hitTest(pointAt(10, 178.4))).toMatchObject({
+        segment: segments[0],
+      });
+      expect(layerManager.hitTest(pointAt(10, 179.5))).toMatchObject({
+        segment: segments[1],
+      });
+    });
+
+    it("drops features whose run is not in the table", async () => {
+      drawMergedRun();
+      await landed();
       mockApp.map!.renderedFeatures = [
         rendered(ALTITUDE, { r: 7, g: 1 }),
         rendered(ALTITUDE, { g: 1 }),
@@ -1379,12 +1472,13 @@ describe("LayerManager", () => {
       expect(project).toHaveBeenCalledTimes(5);
     });
 
-    it("ignores the main runs of other paths in isolate mode", () => {
+    it("ignores the main runs of other paths in isolate mode", async () => {
       addSecondPath();
       mockApp.altitudeLayer.setVisible(true);
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
       layerManager.redrawAltitudePaths();
+      await landed();
       // Tiles cut before the filter still show path 2
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 1, g: 1 })];
 
@@ -1725,6 +1819,56 @@ describe("LayerManager", () => {
       expect(mockApp.map!.getCanvas().style.cursor).toBe("");
     });
 
+    describe("once the map has moved under a pointer that rests", () => {
+      /** What the document finds under the pointer from now on */
+      function under(element: Element | null): void {
+        (
+          document as { elementFromPoint?: (x: number, y: number) => unknown }
+        ).elementFromPoint = vi.fn(() => element);
+      }
+
+      afterEach(() => {
+        // jsdom has none of its own
+        delete (document as { elementFromPoint?: unknown }).elementFromPoint;
+      });
+
+      it("shows the flight a zoom has brought out from under the marker", () => {
+        const originalEvent = onMarker();
+        mockApp.map!.emit("mousemove", {
+          point: pointAt(48.5, 16.5),
+          originalEvent,
+        });
+        runFrames();
+        expect(tooltips()).toHaveLength(0);
+
+        // The marker has moved away; the event still names it
+        under(mockApp.map!.getCanvas());
+        layerManager.redrawAltitudePaths();
+        mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
+        mockApp.map!.emit("idle");
+
+        expect(tooltips().filter((popup) => popup.isOpen())).toHaveLength(1);
+      });
+
+      it("closes the tooltip a zoom has slid a marker under", () => {
+        const onCanvas = new MouseEvent("mousemove", { bubbles: true });
+        mockApp.map!.getCanvas().dispatchEvent(onCanvas);
+        mockApp.map!.emit("mousemove", {
+          point: pointAt(48.5, 16.5),
+          originalEvent: onCanvas,
+        });
+        runFrames();
+        expect(tooltips()[0]!.isOpen()).toBe(true);
+
+        under((onMarker().target as Element).closest(".maplibregl-marker"));
+        layerManager.redrawAltitudePaths();
+        mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
+        mockApp.map!.emit("idle");
+
+        expect(tooltips()[0]!.isOpen()).toBe(false);
+      });
+    });
+
     it("stands down a hover that was already waiting for its frame", () => {
       mockApp.map!.emit("mousemove", { point: pointAt(48.5, 16.5) });
 
@@ -1739,22 +1883,57 @@ describe("LayerManager", () => {
   });
 
   describe("a hover the tiles cannot answer yet", () => {
-    it("looks again on idle, also when the pointer came after the redraw", () => {
+    beforeEach(async () => {
       mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      await landed();
+    });
+
+    it("looks again on idle, also when the pointer came after the redraw", async () => {
       // The pointer is off the map, so the redraw asks for no look on idle
+      const workerAnswers = holdSetData(ALTITUDE);
       layerManager.redrawAltitudePaths();
       expect(mockApp.map!.listenerCount("idle")).toBe(0);
-      mockApp.map!.isSourceLoaded.mockReturnValue(false);
 
       moveTo(pointAt(48.5, 16.5));
       expect(tooltips()).toHaveLength(0);
       expect(mockApp.map!.listenerCount("idle")).toBe(1);
 
-      mockApp.map!.isSourceLoaded.mockReturnValue(true);
-      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+      await workerAnswers();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
       mockApp.map!.emit("idle");
 
       expect(tooltips().filter((popup) => popup.isOpen())).toHaveLength(1);
+    });
+
+    it("keeps the tooltip over a flight of the tiles of before, and only there", () => {
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+      moveTo(pointAt(48.5, 16.5));
+      expect(tooltips()[0]!.isOpen()).toBe(true);
+      holdSetData(ALTITUDE);
+      layerManager.redrawAltitudePaths();
+
+      // The flight may well still be there
+      moveTo(pointAt(48.51, 16.51));
+      expect(tooltips()[0]!.isOpen()).toBe(true);
+
+      // Over nothing at all there is nothing to go on showing
+      mockApp.map!.renderedFeatures = [];
+      moveTo(pointAt(40, 10));
+      expect(tooltips()[0]!.isOpen()).toBe(false);
+      expect(mockApp.map!.getCanvas().style.cursor).toBe("");
+    });
+
+    it("does not take a zoom for one: the tooltip closes beside the flight at once", () => {
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+      moveTo(pointAt(48.5, 16.5));
+      // Tiles are loading, as during every wheel zoom
+      mockApp.map!.isSourceLoaded.mockReturnValue(false);
+      mockApp.map!.renderedFeatures = [];
+
+      moveTo(pointAt(40, 10));
+
+      expect(tooltips()[0]!.isOpen()).toBe(false);
     });
   });
 

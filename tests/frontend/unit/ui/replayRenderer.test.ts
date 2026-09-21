@@ -1171,9 +1171,33 @@ describe("ReplayRenderer", () => {
         expectCameraFollows();
       });
 
-      it("takes a menu that opens for the end of the press", () => {
+      it("takes no menu that opens for the end of a press", () => {
+        // A long press on Android opens one with the finger still down; a
+        // pan on every frame from then on would reset the drag under it
         map.getCanvasContainer().dispatchEvent(new Event("touchstart"));
         window.dispatchEvent(new Event("contextmenu"));
+
+        expectCameraLeftAlone();
+      });
+
+      it("sees a release that went missing in the next move of the mouse", () => {
+        // A menu that opens over a press takes the mouseup with it
+        map.getCanvasContainer().dispatchEvent(new MouseEvent("mousedown"));
+        window.dispatchEvent(new MouseEvent("mousemove", { buttons: 1 }));
+        expectCameraLeftAlone();
+
+        window.dispatchEvent(new MouseEvent("mousemove", { buttons: 0 }));
+        expectCameraFollows();
+      });
+
+      it("takes a camera move of the app for the end of a gesture it cut short", () => {
+        // MapLibre resets the gesture handlers before every camera move,
+        // and ends a drag or a pinch that way without a moveend
+        map.isMoving.mockReturnValue(true);
+        map.emit("movestart", { originalEvent: new Event("mousemove") });
+        expectCameraLeftAlone();
+
+        map.emit("movestart", {});
 
         expectCameraFollows();
       });
