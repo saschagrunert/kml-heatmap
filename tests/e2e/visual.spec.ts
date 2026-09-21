@@ -41,8 +41,13 @@ test.describe("visual", () => {
     await expect(page.locator("#left-buttons")).toBeVisible();
     await expect(page.locator("#right-buttons")).toBeVisible();
 
+    // Nothing in this frame comes from the flights, and the pinned image
+    // renders it identically run after run, so any difference is a change
+    // to the chrome. The project-wide ratio would let a whole control row
+    // disappear; the smaller of the two limits applies.
     await expect(page).toHaveScreenshot("chrome-at-rest.png", {
       animations: "disabled",
+      maxDiffPixels: 0,
     });
   });
 
