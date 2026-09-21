@@ -13,10 +13,13 @@
  * onto a CDN would otherwise only show up as a blank map for visitors.
  *
  * Every spec imports `test` and `expect` from here instead of
- * "@playwright/test" so the fixture is active everywhere.
+ * "@playwright/test" so the fixture is active everywhere. For the same
+ * reason this is where a stale site is refused (see site-check.ts).
  */
 import { test as base, expect } from "@playwright/test";
 import type { BrowserContext, Route } from "@playwright/test";
+import { checkSite } from "./site-check";
+import type { SiteOptions } from "./sites";
 
 /**
  * A 1x1 transparent PNG, served for every map tile. A well-formed one: the
@@ -127,7 +130,20 @@ async function installHermeticRoutes(
   return offSite;
 }
 
-export const test = base.extend<{ hermetic: void }>({
+export const test = base.extend<
+  { hermetic: void },
+  SiteOptions & { currentSite: void }
+>({
+  // Which generated site the project drives; playwright.config.ts sets it
+  // for the projects that do not use docs/
+  site: ["docs", { option: true, scope: "worker" }],
+  currentSite: [
+    async ({ site }, use) => {
+      checkSite(site);
+      await use();
+    },
+    { auto: true, scope: "worker" },
+  ],
   hermetic: [
     async ({ context }, use) => {
       const offSite = await installHermeticRoutes(context);

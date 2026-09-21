@@ -241,7 +241,7 @@ Targets (`make help` prints this list with the current variable values):
 - `format` - Run formatters
 - `lock` - Regenerate `requirements.lock` and `requirements-test.lock` from `pyproject.toml` with pip-compile
 - `obfuscate` - Rewrite the KML files in `INPUT_DIR` in place so they carry no real dates (irreversible)
-- `check-obfuscation` - Check that the KML files in `INPUT_DIR` are obfuscated
+- `check-obfuscation` - Check that the KML files in `INPUT_DIR` and the fixture flights of the visual snapshots are obfuscated
 - `hooks` - Install the pre-push hook that refuses to push KML files with real dates
 - `clean` - Remove the container image (when a runtime is available) and local build artifacts, including the frontend build output in `kml_heatmap/static/`
 - `help` - Show available targets and variables

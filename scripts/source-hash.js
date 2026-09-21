@@ -1,7 +1,7 @@
 /**
  * Content hash of the frontend sources and the build configuration.
  *
- * build.js stamps it into the bundle banner, and the e2e global setup reads
+ * build.js stamps it into the bundle banner, and the e2e site check reads
  * the banner back to refuse a site that was built from other sources. Both
  * import it from here so the two can never hash differently. The build
  * script, the vendoring script, the compiler options and the versions of
