@@ -13,6 +13,7 @@ import type { ReplayManager } from "./replayManager";
 import type { ReplayAirplane, ReplayState } from "./replayState";
 import type { PathSegment, TrailRun } from "../types";
 import { domCache } from "../utils/domCache";
+import { frameCoalescer } from "../utils/frameCoalescer";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 import {
   formatNumber,
@@ -318,6 +319,7 @@ export class AirplaneMarker implements ReplayAirplane {
     element.className = "replay-airplane-root";
     element.title = "Aircraft position";
     element.setAttribute("aria-label", "Aircraft position");
+    element.setAttribute("aria-expanded", "false");
     // The rotation transition lives on the inner icon (see features.css);
     // MapLibre positions the root with transforms, which must not animate
     element.innerHTML =
@@ -325,8 +327,11 @@ export class AirplaneMarker implements ReplayAirplane {
       icon("aircraftTop", 24, undefined, "solid") +
       "</div>";
     // MapLibre fires a map click for a click on a marker as well; the
-    // app's handler tells it by its target and leaves the popup alone
-    element.addEventListener("click", () => {
+    // app's handler tells it by its target and leaves the popup alone. The
+    // second click of a double click or tap would close what the first
+    // opened; a key reports a `detail` of 0.
+    element.addEventListener("click", (event) => {
+      if (event.detail > 1) return;
       if (this.isPopupOpen()) this.closePopup();
       else onActivate();
     });
@@ -342,6 +347,10 @@ export class AirplaneMarker implements ReplayAirplane {
       offset: AIRPLANE_POPUP_OFFSET,
     });
     closeWhenBehindGlobe(map, this.popup);
+    this.popup.on("open", () => element.setAttribute("aria-expanded", "true"));
+    this.popup.on("close", () =>
+      element.setAttribute("aria-expanded", "false"),
+    );
     this.marker = new Marker({ element, anchor: "center" })
       .setLngLat(toLngLat(position))
       .addTo(map);
@@ -523,7 +532,9 @@ export class ReplayRenderer {
   /** Wall-clock time before which auto-zoom does not zoom out again */
   private autoZoomSettlesAt = 0;
   /** The frame the trail is written to the map in, while one is pending */
-  private trailFrameId: number | null = null;
+  private readonly trailFrame = frameCoalescer<ReplayState>((state) =>
+    this.flushTrail(state),
+  );
   /** Follows the user's hand on the map while a replay follows the airplane */
   private userMovement: UserMapMovement | null = null;
   /** The airplane, where it is and the track it flies, as last displayed */
@@ -694,11 +705,7 @@ export class ReplayRenderer {
    * frame at most, and none for a frame that drew nothing new.
    */
   scheduleTrailFlush(state: ReplayState): void {
-    if (!state.trailDirty || this.trailFrameId !== null) return;
-    this.trailFrameId = requestAnimationFrame(() => {
-      this.trailFrameId = null;
-      this.flushTrail(state);
-    });
+    if (state.trailDirty) this.trailFrame.schedule(state);
   }
 
   private flushTrail(state: ReplayState): void {
@@ -706,6 +713,13 @@ export class ReplayRenderer {
     state.trailDirty = false;
     // A replay that has ended meanwhile has emptied the source itself
     if (!state.layerActive) return;
+    // The whole trail on every write, which measured cheap enough to keep:
+    // the longest flight of the sample data (2800 segments) replayed at 500x
+    // in Chrome grew from 90 runs and 1000 vertices a third of the way in to
+    // 250 runs and 3000 vertices (87 KB) at the end, and the write went from
+    // 0.5 to 0.9 ms of main thread, with no dropped frames. Sending only
+    // the changed runs through `updateData` measured worse on the same
+    // replay: more main thread per frame, and dropped frames.
     void this.app.map
       ?.getSource<GeoJSONSource>(MAP_SOURCES.replayTrail)
       ?.setData(trailFeatureCollection(state.trailRuns));
@@ -713,9 +727,7 @@ export class ReplayRenderer {
 
   /** Drop a write that is still pending; the replay layer is going away */
   cancelTrailFlush(): void {
-    if (this.trailFrameId === null) return;
-    cancelAnimationFrame(this.trailFrameId);
-    this.trailFrameId = null;
+    this.trailFrame.cancel();
   }
 
   /**

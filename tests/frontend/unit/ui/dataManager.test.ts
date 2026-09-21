@@ -34,6 +34,7 @@ const loaderMocks = vi.hoisted(() => ({
   loadData: vi.fn(),
   loadAirports: vi.fn(),
   loadMetadata: vi.fn(),
+  destroy: vi.fn(),
   options: null as DataLoaderOptions | null,
 }));
 
@@ -44,6 +45,7 @@ vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
       loadData: loaderMocks.loadData,
       loadAirports: loaderMocks.loadAirports,
       loadMetadata: loaderMocks.loadMetadata,
+      destroy: loaderMocks.destroy,
     };
   }),
 }));
@@ -420,6 +422,12 @@ describe("DataManager", () => {
         expect(loadingEl.style.display).toBe("none");
         expect(bar.hidden).toBe(true);
         expect(share()).toBe("");
+      });
+
+      it("ends the loader, and with it the year worker, with the app", () => {
+        dataManager.destroy();
+
+        expect(loaderMocks.destroy).toHaveBeenCalledTimes(1);
       });
 
       it("works without the bar in the template", () => {

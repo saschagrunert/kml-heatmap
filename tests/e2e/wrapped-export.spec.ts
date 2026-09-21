@@ -1,4 +1,4 @@
-import { test, expect, type Locator } from "./fixtures";
+import { test, expect, type Locator, type Page } from "./fixtures";
 import {
   findSegmentFarFromAirports,
   gotoApp,
@@ -366,16 +366,25 @@ test.describe("Wrapped and Export", () => {
     );
   });
 
+  /**
+   * Stand in for html-to-image, for reliable headless testing: the page
+   * imports the vendored module on the first export, and gets this instead
+   */
+  const FAKE_HTML_TO_IMAGE =
+    "export const toJpeg = () => Promise.resolve(" +
+    '"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA");';
+
+  async function fakeHtmlToImage(page: Page): Promise<void> {
+    await page.route("**/vendor/html-to-image.mjs*", (route) =>
+      route.fulfill({
+        contentType: "text/javascript",
+        body: FAKE_HTML_TO_IMAGE,
+      }),
+    );
+  }
+
   test("export button triggers download", async ({ page }) => {
-    // Mock html-to-image for reliable headless testing
-    await page.evaluate(() => {
-      window.htmlToImage = {
-        toJpeg: () =>
-          Promise.resolve(
-            "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA",
-          ),
-      } as unknown as HtmlToImage;
-    });
+    await fakeHtmlToImage(page);
 
     const downloadPromise = page.waitForEvent("download", {
       timeout: 10000,
@@ -393,13 +402,20 @@ test.describe("Wrapped and Export", () => {
     await expect(page.locator("#replay-btn")).toBeVisible();
   });
 
-  test("export loads html-to-image on demand and reports when unavailable", async ({
+  test("export imports html-to-image on demand, reports when it is unavailable and tries again", async ({
     page,
   }) => {
     // The library is not part of the initial page load
+    const requested: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("html-to-image"))
+        requested.push(request.url());
+    });
     expect(
-      await page.evaluate(
-        () => document.querySelector('script[src*="html-to-image"]') !== null,
+      await page.evaluate(() =>
+        performance
+          .getEntriesByType("resource")
+          .some((entry) => entry.name.includes("html-to-image")),
       ),
     ).toBe(false);
 
@@ -411,6 +427,32 @@ test.describe("Wrapped and Export", () => {
     );
     await expect(page.locator("#export-btn")).toHaveText("Export image");
     await expect(page.locator("#export-btn")).toBeEnabled();
+    expect(requested).toHaveLength(1);
+    expect(requested[0]).toMatch(/\/vendor\/html-to-image\.mjs$/);
+
+    // A browser may answer the import of a URL that failed from memory, so
+    // the next export asks for the module under another one
+    await page.unroute("**/html-to-image*");
+    await fakeHtmlToImage(page);
+    const downloadPromise = page.waitForEvent("download", { timeout: 10000 });
+    await page.locator("#export-btn").click();
+
+    await downloadPromise;
+    expect(requested).toHaveLength(2);
+    expect(requested[1]).toMatch(/\/vendor\/html-to-image\.mjs\?retry=1$/);
+  });
+
+  test("the vendored html-to-image is a module with the export the page uses", async ({
+    page,
+  }) => {
+    const exportsToJpeg = await page.evaluate(async () => {
+      const library = (await import(
+        new URL("./vendor/html-to-image.mjs", location.href).href
+      )) as { toJpeg?: unknown };
+      return typeof library.toJpeg;
+    });
+
+    expect(exportsToJpeg).toBe("function");
   });
 
   test("share button copies the current link", async ({ page, context }) => {

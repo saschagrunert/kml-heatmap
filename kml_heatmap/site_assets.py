@@ -42,6 +42,7 @@ __all__ = [
     "SITE_FILES",
     "SITE_FILE_PATTERNS",
     "STATIC_DIR",
+    "YEAR_WORKER_BUNDLE_FILE",
     "BuildCommit",
     "available_country_flags",
     "build_commit",
@@ -68,7 +69,16 @@ BUNDLE_FILE = STATIC_DIR / "mapApp.bundle.js"
 FEATURES_BUNDLE_FILE = STATIC_DIR / "features.bundle.js"
 # The modules the two above have in common, which both of them import
 SHARED_BUNDLE_FILE = STATIC_DIR / "shared.bundle.js"
-BUNDLE_FILES = (BUNDLE_FILE, FEATURES_BUNDLE_FILE, SHARED_BUNDLE_FILE)
+# The year worker, which parses and decodes the year files off the main
+# thread; the page imports the same file for what it does to year data itself
+# (frontend/services/yearWorker.ts). A build of its own in build.js.
+YEAR_WORKER_BUNDLE_FILE = STATIC_DIR / "yearWorker.bundle.js"
+BUNDLE_FILES = (
+    BUNDLE_FILE,
+    FEATURES_BUNDLE_FILE,
+    SHARED_BUNDLE_FILE,
+    YEAR_WORKER_BUNDLE_FILE,
+)
 # The sources of the bundle; only present in a checkout, not in the image
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 # First line of the bundle; the group is the source hash (scripts/source-hash.js)
@@ -111,7 +121,9 @@ VENDOR_FILES = (
     "maplibre-gl-shared.mjs",
     "maplibre-gl-worker.mjs",
     "maplibre-gl.css",
-    "html-to-image.js",
+    # Bundled there from the package's module (VENDOR_MODULES), and imported
+    # by the page on the first export
+    "html-to-image.mjs",
 )
 # The stylesheets, in the order the page applies them: styles.css is linked in
 # the head, features.css is fetched with the feature bundle the first time
@@ -130,6 +142,8 @@ SITE_FILES = (
     # Published by earlier versions and produced by none now: listed so that
     # regenerating an existing site takes them away
     "vendor/dom-to-image.min.js",
+    # html-to-image as the script it was before the page imported it
+    "vendor/html-to-image.js",
     # Leaflet, which the map was drawn with before MapLibre
     "vendor/leaflet.js",
     "vendor/leaflet.css",

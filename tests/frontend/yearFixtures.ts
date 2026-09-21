@@ -1,0 +1,143 @@
+/**
+ * Year files and datasets for the tests of the loader and of the year worker
+ */
+
+import { vi } from "vitest";
+import { DATA_FORMAT_VERSION } from "../../kml_heatmap/frontend/services/yearDecode";
+import { handleRequest } from "../../kml_heatmap/frontend/services/yearWorker";
+import type { YearWorkerLike } from "../../kml_heatmap/frontend/services/yearDecoder";
+import type {
+  YearRequest,
+  YearResponse,
+} from "../../kml_heatmap/frontend/services/yearWorker";
+import type {
+  KMLDataset,
+  RawColumns,
+  RawPathSegments,
+  RawYearData,
+} from "../../kml_heatmap/frontend/types";
+
+/**
+ * A year worker without a thread: it answers with the real message handler,
+ * a microtask after the request, and its buffers change hands the way a real
+ * transfer would move them.
+ */
+export class FakeYearWorker {
+  requests: YearRequest[] = [];
+  terminate = vi.fn();
+  /** Cleared by a test that wants to answer, or not to answer, by itself */
+  answers = true;
+  private listeners = new Map<string, ((event: Event) => void)[]>();
+
+  addEventListener(type: string, listener: (event: Event) => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+
+  postMessage(request: YearRequest): void {
+    this.requests.push(request);
+    if (this.answers) queueMicrotask(() => this.answer(request));
+  }
+
+  /** Answer `request` as the worker would */
+  answer(request: YearRequest): void {
+    const { response, transfer } = handleRequest(request);
+    this.emit("message", { data: structuredClone(response, { transfer }) });
+  }
+
+  /** Send the page an answer of the test's own making */
+  say(response: YearResponse): void {
+    this.emit("message", { data: response });
+  }
+
+  emit(type: string, event: object): void {
+    const full = { preventDefault: vi.fn(), ...event } as unknown as Event;
+    for (const listener of this.listeners.get(type) ?? []) listener(full);
+  }
+
+  /** For the `createWorker` option of the decoder */
+  asWorker(): YearWorkerLike {
+    return this;
+  }
+}
+
+/**
+ * Column scales of the wire format, mirroring kml_heatmap/segment_codec.py
+ * (the altitude column counts hundreds of feet). The helpers below take rows
+ * in the units a reader thinks in and encode them, so a test says what it
+ * means and the decoder is still checked against an independent encoder.
+ */
+const SCALES = [1e5, 1e5, 1 / 100, 10, 10];
+
+/** One path's exported segments, given as plain `[lat, lon, ft, kt, s?]` rows */
+export function path(
+  start: [number, number],
+  rows: number[][],
+): RawPathSegments {
+  const scaledStart = [
+    Math.round(start[0] * SCALES[0]!),
+    Math.round(start[1] * SCALES[1]!),
+  ];
+  const running = [scaledStart[0]!, scaledStart[1]!, 0, 0, 0];
+  // The time column is only written when some row has a time
+  const columns: (number | null)[][] = [[], [], [], []];
+  if (rows.some((row) => row.length > 4)) columns.push([]);
+  for (const row of rows) {
+    columns.forEach((column, index) => {
+      const value = row[index];
+      if (value === undefined) {
+        column.push(null);
+        return;
+      }
+      const scaled = Math.round(value * SCALES[index]!);
+      column.push(scaled - running[index]!);
+      running[index] = scaled;
+    });
+  }
+  return { start: scaledStart, columns: columns as RawColumns };
+}
+
+export function rawYear(
+  year: number,
+  segments: RawYearData["segments"],
+  pathInfo: RawYearData["path_info"] = [],
+  originalPoints = 0,
+): RawYearData {
+  return {
+    format: DATA_FORMAT_VERSION,
+    year,
+    original_points: originalPoints,
+    path_info: pathInfo,
+    segments,
+  };
+}
+
+export function dataset(
+  segmentsCount: number,
+  pathIdStart = 1,
+  originalPoints = segmentsCount,
+): KMLDataset {
+  const path_segments = Array.from({ length: segmentsCount }, (_, i) => ({
+    path_id: pathIdStart + i,
+    coords: [
+      [50, 8],
+      [50.1, 8.1],
+    ] as [[number, number], [number, number]],
+    altitude_ft: 1000,
+    groundspeed_knots: 100,
+  }));
+  return {
+    coordinates: path_segments.map((s) => s.coords[0]),
+    path_segments,
+    path_info: path_segments.map((s) => ({ id: s.path_id })),
+    original_points: originalPoints,
+  };
+}
+
+/** The body of a year file, as the site would serve it */
+export function yearBytes(raw: unknown): ArrayBuffer {
+  const bytes = new TextEncoder().encode(JSON.stringify(raw));
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  );
+}

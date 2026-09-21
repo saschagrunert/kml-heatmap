@@ -83,12 +83,12 @@ parentheses back is undone on the next `make format`.
   pushed, needs nothing beyond Python 3.14 and refuses the push when it
   cannot check. The published site carries no flight date finer than the
   year either way; this is about the KML files this repository commits.
-- The frontend build output in `kml_heatmap/static/` is gitignored: the three
-  bundles (`mapApp.bundle.js`, `features.bundle.js`, `shared.bundle.js`) with
-  their `.map` files, `vendor/` (the third-party code copied out of
-  `node_modules`) and `flags/` (the country flags of `flag-icons`). It is
-  built by `npm run build` and, for the image, inside the Dockerfile;
-  `make clean` removes it.
+- The frontend build output in `kml_heatmap/static/` is gitignored: the four
+  bundles (`mapApp.bundle.js`, `features.bundle.js`, `shared.bundle.js`,
+  `yearWorker.bundle.js`) with their `.map` files, `vendor/` (the
+  third-party code copied out of `node_modules`) and `flags/` (the country
+  flags of `flag-icons`). It is built by `npm run build` and, for the image,
+  inside the Dockerfile; `make clean` removes it.
 - The Python dependencies are declared once, in `pyproject.toml` (runtime
   dependencies plus the `test` and `dev` extras). `requirements.lock` and
   `requirements-test.lock` are compiled from it with `make lock` (pip-compile
@@ -110,7 +110,7 @@ parentheses back is undone on the next `make format`.
     back to its own token, and a pull request opened with that one does not
     start CI: close and reopen it to run the checks.
 - The published page carries MapLibre GL JS and html-to-image itself:
-  `scripts/vendor.js` copies them out of `node_modules` at build time, so
+  `scripts/vendor.js` takes them out of `node_modules` at build time, so
   `package-lock.json` is the only place their versions are pinned and
   Dependabot can bump them like anything else. Nothing loads from a CDN, and
   the e2e fixture fails any test whose page reaches a third-party origin.

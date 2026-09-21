@@ -2,7 +2,7 @@
 
 The encoding only pays off if it is lossless for the values the exporter
 actually writes, so the round trip is checked over generated data as well as
-over the fixed cases below. ``tests/frontend/unit/services/dataLoader.test.ts``
+over the fixed cases below. ``tests/frontend/unit/services/yearDecode.test.ts``
 and the contract test cover the decoder the browser runs.
 """
 

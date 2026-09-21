@@ -659,6 +659,8 @@ output-dir/
 ├── features.bundle.js.map
 ├── shared.bundle.js       # The modules both of the above import
 ├── shared.bundle.js.map
+├── yearWorker.bundle.js   # Decodes the year files, in a worker
+├── yearWorker.bundle.js.map
 ├── map_config.js          # Map defaults, tile API key and the build stamp
 ├── styles.css             # Linked in the page
 ├── features.css           # Replay and Wrapped, fetched with their bundle
@@ -673,7 +675,7 @@ output-dir/
 │   ├── maplibre-gl-shared.mjs   # Imported by the two around it
 │   ├── maplibre-gl-worker.mjs   # Started by maplibre-gl.mjs as a module worker
 │   ├── maplibre-gl.css
-│   └── html-to-image.js
+│   └── html-to-image.mjs        # Imported on the first image export
 ├── flags/                 # One SVG per country the flights touched
 └── data/
     ├── airports.json      # Airport markers
@@ -706,13 +708,14 @@ the rows contiguous.
 
 Every value above is written as an integer difference to the row before it
 rather than as the number itself (`kml_heatmap/segment_codec.py`, mirrored by
-`expandYearData` in `services/dataLoader.ts`). The exporter has already
-rounded each column to a fixed step (1e-5 degrees, 100 ft, 0.1 kt and 0.1 s),
-so counting in that step is exact, and neighbouring rows barely differ: the
-encoding is lossless and roughly halves a year file. Writing the rows column
-by column puts the repeating differences of one quantity next to each other,
-which takes another sixth off the compressed download. The numbers the page
-works with are the ones described above; only the file is written this way.
+`decodeYear` in `services/yearDecode.ts`, which the page runs in a worker).
+The exporter has already rounded each column to a fixed step (1e-5 degrees,
+100 ft, 0.1 kt and 0.1 s), so counting in that step is exact, and
+neighbouring rows barely differ: the encoding is lossless and roughly halves
+a year file. Writing the rows column by column puts the repeating
+differences of one quantity next to each other, which takes another sixth
+off the compressed download. The numbers the page works with are the ones
+described above; only the file is written this way.
 The page skips the rest of a path, with a warning in the console, from the
 first value that is not a number.
 

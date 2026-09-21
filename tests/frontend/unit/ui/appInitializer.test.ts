@@ -168,6 +168,8 @@ describe("appInitializer", () => {
       expect(element.classList.contains("airport-marker-root")).toBe(true);
       expect(element.title).toBe("Frankfurt EDDF");
       expect(element.getAttribute("aria-label")).toBe("Frankfurt EDDF");
+      // It opens a popup, which starts out closed
+      expect(element.getAttribute("aria-expanded")).toBe("false");
       expect(element.querySelector(".airport-label")!.textContent).toBe("EDDF");
     });
 
@@ -238,6 +240,31 @@ describe("appInitializer", () => {
         "Frankfurt EDDF",
       );
       expect(order).toEqual(["select", "open"]);
+    });
+
+    it("closes its open popup on the next click and selects nothing", () => {
+      create();
+      app.airportManager.isPopupOpen.mockReturnValue(true);
+
+      eddf().getElement().click();
+
+      expect(app.airportManager.closePopup).toHaveBeenCalledWith(
+        "Frankfurt EDDF",
+      );
+      expect(app.airportManager.openPopup).not.toHaveBeenCalled();
+      expect(app.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
+    });
+
+    it("ignores the later clicks of a double click or a double tap", () => {
+      create();
+      const element = eddf().getElement();
+
+      element.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, detail: 2 }),
+      );
+
+      expect(app.airportManager.openPopup).not.toHaveBeenCalled();
+      expect(app.airportManager.closePopup).not.toHaveBeenCalled();
     });
 
     it("opens the popup but leaves the selection alone while replay runs", () => {

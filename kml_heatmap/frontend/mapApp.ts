@@ -48,9 +48,9 @@ import {
 } from "./utils/constants";
 import {
   addDataLayers,
+  withDataLayers,
   AirportLayerHandle,
   MapLayerHandle,
-  MapPathLayerHandle,
 } from "./mapLayers";
 import {
   AppStore,
@@ -77,7 +77,6 @@ import type {
   AirportMarker,
   LayerHandle,
   PathInfo,
-  PathLayerHandle,
   PathSegment,
   Airport,
   AppState,
@@ -155,9 +154,11 @@ export function cartoTransformRequest(
 }
 
 /**
- * What the map shows when the base style cannot be fetched: the page
- * background and nothing else. It needs no network, so the flights still
- * get a map to be drawn on; without it no source could ever be added.
+ * What the map starts on, and stays on when the base style cannot be
+ * fetched: the page background and nothing else. It needs no network, so
+ * the flights are drawn without waiting for CARTO, whose style is swapped
+ * in under them when it arrives (see `loadBaseStyle`). The colour is the
+ * one of that style's background layer and of `#map` (--color-map-bg).
  */
 export const FALLBACK_STYLE: StyleSpecification = {
   version: 8,
@@ -175,12 +176,12 @@ export const FALLBACK_STYLE: StyleSpecification = {
 const WRAPPED_RESTORE_DELAY_MS = 500;
 
 /**
- * How long the base style may take before the flights are drawn without it.
- * The style is 70 KB from a CDN and is preconnected to, so a healthy
- * connection answers in well under a second; the limit is for the ones that
- * never answer, and long enough for a slow phone that eventually does.
+ * How long after a failed request the base style is asked for once more. A
+ * connection that was reset or a CDN node that answered 5xx is usually fine
+ * a moment later; whatever still fails then is not cured by asking again,
+ * except by the network coming back, which `online` reports.
  */
-export const STYLE_LOAD_TIMEOUT_MS = 10_000;
+export const BASE_STYLE_RETRY_MS = 5_000;
 
 /**
  * Said when the feature bundle cannot be fetched. Without it a click on
@@ -252,11 +253,12 @@ export class MapApp {
   map: MapLibreMap | null;
   /**
    * Resolves with the map once its style has loaded and every source and
-   * layer of MAP_SOURCES and MAP_LAYERS exists, empty. A base style that
-   * fails to load does not stop it: FALLBACK_STYLE takes its place. It
-   * rejects when the layers themselves cannot be added, which fails
-   * `initialize()` and is reported like any other failure of the start-up,
-   * and when the app is destroyed first, so nothing waits on it for good.
+   * layer of MAP_SOURCES and MAP_LAYERS exists, empty. That style is
+   * FALLBACK_STYLE, which needs no network, so the base style of CARTO
+   * neither delays it nor can fail it. It rejects when the layers
+   * themselves cannot be added, which fails `initialize()` and is reported
+   * like any other failure of the start-up, and when the app is destroyed
+   * first, so nothing waits on it for good.
    * `initialize()` waits for it before the first data is loaded, so code
    * that runs from there on may use the sources directly; anything that can
    * run earlier (a constructor, a click during the load) goes through this.
@@ -268,10 +270,10 @@ export class MapApp {
   );
   private resolveMapReady!: (map: MapLibreMap) => void;
   private rejectMapReady!: (reason: unknown) => void;
-  /** Whether the base style, or its stand-in, has loaded */
-  private styleLoaded = false;
-  /** Runs out when the base style neither loads nor fails */
-  private styleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Where the request for the base style stands; "idle" before and between */
+  private baseStyle: "idle" | "loading" | "loaded" = "idle";
+  /** Whether the one timed retry of the base style has been spent */
+  private baseStyleRetried = false;
   /** Takes back `keepMarkerTapsFromZoom`, set with the map */
   private releaseMarkerTaps: (() => void) | null = null;
 
@@ -279,8 +281,8 @@ export class MapApp {
   // added or removed; the handles switch their visibility.
   readonly heatmapLayer: LayerHandle;
   readonly aviationLayer: LayerHandle;
-  readonly altitudeLayer: PathLayerHandle;
-  readonly airspeedLayer: PathLayerHandle;
+  readonly altitudeLayer: LayerHandle;
+  readonly airspeedLayer: LayerHandle;
   readonly airportLayer: LayerHandle;
   /** The same five, for attaching them to the map in one go */
   private readonly layerHandles: MapLayerHandle[];
@@ -372,11 +374,11 @@ export class MapApp {
     this.mapReady.catch(() => {});
     const heatmap = new MapLayerHandle([MAP_LAYERS.heat]);
     const aviation = new MapLayerHandle([MAP_LAYERS.aviation]);
-    const altitude = new MapPathLayerHandle([
+    const altitude = new MapLayerHandle([
       MAP_LAYERS.pathsAltitude,
       MAP_LAYERS.pathsAltitudeSelected,
     ]);
-    const airspeed = new MapPathLayerHandle([
+    const airspeed = new MapLayerHandle([
       MAP_LAYERS.pathsAirspeed,
       MAP_LAYERS.pathsAirspeedSelected,
     ]);
@@ -466,10 +468,8 @@ export class MapApp {
    */
   destroy(): void {
     this.destroyed = true;
-    this.clearStyleTimer();
-    // With the timer gone a style request that hangs would never settle
-    // this, and `initialize()` would wait for it forever. Nothing happens
-    // when the map was ready already.
+    // `initialize()` may still be waiting for it. Nothing happens when the
+    // map was ready already.
     this.rejectMapReady(this.destroyedReason);
     if (this.wrappedRestoreTimer !== null) {
       clearTimeout(this.wrappedRestoreTimer);
@@ -617,9 +617,11 @@ export class MapApp {
           fitBoundsOptions: { padding: 30, bearing },
         };
 
+    // A style given as an object is taken in on the next animation frame,
+    // so a tab opened in the background starts up once it is first shown
     const map = new MapLibreMap({
       container: "map",
-      style: cartoStyleUrl(this.config.cartoApiKey),
+      style: FALLBACK_STYLE,
       transformRequest: cartoTransformRequest(this.config.cartoApiKey),
       ...view,
       minZoom: MAP_MIN_ZOOM,
@@ -646,24 +648,25 @@ export class MapApp {
     // writes every error to the console itself.
     map.on("error", this.handleMapError);
 
-    // A request that neither answers nor fails (a captive portal, a
-    // half-open connection) fires no event at all, and the flights would
-    // wait for the browser to give up on it, which takes minutes
-    this.styleTimer = setTimeout(
-      () => this.useFallbackStyle("no answer within the time limit"),
-      STYLE_LOAD_TIMEOUT_MS,
-    );
-
     whenStyleReady(map)
       .then(() => {
-        // A style that arrives after destroy() finds `mapReady` settled and
-        // nobody to add the layers for
+        // Destroyed within the frame the style takes: `mapReady` is settled
+        // and there is nobody to add the layers for
         if (this.destroyed) return;
-        this.clearStyleTimer();
-        this.styleLoaded = true;
         addDataLayers(map);
         for (const handle of this.layerHandles) handle.attach(map);
         this.resolveMapReady(map);
+        // Only now: the swap carries over the layers that were just added
+        void this.loadBaseStyle();
+        window.addEventListener(
+          "online",
+          () => {
+            // A new network is worth a full round, timed retry included
+            this.baseStyleRetried = false;
+            void this.loadBaseStyle();
+          },
+          { signal: this.signal },
+        );
       })
       // A layer the style refuses throws in here. `initialize` waits for
       // `mapReady`, so without this it would wait forever and the page would
@@ -674,40 +677,54 @@ export class MapApp {
   }
 
   /**
+   * Fetch CARTO's style and put it under the flights, however late it
+   * answers: nothing waits for it, so there is no time limit to give up at.
+   * The app fetches it rather than the map, so that `destroy()` can abort
+   * the request and a failure is known to be this one. It is asked for a
+   * second time after BASE_STYLE_RETRY_MS and whenever the browser comes
+   * back online; until then the map stays on FALLBACK_STYLE.
+   *
+   * `setStyle` compares the new style with the one on the map and applies
+   * the difference. `withDataLayers` puts the app's sources and layers into
+   * the new style as they are, so for them there is none: the sources keep
+   * their data and their tiles, the layers their filters, visibility and
+   * paint, and a `setData` that is on its way lands as if nothing happened.
+   */
+  private async loadBaseStyle(): Promise<void> {
+    const map = this.map;
+    if (this.baseStyle !== "idle" || this.destroyed || !map) return;
+    this.baseStyle = "loading";
+    try {
+      const response = await fetch(cartoStyleUrl(this.config.cartoApiKey), {
+        signal: this.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const style = (await response.json()) as StyleSpecification;
+      // `destroy()` leaves the map as it is, also for an answer that was
+      // already being read when the request was aborted
+      if (this.destroyed) return;
+      this.baseStyle = "loaded";
+      map.setStyle(style, { transformStyle: withDataLayers });
+    } catch (error) {
+      if (this.destroyed) return;
+      this.baseStyle = "idle";
+      const message = error instanceof Error ? error.message : String(error);
+      logError(`Base map style failed to load: ${message}`);
+      if (this.baseStyleRetried) return;
+      this.baseStyleRetried = true;
+      setTimeout(() => void this.loadBaseStyle(), BASE_STYLE_RETRY_MS);
+    }
+  }
+
+  /**
    * Report what the map could not load. A tile or a glyph that fails leaves
-   * a hole and nothing more. The base style is different: until it has
-   * loaded there is no style to add the data to, and MapLibre does not try
-   * again, so the first failure swaps in the style that cannot fail.
+   * a hole and nothing more, and the base style is not the map's to load.
    */
   private readonly handleMapError = (e: { error?: unknown }): void => {
     const error = e.error;
     const message = error instanceof Error ? error.message : String(error);
-    if (!this.useFallbackStyle(message)) logError(`Map error: ${message}`);
+    logError(`Map error: ${message}`);
   };
-
-  /**
-   * Give up on the base style and draw the flights on a plain background.
-   * `setStyle` also cancels the request that is still out, so a late answer
-   * cannot replace the style the data layers were added to. The one place
-   * that decides whether there is a swap to make, which it answers: once a
-   * style has loaded, or the stand-in is on its way, there is none.
-   */
-  private useFallbackStyle(reason: string): boolean {
-    if (this.styleLoaded || !this.map) return false;
-    logError(`Base map style failed to load: ${reason}`);
-    this.clearStyleTimer();
-    // Set before the call: a second failure must not swap again
-    this.styleLoaded = true;
-    this.map.setStyle(FALLBACK_STYLE, { diff: false });
-    return true;
-  }
-
-  private clearStyleTimer(): void {
-    if (this.styleTimer !== null) {
-      clearTimeout(this.styleTimer);
-      this.styleTimer = null;
-    }
-  }
 
   /**
    * The store drives the toggle buttons and the colour legends: initial

@@ -18,7 +18,7 @@ scaled by exactly the step it was rounded to, so
 ``decode_rows(encode_start(start), encode_rows(start, rows)) == rows``,
 which ``tests/test_segment_codec.py`` checks over generated data.
 
-``kml_heatmap/frontend/services/dataLoader.ts`` mirrors ``decode_rows``; the
+``kml_heatmap/frontend/services/yearDecode.ts`` mirrors ``decode_rows``; the
 year file carries ``FORMAT_VERSION`` so the two cannot be mismatched
 silently.
 """

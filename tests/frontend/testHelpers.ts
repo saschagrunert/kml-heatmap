@@ -29,7 +29,6 @@ import {
   addDataLayers,
   AirportLayerHandle,
   MapLayerHandle,
-  MapPathLayerHandle,
 } from "../../kml_heatmap/frontend/mapLayers";
 import { MAP_LAYERS } from "../../kml_heatmap/frontend/utils/constants";
 import type { Map as MapLibreMap } from "maplibre-gl";
@@ -199,8 +198,8 @@ export type MockApp = Omit<
     map: MockMapLibreMap | null;
     heatmapLayer: SpiedHandle<MapLayerHandle>;
     aviationLayer: SpiedHandle<MapLayerHandle>;
-    altitudeLayer: SpiedHandle<MapPathLayerHandle> & { getLayers: Mock };
-    airspeedLayer: SpiedHandle<MapPathLayerHandle> & { getLayers: Mock };
+    altitudeLayer: SpiedHandle<MapLayerHandle>;
+    airspeedLayer: SpiedHandle<MapLayerHandle>;
     airportLayer: SpiedHandle<AirportLayerHandle>;
   };
 
@@ -471,7 +470,6 @@ function spied<T extends MapLayerHandle>(handle: T): SpiedHandle<T> {
   const base: MapLayerHandle = handle;
   vi.spyOn(base, "isVisible");
   vi.spyOn(base, "setVisible");
-  if (handle instanceof MapPathLayerHandle) vi.spyOn(handle, "getLayers");
   return handle as SpiedHandle<T>;
 }
 
@@ -491,13 +489,13 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
     heatmapLayer: spied(new MapLayerHandle([MAP_LAYERS.heat])),
     aviationLayer: spied(new MapLayerHandle([MAP_LAYERS.aviation])),
     altitudeLayer: spied(
-      new MapPathLayerHandle([
+      new MapLayerHandle([
         MAP_LAYERS.pathsAltitude,
         MAP_LAYERS.pathsAltitudeSelected,
       ]),
     ),
     airspeedLayer: spied(
-      new MapPathLayerHandle([
+      new MapLayerHandle([
         MAP_LAYERS.pathsAirspeed,
         MAP_LAYERS.pathsAirspeedSelected,
       ]),

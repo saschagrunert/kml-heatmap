@@ -5,6 +5,7 @@
 import type { LngLat, Marker, Point } from "maplibre-gl";
 import type { Coordinate } from "./utils/geometry";
 import type { IconName } from "./utils/icons";
+import type { importYearTools } from "./services/dataLoader";
 
 /**
  * Path information from KML data.
@@ -70,7 +71,7 @@ export interface RawPathSegments {
  * Per-year data file contents (<year>/data.json)
  */
 export interface RawYearData {
-  /** Wire format of the rows, DATA_FORMAT_VERSION in services/dataLoader.ts */
+  /** Wire format of the rows, DATA_FORMAT_VERSION in services/yearDecode.ts */
   format: number;
   year: number;
   original_points: number;
@@ -209,22 +210,6 @@ export interface LayerHandle {
   readonly ids: readonly string[];
   isVisible(): boolean;
   setVisible(visible: boolean): void;
-}
-
-/** One drawn colour run of a path layer, as `getLayers()` reports it */
-export interface PathLayerEntry {
-  pathId: number;
-  options: { color: string; weight: number; opacity: number };
-}
-
-/**
- * Handle of the altitude or the speed layer. `getLayers()` lists what is
- * drawn, from the run tables of the layer manager, which registers itself
- * through `setLayersProvider`; until then the list is empty.
- */
-export interface PathLayerHandle extends LayerHandle {
-  getLayers(): PathLayerEntry[];
-  setLayersProvider(provider: (() => PathLayerEntry[]) | null): void;
 }
 
 /**
@@ -436,6 +421,13 @@ export interface DataLoaderOptions {
   dataDir?: string;
   /** `onProgress` is given for year files of a known size, the ones a bar is drawn for */
   fetchJson?: (url: string, options?: FetchJsonOptions) => Promise<unknown>;
+  /** Fetches the year files, which the year worker parses; same options */
+  fetchBytes?: (
+    url: string,
+    options?: FetchJsonOptions,
+  ) => Promise<ArrayBuffer>;
+  /** Imports the year worker's bundle, see importYearTools in the loader */
+  importYearTools?: typeof importYearTools;
   /** Invoked whenever the loading operation changes, see LoadingState */
   showLoading?: (state: LoadingState) => void;
   hideLoading?: () => void;

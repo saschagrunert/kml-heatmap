@@ -621,6 +621,43 @@ class TestSourceHashParity:
         )
 
 
+class TestBuildOutputParity:
+    """The site publishes what the build writes, under the same names.
+
+    A bundle the build writes and the site does not publish (the year worker,
+    say) leaves a page that fails to load it, and only in a generated site.
+    """
+
+    @pytest.fixture
+    def repo_root(self):
+        root = assets_module.FRONTEND_DIR.parent.parent
+        if not (root / "build.js").is_file():
+            pytest.skip("not running from a checkout")
+        return root
+
+    def test_publishes_every_bundle_the_build_writes(self, repo_root):
+        """BUNDLE_FILES and the bundle names in build.js agree."""
+        names = re.findall(
+            r'^const \w+_BUNDLE = "([^"]+)";$',
+            (repo_root / "build.js").read_text(),
+            re.MULTILINE,
+        )
+        assert names, "build.js no longer names its bundles as constants"
+
+        assert sorted(names) == sorted(path.name for path in assets_module.BUNDLE_FILES)
+
+    def test_publishes_every_file_vendor_js_writes(self, repo_root):
+        """VENDOR_FILES here and VENDOR_FILES and VENDOR_MODULES there agree."""
+        text = (repo_root / "scripts" / "vendor.js").read_text()
+        written = []
+        for name in ("VENDOR_FILES", "VENDOR_MODULES"):
+            listed = re.search(rf"export const {name} = \{{(.*?)\}};", text, re.DOTALL)
+            assert listed is not None, f"{name} is no longer a literal object"
+            written += re.findall(r'^\s*"([^"]+)":', listed.group(1), re.MULTILINE)
+
+        assert sorted(written) == sorted(assets_module.VENDOR_FILES)
+
+
 class TestCountryFlags:
     """Publishing a flag per country the export visited, and no other."""
 

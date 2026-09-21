@@ -221,9 +221,23 @@ export async function initializeApp(
   await app.initialize();
 }
 
+/**
+ * The request for the base style, the one thing MapApp fetches itself. It
+ * never answers unless a test says otherwise, so the map stays on the style
+ * it starts with and no test reaches for the network.
+ */
+export const fetchBaseStyle = vi.fn<typeof fetch>();
+
+/** An answer of `fetchBaseStyle` that carries a style */
+export function styleResponse(style: unknown, status = 200): Response {
+  return new Response(JSON.stringify(style), { status });
+}
+
 /** Reset every mock to a clean, resolved state before a test */
 export function resetManagerMocks(): void {
   vi.resetAllMocks();
+  fetchBaseStyle.mockReturnValue(new Promise(() => {}));
+  vi.stubGlobal("fetch", fetchBaseStyle);
   mockStateManagerInstance.loadState.mockReturnValue(null);
   mockReplayManagerInstance.state.active = false;
   mockReplayManagerInstance.state.airplaneMarker = null;

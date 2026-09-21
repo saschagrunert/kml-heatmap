@@ -350,6 +350,82 @@ describe("AirportManager", () => {
     });
   });
 
+  describe("a second activation of a marker", () => {
+    /** A click as the browser reports it: `detail` counts a burst of them */
+    function click(name: string, detail = 1): void {
+      markers[name]!.getElement().dispatchEvent(
+        new MouseEvent("click", { bubbles: true, detail }),
+      );
+    }
+
+    function expanded(name: string): string | null {
+      return markers[name]!.getElement().getAttribute("aria-expanded");
+    }
+
+    it("closes the popup it opened, as the airplane's does", () => {
+      expect(expanded("EDDF")).toBe("false");
+
+      click("EDDF");
+      expect(popup.isOpen()).toBe(true);
+      expect(expanded("EDDF")).toBe("true");
+
+      click("EDDF");
+      expect(popup.isOpen()).toBe(false);
+      expect(expanded("EDDF")).toBe("false");
+      // Closing selects nothing a second time
+      expect(mockApp.pathSelection.selectPathsByAirport).toHaveBeenCalledTimes(
+        1,
+      );
+    });
+
+    it("moves the popup to another airport without closing it", () => {
+      const closed = vi.fn();
+      popup.on("close", closed);
+      click("EDDF");
+
+      click("EDDM");
+
+      expect(closed).not.toHaveBeenCalled();
+      expect(popup.addTo).toHaveBeenCalledTimes(1);
+      expect(markers["EDDM"]!.isPopupOpen()).toBe(true);
+      expect(expanded("EDDF")).toBe("false");
+      expect(expanded("EDDM")).toBe("true");
+    });
+
+    it("keeps the popup open through a double click or a double tap", () => {
+      click("EDDF", 1);
+      click("EDDF", 2);
+      click("EDDF", 3);
+
+      expect(popup.isOpen()).toBe(true);
+      expect(expanded("EDDF")).toBe("true");
+    });
+
+    it("closes from the keyboard and leaves focus on the marker", () => {
+      const element = markers["EDDF"]!.getElement();
+      element.focus();
+      // Enter and Space reach a button as a click with a `detail` of 0
+      click("EDDF", 0);
+      expect(popup.isOpen()).toBe(true);
+
+      element.focus();
+      click("EDDF", 0);
+
+      expect(popup.isOpen()).toBe(false);
+      expect(document.activeElement).toBe(element);
+      expect(expanded("EDDF")).toBe("false");
+    });
+
+    it("reports a popup closed by its button or the map as closed", () => {
+      click("EDDF");
+
+      // The close button and a click on the map both end in `remove`
+      popup.remove();
+
+      expect(expanded("EDDF")).toBe("false");
+    });
+  });
+
   describe("popup keyboard access", () => {
     it("moves focus into a popup opened from the keyboard", () => {
       const element = markers["EDDF"]!.getElement();

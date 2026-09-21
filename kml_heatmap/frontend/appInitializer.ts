@@ -243,8 +243,16 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
     };
 
     // A button reports Enter and Space as a click, so this one listener is
-    // the mouse, the finger and the keyboard
-    element.addEventListener("click", () => {
+    // the mouse, the finger and the keyboard. A second activation closes the
+    // popup again, as the airplane's does. The second click of a double
+    // click or a double tap is not one: `detail` counts the clicks of such a
+    // burst (a key reports 0), and it would close what the first opened.
+    element.addEventListener("click", (event) => {
+      if (event.detail > 1) return;
+      if (airportMarker.isPopupOpen()) {
+        airportMarker.closePopup();
+        return;
+      }
       if (!app.replayState.active) {
         app.pathSelection.selectPathsByAirport(name);
       }

@@ -129,19 +129,21 @@ implementations agree.
 ## vendor.js
 
 Copies the third-party files the published page loads (the three modules
-of MapLibre GL JS with its stylesheet, and html-to-image) out of
-`node_modules` into
-`kml_heatmap/static/vendor/`, and every country flag of `flag-icons` into
-`kml_heatmap/static/flags/`. Both directories are generated and gitignored,
-and each build replaces them, so a file dropped from the list does not
-linger. A copy differs from its original only in the closing
-`sourceMappingURL` comment, left off because the maps (five megabytes for
-MapLibre) are not shipped and every DevTools session would ask for them and
-get a 404. Serving the files from the site keeps the page working during a CDN
-outage, keeps visitors' addresses away from CDNs and leaves
-`package-lock.json` as the one place their versions are pinned.
+of MapLibre GL JS with its stylesheet) out of `node_modules` into
+`kml_heatmap/static/vendor/`, bundles the module of html-to-image into one
+file next to them (the package ships it as a dozen, and the page imports it
+with `import()` on the first export), and copies every country flag of
+`flag-icons` into `kml_heatmap/static/flags/`. Both directories are
+generated and gitignored, and each build replaces them, so a file dropped
+from the list does not linger. A copy differs from its original only in
+the closing `sourceMappingURL` comment, left off because the maps (five
+megabytes for MapLibre) are not shipped and every DevTools session would
+ask for them and get a 404. Serving the files from the site keeps the page
+working during a CDN outage, keeps visitors' addresses away from CDNs and
+leaves `package-lock.json` as the one place their versions are pinned.
 `kml_heatmap/site_assets.py` keeps its own list of the files it publishes,
-in step with `VENDOR_FILES`; `tests/frontend/unit/vendor.test.ts` checks
-`VENDOR_FILES` against `node_modules`. The wheel ships `vendor/` but not
+in step with `VENDOR_FILES` and `VENDOR_MODULES`, which
+`tests/test_site_assets.py` checks; `tests/frontend/unit/vendor.test.ts`
+checks both against `node_modules`. The wheel ships `vendor/` but not
 `flags/`, and the Python side publishes only the flags of the countries an
 export visited.
