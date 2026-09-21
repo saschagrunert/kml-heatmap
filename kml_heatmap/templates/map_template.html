@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; connect-src 'self' https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; font-src 'self'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; connect-src 'self' https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; font-src 'self'; base-uri 'none'; form-action 'none'"
     />
     <meta
       name="viewport"
@@ -24,9 +24,15 @@
     />
     <meta name="apple-mobile-web-app-title" content="KML Heatmap" />
     <title>KML Heatmap</title>
-    <link rel="preconnect" href="https://a.basemaps.cartocdn.com" />
-    <link rel="preconnect" href="https://b.basemaps.cartocdn.com" />
-    <link rel="preconnect" href="https://c.basemaps.cartocdn.com" />
+    <!-- The style, then the tile index, glyphs and sprite; the tiles come
+         from four more hosts the style only names once it has loaded.
+         crossorigin because MapLibre fetches all of them. -->
+    <link rel="preconnect" href="https://basemaps.cartocdn.com" crossorigin />
+    <link
+      rel="preconnect"
+      href="https://tiles.basemaps.cartocdn.com"
+      crossorigin
+    />
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link
@@ -52,15 +58,17 @@
       href="./apple-touch-icon.png"
     />
     <link rel="manifest" href="./manifest.json" />
-    <link rel="stylesheet" href="./vendor/leaflet.css" />
+    <link rel="stylesheet" href="./vendor/maplibre-gl.css" />
     <link rel="stylesheet" href="./styles.css" />
     <!-- What the app asks for as soon as it runs: the chunk its bundle
-         imports, the two index files, and the latest year, which is what the
-         page shows first. Requesting them here overlaps their download with
-         Leaflet and the bundle instead of starting it once they have run;
+         imports, MapLibre, the two index files, and the latest year, which
+         is what the page shows first. Requesting them here overlaps their
+         download with the bundle instead of starting it once that has run;
          the loader's fetch for the same URL is then served from the preload
          (crossorigin is what makes the two requests match). -->
     <link rel="modulepreload" href="./shared.bundle.js" />
+    <link rel="modulepreload" href="./vendor/maplibre-gl.mjs" />
+    <link rel="modulepreload" href="./vendor/maplibre-gl-shared.mjs" />
     <link
       rel="preload"
       as="fetch"
@@ -605,14 +613,11 @@
       </a>
     </div>
 
-    <!-- Deferred scripts and modules execute in document order: Leaflet,
-         config, application bundle. html-to-image is loaded on the first
-         export. Everything is served from the site itself (vendor/ is copied
-         out of node_modules by scripts/vendor.js), so the page needs no
-         third-party origin. -->
-    <script src="./vendor/leaflet.js" defer></script>
-    <script src="./vendor/leaflet-heat.js" defer></script>
-
+    <!-- Deferred scripts and modules execute in document order: config,
+         then the application bundle, which imports MapLibre from vendor/.
+         html-to-image is loaded on the first export. All code is served
+         from the site itself (vendor/ is copied out of node_modules by
+         scripts/vendor.js); only the map tiles come from elsewhere. -->
     <!-- Configuration with template variables -->
     <script src="./map_config.js" defer></script>
 

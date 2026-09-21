@@ -1,14 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as L from "leaflet";
+import { Point, type LngLat, type Map as MapLibreMap } from "maplibre-gl";
 import {
   LayerManager,
   isTouchDevice,
 } from "../../../../kml_heatmap/frontend/ui/layerManager";
+import { addDataLayers } from "../../../../kml_heatmap/frontend/mapLayers";
 import {
   getColorForAirspeed,
   getColorForAltitude,
 } from "../../../../kml_heatmap/frontend/utils/colors";
-import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
+import type {
+  PathRunProperties,
+  PathSegment,
+} from "../../../../kml_heatmap/frontend/types";
 import {
   createMockApp,
   createDataset,
@@ -16,7 +20,11 @@ import {
   asMapApp,
   type MockApp,
 } from "../../testHelpers";
-import type { MockPolyline } from "../../../mocks/leaflet";
+import {
+  Map as MockMap,
+  mockControl,
+  type Popup as MockPopup,
+} from "../../../mocks/maplibre-gl";
 
 // Mock domCache
 vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
@@ -25,13 +33,34 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
   },
 }));
 
-function polylines(): MockPolyline[] {
-  return vi.mocked(L.polyline).mock.results.map((r) => r.value as MockPolyline);
+// The shared fake with one addition: the popups the code under test made
+const popups = vi.hoisted((): unknown[] => []);
+vi.mock("maplibre-gl", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../mocks/maplibre-gl")>();
+  class Popup extends actual.Popup {
+    constructor(options: Record<string, unknown> = {}) {
+      super(options);
+      popups.push(this);
+    }
+  }
+  return { ...actual, Popup, default: { ...actual.default, Popup } };
+});
+
+interface RunFeature {
+  type: "Feature";
+  properties: PathRunProperties;
+  geometry: { type: "LineString"; coordinates: [number, number][] };
 }
+
+const ALTITUDE = "paths-altitude";
+const ALTITUDE_SELECTED = "paths-altitude-selected";
+const AIRSPEED = "paths-airspeed";
+const AIRSPEED_SELECTED = "paths-airspeed-selected";
 
 /**
  * The middle of the one of 32 equal steps of the range `value` falls in,
- * clamped to the range: what a polyline of `value` is coloured with
+ * clamped to the range: what a run of `value` is coloured with
  */
 function middle(value: number, min: number, max: number): number {
   const span = Math.max(max - min, 1);
@@ -42,7 +71,7 @@ function middle(value: number, min: number, max: number): number {
   return min + ((step + 0.5) / 32) * span;
 }
 
-/** The colour of a polyline of `value`, cut at and shown on one range */
+/** The colour of a run of `value`, cut at and shown on one range */
 function stepColor(
   color: (value: number, min: number, max: number) => string,
   value: number,
@@ -74,14 +103,11 @@ function segmentsAlong(
   );
 }
 
-function clickHandler(pl: MockPolyline): (e: unknown) => void {
-  const call = pl.on.mock.calls.find((c) => c[0] === "click");
-  return call![1] as (e: unknown) => void;
-}
-
 describe("LayerManager", () => {
   let layerManager: LayerManager;
   let mockApp: MockApp;
+  /** Callbacks waiting for the next animation frame, by their handle */
+  let frames: Map<number, FrameRequestCallback>;
 
   const segA = (): PathSegment =>
     createSegment({
@@ -94,9 +120,83 @@ describe("LayerManager", () => {
       ],
     });
 
+  /** A second flight, lower and slower than the first */
+  function addSecondPath(): void {
+    mockApp.currentData!.path_info.push({
+      id: 2,
+      year: 2025,
+      aircraft_registration: "D-ABCD",
+    });
+    mockApp.currentData!.path_segments.push(
+      createSegment({
+        path_id: 2,
+        altitude_ft: 2000,
+        groundspeed_knots: 80,
+        coords: [
+          [47, 15],
+          [47.5, 15.5],
+        ],
+      }),
+    );
+  }
+
+  function features(sourceId: string): RunFeature[] {
+    const data = mockApp.map!.source(sourceId).data as {
+      type: string;
+      features: RunFeature[];
+    };
+    expect(data.type).toBe("FeatureCollection");
+    return data.features;
+  }
+
+  function setDataCalls(sourceId: string): number {
+    return mockApp.map!.source(sourceId).setData.mock.calls.length;
+  }
+
+  function paint(layerId: string): Record<string, unknown> {
+    return mockApp.map!.layer(layerId).paint;
+  }
+
+  function runFrames(): void {
+    const due = [...frames.values()];
+    frames.clear();
+    for (const callback of due) callback(0);
+  }
+
+  /** What the map answers a query with: a feature of a drawn run */
+  function rendered(layerId: string, properties: Partial<PathRunProperties>) {
+    return { layer: { id: layerId }, properties };
+  }
+
+  /** Where the map draws a position of the data */
+  function pointAt(lat: number, lng: number): Point {
+    return mockApp.map!.project([lng, lat]) as unknown as Point;
+  }
+
+  function moveTo(point: Point): void {
+    mockApp.map!.emit("mousemove", { point });
+    runFrames();
+  }
+
+  function tooltips(): MockPopup[] {
+    return popups as MockPopup[];
+  }
+
   beforeEach(() => {
-    vi.mocked(L.polyline).mockClear();
-    vi.mocked(L.popup).mockClear();
+    popups.length = 0;
+    frames = new Map();
+    let handle = 0;
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        frames.set(++handle, callback);
+        return handle;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((id: number) => frames.delete(id)),
+    );
 
     for (const id of [
       "legend-min",
@@ -118,10 +218,15 @@ describe("LayerManager", () => {
       airspeedRange: { min: 0, max: 200 },
     });
 
+    // Attaching the handles is setup, not something the manager did
+    mockApp.map!.setLayoutProperty.mockClear();
+
     layerManager = new LayerManager(asMapApp(mockApp));
   });
 
   afterEach(() => {
+    layerManager.destroy();
+    vi.unstubAllGlobals();
     document.body.innerHTML = "";
     delete (window as { ontouchstart?: unknown }).ontouchstart;
   });
@@ -171,33 +276,53 @@ describe("LayerManager", () => {
 
       layerManager.redrawAltitudePaths();
 
-      expect(mockApp.altitudeLayer.clearLayers).not.toHaveBeenCalled();
-      expect(L.polyline).not.toHaveBeenCalled();
+      expect(setDataCalls(ALTITUDE)).toBe(0);
+      expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
+      expect(mockApp.altitudeLayer.getLayers()).toEqual([]);
     });
 
-    it("clears the layer and draws one polyline per run on the canvas renderer", () => {
+    it("hands the main source one LineString per run, longitude first", () => {
       layerManager.redrawAltitudePaths();
 
-      expect(mockApp.altitudeLayer.clearLayers).toHaveBeenCalled();
-      expect(L.polyline).toHaveBeenCalledTimes(1);
-      const pl = polylines()[0]!;
-      expect(pl.latlngs).toEqual([
-        [48, 16],
-        [49, 17],
+      const color = stepColor(getColorForAltitude, 3000, 0, 5000);
+      expect(features(ALTITUDE)).toEqual([
+        {
+          type: "Feature",
+          properties: { r: 0, g: 1, pathId: 1, color },
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [16, 48],
+              [17, 49],
+            ],
+          },
+        },
       ]);
-      expect(pl.options["renderer"]).toBe(mockApp.pathRenderer);
-      expect(pl.options["bubblingMouseEvents"]).toBe(false);
-      expect(pl.options["color"]).toBe(
-        stepColor(getColorForAltitude, 3000, 0, 5000),
-      );
-      expect(pl.options["weight"]).toBe(4);
-      expect(pl.options["opacity"]).toBe(0.85);
-      expect(pl.addTo).toHaveBeenCalledWith(mockApp.altitudeLayer);
-      expect(mockApp.altitudeLayer.layers.size).toBe(1);
+      // Nothing is selected: the selection's source stays as it was created
+      expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
+      expect(setDataCalls(AIRSPEED)).toBe(0);
+      expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
+      expect(mockApp.map!.layer(ALTITUDE).filter).toBeUndefined();
+      expect(mockApp.altitudeLayer.getLayers()).toEqual([
+        { pathId: 1, options: { color, weight: 4, opacity: 0.85 } },
+      ]);
     });
 
-    it("merges contiguous segments in the same colour step into one polyline", () => {
-      mockApp.map!.getZoom.mockReturnValue(13);
+    it("leaves the visibility of the layers to their handle", () => {
+      layerManager.redrawAltitudePaths();
+
+      expect(mockApp.map!.setLayoutProperty).not.toHaveBeenCalled();
+      expect(mockApp.altitudeLayer.setVisible).not.toHaveBeenCalled();
+    });
+
+    it("counts the generation of a source up with every setData", () => {
+      layerManager.redrawAltitudePaths();
+      layerManager.redrawAltitudePaths();
+
+      expect(features(ALTITUDE)[0]!.properties.g).toBe(2);
+    });
+
+    it("merges contiguous segments in the same colour step into one run", () => {
       mockApp.currentData = createDataset(
         [{ id: 1, year: 2025 }],
         [
@@ -241,25 +366,27 @@ describe("LayerManager", () => {
 
       layerManager.redrawAltitudePaths();
 
-      expect(L.polyline).toHaveBeenCalledTimes(3);
-      expect(polylines()[0]!.latlngs).toEqual([
-        [48, 16],
-        [48.1, 16.1],
-        [48.2, 16.2],
+      const runs = features(ALTITUDE);
+      expect(runs.map((f) => f.geometry.coordinates)).toEqual([
+        [
+          [16, 48],
+          [16.1, 48.1],
+          [16.2, 48.2],
+        ],
+        [
+          [16.2, 48.2],
+          [16.3, 48.3],
+        ],
+        [
+          [17, 49],
+          [17.1, 49.1],
+        ],
       ]);
-      expect(polylines()[1]!.latlngs).toEqual([
-        [48.2, 16.2],
-        [48.3, 16.3],
-      ]);
-      expect(polylines()[2]!.latlngs).toEqual([
-        [49, 17],
-        [49.1, 17.1],
-      ]);
-      expect(mockApp.altitudeLayer.layers.size).toBe(3);
+      expect(runs.map((f) => f.properties.r)).toEqual([0, 1, 2]);
+      expect(mockApp.altitudeLayer.getLayers()).toHaveLength(3);
     });
 
-    it("draws a groundspeed that wanders within a colour step as one polyline", () => {
-      mockApp.map!.getZoom.mockReturnValue(13);
+    it("draws a groundspeed that wanders within a colour step as one run", () => {
       // A step of 0..200 kt is 6.25 kt: 100.1 to 101.9 kt used to be two
       // runs per whole knot crossed
       const points = zigZag(6, 0.01);
@@ -276,12 +403,26 @@ describe("LayerManager", () => {
 
       layerManager.redrawAirspeedPaths();
 
-      expect(L.polyline).toHaveBeenCalledTimes(1);
-      expect(polylines()[0]!.latlngs).toEqual(points);
+      expect(features(AIRSPEED)).toHaveLength(1);
+      expect(features(AIRSPEED)[0]!.geometry.coordinates).toEqual(
+        points.map(([lat, lng]) => [lng, lat]),
+      );
     });
 
-    it("colours no polyline further than half a step from its values", () => {
-      mockApp.map!.getZoom.mockReturnValue(13);
+    it("keeps every exported point, leaving simplification to the map", () => {
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        // Kinks of about 5 m, well below a pixel at an overview zoom
+        segmentsAlong(zigZag(40, 0.00005)),
+      );
+
+      layerManager.redrawAltitudePaths();
+
+      expect(features(ALTITUDE)[0]!.geometry.coordinates).toHaveLength(40);
+      expect(mockApp.map!.listenerCount("zoom")).toBe(0);
+    });
+
+    it("colours no run further than half a step from its values", () => {
       mockApp.currentData = createDataset(
         [{ id: 1, year: 2025 }],
         segmentsAlong(zigZag(3, 0.01), 5000),
@@ -290,7 +431,7 @@ describe("LayerManager", () => {
       layerManager.redrawAltitudePaths();
 
       // The top of the range falls in the last step, not past it
-      expect(polylines()[0]!.options["color"]).toBe(
+      expect(features(ALTITUDE)[0]!.properties.color).toBe(
         getColorForAltitude(5000 - 5000 / 64, 0, 5000),
       );
     });
@@ -321,53 +462,98 @@ describe("LayerManager", () => {
 
       layerManager.redrawAltitudePaths();
 
-      expect(L.polyline).toHaveBeenCalledTimes(2);
+      expect(features(ALTITUDE).map((f) => f.properties.pathId)).toEqual([
+        1, 2,
+      ]);
     });
 
-    it("uses selected paths' range for colours and legend when paths are selected", () => {
+    it("draws a selected path on the selection's layer, on its own range", () => {
       mockApp.selectedPathIds.add(1);
 
       layerManager.redrawAltitudePaths();
 
-      const pl = polylines()[0]!;
-      expect(pl.options["color"]).toBe(
-        stepColor(getColorForAltitude, 3000, 3000, 3000),
+      // The main source keeps the path, cut on the full range
+      expect(features(ALTITUDE)[0]!.properties.color).toBe(
+        stepColor(getColorForAltitude, 3000, 0, 5000),
       );
-      expect(pl.options["weight"]).toBe(6);
-      expect(pl.options["opacity"]).toBe(1);
+      const color = stepColor(getColorForAltitude, 3000, 3000, 3000);
+      expect(features(ALTITUDE_SELECTED)).toEqual([
+        {
+          type: "Feature",
+          properties: { r: 0, g: 1, pathId: 1, color },
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [16, 48],
+              [17, 49],
+            ],
+          },
+        },
+      ]);
+      expect(paint(ALTITUDE_SELECTED)).toMatchObject({
+        "line-width": 6,
+        "line-opacity": 1,
+      });
+      // Drawn once, not a second time dimmed below itself
+      expect(mockApp.map!.layer(ALTITUDE).filter).toEqual([
+        "!",
+        ["in", ["get", "pathId"], ["literal", [1]]],
+      ]);
+      expect(mockApp.altitudeLayer.getLayers()).toEqual([
+        { pathId: 1, options: { color, weight: 6, opacity: 1 } },
+      ]);
       expect(document.getElementById("legend-min")!.textContent).toBe(
         "3,000 ft (914 m)",
       );
     });
 
     it("dims unselected paths when a selection exists", () => {
-      mockApp.currentData!.path_info.push({ id: 2, year: 2025 });
-      mockApp.currentData!.path_segments.push(
-        createSegment({ path_id: 2, altitude_ft: 2000 }),
-      );
+      addSecondPath();
       mockApp.selectedPathIds.add(1);
 
       layerManager.redrawAltitudePaths();
 
-      const [selected, unselected] = polylines();
-      expect(selected!.options["opacity"]).toBe(1);
-      expect(unselected!.options["opacity"]).toBe(0.1);
-      expect(unselected!.options["weight"]).toBe(4);
+      expect(paint(ALTITUDE)["line-opacity"]).toBe(0.1);
+      expect(paint(ALTITUDE)["line-width"]).toBe(4);
+      expect(
+        mockApp.altitudeLayer
+          .getLayers()
+          .map(({ pathId, options }) => [
+            pathId,
+            options.weight,
+            options.opacity,
+          ]),
+      ).toEqual([
+        [2, 4, 0.1],
+        [1, 6, 1],
+      ]);
     });
 
     it("filters segments by year and aircraft", () => {
       mockApp.selectedYear = "2024";
       layerManager.redrawAltitudePaths();
-      expect(L.polyline).not.toHaveBeenCalled();
+      expect(features(ALTITUDE)).toEqual([]);
 
       mockApp.selectedYear = "all";
       mockApp.selectedAircraft = "D-EFGH";
       layerManager.redrawAltitudePaths();
-      expect(L.polyline).not.toHaveBeenCalled();
+      expect(features(ALTITUDE)).toEqual([]);
 
       mockApp.selectedAircraft = "D-ABCD";
       layerManager.redrawAltitudePaths();
-      expect(L.polyline).toHaveBeenCalledTimes(1);
+      expect(features(ALTITUDE)).toHaveLength(1);
+    });
+
+    it("keeps a selected path the filter hides off the selection's layer", () => {
+      addSecondPath();
+      mockApp.currentData!.path_info[1]!.year = 2024;
+      mockApp.selectedPathIds.add(2);
+      mockApp.selectedYear = "2025";
+
+      layerManager.redrawAltitudePaths();
+
+      expect(features(ALTITUDE).map((f) => f.properties.pathId)).toEqual([1]);
+      expect(features(ALTITUDE_SELECTED)).toEqual([]);
     });
 
     it("skips segments without path info when a filter is active", () => {
@@ -376,7 +562,15 @@ describe("LayerManager", () => {
 
       layerManager.redrawAltitudePaths();
 
-      expect(L.polyline).not.toHaveBeenCalled();
+      expect(features(ALTITUDE)).toEqual([]);
+    });
+
+    it("skips segments without coordinates", () => {
+      mockApp.currentData!.path_segments[0]!.coords = undefined;
+
+      layerManager.redrawAltitudePaths();
+
+      expect(features(ALTITUDE)).toEqual([]);
     });
 
     it("does not compute statistics or airport visibility (callers do)", () => {
@@ -401,31 +595,71 @@ describe("LayerManager", () => {
       );
     });
 
-    it("hides unselected paths completely in isolate mode", () => {
-      mockApp.currentData!.path_segments.push(
-        createSegment({
-          path_id: 2,
-          altitude_ft: 2000,
-          coords: [
-            [47, 15],
-            [47.5, 15.5],
-          ],
-        }),
-      );
-      mockApp.currentData!.path_info.push({
-        id: 2,
-        year: 2025,
-        aircraft_registration: "D-ABCD",
-      });
+    it("shows only the selected runs in isolate mode, at normal weight", () => {
+      addSecondPath();
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
 
       layerManager.redrawAltitudePaths();
 
-      expect(L.polyline).toHaveBeenCalledTimes(1);
-      const pl = polylines()[0]!;
-      expect(pl.options["weight"]).toBe(4);
-      expect(pl.options["opacity"]).toBe(0.85);
+      // The main layer shows nothing; its visibility is the handle's
+      expect(mockApp.map!.layer(ALTITUDE).filter).toEqual(["literal", false]);
+      expect(mockApp.map!.setLayoutProperty).not.toHaveBeenCalled();
+      expect(features(ALTITUDE_SELECTED)).toHaveLength(1);
+      expect(paint(ALTITUDE_SELECTED)).toMatchObject({
+        "line-width": 4,
+        "line-opacity": 0.85,
+      });
+      expect(mockApp.altitudeLayer.getLayers()).toEqual([
+        {
+          pathId: 1,
+          options: {
+            color: stepColor(getColorForAltitude, 3000, 3000, 3000),
+            weight: 4,
+            opacity: 0.85,
+          },
+        },
+      ]);
+    });
+
+    it("brings the other paths back when isolate mode ends", () => {
+      addSecondPath();
+      mockApp.selectedPathIds.add(1);
+      mockApp.isolateSelection = true;
+      layerManager.redrawAltitudePaths();
+
+      mockApp.isolateSelection = false;
+      layerManager.redrawAltitudePaths();
+
+      expect(features(ALTITUDE).map((f) => f.properties.pathId)).toEqual([
+        1, 2,
+      ]);
+      expect(mockApp.map!.layer(ALTITUDE).filter).toEqual([
+        "!",
+        ["in", ["get", "pathId"], ["literal", [1]]],
+      ]);
+      expect(paint(ALTITUDE)["line-opacity"]).toBe(0.1);
+      expect(paint(ALTITUDE_SELECTED)["line-width"]).toBe(6);
+      expect(
+        mockApp.altitudeLayer.getLayers().map((entry) => entry.pathId),
+      ).toEqual([2, 1]);
+
+      mockApp.selectedPathIds.clear();
+      layerManager.redrawAltitudePaths();
+
+      expect(mockApp.map!.layer(ALTITUDE).filter).toBeNull();
+      expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
+    });
+
+    it("sets the filter of the main layer only when it changes", () => {
+      layerManager.redrawAltitudePaths();
+      layerManager.redrawAltitudePaths();
+      expect(mockApp.map!.setFilter).not.toHaveBeenCalled();
+
+      mockApp.selectedPathIds.add(1);
+      layerManager.redrawAltitudePaths();
+      layerManager.redrawAltitudePaths();
+      expect(mockApp.map!.setFilter).toHaveBeenCalledOnce();
     });
 
     it("falls back to the full range when selected segments are empty", () => {
@@ -433,9 +667,34 @@ describe("LayerManager", () => {
 
       layerManager.redrawAltitudePaths();
 
-      expect(polylines()[0]!.options["color"]).toBe(
+      expect(features(ALTITUDE)[0]!.properties.color).toBe(
         stepColor(getColorForAltitude, 3000, 0, 5000),
       );
+      expect(features(ALTITUDE_SELECTED)).toEqual([]);
+      expect(document.getElementById("legend-max")!.textContent).toBe(
+        "5,000 ft (1,524 m)",
+      );
+    });
+
+    it("finds the selected paths in a dataset that is not grouped by path", () => {
+      addSecondPath();
+      mockApp.currentData!.path_segments.push(
+        createSegment({
+          path_id: 1,
+          altitude_ft: 4000,
+          coords: [
+            [49, 17],
+            [49.5, 17.5],
+          ],
+        }),
+      );
+      mockApp.selectedPathIds.add(1);
+
+      layerManager.redrawAltitudePaths();
+
+      expect(
+        features(ALTITUDE_SELECTED).map((f) => f.properties.pathId),
+      ).toEqual([1, 1]);
     });
   });
 
@@ -445,14 +704,14 @@ describe("LayerManager", () => {
 
       layerManager.redrawAirspeedPaths();
 
-      expect(mockApp.airspeedLayer.clearLayers).not.toHaveBeenCalled();
+      expect(setDataCalls(AIRSPEED)).toBe(0);
     });
 
     it("draws with airspeed colours and updates the airspeed legend", () => {
       layerManager.redrawAirspeedPaths();
 
-      expect(mockApp.airspeedLayer.clearLayers).toHaveBeenCalled();
-      expect(polylines()[0]!.options["color"]).toBe(
+      expect(setDataCalls(ALTITUDE)).toBe(0);
+      expect(features(AIRSPEED)[0]!.properties.color).toBe(
         stepColor(getColorForAirspeed, 100, 0, 200),
       );
       expect(document.getElementById("airspeed-legend-max")!.textContent).toBe(
@@ -465,17 +724,19 @@ describe("LayerManager", () => {
 
       layerManager.redrawAirspeedPaths();
 
-      expect(polylines()[0]!.options["color"]).toBe(
+      expect(features(AIRSPEED_SELECTED)[0]!.properties.color).toBe(
         stepColor(getColorForAirspeed, 100, 100, 100),
       );
     });
 
     it("skips segments with zero groundspeed", () => {
       mockApp.currentData!.path_segments[0]!.groundspeed_knots = 0;
+      mockApp.selectedPathIds.add(1);
 
       layerManager.redrawAirspeedPaths();
 
-      expect(L.polyline).not.toHaveBeenCalled();
+      expect(features(AIRSPEED)).toEqual([]);
+      expect(features(AIRSPEED_SELECTED)).toEqual([]);
     });
 
     it("falls back to the full airspeed range when selection has no speed data", () => {
@@ -483,176 +744,145 @@ describe("LayerManager", () => {
 
       layerManager.redrawAirspeedPaths();
 
-      expect(polylines()[0]!.options["color"]).toBe(
+      expect(features(AIRSPEED)[0]!.properties.color).toBe(
         stepColor(getColorForAirspeed, 100, 0, 200),
       );
     });
   });
 
-  describe("simplification", () => {
-    beforeEach(() => {
-      mockApp.currentData = createDataset(
-        [{ id: 1, year: 2025, aircraft_registration: "D-ABCD" }],
-        // Kinks of about 5 m: well below a pixel at zoom 10, visible at 16
-        segmentsAlong(zigZag(40, 0.00005)),
-      );
-    });
-
-    /** What the manager does when Leaflet fires "zoom" */
-    function onZoom(): () => void {
-      const call = mockApp.map!.on.mock.calls.find((c) => c[0] === "zoom");
-      return call![1] as () => void;
-    }
-
-    it("simplifies the geometry at overview zooms, keeping the ends", () => {
-      layerManager.redrawAltitudePaths();
-
-      const pl = polylines()[0]!;
-      expect(pl.latlngs.length).toBeLessThan(40);
-      expect(pl.latlngs[0]).toEqual([48, 16]);
-      expect(pl.latlngs.at(-1)).toEqual([48.00005, 16.39]);
-      // The segments behind the tooltip are all still there
-      expect(L.polyline).toHaveBeenCalledTimes(1);
-    });
-
-    it("keeps every point from zoom 13 on", () => {
-      mockApp.map!.getZoom.mockReturnValue(13.5);
-
-      layerManager.redrawAltitudePaths();
-
-      expect(polylines()[0]!.latlngs).toHaveLength(40);
-    });
-
-    it("keeps a kink that is visible at the zoom", () => {
-      mockApp.currentData = createDataset(
-        [{ id: 1, year: 2025, aircraft_registration: "D-ABCD" }],
-        // About 1 km, several pixels at zoom 10
-        segmentsAlong(zigZag(5, 0.01)),
-      );
-
-      layerManager.redrawAltitudePaths();
-
-      expect(polylines()[0]!.latlngs).toHaveLength(5);
-    });
-
-    it("swaps the geometry only when a zoom crosses a whole level", () => {
-      layerManager.redrawAltitudePaths();
-      const pl = polylines()[0]!;
-
-      // 10.75 simplifies like 10
-      mockApp.map!.getZoom.mockReturnValue(10.75);
-      onZoom()();
-      expect(pl.setLatLngs).not.toHaveBeenCalled();
-
-      mockApp.map!.getZoom.mockReturnValue(16);
-      onZoom()();
-      expect(pl.setLatLngs).toHaveBeenCalledExactlyOnceWith(
-        zigZag(40, 0.00005),
-      );
-
-      // Past zoom 13 nothing changes any more
-      mockApp.map!.getZoom.mockReturnValue(14);
-      onZoom()();
-      expect(pl.setLatLngs).toHaveBeenCalledOnce();
-      // The polylines, their tooltips and their styles stay
-      expect(L.polyline).toHaveBeenCalledOnce();
-    });
-
-    it("leaves a cleared layer alone", () => {
-      layerManager.redrawAltitudePaths();
-      layerManager.clearLayer("altitude");
-
-      mockApp.map!.getZoom.mockReturnValue(16);
-      onZoom()();
-      layerManager.redrawAltitudePaths();
-
-      // Built for the zoom it is drawn at, not swapped afterwards
-      expect(polylines()[1]!.latlngs).toHaveLength(40);
-      expect(polylines()[0]!.setLatLngs).not.toHaveBeenCalled();
-    });
-
-    it("listens for zoom changes once", () => {
-      layerManager.redrawAltitudePaths();
-      layerManager.redrawAirspeedPaths();
-
-      const hooks = mockApp.map!.on.mock.calls.filter((c) => c[0] === "zoom");
-      expect(hooks).toHaveLength(1);
-    });
-
-    it("stops listening when destroyed", () => {
-      const handler: unknown = onZoom();
-
+  describe("before the style has loaded", () => {
+    it("draws once the sources exist", async () => {
       layerManager.destroy();
+      mockControl.autoLoadStyle = false;
+      const map = new MockMap({ container: document.createElement("div") });
+      mockControl.autoLoadStyle = true;
+      let ready!: (map: MapLibreMap) => void;
+      mockApp = createMockApp({
+        map,
+        currentData: mockApp.currentData,
+        altitudeRange: { min: 0, max: 5000 },
+      });
+      (mockApp as { mapReady: Promise<MapLibreMap> }).mapReady = new Promise(
+        (resolve) => (ready = resolve),
+      );
+      layerManager = new LayerManager(asMapApp(mockApp));
 
-      expect(mockApp.map!.off).toHaveBeenCalledWith("zoom", handler);
+      expect(() => {
+        layerManager.redrawAltitudePaths();
+        layerManager.redrawAirspeedPaths();
+        layerManager.clearLayer("airspeed");
+        layerManager.updateSelectionStyles();
+      }).not.toThrow();
+      expect(layerManager.hitTest(new Point(0, 0))).toBeNull();
+
+      map.finishStyleLoad();
+      addDataLayers(map as unknown as MapLibreMap);
+      ready(map as unknown as MapLibreMap);
+      await Promise.resolve();
+
+      expect(features(ALTITUDE)).toHaveLength(1);
+      // Cleared last, so it stays empty
+      expect(features(AIRSPEED)).toEqual([]);
+    });
+
+    it("works on the run tables alone in an app without a map", async () => {
+      layerManager.destroy();
+      mockApp = createMockApp({
+        map: null,
+        currentData: mockApp.currentData,
+      });
+      layerManager = new LayerManager(asMapApp(mockApp));
+
+      expect(() => layerManager.redrawAltitudePaths()).not.toThrow();
+      await Promise.resolve();
+
+      expect(mockApp.altitudeLayer.getLayers()).toHaveLength(1);
     });
   });
 
   describe("clearLayer", () => {
-    it("removes polylines and resets the tracking map", () => {
+    it("empties both sources of the mode and the list of layers", () => {
+      mockApp.selectedPathIds.add(1);
       layerManager.redrawAltitudePaths();
-      expect(mockApp.altitudeLayer.layers.size).toBe(1);
+      layerManager.redrawAirspeedPaths();
+      expect(features(ALTITUDE_SELECTED)).toHaveLength(1);
 
       layerManager.clearLayer("altitude");
 
-      expect(mockApp.altitudeLayer.clearLayers).toHaveBeenCalledTimes(2);
-      expect(mockApp.altitudeLayer.layers.size).toBe(0);
+      expect(features(ALTITUDE)).toEqual([]);
+      expect(features(ALTITUDE_SELECTED)).toEqual([]);
+      expect(mockApp.altitudeLayer.getLayers()).toEqual([]);
+      // The other mode is not touched
+      expect(features(AIRSPEED)).toHaveLength(1);
+    });
+
+    it("leaves a source alone that is empty already", () => {
+      layerManager.clearLayer("altitude");
+
+      expect(setDataCalls(ALTITUDE)).toBe(0);
+      expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
     });
   });
 
   describe("updateSelectionStyles", () => {
     beforeEach(() => {
-      mockApp.currentData!.path_info.push({
-        id: 2,
-        year: 2025,
-        aircraft_registration: "D-ABCD",
-      });
-      mockApp.currentData!.path_segments.push(
-        createSegment({
-          path_id: 2,
-          altitude_ft: 2000,
-          groundspeed_knots: 80,
-          coords: [
-            [47, 15],
-            [47.5, 15.5],
-          ],
-        }),
-      );
+      addSecondPath();
     });
 
-    it("rebuilds only the paths that are selected, restyling the others", () => {
+    it("rebuilds only the selection's source and dims the main layer", () => {
       mockApp.altitudeVisible = true;
       layerManager.redrawAltitudePaths();
-      const [old1, pl2] = polylines();
-      vi.mocked(L.polyline).mockClear();
+      const before = features(ALTITUDE);
 
       mockApp.selectedPathIds.add(1);
       layerManager.updateSelectionStyles();
 
+      // The main source keeps the data and the generation it had
+      expect(setDataCalls(ALTITUDE)).toBe(1);
+      expect(features(ALTITUDE)).toBe(before);
+      expect(setDataCalls(ALTITUDE_SELECTED)).toBe(1);
       // Path 1 is cut at the colour steps of the selection's range now
-      expect(L.polyline).toHaveBeenCalledOnce();
-      expect(mockApp.altitudeLayer.layers.has(old1!)).toBe(false);
-      expect(polylines()[0]!.options).toMatchObject({
-        color: stepColor(getColorForAltitude, 3000, 3000, 3000),
-        weight: 6,
-        opacity: 1,
-      });
-      // Path 2 keeps its runs, dimmed on the selection's range
-      expect(pl2!.setStyle).toHaveBeenCalledWith(
-        expect.objectContaining({
-          color: getColorForAltitude(middle(2000, 0, 5000), 3000, 3000),
-          weight: 4,
-          opacity: 0.1,
-        }),
+      expect(features(ALTITUDE_SELECTED).map((f) => f.properties)).toEqual([
+        {
+          r: 0,
+          g: 1,
+          pathId: 1,
+          color: stepColor(getColorForAltitude, 3000, 3000, 3000),
+        },
+      ]);
+      expect(mockApp.map!.setPaintProperty).toHaveBeenCalledWith(
+        ALTITUDE,
+        "line-opacity",
+        0.1,
       );
-      expect(mockApp.altitudeLayer.layers.size).toBe(2);
+      expect(mockApp.map!.layer(ALTITUDE).filter).toEqual([
+        "!",
+        ["in", ["get", "pathId"], ["literal", [1]]],
+      ]);
+      expect(mockApp.altitudeLayer.getLayers()).toEqual([
+        {
+          pathId: 2,
+          options: {
+            color: stepColor(getColorForAltitude, 2000, 0, 5000),
+            weight: 4,
+            opacity: 0.1,
+          },
+        },
+        {
+          pathId: 1,
+          options: {
+            color: stepColor(getColorForAltitude, 3000, 3000, 3000),
+            weight: 6,
+            opacity: 1,
+          },
+        },
+      ]);
       expect(document.getElementById("legend-min")!.textContent).toBe(
         "3,000 ft (914 m)",
       );
     });
 
     it("cuts a selected path at the colour steps of its own range", () => {
-      mockApp.map!.getZoom.mockReturnValue(13);
       // 3000 and 3100 ft share one of 32 steps of 0..5000 ft, but are the
       // two ends of the selected path's range
       const points = zigZag(3, 0.01);
@@ -673,47 +903,74 @@ describe("LayerManager", () => {
       );
       mockApp.altitudeVisible = true;
       layerManager.redrawAltitudePaths();
-      expect(L.polyline).toHaveBeenCalledOnce();
-      vi.mocked(L.polyline).mockClear();
+      expect(features(ALTITUDE)).toHaveLength(1);
 
       mockApp.selectedPathIds.add(1);
       layerManager.updateSelectionStyles();
 
-      expect(polylines().map((pl) => pl.options["color"])).toEqual([
+      expect(
+        features(ALTITUDE_SELECTED).map((f) => f.properties.color),
+      ).toEqual([
         stepColor(getColorForAltitude, 3000, 3000, 3100),
         stepColor(getColorForAltitude, 3100, 3000, 3100),
       ]);
     });
 
-    it("cuts a path at the full range again when it is deselected", () => {
+    it("returns a path to the main layer when it is deselected", () => {
       mockApp.altitudeVisible = true;
       mockApp.selectedPathIds.add(1);
       layerManager.redrawAltitudePaths();
-      vi.mocked(L.polyline).mockClear();
 
       mockApp.selectedPathIds.clear();
       layerManager.updateSelectionStyles();
 
-      expect(L.polyline).toHaveBeenCalledOnce();
-      expect(polylines()[0]!.options).toMatchObject({
-        color: stepColor(getColorForAltitude, 3000, 0, 5000),
-        weight: 4,
-        opacity: 0.85,
-      });
+      expect(setDataCalls(ALTITUDE)).toBe(1);
+      expect(features(ALTITUDE_SELECTED)).toEqual([]);
+      expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
+      expect(mockApp.map!.layer(ALTITUDE).filter).toBeNull();
+      expect(
+        mockApp.altitudeLayer.getLayers().map((entry) => entry.options),
+      ).toEqual([
+        {
+          color: stepColor(getColorForAltitude, 3000, 0, 5000),
+          weight: 4,
+          opacity: 0.85,
+        },
+        {
+          color: stepColor(getColorForAltitude, 2000, 0, 5000),
+          weight: 4,
+          opacity: 0.85,
+        },
+      ]);
       expect(document.getElementById("legend-max")!.textContent).toBe(
         "5,000 ft (1,524 m)",
       );
     });
 
+    it("counts the selection's generation up, leaving stale features behind", () => {
+      mockApp.altitudeVisible = true;
+      layerManager.redrawAltitudePaths();
+
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+      mockApp.selectedPathIds.add(2);
+      layerManager.updateSelectionStyles();
+
+      expect(features(ALTITUDE_SELECTED).map((f) => f.properties.g)).toEqual([
+        2, 2,
+      ]);
+      expect(features(ALTITUDE)[0]!.properties.g).toBe(1);
+    });
+
     it("skips hidden layers", () => {
       mockApp.altitudeVisible = false;
       layerManager.redrawAltitudePaths();
-      const [pl1] = polylines();
 
       mockApp.selectedPathIds.add(1);
       layerManager.updateSelectionStyles();
 
-      expect(pl1!.setStyle).not.toHaveBeenCalled();
+      expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
+      expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
     });
 
     it("does nothing for a visible layer that was never drawn", () => {
@@ -722,23 +979,40 @@ describe("LayerManager", () => {
 
       layerManager.updateSelectionStyles();
 
-      expect(L.polyline).not.toHaveBeenCalled();
+      expect(setDataCalls(ALTITUDE)).toBe(0);
+      expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
+    });
+
+    it("does nothing for a layer that was cleared", () => {
+      mockApp.altitudeVisible = true;
+      layerManager.redrawAltitudePaths();
+      layerManager.clearLayer("altitude");
+
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+
+      expect(features(ALTITUDE_SELECTED)).toEqual([]);
     });
 
     it("updates the airspeed layer when visible", () => {
       mockApp.airspeedVisible = true;
       layerManager.redrawAirspeedPaths();
-      const [pl1] = polylines();
 
       mockApp.selectedPathIds.add(2);
       layerManager.updateSelectionStyles();
 
-      expect(pl1!.setStyle).toHaveBeenCalledWith(
-        expect.objectContaining({
-          color: getColorForAirspeed(middle(100, 0, 200), 80, 80),
-          weight: 4,
-          opacity: 0.1,
-        }),
+      expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
+      expect(features(AIRSPEED_SELECTED).map((f) => f.properties)).toEqual([
+        {
+          r: 0,
+          g: 1,
+          pathId: 2,
+          color: stepColor(getColorForAirspeed, 80, 80, 80),
+        },
+      ]);
+      expect(paint(AIRSPEED)["line-opacity"]).toBe(0.1);
+      expect(document.getElementById("airspeed-legend-min")!.textContent).toBe(
+        "80 kt (148 km/h)",
       );
     });
   });
@@ -791,56 +1065,203 @@ describe("LayerManager", () => {
     });
   });
 
-  describe("segment interactions", () => {
-    it("binds a lazy tooltip function on non-touch devices", () => {
-      layerManager.redrawAltitudePaths();
-
-      const pl = polylines()[0]!;
-      expect(pl.bindTooltip).toHaveBeenCalledWith(
-        expect.any(Function),
-        expect.objectContaining({ sticky: true, className: "segment-tooltip" }),
-      );
-      const contentFn = pl.bindTooltip.mock.calls[0]![0] as () => string;
-      expect(contentFn()).toContain("3,000 ft");
-    });
-
-    it("colours the tooltip chips on the range the polylines use", () => {
-      // Path 2 is selected: its range, not the full one, colours the map
-      mockApp.currentData!.path_info.push({ id: 2, year: 2025 });
-      mockApp.currentData!.path_segments.push(
+  describe("hitTest", () => {
+    /** One path of two segments that merge into one run, slow then fast */
+    function drawMergedRun(): PathSegment[] {
+      const segments = [
         createSegment({
-          path_id: 2,
-          altitude_ft: 1000,
-          groundspeed_knots: 50,
+          path_id: 1,
+          altitude_ft: 3000,
+          groundspeed_knots: 90,
           coords: [
-            [47, 15],
-            [47.5, 15.5],
+            [48, 16],
+            [48.1, 16.1],
           ],
         }),
+        createSegment({
+          path_id: 1,
+          altitude_ft: 3000,
+          groundspeed_knots: 120,
+          coords: [
+            [48.1, 16.1],
+            [48.2, 16.2],
+          ],
+        }),
+      ];
+      mockApp.currentData = createDataset([{ id: 1, year: 2025 }], segments);
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      expect(features(ALTITUDE)).toHaveLength(1);
+      return segments;
+    }
+
+    it("finds nothing while no colour layer is shown", () => {
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+
+      expect(layerManager.hitTest(new Point(10, 10))).toBeNull();
+      expect(mockApp.map!.queryRenderedFeatures).not.toHaveBeenCalled();
+    });
+
+    it("finds nothing on a layer that is shown but was cleared", () => {
+      mockApp.altitudeLayer.setVisible(true);
+
+      expect(layerManager.hitTest(new Point(10, 10))).toBeNull();
+      expect(mockApp.map!.queryRenderedFeatures).not.toHaveBeenCalled();
+    });
+
+    it("asks for the visible path layers in a box of 5 px around the pointer", () => {
+      drawMergedRun();
+
+      expect(layerManager.hitTest(new Point(100, 50))).toBeNull();
+
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenCalledWith(
+        [
+          [95, 45],
+          [105, 55],
+        ],
+        { layers: [ALTITUDE, ALTITUDE_SELECTED] },
       );
-      mockApp.selectedPathIds.add(2);
-      layerManager.redrawAltitudePaths();
-
-      const html = (
-        polylines()[0]!.bindTooltip.mock.calls[0]![0] as () => string
-      )();
-
-      expect(html).toContain(getColorForAltitude(3000, 1000, 1000));
-      expect(html).toContain(getColorForAirspeed(100, 50, 50));
-      expect(html).not.toContain(getColorForAltitude(3000, 0, 5000));
     });
 
-    it("registers the mouseover handler before the tooltip", () => {
-      layerManager.redrawAltitudePaths();
+    it("widens the box to 12 px for a finger", () => {
+      drawMergedRun();
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
 
-      const pl = polylines()[0]!;
-      const mouseoverOrder = pl.on.mock.invocationCallOrder[0]!;
-      const tooltipOrder = pl.bindTooltip.mock.invocationCallOrder[0]!;
-      expect(pl.on.mock.calls[0]![0]).toBe("mouseover");
-      expect(mouseoverOrder).toBeLessThan(tooltipOrder);
+      layerManager.hitTest(new Point(100, 50));
+
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenCalledWith(
+        [
+          [88, 38],
+          [112, 62],
+        ],
+        expect.anything(),
+      );
     });
 
-    it("updates tooltip content to the nearest segment on mousemove for merged polylines", () => {
+    it("returns the path and the segment of the run nearest to the point", () => {
+      const [slow, fast] = drawMergedRun();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+
+      expect(layerManager.hitTest(pointAt(48.19, 16.19))).toEqual({
+        pathId: 1,
+        segment: fast,
+      });
+      expect(layerManager.hitTest(pointAt(48.01, 16.01))).toEqual({
+        pathId: 1,
+        segment: slow,
+      });
+    });
+
+    it("drops features of a generation before the last setData", () => {
+      drawMergedRun();
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBeNull();
+
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).not.toBeNull();
+    });
+
+    it("drops features whose run is not in the table", () => {
+      drawMergedRun();
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE, { r: 7, g: 1 }),
+        rendered(ALTITUDE, { g: 1 }),
+        rendered("replay-trail", { r: 0, g: 1 }),
+      ];
+
+      expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBeNull();
+    });
+
+    it("measures a run once however many tiles return it", () => {
+      drawMergedRun();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+      layerManager.hitTest(pointAt(48.1, 16.1));
+      const once = mockApp.map!.project.mock.calls.length;
+      mockApp.map!.project.mockClear();
+
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE, { r: 0, g: 1 }),
+        rendered(ALTITUDE, { r: 0, g: 1 }),
+        rendered(ALTITUDE, { r: 0, g: 1 }),
+      ];
+      layerManager.hitTest(pointAt(48.1, 16.1));
+
+      expect(mockApp.map!.project.mock.calls.length).toBe(once);
+    });
+
+    it("prefers the run that is closest in pixels", () => {
+      addSecondPath();
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE, { r: 0, g: 1 }),
+        rendered(ALTITUDE, { r: 1, g: 1 }),
+      ];
+
+      expect(layerManager.hitTest(pointAt(47.25, 15.25))?.pathId).toBe(2);
+      expect(layerManager.hitTest(pointAt(48.5, 16.5))?.pathId).toBe(1);
+    });
+
+    it("lets a selected run win a tie", () => {
+      const [, fast] = drawMergedRun();
+      mockApp.selectedPathIds.add(1);
+      mockApp.altitudeVisible = true;
+      layerManager.updateSelectionStyles();
+      // The selection's runs are cut on its own range, like the main ones
+      // here; the segment objects tell which table answered
+      const project = mockApp.map!.project;
+      project.mockClear();
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE, { r: 0, g: 1 }),
+        rendered(ALTITUDE_SELECTED, { r: 0, g: 1 }),
+      ];
+
+      const hit = layerManager.hitTest(pointAt(48.19, 16.19));
+
+      expect(hit).toEqual({ pathId: 1, segment: fast });
+      // Both runs were measured: two ends each, after `pointAt`
+      expect(project).toHaveBeenCalledTimes(5);
+    });
+
+    it("ignores the main runs of other paths in isolate mode", () => {
+      addSecondPath();
+      mockApp.altitudeLayer.setVisible(true);
+      mockApp.selectedPathIds.add(1);
+      mockApp.isolateSelection = true;
+      layerManager.redrawAltitudePaths();
+      // Tiles cut before the filter still show path 2
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 1, g: 1 })];
+
+      expect(layerManager.hitTest(pointAt(47.25, 15.25))).toBeNull();
+
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE_SELECTED, { r: 0, g: 1 }),
+      ];
+      expect(layerManager.hitTest(pointAt(48.5, 16.5))?.pathId).toBe(1);
+    });
+
+    it("queries both modes when both are shown", () => {
+      mockApp.altitudeLayer.setVisible(true);
+      mockApp.airspeedLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      layerManager.redrawAirspeedPaths();
+      mockApp.map!.renderedFeatures = [rendered(AIRSPEED, { r: 0, g: 1 })];
+
+      expect(layerManager.hitTest(pointAt(48.5, 16.5))?.pathId).toBe(1);
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenCalledWith(
+        expect.anything(),
+        {
+          layers: [ALTITUDE, ALTITUDE_SELECTED, AIRSPEED, AIRSPEED_SELECTED],
+        },
+      );
+    });
+  });
+
+  describe("hover tooltip", () => {
+    beforeEach(() => {
       mockApp.currentData = createDataset(
         [{ id: 1, year: 2025 }],
         [
@@ -864,97 +1285,272 @@ describe("LayerManager", () => {
           }),
         ],
       );
-
+      mockApp.altitudeLayer.setVisible(true);
+      mockApp.altitudeVisible = true;
       layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+    });
 
-      expect(L.polyline).toHaveBeenCalledTimes(1);
-      const pl = polylines()[0]!;
-      const mousemove = pl.on.mock.calls.find(
-        (c) => c[0] === "mousemove",
-      )![1] as (e: unknown) => void;
+    function content(popup: MockPopup): string {
+      return popup.getElement().querySelector(".maplibregl-popup-content")!
+        .innerHTML;
+    }
 
-      mousemove({ latlng: { lat: 48.19, lng: 16.19 } });
-      expect(pl.setTooltipContent).toHaveBeenCalledTimes(1);
-      expect(String(pl.setTooltipContent.mock.calls[0]![0])).toContain(
-        "120 kt",
-      );
+    it("opens one popup that tracks the pointer, with the segment's values", () => {
+      const point = pointAt(48.19, 16.19);
+      moveTo(point);
+
+      expect(tooltips()).toHaveLength(1);
+      const tooltip = tooltips()[0]!;
+      expect(tooltip.options).toMatchObject({
+        closeButton: false,
+        closeOnClick: false,
+        className: "segment-tooltip",
+        maxWidth: "none",
+        offset: 10,
+      });
+      expect(tooltip.isOpen()).toBe(true);
+      expect(tooltip.map).toBe(mockApp.map);
+      // Placed under the pointer first: a tracking popup has no position
+      // of its own until the pointer moves again
+      expect(tooltip.getLngLat()).toEqual(mockApp.map!.unproject(point));
+      expect(tooltip.tracksPointer).toBe(true);
+      expect(content(tooltip)).toContain("120 kt");
+      expect(mockApp.map!.getCanvas().style.cursor).toBe("pointer");
+    });
+
+    it("looks under the pointer once per frame", () => {
+      mockApp.map!.emit("mousemove", { point: pointAt(48.19, 16.19) });
+      mockApp.map!.emit("mousemove", { point: pointAt(48.18, 16.18) });
+      mockApp.map!.emit("mousemove", { point: pointAt(48.01, 16.01) });
+
+      expect(requestAnimationFrame).toHaveBeenCalledOnce();
+      expect(mockApp.map!.queryRenderedFeatures).not.toHaveBeenCalled();
+
+      runFrames();
+
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenCalledOnce();
+      // The last position counts
+      expect(content(tooltips()[0]!)).toContain("90 kt");
+    });
+
+    it("sets the content only when the nearest segment changes", () => {
+      moveTo(pointAt(48.19, 16.19));
+      const tooltip = tooltips()[0]!;
+      expect(tooltip.setHTML).toHaveBeenCalledOnce();
 
       // Same nearest segment: no content update
-      mousemove({ latlng: { lat: 48.18, lng: 16.18 } });
-      expect(pl.setTooltipContent).toHaveBeenCalledTimes(1);
+      moveTo(pointAt(48.18, 16.18));
+      expect(tooltip.setHTML).toHaveBeenCalledOnce();
+      expect(tooltip.addTo).toHaveBeenCalledOnce();
+
+      moveTo(pointAt(48.01, 16.01));
+      expect(tooltip.setHTML).toHaveBeenCalledTimes(2);
+      expect(content(tooltip)).toContain("90 kt");
+      expect(tooltips()).toHaveLength(1);
     });
 
-    it("skips bindTooltip on touch devices", () => {
-      (window as { ontouchstart?: unknown }).ontouchstart = null;
+    it("closes beside every flight and reuses the popup on the next one", () => {
+      moveTo(pointAt(48.19, 16.19));
+      const tooltip = tooltips()[0]!;
 
-      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [];
+      moveTo(pointAt(40, 10));
 
-      expect(polylines()[0]!.bindTooltip).not.toHaveBeenCalled();
+      expect(tooltip.isOpen()).toBe(false);
+      expect(mockApp.map!.getCanvas().style.cursor).toBe("");
+
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+      moveTo(pointAt(48.19, 16.19));
+
+      expect(tooltips()).toHaveLength(1);
+      expect(tooltip.isOpen()).toBe(true);
+      expect(tooltip.tracksPointer).toBe(true);
+      expect(content(tooltip)).toContain("120 kt");
     });
 
-    it("opens a standalone popup on touch device click and toggles selection", () => {
-      (window as { ontouchstart?: unknown }).ontouchstart = null;
+    it("closes when the pointer leaves the map", () => {
+      moveTo(pointAt(48.19, 16.19));
 
-      layerManager.redrawAltitudePaths();
+      mockApp.map!.emit("mouseout");
 
-      const pl = polylines()[0]!;
-      const event = {
-        latlng: { lat: 48, lng: 16 },
-        originalEvent: { stopPropagation: vi.fn() },
-      };
-      clickHandler(pl)(event);
+      expect(tooltips()[0]!.isOpen()).toBe(false);
+    });
 
-      expect(event.originalEvent.stopPropagation).toHaveBeenCalled();
-      expect(L.DomEvent.stopPropagation).toHaveBeenCalledWith(event);
-      expect(L.popup).toHaveBeenCalled();
-      const popupInstance = vi.mocked(L.popup).mock.results[0]!.value as {
-        setLatLng: ReturnType<typeof vi.fn>;
-        setContent: ReturnType<typeof vi.fn>;
-        openOn: ReturnType<typeof vi.fn>;
-      };
-      expect(popupInstance.setLatLng).toHaveBeenCalledWith(event.latlng);
-      expect(String(popupInstance.setContent.mock.calls[0]![0])).toContain(
-        "3,000 ft",
+    it("colours the tooltip chips on the range the runs use", () => {
+      // Path 2 is selected: its range, not the full one, colours the map
+      mockApp.currentData!.path_info.push({ id: 2, year: 2025 });
+      mockApp.currentData!.path_segments.push(
+        createSegment({
+          path_id: 2,
+          altitude_ft: 1000,
+          groundspeed_knots: 50,
+          coords: [
+            [47, 15],
+            [47.5, 15.5],
+          ],
+        }),
       );
-      expect(popupInstance.openOn).toHaveBeenCalledWith(mockApp.map);
-      expect(mockApp.pathSelection.togglePathSelection).toHaveBeenCalledWith(1);
-    });
-
-    it("does not open a popup on non-touch click but toggles selection", () => {
+      mockApp.selectedPathIds.add(2);
       layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
 
-      const pl = polylines()[0]!;
-      clickHandler(pl)({
-        latlng: { lat: 48, lng: 16 },
-        originalEvent: { stopPropagation: vi.fn() },
-      });
+      moveTo(pointAt(48.19, 16.19));
 
-      expect(L.popup).not.toHaveBeenCalled();
-      expect(mockApp.pathSelection.togglePathSelection).toHaveBeenCalledWith(1);
+      const html = content(tooltips()[0]!);
+      const chip = (color: string): string => {
+        const probe = document.createElement("span");
+        probe.style.color = color;
+        return probe.style.color;
+      };
+      expect(html).toContain("3,000 ft");
+      expect(
+        [
+          getColorForAltitude(3000, 1000, 1000),
+          chip(getColorForAltitude(3000, 1000, 1000)),
+        ].some((color) => html.includes(color)),
+      ).toBe(true);
+      expect(html).not.toContain(getColorForAltitude(3000, 0, 5000));
     });
 
-    it("hands the hover to the polyline that replaces the clicked one", () => {
-      // Selecting rebuilds the path's polylines, and the tooltip of the one
-      // under the pointer went with it until the pointer moved
-      mockApp.altitudeVisible = true;
+    it("shows no hover tooltip on touch devices", () => {
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
+
+      moveTo(pointAt(48.19, 16.19));
+
+      expect(tooltips()).toHaveLength(0);
+    });
+
+    it("follows the run that replaces the hovered one after a selection", () => {
+      // Selecting rebuilds the runs of the path, and the tiles answer with
+      // the old ones until the map has drawn the new data
       mockApp.pathSelection.togglePathSelection.mockImplementation(
         (id: number) => {
           mockApp.selectedPathIds.add(id);
           layerManager.updateSelectionStyles();
         },
       );
+      const point = pointAt(48.19, 16.19);
+      moveTo(point);
+      const tooltip = tooltips()[0]!;
+      const hit = layerManager.hitTest(point)!;
+      mockApp.map!.queryRenderedFeatures.mockClear();
+
+      layerManager.onPathClick(hit, mockApp.map!.unproject(point) as LngLat);
+
+      expect(mockApp.map!.listenerCount("idle")).toBe(1);
+      expect(mockApp.map!.queryRenderedFeatures).not.toHaveBeenCalled();
+
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE_SELECTED, { r: 0, g: 1 }),
+      ];
+      mockApp.map!.emit("idle");
+
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenCalledOnce();
+      expect(tooltip.isOpen()).toBe(true);
+      // Written again: the range the chips are coloured on has changed
+      expect(tooltip.setHTML).toHaveBeenCalledTimes(2);
+      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+    });
+
+    it("does not wait for idle without a pointer on the map", () => {
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+
+      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+    });
+  });
+
+  describe("onPathClick", () => {
+    function hitOf(segment: PathSegment) {
+      return { pathId: segment.path_id, segment };
+    }
+
+    it("opens a popup with the segment's values on touch and toggles the selection", () => {
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
+      const lngLat = mockApp.map!.unproject([10, 10]) as LngLat;
+
+      layerManager.onPathClick(
+        hitOf(mockApp.currentData!.path_segments[0]!),
+        lngLat,
+      );
+
+      expect(tooltips()).toHaveLength(1);
+      const popup = tooltips()[0]!;
+      expect(popup.options).toMatchObject({ className: "segment-tooltip" });
+      expect(popup.trackPointer).not.toHaveBeenCalled();
+      expect(popup.getLngLat()).toEqual(lngLat);
+      expect(popup.isOpen()).toBe(true);
+      expect(popup.getElement().innerHTML).toContain("3,000 ft");
+      expect(mockApp.pathSelection.togglePathSelection).toHaveBeenCalledWith(1);
+    });
+
+    it("replaces the popup of the tap before", () => {
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
+      const lngLat = mockApp.map!.unproject([10, 10]) as LngLat;
+      const hit = hitOf(mockApp.currentData!.path_segments[0]!);
+
+      layerManager.onPathClick(hit, lngLat);
+      layerManager.onPathClick(hit, lngLat);
+
+      expect(tooltips().map((popup) => popup.isOpen())).toEqual([false, true]);
+    });
+
+    it("opens no popup on a click with a mouse but toggles the selection", () => {
+      layerManager.onPathClick(
+        hitOf(mockApp.currentData!.path_segments[0]!),
+        mockApp.map!.unproject([10, 10]) as LngLat,
+      );
+
+      expect(tooltips()).toHaveLength(0);
+      expect(mockApp.pathSelection.togglePathSelection).toHaveBeenCalledWith(1);
+    });
+  });
+
+  describe("destroy", () => {
+    it("listens to the pointer once per map", () => {
+      expect(mockApp.map!.listenerCount("mousemove")).toBe(1);
+      expect(mockApp.map!.listenerCount("mouseout")).toBe(1);
+    });
+
+    it("removes the listeners, the popups and the pending frame", () => {
+      mockApp.altitudeLayer.setVisible(true);
       layerManager.redrawAltitudePaths();
-      const old = polylines()[0]!;
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+      moveTo(pointAt(48.5, 16.5));
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
+      layerManager.onPathClick(
+        { pathId: 1, segment: mockApp.currentData!.path_segments[0]! },
+        mockApp.map!.unproject([10, 10]) as LngLat,
+      );
+      delete (window as { ontouchstart?: unknown }).ontouchstart;
+      mockApp.map!.emit("mousemove", { point: pointAt(48.5, 16.5) });
+      expect(frames.size).toBe(1);
+      expect(tooltips().map((popup) => popup.isOpen())).toEqual([true, true]);
 
-      const latlng = { lat: 48.5, lng: 16.5 };
-      clickHandler(old)({
-        latlng,
-        originalEvent: { stopPropagation: vi.fn() },
-      });
+      layerManager.destroy();
 
-      const replacement = polylines()[1]!;
-      expect(mockApp.altitudeLayer.layers.has(old)).toBe(false);
-      expect(replacement.fire).toHaveBeenCalledWith("mouseover", { latlng });
+      expect(mockApp.map!.listenerCount("mousemove")).toBe(0);
+      expect(mockApp.map!.listenerCount("mouseout")).toBe(0);
+      expect(cancelAnimationFrame).toHaveBeenCalledOnce();
+      expect(frames.size).toBe(0);
+      expect(tooltips().map((popup) => popup.isOpen())).toEqual([false, false]);
+      expect(mockApp.map!.getCanvas().style.cursor).toBe("");
+      expect(mockApp.altitudeLayer.getLayers()).toEqual([]);
+    });
+
+    it("ignores an idle that arrives afterwards", () => {
+      mockApp.altitudeLayer.setVisible(true);
+      mockApp.altitudeVisible = true;
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.emit("mousemove", { point: pointAt(48.5, 16.5) });
+      layerManager.updateSelectionStyles();
+      mockApp.map!.queryRenderedFeatures.mockClear();
+
+      layerManager.destroy();
+      mockApp.map!.emit("idle");
+
+      expect(mockApp.map!.queryRenderedFeatures).not.toHaveBeenCalled();
     });
   });
 });

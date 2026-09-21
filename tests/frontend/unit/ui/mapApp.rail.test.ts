@@ -2,14 +2,23 @@
  * MapApp: store-driven controls, the statistics rail, map events and setup.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import * as L from "leaflet";
 import {
+  cartoTransformRequest,
+  FALLBACK_STYLE,
   FEATURES_UNAVAILABLE_MESSAGE,
   MapApp,
 } from "../../../../kml_heatmap/frontend/mapApp";
+import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
+import {
+  AttributionControl,
+  lastMap,
+  mockControl,
+  resetMapLibreMock,
+  type Map as MockMap,
+} from "../../../mocks/maplibre-gl";
 import { showToast } from "../../../../kml_heatmap/frontend/utils/toast";
 import { loadFeatures } from "../../../../kml_heatmap/frontend/services/featureLoader";
-import { invalidateMapAfterTransition } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import { resizeMapAfterTransition } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
 // The instances the mocked manager constructors hand out live in the setup
@@ -31,9 +40,15 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
     clear: vi.fn(),
   },
 }));
-vi.mock("../../../../kml_heatmap/frontend/utils/mapHelpers", () => ({
-  invalidateMapAfterTransition: vi.fn(),
-}));
+vi.mock(
+  "../../../../kml_heatmap/frontend/utils/mapHelpers",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../../kml_heatmap/frontend/utils/mapHelpers")
+    >()),
+    resizeMapAfterTransition: vi.fn(),
+  }),
+);
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => ({
   showToast: vi.fn(),
 }));
@@ -109,6 +124,7 @@ vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () => ({
 const {
   initializeApp,
   mockAirportManagerInstance,
+  mockLayerManagerInstance,
   mockPathSelectionInstance,
   mockStateManagerInstance,
   mockStatsManagerInstance,
@@ -118,6 +134,11 @@ const {
 
 function createApp(): MapApp {
   return new MapApp({ ...m.APP_CONFIG });
+}
+
+/** The mock behind `app.map`, for what the real type does not have */
+function mockMap(app: MapApp): MockMap {
+  return app.map as unknown as MockMap;
 }
 
 describe("MapApp controls and map", () => {
@@ -133,6 +154,7 @@ describe("MapApp controls and map", () => {
   afterEach(() => {
     app.destroy();
     document.body.innerHTML = "";
+    resetMapLibreMock();
   });
 
   describe("store-driven buttons", () => {
@@ -241,7 +263,7 @@ describe("MapApp controls and map", () => {
 
     it("opens the rail and remeasures the map", async () => {
       await initializeApp(app);
-      vi.mocked(invalidateMapAfterTransition).mockClear();
+      vi.mocked(resizeMapAfterTransition).mockClear();
 
       const column = document.getElementById("left-buttons")!;
       // The column's own layout and its labels, not the per-button state
@@ -261,7 +283,7 @@ describe("MapApp controls and map", () => {
 
       expect(document.getElementById("stats-rail")!.hidden).toBe(false);
       expect(document.body.classList.contains("stats-open")).toBe(true);
-      expect(invalidateMapAfterTransition).toHaveBeenCalledWith(
+      expect(resizeMapAfterTransition).toHaveBeenCalledWith(
         app.map,
         document.getElementById("map"),
       );
@@ -446,22 +468,37 @@ describe("MapApp controls and map", () => {
   describe("destroy", () => {
     it("takes down the listeners it set up", async () => {
       await initializeApp(app);
-      const map = app.map!;
-      const [handlers] = vi.mocked(map.on).mock.calls[0] as [
-        Record<string, () => void>,
-      ];
+      const map = mockMap(app);
       const statsListener = vi.fn();
       app.store.subscribe("statsPanelVisible", statsListener);
       const signal = app.signal;
+      for (const type of ["moveend", "zoomend", "click", "error"]) {
+        expect(map.listenerCount(type)).toBe(1);
+      }
 
       app.destroy();
 
       expect(signal.aborted).toBe(true);
-      expect(Object.keys(handlers)).toEqual(["moveend", "zoomend", "click"]);
-      expect(map.off).toHaveBeenCalledWith(handlers);
+      for (const type of ["moveend", "zoomend", "click", "error"]) {
+        expect(map.listenerCount(type)).toBe(0);
+      }
       expect(mockStateManagerInstance.cancelSave).toHaveBeenCalled();
       app.store.set("statsPanelVisible", true);
       expect(statsListener).not.toHaveBeenCalled();
+      // The map itself stays as it is
+      expect(map.remove).not.toHaveBeenCalled();
+    });
+
+    it("loads nothing once destroyed while the style was on its way", async () => {
+      mockControl.autoLoadStyle = false;
+      const pending = initializeApp(app);
+      await Promise.resolve();
+
+      app.destroy();
+      mockMap(app).finishStyleLoad();
+      await pending;
+
+      expect(m.mockDataManagerInstance.loadAirports).not.toHaveBeenCalled();
     });
 
     it("drops a Replay click still waiting for the bundle", async () => {
@@ -487,19 +524,13 @@ describe("MapApp controls and map", () => {
   });
 
   describe("map event handlers", () => {
-    function handler(event: string): (e?: unknown) => void {
-      // Registered all at once, as a map of event to handler
-      const [handlers] = vi.mocked(app.map!.on).mock.calls[0] as [
-        Record<string, (e?: unknown) => void>,
-      ];
-      return handlers[event]!;
-    }
+    const click = { point: { x: 10, y: 20 }, lngLat: { lng: 8.5, lat: 50.5 } };
 
     it("schedules a state save on move and zoom", async () => {
       await initializeApp(app);
 
-      handler("moveend")();
-      handler("zoomend")();
+      mockMap(app).emit("moveend");
+      mockMap(app).emit("zoomend");
 
       expect(mockStateManagerInstance.scheduleSave).toHaveBeenCalledTimes(2);
       expect(
@@ -511,16 +542,34 @@ describe("MapApp controls and map", () => {
       await initializeApp(app);
       app.selectedPathIds.add(1);
 
-      handler("click")({});
+      mockMap(app).emit("click", click);
 
+      expect(mockLayerManagerInstance.hitTest).toHaveBeenCalledWith(
+        click.point,
+      );
       expect(mockPathSelectionInstance.clearSelection).toHaveBeenCalledTimes(1);
     });
 
     it("does not clear an empty selection", async () => {
       await initializeApp(app);
 
-      handler("click")({});
+      mockMap(app).emit("click", click);
 
+      expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+    });
+
+    it("hands a click on a flight to the layer manager instead of clearing", async () => {
+      await initializeApp(app);
+      app.selectedPathIds.add(1);
+      const hit = { pathId: 2, segment: { path_id: 2 } };
+      mockLayerManagerInstance.hitTest.mockReturnValue(hit);
+
+      mockMap(app).emit("click", click);
+
+      expect(mockLayerManagerInstance.onPathClick).toHaveBeenCalledWith(
+        hit,
+        click.lngLat,
+      );
       expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
     });
 
@@ -532,88 +581,310 @@ describe("MapApp controls and map", () => {
       app.replayState.airplaneMarker = {
         isPopupOpen: () => true,
         closePopup,
-      } as unknown as L.Marker;
+      } as unknown as MapApp["replayState"]["airplaneMarker"];
 
-      handler("click")({});
+      mockMap(app).emit("click", click);
 
       expect(closePopup).toHaveBeenCalledTimes(1);
       expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+      // The colour layers are hidden during a replay
+      expect(mockLayerManagerInstance.hitTest).not.toHaveBeenCalled();
     });
   });
 
   describe("map setup", () => {
-    it("creates the map with the shared zoom limits and tile layers", async () => {
+    it("creates the map in its own zoom units, north up and flat", async () => {
       await initializeApp(app);
 
-      expect(L.map).toHaveBeenCalledWith(
-        "map",
-        expect.objectContaining({
-          minZoom: 1,
-          maxZoom: 20,
-          preferCanvas: true,
-          // Pinch, scroll and double tap cover zooming
-          zoomControl: false,
-        }),
-      );
-      expect(L.tileLayer).toHaveBeenCalledWith(
-        expect.stringContaining("basemaps.cartocdn.com"),
-        expect.objectContaining({ maxZoom: 20 }),
-      );
-      // The aviation overlay needs no key, and `latest` follows the AIRAC
-      // cycle, so the URL carries neither
-      expect(L.tileLayer).toHaveBeenCalledWith(
-        "https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest",
-        expect.objectContaining({
-          attribution: expect.stringContaining("open flightmaps") as string,
-          minZoom: 7,
-          // Not the map's 20: two levels past the native 12 is as far as
-          // the tiles stretch before they are only a blur
-          maxZoom: 14,
-          maxNativeZoom: 12,
-        }),
+      // One below the 1 to 20 that saved state and links are clamped to
+      expect(mockMap(app).options).toMatchObject({
+        container: "map",
+        style:
+          "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+        minZoom: 0,
+        maxZoom: 19,
+        attributionControl: false,
+        dragRotate: false,
+        pitchWithRotate: false,
+        touchPitch: false,
+        rollEnabled: false,
+        maxPitch: 0,
+      });
+      expect(mockMap(app).options["transformRequest"]).toBeNull();
+      expect(
+        mockMap(app).touchZoomRotate.disableRotation,
+      ).toHaveBeenCalledOnce();
+      expect(mockMap(app).keyboard.disableRotation).toHaveBeenCalledOnce();
+    });
+
+    it("adds an attribution that stays expanded, bottom right", async () => {
+      await initializeApp(app);
+
+      const [{ control, position }] = mockMap(app).controls as [
+        { control: AttributionControl; position: string },
+      ];
+      expect(control).toBeInstanceOf(AttributionControl);
+      expect(control.options).toEqual({ compact: false });
+      expect(position).toBe("bottom-right");
+    });
+
+    it("creates every layer once, in drawing order below the labels", async () => {
+      await initializeApp(app);
+
+      expect(mockMap(app).getLayersOrder()).toEqual([
+        "background",
+        "aviation",
+        "heat",
+        "heat-detail-1",
+        "heat-detail-2",
+        "heat-detail-3",
+        "replay-route",
+        "paths-altitude",
+        "paths-airspeed",
+        "paths-altitude-selected",
+        "paths-airspeed-selected",
+        "replay-trail",
+        "place-labels",
+      ]);
+      // Empty until the managers fill them
+      for (const id of [
+        "heat",
+        "replay-route",
+        "paths-altitude",
+        "paths-airspeed",
+        "paths-altitude-selected",
+        "paths-airspeed-selected",
+        "replay-trail",
+      ]) {
+        expect(mockMap(app).source(id).data).toEqual({
+          type: "FeatureCollection",
+          features: [],
+        });
+      }
+    });
+
+    it("lets MapLibre simplify the paths the way the app used to", async () => {
+      await initializeApp(app);
+
+      for (const id of ["paths-altitude", "paths-altitude-selected"]) {
+        expect(mockMap(app).source(id).spec).toMatchObject({
+          tolerance: 0.25,
+          maxzoom: 14,
+        });
+      }
+      expect(mockMap(app).layer("paths-altitude").paint).toEqual({
+        "line-color": ["get", "color"],
+        "line-width": 4,
+        "line-opacity": 0.85,
+      });
+      expect(mockMap(app).layer("paths-altitude-selected").paint).toMatchObject(
+        { "line-width": 6, "line-opacity": 1 },
       );
     });
 
+    it("limits the aviation overlay to the zooms it still reads at", async () => {
+      await initializeApp(app);
+
+      // The overlay needs no key, and `latest` follows the AIRAC cycle, so
+      // the URL carries neither
+      expect(mockMap(app).source("aviation").spec).toEqual({
+        type: "raster",
+        tiles: [
+          "https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest",
+        ],
+        tileSize: 256,
+        // Tile levels: a 256 pixel tile of level 7 is shown at map zoom 6
+        minzoom: 7,
+        maxzoom: 12,
+        attribution: expect.stringContaining("open flightmaps") as string,
+      });
+      // Map zooms: two levels past the native 11 is as far as the tiles
+      // stretch before they are only a blur, and maxzoom is exclusive
+      expect(mockMap(app).layer("aviation")).toMatchObject({
+        minzoom: 6,
+        maxzoom: 13.01,
+      });
+    });
+
+    it("resolves mapReady with the map once the layers are on it", async () => {
+      mockControl.autoLoadStyle = false;
+      const pending = initializeApp(app);
+      const ready = vi.fn((map: unknown) => {
+        expect((map as MockMap).getLayer("replay-trail")).toBeDefined();
+      });
+      void app.mapReady.then(ready);
+      await Promise.resolve();
+
+      expect(ready).not.toHaveBeenCalled();
+      expect(m.mockDataManagerInstance.loadAirports).not.toHaveBeenCalled();
+
+      mockMap(app).finishStyleLoad();
+      await pending;
+
+      expect(ready).toHaveBeenCalledWith(app.map);
+      expect(m.mockDataManagerInstance.loadAirports).toHaveBeenCalled();
+    });
+
+    it("remembers a visibility asked for before the style has loaded", async () => {
+      mockControl.autoLoadStyle = false;
+      const pending = initializeApp(app);
+      await Promise.resolve();
+
+      app.heatmapLayer.setVisible(true);
+      expect(app.heatmapLayer.isVisible()).toBe(true);
+
+      mockMap(app).finishStyleLoad();
+      await pending;
+
+      expect(mockMap(app).layer("heat").layout["visibility"]).toBe("visible");
+    });
+
+    it("lists the drawn paths through the provider the layer manager sets", () => {
+      const entry = {
+        pathId: 1,
+        options: { color: "#ff0000", weight: 4, opacity: 0.85 },
+      };
+
+      expect(app.altitudeLayer.getLayers()).toEqual([]);
+      app.altitudeLayer.setLayersProvider(() => [entry]);
+      expect(app.altitudeLayer.getLayers()).toEqual([entry]);
+      expect(app.airspeedLayer.getLayers()).toEqual([]);
+      app.altitudeLayer.setLayersProvider(null);
+      expect(app.altitudeLayer.getLayers()).toEqual([]);
+    });
+
+    it("falls back to a style that needs no network when the base style fails", async () => {
+      mockControl.autoLoadStyle = false;
+      const pending = initializeApp(app);
+      await Promise.resolve();
+      const map = mockMap(app);
+
+      map.emit("error", { error: new Error("Failed to fetch") });
+      // A second failure of the same load must not swap again
+      map.emit("error", { error: new Error("Failed to fetch") });
+
+      expect(map.setStyle).toHaveBeenCalledExactlyOnceWith(FALLBACK_STYLE, {
+        diff: false,
+      });
+      expect(logError).toHaveBeenCalledWith(
+        "Base map style failed to load: Failed to fetch",
+      );
+
+      map.finishStyleLoad(FALLBACK_STYLE);
+      await pending;
+
+      // No labels to stay below, so the data layers go on top
+      expect(map.getLayersOrder().slice(0, 2)).toEqual([
+        "background",
+        "aviation",
+      ]);
+      expect(m.mockDataManagerInstance.loadAirports).toHaveBeenCalled();
+    });
+
+    it("logs what fails later and keeps the style", async () => {
+      await initializeApp(app);
+
+      mockMap(app).emit("error", { error: new Error("tile 5/1/2 failed") });
+      mockMap(app).emit("error", { error: "no message" });
+
+      expect(logError).toHaveBeenCalledWith("Map error: tile 5/1/2 failed");
+      expect(logError).toHaveBeenCalledWith("Map error: no message");
+      expect(mockMap(app).setStyle).not.toHaveBeenCalled();
+    });
+
     it.each([
-      [false, true],
-      [true, false],
+      [false, 300],
+      [true, 0],
     ])(
-      "creates the map for reduced motion %s with animations %s",
-      async (reduced, animate) => {
-        // Reduced motion used to cover only the app's own moves, while double
-        // click, wheel and pinch still animated and a drag still glided on
+      "creates the map for reduced motion %s with a fade of %s ms",
+      async (reduced, fadeDuration) => {
+        // MapLibre cuts its camera moves and the glide after a drag short by
+        // itself when told; the tile fade is the one thing it keeps
         const spy = vi
           .spyOn(motion, "prefersReducedMotion")
           .mockReturnValue(reduced);
 
         await initializeApp(app);
 
-        expect(L.map).toHaveBeenLastCalledWith(
-          "map",
-          expect.objectContaining({
-            zoomAnimation: animate,
-            fadeAnimation: animate,
-            markerZoomAnimation: animate,
-            inertia: animate,
-          }),
-        );
+        expect(lastMap().options).toMatchObject({
+          reduceMotion: reduced,
+          fadeDuration,
+        });
         spy.mockRestore();
       },
     );
 
-    it("appends the CARTO API key to the tile URL when configured", async () => {
-      const appWithCarto = new MapApp({
-        ...m.APP_CONFIG,
-        cartoApiKey: "carto-key",
+    it("hands the map's canvas the focus the rail gives up as a last resort", async () => {
+      await initializeApp(app);
+      app.store.set("statsPanelVisible", true);
+      document.getElementById("stats-btn")!.remove();
+      document.getElementById("stats-collapse-btn")!.focus();
+
+      app.store.set("statsPanelVisible", false);
+
+      expect(document.activeElement).toBe(mockMap(app).getCanvas());
+    });
+
+    describe("with a CARTO API key", () => {
+      it("puts the key on the style URL", async () => {
+        const appWithCarto = new MapApp({
+          ...m.APP_CONFIG,
+          cartoApiKey: "carto key",
+        });
+
+        await initializeApp(appWithCarto);
+
+        expect(lastMap().options["style"]).toBe(
+          "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json?key=carto%20key",
+        );
+        expect(lastMap().options["transformRequest"]).toBeTypeOf("function");
+        appWithCarto.destroy();
       });
 
-      await initializeApp(appWithCarto);
+      it("puts the key on every other request to CARTO", () => {
+        const transform = cartoTransformRequest("carto-key")!;
 
-      expect(L.tileLayer).toHaveBeenCalledWith(
-        expect.stringContaining("?key=carto-key"),
-        expect.anything(),
-      );
-      appWithCarto.destroy();
+        expect(
+          transform("https://tiles-a.basemaps.cartocdn.com/vector/1/2/3.mvt"),
+        ).toEqual({
+          url: "https://tiles-a.basemaps.cartocdn.com/vector/1/2/3.mvt?key=carto-key",
+        });
+        expect(
+          transform(
+            "https://tiles.basemaps.cartocdn.com/fonts/a/0-255.pbf?v=1",
+          ),
+        ).toEqual({
+          url: "https://tiles.basemaps.cartocdn.com/fonts/a/0-255.pbf?v=1&key=carto-key",
+        });
+        expect(
+          transform("https://basemaps.cartocdn.com/gl/sprite.json"),
+        ).toEqual({
+          url: "https://basemaps.cartocdn.com/gl/sprite.json?key=carto-key",
+        });
+      });
+
+      it("leaves everything else alone", () => {
+        const transform = cartoTransformRequest("carto-key")!;
+
+        // Already keyed, another host, a lookalike host, a relative URL
+        expect(
+          transform("https://basemaps.cartocdn.com/style.json?key=other"),
+        ).toBeUndefined();
+        expect(
+          transform(
+            "https://nwy-tiles-api.prod.newaydata.com/tiles/7/1/2.png?path=x",
+          ),
+        ).toBeUndefined();
+        expect(
+          transform("https://evilbasemaps.cartocdn.com/1/2/3.mvt"),
+        ).toBeUndefined();
+        expect(transform("data/2025.json")).toBeUndefined();
+      });
+
+      it("transforms nothing without a key", () => {
+        expect(cartoTransformRequest()).toBeNull();
+        expect(cartoTransformRequest("")).toBeNull();
+      });
     });
   });
 });

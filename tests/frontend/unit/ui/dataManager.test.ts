@@ -1,18 +1,18 @@
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  vi,
-  type Mock,
-} from "vitest";
-import * as L from "leaflet";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   DataManager,
   heatmapCoordinates,
+  heatmapFeatures,
+  heatmapPaint,
 } from "../../../../kml_heatmap/frontend/ui/dataManager";
-import type { HeatmapLayer } from "../../../../kml_heatmap/frontend/globals";
+import {
+  HEATMAP_BANDS,
+  HEATMAP_LAYER_IDS,
+  MAP_LAYERS,
+  MAP_MAX_ZOOM,
+  MAP_MIN_ZOOM,
+  MAP_SOURCES,
+} from "../../../../kml_heatmap/frontend/utils/constants";
 import type {
   DataLoaderOptions,
   KMLDataset,
@@ -24,6 +24,7 @@ import {
   asMapApp,
   type MockApp,
 } from "../../testHelpers";
+import type { MockLayer, MockSource } from "../../../mocks/maplibre-gl";
 
 const loaderMocks = vi.hoisted(() => ({
   loadData: vi.fn(),
@@ -49,8 +50,24 @@ vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
 describe("DataManager", () => {
   let dataManager: DataManager;
   let mockApp: MockApp;
-  let mockHeatLayer: Partial<HeatmapLayer>;
-  let heatLayerSpy: Mock;
+
+  const heatSource = (): MockSource => mockApp.map!.source(MAP_SOURCES.heat);
+  const heatLayer = (): MockLayer => mockApp.map!.layer(MAP_LAYERS.heat);
+  /** The `[lng, lat]` points the heat source holds, in full detail */
+  const heatPoints = (): [number, number][] => {
+    const data = heatSource()
+      .data as GeoJSON.FeatureCollection<GeoJSON.MultiPoint>;
+    expect(data.type).toBe("FeatureCollection");
+    const full = data.features.find((f) => f.properties?.["detail"] === 0);
+    if (!full) return [];
+    expect(full.geometry.type).toBe("MultiPoint");
+    return full.geometry.coordinates as [number, number][];
+  };
+  /** How often a paint property of a heat layer was set */
+  const paintCalls = (name: string, layer: string): unknown[][] =>
+    mockApp.map!.setPaintProperty.mock.calls.filter(
+      (call) => call[0] === layer && call[1] === name,
+    );
 
   const baseData = (): KMLDataset =>
     createDataset(
@@ -87,17 +104,11 @@ describe("DataManager", () => {
     loadingEl.style.display = "none";
     document.body.appendChild(loadingEl);
 
-    mockHeatLayer = {
-      addTo: vi.fn(),
-      remove: vi.fn(),
-      setLatLngs: vi.fn(),
-      // A real canvas: the emphasis toggles a class on it, and a bare
-      // { style: {} } stub cannot say whether that worked
-      _canvas: document.createElement("canvas"),
-    };
-    // DataManager imports leaflet, which vitest aliases to the mock module
-    heatLayerSpy = vi.mocked(L.heatLayer);
-    heatLayerSpy.mockReturnValue(mockHeatLayer);
+    // The stylesheet's token; jsdom loads no stylesheet
+    document.documentElement.style.setProperty(
+      "--heatmap-dimmed-opacity",
+      "0.35",
+    );
 
     mockApp = createMockApp();
     dataManager = new DataManager(asMapApp(mockApp));
@@ -105,6 +116,7 @@ describe("DataManager", () => {
 
   afterEach(() => {
     document.getElementById("loading")?.remove();
+    document.documentElement.style.removeProperty("--heatmap-dimmed-opacity");
   });
 
   describe("constructor", () => {
@@ -255,7 +267,7 @@ describe("DataManager", () => {
         "No flight data available for 2025",
         "error",
       );
-      expect(heatLayerSpy).not.toHaveBeenCalled();
+      expect(heatSource().setData).not.toHaveBeenCalled();
       expect(mockApp.currentData).toBeNull();
     });
 
@@ -285,77 +297,98 @@ describe("DataManager", () => {
       );
     });
 
-    it("creates the heatmap with all coordinates when unfiltered", async () => {
+    it("hands the heat source every coordinate, longitude first, when unfiltered", async () => {
       const data = baseData();
       loaderMocks.loadData.mockResolvedValue(data);
 
       await dataManager.updateLayers();
 
-      expect(heatLayerSpy).toHaveBeenCalledWith(
-        data.coordinates,
-        expect.objectContaining({
-          radius: 10,
-          blur: 15,
-          minOpacity: 0.25,
-        }),
+      expect(heatSource().setData).toHaveBeenCalledTimes(1);
+      expect(heatSource().data).toEqual(
+        heatmapFeatures(data.coordinates.map(([lat, lon]) => [lon, lat])),
       );
-      expect(mockHeatLayer._canvas!.style.pointerEvents).toBe("none");
+      expect(heatPoints()).toHaveLength(data.coordinates.length);
+      expect(heatPoints()[0]).toEqual([8.0, 50.0]);
     });
 
-    it("feeds the existing heat layer new points instead of creating another", async () => {
-      const existing = {
-        addTo: vi.fn(),
-        remove: vi.fn(),
-        setLatLngs: vi.fn(),
-      };
-      mockApp.heatmapLayer = existing as unknown as HeatmapLayer;
+    it("gives every heat layer its paint on first use", async () => {
+      for (const id of HEATMAP_LAYER_IDS) {
+        expect(mockApp.map!.layer(id).paint).toEqual({});
+      }
+
+      await dataManager.updateLayers(baseData());
+
+      for (const band of HEATMAP_BANDS) {
+        const paint = mockApp.map!.layer(band.layer).paint;
+        expect(paint).toEqual(heatmapPaint(band.stride));
+        expect(paint["heatmap-radius"]).toBe(22);
+        expect(paint["heatmap-weight"]).toBe(1);
+      }
+      expect(heatLayer().paint).toEqual(heatmapPaint());
+    });
+
+    it("sets the paint once, not with every new set of points", async () => {
+      mockApp.heatmapVisible = false;
+      await dataManager.updateLayers(baseData());
+      await dataManager.updateLayers();
+      dataManager.showHeatmap();
+
+      expect(heatSource().setData).toHaveBeenCalledTimes(2);
+      for (const name of [
+        "heatmap-radius",
+        "heatmap-weight",
+        "heatmap-intensity",
+        "heatmap-color",
+      ]) {
+        for (const id of HEATMAP_LAYER_IDS) {
+          expect(paintCalls(name, id)).toHaveLength(1);
+        }
+      }
+    });
+
+    it("feeds the one heat source new points and adds nothing to the map", async () => {
       const data = baseData();
       loaderMocks.loadData.mockResolvedValue(data);
+      const sources = mockApp.map!.addSource.mock.calls.length;
+      const layers = mockApp.map!.addLayer.mock.calls.length;
 
       await dataManager.updateLayers();
+      mockApp.selectedAircraft = "D-EFGH";
+      await dataManager.updateLayers();
 
-      expect(existing.setLatLngs).toHaveBeenCalledWith(data.coordinates);
-      expect(existing.remove).not.toHaveBeenCalled();
-      expect(heatLayerSpy).not.toHaveBeenCalled();
-      expect(mockApp.heatmapLayer).toBe(existing);
+      expect(heatSource().setData).toHaveBeenCalledTimes(2);
+      expect(mockApp.map!.addSource).toHaveBeenCalledTimes(sources);
+      expect(mockApp.map!.addLayer).toHaveBeenCalledTimes(layers);
     });
 
-    it("adds heatmap to map if visible and not in replay mode", async () => {
+    it("shows the heatmap if visible and not in replay mode", async () => {
       mockApp.heatmapVisible = true;
       loaderMocks.loadData.mockResolvedValue(baseData());
 
       await dataManager.updateLayers();
 
-      expect(mockHeatLayer.addTo).toHaveBeenCalledWith(mockApp.map);
+      expect(mockApp.heatmapLayer.setVisible).toHaveBeenCalledWith(true);
+      expect(heatLayer().layout["visibility"]).toBe("visible");
     });
 
-    it("does not add the heat layer a second time when it is already on the map", async () => {
-      mockApp.heatmapLayer = mockHeatLayer as HeatmapLayer;
-      mockApp.map!.addLayer(mockHeatLayer);
-      loaderMocks.loadData.mockResolvedValue(baseData());
-
-      await dataManager.updateLayers();
-
-      expect(mockHeatLayer.addTo).not.toHaveBeenCalled();
-      expect(mockApp.map!.hasLayer(mockHeatLayer)).toBe(true);
-    });
-
-    it("does not add heatmap if not visible", async () => {
+    it("does not show the heatmap if not visible", async () => {
       mockApp.heatmapVisible = false;
       loaderMocks.loadData.mockResolvedValue(baseData());
 
       await dataManager.updateLayers();
 
-      expect(mockHeatLayer.addTo).not.toHaveBeenCalled();
+      expect(mockApp.heatmapLayer.setVisible).not.toHaveBeenCalled();
+      expect(heatLayer().layout["visibility"]).toBe("none");
     });
 
-    it("does not add heatmap if in replay mode", async () => {
+    it("does not show the heatmap if in replay mode", async () => {
       mockApp.replayManager.state.active = true;
       loaderMocks.loadData.mockResolvedValue(baseData());
 
       await dataManager.updateLayers();
 
-      expect(mockHeatLayer.addTo).not.toHaveBeenCalled();
+      expect(mockApp.heatmapLayer.setVisible).not.toHaveBeenCalled();
+      expect(heatLayer().layout["visibility"]).toBe("none");
     });
 
     it("calculates altitude range from segments", async () => {
@@ -391,11 +424,10 @@ describe("DataManager", () => {
 
       await dataManager.updateLayers();
 
-      const coords = heatLayerSpy.mock.calls[0]![0] as [number, number][];
-      expect(coords).toEqual([
-        [50.0, 8.0],
-        [50.1, 8.1],
-        [50.2, 8.2],
+      expect(heatPoints()).toEqual([
+        [8.0, 50.0],
+        [8.1, 50.1],
+        [8.2, 50.2],
       ]);
     });
 
@@ -405,10 +437,9 @@ describe("DataManager", () => {
 
       await dataManager.updateLayers();
 
-      const coords = heatLayerSpy.mock.calls[0]![0] as [number, number][];
-      expect(coords).toEqual([
-        [52.0, 10.0],
-        [53.0, 11.0],
+      expect(heatPoints()).toEqual([
+        [10.0, 52.0],
+        [11.0, 53.0],
       ]);
     });
 
@@ -419,10 +450,9 @@ describe("DataManager", () => {
 
       await dataManager.updateLayers();
 
-      const coords = heatLayerSpy.mock.calls[0]![0] as [number, number][];
-      expect(coords).toEqual([
-        [52.0, 10.0],
-        [53.0, 11.0],
+      expect(heatPoints()).toEqual([
+        [10.0, 52.0],
+        [11.0, 53.0],
       ]);
     });
 
@@ -437,10 +467,9 @@ describe("DataManager", () => {
 
       await dataManager.updateLayers();
 
-      const coords = heatLayerSpy.mock.calls[0]![0] as [number, number][];
-      expect(coords).toEqual([
-        [52.0, 10.0],
-        [53.0, 11.0],
+      expect(heatPoints()).toEqual([
+        [10.0, 52.0],
+        [11.0, 53.0],
       ]);
     });
 
@@ -453,8 +482,7 @@ describe("DataManager", () => {
 
       expect(loaderMocks.loadData).not.toHaveBeenCalled();
       expect(mockApp.currentData).toBe(data);
-      expect(heatLayerSpy).toHaveBeenCalledTimes(1);
-      expect(mockHeatLayer.setLatLngs).toHaveBeenCalledTimes(1);
+      expect(heatSource().setData).toHaveBeenCalledTimes(2);
     });
 
     it("does not retry and report a partial load on every redraw (regression)", async () => {
@@ -559,80 +587,185 @@ describe("DataManager", () => {
       await first;
 
       expect(mockApp.currentData).toBe(newer);
-      expect(heatLayerSpy).toHaveBeenCalledTimes(1);
+      expect(heatSource().setData).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe("heat layer off the map", () => {
-    it("keeps the points instead of feeding a layer that is off the map (regression)", async () => {
-      // leaflet.heat redraws through the map it was added to, which Leaflet
-      // clears on removal, so setLatLngs threw once the layer had been on
-      // the map and was taken off (heatmap toggled off, or hidden for a
-      // replay); the colour layers were then never redrawn for a new filter
-      const offMap = {
-        addTo: vi.fn(),
-        remove: vi.fn(),
-        setLatLngs: vi.fn(() => {
-          throw new TypeError(
-            "Cannot read properties of null (reading '_animating')",
-          );
-        }),
-      };
-      mockApp.heatmapLayer = offMap as unknown as HeatmapLayer;
+  describe("hidden heat layer", () => {
+    it("takes new points while it is hidden and redraws the colour layers", async () => {
       mockApp.heatmapVisible = false;
       mockApp.altitudeVisible = true;
-      loaderMocks.loadData.mockResolvedValue(baseData());
+      const data = baseData();
+      loaderMocks.loadData.mockResolvedValue(data);
 
       await expect(dataManager.updateLayers()).resolves.toBeUndefined();
 
-      expect(offMap.setLatLngs).not.toHaveBeenCalled();
+      expect(heatPoints()).toHaveLength(data.coordinates.length);
+      expect(heatLayer().layout["visibility"]).toBe("none");
       expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalledTimes(1);
     });
 
-    it("feeds the layer the points it missed when it is shown again", async () => {
-      const layer = {
-        addTo: vi.fn(),
-        remove: vi.fn(),
-        setLatLngs: vi.fn(),
-        _canvas: document.createElement("canvas"),
-      };
-      mockApp.heatmapLayer = layer as unknown as HeatmapLayer;
+    it("shows the layer through its handle without feeding it again", async () => {
       mockApp.heatmapVisible = false;
-      const data = baseData();
-      loaderMocks.loadData.mockResolvedValue(data);
-      await dataManager.updateLayers();
-      expect(layer.setLatLngs).not.toHaveBeenCalled();
+      await dataManager.updateLayers(baseData());
 
       mockApp.heatmapVisible = true;
       dataManager.showHeatmap();
 
-      expect(layer.addTo).toHaveBeenCalledWith(mockApp.map);
-      expect(layer.setLatLngs).toHaveBeenCalledWith(data.coordinates);
-      expect(layer._canvas.style.pointerEvents).toBe("none");
+      expect(mockApp.heatmapLayer.setVisible).toHaveBeenCalledWith(true);
+      expect(mockApp.heatmapLayer.isVisible()).toBe(true);
+      expect(heatLayer().layout["visibility"]).toBe("visible");
+      expect(heatSource().setData).toHaveBeenCalledTimes(1);
     });
 
-    it("feeds a layer that is on the map right away", async () => {
-      mockApp.heatmapLayer = mockHeatLayer as HeatmapLayer;
-      mockApp.map!.addLayer(mockHeatLayer);
-      const data = baseData();
-      loaderMocks.loadData.mockResolvedValue(data);
-
-      await dataManager.updateLayers();
+    it("paints a layer that is shown before it got any points", () => {
       dataManager.showHeatmap();
 
-      expect(mockHeatLayer.setLatLngs).toHaveBeenCalledTimes(1);
-      expect(mockHeatLayer.setLatLngs).toHaveBeenCalledWith(data.coordinates);
-      expect(mockHeatLayer.addTo).not.toHaveBeenCalled();
+      for (const band of HEATMAP_BANDS) {
+        expect(mockApp.map!.layer(band.layer).paint).toEqual(
+          heatmapPaint(band.stride),
+        );
+      }
     });
 
-    it("does nothing without a layer or a map", () => {
-      mockApp.heatmapLayer = null;
-      expect(() => dataManager.showHeatmap()).not.toThrow();
-
-      mockApp.heatmapLayer = mockHeatLayer as HeatmapLayer;
+    it("does nothing without a map", () => {
       mockApp.map = null;
-      dataManager.showHeatmap();
-      expect(mockHeatLayer.addTo).not.toHaveBeenCalled();
+
+      expect(() => dataManager.showHeatmap()).not.toThrow();
+      expect(mockApp.heatmapLayer.setVisible).not.toHaveBeenCalled();
+    });
+
+    it("leaves a map alone whose style has no heat source yet", async () => {
+      for (const id of HEATMAP_LAYER_IDS) mockApp.map!.removeLayer(id);
+      mockApp.map!.removeSource(MAP_SOURCES.heat);
+      mockApp.altitudeVisible = true;
+
+      await expect(
+        dataManager.updateLayers(baseData()),
+      ).resolves.toBeUndefined();
+
+      expect(mockApp.map!.setPaintProperty).not.toHaveBeenCalled();
+      expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("heatmapPaint", () => {
+    const paint = heatmapPaint();
+
+    it("halves the intensity per zoom level out, up to where fixes turn into dots", () => {
+      const intensity = paint["heatmap-intensity"] as unknown[];
+      expect(intensity.slice(0, 3)).toEqual([
+        "interpolate",
+        ["exponential", 2],
+        ["zoom"],
+      ]);
+      const stops = intensity.slice(3) as number[];
+      expect(stops).toHaveLength(6);
+      const [z0, i0, z1, i1, z2, i2] = stops as [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+      ];
+      // A power of two per level makes the base 2 curve exactly 2^zoom
+      expect(i1 / i0).toBe(2 ** (z1 - z0));
+      expect(z2).toBeGreaterThan(z1);
+      expect(i2).toBe(i1);
+    });
+
+    it("scales the intensity of a layer by the stride it draws at", () => {
+      const full = (paint["heatmap-intensity"] as unknown[]).slice(3);
+      for (const { stride } of HEATMAP_BANDS) {
+        const scaled = heatmapPaint(stride);
+        const intensity = scaled["heatmap-intensity"] as unknown[];
+        expect(intensity.slice(0, 3)).toEqual([
+          "interpolate",
+          ["exponential", 2],
+          ["zoom"],
+        ]);
+        // Same zooms, every intensity times the stride
+        expect(intensity.slice(3)).toEqual(
+          full.map((value, i) =>
+            i % 2 === 0 ? value : (value as number) * stride,
+          ),
+        );
+        expect({ ...scaled, "heatmap-intensity": null }).toEqual({
+          ...paint,
+          "heatmap-intensity": null,
+        });
+      }
+    });
+
+    it("keeps a point above what the density texture can hold, in every band", () => {
+      for (const { stride, minzoom } of HEATMAP_BANDS) {
+        const stops = (
+          heatmapPaint(stride)["heatmap-intensity"] as unknown[]
+        ).slice(3) as number[];
+        const [z0, i0] = stops as [number, number];
+        // The curve is i0 * 2^(zoom - z0) up to the reference zoom, and a
+        // band's faintest point is the one at its lower end
+        const faintest = i0 * 2 ** (Math.max(minzoom, MAP_MIN_ZOOM) - z0);
+        expect(faintest).toBeGreaterThanOrEqual(0.004);
+      }
+    });
+
+    /** The stops of the colour ramp as `[density, r, g, b, alpha]` */
+    const colorStops = (): number[][] => {
+      const stops = (paint["heatmap-color"] as unknown[]).slice(3);
+      expect(stops.length % 2).toBe(0);
+      const parsed: number[][] = [];
+      for (let i = 0; i < stops.length; i += 2) {
+        const match = /^rgba\((\d+), (\d+), (\d+), ([\d.]+)\)$/.exec(
+          stops[i + 1] as string,
+        );
+        expect(match).not.toBeNull();
+        parsed.push([stops[i] as number, ...match!.slice(1).map(Number)]);
+      }
+      return parsed;
+    };
+
+    it("colours by density, from nothing at 0 up to 1", () => {
+      const color = paint["heatmap-color"] as unknown[];
+      expect(color.slice(0, 3)).toEqual([
+        "interpolate",
+        ["linear"],
+        ["heatmap-density"],
+      ]);
+      const densities = colorStops().map((stop) => stop[0]!);
+      expect(densities).toEqual([...densities].sort((a, b) => a - b));
+      expect(new Set(densities).size).toBe(densities.length);
+      expect(densities[0]).toBe(0);
+      expect(densities[densities.length - 1]).toBe(1);
+      for (const [, r, g, b] of colorStops()) {
+        for (const channel of [r!, g!, b!]) {
+          expect(channel).toBeGreaterThanOrEqual(0);
+          expect(channel).toBeLessThanOrEqual(255);
+        }
+      }
+    });
+
+    it("gets more opaque with the density, from fully transparent to opaque", () => {
+      const alphas = colorStops().map((stop) => stop[4]!);
+      for (let i = 1; i < alphas.length; i++) {
+        expect(alphas[i]).toBeGreaterThanOrEqual(alphas[i - 1]!);
+      }
+      // Nothing where there is no flight, or the whole map is tinted
+      expect(alphas[0]).toBe(0);
+      expect(alphas[alphas.length - 1]).toBe(1);
+    });
+
+    it("never draws fainter than leaflet.heat's minOpacity", () => {
+      const visible = colorStops()
+        .map((stop) => stop[4]!)
+        .filter((alpha) => alpha > 0);
+      expect(Math.min(...visible)).toBe(0.25);
+      expect(visible[0]).toBe(0.25);
+    });
+
+    it("starts at full opacity", () => {
+      expect(paint["heatmap-opacity"]).toBe(1);
     });
   });
 
@@ -676,14 +809,97 @@ describe("DataManager", () => {
     });
   });
 
+  describe("heatmapFeatures", () => {
+    /** `count` points along a line, `[lng, lat]`, each telling its index */
+    const line = (count: number): [number, number][] =>
+      Array.from({ length: count }, (_, i): [number, number] => [8 + i, 50]);
+
+    it("makes one MultiPoint per level of detail, thinned by its stride", () => {
+      const points = line(1100);
+
+      const { type, features } = heatmapFeatures(points);
+
+      expect(type).toBe("FeatureCollection");
+      expect(features).toHaveLength(HEATMAP_BANDS.length);
+      HEATMAP_BANDS.forEach(({ detail, stride }, i) => {
+        const feature = features[i]!;
+        expect(feature.type).toBe("Feature");
+        expect(feature.properties).toEqual({ detail });
+        expect(feature.geometry.type).toBe("MultiPoint");
+        expect(feature.geometry.coordinates).toEqual(
+          points.filter((_, index) => index % stride === 0),
+        );
+        expect(feature.geometry.coordinates).toHaveLength(
+          Math.ceil(points.length / stride),
+        );
+      });
+      expect(features[0]!.geometry.coordinates).toEqual(points);
+      expect(features[3]!.geometry.coordinates).toEqual([
+        [8, 50],
+        [8 + 512, 50],
+        [8 + 1024, 50],
+      ]);
+    });
+
+    it("gives every level the first point when there are fewer than a stride", () => {
+      const { features } = heatmapFeatures(line(3));
+
+      expect(features.map((f) => f.geometry.coordinates)).toEqual([
+        line(3),
+        [[8, 50]],
+        [[8, 50]],
+        [[8, 50]],
+      ]);
+      expect(heatmapFeatures(line(1)).features).toHaveLength(4);
+    });
+
+    it("has no features, rather than empty ones, without any point", () => {
+      expect(heatmapFeatures([])).toEqual({
+        type: "FeatureCollection",
+        features: [],
+      });
+    });
+
+    it("has a band for every zoom, without gap or overlap", () => {
+      const bands = [...HEATMAP_BANDS].sort((a, b) => a.minzoom - b.minzoom);
+      expect(bands[0]!.minzoom).toBeLessThanOrEqual(MAP_MIN_ZOOM);
+      // `maxzoom` is exclusive, so the last one has to lie beyond the map's
+      expect(bands[bands.length - 1]!.maxzoom).toBeGreaterThan(MAP_MAX_ZOOM);
+      // 24 is the most MapLibre takes for a layer
+      expect(bands[bands.length - 1]!.maxzoom).toBeLessThanOrEqual(24);
+      for (let i = 1; i < bands.length; i++) {
+        expect(bands[i]!.minzoom).toBe(bands[i - 1]!.maxzoom);
+        // Further in, more detail
+        expect(bands[i]!.stride).toBeLessThan(bands[i - 1]!.stride);
+      }
+      for (const band of bands) {
+        expect(band.maxzoom).toBeGreaterThan(band.minzoom);
+      }
+      expect(new Set(bands.map((b) => b.detail)).size).toBe(bands.length);
+      expect(new Set(HEATMAP_LAYER_IDS).size).toBe(bands.length);
+      expect(HEATMAP_BANDS[0]).toMatchObject({
+        stride: 1,
+        layer: MAP_LAYERS.heat,
+      });
+      expect(HEATMAP_LAYER_IDS[0]).toBe(MAP_LAYERS.heat);
+    });
+  });
+
   describe("applyHeatmapEmphasis", () => {
+    /** The opacity of the heat layers, which has to be one and the same */
+    const opacity = (): unknown => {
+      const values = HEATMAP_LAYER_IDS.map(
+        (id) => mockApp.map!.layer(id).paint["heatmap-opacity"],
+      );
+      expect(new Set(values).size).toBe(1);
+      return values[0];
+    };
+
     it("steps the heatmap back while a colour layer is over it", async () => {
       mockApp.altitudeVisible = true;
       await dataManager.updateLayers(baseData());
 
-      expect(mockHeatLayer._canvas!.classList.contains("heatmap-dimmed")).toBe(
-        true,
-      );
+      expect(opacity()).toBe(0.35);
     });
 
     it("brings it back to full strength on its own", async () => {
@@ -691,27 +907,67 @@ describe("DataManager", () => {
       mockApp.airspeedVisible = false;
       await dataManager.updateLayers(baseData());
 
-      expect(mockHeatLayer._canvas!.classList.contains("heatmap-dimmed")).toBe(
-        false,
-      );
+      expect(opacity()).toBe(1);
     });
 
     it("follows the speed layer too", async () => {
       await dataManager.updateLayers(baseData());
-      expect(mockHeatLayer._canvas!.classList.contains("heatmap-dimmed")).toBe(
-        false,
-      );
+      expect(opacity()).toBe(1);
 
       mockApp.airspeedVisible = true;
       dataManager.applyHeatmapEmphasis();
 
-      expect(mockHeatLayer._canvas!.classList.contains("heatmap-dimmed")).toBe(
-        true,
-      );
+      expect(opacity()).toBe(0.35);
+
+      mockApp.airspeedVisible = false;
+      dataManager.applyHeatmapEmphasis();
+
+      expect(opacity()).toBe(1);
     });
 
-    it("does nothing when there is no heatmap yet", () => {
-      mockApp.heatmapLayer = null;
+    it("takes how far from the stylesheet's token", () => {
+      document.documentElement.style.setProperty(
+        "--heatmap-dimmed-opacity",
+        " 0.5 ",
+      );
+      mockApp.altitudeVisible = true;
+
+      dataManager.applyHeatmapEmphasis();
+
+      expect(opacity()).toBe(0.5);
+    });
+
+    it.each(["", "none", "7", "-1"])(
+      "falls back to 0.35 for a token of '%s'",
+      (value) => {
+        document.documentElement.style.setProperty(
+          "--heatmap-dimmed-opacity",
+          value,
+        );
+        mockApp.altitudeVisible = true;
+
+        dataManager.applyHeatmapEmphasis();
+
+        expect(opacity()).toBe(0.35);
+      },
+    );
+
+    it("dims a hidden heatmap too, so it is right when it is shown", () => {
+      mockApp.heatmapVisible = false;
+      mockApp.altitudeVisible = true;
+
+      dataManager.applyHeatmapEmphasis();
+
+      expect(opacity()).toBe(0.35);
+      expect(heatLayer().layout["visibility"]).toBe("none");
+    });
+
+    it("does nothing without a map or before the layers exist", () => {
+      for (const id of HEATMAP_LAYER_IDS) mockApp.map!.removeLayer(id);
+      expect(() => dataManager.applyHeatmapEmphasis()).not.toThrow();
+      expect(mockApp.map!.setPaintProperty).not.toHaveBeenCalled();
+
+      mockApp.map = null;
       expect(() => dataManager.applyHeatmapEmphasis()).not.toThrow();
     });
   });

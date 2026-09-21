@@ -1,7 +1,7 @@
 /**
  * Whether the user asked the system for reduced motion. The stylesheet
- * handles CSS animations on its own. Leaflet's are scripted, so when this is
- * true the map is created without its zoom, fade and inertia animations and
+ * handles CSS animations on its own. The map's are scripted, so when this is
+ * true the map is created with `reduceMotion` and without its tile fade, and
  * the callers that move it pass `animate: false`.
  *
  * The replay asks on every frame it pans. A MediaQueryList follows the

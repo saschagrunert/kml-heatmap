@@ -25,18 +25,22 @@ const minify = !isDevelopment;
 const sourceHash = computeSourceHash();
 const buildBanner = makeBanner(sourceHash);
 
-// Plugin to replace Leaflet import with global L variable
-/** @type {import("esbuild").Plugin} */
-const leafletGlobalPlugin = {
-  name: "leaflet-global",
+/**
+ * Leave MapLibre out of the bundles and import the vendored module instead.
+ *
+ * It is three quarters of a megabyte that changes only when the dependency
+ * is bumped, so it stays a file of its own that the browser caches apart
+ * from the app. It also has to: MapLibre finds its worker relative to its
+ * own URL (see scripts/vendor.js), which a copy inside the bundle would not
+ * have. The bundles sit next to vendor/, so the path is the same for all.
+ * @type {import("esbuild").Plugin}
+ */
+const maplibreVendorPlugin = {
+  name: "maplibre-vendor",
   setup(build) {
-    build.onResolve({ filter: /^leaflet$/ }, (args) => ({
-      path: args.path,
-      namespace: "leaflet-global",
-    }));
-    build.onLoad({ filter: /.*/, namespace: "leaflet-global" }, () => ({
-      contents: "module.exports = window.L;",
-      loader: "js",
+    build.onResolve({ filter: /^maplibre-gl$/ }, () => ({
+      path: "./vendor/maplibre-gl.mjs",
+      external: true,
     }));
   },
 };
@@ -82,7 +86,7 @@ const buildOptions = {
 
   // Don't drop console statements - they are guarded by debug flags in code
   drop: isDevelopment ? [] : ["debugger"],
-  plugins: [leafletGlobalPlugin],
+  plugins: [maplibreVendorPlugin],
 };
 
 /**
@@ -168,7 +172,13 @@ function analyzeBundleComposition(metafile, fileName) {
 // the scroll-fade watcher, and the icon set moving to Lucide, whose shapes
 // carry more detail than the hand drawn paths they replaced (33 of them for
 // about 4 KB more). The split of #250 had left it at 86 KB.
-const BUDGET_APP = 96 * 1024;
+// Raised from 96 KB for MapLibre. Leaflet drew polylines, tooltips and a
+// heatmap by itself; on a WebGL map the app builds the GeoJSON of the path
+// runs, keeps the tables that map a rendered feature back to its segment,
+// does its own hit testing for hover and click, owns the popups (there is
+// no auto pan and no bound popup) and captures the canvas for the export.
+// That is about 10 KB of code Leaflet used to carry in its 148 KB.
+const BUDGET_APP = 106 * 1024;
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.

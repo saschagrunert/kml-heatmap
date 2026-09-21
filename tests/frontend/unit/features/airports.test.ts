@@ -318,39 +318,63 @@ describe("airports feature", () => {
     });
   });
 
-  describe("createAirportIcon", () => {
-    function optionsOf(name: string, isHome: boolean): Record<string, unknown> {
-      // The Leaflet mock hands the options straight back as the icon
-      return (
-        mod.createAirportIcon(name, isHome) as unknown as {
-          options: Record<string, unknown>;
-        }
-      ).options;
-    }
+  describe("createAirportElement", () => {
+    it("builds a plain button named after the airport", () => {
+      const element = mod.createAirportElement("Frankfurt EDDF");
+
+      expect(element).toBeInstanceOf(HTMLButtonElement);
+      // Without it a button inside a form would submit; and it is the
+      // class the stylesheet resets and the airports toggle hides
+      expect(element.type).toBe("button");
+      expect(element.className).toBe("airport-marker-root");
+      expect(element.title).toBe("Frankfurt EDDF");
+      expect(element.getAttribute("aria-label")).toBe("Frankfurt EDDF");
+    });
 
     it("extracts the ICAO code and marks the home base", () => {
-      const options = optionsOf("Frankfurt EDDF", true);
-      const html = options["html"] as string;
+      const element = mod.createAirportElement("Frankfurt EDDF", true);
+      const container = element.firstElementChild!;
 
-      expect(html).toContain(">EDDF<");
-      expect(html).toContain("airport-marker airport-marker-home");
-      expect(html).toContain("airport-label airport-label-home");
-      // The dot is drawn small; the square around it is the 24px a finger
-      // needs, which the airports are too close together to earn by spacing
-      expect(options).toMatchObject({
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-        popupAnchor: [0, -12],
-        className: "",
-      });
+      expect(element.children).toHaveLength(1);
+      expect(container.className).toBe("airport-marker-container");
+      expect([...container.children].map((child) => child.className)).toEqual([
+        "airport-marker airport-marker-home",
+        "airport-label airport-label-home",
+      ]);
+      expect(element.querySelector(".airport-label")!.textContent).toBe("EDDF");
     });
 
     it("falls back to APT without an ICAO code and omits home classes", () => {
-      const html = optionsOf("Small Airfield 123", false)["html"] as string;
+      const element = mod.createAirportElement("Small Airfield 123");
 
-      expect(html).toContain(">APT<");
-      expect(html).not.toContain("airport-marker-home");
-      expect(html).not.toContain("airport-label-home");
+      expect(element.querySelector(".airport-label")!.textContent).toBe("APT");
+      expect(element.querySelector(".airport-marker-home")).toBeNull();
+      expect(element.querySelector(".airport-label-home")).toBeNull();
+    });
+
+    it("does not read a name as markup", () => {
+      const element = mod.createAirportElement('<img src="x"> EDDF');
+
+      expect(element.querySelector("img")).toBeNull();
+      expect(element.title).toBe('<img src="x"> EDDF');
+    });
+  });
+
+  describe("setAirportElementHome", () => {
+    it("switches the home-base classes on the same element", () => {
+      const element = mod.createAirportElement("Frankfurt EDDF");
+      const dot = element.querySelector(".airport-marker")!;
+      const label = element.querySelector(".airport-label")!;
+
+      mod.setAirportElementHome(element, true);
+      expect(dot.classList.contains("airport-marker-home")).toBe(true);
+      expect(label.classList.contains("airport-label-home")).toBe(true);
+
+      mod.setAirportElementHome(element, false);
+      expect(dot.className).toBe("airport-marker");
+      expect(label.className).toBe("airport-label");
+      // Still the nodes it started with: focus and listeners stay
+      expect(element.querySelector(".airport-marker")).toBe(dot);
     });
   });
 });

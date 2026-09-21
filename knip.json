@@ -13,5 +13,5 @@
     "*.js",
     "scripts/*.js"
   ],
-  "ignoreDependencies": ["leaflet.heat", "flag-icons"]
+  "ignoreDependencies": ["flag-icons"]
 }

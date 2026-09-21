@@ -192,8 +192,8 @@ export function calculateYearStats(
 }
 
 /**
- * The span of the latitudes and longitudes the segments touch, as Leaflet
- * bounds, or null when none of them has coordinates.
+ * The span of the latitudes and longitudes the segments touch, as a
+ * [south-west, north-east] pair of [lat, lon], or null when none of them has coordinates.
  */
 export function segmentBounds(
   segments: PathSegment[],

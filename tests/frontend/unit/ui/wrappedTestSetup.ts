@@ -147,6 +147,7 @@ const aircraftModels = {
   "D-EFGH": "Cessna 172",
 };
 
+/** Needs `mountWrappedDom` first: the mock map moves into its `#map` */
 export function createWrappedMockApp(): MockApp {
   return createMockApp({
     selectedYear: "2024",

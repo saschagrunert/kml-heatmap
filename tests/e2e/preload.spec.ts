@@ -38,11 +38,18 @@ test("the first data files are preloaded and fetched once", async ({
   );
 });
 
-test("the shared chunk is preloaded as a module", async ({ page }) => {
+test("the modules the app imports are preloaded", async ({ page }) => {
   await page.goto("/index.html");
 
-  await expect(page.locator('link[rel="modulepreload"]')).toHaveAttribute(
-    "href",
+  // The chunk the bundle shares with the features, and the map library with
+  // the module it imports in turn: all three are needed before anything
+  // draws, and none is discovered until the one before it has been parsed
+  const preloaded = await page
+    .locator('link[rel="modulepreload"]')
+    .evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+  expect(preloaded).toEqual([
     "./shared.bundle.js",
-  );
+    "./vendor/maplibre-gl.mjs",
+    "./vendor/maplibre-gl-shared.mjs",
+  ]);
 });

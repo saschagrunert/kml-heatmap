@@ -1,19 +1,31 @@
 /**
  * Airport Manager - Handles airport markers and popups
  */
-import type * as L from "leaflet";
+import { Popup } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
-import {
-  calculateVisibleAirports,
-  createAirportIcon,
-  findHomeBase,
-} from "../features/airports";
+import { calculateVisibleAirports, findHomeBase } from "../features/airports";
 import type { AirportCounts } from "../features/airports";
 import { datasetIndex } from "../calculations/datasetIndex";
 import type { PathInfo } from "../types";
+import {
+  AIRPORT_HIDE_LABELS_BELOW_ZOOM,
+  AIRPORT_SIZE_ZOOMS,
+} from "../utils/constants";
 import { ddToDms } from "../utils/geometry";
 import { generateAirportPopupHtml } from "../utils/htmlGenerators";
+import { panPopupIntoView } from "../utils/mapHelpers";
+import { prefersReducedMotion } from "../utils/motion";
 import { loadFeatures } from "../services/featureLoader";
+
+/** Room kept between an airport popup and the edge of the map, in pixels */
+const POPUP_PAN_PADDING_PX = 50;
+
+/**
+ * Distance from the middle of a marker, where MapLibre anchors it, to the
+ * edge of its pointer target, where the popup's tip belongs. Half of
+ * `--marker-target` in the stylesheet.
+ */
+const POPUP_OFFSET_PX = 12;
 
 /** Padding added around a label box before two are called overlapping */
 const LABEL_GAP_PX = 2;
@@ -34,7 +46,7 @@ const CHROME_SELECTORS = [
   "#mobile-sheet",
   "#github-footer",
   ".color-legend",
-  ".leaflet-control-attribution",
+  ".maplibregl-ctrl-attrib",
 ] as const;
 
 /** Store keys that change the popup counts and the home base */
@@ -49,8 +61,23 @@ const VISIBILITY_KEYS = [
 
 export class AirportManager {
   private app: MapApp;
-  /** Home-base icon state per airport marker (icons are recreated on change) */
-  private homeIconState: Map<string, boolean> = new Map();
+  /**
+   * The one popup every airport shares: only one is ever open, and its
+   * content depends on the filter of the moment, so it is written when the
+   * popup opens rather than kept per marker. It is opened from here and not
+   * through `marker.setPopup`, whose own click and key handling would toggle
+   * it a second time. MapLibre would focus the first control inside and
+   * narrow it to 240px; the app decides about focus and the stylesheet about
+   * the width.
+   */
+  private readonly popup = new Popup({
+    focusAfterOpen: false,
+    maxWidth: "none",
+    offset: POPUP_OFFSET_PX,
+    closeOnClick: true,
+  });
+  /** The airport the popup is open for */
+  private openAirport: string | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -62,11 +89,15 @@ export class AirportManager {
     app.store.subscribeKeys(POPUP_KEYS, () => this.updateAirportPopups());
     app.store.subscribeKeys(VISIBILITY_KEYS, () => this.updateAirportOpacity());
 
-    // Adding the layer back rebuilds every marker icon from its HTML, which
-    // drops the crowded class; the labels would overlap until the next zoom
+    // A hidden layer has no label boxes to measure, so whatever the map did
+    // in the meantime went past the declutter pass. A popup would be left
+    // pointing at nothing.
     app.store.subscribe("airportsVisible", (visible) => {
       if (visible) this.declutterLabels();
+      else this.closePopup();
     });
+
+    this.popup.on("close", () => this.onPopupClosed());
   }
 
   /**
@@ -85,90 +116,130 @@ export class AirportManager {
   }
 
   /**
-   * Update popup content and home-base marker class with the counts of the
+   * Update the home-base marker and the open popup with the counts of the
    * current year/aircraft filter
    */
   updateAirportPopups(): void {
     if (!this.app.allAirportsData || !this.app.airportMarkers) return;
 
-    let iconsRecreated = false;
-    const airportCounts = this.airportFlightCounts();
-
     // Home base: airport with most flights in the current filter
-    const homeBaseName = findHomeBase(airportCounts);
+    const homeBaseName = findHomeBase(this.airportFlightCounts());
 
     for (const airport of this.app.allAirportsData) {
-      const marker = this.app.airportMarkers[airport.name];
-      if (!marker) continue;
+      this.app.airportMarkers[airport.name]?.setHome(
+        airport.name === homeBaseName,
+      );
+    }
 
-      const flightCount = airportCounts[airport.name] || 0;
-      const isHomeBase = airport.name === homeBaseName;
+    if (this.openAirport !== null) this.writePopupContent(this.openAirport);
+  }
 
-      const popup = generateAirportPopupHtml({
+  /**
+   * Open the popup on an airport's marker.
+   *
+   * A popup opened from the keyboard takes focus, and closing it puts focus
+   * back on the marker instead of dropping it on the page (see
+   * onPopupClosed). A pointer leaves focus where it is.
+   */
+  openPopup(name: string): void {
+    const map = this.app.map;
+    const marker = this.app.airportMarkers[name];
+    if (!map || !marker) return;
+
+    // Moving the open popup is no close: the focus belongs to whatever
+    // asked for the new one, not to the marker that is left behind
+    this.openAirport = name;
+    this.popup.setLngLat(marker.getLatLng());
+    this.writePopupContent(name);
+    if (!this.popup.isOpen()) this.popup.addTo(map);
+
+    if (marker.getElement().matches(":focus-visible")) {
+      this.popup
+        .getElement()
+        ?.querySelector<HTMLElement>(".popup-container")
+        ?.focus();
+    }
+  }
+
+  /**
+   * Close the popup.
+   * @param name - Close it only when it is open for this airport
+   */
+  closePopup(name?: string): void {
+    if (name !== undefined && name !== this.openAirport) return;
+    this.popup.remove();
+  }
+
+  /**
+   * Whether the popup is open.
+   * @param name - Ask for this airport only
+   */
+  isPopupOpen(name?: string): boolean {
+    if (!this.popup.isOpen()) return false;
+    return name === undefined || name === this.openAirport;
+  }
+
+  /**
+   * Write the popup for an airport, with the counts of the current filter
+   * and the flights it lists.
+   *
+   * The list is what lets a keyboard pick a single flight, and with it
+   * replay: otherwise only a click on a path does. It lives in the feature
+   * bundle, which the first popup fetches, so it arrives after the content
+   * and makes the popup taller. MapLibre neither tells when content changes
+   * nor keeps a popup inside the map the way Leaflet did, so both are done
+   * here: once everything is in, the popup is laid out again and the map
+   * panned until it shows in full.
+   */
+  private writePopupContent(name: string): void {
+    const airport = this.app.allAirportsData?.find((a) => a.name === name);
+    if (!airport) return;
+
+    const counts = this.airportFlightCounts();
+    this.popup.setHTML(
+      generateAirportPopupHtml({
         name: airport.name,
         lat: airport.lat,
         lon: airport.lon,
         latDms: ddToDms(airport.lat, true),
         lonDms: ddToDms(airport.lon, false),
-        flightCount,
-        isHomeBase,
-      });
+        flightCount: counts[airport.name] || 0,
+        isHomeBase: airport.name === findHomeBase(counts),
+      }),
+    );
 
-      // The markers are created without a popup so that the very first
-      // content already carries the counts of the active filter
-      if (marker.getPopup()) {
-        marker.setPopupContent(popup);
-      } else {
-        marker.bindPopup(popup, { autoPanPadding: [50, 50] });
-        this.bindPopupEvents(marker, airport.name);
-      }
-
-      if ((this.homeIconState.get(airport.name) ?? false) !== isHomeBase) {
-        marker.setIcon(createAirportIcon(airport.name, isHomeBase));
-        this.homeIconState.set(airport.name, isHomeBase);
-        iconsRecreated = true;
-      }
-    }
-
-    // A new icon is a new element, so whatever declutterLabels() decided
-    // about the old one went with it
-    if (iconsRecreated) this.declutterLabels();
+    void loadFeatures().then((features) => {
+      const map = this.app.map;
+      // The popup can have closed or moved on while the bundle loaded
+      if (!map || this.openAirport !== name || !this.popup.isOpen()) return;
+      features?.listFlights(this.app, this.popup, name);
+      // The side the popup hangs on was chosen for the height it had
+      // before the list; setting the same position chooses again
+      this.popup.setLngLat(this.popup.getLngLat());
+      panPopupIntoView(
+        map,
+        this.popup,
+        POPUP_PAN_PADDING_PX,
+        !prefersReducedMotion(),
+      );
+    });
   }
 
   /**
-   * Keyboard access to an airport popup and the flights it lists.
-   *
-   * The list is what lets a keyboard pick a single flight, and with it
-   * replay: otherwise only a click on a path does. It lives in the feature
-   * bundle, which the first popup fetches. A popup opened from the keyboard
-   * takes focus, and closing it puts focus back on the marker instead of
-   * dropping it on the page. Leaflet closes one on Escape only while the
-   * map itself has focus.
+   * MapLibre has taken the popup out of the document by now. Focus that was
+   * inside it, on the close button or a listed flight, fell to the page
+   * with it, and goes to the marker instead. A click on the map closes the
+   * popup as well, and keeps the focus it gave to the map.
    */
-  private bindPopupEvents(marker: L.Marker, name: string): void {
-    const popup = marker.getPopup()!;
-    popup.on("contentupdate", () => {
-      void loadFeatures().then((features) =>
-        features?.listFlights(this.app, popup, name),
-      );
-    });
-    marker.on("popupopen", () => {
-      if (marker.getElement()?.matches(":focus-visible")) {
-        popup
-          .getElement()
-          ?.querySelector<HTMLElement>(".popup-container")
-          ?.focus();
-      }
-    });
-    marker.on("popupclose", () => {
-      const active = document.activeElement;
-      if (active === document.body || popup.getElement()?.contains(active)) {
-        marker.getElement()?.focus();
-      }
-    });
-    marker.on("keydown", (event: L.LeafletKeyboardEvent) => {
-      if (event.originalEvent.key === "Escape") marker.closePopup();
-    });
+  private onPopupClosed(): void {
+    const name = this.openAirport;
+    this.openAirport = null;
+    if (name === null) return;
+
+    const active = document.activeElement;
+    if (active === null || active === document.body) {
+      this.app.airportMarkers[name]?.getElement().focus();
+    }
   }
 
   updateAirportOpacity(): void {
@@ -189,14 +260,11 @@ export class AirportManager {
     )) {
       if (!marker) continue;
 
-      if (visibleAirports === null || visibleAirports.has(airportName)) {
-        marker.setOpacity(1.0);
-        if (!this.app.airportLayer.hasLayer(marker)) {
-          marker.addTo(this.app.airportLayer);
-        }
-      } else if (this.app.airportLayer.hasLayer(marker)) {
-        this.app.airportLayer.removeLayer(marker);
-      }
+      const visible =
+        visibleAirports === null || visibleAirports.has(airportName);
+      marker.setVisible(visible);
+      // A popup does not outlive the marker it points at
+      if (!visible) this.closePopup(airportName);
     }
 
     // Markers that just left the map free up room for the labels that stay
@@ -210,15 +278,14 @@ export class AirportManager {
     const mapContainer = document.getElementById("map");
     if (!mapContainer) return;
 
-    let sizeClass = "";
-    if (zoom >= 14) sizeClass = "xlarge";
-    else if (zoom >= 12) sizeClass = "large";
-    else if (zoom >= 10) sizeClass = "medium";
-    else if (zoom >= 8) sizeClass = "medium-small";
-    else if (zoom >= 6) sizeClass = "small";
+    const sizeClass =
+      AIRPORT_SIZE_ZOOMS.find((size) => zoom >= size.minZoom)?.sizeClass ?? "";
 
     mapContainer.dataset["zoomSize"] = sizeClass;
-    mapContainer.classList.toggle("zoom-hide-labels", zoom < 5);
+    mapContainer.classList.toggle(
+      "zoom-hide-labels",
+      zoom < AIRPORT_HIDE_LABELS_BELOW_ZOOM,
+    );
 
     this.declutterLabels();
   }
@@ -226,7 +293,7 @@ export class AirportManager {
   /**
    * Hide the ICAO labels that would be drawn on top of one another.
    *
-   * Leaflet places every marker independently, so at the zoom levels that fit
+   * Every marker is placed independently, so at the zoom levels that fit
    * a whole country the codes of neighbouring airports overlap and neither is
    * readable. Busier airports are placed first, so the ones a reader is most
    * likely looking for keep their label; the marker dot itself always stays.
@@ -241,9 +308,7 @@ export class AirportManager {
     const labels = Object.entries(this.app.airportMarkers)
       .map(([name, marker]) => ({
         name,
-        label: marker
-          .getElement()
-          ?.querySelector<HTMLElement>(".airport-label"),
+        label: marker.getElement().querySelector<HTMLElement>(".airport-label"),
       }))
       .filter((entry): entry is { name: string; label: HTMLElement } =>
         Boolean(entry.label),

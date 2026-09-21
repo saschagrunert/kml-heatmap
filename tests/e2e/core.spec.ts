@@ -12,7 +12,7 @@ import {
 import {
   attributionControl,
   mapMarkers,
-  tileLayers,
+  mapSurface,
   waitForMapReady,
   zoomControl,
 } from "./map";
@@ -54,8 +54,8 @@ test.describe("Core", () => {
     await waitForMapReady(page);
   });
 
-  test("map has tile pane initialized", async ({ page }) => {
-    await expect(tileLayers(page)).toBeAttached();
+  test("the map has a surface to draw on", async ({ page }) => {
+    await expect(mapSurface(page)).toBeAttached();
   });
 
   test("control buttons are present", async ({ page, isMobile }) => {

@@ -2,8 +2,12 @@
  * MapApp.initialize: data loading, year selection and restored state.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import * as L from "leaflet";
 import { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
+import {
+  Marker as MockMarker,
+  resetMapLibreMock,
+  type Map as MockMap,
+} from "../../../mocks/maplibre-gl";
 
 // The instances the mocked manager constructors hand out live in the setup
 // module, which is loaded before the mocks are registered
@@ -24,9 +28,15 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
     clear: vi.fn(),
   },
 }));
-vi.mock("../../../../kml_heatmap/frontend/utils/mapHelpers", () => ({
-  invalidateMapAfterTransition: vi.fn(),
-}));
+vi.mock(
+  "../../../../kml_heatmap/frontend/utils/mapHelpers",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../../kml_heatmap/frontend/utils/mapHelpers")
+    >()),
+    resizeMapAfterTransition: vi.fn(),
+  }),
+);
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
 // The real bar registers a window resize listener it never removes, so every
@@ -122,6 +132,15 @@ function createApp(): MapApp {
   return new MapApp({ ...m.APP_CONFIG });
 }
 
+/** The mock behind `app.map`, for what the real type does not have */
+function mockMap(app: MapApp): MockMap {
+  return app.map as unknown as MockMap;
+}
+
+function visibility(app: MapApp, id: string): unknown {
+  return mockMap(app).layer(id).layout["visibility"];
+}
+
 describe("MapApp.initialize", () => {
   let app: MapApp;
 
@@ -136,6 +155,7 @@ describe("MapApp.initialize", () => {
     app.destroy();
     document.body.innerHTML = "";
     vi.useRealTimers();
+    resetMapLibreMock();
   });
 
   describe("data loading", () => {
@@ -206,7 +226,14 @@ describe("MapApp.initialize", () => {
         "Frankfurt EDDF",
         "Munich EDDM",
       ]);
-      expect(L.marker).toHaveBeenCalledTimes(2);
+      const markers = Object.values(app.airportMarkers).map(
+        (entry) => entry.marker as unknown as MockMarker,
+      );
+      expect(markers).toHaveLength(2);
+      for (const marker of markers) {
+        expect(marker).toBeInstanceOf(MockMarker);
+        expect(marker.addTo).toHaveBeenCalledWith(app.map);
+      }
     });
 
     it("handles null metadata gracefully", async () => {
@@ -386,7 +413,8 @@ describe("MapApp.initialize", () => {
       // The button is disabled, so a pressed state could never have been
       // released, and the empty layer showed a legend with placeholders
       expect(app.airspeedVisible).toBe(false);
-      expect(app.map!.addLayer).not.toHaveBeenCalledWith(app.airspeedLayer);
+      expect(app.airspeedLayer.isVisible()).toBe(false);
+      expect(visibility(app, "paths-airspeed")).toBe("none");
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(true);
       expect(btn.getAttribute("aria-pressed")).toBe("false");
@@ -417,7 +445,10 @@ describe("MapApp.initialize", () => {
       await initializeApp(app);
 
       expect(app.altitudeVisible).toBe(true);
-      expect(app.map!.addLayer).toHaveBeenCalledWith(app.altitudeLayer);
+      expect(app.altitudeLayer.isVisible()).toBe(true);
+      expect(visibility(app, "paths-altitude")).toBe("visible");
+      expect(visibility(app, "paths-altitude-selected")).toBe("visible");
+      expect(visibility(app, "paths-airspeed")).toBe("none");
       expect(document.getElementById("altitude-legend")!.style.display).toBe(
         "block",
       );
@@ -457,7 +488,8 @@ describe("MapApp.initialize", () => {
 
       await initializeApp(app);
 
-      expect(app.map!.addLayer).toHaveBeenCalledWith(app.airspeedLayer);
+      expect(visibility(app, "paths-airspeed")).toBe("visible");
+      expect(visibility(app, "paths-airspeed-selected")).toBe("visible");
       expect(document.getElementById("airspeed-legend")!.style.display).toBe(
         "block",
       );
@@ -475,32 +507,42 @@ describe("MapApp.initialize", () => {
       expect(legend.style.display).toBe("none");
     });
 
-    it("adds the aviation layer when visible", async () => {
+    it("shows the aviation layer when visible", async () => {
       mockStateManagerInstance.loadState.mockReturnValue({
         aviationVisible: true,
       });
 
       await initializeApp(app);
 
-      expect(app.aviationLayer).not.toBeNull();
-      expect(app.map!.addLayer).toHaveBeenCalledWith(app.aviationLayer);
+      expect(visibility(app, "aviation")).toBe("visible");
     });
 
-    it("creates the aviation layer without adding it when hidden", async () => {
+    it("creates the aviation layer hidden otherwise", async () => {
       await initializeApp(app);
 
-      expect(app.aviationLayer).not.toBeNull();
-      expect(app.map!.addLayer).not.toHaveBeenCalledWith(app.aviationLayer);
+      expect(app.aviationLayer.isVisible()).toBe(false);
+      expect(visibility(app, "aviation")).toBe("none");
     });
 
-    it("hides the airport layer when airports are not visible", async () => {
+    it("hides the airport markers when airports are not visible", async () => {
       mockStateManagerInstance.loadState.mockReturnValue({
         airportsVisible: false,
       });
 
       await initializeApp(app);
 
-      expect(app.airportLayer.addTo).not.toHaveBeenCalled();
+      expect(app.airportLayer.isVisible()).toBe(false);
+      expect(
+        mockMap(app).getContainer().classList.contains("airports-hidden"),
+      ).toBe(true);
+    });
+
+    it("shows the airport markers by default", async () => {
+      await initializeApp(app);
+
+      expect(
+        mockMap(app).getContainer().classList.contains("airports-hidden"),
+      ).toBe(false);
     });
 
     it("restores selected paths and isolate mode into the store", async () => {
@@ -620,8 +662,12 @@ describe("MapApp.initialize", () => {
 
       await initializeApp(app);
 
-      expect(app.map!.setView).toHaveBeenCalledWith([50.5, 8.5], 12);
-      expect(app.map!.fitBounds).not.toHaveBeenCalled();
+      // Longitude first, and one level below the zoom the state carries
+      expect(mockMap(app).options).toMatchObject({
+        center: [8.5, 50.5],
+        zoom: 11,
+      });
+      expect(mockMap(app).options).not.toHaveProperty("bounds");
     });
 
     it("treats a saved zoom of 0 as a view, not as a missing one", async () => {
@@ -632,8 +678,13 @@ describe("MapApp.initialize", () => {
 
       await initializeApp(app);
 
-      expect(app.map!.setView).toHaveBeenCalledWith([50.5, 8.5], 0);
-      expect(app.map!.fitBounds).not.toHaveBeenCalled();
+      // State zoom 0 is below what the map can show, so it opens as far
+      // out as the map goes rather than at the default zoom
+      expect(mockMap(app).options).toMatchObject({
+        center: [8.5, 50.5],
+        zoom: 0,
+      });
+      expect(mockMap(app).options).not.toHaveProperty("bounds");
     });
 
     it("centres a link that carries no zoom at the default zoom", async () => {
@@ -644,16 +695,25 @@ describe("MapApp.initialize", () => {
 
       await initializeApp(app);
 
-      expect(app.map!.setView).toHaveBeenCalledWith([50.5, 8.5], 10);
-      expect(app.map!.fitBounds).not.toHaveBeenCalled();
+      expect(mockMap(app).options).toMatchObject({
+        center: [8.5, 50.5],
+        zoom: 9,
+      });
+      expect(mockMap(app).options).not.toHaveProperty("bounds");
     });
 
     it("fits the configured bounds without a saved view", async () => {
       await initializeApp(app);
 
-      expect(app.map!.fitBounds).toHaveBeenCalledWith(app.config.bounds, {
-        padding: [30, 30],
+      expect(mockMap(app).options).toMatchObject({
+        bounds: [
+          [8, 50],
+          [10, 52],
+        ],
+        fitBoundsOptions: { padding: 30 },
       });
+      expect(mockMap(app).options).not.toHaveProperty("center");
+      expect(mockMap(app).options).not.toHaveProperty("zoom");
     });
   });
 });

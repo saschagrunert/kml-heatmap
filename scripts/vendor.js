@@ -37,24 +37,23 @@ const FLAG_SOURCE = join(NODE_MODULES, "flag-icons/flags/4x3");
 /**
  * Published path inside vendor/ -> path inside node_modules.
  *
- * leaflet.css asks for `images/layers.png` and `images/marker-icon.png`
- * relative to itself, and L.Icon.Default builds marker-icon-2x.png and
- * marker-shadow.png from JavaScript, so the whole image set comes along.
+ * MapLibre is three modules that have to sit next to each other under these
+ * names: maplibre-gl.mjs imports the shared one by its relative path, and
+ * starts its worker from `./maplibre-gl-worker.mjs` relative to its own URL.
+ * That worker is a module of the site's own origin, which is why the page's
+ * CSP gets by with `worker-src 'self'` and no `blob:`. The app bundle imports
+ * maplibre-gl.mjs from here instead of carrying a copy (see build.js).
  * kml_heatmap/site_assets.py keeps the list of the files it publishes in
  * step with this one; tests/frontend/unit/vendor.test.ts checks this list
  * against node_modules.
  * @type {Record<string, string>}
  */
 export const VENDOR_FILES = {
-  "leaflet.js": "leaflet/dist/leaflet.js",
-  "leaflet.css": "leaflet/dist/leaflet.css",
-  "leaflet-heat.js": "leaflet.heat/dist/leaflet-heat.js",
+  "maplibre-gl.mjs": "maplibre-gl/dist/maplibre-gl.mjs",
+  "maplibre-gl-shared.mjs": "maplibre-gl/dist/maplibre-gl-shared.mjs",
+  "maplibre-gl-worker.mjs": "maplibre-gl/dist/maplibre-gl-worker.mjs",
+  "maplibre-gl.css": "maplibre-gl/dist/maplibre-gl.css",
   "html-to-image.js": "html-to-image/dist/html-to-image.js",
-  "images/layers.png": "leaflet/dist/images/layers.png",
-  "images/layers-2x.png": "leaflet/dist/images/layers-2x.png",
-  "images/marker-icon.png": "leaflet/dist/images/marker-icon.png",
-  "images/marker-icon-2x.png": "leaflet/dist/images/marker-icon-2x.png",
-  "images/marker-shadow.png": "leaflet/dist/images/marker-shadow.png",
 };
 
 /**
@@ -87,7 +86,7 @@ export function copyVendorAssets() {
   }
   /** @type {Record<string, string>} */
   const versions = {};
-  for (const name of ["leaflet", "leaflet.heat", "html-to-image"]) {
+  for (const name of ["maplibre-gl", "html-to-image"]) {
     versions[name] = pinnedVersion(name);
   }
   return { count: Object.keys(VENDOR_FILES).length, versions };

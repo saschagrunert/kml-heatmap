@@ -3,14 +3,18 @@
  * Extracted from MapApp to reduce file size and improve modularity
  */
 
-import * as L from "leaflet";
-import { createAirportIcon } from "./features/airports";
+import { Marker } from "maplibre-gl";
+import {
+  createAirportElement,
+  setAirportElementHome,
+} from "./features/airports";
 import { domCache } from "./utils/domCache";
 import { applyMetricColors } from "./utils/htmlGenerators";
+import { toLngLat } from "./utils/mapHelpers";
 import { showToast } from "./utils/toast";
 import { datasetIndex } from "./calculations/datasetIndex";
 import type { MapApp } from "./mapApp";
-import type { Airport, KMLDataset } from "./types";
+import type { Airport, AirportMarker, KMLDataset } from "./types";
 
 /**
  * Populate the year dropdown and make sure the selected year exists.
@@ -148,17 +152,9 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   app.airportManager.updateAirportMarkerSizes();
 
   // Restore layer visibility; the legends follow the store
-  if (app.map) {
-    if (app.altitudeVisible) {
-      app.map.addLayer(app.altitudeLayer);
-    }
-    if (app.airspeedVisible) {
-      app.map.addLayer(app.airspeedLayer);
-    }
-    if (app.aviationVisible && app.aviationLayer) {
-      app.map.addLayer(app.aviationLayer);
-    }
-  }
+  app.altitudeLayer.setVisible(app.altitudeVisible);
+  app.airspeedLayer.setVisible(app.airspeedVisible);
+  app.aviationLayer.setVisible(app.aviationVisible);
 
   // Restore stats panel visibility
   if (app.savedState && app.savedState.statsPanelVisible) {
@@ -167,7 +163,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
 }
 
 /**
- * Colour the segment popups and tooltips as Leaflet writes them into the
+ * Colour the segment popups and tooltips as they are written into the
  * map. They carry their colours as data, since the CSP allows no style
  * attribute (see applyMetricColors); the observer runs before the next
  * paint, so they never show uncoloured.
@@ -208,34 +204,60 @@ export function dropUnknownPathIds(app: MapApp, data: KMLDataset): void {
 }
 
 /**
- * Create airport markers and add them to the airport layer.
- * The popup itself, the home-base class and the badge are all filled in by
- * AirportManager.updateAirportPopups() once the path data is loaded, so no
- * marker ever shows a flight count that the current filter contradicts.
+ * Create the airport markers and put them on the map.
+ * The popup content and the home-base class are filled in by AirportManager
+ * once the path data is loaded, so no marker ever shows a flight count that
+ * the current filter contradicts.
  * @param app - The MapApp instance to operate on
  * @param airports - Array of airports to create markers for
  */
 export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
+  const map = app.map;
+  if (!map) return;
+
   for (const airport of airports) {
-    const marker = L.marker([airport.lat, airport.lon], {
-      icon: createAirportIcon(airport.name, false),
-      title: airport.name,
-      alt: airport.name,
-    });
+    const name = airport.name;
+    const element = createAirportElement(name);
+    const marker = new Marker({ element, anchor: "center" })
+      .setLngLat(toLngLat([airport.lat, airport.lon]))
+      .addTo(map);
 
-    const select = (): void => {
-      if (!app.replayState.active) {
-        app.pathSelection.selectPathsByAirport(airport.name);
-      }
+    // The popup is the one AirportManager shares between all airports
+    const airportMarker: AirportMarker = {
+      marker,
+      getLatLng: () => {
+        const { lat, lng } = marker.getLngLat();
+        return { lat, lng };
+      },
+      getElement: () => element,
+      openPopup: () => app.airportManager.openPopup(name),
+      closePopup: () => app.airportManager.closePopup(name),
+      isPopupOpen: () => app.airportManager.isPopupOpen(name),
+      // `hidden` rather than taking the marker off the map: a hidden
+      // element leaves the tab order and measures as empty, which is how
+      // the label declutter tells that it is not shown
+      setVisible: (visible) => {
+        element.hidden = !visible;
+      },
+      setHome: (home) => setAirportElementHome(element, home),
     };
-    marker.on("click", select);
-    // Enter on the focused marker: Leaflet reports it as keypress, not as
-    // click, and opened the popup without selecting the flights
-    marker.on("keypress", (e: L.LeafletKeyboardEvent) => {
-      if (e.originalEvent.key === "Enter") select();
+
+    // A button reports Enter and Space as a click, so this one listener is
+    // the mouse, the finger and the keyboard. The event stops here: the
+    // marker lies on top of the map, which would take the same click for
+    // one beside every flight and clear the selection just made.
+    element.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (!app.replayState.active) {
+        app.pathSelection.selectPathsByAirport(name);
+      }
+      airportMarker.openPopup();
+    });
+    // Escape reaches the popup itself only while focus is inside it
+    element.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") airportMarker.closePopup();
     });
 
-    marker.addTo(app.airportLayer);
-    app.airportMarkers[airport.name] = marker;
+    app.airportMarkers[name] = airportMarker;
   }
 }

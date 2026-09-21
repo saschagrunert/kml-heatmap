@@ -1,7 +1,7 @@
 /**
  * The published page carries its third-party code itself.
  *
- * Leaflet, leaflet.heat and the image export library used to be loaded from
+ * The map library and the image export library used to be loaded from
  * unpkg and jsdelivr with subresource integrity hashes. Nothing could check
  * those against the real CDN: the e2e fixture answers from node_modules, so
  * a moved path or changed bytes only showed up as a blank map for visitors.
@@ -22,7 +22,7 @@ const TEMPLATE = readFileSync(
 );
 
 /** vendor/ is a build output; `npm run build` fills it */
-const built = existsSync(join(VENDOR_DIR, "leaflet.js"));
+const built = existsSync(join(VENDOR_DIR, "maplibre-gl.mjs"));
 const whenBuilt = built || process.env["CI"] ? it : it.skip;
 
 describe("vendored third-party files", () => {
@@ -41,17 +41,36 @@ describe("vendored third-party files", () => {
     }
   });
 
-  it("covers the images leaflet.css asks for", () => {
+  it("maplibre-gl.css needs no file beside itself", () => {
     const css = readFileSync(
-      join(REPO_ROOT, "node_modules/leaflet/dist/leaflet.css"),
+      join(REPO_ROOT, "node_modules/maplibre-gl/dist/maplibre-gl.css"),
       "utf8",
     );
-    const referenced = [...css.matchAll(/url\((images\/[^)]+)\)/g)].map(
-      (match) => match[1]!,
+    const referenced = [...css.matchAll(/url\(([^)]+)\)/g)].map((match) =>
+      match[1]!.replace(/^["']/, ""),
     );
+    // Its icons are inlined; an `images/` directory would have to be
+    // vendored with it, as Leaflet's was
     expect(referenced.length).toBeGreaterThan(0);
-    for (const image of referenced) {
-      expect(Object.keys(VENDOR_FILES)).toContain(image);
+    for (const url of referenced) expect(url.startsWith("data:")).toBe(true);
+  });
+
+  it("carries the modules MapLibre loads by their relative names", () => {
+    const entry = readFileSync(
+      join(REPO_ROOT, "node_modules/maplibre-gl/dist/maplibre-gl.mjs"),
+      "utf8",
+    );
+    // The entry imports the shared module and starts the worker from a URL
+    // relative to its own, so both have to be published under these names
+    const siblings = new Set(
+      [...entry.matchAll(/maplibre-gl[\w-]*\.mjs/g)].map((match) => match[0]),
+    );
+    // The -dev worker is only named for the -dev build, which is not shipped
+    siblings.delete("maplibre-gl-worker-dev.mjs");
+    expect(siblings).toContain("maplibre-gl-shared.mjs");
+    expect(siblings).toContain("maplibre-gl-worker.mjs");
+    for (const name of siblings) {
+      expect(Object.keys(VENDOR_FILES)).toContain(name);
     }
   });
 });

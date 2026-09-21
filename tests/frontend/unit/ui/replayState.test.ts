@@ -11,7 +11,9 @@ describe("ReplayState", () => {
       expect(state.currentTime).toBe(0);
       expect(state.maxTime).toBe(0);
       expect(state.speed).toBe(50.0);
-      expect(state.layer).toBeNull();
+      expect(state.layerActive).toBe(false);
+      expect(state.trailRuns).toEqual([]);
+      expect(state.trailDirty).toBe(false);
       expect(state.segments).toEqual([]);
       expect(state.airplaneMarker).toBeNull();
       expect(state.lastDrawnIndex).toBe(-1);
@@ -50,6 +52,34 @@ describe("ReplayState", () => {
       expect(state.recenterTimestamps).toEqual([]);
       expect(state.recenterPanEndsAt).toBe(0);
       expect(state.lastSeekPanTime).toBe(0);
+    });
+
+    it("empties the trail and marks it dirty", () => {
+      const state = new ReplayState();
+      state.trailRuns = [
+        {
+          color: "#ff0000",
+          coords: [
+            [16, 48],
+            [16.1, 48.1],
+          ],
+          firstIndex: 0,
+          lastIndex: 0,
+        },
+      ];
+
+      state.resetDrawState();
+
+      expect(state.trailRuns).toEqual([]);
+      expect(state.trailDirty).toBe(true);
+    });
+
+    it("leaves an empty trail clean", () => {
+      const state = new ReplayState();
+
+      state.resetDrawState();
+
+      expect(state.trailDirty).toBe(false);
     });
 
     it("preserves non-drawing properties", () => {

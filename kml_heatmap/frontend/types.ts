@@ -2,6 +2,7 @@
  * Shared TypeScript type definitions for the KML Heatmap application
  */
 
+import type { LngLat, Marker, Point } from "maplibre-gl";
 import type { Coordinate } from "./utils/geometry";
 import type { IconName } from "./utils/icons";
 
@@ -192,9 +193,110 @@ export interface KMLDataset {
 /**
  * Map center coordinates
  */
-interface MapCenter {
+export interface MapCenter {
   lat: number;
   lng: number;
+}
+
+/**
+ * What the app holds in place of a map layer. The layers themselves are
+ * created once with the map and never removed (see MAP_LAYERS); showing and
+ * hiding one is a layout property. The handle remembers the wish, so it can
+ * be set before the style has loaded and is applied when the layers appear.
+ */
+export interface LayerHandle {
+  /** The map layers this handle switches, bottom to top; none for markers */
+  readonly ids: readonly string[];
+  isVisible(): boolean;
+  setVisible(visible: boolean): void;
+}
+
+/** One drawn colour run of a path layer, as `getLayers()` reports it */
+export interface PathLayerEntry {
+  pathId: number;
+  options: { color: string; weight: number; opacity: number };
+}
+
+/**
+ * Handle of the altitude or the speed layer. `getLayers()` lists what is
+ * drawn, from the run tables of the layer manager, which registers itself
+ * through `setLayersProvider`; until then the list is empty.
+ */
+export interface PathLayerHandle extends LayerHandle {
+  getLayers(): PathLayerEntry[];
+  setLayersProvider(provider: (() => PathLayerEntry[]) | null): void;
+}
+
+/**
+ * Properties of one feature in a paths source: a run of consecutive
+ * segments of one path that share a colour step.
+ */
+export interface PathRunProperties {
+  /** Index of the run in the layer manager's run table */
+  r: number;
+  /**
+   * Generation of the table. Tiles answer queries with features of the
+   * previous `setData` for a while; a stale generation gives them away.
+   */
+  g: number;
+  pathId: number;
+  color: string;
+}
+
+/** What `LayerManager.hitTest` found under a point of the map */
+export interface PathHit {
+  pathId: number;
+  /** The segment nearest to the point, for the tooltip */
+  segment: PathSegment;
+}
+
+/**
+ * What MapApp's click dispatcher asks of the layer manager. Paths are pixels
+ * of a map layer and have no click listeners of their own, so the map's one
+ * click handler asks what is under the pointer and hands a hit back.
+ */
+export interface PathHitTester {
+  /** The flight drawn at `point` (container pixels), or null */
+  hitTest(point: Point): PathHit | null;
+  /** Act on a click that hit a flight; `lngLat` is where it landed */
+  onPathClick(hit: PathHit, lngLat: LngLat): void;
+}
+
+/** Anything on the map that owns a popup the app may have to close */
+export interface PopupHost {
+  openPopup(): void;
+  closePopup(): void;
+  isPopupOpen(): boolean;
+}
+
+/**
+ * An airport on the map. MapLibre's marker knows nothing of popups the way
+ * the app uses them (one shared popup, opened by the app and not by
+ * `setPopup`, which toggles a second time on the same click) nor of being
+ * hidden, so the app's markers are wrapped.
+ */
+export interface AirportMarker extends PopupHost {
+  readonly marker: Marker;
+  /** Latitude first, like the rest of the app */
+  getLatLng(): MapCenter;
+  /** The marker's element: a real button, so it takes focus and Enter */
+  getElement(): HTMLButtonElement;
+  setVisible(visible: boolean): void;
+  setHome(home: boolean): void;
+}
+
+/**
+ * One stretch of the replay trail in a single colour: a feature of the
+ * `replay-trail` source. Consecutive segments of a colour extend the last
+ * run instead of adding a feature each.
+ */
+export interface TrailRun {
+  color: string;
+  /** `[lng, lat]` vertices, ready for a LineString */
+  coords: [number, number][];
+  /** Indices of the first and the last replay segment in the run */
+  firstIndex: number;
+  lastIndex: number;
 }
 
 /**
@@ -221,6 +323,7 @@ export interface AppState {
   buttonsHidden?: boolean;
   isolateSelection?: boolean;
   center?: MapCenter;
+  /** In state (legacy) units, one above the map's; see ZOOM_OFFSET */
   zoom?: number;
 }
 

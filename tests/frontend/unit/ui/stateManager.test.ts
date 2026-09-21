@@ -4,6 +4,7 @@ import {
   sanitizeSavedState,
   storageKey,
 } from "../../../../kml_heatmap/frontend/ui/stateManager";
+import { LngLat } from "../../../mocks/maplibre-gl";
 import { createMockApp, asMapApp, type MockApp } from "../../testHelpers";
 
 describe("sanitizeSavedState", () => {
@@ -101,8 +102,9 @@ describe("StateManager", () => {
     setLocation("");
 
     mockApp = createMockApp();
-    mockApp.map!.getCenter.mockReturnValue({ lat: 50.0, lng: 8.0 });
-    mockApp.map!.getZoom.mockReturnValue(10);
+    mockApp.map!.getCenter.mockReturnValue(new LngLat(8.0, 50.0));
+    // The map's own unit; the state carries one more (see ZOOM_OFFSET)
+    mockApp.map!.getZoom.mockReturnValue(9);
 
     stateManager = new StateManager(asMapApp(mockApp));
   });
@@ -285,8 +287,8 @@ describe("StateManager", () => {
 
   describe("saveMapState", () => {
     it("wraps a centre panned past the antimeridian into the link", () => {
-      // Leaflet reports the unwrapped longitude after a pan across 180
-      mockApp.map!.getCenter.mockReturnValue({ lat: -17, lng: 190 });
+      // The map reports the unwrapped longitude after a pan across 180
+      mockApp.map!.getCenter.mockReturnValue(new LngLat(190, -17));
 
       stateManager.saveMapState();
 
@@ -295,12 +297,41 @@ describe("StateManager", () => {
       expect(url).toContain("lng=-170.000000");
     });
 
+    it("wraps a centre panned past it to the west as well", () => {
+      mockApp.map!.getCenter.mockReturnValue(new LngLat(-185.5, 60));
+
+      stateManager.saveMapState();
+
+      expect(savedState()["center"]).toEqual({ lat: 60, lng: 174.5 });
+    });
+
+    it("saves a centre inside the range exactly as the map reports it", () => {
+      // The wrap is arithmetic and would add rounding noise to any value
+      mockApp.map!.getCenter.mockReturnValue(new LngLat(8.123456789, 50.1));
+
+      stateManager.saveMapState();
+
+      expect(savedState()["center"]).toEqual({ lat: 50.1, lng: 8.123456789 });
+    });
+
+    it("saves the zoom in the unit links have always carried", () => {
+      // One above the map's, so a link from before the map library changed
+      // still shows the same area
+      mockApp.map!.getZoom.mockReturnValue(12);
+
+      stateManager.saveMapState();
+
+      expect(savedState()["zoom"]).toBe(13);
+      const url = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
+      expect(url).toContain("z=13.00");
+    });
+
     it("saves the user's own view while Wrapped has the map fitted", () => {
       // With the fitted overview saved, a reload or a shared link landed on
       // the overview once the dialog was closed
       mockApp.wrappedManager.userMapView.mockReturnValue({
         center: { lat: 48.1, lng: 11.6 },
-        zoom: 13,
+        zoom: 12,
       });
 
       stateManager.saveMapState();

@@ -6,16 +6,20 @@ import {
   MAX_FRAME_DELTA_MS,
   type ReplayManager,
 } from "../../../../kml_heatmap/frontend/ui/replayManager";
+import * as mapHelpers from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import { AUTO_ZOOM_FOLLOW } from "../../../../kml_heatmap/frontend/utils/constants";
 import {
   createReplayManager,
   createReplayMockApp,
   el,
+  featuresOf,
   liveRegionText,
   mockAnimationFrame,
   mountReplayDom,
+  replaySources,
   unmountReplayDom,
+  type MockApp,
 } from "./replayTestSetup";
-import type { MockApp } from "../../testHelpers";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateSegmentPopupHtml: vi.fn(() => "<div>popup</div>"),
@@ -102,17 +106,33 @@ describe("ReplayManager playback", () => {
       expect(replayManager.state.currentTime).toBe(0);
       expect(replayManager.state.lastDrawnIndex).toBe(-1);
       expect(replayManager.state.currentIndex).toBe(-1);
-      expect(replayManager.state.layer!.clearLayers).toHaveBeenCalled();
+    });
+
+    it("takes the flown trail off the map when restarting, and keeps the route", () => {
+      const { route, trail } = replaySources(mockApp);
+      replayManager.seekReplay(String(replayManager.state.maxTime));
+      vi.advanceTimersByTime(16);
+      expect(featuresOf(trail)).toHaveLength(3);
+      route.setData.mockClear();
+
+      replayManager.playReplay();
+      vi.advanceTimersByTime(16);
+
+      expect(featuresOf(trail)).toEqual([]);
+      expect(route.setData).not.toHaveBeenCalled();
+      expect(featuresOf(route)).toHaveLength(1);
     });
 
     it("resets airplane to start when restarting from end", () => {
       replayManager.state.currentTime = replayManager.state.maxTime;
 
+      replayManager.state.airplaneMarker!.setLatLng([48.3, 16.3]);
+
       replayManager.playReplay();
 
-      expect(
-        replayManager.state.airplaneMarker!.setLatLng,
-      ).toHaveBeenCalledWith([48.0, 16.0]);
+      expect(replayManager.state.airplaneMarker!.getLatLng()).toEqual([
+        48.0, 16.0,
+      ]);
     });
 
     it("resets to initial zoom when restarting with autoZoom enabled", () => {
@@ -121,11 +141,14 @@ describe("ReplayManager playback", () => {
 
       replayManager.playReplay();
 
-      expect(mockApp.map!.setView).toHaveBeenCalledWith(
-        [48.0, 16.0],
-        16,
-        expect.objectContaining({ animate: true }),
-      );
+      // The follow zoom in map units, over half a second in milliseconds
+      expect(AUTO_ZOOM_FOLLOW).toBe(15);
+      expect(mockApp.map!.easeTo).toHaveBeenLastCalledWith({
+        center: [16.0, 48.0],
+        zoom: AUTO_ZOOM_FOLLOW,
+        duration: 500,
+        animate: true,
+      });
     });
 
     it("advances time with the configured speed and keeps looping", () => {
@@ -141,7 +164,8 @@ describe("ReplayManager playback", () => {
       expect(replayManager.state.currentTime).toBeLessThan(
         replayManager.state.maxTime,
       );
-      expect(requestAnimationFrame).toHaveBeenCalledTimes(3);
+      // Three of the loop, and one that hands the first segment to the map
+      expect(requestAnimationFrame).toHaveBeenCalledTimes(4);
     });
 
     it("pauses, fits bounds and announces when reaching max time", () => {
@@ -153,7 +177,14 @@ describe("ReplayManager playback", () => {
 
       expect(replayManager.state.playing).toBe(false);
       expect(replayManager.state.currentTime).toBe(replayManager.state.maxTime);
-      expect(mockApp.map!.fitBounds).toHaveBeenCalled();
+      // South-west and north-east corner, longitude first; one second
+      expect(mockApp.map!.fitBounds).toHaveBeenCalledWith(
+        [
+          [16.0, 48.0],
+          [16.3, 48.3],
+        ],
+        { padding: 50, duration: 1000, animate: true },
+      );
       expect(liveRegionText()).toBe("Replay finished");
       expect(el("replay-play-btn").hidden).toBe(false);
     });
@@ -232,16 +263,19 @@ describe("ReplayManager playback", () => {
 
   describe("airplane popup panning", () => {
     it("lets an open popup pan the map only while paused", () => {
-      const popup = { options: { autoPan: true }, setContent: vi.fn() };
-      (
-        replayManager.state.airplaneMarker!.getPopup as ReturnType<typeof vi.fn>
-      ).mockReturnValue(popup);
+      const pan = vi.spyOn(mapHelpers, "panPopupIntoView");
+      replayManager.updateReplayAirplanePopup();
+      pan.mockClear();
 
+      // The popup is rebuilt as the airplane reaches the second segment
       replayManager.playReplay();
-      expect(popup.options.autoPan).toBe(false);
+      replayManager.state.currentTime = 61;
+      replayManager.updateReplayDisplay();
+      expect(pan).not.toHaveBeenCalled();
 
       replayManager.pauseReplay();
-      expect(popup.options.autoPan).toBe(true);
+      replayManager.seekReplay("121");
+      expect(pan).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -345,18 +379,28 @@ describe("ReplayManager playback", () => {
       expect(liveRegionText()).toBe("Replay stopped");
     });
 
-    it("clears replay layer", () => {
-      replayManager.stopReplay();
+    it("takes the trail off the map and keeps the route", () => {
+      const { route, trail } = replaySources(mockApp);
+      replayManager.seekReplay("100");
+      vi.advanceTimersByTime(16);
+      expect(featuresOf(trail)).toHaveLength(2);
 
-      expect(replayManager.state.layer!.clearLayers).toHaveBeenCalled();
+      replayManager.stopReplay();
+      vi.advanceTimersByTime(16);
+
+      expect(replayManager.state.trailRuns).toEqual([]);
+      expect(featuresOf(trail)).toEqual([]);
+      expect(featuresOf(route)).toHaveLength(1);
     });
 
     it("resets airplane to start position", () => {
+      replayManager.seekReplay("100");
+
       replayManager.stopReplay();
 
-      expect(
-        replayManager.state.airplaneMarker!.setLatLng,
-      ).toHaveBeenCalledWith([48.0, 16.0]);
+      expect(replayManager.state.airplaneMarker!.getLatLng()).toEqual([
+        48.0, 16.0,
+      ]);
     });
 
     it("resets the slider and time display", () => {
@@ -381,36 +425,44 @@ describe("ReplayManager playback", () => {
     it("removes only the segments after the new time when seeking backward", () => {
       replayManager.seekReplay("100");
       expect(replayManager.state.lastDrawnIndex).toBe(1);
-      const clearSpy = replayManager.state.layer!.clearLayers as ReturnType<
-        typeof vi.fn
-      >;
-      const removeSpy = replayManager.state.layer!.removeLayer as ReturnType<
-        typeof vi.fn
-      >;
-      clearSpy.mockClear();
-      removeSpy.mockClear();
+      vi.advanceTimersByTime(16);
+      const { trail } = replaySources(mockApp);
+      const firstRun = replayManager.state.trailRuns[0];
+      trail.setData.mockClear();
 
       replayManager.seekReplay("30");
+      vi.advanceTimersByTime(16);
 
-      // A full clear would redraw the whole flight on every drag event
-      expect(clearSpy).not.toHaveBeenCalled();
-      expect(removeSpy).toHaveBeenCalledTimes(1);
+      // Starting over would colour the whole flight on every drag event
+      expect(replayManager.state.trailRuns[0]).toBe(firstRun);
       expect(replayManager.state.currentTime).toBe(30);
       // Only the segment at t=0 is visible again
       expect(replayManager.state.lastDrawnIndex).toBe(0);
-      expect(replayManager.state.drawnLayers).toHaveLength(1);
+      expect(replayManager.state.trailRuns).toHaveLength(1);
+      expect(trail.setData).toHaveBeenCalledTimes(1);
+      expect(featuresOf(trail)).toHaveLength(1);
     });
 
-    it("does not clear when seeking forward", () => {
+    it("writes one trail per frame for a drag back and forth", () => {
+      const { trail } = replaySources(mockApp);
+      trail.setData.mockClear();
+
+      for (const value of ["100", "30", "125", "70"]) {
+        replayManager.seekReplay(value);
+      }
+      vi.advanceTimersByTime(16);
+
+      expect(trail.setData).toHaveBeenCalledTimes(1);
+      expect(featuresOf(trail)).toHaveLength(2);
+    });
+
+    it("keeps the flown trail when seeking forward", () => {
       replayManager.seekReplay("30");
-      const clearSpy = replayManager.state.layer!.clearLayers as ReturnType<
-        typeof vi.fn
-      >;
-      clearSpy.mockClear();
+      const firstRun = replayManager.state.trailRuns[0];
 
       replayManager.seekReplay("60");
 
-      expect(clearSpy).not.toHaveBeenCalled();
+      expect(replayManager.state.trailRuns[0]).toBe(firstRun);
       expect(replayManager.state.lastDrawnIndex).toBe(1);
     });
 

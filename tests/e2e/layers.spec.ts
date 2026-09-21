@@ -8,11 +8,12 @@ import {
   waitForPathData,
 } from "./helpers";
 import {
-  aviationTiles,
-  baseMapTiles,
+  aviationOnMap,
+  baseMapStyleRequest,
   expectAviationTiles,
   expectHeatUnderPaths,
-  heatmapSurface,
+  heatmapOnMap,
+  heatmapOpacity,
   mapPopupContent,
   pathCount,
   setZoom,
@@ -203,18 +204,18 @@ test.describe("Layers", () => {
 
     await btn.click();
     await expect(btn).toHaveCSS("opacity", "0.5");
-    await expect(aviationTiles(page)).toHaveCount(0);
+    await expect.poll(() => aviationOnMap(page)).toBe(false);
   });
 
-  test("the base map tiles carry the CARTO key only when there is one", async ({
+  test("the base map is asked for with the CARTO key only when there is one", async ({
     page,
   }) => {
     const key = await page.evaluate(() => window.MAP_CONFIG?.cartoApiKey ?? "");
-    const tile = baseMapTiles(page).first();
-    await expect(tile).toBeAttached();
 
-    const src = new URL((await tile.getAttribute("src"))!);
-    expect(src.searchParams.get("key")).toBe(key || null);
+    const style = await baseMapStyleRequest(page);
+
+    expect(style.pathname).toContain("dark-matter-gl-style");
+    expect(style.searchParams.get("key")).toBe(key || null);
   });
 
   test("airport marker sizes change with zoom level", async ({ page }) => {
@@ -303,7 +304,7 @@ test.describe("Layers", () => {
   }) => {
     await waitForPathData(page);
     await toggleLayer(page, "heatmap");
-    await expect(heatmapSurface(page)).toHaveCount(0);
+    await expect.poll(() => heatmapOnMap(page)).toBe(false);
 
     // An aircraft that flew fewer than all the loaded flights
     const aircraft = await page.evaluate(() => {
@@ -345,41 +346,29 @@ test.describe("Layers", () => {
   });
 
   test.describe("Heatmap emphasis", () => {
-    /** Opacity as the browser computes it, so the token stays the one source */
-    function heatOpacity(page: Page): Promise<number> {
-      return heatmapSurface(page).evaluate((el) =>
-        Number(getComputedStyle(el).opacity),
-      );
-    }
-
     test("the heatmap steps back while a colour layer is over it", async ({
       page,
     }) => {
-      const canvas = heatmapSurface(page);
-      await expect(canvas).toBeVisible();
-      expect(await heatOpacity(page)).toBe(1);
+      expect(await heatmapOnMap(page)).toBe(true);
+      expect(await heatmapOpacity(page)).toBe(1);
 
       // waitForPathData switches the altitude layer on
       await waitForPathData(page);
 
-      await expect(canvas).toHaveClass(/heatmap-dimmed/);
       // Its bloom under the gradient washed out the scale just switched on
-      const dimmed = await heatOpacity(page);
-      expect(dimmed).toBeLessThan(1);
-      expect(dimmed).toBeGreaterThan(0);
+      await expect.poll(() => heatmapOpacity(page)).toBeLessThan(1);
+      expect(await heatmapOpacity(page)).toBeGreaterThan(0);
     });
 
     test("it comes back to full strength when the layer goes", async ({
       page,
     }) => {
-      const canvas = heatmapSurface(page);
       await waitForPathData(page);
-      await expect(canvas).toHaveClass(/heatmap-dimmed/);
+      await expect.poll(() => heatmapOpacity(page)).toBeLessThan(1);
 
       await toggleLayer(page, "altitude");
 
-      await expect(canvas).not.toHaveClass(/heatmap-dimmed/);
-      expect(await heatOpacity(page)).toBe(1);
+      await expect.poll(() => heatmapOpacity(page)).toBe(1);
     });
   });
 });

@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as L from "leaflet";
 import {
   colorSegmentPopups,
   createAirportMarkers,
@@ -20,7 +19,7 @@ import {
   syncControlsWithStore,
   type MockApp,
 } from "../../testHelpers";
-import type { MockMarker } from "../../../mocks/leaflet";
+import { Marker as MockMarker } from "../../../mocks/maplibre-gl";
 
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
@@ -127,85 +126,199 @@ describe("appInitializer", () => {
   });
 
   describe("createAirportMarkers", () => {
-    it("creates one marker per airport with an icon and no popup yet", () => {
-      createAirportMarkers(asMapApp(app), airports);
+    function create(list: Airport[] = airports): void {
+      createAirportMarkers(asMapApp(app), list);
+    }
 
-      expect(L.marker).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(L.marker).mock.calls[0]![0]).toEqual([50.1, 8.67]);
-      const marker = vi.mocked(L.marker).mock.results[0]!
-        .value as unknown as MockMarker;
-      // The popup is bound by AirportManager.updateAirportPopups() once the
-      // path data is loaded, so no marker ever shows a stale flight count
-      expect(marker.bindPopup).not.toHaveBeenCalled();
-      expect(vi.mocked(L.marker).mock.calls[0]![1]).toMatchObject({
-        title: "Frankfurt EDDF",
-        alt: "Frankfurt EDDF",
-      });
-      expect(marker.addTo).toHaveBeenCalledWith(app.airportLayer);
-      expect(app.airportLayer.hasLayer(marker)).toBe(true);
+    function eddf(): MockApp["airportMarkers"][string] {
+      return app.airportMarkers["Frankfurt EDDF"]!;
+    }
+
+    it("creates one marker per airport, on the map and with no popup of its own", () => {
+      create();
+
       expect(Object.keys(app.airportMarkers)).toEqual([
         "Frankfurt EDDF",
         "Munich EDDM",
       ]);
+      const marker = eddf().marker as unknown as MockMarker;
+      expect(marker).toBeInstanceOf(MockMarker);
+      expect(marker.options).toEqual({
+        element: eddf().getElement(),
+        anchor: "center",
+      });
+      // Longitude first for the map, latitude first for the app
+      expect(marker.setLngLat).toHaveBeenCalledWith([8.67, 50.1]);
+      expect(eddf().getLatLng()).toEqual({ lat: 50.1, lng: 8.67 });
+      expect(marker.addTo).toHaveBeenCalledWith(app.map);
+      expect(app.map!.getCanvasContainer().contains(eddf().getElement())).toBe(
+        true,
+      );
+      // The popup is AirportManager's, shared and opened by the app;
+      // `setPopup` would toggle it a second time on the same click
+      expect(marker.setPopup).not.toHaveBeenCalled();
+    });
+
+    it("makes each marker a button named after its airport", () => {
+      create();
+      const element = eddf().getElement();
+
+      expect(element).toBeInstanceOf(HTMLButtonElement);
+      expect(element.type).toBe("button");
+      expect(element.classList.contains("airport-marker-root")).toBe(true);
+      expect(element.title).toBe("Frankfurt EDDF");
+      expect(element.getAttribute("aria-label")).toBe("Frankfurt EDDF");
+      expect(element.querySelector(".airport-label")!.textContent).toBe("EDDF");
     });
 
     it("does not pre-assign the home base (the airport manager does)", () => {
-      createAirportMarkers(asMapApp(app), airports);
+      create();
 
-      const htmls = vi
-        .mocked(L.divIcon)
-        .mock.calls.map((c) => c[0]!.html as string);
-      expect(htmls.every((h) => !h.includes("airport-marker-home"))).toBe(true);
+      for (const marker of Object.values(app.airportMarkers)) {
+        expect(
+          marker.getElement().querySelector(".airport-marker-home"),
+        ).toBeNull();
+      }
     });
 
-    it("selects the airport's paths on click unless replay is active", () => {
-      createAirportMarkers(asMapApp(app), airports);
-      const marker = vi.mocked(L.marker).mock.results[0]!
-        .value as unknown as MockMarker;
-      const click = marker.on.mock.calls.find((c) => c[0] === "click")![1] as (
-        e: unknown,
-      ) => void;
+    it("switches the home-base styling on the same element", () => {
+      create();
+      const element = eddf().getElement();
 
-      click({});
+      eddf().setHome(true);
+      expect(element.querySelector(".airport-marker-home")).not.toBeNull();
+      expect(element.querySelector(".airport-label-home")).not.toBeNull();
+
+      eddf().setHome(false);
+      expect(element.querySelector(".airport-marker-home")).toBeNull();
+      expect(eddf().getElement()).toBe(element);
+    });
+
+    it("hides a marker without taking it off the map", () => {
+      create();
+
+      eddf().setVisible(false);
+      expect(eddf().getElement().hidden).toBe(true);
+      expect(eddf().marker.remove).not.toHaveBeenCalled();
+
+      eddf().setVisible(true);
+      expect(eddf().getElement().hidden).toBe(false);
+    });
+
+    it("drives the shared popup of the airport manager", () => {
+      create();
+      app.airportManager.isPopupOpen.mockReturnValue(true);
+
+      eddf().openPopup();
+      eddf().closePopup();
+
+      expect(app.airportManager.openPopup).toHaveBeenCalledWith(
+        "Frankfurt EDDF",
+      );
+      expect(app.airportManager.closePopup).toHaveBeenCalledWith(
+        "Frankfurt EDDF",
+      );
+      expect(eddf().isPopupOpen()).toBe(true);
+      expect(app.airportManager.isPopupOpen).toHaveBeenCalledWith(
+        "Frankfurt EDDF",
+      );
+    });
+
+    it("selects the airport's paths on click, then opens the popup", () => {
+      create();
+      const order: string[] = [];
+      app.pathSelection.selectPathsByAirport.mockImplementation(() =>
+        order.push("select"),
+      );
+      app.airportManager.openPopup.mockImplementation(() => order.push("open"));
+
+      eddf().getElement().click();
+
       expect(app.pathSelection.selectPathsByAirport).toHaveBeenCalledWith(
         "Frankfurt EDDF",
       );
-
-      app.replayManager.state.active = true;
-      click({});
-      expect(app.pathSelection.selectPathsByAirport).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(["select", "open"]);
     });
 
-    it("selects the airport's paths on Enter, which Leaflet reports as keypress", () => {
-      createAirportMarkers(asMapApp(app), airports);
-      const marker = vi.mocked(L.marker).mock.results[0]!
-        .value as unknown as MockMarker;
-      const keypress = marker.on.mock.calls.find(
-        (c) => c[0] === "keypress",
-      )![1] as (e: unknown) => void;
+    it("keeps the click from the map, which would clear the selection", () => {
+      create();
+      const onMap = vi.fn();
+      app.map!.getCanvasContainer().addEventListener("click", onMap);
+      const event = new MouseEvent("click", { bubbles: true });
+      const stop = vi.spyOn(event, "stopPropagation");
 
-      keypress({ originalEvent: { key: "a" } });
+      eddf().getElement().dispatchEvent(event);
+
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(onMap).not.toHaveBeenCalled();
+    });
+
+    it("opens the popup but leaves the selection alone while replay runs", () => {
+      create();
+      app.replayManager.state.active = true;
+
+      eddf().getElement().click();
+
       expect(app.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
+      expect(app.airportManager.openPopup).toHaveBeenCalledTimes(1);
+    });
 
-      keypress({ originalEvent: { key: "Enter" } });
-      expect(app.pathSelection.selectPathsByAirport).toHaveBeenCalledWith(
+    it("has a single click listener, which is also Enter and Space on a button", () => {
+      const listen = vi.spyOn(HTMLButtonElement.prototype, "addEventListener");
+
+      create([airports[0]!]);
+
+      expect(listen.mock.calls.map(([type]) => type).sort()).toEqual([
+        "click",
+        "keydown",
+      ]);
+      listen.mockRestore();
+
+      // The keys arrive as the click the browser makes of them, and not a
+      // second time through a key listener
+      eddf()
+        .getElement()
+        .dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+        );
+      expect(app.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
+    });
+
+    it("closes its popup on Escape from the focused marker", () => {
+      create();
+      const element = eddf().getElement();
+
+      element.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "a", bubbles: true }),
+      );
+      expect(app.airportManager.closePopup).not.toHaveBeenCalled();
+
+      element.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      expect(app.airportManager.closePopup).toHaveBeenCalledWith(
         "Frankfurt EDDF",
       );
     });
 
     it("handles an empty list and missing names", () => {
-      createAirportMarkers(asMapApp(app), []);
-      expect(L.marker).not.toHaveBeenCalled();
+      create([]);
+      expect(app.airportMarkers).toEqual({});
 
-      createAirportMarkers(asMapApp(app), [{ name: "", lat: 1, lon: 2 }]);
-      expect(L.marker).toHaveBeenCalledTimes(1);
+      create([{ name: "", lat: 1, lon: 2 }]);
       expect(Object.keys(app.airportMarkers)).toEqual([""]);
     });
 
+    it("creates nothing without a map", () => {
+      app.map = null;
+
+      create();
+
+      expect(app.airportMarkers).toEqual({});
+    });
+
     it("rejects invalid coordinates (mock validation)", () => {
-      expect(() =>
-        createAirportMarkers(asMapApp(app), [{ name: "X", lat: 91, lon: 0 }]),
-      ).toThrow(/latitude/);
+      expect(() => create([{ name: "X", lat: 91, lon: 0 }])).toThrow(/lat/i);
     });
   });
 
@@ -306,7 +419,7 @@ describe("appInitializer", () => {
 
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.style.opacity).toBe("1");
-      expect(app.map!.addLayer).toHaveBeenCalledWith(app.airspeedLayer);
+      expect(app.airspeedLayer.setVisible).toHaveBeenCalledWith(true);
       expect(document.getElementById("airspeed-legend")!.style.display).toBe(
         "block",
       );
@@ -335,25 +448,26 @@ describe("appInitializer", () => {
 
       await loadInitialData(asMapApp(app));
 
-      expect(app.map!.addLayer).toHaveBeenCalledWith(app.altitudeLayer);
-      expect(app.map!.addLayer).not.toHaveBeenCalledWith(app.airspeedLayer);
+      expect(app.altitudeLayer.setVisible).toHaveBeenCalledWith(true);
+      expect(app.airspeedLayer.setVisible).toHaveBeenCalledWith(false);
     });
 
-    it("adds the aviation layer when visible", async () => {
-      const layer = { addTo: vi.fn() };
-      app.aviationLayer = layer as never;
+    it("shows the aviation layer when visible", async () => {
       app.aviationVisible = true;
 
       await loadInitialData(asMapApp(app));
 
-      expect(app.map!.addLayer).toHaveBeenCalledWith(layer);
+      expect(app.aviationLayer.setVisible).toHaveBeenCalledWith(true);
+      expect(app.aviationLayer.isVisible()).toBe(true);
     });
 
-    it("skips layer restoration without a map", async () => {
+    it("restores the layers without a map: the handles remember", async () => {
       app.map = null;
+      app.altitudeVisible = true;
 
       await expect(loadInitialData(asMapApp(app))).resolves.toBeUndefined();
       expect(app.airportManager.updateAirportMarkerSizes).toHaveBeenCalled();
+      expect(app.altitudeLayer.setVisible).toHaveBeenCalledWith(true);
     });
 
     it("restores the stats panel through the stats manager", async () => {
@@ -399,10 +513,8 @@ describe("appInitializer", () => {
     it("keeps created markers accessible for the airport manager", async () => {
       await loadInitialData(asMapApp(app));
 
-      const marker = app.airportMarkers[
-        "Frankfurt EDDF"
-      ] as unknown as MockMarker;
-      expect(marker.latlng).toEqual({ lat: 50.1, lng: 8.67 });
+      const marker = app.airportMarkers["Frankfurt EDDF"]!;
+      expect(marker.getLatLng()).toEqual({ lat: 50.1, lng: 8.67 });
     });
 
     it("keeps no restored path the dataset does not have", async () => {
@@ -490,10 +602,10 @@ describe("appInitializer", () => {
     });
   });
   describe("colorSegmentPopups", () => {
-    it("colours a metric as Leaflet writes it into a popup", async () => {
+    it("colours a metric as it is written into a popup", async () => {
       const map = document.createElement("div");
       map.id = "map";
-      map.innerHTML = '<div class="leaflet-popup-pane"></div>';
+      map.innerHTML = '<div class="maplibregl-popup"></div>';
       document.body.appendChild(map);
 
       colorSegmentPopups();

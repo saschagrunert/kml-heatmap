@@ -134,7 +134,7 @@ imports, because several of them hold state that has to be a single
 instance. Two entry points can only share one chunk, so it has a fixed name
 that the site publishes and the page preloads; the build fails if it ever
 writes another file (`assertExpectedOutputs` in `build.js`).
-The same command copies Leaflet, leaflet.heat and html-to-image out of
+The same command copies MapLibre GL JS and html-to-image out of
 `node_modules` into `kml_heatmap/static/vendor/`, which is what the published
 page loads them from, and the country flags of `flag-icons` into
 `kml_heatmap/static/flags/` (`scripts/vendor.js`). All of it is gitignored,

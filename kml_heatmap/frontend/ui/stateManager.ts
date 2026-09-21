@@ -1,15 +1,17 @@
 /**
  * State Manager - Handles state persistence (localStorage, URL)
  */
+import { LngLat } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
-import type { SavedState } from "../types";
+import type { MapCenter, SavedState } from "../types";
 import {
   isSupportedSchemaVersion,
   STATE_SCHEMA_VERSION,
   encodeStateToUrl,
   parseUrlParams,
 } from "../state/urlState";
+import { mapZoomToState } from "../utils/mapHelpers";
 
 const STORAGE_KEY = "kml-heatmap-state";
 
@@ -185,14 +187,18 @@ export class StateManager {
     // Panning across the antimeridian takes the longitude past 180, which
     // a link cannot carry (parseUrlParams rejects it); the wrapped one is
     // the same place. Only then: the wrap adds rounding noise to any value.
-    const center =
-      Math.abs(view.center.lng) > 180
-        ? this.app.map.wrapLatLng(view.center)
-        : view.center;
+    const { lat, lng } = view.center;
+    const center: MapCenter =
+      Math.abs(lng) > 180
+        ? { lat, lng: new LngLat(lng, lat).wrap().lng }
+        : { lat, lng };
     const state: SavedState = {
       schemaVersion: STATE_SCHEMA_VERSION,
       center,
-      zoom: view.zoom,
+      // Saved state and links keep the zoom unit they have always had, one
+      // above the map's, so a link shared before the map library changed
+      // still shows the same area. MapApp converts back on restore.
+      zoom: mapZoomToState(view.zoom),
       heatmapVisible: this.app.heatmapVisible,
       altitudeVisible: this.app.altitudeVisible,
       airspeedVisible: this.app.airspeedVisible,

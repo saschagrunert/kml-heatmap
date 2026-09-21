@@ -3,79 +3,68 @@
  *
  * The specs say what they want from the map (zoom there, is the heatmap on,
  * how many paths are drawn, where is the popup) and this file says how the
- * library answers: its class names, its layer objects, its methods. A spec
- * that reaches into `window.mapApp.map` or names a `.leaflet-*` class itself
+ * library answers: its class names, its layers, its methods. A spec that
+ * reaches into `window.mapApp.map` or names a `.maplibregl-*` class itself
  * has to be rewritten with the library; one that goes through here does not.
+ *
+ * Zoom levels are the ones of saved state and shared links, which count one
+ * higher than the map does: they date from a map with 256 pixel tiles, where
+ * the same view had a zoom one greater, and old links still have to show the
+ * same area. The specs were written in that unit and keep it; `getZoom` and
+ * `setZoom` translate (see `stateZoomToMap` in utils/mapHelpers.ts).
  */
-/// <reference types="leaflet" />
 import { expect, type Locator, type Page } from "@playwright/test";
 // Type-only import so the window.mapApp / MAP_CONFIG globals are declared
 import type {} from "../../kml_heatmap/frontend/globals";
+
+/** Matches ZOOM_OFFSET in utils/constants.ts */
+const ZOOM_OFFSET = 1;
 
 /* ==========================================================================
    Locators
    ========================================================================== */
 
 /** The map container once the library has taken it over */
-const MAP_READY_SELECTOR = "#map.leaflet-container";
+const MAP_READY_SELECTOR = "#map.maplibregl-map";
 
-/** What holds the base map and the overlay tiles */
-export function tileLayers(page: Page): Locator {
-  return page.locator(".leaflet-tile-pane");
-}
-
-/** Base map tiles that are on the map */
-export function baseMapTiles(page: Page): Locator {
-  return tileLayers(page).locator('img[src*=".basemaps.cartocdn.com/"]');
-}
-
-/** Tiles of the open flightmaps aviation overlay that are on the map */
-export function aviationTiles(page: Page): Locator {
-  return tileLayers(page).locator(
-    'img[src*="//nwy-tiles-api.prod.newaydata.com/"]',
-  );
+/** What the base map, the overlays and the paths are drawn on */
+export function mapSurface(page: Page): Locator {
+  return page.locator("#map canvas.maplibregl-canvas");
 }
 
 /** The library's own zoom buttons, which the page does not use */
 export function zoomControl(page: Page): Locator {
-  return page.locator(".leaflet-control-zoom");
+  return page.locator(".maplibregl-ctrl-zoom-in, .maplibregl-ctrl-zoom-out");
 }
 
 /** The tile credit */
 export function attributionControl(page: Page): Locator {
-  return page.locator(".leaflet-control-attribution");
+  return page.locator(".maplibregl-ctrl-attrib");
 }
 
 /** Every marker on the map: the airports, and the airplane during a replay */
 export function mapMarkers(page: Page): Locator {
-  return page.locator(".leaflet-marker-icon");
+  return page.locator(".maplibregl-marker");
 }
 
 /** What holds the markers, and is made inert while a dialog covers the map */
 export function markerContainer(page: Page): Locator {
-  return page.locator("#map .leaflet-marker-pane");
+  return page.locator("#map .maplibregl-canvas-container");
 }
 
-/** An open popup, frame and all */
+/** An open popup, frame and all; the hover tooltip of a path is not one */
 export function mapPopup(page: Page): Locator {
-  return page.locator(".leaflet-popup");
+  return page.locator(".maplibregl-popup:not(.segment-tooltip)");
 }
 
 /** The content of an open popup */
 export function mapPopupContent(page: Page): Locator {
-  return page.locator(".leaflet-popup-content");
+  return page.locator(".maplibregl-popup-content");
 }
 
 /** The details of a segment: a tooltip under a mouse, a popup under a finger */
 export function segmentDetails(page: Page): Locator {
-  return page.locator(".segment-tooltip, .leaflet-popup-content");
-}
-
-const HEATMAP_SURFACE = "canvas.leaflet-heatmap-layer";
-
-/** What the heatmap is painted on, which the emphasis class lands on */
-export function heatmapSurface(page: Page): Locator {
-  return page.locator(HEATMAP_SURFACE);
+  return page.locator(".segment-tooltip .maplibregl-popup-content");
 }
 
 /* ==========================================================================
@@ -83,25 +72,43 @@ export function heatmapSurface(page: Page): Locator {
    ========================================================================== */
 
 /**
- * Wait until the library has set the map up and it is at rest. Leaflet
- * ignores setZoom/setView while a zoom animation is running, so the map must
- * be idle as well. The specs run with reduced motion, which turns the map's
- * animations off; the check keeps a spec that turns it back on safe.
+ * Wait until the library has set the map up and it is at rest: a camera
+ * call made while the map still moves stops that movement, so a spec that
+ * positions the map has to start from a map that stands still. The specs
+ * run with reduced motion, which turns the map's animations off; the check
+ * keeps a spec that turns it back on safe.
  */
 export async function waitForMapReady(page: Page): Promise<void> {
   await page.waitForSelector(MAP_READY_SELECTOR, { timeout: 15000 });
   await page.waitForFunction(
     () => {
-      const map = window.mapApp?.map as
-        { _animatingZoom?: boolean } | null | undefined;
-      return !!map && map._animatingZoom !== true;
+      const map = window.mapApp?.map;
+      return !!map && !map.isMoving();
     },
     { timeout: 20000 },
   );
 }
 
+/**
+ * Wait until the map has drawn what it was given: sources are handed to a
+ * worker, so data set a moment ago is not on the canvas, and cannot be hit
+ * by a pointer, until the map has loaded it and stands still
+ */
+async function waitForMapIdle(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const map = window.mapApp?.map;
+      return !!map && map.loaded() && !map.isMoving();
+    },
+    { timeout: 15000 },
+  );
+}
+
 export function getZoom(page: Page): Promise<number> {
-  return page.evaluate(() => window.mapApp!.map!.getZoom());
+  return page.evaluate(
+    (offset) => window.mapApp!.map!.getZoom() + offset,
+    ZOOM_OFFSET,
+  );
 }
 
 export function getCenter(page: Page): Promise<{ lat: number; lng: number }> {
@@ -114,9 +121,10 @@ export function getCenter(page: Page): Promise<{ lat: number; lng: number }> {
 /** Zoom around the centre without animating, and wait until the map is there */
 export async function setZoom(page: Page, zoom: number): Promise<void> {
   await page.evaluate((z) => {
-    window.mapApp!.map!.setZoom(z, { animate: false });
-  }, zoom);
+    window.mapApp!.map!.jumpTo({ zoom: z });
+  }, zoom - ZOOM_OFFSET);
   await expect.poll(() => getZoom(page)).toBe(zoom);
+  await waitForMapIdle(page);
 }
 
 /** Move the map to a coordinate without animating, and wait until it is there */
@@ -125,32 +133,27 @@ export async function setView(
   [lat, lng]: readonly [number, number],
   zoom: number,
 ): Promise<void> {
-  await page.evaluate(
-    (view) => {
-      window.mapApp!.map!.setView(L.latLng(view.lat, view.lng), view.zoom, {
-        animate: false,
-      });
-    },
-    { lat, lng, zoom },
-  );
-  // Arrived means drawn in the middle of the map, to the pixel. Comparing
-  // coordinates does not work: Leaflet can report a centre snapped to the
-  // pixel grid, which at zoom 13 is off by more than any tolerance that
-  // would still mean something at zoom 3.
+  const view = { lat, lng, zoom: zoom - ZOOM_OFFSET };
+  await page.evaluate((to) => {
+    window.mapApp!.map!.jumpTo({ center: [to.lng, to.lat], zoom: to.zoom });
+  }, view);
+  // Arrived means drawn in the middle of the map, to the pixel, which holds
+  // at every zoom where a tolerance in degrees does not
   await page.waitForFunction(
-    (view) => {
+    (to) => {
       const map = window.mapApp!.map!;
-      if (map.getZoom() !== view.zoom) return false;
-      const size = map.getSize();
-      const point = map.latLngToContainerPoint(L.latLng(view.lat, view.lng));
+      if (map.getZoom() !== to.zoom) return false;
+      const container = map.getContainer();
+      const point = map.project([to.lng, to.lat]);
       return (
-        Math.abs(point.x - size.x / 2) <= 1 &&
-        Math.abs(point.y - size.y / 2) <= 1
+        Math.abs(point.x - container.clientWidth / 2) <= 1 &&
+        Math.abs(point.y - container.clientHeight / 2) <= 1
       );
     },
-    { lat, lng, zoom },
+    view,
     { timeout: 5000 },
   );
+  await waitForMapIdle(page);
 }
 
 /** Where a coordinate is drawn, in CSS pixels from the map's top left corner */
@@ -160,9 +163,7 @@ export function containerPoint(
 ): Promise<{ x: number; y: number }> {
   return page.evaluate(
     (at) => {
-      const point = window.mapApp!.map!.latLngToContainerPoint(
-        L.latLng(at.lat, at.lng),
-      );
+      const point = window.mapApp!.map!.project([at.lng, at.lat]);
       return { x: point.x, y: point.y };
     },
     { lat, lng },
@@ -170,11 +171,11 @@ export function containerPoint(
 }
 
 /**
- * Take the map's own drawing out of the picture, tiles, paths and markers
- * alike, and leave the page's chrome. Masking them is not an option, because
- * every Leaflet pane fills the viewport, so a mask over one covers the
- * controls as well. The map keeps its own background, so the layout below it
- * is unchanged.
+ * Take the map's own drawing out of the picture, base map, paths, markers
+ * and popups alike, and leave the page's chrome. Masking them is not an
+ * option, because the canvas fills the viewport, so a mask over it covers
+ * the controls as well. The map keeps its own background, so the layout
+ * below it is unchanged.
  *
  * Through a constructed stylesheet rather than a <style> tag: the page's CSP
  * allows no inline style, and CSSOM stylesheets are not inline.
@@ -182,9 +183,60 @@ export function containerPoint(
 export async function hideMapData(page: Page): Promise<void> {
   await page.evaluate(() => {
     const sheet = new CSSStyleSheet();
-    sheet.replaceSync(".leaflet-pane { visibility: hidden !important; }");
+    sheet.replaceSync(
+      ".maplibregl-canvas, .maplibregl-marker, .maplibregl-popup " +
+        "{ visibility: hidden !important; }",
+    );
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
   });
+}
+
+/* ==========================================================================
+   Requests
+
+   The map fetches its style and its tiles itself, so none of them is an
+   element a spec could find. What the page asked for is in the browser's
+   resource timing, requests answered by the fixture included.
+   ========================================================================== */
+
+function requestedUrls(page: Page, host: string): Promise<string[]> {
+  return page.evaluate(
+    (hostname) =>
+      performance
+        .getEntriesByType("resource")
+        .map((entry) => entry.name)
+        .filter((url) => new URL(url).hostname.endsWith(hostname)),
+    host,
+  );
+}
+
+/** The request for the base map's style, which carries the API key */
+export async function baseMapStyleRequest(page: Page): Promise<URL> {
+  const host = "basemaps.cartocdn.com";
+  await expect
+    .poll(async () => (await requestedUrls(page, host)).length)
+    .toBeGreaterThan(0);
+  const urls = await requestedUrls(page, host);
+  return new URL(urls.find((url) => url.includes("style.json")) ?? urls[0]!);
+}
+
+/** Requests for tiles of the open flightmaps aviation overlay so far */
+function aviationTileRequests(page: Page): Promise<string[]> {
+  return requestedUrls(page, "nwy-tiles-api.prod.newaydata.com");
+}
+
+/**
+ * Zoom in far enough for the aviation overlay, which starts at zoom 7, and
+ * wait for its tiles. They have to ask for the aeronautical layer of the
+ * current AIRAC cycle.
+ */
+export async function expectAviationTiles(page: Page): Promise<void> {
+  await setZoom(page, 8);
+  await expect
+    .poll(async () => (await aviationTileRequests(page)).length)
+    .toBeGreaterThan(0);
+  const tile = new URL((await aviationTileRequests(page))[0]!);
+  expect(tile.searchParams.get("path")).toBe("latest/aero/latest");
 }
 
 /* ==========================================================================
@@ -214,7 +266,7 @@ export async function centerOnAirport(
 /** Give an airport's marker the keyboard focus */
 export function focusAirportMarker(page: Page, name: string): Promise<void> {
   return page.evaluate((airport) => {
-    window.mapApp!.airportMarkers[airport]!.getElement()!.focus();
+    window.mapApp!.airportMarkers[airport]!.getElement().focus();
   }, name);
 }
 
@@ -237,7 +289,7 @@ export function airportMarkerCenter(
 ): Promise<{ x: number; y: number }> {
   return page.evaluate((airport) => {
     const box = window
-      .mapApp!.airportMarkers[airport]!.getElement()!
+      .mapApp!.airportMarkers[airport]!.getElement()
       .getBoundingClientRect();
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   }, name);
@@ -270,7 +322,7 @@ export function pathColors(page: Page, layer: ColorLayer): Promise<string[]> {
     (mode) =>
       window
         .mapApp![`${mode}Layer`].getLayers()
-        .map((polyline) => String((polyline as L.Polyline).options.color)),
+        .map((run) => String(run.options.color)),
     layer,
   );
 }
@@ -281,73 +333,69 @@ export function pathWeights(page: Page, layer: ColorLayer): Promise<number[]> {
     (mode) =>
       window
         .mapApp![`${mode}Layer`].getLayers()
-        .map((polyline) => (polyline as L.Polyline).options.weight ?? 0),
+        .map((run) => run.options.weight),
     layer,
   );
 }
 
 /** Whether the heatmap is on the map right now */
 export function heatmapOnMap(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
-    const app = window.mapApp!;
-    return !!app.heatmapLayer && app.map!.hasLayer(app.heatmapLayer);
-  });
+  return page.evaluate(() => window.mapApp!.heatmapLayer.isVisible());
 }
 
 /** Whether the airport markers are on the map right now */
 export function airportsOnMap(page: Page): Promise<boolean> {
+  return page.evaluate(() => window.mapApp!.airportLayer.isVisible());
+}
+
+/** Whether the aviation overlay is on the map right now */
+export function aviationOnMap(page: Page): Promise<boolean> {
+  return page.evaluate(() => window.mapApp!.aviationLayer.isVisible());
+}
+
+/** How strongly the heatmap is drawn, from 0 to 1 */
+export function heatmapOpacity(page: Page): Promise<number> {
   return page.evaluate(() => {
     const app = window.mapApp!;
-    return app.map!.hasLayer(app.airportLayer);
+    const opacity: unknown = app.map!.getPaintProperty(
+      app.heatmapLayer.ids[0]!,
+      "heatmap-opacity",
+    );
+    return typeof opacity === "number" ? opacity : 1;
   });
 }
 
-/** The heatmap is on the map and has a surface with a size to paint into */
+/** The heatmap is on the map and has points to draw */
 export async function expectHeatmapPainted(page: Page): Promise<void> {
   expect(await heatmapOnMap(page)).toBe(true);
-  // Read at once rather than through the locator, which would wait out the
-  // test's timeout for a surface that is not there instead of saying so
-  const size = await page.evaluate((selector) => {
-    const canvas = document.querySelector<HTMLCanvasElement>(selector);
-    return { width: canvas?.width ?? 0, height: canvas?.height ?? 0 };
-  }, HEATMAP_SURFACE);
-  expect(size.width).toBeGreaterThan(0);
-  expect(size.height).toBeGreaterThan(0);
+  await waitForMapIdle(page);
+  const points = await page.evaluate(() => {
+    const app = window.mapApp!;
+    const layer = app.map!.getLayer(app.heatmapLayer.ids[0]!)!;
+    return app.map!.querySourceFeatures(layer.source).length;
+  });
+  expect(points).toBeGreaterThan(0);
 }
 
 /**
- * The heat canvas and the canvas the coloured paths are drawn on share the
- * overlay pane. Whichever was appended last would paint on top, so the
- * stylesheet pins the heat canvas underneath; this reads the result.
+ * The heatmap and the coloured paths are layers of one style, drawn in the
+ * order they are listed in. The heat has to come first, or it paints over
+ * the paths.
  */
 export async function expectHeatUnderPaths(page: Page): Promise<void> {
-  const pane = page.locator(".leaflet-overlay-pane");
-  await expect(pane.locator("canvas.leaflet-heatmap-layer")).toHaveCount(1);
-  await expect(pane.locator("canvas:not(.leaflet-heatmap-layer)")).toHaveCount(
-    1,
-  );
-  const order = await pane.evaluate((el) => {
-    const zIndex = (selector: string): number =>
-      Number(getComputedStyle(el.querySelector(selector)!).zIndex);
+  const order = await page.evaluate(() => {
+    const app = window.mapApp!;
+    const ids = app.map!.getStyle().layers.map((layer) => layer.id);
+    const index = (id: string): number => ids.indexOf(id);
     return {
-      heat: zIndex("canvas.leaflet-heatmap-layer"),
-      paths: zIndex("canvas:not(.leaflet-heatmap-layer)"),
+      heat: app.heatmapLayer.ids.map(index),
+      paths: [...app.altitudeLayer.ids, ...app.airspeedLayer.ids].map(index),
     };
   });
-  expect(order.heat, "the heat canvas paints over the paths").toBeLessThan(
-    order.paths,
-  );
-}
-
-/**
- * Zoom in far enough for the aviation overlay, which starts at zoom 7, and
- * wait for its tiles. They have to ask for the aeronautical layer of the
- * current AIRAC cycle.
- */
-export async function expectAviationTiles(page: Page): Promise<void> {
-  await setZoom(page, 8);
-  const tile = aviationTiles(page).first();
-  await expect(tile).toBeAttached();
-  const src = new URL((await tile.getAttribute("src"))!);
-  expect(src.searchParams.get("path")).toBe("latest/aero/latest");
+  expect(order.heat.every((at) => at >= 0)).toBe(true);
+  expect(order.paths.every((at) => at >= 0)).toBe(true);
+  expect(
+    Math.max(...order.heat),
+    "the heatmap paints over the paths",
+  ).toBeLessThan(Math.min(...order.paths));
 }

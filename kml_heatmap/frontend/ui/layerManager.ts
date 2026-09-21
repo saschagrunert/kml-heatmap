@@ -2,35 +2,61 @@
  * Layer Manager - Handles altitude/airspeed path rendering and legend updates
  *
  * Rendering strategy:
- * - Paths are drawn on the shared canvas renderer (`app.pathRenderer`).
+ * - Each mode draws from two GeoJSON sources that exist from the start (see
+ *   mapLayers.ts): the main one with every flight, and a small one for the
+ *   selection, whose layer lies on top. This module only ever calls
+ *   `setData` on them and sets paint properties and a filter.
  * - Consecutive, contiguous segments of the same path whose value falls in
  *   the same one of COLOR_BINS steps of the colour range are merged into ONE
- *   polyline, drawn in the colour of the middle of its step. Merging by the
- *   rounded value instead made tens of thousands of polylines out of a
+ *   LineString feature, in the colour of the middle of its step. Merging by
+ *   the rounded value instead made tens of thousands of lines out of a
  *   groundspeed that never sits still, for colours no eye tells apart. The
- *   merged polyline keeps its segment list so the tooltip can show the exact
- *   data of the segment nearest to the cursor (`findNearestSegment`).
- * - Below SIMPLIFY_MAX_ZOOM the geometry of a polyline is simplified to a
- *   quarter of a screen pixel at the whole zoom level it is drawn at, and
- *   swapped when a zoom crosses into another whole level. Leaflet simplifies
- *   to a pixel when it renders anyway, but only after projecting every
- *   vertex, on every zoom. The heatmap, the replay and the statistics read
- *   the full data and are not affected.
- * - Polylines are tracked per path id; selection changes restyle them
- *   (`updateSelectionStyles`) and rebuild only the paths that were or are
- *   selected, whose runs follow the selection's colour range.
- * - Tooltip HTML is generated lazily when the tooltip opens.
+ *   colour is computed here and carried as a property, so the map and the
+ *   legend cannot disagree.
+ * - A run table per source remembers which segments of the dataset each
+ *   feature stands for. It answers `getLayers()` and lets the tooltip show
+ *   the exact data of the segment nearest to the cursor
+ *   (`findNearestSegment`). MapLibre simplifies the geometry per tile; the
+ *   heatmap, the replay and the statistics read the full data anyway.
+ * - A selection rebuilds only the selection's source, whose runs follow the
+ *   selection's colour range. The main source stays as it is: its layer is
+ *   dimmed with one paint property and filtered to leave the selected
+ *   flights (in isolate mode: everything) out.
+ * - Paths are pixels of a layer and have no events of their own. One
+ *   `mousemove` handler per map asks what is rendered under the pointer, at
+ *   most once per frame, and moves one reused tooltip along.
  */
-import * as L from "leaflet";
+import {
+  Popup,
+  type FilterSpecification,
+  type GeoJSONSource,
+  type LngLat,
+  type Map as MapLibreMap,
+  type MapMouseEvent,
+  type Point,
+} from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { Range } from "../state/store";
-import type { KMLDataset, PathInfo, PathSegment } from "../types";
-import type { Coordinate } from "../utils/geometry";
+import type {
+  KMLDataset,
+  PathHit,
+  PathHitTester,
+  PathInfo,
+  PathLayerEntry,
+  PathLayerHandle,
+  PathRunProperties,
+  PathSegment,
+} from "../types";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
+import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
+import { toLngLat, type LngLatTuple } from "../utils/mapHelpers";
 import { datasetIndex } from "../calculations/datasetIndex";
-import { segmentsForPathIds } from "../calculations/statistics";
+import {
+  segmentRangesFor,
+  segmentsForPathIds,
+} from "../calculations/statistics";
 import {
   calculateAirspeedRange,
   calculateAltitudeRange,
@@ -42,9 +68,15 @@ import {
 
 export type LayerMode = "altitude" | "airspeed";
 
+/** The two sources of a mode, and the layers drawn from them */
+type RunSet = "main" | "selected";
+
 interface LayerConfig {
   mode: LayerMode;
-  layer: L.LayerGroup;
+  handle: PathLayerHandle;
+  /** Source and layer share their id, see MAP_SOURCES and MAP_LAYERS */
+  sources: Record<RunSet, string>;
+  layers: Record<RunSet, string>;
   range: Range;
   getValue: (seg: PathSegment) => number;
   getColor: (value: number, min: number, max: number) => string;
@@ -60,19 +92,64 @@ interface LayerConfig {
   formatLegend: (value: number) => string;
 }
 
-/** Colour steps a range is cut into; the merge key of a polyline */
+/** Colour steps a range is cut into; the merge key of a run */
 const COLOR_BINS = 32;
 
-/** From this zoom on, polylines keep every exported point */
-const SIMPLIFY_MAX_ZOOM = 13;
+/**
+ * How far from the pointer a flight still counts as under it, in pixels to
+ * each side. A finger covers more of the map than it aims at.
+ */
+const HIT_PADDING_PX = 5;
+const TOUCH_HIT_PADDING_PX = 12;
 
-interface PolylineEntry {
-  polyline: L.Polyline;
+/** Distance of the tooltip from the pointer, in pixels */
+const TOOLTIP_OFFSET_PX = 10;
+
+const MODES: readonly LayerMode[] = ["altitude", "airspeed"];
+
+/** One feature of a source: a run of segments of one path in one colour */
+interface Run {
+  /** Half-open index range of the run within the drawn segment array */
+  start: number;
+  end: number;
   pathId: number;
-  /** The value the polyline is coloured with: the middle of its colour step */
+  /** The value the run is coloured with: the middle of its colour step */
   value: number;
-  /** Segments merged into this polyline, in drawing order */
-  segments: PathSegment[];
+  color: string;
+}
+
+/** The runs of one source; the index of a run is the `r` of its feature */
+interface RunTable {
+  runs: Run[];
+  /** Bumped on every `setData`; features of an older one are stale */
+  g: number;
+  /** Whether the source holds no feature, which is how it is created */
+  sourceEmpty: boolean;
+}
+
+/** The selection a mode's layers were last styled for */
+interface ShownSelection {
+  selected: Set<number>;
+  isolate: boolean;
+}
+
+interface ModeState {
+  tables: Record<RunSet, RunTable>;
+  /** The array the runs index into, null while the mode is not drawn */
+  segments: PathSegment[] | null;
+  shown: ShownSelection;
+  /** The filter on the main layer, serialised, to set it only on a change */
+  filterKey: string;
+}
+
+function emptyModeState(): ModeState {
+  const table = (): RunTable => ({ runs: [], g: 0, sourceEmpty: true });
+  return {
+    tables: { main: table(), selected: table() },
+    segments: null,
+    shown: { selected: new Set(), isolate: false },
+    filterKey: "null",
+  };
 }
 
 /**
@@ -85,14 +162,6 @@ export function isTouchDevice(): boolean {
     return window.matchMedia("(hover: none)").matches;
   }
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
-}
-
-/** The whole zoom level geometry is simplified for, capped where it stops */
-function simplifyZoom(map: L.Map | null): number {
-  return Math.min(
-    Math.floor(map?.getZoom() ?? SIMPLIFY_MAX_ZOOM),
-    SIMPLIFY_MAX_ZOOM,
-  );
 }
 
 /**
@@ -111,71 +180,139 @@ function stepValue(value: number, range: Range): number {
 }
 
 /**
- * Douglas-Peucker to a quarter pixel at `zoom`, on longitudes scaled by the
- * cosine of the latitude so that both axes are in degrees of latitude
+ * Width and opacity of the runs of a selected or an unselected path. The
+ * numbers are those of `calculateSegmentProperties`, asked for a path that
+ * stands in for every path of its kind, since a layer has one look.
  */
-function simplify(latLngs: Coordinate[], zoom: number): Coordinate[] {
-  if (zoom >= SIMPLIFY_MAX_ZOOM || latLngs.length < 3) return latLngs;
-  const scale = Math.cos((latLngs[0]![0] * Math.PI) / 180);
-  const points = latLngs.map((c, i) =>
-    Object.assign(L.point(c[1] * scale, c[0]), { i }),
-  );
-  // A pixel spans 360 / 256 / 2^zoom degrees of longitude, and fewer
-  // degrees of latitude by the cosine on a Mercator map
-  const tolerance = ((0.25 * 360) / 256 / 2 ** zoom) * scale;
-  return L.LineUtil.simplify(points, tolerance).map(
-    (p) => latLngs[(p as typeof p & { i: number }).i]!,
-  );
+function runLook(
+  isSelected: boolean,
+  shown: ShownSelection,
+): { weight: number; opacity: number } {
+  const hasSelection = shown.selected.size > 0;
+  const { weight, opacity } = calculateSegmentProperties({
+    pathId: 0,
+    selectedPathIds: new Set(isSelected ? [0] : hasSelection ? [1] : []),
+    isolateSelection: shown.isolate,
+  });
+  return { weight, opacity };
 }
 
-export class LayerManager {
+/** Whether the main layer's filter leaves the runs of a path out */
+function hiddenInMain(pathId: number, shown: ShownSelection): boolean {
+  if (shown.selected.size === 0) return false;
+  return shown.isolate || shown.selected.has(pathId);
+}
+
+/** Distance in pixels between a point of the map and a drawn segment */
+function pixelDistance(
+  map: MapLibreMap,
+  point: Point,
+  segment: PathSegment,
+): number {
+  const coords = segment.coords;
+  if (!coords) return Infinity;
+  const a = map.project(toLngLat(coords[0]));
+  const b = map.project(toLngLat(coords[1]));
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+  let t = 0;
+  if (lengthSquared > 0) {
+    t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared;
+    t = Math.max(0, Math.min(1, t));
+  }
+  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+}
+
+export class LayerManager implements PathHitTester {
   private app: MapApp;
-  private polylinesByPath: Record<LayerMode, Map<number, PolylineEntry[]>> = {
-    altitude: new Map(),
-    airspeed: new Map(),
+  private state: Record<LayerMode, ModeState> = {
+    altitude: emptyModeState(),
+    airspeed: emptyModeState(),
   };
 
-  /** The zoom and the selection each drawn layer was built for */
-  private built: Partial<
-    Record<LayerMode, { zoom: number; selected: Set<number> }>
-  > = {};
+  /** Modes that were drawn or cleared before the sources existed */
+  private pendingModes = new Set<LayerMode>();
+  private waitingForMap = false;
+  private destroyed = false;
 
-  private readonly handleZoom = (): void => this.onZoom();
+  /** The map the pointer handlers are registered on */
+  private listeningTo: MapLibreMap | null = null;
+  /** Where the pointer last was, in container pixels; null off the map */
+  private lastPoint: Point | null = null;
+  private hoverFrame: number | null = null;
+  private rehoverPending = false;
+  /** The one tooltip, created on the first hover and reused from then on */
+  private tooltip: Popup | null = null;
+  /** The segment the tooltip describes, null while it is closed */
+  private hovered: PathSegment | null = null;
+  /** The popup a tap opened; a tap elsewhere replaces it */
+  private touchPopup: Popup | null = null;
+
+  private readonly handleMouseMove = (e: MapMouseEvent): void => {
+    this.lastPoint = e.point;
+    // A pointer moves many times per frame, and a query walks the tiles
+    this.hoverFrame ??= requestAnimationFrame(() => {
+      this.hoverFrame = null;
+      this.hover();
+    });
+  };
+
+  private readonly handleMouseOut = (): void => {
+    this.lastPoint = null;
+    this.hideTooltip();
+  };
 
   constructor(app: MapApp) {
     this.app = app;
-    // On "zoom" rather than "zoomend": Leaflet projects every vertex again
-    // on zoomend, and should find the new geometry there already
-    app.map?.on("zoom", this.handleZoom);
-  }
-
-  /** Stop following the zoom; the drawn layers stay on the map */
-  destroy(): void {
-    this.app.map?.off("zoom", this.handleZoom);
-  }
-
-  /** Swap in the geometry of another zoom level where one was crossed */
-  private onZoom(): void {
-    const zoom = simplifyZoom(this.app.map);
-    for (const mode of ["altitude", "airspeed"] as const) {
-      const built = this.built[mode];
-      if (!built || built.zoom === zoom) continue;
-      built.zoom = zoom;
-      for (const entries of this.polylinesByPath[mode].values()) {
-        for (const { polyline, segments } of entries) {
-          const latLngs = segments.map((segment) => segment.coords![1]);
-          latLngs.unshift(segments[0]!.coords![0]);
-          polyline.setLatLngs(simplify(latLngs, zoom));
-        }
-      }
+    app.altitudeLayer.setLayersProvider(() => this.layersOf("altitude"));
+    app.airspeedLayer.setLayersProvider(() => this.layersOf("airspeed"));
+    if (app.map) {
+      this.listen(app.map);
+    } else {
+      void app.mapReady.then(() => {
+        if (!this.destroyed && app.map) this.listen(app.map);
+      });
     }
+  }
+
+  private listen(map: MapLibreMap): void {
+    this.listeningTo = map;
+    map.on("mousemove", this.handleMouseMove);
+    map.on("mouseout", this.handleMouseOut);
+  }
+
+  /** Stop following the pointer; the drawn layers stay on the map */
+  destroy(): void {
+    this.destroyed = true;
+    this.listeningTo?.off("mousemove", this.handleMouseMove);
+    this.listeningTo?.off("mouseout", this.handleMouseOut);
+    this.listeningTo = null;
+    if (this.hoverFrame !== null) {
+      cancelAnimationFrame(this.hoverFrame);
+      this.hoverFrame = null;
+    }
+    this.lastPoint = null;
+    this.hideTooltip();
+    this.touchPopup?.remove();
+    this.touchPopup = null;
+    this.app.altitudeLayer.setLayersProvider(null);
+    this.app.airspeedLayer.setLayersProvider(null);
   }
 
   private getConfig(mode: LayerMode): LayerConfig {
     if (mode === "altitude") {
       return {
         mode,
-        layer: this.app.altitudeLayer,
+        handle: this.app.altitudeLayer,
+        sources: {
+          main: MAP_SOURCES.pathsAltitude,
+          selected: MAP_SOURCES.pathsAltitudeSelected,
+        },
+        layers: {
+          main: MAP_LAYERS.pathsAltitude,
+          selected: MAP_LAYERS.pathsAltitudeSelected,
+        },
         range: this.app.altitudeRange,
         getValue: (seg) => seg.altitude_ft ?? 0,
         getColor: getColorForAltitude,
@@ -187,7 +324,15 @@ export class LayerManager {
     }
     return {
       mode,
-      layer: this.app.airspeedLayer,
+      handle: this.app.airspeedLayer,
+      sources: {
+        main: MAP_SOURCES.pathsAirspeed,
+        selected: MAP_SOURCES.pathsAirspeedSelected,
+      },
+      layers: {
+        main: MAP_LAYERS.pathsAirspeed,
+        selected: MAP_LAYERS.pathsAirspeedSelected,
+      },
       range: this.app.airspeedRange,
       getValue: (seg) => seg.groundspeed_knots ?? 0,
       getColor: getColorForAirspeed,
@@ -200,6 +345,215 @@ export class LayerManager {
     };
   }
 
+  /**
+   * The map once the path sources exist on it. They are created when the
+   * style has loaded, and a source that is not there cannot take data.
+   */
+  private readyMap(): MapLibreMap | null {
+    const map = this.app.map;
+    return map?.getSource(MAP_SOURCES.pathsAltitude) ? map : null;
+  }
+
+  /**
+   * Remember a mode that could not reach its sources, and bring it up to
+   * date once the map is ready: drawn again from the data of that moment,
+   * or cleared, whichever it was last.
+   */
+  private deferUntilReady(mode: LayerMode): void {
+    this.pendingModes.add(mode);
+    if (this.waitingForMap) return;
+    this.waitingForMap = true;
+    void this.app.mapReady.then(() => {
+      this.waitingForMap = false;
+      const pending = [...this.pendingModes];
+      this.pendingModes.clear();
+      // Without the sources even now there is nothing to wait for
+      if (this.destroyed || !this.readyMap()) return;
+      for (const pendingMode of pending) {
+        if (this.state[pendingMode].segments) {
+          this.redrawPaths(this.getConfig(pendingMode));
+        } else {
+          this.clearLayer(pendingMode);
+        }
+      }
+    });
+  }
+
+  /**
+   * The flight drawn at a point of the map, or null beside every flight.
+   * Part of the contract with MapApp's click dispatcher, and what the hover
+   * runs on.
+   */
+  hitTest(point: Point): PathHit | null {
+    const map = this.readyMap();
+    if (!map) return null;
+
+    const tableOfLayer = new Map<string, [ModeState, RunSet]>();
+    for (const mode of MODES) {
+      const config = this.getConfig(mode);
+      const state = this.state[mode];
+      if (!config.handle.isVisible() || !state.segments) continue;
+      tableOfLayer.set(config.layers.main, [state, "main"]);
+      tableOfLayer.set(config.layers.selected, [state, "selected"]);
+    }
+    if (tableOfLayer.size === 0) return null;
+
+    const pad = isTouchDevice() ? TOUCH_HIT_PADDING_PX : HIT_PADDING_PX;
+    const features = map.queryRenderedFeatures(
+      [
+        [point.x - pad, point.y - pad],
+        [point.x + pad, point.y + pad],
+      ],
+      { layers: [...tableOfLayer.keys()] },
+    );
+    if (features.length === 0) return null;
+
+    const lngLat = map.unproject(point);
+    const seen = new Set<Run>();
+    let best: PathHit | null = null;
+    let bestDistance = Infinity;
+    let bestSelected = false;
+
+    for (const feature of features) {
+      const entry = tableOfLayer.get(feature.layer.id);
+      if (!entry) continue;
+      const [state, set] = entry;
+      const table = state.tables[set];
+      const { r, g } = feature.properties as Partial<PathRunProperties>;
+      // Tiles cut from the data before the last `setData` still answer for
+      // a while, with indices into a table that is gone
+      if (g !== table.g || r === undefined) continue;
+      const run = table.runs[r];
+      // A run crossing a tile border comes back once per tile
+      if (!run || seen.has(run)) continue;
+      seen.add(run);
+      // Left out by the isolate filter, but still in tiles cut before it.
+      // A selected path is not skipped: its main runs are the same flight,
+      // and they bridge the moment until the selection's tiles are there.
+      const { selected, isolate } = state.shown;
+      if (
+        set === "main" &&
+        isolate &&
+        selected.size > 0 &&
+        !selected.has(run.pathId)
+      ) {
+        continue;
+      }
+
+      const segment = findNearestSegment(
+        state.segments!.slice(run.start, run.end),
+        lngLat.lat,
+        lngLat.lng,
+      );
+      if (!segment) continue;
+      const distance = pixelDistance(map, point, segment);
+      const isSelected = set === "selected";
+      if (
+        distance < bestDistance ||
+        (distance === bestDistance && isSelected && !bestSelected)
+      ) {
+        best = { pathId: run.pathId, segment };
+        bestDistance = distance;
+        bestSelected = isSelected;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * What a click on a flight does: toggle its selection and, on touch, show
+   * the segment's values. Part of the contract with MapApp's click dispatcher.
+   */
+  onPathClick(hit: PathHit, lngLat: LngLat): void {
+    const map = this.app.map;
+    if (map && isTouchDevice()) {
+      // No pointer to follow: the values stay where the finger was until
+      // the next tap on the map closes them
+      this.touchPopup?.remove();
+      this.touchPopup = new Popup({
+        className: "segment-tooltip",
+        maxWidth: "none",
+        focusAfterOpen: false,
+      })
+        .setLngLat(lngLat)
+        .setHTML(this.formatSegmentTooltip(hit.segment))
+        .addTo(map);
+    }
+    // Selecting rebuilds the runs of the path, the hovered one included;
+    // `updateSelectionStyles` hands the tooltip over to its replacement
+    this.app.pathSelection.togglePathSelection(hit.pathId);
+  }
+
+  /**
+   * Put away the values a hover or a tap left on the map. Replay calls this
+   * as it opens: MapLibre keeps no list of open popups to close them by.
+   */
+  closeSegmentPopup(): void {
+    this.hideTooltip();
+    this.touchPopup?.remove();
+    this.touchPopup = null;
+  }
+
+  /** Look under the pointer and show, move on or close the tooltip */
+  private hover(): void {
+    const map = this.app.map;
+    const point = this.lastPoint;
+    const hit =
+      map && point && !this.destroyed && !isTouchDevice()
+        ? this.hitTest(point)
+        : null;
+    if (!map || !point || !hit) {
+      this.hideTooltip();
+      return;
+    }
+
+    const tooltip = (this.tooltip ??= new Popup({
+      closeButton: false,
+      closeOnClick: false,
+      focusAfterOpen: false,
+      className: "segment-tooltip",
+      maxWidth: "none",
+      offset: TOOLTIP_OFFSET_PX,
+    }));
+    if (hit.segment !== this.hovered) {
+      this.hovered = hit.segment;
+      tooltip.setHTML(this.formatSegmentTooltip(hit.segment));
+    }
+    if (!tooltip.isOpen()) {
+      // A popup that tracks the pointer has no place until the pointer
+      // moves again, and sits in the corner of the map until then. Opened
+      // at a position first, it starts out where the pointer is.
+      tooltip.setLngLat(map.unproject(point)).addTo(map).trackPointer();
+    }
+    map.getCanvas().style.cursor = "pointer";
+  }
+
+  private hideTooltip(): void {
+    this.hovered = null;
+    if (!this.tooltip?.isOpen()) return;
+    this.tooltip.remove();
+    const canvas = this.app.map?.getCanvas();
+    if (canvas) canvas.style.cursor = "";
+  }
+
+  /**
+   * Look under the resting pointer again once the map has drawn what was
+   * just changed. Until then the tiles answer with the features of before,
+   * and the tooltip would close although the flight is still there.
+   */
+  private rehoverOnIdle(): void {
+    const map = this.app.map;
+    if (!map || !this.lastPoint || this.rehoverPending) return;
+    this.rehoverPending = true;
+    map.once("idle", () => {
+      this.rehoverPending = false;
+      if (this.destroyed) return;
+      // The colour range may have changed under the same segment
+      this.hovered = null;
+      this.hover();
+    });
+  }
+
   redrawAltitudePaths(): void {
     this.redrawPaths(this.getConfig("altitude"));
   }
@@ -209,14 +563,15 @@ export class LayerManager {
   }
 
   /**
-   * Remove all polylines of a layer (used for hidden layers so they do not
+   * Empty both sources of a mode (used for hidden layers so they do not
    * keep stale geometry around)
    */
   clearLayer(mode: LayerMode): void {
     const config = this.getConfig(mode);
-    config.layer.clearLayers();
-    this.polylinesByPath[mode] = new Map();
-    delete this.built[mode];
+    this.state[mode].segments = null;
+    this.setRuns(config, "main", []);
+    this.setRuns(config, "selected", []);
+    this.rehoverOnIdle();
   }
 
   /**
@@ -239,236 +594,243 @@ export class LayerManager {
   }
 
   /**
-   * Build the polylines of a layer, or with `only` rebuild those of the
-   * given paths and leave the others as they are
+   * Cut the segments into runs: of every path on the full range, or with
+   * `only` of the given paths on `range`. The year/aircraft filter and the
+   * mode's own filter apply to both.
    */
-  private redrawPaths(config: LayerConfig, only?: Set<number>): void {
-    const data = this.app.currentData;
-    if (!data) return;
-
-    let byPath = this.polylinesByPath[config.mode];
-    if (only) {
-      for (const id of only) {
-        for (const entry of byPath.get(id) ?? []) {
-          config.layer.removeLayer(entry.polyline);
-        }
-        byPath.delete(id);
-      }
-    } else {
-      config.layer.clearLayers();
-      byPath = this.polylinesByPath[config.mode] = new Map<
-        number,
-        PolylineEntry[]
-      >();
-    }
-
-    const range = this.resolveColorRange(config);
-    const zoom = simplifyZoom(this.app.map);
-    const selectedPathIds = this.app.selectedPathIds;
-    this.built[config.mode] = { zoom, selected: new Set(selectedPathIds) };
-    const { min: colorMin, max: colorMax } = range;
+  private cutRuns(
+    config: LayerConfig,
+    data: KMLDataset,
+    range: Range,
+    only?: Set<number>,
+  ): Run[] {
+    const segments = data.path_segments;
     // Resolve the filter once over the path info instead of re-deriving it per
     // segment: `null` means every path passes, so no lookup is needed at all
     const visiblePathIds = this.visiblePathIds(data);
-    const hasSelection = selectedPathIds.size > 0;
-    const isolate = this.app.isolateSelection;
-    const touch = isTouchDevice();
+    const runs: Run[] = [];
 
-    // Current merge run. Its key is the middle of its colour step: of the
-    // selection's range for a selected path, which is shown on it, and of
-    // the full range for the others, which are dimmed until they return to
-    // it when the selection is cleared
-    let run: PathSegment[] = [];
-    let runLatLngs: Coordinate[] = [];
+    // The stretches of the array to walk: all of it, or the slices of the
+    // wanted paths where the array is indexed by path
+    let stretches: [number, number][] = [[0, segments.length]];
+    const index = only ? segmentRangesFor(segments) : null;
+    if (only && index) {
+      stretches = [];
+      for (const id of only) {
+        const stretch = index.get(id);
+        if (stretch) stretches.push([stretch[0], stretch[1]]);
+      }
+      stretches.sort((a, b) => a[0] - b[0]);
+    }
+
+    // Current merge run. Its key is the middle of its colour step.
+    let runStart = -1;
     let runPathId = -1;
     let runKey = NaN;
-    let runEnd: Coordinate | null = null;
+    let runEnd: readonly number[] | null = null;
 
-    const flush = (): void => {
-      if (run.length === 0) return;
-      const props = calculateSegmentProperties({
-        pathId: runPathId,
-        selectedPathIds,
-        isolateSelection: isolate,
-        colorFunction: config.getColor,
-        colorMin,
-        colorMax,
-        value: runKey,
-      });
-      const polyline = L.polyline(simplify(runLatLngs, zoom), {
-        color: props.color,
-        weight: props.weight,
-        opacity: props.opacity,
-        // Round caps and joins and interactivity are Leaflet's defaults
-        renderer: this.app.pathRenderer,
-        bubblingMouseEvents: false,
-      });
-      const entry: PolylineEntry = {
-        polyline,
+    const flush = (end: number): void => {
+      if (runStart < 0) return;
+      runs.push({
+        start: runStart,
+        end,
         pathId: runPathId,
         value: runKey,
-        segments: run,
-      };
-      this.bindSegmentInteractions(entry, touch);
-      polyline.addTo(config.layer);
-
-      const list = byPath.get(runPathId);
-      if (list) list.push(entry);
-      else byPath.set(runPathId, [entry]);
-
-      run = [];
-      runLatLngs = [];
+        color: config.getColor(runKey, range.min, range.max),
+      });
+      runStart = -1;
       runEnd = null;
     };
 
-    for (const segment of only
-      ? segmentsForPathIds(data.path_segments, only)
-      : data.path_segments) {
-      const pathId = segment.path_id;
-      const coords = segment.coords;
+    for (const [from, to] of stretches) {
+      for (let i = from; i < to; i++) {
+        const segment = segments[i]!;
+        const pathId = segment.path_id;
+        const coords = segment.coords;
 
-      if (
-        !coords ||
-        (visiblePathIds !== null && !visiblePathIds.has(pathId)) ||
-        (config.filterSegment && !config.filterSegment(segment)) ||
-        (hasSelection && isolate && !selectedPathIds.has(pathId))
-      ) {
-        flush();
-        continue;
+        if (
+          !coords ||
+          (only && !only.has(pathId)) ||
+          (visiblePathIds !== null && !visiblePathIds.has(pathId)) ||
+          (config.filterSegment && !config.filterSegment(segment))
+        ) {
+          flush(i);
+          continue;
+        }
+
+        const key = stepValue(config.getValue(segment), range);
+        const contiguous =
+          runEnd !== null &&
+          pathId === runPathId &&
+          key === runKey &&
+          runEnd[0] === coords[0][0] &&
+          runEnd[1] === coords[0][1];
+
+        if (!contiguous) {
+          flush(i);
+          runStart = i;
+          runPathId = pathId;
+          runKey = key;
+        }
+        runEnd = coords[1];
       }
-
-      const key = stepValue(
-        config.getValue(segment),
-        selectedPathIds.has(pathId) ? range : config.range,
-      );
-      const contiguous =
-        runEnd !== null &&
-        pathId === runPathId &&
-        key === runKey &&
-        runEnd[0] === coords[0][0] &&
-        runEnd[1] === coords[0][1];
-
-      if (!contiguous) {
-        flush();
-        runPathId = pathId;
-        runKey = key;
-        runLatLngs = [coords[0]];
-      }
-      runLatLngs.push(coords[1]);
-      runEnd = coords[1];
-      run.push(segment);
+      flush(to);
     }
-    flush();
+    return runs;
+  }
 
-    this.updateLegend(colorMin, colorMax, config);
+  /** Replace the runs of one source, and its data where the map has it */
+  private setRuns(config: LayerConfig, set: RunSet, runs: Run[]): void {
+    const state = this.state[config.mode];
+    const table = state.tables[set];
+    table.runs = runs;
+
+    const map = this.readyMap();
+    if (!map) {
+      this.deferUntilReady(config.mode);
+      return;
+    }
+    // Most redraws happen without a selection; an empty source that stays
+    // empty is not worth cutting its tiles again
+    if (runs.length === 0 && table.sourceEmpty) return;
+
+    const g = ++table.g;
+    const segments = state.segments ?? [];
+    const features = runs.map(
+      (run, r): GeoJSON.Feature<GeoJSON.LineString, PathRunProperties> => {
+        const coordinates: LngLatTuple[] = [
+          toLngLat(segments[run.start]!.coords![0]),
+        ];
+        for (let i = run.start; i < run.end; i++) {
+          coordinates.push(toLngLat(segments[i]!.coords![1]));
+        }
+        return {
+          type: "Feature",
+          properties: { r, g, pathId: run.pathId, color: run.color },
+          geometry: { type: "LineString", coordinates },
+        };
+      },
+    );
+    // The promise never rejects: a failure arrives as the map's error event
+    void map
+      .getSource<GeoJSONSource>(config.sources[set])
+      ?.setData({ type: "FeatureCollection", features });
+    table.sourceEmpty = runs.length === 0;
+  }
+
+  /** Draw every flight of a mode, and the selection on top of them */
+  private redrawPaths(config: LayerConfig): void {
+    const data = this.app.currentData;
+    if (!data) return;
+
+    this.state[config.mode].segments = data.path_segments;
+    this.setRuns(config, "main", this.cutRuns(config, data, config.range));
+    this.showSelection(config, data);
+    this.rehoverOnIdle();
   }
 
   /**
-   * Restyle the drawn polylines of the visible layers for the current
-   * selection (weight/opacity/colour range). Only the paths that were or
-   * are now selected are rebuilt, since their runs are cut at the colour
-   * steps of the range they are shown on.
-   * Isolate mode changes which paths are drawn and therefore needs a redraw
-   * (see DataManager.updateLayers).
+   * Draw the selected paths on the selection's layer, cut at the colour
+   * steps of the selection's range, which is shown on them; and give both
+   * layers the look the selection asks for. The others stay cut on the
+   * full range, dimmed until the selection is cleared.
+   */
+  private showSelection(config: LayerConfig, data: KMLDataset): void {
+    const selected = this.app.selectedPathIds;
+    const range = this.resolveColorRange(config);
+    this.setRuns(
+      config,
+      "selected",
+      selected.size > 0 ? this.cutRuns(config, data, range, selected) : [],
+    );
+    this.applyLook(config);
+    this.updateLegend(range.min, range.max, config);
+  }
+
+  /**
+   * Style the two layers of a mode for the current selection. The handle
+   * owns their visibility, so what the main layer must not show (the
+   * selected flights, drawn on top, or in isolate mode everything) is left
+   * out by a filter.
+   */
+  private applyLook(config: LayerConfig): void {
+    const state = this.state[config.mode];
+    const shown: ShownSelection = {
+      selected: new Set(this.app.selectedPathIds),
+      isolate: this.app.isolateSelection,
+    };
+    state.shown = shown;
+    const map = this.readyMap();
+    if (!map) return;
+
+    const selectedLook = runLook(true, shown);
+    map.setPaintProperty(
+      config.layers.main,
+      "line-opacity",
+      runLook(false, shown).opacity,
+    );
+    map.setPaintProperty(
+      config.layers.selected,
+      "line-width",
+      selectedLook.weight,
+    );
+    map.setPaintProperty(
+      config.layers.selected,
+      "line-opacity",
+      selectedLook.opacity,
+    );
+
+    let filter: FilterSpecification | null = null;
+    if (shown.selected.size > 0) {
+      filter = shown.isolate
+        ? ["literal", false]
+        : ["!", ["in", ["get", "pathId"], ["literal", [...shown.selected]]]];
+    }
+    // A filter cuts the tiles of the layer again, even one equal to the last
+    const filterKey = JSON.stringify(filter);
+    if (filterKey !== state.filterKey) {
+      state.filterKey = filterKey;
+      map.setFilter(config.layers.main, filter);
+    }
+  }
+
+  /** What is drawn of a mode, one entry per run; backs `getLayers()` */
+  private layersOf(mode: LayerMode): PathLayerEntry[] {
+    const { tables, shown } = this.state[mode];
+    const entries: PathLayerEntry[] = [];
+    const add = (run: Run, isSelected: boolean): void => {
+      const { weight, opacity } = runLook(isSelected, shown);
+      entries.push({
+        pathId: run.pathId,
+        options: { color: run.color, weight, opacity },
+      });
+    };
+    for (const run of tables.main.runs) {
+      if (!hiddenInMain(run.pathId, shown)) add(run, false);
+    }
+    for (const run of tables.selected.runs) add(run, true);
+    return entries;
+  }
+
+  /**
+   * Follow a change of the selection on the visible layers: only the
+   * selection's source is rebuilt, the main one keeps its runs and is
+   * dimmed and filtered instead.
    */
   updateSelectionStyles(): void {
-    const modes: LayerMode[] = ["altitude", "airspeed"];
-    for (const mode of modes) {
+    const data = this.app.currentData;
+    for (const mode of MODES) {
       const visible =
         mode === "altitude"
           ? this.app.altitudeVisible
           : this.app.airspeedVisible;
-      const built = this.built[mode];
-      if (!visible || !built) continue;
-
-      const config = this.getConfig(mode);
-      const selectedPathIds = this.app.selectedPathIds;
-      const recut = new Set([...built.selected, ...selectedPathIds]);
-      if (recut.size > 0) this.redrawPaths(config, recut);
-      const { min, max } = this.resolveColorRange(config);
-
-      for (const [pathId, entries] of this.polylinesByPath[mode]) {
-        for (const entry of entries) {
-          const props = calculateSegmentProperties({
-            pathId,
-            selectedPathIds,
-            isolateSelection: this.app.isolateSelection,
-            colorFunction: config.getColor,
-            colorMin: min,
-            colorMax: max,
-            value: entry.value,
-          });
-          // isSelected rides along into the options, where nothing reads it
-          entry.polyline.setStyle(props);
-        }
-      }
-
-      this.updateLegend(min, max, config);
+      if (!visible || !data || !this.state[mode].segments) continue;
+      this.showSelection(this.getConfig(mode), data);
     }
+    this.rehoverOnIdle();
   }
 
-  private bindSegmentInteractions(entry: PolylineEntry, touch: boolean): void {
-    const { polyline, segments, pathId } = entry;
-    let current: PathSegment = segments[0]!;
-
-    const pick = (latlng: L.LatLng): void => {
-      if (segments.length > 1) {
-        current =
-          findNearestSegment(segments, latlng.lat, latlng.lng) ?? current;
-      }
-    };
-    const tooltipHtml = (): string => this.formatSegmentTooltip(current);
-
-    if (!touch) {
-      // Registered before bindTooltip so the nearest segment is known when
-      // Leaflet's own mouseover handler opens the (lazy) tooltip
-      polyline.on("mouseover", (e: L.LeafletMouseEvent) => pick(e.latlng));
-      polyline.bindTooltip(tooltipHtml, {
-        sticky: true,
-        direction: "top",
-        offset: [0, -10],
-        opacity: 1,
-        className: "segment-tooltip",
-      });
-      if (segments.length > 1) {
-        polyline.on("mousemove", (e: L.LeafletMouseEvent) => {
-          const previous = current;
-          pick(e.latlng);
-          if (current !== previous) {
-            polyline.setTooltipContent(tooltipHtml());
-          }
-        });
-      }
-    }
-
-    polyline.on("click", (e: L.LeafletMouseEvent) => {
-      L.DomEvent.stopPropagation(e);
-      if (e.originalEvent) {
-        e.originalEvent.stopPropagation();
-      }
-      if (touch && this.app.map) {
-        pick(e.latlng);
-        L.popup({ className: "segment-tooltip" })
-          .setLatLng(e.latlng)
-          .setContent(tooltipHtml())
-          .openOn(this.app.map);
-      }
-      this.app.pathSelection.togglePathSelection(pathId);
-      // Selecting rebuilds the polylines of the path, this one included.
-      // The one that draws the clicked segment now takes over the hover,
-      // tooltip and all, until the pointer moves on.
-      if (!touch && !this.app.map?.hasLayer(polyline)) {
-        for (const byPath of Object.values(this.polylinesByPath)) {
-          byPath
-            .get(pathId)
-            ?.find((other) => other.segments.includes(current))
-            ?.polyline.fire("mouseover", { latlng: e.latlng });
-        }
-      }
-    });
-  }
-
-  /** Coloured on the same range as the polylines, the selection's if any */
+  /** Coloured on the same range as the runs, the selection's if any */
   private formatSegmentTooltip(segment: PathSegment): string {
     const altitude = this.resolveColorRange(this.getConfig("altitude"));
     const speed = this.resolveColorRange(this.getConfig("airspeed"));

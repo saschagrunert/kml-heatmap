@@ -170,7 +170,7 @@ const TIME_SCALE = 10;
  * stays where the last row that had one left it.
  *
  * A value that is not a finite number would turn into a NaN coordinate,
- * which Leaflet throws on. Since every value is a difference, nothing after
+ * which the map cannot draw. Since every value is a difference, nothing after
  * it can be trusted either, so the path is cut short there with a warning
  * instead, and left out when that is its first row.
  * @param raw - Contents of <year>/data.json

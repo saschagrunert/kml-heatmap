@@ -5,7 +5,7 @@
  * the banner back to refuse a site that was built from other sources. Both
  * import it from here so the two can never hash differently. The build
  * script, the compiler options, the esbuild version and the version of every package bundled into the
- * page (only Lucide: Leaflet is a global) shape the bundle as much as the
+ * page (only Lucide: MapLibre is vendored next to the bundles) shape the bundle as much as the
  * sources do, so they are part of the hash.
  *
  * The stylesheets are in it as well. They are not part of any bundle, but

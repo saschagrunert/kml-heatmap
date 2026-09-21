@@ -1,18 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as L from "leaflet";
 import { AirportManager } from "../../../../kml_heatmap/frontend/ui/airportManager";
-import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
+import { createAirportMarkers } from "../../../../kml_heatmap/frontend/appInitializer";
+import { panPopupIntoView } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
+import type {
+  AirportMarker,
+  PathInfo,
+} from "../../../../kml_heatmap/frontend/types";
 import {
   createMockApp,
   createDataset,
   asMapApp,
   type MockApp,
 } from "../../testHelpers";
-import {
-  marker as mockMarker,
-  type MockBoundPopup,
-  type MockMarker,
-} from "../../../mocks/leaflet";
+import type { Popup as MockPopup } from "../../../mocks/maplibre-gl";
 
 const { loadFeatures, listFlights } = vi.hoisted(() => {
   const listFlights = vi.fn();
@@ -24,11 +25,42 @@ const { loadFeatures, listFlights } = vi.hoisted(() => {
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
   loadFeatures,
 }));
+vi.mock(
+  "../../../../kml_heatmap/frontend/utils/mapHelpers",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../../kml_heatmap/frontend/utils/mapHelpers")
+    >()),
+    panPopupIntoView: vi.fn(),
+  }),
+);
+
+/** The count the popup shows, as its markup */
+function countHtml(count: number): string {
+  return `<span class="popup-metric-value kh-popup-accent">${count}</span>`;
+}
+
+/** Let the feature bundle "load" */
+async function featuresLoaded(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+/** jsdom does not track how focus arrived; say it here */
+function focusVisible(element: HTMLElement, visible: boolean): void {
+  Object.defineProperty(element, "matches", {
+    configurable: true,
+    value: (selector: string) => visible && selector === ":focus-visible",
+  });
+}
 
 describe("AirportManager", () => {
   let airportManager: AirportManager;
   let mockApp: MockApp;
-  let markers: Record<string, MockMarker>;
+  let markers: Record<string, AirportMarker>;
+  let mapContainer: HTMLElement;
+  /** The popup the manager shares between the airports */
+  let popup: MockPopup;
 
   const pathInfo: PathInfo[] = [
     {
@@ -54,100 +86,365 @@ describe("AirportManager", () => {
     },
   ];
 
+  const airports = [
+    { name: "EDDF", lat: 50.1, lon: 8.67 },
+    { name: "EDDM", lat: 48.35, lon: 11.78 },
+    { name: "EDDK", lat: 50.87, lon: 7.14 },
+    { name: "LOWW", lat: 48.11, lon: 16.57 },
+  ];
+
+  function isHome(name: string): boolean {
+    return (
+      markers[name]!.getElement().querySelector(".airport-marker-home") !== null
+    );
+  }
+
   beforeEach(() => {
-    vi.mocked(L.divIcon).mockClear();
-    markers = {
-      EDDF: mockMarker([50.1, 8.67]),
-      EDDM: mockMarker([48.35, 11.78]),
-      EDDK: mockMarker([50.87, 7.14]),
-      LOWW: mockMarker([48.11, 16.57]),
-    };
+    // In the document, so that the markers and the popup can take focus
+    mapContainer = document.createElement("div");
+    mapContainer.id = "map";
+    document.body.appendChild(mapContainer);
+
     mockApp = createMockApp({
       currentData: createDataset(pathInfo),
-      allAirportsData: [
-        { name: "EDDF", lat: 50.1, lon: 8.67 },
-        { name: "EDDM", lat: 48.35, lon: 11.78 },
-        { name: "EDDK", lat: 50.87, lon: 7.14 },
-        { name: "LOWW", lat: 48.11, lon: 16.57 },
-      ],
-      airportMarkers: markers as unknown as MockApp["airportMarkers"],
+      allAirportsData: airports.map((airport) => ({ ...airport })),
     });
-    mockApp.airportLayer.hasLayer.mockReturnValue(true);
-
     airportManager = new AirportManager(asMapApp(mockApp));
+    // The markers are the app's own, wired to this manager like the app's
+    (mockApp as unknown as { airportManager: AirportManager }).airportManager =
+      airportManager;
+    createAirportMarkers(asMapApp(mockApp), mockApp.allAirportsData);
+    markers = mockApp.airportMarkers;
+    popup = (airportManager as unknown as { popup: MockPopup }).popup;
   });
 
-  describe("updateAirportPopups", () => {
-    it("binds the popup with the current counts on the first update", () => {
-      airportManager.updateAirportPopups();
+  afterEach(() => {
+    document.body.innerHTML = "";
+    listFlights.mockReset();
+    loadFeatures.mockClear();
+    vi.mocked(panPopupIntoView).mockClear();
+  });
 
+  describe("the shared popup", () => {
+    it("is one popup that leaves focus and width to the app", () => {
+      expect(popup.options).toEqual({
+        focusAfterOpen: false,
+        maxWidth: "none",
+        offset: 12,
+        closeOnClick: true,
+      });
+      // `setPopup` brings click and key handling that would toggle twice
       for (const marker of Object.values(markers)) {
-        // Markers are created without a popup, so the first content the user
-        // can ever see already carries the counts of the active filter
-        expect(marker.bindPopup).toHaveBeenCalledTimes(1);
-        expect(marker.setPopupContent).not.toHaveBeenCalled();
+        expect(marker.marker.getPopup()).toBeNull();
       }
-      const eddf = String(markers["EDDF"]!.popupContent());
-      expect(eddf).toContain("EDDF");
-      expect(eddf).toContain(
-        '<span class="popup-metric-value kh-popup-accent">3</span>',
-      );
-      expect(eddf).toContain("https://www.google.com/maps?q=50.1,8.67");
-      expect(eddf).toContain("N");
-      expect(eddf).toContain("E");
     });
 
-    it("replaces the content of an already bound popup", () => {
-      airportManager.updateAirportPopups();
-      // The filter change reaches the manager through the store
-      mockApp.selectedAircraft = "D-EFGH";
+    it("opens on the marker with the counts of the current filter", () => {
+      markers["EDDF"]!.openPopup();
 
-      const eddf = markers["EDDF"]!;
-      expect(eddf.bindPopup).toHaveBeenCalledTimes(1);
-      expect(eddf.setPopupContent).toHaveBeenCalledTimes(1);
-      expect(String(eddf.popupContent())).toContain(
-        '<span class="popup-metric-value kh-popup-accent">1</span>',
-      );
+      expect(popup.isOpen()).toBe(true);
+      expect(popup.map).toBe(mockApp.map);
+      expect(popup.getLngLat()).toMatchObject({ lng: 8.67, lat: 50.1 });
+      const html = popup.getElement().innerHTML;
+      expect(html).toContain("EDDF");
+      expect(html).toContain(countHtml(3));
+      expect(html).toContain("https://www.google.com/maps?q=50.1,8.67");
+      expect(html).toContain("HOME");
+      expect(markers["EDDF"]!.isPopupOpen()).toBe(true);
+      expect(markers["EDDM"]!.isPopupOpen()).toBe(false);
+      expect(airportManager.isPopupOpen()).toBe(true);
     });
 
-    it("marks the home base with the badge and the marker class", () => {
+    it("writes the content when it opens, not before", () => {
       airportManager.updateAirportPopups();
 
-      expect(String(markers["EDDF"]!.popupContent())).toContain("HOME");
-      expect(String(markers["EDDM"]!.popupContent())).not.toContain("HOME");
-      expect(markers["EDDF"]!.setIcon).toHaveBeenCalledTimes(1);
-      const iconHtml = vi.mocked(L.divIcon).mock.calls.at(-1)![0]!
-        .html as string;
-      expect(iconHtml).toContain("airport-marker-home");
-      expect(iconHtml).toContain("airport-label-home");
-      // Non-home markers keep their initial (non-home) icon
-      expect(markers["EDDM"]!.setIcon).not.toHaveBeenCalled();
+      expect(popup.setHTML).not.toHaveBeenCalled();
     });
 
-    it("moves the home base when the filter changes", () => {
-      airportManager.updateAirportPopups();
-      vi.mocked(L.divIcon).mockClear();
+    it("moves to another airport without closing in between", () => {
+      const closed = vi.fn();
+      popup.on("close", closed);
+      markers["EDDF"]!.openPopup();
+      markers["EDDF"]!.getElement().focus();
 
-      // Only path 2 (EDDM -> EDDF) matches: tie, first wins (EDDM)
-      mockApp.selectedAircraft = "D-EFGH";
-      airportManager.updateAirportPopups();
+      markers["EDDM"]!.openPopup();
 
-      expect(markers["EDDF"]!.setIcon).toHaveBeenCalledTimes(2);
-      expect(markers["EDDM"]!.setIcon).toHaveBeenCalledTimes(1);
-      const htmls = vi
-        .mocked(L.divIcon)
-        .mock.calls.map((c) => c[0]!.html as string);
-      expect(htmls.some((h) => h.includes("airport-marker-home"))).toBe(true);
-      expect(htmls.some((h) => !h.includes("airport-marker-home"))).toBe(true);
+      expect(popup.addTo).toHaveBeenCalledTimes(1);
+      expect(closed).not.toHaveBeenCalled();
+      expect(popup.getLngLat()).toMatchObject({ lng: 11.78, lat: 48.35 });
+      expect(popup.getElement().innerHTML).toContain("EDDM");
+      expect(popup.getElement().innerHTML).not.toContain("HOME");
+      expect(markers["EDDF"]!.isPopupOpen()).toBe(false);
+      expect(markers["EDDM"]!.isPopupOpen()).toBe(true);
     });
 
     it("shows zero flights for airports outside the filter", () => {
+      markers["LOWW"]!.openPopup();
+
+      expect(popup.getElement().innerHTML).toContain(countHtml(0));
+    });
+
+    it("rewrites the open popup when the filter changes", () => {
+      markers["EDDF"]!.openPopup();
+      // The filter change reaches the manager through the store
+      mockApp.selectedAircraft = "D-EFGH";
+
+      expect(popup.setHTML).toHaveBeenCalledTimes(2);
+      expect(popup.addTo).toHaveBeenCalledTimes(1);
+      expect(popup.getElement().innerHTML).toContain(countHtml(1));
+    });
+
+    it("leaves a closed popup alone when the filter changes", () => {
+      markers["EDDF"]!.openPopup();
+      markers["EDDF"]!.closePopup();
+      popup.setHTML.mockClear();
+
+      mockApp.selectedAircraft = "D-EFGH";
+
+      expect(popup.setHTML).not.toHaveBeenCalled();
+    });
+
+    it("closes only for the airport it is open for", () => {
+      markers["EDDF"]!.openPopup();
+
+      markers["EDDM"]!.closePopup();
+      expect(popup.isOpen()).toBe(true);
+
+      markers["EDDF"]!.closePopup();
+      expect(popup.isOpen()).toBe(false);
+      expect(markers["EDDF"]!.isPopupOpen()).toBe(false);
+      expect(airportManager.isPopupOpen()).toBe(false);
+    });
+
+    it("does nothing for an unknown airport or without a map", () => {
+      airportManager.openPopup("NOPE");
+      expect(popup.isOpen()).toBe(false);
+
+      mockApp.map = null;
+      airportManager.openPopup("EDDF");
+      expect(popup.isOpen()).toBe(false);
+    });
+
+    it("recounts when the dataset is replaced, even at the same size", () => {
+      markers["EDDF"]!.openPopup();
+      expect(popup.getElement().innerHTML).toContain(countHtml(3));
+
+      // Same year, same aircraft filter and the same number of paths, but a
+      // different dataset: counts keyed on the size alone would go stale
+      mockApp.currentData = createDataset([
+        { id: 1, year: 2025, start_airport: "EDDM", end_airport: "EDDK" },
+        { id: 2, year: 2025, start_airport: "EDDM", end_airport: "EDDK" },
+        { id: 3, year: 2025, start_airport: "EDDM", end_airport: "EDDK" },
+      ]);
+
+      expect(popup.getElement().innerHTML).toContain(countHtml(0));
+      markers["EDDM"]!.openPopup();
+      expect(popup.getElement().innerHTML).toContain(countHtml(3));
+    });
+  });
+
+  describe("the flight list and the pan into view", () => {
+    it("lists the flights after the content is written, then pans", async () => {
+      const order: string[] = [];
+      popup.setHTML.mockImplementationOnce((html: string) => {
+        order.push("setHTML");
+        popup
+          .getElement()
+          .querySelector(".maplibregl-popup-content")!.innerHTML = html;
+        return popup;
+      });
+      listFlights.mockImplementation(() => order.push("listFlights"));
+      vi.mocked(panPopupIntoView).mockImplementation(() => {
+        order.push("pan");
+      });
+
+      markers["EDDF"]!.openPopup();
+      popup.setLngLat.mockClear();
+      await featuresLoaded();
+
+      expect(loadFeatures).toHaveBeenCalled();
+      expect(listFlights).toHaveBeenCalledWith(mockApp, popup, "EDDF");
+      expect(order).toEqual(["setHTML", "listFlights", "pan"]);
+      // Laid out again for the height the list added, where it stood
+      expect(popup.setLngLat).toHaveBeenCalledTimes(1);
+      expect(popup.getLngLat()).toMatchObject({ lng: 8.67, lat: 50.1 });
+      expect(panPopupIntoView).toHaveBeenCalledWith(
+        mockApp.map,
+        popup,
+        50,
+        true,
+      );
+    });
+
+    it("lists them again whenever the content is rewritten", async () => {
+      markers["EDDF"]!.openPopup();
+      await featuresLoaded();
+      mockApp.selectedAircraft = "D-EFGH";
+      await featuresLoaded();
+
+      expect(listFlights).toHaveBeenCalledTimes(2);
+      expect(panPopupIntoView).toHaveBeenCalledTimes(2);
+    });
+
+    it("pans without the list when the bundle failed to load", async () => {
+      loadFeatures.mockResolvedValueOnce(
+        null as unknown as { listFlights: typeof listFlights },
+      );
+
+      markers["EDDF"]!.openPopup();
+      await featuresLoaded();
+
+      expect(listFlights).not.toHaveBeenCalled();
+      expect(panPopupIntoView).toHaveBeenCalledTimes(1);
+    });
+
+    it("pans without animation under reduced motion", async () => {
+      const reduced = vi
+        .spyOn(motion, "prefersReducedMotion")
+        .mockReturnValue(true);
+
+      markers["EDDF"]!.openPopup();
+      await featuresLoaded();
+      reduced.mockRestore();
+
+      expect(panPopupIntoView).toHaveBeenCalledWith(
+        mockApp.map,
+        popup,
+        50,
+        false,
+      );
+    });
+
+    it("drops the list of a popup that closed while the bundle loaded", async () => {
+      markers["EDDF"]!.openPopup();
+      markers["EDDF"]!.closePopup();
+      await featuresLoaded();
+
+      expect(listFlights).not.toHaveBeenCalled();
+      expect(panPopupIntoView).not.toHaveBeenCalled();
+    });
+
+    it("drops the list of an airport the popup has left", async () => {
+      markers["EDDF"]!.openPopup();
+      markers["EDDM"]!.openPopup();
+      await featuresLoaded();
+
+      expect(listFlights).toHaveBeenCalledTimes(1);
+      expect(listFlights).toHaveBeenCalledWith(mockApp, popup, "EDDM");
+    });
+  });
+
+  describe("popup keyboard access", () => {
+    it("moves focus into a popup opened from the keyboard", () => {
+      const element = markers["EDDF"]!.getElement();
+      element.focus();
+      focusVisible(element, true);
+
+      markers["EDDF"]!.openPopup();
+
+      const container = popup.getElement().querySelector(".popup-container");
+      expect(container).not.toBeNull();
+      expect(document.activeElement).toBe(container);
+    });
+
+    it("leaves focus alone when a pointer opened the popup", () => {
+      const element = markers["EDDF"]!.getElement();
+      element.focus();
+      focusVisible(element, false);
+
+      markers["EDDF"]!.openPopup();
+
+      expect(document.activeElement).toBe(element);
+    });
+
+    it("puts focus back on the marker when the popup had it", () => {
+      markers["EDDF"]!.openPopup();
+      popup
+        .getElement()
+        .querySelector<HTMLElement>(".popup-container")!
+        .focus();
+
+      // Closing takes the popup, and the focus in it, out of the document
+      popup.remove();
+
+      expect(document.activeElement).toBe(markers["EDDF"]!.getElement());
+    });
+
+    it("puts focus back on the marker rather than on the page", () => {
+      markers["EDDF"]!.openPopup();
+      (document.activeElement as HTMLElement | null)?.blur();
+
+      markers["EDDF"]!.closePopup();
+
+      expect(document.activeElement).toBe(markers["EDDF"]!.getElement());
+    });
+
+    it("does not take focus from wherever the user went", () => {
+      markers["EDDF"]!.openPopup();
+      const elsewhere = document.createElement("button");
+      document.body.append(elsewhere);
+      elsewhere.focus();
+
+      markers["EDDF"]!.closePopup();
+
+      expect(document.activeElement).toBe(elsewhere);
+    });
+
+    it("leaves focus alone when nothing was open", () => {
+      airportManager.closePopup();
+
+      expect(document.activeElement).toBe(document.body);
+    });
+
+    it("closes the popup on Escape from the marker", () => {
+      const element = markers["EDDF"]!.getElement();
+      markers["EDDF"]!.openPopup();
+
+      element.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+      );
+      expect(popup.isOpen()).toBe(true);
+
+      element.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      expect(popup.isOpen()).toBe(false);
+    });
+
+    it("keeps another airport's popup on Escape", () => {
+      markers["EDDM"]!.openPopup();
+
+      markers["EDDF"]!.getElement().dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+
+      expect(popup.isOpen()).toBe(true);
+    });
+  });
+
+  describe("updateAirportPopups", () => {
+    it("marks the home base on its marker", () => {
       airportManager.updateAirportPopups();
 
-      const loww = String(markers["LOWW"]!.popupContent());
-      expect(loww).toContain(
-        '<span class="popup-metric-value kh-popup-accent">0</span>',
-      );
+      expect(isHome("EDDF")).toBe(true);
+      expect(
+        markers["EDDF"]!.getElement().querySelector(".airport-label-home"),
+      ).not.toBeNull();
+      for (const name of ["EDDM", "EDDK", "LOWW"]) {
+        expect(isHome(name)).toBe(false);
+      }
+    });
+
+    it("moves the home base when the filter changes, on the same elements", () => {
+      airportManager.updateAirportPopups();
+      const eddf = markers["EDDF"]!.getElement();
+
+      // Only path 2 (EDDM -> EDDF) matches: tie, first wins (EDDM)
+      mockApp.selectedAircraft = "D-EFGH";
+
+      expect(isHome("EDDF")).toBe(false);
+      expect(isHome("EDDM")).toBe(true);
+      expect(markers["EDDF"]!.getElement()).toBe(eddf);
     });
 
     it("skips airports without markers", () => {
@@ -157,60 +454,40 @@ describe("AirportManager", () => {
   });
 
   describe("updateAirportOpacity", () => {
+    function hidden(): string[] {
+      return Object.keys(markers).filter(
+        (name) => markers[name]!.getElement().hidden,
+      );
+    }
+
     it("shows all airports when no filters or selection", () => {
-      mockApp.airportLayer.hasLayer.mockReturnValue(false);
+      for (const marker of Object.values(markers)) marker.setVisible(false);
 
       airportManager.updateAirportOpacity();
 
-      for (const marker of Object.values(markers)) {
-        expect(marker.setOpacity).toHaveBeenCalledWith(1.0);
-        expect(marker.addTo).toHaveBeenCalledWith(mockApp.airportLayer);
-      }
-      expect(mockApp.airportLayer.removeLayer).not.toHaveBeenCalled();
+      expect(hidden()).toEqual([]);
     });
 
     it("shows only airports matching the year filter", () => {
       mockApp.selectedYear = "2024";
 
-      airportManager.updateAirportOpacity();
-
-      expect(markers["EDDF"]!.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(markers["EDDK"]!.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        markers["EDDM"],
-      );
-      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        markers["LOWW"],
-      );
+      expect(hidden()).toEqual(["EDDM", "LOWW"]);
     });
 
     it("shows only airports matching the aircraft filter", () => {
       mockApp.selectedAircraft = "D-EFGH";
 
-      airportManager.updateAirportOpacity();
-
-      expect(markers["EDDF"]!.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(markers["EDDM"]!.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        markers["EDDK"],
-      );
+      expect(hidden()).toEqual(["EDDK", "LOWW"]);
     });
 
     it("adds airports of selected paths to the filter's airports", () => {
       mockApp.selectedYear = "2025";
-      mockApp.airportLayer.removeLayer.mockClear();
       // Path 3 flew in 2024, to EDDK
       mockApp.selectedPathIds.add(3);
 
       airportManager.updateAirportOpacity();
 
-      for (const name of ["EDDF", "EDDM", "EDDK"]) {
-        expect(markers[name]!.setOpacity).toHaveBeenCalledWith(1.0);
-      }
-      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledTimes(1);
-      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        markers["LOWW"],
-      );
+      expect(hidden()).toEqual(["LOWW"]);
     });
 
     it("keeps every airport for a selection without a filter (regression)", () => {
@@ -218,7 +495,7 @@ describe("AirportManager", () => {
 
       airportManager.updateAirportOpacity();
 
-      expect(mockApp.airportLayer.removeLayer).not.toHaveBeenCalled();
+      expect(hidden()).toEqual([]);
     });
 
     it("only shows airports of selected paths in isolate mode", () => {
@@ -226,64 +503,61 @@ describe("AirportManager", () => {
       mockApp.selectedPathIds.add(3);
       mockApp.isolateSelection = true;
 
-      airportManager.updateAirportOpacity();
-
-      expect(markers["EDDF"]!.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(markers["EDDK"]!.setOpacity).toHaveBeenCalledWith(1.0);
-      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        markers["EDDM"],
-      );
+      expect(hidden()).toEqual(["EDDM", "LOWW"]);
     });
 
-    it("re-adds hidden markers that become visible", () => {
+    it("shows hidden markers that become visible again", () => {
       mockApp.selectedYear = "2024";
-      // The year change already hid the markers outside the filter; from
-      // here on nothing is on the layer
-      mockApp.airportLayer.removeLayer.mockClear();
-      mockApp.airportLayer.hasLayer.mockReturnValue(false);
+      expect(hidden()).toEqual(["EDDM", "LOWW"]);
 
-      airportManager.updateAirportOpacity();
+      mockApp.selectedYear = "all";
 
-      expect(markers["EDDF"]!.addTo).toHaveBeenCalledWith(mockApp.airportLayer);
-      expect(markers["EDDM"]!.addTo).not.toHaveBeenCalled();
-      expect(mockApp.airportLayer.removeLayer).not.toHaveBeenCalled();
+      expect(hidden()).toEqual([]);
     });
 
-    it("does not re-add markers already on the layer", () => {
-      airportManager.updateAirportOpacity();
+    it("never takes a marker off the map", () => {
+      mockApp.selectedYear = "2024";
 
       for (const marker of Object.values(markers)) {
-        expect(marker.addTo).not.toHaveBeenCalled();
+        expect(marker.marker.remove).not.toHaveBeenCalled();
       }
+    });
+
+    it("closes the popup of a marker that gets hidden", () => {
+      markers["EDDM"]!.openPopup();
+
+      mockApp.selectedYear = "2024";
+
+      expect(popup.isOpen()).toBe(false);
+    });
+
+    it("keeps the popup of a marker that stays", () => {
+      markers["EDDF"]!.openPopup();
+
+      mockApp.selectedYear = "2024";
+
+      expect(popup.isOpen()).toBe(true);
+      expect(markers["EDDF"]!.isPopupOpen()).toBe(true);
     });
   });
 
   describe("updateAirportMarkerSizes", () => {
-    let mapContainer: HTMLElement;
-
-    beforeEach(() => {
-      mapContainer = document.createElement("div");
-      mapContainer.id = "map";
-      document.body.appendChild(mapContainer);
-    });
-
-    afterEach(() => {
-      mapContainer.remove();
-    });
-
     it("does nothing if map is not initialized", () => {
       mockApp.map = null;
       airportManager.updateAirportMarkerSizes();
       expect(mapContainer.dataset["zoomSize"]).toBeUndefined();
     });
 
+    // Map units: one below the Leaflet zooms the sizes were tuned at
     it.each([
-      [14, "xlarge"],
-      [12, "large"],
-      [10, "medium"],
-      [8, "medium-small"],
-      [6, "small"],
-      [3, ""],
+      [13, "xlarge"],
+      [12.9, "large"],
+      [11, "large"],
+      [9, "medium"],
+      [7, "medium-small"],
+      [5, "small"],
+      [4.9, ""],
+      [2, ""],
     ])("sets data-zoom-size for zoom %s", (zoom, expected) => {
       mockApp.map!.getZoom.mockReturnValue(zoom);
 
@@ -292,14 +566,22 @@ describe("AirportManager", () => {
       expect(mapContainer.dataset["zoomSize"]).toBe(expected);
     });
 
-    it("toggles zoom-hide-labels below zoom 5", () => {
-      mockApp.map!.getZoom.mockReturnValue(4);
+    it("toggles zoom-hide-labels below zoom 4", () => {
+      mockApp.map!.getZoom.mockReturnValue(3.9);
       airportManager.updateAirportMarkerSizes();
       expect(mapContainer.classList.contains("zoom-hide-labels")).toBe(true);
 
-      mockApp.map!.getZoom.mockReturnValue(5);
+      mockApp.map!.getZoom.mockReturnValue(4);
       airportManager.updateAirportMarkerSizes();
       expect(mapContainer.classList.contains("zoom-hide-labels")).toBe(false);
+    });
+
+    it("declutters the labels for the new size", () => {
+      const declutter = vi.spyOn(airportManager, "declutterLabels");
+
+      airportManager.updateAirportMarkerSizes();
+
+      expect(declutter).toHaveBeenCalledTimes(1);
     });
 
     it("does nothing without a map container", () => {
@@ -314,11 +596,10 @@ describe("AirportManager", () => {
       name: string,
       rect: { left: number; top: number; width: number; height: number },
     ): HTMLElement {
-      const root = document.createElement("div");
-      const label = document.createElement("div");
-      label.className = "airport-label";
-      label.textContent = name;
-      root.appendChild(label);
+      const label =
+        markers[name]!.getElement().querySelector<HTMLElement>(
+          ".airport-label",
+        )!;
       label.getBoundingClientRect = () => ({
         left: rect.left,
         top: rect.top,
@@ -330,7 +611,6 @@ describe("AirportManager", () => {
         y: rect.top,
         toJSON: () => ({}),
       });
-      markers[name]!.element = root;
       return label;
     }
 
@@ -409,8 +689,48 @@ describe("AirportManager", () => {
       expect(eddm.classList.contains("airport-label-crowded")).toBe(false);
     });
 
-    it("skips markers that are not on the map", () => {
-      expect(() => airportManager.declutterLabels()).not.toThrow();
+    it("skips markers that have no layout", () => {
+      // A hidden marker, and every marker in jsdom, measures as empty
+      const eddf = withLabel("EDDF", { left: 0, top: 0, width: 0, height: 0 });
+      const eddm = withLabel("EDDM", {
+        left: 0,
+        top: 0,
+        width: 40,
+        height: 14,
+      });
+
+      airportManager.declutterLabels();
+
+      expect(eddf.classList.contains("airport-label-crowded")).toBe(false);
+      expect(eddm.classList.contains("airport-label-crowded")).toBe(false);
+    });
+
+    it("counts the attribution as taken space", () => {
+      const attribution = document.createElement("div");
+      attribution.className = "maplibregl-ctrl-attrib";
+      attribution.getBoundingClientRect = () => ({
+        left: 500,
+        top: 580,
+        right: 800,
+        bottom: 600,
+        width: 300,
+        height: 20,
+        x: 500,
+        y: 580,
+        toJSON: () => ({}),
+      });
+      mapContainer.appendChild(attribution);
+
+      const covered = withLabel("EDDF", {
+        left: 600,
+        top: 575,
+        width: 40,
+        height: 14,
+      });
+
+      airportManager.declutterLabels();
+
+      expect(covered.classList.contains("airport-label-crowded")).toBe(true);
     });
 
     it("hides a label that would sit under the control column", () => {
@@ -453,29 +773,6 @@ describe("AirportManager", () => {
     });
   });
 
-  describe("declutterLabels after icon changes", () => {
-    it("re-runs the declutter when updateAirportPopups recreates an icon", () => {
-      const spy = vi.spyOn(airportManager, "declutterLabels");
-
-      // First pass assigns the home base, so at least one icon is recreated
-      airportManager.updateAirportPopups();
-
-      expect(spy).toHaveBeenCalled();
-      spy.mockRestore();
-    });
-
-    it("does not re-run when no icon changed", () => {
-      airportManager.updateAirportPopups();
-      const spy = vi.spyOn(airportManager, "declutterLabels");
-
-      // Same filter, same home base: nothing is recreated
-      airportManager.updateAirportPopups();
-
-      expect(spy).not.toHaveBeenCalled();
-      spy.mockRestore();
-    });
-  });
-
   describe("store subscriptions", () => {
     it("refreshes each once for an update that changes several keys (regression)", () => {
       const popups = vi.spyOn(airportManager, "updateAirportPopups");
@@ -499,8 +796,7 @@ describe("AirportManager", () => {
       mockApp.airportsVisible = false;
       const declutter = vi.spyOn(airportManager, "declutterLabels");
 
-      // Leaflet rebuilds each icon from its HTML when the layer comes back,
-      // which drops the crowded class of every label
+      // Hidden labels have no box, so nothing was decided while they were
       mockApp.airportsVisible = true;
 
       expect(declutter).toHaveBeenCalledTimes(1);
@@ -512,6 +808,14 @@ describe("AirportManager", () => {
       mockApp.airportsVisible = false;
 
       expect(declutter).not.toHaveBeenCalled();
+    });
+
+    it("closes the popup when the airports are hidden", () => {
+      markers["EDDF"]!.openPopup();
+
+      mockApp.airportsVisible = false;
+
+      expect(popup.isOpen()).toBe(false);
     });
 
     it("refreshes the popups and the visibility when the filter changes", () => {
@@ -541,171 +845,13 @@ describe("AirportManager", () => {
       expect(opacity).toHaveBeenCalledTimes(2);
     });
 
-    it("binds the popups and hides the markers as soon as a dataset arrives", () => {
+    it("marks the home base and hides the markers as soon as a dataset arrives", () => {
       mockApp.selectedYear = "2024";
-      for (const marker of Object.values(markers)) marker.bindPopup.mockClear();
-      mockApp.airportLayer.removeLayer.mockClear();
 
       mockApp.currentData = createDataset(pathInfo.slice(2));
 
-      expect(markers["EDDF"]!.setPopupContent).toHaveBeenCalled();
-      expect(mockApp.airportLayer.removeLayer).toHaveBeenCalledWith(
-        markers["EDDM"],
-      );
-    });
-  });
-
-  describe("flight count caching", () => {
-    it("recounts when the dataset is replaced, even at the same size", () => {
-      airportManager.updateAirportPopups();
-      expect(String(markers["EDDF"]!.popupContent())).toContain(
-        '<span class="popup-metric-value kh-popup-accent">3</span>',
-      );
-
-      // Same year, same aircraft filter and the same number of paths, but a
-      // different dataset: counts keyed on the size alone would go stale
-      mockApp.currentData = createDataset([
-        { id: 1, year: 2025, start_airport: "EDDM", end_airport: "EDDK" },
-        { id: 2, year: 2025, start_airport: "EDDM", end_airport: "EDDK" },
-        { id: 3, year: 2025, start_airport: "EDDM", end_airport: "EDDK" },
-      ]);
-      airportManager.updateAirportPopups();
-
-      expect(String(markers["EDDF"]!.popupContent())).toContain(
-        '<span class="popup-metric-value kh-popup-accent">0</span>',
-      );
-      expect(String(markers["EDDM"]!.popupContent())).toContain(
-        '<span class="popup-metric-value kh-popup-accent">3</span>',
-      );
-    });
-  });
-  describe("popup keyboard access", () => {
-    type Handler = (event?: unknown) => void;
-
-    /** The handler the manager registered for an event */
-    function handler(
-      target: { on: { mock: { calls: unknown[][] } } },
-      type: string,
-    ): Handler {
-      const call = target.on.mock.calls.find(([name]) => name === type);
-      expect(call, type).toBeDefined();
-      return call![1] as Handler;
-    }
-
-    /** jsdom does not track how focus arrived; say it here */
-    function focusVisible(element: HTMLElement, visible: boolean): void {
-      Object.defineProperty(element, "matches", {
-        value: (selector: string) => visible && selector === ":focus-visible",
-      });
-    }
-
-    function setUp() {
-      airportManager.updateAirportPopups();
-      const marker = markers["EDDF"]!;
-      const popup = marker.getPopup() as MockBoundPopup;
-      const markerEl = document.createElement("div");
-      markerEl.tabIndex = 0;
-      const popupEl = document.createElement("div");
-      popupEl.innerHTML =
-        '<div class="popup-container" tabindex="-1"><button>x</button></div>';
-      marker.element = markerEl;
-      popup.element = popupEl;
-      document.body.append(markerEl, popupEl);
-      return { marker, popup, markerEl, popupEl };
-    }
-
-    afterEach(() => {
-      document.body.innerHTML = "";
-      listFlights.mockClear();
-    });
-
-    it("binds the events once, with the popup", () => {
-      airportManager.updateAirportPopups();
-      airportManager.updateAirportPopups();
-
-      const types = markers["EDDF"]!.on.mock.calls.map(([type]) =>
-        String(type),
-      );
-      expect(types.filter((type) => type === "popupopen")).toHaveLength(1);
-      expect(types).toEqual(
-        expect.arrayContaining(["popupopen", "popupclose", "keydown"]),
-      );
-    });
-
-    it("lists the flights from the feature bundle whenever the content is written", async () => {
-      const { popup } = setUp();
-
-      handler(popup, "contentupdate")();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(loadFeatures).toHaveBeenCalled();
-      expect(listFlights).toHaveBeenCalledWith(mockApp, popup, "EDDF");
-    });
-
-    it("moves focus into a popup opened from the keyboard", () => {
-      const { marker, markerEl, popupEl } = setUp();
-      focusVisible(markerEl, true);
-
-      handler(marker, "popupopen")();
-
-      expect(document.activeElement).toBe(
-        popupEl.querySelector(".popup-container"),
-      );
-    });
-
-    it("leaves focus alone when the mouse opened the popup", () => {
-      const { marker, markerEl } = setUp();
-      focusVisible(markerEl, false);
-      markerEl.focus();
-
-      handler(marker, "popupopen")();
-
-      expect(document.activeElement).toBe(markerEl);
-    });
-
-    it("puts focus back on the marker when the popup had it", () => {
-      const { marker, markerEl, popupEl } = setUp();
-      popupEl.querySelector("button")!.focus();
-
-      handler(marker, "popupclose")();
-
-      expect(document.activeElement).toBe(markerEl);
-    });
-
-    it("puts focus back on the marker rather than on the page", () => {
-      const { marker, markerEl } = setUp();
-      (document.activeElement as HTMLElement | null)?.blur();
-
-      handler(marker, "popupclose")();
-
-      expect(document.activeElement).toBe(markerEl);
-    });
-
-    it("does not take focus from wherever the user went", () => {
-      const { marker } = setUp();
-      const elsewhere = document.createElement("button");
-      document.body.append(elsewhere);
-      elsewhere.focus();
-
-      handler(marker, "popupclose")();
-
-      expect(document.activeElement).toBe(elsewhere);
-    });
-
-    it("closes the popup on Escape from the marker", () => {
-      const { marker } = setUp();
-      const keydown = handler(marker, "keydown");
-
-      keydown({
-        originalEvent: new KeyboardEvent("keydown", { key: "Enter" }),
-      });
-      expect(marker.closePopup).not.toHaveBeenCalled();
-
-      keydown({
-        originalEvent: new KeyboardEvent("keydown", { key: "Escape" }),
-      });
-      expect(marker.closePopup).toHaveBeenCalledTimes(1);
+      expect(isHome("EDDF")).toBe(true);
+      expect(markers["EDDM"]!.getElement().hidden).toBe(true);
     });
   });
 });
