@@ -67,6 +67,27 @@ describe("MapOrientation", () => {
       expect(floating().hidden).toBe(false);
     });
 
+    it("lays the needle back with the map, grown so it stays readable", () => {
+      const tilt = (button: HTMLElement): string =>
+        button.style.getPropertyValue("--compass-tilt");
+      const grow = (button: HTMLElement): number =>
+        Number(button.style.getPropertyValue("--compass-grow"));
+      // Flat, no 3D transform at all (the stylesheet's fallback)
+      expect(tilt(compass())).toBe("");
+
+      turn({ pitch: 60 });
+
+      for (const button of [compass(), floating()]) {
+        expect(tilt(button)).toBe("rotateX(60deg)");
+        // Half as tall laid back by 60, so it grows by the root of two
+        expect(grow(button)).toBeCloseTo(Math.SQRT2, 6);
+      }
+
+      turn({ pitch: 0 });
+      expect(tilt(compass())).toBe("");
+      expect(compass().style.getPropertyValue("--compass-grow")).toBe("");
+    });
+
     it("reads the orientation a link opened the map with", () => {
       orientation.destroy();
       app.map!.jumpTo({ bearing: -120 });

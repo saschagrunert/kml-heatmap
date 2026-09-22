@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   DataManager,
+  heatLinesPaint,
   heatmapCoordinates,
   heatmapFeatures,
   heatmapPaint,
   HEATMAP_LEAST_CONTRIBUTION,
 } from "../../../../kml_heatmap/frontend/ui/dataManager";
 import {
+  HEAT_LINES,
   HEATMAP_CLUSTER,
   MAP_LAYERS,
   MAP_MAX_ZOOM,
@@ -80,6 +82,26 @@ describe("DataManager", () => {
       expect(feature.geometry.type).toBe("Point");
       return feature.geometry.coordinates as [number, number];
     });
+  };
+  /** Every fix of baseData's segments, `[lng, lat]` */
+  const ALL_FIXES = [
+    [8.0, 50.0],
+    [8.1, 50.1],
+    [8.2, 50.2],
+    [10.0, 52.0],
+    [11.0, 53.0],
+  ];
+  /** The `[lng, lat]` points the heat line source draws, each once */
+  const heatLinePoints = (): [number, number][] => {
+    const data = mockApp.map!.source(MAP_SOURCES.heatLines)
+      .data as GeoJSON.FeatureCollection<GeoJSON.LineString>;
+    const points = new Map<string, [number, number]>();
+    for (const feature of data.features) {
+      for (const point of feature.geometry.coordinates) {
+        points.set(point.join(), point as [number, number]);
+      }
+    }
+    return [...points.values()];
   };
   /** How often a paint property of a heat layer was set */
   const paintCalls = (name: string, layer: string): unknown[][] =>
@@ -555,6 +577,9 @@ describe("DataManager", () => {
 
       expect(heatLayer().paint).toEqual(heatmapPaint());
       expect(heatLayer().paint["heatmap-radius"]).toBe(22);
+      for (const [id, paint] of Object.entries(heatLinesPaint())) {
+        expect(mockApp.map!.layer(id).paint).toEqual(paint);
+      }
     });
 
     it("sets the paint once, not with every new set of points", async () => {
@@ -657,6 +682,14 @@ describe("DataManager", () => {
         [8.1, 50.1],
         [8.2, 50.2],
       ]);
+      // The heat lines draw the same flights
+      expect(heatLinePoints()).toEqual(heatPoints());
+    });
+
+    it("hands the heat lines every flight when unfiltered", async () => {
+      await dataManager.updateLayers(baseData());
+
+      expect(heatLinePoints()).toEqual(ALL_FIXES);
     });
 
     it("filters heatmap coordinates by selected aircraft", async () => {
@@ -744,11 +777,13 @@ describe("DataManager", () => {
         [10.0, 52.0],
         [11.0, 53.0],
       ]);
+      expect(heatLinePoints()).toEqual(heatPoints());
 
       mockApp.isolateSelection = false;
       await dataManager.updateLayers();
       expect(heatSource().setData).toHaveBeenCalledTimes(3);
       expect(heatPoints()).toHaveLength(data.coordinates.length);
+      expect(heatLinePoints()).toEqual(ALL_FIXES);
 
       // The same points of another dataset are other points
       await dataManager.updateLayers(baseData());
@@ -1081,8 +1116,70 @@ describe("DataManager", () => {
       expect(visible[0]).toBe(0.25);
     });
 
-    it("starts at full opacity", () => {
-      expect(paint["heatmap-opacity"]).toBe(1);
+    it("starts at full opacity and fades out for the heat lines", () => {
+      expect(paint["heatmap-opacity"]).toEqual([
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        HEAT_LINES.midZoom,
+        1,
+        HEAT_LINES.fullZoom,
+        0,
+      ]);
+    });
+
+    it("fades the heatmap out only once the heat lines are all there", () => {
+      // Both half faded at once lay a grey haze beside lines too faint yet
+      expect(HEAT_LINES.fromZoom).toBeLessThan(HEAT_LINES.midZoom);
+      expect(HEAT_LINES.midZoom).toBeLessThan(HEAT_LINES.fullZoom);
+    });
+
+    it("fades the heat lines in as the heatmap fades out", () => {
+      for (const linePaint of Object.values(heatLinesPaint())) {
+        const opacity = linePaint["line-opacity"] as unknown[];
+        expect(opacity.slice(0, 5)).toEqual([
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          HEAT_LINES.fromZoom,
+          0,
+        ]);
+        expect(opacity[5]).toBe(HEAT_LINES.midZoom);
+      }
+      // The glow is even, the core fainter where less time was spent
+      const glow = heatLinesPaint()[MAP_LAYERS.heatLinesGlow]["line-opacity"];
+      expect((glow as unknown[])[6]).toBeGreaterThan(0);
+      expect((glow as unknown[])[6]).toBeLessThan(1);
+      const core = (
+        heatLinesPaint()[MAP_LAYERS.heatLinesCore]["line-opacity"] as unknown[]
+      )[6] as unknown[];
+      expect(core.slice(0, 3)).toEqual([
+        "interpolate",
+        ["linear"],
+        ["get", "heat"],
+      ]);
+      const byHeat = core.slice(3).filter((_, i) => i % 2 === 1) as number[];
+      expect(byHeat).toEqual([...byHeat].sort((a, b) => a - b));
+      expect(byHeat[byHeat.length - 1]).toBe(1);
+    });
+
+    it("colours the heat lines with the heatmap's colours, by the seconds spent", () => {
+      const heatColors = colorStops()
+        .slice(1)
+        .map(([, r, g, b]) => `rgb(${r}, ${g}, ${b})`);
+      for (const linePaint of Object.values(heatLinesPaint())) {
+        const color = linePaint["line-color"] as unknown[];
+        expect(color.slice(0, 3)).toEqual([
+          "interpolate",
+          ["linear"],
+          ["get", "heat"],
+        ]);
+        const stops = color.slice(3);
+        const seconds = stops.filter((_, i) => i % 2 === 0) as number[];
+        expect(stops.filter((_, i) => i % 2 === 1)).toEqual(heatColors);
+        expect(seconds).toEqual([...seconds].sort((a, b) => a - b));
+        expect(new Set(seconds).size).toBe(seconds.length);
+      }
     });
   });
 
@@ -1153,13 +1250,41 @@ describe("DataManager", () => {
   });
 
   describe("applyHeatmapEmphasis", () => {
-    const opacity = (): unknown => heatLayer().paint["heatmap-opacity"];
+    /** The opacity of the heatmap before it fades out for the heat lines */
+    const opacity = (): unknown =>
+      (heatLayer().paint["heatmap-opacity"] as unknown[])[4];
+    /**
+     * The opacities of a heat line layer once faded in: one, or one per
+     * heat where it depends on the heat
+     */
+    const strengths = (value: unknown): number[] => {
+      const faded = (value as unknown[])[6];
+      if (typeof faded === "number") return [faded];
+      return (faded as unknown[])
+        .slice(3)
+        .filter((_, i) => i % 2 === 1) as number[];
+    };
+    const lineOpacity = (id: string): number[] =>
+      strengths(mockApp.map!.layer(id).paint["line-opacity"]);
+    const fullLineOpacity = (id: string): number[] =>
+      strengths(
+        heatLinesPaint()[id as keyof ReturnType<typeof heatLinesPaint>][
+          "line-opacity"
+        ],
+      );
 
     it("steps the heatmap back while a colour layer is over it", async () => {
       mockApp.altitudeVisible = true;
       await dataManager.updateLayers(baseData());
 
       expect(opacity()).toBe(0.35);
+      // And the heat lines it hands over to, as far
+      for (const id of [MAP_LAYERS.heatLinesGlow, MAP_LAYERS.heatLinesCore]) {
+        const full = fullLineOpacity(id);
+        lineOpacity(id).forEach((value, i) => {
+          expect(value).toBeCloseTo(full[i]! * 0.35);
+        });
+      }
     });
 
     it("brings it back to full strength on its own", async () => {
@@ -1168,6 +1293,9 @@ describe("DataManager", () => {
       await dataManager.updateLayers(baseData());
 
       expect(opacity()).toBe(1);
+      for (const id of [MAP_LAYERS.heatLinesGlow, MAP_LAYERS.heatLinesCore]) {
+        expect(lineOpacity(id)).toEqual(fullLineOpacity(id));
+      }
     });
 
     it("follows the speed layer too", async () => {

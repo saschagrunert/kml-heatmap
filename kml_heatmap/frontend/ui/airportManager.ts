@@ -349,20 +349,17 @@ export class AirportManager {
       )
       .sort((a, b) => (counts[b.name] ?? 0) - (counts[a.name] ?? 0));
 
-    // Clear last run's verdict first: a crowded label is only invisible, it
-    // still takes its place in layout, so this is a state reset rather than
-    // something the measurement needs. Doing every write before every read
-    // is what keeps this to one reflow instead of one per label.
-    for (const { label } of labels) {
-      label.classList.remove("airport-label-crowded");
-    }
+    // A crowded label is only invisible, it keeps its place in layout, so
+    // last run's verdict can stay while this one is measured. Every read
+    // comes before every write, which keeps this to one reflow instead of
+    // one per label.
     const boxes = labels.map(({ label }) => label.getBoundingClientRect());
     placed.push(...chromeBoxes());
 
-    labels.forEach(({ label }, index) => {
+    const crowded = labels.map((_, index) => {
       const box = boxes[index]!;
       // A marker that is not on the map has no layout at all
-      if (box.width === 0) return;
+      if (box.width === 0) return false;
 
       const overlaps = placed.some(
         (other) =>
@@ -371,12 +368,15 @@ export class AirportManager {
           box.top < other.bottom + LABEL_GAP_PX &&
           box.bottom > other.top - LABEL_GAP_PX,
       );
+      if (!overlaps) placed.push(box);
+      return overlaps;
+    });
 
-      if (overlaps) {
-        label.classList.add("airport-label-crowded");
-      } else {
-        placed.push(box);
-      }
+    // Only a label whose verdict changed is touched: the stylesheet fades
+    // it, and a class taken off and put back would restart that fade on
+    // every label at every run
+    labels.forEach(({ label }, index) => {
+      label.classList.toggle("airport-label-crowded", crowded[index]);
     });
   }
 }

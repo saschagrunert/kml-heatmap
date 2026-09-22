@@ -767,6 +767,8 @@ describe("MapApp controls and map", () => {
         "background",
         "aviation",
         "heat",
+        "heat-lines-glow",
+        "heat-lines-core",
         "replay-route",
         "paths-altitude",
         "paths-airspeed",
@@ -777,6 +779,7 @@ describe("MapApp controls and map", () => {
       // Empty until the managers fill them
       for (const id of [
         "heat",
+        "heat-lines",
         "replay-route",
         "paths-altitude",
         "paths-airspeed",
@@ -984,6 +987,8 @@ describe("MapApp controls and map", () => {
           "water",
           "aviation",
           "heat",
+          "heat-lines-glow",
+          "heat-lines-core",
           "replay-route",
           "paths-altitude",
           "paths-airspeed",

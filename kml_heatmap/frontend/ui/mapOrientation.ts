@@ -124,10 +124,15 @@ export class MapOrientation {
   }
 
   /**
-   * Point the needle north. The angle goes on the button and the stylesheet
-   * turns the icon by it: the icon itself is drawn again whenever the chrome
-   * changes size, and would lose a transform of its own. The tilt is not
-   * shown: laid back by up to 60 degrees, a 16 px needle is a smudge.
+   * Point the needle north and lay it back with the map. The angles go on
+   * the button and the stylesheet turns the icon by them: the icon itself
+   * is drawn again whenever the chrome changes size, and would lose a
+   * transform of its own.
+   *
+   * Laid back by the full tilt, up to 60 degrees, a 16 px needle is half as
+   * tall and a smudge. So it also grows by the square root of what the
+   * tilt takes, as MapLibre's own compass does: the tilt still shows, and
+   * the needle stays readable.
    */
   private syncCompass(): void {
     const map = this.app.map;
@@ -139,6 +144,18 @@ export class MapOrientation {
       // At 0 the stylesheet draws the needle pointing up, so north is at
       // minus the bearing
       button?.style.setProperty("--compass-turn", `${-bearing}deg`);
+      // Only a tilted map gets the 3D transform: even `rotateX(0deg)` has
+      // the flat needle drawn a few pixels differently
+      if (pitch > 0) {
+        button?.style.setProperty("--compass-tilt", `rotateX(${pitch}deg)`);
+        button?.style.setProperty(
+          "--compass-grow",
+          String(1 / Math.sqrt(Math.cos((pitch * Math.PI) / 180))),
+        );
+      } else {
+        button?.style.removeProperty("--compass-tilt");
+        button?.style.removeProperty("--compass-grow");
+      }
     }
     if (!floating) return;
     const upright = bearing === 0 && pitch === 0;

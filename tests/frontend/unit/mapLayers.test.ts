@@ -9,6 +9,7 @@ import {
 } from "../../../kml_heatmap/frontend/mapLayers";
 import { HEATMAP_RADIUS_PX } from "../../../kml_heatmap/frontend/ui/dataManager";
 import {
+  HEAT_LINES,
   HEATMAP_CLUSTER,
   MAP_LAYERS,
   MAP_MIN_ZOOM,
@@ -68,7 +69,11 @@ describe("layer handles", () => {
     const map = app.map!;
 
     // The e2e driver reads the heatmap off `ids[0]`
-    expect(app.heatmapLayer.ids).toEqual([MAP_LAYERS.heat]);
+    expect(app.heatmapLayer.ids).toEqual([
+      MAP_LAYERS.heat,
+      MAP_LAYERS.heatLinesGlow,
+      MAP_LAYERS.heatLinesCore,
+    ]);
     expect(map.source(MAP_SOURCES.heat).spec).toMatchObject({
       type: "geojson",
       cluster: true,
@@ -87,8 +92,50 @@ describe("layer handles", () => {
     const order = map.getLayersOrder();
     const heat = order.indexOf(MAP_LAYERS.heat);
     expect(order[heat - 1]).toBe(MAP_LAYERS.aviation);
-    expect(order[heat + 1]).toBe(MAP_LAYERS.replayRoute);
+    expect(order[heat + 1]).toBe(MAP_LAYERS.heatLinesGlow);
     expect(heat).toBeLessThan(order.indexOf(MAP_LAYERS.pathsAltitude));
+  });
+
+  it("draw the heat lines as a glow and a core over it, from where the heatmap fades", () => {
+    const app = createMockApp();
+    const map = app.map!;
+
+    expect(map.source(MAP_SOURCES.heatLines).spec).toMatchObject({
+      type: "geojson",
+      tolerance: 0.25,
+      maxzoom: 14,
+    });
+    for (const id of [MAP_LAYERS.heatLinesGlow, MAP_LAYERS.heatLinesCore]) {
+      const layer = map.layer(id);
+      expect(layer.type).toBe("line");
+      expect(layer.source).toBe(MAP_SOURCES.heatLines);
+      expect(layer.minzoom).toBe(HEAT_LINES.fromZoom);
+      expect(layer.layout["visibility"]).toBe("none");
+    }
+    expect(HEAT_LINES.fullZoom).toBeGreaterThan(HEAT_LINES.fromZoom);
+
+    const order = map.getLayersOrder();
+    expect(order.indexOf(MAP_LAYERS.heatLinesCore)).toBe(
+      order.indexOf(MAP_LAYERS.heatLinesGlow) + 1,
+    );
+    expect(order[order.indexOf(MAP_LAYERS.heatLinesCore) + 1]).toBe(
+      MAP_LAYERS.replayRoute,
+    );
+  });
+
+  it("switch the heat lines with the heatmap", () => {
+    const app = createMockApp();
+    const map = app.map!;
+
+    app.heatmapLayer.setVisible(true);
+    for (const id of [MAP_LAYERS.heatLinesGlow, MAP_LAYERS.heatLinesCore]) {
+      expect(map.layer(id).layout["visibility"]).toBe("visible");
+    }
+
+    app.heatmapLayer.setVisible(false);
+    for (const id of [MAP_LAYERS.heatLinesGlow, MAP_LAYERS.heatLinesCore]) {
+      expect(map.layer(id).layout["visibility"]).toBe("none");
+    }
   });
 
   it("keep the clusters finer than the reach of a point", () => {

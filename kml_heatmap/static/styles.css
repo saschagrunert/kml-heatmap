@@ -628,9 +628,14 @@ body {
   background: var(--gradient-speed);
 }
 /* Set by AirportManager.declutterLabels() on the labels that would be drawn
-   over an already placed one. The marker dot stays; only the code is hidden. */
-.airport-label-crowded {
+   over an already placed one. The marker dot stays; only the code is hidden,
+   and it fades rather than blinks (see .airport-label). */
+.airport-label.airport-label-crowded {
+  opacity: 0;
   visibility: hidden;
+  /* `visibility` flips once the fade has run, so the label is gone from
+     reach but seen to go. Shown again, it flips at once and fades in. */
+  transition-delay: 0s, 0s, 0s, 0s, var(--duration-base);
 }
 
 .control-sep {
@@ -706,8 +711,11 @@ body {
    inside is drawn again whenever the chrome changes size.
    ========================================================================== */
 .compass-btn .icon {
-  /* The arrow is drawn pointing north-east (see utils/icons.ts) */
-  transform: rotate(calc(var(--compass-turn, 0deg) - 45deg));
+  /* The arrow is drawn pointing north-east (see utils/icons.ts). Turned to
+     north first, then laid back with the map and grown to make up for it:
+     transforms apply right to left. */
+  transform: scale(var(--compass-grow, 1)) var(--compass-tilt, rotate(0deg))
+    rotate(calc(var(--compass-turn, 0deg) - 45deg));
 }
 /* The phone's compass, there only while the map is turned or tilted. One
    row below the top edge, which the selection chip spans on a narrow phone. */
@@ -1264,10 +1272,13 @@ body.stats-open #left-buttons {
   bottom: var(--label-bottom);
   left: 50%;
   transform: translateX(-50%);
+  /* The order matters: the rules that hide a label delay the last one */
   transition:
     transform var(--duration-fast) ease,
     box-shadow var(--duration-fast) ease,
-    border-width var(--duration-fast) ease;
+    border-width var(--duration-fast) ease,
+    opacity var(--duration-base) ease,
+    visibility 0s linear;
 }
 @supports (backdrop-filter: blur(6px)) or (-webkit-backdrop-filter: blur(6px)) {
   .airport-label {
@@ -1333,9 +1344,11 @@ body.stats-open #left-buttons {
   }
 }
 
-/* Hide labels when zoomed out */
+/* Hide labels when zoomed out, fading like a crowded one */
 .zoom-hide-labels .airport-label {
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  transition-delay: 0s, 0s, 0s, 0s, var(--duration-base);
 }
 
 /* ==========================================================================

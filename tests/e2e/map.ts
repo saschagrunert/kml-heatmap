@@ -710,7 +710,11 @@ export function aviationOnMap(page: Page): Promise<boolean> {
   return layersOnMap(page, "aviationLayer");
 }
 
-/** How strongly the heatmap is drawn, from 0 to 1 */
+/**
+ * How strongly the heatmap is drawn, from 0 to 1, before it fades out for
+ * the heat lines (HEAT_LINES in constants.ts). The opacity is an
+ * interpolation over the zoom whose first stop is that strength.
+ */
 export function heatmapOpacity(page: Page): Promise<number> {
   return page.evaluate(() => {
     const app = window.mapApp!;
@@ -718,7 +722,11 @@ export function heatmapOpacity(page: Page): Promise<number> {
       app.heatmapLayer.ids[0]!,
       "heatmap-opacity",
     );
-    return typeof opacity === "number" ? opacity : 1;
+    if (typeof opacity === "number") return opacity;
+    if (Array.isArray(opacity) && typeof opacity[4] === "number") {
+      return opacity[4];
+    }
+    return 1;
   });
 }
 
