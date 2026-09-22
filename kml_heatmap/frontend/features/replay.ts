@@ -21,11 +21,11 @@ export function prepareReplaySegments(
   // The path's own segments come from the per-path index; only the ones
   // with time data can be replayed
   const replaySegments = segmentsForPathIds(segments, [pathId]).filter(
-    (seg) => seg.time !== undefined,
+    (seg): seg is PathSegment & { time: number } => seg.time !== undefined,
   );
 
   // Sort by time
-  return replaySegments.sort((a, b) => a.time! - b.time!);
+  return replaySegments.sort((a, b) => a.time - b.time);
 }
 
 /**
