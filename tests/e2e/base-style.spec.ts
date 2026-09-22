@@ -34,6 +34,8 @@ import {
 const FLIGHT_LAYERS = [
   "aviation",
   "heat",
+  "heat-lines-glow",
+  "heat-lines-core",
   "replay-route",
   "paths-altitude",
   "paths-airspeed",

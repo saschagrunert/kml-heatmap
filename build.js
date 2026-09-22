@@ -240,7 +240,13 @@ function analyzeBundleComposition(metafile, fileName) {
 // Raised by 0.5 KB for the WebGL 2 check, the context loss toasts and the
 // double tap filter of the markers (WebKit counts no taps in `detail`),
 // which took it to 112.05 KB.
-const BUDGET_APP = 112.5 * 1024;
+// Raised from 112.5 KB for the heat lines the heatmap hands over to when
+// zoomed in (see HEAT_LINES in constants.ts): their source, two layers, the
+// cross fade, and the time spent around every stretch that colours them
+// and sets their width, smoothed along each flight (calculations/
+// heatLines.ts), 3.5 KB on top of main's 112.05 KB. They cannot load later:
+// a link may open zoomed in.
+const BUDGET_APP = 116 * 1024;
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.

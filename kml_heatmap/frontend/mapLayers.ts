@@ -6,7 +6,12 @@
  */
 import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 import { cssVar, firstSymbolLayerId } from "./utils/mapHelpers";
-import { HEATMAP_CLUSTER, MAP_LAYERS, MAP_SOURCES } from "./utils/constants";
+import {
+  HEAT_LINES,
+  HEATMAP_CLUSTER,
+  MAP_LAYERS,
+  MAP_SOURCES,
+} from "./utils/constants";
 import type { LayerHandle } from "./types";
 
 /**
@@ -162,6 +167,31 @@ export function addDataLayers(map: MapLibreMap): void {
     },
     before,
   );
+
+  // What the heatmap hands over to when zoomed in (see HEAT_LINES): the
+  // flights as lines with the time spent around them as `heat`, drawn as a
+  // glow and a core. Their look belongs to the data manager, like the
+  // heatmap's. Below `fromZoom` they are fully transparent, and the minimum
+  // zoom spares the map their tiles there. The hotter lines are drawn last,
+  // so a busy taxiway is not painted over by a flight that crossed it once
+  map.addSource(MAP_SOURCES.heatLines, {
+    type: "geojson",
+    data: emptyGeoJson(),
+    tolerance: 0.25,
+    maxzoom: 14,
+  });
+  for (const id of [MAP_LAYERS.heatLinesGlow, MAP_LAYERS.heatLinesCore]) {
+    map.addLayer(
+      {
+        id,
+        type: "line",
+        source: MAP_SOURCES.heatLines,
+        minzoom: HEAT_LINES.fromZoom,
+        layout: { ...round, ...hidden, "line-sort-key": ["get", "heat"] },
+      },
+      before,
+    );
+  }
 
   // The replay layers are always visible and empty outside a replay
   map.addSource(MAP_SOURCES.replayRoute, {

@@ -8,7 +8,7 @@ import {
   SEEK_PAN_THROTTLE_MS,
   appendTrailSegment,
   findSegmentIndexAtTime,
-  screenHeading,
+  iconHeading,
   trailFeatureCollection,
   truncateTrail,
   unwrapRotation,
@@ -94,10 +94,10 @@ describe("unwrapRotation", () => {
   });
 });
 
-describe("screenHeading", () => {
+describe("iconHeading", () => {
   let map: MockMapLibreMap;
   const heading = (track: number): number =>
-    screenHeading(map as unknown as MapLibreMap, [0, 0], track);
+    iconHeading(map as unknown as MapLibreMap, [0, 0], track);
 
   beforeEach(() => {
     map = createMapLibreMock();
@@ -120,14 +120,17 @@ describe("screenHeading", () => {
     expect(heading(90)).toBeCloseTo(0, 6);
   });
 
-  it("follows the foreshortening of a tilted map", () => {
-    // At 60 degrees what runs up the screen is half as long as what runs
-    // across, so a north-east track points 63 degrees off the vertical
+  it("leaves the foreshortening of a tilted map to the marker's own tilt", () => {
+    // At 60 degrees a north-east track runs 63 degrees off the vertical on
+    // screen. The marker lies on the map and MapLibre tilts it back by the
+    // same 60, so the icon itself is turned by the angle on the ground
     map.jumpTo({ pitch: 60 });
 
-    expect(heading(45)).toBeCloseTo(63.435, 3);
+    expect(heading(45)).toBeCloseTo(45, 3);
     expect(heading(0)).toBeCloseTo(0, 6);
     expect(heading(90)).toBeCloseTo(90, 6);
+    map.jumpTo({ pitch: 60, bearing: 30 });
+    expect(heading(45)).toBeCloseTo(15, 3);
   });
 
   it("measures on a globe even when it is north up and flat", () => {
@@ -367,6 +370,14 @@ describe("AirplaneMarker", () => {
       (airplane.marker as unknown as { options: unknown }).options,
     ).toMatchObject({ anchor: "center" });
     expect(airplane.getLatLng()).toEqual([48, 16]);
+  });
+
+  it("lies on the map, tilted with it, and turns on its own", () => {
+    // The heading is turned inside the marker (see iconHeading), so the
+    // marker only takes the map's tilt, not its bearing
+    expect(
+      (airplane.marker as unknown as { options: unknown }).options,
+    ).toMatchObject({ pitchAlignment: "map", rotationAlignment: "viewport" });
   });
 
   it("closes its popup once the globe has turned the airplane away", () => {

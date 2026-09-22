@@ -30,7 +30,7 @@ import type {
  * memoised on the segment. The value only depends on `coords`, which the
  * data loader never changes after expansion.
  */
-function segmentDistance(segment: PathSegment): number {
+export function segmentDistance(segment: PathSegment): number {
   const cached = segment.distance_km;
   if (cached !== undefined) return cached;
 

@@ -132,15 +132,21 @@ export function unwrapRotation(
 const HEADING_PROBE_PX = 16;
 
 /**
- * The angle the airplane is drawn at, clockwise from the top of the screen,
- * for a track over the ground. On a flat map that is north up the two are
- * the same. Turned, the map's bearing comes off; tilted, a track across the
- * screen keeps its length while one up the screen is foreshortened; and on
- * a globe north is not up anywhere but on the centre meridian. Measuring
- * between the position and a point a few pixels further along the track
- * answers for all three at once.
+ * The angle the airplane is drawn at inside its marker, clockwise from the
+ * marker's top, for a track over the ground. The marker lies on the map
+ * (see AirplaneMarker): MapLibre tilts it back with the map, so the icon
+ * is foreshortened like the ground under it, and the angle it needs is the
+ * one on the ground, seen from straight above.
+ *
+ * On a flat map that is north up the two are the same. Turned, the map's
+ * bearing comes off; and on a globe north is not up anywhere but on the
+ * centre meridian. Measuring between the position and a point a few pixels
+ * further along the track answers for both at once. On a tilted map that
+ * measures the track foreshortened, as it runs on screen: the part up the
+ * screen is stretched back by the tilt, or the marker's own tilt would
+ * foreshorten it a second time.
  */
-export function screenHeading(
+export function iconHeading(
   map: MapLibreMap,
   position: readonly [lat: number, lon: number],
   track: number,
@@ -160,7 +166,7 @@ export function screenHeading(
     Math.max(-89, Math.min(89, lat + step * Math.cos(radians))),
   ]);
   const dx = to.x - from.x;
-  const dy = to.y - from.y;
+  const dy = (to.y - from.y) / Math.cos((map.getPitch() * Math.PI) / 180);
   if (dx === 0 && dy === 0) return track - map.getBearing();
   // Screen y grows downwards
   return (Math.atan2(dx, -dy) * 180) / Math.PI;
@@ -353,7 +359,16 @@ export class AirplaneMarker implements ReplayAirplane {
     this.popup.on("close", () =>
       element.setAttribute("aria-expanded", "false"),
     );
-    this.marker = new Marker({ element, anchor: "center" })
+    // Laid on the map: the icon is a view from above, and upright on a
+    // tilted map it looked down on the aircraft while the ground under it
+    // was seen at a slant. The heading is turned inside the marker, so its
+    // own rotation stays with the viewport (see iconHeading).
+    this.marker = new Marker({
+      element,
+      anchor: "center",
+      pitchAlignment: "map",
+      rotationAlignment: "viewport",
+    })
       .setLngLat(toLngLat(position))
       .addTo(map);
   }
@@ -752,7 +767,7 @@ export class ReplayRenderer {
   }
 
   /**
-   * Turn the icon to the track as it runs on screen. Hardware-accelerated
+   * Turn the icon to the track (see iconHeading). Hardware-accelerated
    * transforms; the same angle as last time is not written again. The
    * marker is drawn nose up, so the rotation is the heading itself: the old
    * emoji pointed north-east and needed the difference taken out.
@@ -770,7 +785,7 @@ export class ReplayRenderer {
     }
     this.rotation = unwrapRotation(
       this.rotation,
-      screenHeading(map, position, track),
+      iconHeading(map, position, track),
     );
     const transform = "translate3d(0,0,0) rotate(" + this.rotation + "deg)";
     if (transform !== this.lastTransform) {

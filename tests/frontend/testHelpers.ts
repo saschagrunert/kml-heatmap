@@ -30,7 +30,10 @@ import {
   AirportLayerHandle,
   MapLayerHandle,
 } from "../../kml_heatmap/frontend/mapLayers";
-import { MAP_LAYERS } from "../../kml_heatmap/frontend/utils/constants";
+import {
+  HEATMAP_LAYER_IDS,
+  MAP_LAYERS,
+} from "../../kml_heatmap/frontend/utils/constants";
 import type { Map as MapLibreMap } from "maplibre-gl";
 
 /**
@@ -486,7 +489,7 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
   const { map: mapOverride, ...rest } = overrides;
   const map = mapOverride === undefined ? createMapLibreMock() : mapOverride;
   const handles = {
-    heatmapLayer: spied(new MapLayerHandle([MAP_LAYERS.heat])),
+    heatmapLayer: spied(new MapLayerHandle(HEATMAP_LAYER_IDS)),
     aviationLayer: spied(new MapLayerHandle([MAP_LAYERS.aviation])),
     altitudeLayer: spied(
       new MapLayerHandle([

@@ -75,6 +75,7 @@ export const AIRPORT_HIDE_LABELS_BELOW_ZOOM = 4;
 export const MAP_SOURCES = {
   aviation: "aviation",
   heat: "heat",
+  heatLines: "heat-lines",
   replayRoute: "replay-route",
   pathsAltitude: "paths-altitude",
   pathsAirspeed: "paths-airspeed",
@@ -85,12 +86,15 @@ export const MAP_SOURCES = {
 
 /**
  * Ids of the layers the map is created with, one per source and named like
- * it. The order here is the drawing order, bottom to top; all of them sit
- * below the first label layer of the base style.
+ * it, except for the heat lines, which are drawn twice: a wide blurred glow
+ * and a thin core over it. The order here is the drawing order, bottom to
+ * top; all of them sit below the first label layer of the base style.
  */
 export const MAP_LAYERS = {
   aviation: "aviation",
   heat: "heat",
+  heatLinesGlow: "heat-lines-glow",
+  heatLinesCore: "heat-lines-core",
   replayRoute: "replay-route",
   pathsAltitude: "paths-altitude",
   pathsAirspeed: "paths-airspeed",
@@ -132,6 +136,36 @@ export const MAP_LAYERS = {
  * manager).
  */
 export const HEATMAP_CLUSTER = { radius: 6, maxZoom: 8 } as const;
+
+/**
+ * Where the heatmap hands over to the heat lines. A point reaches 22 px and
+ * the fixes of a track are about 235 m apart, which is 20 px at zoom 12 and
+ * 80 px at zoom 14: from 12 on a track falls apart into beads, and further
+ * in into scattered dots. The heat lines draw the flights as lines instead,
+ * coloured by the time spent around them (see calculations/heatLines.ts),
+ * so the busy places still read as the hot ones while each circuit and taxi
+ * route stays a line of its own.
+ *
+ * The lines fade in between `fromZoom` and `midZoom`, and only then does the
+ * heatmap fade out, until `fullZoom`. Both at once looked muddy: a heatmap
+ * at half opacity turns its white into grey and its blues into teal, and
+ * that haze lay beside lines too faint yet to carry the colour. Map units.
+ */
+export const HEAT_LINES = {
+  fromZoom: 11,
+  midZoom: 11.75,
+  fullZoom: 12.5,
+} as const;
+
+/**
+ * The layers the heatmap toggle shows and hides: the heatmap first (the
+ * e2e driver reads it off the front), then the lines it hands over to.
+ */
+export const HEATMAP_LAYER_IDS = [
+  MAP_LAYERS.heat,
+  MAP_LAYERS.heatLinesGlow,
+  MAP_LAYERS.heatLinesCore,
+] as const;
 
 /**
  * Elements hidden while the map is captured as an image (export, wrapped).
