@@ -728,7 +728,7 @@ describe("MapApp controls and map", () => {
         attributionControl: false,
         bearing: 0,
         pitch: 0,
-        maxPitch: 60,
+        maxPitch: 85,
       });
       expect(mockMap(app).options["transformRequest"]).toBeNull();
       expect(mockMap(app).getProjection()).toBeUndefined();
@@ -802,7 +802,12 @@ describe("MapApp controls and map", () => {
         "paths-airspeed",
         "paths-altitude-selected",
         "paths-airspeed-selected",
+        "paths-altitude-3d",
+        "paths-airspeed-3d",
+        "paths-altitude-selected-3d",
+        "paths-airspeed-selected-3d",
         "replay-trail",
+        "replay-trail-3d",
         "airport-labels",
       ]);
       // Empty until the managers fill them
@@ -1024,7 +1029,12 @@ describe("MapApp controls and map", () => {
           "paths-airspeed",
           "paths-altitude-selected",
           "paths-airspeed-selected",
+          "paths-altitude-3d",
+          "paths-airspeed-3d",
+          "paths-altitude-selected-3d",
+          "paths-airspeed-selected-3d",
           "replay-trail",
+          "replay-trail-3d",
           "place-labels",
           // Labels themselves, on top of the base style's
           "airport-labels",

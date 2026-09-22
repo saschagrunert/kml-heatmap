@@ -497,12 +497,16 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
       new MapLayerHandle([
         MAP_LAYERS.pathsAltitude,
         MAP_LAYERS.pathsAltitudeSelected,
+        MAP_LAYERS.pathsAltitudeRibbons,
+        MAP_LAYERS.pathsAltitudeSelectedRibbons,
       ]),
     ),
     airspeedLayer: spied(
       new MapLayerHandle([
         MAP_LAYERS.pathsAirspeed,
         MAP_LAYERS.pathsAirspeedSelected,
+        MAP_LAYERS.pathsAirspeedRibbons,
+        MAP_LAYERS.pathsAirspeedSelectedRibbons,
       ]),
     ),
     airportLayer: spied(new AirportLayerHandle()),

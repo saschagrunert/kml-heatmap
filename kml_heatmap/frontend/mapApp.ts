@@ -45,6 +45,7 @@ import {
   HEATMAP_LAYER_IDS,
   MAP_LAYERS,
   MAP_MAX_PITCH,
+  MAP_SKY,
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
 } from "./utils/constants";
@@ -164,6 +165,7 @@ export function cartoTransformRequest(
  */
 export const FALLBACK_STYLE: StyleSpecification = {
   version: 8,
+  sky: MAP_SKY,
   sources: {},
   layers: [
     {
@@ -211,6 +213,7 @@ export class MapApp {
   declare airportsVisible: StoreAccessors["airportsVisible"];
   declare aviationVisible: StoreAccessors["aviationVisible"];
   declare globeVisible: StoreAccessors["globeVisible"];
+  declare threeDVisible: StoreAccessors["threeDVisible"];
   declare currentData: StoreAccessors["currentData"];
   declare hasTimingData: StoreAccessors["hasTimingData"];
 
@@ -382,13 +385,18 @@ export class MapApp {
     this.mapReady.catch(() => {});
     const heatmap = new MapLayerHandle(HEATMAP_LAYER_IDS);
     const aviation = new MapLayerHandle([MAP_LAYERS.aviation]);
+    // The lines first: the e2e driver reads a mode's layer off the front
     const altitude = new MapLayerHandle([
       MAP_LAYERS.pathsAltitude,
       MAP_LAYERS.pathsAltitudeSelected,
+      MAP_LAYERS.pathsAltitudeRibbons,
+      MAP_LAYERS.pathsAltitudeSelectedRibbons,
     ]);
     const airspeed = new MapLayerHandle([
       MAP_LAYERS.pathsAirspeed,
       MAP_LAYERS.pathsAirspeedSelected,
+      MAP_LAYERS.pathsAirspeedRibbons,
+      MAP_LAYERS.pathsAirspeedSelectedRibbons,
     ]);
     const airports = new AirportLayerHandle();
     this.heatmapLayer = heatmap;
@@ -587,6 +595,9 @@ export class MapApp {
       if (state.globeVisible !== undefined) {
         this.globeVisible = state.globeVisible;
       }
+      if (state.threeDVisible !== undefined) {
+        this.threeDVisible = state.threeDVisible;
+      }
       // Isolating nothing is not a state the controls can leave: a link
       // written before path ids were versioned drops its selection but still
       // carries the isolate flag
@@ -776,6 +787,7 @@ export class MapApp {
     syncToggleButton(this.store, "airportsVisible", "airports-btn");
     syncToggleButton(this.store, "aviationVisible", "aviation-btn");
     syncToggleButton(this.store, "globeVisible", "globe-btn");
+    syncToggleButton(this.store, "threeDVisible", "three-d-btn");
     syncLegend(this.store, "altitudeVisible", "altitude-legend");
     syncLegend(this.store, "airspeedVisible", "airspeed-legend");
     // The isolate button depends on two keys, so PathSelection owns it

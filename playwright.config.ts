@@ -77,6 +77,13 @@ export default defineConfig<object, SiteOptions>({
       // goes through them, so a retry would hide exactly the intermittent
       // failures this project exists to catch
       retries: 0,
+      // Software WebGL at the Pixel 7's 2.6x pixel ratio, one browser per
+      // core of the runner: with the airport labels fading in and out on
+      // every move, every step of a spec takes one to four seconds there,
+      // against a tenth of that on a desktop. The specs that load the page
+      // twice, or replay over an open sheet, took 31 s in CI; a spec that
+      // hangs still fails
+      timeout: 60000,
       use: {
         ...devices["Pixel 7"],
         ...launchOptions,

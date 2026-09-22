@@ -9,7 +9,10 @@ import {
   LIVE_REGION_DELAY_MS,
   TOAST_STATUS_ID,
 } from "../../../../kml_heatmap/frontend/utils/toast";
-import { MAP_LAYERS } from "../../../../kml_heatmap/frontend/utils/constants";
+import {
+  MAP_LAYERS,
+  MAP_SOURCES,
+} from "../../../../kml_heatmap/frontend/utils/constants";
 import type { AirportMarker } from "../../../../kml_heatmap/frontend/types";
 import {
   createReplayManager,
@@ -980,6 +983,90 @@ describe("ReplayManager activation", () => {
     });
   });
 
+  describe("in the 3D view", () => {
+    it("lifts the trail when the replay opens in 3D", () => {
+      mockApp.threeDVisible = true;
+      mockApp.selectedPathIds = new Set([1]);
+
+      replayManager.toggleReplay();
+
+      expect(replayManager.state.active).toBe(true);
+      expect(replayManager.state.lifted).toBe(true);
+      expect(replayManager.state.smoothed?.chains).toHaveLength(1);
+    });
+
+    /** The features of a replay source */
+    const featuresOf = (id: string): GeoJSON.Feature[] =>
+      (mockApp.map!.source(id).data as GeoJSON.FeatureCollection).features;
+
+    /** Fly the replay to its end and let the trail be written */
+    const flyToTheEnd = (): void => {
+      replayManager.state.currentTime = replayManager.state.maxTime;
+      replayManager.updateReplayDisplay();
+      vi.advanceTimersByTime(100);
+    };
+
+    it("stands the replayed flight on its own ground", () => {
+      mockApp.selectedPathIds = new Set([1]);
+
+      replayManager.toggleReplay();
+
+      const altitudes = replayManager.state.segments.map(
+        (s) => s.altitude_ft ?? 0,
+      );
+      // One height per segment, among the flight's own
+      const ground = [...replayManager.state.groundFt];
+      expect(ground).toHaveLength(altitudes.length);
+      for (const height of ground) {
+        expect(height).toBeGreaterThanOrEqual(Math.min(...altitudes));
+        expect(height).toBeLessThanOrEqual(Math.max(...altitudes));
+      }
+    });
+
+    it("lifts the flown trail and puts it back as 3D comes and goes", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      replayManager.state.currentTime = replayManager.state.maxTime;
+      replayManager.updateReplayDisplay();
+      expect(replayManager.state.smoothed).toBeNull();
+
+      mockApp.store.set("threeDVisible", true);
+      vi.advanceTimersByTime(100);
+
+      expect(replayManager.state.lifted).toBe(true);
+      // The flight smoothed once, as one chain, for the trail's ribbons
+      expect(replayManager.state.smoothed?.chains).toHaveLength(1);
+      expect(replayManager.state.trailRuns.length).toBeGreaterThan(0);
+      // Written to the ribbons' source, and gone from the lines'
+      expect(featuresOf(MAP_SOURCES.replayTrail)).toEqual([]);
+      expect(featuresOf(MAP_SOURCES.replayTrailRibbons).length).toBeGreaterThan(
+        0,
+      );
+
+      mockApp.store.set("threeDVisible", false);
+      vi.advanceTimersByTime(100);
+
+      expect(replayManager.state.lifted).toBe(false);
+      expect(replayManager.state.smoothed).toBeNull();
+      expect(featuresOf(MAP_SOURCES.replayTrailRibbons)).toEqual([]);
+      expect(featuresOf(MAP_SOURCES.replayTrail).length).toBeGreaterThan(0);
+    });
+
+    it("empties the trail's ribbons as the replay closes", () => {
+      mockApp.threeDVisible = true;
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      flyToTheEnd();
+      expect(featuresOf(MAP_SOURCES.replayTrailRibbons).length).toBeGreaterThan(
+        0,
+      );
+
+      replayManager.toggleReplay();
+
+      expect(featuresOf(MAP_SOURCES.replayTrailRibbons)).toEqual([]);
+    });
+  });
+
   describe("toggleAutoZoom", () => {
     /** A replay in progress, with the aircraft away from the start */
     function replayInProgress(
@@ -1003,9 +1090,27 @@ describe("ReplayManager activation", () => {
       expect(mockApp.map!.easeTo).toHaveBeenCalledWith({
         center: [lon, lat],
         zoom: 15,
+        // Flat: nothing lifts the airplane off the ground under it
+        offset: [0, 0],
         duration: 800,
         animate: true,
       });
+    });
+
+    it("brings the airplane itself to the middle in the 3D view", () => {
+      replayInProgress();
+      mockApp.map!.jumpTo({ pitch: 60 });
+      replayManager.state.airplaneHeightFt = 3000;
+
+      replayManager.toggleAutoZoom();
+
+      // The ground under it goes as far below the middle as the airplane
+      // is drawn above it at the follow zoom
+      const { offset } = mockApp.map!.easeTo.mock.calls[0]![0] as {
+        offset: [number, number];
+      };
+      expect(offset[0]).toBe(0);
+      expect(offset[1]).toBeGreaterThan(100);
     });
 
     it("arrives where a replay that started with it on would be", () => {

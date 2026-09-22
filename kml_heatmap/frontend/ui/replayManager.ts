@@ -15,11 +15,18 @@ import {
 } from "../utils/buttonState";
 import { setControlIcon } from "../utils/icons";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
+import {
+  airplaneLiftPx,
+  groundProfileFt,
+  liftFt,
+  smoothFlights,
+} from "../calculations/lift";
 import { toBounds, toLngLat, type LngLatTuple } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { prepareReplaySegments } from "../features/replay";
 import { segmentBounds } from "../features/wrapped";
 import { segmentsForPathIds } from "../calculations/statistics";
+
 import {
   AirplaneMarker,
   ReplayRenderer,
@@ -252,10 +259,42 @@ export class ReplayManager {
     // the trail, so the scale follows them. Subscribed after the store's own
     // legend sync, so this runs last and has the final word.
     this.stopFollowingTrailLegend();
-    this.unsubscribeTrailLegend = this.app.store.subscribeKeys(
+    const unsubscribeLegend = this.app.store.subscribeKeys(
       ["altitudeVisible", "airspeedVisible"],
       () => this.updateTrailLegend(),
     );
+    // The 3D view comes or goes during a replay: the flown trail is cut
+    // again, lifted or flat, and the airplane goes up or down with it
+    const unsubscribeLift = this.app.store.subscribe("threeDVisible", (on) => {
+      this.setLifted(on);
+      this.redrawReplayPath(
+        this.app.airspeedVisible && !this.app.altitudeVisible
+          ? "airspeed"
+          : "altitude",
+      );
+      this.updateReplayDisplay();
+    });
+    this.unsubscribeTrailLegend = () => {
+      unsubscribeLegend();
+      unsubscribeLift();
+    };
+  }
+
+  /**
+   * Lift the trail and the airplane, or put them on the ground: the flight
+   * is smoothed at its height once, and the trail's ribbons are cut from it
+   * (see lift.ts)
+   */
+  private setLifted(lifted: boolean): void {
+    const state = this.state;
+    state.lifted = lifted;
+    state.smoothed = lifted
+      ? smoothFlights(state.segments, (i) =>
+          liftFt(state.segments[i]!.altitude_ft ?? 0, state.groundFt[i] ?? 0),
+        )
+      : null;
+    state.trailPieces = new WeakMap();
+    state.trailWidthZoom = null;
   }
 
   private stopFollowingTrailLegend(): void {
@@ -403,6 +442,8 @@ export class ReplayManager {
     }
 
     this.calculateColorRanges(selectedPathId);
+    this.state.groundFt = groundProfileFt(this.state.segments);
+    this.setLifted(this.app.threeDVisible);
     this.setupReplayUI();
     // The speed select may hold a value restored by the browser, so the
     // state follows it rather than the other way round
@@ -505,6 +546,8 @@ export class ReplayManager {
           ],
     );
     this.setReplaySource(MAP_SOURCES.replayTrail, []);
+    this.setReplaySource(MAP_SOURCES.replayTrailRibbons, []);
+    this.state.trailWrittenTo = null;
     this.state.trailRuns = [];
     this.state.trailDirty = false;
     this.state.layerActive = true;
@@ -518,10 +561,15 @@ export class ReplayManager {
     this.state.layerActive = false;
     this.setReplaySource(MAP_SOURCES.replayRoute, []);
     this.setReplaySource(MAP_SOURCES.replayTrail, []);
+    this.setReplaySource(MAP_SOURCES.replayTrailRibbons, []);
+    this.state.trailWrittenTo = null;
   }
 
   private setReplaySource(
-    id: typeof MAP_SOURCES.replayRoute | typeof MAP_SOURCES.replayTrail,
+    id:
+      | typeof MAP_SOURCES.replayRoute
+      | typeof MAP_SOURCES.replayTrail
+      | typeof MAP_SOURCES.replayTrailRibbons,
     features: Feature[],
   ): void {
     void this.app.map
@@ -794,10 +842,21 @@ export class ReplayManager {
    */
   private zoomToAircraft(): void {
     const position = this.state.airplaneMarker?.getLatLng();
-    if (!position || !this.app.map) return;
-    this.app.map.easeTo({
+    const map = this.app.map;
+    if (!position || !map) return;
+    // In the 3D view the airplane is drawn up at its height: the ground
+    // under it goes as far below the middle as it is drawn above it at the
+    // zoom this ends at, which brings the airplane itself to the middle
+    const lift = airplaneLiftPx(
+      map,
+      position[0],
+      this.state.airplaneHeightFt,
+      AUTO_ZOOM_FOLLOW,
+    );
+    map.easeTo({
       center: toLngLat(position),
       zoom: AUTO_ZOOM_FOLLOW,
+      offset: [0, lift],
       duration: AUTO_ZOOM_PAN_MS,
       animate: !prefersReducedMotion(),
     });

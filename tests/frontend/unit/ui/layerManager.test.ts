@@ -51,7 +51,9 @@ vi.mock("maplibre-gl", async (importOriginal) => {
 interface RunFeature {
   type: "Feature";
   properties: PathRunProperties;
-  geometry: { type: "LineString"; coordinates: [number, number][] };
+  geometry:
+    | { type: "LineString"; coordinates: [number, number][] }
+    | { type: "MultiPolygon"; coordinates: number[][][][] };
 }
 
 const ALTITUDE = "paths-altitude";
@@ -158,6 +160,8 @@ describe("LayerManager", () => {
       if (op === "literal") return args[0];
       if (op === "get") return properties[args[0] as keyof PathRunProperties];
       if (op === "!") return !evaluate(args[0]);
+      if (op === "all") return args.every((arg) => evaluate(arg) === true);
+      if (op === "has") return (args[0] as string) in properties;
       if (op === "in") {
         return (evaluate(args[1]) as unknown[]).includes(evaluate(args[0]));
       }
@@ -192,6 +196,11 @@ describe("LayerManager", () => {
           },
         }));
     });
+  }
+
+  /** A main layer's filter, which follows the selection; null for none */
+  function selectionFilter(layerId: string): unknown {
+    return mockApp.map!.layer(layerId).filter ?? null;
   }
 
   function setDataCalls(sourceId: string): number {
@@ -369,7 +378,7 @@ describe("LayerManager", () => {
       expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
       expect(setDataCalls(AIRSPEED)).toBe(0);
       expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
-      expect(mockApp.map!.layer(ALTITUDE).filter).toBeUndefined();
+      expect(selectionFilter(ALTITUDE)).toBeNull();
       expect(drawn("altitude")).toEqual([
         { pathId: 1, options: { color, weight: 4, opacity: 0.85 } },
       ]);
@@ -562,7 +571,7 @@ describe("LayerManager", () => {
         "line-opacity": 1,
       });
       // Drawn once, not a second time dimmed below itself
-      expect(mockApp.map!.layer(ALTITUDE).filter).toEqual([
+      expect(selectionFilter(ALTITUDE)).toEqual([
         "!",
         ["in", ["get", "pathId"], ["literal", [1]]],
       ]);
@@ -668,7 +677,7 @@ describe("LayerManager", () => {
       layerManager.redrawAltitudePaths();
 
       // The main layer shows nothing; its visibility is the handle's
-      expect(mockApp.map!.layer(ALTITUDE).filter).toEqual(["literal", false]);
+      expect(selectionFilter(ALTITUDE)).toEqual(["literal", false]);
       expect(mockApp.map!.setLayoutProperty).not.toHaveBeenCalled();
       expect(features(ALTITUDE_SELECTED)).toHaveLength(1);
       expect(paint(ALTITUDE_SELECTED)).toMatchObject({
@@ -699,7 +708,7 @@ describe("LayerManager", () => {
       expect(features(ALTITUDE).map((f) => f.properties.pathId)).toEqual([
         1, 2,
       ]);
-      expect(mockApp.map!.layer(ALTITUDE).filter).toEqual([
+      expect(selectionFilter(ALTITUDE)).toEqual([
         "!",
         ["in", ["get", "pathId"], ["literal", [1]]],
       ]);
@@ -710,7 +719,7 @@ describe("LayerManager", () => {
       mockApp.selectedPathIds.clear();
       layerManager.redrawAltitudePaths();
 
-      expect(mockApp.map!.layer(ALTITUDE).filter).toBeNull();
+      expect(selectionFilter(ALTITUDE)).toBeNull();
       expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
     });
 
@@ -722,7 +731,8 @@ describe("LayerManager", () => {
       mockApp.selectedPathIds.add(1);
       layerManager.redrawAltitudePaths();
       layerManager.redrawAltitudePaths();
-      expect(mockApp.map!.setFilter).toHaveBeenCalledOnce();
+      // Once for the lines and once for the ribbons of the same source
+      expect(mockApp.map!.setFilter).toHaveBeenCalledTimes(2);
     });
 
     it("falls back to the full range when selected segments are empty", () => {
@@ -952,7 +962,7 @@ describe("LayerManager", () => {
         "line-opacity",
         0.1,
       );
-      expect(mockApp.map!.layer(ALTITUDE).filter).toEqual([
+      expect(selectionFilter(ALTITUDE)).toEqual([
         "!",
         ["in", ["get", "pathId"], ["literal", [1]]],
       ]);
@@ -1024,7 +1034,7 @@ describe("LayerManager", () => {
       expect(setDataCalls(ALTITUDE)).toBe(1);
       expect(features(ALTITUDE_SELECTED)).toEqual([]);
       expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
-      expect(mockApp.map!.layer(ALTITUDE).filter).toBeNull();
+      expect(selectionFilter(ALTITUDE)).toBeNull();
       expect(drawn("altitude").map((entry) => entry.options)).toEqual([
         {
           color: stepColor(getColorForAltitude, 3000, 0, 5000),
@@ -2026,6 +2036,227 @@ describe("LayerManager", () => {
       mockApp.map!.emit("idle");
 
       expect(tooltips().filter((popup) => popup.isOpen())).toHaveLength(0);
+    });
+  });
+
+  describe("the 3D view", () => {
+    const RIBBONS = "paths-altitude-3d";
+    const RIBBONS_SELECTED = "paths-altitude-selected-3d";
+
+    /** A climb from the ground at 1000 ft to 1100 ft, then level */
+    function drawClimb(): void {
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        [
+          createSegment({
+            path_id: 1,
+            altitude_ft: 1000,
+            coords: [
+              [48, 16],
+              [48, 16.01],
+            ],
+          }),
+          createSegment({
+            path_id: 1,
+            altitude_ft: 1100,
+            coords: [
+              [48, 16.01],
+              [48, 16.02],
+            ],
+          }),
+          createSegment({
+            path_id: 1,
+            altitude_ft: 1100,
+            coords: [
+              [48, 16.02],
+              [48, 16.03],
+            ],
+          }),
+        ],
+      );
+      mockApp.altitudeRange = { min: 0, max: 32000 };
+      mockApp.store.set("threeDVisible", true);
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+    }
+
+    const ribbons = (): RunFeature[] => features(RIBBONS);
+
+    /** How far apart the two edges of a ribbon's first quad are, in metres */
+    const ribbonWidthM = (): number => {
+      const geometry = ribbons()[0]!.geometry as GeoJSON.MultiPolygon;
+      const [a, , , d] = geometry.coordinates[0]![0]! as [number, number][];
+      const metresPerDegree = 111320;
+      const dLng =
+        (d![0] - a![0]) * metresPerDegree * Math.cos((48 * Math.PI) / 180);
+      const dLat = (d![1] - a![1]) * metresPerDegree;
+      return Math.hypot(dLng, dLat);
+    };
+
+    it("writes each run as ribbon pieces of the same run in place of its line", () => {
+      drawClimb();
+
+      // To a source of their own, which is not simplified
+      expect(features(ALTITUDE)).toEqual([]);
+      expect(ribbons().length).toBeGreaterThan(1);
+      for (const ribbon of ribbons()) {
+        expect(ribbon.geometry.type).toBe("MultiPolygon");
+        // One run: the table answers for all of its pieces
+        expect(ribbon.properties).toMatchObject({ r: 0, g: 1, pathId: 1 });
+      }
+    });
+
+    it("stands the ribbon on the flight's ground and slopes it with the climb", () => {
+      drawClimb();
+
+      // The ground of this flight is where it spent the lowest of its time,
+      // 1000 ft: level on it, then 100 ft of climb cut into pieces of 20 ft,
+      // each at the height of its middle, then level at the top
+      expect(ribbons().map((ribbon) => ribbon.properties.h)).toEqual([
+        0, 10, 30, 50, 70, 90, 100,
+      ]);
+    });
+
+    it("writes no ribbon outside the 3D view", () => {
+      drawClimb();
+      mockApp.store.set("threeDVisible", false);
+
+      expect(ribbons()).toEqual([]);
+      expect(features(ALTITUDE)).toHaveLength(1);
+    });
+
+    it("draws the ribbons a few pixels wide, cut again for another zoom level", () => {
+      mockApp.map!.jumpTo({ zoom: 8.2 });
+      drawClimb();
+      const at8 = ribbonWidthM();
+      const writes = setDataCalls(RIBBONS);
+
+      // Within the level nothing is cut again
+      mockApp.map!.jumpTo({ zoom: 8.9 });
+      mockApp.map!.emit("zoomend");
+      expect(setDataCalls(RIBBONS)).toBe(writes);
+
+      // A level further in, half as wide on the ground: as wide on screen
+      mockApp.map!.jumpTo({ zoom: 9.1 });
+      mockApp.map!.emit("zoomend");
+      expect(setDataCalls(RIBBONS)).toBe(writes + 1);
+      expect(ribbonWidthM()).toBeCloseTo(at8 / 2, 3);
+      // About 3 pixels at zoom 9.5, 512 px tiles, at 48 degrees
+      const metresPerPixel =
+        (40075016.686 * Math.cos((48 * Math.PI) / 180)) / (512 * 2 ** 9.5);
+      expect(ribbonWidthM() / metresPerPixel).toBeCloseTo(3, 1);
+    });
+
+    it("still answers for the flights while the ribbons are cut for another zoom", async () => {
+      mockApp.map!.jumpTo({ zoom: 8.2 });
+      drawClimb();
+      await landed();
+      const g = ribbons()[0]!.properties.g;
+      const workerAnswers = holdSetData(RIBBONS);
+
+      mockApp.map!.jumpTo({ zoom: 9.1 });
+      mockApp.map!.emit("zoomend");
+
+      // The same runs, so the tiles of before still stand for them: no
+      // click or pointer is kept waiting for the new ones
+      expect(ribbons()[0]!.properties.g).toBe(g);
+      mockApp.map!.renderedFeatures = [
+        rendered(RIBBONS, { r: 0, g, pathId: 1, h: 0 }),
+      ];
+      expect(layerManager.hitTest(pointAt(48, 16.005))).toMatchObject({
+        pathId: 1,
+      });
+      await workerAnswers();
+    });
+
+    it("draws the flights as lines zoomed in close, and lifts them again further out", () => {
+      mockApp.map!.jumpTo({ zoom: 16.5 });
+      drawClimb();
+      expect(ribbons().length).toBeGreaterThan(0);
+
+      // The camera is lower than a circuit there
+      mockApp.map!.jumpTo({ zoom: 17.2 });
+      mockApp.map!.emit("zoomend");
+      expect(ribbons()).toEqual([]);
+      expect(features(ALTITUDE)).toHaveLength(1);
+
+      mockApp.map!.jumpTo({ zoom: 16.8 });
+      mockApp.map!.emit("zoomend");
+      expect(features(ALTITUDE)).toEqual([]);
+      expect(ribbons().length).toBeGreaterThan(0);
+    });
+
+    it("leaves the ribbons be as the map zooms while the flights are flat", () => {
+      drawClimb();
+      mockApp.store.set("threeDVisible", false);
+      const writes = setDataCalls(RIBBONS);
+
+      mockApp.map!.jumpTo({ zoom: 3 });
+      mockApp.map!.emit("zoomend");
+
+      expect(setDataCalls(RIBBONS)).toBe(writes);
+    });
+
+    it("draws the ribbons as strong as the lines, dimmed like them", () => {
+      drawClimb();
+
+      expect(paint(RIBBONS)["fill-extrusion-opacity"]).toBe(0.85);
+      expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
+    });
+
+    it("keeps the ribbons of the selected flights off the main layer, like the lines", () => {
+      drawClimb();
+      mockApp.altitudeVisible = true;
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+
+      expect(mockApp.map!.layer(RIBBONS).filter).toEqual([
+        "!",
+        ["in", ["get", "pathId"], ["literal", [1]]],
+      ]);
+      // The selection's own ribbons, at full strength
+      expect(features(ALTITUDE_SELECTED)).toEqual([]);
+      expect(features(RIBBONS_SELECTED).length).toBeGreaterThan(0);
+      expect(paint(RIBBONS_SELECTED)["fill-extrusion-opacity"]).toBe(1);
+    });
+
+    it("looks for the ribbons under the pointer only in the 3D view", () => {
+      drawClimb();
+
+      layerManager.hitTest(new Point(100, 50));
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenLastCalledWith(
+        expect.anything(),
+        { layers: [ALTITUDE, ALTITUDE_SELECTED, RIBBONS, RIBBONS_SELECTED] },
+      );
+
+      mockApp.store.set("threeDVisible", false);
+      layerManager.hitTest(new Point(100, 50));
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenLastCalledWith(
+        expect.anything(),
+        { layers: [ALTITUDE, ALTITUDE_SELECTED] },
+      );
+    });
+
+    it("finds the flight of a ribbon under the pointer", async () => {
+      drawClimb();
+      await landed();
+      mockApp.map!.renderedFeatures = [
+        rendered(RIBBONS, { r: 0, g: 1, h: 100 }),
+      ];
+
+      expect(layerManager.hitTest(pointAt(48, 16.025))).toMatchObject({
+        pathId: 1,
+      });
+    });
+
+    it("cuts and writes the flights again as the 3D view comes and goes", () => {
+      drawClimb();
+      const writes = setDataCalls(ALTITUDE);
+
+      mockApp.store.set("threeDVisible", false);
+      expect(setDataCalls(ALTITUDE)).toBe(writes + 1);
+      mockApp.store.set("threeDVisible", true);
+      expect(setDataCalls(ALTITUDE)).toBe(writes + 2);
     });
   });
 

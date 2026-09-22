@@ -30,11 +30,29 @@ export const MAP_MIN_ZOOM = MIN_ZOOM - ZOOM_OFFSET;
 export const MAP_MAX_ZOOM = MAX_ZOOM - ZOOM_OFFSET;
 
 /**
- * How far the map tilts, in degrees. MapLibre's own default: past it a flat
- * map shows its horizon, which needs a sky above it and tiles out to the
- * vanishing point.
+ * How far the map tilts, in degrees: MapLibre's limit, all but level with
+ * the ground, which the 3D view (calculations/lift.ts) is best seen from.
+ * Past 60 a flat map shows its horizon, so the map has a sky above it (see
+ * MAP_SKY), and MapLibre loads coarser tiles towards the vanishing point.
  */
-export const MAP_MAX_PITCH = 60;
+export const MAP_MAX_PITCH = 85;
+
+/**
+ * The sky above the horizon of a steeply tilted map: the dark of the base
+ * style, a shade lighter at the horizon, with the far ground fading into
+ * it, so the map ends in a haze rather than an edge against nothing. A
+ * style property, which the base style does not set; the app's styles
+ * carry it (see FALLBACK_STYLE and withDataLayers).
+ */
+export const MAP_SKY = {
+  "sky-color": "#0b0d12",
+  "horizon-color": "#1b202b",
+  "fog-color": "#0e0e0e",
+  "sky-horizon-blend": 0.6,
+  "horizon-fog-blend": 0.4,
+  "fog-ground-blend": 0.75,
+  "atmosphere-blend": 0,
+} as const;
 
 /**
  * Zoom of a view that names no zoom of its own: the map's first view, and
@@ -81,17 +99,25 @@ export const MAP_SOURCES = {
   pathsAirspeed: "paths-airspeed",
   pathsAltitudeSelected: "paths-altitude-selected",
   pathsAirspeedSelected: "paths-airspeed-selected",
+  pathsAltitudeRibbons: "paths-altitude-3d",
+  pathsAirspeedRibbons: "paths-airspeed-3d",
+  pathsAltitudeSelectedRibbons: "paths-altitude-selected-3d",
+  pathsAirspeedSelectedRibbons: "paths-airspeed-selected-3d",
   replayTrail: "replay-trail",
+  replayTrailRibbons: "replay-trail-3d",
   airportLabels: "airport-labels",
 } as const;
 
 /**
  * Ids of the layers the map is created with, one per source and named like
  * it, except for the heat lines, which are drawn twice: a wide blurred glow
- * and a thin core over it. The order here is the drawing order, bottom to
- * top. All of them sit below the first label layer of the base style, but
- * the airport labels: they are labels themselves and go on top of every
- * layer, where the map places them first and the place names give way.
+ * and a thin core over it. The flights and the replay trail have a source
+ * and a layer each for their lines and for their ribbons at their altitude
+ * in the 3D view (see calculations/lift.ts). The order here is the drawing order,
+ * bottom to top. All of them sit below the first label layer of the base
+ * style, but the airport labels: they are labels themselves and go on top
+ * of every layer, where the map places them first and the place names give
+ * way.
  */
 export const MAP_LAYERS = {
   aviation: "aviation",
@@ -103,7 +129,12 @@ export const MAP_LAYERS = {
   pathsAirspeed: "paths-airspeed",
   pathsAltitudeSelected: "paths-altitude-selected",
   pathsAirspeedSelected: "paths-airspeed-selected",
+  pathsAltitudeRibbons: "paths-altitude-3d",
+  pathsAirspeedRibbons: "paths-airspeed-3d",
+  pathsAltitudeSelectedRibbons: "paths-altitude-selected-3d",
+  pathsAirspeedSelectedRibbons: "paths-airspeed-selected-3d",
   replayTrail: "replay-trail",
+  replayTrailRibbons: "replay-trail-3d",
   airportLabels: "airport-labels",
 } as const;
 

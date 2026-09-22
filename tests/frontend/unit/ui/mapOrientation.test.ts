@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { MapOrientation } from "../../../../kml_heatmap/frontend/ui/mapOrientation";
 import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import {
@@ -7,6 +7,11 @@ import {
   mountElements,
   type MockApp,
 } from "../../testHelpers";
+import { showToast } from "../../../../kml_heatmap/frontend/utils/toast";
+
+vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => ({
+  showToast: vi.fn(),
+}));
 
 describe("MapOrientation", () => {
   let app: MockApp;
@@ -82,6 +87,11 @@ describe("MapOrientation", () => {
         // Half as tall laid back by 60, so it grows by the root of two
         expect(grow(button)).toBeCloseTo(Math.SQRT2, 6);
       }
+
+      // Further back it would lie flat and outgrow its button
+      turn({ pitch: 85 });
+      expect(tilt(compass())).toBe("rotateX(60deg)");
+      expect(grow(compass())).toBeCloseTo(Math.SQRT2, 6);
 
       turn({ pitch: 0 });
       expect(tilt(compass())).toBe("");
@@ -189,6 +199,41 @@ describe("MapOrientation", () => {
 
       await expect(failed).rejects.toThrow("no layers");
       expect(app.map!.setProjection).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("3D", () => {
+    beforeEach(() => vi.mocked(showToast).mockClear());
+
+    it("tilts a flat map and brings the altitude colours on", () => {
+      app.map!.jumpTo({ zoom: 12, pitch: 0 });
+
+      orientation.toggleThreeD();
+
+      expect(app.threeDVisible).toBe(true);
+      expect(app.map!.easeTo).toHaveBeenCalledWith({ pitch: 50 });
+      // The ribbons are the colour layers lifted: without one, nothing shows
+      expect(app.uiToggles.toggleAltitude).toHaveBeenCalledOnce();
+    });
+
+    it("leaves a tilted map and a shown colour layer as they are", () => {
+      app.map!.jumpTo({ zoom: 12, pitch: 40 });
+      app.airspeedVisible = true;
+
+      orientation.toggleThreeD();
+
+      expect(app.map!.easeTo).not.toHaveBeenCalled();
+      expect(app.uiToggles.toggleAltitude).not.toHaveBeenCalled();
+    });
+
+    it("puts the flights back on the ground and leaves the map be", () => {
+      orientation.toggleThreeD();
+      vi.mocked(app.map!.easeTo).mockClear();
+
+      orientation.toggleThreeD();
+
+      expect(app.threeDVisible).toBe(false);
+      expect(app.map!.easeTo).not.toHaveBeenCalled();
     });
   });
 

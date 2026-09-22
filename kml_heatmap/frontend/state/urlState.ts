@@ -71,6 +71,7 @@ function parsePathId(text: string, radix: number): number | null {
  *   b - bearing in degrees, clockwise from north (absent: north up)
  *   t - tilt (pitch) in degrees (absent: flat)
  *   g - '1' when the map is drawn as a globe (absent: Mercator)
+ *   d - '1' when the flights are lifted in 3D (absent: flat)
  * @param params - URLSearchParams object or search string
  * @returns Parsed state or null if no params
  */
@@ -190,6 +191,7 @@ export function parseUrlParams(
   const pitch = toMapPitch(parseFloat(urlParams.get("t") ?? ""));
   if (pitch !== null) state.pitch = pitch;
   if (urlParams.get("g") === "1") state.globeVisible = true;
+  if (urlParams.get("d") === "1") state.threeDVisible = true;
 
   return state;
 }
@@ -285,6 +287,7 @@ export function encodeStateToUrl(state: AppState): string {
   const pitch = roundToTenth(state.pitch ?? 0);
   if (pitch !== 0) params.set("t", String(pitch));
   if (state.globeVisible) params.set("g", "1");
+  if (state.threeDVisible) params.set("d", "1");
 
   return params.toString();
 }

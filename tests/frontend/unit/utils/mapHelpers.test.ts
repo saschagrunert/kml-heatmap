@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Map as MapLibreMap, Popup as MapLibrePopup } from "maplibre-gl";
 import {
+  cameraDistanceRatio,
   closeWhenBehindGlobe,
   createActivationFilter,
   cssVar,
@@ -243,6 +244,42 @@ describe("mapHelpers", () => {
       const place = map.project([8, 50]);
       expect(place.x).toBeCloseTo(-36, 3);
       expect(place.y).toBeCloseTo(-6, 3);
+    });
+  });
+
+  describe("cameraDistanceRatio", () => {
+    /** A map 800 px tall, tilted by `pitch` */
+    function tilted(pitch: number): MapLibreMap & MockMap {
+      const map = mapStub({ center: [10, 50] });
+      Object.defineProperty(map.getContainer(), "clientHeight", {
+        value: 800,
+      });
+      map.jumpTo({ pitch });
+      return map;
+    }
+
+    it("is 1 on a flat map and in the middle of a tilted one", () => {
+      expect(cameraDistanceRatio(tilted(0), { lng: 10, lat: 50.3 })).toBe(1);
+      expect(cameraDistanceRatio(tilted(60), { lng: 10, lat: 50 })).toBeCloseTo(
+        1,
+        9,
+      );
+    });
+
+    it("grows towards the top of a tilted map, and is Infinity past its horizon", () => {
+      const map = tilted(60);
+      const near = cameraDistanceRatio(map, { lng: 10, lat: 49.9 });
+      const far = cameraDistanceRatio(map, { lng: 10, lat: 50.2 });
+
+      expect(near).toBeLessThan(1);
+      expect(far).toBeGreaterThan(1);
+      // The ray to a place drawn y pixels over the middle leaves the camera
+      // atan(y / focal) above the middle's, which meets the ground at 60°
+      const focal = 400 / Math.tan((36.87 * Math.PI) / 360);
+      const y = -map.project([10, 50.2]).y;
+      const angle = Math.PI / 3 + Math.atan(y / focal);
+      expect(far).toBeCloseTo(Math.cos(Math.PI / 3) / Math.cos(angle), 6);
+      expect(cameraDistanceRatio(map, { lng: 10, lat: 60 })).toBe(Infinity);
     });
   });
 

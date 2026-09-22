@@ -3,6 +3,7 @@
  */
 import type { Marker, Popup } from "maplibre-gl";
 import type { PathSegment, PopupHost, TrailRun } from "../types";
+import type { RibbonPiece, SmoothedFlights } from "../calculations/lift";
 
 /**
  * The airplane on the map. MapLibre's marker knows nothing of popups the way
@@ -18,6 +19,11 @@ export interface ReplayAirplane extends PopupHost {
   getLatLng(): [lat: number, lon: number];
   /** Move the airplane, and its popup with it while that is open */
   setLatLng(position: readonly [lat: number, lon: number]): void;
+  /**
+   * Draw the airplane, and its popup, `px` above its position: at its
+   * height in the 3D view (see airplaneLiftPx)
+   */
+  setLift(px: number): void;
   /** The marker's element: a real button, so it takes focus and Enter */
   getElement(): HTMLButtonElement;
   setPopupContent(html: string): void;
@@ -48,6 +54,33 @@ export class ReplayState {
   lastFrameTime: number | null = null;
   colorMinAlt = 0;
   colorMaxAlt = 10000;
+  /** The ground under each segment of the flight, in feet (groundProfileFt) */
+  groundFt: Float64Array = new Float64Array(0);
+  /** Whether the trail and the airplane are lifted: the 3D view is on */
+  lifted = false;
+  /**
+   * The flight smoothed at its height, which the trail's ribbons are cut
+   * from in the 3D view (see lift.ts); null while it is flat
+   */
+  smoothed: SmoothedFlights | null = null;
+  /**
+   * The ribbon pieces of each run of the trail, as last cut: a run that has
+   * not grown since, at the same width, is not cut again (see
+   * trailFeatureCollection)
+   */
+  trailPieces = new WeakMap<
+    TrailRun,
+    { lastIndex: number; widthZoom: number; pieces: RibbonPiece[] }
+  >();
+  /** The zoom the trail's ribbons were last written for, null for none */
+  trailWidthZoom: number | null = null;
+  /** The source the trail was last written to, its line's or its ribbons' */
+  trailWrittenTo: string | null = null;
+  /**
+   * The airplane's height above the flight's ground where it is now, null
+   * while it is not lifted; the camera follows it up there
+   */
+  airplaneHeightFt: number | null = null;
   colorMinSpeed = 0;
   colorMaxSpeed = 200;
   autoZoom = false;

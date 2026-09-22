@@ -4,7 +4,12 @@
  * layers that are created once, empty, when the style has loaded. This
  * module creates them and provides the handles that show and hide them.
  */
-import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
+import type {
+  FillExtrusionLayerSpecification,
+  Map as MapLibreMap,
+  StyleSpecification,
+} from "maplibre-gl";
+import { ribbonHeights } from "./calculations/lift";
 import { cssVar, firstSymbolLayerId } from "./utils/mapHelpers";
 import {
   HEAT_LINES,
@@ -109,6 +114,49 @@ export class AirportLayerHandle extends MapLayerHandle {
       ?.getContainer()
       .classList.toggle(AIRPORTS_HIDDEN_CLASS, !this.isVisible());
   }
+}
+
+/**
+ * A source of lifted flights, which the 3D view draws as ribbons at their
+ * height (see calculations/lift.ts), and its layer. The source is not
+ * simplified: a ribbon is a few pixels across, and its quads would be
+ * dropped from the tiles. The layer's opacity is the owner's business: the
+ * layer manager dims it for a selection, as it does the lines.
+ */
+function addRibbons(
+  map: MapLibreMap,
+  id: string,
+  layout: { visibility?: "none" },
+  opacity: number | undefined,
+  before: string | undefined,
+): void {
+  map.addSource(id, {
+    type: "geojson",
+    data: emptyGeoJson(),
+    tolerance: 0,
+    maxzoom: 14,
+  });
+  map.addLayer(ribbonLayer(id, layout, opacity), before);
+}
+
+function ribbonLayer(
+  id: string,
+  layout: { visibility?: "none" },
+  opacity: number | undefined,
+): FillExtrusionLayerSpecification {
+  const { base, height } = ribbonHeights();
+  return {
+    id,
+    type: "fill-extrusion",
+    source: id,
+    layout,
+    paint: {
+      ...(opacity !== undefined && { "fill-extrusion-opacity": opacity }),
+      "fill-extrusion-color": ["get", "color"],
+      "fill-extrusion-base": base,
+      "fill-extrusion-height": height,
+    },
+  };
 }
 
 /** An empty GeoJSON source, the state every data source is created in */
@@ -256,6 +304,14 @@ export function addDataLayers(map: MapLibreMap): void {
       before,
     );
   }
+  for (const id of [
+    MAP_SOURCES.pathsAltitudeRibbons,
+    MAP_SOURCES.pathsAirspeedRibbons,
+    MAP_SOURCES.pathsAltitudeSelectedRibbons,
+    MAP_SOURCES.pathsAirspeedSelectedRibbons,
+  ]) {
+    addRibbons(map, id, hidden, undefined, before);
+  }
 
   map.addSource(MAP_SOURCES.replayTrail, {
     type: "geojson",
@@ -273,6 +329,14 @@ export function addDataLayers(map: MapLibreMap): void {
         "line-opacity": REPLAY_TRAIL_LINE.opacity,
       },
     },
+    before,
+  );
+  // In the 3D view the trail is written here instead (see ReplayRenderer)
+  addRibbons(
+    map,
+    MAP_SOURCES.replayTrailRibbons,
+    {},
+    REPLAY_TRAIL_LINE.opacity,
     before,
   );
 
@@ -317,5 +381,13 @@ export function withDataLayers(
   layers.splice(labels < 0 ? layers.length : labels, 0, ...below);
   layers.push(...onTop);
   const projection = previous.projection ?? next.projection;
-  return { ...next, sources, layers, ...(projection && { projection }) };
+  // The sky of a tilted map: the base style has none of its own
+  const sky = next.sky ?? previous.sky;
+  return {
+    ...next,
+    sources,
+    layers,
+    ...(projection && { projection }),
+    ...(sky && { sky }),
+  };
 }
