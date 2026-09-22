@@ -246,7 +246,12 @@ function analyzeBundleComposition(metafile, fileName) {
 // and sets their width, smoothed along each flight (calculations/
 // heatLines.ts), 3.5 KB on top of main's 112.05 KB. They cannot load later:
 // a link may open zoomed in.
-const BUDGET_APP = 116 * 1024;
+// Raised from 116 KB for the airport codes as a label layer of the map
+// (ui/airportLabels.ts): the layer's style, the chip it computes as a
+// distance field, the label data and the hover that joins label and
+// marker, less the DOM declutter it replaces, which took 115.76 KB to
+// 118.43 KB. The codes are on the first paint.
+const BUDGET_APP = 118.5 * 1024;
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.

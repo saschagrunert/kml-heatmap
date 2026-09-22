@@ -192,60 +192,6 @@ describe("MapOrientation", () => {
     });
   });
 
-  describe("airport labels", () => {
-    const declutter = () => app.airportManager.declutterLabels;
-
-    it("are sorted out again once the map has turned or tilted", () => {
-      turn({ bearing: 40 });
-      expect(declutter()).toHaveBeenCalledTimes(1);
-
-      turn({ pitch: 30 });
-      expect(declutter()).toHaveBeenCalledTimes(2);
-    });
-
-    it("are left alone by a pan of a flat map", () => {
-      app.map!.emit("moveend");
-      turn({ bearing: 40 });
-      declutter().mockClear();
-
-      // Every marker moves by the same pixels
-      app.map!.emit("moveend");
-
-      expect(declutter()).not.toHaveBeenCalled();
-    });
-
-    it("are sorted out after a pan of a tilted map", () => {
-      turn({ pitch: 30 });
-      declutter().mockClear();
-
-      // What is further away is drawn closer together, so a pan moves the
-      // markers against each other
-      app.map!.emit("moveend");
-
-      expect(declutter()).toHaveBeenCalledTimes(1);
-    });
-
-    it("are sorted out after every move of a globe", async () => {
-      await app.mapReady;
-      orientation.toggleGlobe();
-      declutter().mockClear();
-
-      app.map!.emit("moveend");
-
-      expect(declutter()).toHaveBeenCalledTimes(1);
-    });
-
-    it("are sorted out once the map has drawn in the other projection", async () => {
-      await app.mapReady;
-
-      orientation.toggleGlobe();
-      expect(declutter()).not.toHaveBeenCalled();
-      app.map!.emit("idle");
-
-      expect(declutter()).toHaveBeenCalledTimes(1);
-    });
-  });
-
   describe("a focused marker that goes behind the globe", () => {
     let marker: HTMLButtonElement;
 

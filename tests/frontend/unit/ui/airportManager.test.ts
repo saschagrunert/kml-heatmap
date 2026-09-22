@@ -11,12 +11,17 @@ import type {
   PathInfo,
 } from "../../../../kml_heatmap/frontend/types";
 import {
+  MAP_LAYERS,
+  MAP_SOURCES,
+} from "../../../../kml_heatmap/frontend/utils/constants";
+import {
   createMockApp,
   createDataset,
   asMapApp,
   type MockApp,
 } from "../../testHelpers";
 import type { Popup as MockPopup } from "../../../mocks/maplibre-gl";
+import type { Point } from "maplibre-gl";
 
 const { loadFeatures, listFlights } = vi.hoisted(() => {
   const listFlights = vi.fn();
@@ -528,9 +533,6 @@ describe("AirportManager", () => {
       airportManager.updateAirportPopups();
 
       expect(isHome("EDDF")).toBe(true);
-      expect(
-        markers["EDDF"]!.getElement().querySelector(".airport-label-home"),
-      ).not.toBeNull();
       for (const name of ["EDDM", "EDDK", "LOWW"]) {
         expect(isHome(name)).toBe(false);
       }
@@ -667,240 +669,171 @@ describe("AirportManager", () => {
       expect(mapContainer.dataset["zoomSize"]).toBe(expected);
     });
 
-    it("toggles zoom-hide-labels below zoom 4", () => {
-      mockApp.map!.getZoom.mockReturnValue(3.9);
-      airportManager.updateAirportMarkerSizes();
-      expect(mapContainer.classList.contains("zoom-hide-labels")).toBe(true);
-
-      mockApp.map!.getZoom.mockReturnValue(4);
-      airportManager.updateAirportMarkerSizes();
-      expect(mapContainer.classList.contains("zoom-hide-labels")).toBe(false);
-    });
-
-    it("declutters the labels for the new size", () => {
-      const declutter = vi.spyOn(airportManager, "declutterLabels");
-
-      airportManager.updateAirportMarkerSizes();
-
-      expect(declutter).toHaveBeenCalledTimes(1);
-    });
-
     it("does nothing without a map container", () => {
       mapContainer.remove();
       expect(() => airportManager.updateAirportMarkerSizes()).not.toThrow();
     });
   });
 
-  describe("declutterLabels", () => {
-    /** Give a marker a label element whose box the test controls */
-    function withLabel(
-      name: string,
-      rect: { left: number; top: number; width: number; height: number },
-    ): HTMLElement {
-      const label =
-        markers[name]!.getElement().querySelector<HTMLElement>(
-          ".airport-label",
-        )!;
-      label.getBoundingClientRect = () => ({
-        left: rect.left,
-        top: rect.top,
-        right: rect.left + rect.width,
-        bottom: rect.top + rect.height,
-        width: rect.width,
-        height: rect.height,
-        x: rect.left,
-        y: rect.top,
-        toJSON: () => ({}),
-      });
-      return label;
-    }
+  describe("activateAirport", () => {
+    it("selects the airport's paths, then opens its popup", () => {
+      const order: string[] = [];
+      mockApp.pathSelection.selectPathsByAirport.mockImplementation(() =>
+        order.push("select"),
+      );
+      const open = vi
+        .spyOn(airportManager, "openPopup")
+        .mockImplementation(() => order.push("open"));
 
-    it("hides the label that would be drawn over a busier one", () => {
-      // EDDF has three flights, EDDM two, and the two boxes overlap
-      const eddf = withLabel("EDDF", {
-        left: 100,
-        top: 100,
-        width: 40,
-        height: 14,
-      });
-      const eddm = withLabel("EDDM", {
-        left: 120,
-        top: 104,
-        width: 40,
-        height: 14,
-      });
+      airportManager.activateAirport("EDDF");
 
-      airportManager.declutterLabels();
-
-      expect(eddf.classList.contains("airport-label-crowded")).toBe(false);
-      expect(eddm.classList.contains("airport-label-crowded")).toBe(true);
+      expect(mockApp.pathSelection.selectPathsByAirport).toHaveBeenCalledWith(
+        "EDDF",
+      );
+      expect(open).toHaveBeenCalledWith("EDDF");
+      expect(order).toEqual(["select", "open"]);
     });
 
-    it("gives a label behind the globe no say, hidden as its marker is", () => {
-      // The far side projects into the disc, so the busier EDDF, turned
-      // away, would still crowd out EDDM, which is in plain sight
-      const eddf = withLabel("EDDF", {
-        left: 100,
-        top: 100,
-        width: 40,
-        height: 14,
-      });
-      const eddm = withLabel("EDDM", {
-        left: 120,
-        top: 104,
-        width: 40,
-        height: 14,
-      });
-      mockApp.map!.setProjection({ type: "globe" });
-      mockApp.map!.jumpTo({ center: [8.67 + 91.5, 49] });
+    it("closes the popup it has open and selects nothing", () => {
+      airportManager.openPopup("EDDF");
+      mockApp.pathSelection.selectPathsByAirport.mockClear();
 
-      airportManager.declutterLabels();
+      airportManager.activateAirport("EDDF");
 
-      expect(eddm.classList.contains("airport-label-crowded")).toBe(false);
-
-      // Both in sight again, the busier one wins as it always did
-      mockApp.map!.jumpTo({ center: [10, 49] });
-      airportManager.declutterLabels();
-
-      expect(eddf.classList.contains("airport-label-crowded")).toBe(false);
-      expect(eddm.classList.contains("airport-label-crowded")).toBe(true);
+      expect(popup.isOpen()).toBe(false);
+      expect(mockApp.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
     });
 
-    it("keeps both labels when they do not overlap", () => {
-      const eddf = withLabel("EDDF", {
-        left: 0,
-        top: 0,
-        width: 40,
-        height: 14,
-      });
-      const eddm = withLabel("EDDM", {
-        left: 300,
-        top: 300,
-        width: 40,
-        height: 14,
-      });
+    it("moves the popup to another airport", () => {
+      airportManager.openPopup("EDDF");
 
-      airportManager.declutterLabels();
+      airportManager.activateAirport("EDDM");
 
-      expect(eddf.classList.contains("airport-label-crowded")).toBe(false);
-      expect(eddm.classList.contains("airport-label-crowded")).toBe(false);
+      expect(airportManager.isPopupOpen("EDDM")).toBe(true);
     });
 
-    it("reconsiders a label that was hidden before", () => {
-      const eddf = withLabel("EDDF", {
-        left: 100,
-        top: 100,
-        width: 40,
-        height: 14,
-      });
-      const eddm = withLabel("EDDM", {
-        left: 120,
-        top: 104,
-        width: 40,
-        height: 14,
-      });
-      airportManager.declutterLabels();
-      expect(eddm.classList.contains("airport-label-crowded")).toBe(true);
+    it("opens the popup but leaves the selection alone while replay runs", () => {
+      mockApp.replayState.active = true;
 
-      // The map moved and they no longer overlap
-      eddm.getBoundingClientRect = () => ({
-        left: 400,
-        top: 400,
-        right: 440,
-        bottom: 414,
-        width: 40,
-        height: 14,
-        x: 400,
-        y: 400,
-        toJSON: () => ({}),
-      });
-      airportManager.declutterLabels();
+      airportManager.activateAirport("EDDF");
 
-      expect(eddf.classList.contains("airport-label-crowded")).toBe(false);
-      expect(eddm.classList.contains("airport-label-crowded")).toBe(false);
+      expect(mockApp.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
+      expect(airportManager.isPopupOpen("EDDF")).toBe(true);
+    });
+  });
+
+  describe("airport labels", () => {
+    type Label = GeoJSON.Feature<GeoJSON.Point, Record<string, unknown>>;
+    const labels = (): Label[] =>
+      (
+        mockApp.map!.source(MAP_SOURCES.airportLabels)
+          .data as GeoJSON.FeatureCollection<GeoJSON.Point>
+      ).features as Label[];
+    const label = (name: string): Label | undefined =>
+      labels().find((feature) => feature.properties["name"] === name);
+
+    it("hands the label layer every airport, with its flights and the home base", () => {
+      airportManager.updateAirportPopups();
+
+      expect(labels().map((feature) => feature.properties["name"])).toEqual(
+        airports.map((airport) => airport.name),
+      );
+      expect(label("EDDF")!.properties).toMatchObject({
+        icao: "EDDF",
+        count: 3,
+        home: true,
+      });
+      expect(label("EDDM")!.properties).toMatchObject({
+        count: 2,
+        home: false,
+      });
+      expect(label("LOWW")!.properties["count"]).toBe(0);
+      expect(label("EDDK")!.geometry.coordinates).toEqual([7.14, 50.87]);
     });
 
-    it("skips markers that have no layout", () => {
-      // A hidden marker, and every marker in jsdom, measures as empty
-      const eddf = withLabel("EDDF", { left: 0, top: 0, width: 0, height: 0 });
-      const eddm = withLabel("EDDM", {
-        left: 0,
-        top: 0,
-        width: 40,
-        height: 14,
-      });
+    it("leaves out the airports the filter hides, like their markers", () => {
+      mockApp.selectedYear = "2024";
 
-      airportManager.declutterLabels();
-
-      expect(eddf.classList.contains("airport-label-crowded")).toBe(false);
-      expect(eddm.classList.contains("airport-label-crowded")).toBe(false);
+      expect(labels().map((feature) => feature.properties["name"])).toEqual([
+        "EDDF",
+        "EDDK",
+      ]);
+      // Counted under the filter: EDDF has one flight in 2024
+      expect(label("EDDF")!.properties["count"]).toBe(1);
     });
 
-    it("counts the attribution as taken space", () => {
-      const attribution = document.createElement("div");
-      attribution.className = "maplibregl-ctrl-attrib";
-      attribution.getBoundingClientRect = () => ({
-        left: 500,
-        top: 580,
-        right: 800,
-        bottom: 600,
-        width: 300,
-        height: 20,
-        x: 500,
-        y: 580,
-        toJSON: () => ({}),
-      });
-      mapContainer.appendChild(attribution);
+    it("finds the airport whose label the map placed at a point", () => {
+      const map = mockApp.map!;
+      map.renderedFeatures = [
+        { layer: { id: "paths-altitude" }, properties: { pathId: 1 } },
+        {
+          layer: { id: MAP_LAYERS.airportLabels },
+          properties: { name: "EDDM" },
+        },
+      ];
 
-      const covered = withLabel("EDDF", {
-        left: 600,
-        top: 575,
-        width: 40,
-        height: 14,
-      });
+      const point = { x: 10, y: 20 } as Point;
+      expect(airportManager.airportLabelAt(point)).toBe("EDDM");
+      // A few pixels around the click, which lands on whole pixels
+      const [box, options] = map.queryRenderedFeatures.mock.calls[0] as [
+        [[number, number], [number, number]],
+        unknown,
+      ];
+      const [[left, top], [right, bottom]] = box;
+      expect(options).toEqual({ layers: [MAP_LAYERS.airportLabels] });
+      expect(10 - left).toBeGreaterThan(0);
+      expect(right - 10).toBe(10 - left);
+      expect(20 - top).toBe(10 - left);
+      expect(bottom - 20).toBe(10 - left);
 
-      airportManager.declutterLabels();
-
-      expect(covered.classList.contains("airport-label-crowded")).toBe(true);
+      map.renderedFeatures = [
+        { layer: { id: "paths-altitude" }, properties: { pathId: 1 } },
+      ];
+      expect(
+        airportManager.airportLabelAt({ x: 10, y: 20 } as Point),
+      ).toBeNull();
     });
 
-    it("hides a label that would sit under the control column", () => {
-      // The panels are over the map, and a label that slid under one used
-      // to stay visible, half covered by its edge
-      const panel = document.createElement("div");
-      panel.id = "left-buttons";
-      panel.getBoundingClientRect = () => ({
-        left: 0,
-        top: 0,
-        right: 250,
-        bottom: 400,
-        width: 250,
-        height: 400,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
+    it("lights a hovered label up, and the dot of its marker with it", async () => {
+      await mockApp.mapReady;
+      await Promise.resolve();
+      const map = mockApp.map!;
+      const hover = (name: string): boolean =>
+        markers[name]!.getElement().classList.contains("is-label-hovered");
+      const pointOn = (name: string): void =>
+        map.emit(`mousemove:${MAP_LAYERS.airportLabels}`, {
+          features: [{ properties: { name } }],
+        });
+
+      pointOn("EDDF");
+      expect(hover("EDDF")).toBe(true);
+      expect(map.featureStates.get("airport-labels:EDDF")).toEqual({
+        hover: true,
       });
-      document.body.appendChild(panel);
+      expect(map.getCanvas().style.cursor).toBe("pointer");
 
-      const covered = withLabel("EDDF", {
-        left: 200,
-        top: 100,
-        width: 40,
-        height: 14,
+      // Straight on to the next label
+      pointOn("EDDM");
+      expect(hover("EDDF")).toBe(false);
+      expect(map.featureStates.get("airport-labels:EDDF")).toEqual({
+        hover: false,
       });
-      const clear = withLabel("EDDM", {
-        left: 600,
-        top: 100,
-        width: 40,
-        height: 14,
+      expect(hover("EDDM")).toBe(true);
+
+      map.emit(`mouseleave:${MAP_LAYERS.airportLabels}`);
+      expect(hover("EDDM")).toBe(false);
+      expect(map.featureStates.get("airport-labels:EDDM")).toEqual({
+        hover: false,
       });
+      expect(map.getCanvas().style.cursor).toBe("");
+    });
 
-      airportManager.declutterLabels();
+    it("finds no label before the map has its layers", () => {
+      mockApp.map!.removeLayer(MAP_LAYERS.airportLabels);
 
-      expect(covered.classList.contains("airport-label-crowded")).toBe(true);
-      expect(clear.classList.contains("airport-label-crowded")).toBe(false);
-
-      panel.remove();
+      expect(
+        airportManager.airportLabelAt({ x: 10, y: 20 } as Point),
+      ).toBeNull();
     });
   });
 
@@ -921,24 +854,6 @@ describe("AirportManager", () => {
 
       expect(popups).toHaveBeenCalledTimes(1);
       expect(opacity).toHaveBeenCalledTimes(1);
-    });
-
-    it("declutters the labels again when the airports are shown (regression)", () => {
-      mockApp.airportsVisible = false;
-      const declutter = vi.spyOn(airportManager, "declutterLabels");
-
-      // Hidden labels have no box, so nothing was decided while they were
-      mockApp.airportsVisible = true;
-
-      expect(declutter).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not declutter when the airports are hidden", () => {
-      const declutter = vi.spyOn(airportManager, "declutterLabels");
-
-      mockApp.airportsVisible = false;
-
-      expect(declutter).not.toHaveBeenCalled();
     });
 
     it("closes the popup when the airports are hidden", () => {

@@ -144,9 +144,6 @@
   /* What a finger gets, whatever the dot measures: WCAG asks for 24 */
   --marker-target: 24px;
   --marker-border: 1px;
-  --label-font: 9px;
-  --label-padding: 1px 3px;
-  --label-bottom: 19px;
 
   /* Motion */
   --duration-fast: 0.2s;
@@ -626,16 +623,6 @@ body {
 .gradient-chip-speed,
 #airspeed-legend .gradient-bar {
   background: var(--gradient-speed);
-}
-/* Set by AirportManager.declutterLabels() on the labels that would be drawn
-   over an already placed one. The marker dot stays; only the code is hidden,
-   and it fades rather than blinks (see .airport-label). */
-.airport-label.airport-label-crowded {
-  opacity: 0;
-  visibility: hidden;
-  /* `visibility` flips once the fade has run, so the label is gone from
-     reach but seen to go. Shown again, it flips at once and fades in. */
-  transition-delay: 0s, 0s, 0s, 0s, var(--duration-base);
 }
 
 .control-sep {
@@ -1182,42 +1169,28 @@ body.stats-open #left-buttons {
 }
 
 /* ==========================================================================
-   Airport markers (sizes come from the --marker-* / --label-* tokens)
+   Airport markers (sizes come from the --marker-* tokens; the codes beside
+   them are a layer of the map, see ui/airportLabels.ts)
    ========================================================================== */
 [data-zoom-size="small"] {
   --marker-size: 7px;
   --marker-border: 1px;
-  --label-font: 10px;
-  --label-padding: 1px 3px;
-  --label-bottom: 20px;
 }
 [data-zoom-size="medium-small"] {
   --marker-size: 8px;
   --marker-border: 1px;
-  --label-font: 11px;
-  --label-padding: 1px 4px;
-  --label-bottom: 20px;
 }
 [data-zoom-size="medium"] {
   --marker-size: 10px;
   --marker-border: 2px;
-  --label-font: 12px;
-  --label-padding: 2px 5px;
-  --label-bottom: 21px;
 }
 [data-zoom-size="large"] {
   --marker-size: 11px;
   --marker-border: 2px;
-  --label-font: 12px;
-  --label-padding: 2px 5px;
-  --label-bottom: 22px;
 }
 [data-zoom-size="xlarge"] {
   --marker-size: 12px;
   --marker-border: 2px;
-  --label-font: 13px;
-  --label-padding: 2px 6px;
-  --label-bottom: 24px;
 }
 
 /* A dot with a ring of the page's own dark around it, so it reads against
@@ -1243,70 +1216,6 @@ body.stats-open #left-buttons {
   background-color: var(--color-home-blue);
 }
 
-/* No border: sixteen of these carry a green outline each, in the middle of
-   a heat bloom drawn in the same greens. The chip keeps its own fill, which
-   is what makes the code readable over the data. */
-/* A pill of the map's own darkness with the tiles blurred behind it: the
-   code stays readable over the brightest part of the bloom without a box
-   heavy enough to compete with it. `backdrop-filter` is decoration, and a
-   browser without it keeps the same fill, a shade more opaque. */
-.airport-label {
-  background-color: rgba(var(--color-bg-secondary-rgb), 0.82);
-  /* A hairline rim so the pill has an edge of its own against the dark,
-     over a dark ring that holds it apart from the bright core of the bloom */
-  border: 1px solid rgba(var(--color-text-rgb), 0.18);
-  color: var(--color-text);
-  font-family: var(--font-mono);
-  font-weight: 500;
-  font-size: var(--label-font);
-  letter-spacing: 0.04em;
-  padding: var(--label-padding);
-  border-radius: var(--radius-pill);
-  white-space: nowrap;
-  pointer-events: auto; /* Make labels clickable */
-  cursor: pointer;
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.45),
-    0 1px 6px rgba(0, 0, 0, 0.5);
-  position: absolute;
-  bottom: var(--label-bottom);
-  left: 50%;
-  transform: translateX(-50%);
-  /* The order matters: the rules that hide a label delay the last one */
-  transition:
-    transform var(--duration-fast) ease,
-    box-shadow var(--duration-fast) ease,
-    border-width var(--duration-fast) ease,
-    opacity var(--duration-base) ease,
-    visibility 0s linear;
-}
-@supports (backdrop-filter: blur(6px)) or (-webkit-backdrop-filter: blur(6px)) {
-  .airport-label {
-    background-color: rgba(var(--color-bg-secondary-rgb), 0.62);
-    /* The bloom is at its brightest exactly where the busiest airports are,
-       so the backdrop is dimmed and drained as well as blurred; blur alone
-       left green showing through the pill */
-    -webkit-backdrop-filter: blur(8px) saturate(0.35) brightness(0.5);
-    backdrop-filter: blur(8px) saturate(0.35) brightness(0.5);
-  }
-}
-
-/* Label hover effect */
-@media (hover: hover) {
-  .airport-label:hover {
-    background-color: rgba(var(--color-bg-secondary-rgb), 1);
-    border-width: 2px;
-    transform: translateX(-50%) scale(1.1);
-    box-shadow: 0 2px 6px var(--shadow-color-strong);
-  }
-}
-
-/* Home base label */
-/* The home base is the one marked airport; the ring carries that, not the
-   code itself, which stays as readable as every other */
-.airport-label.airport-label-home {
-  border-color: rgba(var(--color-accent-blue-rgb), 0.85);
-}
 /* The element MapLibre positions is a real button, so a marker can be
    tabbed to and pressed. It is stripped back to nothing: the container
    inside draws the marker. No `position` or `transform` here, both are
@@ -1327,8 +1236,7 @@ body.stats-open #left-buttons {
 #map.airports-hidden .airport-marker-root {
   display: none;
 }
-/* The square a pointer gets, around the dot that is drawn. The label hangs
-   off its top edge, so `--label-bottom` is measured from there. */
+/* The square a pointer gets, around the dot that is drawn */
 .airport-marker-container {
   position: relative;
   display: flex;
@@ -1337,18 +1245,24 @@ body.stats-open #left-buttons {
   width: var(--marker-target);
   height: var(--marker-target);
 }
+/* The code above the dot is a label of the map (ui/airportLabels.ts), and
+   the button reaches up over it, as it did when the code was a child of
+   it: a tap on the code is one on the marker */
+.airport-marker-reach {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 100%;
+  height: var(--marker-target);
+}
 @media (hover: hover) {
-  .airport-marker-container:hover .airport-marker {
+  /* The dot under the pointer, or the dot of the label under it (a layer
+     of the map, see ui/airportLabels.ts, which lights up with it) */
+  .airport-marker-container:hover .airport-marker,
+  .airport-marker-root.is-label-hovered .airport-marker {
     transform: scale(1.3);
     box-shadow: 0 3px 8px var(--shadow-color-strong);
   }
-}
-
-/* Hide labels when zoomed out, fading like a crowded one */
-.zoom-hide-labels .airport-label {
-  opacity: 0;
-  visibility: hidden;
-  transition-delay: 0s, 0s, 0s, 0s, var(--duration-base);
 }
 
 /* ==========================================================================
@@ -1896,11 +1810,9 @@ body.stats-open #left-buttons {
     font-size: var(--text-sm);
   }
 
-  /* The two sizes drawn outside the type scale: the map's attribution and
-     the map labels. The scale itself is raised by --text-xs above. */
-  .airport-label {
-    font-size: max(var(--text-sm), var(--label-font));
-  }
+  /* The one size drawn outside the type scale: the map's attribution. The
+     scale itself is raised by --text-xs above; the airport codes on the map
+     follow it in ui/airportLabels.ts. */
   .maplibregl-map .maplibregl-ctrl-attrib,
   .maplibregl-map .maplibregl-ctrl-attrib.maplibregl-compact {
     font-size: var(--text-sm);
@@ -2436,7 +2348,6 @@ body.stats-open #left-buttons {
   .control-btn,
   .control-row,
   .airport-marker,
-  .airport-label,
   #github-footer a,
   #github-footer .github-icon,
   .toast-notification,
@@ -2467,13 +2378,6 @@ body.stats-open #left-buttons {
     --color-divider: #4a4a4a;
     --color-text-muted: #b4b4b4;
     --color-text-dim: #b4b4b4;
-  }
-  /* The glass pill of a map label is decoration; asked for contrast it
-     becomes a solid one */
-  .airport-label {
-    background-color: var(--color-bg-secondary);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
   .control-group,
   .color-legend,

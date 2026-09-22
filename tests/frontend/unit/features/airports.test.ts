@@ -331,25 +331,25 @@ describe("airports feature", () => {
       expect(element.getAttribute("aria-label")).toBe("Frankfurt EDDF");
     });
 
-    it("extracts the ICAO code and marks the home base", () => {
+    it("draws only the dot and marks the home base", () => {
       const element = mod.createAirportElement("Frankfurt EDDF", true);
       const container = element.firstElementChild!;
 
       expect(element.children).toHaveLength(1);
       expect(container.className).toBe("airport-marker-container");
+      // The code is a label of the map (see ui/airportLabels.ts)
       expect([...container.children].map((child) => child.className)).toEqual([
         "airport-marker airport-marker-home",
-        "airport-label airport-label-home",
+        "airport-marker-reach",
       ]);
-      expect(element.querySelector(".airport-label")!.textContent).toBe("EDDF");
+      expect(element.textContent).toBe("");
     });
 
-    it("falls back to APT without an ICAO code and omits home classes", () => {
+    it("omits the home class for any other airport", () => {
       const element = mod.createAirportElement("Small Airfield 123");
 
-      expect(element.querySelector(".airport-label")!.textContent).toBe("APT");
+      expect(element.querySelector(".airport-marker")).not.toBeNull();
       expect(element.querySelector(".airport-marker-home")).toBeNull();
-      expect(element.querySelector(".airport-label-home")).toBeNull();
     });
 
     it("does not read a name as markup", () => {
@@ -364,15 +364,12 @@ describe("airports feature", () => {
     it("switches the home-base classes on the same element", () => {
       const element = mod.createAirportElement("Frankfurt EDDF");
       const dot = element.querySelector(".airport-marker")!;
-      const label = element.querySelector(".airport-label")!;
 
       mod.setAirportElementHome(element, true);
       expect(dot.classList.contains("airport-marker-home")).toBe(true);
-      expect(label.classList.contains("airport-label-home")).toBe(true);
 
       mod.setAirportElementHome(element, false);
       expect(dot.className).toBe("airport-marker");
-      expect(label.className).toBe("airport-label");
       // Still the nodes it started with: focus and listeners stay
       expect(element.querySelector(".airport-marker")).toBe(dot);
     });

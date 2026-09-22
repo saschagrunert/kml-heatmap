@@ -568,6 +568,34 @@ describe("MapApp controls and map", () => {
       expect(mockPathSelectionInstance.clearSelection).toHaveBeenCalledTimes(1);
     });
 
+    it("hands a click on an airport's label to its airport, as on the marker", async () => {
+      await initializeApp(app);
+      app.selectedPathIds.add(1);
+      mockAirportManagerInstance.airportLabelAt.mockReturnValue("Leipzig EDDP");
+
+      mockMap(app).emit("click", {
+        ...click,
+        originalEvent: { detail: 1, timeStamp: 1000 },
+      });
+
+      expect(mockAirportManagerInstance.airportLabelAt).toHaveBeenCalledWith(
+        click.point,
+      );
+      expect(mockAirportManagerInstance.activateAirport).toHaveBeenCalledWith(
+        "Leipzig EDDP",
+      );
+      // Not a click on the map beside every flight
+      expect(mockLayerManagerInstance.hitTest).not.toHaveBeenCalled();
+      expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+
+      // The second click of a double click would close what the first opened
+      mockMap(app).emit("click", {
+        ...click,
+        originalEvent: { detail: 2, timeStamp: 1200 },
+      });
+      expect(mockAirportManagerInstance.activateAirport).toHaveBeenCalledOnce();
+    });
+
     it("closes the popups, none of which closes on a click by itself", async () => {
       await initializeApp(app);
 
@@ -775,6 +803,7 @@ describe("MapApp controls and map", () => {
         "paths-altitude-selected",
         "paths-airspeed-selected",
         "replay-trail",
+        "airport-labels",
       ]);
       // Empty until the managers fill them
       for (const id of [
@@ -786,6 +815,7 @@ describe("MapApp controls and map", () => {
         "paths-altitude-selected",
         "paths-airspeed-selected",
         "replay-trail",
+        "airport-labels",
       ]) {
         expect(mockMap(app).source(id).data).toEqual({
           type: "FeatureCollection",
@@ -996,6 +1026,8 @@ describe("MapApp controls and map", () => {
           "paths-airspeed-selected",
           "replay-trail",
           "place-labels",
+          // Labels themselves, on top of the base style's
+          "airport-labels",
         ]);
         // The same source, not one made again from a copy of its data: a
         // `setData` that is on its way still lands in it
@@ -1084,7 +1116,7 @@ describe("MapApp controls and map", () => {
 
           expect(fetchBaseStyle).toHaveBeenCalledTimes(3);
           expect(mockMap(app).setStyle).toHaveBeenCalledOnce();
-          expect(mockMap(app).getLayersOrder().at(-1)).toBe("place-labels");
+          expect(mockMap(app).getLayersOrder().at(-2)).toBe("place-labels");
 
           // Once it is there, it is there
           window.dispatchEvent(new Event("online"));

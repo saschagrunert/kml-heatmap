@@ -30,6 +30,7 @@ import { syncLegend, syncToggleButton } from "./utils/buttonState";
 import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
 import {
+  createActivationFilter,
   isOnMarker,
   keepMarkerTapsFromZoom,
   resizeMapAfterTransition,
@@ -277,6 +278,12 @@ export class MapApp {
   private baseStyleRetried = false;
   /** Takes back `keepMarkerTapsFromZoom`, set with the map */
   private releaseMarkerTaps: (() => void) | null = null;
+  /**
+   * The clicks on airport labels that activate them: the second click of a
+   * double click or tap would close the popup the first one opened, as it
+   * would on a marker (see createActivationFilter)
+   */
+  private readonly isLabelActivation = createActivationFilter();
 
   // Handles of the layers the map is created with. The layers are never
   // added or removed; the handles switch their visibility.
@@ -655,7 +662,12 @@ export class MapApp {
     });
     map.addControl(new AttributionControl({ compact: false }), "bottom-right");
     this.map = map;
-    this.releaseMarkerTaps = keepMarkerTapsFromZoom(map);
+    // An airport's label opens its popup like the marker does, so a double
+    // click or tap on it does not zoom either
+    this.releaseMarkerTaps = keepMarkerTapsFromZoom(
+      map,
+      (point) => this.airportManager?.airportLabelAt(point) != null,
+    );
 
     // Registered before anything can fail. Without a listener MapLibre
     // writes every error to the console itself.
@@ -986,6 +998,16 @@ export class MapApp {
     // not change the selection behind the dialog, nor open the values of a
     // flight, whose popup would be a tab stop outside the dialog.
     if (this.store.get("wrappedVisible")) return;
+
+    // An airport's label is drawn by the map, and a click on it is one on
+    // its marker (see ui/airportLabels.ts), replay or not
+    const airport = this.airportManager.airportLabelAt(e.point);
+    if (airport !== null) {
+      if (this.isLabelActivation(e.originalEvent)) {
+        this.airportManager.activateAirport(airport);
+      }
+      return;
+    }
 
     const replay = this.replayState;
     if (replay.active) {

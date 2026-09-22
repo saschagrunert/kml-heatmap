@@ -12,6 +12,7 @@ import { domCache } from "./utils/domCache";
 import { applyMetricColors } from "./utils/htmlGenerators";
 import { createActivationFilter, toLngLat } from "./utils/mapHelpers";
 import { showToast } from "./utils/toast";
+import { setAirportLabelHover } from "./ui/airportLabels";
 import { datasetIndex } from "./calculations/datasetIndex";
 import type { MapApp } from "./mapApp";
 import type { Airport, AirportMarker, KMLDataset } from "./types";
@@ -234,8 +235,7 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
       closePopup: () => app.airportManager.closePopup(name),
       isPopupOpen: () => app.airportManager.isPopupOpen(name),
       // `hidden` rather than taking the marker off the map: a hidden
-      // element leaves the tab order and measures as empty, which is how
-      // the label declutter tells that it is not shown
+      // element leaves the tab order
       setVisible: (visible) => {
         element.hidden = !visible;
       },
@@ -249,16 +249,15 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
     // opened (see createActivationFilter).
     const isActivation = createActivationFilter();
     element.addEventListener("click", (event) => {
-      if (!isActivation(event)) return;
-      if (airportMarker.isPopupOpen()) {
-        airportMarker.closePopup();
-        return;
-      }
-      if (!app.replayState.active) {
-        app.pathSelection.selectPathsByAirport(name);
-      }
-      airportMarker.openPopup();
+      if (isActivation(event)) app.airportManager.activateAirport(name);
     });
+    // The dot under the pointer lights its label up too (see airportLabels)
+    element.addEventListener("mouseenter", () =>
+      setAirportLabelHover(map, name, true),
+    );
+    element.addEventListener("mouseleave", () =>
+      setAirportLabelHover(map, name, false),
+    );
     // Escape reaches the popup itself only while focus is inside it
     element.addEventListener("keydown", (event) => {
       if (event.key === "Escape") airportMarker.closePopup();

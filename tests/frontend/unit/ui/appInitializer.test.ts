@@ -170,7 +170,8 @@ describe("appInitializer", () => {
       expect(element.getAttribute("aria-label")).toBe("Frankfurt EDDF");
       // It opens a popup, which starts out closed
       expect(element.getAttribute("aria-expanded")).toBe("false");
-      expect(element.querySelector(".airport-label")!.textContent).toBe("EDDF");
+      // The code is a label of the map (see ui/airportLabels.ts)
+      expect(element.querySelector(".airport-label")).toBeNull();
     });
 
     it("does not pre-assign the home base (the airport manager does)", () => {
@@ -189,7 +190,6 @@ describe("appInitializer", () => {
 
       eddf().setHome(true);
       expect(element.querySelector(".airport-marker-home")).not.toBeNull();
-      expect(element.querySelector(".airport-label-home")).not.toBeNull();
 
       eddf().setHome(false);
       expect(element.querySelector(".airport-marker-home")).toBeNull();
@@ -226,33 +226,14 @@ describe("appInitializer", () => {
       );
     });
 
-    it("selects the airport's paths on click, then opens the popup", () => {
+    it("activates its airport on a click, which the airport manager acts on", () => {
       create();
-      const order: string[] = [];
-      app.pathSelection.selectPathsByAirport.mockImplementation(() =>
-        order.push("select"),
-      );
-      app.airportManager.openPopup.mockImplementation(() => order.push("open"));
 
       eddf().getElement().click();
 
-      expect(app.pathSelection.selectPathsByAirport).toHaveBeenCalledWith(
+      expect(app.airportManager.activateAirport).toHaveBeenCalledWith(
         "Frankfurt EDDF",
       );
-      expect(order).toEqual(["select", "open"]);
-    });
-
-    it("closes its open popup on the next click and selects nothing", () => {
-      create();
-      app.airportManager.isPopupOpen.mockReturnValue(true);
-
-      eddf().getElement().click();
-
-      expect(app.airportManager.closePopup).toHaveBeenCalledWith(
-        "Frankfurt EDDF",
-      );
-      expect(app.airportManager.openPopup).not.toHaveBeenCalled();
-      expect(app.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
     });
 
     it("ignores the later clicks of a double click or a double tap", () => {
@@ -263,16 +244,12 @@ describe("appInitializer", () => {
         new MouseEvent("click", { bubbles: true, detail: 2 }),
       );
 
-      expect(app.airportManager.openPopup).not.toHaveBeenCalled();
-      expect(app.airportManager.closePopup).not.toHaveBeenCalled();
+      expect(app.airportManager.activateAirport).not.toHaveBeenCalled();
     });
 
     it("ignores a second tap that WebKit reports as a single click", () => {
       create();
       const element = eddf().getElement();
-      app.airportManager.openPopup.mockImplementation(() =>
-        app.airportManager.isPopupOpen.mockReturnValue(true),
-      );
 
       for (let tap = 0; tap < 2; tap++) {
         element.dispatchEvent(
@@ -280,18 +257,7 @@ describe("appInitializer", () => {
         );
       }
 
-      expect(app.airportManager.openPopup).toHaveBeenCalledTimes(1);
-      expect(app.airportManager.closePopup).not.toHaveBeenCalled();
-    });
-
-    it("opens the popup but leaves the selection alone while replay runs", () => {
-      create();
-      app.replayManager.state.active = true;
-
-      eddf().getElement().click();
-
-      expect(app.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
-      expect(app.airportManager.openPopup).toHaveBeenCalledTimes(1);
+      expect(app.airportManager.activateAirport).toHaveBeenCalledTimes(1);
     });
 
     it("stops none of its events on their way to the map", () => {
@@ -317,10 +283,13 @@ describe("appInitializer", () => {
 
       create([airports[0]!]);
 
-      // The only key is Escape
+      // The only key is Escape; the pointer's coming and going lights the
+      // label up
       expect(listen.mock.calls.map(([type]) => type).sort()).toEqual([
         "click",
         "keydown",
+        "mouseenter",
+        "mouseleave",
       ]);
       listen.mockRestore();
 
@@ -331,7 +300,24 @@ describe("appInitializer", () => {
         .dispatchEvent(
           new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
         );
-      expect(app.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
+      expect(app.airportManager.activateAirport).not.toHaveBeenCalled();
+    });
+
+    it("lights its label up while the pointer is on the dot", () => {
+      create();
+      const element = eddf().getElement();
+
+      element.dispatchEvent(new MouseEvent("mouseenter"));
+      expect(app.map!.setFeatureState).toHaveBeenLastCalledWith(
+        { source: "airport-labels", id: "Frankfurt EDDF" },
+        { hover: true },
+      );
+
+      element.dispatchEvent(new MouseEvent("mouseleave"));
+      expect(app.map!.setFeatureState).toHaveBeenLastCalledWith(
+        { source: "airport-labels", id: "Frankfurt EDDF" },
+        { hover: false },
+      );
     });
 
     it("closes its popup on Escape from the focused marker", () => {

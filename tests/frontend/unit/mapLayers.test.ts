@@ -178,6 +178,30 @@ describe("layer handles", () => {
     expect(container.classList.contains(AIRPORTS_HIDDEN_CLASS)).toBe(false);
   });
 
+  it("switch the airport labels, a layer of the map, with their markers", () => {
+    const app = createMockApp();
+    const map = app.map!;
+    const visibility = (): unknown =>
+      map.layer(MAP_LAYERS.airportLabels).layout["visibility"];
+
+    // On by default, like the markers
+    expect(visibility()).toBe("visible");
+
+    app.airportLayer.setVisible(false);
+    expect(visibility()).toBe("none");
+
+    app.airportLayer.setVisible(true);
+    expect(visibility()).toBe("visible");
+  });
+
+  it("put the airport labels on top of every layer, labels of the style included", () => {
+    const app = createMockApp();
+    const order = app.map!.getLayersOrder();
+
+    expect(order.at(-1)).toBe(MAP_LAYERS.airportLabels);
+    expect(app.map!.layer(MAP_LAYERS.airportLabels).type).toBe("symbol");
+  });
+
   it("only remember the wish on an app without a map", () => {
     const app = createMockApp({ map: null });
 
@@ -229,6 +253,38 @@ describe("withDataLayers", () => {
     expect(style.glyphs).toBe(next.glyphs);
     expect(next.layers).toHaveLength(1);
     expect(style.projection).toBeUndefined();
+  });
+
+  it("keeps the airport labels on top of the new style's labels", () => {
+    const next: StyleSpecification = {
+      version: 8,
+      sources: { places: { type: "geojson", data: "places" } },
+      layers: [
+        { id: "base", type: "background" },
+        { id: "place-labels", type: "symbol", source: "places" },
+      ],
+    };
+    const labelled: StyleSpecification = {
+      ...previous,
+      layers: [
+        ...previous.layers,
+        {
+          id: MAP_LAYERS.airportLabels,
+          type: "symbol",
+          source: MAP_SOURCES.heat,
+        },
+      ],
+    };
+
+    const style = withDataLayers(labelled, next);
+
+    expect(style.layers.map((layer) => layer.id)).toEqual([
+      "base",
+      MAP_LAYERS.heat,
+      MAP_LAYERS.replayTrail,
+      "place-labels",
+      MAP_LAYERS.airportLabels,
+    ]);
   });
 
   it("keeps the globe chosen before the base style arrived", () => {
