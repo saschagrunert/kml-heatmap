@@ -125,9 +125,9 @@ export function decodeYear(raw: RawYearData): DecodedYear {
     let row = 0;
     for (; row < latDeltas.length; row++) {
       latScaled += latDeltas[row]!;
-      lonScaled += lonDeltas?.[row] as number;
-      altitudeScaled += altitudeDeltas?.[row] as number;
-      speedScaled += speedDeltas?.[row] as number;
+      lonScaled += lonDeltas?.[row] ?? NaN;
+      altitudeScaled += altitudeDeltas?.[row] ?? NaN;
+      speedScaled += speedDeltas?.[row] ?? NaN;
       const timeDelta = timeDeltas?.[row] ?? null;
       // A missing value makes the sum NaN and a string makes it a string,
       // so one check covers every column, the start point included

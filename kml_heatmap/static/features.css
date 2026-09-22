@@ -647,7 +647,7 @@
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
 }
 #wrapped-header .close-btn {
   background: transparent;
@@ -665,7 +665,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.04em;
 }
 #wrapped-header .close-btn:hover {
   background-color: rgba(var(--color-text-rgb), 0.08);
@@ -692,7 +692,7 @@
   font-weight: bold;
   margin-bottom: var(--space-md);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
   background: linear-gradient(
     135deg,
     var(--color-accent-blue) 0%,
@@ -779,7 +779,7 @@
   font-weight: bold;
   margin-bottom: var(--space-md);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
   background: linear-gradient(
     135deg,
     var(--color-accent-red) 0%,
@@ -849,7 +849,7 @@
   font-weight: bold;
   margin-bottom: var(--space-md);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
   background: linear-gradient(
     135deg,
     var(--color-accent-pink) 0%,
@@ -878,7 +878,7 @@
   color: rgba(var(--color-accent-pink-rgb), 0.8);
   margin-bottom: var(--space-md);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
   display: flex;
   align-items: center;
   gap: var(--space-sm);
@@ -1024,7 +1024,7 @@
   font-weight: bold;
   margin-bottom: var(--space-md);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
   background: linear-gradient(
     135deg,
     var(--color-accent-blue) 0%,
