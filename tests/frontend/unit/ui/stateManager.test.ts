@@ -76,9 +76,9 @@ describe("sanitizeSavedState", () => {
       sanitizeSavedState({ bearing: -40.5, pitch: 35, globeVisible: true }),
     ).toEqual({ bearing: -40.5, pitch: 35, globeVisible: true });
     // A bearing is the same direction a full turn on, a pitch is not
-    expect(sanitizeSavedState({ bearing: 270, pitch: 85 })).toEqual({
+    expect(sanitizeSavedState({ bearing: 270, pitch: 89 })).toEqual({
       bearing: -90,
-      pitch: 60,
+      pitch: 85,
     });
     expect(sanitizeSavedState({ bearing: -540, pitch: -5 })).toEqual({
       bearing: -180,
@@ -204,6 +204,7 @@ describe("StateManager", () => {
         "airportsVisible",
         "aviationVisible",
         "globeVisible",
+        "threeDVisible",
         "statsPanelVisible",
         "wrappedVisible",
       ]);
@@ -415,6 +416,16 @@ describe("StateManager", () => {
       expect(mockApp.map!.getBearing).not.toHaveBeenCalled();
     });
 
+    it("saves the 3D view and links it", () => {
+      mockApp.store.set("threeDVisible", true);
+
+      stateManager.saveMapState();
+
+      expect(savedState()).toMatchObject({ threeDVisible: true });
+      const url = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
+      expect(url).toContain("&d=1");
+    });
+
     it("saves the bearing, the pitch and the globe, and links them", () => {
       mockApp.map!.jumpTo({ bearing: -40.26, pitch: 35 });
       mockApp.store.set("globeVisible", true);
@@ -444,6 +455,7 @@ describe("StateManager", () => {
         bearing: 0,
         pitch: 0,
         globeVisible: false,
+        threeDVisible: false,
         heatmapVisible: true,
         altitudeVisible: false,
         airspeedVisible: false,

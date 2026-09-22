@@ -43,14 +43,20 @@ describe("MapApp", () => {
       expect(app.altitudeLayer.isVisible()).toBe(false);
       expect(app.airspeedLayer.isVisible()).toBe(false);
       expect(app.airportLayer.isVisible()).toBe(true);
+      // The lines, then the ribbons of the 3D view from the same sources
       expect(app.altitudeLayer.ids).toEqual([
         "paths-altitude",
         "paths-altitude-selected",
+        "paths-altitude-3d",
+        "paths-altitude-selected-3d",
       ]);
       expect(app.airspeedLayer.ids).toEqual([
         "paths-airspeed",
         "paths-airspeed-selected",
+        "paths-airspeed-3d",
+        "paths-airspeed-selected-3d",
       ]);
+      expect(app.threeDVisible).toBe(false);
       expect(app.airportToPaths).toEqual({});
       expect(app.airportMarkers).toEqual({});
     });
@@ -88,6 +94,7 @@ describe("MapApp", () => {
       "airspeedVisible",
       "airportsVisible",
       "aviationVisible",
+      "threeDVisible",
     ] as const)("%s getter/setter delegates to store", (key) => {
       const initial = app[key];
       app[key] = !initial;

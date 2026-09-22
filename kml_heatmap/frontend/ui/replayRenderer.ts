@@ -1,17 +1,23 @@
 /**
  * Replay Renderer - Handles rendering concerns for flight replay
  */
-import type { FeatureCollection, LineString } from "geojson";
+import type {
+  Feature,
+  FeatureCollection,
+  LineString,
+  MultiPolygon,
+} from "geojson";
 import {
   Marker,
   Popup,
   type GeoJSONSource,
   type Map as MapLibreMap,
+  type PositionAnchor,
 } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { ReplayManager } from "./replayManager";
 import type { ReplayAirplane, ReplayState } from "./replayState";
-import type { PathSegment, TrailRun } from "../types";
+import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
 import { frameCoalescer } from "../utils/frameCoalescer";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
@@ -38,6 +44,13 @@ import {
 } from "../utils/mapHelpers";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
+import {
+  airplaneLiftPx,
+  isLiftedAt,
+  pointOnFlight,
+  ribbonOf,
+  ribbonWidthZoom,
+} from "../calculations/lift";
 import { calculateSmoothedBearing } from "../features/replay";
 import { prefersReducedMotion } from "../utils/motion";
 
@@ -69,6 +82,31 @@ export const AUTO_ZOOM_SETTLE_MS = 300;
 
 /** Pixels between the airplane's position and the tip of its popup */
 const AIRPLANE_POPUP_OFFSET = 16;
+
+/**
+ * The popup's offset for each side it may open on, as MapLibre makes of
+ * AIRPLANE_POPUP_OFFSET, with the whole of it moved up by `lift` pixels to
+ * where the airplane is drawn
+ */
+function liftedPopupOffset(
+  lift: number,
+): Record<PositionAnchor, [number, number]> {
+  const o = AIRPLANE_POPUP_OFFSET;
+  const corner = Math.round(Math.sqrt(0.5 * o * o));
+  const sides: Record<PositionAnchor, [number, number]> = {
+    center: [0, 0],
+    top: [0, o],
+    "top-left": [corner, corner],
+    "top-right": [-corner, corner],
+    bottom: [0, -o],
+    "bottom-left": [corner, -corner],
+    "bottom-right": [-corner, -corner],
+    left: [o, 0],
+    right: [-o, 0],
+  };
+  for (const offset of Object.values(sides)) offset[1] -= lift;
+  return sides;
+}
 
 /** Fraction of the viewport used as the "near edge" margin for auto-panning */
 const EDGE_MARGIN_FRACTION = 0.1;
@@ -284,17 +322,61 @@ export function truncateTrail(state: ReplayState, time: number): void {
   state.trailDirty = true;
 }
 
-/** The trail as the data of its source: one line per colour run */
+/** What a feature of the trail carries: its colour, and a ribbon its height */
+interface TrailProperties {
+  color: string;
+  h?: number;
+}
+
+type TrailFeature = Feature<LineString | MultiPolygon, TrailProperties>;
+
+/**
+ * The trail as the data of its source: one line per colour run, or in the
+ * 3D view, with the flight smoothed (`state.smoothed`), the runs as ribbons
+ * at their height, as wide as `widthZoom` asks, for the ribbons' source;
+ * zoomed in as far as LIFT_MAX_ZOOM, the lines again.
+ * Only a run that has grown or changed its width is cut again: the others
+ * keep their pieces, so the trail costs no more to write than its line.
+ */
 export function trailFeatureCollection(
-  runs: readonly TrailRun[],
-): FeatureCollection<LineString, { color: string }> {
+  state: Pick<ReplayState, "trailRuns" | "smoothed" | "trailPieces">,
+  widthZoom: number,
+): FeatureCollection<LineString | MultiPolygon, TrailProperties> {
+  const smoothed = isLiftedAt(widthZoom) ? state.smoothed : null;
   return {
     type: "FeatureCollection",
-    features: runs.map((run) => ({
-      type: "Feature",
-      properties: { color: run.color },
-      geometry: { type: "LineString", coordinates: run.coords },
-    })),
+    features: state.trailRuns.flatMap((run): TrailFeature[] => {
+      if (!smoothed) {
+        return [
+          {
+            type: "Feature" as const,
+            properties: { color: run.color },
+            geometry: { type: "LineString" as const, coordinates: run.coords },
+          },
+        ];
+      }
+      let cut = state.trailPieces.get(run);
+      if (cut?.lastIndex !== run.lastIndex || cut.widthZoom !== widthZoom) {
+        // Cut from the flight's smoothed curve, so the runs of the trail
+        // meet without a seam
+        cut = {
+          lastIndex: run.lastIndex,
+          widthZoom,
+          pieces: ribbonOf(
+            smoothed,
+            run.firstIndex,
+            run.lastIndex + 1,
+            widthZoom,
+          ),
+        };
+        state.trailPieces.set(run, cut);
+      }
+      return cut.pieces.map((piece) => ({
+        type: "Feature" as const,
+        properties: { color: run.color, h: piece.h },
+        geometry: piece.geometry,
+      }));
+    }),
   };
 }
 
@@ -307,6 +389,8 @@ export function trailFeatureCollection(
 export class AirplaneMarker implements ReplayAirplane {
   readonly marker: Marker;
   readonly popup: Popup;
+  /** Pixels the airplane is drawn above its position (see setLift) */
+  private lift = 0;
   private readonly map: MapLibreMap;
   private readonly element: HTMLButtonElement;
 
@@ -382,6 +466,15 @@ export class AirplaneMarker implements ReplayAirplane {
     this.marker.setLngLat(lngLat);
     // The popup is not bound to the marker, so it is taken along
     if (this.popup.isOpen()) this.popup.setLngLat(lngLat);
+  }
+
+  setLift(px: number): void {
+    if (px === this.lift) return;
+    this.lift = px;
+    this.marker.setOffset([0, -px]);
+    // The popup points at the airplane where it is drawn, whichever side
+    // of it the popup opens on
+    this.popup.setOffset(liftedPopupOffset(px));
   }
 
   getElement(): HTMLButtonElement {
@@ -555,10 +648,21 @@ export class ReplayRenderer {
   /** Follows the user's hand on the map while a replay follows the airplane */
   private userMovement: UserMapMovement | null = null;
   /** The airplane, where it is and the track it flies, as last displayed */
+  /**
+   * Where the airplane is and where it heads, for the turns and the lift
+   * that follow the map. `heightFt` is its height above the flight's
+   * ground, null while the trail is flat.
+   */
   private heading: {
     marker: ReplayAirplane;
+    /** Where the airplane is on the line of its segment */
     position: [number, number];
+    /** And on its ribbon's curve, in the 3D view (see pointOnFlight) */
+    onCurve: [number, number] | null;
     track: number;
+    heightFt: number | null;
+    /** The replay's, whose trail's ribbons are as wide as the zoom asks */
+    state: ReplayState;
   } | null = null;
   /** The map whose moves turn the icon, while a replay shows one */
   private turningWith: MapLibreMap | null = null;
@@ -737,9 +841,24 @@ export class ReplayRenderer {
     // 0.5 to 0.9 ms of main thread, with no dropped frames. Sending only
     // the changed runs through `updateData` measured worse on the same
     // replay: more main thread per frame, and dropped frames.
-    void this.app.map
-      ?.getSource<GeoJSONSource>(MAP_SOURCES.replayTrail)
-      ?.setData(trailFeatureCollection(state.trailRuns));
+    const map = this.app.map;
+    if (!map) return;
+    const widthZoom = ribbonWidthZoom(map.getZoom());
+    state.trailWidthZoom = state.lifted ? widthZoom : null;
+    const id =
+      state.lifted && isLiftedAt(widthZoom)
+        ? MAP_SOURCES.replayTrailRibbons
+        : MAP_SOURCES.replayTrail;
+    // Lifted or flat, the trail is in one source, and leaves the other
+    if (state.trailWrittenTo !== null && state.trailWrittenTo !== id) {
+      void map
+        .getSource<GeoJSONSource>(state.trailWrittenTo)
+        ?.setData({ type: "FeatureCollection", features: [] });
+    }
+    state.trailWrittenTo = id;
+    void map
+      .getSource<GeoJSONSource>(id)
+      ?.setData(trailFeatureCollection(state, widthZoom));
   }
 
   /** Drop a write that is still pending; the replay layer is going away */
@@ -775,7 +894,22 @@ export class ReplayRenderer {
   private turnIcon(): void {
     const map = this.app.map;
     if (!map || !this.heading) return;
-    const { marker, position, track } = this.heading;
+    const { marker, track, heightFt, state, onCurve } = this.heading;
+    // On its ribbon in the 3D view, and up at its height; zoomed in so far
+    // that the trail is its line again, on the line
+    const position =
+      onCurve && isLiftedAt(map.getZoom()) ? onCurve : this.heading.position;
+    const [lat, lon] = marker.getLatLng();
+    if (lat !== position[0] || lon !== position[1]) marker.setLatLng(position);
+    marker.setLift(airplaneLiftPx(map, position[0], heightFt));
+    // The ribbons are as wide as the zoom they were cut for (see lift.ts)
+    if (
+      state.trailWidthZoom !== null &&
+      ribbonWidthZoom(map.getZoom()) !== state.trailWidthZoom
+    ) {
+      state.trailDirty = true;
+      this.scheduleTrailFlush(state);
+    }
     const iconDiv = this.airplaneIcon(marker);
     if (!iconDiv) return;
     if (this.turningWith !== map) {
@@ -870,10 +1004,19 @@ export class ReplayRenderer {
         fraction = Math.min(Math.max((currentTime - start) / duration, 0), 1);
       }
     }
-    const currentPos: [number, number] = [
+    // In the 3D view on the trail's ribbon, which follows the curve through
+    // the flight's points rather than the straight segment, at its height
+    // there. Known before the camera moves, which follows the airplane up.
+    const onCurve = state.smoothed
+      ? pointOnFlight(state.smoothed, currentIndex, fraction)
+      : null;
+    const onLine: [number, number] = [
       lat1 + (lat2 - lat1) * fraction,
       lon1 + (lon2 - lon1) * fraction,
     ];
+    const currentPos =
+      onCurve && isLiftedAt(this.app.map.getZoom()) ? onCurve.position : onLine;
+    state.airplaneHeightFt = onCurve?.heightFt ?? null;
     let bearing = calculateBearing(lat1, lon1, lat2, lon2);
 
     // Smooth the heading by looking ahead several segments
@@ -894,7 +1037,14 @@ export class ReplayRenderer {
     }
 
     // After the camera, which may have moved the map under the airplane
-    this.heading = { marker, position: currentPos, track: bearing };
+    this.heading = {
+      marker,
+      position: onLine,
+      onCurve: onCurve?.position ?? null,
+      track: bearing,
+      heightFt: state.airplaneHeightFt,
+      state,
+    };
     this.turnIcon();
 
     // The popup describes a segment, so an open one is rebuilt only once the
@@ -991,7 +1141,15 @@ export class ReplayRenderer {
 
     const container = map.getContainer();
     const mapSize = { x: container.clientWidth, y: container.clientHeight };
-    const point = map.project(toLngLat(currentPos));
+    // Where the airplane is drawn: in the 3D view up at its height, where
+    // the camera has to keep it and not at the ground under it
+    const ground = map.project(toLngLat(currentPos));
+    const lift = airplaneLiftPx(map, currentPos[0], state.airplaneHeightFt);
+    const point = { x: ground.x, y: ground.y - lift };
+    // The centre that brings the airplane itself to the middle of the map
+    const center = lift
+      ? map.unproject([point.x, point.y])
+      : toLngLat(currentPos);
     const marginX = mapSize.x * EDGE_MARGIN_FRACTION;
     const marginY = mapSize.y * EDGE_MARGIN_FRACTION;
 
@@ -1022,7 +1180,7 @@ export class ReplayRenderer {
       const throttled = now - state.lastSeekPanTime < SEEK_PAN_THROTTLE_MS;
       if (throttled && !outsideViewport) return;
       state.lastSeekPanTime = now;
-      map.jumpTo({ center: toLngLat(currentPos) });
+      map.jumpTo({ center });
       return;
     }
 
@@ -1030,7 +1188,7 @@ export class ReplayRenderer {
     // keeps a fast replay in view
     const animate = !prefersReducedMotion();
     map.easeTo({
-      center: toLngLat(currentPos),
+      center,
       duration: RECENTER_PAN_DURATION_MS,
       easing: recenterEasing,
       animate,

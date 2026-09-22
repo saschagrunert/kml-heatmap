@@ -42,6 +42,7 @@
 - Year and aircraft filtering
 - Flight replay with animated airplane marker
 - A map that turns and tilts, and a globe for flights that span a continent
+- A 3D view that lifts the flights to their altitude
 - Year-in-review "Wrapped" summary
 - Shareable URLs that encode the exact map state
 - Privacy protection: no flight date finer than the year reaches the
@@ -739,7 +740,11 @@ as scripts (`data.js`, `metadata.js`, `airports.js`), removes those files.
 
 ### Layers
 
-- **Density Heatmap** (toggle) - Shows frequently visited locations
+- **Density Heatmap** (toggle) - Shows frequently visited locations.
+  Zoomed in from `z` 12 to 13.5 (the `z` of a
+  [shared link](#shareable-urls)) it hands over to heat lines: the tracks
+  themselves, coloured and widened by the time spent on each 40 m of them,
+  so the taxiways and circuits of a busy airport stay apart
 - **Altitude** (toggle) - Paths coloured by elevation, on a scale that runs
   purple through magenta to orange
 - **Speed** (toggle) - Paths coloured by groundspeed, on a scale that runs
@@ -747,12 +752,16 @@ as scripts (`data.js`, `metadata.js`, `airports.js`), removes those files.
   exported image says which of them is drawn without its legend; both
   brighten from end to end, so they survive being printed in grey. Both
   colour layers draw 32 steps of their scale, one line per run of a path in
-  the same step, and below zoom 15 (counted as the `z` of a
-  [shared link](#shareable-urls)) they draw simplified geometry (a quarter
-  of a pixel). Hovering a path still shows the exact value. The heatmap,
-  Replay and the statistics always use every point
-- **Airports** (toggle) - Airport markers with ICAO codes
-- **Aviation Data** (toggle) - Airspaces, airports, navaids, and reporting points from open flightmaps, where it has coverage. Drawn from zoom 7 to 14 (again the `z` of a link); its charts end at zoom 12, and further in than two levels of upscaling they would only blur the base map
+  the same step, and draw every recorded point. Hovering a path shows the
+  exact value
+- **Airports** (toggle) - Airport markers with their ICAO codes above them.
+  The codes are placed together with the place names of the base map, so
+  they never cover one another; where two would collide, the home base and
+  then the busier airport keep theirs. They are left out below `z` 5, and
+  on a map tilted past about 55 degrees the airports more than twice as
+  far from the camera as the middle of the map are hidden, markers and
+  codes, where they would crowd into a strip along the horizon
+- **Aviation Data** (toggle) - Airspaces, airports, navaids, and reporting points from open flightmaps, where it has coverage. Drawn from `z` 7 to 14; its charts end at `z` 12, and further in than two levels of upscaling they would only blur the base map
 
 ### Controls
 
@@ -762,7 +771,8 @@ as scripts (`data.js`, `metadata.js`, `airports.js`), removes those files.
 - **Wrapped** - View the year-in-review summary; Escape closes it
 - **Replay** - Animate one flight with adjustable speed (default 50x) and an auto-zoom button that follows the airplane. The whole track is drawn dimmed and the flown part paints over it in the colours of the active scale. Replay needs exactly one selected flight with timing data; a toast explains why it is unavailable otherwise
 - **Globe** - Draw the map as a globe instead of in Mercator. Above zoom 12 the two look the same, which is MapLibre's doing. Airport markers on the far side are hidden, and a popup closes once the globe has turned its place away. The space around the globe is the page background; no atmosphere is drawn
-- **North up** - The map turns and tilts (up to 60 degrees) by gesture: drag with the right mouse button or with Ctrl held, twist or drag with two fingers, or hold Shift with the arrow keys once the map has focus. The needle on this button points north, and a click turns the map back north up and flat. On a phone the compass floats at the top right of the map while the map is turned or tilted, and the globe switch is in the Layers sheet. Replay keeps the orientation you chose and points the airplane along its track on screen; Wrapped shows its overview north up and flat and gives your view back when it closes
+- **3D** - Lift the flights to their altitude, as ribbons about as wide as the lines at every zoom that stand on the ground of each flight: the altitudes it recorded taxiing at the field it left and at the one it landed on, sloping from one to the other along the way, so a flight taxis on the map at both ends even between fields of different height, and an altitude glitch of the recorder takes no flight up with it and follow its climbs and descents in 20 ft steps. Heights are exaggerated where the map is zoomed out, 60 times at `z` 5 down to 1.5 times at `z` 17, so a flight still shows its shape on a map of half of Europe. Switching it on colours the paths by altitude if neither colour layer is on and tilts a flatter map to 50 degrees. From `z` 18 in, where the camera is lower than a traffic circuit, the flights are drawn flat again. Replay lifts its airplane and its trail with them. There is no terrain: the map stays flat, and each flight is drawn at its height above its own ground
+- **North up** - The map turns and tilts (up to 85 degrees, with a sky above the horizon) by gesture: drag with the right mouse button or with Ctrl held, twist or drag with two fingers, or hold Shift with the arrow keys once the map has focus. The needle on this button points north, and a click turns the map back north up and flat. On a phone the compass floats at the top right of the map while the map is turned or tilted, and the globe switch is in the Layers sheet. Replay keeps the orientation you chose and points the airplane along its track on screen; Wrapped shows its overview north up and flat and gives your view back when it closes
 - A map attribution, on the map at every width; it steps aside only while a sheet or the statistics panel covers the map it credits. There are no zoom buttons: use the scroll wheel, pinch, double click, or the keyboard once the map has focus
 - Below 768 px the two control columns are replaced by a bottom bar with five tabs. Layers, Filter and More open a sheet; Stats and Wrapped open their panel directly. Escape closes an open sheet, and Tab stays inside it. Replay takes over the bottom edge and the bar steps aside until it ends
 
@@ -798,12 +808,13 @@ browser's address bar or use the copy-link button:
   switch to MapLibre therefore still show the same area
 - Orientation (`?b=-40.5&t=35`): `b` is the bearing, the degrees the top of
   the map is turned clockwise from north (any number, wrapped into -180 to
-  180), and `t` the tilt in degrees (held between 0 and 60). Both are
+  180), and `t` the tilt in degrees (held between 0 and 85). Both are
   written to a tenth of a degree and left out while the map is north up and
   flat
 - Globe (`?g=1`), left out for Mercator. A link without `b`, `t` and `g`,
   which is every link from before the map could turn, opens north up, flat
   and in Mercator
+- 3D view (`?d=1`), left out while the flights are drawn flat
 - Debug logging in the browser console (`?debug=true`)
 
 **Example URLs:**
@@ -813,6 +824,7 @@ browser's address bar or use the copy-link button:
 ?y=2025&v=010000000                      # 2025 with the altitude layer only
 ?y=2025&a=D-EAGJ&lat=51.5&lng=13.4&z=10  # Complete state
 ?y=all&lat=48&lng=8&z=4&g=1&b=-30&t=50   # All years on a turned, tilted globe
+?y=2025&z=9&t=60&d=1                     # 2025 in 3D
 ```
 
 URL parameters take precedence over localStorage, allowing shared links to

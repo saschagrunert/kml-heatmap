@@ -123,6 +123,64 @@ describe("layer handles", () => {
     );
   });
 
+  it("draw the flights of each path source again as ribbons, from a source of their own", () => {
+    const app = createMockApp();
+    const map = app.map!;
+    const pairs = [
+      [MAP_LAYERS.pathsAltitude, MAP_LAYERS.pathsAltitudeRibbons],
+      [MAP_LAYERS.pathsAirspeed, MAP_LAYERS.pathsAirspeedRibbons],
+      [
+        MAP_LAYERS.pathsAltitudeSelected,
+        MAP_LAYERS.pathsAltitudeSelectedRibbons,
+      ],
+      [
+        MAP_LAYERS.pathsAirspeedSelected,
+        MAP_LAYERS.pathsAirspeedSelectedRibbons,
+      ],
+      [MAP_LAYERS.replayTrail, MAP_LAYERS.replayTrailRibbons],
+    ] as const;
+
+    for (const [lineId, ribbonId] of pairs) {
+      const line = map.layer(lineId);
+      const ribbon = map.layer(ribbonId);
+      expect(ribbon.type).toBe("fill-extrusion");
+      // A source of their own, named like the layer, and not simplified:
+      // the lines' sources are
+      expect(ribbon.source).toBe(ribbonId);
+      expect(ribbon.source).not.toBe(line.source);
+      expect(map.source(ribbonId).spec).toMatchObject({ tolerance: 0 });
+      expect(line.filter).toBeUndefined();
+      expect(ribbon.filter).toBeUndefined();
+      // At every zoom
+      expect(ribbon.minzoom).toBeUndefined();
+      expect(ribbon.paint["fill-extrusion-color"]).toEqual(["get", "color"]);
+    }
+    // Drawn over the lines, under the replay's trail and the airport codes
+    const order = map.getLayersOrder();
+    expect(order.indexOf(MAP_LAYERS.pathsAltitudeRibbons)).toBeGreaterThan(
+      order.indexOf(MAP_LAYERS.pathsAirspeedSelected),
+    );
+    expect(order.indexOf(MAP_LAYERS.pathsAltitudeRibbons)).toBeLessThan(
+      order.indexOf(MAP_LAYERS.replayTrail),
+    );
+  });
+
+  it("switch the ribbons of a colour mode with its lines", () => {
+    const app = createMockApp();
+    const map = app.map!;
+
+    app.altitudeLayer.setVisible(true);
+    for (const id of [
+      MAP_LAYERS.pathsAltitudeRibbons,
+      MAP_LAYERS.pathsAltitudeSelectedRibbons,
+    ]) {
+      expect(map.layer(id).layout["visibility"]).toBe("visible");
+    }
+    expect(
+      map.layer(MAP_LAYERS.pathsAirspeedRibbons).layout["visibility"],
+    ).toBe("none");
+  });
+
   it("switch the heat lines with the heatmap", () => {
     const app = createMockApp();
     const map = app.map!;
@@ -285,6 +343,18 @@ describe("withDataLayers", () => {
       "place-labels",
       MAP_LAYERS.airportLabels,
     ]);
+  });
+
+  it("keeps the sky of a tilted map, which the base style does not have", () => {
+    const next: StyleSpecification = { version: 8, sources: {}, layers: [] };
+    const sky = { "sky-color": "#000000" };
+
+    expect(withDataLayers({ ...previous, sky }, next).sky).toEqual(sky);
+    // A base style with a sky of its own keeps it
+    const own = { "sky-color": "#ffffff" };
+    expect(
+      withDataLayers({ ...previous, sky }, { ...next, sky: own }).sky,
+    ).toBe(own);
   });
 
   it("keeps the globe chosen before the base style arrived", () => {

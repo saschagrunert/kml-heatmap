@@ -266,6 +266,30 @@ export function panPopupIntoView(
   );
 }
 
+/**
+ * How many times farther from the camera a place on the ground is than the
+ * middle of the map: 1 there, more towards the top of a tilted map, and
+ * Infinity at and beyond its horizon. Worked out from where the place is
+ * drawn: the ray to it leaves the camera the more steeply the lower it is
+ * on the screen, and meets the ground the farther off the flatter it is.
+ */
+export function cameraDistanceRatio(
+  map: MapLibreMap,
+  place: { lng: number; lat: number },
+): number {
+  const pitch = (map.getPitch() * Math.PI) / 180;
+  if (pitch === 0) return 1;
+  const fov = (map.getVerticalFieldOfView() * Math.PI) / 180;
+  // The distance from the camera to the screen, in pixels
+  const focal = map.getContainer().clientHeight / 2 / Math.tan(fov / 2);
+  const centre = map.project(map.getCenter());
+  const at = map.project([place.lng, place.lat]);
+  // The ray's angle from the ground straight below the camera
+  const angle = pitch + Math.atan2(centre.y - at.y, focal);
+  if (angle >= Math.PI / 2) return Infinity;
+  return Math.cos(pitch) / Math.cos(angle);
+}
+
 /** How far off a place may come back from the round trip of `isBehindGlobe` */
 const GLOBE_ROUND_TRIP_DEGREES = 0.01;
 

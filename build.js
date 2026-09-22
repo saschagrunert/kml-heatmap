@@ -251,11 +251,24 @@ function analyzeBundleComposition(metafile, fileName) {
 // distance field, the label data and the hover that joins label and
 // marker, less the DOM declutter it replaces, which took 115.76 KB to
 // 118.43 KB. The codes are on the first paint.
-const BUDGET_APP = 118.5 * 1024;
+// Raised from 118.5 KB for the 3D view (calculations/lift.ts): the ribbon
+// layers and their sources, the runs cut by height and written as ribbons
+// instead of lines, as wide as the zoom asks, the ranking of a lifted
+// ribbon under the pointer, the ribbons mitred at their bends, sloped with
+// the climb and smoothed along a spline through each flight, the switch
+// with its link flag and sheet row, the sky of a map tilted past 60
+// degrees, the airports hidden towards its horizon, and the ground of
+// each flight from its fields, which took 118.48 KB to 129.22 KB. A link may open in 3D, so none of it waits for a
+// later bundle.
+const BUDGET_APP = 130 * 1024;
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.
-const BUDGET_FEATURES = 40 * 1024;
+// Raised from 40 KB for the replay in the 3D view: the trail drawn as
+// ribbons sloped with the flight, each run cut once and handed back to its
+// line zoomed in close, and the airplane lifted to its height on the
+// flight's curve (41.22 KB).
+const BUDGET_FEATURES = 42 * 1024;
 
 // The year worker's bundle is fetched by every visit, but next to the first
 // year file rather than ahead of the app, so it holds up nothing on the page.

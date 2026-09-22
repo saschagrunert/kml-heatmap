@@ -225,6 +225,8 @@ export interface PathRunProperties {
    */
   g: number;
   pathId: number;
+  /** Feet above the flight's ground; only a ribbon of the 3D view has it */
+  h?: number;
   color: string;
 }
 
@@ -323,6 +325,8 @@ export interface AppState {
   pitch?: number;
   /** Whether the map is drawn as a globe; absent means Mercator */
   globeVisible?: boolean;
+  /** Whether the flights are lifted to their altitude; absent means flat */
+  threeDVisible?: boolean;
 }
 
 /**

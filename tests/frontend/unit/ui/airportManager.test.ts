@@ -751,6 +751,69 @@ describe("AirportManager", () => {
       expect(label("EDDK")!.geometry.coordinates).toEqual([7.14, 50.87]);
     });
 
+    it("leaves out the airports towards the horizon of a steeply tilted map", async () => {
+      await mockApp.mapReady;
+      await Promise.resolve();
+      const map = mockApp.map!;
+      Object.defineProperty(map.getContainer(), "clientHeight", {
+        value: 800,
+      });
+      const names = (): unknown[] =>
+        labels().map((feature) => feature.properties["name"]);
+      airportManager.updateAirportOpacity();
+
+      // Looking north over EDDF: EDDK is up at the horizon, three times as
+      // far from the camera as EDDF; the others are to the south, near
+      map.jumpTo({ center: [8.67, 50.1], pitch: 80 });
+      map.emit("move");
+
+      expect(markers["EDDK"]!.getElement().hidden).toBe(true);
+      expect(markers["EDDF"]!.getElement().hidden).toBe(false);
+      expect(names()).toEqual(["EDDF", "EDDM", "LOWW"]);
+
+      // Flatter, it is back, marker and label
+      map.jumpTo({ pitch: 45 });
+      map.emit("move");
+
+      expect(markers["EDDK"]!.getElement().hidden).toBe(false);
+      expect(names()).toEqual(airports.map((airport) => airport.name));
+    });
+
+    it("keeps the airport the keyboard is on, however far it is", async () => {
+      await mockApp.mapReady;
+      await Promise.resolve();
+      const map = mockApp.map!;
+      Object.defineProperty(map.getContainer(), "clientHeight", {
+        value: 800,
+      });
+      markers["EDDK"]!.getElement().focus();
+
+      map.jumpTo({ center: [8.67, 50.1], pitch: 80 });
+      map.emit("move");
+
+      expect(markers["EDDK"]!.getElement().hidden).toBe(false);
+      expect(document.activeElement).toBe(markers["EDDK"]!.getElement());
+    });
+
+    it("keeps an airport the filter hides hidden as it comes back from the horizon", async () => {
+      await mockApp.mapReady;
+      await Promise.resolve();
+      const map = mockApp.map!;
+      Object.defineProperty(map.getContainer(), "clientHeight", {
+        value: 800,
+      });
+      map.jumpTo({ center: [8.67, 50.1], pitch: 80 });
+      map.emit("move");
+      // 2024 has no flight to LOWW
+      mockApp.selectedYear = "2024";
+
+      map.jumpTo({ pitch: 0 });
+      map.emit("move");
+
+      expect(markers["LOWW"]!.getElement().hidden).toBe(true);
+      expect(markers["EDDK"]!.getElement().hidden).toBe(false);
+    });
+
     it("leaves out the airports the filter hides, like their markers", () => {
       mockApp.selectedYear = "2024";
 

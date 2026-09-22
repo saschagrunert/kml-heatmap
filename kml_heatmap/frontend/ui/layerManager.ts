@@ -21,13 +21,21 @@
  *   selection's colour range. The main source stays as it is: its layer is
  *   dimmed with one paint property and filtered to leave the selected
  *   flights (in isolate mode: everything) out.
+ * - In the 3D view (calculations/lift.ts) each run is written as a ribbon
+ *   at its height instead of its line, at every zoom, to a source of
+ *   ribbons of its own. The ribbon climbs and descends with the flight, in
+ *   pieces of one height each, and every piece is a feature of the same
+ *   run, so the run table, the selection and the tooltip serve all of them
+ *   as they do the line. Its width is part of its geometry, so the ribbons
+ *   are written again as the map zooms to another whole level.
  * - Paths are pixels of a layer and have no events of their own. One
  *   `mousemove` handler per map asks what is rendered under the pointer, at
  *   most once per frame, and moves one reused tooltip along.
  */
 import {
+  Point as PointClass,
   Popup,
-  type FilterSpecification,
+  type ExpressionSpecification,
   type GeoJSONSource,
   type LngLat,
   type Map as MapLibreMap,
@@ -66,6 +74,16 @@ import {
   segmentsForPathIds,
 } from "../calculations/statistics";
 import {
+  groundProfileFt,
+  isLiftedAt,
+  liftFt,
+  liftOffsetPx,
+  ribbonOf,
+  ribbonWidthZoom,
+  smoothFlights,
+  type SmoothedFlights,
+} from "../calculations/lift";
+import {
   calculateAirspeedRange,
   calculateAltitudeRange,
   calculateSegmentProperties,
@@ -88,6 +106,11 @@ interface LayerConfig {
   /** Source and layer share their id, see MAP_SOURCES and MAP_LAYERS */
   sources: Record<RunSet, string>;
   layers: Record<RunSet, string>;
+  /**
+   * The sources the 3D view writes the runs to as ribbons, and their
+   * layers, which share their id
+   */
+  ribbons: Record<RunSet, string>;
   range: Range;
   getValue: (seg: PathSegment) => number;
   getColor: (value: number, min: number, max: number) => string;
@@ -134,8 +157,12 @@ interface RunTable {
   runs: Run[];
   /** Bumped on every `setData`; features of an older one are stale */
   g: number;
-  /** Whether the source holds no feature, which is how it is created */
-  sourceEmpty: boolean;
+  /**
+   * The source that holds the runs' features, null while none does, which
+   * is how they are created: the lines' source, or in the 3D view the
+   * ribbons' source
+   */
+  written: string | null;
   /**
    * How far the last `setData` has got: with the worker, with the tiles in
    * view being cut from it, or null once the map shows it. Until then the
@@ -163,7 +190,7 @@ function emptyModeState(): ModeState {
   const table = (): RunTable => ({
     runs: [],
     g: 0,
-    sourceEmpty: true,
+    written: null,
     landing: null,
   });
   return {
@@ -279,6 +306,13 @@ export class LayerManager implements PathHitTester {
   private hovered: PathSegment | null = null;
   /** The popup a tap opened; a tap elsewhere replaces it */
   private touchPopup: Popup | null = null;
+  /** The zoom the ribbons were last written for (see ribbonWidthZoom) */
+  private widthZoom: number | null = null;
+  /** Every flight of a dataset smoothed at its height, for the 3D view */
+  private smoothed: {
+    segments: PathSegment[];
+    flights: SmoothedFlights;
+  } | null = null;
 
   private readonly handleMouseMove = (e: MapMouseEvent): void => {
     // The overview of the Wrapped dialog is this map, but there to be
@@ -298,8 +332,19 @@ export class LayerManager implements PathHitTester {
     this.hideTooltip();
   };
 
+  /** A ribbon is as wide as the zoom it was written for (see lift.ts) */
+  private readonly handleZoomEnd = (): void => {
+    const map = this.listeningTo;
+    if (!map || !this.app.threeDVisible || this.widthZoom === null) return;
+    if (ribbonWidthZoom(map.getZoom()) !== this.widthZoom) {
+      this.recutRuns();
+    }
+  };
+
   constructor(app: MapApp) {
     this.app = app;
+    // Lifted or flat, the flights are cut and written anew
+    app.store.subscribe("threeDVisible", () => this.redrawVisibleModes());
     if (app.map) {
       this.listen(app.map);
     } else {
@@ -335,6 +380,7 @@ export class LayerManager implements PathHitTester {
     this.listeningTo = map;
     map.on("mousemove", this.handleMouseMove);
     map.on("mouseout", this.handleMouseOut);
+    map.on("zoomend", this.handleZoomEnd);
   }
 
   /** Stop following the pointer; the drawn layers stay on the map */
@@ -342,6 +388,7 @@ export class LayerManager implements PathHitTester {
     this.destroyed = true;
     this.listeningTo?.off("mousemove", this.handleMouseMove);
     this.listeningTo?.off("mouseout", this.handleMouseOut);
+    this.listeningTo?.off("zoomend", this.handleZoomEnd);
     this.listeningTo = null;
     this.hoverFrame.cancel();
     this.lastMove = null;
@@ -363,6 +410,10 @@ export class LayerManager implements PathHitTester {
           main: MAP_LAYERS.pathsAltitude,
           selected: MAP_LAYERS.pathsAltitudeSelected,
         },
+        ribbons: {
+          main: MAP_SOURCES.pathsAltitudeRibbons,
+          selected: MAP_SOURCES.pathsAltitudeSelectedRibbons,
+        },
         range: this.app.altitudeRange,
         getValue: (seg) => seg.altitude_ft ?? 0,
         getColor: getColorForAltitude,
@@ -382,6 +433,10 @@ export class LayerManager implements PathHitTester {
       layers: {
         main: MAP_LAYERS.pathsAirspeed,
         selected: MAP_LAYERS.pathsAirspeedSelected,
+      },
+      ribbons: {
+        main: MAP_SOURCES.pathsAirspeedRibbons,
+        selected: MAP_SOURCES.pathsAirspeedSelectedRibbons,
       },
       range: this.app.airspeedRange,
       getValue: (seg) => seg.groundspeed_knots ?? 0,
@@ -458,13 +513,18 @@ export class LayerManager implements PathHitTester {
       if (!config.handle.isVisible() || !state.segments) continue;
       tableOfLayer.set(config.layers.main, [state, "main"]);
       tableOfLayer.set(config.layers.selected, [state, "selected"]);
+      // Only the 3D view writes ribbons to look for
+      if (this.app.threeDVisible) {
+        tableOfLayer.set(config.ribbons.main, [state, "main"]);
+        tableOfLayer.set(config.ribbons.selected, [state, "selected"]);
+      }
       for (const set of ["main", "selected"] as const) {
         const table = state.tables[set];
         // Asked here rather than followed through the map's events: the
         // answer is only needed when someone looks
         if (
           table.landing === "tiles" &&
-          map.isSourceLoaded(config.sources[set])
+          map.isSourceLoaded(table.written ?? config.sources[set])
         ) {
           table.landing = null;
         }
@@ -490,6 +550,9 @@ export class LayerManager implements PathHitTester {
     // map reports it, unwrapped, and put each segment into the copy of the
     // world nearest to it (see findNearestSegment and pixelDistance).
     const pointer = map.unproject(point);
+    const ribbonLayers = new Set<string>(
+      MODES.flatMap((mode) => Object.values(this.getConfig(mode).ribbons)),
+    );
     const seen = new Set<Run>();
     let stale = false;
     let best: PathHit | null = null;
@@ -526,13 +589,27 @@ export class LayerManager implements PathHitTester {
         continue;
       }
 
+      // A ribbon is drawn above the ground it stands on: the pointer is
+      // taken down by as much before the segment and the distance to it
+      // are looked for (see liftOffsetPx)
+      const { h } = feature.properties as Partial<PathRunProperties>;
+      const lift =
+        h !== undefined && ribbonLayers.has(feature.layer.id)
+          ? liftOffsetPx(map, pointer.lat, h)
+          : 0;
+      const ground = lift ? map.unproject([point.x, point.y + lift]) : pointer;
       const segment = findNearestSegment(
         state.segments!.slice(run.start, run.end),
-        pointer.lat,
-        pointer.lng,
+        ground.lat,
+        ground.lng,
       );
       if (!segment) continue;
-      const distance = pixelDistance(map, point, pointer.lng, segment);
+      const distance = pixelDistance(
+        map,
+        new PointClass(point.x, point.y + lift),
+        pointer.lng,
+        segment,
+      );
       const isSelected = set === "selected";
       if (
         distance < bestDistance ||
@@ -810,8 +887,18 @@ export class LayerManager implements PathHitTester {
     return runs;
   }
 
-  /** Replace the runs of one source, and its data where the map has it */
-  private setRuns(config: LayerConfig, set: RunSet, runs: Run[]): void {
+  /**
+   * Replace the runs of one source, and its data where the map has it.
+   * `recut` writes the same runs again, cut for another zoom: the features
+   * the tiles still hold stand for the same runs, so they stay valid, and
+   * the flights under the pointer are not "stale" meanwhile.
+   */
+  private setRuns(
+    config: LayerConfig,
+    set: RunSet,
+    runs: Run[],
+    recut = false,
+  ): void {
     const state = this.state[config.mode];
     const table = state.tables[set];
     table.runs = runs;
@@ -823,29 +910,68 @@ export class LayerManager implements PathHitTester {
     }
     // Most redraws happen without a selection; an empty source that stays
     // empty is not worth cutting its tiles again
-    if (runs.length === 0 && table.sourceEmpty) return;
+    if (runs.length === 0 && table.written === null) return;
 
-    const g = ++table.g;
+    // Zoomed in close the 3D view draws the lines (see LIFT_MAX_ZOOM)
+    const threeD = this.app.threeDVisible;
+    const lifted = threeD && isLiftedAt(map.getZoom());
+    const id = lifted ? config.ribbons[set] : config.sources[set];
+    // Lifted or flat, the runs are in one source, and leave the other
+    if (table.written !== null && table.written !== id) {
+      void map
+        .getSource<GeoJSONSource>(table.written)
+        ?.setData({ type: "FeatureCollection", features: [] });
+    }
+
+    const moved = table.written !== null && table.written !== id;
+    const g = recut ? table.g : ++table.g;
     const segments = state.segments ?? [];
-    const features = runs.map(
-      (run, r): GeoJSON.Feature<GeoJSON.LineString, PathRunProperties> => {
+    // Every flight smoothed at its height, in the 3D view (see lift.ts),
+    // and the ribbons as wide as the zoom asks
+    const smoothed = lifted ? this.smoothedFlights(segments) : null;
+    const widthZoom = ribbonWidthZoom(map.getZoom());
+    if (threeD) this.widthZoom = widthZoom;
+    const features: GeoJSON.Feature<
+      GeoJSON.LineString | GeoJSON.MultiPolygon,
+      PathRunProperties
+    >[] = [];
+    runs.forEach((run, r) => {
+      const properties = { r, g, pathId: run.pathId, color: run.color };
+      if (!smoothed) {
         const coordinates: LngLatTuple[] = [
           toLngLat(segments[run.start]!.coords![0]),
         ];
         for (let i = run.start; i < run.end; i++) {
           coordinates.push(toLngLat(segments[i]!.coords![1]));
         }
-        return {
+        features.push({
           type: "Feature",
-          properties: { r, g, pathId: run.pathId, color: run.color },
+          properties,
           geometry: { type: "LineString", coordinates },
-        };
-      },
-    );
-    table.sourceEmpty = runs.length === 0;
-    const id = config.sources[set];
+        });
+        return;
+      }
+      // In the 3D view the run is a ribbon at its height, at every zoom, cut
+      // from its flight's smoothed curve so it meets the runs on either side
+      // without a seam
+      for (const piece of ribbonOf(smoothed, run.start, run.end, widthZoom)) {
+        features.push({
+          type: "Feature",
+          properties: { ...properties, h: piece.h },
+          geometry: piece.geometry,
+        });
+      }
+    });
+    table.written = runs.length === 0 ? null : id;
     const source = map.getSource<GeoJSONSource>(id);
     if (!source) return;
+    // A recut into the source that has the runs changes nothing a click
+    // or the pointer could find; into the other one, it has none of them
+    // until its tiles are cut
+    if (recut && !moved) {
+      void source.setData({ type: "FeatureCollection", features });
+      return;
+    }
     table.landing = "worker";
     // The promise never rejects: a failure arrives as the map's error
     // event. It settles once the worker has the data of the last call,
@@ -904,11 +1030,8 @@ export class LayerManager implements PathHitTester {
     if (!map) return;
 
     const selectedLook = runLook(true, shown);
-    map.setPaintProperty(
-      config.layers.main,
-      "line-opacity",
-      runLook(false, shown).opacity,
-    );
+    const mainOpacity = runLook(false, shown).opacity;
+    map.setPaintProperty(config.layers.main, "line-opacity", mainOpacity);
     map.setPaintProperty(
       config.layers.selected,
       "line-width",
@@ -919,8 +1042,19 @@ export class LayerManager implements PathHitTester {
       "line-opacity",
       selectedLook.opacity,
     );
+    // The ribbons of the 3D view, dimmed for a selection like the lines
+    map.setPaintProperty(
+      config.ribbons.main,
+      "fill-extrusion-opacity",
+      mainOpacity,
+    );
+    map.setPaintProperty(
+      config.ribbons.selected,
+      "fill-extrusion-opacity",
+      selectedLook.opacity,
+    );
 
-    let filter: FilterSpecification | null = null;
+    let filter: ExpressionSpecification | null = null;
     if (shown.selected.size > 0) {
       filter = shown.isolate
         ? ["literal", false]
@@ -931,7 +1065,48 @@ export class LayerManager implements PathHitTester {
     if (filterKey !== state.filterKey) {
       state.filterKey = filterKey;
       map.setFilter(config.layers.main, filter);
+      map.setFilter(config.ribbons.main, filter);
     }
+  }
+
+  /** Cut and write the visible modes again, as the 3D view comes or goes */
+  private redrawVisibleModes(): void {
+    for (const mode of MODES) {
+      if (this.state[mode].segments) this.redrawPaths(this.getConfig(mode));
+    }
+  }
+
+  /**
+   * Write the runs of the drawn modes again, as they are, cut for the zoom
+   * the map is at now (see ribbonWidthZoom)
+   */
+  private recutRuns(): void {
+    for (const mode of MODES) {
+      const state = this.state[mode];
+      if (!state.segments) continue;
+      const config = this.getConfig(mode);
+      this.setRuns(config, "main", state.tables.main.runs, true);
+      this.setRuns(config, "selected", state.tables.selected.runs, true);
+    }
+  }
+
+  /**
+   * Every flight smoothed at its height above its ground, kept for the
+   * dataset it was worked out for: the data of a year does not change while
+   * it is on the map
+   */
+  private smoothedFlights(segments: PathSegment[]): SmoothedFlights {
+    if (this.smoothed?.segments !== segments) {
+      // Each flight stands on its own fields (groundProfileFt)
+      const ground = groundProfileFt(segments);
+      this.smoothed = {
+        segments,
+        flights: smoothFlights(segments, (i) =>
+          liftFt(segments[i]!.altitude_ft ?? 0, ground[i]!),
+        ),
+      };
+    }
+    return this.smoothed.flights;
   }
 
   /**

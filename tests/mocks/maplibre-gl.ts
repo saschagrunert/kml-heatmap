@@ -317,6 +317,7 @@ export class Map
       | "getBounds"
       | "getBearing"
       | "getPitch"
+      | "getVerticalFieldOfView"
       | "getProjection"
       | "setProjection"
       | "fitBounds"
@@ -521,6 +522,13 @@ export class Map
     (id: string, name: string) => this.layer(id).layout[name],
   );
 
+  setLayerZoomRange = vi.fn((id: string, minzoom: number, maxzoom: number) => {
+    const layer = this.layer(id);
+    layer.minzoom = minzoom;
+    layer.maxzoom = maxzoom;
+    return this;
+  });
+
   setPaintProperty = vi.fn((id: string, name: string, value: unknown) => {
     this.layer(id).paint[name] = value;
     return this;
@@ -615,6 +623,7 @@ export class Map
 
   getBearing = vi.fn(() => this.bearing);
   getPitch = vi.fn(() => this.pitch);
+  getVerticalFieldOfView = vi.fn(() => 36.87);
 
   getProjection = vi.fn(() => this.projection);
   /** Like MapLibre: a projection is part of the style, so it needs one */

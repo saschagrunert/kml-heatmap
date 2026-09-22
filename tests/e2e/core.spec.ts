@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from "./fixtures";
+import { DOUBLE_TAP_MS as APP_DOUBLE_TAP_MS } from "../../kml_heatmap/frontend/utils/mapHelpers";
 import {
   activateReplay,
   attachErrorCollectors,
@@ -10,6 +11,7 @@ import {
   usesMobileBar,
 } from "./helpers";
 import {
+  airportMarkerCenter,
   airportMarkerIsFocused,
   attributionControl,
   centerOnAirport,
@@ -48,25 +50,75 @@ async function twoAirports(page: Page): Promise<[string, string]> {
 /** Longer than the double tap time of Chrome (300 ms) and Safari */
 const DOUBLE_TAP_MS = 500;
 
+declare global {
+  interface Window {
+    /** The times of the clicks on the target of doubleTap */
+    __doubleTapClicks?: number[];
+  }
+}
+
 /**
- * Two taps on an element that the browser counts as a double tap. Chromium
- * is handed both at once with the times they happen at, so the gap between
- * them is the one given and not how long the page took over the first; that
- * made it a single tap now and then. Other engines get two taps in a row.
+ * Two taps on an airport's marker that the browser counts as a double tap.
+ * Chromium is handed both at once with the times they happen at, so the gap
+ * between them is the one given and not how long the page took over the
+ * first; that made it a single tap now and then.
+ *
+ * Other engines get two taps in a row, and either may go astray. A busy
+ * runner can hold them farther apart than the app counts as one double tap
+ * (DOUBLE_TAP_MS in utils/mapHelpers.ts): a WebKit run in CI had them reach
+ * the page 480 ms apart, and the app rightly saw two taps, the second
+ * closing what the first opened. The popup of the first tap also pans the
+ * map to fit once its flights are in, which carries the marker out from
+ * under the second tap. So every tap is aimed afresh at where the marker is
+ * now, and the clicks the marker saw say whether the pair arrived as one
+ * double tap. If it did not, the marker starts over: popup closed, map back
+ * on it, and tapped again.
  */
 async function doubleTap(
   page: Page,
-  target: Locator,
+  name: string,
   browserName: string,
 ): Promise<void> {
-  const box = (await target.boundingBox())!;
-  const x = box.x + box.width / 2;
-  const y = box.y + box.height / 2;
+  const tapMarker = async (): Promise<void> => {
+    const { x, y } = await airportMarkerCenter(page, name);
+    await page.touchscreen.tap(x, y);
+  };
   if (browserName !== "chromium") {
-    await page.touchscreen.tap(x, y);
-    await page.touchscreen.tap(x, y);
-    return;
+    // The times of the clicks the taps give, as the page saw them
+    await page.evaluate((airport) => {
+      window.__doubleTapClicks = [];
+      window
+        .mapApp!.airportMarkers[airport]!.getElement()
+        .addEventListener("click", (event) =>
+          window.__doubleTapClicks!.push(event.timeStamp),
+        );
+    }, name);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.evaluate((airport) => {
+        window.__doubleTapClicks!.length = 0;
+        window.mapApp!.airportMarkers[airport]!.closePopup();
+      }, name);
+      // Whatever the last attempt left behind: the marker in the middle
+      // again, at the zoom the test set, so a wrong zoom still shows there
+      await centerOnAirport(page, name, await getZoom(page));
+      await tapMarker();
+      await tapMarker();
+      // The click of the second tap may still be on its way
+      const [first, second] = await page.evaluate(async (waitMs) => {
+        const clicks = window.__doubleTapClicks!;
+        const until = Date.now() + waitMs;
+        while (clicks.length < 2 && Date.now() < until)
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        return clicks;
+      }, APP_DOUBLE_TAP_MS);
+      if (second !== undefined && second - first! < APP_DOUBLE_TAP_MS) return;
+      // Two single taps, or one that missed the marker: wait out the app's
+      // double tap time, so the next pair starts afresh
+      await page.waitForTimeout(APP_DOUBLE_TAP_MS);
+    }
+    throw new Error("the runner never tapped twice within a double tap");
   }
+  const { x, y } = await airportMarkerCenter(page, name);
   const cdp = await page.context().newCDPSession(page);
   const start = Date.now() / 1000;
   const steps = [
@@ -436,7 +488,7 @@ test.describe("Core", () => {
       const marker = airportMarker(page, name);
 
       if (hasTouch) {
-        await doubleTap(page, marker, browserName);
+        await doubleTap(page, name, browserName);
       } else {
         await marker.dblclick();
       }

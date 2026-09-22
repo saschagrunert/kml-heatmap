@@ -52,8 +52,9 @@ function randomState(rnd: () => number): AppState {
     zoom: Math.round((MIN_ZOOM + rnd() * (MAX_ZOOM - MIN_ZOOM)) * 100) / 100,
     // Half of the views are north up and flat, like most real ones
     bearing: bool() ? 0 : Math.round((rnd() * 360 - 180) * 10) / 10,
-    pitch: bool() ? 0 : Math.round(rnd() * 600) / 10,
+    pitch: bool() ? 0 : Math.round(rnd() * 850) / 10,
     globeVisible: bool(),
+    threeDVisible: bool(),
   };
 }
 
@@ -240,7 +241,7 @@ describe("URL state management", () => {
       expect(parseUrlParams("b=270")!.bearing).toBe(-90);
       expect(parseUrlParams("b=-190")!.bearing).toBe(170);
       expect(parseUrlParams("b=180")!.bearing).toBe(180);
-      expect(parseUrlParams("t=85")!.pitch).toBe(60);
+      expect(parseUrlParams("t=89")!.pitch).toBe(85);
       expect(parseUrlParams("t=-10")!.pitch).toBe(0);
     });
 
@@ -417,6 +418,8 @@ describe("URL state management", () => {
       // Closer to north than a link tells apart, from either side
       expect(encodeStateToUrl({ bearing: -0.04, pitch: 0.04 })).toBe("");
       expect(encodeStateToUrl({ globeVisible: true })).toBe("g=1");
+      expect(encodeStateToUrl({ threeDVisible: false })).toBe("");
+      expect(encodeStateToUrl({ threeDVisible: true })).toBe("d=1");
     });
 
     it("returns an empty string for an empty state", () => {
@@ -444,6 +447,7 @@ describe("URL state management", () => {
         bearing: -135.5,
         pitch: 42.3,
         globeVisible: true,
+        threeDVisible: true,
       };
 
       const decoded = parseUrlParams(encodeStateToUrl(original));
@@ -467,6 +471,7 @@ describe("URL state management", () => {
         if (state.bearing === 0) delete expected.bearing;
         if (state.pitch === 0) delete expected.pitch;
         if (!state.globeVisible) delete expected.globeVisible;
+        if (!state.threeDVisible) delete expected.threeDVisible;
         const flags = [
           state.heatmapVisible,
           state.altitudeVisible,

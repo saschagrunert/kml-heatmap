@@ -41,7 +41,12 @@ const FLIGHT_LAYERS = [
   "paths-airspeed",
   "paths-altitude-selected",
   "paths-airspeed-selected",
+  "paths-altitude-3d",
+  "paths-airspeed-3d",
+  "paths-altitude-selected-3d",
+  "paths-airspeed-selected-3d",
   "replay-trail",
+  "replay-trail-3d",
 ];
 
 /** The airport codes, a label layer on top of all (ui/airportLabels.ts) */

@@ -17,12 +17,22 @@ import { domCache } from "../utils/domCache";
 import { showToast } from "../utils/toast";
 
 /**
+ * The tilt the 3D view turns a flatter map to, and what counts as flat
+ * enough to need it: straight from above, a height takes no room.
+ */
+const THREE_D_PITCH = 50;
+const THREE_D_MIN_PITCH = 20;
+
+/**
  * The compass in the control column, and the one that floats over the map
  * on a phone, where the columns are hidden. The floating one only shows
  * while there is something to reset.
  */
 const COMPASS_ID = "compass-btn";
 const FLOATING_COMPASS_ID = "compass-float-btn";
+
+/** The furthest the needle lays back, in degrees (see syncCompass) */
+const COMPASS_MAX_TILT = 60;
 
 export class MapOrientation {
   private readonly app: MapApp;
@@ -97,6 +107,25 @@ export class MapOrientation {
     }
   }
 
+  /**
+   * Lift the flights to their altitude, or put them back on the ground.
+   * Lifted, they only show on a tilted map, so a flat one is tilted; and
+   * they are the colour layers lifted, so without one the altitude colours
+   * come on.
+   */
+  toggleThreeD(): void {
+    const entering = !this.app.threeDVisible;
+    this.app.threeDVisible = entering;
+    if (!entering) return;
+    const map = this.app.map;
+    if (!this.app.altitudeVisible && !this.app.airspeedVisible) {
+      this.app.uiToggles.toggleAltitude();
+    }
+    if (map && map.getPitch() < THREE_D_MIN_PITCH) {
+      map.easeTo({ pitch: THREE_D_PITCH });
+    }
+  }
+
   private applyProjection(): void {
     const map = this.styled;
     if (!map) return;
@@ -112,10 +141,12 @@ export class MapOrientation {
    * is drawn again whenever the chrome changes size, and would lose a
    * transform of its own.
    *
-   * Laid back by the full tilt, up to 60 degrees, a 16 px needle is half as
+   * Laid back by the full tilt, 60 degrees, a 16 px needle is half as
    * tall and a smudge. So it also grows by the square root of what the
    * tilt takes, as MapLibre's own compass does: the tilt still shows, and
-   * the needle stays readable.
+   * the needle stays readable. The map tilts further (MAP_MAX_PITCH), where
+   * the needle would lie flat and grow out of its button, so it stops at
+   * COMPASS_MAX_TILT.
    */
   private syncCompass(): void {
     const map = this.app.map;
@@ -130,10 +161,11 @@ export class MapOrientation {
       // Only a tilted map gets the 3D transform: even `rotateX(0deg)` has
       // the flat needle drawn a few pixels differently
       if (pitch > 0) {
-        button?.style.setProperty("--compass-tilt", `rotateX(${pitch}deg)`);
+        const tilt = Math.min(pitch, COMPASS_MAX_TILT);
+        button?.style.setProperty("--compass-tilt", `rotateX(${tilt}deg)`);
         button?.style.setProperty(
           "--compass-grow",
-          String(1 / Math.sqrt(Math.cos((pitch * Math.PI) / 180))),
+          String(1 / Math.sqrt(Math.cos((tilt * Math.PI) / 180))),
         );
       } else {
         button?.style.removeProperty("--compass-tilt");

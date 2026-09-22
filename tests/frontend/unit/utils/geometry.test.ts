@@ -86,8 +86,8 @@ describe("geometry utilities", () => {
   describe("toMapPitch", () => {
     it("holds a pitch between flat and what the map tilts to", () => {
       expect(toMapPitch(35)).toBe(35);
-      expect(toMapPitch(60)).toBe(60);
-      expect(toMapPitch(85)).toBe(60);
+      expect(toMapPitch(85)).toBe(85);
+      expect(toMapPitch(89)).toBe(85);
       expect(toMapPitch(-5)).toBe(0);
     });
 

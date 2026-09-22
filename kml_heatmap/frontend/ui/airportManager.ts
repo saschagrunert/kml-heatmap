@@ -14,7 +14,11 @@ import {
 } from "../utils/constants";
 import { ddToDms } from "../utils/geometry";
 import { generateAirportPopupHtml } from "../utils/htmlGenerators";
-import { closeWhenBehindGlobe, panPopupIntoView } from "../utils/mapHelpers";
+import {
+  cameraDistanceRatio,
+  closeWhenBehindGlobe,
+  panPopupIntoView,
+} from "../utils/mapHelpers";
 import { isTouchDevice } from "./layerManager";
 import { airportLabelFeatures, setAirportLabelHover } from "./airportLabels";
 
@@ -46,6 +50,18 @@ const POPUP_OFFSET_PX = 12;
 /** Store keys that change the popup counts and the home base */
 const POPUP_KEYS = ["currentData", "selectedYear", "selectedAircraft"] as const;
 
+/**
+ * How many times farther from the camera than the middle of the map an
+ * airport may be and still be shown. Towards the horizon of a steeply tilted
+ * map the airports of a whole country crowd into a strip of dots and labels
+ * over one another; up to about 55 degrees of tilt the whole map is nearer
+ * than this (see cameraDistanceRatio).
+ */
+const AIRPORT_MAX_DISTANCE_RATIO = 2;
+
+/** Tilt in degrees up to which no airport in view is that far (see above) */
+const AIRPORT_ALL_NEAR_PITCH = 50;
+
 /** Store keys that change which markers are shown */
 const VISIBILITY_KEYS = [
   ...POPUP_KEYS,
@@ -76,6 +92,8 @@ export class AirportManager {
   private openAirport: string | null = null;
   /** The airports shown under the filter and selection, null for all */
   private visibleAirports: ReadonlySet<string> | null = null;
+  /** The airports too far towards the horizon to be shown */
+  private farAirports: ReadonlySet<string> = new Set();
   /** The airport whose label is under the pointer */
   private hoveredLabel: string | null = null;
 
@@ -100,6 +118,7 @@ export class AirportManager {
     // The labels are there once the map's layers are
     app.mapReady
       .then((map) => {
+        map.on("move", () => this.updateFarAirports());
         const canvas = map.getCanvas();
         // A label opens a popup like its marker, and says so: the pointer,
         // and the hover of both the label and the marker's dot
@@ -331,19 +350,60 @@ export class AirportManager {
         : new Map<number, PathInfo>(),
     });
 
+    this.visibleAirports = visibleAirports;
+    this.applyVisibility();
+  }
+
+  /**
+   * Hide the airports that have gone too far towards the horizon, and show
+   * the ones that have come back; nothing is touched while that stays
+   */
+  private updateFarAirports(): void {
+    const map = this.app.map;
+    if (!map || !this.app.allAirportsData) return;
+    const far = new Set<string>();
+    if (
+      map.getPitch() > AIRPORT_ALL_NEAR_PITCH &&
+      map.getProjection()?.type !== "globe"
+    ) {
+      for (const airport of this.app.allAirportsData) {
+        const place = { lng: airport.lon, lat: airport.lat };
+        // The one the keyboard is on stays, or focus would fall to the page
+        const focused =
+          this.app.airportMarkers[airport.name]?.getElement() ===
+          document.activeElement;
+        if (
+          !focused &&
+          cameraDistanceRatio(map, place) > AIRPORT_MAX_DISTANCE_RATIO
+        ) {
+          far.add(airport.name);
+        }
+      }
+    }
+    const previous = this.farAirports;
+    if (far.size === previous.size && [...far].every((n) => previous.has(n))) {
+      return;
+    }
+    this.farAirports = far;
+    this.applyVisibility();
+  }
+
+  /** Show the markers and labels of the airports the filter and view allow */
+  private applyVisibility(): void {
+    const visibleAirports = this.visibleAirports;
+    const far = this.farAirports;
     for (const [airportName, marker] of Object.entries(
       this.app.airportMarkers,
     )) {
       if (!marker) continue;
 
       const visible =
-        visibleAirports === null || visibleAirports.has(airportName);
+        (visibleAirports === null || visibleAirports.has(airportName)) &&
+        !far.has(airportName);
       marker.setVisible(visible);
       // A popup does not outlive the marker it points at
       if (!visible) this.closePopup(airportName);
     }
-
-    this.visibleAirports = visibleAirports;
     this.updateLabels();
   }
 
@@ -363,9 +423,21 @@ export class AirportManager {
         this.app.allAirportsData,
         counts,
         findHomeBase(counts),
-        this.visibleAirports,
+        this.shownAirports(),
       ),
     );
+  }
+
+  /** The airports whose labels are shown, null for all */
+  private shownAirports(): ReadonlySet<string> | null {
+    const far = this.farAirports;
+    if (far.size === 0) return this.visibleAirports;
+    const names = new Set(
+      this.visibleAirports ??
+        (this.app.allAirportsData ?? []).map((airport) => airport.name),
+    );
+    for (const name of far) names.delete(name);
+    return names;
   }
 
   /**

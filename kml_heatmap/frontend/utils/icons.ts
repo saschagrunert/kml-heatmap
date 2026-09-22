@@ -28,6 +28,7 @@ import {
   Flame,
   Gauge,
   Globe,
+  Box,
   Info,
   Layers,
   Link2,
@@ -78,6 +79,7 @@ export type IconName =
   | "github"
   | "info"
   | "globe"
+  | "threeD"
   | "compass"
   | "clock"
   | "trophy"
@@ -129,6 +131,7 @@ const NODES: Record<Exclude<IconName, keyof typeof OWN_PATHS>, IconNode> = {
   more: Ellipsis,
   info: Info,
   globe: Globe,
+  threeD: Box,
   // An arrow rather than Lucide's compass rose: the control turns it to
   // where north is, and the rose reads the same from every side. The arrow
   // of the aircraft filter, which points north-east; the stylesheet turns

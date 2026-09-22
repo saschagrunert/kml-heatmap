@@ -15,6 +15,13 @@ import {
   zoomOutSteps,
 } from "../../../../kml_heatmap/frontend/ui/replayRenderer";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
+import {
+  liftFt,
+  liftOffsetPx,
+  pointOnFlight,
+  smoothFlights,
+  type SmoothedFlights,
+} from "../../../../kml_heatmap/frontend/calculations/lift";
 import { ReplayState } from "../../../../kml_heatmap/frontend/ui/replayState";
 import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
 import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
@@ -320,7 +327,7 @@ describe("trail runs", () => {
     const state = stateWith(makeChain([0, 10000]));
     for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
 
-    const data = trailFeatureCollection(state.trailRuns);
+    const data = trailFeatureCollection(state, 13);
 
     expect(data.type).toBe("FeatureCollection");
     expect(data.features).toHaveLength(2);
@@ -335,6 +342,76 @@ describe("trail runs", () => {
         ],
       },
     });
+  });
+});
+
+describe("trail runs in the 3D view", () => {
+  /** The trail's flight smoothed at its height above 1000 ft */
+  function smoothed(segments: PathSegment[]): SmoothedFlights {
+    return smoothFlights(segments, (i) =>
+      Math.max((segments[i]!.altitude_ft ?? 0) - 1000, 0),
+    );
+  }
+
+  it("writes each run as ribbons cut from the smoothed flight, in place of its line", () => {
+    const segments = makeChain([1000, 1100]);
+    const state = new ReplayState();
+    state.segments = segments;
+    state.smoothed = smoothed(segments);
+    for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
+
+    const data = trailFeatureCollection(state, 13);
+
+    // The lines' source is another one
+    expect(data.features.every((f) => f.geometry.type === "MultiPolygon")).toBe(
+      true,
+    );
+    const heights = data.features.map((ribbon) => ribbon.properties.h!);
+    expect(heights[0]).toBe(0);
+    expect(heights).toEqual([...heights].sort((a, b) => a - b));
+    expect(Math.max(...heights)).toBeLessThanOrEqual(100);
+    expect(heights.length).toBeGreaterThanOrEqual(1 + 100 / 20);
+  });
+
+  it("writes no ribbon while the trail is flat", () => {
+    const state = new ReplayState();
+    state.segments = makeChain([1000, 1100]);
+    for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
+
+    expect(
+      trailFeatureCollection(state, 13).features.every(
+        (feature) => feature.geometry.type === "LineString",
+      ),
+    ).toBe(true);
+  });
+
+  it("cuts only the runs that grew or changed their width again", () => {
+    // Two runs: the climb changes the colour after the first segment
+    const segments = makeChain([1000, 1000, 9000, 9000]);
+    const state = new ReplayState();
+    state.segments = segments;
+    state.smoothed = smoothed(segments);
+    for (let i = 0; i < 3; i++) appendTrailSegment(state, i, false);
+    expect(state.trailRuns).toHaveLength(2);
+    const [first, second] = state.trailRuns;
+    const geometryOf = (data: ReturnType<typeof trailFeatureCollection>) =>
+      data.features.map((feature) => feature.geometry);
+
+    const before = geometryOf(trailFeatureCollection(state, 13));
+    const cutFirst = state.trailPieces.get(first!)!.pieces;
+    const cutSecond = state.trailPieces.get(second!)!.pieces;
+    appendTrailSegment(state, 3, false);
+    const after = geometryOf(trailFeatureCollection(state, 13));
+
+    // The first run is the same, down to its geometry; the second grew
+    expect(state.trailPieces.get(first!)!.pieces).toBe(cutFirst);
+    expect(state.trailPieces.get(second!)!.pieces).not.toBe(cutSecond);
+    expect(after[0]).toBe(before[0]);
+
+    // Another zoom level, and every run is cut again, as wide as it asks
+    trailFeatureCollection(state, 9);
+    expect(state.trailPieces.get(first!)!.pieces).not.toBe(cutFirst);
+    expect(state.trailPieces.get(first!)!.widthZoom).toBe(9);
   });
 });
 
@@ -378,6 +455,65 @@ describe("AirplaneMarker", () => {
     expect(
       (airplane.marker as unknown as { options: unknown }).options,
     ).toMatchObject({ pitchAlignment: "map", rotationAlignment: "viewport" });
+  });
+
+  describe("setLift", () => {
+    /** The last offset the popup was given, by anchor */
+    const popupOffset = (): Record<string, [number, number]> =>
+      vi.mocked(airplane.popup.setOffset).mock.calls.at(-1)![0] as Record<
+        string,
+        [number, number]
+      >;
+    /** What MapLibre makes of a popup offset of 16 px, by anchor */
+    const standard: Record<string, [number, number]> = {
+      center: [0, 0],
+      top: [0, 16],
+      "top-left": [11, 11],
+      "top-right": [-11, 11],
+      bottom: [0, -16],
+      "bottom-left": [11, -11],
+      "bottom-right": [-11, -11],
+      left: [16, 0],
+      right: [-16, 0],
+    };
+
+    it("draws the airplane and points its popup the lift higher", () => {
+      airplane.setLift(30);
+
+      expect(airplane.marker.setOffset).toHaveBeenLastCalledWith([0, -30]);
+      const offset = popupOffset();
+      expect(Object.keys(offset).sort()).toEqual(Object.keys(standard).sort());
+      for (const [anchor, [x, y]] of Object.entries(standard)) {
+        // Whichever side it opens on, only up by the lift
+        expect(offset[anchor]).toEqual([x, y - 30]);
+      }
+    });
+
+    it("gives the standard offsets back on the ground", () => {
+      airplane.setLift(30);
+      airplane.setLift(0);
+
+      expect(airplane.marker.setOffset).toHaveBeenLastCalledWith([0, -0]);
+      expect(popupOffset()).toEqual(
+        Object.fromEntries(
+          Object.entries(standard).map(([anchor, [x, y]]) => [
+            anchor,
+            [x, y - 0],
+          ]),
+        ),
+      );
+    });
+
+    it("writes nothing when the lift has not changed", () => {
+      airplane.setLift(12);
+      vi.mocked(airplane.marker.setOffset).mockClear();
+      vi.mocked(airplane.popup.setOffset).mockClear();
+
+      airplane.setLift(12);
+
+      expect(airplane.marker.setOffset).not.toHaveBeenCalled();
+      expect(airplane.popup.setOffset).not.toHaveBeenCalled();
+    });
   });
 
   it("closes its popup once the globe has turned the airplane away", () => {
@@ -861,9 +997,7 @@ describe("ReplayRenderer", () => {
       runFrame();
 
       expect(trailSource().setData).toHaveBeenCalledTimes(1);
-      expect(trailSource().data).toEqual(
-        trailFeatureCollection(state.trailRuns),
-      );
+      expect(trailSource().data).toEqual(trailFeatureCollection(state, 13));
       expect(
         (trailSource().data as { features: unknown[] }).features,
       ).toHaveLength(2);
@@ -1106,6 +1240,189 @@ describe("ReplayRenderer", () => {
       bearing.mockReturnValue(340);
       callUpdateDisplay();
       expect(iconDiv.style.transform).toContain("rotate(340deg)");
+    });
+
+    describe("in the 3D view", () => {
+      let airplane: AirplaneMarker;
+
+      beforeEach(() => {
+        airplane = makeAirplane();
+        mockReplayManager.state.airplaneMarker = airplane;
+        mockReplayManager.state.currentTime = 15;
+        // Halfway along a segment climbing from 1000 to 2000 ft
+        mockReplayManager.state.segments = makeChain([1000, 2000, 2000]);
+        lifted(true);
+      });
+
+      /** The trail lifted, as ReplayManager does it, or flat */
+      const lifted = (on: boolean): void => {
+        const state = mockReplayManager.state;
+        state.lifted = on;
+        // Standing on 1000 ft all along
+        state.groundFt = new Float64Array(state.segments.length).fill(1000);
+        state.smoothed = on
+          ? smoothFlights(state.segments, (i) =>
+              liftFt(state.segments[i]!.altitude_ft ?? 0, state.groundFt[i]!),
+            )
+          : null;
+      };
+
+      /** How far up the marker is drawn, in pixels */
+      /** How far up the marker is drawn, in pixels; 0 before it is moved */
+      const lift = (): number => {
+        const calls = vi.mocked(airplane.marker.setOffset).mock.calls;
+        const last = calls[calls.length - 1]?.[0] as
+          [number, number] | undefined;
+        return last ? -last[1] : 0;
+      };
+
+      it("lifts the airplane to its height on a tilted map, along its segment", () => {
+        map.jumpTo({ zoom: 13, pitch: 60 });
+
+        callUpdateDisplay();
+
+        // 500 ft above the ground, halfway up the climb
+        expect(lift()).toBeCloseTo(
+          liftOffsetPx(map as unknown as MapLibreMap, 50, 500),
+          0,
+        );
+        expect(lift()).toBeGreaterThan(0);
+      });
+
+      it("lifts it zoomed out too, where the replay starts", () => {
+        // The replay's one flight is lifted at every zoom, unlike the flights
+        map.jumpTo({ zoom: 8, pitch: 60 });
+
+        callUpdateDisplay();
+
+        expect(lift()).toBeGreaterThan(0);
+      });
+
+      it("points its popup at it, up where it is drawn", () => {
+        map.jumpTo({ zoom: 13, pitch: 60 });
+
+        callUpdateDisplay();
+
+        const offset = vi
+          .mocked(airplane.popup.setOffset)
+          .mock.calls.at(-1)![0] as Record<string, [number, number]>;
+        // Opening above it or below it, the popup moves up with it
+        expect(offset["bottom"]![1]).toBeCloseTo(-16 - lift(), 6);
+        expect(offset["top"]![1]).toBeCloseTo(16 - lift(), 6);
+      });
+
+      it("keeps the lifted airplane, not the ground under it, in view", () => {
+        // 3000 ft up at zoom 15, well over the top of an 800 px map, while
+        // the ground under it is in the middle
+        mockReplayManager.state.segments = [
+          makeSegment({ time: 0, altitude_ft: 4000 }),
+          makeSegment({ time: 0, altitude_ft: 4000 }),
+          makeSegment({ time: 10, altitude_ft: 4000 }),
+        ];
+        mockReplayManager.state.currentTime = 5;
+        lifted(true);
+        mockReplayManager.state.playing = true;
+        map.jumpTo({ center: [8.505, 50.005], zoom: 15, pitch: 60 });
+
+        callUpdateDisplay();
+
+        expect(map.easeTo).toHaveBeenCalled();
+
+        // Flat, the same airplane is in the middle and nothing moves
+        vi.mocked(map.easeTo).mockClear();
+        lifted(false);
+        callUpdateDisplay();
+        expect(map.easeTo).not.toHaveBeenCalled();
+      });
+
+      it("follows the map as it tilts under a paused airplane", () => {
+        map.jumpTo({ zoom: 13, pitch: 30 });
+        callUpdateDisplay();
+        const at30 = lift();
+
+        map.jumpTo({ zoom: 13, pitch: 60 });
+        map.emit("move");
+
+        expect(lift()).toBeGreaterThan(at30);
+      });
+
+      it("flies along the ribbon's curve through a turn, not across it", () => {
+        // A right angle at the second point: the ribbon rounds it
+        const segments = [0, 10, 20].map((time) =>
+          makeSegment({ time, altitude_ft: 2000 }),
+        );
+        segments[0]!.coords = [
+          [50, 8],
+          [50.01, 8],
+        ];
+        segments[1]!.coords = [
+          [50.01, 8],
+          [50.01, 8.015],
+        ];
+        segments[2]!.coords = [
+          [50.01, 8.015],
+          [50.01, 8.03],
+        ];
+        mockReplayManager.state.segments = segments;
+        mockReplayManager.state.currentTime = 5;
+        lifted(true);
+        map.jumpTo({ zoom: 13, pitch: 60 });
+
+        callUpdateDisplay();
+
+        // Halfway up the first segment, where its ribbon is: the curve is
+        // off the straight line already, swinging out to come into the turn
+        const [lat, lon] = airplane.getLatLng();
+        const onCurve = pointOnFlight(
+          mockReplayManager.state.smoothed!,
+          0,
+          0.5,
+        );
+        expect(lat).toBeCloseTo(onCurve!.position[0], 9);
+        expect(lon).toBeCloseTo(onCurve!.position[1], 9);
+        expect(Math.abs(lon - 8)).toBeGreaterThan(1e-4);
+        // Flat, straight up the segment
+        lifted(false);
+        callUpdateDisplay();
+        expect(airplane.getLatLng()[1]).toBeCloseTo(8, 9);
+      });
+
+      it("hands the trail to its line and the airplane to the ground zoomed in close", () => {
+        const state = mockReplayManager.state;
+        state.layerActive = true;
+        const ribbons = (): unknown[] =>
+          (
+            (map.source(MAP_SOURCES.replayTrailRibbons).data ?? {
+              features: [],
+            }) as { features: unknown[] }
+          ).features;
+        const lines = (): unknown[] =>
+          ((trailSource().data ?? { features: [] }) as { features: unknown[] })
+            .features;
+        map.jumpTo({ zoom: 14, pitch: 60 });
+        callUpdateDisplay(true);
+        runFrame();
+        expect(ribbons().length).toBeGreaterThan(0);
+        expect(lift()).toBeGreaterThan(0);
+
+        // Lower than a circuit, the camera would be among the flights
+        map.jumpTo({ zoom: 17.5 });
+        map.emit("move");
+        runFrame();
+
+        expect(ribbons()).toEqual([]);
+        expect(lines().length).toBeGreaterThan(0);
+        expect(lift()).toBe(0);
+      });
+
+      it("keeps it on the ground while the trail is flat", () => {
+        lifted(false);
+        map.jumpTo({ zoom: 13, pitch: 60 });
+
+        callUpdateDisplay();
+
+        expect(lift()).toBe(0);
+      });
     });
 
     describe("on a turned map", () => {

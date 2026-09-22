@@ -615,6 +615,9 @@ async function drawnPaths(page: Page, layer: ColorLayer): Promise<DrawnPath[]> {
     for (const id of app[`${mode}Layer`].ids) {
       const style = map.getLayer(id);
       if (!style) throw new Error(`no layer "${id}" on the map`);
+      // The paths as lines; the ribbons of the 3D view are the same runs,
+      // in sources of their own
+      if (style.type !== "line") continue;
       if (map.getLayoutProperty(id, "visibility") === "none") continue;
       const source = map.getSource(style.source);
       if (source?.type !== "geojson") throw new Error(`"${id}" is not GeoJSON`);
