@@ -10,7 +10,7 @@ import {
 } from "./features/airports";
 import { domCache } from "./utils/domCache";
 import { applyMetricColors } from "./utils/htmlGenerators";
-import { toLngLat } from "./utils/mapHelpers";
+import { createActivationFilter, toLngLat } from "./utils/mapHelpers";
 import { showToast } from "./utils/toast";
 import { datasetIndex } from "./calculations/datasetIndex";
 import type { MapApp } from "./mapApp";
@@ -245,10 +245,11 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
     // A button reports Enter and Space as a click, so this one listener is
     // the mouse, the finger and the keyboard. A second activation closes the
     // popup again, as the airplane's does. The second click of a double
-    // click or a double tap is not one: `detail` counts the clicks of such a
-    // burst (a key reports 0), and it would close what the first opened.
+    // click or a double tap is not one: it would close what the first
+    // opened (see createActivationFilter).
+    const isActivation = createActivationFilter();
     element.addEventListener("click", (event) => {
-      if (event.detail > 1) return;
+      if (!isActivation(event)) return;
       if (airportMarker.isPopupOpen()) {
         airportMarker.closePopup();
         return;

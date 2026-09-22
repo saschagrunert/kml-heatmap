@@ -20,6 +20,7 @@ import type { SheetRow } from "./mobileSheet";
 import { MobileSheet } from "./mobileSheet";
 import { icon, type IconName } from "../utils/icons";
 import { MOBILE_BREAKPOINT_PX } from "../utils/constants";
+import { logError } from "../utils/logger";
 
 /** Bar and sheet exist only below this width (matches the CSS breakpoint) */
 export const MOBILE_BAR_BREAKPOINT_PX = MOBILE_BREAKPOINT_PX;
@@ -260,7 +261,10 @@ export class MobileBar {
       case "wrapped":
         this.closeSheet();
         this.tabs.get(id)?.focus();
-        void this.app.loadWrapped().then((manager) => manager?.showWrapped());
+        void this.app
+          .loadWrapped()
+          .then((manager) => manager?.showWrapped())
+          .catch(logError);
         break;
     }
     this.syncTabs();

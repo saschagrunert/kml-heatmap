@@ -431,7 +431,7 @@ describe("ReplayManager activation", () => {
       // Closing replay used to switch the altitude layer on unasked
       expect(mockApp.altitudeVisible).toBe(false);
       expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("false");
-      expect(el("altitude-legend").style.display).toBe("none");
+      expect(el("altitude-legend").hidden).toBe(true);
       expect(mockApp.altitudeLayer.isVisible()).toBe(false);
       expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
     });
@@ -444,8 +444,8 @@ describe("ReplayManager activation", () => {
       replayManager.toggleReplay();
 
       // The trail is drawn in altitude colours, so its scale is shown
-      expect(el("altitude-legend").style.display).toBe("block");
-      expect(el("airspeed-legend").style.display).toBe("none");
+      expect(el("altitude-legend").hidden).toBe(false);
+      expect(el("airspeed-legend").hidden).toBe(true);
     });
 
     it("moves the trail's scale along when a colour layer is toggled", () => {
@@ -457,13 +457,13 @@ describe("ReplayManager activation", () => {
       // Speed switched on during replay colours the trail by speed: its
       // scale replaces the altitude one instead of stacking on top of it
       mockApp.airspeedVisible = true;
-      expect(el("altitude-legend").style.display).toBe("none");
-      expect(el("airspeed-legend").style.display).toBe("block");
+      expect(el("altitude-legend").hidden).toBe(true);
+      expect(el("airspeed-legend").hidden).toBe(false);
 
       // And back off, the trail is coloured by altitude again
       mockApp.airspeedVisible = false;
-      expect(el("altitude-legend").style.display).toBe("block");
-      expect(el("airspeed-legend").style.display).toBe("none");
+      expect(el("altitude-legend").hidden).toBe(false);
+      expect(el("airspeed-legend").hidden).toBe(true);
     });
 
     it("stops following the colour layers once replay is closed", () => {
@@ -475,9 +475,9 @@ describe("ReplayManager activation", () => {
 
       // Only the store's own sync, which never touches the altitude legend
       // for the speed key, is left to react
-      el("altitude-legend").style.display = "block";
+      el("altitude-legend").hidden = false;
       mockApp.airspeedVisible = true;
-      expect(el("altitude-legend").style.display).toBe("block");
+      expect(el("altitude-legend").hidden).toBe(false);
     });
 
     it("closes a popup left open on the map", () => {
@@ -521,8 +521,8 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleReplay();
 
-      expect(el("altitude-legend").style.display).toBe("none");
-      expect(el("airspeed-legend").style.display).toBe("block");
+      expect(el("altitude-legend").hidden).toBe(true);
+      expect(el("airspeed-legend").hidden).toBe(false);
     });
 
     it("redraws altitude paths exactly once after deactivation", () => {

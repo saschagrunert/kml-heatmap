@@ -626,7 +626,7 @@ describe("wrappedHtml", () => {
       });
 
       expect(html).toContain('<img class="country-flag" src="flags/de.svg"');
-      expect(html).toContain('alt=""');
+      expect(html).toContain('alt="DE"');
       expect(html).not.toContain("country-code");
     });
 

@@ -418,9 +418,7 @@ describe("MapApp.initialize", () => {
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(true);
       expect(btn.getAttribute("aria-pressed")).toBe("false");
-      expect(document.getElementById("airspeed-legend")!.style.display).toBe(
-        "none",
-      );
+      expect(document.getElementById("airspeed-legend")!.hidden).toBe(true);
     });
 
     it("keeps the airspeed button lit when airspeed is visible", async () => {
@@ -449,12 +447,8 @@ describe("MapApp.initialize", () => {
       expect(visibility(app, "paths-altitude")).toBe("visible");
       expect(visibility(app, "paths-altitude-selected")).toBe("visible");
       expect(visibility(app, "paths-airspeed")).toBe("none");
-      expect(document.getElementById("altitude-legend")!.style.display).toBe(
-        "block",
-      );
-      expect(document.getElementById("airspeed-legend")!.style.display).toBe(
-        "none",
-      );
+      expect(document.getElementById("altitude-legend")!.hidden).toBe(false);
+      expect(document.getElementById("airspeed-legend")!.hidden).toBe(true);
     });
 
     it("steps the heatmap back for a restored colour layer", async () => {
@@ -490,21 +484,19 @@ describe("MapApp.initialize", () => {
 
       expect(visibility(app, "paths-airspeed")).toBe("visible");
       expect(visibility(app, "paths-airspeed-selected")).toBe("visible");
-      expect(document.getElementById("airspeed-legend")!.style.display).toBe(
-        "block",
-      );
+      expect(document.getElementById("airspeed-legend")!.hidden).toBe(false);
     });
 
     it("keeps the legends in step with the store after initialization", async () => {
       await initializeApp(app);
       const legend = document.getElementById("altitude-legend")!;
-      expect(legend.style.display).toBe("none");
+      expect(legend.hidden).toBe(true);
 
       app.altitudeVisible = true;
-      expect(legend.style.display).toBe("block");
+      expect(legend.hidden).toBe(false);
 
       app.altitudeVisible = false;
-      expect(legend.style.display).toBe("none");
+      expect(legend.hidden).toBe(true);
     });
 
     it("shows the aviation layer when visible", async () => {

@@ -368,10 +368,10 @@ test.describe("Core", () => {
 
   test.describe("Airport popup", () => {
     /**
-     * A tap on a touch screen, a click everywhere else. The browser counts a
-     * tap that follows another within its double tap time as the second of
-     * a double tap, which the marker ignores on purpose (see the spec for
-     * it), so a tap waits that time out. It is the browser's clock the test
+     * A tap on a touch screen, a click everywhere else. A tap or a click
+     * that follows another within the double tap time is the second of a
+     * double tap or a double click, which the marker ignores on purpose (see
+     * the spec for it), so each waits that time out. It is a clock the test
      * has to get past; nothing on the page could be waited on instead.
      */
     async function activate(
@@ -379,12 +379,8 @@ test.describe("Core", () => {
       marker: Locator,
       hasTouch: boolean,
     ): Promise<void> {
-      if (!hasTouch) {
-        await marker.click();
-        return;
-      }
       await page.waitForTimeout(DOUBLE_TAP_MS);
-      await marker.tap();
+      await (hasTouch ? marker.tap() : marker.click());
     }
 
     test("a second activation of a marker closes its popup", async ({

@@ -83,6 +83,29 @@ export function isOnMarker(e: { originalEvent?: Event | undefined }): boolean {
   return isInMarker(e.originalEvent?.target);
 }
 
+/** Longest gap between the taps of a double tap, in milliseconds */
+export const DOUBLE_TAP_MS = 400;
+
+/**
+ * Tell a marker's own activations apart from the later clicks of a double
+ * click or a double tap, which would close the popup the first one opened.
+ * Returns a filter for the marker's clicks, true for an activation.
+ *
+ * `detail` counts the clicks of a burst, but WebKit reports every tap as a
+ * click with a `detail` of 1. A click that follows the last one within the
+ * double tap time counts as part of its burst as well. A key reports a
+ * `detail` of 0 and is always an activation.
+ */
+export function createActivationFilter(): (event: MouseEvent) => boolean {
+  let lastClickAt = -Infinity;
+  return ({ detail, timeStamp }) => {
+    if (!detail) return true;
+    const isFirst = detail < 2 && timeStamp - lastClickAt >= DOUBLE_TAP_MS;
+    lastClickAt = timeStamp;
+    return isFirst;
+  };
+}
+
 /** Whether an element, or whatever else an event was aimed at, is part of a marker */
 export function isInMarker(target: EventTarget | null | undefined): boolean {
   return target instanceof Element && !!target.closest(".maplibregl-marker");

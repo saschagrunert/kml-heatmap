@@ -14,6 +14,7 @@
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
+import { showToast } from "../utils/toast";
 
 /**
  * The compass in the control column, and the one that floats over the map
@@ -29,6 +30,7 @@ export class MapOrientation {
   private styled: MapLibreMap | null = null;
   /** Bearing and pitch the airport labels were last sorted out at */
   private declutteredAt = "0/0";
+  private globeToastShown = false;
 
   private readonly onTurn = (): void => this.syncCompass();
 
@@ -101,7 +103,12 @@ export class MapOrientation {
   }
 
   toggleGlobe(): void {
-    this.app.globeVisible = !this.app.globeVisible;
+    const entering = !this.app.globeVisible;
+    this.app.globeVisible = entering;
+    if (entering && !this.globeToastShown) {
+      this.globeToastShown = true;
+      showToast("Drag to spin the globe");
+    }
   }
 
   private applyProjection(): void {

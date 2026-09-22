@@ -38,6 +38,7 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
   // The content can be rewritten or the popup closed while the bundle loads
   if (!container || !host || !data) return;
   if (host.querySelector(".kh-popup-flights")) return;
+  host.querySelector(".kh-popup-flights-loading")?.remove();
 
   // MapLibre closes a popup on a click, never on a key
   container.onkeydown = (event) => {

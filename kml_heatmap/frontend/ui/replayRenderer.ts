@@ -30,6 +30,7 @@ import {
 import { icon } from "../utils/icons";
 import {
   closeWhenBehindGlobe,
+  createActivationFilter,
   fromLngLat,
   isBehindGlobe,
   panPopupIntoView,
@@ -329,9 +330,10 @@ export class AirplaneMarker implements ReplayAirplane {
     // MapLibre fires a map click for a click on a marker as well; the
     // app's handler tells it by its target and leaves the popup alone. The
     // second click of a double click or tap would close what the first
-    // opened; a key reports a `detail` of 0.
+    // opened (see createActivationFilter).
+    const isActivation = createActivationFilter();
     element.addEventListener("click", (event) => {
-      if (event.detail > 1) return;
+      if (!isActivation(event)) return;
       if (this.isPopupOpen()) this.closePopup();
       else onActivate();
     });

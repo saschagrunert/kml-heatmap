@@ -14,6 +14,7 @@
       name="description"
       content="Interactive flight path heatmap visualization from KML flight logs"
     />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#141414" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -23,6 +24,12 @@
       content="black-translucent"
     />
     <meta name="apple-mobile-web-app-title" content="KML Heatmap" />
+    <meta property="og:title" content="KML Heatmap" />
+    <meta
+      property="og:description"
+      content="Interactive flight path heatmap visualization from KML flight logs"
+    />
+    <meta property="og:type" content="website" />
     <title>KML Heatmap</title>
     <!-- The style, then the tile index, glyphs and sprite; the tiles come
          from four more hosts the style only names once it has loaded.
@@ -394,6 +401,7 @@
     <div
       id="altitude-legend"
       class="color-legend"
+      hidden
       role="region"
       aria-label="Altitude color scale legend"
     >
@@ -411,6 +419,7 @@
     <div
       id="airspeed-legend"
       class="color-legend"
+      hidden
       role="region"
       aria-label="Groundspeed color scale legend"
     >
@@ -431,7 +440,7 @@
          that show the heat bloom alone it had no representation at all, and
          nothing anywhere said how many flights Isolate and the shared link
          would carry. Filled by ui/pathSelection.ts. -->
-    <div id="selection-chip" hidden>
+    <div id="selection-chip" role="status" hidden>
       <span id="selection-chip-count"></span>
       <button
         type="button"
@@ -567,6 +576,7 @@
     <!-- Wrapped Card Modal -->
     <div
       id="wrapped-modal"
+      hidden
       role="dialog"
       aria-modal="true"
       aria-labelledby="wrapped-title"

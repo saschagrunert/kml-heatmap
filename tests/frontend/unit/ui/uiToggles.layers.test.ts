@@ -138,7 +138,7 @@ describe("UIToggles layers", () => {
       expect(app.airspeedVisible).toBe(false);
       expect(el("airspeed-btn").style.opacity).toBe("0.5");
       expect(el("airspeed-btn").getAttribute("aria-pressed")).toBe("false");
-      expect(el("airspeed-legend").style.display).toBe("none");
+      expect(el("airspeed-legend").hidden).toBe(true);
 
       expect(app.altitudeLayer.setVisible).toHaveBeenCalledExactlyOnceWith(
         true,
@@ -148,7 +148,7 @@ describe("UIToggles layers", () => {
       expect(app.altitudeVisible).toBe(true);
       expect(el("altitude-btn").style.opacity).toBe("1");
       expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("true");
-      expect(el("altitude-legend").style.display).toBe("block");
+      expect(el("altitude-legend").hidden).toBe(false);
       expect(app.layerManager.redrawAltitudePaths).toHaveBeenCalled();
       // The layer it replaces lets go of its features
       expect(app.layerManager.clearLayer).toHaveBeenCalledExactlyOnceWith(
@@ -169,7 +169,7 @@ describe("UIToggles layers", () => {
       expect(visibility(MAP_LAYERS.pathsAltitudeSelected)).toBe("none");
       expect(app.altitudeVisible).toBe(false);
       expect(el("altitude-btn").style.opacity).toBe("0.5");
-      expect(el("altitude-legend").style.display).toBe("none");
+      expect(el("altitude-legend").hidden).toBe(true);
       // Kept, the features of a hidden layer held tens of MB
       expect(app.layerManager.clearLayer).toHaveBeenCalledExactlyOnceWith(
         "altitude",
@@ -249,7 +249,7 @@ describe("UIToggles layers", () => {
       expect(visibility(MAP_LAYERS.pathsAltitude)).toBe("none");
       expect(app.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
       expect(app.altitudeVisible).toBe(true);
-      expect(el("altitude-legend").style.display).toBe("block");
+      expect(el("altitude-legend").hidden).toBe(false);
     });
 
     it("during replay hides airspeed without removing the layer", () => {
@@ -317,7 +317,7 @@ describe("UIToggles layers", () => {
       expect(visibility(MAP_LAYERS.pathsAltitudeSelected)).toBe("none");
       expect(app.altitudeVisible).toBe(false);
       expect(el("altitude-btn").style.opacity).toBe("0.5");
-      expect(el("altitude-legend").style.display).toBe("none");
+      expect(el("altitude-legend").hidden).toBe(true);
 
       expect(app.airspeedLayer.setVisible).toHaveBeenCalledExactlyOnceWith(
         true,
@@ -326,7 +326,7 @@ describe("UIToggles layers", () => {
       expect(visibility(MAP_LAYERS.pathsAirspeedSelected)).toBe("visible");
       expect(app.airspeedVisible).toBe(true);
       expect(el("airspeed-btn").style.opacity).toBe("1");
-      expect(el("airspeed-legend").style.display).toBe("block");
+      expect(el("airspeed-legend").hidden).toBe(false);
       expect(app.layerManager.redrawAirspeedPaths).toHaveBeenCalled();
     });
 
@@ -343,7 +343,7 @@ describe("UIToggles layers", () => {
       expect(visibility(MAP_LAYERS.pathsAirspeedSelected)).toBe("none");
       expect(app.airspeedVisible).toBe(false);
       expect(el("airspeed-btn").style.opacity).toBe("0.5");
-      expect(el("airspeed-legend").style.display).toBe("none");
+      expect(el("airspeed-legend").hidden).toBe(true);
     });
 
     it("shows airspeed without altitude conflict", () => {
@@ -388,7 +388,7 @@ describe("UIToggles layers", () => {
       expect(visibility(MAP_LAYERS.pathsAirspeed)).toBe("none");
       expect(app.layerManager.redrawAirspeedPaths).not.toHaveBeenCalled();
       expect(app.airspeedVisible).toBe(true);
-      expect(el("airspeed-legend").style.display).toBe("block");
+      expect(el("airspeed-legend").hidden).toBe(false);
     });
 
     it("during replay delegates the redraw to the replay manager", () => {

@@ -82,7 +82,7 @@ jobs:
         run: npm run lint:unused
 
   unit:
-    needs: lint
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -153,7 +153,7 @@ jobs:
           verbose: true
 
   packaging:
-    needs: lint
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -223,7 +223,7 @@ jobs:
           cmp "$GITHUB_WORKSPACE/tests/fixtures/airports.csv" smoke/cache/airports.csv
 
   e2e:
-    needs: lint
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -412,7 +412,7 @@ jobs:
             git --redact --verbose --config /repo/.gitleaks.toml /repo
 
   container:
-    needs: lint
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

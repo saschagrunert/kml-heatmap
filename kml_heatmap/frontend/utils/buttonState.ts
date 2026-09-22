@@ -45,12 +45,12 @@ export function syncToggleButton(
   return store.subscribe(key, (value) => apply(value));
 }
 
-/** Show or hide a colour legend, which the stylesheet hides by default */
+/** Show or hide a colour legend via the hidden attribute, faded by CSS */
 export function applyLegendVisibility(
   legend: HTMLElement,
   visible: boolean,
 ): void {
-  legend.style.display = visible ? "block" : "none";
+  legend.hidden = !visible;
 }
 
 /**

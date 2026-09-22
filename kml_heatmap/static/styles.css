@@ -33,10 +33,12 @@
   --color-divider: #232323;
   --color-text: #f2f2f2;
   --color-text-secondary: #c8c8c8;
-  --color-text-muted: #8a8a8a;
-  /* 4.7:1 on the primary surface. It was #6f6f6f, which clears the 3:1 an
-     icon needs and not the 4.5:1 of the text it sits beside. */
-  --color-text-dim: #808080;
+  /* 6.1:1 on the primary surface, 5.0:1 on raised */
+  --color-text-muted: #949494;
+  /* 5.5:1 on the primary surface, 4.5:1 on raised. It was #6f6f6f, which
+     clears the 3:1 an icon needs and not the 4.5:1 of the text it sits
+     beside; then #808080, which passed on the primary but not on raised. */
+  --color-text-dim: #8c8c8c;
   --color-accent-blue: #4facfe;
   --color-accent-green: #28a745;
   --color-accent-red: #f5576c;
@@ -625,7 +627,6 @@ body {
 #airspeed-legend .gradient-bar {
   background: var(--gradient-speed);
 }
-
 /* Set by AirportManager.declutterLabels() on the labels that would be drawn
    over an already placed one. The marker dot stays; only the code is hidden. */
 .airport-label-crowded {
@@ -723,6 +724,10 @@ body {
   padding: 0;
   border-radius: 50%;
   cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--duration-base) ease,
+    display var(--duration-base) allow-discrete;
 }
 
 /* A marker on the far side of the globe. MapLibre only fades it, and a
@@ -751,8 +756,20 @@ body {
   min-width: 200px;
   box-shadow: var(--shadow-panel);
   box-sizing: border-box;
-  display: none;
-  transition: left var(--duration-base) ease;
+  opacity: 0;
+  transition:
+    opacity var(--duration-base) ease,
+    left var(--duration-base) ease,
+    display var(--duration-base) allow-discrete;
+}
+.color-legend:not([hidden]) {
+  display: block;
+  opacity: 1;
+}
+@starting-style {
+  .color-legend:not([hidden]) {
+    opacity: 0;
+  }
 }
 .color-legend .legend-title {
   display: flex;
@@ -766,7 +783,7 @@ body {
   color: var(--color-text-muted);
 }
 .color-legend .gradient-bar {
-  height: var(--icon-md);
+  height: 28px;
   border-radius: var(--radius-bar);
   margin-bottom: var(--space-xs);
 }
@@ -1089,7 +1106,7 @@ body.stats-open #left-buttons {
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-panel);
   padding: 0;
-  font-size: 0.8125rem;
+  font-size: var(--text-md);
   line-height: 1.4;
   -webkit-user-select: text;
   user-select: text;
@@ -1293,6 +1310,7 @@ body.stats-open #left-buttons {
   color: inherit;
   font: inherit;
   cursor: pointer;
+  touch-action: manipulation;
 }
 /* The airports toggle: set on #map by the layer handle */
 #map.airports-hidden .airport-marker-root {
@@ -1348,7 +1366,7 @@ body.stats-open #left-buttons {
   color: var(--color-text-muted);
   margin-bottom: 2px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
 }
 .popup-metric {
   padding: var(--space-xs) var(--space-sm);
@@ -1496,6 +1514,12 @@ body.stats-open #left-buttons {
 
   #compass-float-btn:not([hidden]) {
     display: inline-flex;
+    opacity: 1;
+  }
+  @starting-style {
+    #compass-float-btn:not([hidden]) {
+      opacity: 0;
+    }
   }
 
   /* Bottom bar */
@@ -2016,7 +2040,7 @@ body.stats-open #left-buttons {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
 }
 .kh-popup-accent {
   color: var(--color-accent-blue);
@@ -2370,15 +2394,16 @@ body.stats-open #left-buttons {
   display: none;
 }
 
-/* The two feature panels are in the page from the first paint, but the rules
+/* The feature panels are in the page from the first paint, but the rules
    that lay them out are in features.css, which does not arrive until one of
    them is opened. Hiding them has to be here, or they show unstyled until
-   then. ReplayManager and WrappedManager open them by setting an inline
-   display, which outranks this and the identical rule features.css carries
-   for the loaded case. Everything else replay and Wrapped draw is inside one
-   of these two, so this is the whole of what core has to know about them. */
-#replay-controls,
-#wrapped-modal {
+   then. ReplayManager opens the replay panel by setting an inline display,
+   which outranks this and the identical rule features.css carries for the
+   loaded case. The wrapped modal uses the hidden attribute instead, so it
+   does not need a display rule here. Everything else replay and Wrapped draw
+   is inside one of these two, so this is the whole of what core has to know
+   about them. */
+#replay-controls {
   display: none;
 }
 
@@ -2409,7 +2434,8 @@ body.stats-open #left-buttons {
   .sheet-switch-thumb,
   .mobile-sheet,
   .mobile-sheet.is-open,
-  #stats-rail {
+  #stats-rail,
+  #compass-float-btn {
     transition: none;
   }
 }
@@ -2452,5 +2478,35 @@ body.stats-open #left-buttons {
   .initially-half-opacity,
   .control-btn:disabled {
     opacity: 0.75 !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .color-legend .gradient-bar,
+  .ramp-chip {
+    border: 1px solid CanvasText;
+  }
+}
+
+/* ==========================================================================
+   Print
+   ========================================================================== */
+@media print {
+  .control-group,
+  .color-legend,
+  #selection-chip,
+  #stats-rail,
+  #github-footer,
+  .mobile-bar,
+  .mobile-sheet,
+  .toast-notification,
+  .skip-nav,
+  .maplibregl-ctrl-group {
+    display: none !important;
+  }
+  #map {
+    position: static;
+    width: 100%;
+    height: 100vh;
   }
 }

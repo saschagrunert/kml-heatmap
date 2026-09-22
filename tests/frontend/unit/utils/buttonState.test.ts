@@ -105,13 +105,13 @@ describe("buttonState", () => {
       const store = new AppStore({ altitudeVisible: true });
 
       syncLegend(store, "altitudeVisible", "altitude-legend");
-      expect(legend.style.display).toBe("block");
+      expect(legend.hidden).toBe(false);
 
       store.set("altitudeVisible", false);
-      expect(legend.style.display).toBe("none");
+      expect(legend.hidden).toBe(true);
 
       store.set("altitudeVisible", true);
-      expect(legend.style.display).toBe("block");
+      expect(legend.hidden).toBe(false);
     });
 
     it("stops following after unsubscribe", () => {
@@ -125,7 +125,7 @@ describe("buttonState", () => {
       unsubscribe();
       store.set("altitudeVisible", true);
 
-      expect(legend.style.display).toBe("none");
+      expect(legend.hidden).toBe(true);
     });
 
     it("tolerates a missing legend", () => {

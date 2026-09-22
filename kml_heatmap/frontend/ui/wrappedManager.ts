@@ -289,7 +289,7 @@ export class WrappedManager {
     // Show modal first to ensure wrapped-map-container has dimensions
     const modal = domCache.get("wrapped-modal");
     if (modal) {
-      modal.style.display = "flex";
+      modal.hidden = false;
       this.trapFocus(modal);
     }
     this.setWrappedVisible(true);
@@ -326,7 +326,7 @@ export class WrappedManager {
       // Make sure the map container fills the wrapped container
       mapContainer.style.width = "100%";
       mapContainer.style.height = "100%";
-      mapContainer.style.borderRadius = "12px";
+      mapContainer.style.borderRadius = "var(--radius-sheet)";
       mapContainer.style.overflow = "hidden";
 
       // Force a layout recalculation
@@ -653,7 +653,7 @@ export class WrappedManager {
     }
 
     const modal = domCache.get("wrapped-modal");
-    if (modal) modal.style.display = "none";
+    if (modal) modal.hidden = true;
     this.setWrappedVisible(false);
 
     // Remove Escape key handler

@@ -53,7 +53,10 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
       void app.uiToggles.shareLink();
     },
     showWrapped: () => {
-      void app.loadWrapped().then((manager) => manager?.showWrapped());
+      void app
+        .loadWrapped()
+        .then((manager) => manager?.showWrapped())
+        .catch(logError);
     },
     closeWrapped: () => app.wrappedManager?.closeWrapped(),
     toggleIsolateSelection: () => app.pathSelection.toggleIsolateSelection(),
