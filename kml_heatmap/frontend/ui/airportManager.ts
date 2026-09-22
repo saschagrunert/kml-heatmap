@@ -20,6 +20,7 @@ import {
 } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { loadFeatures } from "../services/featureLoader";
+import { logError } from "../utils/logger";
 
 /** Room kept between an airport popup and the edge of the map, in pixels */
 const POPUP_PAN_PADDING_PX = 50;
@@ -217,21 +218,31 @@ export class AirportManager {
       }),
     );
 
-    void loadFeatures().then((features) => {
-      const map = this.app.map;
-      // The popup can have closed or moved on while the bundle loaded
-      if (!map || this.openAirport !== name || !this.popup.isOpen()) return;
-      features?.listFlights(this.app, this.popup, name);
-      // The side the popup hangs on was chosen for the height it had
-      // before the list; setting the same position chooses again
-      this.popup.setLngLat(this.popup.getLngLat());
-      panPopupIntoView(
-        map,
-        this.popup,
-        POPUP_PAN_PADDING_PX,
-        !prefersReducedMotion(),
-      );
-    });
+    void loadFeatures()
+      .then((features) => {
+        const map = this.app.map;
+        // The popup can have closed or moved on while the bundle loaded
+        if (!map || this.openAirport !== name || !this.popup.isOpen()) return;
+        features?.listFlights(this.app, this.popup, name);
+        // The side the popup hangs on was chosen for the height it had
+        // before the list; setting the same position chooses again
+        this.popup.setLngLat(this.popup.getLngLat());
+        panPopupIntoView(
+          map,
+          this.popup,
+          POPUP_PAN_PADDING_PX,
+          !prefersReducedMotion(),
+        );
+      })
+      .catch((error) => {
+        logError(error);
+        if (this.popup.isOpen()) {
+          this.popup
+            .getElement()
+            ?.querySelector(".kh-popup-flights-loading")
+            ?.remove();
+        }
+      });
   }
 
   /**

@@ -445,14 +445,16 @@ export class MapApp {
     if (state && state.wrappedVisible) {
       this.wrappedRestoreTimer = setTimeout(() => {
         this.wrappedRestoreTimer = null;
-        void this.loadWrapped().then((manager) => {
-          // The bundle may arrive after the app was torn down
-          if (this.destroyed) return;
-          manager?.showWrapped();
-          // Opened or not, the restore is done: saves stop writing the
-          // flag it had (see StateManager.panelVisible)
-          delete state.wrappedVisible;
-        });
+        void this.loadWrapped()
+          .then((manager) => {
+            // The bundle may arrive after the app was torn down
+            if (this.destroyed) return;
+            manager?.showWrapped();
+            // Opened or not, the restore is done: saves stop writing the
+            // flag it had (see StateManager.panelVisible)
+            delete state.wrappedVisible;
+          })
+          .catch(logError);
       }, WRAPPED_RESTORE_DELAY_MS);
     }
 
@@ -588,6 +590,16 @@ export class MapApp {
   }
 
   private setupMap(): void {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl2");
+    if (!gl) {
+      throw new Error(
+        "WebGL 2 is not available. The map requires a browser with WebGL 2 support.",
+      );
+    }
+    // Free the test context immediately
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+
     // MapLibre runs every camera move through easeTo or flyTo and shortens
     // those to nothing under reduced motion, the app's own included; the
     // glide after a drag goes with them. The tile and label fades are the
@@ -647,6 +659,16 @@ export class MapApp {
     // Registered before anything can fail. Without a listener MapLibre
     // writes every error to the console itself.
     map.on("error", this.handleMapError);
+
+    const mapCanvas = map.getCanvas();
+    mapCanvas.addEventListener("webglcontextlost", (e) => {
+      e.preventDefault();
+      logError("WebGL context lost");
+      showToast("Map rendering interrupted, restoring…", "error");
+    });
+    mapCanvas.addEventListener("webglcontextrestored", () => {
+      showToast("Map rendering restored", "info");
+    });
 
     whenStyleReady(map)
       .then(() => {
@@ -830,10 +852,15 @@ export class MapApp {
       this.replayManager.toggleReplay();
       return;
     }
-    this.pendingReplayToggle ??= this.loadReplay().then((manager) => {
-      this.pendingReplayToggle = null;
-      if (!this.destroyed) manager?.toggleReplay();
-    });
+    this.pendingReplayToggle ??= this.loadReplay()
+      .then((manager) => {
+        this.pendingReplayToggle = null;
+        if (!this.destroyed) manager?.toggleReplay();
+      })
+      .catch((error) => {
+        this.pendingReplayToggle = null;
+        logError(error);
+      });
   }
 
   /**

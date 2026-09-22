@@ -573,7 +573,6 @@ export class ReplayManager {
     // it as on; restoreLayerVisibility hands it back to the store
     const heatmapBtn = domCache.get("heatmap-btn");
     if (heatmapBtn) applyToggleButtonState(heatmapBtn, false);
-
     if (this.app.altitudeVisible) this.app.altitudeLayer.setVisible(false);
     if (this.app.airspeedVisible) this.app.airspeedLayer.setVisible(false);
 

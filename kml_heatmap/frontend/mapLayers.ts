@@ -175,7 +175,7 @@ export function addDataLayers(map: MapLibreMap): void {
       source: MAP_SOURCES.replayRoute,
       layout: round,
       paint: {
-        "line-color": cssVar("--color-text-dim") || "#888888",
+        "line-color": cssVar("--color-text-dim") || "#8c8c8c",
         "line-width": REPLAY_ROUTE_LINE.width,
         "line-opacity": REPLAY_ROUTE_LINE.opacity,
       },

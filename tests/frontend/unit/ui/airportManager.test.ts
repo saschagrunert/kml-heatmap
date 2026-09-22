@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { AirportManager } from "../../../../kml_heatmap/frontend/ui/airportManager";
 import { createAirportMarkers } from "../../../../kml_heatmap/frontend/appInitializer";
-import { panPopupIntoView } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import {
+  DOUBLE_TAP_MS,
+  panPopupIntoView,
+} from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import type {
   AirportMarker,
@@ -351,11 +354,17 @@ describe("AirportManager", () => {
   });
 
   describe("a second activation of a marker", () => {
-    /** A click as the browser reports it: `detail` counts a burst of them */
+    let clickAt = 0;
+
+    /**
+     * A click as the browser reports it: `detail` counts a burst of them.
+     * Each comes later than a double tap would, so only `detail` makes one.
+     */
     function click(name: string, detail = 1): void {
-      markers[name]!.getElement().dispatchEvent(
-        new MouseEvent("click", { bubbles: true, detail }),
-      );
+      const event = new MouseEvent("click", { bubbles: true, detail });
+      clickAt += DOUBLE_TAP_MS;
+      Object.defineProperty(event, "timeStamp", { value: clickAt });
+      markers[name]!.getElement().dispatchEvent(event);
     }
 
     function expanded(name: string): string | null {

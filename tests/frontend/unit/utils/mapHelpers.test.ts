@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Map as MapLibreMap, Popup as MapLibrePopup } from "maplibre-gl";
 import {
   closeWhenBehindGlobe,
+  createActivationFilter,
   cssVar,
+  DOUBLE_TAP_MS,
   firstSymbolLayerId,
   fromLngLat,
   isBehindGlobe,
@@ -352,6 +354,40 @@ describe("mapHelpers", () => {
       expect(isOnMarker(aimedAt(canvas))).toBe(false);
       // An event the app made up carries none
       expect(isOnMarker({})).toBe(false);
+    });
+  });
+
+  describe("createActivationFilter", () => {
+    /** A click as the browser reports it, at a time in milliseconds */
+    function click(detail: number, timeStamp: number): MouseEvent {
+      return { detail, timeStamp } as MouseEvent;
+    }
+
+    it("takes clicks further apart than a double tap", () => {
+      const isActivation = createActivationFilter();
+      expect(isActivation(click(1, 1000))).toBe(true);
+      expect(isActivation(click(1, 1000 + DOUBLE_TAP_MS))).toBe(true);
+    });
+
+    it("drops the later clicks of a burst the browser counts", () => {
+      const isActivation = createActivationFilter();
+      expect(isActivation(click(1, 1000))).toBe(true);
+      expect(isActivation(click(2, 1000 + DOUBLE_TAP_MS))).toBe(false);
+    });
+
+    it("drops a second tap that WebKit reports as a single click", () => {
+      const isActivation = createActivationFilter();
+      expect(isActivation(click(1, 1000))).toBe(true);
+      expect(isActivation(click(1, 1100))).toBe(false);
+      // Each tap of the burst moves its end
+      expect(isActivation(click(1, 1100 + DOUBLE_TAP_MS - 1))).toBe(false);
+    });
+
+    it("always takes a key, which reports no clicks", () => {
+      const isActivation = createActivationFilter();
+      expect(isActivation(click(1, 1000))).toBe(true);
+      expect(isActivation(click(0, 1001))).toBe(true);
+      expect(isActivation(click(0, 1002))).toBe(true);
     });
   });
 

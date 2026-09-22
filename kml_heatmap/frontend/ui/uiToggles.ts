@@ -259,6 +259,8 @@ export class UIToggles {
         if (!replay) this.app[`${other}Layer`].setVisible(false);
         this.app[`${other}Visible`] = false;
         layers.clearLayer(other);
+        const label = other === "altitude" ? "Altitude" : "Speed";
+        showToast(`${label} layer disabled`, "info");
       }
 
       if (!replay) {

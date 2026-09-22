@@ -50,7 +50,7 @@ describe("WrappedManager dialog", () => {
     it("shows the modal and records it in the store", () => {
       wrappedManager.showWrapped();
 
-      expect(el("wrapped-modal").style.display).toBe("flex");
+      expect(el("wrapped-modal").hidden).toBe(false);
       expect(mockApp.store.get("wrappedVisible")).toBe(true);
     });
 
@@ -133,7 +133,7 @@ describe("WrappedManager dialog", () => {
 
       wrappedManager.showWrapped();
 
-      expect(el("wrapped-modal").style.display).toBe("");
+      expect(el("wrapped-modal").hidden).toBe(true);
       expect(mockApp.store.get("wrappedVisible")).toBe(false);
       expect(mockApp.map!.fitBounds).not.toHaveBeenCalled();
     });
@@ -205,7 +205,7 @@ describe("WrappedManager dialog", () => {
       expect(el("wrapped-map-container").contains(mapEl)).toBe(true);
       expect(mapEl.style.width).toBe("100%");
       expect(mapEl.style.height).toBe("100%");
-      expect(mapEl.style.borderRadius).toBe("12px");
+      expect(mapEl.style.borderRadius).toBe("var(--radius-sheet)");
       expect(mapEl.style.overflow).toBe("hidden");
 
       wrappedManager.closeWrapped();
@@ -289,7 +289,7 @@ describe("WrappedManager dialog", () => {
 
       wrappedManager.showWrapped();
 
-      expect(el("wrapped-modal").style.display).toBe("");
+      expect(el("wrapped-modal").hidden).toBe(true);
       expect(el("stats-btn").style.display).toBe("");
     });
 
@@ -298,7 +298,7 @@ describe("WrappedManager dialog", () => {
 
       wrappedManager.showWrapped();
 
-      expect(el("wrapped-modal").style.display).toBe("");
+      expect(el("wrapped-modal").hidden).toBe(true);
       expect(mockApp.store.get("wrappedVisible")).toBe(false);
     });
   });
@@ -346,7 +346,7 @@ describe("WrappedManager dialog", () => {
 
       wrappedManager.closeWrapped();
 
-      expect(el("wrapped-modal").style.display).toBe("none");
+      expect(el("wrapped-modal").hidden).toBe(true);
       expect(mockApp.store.get("wrappedVisible")).toBe(false);
     });
 
@@ -582,7 +582,7 @@ describe("WrappedManager dialog", () => {
 
       wrappedManager.closeWrapped();
 
-      expect(el("wrapped-modal").style.display).toBe("flex");
+      expect(el("wrapped-modal").hidden).toBe(false);
       expect(el("stats-btn").style.display).toBe("none");
       expect(el("left-buttons").hasAttribute("inert")).toBe(true);
     });
@@ -745,10 +745,10 @@ describe("WrappedManager dialog", () => {
       openWrapped();
 
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
-      expect(el("wrapped-modal").style.display).toBe("flex");
+      expect(el("wrapped-modal").hidden).toBe(false);
 
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-      expect(el("wrapped-modal").style.display).toBe("none");
+      expect(el("wrapped-modal").hidden).toBe(true);
     });
 
     it("ignores Escape after the dialog was closed", () => {
@@ -760,7 +760,7 @@ describe("WrappedManager dialog", () => {
 
       // A second close would have restored the controls again
       expect(el("stats-btn").style.display).toBe("block");
-      expect(el("wrapped-modal").style.display).toBe("none");
+      expect(el("wrapped-modal").hidden).toBe(true);
     });
   });
 
@@ -780,7 +780,7 @@ describe("WrappedManager dialog", () => {
       wrappedManager.destroy();
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
-      expect(el("wrapped-modal").style.display).toBe("flex");
+      expect(el("wrapped-modal").hidden).toBe(false);
     });
   });
 

@@ -202,7 +202,9 @@ function countryMark(code: string): string {
   return src
     ? '<img class="kh-stats-group-flag" src="' +
         escapeHtml(src) +
-        '" alt="" width="16" height="12" loading="lazy">'
+        '" alt="' +
+        escapeHtml(code) +
+        '" width="16" height="12" loading="lazy">'
     : '<span class="kh-stats-group-code" aria-hidden="true">' +
         escapeHtml(code) +
         "</span>";

@@ -119,7 +119,21 @@ export const APP_CONFIG = {
   dataDir: "/data",
 };
 
+const originalGetContext = HTMLCanvasElement.prototype.getContext;
+
 export function setupDOM(): void {
+  HTMLCanvasElement.prototype.getContext = function (
+    this: HTMLCanvasElement,
+    type: string,
+    ...args: unknown[]
+  ) {
+    if (type === "webgl2") {
+      return {
+        getExtension: () => ({ loseContext() {} }),
+      } as unknown as RenderingContext;
+    }
+    return originalGetContext.call(this, type, ...args);
+  } as typeof originalGetContext;
   document.body.innerHTML = `
     <div id="map"></div>
     <select id="year-select">

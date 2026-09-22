@@ -293,7 +293,9 @@ export function generateDestinationsHtml(
       : flag
         ? '<img class="country-flag" src="' +
           escapeHtml(flag) +
-          '" alt="" width="18" height="14" loading="lazy">'
+          '" alt="' +
+          escapeHtml(code) +
+          '" width="18" height="14" loading="lazy">'
         : '<span class="country-code" aria-hidden="true">' +
           escapeHtml(code) +
           "</span>";

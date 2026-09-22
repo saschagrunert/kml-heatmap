@@ -237,7 +237,10 @@ function analyzeBundleComposition(metafile, fileName) {
 // a popup into view on a map where a pixel is not the same way everywhere.
 // None of it can load later: a link may open turned and as a globe, and the
 // controls are on the first paint.
-const BUDGET_APP = 112 * 1024;
+// Raised by 0.5 KB for the WebGL 2 check, the context loss toasts and the
+// double tap filter of the markers (WebKit counts no taps in `detail`),
+// which took it to 112.05 KB.
+const BUDGET_APP = 112.5 * 1024;
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.
@@ -348,8 +351,10 @@ async function build() {
       }
     } else {
       console.log("🔨 Building the JavaScript bundles...");
-      const result = await esbuild.build(buildOptions);
-      const workerResult = await esbuild.build(workerBuildOptions);
+      const [result, workerResult] = await Promise.all([
+        esbuild.build(buildOptions),
+        esbuild.build(workerBuildOptions),
+      ]);
       assertExpectedOutputs([result.metafile, workerResult.metafile]);
 
       console.log("✅ Build complete!");

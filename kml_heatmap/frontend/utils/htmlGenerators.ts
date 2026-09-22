@@ -119,6 +119,7 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
             <span class="kh-popup-metric-label">Total Flights</span>
             <span class="popup-metric-value kh-popup-accent">${params.flightCount}</span>
         </div>
+        <div class="kh-popup-flights-loading popup-section-label">Loading flights…</div>
     </div>`;
 }
 

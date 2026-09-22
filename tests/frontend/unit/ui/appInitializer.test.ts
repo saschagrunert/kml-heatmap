@@ -267,6 +267,23 @@ describe("appInitializer", () => {
       expect(app.airportManager.closePopup).not.toHaveBeenCalled();
     });
 
+    it("ignores a second tap that WebKit reports as a single click", () => {
+      create();
+      const element = eddf().getElement();
+      app.airportManager.openPopup.mockImplementation(() =>
+        app.airportManager.isPopupOpen.mockReturnValue(true),
+      );
+
+      for (let tap = 0; tap < 2; tap++) {
+        element.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, detail: 1 }),
+        );
+      }
+
+      expect(app.airportManager.openPopup).toHaveBeenCalledTimes(1);
+      expect(app.airportManager.closePopup).not.toHaveBeenCalled();
+    });
+
     it("opens the popup but leaves the selection alone while replay runs", () => {
       create();
       app.replayManager.state.active = true;
@@ -453,9 +470,7 @@ describe("appInitializer", () => {
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.style.opacity).toBe("1");
       expect(app.airspeedLayer.setVisible).toHaveBeenCalledWith(true);
-      expect(document.getElementById("airspeed-legend")!.style.display).toBe(
-        "block",
-      );
+      expect(document.getElementById("airspeed-legend")!.hidden).toBe(false);
     });
 
     it("disables the airspeed button without timing data", async () => {
