@@ -1,23 +1,34 @@
 /**
  * Airport Manager - Handles airport markers and popups
  */
-import { Popup } from "maplibre-gl";
+import { Popup, type GeoJSONSource, type Point } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { calculateVisibleAirports, findHomeBase } from "../features/airports";
 import type { AirportCounts } from "../features/airports";
 import { datasetIndex } from "../calculations/datasetIndex";
 import type { PathInfo } from "../types";
 import {
-  AIRPORT_HIDE_LABELS_BELOW_ZOOM,
   AIRPORT_SIZE_ZOOMS,
+  MAP_LAYERS,
+  MAP_SOURCES,
 } from "../utils/constants";
 import { ddToDms } from "../utils/geometry";
 import { generateAirportPopupHtml } from "../utils/htmlGenerators";
-import {
-  closeWhenBehindGlobe,
-  isBehindGlobe,
-  panPopupIntoView,
-} from "../utils/mapHelpers";
+import { closeWhenBehindGlobe, panPopupIntoView } from "../utils/mapHelpers";
+import { isTouchDevice } from "./layerManager";
+import { airportLabelFeatures, setAirportLabelHover } from "./airportLabels";
+
+/**
+ * How far from a click an airport label still counts as hit, in pixels: a
+ * little for a pointer, more for a finger. Less than for a flight (see
+ * layerManager), since a label sits over the flights it would take clicks
+ * from.
+ */
+const LABEL_HIT_PADDING_PX = 3;
+const LABEL_TOUCH_HIT_PADDING_PX = 6;
+
+/** Class on a marker whose label is under the pointer */
+const LABEL_HOVERED_CLASS = "is-label-hovered";
 import { prefersReducedMotion } from "../utils/motion";
 import { loadFeatures } from "../services/featureLoader";
 import { logError } from "../utils/logger";
@@ -31,28 +42,6 @@ const POPUP_PAN_PADDING_PX = 50;
  * `--marker-target` in the stylesheet.
  */
 const POPUP_OFFSET_PX = 12;
-
-/** Padding added around a label box before two are called overlapping */
-const LABEL_GAP_PX = 2;
-
-/**
- * Chrome that sits over the map. A label underneath one of these is not
- * hidden by it, it is half hidden by it: the panels are translucent in
- * places and the label slides under an edge. They are fed to the declutter
- * pass as space that is already taken.
- */
-const CHROME_SELECTORS = [
-  "#left-buttons",
-  "#right-buttons",
-  "#stats-rail",
-  "#mobile-bar",
-  "#replay-controls",
-  "#selection-chip",
-  "#mobile-sheet",
-  "#github-footer",
-  ".color-legend",
-  ".maplibregl-ctrl-attrib",
-] as const;
 
 /** Store keys that change the popup counts and the home base */
 const POPUP_KEYS = ["currentData", "selectedYear", "selectedAircraft"] as const;
@@ -85,6 +74,10 @@ export class AirportManager {
   });
   /** The airport the popup is open for */
   private openAirport: string | null = null;
+  /** The airports shown under the filter and selection, null for all */
+  private visibleAirports: ReadonlySet<string> | null = null;
+  /** The airport whose label is under the pointer */
+  private hoveredLabel: string | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -96,24 +89,38 @@ export class AirportManager {
     app.store.subscribeKeys(POPUP_KEYS, () => this.updateAirportPopups());
     app.store.subscribeKeys(VISIBILITY_KEYS, () => this.updateAirportOpacity());
 
-    // A hidden layer has no label boxes to measure, so whatever the map did
-    // in the meantime went past the declutter pass. A popup would be left
-    // pointing at nothing.
+    // A popup would be left pointing at nothing
     app.store.subscribe("airportsVisible", (visible) => {
-      if (visible) this.declutterLabels();
-      else this.closePopup();
+      if (!visible) this.closePopup();
     });
 
     this.popup.on("close", () => this.onPopupClosed());
     if (app.map) closeWhenBehindGlobe(app.map, this.popup);
+
+    // The labels are there once the map's layers are
+    app.mapReady
+      .then((map) => {
+        const canvas = map.getCanvas();
+        // A label opens a popup like its marker, and says so: the pointer,
+        // and the hover of both the label and the marker's dot
+        map.on("mousemove", MAP_LAYERS.airportLabels, (event) => {
+          const name: unknown = event.features?.[0]?.properties["name"];
+          if (typeof name !== "string") return;
+          canvas.style.cursor = "pointer";
+          this.hoverLabel(name);
+        });
+        map.on("mouseleave", MAP_LAYERS.airportLabels, () => {
+          canvas.style.cursor = "";
+          this.hoverLabel(null);
+        });
+      })
+      // The start-up reports a map that never got ready
+      .catch(() => {});
   }
 
   /**
    * Flights per airport under the current filter, kept with the dataset for
-   * as long as the filter stays.
-   *
-   * declutterLabels() needs them to decide which label wins, and it runs on
-   * every zoom, where nothing about the counts can have changed.
+   * as long as the filter stays
    */
   private airportFlightCounts(): AirportCounts {
     const data = this.app.currentData;
@@ -140,6 +147,47 @@ export class AirportManager {
     }
 
     if (this.openAirport !== null) this.writePopupContent(this.openAirport);
+    this.updateLabels();
+  }
+
+  /**
+   * What a click on an airport's marker or on its label does: open its
+   * popup and select its flights, or close the popup it has open already.
+   * No flights are selected during a replay, which shows the one flight.
+   */
+  activateAirport(name: string): void {
+    if (this.isPopupOpen(name)) {
+      this.closePopup(name);
+      return;
+    }
+    if (!this.app.replayState.active) {
+      this.app.pathSelection.selectPathsByAirport(name);
+    }
+    this.openPopup(name);
+  }
+
+  /**
+   * The airport whose label is drawn at a point of the map, if any. Only a
+   * label the map has placed counts: one it left out for lack of room is
+   * not there to be clicked. A click lands on whole pixels and a finger is
+   * not precise, so a label within a few pixels counts as hit: the chip is
+   * small, and a click on its edge would otherwise go to the map beneath.
+   */
+  airportLabelAt(point: Point): string | null {
+    const map = this.app.map;
+    if (!map?.getLayer(MAP_LAYERS.airportLabels)) return null;
+    const pad = isTouchDevice()
+      ? LABEL_TOUCH_HIT_PADDING_PX
+      : LABEL_HIT_PADDING_PX;
+    const [feature] = map.queryRenderedFeatures(
+      [
+        [point.x - pad, point.y - pad],
+        [point.x + pad, point.y + pad],
+      ],
+      { layers: [MAP_LAYERS.airportLabels] },
+    );
+    const name: unknown = feature?.properties["name"];
+    return typeof name === "string" ? name : null;
   }
 
   /**
@@ -295,8 +343,52 @@ export class AirportManager {
       if (!visible) this.closePopup(airportName);
     }
 
-    // Markers that just left the map free up room for the labels that stay
-    this.declutterLabels();
+    this.visibleAirports = visibleAirports;
+    this.updateLabels();
+  }
+
+  /**
+   * Hand the label layer the airports that are shown, with the counts that
+   * decide which label wins and the home base, whose label is marked. The
+   * map places, fades and hides them itself (see ui/airportLabels.ts).
+   */
+  updateLabels(): void {
+    const source = this.app.map?.getSource<GeoJSONSource>(
+      MAP_SOURCES.airportLabels,
+    );
+    if (!source || !this.app.allAirportsData) return;
+    const counts = this.airportFlightCounts();
+    void source.setData(
+      airportLabelFeatures(
+        this.app.allAirportsData,
+        counts,
+        findHomeBase(counts),
+        this.visibleAirports,
+      ),
+    );
+  }
+
+  /**
+   * The pointer is on an airport's label, or on none (null). The label
+   * shows it, and so does the marker's dot, as if the pointer were on it.
+   */
+  private hoverLabel(name: string | null): void {
+    const map = this.app.map;
+    const previous = this.hoveredLabel;
+    if (!map || name === previous) return;
+    this.hoveredLabel = name;
+    if (previous !== null) {
+      setAirportLabelHover(map, previous, false);
+      this.app.airportMarkers[previous]
+        ?.getElement()
+        .classList.remove(LABEL_HOVERED_CLASS);
+    }
+    if (name !== null) {
+      setAirportLabelHover(map, name, true);
+      this.app.airportMarkers[name]
+        ?.getElement()
+        .classList.add(LABEL_HOVERED_CLASS);
+    }
   }
 
   updateAirportMarkerSizes(): void {
@@ -310,89 +402,5 @@ export class AirportManager {
       AIRPORT_SIZE_ZOOMS.find((size) => zoom >= size.minZoom)?.sizeClass ?? "";
 
     mapContainer.dataset["zoomSize"] = sizeClass;
-    mapContainer.classList.toggle(
-      "zoom-hide-labels",
-      zoom < AIRPORT_HIDE_LABELS_BELOW_ZOOM,
-    );
-
-    this.declutterLabels();
   }
-
-  /**
-   * Hide the ICAO labels that would be drawn on top of one another.
-   *
-   * Every marker is placed independently, so at the zoom levels that fit
-   * a whole country the codes of neighbouring airports overlap and neither is
-   * readable. Busier airports are placed first, so the ones a reader is most
-   * likely looking for keep their label; the marker dot itself always stays.
-   *
-   * The page's own panels count as taken space for the same reason, so a
-   * label pans behind the control column instead of sliding half under it.
-   */
-  declutterLabels(): void {
-    const counts = this.airportFlightCounts();
-    const placed: DOMRect[] = [];
-
-    // A marker behind the globe is hidden, not gone: its label keeps a box,
-    // at the point the far side projects to, right among the visible ones.
-    // Asked of the map and not of the class MapLibre hides it by, which it
-    // sets a frame after the move this may run at the end of.
-    const map = this.app.map;
-    const labels = Object.entries(this.app.airportMarkers)
-      .filter(([, marker]) => !map || !isBehindGlobe(map, marker.getLatLng()))
-      .map(([name, marker]) => ({
-        name,
-        label: marker.getElement().querySelector<HTMLElement>(".airport-label"),
-      }))
-      .filter((entry): entry is { name: string; label: HTMLElement } =>
-        Boolean(entry.label),
-      )
-      .sort((a, b) => (counts[b.name] ?? 0) - (counts[a.name] ?? 0));
-
-    // A crowded label is only invisible, it keeps its place in layout, so
-    // last run's verdict can stay while this one is measured. Every read
-    // comes before every write, which keeps this to one reflow instead of
-    // one per label.
-    const boxes = labels.map(({ label }) => label.getBoundingClientRect());
-    placed.push(...chromeBoxes());
-
-    const crowded = labels.map((_, index) => {
-      const box = boxes[index]!;
-      // A marker that is not on the map has no layout at all
-      if (box.width === 0) return false;
-
-      const overlaps = placed.some(
-        (other) =>
-          box.left < other.right + LABEL_GAP_PX &&
-          box.right > other.left - LABEL_GAP_PX &&
-          box.top < other.bottom + LABEL_GAP_PX &&
-          box.bottom > other.top - LABEL_GAP_PX,
-      );
-      if (!overlaps) placed.push(box);
-      return overlaps;
-    });
-
-    // Only a label whose verdict changed is touched: the stylesheet fades
-    // it, and a class taken off and put back would restart that fade on
-    // every label at every run
-    labels.forEach(({ label }, index) => {
-      label.classList.toggle("airport-label-crowded", crowded[index]);
-    });
-  }
-}
-
-/** Boxes of the chrome currently drawn over the map */
-function chromeBoxes(): DOMRect[] {
-  const boxes: DOMRect[] = [];
-  for (const selector of CHROME_SELECTORS) {
-    for (const element of document.querySelectorAll<HTMLElement>(selector)) {
-      // `display: none` already measures as an empty box; `visibility` does
-      // not, and replay hides the legends, the GitHub link and the
-      // statistics sheet that way rather than relayouting around them
-      if (getComputedStyle(element).visibility === "hidden") continue;
-      const box = element.getBoundingClientRect();
-      if (box.width > 0 && box.height > 0) boxes.push(box);
-    }
-  }
-  return boxes;
 }

@@ -8,6 +8,7 @@ import type {
   Map as MapLibreMap,
   MapMouseEvent,
   MapTouchEvent,
+  Point,
   Popup,
 } from "maplibre-gl";
 import { ZOOM_OFFSET } from "./constants";
@@ -113,7 +114,9 @@ export function isInMarker(target: EventTarget | null | undefined): boolean {
 
 /**
  * Keep a double click and a double tap on a marker from zooming the map,
- * for every marker there is or will be. Returns what takes it back.
+ * for every marker there is or will be, and on whatever else `isTarget`
+ * finds at the point of the map (a label that opens a popup like its
+ * marker does). Returns what takes it back.
  *
  * A `dblclick` of the map can be prevented, which skips the zoom. A double
  * tap has no event to prevent: the zoom is recognised from `touchstart` and
@@ -130,13 +133,18 @@ export function isInMarker(target: EventTarget | null | undefined): boolean {
  * well, and a pinch with a finger on a marker has to go on working. The
  * gesture is a deliberate one and zooms where the marker is.
  */
-export function keepMarkerTapsFromZoom(map: MapLibreMap): () => void {
+export function keepMarkerTapsFromZoom(
+  map: MapLibreMap,
+  isTarget: (point: Point) => boolean = () => false,
+): () => void {
   let switchedOff = false;
+  const onTarget = (e: MapMouseEvent | MapTouchEvent): boolean =>
+    isOnMarker(e) || isTarget(e.point);
   const onDoubleClick = (e: MapMouseEvent): void => {
-    if (isOnMarker(e)) e.preventDefault();
+    if (onTarget(e)) e.preventDefault();
   };
   const onTouchStart = (e: MapTouchEvent): void => {
-    if (!isOnMarker(e) || !map.doubleClickZoom.isEnabled()) return;
+    if (!onTarget(e) || !map.doubleClickZoom.isEnabled()) return;
     map.doubleClickZoom.disable();
     switchedOff = true;
   };

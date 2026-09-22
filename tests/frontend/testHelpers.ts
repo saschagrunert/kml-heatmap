@@ -117,7 +117,8 @@ interface MockManagers {
     updateAirportPopups: Mock;
     updateAirportOpacity: Mock;
     updateAirportMarkerSizes: Mock;
-    declutterLabels: Mock;
+    activateAirport: Mock;
+    airportLabelAt: Mock;
     openPopup: Mock;
     closePopup: Mock;
     isPopupOpen: Mock;
@@ -297,7 +298,8 @@ function createMockManagers(): MockManagers {
       updateAirportPopups: vi.fn(),
       updateAirportOpacity: vi.fn(),
       updateAirportMarkerSizes: vi.fn(),
-      declutterLabels: vi.fn(),
+      activateAirport: vi.fn(),
+      airportLabelAt: vi.fn(() => null),
       openPopup: vi.fn(),
       closePopup: vi.fn(),
       isPopupOpen: vi.fn(() => false),

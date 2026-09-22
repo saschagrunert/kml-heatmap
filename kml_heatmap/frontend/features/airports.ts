@@ -17,21 +17,19 @@ export const AIRPORT_MARKER_CLASS = "airport-marker-root";
  * dot is what is drawn, the square is what a finger has to hit. WCAG asks
  * for 24, and at these zoom levels neighbouring airports are nowhere near
  * far enough apart to earn the spacing exemption. The stylesheet sizes it.
- * @param name - Airport name (ICAO code is extracted from it)
+ * The ICAO code beside it is a label of the map (see ui/airportLabels.ts).
+ * @param name - Airport name
  * @param isHomeBase - Whether the airport is the current home base
  */
 export function createAirportElement(
   name: string,
   isHomeBase = false,
 ): HTMLButtonElement {
-  const icaoMatch = name ? name.match(/\b([A-Z]{4})\b/) : null;
-  const icao = icaoMatch ? icaoMatch[1]! : "APT";
-
   const button = document.createElement("button");
   button.type = "button";
   button.className = AIRPORT_MARKER_CLASS;
   // The name a pointer reads and the name a screen reader announces; the
-  // label inside is only the code
+  // label on the map is only the code
   button.title = name;
   button.setAttribute("aria-label", name);
   // It opens and closes the airport's popup; AirportManager keeps this true
@@ -41,10 +39,10 @@ export function createAirportElement(
   container.className = "airport-marker-container";
   const dot = document.createElement("div");
   dot.className = "airport-marker";
-  const label = document.createElement("div");
-  label.className = "airport-label";
-  label.textContent = icao;
-  container.append(dot, label);
+  // The part of the target over the code above the dot (see the stylesheet)
+  const reach = document.createElement("span");
+  reach.className = "airport-marker-reach";
+  container.append(dot, reach);
   button.append(container);
 
   if (isHomeBase) setAirportElementHome(button, true);
@@ -53,8 +51,8 @@ export function createAirportElement(
 
 /**
  * Style a marker element as the home base, or as any other airport. The
- * element stays the same, so its focus, its listeners and what the label
- * declutter decided about it all survive a change of home base.
+ * element stays the same, so its focus and its listeners survive a change
+ * of home base.
  */
 export function setAirportElementHome(
   element: HTMLElement,
@@ -63,9 +61,6 @@ export function setAirportElementHome(
   element
     .querySelector(".airport-marker")
     ?.classList.toggle("airport-marker-home", isHomeBase);
-  element
-    .querySelector(".airport-label")
-    ?.classList.toggle("airport-label-home", isHomeBase);
 }
 
 let _countryByAirport: Map<string, string> | null = null;

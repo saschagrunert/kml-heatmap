@@ -13,6 +13,7 @@ import {
   MAP_SOURCES,
 } from "./utils/constants";
 import type { LayerHandle } from "./types";
+import { addAirportLabelImages, airportLabelLayer } from "./ui/airportLabels";
 
 /**
  * Aeronautical overlay of open flightmaps: airspaces, airfields, navaids and
@@ -92,16 +93,18 @@ export class MapLayerHandle implements LayerHandle {
 }
 
 /**
- * Handle of the airport markers. They are DOM, not a map layer, so hiding
- * them is a class on the map container that the stylesheet acts on; every
- * marker follows at once and none has to be removed and added again.
+ * Handle of the airport markers and their labels. The markers are DOM, not
+ * a map layer, so hiding them is a class on the map container that the
+ * stylesheet acts on; every marker follows at once and none has to be
+ * removed and added again. The labels are a layer of the map.
  */
 export class AirportLayerHandle extends MapLayerHandle {
   constructor(visible = true) {
-    super([], visible);
+    super([MAP_LAYERS.airportLabels], visible);
   }
 
   protected override apply(): void {
+    super.apply();
     this.map
       ?.getContainer()
       .classList.toggle(AIRPORTS_HIDDEN_CLASS, !this.isVisible());
@@ -272,6 +275,17 @@ export function addDataLayers(map: MapLibreMap): void {
     },
     before,
   );
+
+  // The airport codes: labels, so on top of every layer, the base style's
+  // own labels included (see ui/airportLabels.ts)
+  map.addSource(MAP_SOURCES.airportLabels, {
+    type: "geojson",
+    data: emptyGeoJson(),
+    // The hover state is set by the airport's name
+    promoteId: "name",
+  });
+  addAirportLabelImages(map);
+  map.addLayer(airportLabelLayer());
 }
 
 /**
@@ -279,9 +293,10 @@ export function addDataLayers(map: MapLibreMap): void {
  * what `setStyle` takes as `transformStyle`, which would otherwise drop
  * them. They are carried over as the map reports them, with their data,
  * filters, visibility and paint, in their order, and below the first label
- * layer of the new style, where `addDataLayers` would have put them. The
- * projection comes along too: it lives in the style, and a globe chosen
- * before the base style arrived would otherwise turn back into Mercator.
+ * layer of the new style, where `addDataLayers` would have put them; the
+ * airport labels go on top of all. The projection comes along too: it
+ * lives in the style, and a globe chosen before the base style arrived
+ * would otherwise turn back into Mercator.
  */
 export function withDataLayers(
   previous: StyleSpecification | undefined,
@@ -295,9 +310,12 @@ export function withDataLayers(
   }
   const ids: readonly string[] = Object.values(MAP_LAYERS);
   const own = previous.layers.filter((layer) => ids.includes(layer.id));
+  const onTop = own.filter((layer) => layer.id === MAP_LAYERS.airportLabels);
+  const below = own.filter((layer) => layer.id !== MAP_LAYERS.airportLabels);
   const labels = next.layers.findIndex((layer) => layer.type === "symbol");
   const layers = [...next.layers];
-  layers.splice(labels < 0 ? layers.length : labels, 0, ...own);
+  layers.splice(labels < 0 ? layers.length : labels, 0, ...below);
+  layers.push(...onTop);
   const projection = previous.projection ?? next.projection;
   return { ...next, sources, layers, ...(projection && { projection }) };
 }

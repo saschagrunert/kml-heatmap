@@ -178,12 +178,22 @@ interface MockCameraOptions {
 class MockEvented {
   readonly handlers = new globalThis.Map<string, Set<Handler>>();
 
-  on = vi.fn((type: string, handler: Handler) => {
-    let set = this.handlers.get(type);
-    if (!set) this.handlers.set(type, (set = new Set()));
-    set.add(handler);
-    return { unsubscribe: () => this.off(type, handler) };
-  });
+  /**
+   * A listener for one layer, `on(type, layerId, handler)`, is kept under
+   * `type:layerId`: `emit("mouseenter:airport-labels")` calls it
+   */
+  on = vi.fn(
+    (type: string, layerOrHandler: string | Handler, handler?: Handler) => {
+      const key =
+        typeof layerOrHandler === "string" ? `${type}:${layerOrHandler}` : type;
+      const listener =
+        typeof layerOrHandler === "string" ? handler! : layerOrHandler;
+      let set = this.handlers.get(key);
+      if (!set) this.handlers.set(key, (set = new Set()));
+      set.add(listener);
+      return { unsubscribe: () => this.off(key, listener) };
+    },
+  );
 
   once = vi.fn((type: string, handler?: Handler) => {
     // Like MapLibre: without a handler the next event is promised
@@ -708,7 +718,33 @@ export class Map
     return Math.cos((this.pitch * Math.PI) / 180);
   }
 
-  queryRenderedFeatures = vi.fn(() => this.renderedFeatures);
+  /** `renderedFeatures`, those of the asked for layers only */
+  queryRenderedFeatures = vi.fn(
+    (_where?: unknown, options?: { layers?: string[] }) =>
+      options?.layers
+        ? this.renderedFeatures.filter((feature) =>
+            options.layers!.includes(
+              (feature as { layer?: { id?: string } }).layer?.id ?? "",
+            ),
+          )
+        : this.renderedFeatures,
+  );
+
+  /** The state the app set per feature, by `source:id` */
+  readonly featureStates = new globalThis.Map<string, object>();
+  setFeatureState = vi.fn(
+    (feature: { source: string; id?: string | number }, state: object) => {
+      const key = `${feature.source}:${String(feature.id)}`;
+      this.featureStates.set(key, { ...this.featureStates.get(key), ...state });
+    },
+  );
+
+  /** The images the map was given, by name */
+  readonly images = new globalThis.Map<string, unknown>();
+  hasImage = vi.fn((id: string) => this.images.has(id));
+  addImage = vi.fn((id: string, image: unknown) => {
+    this.images.set(id, image);
+  });
 
   getContainer = vi.fn(() => this.container);
   getCanvas = vi.fn(() => this.canvas);

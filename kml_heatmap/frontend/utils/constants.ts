@@ -64,7 +64,7 @@ export const AIRPORT_SIZE_ZOOMS = [
   { minZoom: 5, sizeClass: "small" },
 ] as const;
 
-/** Below this zoom the airport markers drop their labels. Map units. */
+/** Below this zoom the airport markers have no labels. Map units. */
 export const AIRPORT_HIDE_LABELS_BELOW_ZOOM = 4;
 
 /**
@@ -82,13 +82,16 @@ export const MAP_SOURCES = {
   pathsAltitudeSelected: "paths-altitude-selected",
   pathsAirspeedSelected: "paths-airspeed-selected",
   replayTrail: "replay-trail",
+  airportLabels: "airport-labels",
 } as const;
 
 /**
  * Ids of the layers the map is created with, one per source and named like
  * it, except for the heat lines, which are drawn twice: a wide blurred glow
  * and a thin core over it. The order here is the drawing order, bottom to
- * top; all of them sit below the first label layer of the base style.
+ * top. All of them sit below the first label layer of the base style, but
+ * the airport labels: they are labels themselves and go on top of every
+ * layer, where the map places them first and the place names give way.
  */
 export const MAP_LAYERS = {
   aviation: "aviation",
@@ -101,6 +104,7 @@ export const MAP_LAYERS = {
   pathsAltitudeSelected: "paths-altitude-selected",
   pathsAirspeedSelected: "paths-airspeed-selected",
   replayTrail: "replay-trail",
+  airportLabels: "airport-labels",
 } as const;
 
 /**

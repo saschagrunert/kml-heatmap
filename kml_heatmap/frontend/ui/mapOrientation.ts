@@ -28,34 +28,20 @@ export class MapOrientation {
   private readonly app: MapApp;
   /** Set once the style has loaded, before which no projection can be set */
   private styled: MapLibreMap | null = null;
-  /** Bearing and pitch the airport labels were last sorted out at */
-  private declutteredAt = "0/0";
   private globeToastShown = false;
 
   private readonly onTurn = (): void => this.syncCompass();
 
   /**
-   * Sort the airport labels out again once the map has turned or tilted. A
-   * pan of a flat map moves every marker by the same pixels, so there the
-   * zoom alone decides which labels collide (see MapApp). A turn and a tilt
-   * shift them against each other, and so does any move of a tilted map,
-   * where what is further away is drawn closer together, and of a globe.
+   * A marker that went behind the globe while it had focus. Hidden like the
+   * others it would drop the focus to <body>, and the arrow keys that were
+   * turning the globe would stop doing anything half way; so the stylesheet
+   * leaves it, faded, until the map has taken the focus. A frame later:
+   * MapLibre marks the markers in the frame after a move.
    */
   private readonly onMoveEnd = (): void => {
     const map = this.app.map;
-    if (!map) return;
-    const globe = this.app.globeVisible;
-    const pitch = map.getPitch();
-    const orientation = `${map.getBearing()}/${pitch}`;
-    if (orientation === this.declutteredAt && pitch === 0 && !globe) return;
-    this.declutteredAt = orientation;
-    this.app.airportManager.declutterLabels();
-    // A marker that went behind the globe while it had focus. Hidden like
-    // the others it would drop the focus to <body>, and the arrow keys that
-    // were turning the globe would stop doing anything half way; so the
-    // stylesheet leaves it, faded, until the map has taken the focus. A
-    // frame later: MapLibre marks the markers in the frame after a move.
-    if (!globe) return;
+    if (!map || !this.app.globeVisible) return;
     requestAnimationFrame(() => {
       if (document.activeElement?.closest(".maplibregl-marker-covered")) {
         map.getCanvas().focus();
@@ -118,9 +104,6 @@ export class MapOrientation {
     // A style names no projection until one is set, and means Mercator
     if ((map.getProjection()?.type ?? "mercator") === type) return;
     map.setProjection({ type });
-    // No camera moved, so no `moveend` comes, yet every marker has a new
-    // place once the map has drawn in the other projection
-    void map.once("idle", () => this.app.airportManager.declutterLabels());
   }
 
   /**

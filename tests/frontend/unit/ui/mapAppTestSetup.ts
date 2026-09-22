@@ -45,6 +45,8 @@ export const mockAirportManagerInstance = {
   updateAirportOpacity: vi.fn(),
   updateAirportMarkerSizes: vi.fn(),
   closePopup: vi.fn(),
+  activateAirport: vi.fn(),
+  airportLabelAt: vi.fn((): string | null => null),
 };
 
 export const mockReplayManagerInstance = {
