@@ -31,13 +31,14 @@ RUN node -e ' \
     && npm install --no-save --no-audit --no-fund
 
 # Only what build.js reads: its own scripts, the compiler options, the
-# TypeScript sources and the two stylesheets that are part of the source hash
+# TypeScript sources and the stylesheets that are part of the source hash
 # (scripts/source-hash.js). A change to the Python side or the templates then
 # reuses the bundles of the last build.
 COPY build.js tsconfig.json ./
 COPY scripts/*.js ./scripts/
 COPY kml_heatmap/frontend/ ./kml_heatmap/frontend/
-COPY kml_heatmap/static/styles.css kml_heatmap/static/features.css ./kml_heatmap/static/
+COPY kml_heatmap/static/styles.css kml_heatmap/static/features.css \
+    kml_heatmap/static/wrapped.css ./kml_heatmap/static/
 RUN npm run build
 
 # Stage 2: the Python package without the TypeScript sources. A stage of its

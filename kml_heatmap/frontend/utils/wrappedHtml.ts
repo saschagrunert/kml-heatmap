@@ -1,5 +1,5 @@
 /**
- * HTML of the Wrapped dialog. Only the lazily loaded feature bundle uses
+ * HTML of the Wrapped dialog. Only the lazily loaded Wrapped bundle uses
  * these generators, so they live apart from utils/htmlGenerators, which the
  * main bundle carries and shares.
  */

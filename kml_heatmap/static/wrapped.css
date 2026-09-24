@@ -1,0 +1,1149 @@
+/* The styles of Wrapped, loaded with wrapped.bundle.js.
+
+   Not in the page up front: see the header of styles.css for why, and for
+   which rule belongs where.
+
+   The dependency runs one way. This file may use the tokens and shared
+   classes styles.css defines; nothing in styles.css may depend on a rule
+   here, because this file is absent until Wrapped is opened. It is appended
+   after styles.css, so a rule here wins a tie on specificity: do not set a
+   property here that styles.css relies on winning, `.initially-hidden` in
+   particular (see the note on it there). features.css is fetched by the
+   other lazy bundle and may land before or after this file, so the two
+   must not style the same elements. */
+
+/* ==========================================================================
+   Wrapped (year in review) modal
+
+   Wrapped keeps its own voice: the navy card gradient, the gradient display
+   type and the glow all stay. Only its structure sits on the token scale,
+   and its display sizes are ratios of --text-display.
+   ========================================================================== */
+/* Wrapped re-parents #map into its own container, where the rail inset
+   would leave an empty band on the left and clip the map on the right. */
+#wrapped-map-container #map {
+  left: 0;
+}
+#wrapped-modal {
+  --wrapped-gutter: calc(var(--space-base) + var(--space-lg));
+  --wrapped-title: calc(var(--text-display) * 1.4);
+  --wrapped-year: calc(var(--text-display) * 3);
+  --wrapped-stat: calc(var(--text-display) * 1.25);
+  --wrapped-section: var(--text-base);
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  background: linear-gradient(
+    135deg,
+    rgba(10, 10, 20, 0.97) 0%,
+    rgba(15, 20, 35, 0.97) 100%
+  );
+  z-index: var(--z-modal);
+  opacity: 0;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  box-sizing: border-box;
+  transition:
+    opacity var(--duration-base) ease,
+    display var(--duration-base) allow-discrete;
+}
+#wrapped-modal:not([hidden]) {
+  display: flex;
+  opacity: 1;
+}
+@starting-style {
+  #wrapped-modal:not([hidden]) {
+    opacity: 0;
+  }
+}
+#wrapped-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+#wrapped-header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: calc(var(--space-md) + var(--safe-top)) var(--wrapped-gutter)
+    var(--space-md);
+  background: transparent;
+  flex-shrink: 0;
+}
+/* The cards are the only thing that scrolls. Scrolling the row itself took
+   the map with it and left most of the dialog empty for cards two to four. */
+#wrapped-content {
+  display: flex;
+  gap: var(--space-lg);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  align-items: stretch;
+  padding: 0 var(--wrapped-gutter)
+    calc(var(--wrapped-gutter) + var(--safe-bottom));
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Map container - right side */
+/* Until the map has been moved in and remeasured, the panel is an empty
+   rectangle over more than half the dialog. It holds a placeholder of its
+   own surface instead, and the map fades in over it. */
+#wrapped-map-container.is-awaiting-map::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* The face the cards beside it are drawn on, with a sweep over it, so the
+     panel reads as a card that is filling rather than as a hole */
+  background:
+    linear-gradient(
+      120deg,
+      rgba(var(--color-text-rgb), 0) 35%,
+      rgba(var(--color-text-rgb), 0.07) 50%,
+      rgba(var(--color-text-rgb), 0) 65%
+    ),
+    var(--gradient-wrapped-card);
+  background-size:
+    200% 100%,
+    100% 100%;
+  animation: wrapped-map-wait 1.4s ease-in-out infinite;
+}
+#wrapped-map-container #map {
+  transition: opacity var(--duration-base) ease;
+}
+#wrapped-map-container.is-awaiting-map #map {
+  opacity: 0;
+}
+@keyframes wrapped-map-wait {
+  from {
+    background-position:
+      100% 0,
+      0 0;
+  }
+  to {
+    background-position:
+      -100% 0,
+      0 0;
+  }
+}
+
+#wrapped-map-container {
+  flex: 1;
+  background-color: var(--color-bg-primary);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  box-shadow: 0 10px 40px var(--shadow-color-strong);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 400px;
+  opacity: 0;
+  animation: fadeInUp 0.8s ease-out 0.9s forwards;
+}
+
+/* Cards column - left side */
+#wrapped-cards-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  width: 500px;
+  flex-shrink: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Three of the four cards start below the fold, so the column fades out at
+     its bottom edge to say that there is more, and keeps a visible scrollbar
+     rather than the overlay one the platform would hide. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-bg-active) transparent;
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--space-lg)),
+    transparent 100%
+  );
+}
+#wrapped-cards-column.is-at-end {
+  mask-image: none;
+}
+#wrapped-cards-column::-webkit-scrollbar {
+  width: 6px;
+}
+#wrapped-cards-column::-webkit-scrollbar-thumb {
+  background-color: var(--color-bg-active);
+  border-radius: var(--radius-pill);
+}
+
+/* Square card base styles */
+.wrapped-square-card {
+  background: var(--gradient-wrapped-card);
+  border-radius: var(--radius-card);
+  padding: var(--space-lg);
+  flex-shrink: 0;
+  box-shadow: 0 10px 40px var(--shadow-color-strong);
+  color: var(--color-text);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  animation: fadeInUp 0.6s ease-out forwards;
+}
+.wrapped-square-card:nth-child(1) {
+  animation-delay: 0.1s;
+}
+.wrapped-square-card:nth-child(2) {
+  animation-delay: 0.3s;
+}
+.wrapped-square-card:nth-child(3) {
+  animation-delay: 0.5s;
+}
+.wrapped-square-card:nth-child(4) {
+  animation-delay: 0.7s;
+}
+
+/* Shared card styles */
+/* The card's own accent, the one its figures are drawn in. The title used
+   to carry a third gradient family (pink, red, gold) of its own. */
+.wrapped-square-card h1 {
+  font-size: var(--wrapped-title);
+  margin: 0 0 var(--space-sm) 0;
+  text-align: center;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-blue) 0%,
+    var(--color-accent-cyan) 100%
+  );
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer 4s ease-in-out infinite;
+}
+/* Section titles generated as headings keep the styling of their class */
+.wrapped-square-card h2,
+.wrapped-square-card h3 {
+  margin: 0;
+}
+.wrapped-square-card .year {
+  font-size: var(--wrapped-year);
+  font-weight: 900;
+  text-align: center;
+  margin: var(--space-lg) 0;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-blue) 0%,
+    var(--color-accent-cyan) 100%
+  );
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: var(--space-sm);
+  text-shadow: 0 0 30px rgba(var(--color-accent-blue-rgb), 0.5);
+  animation: shimmer 3s ease-in-out infinite;
+  position: relative;
+}
+.wrapped-square-card .year::before,
+.wrapped-square-card .year::after {
+  content: "";
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  top: 50%;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.wrapped-square-card .year::before {
+  left: 10%;
+  animation: firework-left 2.7s ease-out 0.3s infinite;
+  box-shadow:
+    -25px -90px 1px var(--color-accent-pink),
+    35px -75px 0 var(--color-accent-cyan),
+    -65px -35px 2px var(--color-accent-gold),
+    -80px 15px 0 var(--color-accent-blue),
+    15px 80px 1px var(--color-accent-red),
+    -45px 60px 0 var(--color-accent-pink),
+    40px -50px 2px var(--color-accent-gold),
+    -55px -65px 0 var(--color-accent-cyan),
+    -15px 45px 1px var(--color-accent-blue),
+    50px 25px 0 var(--color-accent-red);
+}
+.wrapped-square-card .year::after {
+  right: 10%;
+  animation: firework-right 3.1s ease-out 1.2s infinite;
+  box-shadow:
+    50px -80px 0 var(--color-accent-gold),
+    -25px -95px 2px var(--color-accent-pink),
+    70px -20px 1px var(--color-accent-cyan),
+    80px 50px 0 var(--color-accent-blue),
+    -15px 85px 2px var(--color-accent-red),
+    55px 65px 0 var(--color-accent-gold),
+    -40px -55px 1px var(--color-accent-pink),
+    35px -40px 0 var(--color-accent-cyan),
+    -60px 30px 2px var(--color-accent-blue),
+    20px 40px 1px var(--color-accent-red);
+}
+#wrapped-card-stats::after {
+  content: "";
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  left: 50%;
+  top: 30%;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+  will-change: transform, opacity;
+  animation: firework-center 3.7s ease-out 0.7s infinite;
+  box-shadow:
+    -35px -85px 2px var(--color-accent-cyan),
+    45px -70px 0 var(--color-accent-gold),
+    -75px -10px 1px var(--color-accent-pink),
+    70px -45px 0 var(--color-accent-blue),
+    -20px 75px 2px var(--color-accent-gold),
+    60px 55px 1px var(--color-accent-red),
+    -50px 40px 0 var(--color-accent-cyan),
+    30px -60px 2px var(--color-accent-pink),
+    -10px -50px 0 var(--color-accent-blue),
+    45px 30px 1px var(--color-accent-red);
+}
+#wrapped-card-stats {
+  position: relative;
+  overflow: hidden;
+}
+
+.wrapped-square-card .stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-lg);
+  margin: var(--space-lg) 0;
+}
+.wrapped-square-card .stat-card {
+  background: linear-gradient(
+    145deg,
+    rgba(var(--color-accent-blue-rgb), 0.1) 0%,
+    rgba(var(--color-accent-cyan-rgb), 0.06) 50%,
+    rgba(var(--color-accent-pink-rgb), 0.08) 100%
+  );
+  border-radius: var(--radius-sheet);
+  padding: var(--space-lg);
+  text-align: center;
+  transition:
+    transform var(--duration-base) ease,
+    background-color var(--duration-base) ease,
+    box-shadow var(--duration-base) ease,
+    border-color var(--duration-base) ease;
+  border: 1px solid rgba(var(--color-accent-blue-rgb), 0.2);
+  box-shadow:
+    0 2px 8px rgba(var(--color-accent-blue-rgb), 0.08),
+    inset 0 1px 0 rgba(var(--color-accent-cyan-rgb), 0.1);
+}
+@media (hover: hover) {
+  .wrapped-square-card .stat-card:hover {
+    transform: translateY(-5px);
+    background: linear-gradient(
+      145deg,
+      rgba(var(--color-accent-blue-rgb), 0.15) 0%,
+      rgba(var(--color-accent-cyan-rgb), 0.1) 50%,
+      rgba(var(--color-accent-pink-rgb), 0.12) 100%
+    );
+    box-shadow:
+      0 10px 30px rgba(var(--color-accent-blue-rgb), 0.2),
+      0 0 15px rgba(var(--color-accent-cyan-rgb), 0.1);
+    border-color: rgba(var(--color-accent-cyan-rgb), 0.4);
+  }
+}
+.wrapped-square-card .stat-value {
+  font-size: var(--wrapped-stat);
+  font-weight: bold;
+  margin-bottom: var(--space-xs);
+  animation: countUp 0.8s ease-out;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-blue) 0%,
+    var(--color-accent-cyan) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.wrapped-square-card .stat-unit {
+  font-size: var(--text-base);
+  font-weight: 500;
+  -webkit-text-fill-color: rgba(var(--color-accent-cyan-rgb), 0.8);
+  margin-left: var(--unit-gap);
+}
+
+/* The four card headings share one shape: icon, then label */
+.wrapped-square-card .fun-facts-title,
+.wrapped-square-card .top-airports-title,
+.wrapped-square-card .airports-grid-title,
+.wrapped-square-card .aircraft-fleet-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.wrapped-square-card .section-title-text {
+  min-width: 0;
+}
+/* The label of a heading is painted by `background-clip: text`, which an
+   inline SVG beside it does not take part in: without this the icons stayed
+   the inherited white while every label carried its card's accent. */
+.wrapped-square-card .fun-facts-title .icon,
+.wrapped-square-card .aircraft-fleet-title .icon {
+  color: var(--color-accent-blue);
+}
+.wrapped-square-card .top-airports-title .icon,
+.wrapped-square-card .airports-grid-title .icon {
+  color: var(--color-accent-red);
+}
+.wrapped-square-card .stat-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+#wrapped-header .close-btn {
+  background: transparent;
+  border: none;
+  color: rgba(var(--color-text-rgb), 0.6);
+  font-size: var(--text-md);
+  cursor: pointer;
+  padding: var(--space-xs) var(--space-md);
+  min-height: var(--btn-min-height);
+  border-radius: var(--radius-control);
+  transition:
+    background-color var(--duration-fast) ease,
+    color var(--duration-fast) ease;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  letter-spacing: 0.04em;
+}
+#wrapped-header .close-btn:hover {
+  background-color: rgba(var(--color-text-rgb), 0.08);
+  color: rgba(var(--color-text-rgb), 0.9);
+}
+#wrapped-header .close-btn:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
+  color: var(--color-text);
+}
+.wrapped-square-card .fun-facts {
+  margin: var(--space-lg) 0;
+  padding: var(--space-lg);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-blue-rgb), 0.15) 0%,
+    rgba(var(--color-accent-cyan-rgb), 0.15) 100%
+  );
+  border-radius: var(--radius-sheet);
+  border: 1px solid rgba(var(--color-accent-blue-rgb), 0.3);
+}
+.wrapped-square-card .fun-facts-title {
+  font-size: var(--wrapped-section);
+  font-weight: bold;
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-blue) 0%,
+    var(--color-accent-cyan) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.wrapped-square-card .fun-fact {
+  font-size: var(--text-base);
+  margin: var(--space-md) 0;
+  padding: var(--space-sm) var(--space-md);
+  opacity: 0;
+  line-height: 1.6;
+  border-radius: var(--radius-panel);
+  background: rgba(var(--color-text-rgb), 0.05);
+  border-left: 3px solid;
+  transition:
+    background-color var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
+  display: flex;
+  gap: var(--space-sm);
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+.wrapped-square-card .fun-fact:nth-child(2) {
+  animation-delay: 0.1s;
+}
+.wrapped-square-card .fun-fact:nth-child(3) {
+  animation-delay: 0.2s;
+}
+.wrapped-square-card .fun-fact:nth-child(4) {
+  animation-delay: 0.3s;
+}
+.wrapped-square-card .fun-fact:nth-child(5) {
+  animation-delay: 0.4s;
+}
+.wrapped-square-card .fun-fact:nth-child(6) {
+  animation-delay: 0.5s;
+}
+.wrapped-square-card .fun-fact:nth-child(7) {
+  animation-delay: 0.6s;
+}
+.wrapped-square-card .fun-fact-icon {
+  flex-shrink: 0;
+}
+.wrapped-square-card .fun-fact-text {
+  flex: 1;
+}
+@media (hover: hover) {
+  .wrapped-square-card .fun-fact:hover {
+    opacity: 1;
+    background: rgba(var(--color-text-rgb), 0.08);
+    transform: translateX(3px);
+  }
+}
+.wrapped-square-card .fun-fact strong {
+  color: var(--color-accent-cyan);
+  font-weight: 600;
+}
+/* Category-specific colors */
+/* Every fact carries the same accent. Its category is drawn beside it now,
+   where it used to be spelled a second time in one of six bar colours that
+   no legend explained. An achievement is the one fact meant to stand out. */
+.wrapped-square-card .fun-fact {
+  border-left-color: var(--color-accent-cyan);
+}
+.wrapped-square-card .fun-fact-icon {
+  color: var(--color-accent-cyan);
+}
+.wrapped-square-card .fun-fact[data-category="achievement"] {
+  border-left-color: var(--color-accent-orange);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-orange-rgb), 0.1) 0%,
+    rgba(var(--color-accent-gold-rgb), 0.1) 100%
+  );
+}
+.wrapped-square-card .top-airports {
+  margin: var(--space-lg) 0;
+}
+.wrapped-square-card .top-airports-title {
+  font-size: var(--wrapped-section);
+  font-weight: bold;
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-red) 0%,
+    var(--color-accent-pink) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.wrapped-square-card .top-airport {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  margin: var(--space-sm) 0;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-red-rgb), 0.12) 0%,
+    rgba(var(--color-accent-pink-rgb), 0.08) 100%
+  );
+  border-radius: var(--radius-panel);
+  border-left: 3px solid var(--color-accent-red);
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+@media (hover: hover) {
+  .wrapped-square-card .top-airport:hover {
+    transform: translateX(3px);
+    box-shadow: 0 2px 10px rgba(var(--color-accent-red-rgb), 0.15);
+  }
+}
+.wrapped-square-card .top-airport-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+.wrapped-square-card .top-airport-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--color-accent-red);
+}
+.wrapped-square-card .top-airport-place {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wrapped-square-card .top-airport-count {
+  flex-shrink: 0;
+  font-size: var(--text-base);
+  font-weight: bold;
+  color: var(--color-accent-red);
+}
+.wrapped-square-card .airports-grid {
+  margin: var(--space-lg) 0;
+}
+.wrapped-square-card .airports-grid-title {
+  font-size: var(--wrapped-section);
+  font-weight: bold;
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-pink) 0%,
+    var(--color-accent-red) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.wrapped-square-card .country-group {
+  margin-bottom: var(--space-md);
+  padding: var(--space-md);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-pink-rgb), 0.06) 0%,
+    rgba(var(--color-accent-blue-rgb), 0.06) 100%
+  );
+  border-radius: var(--radius-panel);
+  border: 1px solid rgba(var(--color-accent-pink-rgb), 0.15);
+  opacity: 0;
+  animation: fadeInUp 0.4s ease-out forwards;
+}
+.wrapped-square-card .country-group-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: rgba(var(--color-accent-pink-rgb), 0.8);
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.wrapped-square-card .country-flag {
+  flex-shrink: 0;
+  width: 18px;
+  height: 14px;
+  border-radius: var(--radius-bar);
+  box-shadow: 0 0 0 1px rgba(var(--color-text-rgb), 0.35);
+}
+.wrapped-square-card .country-code {
+  flex-shrink: 0;
+  min-width: 24px;
+  padding: 0 var(--space-xs);
+  border-radius: var(--radius-bar);
+  background: rgba(var(--color-accent-cyan-rgb), 0.16);
+  color: var(--color-accent-cyan);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0;
+  line-height: 1.6;
+  text-align: center;
+}
+.wrapped-square-card .country-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wrapped-square-card .country-count {
+  flex-shrink: 0;
+  order: 1;
+  padding: 0 var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--color-accent-pink-rgb), 0.18);
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  color: var(--color-accent-pink);
+}
+/* The hairline fills the gap; the count is ordered after it */
+.wrapped-square-card .country-group-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--color-accent-pink-rgb), 0.3) 0%,
+    transparent 100%
+  );
+}
+/* Destinations: one airport per row inside its country group */
+.wrapped-square-card .country-airports {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+.wrapped-square-card .destination {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px var(--space-base);
+  border-radius: var(--radius-card);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-pink-rgb), 0.2) 0%,
+    rgba(var(--color-accent-red-rgb), 0.2) 100%
+  );
+  border: 1px solid rgba(var(--color-accent-pink-rgb), 0.4);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  max-width: 100%;
+  box-sizing: border-box;
+  transition:
+    transform var(--duration-base) ease,
+    box-shadow var(--duration-base) ease,
+    border-color var(--duration-base) ease;
+}
+@media (hover: hover) {
+  .wrapped-square-card .destination:hover {
+    transform: scale(1.1);
+    box-shadow: 0 5px 15px rgba(var(--color-accent-pink-rgb), 0.4);
+    border-color: rgba(var(--color-accent-pink-rgb), 0.8);
+  }
+}
+/* The name is the part that gives way in a narrow pill. A shrinkable code
+   was squeezed to 20 px beside a wrapped name and ran into its text. */
+.wrapped-square-card .destination-code {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-right: var(--space-xs);
+}
+/* A long airport name wraps inside its pill. Kept on one line, a 39
+   character name made the pill wider than the card on a phone and the
+   dialog scrolled sideways. */
+.wrapped-square-card .destination-name {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+}
+.wrapped-square-card .destination-tag {
+  flex-shrink: 0;
+  padding: 2px var(--space-sm);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+/* The home base glows cyan, the furthest reach pink */
+.wrapped-square-card .destination.is-home {
+  background: rgba(var(--color-accent-cyan-rgb), 0.15);
+  border-color: rgba(var(--color-accent-cyan-rgb), 0.4);
+}
+.wrapped-square-card .destination.is-home .destination-code {
+  color: var(--color-accent-cyan);
+}
+.wrapped-square-card .destination.is-home .destination-tag {
+  background: rgba(var(--color-accent-cyan-rgb), 0.2);
+  color: var(--color-accent-cyan);
+}
+.wrapped-square-card .destination.is-furthest {
+  background: rgba(var(--color-accent-pink-rgb), 0.25);
+  border-color: rgba(var(--color-accent-pink-rgb), 0.6);
+}
+.wrapped-square-card .destination.is-furthest .destination-tag {
+  background: rgba(var(--color-accent-pink-rgb), 0.2);
+  color: var(--color-accent-pink);
+}
+.wrapped-square-card .aircraft-fleet {
+  margin: var(--space-lg) 0;
+}
+.wrapped-square-card .aircraft-fleet-title {
+  font-size: var(--wrapped-section);
+  font-weight: bold;
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent-blue) 0%,
+    var(--color-accent-cyan) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.wrapped-square-card .fleet-aircraft {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  margin: var(--space-sm) 0;
+  border-radius: var(--radius-panel);
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+@media (hover: hover) {
+  .wrapped-square-card .fleet-aircraft:hover {
+    transform: translateX(3px);
+    box-shadow: 0 2px 10px rgba(var(--color-accent-blue-rgb), 0.12);
+  }
+}
+.wrapped-square-card .fleet-aircraft-high {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-red-rgb), 0.15) 0%,
+    rgba(var(--color-accent-pink-rgb), 0.08) 100%
+  );
+  border-left: 3px solid var(--color-accent-red);
+}
+.wrapped-square-card .fleet-aircraft-high .fleet-aircraft-stats {
+  color: var(--color-accent-red);
+}
+.wrapped-square-card .fleet-aircraft-medium-high {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-mint-rgb), 0.15) 0%,
+    rgba(var(--color-accent-cyan-rgb), 0.08) 100%
+  );
+  border-left: 3px solid var(--color-accent-mint);
+}
+.wrapped-square-card .fleet-aircraft-medium-high .fleet-aircraft-stats {
+  color: var(--color-accent-mint);
+}
+.wrapped-square-card .fleet-aircraft-medium-low {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-cyan-rgb), 0.15) 0%,
+    rgba(var(--color-accent-blue-rgb), 0.08) 100%
+  );
+  border-left: 3px solid var(--color-accent-cyan);
+}
+.wrapped-square-card .fleet-aircraft-medium-low .fleet-aircraft-stats {
+  color: var(--color-accent-cyan);
+}
+.wrapped-square-card .fleet-aircraft-low {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-accent-blue-rgb), 0.15) 0%,
+    rgba(var(--color-accent-cyan-rgb), 0.06) 100%
+  );
+  border-left: 3px solid var(--color-accent-blue);
+}
+.wrapped-square-card .fleet-aircraft-low .fleet-aircraft-stats {
+  color: var(--color-accent-blue);
+}
+.wrapped-square-card .fleet-aircraft-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wrapped-square-card .fleet-aircraft-model {
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+.wrapped-square-card .fleet-aircraft-registration {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+.wrapped-square-card .fleet-aircraft-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: right;
+}
+.wrapped-square-card .fleet-aircraft-flights {
+  font-size: var(--text-base);
+  font-weight: bold;
+}
+.wrapped-square-card .fleet-aircraft-time {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ==========================================================================
+   Wrapped, stacked (narrow and medium viewports)
+
+   Side by side the dialog needs the 500px cards, the gap, the 400px map
+   minimum and both gutters: 1004px. Below that the map was cut off, which
+   covers iPads in either orientation and landscape phones, so the dialog
+   stacks until the row fits.
+   ========================================================================== */
+@media (max-width: 1023.98px) {
+  /* The map is a card of its own, so the dialog scrolls as one column and
+     the desktop mask and inner scroller are handed back */
+  #wrapped-content {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  #wrapped-cards-column {
+    width: 100%;
+    overflow: visible;
+    mask-image: none;
+  }
+  .wrapped-square-card {
+    width: 100%;
+    height: auto;
+    box-sizing: border-box;
+  }
+  #wrapped-map-container {
+    width: 100%;
+    padding-bottom: 100%;
+    position: relative;
+    height: 0;
+    min-width: 0;
+  }
+  #wrapped-map-container > * {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+/* ==========================================================================
+   Mobile layout (narrow viewports)
+   ========================================================================== */
+@media (max-width: 767.98px) {
+  #wrapped-modal {
+    --wrapped-gutter: var(--space-base);
+    --wrapped-title: calc(var(--text-display) * 0.92);
+    --wrapped-year: calc(var(--text-display) * 2.15);
+    --wrapped-stat: var(--text-display);
+  }
+  #wrapped-header {
+    padding: calc(var(--space-sm) + var(--safe-top)) var(--wrapped-gutter)
+      var(--space-sm);
+  }
+  #wrapped-header .close-btn {
+    font-size: var(--text-md);
+    padding: var(--space-xs) var(--space-sm);
+  }
+  #wrapped-cards-column {
+    gap: var(--space-base);
+  }
+  .wrapped-square-card {
+    padding: var(--space-base);
+  }
+  .wrapped-square-card h1 {
+    word-wrap: break-word;
+    line-height: 1.2;
+  }
+  .wrapped-square-card .year {
+    margin: var(--space-lg) 0;
+    letter-spacing: var(--space-xs);
+  }
+  .wrapped-square-card .stat-grid {
+    gap: var(--space-md);
+    margin: var(--space-lg) 0;
+  }
+  .wrapped-square-card .stat-card {
+    padding: var(--space-md) var(--space-sm);
+  }
+  .wrapped-square-card .fun-facts {
+    margin: var(--space-base) 0;
+    padding: var(--space-base);
+  }
+  .wrapped-square-card .fun-facts-title,
+  .wrapped-square-card .top-airports-title,
+  .wrapped-square-card .airports-grid-title,
+  .wrapped-square-card .aircraft-fleet-title {
+    font-size: var(--text-base);
+  }
+  .wrapped-square-card .fun-fact {
+    font-size: var(--text-sm);
+    padding: var(--space-sm);
+    margin: var(--space-sm) 0;
+  }
+  @media (hover: hover) {
+    .wrapped-square-card .fun-fact:hover {
+      transform: translateX(2px);
+    }
+  }
+  .wrapped-square-card .top-airports,
+  .wrapped-square-card .airports-grid,
+  .wrapped-square-card .aircraft-fleet {
+    margin: var(--space-base) 0;
+  }
+  .wrapped-square-card .top-airport,
+  .wrapped-square-card .fleet-aircraft {
+    padding: var(--space-sm) var(--space-md);
+  }
+  .wrapped-square-card .top-airport-name,
+  .wrapped-square-card .top-airport-count,
+  .wrapped-square-card .fleet-aircraft-model,
+  .wrapped-square-card .fleet-aircraft-flights {
+    font-size: var(--text-sm);
+  }
+  .wrapped-square-card .destination {
+    padding: var(--space-xs) var(--space-md);
+    font-size: var(--text-sm);
+  }
+  .wrapped-square-card .fleet-aircraft-registration,
+  .wrapped-square-card .fleet-aircraft-time {
+    font-size: var(--text-sm);
+  }
+}
+
+/* ==========================================================================
+   Reduced motion
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .wrapped-square-card,
+  .wrapped-square-card:nth-child(1),
+  .wrapped-square-card:nth-child(2),
+  .wrapped-square-card:nth-child(3),
+  .wrapped-square-card:nth-child(4),
+  .wrapped-square-card h1,
+  .wrapped-square-card .year,
+  .wrapped-square-card .stat-value,
+  .wrapped-square-card .fun-fact,
+  .wrapped-square-card .fun-fact:nth-child(2),
+  .wrapped-square-card .fun-fact:nth-child(3),
+  .wrapped-square-card .fun-fact:nth-child(4),
+  .wrapped-square-card .fun-fact:nth-child(5),
+  .wrapped-square-card .fun-fact:nth-child(6),
+  .wrapped-square-card .fun-fact:nth-child(7),
+  .wrapped-square-card .country-group,
+  .wrapped-square-card .destination,
+  #wrapped-map-container,
+  #wrapped-map-container.is-awaiting-map::after {
+    animation: none;
+    /* Also neutralises the inline animation-delay on each country group */
+    animation-delay: 0s;
+    opacity: 1;
+  }
+  .wrapped-square-card .year::before,
+  .wrapped-square-card .year::after,
+  #wrapped-card-stats::after {
+    animation: none;
+    opacity: 0;
+  }
+  #wrapped-modal,
+  #wrapped-header .close-btn,
+  .wrapped-square-card .stat-card,
+  .wrapped-square-card .fun-fact,
+  .wrapped-square-card .destination,
+  #wrapped-map-container #map {
+    transition: none;
+  }
+}
+
+/* ==========================================================================
+   Animations
+
+   Only Wrapped uses these, so they are here rather than in styles.css,
+   which every visit loads. `spin`, the loading indicator's, is the one that
+   stays there.
+   ========================================================================== */
+@keyframes firework-left {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(15px, -10px) scale(1);
+  }
+  55% {
+    opacity: 0;
+    transform: translate(15px, -10px) scale(1.4);
+  }
+  55.1%,
+  100% {
+    opacity: 0;
+    transform: translate(-20px, 15px) scale(0);
+  }
+}
+@keyframes firework-right {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-10px, 12px) scale(1);
+  }
+  55% {
+    opacity: 0;
+    transform: translate(-10px, 12px) scale(1.4);
+  }
+  55.1%,
+  100% {
+    opacity: 0;
+    transform: translate(18px, -8px) scale(0);
+  }
+}
+@keyframes firework-center {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-12px, -15px) scale(1);
+  }
+  55% {
+    opacity: 0;
+    transform: translate(-12px, -15px) scale(1.4);
+  }
+  55.1%,
+  100% {
+    opacity: 0;
+    transform: translate(10px, 10px) scale(0);
+  }
+}
+@keyframes shimmer {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes countUp {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

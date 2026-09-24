@@ -22,9 +22,8 @@ import {
   calculateYearStats,
   findFurthestAirport,
   generateFunFacts,
-  segmentBounds,
 } from "../features/wrapped";
-import type { Coordinate } from "../utils/geometry";
+import { segmentBounds, type Coordinate } from "../utils/geometry";
 import { calculateFilteredStatistics } from "../calculations/statistics";
 import { datasetIndex } from "../calculations/datasetIndex";
 import {

@@ -74,7 +74,7 @@ function createMockApp() {
     wrappedManager,
     pathSelection: { toggleIsolateSelection: vi.fn() },
     replayManager,
-    // Replay and Wrapped come from the lazily loaded feature bundle; the
+    // Replay and Wrapped come from lazily loaded bundles; the
     // bar asks the app for them and for whether replay is possible at all
     canReplay: vi.fn(() => true),
     loadReplay: vi.fn(() => Promise.resolve(replayManager)),

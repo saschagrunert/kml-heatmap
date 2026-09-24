@@ -11,8 +11,9 @@ here, so that the budgets keep covering the files the site actually serves
 however the renderer produces them.
 
 Raise a budget on purpose when a change needs the room, not to make the suite
-pass. The two are separate on purpose: only styles.css is on the critical
-path, so room taken there is not the same as room taken in features.css.
+pass. They are separate on purpose: only styles.css is on the critical path,
+so room taken there is not the same as room taken in features.css or
+wrapped.css.
 """
 
 import pytest
@@ -25,11 +26,14 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # 68 KB sheet until replay and Wrapped moved into features.css, which cut it to
 # about 39 KB; the budget keeps that win rather than letting it drain back.
 #
-# features.css is fetched only when a replay or Wrapped panel is opened, so it
-# is the more forgiving of the two.
+# features.css and wrapped.css are fetched only when replay or Wrapped is
+# opened, so they are the more forgiving. The two were one 28.8 KB sheet until
+# Wrapped got a bundle of its own; split, they minify to 5.0 KB (replay) and
+# 23.2 KB (Wrapped), and each budget keeps about 2 KB over that.
 STYLESHEET_BUDGET_BYTES = {
     "styles.css": 42 * 1024,
-    "features.css": 32 * 1024,
+    "features.css": 7 * 1024,
+    "wrapped.css": 26 * 1024,
 }
 
 

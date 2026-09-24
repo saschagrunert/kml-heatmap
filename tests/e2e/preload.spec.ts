@@ -41,7 +41,7 @@ test("the first data files are preloaded and fetched once", async ({
 test("the modules the app imports are preloaded", async ({ page }) => {
   await page.goto("/index.html");
 
-  // The chunk the bundle shares with the features, and the map library with
+  // The chunk the bundle shares with the lazy ones, and the map library with
   // the module it imports in turn: all three are needed before anything
   // draws, and none is discovered until the one before it has been parsed
   const preloaded = await page

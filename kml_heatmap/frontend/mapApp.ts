@@ -72,8 +72,7 @@ import {
 } from "./state/store";
 import { ReplayState } from "./ui/replayState";
 import { watchScrollEnd, type ScrollEndWatcher } from "./utils/scrollFade";
-import { loadFeatures } from "./services/featureLoader";
-import type { FeatureModule } from "./features";
+import { loadFeatures, loadWrapped } from "./services/featureLoader";
 import { updateReplayButtonState } from "./ui/replayButton";
 import { segmentsForPathIds } from "./calculations/statistics";
 import {
@@ -206,13 +205,15 @@ const WRAPPED_RESTORE_DELAY_MS = 500;
 export const BASE_STYLE_RETRY_MS = 5_000;
 
 /**
- * Said when the feature bundle cannot be fetched. Without it a click on
- * Replay or Wrapped would do nothing at all and look like a dead control;
- * the export button says the same kind of thing when html-to-image is
- * missing.
+ * Said when the feature bundle or the Wrapped bundle cannot be fetched.
+ * Without it a click on Replay or Wrapped would do nothing at all and look
+ * like a dead control; the export button says the same kind of thing when
+ * html-to-image is missing.
  */
-export const FEATURES_UNAVAILABLE_MESSAGE =
-  "Replay and Wrapped are unavailable: their code could not be loaded";
+export const REPLAY_UNAVAILABLE_MESSAGE =
+  "Replay is unavailable: its code could not be loaded";
+export const WRAPPED_UNAVAILABLE_MESSAGE =
+  "Wrapped is unavailable: its code could not be loaded";
 
 /**
  * How long the map may take to draw once the data is in. The map draws
@@ -367,8 +368,8 @@ export class MapApp {
   airportManager!: AirportManager;
   mapOrientation!: MapOrientation;
   /**
-   * Replay and Wrapped live in the lazily loaded feature bundle, so these
-   * are undefined until the user first opens one. Reach them through
+   * Replay and Wrapped live in lazily loaded bundles, so these are
+   * undefined until the user first opens one. Reach them through
    * `loadReplay()` / `loadWrapped()`; read them directly only where the
    * feature must already be open for the code to run at all.
    */
@@ -1087,14 +1088,17 @@ export class MapApp {
   }
 
   /**
-   * The feature bundle, or null when it could not be fetched. A failure is
+   * A lazy bundle, or null when it could not be fetched. A failure is
    * reported here rather than at each call site, so every way into Replay
    * or Wrapped says the same thing instead of doing nothing.
    */
-  private async loadFeatureBundle(): Promise<FeatureModule | null> {
-    const features = await loadFeatures();
-    if (!features) showToast(FEATURES_UNAVAILABLE_MESSAGE, "error");
-    return features;
+  private async loadLazyBundle<T>(
+    load: () => Promise<T | null>,
+    unavailable: string,
+  ): Promise<T | null> {
+    const bundle = await load();
+    if (!bundle) showToast(unavailable, "error");
+    return bundle;
   }
 
   /**
@@ -1103,7 +1107,10 @@ export class MapApp {
    */
   async loadReplay(): Promise<ReplayManager | undefined> {
     if (!this.replayManager) {
-      const features = await this.loadFeatureBundle();
+      const features = await this.loadLazyBundle(
+        loadFeatures,
+        REPLAY_UNAVAILABLE_MESSAGE,
+      );
       // Another caller may have finished the same load in the meantime
       this.replayManager ??= features
         ? new features.ReplayManager(this)
@@ -1112,12 +1119,18 @@ export class MapApp {
     return this.replayManager;
   }
 
-  /** The Wrapped manager, fetching the feature bundle on first use */
+  /**
+   * The Wrapped manager, fetching the Wrapped bundle (not the feature
+   * bundle) on first use
+   */
   async loadWrapped(): Promise<WrappedManager | undefined> {
     if (!this.wrappedManager) {
-      const features = await this.loadFeatureBundle();
-      this.wrappedManager ??= features
-        ? new features.WrappedManager(this)
+      const wrapped = await this.loadLazyBundle(
+        loadWrapped,
+        WRAPPED_UNAVAILABLE_MESSAGE,
+      );
+      this.wrappedManager ??= wrapped
+        ? new wrapped.WrappedManager(this)
         : undefined;
     }
     return this.wrappedManager;

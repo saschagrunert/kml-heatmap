@@ -3,6 +3,7 @@
   "entry": [
     "kml_heatmap/frontend/mapApp.ts",
     "kml_heatmap/frontend/features.ts",
+    "kml_heatmap/frontend/wrapped.ts",
     "scripts/*.js",
     "tests/**/*.test.ts",
     "tests/e2e/*.spec.ts"
