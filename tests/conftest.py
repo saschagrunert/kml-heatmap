@@ -3,7 +3,7 @@
 The cache directory is redirected to a session-private directory through the
 production ``KML_HEATMAP_CACHE_DIR`` setting, a small fixture airports.csv is
 installed there so no test needs the network, and any attempt to download the
-airport database fails loudly.
+airport database or an elevation tile fails loudly.
 """
 
 import json
@@ -56,12 +56,17 @@ def airport_fixture_csv():
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    """Fail loudly if anything tries to download the airport database."""
+    """Fail loudly if anything tries to download the airport database or tiles.
+
+    An AssertionError is none of the errors the elevation tile download
+    degrades on, so it fails the test from the download thread.
+    """
 
     def _refuse(*args, **kwargs):
         raise AssertionError("Unexpected network access through urlopen in tests")
 
     monkeypatch.setattr("kml_heatmap.airport_lookup.urlopen", _refuse)
+    monkeypatch.setattr("kml_heatmap.terrain.urlopen", _refuse)
 
 
 @pytest.fixture(autouse=True)

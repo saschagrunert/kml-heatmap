@@ -70,8 +70,13 @@ export class ReplayState {
   lastFrameTime: number | null = null;
   colorMinAlt = 0;
   colorMaxAlt = 10000;
-  /** The ground under each segment of the flight, in feet (groundProfileFt) */
+  /**
+   * The ground under each segment of the flight, in feet (groundProfileFt):
+   * sampled where the relief is drawn, the line between its fields elsewhere
+   */
   groundFt: Float64Array = new Float64Array(0);
+  /** Whether groundFt, and the heights of `smoothed`, are the sampled ones */
+  onTerrain = false;
   /** Whether the trail and the airplane are lifted: the 3D view is on */
   lifted = false;
   /**

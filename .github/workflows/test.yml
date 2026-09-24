@@ -119,6 +119,18 @@ jobs:
           path: ~/.cache/kml-heatmap/airports.csv
           key: airports-${{ steps.week.outputs.week }}
           restore-keys: airports-
+      # The elevation tiles the ground under the flights is sampled from
+      # (kml_heatmap/terrain.py), about 45 MB for data/. A tile never changes
+      # upstream, so the cache of the last set of flights is restored for the
+      # next and only the tiles of new flights are downloaded; it is saved
+      # again under the new set. A tile that failed to download is simply
+      # not in it, so no failure is carried over.
+      - name: Cache the elevation tiles
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kml-heatmap/terrain
+          key: terrain-${{ hashFiles('data/*.kml') }}
+          restore-keys: terrain-
       # The export contract test reads the data files of a real build
       - name: Build the site from the current sources
         run: python -m kml_heatmap data --output-dir docs
@@ -210,7 +222,9 @@ jobs:
           test "$maps" = "False"
       # Loads the parser, the minifiers, the renderer and the templates, which
       # `--version` alone never imports. The airport fixture stands in for
-      # the OurAirports download.
+      # the OurAirports download, and `--no-terrain` keeps the elevation
+      # tiles from being fetched on every run: the sampling has tests of
+      # its own, and the image below builds without a network.
       - name: Generate a site with the installed package
         working-directory: ${{ runner.temp }}
         env:
@@ -221,7 +235,7 @@ jobs:
           kml=("$GITHUB_WORKSPACE"/data/*.kml)
           cp "${kml[@]:0:3}" smoke/input/
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
-          "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" smoke/input --output-dir smoke/site
+          "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --no-terrain smoke/input --output-dir smoke/site
           for file in index.html map_config.js mapApp.bundle.js \
             features.bundle.js shared.bundle.js yearWorker.bundle.js \
             styles.css features.css \
@@ -293,6 +307,13 @@ jobs:
           path: ~/.cache/kml-heatmap/airports.csv
           key: airports-${{ steps.week.outputs.week }}
           restore-keys: airports-
+      # The elevation tiles, see the unit job
+      - name: Cache the elevation tiles
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kml-heatmap/terrain
+          key: terrain-${{ hashFiles('data/*.kml') }}
+          restore-keys: terrain-
       - name: Build the site from the current sources
         run: python -m kml_heatmap data --output-dir docs
         env:
@@ -446,7 +467,9 @@ jobs:
       - name: Build the container image
         run: docker build -t kml-heatmap .
       # Runs the image the way the Makefile does, with the airport fixture in
-      # place of the OurAirports download
+      # place of the OurAirports download. Without a network the elevation
+      # tiles cannot be fetched either, which the build has to get through
+      # with the ground left out.
       - name: Generate a site with the image
         run: |
           smoke="$RUNNER_TEMP/smoke"
@@ -582,6 +605,13 @@ jobs:
           path: ~/.cache/kml-heatmap/airports.csv
           key: airports-${{ steps.week.outputs.week }}
           restore-keys: airports-
+      # The elevation tiles, see the unit job
+      - name: Cache the elevation tiles
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kml-heatmap/terrain
+          key: terrain-${{ hashFiles('data/*.kml') }}
+          restore-keys: terrain-
       - name: Build the site
         run: python -m kml_heatmap data --output-dir site
         env:

@@ -6,6 +6,7 @@ halved, a flight dropped, ids renumbered) fails instead of passing as
 internally consistent.
 """
 
+import math
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,8 +22,11 @@ from kml_heatmap.renderer import create_progressive_heatmap
 from kml_heatmap.segment_codec import (
     COORDINATE_SCALE,
     FORMAT_VERSION,
+    GROUND_STEP,
+    decode_ground,
     decode_rows,
 )
+from kml_heatmap.terrain import TILE_SIZE
 from tests.conftest import parse_data as _load_js
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -57,6 +61,8 @@ GOLDEN = {
     "available_years": [2025, 2026],
     "distance_km": {2025: 387.5, 2026: 1176.2},
     "flight_seconds": {2025: 12338.5, 2026: 23987.6},
+    # Paths with a ground, and its lowest, highest and mean, over Hills
+    "ground_ft": {2025: (4, 80.0, 550.0, 368.8), 2026: (4, -60.0, 980.0, 430.0)},
     "groundspeed_knots": (0.1, 167.4),
     "path_count": 8,
     "path_ids": {
@@ -92,11 +98,31 @@ def _select_input_files(per_year=PER_YEAR):
     return selected, {year: len(paths) for year, paths in by_year.items()}
 
 
+class Hills:
+    """Rolling hills of a few hundred metres, the same on every run.
+
+    Stands in for the elevation tiles, which the tests never download.
+    """
+
+    def pixels(self, wanted):
+        return {
+            tile: [
+                200.0
+                + 150.0
+                * math.sin((tile.x * TILE_SIZE + index % TILE_SIZE) / 40)
+                * math.cos((tile.y * TILE_SIZE + index // TILE_SIZE) / 40)
+                for index in indices
+            ]
+            for tile, indices in wanted.items()
+        }
+
+
 def _build_site(out, inputs):
     """Run the pipeline on ``inputs`` into ``out / "site"``.
 
     The pipeline never writes to its inputs (only the CLI does, and only with
-    --obfuscate-inputs), so data/ is safe to read here.
+    --obfuscate-inputs), so data/ is safe to read here. The ground comes from
+    ``Hills``.
     """
     # The pipeline requires the bundle, which the Python tests do not build
     bundle = out / "static" / "mapApp.bundle.js"
@@ -109,6 +135,7 @@ def _build_site(out, inputs):
             str(out / "site" / "index.html"),
             str(out / "site" / "data"),
             [DATA_DIR / "aircraft.json"],
+            terrain=Hills(),
         )
 
 
@@ -120,6 +147,7 @@ def _observed_values(data_dir):
     segment_rows = {}
     distance_km = {}
     flight_seconds = {}
+    ground_ft = {}
     for year in metadata["available_years"]:
         data = _load_js(data_dir / str(year) / "data.json")
         path_ids[year] = [info["id"] for info in data["path_info"]]
@@ -142,12 +170,26 @@ def _observed_values(data_dir):
                 seconds += max(times) - min(times)
         distance_km[year] = round(distance, 1)
         flight_seconds[year] = round(seconds, 1)
+        grounds = [
+            feet
+            for entry in entries
+            if "ground" in entry
+            for feet in decode_ground(entry["ground"])
+        ]
+        # How many paths have a ground, and its range and mean
+        ground_ft[year] = (
+            sum("ground" in entry for entry in entries),
+            min(grounds),
+            max(grounds),
+            round(sum(grounds) / len(grounds), 1),
+        )
     return {
         "aircraft_models": metadata["aircraft_models"],
         "airport_names": sorted(airport["name"] for airport in airports),
         "available_years": metadata["available_years"],
         "distance_km": distance_km,
         "flight_seconds": flight_seconds,
+        "ground_ft": ground_ft,
         "groundspeed_knots": (
             metadata["min_groundspeed_knots"],
             metadata["max_groundspeed_knots"],
@@ -294,6 +336,14 @@ def test_year_data_shape_and_unique_ids(golden_output):
             for row in decode_rows(entry["start"], encoded):
                 assert row[2] % 100 == 0
                 assert row[3] >= 0
+            # The ground is optional, and covers every row where it is written
+            assert set(entry) <= {"start", "columns", "ground"}
+            if "ground" in entry:
+                assert len(entry["ground"]) == len(encoded[0])
+                assert all(isinstance(value, int) for value in entry["ground"])
+                assert all(
+                    feet % GROUND_STEP == 0 for feet in decode_ground(entry["ground"])
+                )
 
     assert len(set(all_ids)) == len(all_ids) == len(inputs)
     assert all(0 <= path_id < 2**PATH_ID_BITS for path_id in all_ids)

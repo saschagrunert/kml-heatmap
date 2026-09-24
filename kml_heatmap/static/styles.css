@@ -73,6 +73,11 @@
   /* The selected flights over the heatmap with no colour layer on: a light
      line, which no colour ramp uses, over the dimmed heat */
   --selection-highlight-color: #f2f2f2;
+  /* The shading of the 3D view's relief (ui/terrain.ts): dark slopes and a
+     faint light on the others, below the heat and the flights */
+  --terrain-shadow: rgba(0, 0, 0, 0.7);
+  --terrain-highlight: rgba(255, 255, 255, 0.12);
+  --terrain-exaggeration: 0.5;
   --shadow-color: rgba(0, 0, 0, 0.4);
   --shadow-color-strong: rgba(0, 0, 0, 0.6);
   /* One soft elevation per surface class */
@@ -2382,6 +2387,9 @@ body.stats-open #left-buttons {
     --color-text-muted: #b4b4b4;
     --color-text-dim: #b4b4b4;
     --selection-highlight-color: #ffffff;
+    --terrain-shadow: rgba(0, 0, 0, 0.8);
+    --terrain-highlight: rgba(255, 255, 255, 0.2);
+    --terrain-exaggeration: 0.6;
   }
   .control-group,
   .color-legend,

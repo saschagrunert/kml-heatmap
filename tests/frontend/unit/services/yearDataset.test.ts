@@ -38,8 +38,8 @@ describe("transferablesOf", () => {
 
     const buffers = transferablesOf(decoded);
 
-    expect(buffers).toHaveLength(7);
-    expect(new Set(buffers).size).toBe(7);
+    expect(buffers).toHaveLength(8);
+    expect(new Set(buffers).size).toBe(8);
     expect(buffers).toContain(decoded.lats.buffer);
     expect(buffers).toContain(decoded.rowCounts.buffer);
     // What a transfer requires

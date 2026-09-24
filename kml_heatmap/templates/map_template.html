@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com https://s3.amazonaws.com; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'"
     />
     <meta
       name="viewport"
@@ -342,11 +342,11 @@
             class="btn-surface control-btn"
             data-action="toggleThreeD"
             data-icon="threeD"
-            title="3D flights: lift the flights to their altitude"
-            aria-label="3D flights: lift the flights to their altitude"
+            title="3D: lift the flights to their altitude, over the terrain"
+            aria-label="3D: lift the flights to their altitude, over the terrain"
             aria-pressed="false"
           >
-            <span class="control-label">3D flights</span>
+            <span class="control-label">3D</span>
           </button>
         </div>
         <div class="control-row">

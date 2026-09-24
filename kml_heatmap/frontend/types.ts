@@ -41,6 +41,12 @@ export interface PathSegment {
   altitude_ft?: number | undefined;
   groundspeed_knots?: number | undefined;
   time?: number | undefined;
+  /**
+   * Feet of ground under the segment's end, from the elevation model of the
+   * build (kml_heatmap/terrain.py); only on a path that has it for every
+   * segment, see groundProfileFt
+   */
+  ground_ft?: number | undefined;
   /** Great-circle length in km, memoised by `segmentDistance` on first use */
   distance_km?: number | undefined;
 }
@@ -67,6 +73,11 @@ export type RawColumns =
 export interface RawPathSegments {
   start: number[];
   columns: RawColumns;
+  /**
+   * Ground under every row in tens of feet, as differences like the
+   * columns; left out for a path whose ground the build does not know
+   */
+  ground?: number[];
 }
 
 /**

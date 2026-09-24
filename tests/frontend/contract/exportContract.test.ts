@@ -154,6 +154,21 @@ export function isRawPathSegments(value: unknown): boolean {
   if ("rows" in value) return false;
   const columns = value["columns"];
   if (!isRawColumns(columns)) return false;
+  // The ground under every row, in tens of feet (GROUND_STEP in
+  // segment_codec.py), left out for a path whose ground the build does not
+  // know; where it is written it covers every row
+  const ground = value["ground"];
+  if (
+    ground !== undefined &&
+    !(
+      Array.isArray(ground) &&
+      ground.length === columns[0].length &&
+      ground.length > 0 &&
+      ground.every(isInteger)
+    )
+  ) {
+    return false;
+  }
   const start = value["start"];
   if (!Array.isArray(start)) return false;
   // A path with rows has to say where its first row starts, as a scaled
@@ -254,9 +269,13 @@ export function isMetadata(value: unknown): value is Metadata {
  */
 const SCALES = [1e5, 1e5, 1 / 100, 10, 10];
 
+/** Tens of feet, GROUND_STEP of kml_heatmap/segment_codec.py */
+const GROUND_SCALE = 1 / 10;
+
 function encodePath(
   start: [number, number],
   rows: number[][],
+  groundFt?: number[],
 ): RawPathSegments {
   const scaledStart = [
     Math.round(start[0] * SCALES[0]!),
@@ -277,7 +296,20 @@ function encodePath(
       running[index] = scaled;
     });
   }
-  return { start: scaledStart, columns: columns as RawColumns };
+  const encoded: RawPathSegments = {
+    start: scaledStart,
+    columns: columns as RawColumns,
+  };
+  if (groundFt) {
+    let previous = 0;
+    encoded.ground = groundFt.map((feet) => {
+      const scaled = Math.round(feet * GROUND_SCALE);
+      const difference = scaled - previous;
+      previous = scaled;
+      return difference;
+    });
+  }
+  return encoded;
 }
 
 const sampleMetadata = {
@@ -327,7 +359,9 @@ const sampleYear2025: RawYearData = {
         [49.5, 9.5, 3000, 110, 0],
         [48.35, 11.79, 4000, 120, 1800],
       ],
+      [1400, 1530],
     ),
+    // A path whose ground the build does not know
     "5": encodePath([48.35, 11.79], [[48.4, 11.8, 1000, 60]]),
   },
 };
@@ -419,6 +453,12 @@ describe("export contract (inline new-format sample)", () => {
     ]) {
       expect(isRawPathSegments({ start: valid.start, columns })).toBe(false);
     }
+    // The ground covers every row, in whole steps, or is left out
+    for (const ground of [[], [140], [140, 13.5], [140, null], "140,13"]) {
+      expect(isRawPathSegments({ ...valid, ground })).toBe(false);
+    }
+    const { ground: _ground, ...withoutGround } = valid;
+    expect(isRawPathSegments(withoutGround)).toBe(true);
     // A row without a relative time
     expect(
       isRawPathSegments({
@@ -515,8 +555,11 @@ describe("export contract (inline new-format sample)", () => {
       altitude_ft: 3000,
       groundspeed_knots: 110,
       time: 0,
+      ground_ft: 1400,
     });
+    expect(data.path_segments[1]!.ground_ft).toBe(1530);
     expect(data.path_segments[2]!.time).toBeUndefined();
+    expect(data.path_segments[2]!.ground_ft).toBeUndefined();
   });
 });
 

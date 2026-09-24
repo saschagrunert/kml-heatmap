@@ -68,10 +68,14 @@ export class FakeYearWorker {
  */
 const SCALES = [1e5, 1e5, 1 / 100, 10, 10];
 
-/** One path's exported segments, given as plain `[lat, lon, ft, kt, s?]` rows */
+/**
+ * One path's exported segments, given as plain `[lat, lon, ft, kt, s?]` rows,
+ * and the feet of ground under each row when the path has them
+ */
 export function path(
   start: [number, number],
   rows: number[][],
+  groundFt?: number[],
 ): RawPathSegments {
   const scaledStart = [
     Math.round(start[0] * SCALES[0]!),
@@ -93,7 +97,17 @@ export function path(
       running[index] = scaled;
     });
   }
-  return { start: scaledStart, columns: columns as RawColumns };
+  const encoded: RawPathSegments = {
+    start: scaledStart,
+    columns: columns as RawColumns,
+  };
+  if (groundFt) {
+    // In tens of feet, as differences (GROUND_STEP of segment_codec.py)
+    encoded.ground = groundFt.map(
+      (feet, i) => (feet - (groundFt[i - 1] ?? 0)) / 10,
+    );
+  }
+  return encoded;
 }
 
 export function rawYear(

@@ -222,6 +222,12 @@ class MockEvented {
     }
   }
 
+  /** MapLibre's own `fire`, for an event the app raises on the map */
+  fire = vi.fn((type: string, event: object = {}) => {
+    this.emit(type, event);
+    return this;
+  });
+
   /** How many handlers listen to `type` right now */
   listenerCount(type: string): number {
     return this.handlers.get(type)?.size ?? 0;
@@ -633,6 +639,20 @@ export class Map
     this.emit("projectiontransition", { newProjection: projection.type });
     return this;
   });
+
+  terrain: { source: string; exaggeration?: number } | null = null;
+  getTerrain = vi.fn(() => this.terrain);
+  /** Like MapLibre: the relief needs a style and its elevation source */
+  setTerrain = vi.fn(
+    (terrain: { source: string; exaggeration?: number } | null) => {
+      if (!this.styleLoaded) throw new Error("Style is not done loading.");
+      if (terrain && !this.sources[terrain.source]) {
+        throw new Error(`no source with ID: ${terrain.source}`);
+      }
+      this.terrain = terrain;
+      return this;
+    },
+  );
 
   /** Like MapLibre: a fit turns the map north up unless it names a bearing */
   fitBounds = vi.fn((bounds: unknown, options: MockCameraOptions = {}) => {

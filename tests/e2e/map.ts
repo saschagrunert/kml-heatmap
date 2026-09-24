@@ -162,6 +162,22 @@ export async function setZoom(page: Page, zoom: number): Promise<void> {
 /** Move the map to a coordinate without animating, and wait until it is there */
 export async function setView(
   page: Page,
+  at: readonly [number, number],
+  zoom: number,
+): Promise<void> {
+  await jumpToView(page, at, zoom);
+  await waitForMapIdle(page);
+}
+
+/**
+ * Move the map like setView, but only wait for the view to arrive, not for
+ * everything in it to be drawn. For a spec that polls for what it asserts:
+ * the relief of the 3D view draws a frame in about a second in software
+ * WebGL on a loaded machine, and idle waits for every source, the base map
+ * and the heat included, which takes a frame or more per tile in view.
+ */
+export async function jumpToView(
+  page: Page,
   [lat, lng]: readonly [number, number],
   zoom: number,
 ): Promise<void> {
@@ -169,23 +185,30 @@ export async function setView(
   await page.evaluate((to) => {
     window.mapApp!.map!.jumpTo({ center: [to.lng, to.lat], zoom: to.zoom });
   }, view);
-  // Arrived means drawn in the middle of the map, to the pixel, which holds
-  // at every zoom where a tolerance in degrees does not
+  // Arrived means in the middle of the map, to the pixel at that zoom,
+  // which holds at every zoom where a fixed tolerance in degrees does not.
+  // Asked of the camera rather than of `project`: over the relief of the
+  // 3D view the map raises its centre onto the elevation tiles as they
+  // land, and until then the point in the middle is drawn a little off it.
   await page.waitForFunction(
     (to) => {
       const map = window.mapApp!.map!;
       if (map.getZoom() !== to.zoom) return false;
-      const container = map.getContainer();
-      const point = map.project([to.lng, to.lat]);
+      const center = map.getCenter();
+      // Degrees of longitude a pixel spans; of latitude, fewer by the cosine
+      const pixel = 360 / (512 * 2 ** to.zoom);
       return (
-        Math.abs(point.x - container.clientWidth / 2) <= 1 &&
-        Math.abs(point.y - container.clientHeight / 2) <= 1
+        Math.abs(center.lng - to.lng) <= pixel &&
+        Math.abs(center.lat - to.lat) <=
+          pixel * Math.cos((to.lat * Math.PI) / 180)
       );
     },
     view,
-    { timeout: 5000 },
+    // The camera is there as soon as jumpTo returns, but the predicate is
+    // asked in a frame, and a page cutting the flights anew for the relief
+    // on a loaded machine may not draw one for seconds
+    { timeout: 15000 },
   );
-  await waitForMapIdle(page);
 }
 
 /** How the map is turned, tilted and projected */

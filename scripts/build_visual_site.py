@@ -8,8 +8,11 @@ rail and of Wrapped; this builds tests/fixtures/visual/ instead, a handful of
 flights that only change on purpose, into visual-site/.
 
 Everything else that varies between builds is pinned here as well: the build
-stamp of the statistics panel, the airport database and the tile API key. Run
-`npm run build` first; the generator needs the bundles.
+stamp of the statistics panel, the airport database and the tile API key. The
+ground under the flights is left out (--no-terrain): sampling it would fetch
+elevation tiles, and none of the snapshots shows the 3D view it is for, so a
+flat or fixture model would only add a download to avoid. Run `npm run build`
+first; the generator needs the bundles.
 """
 
 import os
@@ -58,6 +61,7 @@ def main() -> int:
                 str(FIXTURE_DIR),
                 "--output-dir",
                 str(SITE_DIR),
+                "--no-terrain",
             ],
             cwd=ROOT,
             env=env,

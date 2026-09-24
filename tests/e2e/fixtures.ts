@@ -2,11 +2,14 @@
  * Hermetic Playwright test fixture.
  *
  * The page carries its own JavaScript and CSS (see scripts/vendor.js), so
- * the only third parties left are CARTO, for the base map, and the open
- * flightmaps tile server. An outage of either used to fail the whole suite
- * and a slow one made timings unpredictable, so neither is ever reached: the
- * base style is answered with one that draws a background and asks for
- * nothing else, and every tile with a transparent pixel.
+ * the only third parties left are CARTO, for the base map, the open
+ * flightmaps tile server, and AWS for the elevation tiles of the 3D view's
+ * relief. An outage of any used to fail the whole suite and a slow one made
+ * timings unpredictable, so none is ever reached: the base style is
+ * answered with one that draws a background and asks for nothing else,
+ * every elevation tile with flat ground (TERRAIN_ELEVATION_M), or a slope
+ * for a spec that asks for one (`terrain`), and every other tile with a
+ * transparent pixel.
  *
  * Any other cross-origin request fails the test that made it. The page is
  * meant to need nothing but its own host; a dependency that creeps back
@@ -16,6 +19,7 @@
  * "@playwright/test" so the fixture is active everywhere. For the same
  * reason this is where a stale site is refused (see site-check.ts).
  */
+import { crc32, deflateSync } from "node:zlib";
 import { test as base, expect } from "@playwright/test";
 import type { BrowserContext, Page, Route } from "@playwright/test";
 import { checkSite } from "./site-check";
@@ -30,6 +34,93 @@ const TRANSPARENT_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNgAAIAAAUAAen63NgAAAAASUVORK5CYII=",
   "base64",
 );
+
+/**
+ * The ground every elevation tile has: flat, so the relief draws the same
+ * on every run, and above sea level, so a spec can tell the relief is
+ * there by the flights standing on it
+ */
+const TERRAIN_ELEVATION_M = 500;
+
+/**
+ * The ground the elevation tiles answer with: flat, the default, or the
+ * slope of slopeElevationM, for a spec where the relief is the point
+ */
+export type TerrainFixture = "flat" | "slope";
+
+/** How far apart the ridges of the slope are, in degrees of longitude */
+const SLOPE_PERIOD_DEG = 1;
+/** How high the ridges rise above the valleys of the slope */
+const SLOPE_RISE_M = 1000;
+
+/**
+ * The ground of the slope at a longitude, in metres: it rises by the same
+ * gradient eastwards from TERRAIN_ELEVATION_M at every whole degree to
+ * SLOPE_RISE_M more half a degree on, and falls back as much to the next
+ * whole degree. A ramp across the whole world would leave the range the
+ * tiles can hold; this one repeats, and like a ramp it does not depend on
+ * where the flights of data/ are. It depends on the longitude alone, so it
+ * is the same on both sides of a tile border and at every tile level:
+ * the map samples the tiles bilinearly, and gets it back between the
+ * ridges to a metre or two.
+ */
+export function slopeElevationM(lng: number): number {
+  const phase = (((lng / SLOPE_PERIOD_DEG) % 1) + 1) % 1;
+  return TERRAIN_ELEVATION_M + SLOPE_RISE_M * (1 - Math.abs(1 - 2 * phase));
+}
+
+/**
+ * A Terrarium tile (256 pixels square, RGB) with `elevationM` of the
+ * longitude of each column: red * 256 + green + blue / 256 - 32768 metres.
+ * A transparent pixel would decode to -32768 m, and a tile of another size
+ * is refused.
+ */
+function terrariumTile(
+  z: number,
+  x: number,
+  elevationM: (lng: number) => number,
+): Buffer {
+  const size = 256;
+  // A pixel stands for the ground at its centre, as the map reads it
+  const pixels = Array.from({ length: size }, (_, column) => {
+    const lng = ((x + (column + 0.5) / size) / 2 ** z) * 360 - 180;
+    const value = elevationM(lng) + 32768;
+    return [
+      Math.floor(value / 256),
+      Math.floor(value) % 256,
+      Math.floor((value % 1) * 256),
+    ];
+  });
+  // Every line starts with its filter type, 0 for none
+  const line = Buffer.from([0, ...pixels.flat()]);
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(Buffer.concat(Array(size).fill(line)))),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+const FLAT_TERRAIN_TILE = terrariumTile(0, 0, () => TERRAIN_ELEVATION_M);
+
+/** The tile of the slope at `url`, a Terrarium tile's /{z}/{x}/{y}.png */
+function slopeTerrainTile(url: string): Buffer {
+  const match = /\/(\d+)\/(\d+)\/\d+\.png$/.exec(url);
+  if (!match) throw new Error(`not an elevation tile: ${url}`);
+  return terrariumTile(Number(match[1]), Number(match[2]), slopeElevationM);
+}
 
 /** The label layer of the style `holdBaseStyle` answers with */
 export const BASE_STYLE_LABELS = "place-labels";
@@ -93,6 +184,7 @@ const TILE_HOSTS = [
   // get out is answered rather than failing the test for CARTO's layout
   /^tiles(-[a-d])?\.basemaps\.cartocdn\.com$/,
   /^nwy-tiles-api\.prod\.newaydata\.com$/,
+  /^s3\.amazonaws\.com$/,
 ];
 
 /** The site under test, served by the webServer in playwright.config.ts */
@@ -113,9 +205,14 @@ function isSite(url: URL): boolean {
   return LOCAL_HOSTS.has(url.hostname);
 }
 
-async function serveTransparentTile(route: Route): Promise<void> {
+async function serveTile(route: Route, ground: TerrainFixture): Promise<void> {
+  const url = route.request().url();
+  let body: Buffer = TRANSPARENT_PNG;
+  if (url.includes("/terrarium/")) {
+    body = ground === "slope" ? slopeTerrainTile(url) : FLAT_TERRAIN_TILE;
+  }
   await route.fulfill({
-    body: TRANSPARENT_PNG,
+    body,
     contentType: "image/png",
     // MapLibre fetches its tiles, so they are subject to CORS
     headers: { "access-control-allow-origin": "*" },
@@ -162,10 +259,11 @@ export async function failBaseStyle(page: Page): Promise<void> {
  */
 async function installHermeticRoutes(
   context: BrowserContext,
+  ground: TerrainFixture,
 ): Promise<string[]> {
   const offSite: string[] = [];
   await context.route(isBaseStyle, serveStubStyle);
-  await context.route(isTile, serveTransparentTile);
+  await context.route(isTile, (route) => serveTile(route, ground));
   await context.route(
     (url) => !isSite(url) && !isTile(url) && !isBaseStyle(url),
     async (route) => {
@@ -177,9 +275,11 @@ async function installHermeticRoutes(
 }
 
 export const test = base.extend<
-  { hermetic: void },
+  { hermetic: void; terrain: TerrainFixture },
   SiteOptions & { currentSite: void }
 >({
+  // The ground of the elevation tiles, for `test.use` in a spec
+  terrain: ["flat", { option: true }],
   // Which generated site the project drives; playwright.config.ts sets it
   // for the projects that do not use docs/
   site: ["docs", { option: true, scope: "worker" }],
@@ -191,8 +291,8 @@ export const test = base.extend<
     { auto: true, scope: "worker" },
   ],
   hermetic: [
-    async ({ context }, use) => {
-      const offSite = await installHermeticRoutes(context);
+    async ({ context, terrain }, use) => {
+      const offSite = await installHermeticRoutes(context, terrain);
       await use();
       expect(
         offSite,

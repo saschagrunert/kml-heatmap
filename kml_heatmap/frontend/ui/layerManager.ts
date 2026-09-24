@@ -77,10 +77,11 @@ import {
   segmentRangesFor,
   segmentsForPathIds,
 } from "../calculations/statistics";
+import { loadFeatures } from "../services/featureLoader";
 import {
   groundProfileFt,
   isLiftedAt,
-  liftFt,
+  isTerrainAt,
   liftOffsetPx,
   ribbonOf,
   ribbonWidthZoom,
@@ -332,6 +333,15 @@ export class LayerManager implements PathHitTester {
     segments: PathSegment[];
     flights: SmoothedFlights;
   } | null = null;
+  /** The relief's code has been loaded and follows terrainActive */
+  private terrainLoaded = false;
+  /** A cut of the flights waits for the relief's code (see syncTerrain) */
+  private cutAwaited = false;
+  /**
+   * 0 while the relief's code hides the ribbons, until the map has drawn
+   * them on their new ground (ui/terrain.ts), 1 otherwise
+   */
+  ribbonsShown = 1;
 
   private readonly handleMouseMove = (e: MapMouseEvent): void => {
     // The overview of the Wrapped dialog is this map, but there to be
@@ -359,6 +369,11 @@ export class LayerManager implements PathHitTester {
   private readonly handleZoomEnd = (): void => {
     const map = this.listeningTo;
     if (!map || !this.app.threeDVisible) return;
+    // Onto or off the relief the flights are cut anew on their other ground,
+    // and for a level in it once its code has arrived (see syncTerrain)
+    const changed = this.syncTerrain();
+    if (changed === null) return;
+    if (changed || this.cutAwaited) this.redrawVisibleModes();
     const zoom = map.getZoom();
     const level = ribbonWidthZoom(zoom);
     for (const mode of MODES) {
@@ -383,7 +398,10 @@ export class LayerManager implements PathHitTester {
     // flights only the 3D view needs are let go with it.
     app.store.subscribe("threeDVisible", (threeD) => {
       if (!threeD) this.smoothed = null;
-      this.redrawVisibleModes();
+      if (this.syncTerrain() !== null) this.redrawVisibleModes();
+    });
+    app.store.subscribe("globeVisible", () => {
+      if (this.syncTerrain()) this.redrawVisibleModes();
     });
     if (app.map) {
       this.listen(app.map);
@@ -422,6 +440,10 @@ export class LayerManager implements PathHitTester {
     map.on("mouseout", this.handleMouseOut);
     map.on("zoomend", this.handleZoomEnd);
     whenContextRestored(map, () => this.restoreModes());
+    // A link or a saved view can open in 3D and close in: the store had
+    // its 3D view before this manager subscribed, and a map built at a
+    // zoom fires no zoomend
+    if (this.syncTerrain()) this.redrawVisibleModes();
   }
 
   /** Stop following the pointer; the drawn layers stay on the map */
@@ -632,7 +654,9 @@ export class LayerManager implements PathHitTester {
 
       // A ribbon is drawn above the ground it stands on: the pointer is
       // taken down by as much before the segment and the distance to it
-      // are looked for (see liftOffsetPx, which scales by the centre)
+      // are looked for (see liftOffsetPx, which scales by the centre).
+      // Over the relief that ground is raised too, but `project` and
+      // `unproject` meet the relief themselves
       const { h } = feature.properties as Partial<PathRunProperties>;
       const ribbon = h !== undefined && ribbonLayers.has(feature.layer.id);
       const lift = ribbon ? liftOffsetPx(map, map.getCenter().lat, h) : 0;
@@ -1141,16 +1165,17 @@ export class LayerManager implements PathHitTester {
       "line-opacity",
       selectedLook.opacity,
     );
-    // The ribbons of the 3D view, dimmed for a selection like the lines
+    // The ribbons of the 3D view, dimmed for a selection like the lines,
+    // and out of sight while they settle on another ground
     map.setPaintProperty(
       config.ribbons.main,
       "fill-extrusion-opacity",
-      mainOpacity,
+      mainOpacity * this.ribbonsShown,
     );
     map.setPaintProperty(
       config.ribbons.selected,
       "fill-extrusion-opacity",
-      selectedLook.opacity,
+      selectedLook.opacity * this.ribbonsShown,
     );
 
     let filter: ExpressionSpecification | null = null;
@@ -1184,6 +1209,7 @@ export class LayerManager implements PathHitTester {
 
   /** Cut and write the visible modes again, as the 3D view comes or goes */
   private redrawVisibleModes(): void {
+    this.cutAwaited = false;
     for (const mode of MODES) {
       if (this.drawsNow(mode)) this.redrawPaths(this.getConfig(mode));
     }
@@ -1210,16 +1236,90 @@ export class LayerManager implements PathHitTester {
    */
   private smoothedFlights(segments: PathSegment[]): SmoothedFlights {
     if (this.smoothed?.segments !== segments) {
-      // Each flight stands on its own fields (groundProfileFt)
-      const ground = groundProfileFt(segments);
+      // Each flight stands on its own fields (groundProfileFt), and on the
+      // relief where it is drawn (let go of as that comes or goes)
+      const ground = groundProfileFt(segments, this.app.terrainActive);
       this.smoothed = {
         segments,
-        flights: smoothFlights(segments, (i) =>
-          liftFt(segments[i]!.altitude_ft ?? 0, ground[i]!),
-        ),
+        flights: smoothFlights(segments, (i) => segments[i]!.altitude_ft ?? 0, {
+          groundOf: (i) => ground[i]!,
+        }),
       };
     }
     return this.smoothed.flights;
+  }
+
+  /**
+   * Whether the 3D view draws the relief (terrainActive): from
+   * TERRAIN_MIN_ZOOM in, by the level the ribbons are cut for, so they are
+   * cut on the sampled ground exactly where the relief is under them, and
+   * the map switches it in the same task as the ground changes. Returns
+   * whether it changed, which the caller answers by cutting the flights
+   * anew. The globe leaves the relief out (MapLibre 6.10 breaks the ribbons
+   * up on it) and only shades it (reliefShaded), over the flat ground the
+   * ribbons stand on there. Its code comes with the feature bundle, which
+   * is fetched the first time either is wanted: until it has arrived the
+   * relief is not drawn and the cut is left to its arrival (cutAwaited),
+   * or to its failure, after which the flights stay on the flat map. Cut
+   * on the flat ground first, they would be cut twice in a row, and the
+   * map's worker hold both cuts at once.
+   */
+  private syncTerrain(): boolean | null {
+    const map = this.listeningTo;
+    const shaded =
+      !!map && this.app.threeDVisible && isTerrainAt(map.getZoom());
+    const wanted = shaded && !this.app.globeVisible;
+    this.app.reliefShaded = shaded;
+    if (shaded && !this.terrainLoaded) {
+      void loadFeatures().then((features) => {
+        if (this.destroyed || this.terrainLoaded) return;
+        if (features) {
+          features.followTerrain(this.app);
+          this.terrainLoaded = true;
+        }
+        // A failure is tried again by the next zoom, not from here
+        if ((features && this.syncTerrain()) || this.cutAwaited) {
+          this.redrawVisibleModes();
+        }
+      });
+      if (wanted) {
+        this.cutAwaited = true;
+        return null;
+      }
+    }
+    if (wanted === this.app.terrainActive) return false;
+    this.app.terrainActive = wanted;
+    this.smoothed = null;
+    this.releaseRibbons();
+    return true;
+  }
+
+  /**
+   * Empty the ribbons about to be cut on their other ground, before they
+   * are: the map's worker lets go of the tiles of the old cut before it
+   * takes in the new one, instead of holding both, and the page of its copy
+   * of the old before the new is built. Nobody sees them go: the relief's
+   * code hides the ribbons as the ground changes, until the new cut has
+   * been drawn (ui/terrain.ts). A mode that is hidden is drawn anew as it
+   * shows (drawsNow).
+   */
+  private releaseRibbons(): void {
+    const map = this.readyMap();
+    for (const mode of MODES) {
+      const ribbons = Object.values(this.getConfig(mode).ribbons);
+      for (const { written } of Object.values(this.state[mode].tables)) {
+        if (written && ribbons.includes(written)) {
+          void map
+            ?.getSource<GeoJSONSource>(written)
+            ?.setData({ type: "FeatureCollection", features: [] });
+        }
+      }
+    }
+  }
+
+  /** Style the layers of both modes again, for ribbonsShown */
+  restyle(): void {
+    for (const mode of MODES) this.applyLook(this.getConfig(mode));
   }
 
   /**

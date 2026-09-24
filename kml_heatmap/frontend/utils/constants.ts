@@ -88,7 +88,8 @@ export const AIRPORT_HIDE_LABELS_BELOW_ZOOM = 4;
 /**
  * Ids of the sources the map is created with. Every one exists, empty, from
  * the moment `mapReady` resolves; modules fill them with `setData` and never
- * add or remove one.
+ * add or remove one. All but the elevation tiles of the relief, which come
+ * with its code the first time it is drawn (ui/terrain.ts).
  */
 export const MAP_SOURCES = {
   aviation: "aviation",
@@ -107,6 +108,7 @@ export const MAP_SOURCES = {
   replayTrail: "replay-trail",
   replayTrailRibbons: "replay-trail-3d",
   airportLabels: "airport-labels",
+  terrain: "terrain",
 } as const;
 
 /**

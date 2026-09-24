@@ -70,7 +70,8 @@ COPY --from=js-builder /build/kml_heatmap/static/ ./kml_heatmap/static/
 COPY serve.py ./
 
 # Run as an unprivileged user; /data is the work directory for input and
-# output mounts, /cache holds the OurAirports database and the parse cache.
+# output mounts, /cache holds the OurAirports database, the elevation tiles
+# and the parse cache.
 RUN useradd --system --uid 10001 --user-group --no-create-home \
       --home-dir /nonexistent --shell /usr/sbin/nologin app \
     && mkdir -p /data /cache \

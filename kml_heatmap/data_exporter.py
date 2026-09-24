@@ -62,8 +62,9 @@ from .export_writers import (
     exported_country_codes,
 )
 from .logger import logger
-from .segment_codec import FORMAT_VERSION, encode_rows, encode_start
+from .segment_codec import FORMAT_VERSION, encode_ground, encode_rows, encode_start
 from .site_assets import available_country_flags
+from .terrain import ground_profile_ft, sample_path_elevations
 from .types import COORDINATE_DECIMALS
 from .validation import protected_directories
 from .workers import init_worker
@@ -78,6 +79,7 @@ except ImportError:  # pragma: no cover - Windows has no fcntl
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
+    from .terrain import Coordinate, TileSource
     from .types import (
         AirportData,
         FlightPath,
@@ -191,6 +193,8 @@ class _ChunkPlan:
     path_indices: list[int]
     # One entry per path index: its id, or None when it is not exported
     path_ids: list[int | None]
+    # One entry per path index: the ground under its points, see terrain
+    elevations: list[Mapping[Coordinate, float] | None]
 
 
 def is_exportable_path(path: FlightPath) -> bool:
@@ -341,12 +345,16 @@ def process_year_chunk(
     output_dir: str,
     index: int = 0,
     airport_names: frozenset[str] | None = None,
+    path_elevations: Sequence[Mapping[Coordinate, float] | None] | None = None,
 ) -> ChunkResult:
     """Export a chunk of a year's paths into JSON fragments.
 
     ``path_ids`` holds the id of each path, None for the paths that are not
     exported (see ``assign_path_ids``). ``airport_names`` are the exported
-    airport markers (see ``export_pipeline.build_path_info``). Writes
+    airport markers (see ``export_pipeline.build_path_info``).
+    ``path_elevations`` holds the ground under the points of each path (see
+    ``terrain.sample_path_elevations``), None for a path without; a path
+    gets a ground column when they cover every row of it. Writes
     ``<output_dir>/<year>/.data.<index>.info.part`` (the path_info entries,
     comma separated) and ``.data.<index>.segments.part`` (the
     ``"<id>":{...}`` entries of the segments object, comma separated). The
@@ -358,13 +366,15 @@ def process_year_chunk(
     info_part, segments_part = _part_paths(output_dir, year, index)
     info_part.parent.mkdir(parents=True, exist_ok=True)
 
+    if path_elevations is None:
+        path_elevations = [None] * len(path_ids)
     path_count = 0
     with (
         open(info_part, "w", encoding="utf-8") as info_out,
         open(segments_part, "w", encoding="utf-8") as segments_out,
     ):
-        for path, metadata, path_id in zip(
-            year_path_groups, year_path_metadata, path_ids, strict=True
+        for path, metadata, path_id, elevations in zip(
+            year_path_groups, year_path_metadata, path_ids, path_elevations, strict=True
         ):
             if path_id is None:
                 continue
@@ -378,10 +388,13 @@ def process_year_chunk(
             info_out.write(separator + json.dumps(info, separators=JSON_SEPARATORS))
             # Scaled to integers, stored as differences and written column
             # by column, see segment_codec
-            segments = {
+            segments: dict[str, object] = {
                 "start": encode_start(start),
                 "columns": encode_rows(start, rows),
             }
+            ground = ground_profile_ft(start, rows, elevations) if elevations else None
+            if ground is not None:
+                segments["ground"] = encode_ground(ground)
             segments_out.write(
                 f'{separator}"{path_id}":'
                 + json.dumps(segments, separators=JSON_SEPARATORS)
@@ -510,12 +523,16 @@ def _plan_chunks(
     paths_by_year: dict[int, list[int]],
     path_ids: Mapping[int, int],
     max_workers: int,
+    elevations: Mapping[int, Mapping[Coordinate, float]] | None = None,
 ) -> list[_ChunkPlan]:
     """Cut the years into chunks, in input order, and hand each its path ids.
 
     ``path_ids`` are the ids of the exported paths by input index (see
     ``assign_path_ids``); the chunk boundaries do not change them.
+    ``elevations`` are the ground under the points of the paths, by input
+    index (see ``terrain.sample_path_elevations``).
     """
+    elevations = elevations or {}
     plans: list[_ChunkPlan] = []
     for year in sorted(paths_by_year):
         indices = paths_by_year[year]
@@ -524,7 +541,10 @@ def _plan_chunks(
         for index, start in enumerate(range(0, max(1, len(indices)), size)):
             chunk_indices = indices[start : start + size]
             chunk_ids = [path_ids.get(i) for i in chunk_indices]
-            plans.append(_ChunkPlan(year, index, chunk_indices, chunk_ids))
+            chunk_elevations = [elevations.get(i) for i in chunk_indices]
+            plans.append(
+                _ChunkPlan(year, index, chunk_indices, chunk_ids, chunk_elevations)
+            )
     return plans
 
 
@@ -543,6 +563,7 @@ def _run_chunk(
         output_dir,
         plan.index,
         airport_names,
+        plan.elevations,
     )
 
 
@@ -623,6 +644,7 @@ def _export_chunks(
                             output_dir,
                             plan.index,
                             airport_names,
+                            plan.elevations,
                         )
                     ] = plan
 
@@ -927,13 +949,16 @@ def export_all_data(
     output_dir: str | Path = "data",
     aircraft_data: Mapping[str, str] | None = None,
     exportable: Sequence[bool] | None = None,
+    terrain: TileSource | None = None,
 ) -> ExportResult:
     """Write the data files into ``output_dir``.
 
     ``output_dir`` is expected to hold no previous export: the pipeline
     passes the data staging directory of a ``SiteOutput``, which publishes
     the files. ``exportable`` is ``is_exportable_path`` of every path, when
-    the caller has it already.
+    the caller has it already. ``terrain`` is where the ground under the
+    flights comes from (see ``kml_heatmap.terrain``); without it the year
+    files carry no ground and the page takes it from the airfields.
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -948,8 +973,17 @@ def export_all_data(
     logger.info("\n  Splitting data by year: %s", sorted(paths_by_year))
 
     path_ids = assign_path_ids(paths_by_year, contents)
+    # Once for all paths, in this process: every tile is fetched and decoded
+    # once, and a chunk only gets the elevations of its own paths
+    elevations = (
+        sample_path_elevations(
+            {index: all_path_groups[index] for index in path_ids}, terrain
+        )
+        if terrain is not None and path_ids
+        else None
+    )
     max_workers = os.process_cpu_count() or 4
-    plans = _plan_chunks(paths_by_year, path_ids, max_workers)
+    plans = _plan_chunks(paths_by_year, path_ids, max_workers, elevations)
 
     logger.info(
         "\n  Processing %d year(s) in %d chunk(s)...", len(paths_by_year), len(plans)

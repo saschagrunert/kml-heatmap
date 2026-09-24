@@ -17,7 +17,7 @@ import type { KMLDataset, RawYearData } from "../types";
  * Wire format of the year files this build reads (kml_heatmap/segment_codec.py).
  * A file written by another release is refused rather than misread.
  */
-export const DATA_FORMAT_VERSION = 3;
+export const DATA_FORMAT_VERSION = 4;
 
 /**
  * How the encoded columns become values again, the mirror of
@@ -28,6 +28,7 @@ const COORDINATE_SCALE = 1e5;
 const ALTITUDE_STEP = 100;
 const SPEED_SCALE = 10;
 const TIME_SCALE = 10;
+const GROUND_STEP = 10;
 
 /**
  * Decode the compact per-year file format into flat columns.
@@ -41,7 +42,9 @@ const TIME_SCALE = 10;
  * stored as differences to the row before (the start point seeds the two
  * coordinate columns). A path without a time column carries no relative
  * times, and a null in it marks a row without one; the running time then
- * stays where the last row that had one left it.
+ * stays where the last row that had one left it. The ground under every
+ * row is a column of its own, `ground`, which a path may leave out; one that
+ * does not fit its path is dropped, the path is not.
  *
  * A value that is not a finite number would turn into a NaN coordinate,
  * which the map cannot draw. Since every value is a difference, nothing after
@@ -94,6 +97,7 @@ export function decodeYear(raw: RawYearData): DecodedYear {
   const altitudes = new Float64Array(maxRows);
   const speeds = new Float64Array(maxRows);
   const times = new Float64Array(maxRows);
+  const grounds = new Float64Array(maxRows);
   const warnings: string[] = [];
 
   let paths = 0;
@@ -121,6 +125,11 @@ export function decodeYear(raw: RawYearData): DecodedYear {
     let altitudeScaled = 0;
     let speedScaled = 0;
     let timeScaled = 0;
+    // NaN without a ground column, so every row of the path reads as none
+    const groundDeltas =
+      entry.ground?.length === latDeltas.length ? entry.ground : [NaN];
+    let groundScaled = 0;
+    const firstRow = rows;
 
     // The start point is written with the first row that holds, so a path
     // whose first row is broken leaves nothing behind
@@ -165,8 +174,12 @@ export function decodeYear(raw: RawYearData): DecodedYear {
       } else {
         times[rows] = NaN;
       }
+      groundScaled += groundDeltas[row] ?? NaN;
+      grounds[rows] = groundScaled * GROUND_STEP;
       rows++;
     }
+    // A value that is not a number leaves the whole path without ground
+    if (!Number.isFinite(groundScaled)) grounds.fill(NaN, firstRow, rows);
 
     if (row > 0) {
       ids[paths] = Number(id);
@@ -187,6 +200,7 @@ export function decodeYear(raw: RawYearData): DecodedYear {
     altitudes: trimmed(altitudes, rows),
     speeds: trimmed(speeds, rows),
     times: trimmed(times, rows),
+    grounds: trimmed(grounds, rows),
     warnings,
   };
 }

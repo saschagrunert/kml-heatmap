@@ -1052,6 +1052,45 @@ describe("ReplayManager activation", () => {
       expect(featuresOf(MAP_SOURCES.replayTrail).length).toBeGreaterThan(0);
     });
 
+    it("stands the flight on the sampled ground while the relief is drawn", () => {
+      for (const segment of mockApp.currentData!.path_segments) {
+        segment.ground_ft = 123;
+      }
+      mockApp.threeDVisible = true;
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      flyToTheEnd();
+      const flat = replayManager.state.smoothed!;
+      const times = replayManager.state.segments.map((s) => s.time);
+      expect(replayManager.state.groundFt).not.toContain(123);
+
+      mockApp.store.set("terrainActive", true);
+      vi.advanceTimersByTime(100);
+
+      expect([...new Set(replayManager.state.groundFt)]).toEqual([123]);
+      expect(replayManager.state.smoothed).not.toBe(flat);
+      // Only the heights are worked out anew: the times the curve smoothed
+      // from the logged ones stay, and are not smoothed a second time
+      expect(replayManager.state.smoothed!.times).toBe(flat.times);
+      expect(replayManager.state.segments.map((s) => s.time)).toEqual(times);
+      expect(replayManager.state.smoothed!.chains[0]!.heights).not.toEqual(
+        flat.chains[0]!.heights,
+      );
+
+      // And back off the relief, on the line between the fields again
+      mockApp.store.set("terrainActive", false);
+      vi.advanceTimersByTime(100);
+
+      expect(replayManager.state.groundFt).not.toContain(123);
+      expect(replayManager.state.smoothed!.times).toBe(flat.times);
+      expect(replayManager.state.smoothed!.chains[0]!.heights).toEqual(
+        flat.chains[0]!.heights,
+      );
+      expect(featuresOf(MAP_SOURCES.replayTrailRibbons).length).toBeGreaterThan(
+        0,
+      );
+    });
+
     it("empties the trail's ribbons as the replay closes", () => {
       mockApp.threeDVisible = true;
       mockApp.selectedPathIds = new Set([1]);

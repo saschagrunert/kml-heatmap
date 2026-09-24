@@ -3,9 +3,12 @@ import type { Map as MapLibreMap } from "maplibre-gl";
 import {
   LIFT_MAX_ZOOM,
   LIFT_STEP_FT,
+  TERRAIN_EXAGGERATION,
+  TERRAIN_MIN_ZOOM,
   airplaneLiftPx,
   groundProfileFt,
   isLiftedAt,
+  isTerrainAt,
   liftFt,
   liftOffsetPx,
   pointOnFlight,
@@ -150,6 +153,45 @@ describe("lift", () => {
 
       expect(ground[0]).toBe(400);
       expect(ground[9]).toBe(1000);
+    });
+
+    it("takes the ground the build sampled where a flight has it", () => {
+      const sampled = [420, 430, 400, 900, 1500, 1100, 2000, 2010, 2000];
+      const segments = [
+        ...flight(400, 2000).map((segment, i) => ({
+          ...segment,
+          ground_ft: sampled[i],
+        })),
+        ...flight(400, 400).map((segment) => ({ ...segment, path_id: 2 })),
+      ];
+
+      const ground = groundProfileFt(segments);
+
+      // The relief under the first flight, the line between its fields
+      // under the second
+      expect([...ground.slice(0, 9)]).toEqual(sampled);
+      expect([...ground.slice(9)]).toEqual(segments.slice(9).map(() => 400));
+    });
+
+    it("leaves the sampled ground out where the relief is not drawn", () => {
+      const segments = flight(400, 2000).map((segment) => ({
+        ...segment,
+        ground_ft: 5000,
+      }));
+
+      expect([...groundProfileFt(segments, false)]).toEqual([
+        ...groundProfileFt(flight(400, 2000)),
+      ]);
+    });
+
+    it("falls back to its fields where the sampled ground has a gap", () => {
+      const segments = flight(400, 2000).map((segment, i) =>
+        i === 4 ? segment : { ...segment, ground_ft: 5000 },
+      );
+
+      expect([...groundProfileFt(segments)]).toEqual([
+        ...groundProfileFt(flight(400, 2000)),
+      ]);
     });
   });
 
@@ -454,7 +496,9 @@ describe("lift", () => {
         [50.0028, 8.0014],
       ];
       const coarse = smoothLine(points, [0, 0, 0, 0]);
-      const fine = smoothLine(points, [0, 0, 0, 0], 4);
+      const fine = smoothLine(points, [0, 0, 0, 0], {
+        turnStepDeg: 4,
+      });
 
       // Twice as many points between the fixes at the flat lines' 4
       // degrees as at the ribbons' 8
@@ -463,6 +507,39 @@ describe("lift", () => {
       );
       // Through the logged points all the same
       expect(fine.vertex.map((v) => fine.points[v])).toEqual(points);
+    });
+
+    it("holds altitudes to the slope before it takes the ground off", () => {
+      // Level at 3,000 ft over a ridge that rises 2,000 ft between two
+      // fixes 700 m apart, far steeper than any climb
+      const points: [number, number][] = [
+        [50, 8],
+        [50, 8.01],
+        [50, 8.02],
+      ];
+      const line = smoothLine(points, [3000, 3000, 3000], {
+        ground: [500, 2500, 500],
+      });
+
+      // Over the ground the flight has its full height, on the ridge too
+      expect(line.heights).toEqual([2500, 500, 2500]);
+      // Measured from the ground instead, the slope would hold it up there
+      expect(smoothLine(points, [2500, 500, 2500]).heights[1]).toBeGreaterThan(
+        500,
+      );
+    });
+
+    it("never takes a flight below its ground", () => {
+      const line = smoothLine(
+        [
+          [50, 8],
+          [50, 8.01],
+        ],
+        [400, 1000],
+        { ground: [600, 600] },
+      );
+
+      expect(line.heights).toEqual([0, 400]);
     });
 
     it("eases a climb in and out without going beyond its heights", () => {
@@ -664,6 +741,14 @@ describe("lift", () => {
     });
   });
 
+  describe("isTerrainAt", () => {
+    it("draws the relief from the whole level TERRAIN_MIN_ZOOM in", () => {
+      expect(isTerrainAt(TERRAIN_MIN_ZOOM - 0.01)).toBe(false);
+      expect(isTerrainAt(TERRAIN_MIN_ZOOM)).toBe(true);
+      expect(isTerrainAt(LIFT_MAX_ZOOM + 2)).toBe(true);
+    });
+  });
+
   describe("liftOffsetPx", () => {
     const map = (): MapLibreMap =>
       createMapLibreMock() as unknown as MapLibreMap;
@@ -705,10 +790,23 @@ describe("lift", () => {
       // Below the first stop, at zoom 4, and above the last, at zoom 16
       expect(exaggeration(2)).toBeCloseTo(60, 6);
       expect(exaggeration(4)).toBeCloseTo(60, 6);
-      expect(exaggeration(16)).toBeCloseTo(1.5, 6);
-      expect(exaggeration(19)).toBeCloseTo(1.5, 6);
+      expect(exaggeration(19)).toBeCloseTo(TERRAIN_EXAGGERATION, 6);
       // Between two stops, linear
       expect(exaggeration(5)).toBeCloseTo((60 + 25) / 2, 6);
+    });
+
+    it("exaggerates the heights as much as the relief where it is drawn", () => {
+      const tilted = map();
+      for (const zoom of [TERRAIN_MIN_ZOOM, 11.5, 13, 16]) {
+        tilted.jumpTo({ zoom, pitch: 90 });
+        const metresPerPixel =
+          (40075016.686 * Math.cos((51 * Math.PI) / 180)) / (512 * 2 ** zoom);
+
+        expect(
+          (liftOffsetPx(tilted, 51, 1000) * metresPerPixel) /
+            (1000 * FEET_TO_METERS),
+        ).toBeCloseTo(TERRAIN_EXAGGERATION, 6);
+      }
     });
 
     it("draws 1,000 ft about as the ribbons do at zoom 13", () => {

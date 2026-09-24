@@ -79,6 +79,70 @@ describe("decodeYear", () => {
   });
 });
 
+describe("decodeYear ground", () => {
+  const rows = [
+    [50.1, 8.1, 500, 10],
+    [50.2, 8.2, 900, 90],
+    [50.3, 8.3, 600, 10],
+  ];
+
+  it("reads the ground of every row, and NaN for a path without", () => {
+    const decoded = decodeYear(
+      rawYear(2025, {
+        "1": path([50, 8], rows, [480, 1210, 590]),
+        "2": path([50, 8], rows),
+      }),
+    );
+
+    expect([...decoded.grounds]).toEqual([480, 1210, 590, NaN, NaN, NaN]);
+  });
+
+  it("drops a ground that does not fit its path, and keeps the path", () => {
+    const short = { ...path([50, 8], rows), ground: [48, 73] };
+    const broken = { ...path([50, 8], rows), ground: [48, "x", 1] };
+    const decoded = decodeYear(
+      rawYear(2025, {
+        "1": short,
+        "2": broken as unknown as RawPathSegments,
+        "3": path([50, 8], rows, [480, 1210, 590]),
+      }),
+    );
+
+    expect([...decoded.rowCounts]).toEqual([3, 3, 3]);
+    expect([...decoded.grounds]).toEqual([
+      NaN,
+      NaN,
+      NaN,
+      NaN,
+      NaN,
+      NaN,
+      480,
+      1210,
+      590,
+    ]);
+    expect(decoded.warnings).toEqual([]);
+  });
+
+  it("hands the ground to the segments that have it", () => {
+    const data = expandYearData(
+      rawYear(2025, {
+        "1": path([50, 8], rows, [480, 1210, 590]),
+        "2": path([50, 8], rows),
+      }),
+    );
+
+    expect(data.path_segments.map((s) => s.ground_ft)).toEqual([
+      480,
+      1210,
+      590,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect("ground_ft" in data.path_segments[3]!).toBe(false);
+  });
+});
+
 describe("decodeYearBytes", () => {
   it("parses the body of a year file and decodes it", () => {
     const raw = rawYear(2025, { "1": path([50, 8], [[50.1, 8.1, 500, 100]]) });
@@ -418,7 +482,7 @@ describe("expandYearData", () => {
     ).toThrow("segments");
   });
 
-  it.each([undefined, 2, 4, "3"])(
+  it.each([undefined, 3, 5, "4"])(
     "refuses a year file written in format %s",
     (format) => {
       expect(() =>

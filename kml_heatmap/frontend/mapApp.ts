@@ -230,6 +230,8 @@ export class MapApp {
   declare aviationVisible: StoreAccessors["aviationVisible"];
   declare globeVisible: StoreAccessors["globeVisible"];
   declare threeDVisible: StoreAccessors["threeDVisible"];
+  declare terrainActive: StoreAccessors["terrainActive"];
+  declare reliefShaded: StoreAccessors["reliefShaded"];
   declare replayActive: StoreAccessors["replayActive"];
   declare currentData: StoreAccessors["currentData"];
   declare hasTimingData: StoreAccessors["hasTimingData"];

@@ -373,7 +373,7 @@ export class MobileBar {
         kind: "switch",
         id: "three-d",
         icon: "threeD",
-        label: "3D flights",
+        label: "3D",
         isOn: () => app.threeDVisible,
         onToggle: () => app.mapOrientation.toggleThreeD(),
       },

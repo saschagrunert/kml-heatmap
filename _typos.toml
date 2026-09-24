@@ -11,3 +11,11 @@ extend-exclude = [
 [default.extend-words]
 # Unicode general category "decimal number", used in Hypothesis strategies
 Nd = "Nd"
+# The PNG filter of Alan W. Paeth (kml_heatmap/terrain.py)
+paeth = "paeth"
+# The National Elevation Dataset, in the attribution of the terrain tiles
+NED = "NED"
+
+[default.extend-identifiers]
+# The plural of the image format, which typos would split into "PN" and "Gs"
+PNGs = "PNGs"

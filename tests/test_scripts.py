@@ -135,6 +135,8 @@ class TestBuildVisualSite:
             str(build_visual_site.FIXTURE_DIR),
             "--output-dir",
             str(site),
+            # Offline: no elevation tiles
+            "--no-terrain",
         ]
         assert call["cwd"] == build_visual_site.ROOT
         assert call["check"] is False

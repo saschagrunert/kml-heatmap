@@ -27,7 +27,7 @@ describe("handleRequest", () => {
 
     if (!("decoded" in response)) throw new Error("not decoded");
     const { lats } = response.decoded;
-    expect(transfer).toHaveLength(7);
+    expect(transfer).toHaveLength(8);
     expect(transfer).toContain(lats.buffer);
     // The transfer a real worker would make: the columns arrive whole, and
     // are gone on the side that sent them
@@ -85,7 +85,7 @@ describe("serveRequests", () => {
     expect(scope.postMessage).toHaveBeenCalledTimes(1);
     const [response, transfer] = vi.mocked(scope.postMessage).mock.calls[0]!;
     expect(response).toEqual({ id: 2, decoded: decodeYear(year) });
-    expect(transfer).toHaveLength(7);
+    expect(transfer).toHaveLength(8);
   });
 });
 
