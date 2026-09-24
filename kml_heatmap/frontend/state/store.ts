@@ -25,6 +25,8 @@ export interface StoreState {
   globeVisible: boolean;
   /** Whether the flights are lifted to their altitude (calculations/lift.ts) */
   threeDVisible: boolean;
+  /** Whether the ground is drawn from satellite imagery (ui/satellite.ts) */
+  satelliteVisible: boolean;
   /**
    * Whether the 3D view draws the relief, and the flights stand on the
    * sampled ground (see LayerManager.syncTerrain, its only writer)
@@ -81,6 +83,7 @@ export const STORE_ACCESSOR_KEYS = [
   "aviationVisible",
   "globeVisible",
   "threeDVisible",
+  "satelliteVisible",
   "terrainActive",
   "reliefShaded",
   "replayActive",
@@ -129,6 +132,7 @@ export function createDefaultState(): StoreState {
     aviationVisible: false,
     globeVisible: false,
     threeDVisible: false,
+    satelliteVisible: false,
     terrainActive: false,
     reliefShaded: false,
     replayActive: false,

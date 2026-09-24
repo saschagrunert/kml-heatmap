@@ -37,6 +37,7 @@ const SHEET_KEYS = [
   "aviationVisible",
   "globeVisible",
   "threeDVisible",
+  "satelliteVisible",
   "selectedPathIds",
   "isolateSelection",
   "selectedYear",
@@ -376,6 +377,14 @@ export class MobileBar {
         label: "3D",
         isOn: () => app.threeDVisible,
         onToggle: () => app.mapOrientation.toggleThreeD(),
+      },
+      {
+        kind: "switch",
+        id: "satellite",
+        icon: "satellite",
+        label: "Satellite",
+        isOn: () => app.satelliteVisible,
+        onToggle: () => app.uiToggles.toggleSatellite(),
       },
     ];
   }

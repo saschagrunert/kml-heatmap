@@ -22,7 +22,10 @@ import { AirportManager } from "./ui/airportManager";
 import { MapOrientation } from "./ui/mapOrientation";
 
 import { UIToggles } from "./ui/uiToggles";
-import { followLayerVisibility } from "./ui/layerVisibility";
+import {
+  followLayerVisibility,
+  followSatelliteSwitch,
+} from "./ui/layerVisibility";
 import { followSelectionHighlight } from "./ui/selectionHighlight";
 import { MobileBar } from "./ui/mobileBar";
 import { bindActions } from "./ui/actions";
@@ -181,6 +184,13 @@ export const FALLBACK_STYLE: StyleSpecification = {
   ],
 };
 
+/** The flags of a saved state that `restoreState` leaves to others */
+const RESTORED_LATER: readonly string[] = [
+  "isolateSelection",
+  "statsPanelVisible",
+  "wrappedVisible",
+];
+
 /** Padding around the flights when the view is fitted to all of them */
 const START_VIEW_PADDING = 30;
 
@@ -236,6 +246,7 @@ export class MapApp {
   declare aviationVisible: StoreAccessors["aviationVisible"];
   declare globeVisible: StoreAccessors["globeVisible"];
   declare threeDVisible: StoreAccessors["threeDVisible"];
+  declare satelliteVisible: StoreAccessors["satelliteVisible"];
   declare terrainActive: StoreAccessors["terrainActive"];
   declare reliefShaded: StoreAccessors["reliefShaded"];
   declare replayActive: StoreAccessors["replayActive"];
@@ -635,27 +646,14 @@ export class MapApp {
         this.store.notifyMutation("selectedPathIds");
       }
 
-      // Restore layer visibility
-      if (state.heatmapVisible !== undefined) {
-        this.heatmapVisible = state.heatmapVisible;
-      }
-      if (state.altitudeVisible !== undefined) {
-        this.altitudeVisible = state.altitudeVisible;
-      }
-      if (state.airspeedVisible !== undefined) {
-        this.airspeedVisible = state.airspeedVisible;
-      }
-      if (state.airportsVisible !== undefined) {
-        this.airportsVisible = state.airportsVisible;
-      }
-      if (state.aviationVisible !== undefined) {
-        this.aviationVisible = state.aviationVisible;
-      }
-      if (state.globeVisible !== undefined) {
-        this.globeVisible = state.globeVisible;
-      }
-      if (state.threeDVisible !== undefined) {
-        this.threeDVisible = state.threeDVisible;
+      // Restore the layers and how the map is drawn. The panels reopen
+      // once there is data for them (see initialize), and isolating needs
+      // a selection (below).
+      for (const key of BOOLEAN_KEYS) {
+        const value = state[key];
+        if (value !== undefined && !RESTORED_LATER.includes(key)) {
+          this.store.set(key, value);
+        }
       }
       // Isolating nothing is not a state the controls can leave: a link
       // written before path ids were versioned drops its selection but still
@@ -847,6 +845,7 @@ export class MapApp {
     syncToggleButton(this.store, "aviationVisible", "aviation-btn");
     syncToggleButton(this.store, "globeVisible", "globe-btn");
     syncToggleButton(this.store, "threeDVisible", "three-d-btn");
+    syncToggleButton(this.store, "satelliteVisible", "satellite-btn");
     syncLegend(this.store, "airspeedVisible", "airspeed-legend");
     // The isolate button depends on two keys, so PathSelection owns it
   }
@@ -892,6 +891,7 @@ export class MapApp {
     this.uiToggles = new UIToggles(this);
     this.mobileBar = MobileBar.mountFor(this);
     followLayerVisibility(this);
+    followSatelliteSwitch(this);
     followSelectionHighlight(this);
     this.followReplayAvailability();
     this.store.subscribeKeys(

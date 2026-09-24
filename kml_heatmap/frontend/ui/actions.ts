@@ -38,6 +38,7 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
     toggleAviation: () => app.uiToggles.toggleAviation(),
     toggleGlobe: () => app.mapOrientation.toggleGlobe(),
     toggleThreeD: () => app.mapOrientation.toggleThreeD(),
+    toggleSatellite: () => app.uiToggles.toggleSatellite(),
     resetNorth: () => app.mapOrientation.resetNorth(),
     resetView: () => {
       app.resetView().catch(logError);

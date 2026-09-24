@@ -55,6 +55,7 @@ function randomState(rnd: () => number): AppState {
     pitch: bool() ? 0 : Math.round(rnd() * 850) / 10,
     globeVisible: bool(),
     threeDVisible: bool(),
+    satelliteVisible: bool(),
   };
 }
 
@@ -235,6 +236,17 @@ describe("URL state management", () => {
         bearing: -40.5,
         pitch: 35,
         globeVisible: true,
+      });
+    });
+
+    it("parses the satellite imagery, and leaves a link without it on the dark map", () => {
+      expect(parseUrlParams("s=1")).toEqual({ satelliteVisible: true });
+      expect(parseUrlParams("y=2025&s=0")).toEqual({ selectedYear: "2025" });
+      // The visibility flags keep their nine slots; the imagery has none
+      expect(parseUrlParams("v=100100000&s=1")).toMatchObject({
+        heatmapVisible: true,
+        isolateSelection: false,
+        satelliteVisible: true,
       });
     });
 
@@ -421,6 +433,8 @@ describe("URL state management", () => {
       expect(encodeStateToUrl({ globeVisible: true })).toBe("g=1");
       expect(encodeStateToUrl({ threeDVisible: false })).toBe("");
       expect(encodeStateToUrl({ threeDVisible: true })).toBe("d=1");
+      expect(encodeStateToUrl({ satelliteVisible: false })).toBe("");
+      expect(encodeStateToUrl({ satelliteVisible: true })).toBe("s=1");
     });
 
     it("returns an empty string for an empty state", () => {
@@ -449,6 +463,7 @@ describe("URL state management", () => {
         pitch: 42.3,
         globeVisible: true,
         threeDVisible: true,
+        satelliteVisible: true,
       };
 
       const decoded = parseUrlParams(encodeStateToUrl(original));
@@ -473,6 +488,7 @@ describe("URL state management", () => {
         if (state.pitch === 0) delete expected.pitch;
         if (!state.globeVisible) delete expected.globeVisible;
         if (!state.threeDVisible) delete expected.threeDVisible;
+        if (!state.satelliteVisible) delete expected.satelliteVisible;
         const flags = [
           state.heatmapVisible,
           state.altitudeVisible,

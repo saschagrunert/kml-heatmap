@@ -30,10 +30,13 @@ describe("layer handles", () => {
     const app = createMockApp();
     const map = app.map!;
 
-    // All but the elevation tiles, which come with the relief's code
+    // All but the elevation tiles and the satellite imagery, which come
+    // with their code
     expect(Object.keys(map.sources).sort()).toEqual(
       Object.values(MAP_SOURCES)
-        .filter((id) => id !== MAP_SOURCES.terrain)
+        .filter(
+          (id) => id !== MAP_SOURCES.terrain && id !== MAP_SOURCES.satellite,
+        )
         .sort(),
     );
     for (const id of Object.values(MAP_LAYERS)) {

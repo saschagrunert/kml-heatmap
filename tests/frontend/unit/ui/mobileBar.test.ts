@@ -359,6 +359,7 @@ describe("MobileBar", () => {
         "aviation",
         "globe",
         "three-d",
+        "satellite",
       ]);
       expect(tab("layers").classList.contains("active")).toBe(true);
       expect(tab("layers").getAttribute("aria-expanded")).toBeNull();

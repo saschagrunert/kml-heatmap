@@ -146,8 +146,9 @@ their traces in `test-results/`, and every run writes an HTML report to
   names only, not the TypeScript sources
 
 `npm run build` produces four bundles. `mapApp.bundle.js` is the map itself,
-and `features.bundle.js` holds Replay, Wrapped and the flight list of the
-airport popups, which the page imports the first time one of them is opened.
+and `features.bundle.js` holds Replay, Wrapped, the flight list of the
+airport popups, the relief of the 3D view and the satellite imagery, which
+the page imports the first time one of them is wanted.
 `shared.bundle.js` is what the two have in common. Their styles are split
 the same way and travel with them: `kml_heatmap/static/styles.css` is linked
 in the page, `features.css` is fetched alongside the feature bundle (see
@@ -312,8 +313,9 @@ line between the fields outside, in the same task as the relief is switched;
 `ui/terrain.ts` hides the ribbons until the map has drawn their new tiles and
 the elevation tiles, for `SETTLE_MAX_MS` (3 s) at most, since a frame of the
 relief takes seconds in software WebGL. A `hillshade` layer from the same source shades the
-relief while it is drawn, directly above the base map's last area fill (so
-below its roads, its labels and every layer of the app), in the colours of
+relief while it is drawn, directly above the base map's last area fill (its
+buildings in CARTO's style, so above its roads but below its labels and every
+layer of the app) and the satellite imagery, in the colours of
 the `--terrain-*` tokens of `styles.css`; a second source would fetch about
 2.6 times the tiles, for a sharper shading nobody sees under the dark
 style (MapLibre warns about the shared source once). `withDataLayers`
@@ -329,6 +331,30 @@ The page fetches the tiles from `s3.amazonaws.com`, which the CSP names in
 The e2e fixture (`tests/e2e/fixtures.ts`) answers them itself with a flat
 tile 500 m up, so specs and screenshots stay deterministic and a spec can
 tell the flights stand on the relief.
+
+**The satellite imagery:**
+
+The Satellite switch (`satelliteVisible` in the store, `s=1` in the link)
+fetches `ui/satellite.ts` with the feature bundle the first time it is on
+(`followSatelliteSwitch` in `ui/layerVisibility.ts`; a failed fetch turns the
+switch back off with a toast, if it is still on). It adds a `raster` source
+of EOX's Sentinel-2 cloudless 2024 tiles (`SATELLITE_TILE_MAX_ZOOM`, level 14
+of the 256 px tiles at most, `z` 14 in the UI, the last that adds detail over
+the one below)
+with the credit on the source, so the map shows it only while the layer is
+visible, and one `raster` layer directly above the last layer of the base
+map's ground (the `landcover`, `landuse`, `park` and `water` source layers of
+CARTO's OpenMapTiles schema, or the background of a style without them), so
+below its roads and labels, the shading of the relief and every layer of the
+app. CARTO draws its county and state borders among those fills; they are
+moved above the imagery. Like the shading, the layer is none of the app's:
+`withDataLayers` carries its source across a base style swap and
+`ui/satellite.ts` puts the layer back on `styledata`. Its paint
+(`raster-brightness-max`, `raster-saturation`, `raster-contrast`) comes from
+the `--satellite-*` tokens of `styles.css`, darker and paler under
+`prefers-contrast: more`. The page fetches the tiles from
+`tiles.maps.eox.at`, named in `connect-src` like the other tile hosts; the e2e
+fixture answers them with its transparent tile.
 
 ## Test Data Generation
 

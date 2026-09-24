@@ -340,6 +340,8 @@ export interface AppState {
   globeVisible?: boolean;
   /** Whether the flights are lifted to their altitude; absent means flat */
   threeDVisible?: boolean;
+  /** Whether the ground is satellite imagery; absent means the dark map */
+  satelliteVisible?: boolean;
 }
 
 /**

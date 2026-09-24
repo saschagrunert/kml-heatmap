@@ -110,6 +110,8 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       WrappedManager: vi.fn(function () {
         return m.mockWrappedManagerInstance;
       }),
+      // The satellite switch hands itself over to the bundle
+      followSatellite: vi.fn(),
     }),
   ),
 }));
@@ -474,6 +476,7 @@ describe("MapApp.initialize", () => {
         app.aviationVisible = true;
         app.globeVisible = true;
         app.threeDVisible = true;
+        app.satelliteVisible = true;
         app.store.set("statsPanelVisible", true);
       });
       mockMap(app).jumpTo({ bearing: 40, pitch: 60 });
@@ -494,6 +497,7 @@ describe("MapApp.initialize", () => {
         "aviationVisible",
         "globeVisible",
         "threeDVisible",
+        "satelliteVisible",
         "statsPanelVisible",
       ] as const;
       const listener = vi.fn();
@@ -630,6 +634,7 @@ describe("MapApp.initialize", () => {
       ["the heatmap off", () => (app.heatmapVisible = false)],
       ["3D flights", () => (app.threeDVisible = true)],
       ["the globe", () => (app.globeVisible = true)],
+      ["the satellite imagery", () => (app.satelliteVisible = true)],
       ["the statistics", () => app.store.set("statsPanelVisible", true)],
       [
         "a selection",

@@ -117,6 +117,8 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       WrappedManager: vi.fn(function () {
         return m.mockWrappedManagerInstance;
       }),
+      // The satellite switch hands itself over to the bundle
+      followSatellite: vi.fn(),
     }),
   ),
 }));

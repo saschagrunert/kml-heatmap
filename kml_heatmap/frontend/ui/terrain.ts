@@ -20,6 +20,7 @@ import type { MapApp } from "../mapApp";
 import { TERRAIN_EXAGGERATION } from "../calculations/lift";
 import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { cssVar, whenContextRestored } from "../utils/mapHelpers";
+import { SATELLITE_LAYER } from "./satellite";
 
 const TERRAIN_TILE_URL =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
@@ -124,9 +125,10 @@ function addSource(map: MapLibreMap): void {
 /**
  * Show the shading while the relief is drawn or, on the globe, would be,
  * hide it otherwise: created the first time, directly above the last of
- * the base map's area fills (land, parks, water) and so below its roads,
- * its labels and every layer of the app. Its colours are the stylesheet's (--terrain-*), subtle on
- * the dark map, so the heat and the flights stay what reads.
+ * the base map's area fills (land, parks, water) and the satellite imagery
+ * (ui/satellite.ts), and so below its labels and every layer of the app.
+ * Its colours are the stylesheet's (--terrain-*), subtle on the dark map,
+ * so the heat and the flights stay what reads.
  */
 function shade(map: MapLibreMap, shown: boolean): void {
   if (map.getLayer(HILLSHADE_LAYER)) {
@@ -144,7 +146,9 @@ function shade(map: MapLibreMap, shown: boolean): void {
   for (const [i, id] of order.entries()) {
     const type = map.getLayer(id)?.type;
     if (own.has(id) || type === "symbol") break;
-    if (type === "fill" || type === "background") before = order[i + 1];
+    if (type === "fill" || type === "background" || id === SATELLITE_LAYER) {
+      before = order[i + 1];
+    }
   }
   const shadow = cssVar("--terrain-shadow") || "rgba(0, 0, 0, 0.7)";
   map.addLayer(
