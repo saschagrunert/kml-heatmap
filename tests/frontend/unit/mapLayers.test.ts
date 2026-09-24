@@ -2,7 +2,10 @@
  * The layer handles, on the mock app every ported suite builds on.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import type { StyleSpecification } from "maplibre-gl";
+import type {
+  RasterDEMSourceSpecification,
+  StyleSpecification,
+} from "maplibre-gl";
 import {
   AIRPORTS_HIDDEN_CLASS,
   withDataLayers,
@@ -27,8 +30,11 @@ describe("layer handles", () => {
     const app = createMockApp();
     const map = app.map!;
 
+    // All but the elevation tiles, which come with the relief's code
     expect(Object.keys(map.sources).sort()).toEqual(
-      Object.values(MAP_SOURCES).sort(),
+      Object.values(MAP_SOURCES)
+        .filter((id) => id !== MAP_SOURCES.terrain)
+        .sort(),
     );
     for (const id of Object.values(MAP_LAYERS)) {
       expect(map.getLayer(id)).toBeDefined();
@@ -427,5 +433,28 @@ describe("withDataLayers", () => {
     );
 
     expect(style.projection).toEqual({ type: "globe" });
+  });
+
+  it("keeps the relief of the 3D view, and its elevation tiles", () => {
+    const next: StyleSpecification = { version: 8, sources: {}, layers: [] };
+    const dem: RasterDEMSourceSpecification = {
+      type: "raster-dem",
+      tiles: [],
+      encoding: "terrarium",
+    };
+    const terrain = { source: MAP_SOURCES.terrain, exaggeration: 2 };
+
+    const style = withDataLayers(
+      {
+        ...previous,
+        sources: { ...previous.sources, [MAP_SOURCES.terrain]: dem },
+        terrain,
+      },
+      next,
+    );
+
+    expect(style.terrain).toEqual(terrain);
+    expect(style.sources[MAP_SOURCES.terrain]).toBe(dem);
+    expect(withDataLayers(previous, next).terrain).toBeUndefined();
   });
 });

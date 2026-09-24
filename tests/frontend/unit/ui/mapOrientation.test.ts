@@ -108,6 +108,21 @@ describe("MapOrientation", () => {
       expect(floating().hidden).toBe(false);
     });
 
+    it("shows the compass unavailable while the map is north up and flat", () => {
+      expect(compass().getAttribute("aria-disabled")).toBe("true");
+      expect(compass().style.opacity).toBe("0.5");
+
+      turn({ bearing: 40 });
+      expect(compass().getAttribute("aria-disabled")).toBe("false");
+      expect(compass().style.opacity).toBe("1");
+
+      turn({ bearing: 0, pitch: 30 });
+      expect(compass().getAttribute("aria-disabled")).toBe("false");
+
+      turn({ bearing: 0, pitch: 0 });
+      expect(compass().getAttribute("aria-disabled")).toBe("true");
+    });
+
     it("turns the map north up and lays it flat", () => {
       turn({ bearing: 40, pitch: 30 });
 

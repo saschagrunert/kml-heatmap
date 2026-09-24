@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from .airport_lookup import AirportRecord
+    from .terrain import TileSource
     from .types import FlightPathGroup, PathMetadata, TrackPoint
 
 __all__ = [
@@ -365,11 +366,13 @@ def _export_site(
     output_file: Path,
     data_dir: Path,
     aircraft_data: dict[str, str] | None = None,
+    terrain: TileSource | None = None,
 ) -> ExportResult:
     """Export the data, render the page and package its assets.
 
     Everything is staged first and published at the end (see ``SiteOutput``),
     so a failure at any step leaves the previous site in the output as it was.
+    ``terrain`` is handed to ``export_all_data``.
     """
     all_path_groups, all_path_metadata = _drop_paths_without_year(
         all_path_groups, all_path_metadata
@@ -405,6 +408,7 @@ def _export_site(
             site.data_stage,
             aircraft_data=aircraft_data,
             exportable=exportable,
+            terrain=terrain,
         )
         # The page opens on the latest year, see resolveYearSelection
         render_html(
@@ -430,12 +434,17 @@ def create_progressive_heatmap(
     output_file: str = "index.html",
     data_dir: str = "data",
     aircraft_files: list[Path] | None = None,
+    terrain: TileSource | None = None,
 ) -> bool:
     """Create a progressive-loading heatmap with external data files.
 
     Returns False (after logging the reason) when the site could not be
     generated; a previous site in the output is then left as it was. No
     exception escapes for the failure modes the pipeline knows about.
+
+    ``terrain`` is where the ground under the flights comes from (see
+    ``kml_heatmap.terrain``). The default, None, leaves it out of the year
+    files; the command line passes ``TerrariumTiles`` unless told not to.
     """
     aircraft_files = aircraft_files or []
 
@@ -500,6 +509,7 @@ def create_progressive_heatmap(
             Path(output_file),
             Path(data_dir),
             aircraft_data=aircraft_data,
+            terrain=terrain,
         )
     except (ValueError, RuntimeError, OSError, KMLHeatmapError) as e:
         logger.error("Export failed: %s", e)

@@ -13,7 +13,10 @@ from hypothesis import strategies as st
 from kml_heatmap.segment_codec import (
     COORDINATE_SCALE,
     FORMAT_VERSION,
+    GROUND_STEP,
+    decode_ground,
     decode_rows,
+    encode_ground,
     encode_rows,
     encode_start,
 )
@@ -130,4 +133,29 @@ class TestEncoding:
 
 def test_the_format_version_is_pinned():
     """Bumping it is a deliberate act; the frontend checks the same number."""
-    assert FORMAT_VERSION == 3
+    assert FORMAT_VERSION == 4
+
+
+grounds = st.lists(
+    st.integers(-50_000, 300_000).map(lambda v: float(v * GROUND_STEP)), max_size=30
+)
+
+
+class TestGround:
+    @given(grounds)
+    def test_round_trip(self, ground):
+        column = encode_ground(ground)
+
+        assert all(isinstance(value, int) for value in column)
+        assert decode_ground(column) == ground
+
+    def test_is_stored_in_steps_as_differences(self):
+        assert encode_ground([1200.0, 1210.0, 1210.0, 1180.0]) == [120, 1, 0, -3]
+
+    def test_refuses_a_ground_off_the_step(self):
+        with pytest.raises(ValueError, match="not a multiple"):
+            encode_ground([1205.0])
+
+    def test_an_empty_column(self):
+        assert encode_ground([]) == []
+        assert decode_ground([]) == []

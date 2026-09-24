@@ -54,7 +54,8 @@ const TIME_WINDOW = 2;
 const METRES_PER_DEGREE = 111320;
 
 /**
- * The flight of `segments`, at the feet above ground `heightOf` gives (see
+ * The flight of `segments`, at the feet above ground `heightOf` gives, or
+ * with `groundOf` at the altitudes it gives over that ground (see
  * smoothFlights), along the curve the lines are drawn on (see
  * calculations/curves.ts), and when it is where.
  *
@@ -79,8 +80,12 @@ const METRES_PER_DEGREE = 111320;
 export function replayCurve(
   segments: readonly PathSegment[],
   heightOf: (index: number) => number,
+  groundOf?: (index: number) => number,
 ): ReplayCurve {
-  const curves = smoothFlights(segments, heightOf, FLAT_TURN_STEP_DEG);
+  const curves = smoothFlights(segments, heightOf, {
+    turnStepDeg: FLAT_TURN_STEP_DEG,
+    groundOf,
+  });
   const along = curves.chains.map(({ points }) => {
     const metres = new Float64Array(points.length);
     for (let i = 1; i < points.length; i++) {
@@ -162,6 +167,26 @@ export function replayCurve(
     endSlope[i] = (joined(i + 1) ? atStart[i + 1]! : own) * seconds[i]!;
   }
   return { ...curves, along, startSlope, endSlope, times };
+}
+
+/**
+ * `curve` on another ground (see replayCurve): the heights of its points
+ * worked out anew, where the curve on the map, the distances along it and
+ * its times stay as they are. These depend only on where the fixes are and
+ * when they were logged, and the times of `segments` may be the ones the
+ * curve has already smoothed, which are not smoothed a second time.
+ */
+export function liftReplayCurve(
+  curve: ReplayCurve,
+  segments: readonly PathSegment[],
+  heightOf: (index: number) => number,
+  groundOf?: (index: number) => number,
+): ReplayCurve {
+  const { chains } = smoothFlights(segments, heightOf, {
+    turnStepDeg: FLAT_TURN_STEP_DEG,
+    groundOf,
+  });
+  return { ...curve, chains };
 }
 
 /** Metres between two `[lat, lng]` points close to each other */

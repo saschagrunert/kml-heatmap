@@ -9,6 +9,7 @@ import pytest
 
 from kml_heatmap.cli import main
 from kml_heatmap.exceptions import KMLHeatmapError
+from kml_heatmap.terrain import TerrariumTiles
 
 MINIMAL_KML = "<?xml version='1.0'?><kml></kml>"
 
@@ -84,6 +85,27 @@ class TestArgumentParsing:
         ):
             main()
         assert exc_info.value.code == 2
+
+
+class TestTerrain:
+    def test_samples_the_ground_from_the_elevation_tiles(self, workspace):
+        _, kml, out = workspace
+
+        mock_create = _run([str(kml), "--output-dir", str(out)])
+
+        assert isinstance(mock_create.call_args.kwargs["terrain"], TerrariumTiles)
+
+    def test_no_terrain_leaves_it_out(self, workspace):
+        _, kml, out = workspace
+
+        mock_create = _run([str(kml), "--output-dir", str(out), "--no-terrain"])
+
+        assert mock_create.call_args.kwargs["terrain"] is None
+
+    def test_the_switch_is_in_the_help(self, capsys):
+        with patch("sys.argv", ["kml-heatmap", "--help"]), pytest.raises(SystemExit):
+            main()
+        assert "--no-terrain" in capsys.readouterr().out
 
 
 class TestFileCollection:

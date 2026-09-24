@@ -136,8 +136,14 @@ def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
     return [new_names.get(kml_file, kml_file) for kml_file in kml_files]
 
 
-def _generate(paths: list[str], output_dir: Path, obfuscate_inputs: bool) -> None:
+def _generate(
+    paths: list[str], output_dir: Path, obfuscate_inputs: bool, terrain: bool = True
+) -> None:
     """Generate the site into ``output_dir``.
+
+    ``terrain`` samples the ground under the flights from the elevation
+    tiles of AWS (see ``kml_heatmap.terrain``), which are downloaded once
+    into the cache directory.
 
     The generated site never carries a flight date finer than the year,
     whatever the inputs hold: the exported paths keep their year, their
@@ -178,8 +184,14 @@ def _generate(paths: list[str], output_dir: Path, obfuscate_inputs: bool) -> Non
     if obfuscate_inputs:
         kml_files = _obfuscate_inputs(kml_files)
 
+    from .terrain import TerrariumTiles
+
     success = create_progressive_heatmap(
-        kml_files, output_file, data_dir, aircraft_files=aircraft_files
+        kml_files,
+        output_file,
+        data_dir,
+        aircraft_files=aircraft_files,
+        terrain=TerrariumTiles() if terrain else None,
     )
 
     if not success:
@@ -251,6 +263,17 @@ output directory untouched.
         ),
     )
     parser.add_argument(
+        "--no-terrain",
+        dest="terrain",
+        action="store_false",
+        help=(
+            "do not sample the ground under the flights from elevation tiles; "
+            "the 3D view then puts each flight on a line between its airfields "
+            "(the tiles of the flown area are otherwise downloaded once from "
+            "AWS and cached)"
+        ),
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -262,7 +285,9 @@ output directory untouched.
         set_debug_mode(True)
 
     try:
-        _generate(args.paths, Path(args.output_dir), args.obfuscate_inputs)
+        _generate(
+            args.paths, Path(args.output_dir), args.obfuscate_inputs, args.terrain
+        )
     except (KMLHeatmapError, OSError) as e:
         # Expected failures (an unwritable output directory, a missing airport
         # database) end in one line instead of a traceback

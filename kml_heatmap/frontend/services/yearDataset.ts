@@ -33,16 +33,26 @@ export interface DecodedYear {
   speeds: Float64Array;
   /** Per row, in seconds from the start of the path; NaN for a row without */
   times: Float64Array;
+  /** Per row, feet of ground under its end; NaN for a path without */
+  grounds: Float64Array;
   /** What the decoder had to say about broken paths */
   warnings: string[];
 }
 
 /** The buffers of a decoded year, for the transfer list of postMessage */
 export function transferablesOf(decoded: DecodedYear): ArrayBuffer[] {
-  const { pathIds, rowCounts, lats, lons, altitudes, speeds, times } = decoded;
-  return [pathIds, rowCounts, lats, lons, altitudes, speeds, times].map(
-    (column) => column.buffer as ArrayBuffer,
-  );
+  const { pathIds, rowCounts, lats, lons, altitudes, speeds, times, grounds } =
+    decoded;
+  return [
+    pathIds,
+    rowCounts,
+    lats,
+    lons,
+    altitudes,
+    speeds,
+    times,
+    grounds,
+  ].map((column) => column.buffer as ArrayBuffer);
 }
 
 /** Where a dataset under construction stands */
@@ -80,7 +90,8 @@ function addRows(
   cursor: BuildCursor,
   isDue: () => boolean,
 ): boolean {
-  const { pathIds, rowCounts, lats, lons, altitudes, speeds, times } = decoded;
+  const { pathIds, rowCounts, lats, lons, altitudes, speeds, times, grounds } =
+    decoded;
   // Filled with push: arrays preallocated with new Array(n) have holes
   // until they are full, which V8 keeps treating as the slower kind
   const { coordinates, path_segments } = dataset;
@@ -104,6 +115,8 @@ function addRows(
       };
       const time = times[row]!;
       if (!Number.isNaN(time)) segment.time = time;
+      const ground = grounds[row]!;
+      if (!Number.isNaN(ground)) segment.ground_ft = ground;
       path_segments.push(segment);
       coordinates.push(previous);
       previous = next;

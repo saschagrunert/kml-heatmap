@@ -7,10 +7,12 @@
  * band of height of its own, so it shows edge on as well. The heights are
  * above ground (AGL): without terrain the map is at sea level everywhere,
  * and a traffic pattern at 1,000 ft over a field at 1,500 ft belongs 1,000
- * ft up, not 2,500. The ground of a flight runs from the field it left to
- * the one it landed on, as its taxiing there recorded them (see
- * groundProfileFt), so a flight taxis on the map at both ends. Terrain
- * would go underneath later (issue #297).
+ * ft up, not 2,500. The ground of a flight is the one the build sampled
+ * under it from an elevation model, anchored to the fields it left and
+ * landed on (kml_heatmap/terrain.py), and without it the line from the one
+ * field to the other (see groundProfileFt); either way a flight taxis on
+ * the map at both ends. From TERRAIN_MIN_ZOOM in, the map draws the relief
+ * under the flights, and the ribbons stand on it.
  *
  * The heights are exaggerated, more the further out the map is: at true
  * scale a circuit is a hair above the ground at any zoom where the
@@ -50,6 +52,32 @@ const RIBBON_WIDTH_PX = 3;
  */
 export const LIFT_MAX_ZOOM = 17;
 
+/**
+ * The map zoom from which the 3D view draws the relief under the flights
+ * (ui/terrain.ts), by the whole level the ribbons are cut for (see
+ * ribbonWidthZoom). Further out a mountain is a few pixels high, while
+ * every elevation tile in view would be fetched and the layers draped over
+ * it drawn to textures; and the flights are lifted there many times more
+ * than the relief could be (LIFT_STOPS). The map shapes the relief from
+ * the tiles of its own level, one coarser than the ground was sampled at
+ * on this one, which smooths a ridge by a pixel or two and no more; a
+ * level further out a level flight would climb and sink with every crest.
+ */
+export const TERRAIN_MIN_ZOOM = 9;
+
+/**
+ * How much the relief is exaggerated, and the heights of the flights with
+ * it, from TERRAIN_MIN_ZOOM in. The map adds the relief's exaggerated
+ * elevation to a ribbon's own height, so a flight only stays at its height
+ * over the ground it flew over where the two factors are the same.
+ */
+export const TERRAIN_EXAGGERATION = 2;
+
+/** Whether the 3D view draws the relief at the map zoom `zoom` */
+export function isTerrainAt(zoom: number): boolean {
+  return ribbonWidthZoom(zoom) >= TERRAIN_MIN_ZOOM;
+}
+
 /** Whether the 3D view lifts the flights at the map zoom `zoom` */
 export function isLiftedAt(zoom: number): boolean {
   return zoom < LIFT_MAX_ZOOM;
@@ -86,7 +114,11 @@ export function ribbonWidthZoom(zoom: number): number {
  * By map zoom: how much the heights are exaggerated, and the band of
  * height a ribbon has, in metres, about three pixels at every zoom. The
  * flights are lifted at every zoom, the whole of a long flight in view
- * included, so the stops reach down to a map of half of Europe.
+ * included, so the stops reach down to a map of half of Europe. Where the
+ * relief is drawn the heights are exaggerated as much as it is, and no
+ * more (see TERRAIN_EXAGGERATION); the ramp comes down to that over the
+ * two levels before, where the flights stay about as high on the screen
+ * as the map grows.
  */
 const LIFT_STOPS: readonly (readonly [
   zoom: number,
@@ -95,11 +127,12 @@ const LIFT_STOPS: readonly (readonly [
 ])[] = [
   [4, 60, 12000],
   [6, 25, 3000],
-  [8, 10, 750],
-  [9.5, 6, 250],
-  [11, 3, 110],
-  [13, 2, 28],
-  [16, 1.5, 6],
+  [7, 10, 1900],
+  [TERRAIN_MIN_ZOOM, TERRAIN_EXAGGERATION, 480],
+  [10, TERRAIN_EXAGGERATION, 200],
+  [11, TERRAIN_EXAGGERATION, 110],
+  [13, TERRAIN_EXAGGERATION, 28],
+  [16, TERRAIN_EXAGGERATION, 6],
 ];
 
 const METRES_PER_DEGREE = 111320;
@@ -143,12 +176,17 @@ function fieldFt(
 }
 
 /**
- * The ground under every segment, in feet, by its index: from the field a
- * flight left to the one it landed on, as its taxiing recorded them, and
- * in between along the way it flew, in proportion to the distance. The
- * heights are the recorder's own, so its taxiing is on the map whatever
- * its altimeter was off by; and an altitude that dips below the fields in
- * flight, as a glitch of the recorder does, takes no flight up with it.
+ * The ground under every segment, in feet, by its index: what the build
+ * sampled under a flight (PathSegment.ground_ft), where it has that for
+ * every segment and `sampled` asks for it. The sampled ground follows the
+ * relief, so it is only the ground where the relief is drawn: over a flat
+ * map a level flight above it would climb and sink with every ridge it
+ * crossed. Otherwise from the field a flight left to the one it
+ * landed on, as its taxiing recorded them, and in between along the way it
+ * flew, in proportion to the distance. The heights are the recorder's own,
+ * so its taxiing is on the map whatever its altimeter was off by; and an
+ * altitude that dips below the fields in flight, as a glitch of the
+ * recorder does, takes no flight up with it.
  *
  * A flight that starts or ends in the air has a field at one end only, and
  * stands on it; one with neither, or without speeds, on the lowest part
@@ -156,6 +194,7 @@ function fieldFt(
  */
 export function groundProfileFt(
   segments: readonly PathSegment[],
+  sampled = true,
 ): Float64Array {
   const byPath = new Map<number, number[]>();
   segments.forEach((segment, index) => {
@@ -166,6 +205,11 @@ export function groundProfileFt(
   const ground = new Float64Array(segments.length);
   let lowest: Map<number, number> | null = null;
   for (const [pathId, indices] of byPath) {
+    const samples = indices.map((index) => segments[index]!.ground_ft);
+    if (sampled && !samples.includes(undefined)) {
+      samples.forEach((feet, i) => (ground[indices[i]!] = feet!));
+      continue;
+    }
     const start = fieldFt(segments, indices);
     const end = fieldFt(segments, [...indices].reverse());
     if (start === null && end === null) {
@@ -361,6 +405,17 @@ function smoothHeight(
   return Math.min(Math.max(h, Math.min(h1, h2)), Math.max(h1, h2));
 }
 
+/** How smoothLine smooths a line */
+export interface SmoothOptions {
+  /** Degrees of turn per point of the curve (see SMOOTH_TURN_DEG) */
+  turnStepDeg?: number | undefined;
+  /**
+   * The ground under each point, in feet: the heights are altitudes then,
+   * and the ground is taken off them after they are smoothed
+   */
+  ground?: readonly number[] | undefined;
+}
+
 /**
  * A line of `[lat, lng]` points with the feet above ground at each, drawn
  * as a smooth curve through its points: the logged positions stay where
@@ -368,13 +423,21 @@ function smoothHeight(
  * along a spline through its neighbours; its heights change no faster
  * than MAX_SLOPE allows. The whole of a flight is smoothed at once, so the ribbons cut from it at its colour and height steps meet
  * in the same points and fit together without a seam.
+ *
+ * `turnStepDeg` is the turn per point of the curve. With `ground`, the
+ * ground under each point, `heights` are altitudes, and
+ * are smoothed and held to the slope as such before the ground is taken
+ * off: a flight level over a ridge stays level, where its height above the
+ * relief changes faster than any climb.
  */
 export function smoothLine(
   points: readonly Coordinate[],
   heights: readonly number[],
-  turnStepDeg = SMOOTH_TURN_DEG,
+  { turnStepDeg = SMOOTH_TURN_DEG, ground }: SmoothOptions = {},
 ): SmoothedLine {
   if (points.length === 0) return { points: [], heights: [], vertex: [] };
+  // The ground at every point of the curve, straight between the given ones
+  const under = ground && [ground[0]!];
   // Planar metres around the line, so the curve is round on the ground
   const [lat0] = points[0]!;
   const scale = Math.cos(lat0 * DEGREES_TO_RADIANS);
@@ -407,12 +470,17 @@ export function smoothLine(
       const [x, y] = catmullRom(p0, p1, p2, p3, k / steps);
       out.points.push([y! / METRES_PER_DEGREE, x! / scale / METRES_PER_DEGREE]);
       out.heights.push(smoothHeight(h0, h1, h2, h3, k / steps));
+      under?.push(ground![i]! + ((ground![i + 1]! - ground![i]!) * k) / steps);
     }
     out.points.push(points[i + 1]!);
     out.heights.push(h2);
+    under?.push(ground![i + 1]!);
     out.vertex.push(out.points.length - 1);
   }
   limitSlope(out.points, out.heights);
+  if (under) {
+    out.heights = out.heights.map((feet, j) => liftFt(feet, under[j]!));
+  }
   return out;
 }
 
@@ -454,12 +522,24 @@ export interface SmoothedFlights {
   to: Int32Array;
 }
 
+/** How smoothFlights smooths the flights */
+export interface SmoothFlightsOptions {
+  /** Degrees of turn per point of the curve (see SMOOTH_TURN_DEG) */
+  turnStepDeg?: number | undefined;
+  /**
+   * The ground under the end of a segment, in feet: `heightOf` gives
+   * altitudes then (see SmoothOptions)
+   */
+  groundOf?: ((index: number) => number) | undefined;
+}
+
 /**
  * Smooth the flights of `segments`, the height of each point from
- * `heightOf`: the feet above ground a segment ends at. A segment's
- * altitude is the one at its end, so a chain's first point takes the
- * height of its first segment. `turnStepDeg` is the turn per point of the
- * curve (see SMOOTH_TURN_DEG).
+ * `heightOf`: the feet above ground a segment ends at, or with `groundOf`
+ * its altitude, and the ground under it from that (see smoothLine). A
+ * segment's altitude is the one at its end, so a chain's first point takes
+ * the height of its first segment. `turnStepDeg` is the turn per point of
+ * the curve (see SMOOTH_TURN_DEG).
  */
 export function smoothFlights(
   segments: readonly {
@@ -467,7 +547,7 @@ export function smoothFlights(
     coords?: readonly [Coordinate, Coordinate] | undefined;
   }[],
   heightOf: (index: number) => number,
-  turnStepDeg?: number,
+  { turnStepDeg, groundOf }: SmoothFlightsOptions = {},
 ): SmoothedFlights {
   const count = segments.length;
   const chainOf = new Int32Array(count).fill(-1);
@@ -498,6 +578,7 @@ export function smoothFlights(
     }
     const points: Coordinate[] = [first.coords[0]];
     const heights: number[] = [heightOf(i)];
+    const ground = groundOf && [groundOf(i)];
     for (const m of members) {
       // Across the antimeridian the curve goes on past 180 rather than
       // round the world, through the spline points it would add there
@@ -505,8 +586,9 @@ export function smoothFlights(
       const lng = unwrapLng(end[1], points[points.length - 1]![1]);
       points.push(lng === end[1] ? end : [end[0], lng]);
       heights.push(heightOf(m));
+      ground?.push(groundOf!(m));
     }
-    const line = smoothLine(points, heights, turnStepDeg);
+    const line = smoothLine(points, heights, { turnStepDeg, ground });
     members.forEach((m, j) => {
       chainOf[m] = chains.length;
       from[m] = line.vertex[j]!;

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  liftReplayCurve,
   prepareReplaySegments,
   replayCurve,
   replayPoint,
@@ -282,6 +283,41 @@ describe("replay feature", () => {
       const middle = replayPoint(curve, 1, 0.5)!.heightFt;
       expect(middle).toBeGreaterThan(100);
       expect(middle).toBeLessThan(200);
+    });
+
+    it("stands the curve on another ground and keeps its times", () => {
+      // Uneven times, which the curve smooths
+      const segments = flight(turn, [2, 1, 3, 1, 2, 4]);
+      const altitude = (): number => 3000;
+      const line = (): number => 500;
+      const relief = (i: number): number => 500 + 400 * (i % 2);
+      const curve = replayCurve(segments, altitude, line);
+      expect([...curve.times]).not.toEqual(segments.map((s) => s.time));
+      // The replay goes on with the smoothed times (see replayManager.ts)
+      const replayed = segments.map((segment, i) => ({
+        ...segment,
+        time: curve.times[i]!,
+      }));
+
+      const lifted = liftReplayCurve(curve, replayed, altitude, relief);
+
+      // When the airplane is where stays as it was: the smoothed times are
+      // not smoothed again
+      expect(lifted.times).toBe(curve.times);
+      expect(lifted.along).toBe(curve.along);
+      expect(lifted.startSlope).toBe(curve.startSlope);
+      expect(lifted.endSlope).toBe(curve.endSlope);
+      expect(lifted.chains.map((c) => c.points)).toEqual(
+        curve.chains.map((c) => c.points),
+      );
+      // The heights are the ones over the new ground
+      const fresh = replayCurve(segments, altitude, relief);
+      expect(lifted.chains.map((c) => c.heights)).toEqual(
+        fresh.chains.map((c) => c.heights),
+      );
+      expect(lifted.chains[0]!.heights).not.toEqual(curve.chains[0]!.heights);
+      // And the times of the fresh curve, from the logged ones, agree
+      expect([...fresh.times]).toEqual([...curve.times]);
     });
 
     it("has nothing for a segment without coordinates", () => {

@@ -33,7 +33,9 @@ const curvesOf = new WeakMap<readonly PathSegment[], SmoothedFlights>();
 export function flatCurves(segments: readonly PathSegment[]): SmoothedFlights {
   let curves = curvesOf.get(segments);
   if (!curves) {
-    curves = smoothFlights(segments, () => 0, FLAT_TURN_STEP_DEG);
+    curves = smoothFlights(segments, () => 0, {
+      turnStepDeg: FLAT_TURN_STEP_DEG,
+    });
     curvesOf.set(segments, curves);
   }
   return curves;

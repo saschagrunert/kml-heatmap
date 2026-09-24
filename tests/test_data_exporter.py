@@ -35,7 +35,8 @@ from kml_heatmap.data_exporter import (
 )
 from kml_heatmap.exceptions import KMLHeatmapError
 from kml_heatmap.helpers import parse_timestamp_epoch
-from kml_heatmap.segment_codec import FORMAT_VERSION
+from kml_heatmap.segment_codec import FORMAT_VERSION, decode_ground
+from kml_heatmap.terrain import FlatTiles
 from kml_heatmap.types import TrackPoint
 from tests.conftest import decoded_segments
 
@@ -1335,6 +1336,7 @@ class TestExportAllData:
                     [],
                     output_dir=str(output_dir),
                     aircraft_data={"D-EAGJ": "Katana"},
+                    terrain=FlatTiles(100.0),
                 )
             trees.append(
                 {
@@ -1351,3 +1353,61 @@ class TestExportAllData:
             "metadata.json",
         ]
         assert trees[0] == trees[1]
+        # The ground reached the chunks the pool ran
+        assert b'"ground":[' in trees[1]["2025/data.json"]
+
+
+class OneTileMissing:
+    """Flat ground at 100 m, but for the tile around longitude 12"""
+
+    def pixels(self, wanted):
+        return {
+            tile: [100.0] * len(indices)
+            for tile, indices in wanted.items()
+            if tile.x != 546
+        }
+
+
+class TestGround:
+    def test_no_ground_without_terrain(self, tmp_path, parse_data):
+        export_all_data([_timed_path()], [{"year": 2025}], [], output_dir=tmp_path)
+
+        entries = parse_data(tmp_path / "2025" / "data.json")["segments"].values()
+        assert all("ground" not in entry for entry in entries)
+
+    def test_every_row_of_a_path_gets_its_ground(self, tmp_path, parse_data):
+        export_all_data(
+            [_timed_path()],
+            [{"year": 2025}],
+            [],
+            output_dir=tmp_path,
+            terrain=FlatTiles(100.0),
+        )
+
+        data = parse_data(tmp_path / "2025" / "data.json")
+        (entry,) = data["segments"].values()
+        # The path neither starts nor ends taxiing, so the model is the ground
+        assert decode_ground(entry["ground"]) == [330.0, 330.0]
+
+    def test_a_path_under_a_missing_tile_gets_none(self, tmp_path, parse_data):
+        paths = [_timed_path(), _path((50.0, 12.0, 100.0), (50.1, 12.1, 200.0))]
+
+        export_all_data(
+            paths,
+            [{"year": 2025}] * 2,
+            [],
+            output_dir=tmp_path,
+            terrain=OneTileMissing(),
+        )
+
+        segments = parse_data(tmp_path / "2025" / "data.json")["segments"]
+        assert "ground" in segments[str(path_content_id(paths[0]))]
+        assert "ground" not in segments[str(path_content_id(paths[1]))]
+
+    def test_a_chunk_without_elevations_writes_no_ground(self, tmp_path):
+        process_year_chunk(
+            2025, [_timed_path()], [{"year": 2025}], [1], str(tmp_path), 0, None, [None]
+        )
+
+        _, segments_part = _part_paths(str(tmp_path), 2025, 0)
+        assert '"ground"' not in segments_part.read_text()

@@ -96,6 +96,8 @@ interface MockManagers {
     hitTest: Mock;
     onPathClick: Mock;
     closeSegmentPopup: Mock;
+    restyle: Mock;
+    ribbonsShown: number;
   };
   filterManager: {
     updateAircraftDropdown: Mock;
@@ -280,6 +282,8 @@ function createMockManagers(): MockManagers {
       hitTest: vi.fn(() => null),
       onPathClick: vi.fn(),
       closeSegmentPopup: vi.fn(),
+      restyle: vi.fn(),
+      ribbonsShown: 1,
     },
     filterManager: {
       updateAircraftDropdown: vi.fn(),

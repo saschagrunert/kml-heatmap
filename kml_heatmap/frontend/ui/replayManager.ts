@@ -14,7 +14,6 @@ import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
 import {
   airplaneLiftPx,
   groundProfileFt,
-  liftFt,
   type SmoothedFlights,
 } from "../calculations/lift";
 import { appendCurve } from "../calculations/curves";
@@ -25,7 +24,11 @@ import {
   type LngLatTuple,
 } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
-import { prepareReplaySegments, replayCurve } from "../features/replay";
+import {
+  liftReplayCurve,
+  prepareReplaySegments,
+  replayCurve,
+} from "../features/replay";
 import { segmentBounds } from "../features/wrapped";
 import { segmentsForPathIds } from "../calculations/statistics";
 
@@ -249,8 +252,9 @@ export class ReplayManager {
 
   /**
    * The colour toggles stay usable during replay and change what colours
-   * the trail; the 3D view comes or goes, and the flown trail is cut again,
-   * lifted or flat, with the airplane going up or down with it
+   * the trail; the 3D view or its relief comes or goes, and the flown trail
+   * is cut again, lifted or flat, on the ground of the view, with the
+   * airplane going up or down with it
    */
   private followLayers(): void {
     this.stopFollowingLayers();
@@ -266,11 +270,14 @@ export class ReplayManager {
       ["altitudeVisible", "airspeedVisible"],
       recolour,
     );
-    const unsubscribeLift = store.subscribe("threeDVisible", (on) => {
-      this.setLifted(on);
-      this.redrawReplayPath(this.trailMode());
-      this.updateReplayDisplay();
-    });
+    const unsubscribeLift = store.subscribeKeys(
+      ["threeDVisible", "terrainActive"],
+      () => {
+        this.setLifted(this.app.threeDVisible);
+        this.redrawReplayPath(this.trailMode());
+        this.updateReplayDisplay();
+      },
+    );
     this.unsubscribeTrail = () => {
       unsubscribeColours();
       unsubscribeLift();
@@ -286,11 +293,28 @@ export class ReplayManager {
 
   /**
    * Lift the trail and the airplane, or put them on the ground: the trail's
-   * ribbons are cut from the flight's curve at its height (see lift.ts)
+   * ribbons are cut from the flight's curve at its height (see lift.ts),
+   * over the ground the layers stand on (terrainActive). As that changes,
+   * the curve's heights are worked out anew; where it runs, and when the
+   * airplane is where on it, stay as they are.
    */
   private setLifted(lifted: boolean): void {
     const state = this.state;
     state.lifted = lifted;
+    const curve = state.smoothed;
+    if (curve && state.onTerrain !== this.app.terrainActive) {
+      state.onTerrain = this.app.terrainActive;
+      const ground = (state.groundFt = groundProfileFt(
+        state.segments,
+        state.onTerrain,
+      ));
+      state.smoothed = liftReplayCurve(
+        curve,
+        state.segments,
+        (i) => state.segments[i]!.altitude_ft ?? 0,
+        (i) => ground[i]!,
+      );
+    }
     state.trailPieces = new WeakMap();
     state.trailWidthZoom = null;
   }
@@ -423,12 +447,19 @@ export class ReplayManager {
 
     this.calculateColorRanges(selectedPathId);
     const state = this.state;
-    state.groundFt = groundProfileFt(state.segments);
+    state.onTerrain = this.app.terrainActive;
+    const ground = (state.groundFt = groundProfileFt(
+      state.segments,
+      state.onTerrain,
+    ));
     // The flight's curve, timed, and at its height for the 3D view: once
-    // per replay, flat or lifted. The replay goes by the times the curve
-    // has smoothed, on copies of the segments: the dataset keeps its own.
-    const curve = (state.smoothed = replayCurve(state.segments, (i) =>
-      liftFt(state.segments[i]!.altitude_ft ?? 0, state.groundFt[i] ?? 0),
+    // per replay, flat or lifted, and on the ground of the view (see
+    // setLifted). The replay goes by the times the curve has smoothed, on
+    // copies of the segments: the dataset keeps its own.
+    const curve = (state.smoothed = replayCurve(
+      state.segments,
+      (i) => state.segments[i]!.altitude_ft ?? 0,
+      (i) => ground[i]!,
     ));
     state.segments = state.segments.map((segment, i) => ({
       ...segment,

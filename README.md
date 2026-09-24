@@ -42,7 +42,8 @@
 - Year and aircraft filtering
 - Flight replay with animated airplane marker
 - A map that turns and tilts, and a globe for flights that span a continent
-- A 3D view that lifts the flights to their altitude
+- A 3D view that lifts the flights to their altitude above the ground they
+  flew over, sampled from an elevation model when the site is built
 - Year-in-review "Wrapped" summary
 - Shareable URLs that encode the exact map state
 - Privacy protection: no flight date finer than the year reaches the
@@ -260,9 +261,10 @@ container.
 ### Docker Usage
 
 If you prefer using Docker directly. Input files are read and left alone (pass
-`--obfuscate-inputs` to rewrite them too). Mount the OurAirports cache so it is
-not downloaded on every run, and run as your user id so the output is owned by
-you (add `--userns=keep-id` with rootless podman):
+`--obfuscate-inputs` to rewrite them too). Mount the cache of the OurAirports
+database and the elevation tiles so they are not downloaded on every run, and
+run as your user id so the output is owned by you (add `--userns=keep-id` with
+rootless podman):
 
 ```bash
 # Build the image
@@ -322,7 +324,7 @@ wrapper.
 ### Command-Line Options
 
 ```
-kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--version] path [path ...]
+kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--version] path [path ...]
 ```
 
 - `path` - KML files and/or directories. Directories are scanned with their
@@ -341,6 +343,10 @@ kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--version] path [
   by default: the generated site never carries a flight date finer than the
   year whatever the inputs hold (see [Privacy](#privacy)), so this is about the
   KML files, not about what gets published. Keep a copy of the originals first.
+- `--no-terrain` - Do not sample the ground under the flights from the
+  elevation tiles (see [Elevation Data](#elevation-data)); nothing is
+  downloaded for it, and the 3D view puts each flight on a line between its
+  airfields
 - `--version` - Show the version and exit
 
 Every file is written into a hidden staging directory inside the output first
@@ -601,6 +607,16 @@ known.
 **Your input files are read and left alone** unless you pass
 `--obfuscate-inputs`, which cannot be undone.
 
+**The build asks AWS for the elevation tiles of the area you flew over**
+(see [Elevation Data](#elevation-data)): tiles of about 25 km across at
+50 degrees north, fetched once and cached, with nothing else in the request.
+Pass `--no-terrain` to build without them.
+
+**The page asks AWS for the elevation tiles of the area in view** while the 3D
+view is on and zoomed in to `z` 10 or closer, to draw or shade the relief: AWS sees the
+visitor's address and which tiles, so roughly where on the map they look, as
+CARTO does for the base map. Nothing is fetched from AWS otherwise.
+
 ### Obfuscating the KML files themselves
 
 That is a separate need: this repository commits the files in `data/`, and
@@ -694,11 +710,14 @@ written by another release is refused rather than misread. `path_info` lists
 the flights in input order, each with its id, year, airports, aircraft and
 exact altitude range; where a flight starts and ends is read from its
 segments. `segments` maps a path id to
-`{"start": [lat, lon], "columns": [lats, lons, altitudes, speeds, times]}`,
+`{"start": [lat, lon], "columns": [lats, lons, altitudes, speeds, times], "ground": [...]}`,
 one row per segment, written column by column: the n-th entry of each column
 is the n-th row's latitude, longitude, altitude in feet, groundspeed in knots
 and relative time in seconds. The `times` column is only present for files
-with timestamps, and holds `null` for a row without one.
+with timestamps, and holds `null` for a row without one. `ground` is the
+ground under each row in feet (see [Elevation Data](#elevation-data)); a path
+whose ground the build does not know has none, and the page takes it from
+the airfields.
 
 The coordinate in a row is the segment's **end** point. Its start is the end
 of the previous row, and the first row continues from `start`, so a shared
@@ -711,8 +730,8 @@ Every value above is written as an integer difference to the row before it
 rather than as the number itself (`kml_heatmap/segment_codec.py`, mirrored by
 `decodeYear` in `services/yearDecode.ts`, which the page runs in a worker).
 The exporter has already rounded each column to a fixed step (1e-5 degrees,
-100 ft, 0.1 kt and 0.1 s), so counting in that step is exact, and
-neighbouring rows barely differ: the encoding is lossless and roughly halves
+100 ft, 0.1 kt, 0.1 s and 10 ft of ground), so counting in that step is
+exact, and neighbouring rows barely differ: the encoding is lossless and roughly halves
 a year file. Writing the rows column by column puts the repeating
 differences of one quantity next to each other, which takes another sixth
 off the compressed download. The numbers the page works with are the ones
@@ -771,7 +790,7 @@ as scripts (`data.js`, `metadata.js`, `airports.js`), removes those files.
 - **Wrapped** - View the year-in-review summary; Escape closes it
 - **Replay** - Animate one flight with adjustable speed (default 50x) and an auto-zoom button that follows the airplane. The whole track is drawn dimmed and the flown part paints over it in the colours of the active scale. Replay needs exactly one selected flight with timing data; a toast explains why it is unavailable otherwise
 - **Globe** - Draw the map as a globe instead of in Mercator. Above zoom 12 the two look the same, which is MapLibre's doing. Airport markers on the far side are hidden, and a popup closes once the globe has turned its place away. The space around the globe is the page background; no atmosphere is drawn
-- **3D flights** - Lift the flights to their altitude, as ribbons about as wide as the lines at every zoom that stand on the ground of each flight: the altitudes it recorded taxiing at the field it left and at the one it landed on, sloping from one to the other along the way, so a flight taxis on the map at both ends even between fields of different height, and an altitude glitch of the recorder takes no flight up with it and follow its climbs and descents in 20 ft steps. Heights are exaggerated where the map is zoomed out, 60 times at `z` 5 down to 1.5 times at `z` 17, so a flight still shows its shape on a map of half of Europe. Switching it on colours the paths by altitude if neither colour layer is on and tilts a flatter map to 50 degrees. From `z` 18 in, where the camera is lower than a traffic circuit, the flights are drawn flat again. Replay lifts its airplane and its trail with them. There is no terrain: the map stays flat, and each flight is drawn at its height above its own ground
+- **3D** - Lift the flights to their altitude, as ribbons about as wide as the lines at every zoom that follow their climbs and descents in 20 ft steps and stand on the ground each flight flew over: the build samples it under every logged position from an elevation model (see [Elevation Data](#elevation-data)) and shifts it to meet the altitudes the flight recorded taxiing at the field it left and at the one it landed on, so a flight taxis on the map at both ends even where the model and the recorder disagree by tens of feet, and crosses a ridge at its true height above it. A flight whose ground is not known (a build with `--no-terrain` or without the tiles) stands on a line from the one field to the other instead, and an altitude glitch of the recorder takes no flight up with either. Heights are exaggerated where the map is zoomed out, 60 times at `z` 5 down to twice at `z` 10, so a flight still shows its shape on a map of half of Europe. Switching it on colours the paths by altitude if neither colour layer is on and tilts a flatter map to 50 degrees. From `z` 18 in, where the camera is lower than a traffic circuit, the flights are drawn flat again. Replay lifts its airplane and its trail with them. From `z` 10 in the map draws the relief under the flights, exaggerated twice like their heights and shaded faintly (dark slopes, a little light on the others) under the roads, the labels and the flights, and each flight stands on it at its height above the ground it flew over; further out the map stays flat and each flight stands on the line between its fields, since a ridge a few pixels high would only make a level flight climb and sink with it. The relief comes from the same elevation tiles as the ground (see [Elevation Data](#elevation-data)), which the browser fetches from AWS while it is drawn. The globe only shades it: the relief itself is left out there, and each flight stands on the line between its fields.
 - **North up** - The map turns and tilts (up to 85 degrees, with a sky above the horizon) by gesture: drag with the right mouse button or with Ctrl held, twist or drag with two fingers, or hold Shift with the arrow keys once the map has focus. The needle on this button points north, and a click turns the map back north up and flat. On a phone the compass floats at the top right of the map while the map is turned or tilted, and the globe switch is in the Layers sheet. Replay keeps the orientation you chose and points the airplane along its track on screen; Wrapped shows its overview north up and flat and gives your view back when it closes
 - A map attribution, on the map at every width; it steps aside only while a sheet or the statistics panel covers the map it credits. There are no zoom buttons: use the scroll wheel, pinch, double click, or the keyboard once the map has focus
 - Below 768 px the two control columns are replaced by a bottom bar with five tabs. Layers, Filter and More open a sheet; Stats and Wrapped open their panel directly. Escape closes an open sheet, and Tab stays inside it. Replay takes over the bottom edge and the bar steps aside until it ends
@@ -856,7 +875,7 @@ Airport names and coordinates come from the
 run and cached for 30 days in `~/.cache/kml-heatmap` (override with
 `KML_HEATMAP_CACHE_DIR`; the container image uses `/cache`). Mount the cache
 directory as the `Makefile` does (`-v ~/.cache/kml-heatmap:/cache`) to avoid
-downloading it on every container run. The same directory holds a per-file
+downloading it, and the elevation tiles, on every container run. The same directory holds a per-file
 parse cache (`kml/`) keyed by file name and content, the parser code and the
 airport database, so unchanged KML files are not parsed again; entries unused
 for 30 days are removed.
@@ -865,6 +884,56 @@ Without the database the site is still generated, with the airport names as
 the KML files spell them and without countries. Set
 `KML_HEATMAP_REQUIRE_AIRPORT_DB=1` to fail instead, as CI does for the
 published site.
+
+### Elevation Data
+
+The ground under the flights (the 3D view stands them on it) comes from the
+[Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) on AWS Open
+Data, in the Terrarium encoding, at zoom 10: pixels of about 100 m at
+50 degrees north, fine enough for the relief under a flight. The build
+samples the elevation under every exported position, bilinear across tile
+edges, and writes it into the year files; `kml_heatmap/terrain.py` has the
+details, including how the model is shifted to meet the altitudes a flight
+recorded taxiing at both ends. The 3D view draws the relief from the same
+tiles from `z` 10 in (the page fetches them from AWS then, and credits them
+on the map while they are drawn), so the ground a flight is measured against
+and the ground it is drawn on are the same model; at `z` 10 the map shapes it
+from the tiles a level coarser, which smooths a ridge by a pixel or two.
+
+The tiles are downloaded on the first run, eight at a time, and kept in
+`terrain/` of the cache directory (see [Airport Database](#airport-database)),
+about 100 KB each: the flights of `data/` touch 389 of them, 44 MB. A tile
+never changes, so it is never fetched again. Offline, or when a tile cannot
+be fetched, the build goes on without it: a flight with a position under a
+missing tile gets no ground and stands on the line between its airfields, and
+one warning says how many flights that affects. `--no-terrain` skips the
+tiles altogether.
+
+The terrain tiles are made by Mapzen's
+[Joerd](https://github.com/tilezen/joerd) from several sources, which ask for
+this [attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution.md):
+
+- ArcticDEM terrain data DEM(s) were created from DigitalGlobe, Inc., imagery
+  and funded under National Science Foundation awards 1043681, 1559691, and
+  1542736;
+- Australia terrain data © Commonwealth of Australia (Geoscience Australia)
+  2017;
+- Austria terrain data © offene Daten Österreichs - Digitales Geländemodell
+  (DGM) Österreich;
+- Canada terrain data contains information licensed under the Open Government
+  Licence - Canada;
+- Europe terrain data produced using Copernicus data and information funded by
+  the European Union - EU-DEM layers;
+- Global ETOPO1 terrain data U.S. National Oceanic and Atmospheric
+  Administration
+- Mexico terrain data source: INEGI, Continental relief, 2016;
+- New Zealand terrain data Copyright 2011 Crown copyright (c) Land Information
+  New Zealand and the New Zealand Government (All rights reserved);
+- Norway terrain data © Kartverket;
+- United Kingdom terrain data © Environment Agency copyright and/or database
+  right 2015. All rights reserved;
+- United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data
+  courtesy of the U.S. Geological Survey.
 
 ### Data Export
 

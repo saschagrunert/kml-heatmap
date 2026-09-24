@@ -399,7 +399,9 @@ export function addDataLayers(map: MapLibreMap): void {
  * layer of the new style, where `addDataLayers` would have put them; the
  * airport labels go on top of all. The projection comes along too: it
  * lives in the style, and a globe chosen before the base style arrived
- * would otherwise turn back into Mercator.
+ * would otherwise turn back into Mercator; and so does the relief of the
+ * 3D view (ui/terrain.ts), which would otherwise go while the flights
+ * stay cut for it.
  */
 export function withDataLayers(
   previous: StyleSpecification | undefined,
@@ -422,11 +424,13 @@ export function withDataLayers(
   const projection = previous.projection ?? next.projection;
   // The sky of a tilted map: the base style has none of its own
   const sky = next.sky ?? previous.sky;
+  const terrain = previous.terrain;
   return {
     ...next,
     sources,
     layers,
     ...(projection && { projection }),
     ...(sky && { sky }),
+    ...(terrain && { terrain }),
   };
 }

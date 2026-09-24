@@ -26,6 +26,17 @@ export interface StoreState {
   /** Whether the flights are lifted to their altitude (calculations/lift.ts) */
   threeDVisible: boolean;
   /**
+   * Whether the 3D view draws the relief, and the flights stand on the
+   * sampled ground (see LayerManager.syncTerrain, its only writer)
+   */
+  terrainActive: boolean;
+  /**
+   * Whether the 3D view shades the relief: where it draws it, and on the
+   * globe, which leaves the relief itself out (see LayerManager.syncTerrain,
+   * its only writer)
+   */
+  reliefShaded: boolean;
+  /**
    * Whether a replay is running. The layer flags keep what the user chose;
    * what the map shows follows from both (see ui/layerVisibility.ts).
    */
@@ -70,6 +81,8 @@ export const STORE_ACCESSOR_KEYS = [
   "aviationVisible",
   "globeVisible",
   "threeDVisible",
+  "terrainActive",
+  "reliefShaded",
   "replayActive",
   "currentData",
   "hasTimingData",
@@ -116,6 +129,8 @@ export function createDefaultState(): StoreState {
     aviationVisible: false,
     globeVisible: false,
     threeDVisible: false,
+    terrainActive: false,
+    reliefShaded: false,
     replayActive: false,
     statsPanelVisible: false,
     wrappedVisible: false,

@@ -263,6 +263,72 @@ make check-obfuscation                  # KML files in data/ are obfuscated
 - `lxml` - Fast XML parsing for KML files
 - `rcssmin`, `rjsmin`, `minify-html` - Output minification (HTML/CSS/JS)
 
+**Year file format and the ground column:**
+
+The year files are data format 4 (`FORMAT_VERSION` in
+`kml_heatmap/segment_codec.py`, `DATA_FORMAT_VERSION` in
+`services/yearDecode.ts`; bump both together, the page refuses any other).
+Format 4 added a `ground` column per path: the ground under every row in
+steps of 10 ft, as differences like the other columns, left out for a path
+whose ground is not known. `kml_heatmap/terrain.py` computes it at build time
+from the Terrarium elevation tiles of AWS, shifted to meet the altitudes the
+flight recorded taxiing at both ends, so the correction lives in one place
+and the page only reads the result (`groundProfileFt` in
+`calculations/lift.ts` falls back to the line between the fields without it).
+
+The tiles (zoom 10, about 100 KB each) are cached as PNGs in `terrain/` of
+the cache directory (`KML_HEATMAP_CACHE_DIR`, by default
+`~/.cache/kml-heatmap`) and decoded by a small pure-Python PNG reader in a
+process pool; `data/` needs 389 of them, 44 MB. Offline, or for a tile that
+cannot be fetched, the build goes on and the flights under it get no ground;
+one warning says how many. `--no-terrain` skips the tiles altogether, which
+`scripts/build_visual_site.py` does: its snapshots show no 3D view. The CI
+jobs that build from `data/` restore the tile cache with `actions/cache`.
+
+No test touches the network: `tests/conftest.py` fails any download of a
+tile loudly, the pipeline tests pass a tile source of their own
+(`create_progressive_heatmap(..., terrain=...)`, see `TileSource`), and
+`FlatTiles` stands the flights on a flat model. A decoding pool that dies
+leaves the ground out with one warning instead of failing the build.
+
+**The relief of the 3D view:**
+
+From map zoom 9 in (`TERRAIN_MIN_ZOOM` in `calculations/lift.ts`, `z` 10 in
+the UI) the 3D view draws the relief with `setTerrain`, from a `raster-dem`
+source of the same Terrarium tiles and level the build samples
+(`ui/terrain.ts`, which comes with the feature bundle and is fetched the
+first time the relief is wanted). The relief and the heights of the ribbons
+are exaggerated by the one `TERRAIN_EXAGGERATION` there, since the
+`fill-extrusion` shader adds the exaggerated relief to every ribbon; the
+`LIFT_STOPS` ramp comes down to it at that zoom. MapLibre shapes the relief
+from the elevation tiles of the map's own level (its terrain tiles are
+twice the source's 256 pixels), so at map zoom 9 they are a level coarser
+than the sampled ground and a level flight ripples by a pixel or two; at 8
+it would be two levels, where the ramp lifts the flights three times as
+much as the relief. `LayerManager.syncTerrain`
+decides it (`terrainActive` in the store) by the whole level the ribbons are
+cut for, and cuts them on the sampled ground inside the relief and on the
+line between the fields outside, in the same task as the relief is switched;
+`ui/terrain.ts` hides the ribbons until the map has drawn their new tiles and
+the elevation tiles. A `hillshade` layer from the same source shades the
+relief while it is drawn, directly above the base map's last area fill (so
+below its roads, its labels and every layer of the app), in the colours of
+the `--terrain-*` tokens of `styles.css`; a second source would fetch about
+2.6 times the tiles, for a sharper shading nobody sees under the dark
+style (MapLibre warns about the shared source once). `withDataLayers`
+carries the source and the relief across a base style swap and
+`ui/terrain.ts` puts the shading back into the new style. The globe gets
+the shading alone (`reliefShaded` in the store, set by `syncTerrain` for the
+3D view in the same zoom band, globe or not) and no relief, since MapLibre
+6.10 breaks the ribbons up on the relief of the globe: `terrainActive`, and
+with it the ground the ribbons are cut on, stays off there.
+
+The page fetches the tiles from `s3.amazonaws.com`, which the CSP names in
+`connect-src` (MapLibre fetches raster-dem tiles; `img-src` needs no entry).
+The e2e fixture (`tests/e2e/fixtures.ts`) answers them itself with a flat
+tile 500 m up, so specs and screenshots stay deterministic and a spec can
+tell the flights stand on the relief.
+
 ## Test Data Generation
 
 Generate realistic test KML files for performance testing:

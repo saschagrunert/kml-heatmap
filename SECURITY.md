@@ -43,7 +43,9 @@ for scripts or styles. Only `img-src` and `connect-src` name foreign hosts:
 CARTO's subdomains (`*.basemaps.cartocdn.com`) for the tiles, glyphs and
 sprite of the base map, in `connect-src` also `basemaps.cartocdn.com`
 itself, which serves the style, and the open flightmaps tile server
-(`nwy-tiles-api.prod.newaydata.com`). MapLibre GL JS is published with the
+(`nwy-tiles-api.prod.newaydata.com`), and in `connect-src` the elevation
+tiles on AWS (`s3.amazonaws.com`) the 3D view draws its relief from.
+MapLibre GL JS is published with the
 site as ES modules and starts its worker from one of them, so
 `worker-src 'self'` is enough and no `blob:` worker is allowed.
 Colours computed at runtime are applied through the CSSOM, and a test fails

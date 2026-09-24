@@ -18,9 +18,14 @@ scaled by exactly the step it was rounded to, so
 ``decode_rows(encode_start(start), encode_rows(start, rows)) == rows``,
 which ``tests/test_segment_codec.py`` checks over generated data.
 
-``kml_heatmap/frontend/services/yearDecode.ts`` mirrors ``decode_rows``; the
-year file carries ``FORMAT_VERSION`` so the two cannot be mismatched
-silently.
+Format 4 adds the ground under every row (see ``kml_heatmap.terrain``), in
+feet, as a column of its own beside the others: ``encode_ground``. A path
+whose ground is not known has none, and the page falls back to the line
+between its airfields.
+
+``kml_heatmap/frontend/services/yearDecode.ts`` mirrors ``decode_rows`` and
+``decode_ground``; the year file carries ``FORMAT_VERSION`` so the two cannot
+be mismatched silently.
 """
 
 from __future__ import annotations
@@ -38,17 +43,20 @@ __all__ = [
     "ALTITUDE_STEP",
     "COORDINATE_SCALE",
     "FORMAT_VERSION",
+    "GROUND_STEP",
     "SPEED_SCALE",
     "TIME_SCALE",
     "EncodedColumns",
+    "decode_ground",
     "decode_rows",
+    "encode_ground",
     "encode_rows",
     "encode_start",
 ]
 
 # Bumped whenever the layout below changes, so a page never reads a year
 # file written by another release's exporter as if it were its own
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 
 # How each column becomes an integer: the step the exporter rounds it to.
 # process_path_segments rounds coordinates to COORDINATE_DECIMALS ...
@@ -58,6 +66,9 @@ ALTITUDE_STEP = 100
 # ... and groundspeeds and relative times to one decimal
 SPEED_SCALE = 10
 TIME_SCALE = 10
+# The ground is written in steps of 10 ft: the altitudes above it are
+# rounded to 100 ft, and a finer ground would only cost bytes
+GROUND_STEP = 10
 
 # Column order of a decoded row, and of the encoded columns
 LAT, LON, ALTITUDE, SPEED, TIME = range(5)
@@ -136,3 +147,31 @@ def decode_rows(
             row.append(_unscale(column, previous[column]))
         rows.append(row)
     return rows
+
+
+def encode_ground(ground: Sequence[float]) -> list[int]:
+    """The ground column of a path: feet in ``GROUND_STEP``, as differences.
+
+    The first value is a difference to zero. The ground changes slowly along
+    a flight, so most differences are one or two digits.
+    """
+    column: list[int] = []
+    previous = 0
+    for feet in ground:
+        if feet % GROUND_STEP:
+            msg = f"ground {feet} is not a multiple of {GROUND_STEP} ft"
+            raise ValueError(msg)
+        value = round(feet / GROUND_STEP)
+        column.append(value - previous)
+        previous = value
+    return column
+
+
+def decode_ground(column: Sequence[int]) -> list[float]:
+    """Undo :func:`encode_ground`. The mirror of the frontend's decoder."""
+    ground: list[float] = []
+    value = 0
+    for difference in column:
+        value += difference
+        ground.append(float(value * GROUND_STEP))
+    return ground

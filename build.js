@@ -285,7 +285,17 @@ function analyzeBundleComposition(metafile, fileName) {
 // the abandoned year, antimeridian unwrapping, the redraw after a lost
 // WebGL context), and given a gzipped budget next to the raw one: 135,184 B
 // raw and 45,871 B gzipped.
-const BUDGET_APP = { raw: 134 * 1024, gzip: 46 * 1024 };
+// Raised from 134 KB for the relief under the 3D view (issue #297). The
+// relief itself, its elevation source and the hiding of the ribbons while
+// they settle on it come with the feature bundle (ui/terrain.ts); what
+// cannot wait is in the path every ribbon is cut on: the choice of ground
+// by the level being cut, the flights smoothed as altitudes before the
+// ground is taken off, and the switch that fetches the relief's code,
+// 1.15 KB on top of the 133.42 KB main had after #304; with the single
+// cut of the ribbons as the relief's code arrives, the release of the old
+// cut before the new one, and North up shown unavailable while there is
+// nothing to reset: 138,262 B raw and 45.8 KB gzipped.
+const BUDGET_APP = { raw: 136 * 1024, gzip: 46 * 1024 };
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.
@@ -300,7 +310,11 @@ const BUDGET_APP = { raw: 134 * 1024, gzip: 46 * 1024 };
 // fixes, its heading from the curve, the trail ending at the airplane, and
 // the camera following it as a damped spring instead of a pan restarted on
 // every frame: 45,510 B raw and 15,587 B gzipped.
-const BUDGET_FEATURES = { raw: 47 * 1024, gzip: 16 * 1024 };
+// Raised from 47 KB for the relief of the 3D view and its shading
+// (ui/terrain.ts), which wait here for the first zoom that draws them
+// rather than in the first visit, and the replay's curve lifted anew as
+// the relief comes or goes: 47,861 B raw and 16,495 B gzipped.
+const BUDGET_FEATURES = { raw: 48 * 1024, gzip: 17 * 1024 };
 
 // The year worker's bundle is fetched by every visit, but next to the first
 // year file rather than ahead of the app, so it holds up nothing on the page.
