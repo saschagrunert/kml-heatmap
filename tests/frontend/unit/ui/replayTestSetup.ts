@@ -174,6 +174,7 @@ const PAGE_CHROME: FixtureNode[] = [
   { id: "aircraft-select", tag: "select" },
   { id: "isolate-btn", tag: "button" },
   { id: "selection-clear-btn", tag: "button" },
+  { id: "reset-view-btn", tag: "button" },
 ];
 
 function buildFixtureNode(node: FixtureNode): HTMLElement {

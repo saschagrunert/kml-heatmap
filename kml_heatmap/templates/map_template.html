@@ -325,6 +325,18 @@
         <h2 class="control-group-title" id="map-group-title">Map</h2>
         <div class="control-row">
           <button
+            id="compass-btn"
+            class="btn-surface control-btn compass-btn"
+            data-action="resetNorth"
+            data-icon="compass"
+            title="North up: turn the map back north up and flat (right drag or Ctrl drag turns and tilts it)"
+            aria-label="North up: turn the map back north up and flat"
+          >
+            <span class="control-label">North up</span>
+          </button>
+        </div>
+        <div class="control-row">
+          <button
             id="globe-btn"
             class="btn-surface control-btn"
             data-action="toggleGlobe"
@@ -351,14 +363,14 @@
         </div>
         <div class="control-row">
           <button
-            id="compass-btn"
-            class="btn-surface control-btn compass-btn"
-            data-action="resetNorth"
-            data-icon="compass"
-            title="North up: turn the map back north up and flat (right drag or Ctrl drag turns and tilts it)"
-            aria-label="North up: turn the map back north up and flat"
+            id="reset-view-btn"
+            class="btn-surface control-btn"
+            data-action="resetView"
+            data-icon="reset"
+            title="Reset view: newest year, all aircraft, heatmap and airports, north up"
+            aria-label="Reset view: newest year, all aircraft, heatmap and airports, north up"
           >
-            <span class="control-label">North up</span>
+            <span class="control-label">Reset view</span>
           </button>
         </div>
       </div>

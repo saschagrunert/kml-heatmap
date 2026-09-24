@@ -41,6 +41,7 @@ export function resolveYearSelection(
 
   const latestValue =
     availableYears.length > 0 ? Math.max(...availableYears).toString() : "all";
+  app.defaultYear = latestValue;
 
   if (app.selectedYear === "all") {
     // Default to the latest year only if no saved state exists

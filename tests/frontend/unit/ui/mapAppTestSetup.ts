@@ -168,6 +168,7 @@ export function setupDOM(): void {
       <button id="globe-btn"></button>
       <button id="compass-btn"></button>
       <button id="compass-float-btn" hidden></button>
+      <button id="reset-view-btn"></button>
     </div>
     <div id="altitude-legend"></div>
     <div id="airspeed-legend"></div>
@@ -230,7 +231,7 @@ export async function initializeApp(
   // Keep an implementation that a test installed before initializing
   const filterByYear = mockFilterManagerInstance.filterByYear;
   if (!filterByYear.getMockImplementation()) {
-    filterByYear.mockResolvedValue(undefined);
+    filterByYear.mockResolvedValue(true);
   }
 
   await app.initialize();

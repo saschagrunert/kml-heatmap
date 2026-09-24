@@ -425,6 +425,20 @@ export class MobileBar {
       },
       {
         kind: "action",
+        id: "reset-view",
+        icon: "reset",
+        label: "Reset view",
+        isDisabled: () => app.isReset(),
+        // With nothing to reset a tap does nothing, and the sheet stays
+        closeOnSelect: false,
+        onSelect: () => {
+          if (app.isReset()) return;
+          this.closeSheet();
+          app.resetView().catch(logError);
+        },
+      },
+      {
+        kind: "action",
         id: "export",
         icon: "export",
         label: "Export image",

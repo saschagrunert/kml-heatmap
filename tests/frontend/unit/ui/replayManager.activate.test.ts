@@ -1255,6 +1255,7 @@ describe("ReplayManager activation", () => {
       expect((el("selection-clear-btn") as HTMLButtonElement).disabled).toBe(
         true,
       );
+      expect((el("reset-view-btn") as HTMLButtonElement).disabled).toBe(true);
 
       replayManager.toggleReplay();
 
@@ -1262,6 +1263,7 @@ describe("ReplayManager activation", () => {
       expect((el("selection-clear-btn") as HTMLButtonElement).disabled).toBe(
         false,
       );
+      expect((el("reset-view-btn") as HTMLButtonElement).disabled).toBe(false);
     });
 
     it("disables Wrapped, which would take the map away from the replay", () => {

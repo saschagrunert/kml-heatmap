@@ -75,11 +75,17 @@ export class FilterManager {
   /**
    * Switch to the year the dropdown shows. The store only changes once the
    * year has loaded: a failed load puts the dropdown back to the year that
-   * is still on the map instead of leaving the two disagreeing.
+   * is still on the map instead of leaving the two disagreeing. `year`
+   * picks the year in the dropdown first, and `also` changes more of the
+   * store in the same batch, before the aircraft list is rebuilt (see
+   * MapApp.resetView). Resolves to whether the year was applied: false
+   * when it failed to load or a newer filter change replaced it, and then
+   * `also` has not run either.
    */
-  async filterByYear(): Promise<void> {
+  async filterByYear(year?: string, also?: () => void): Promise<boolean> {
     const yearSelect = domCache.get("year-select", HTMLSelectElement);
-    if (!yearSelect) return;
+    if (!yearSelect) return false;
+    if (year) yearSelect.value = year;
 
     const previousYear = this.app.selectedYear;
     const requestedYear = yearSelect.value;
@@ -105,7 +111,7 @@ export class FilterManager {
       ) {
         yearSelect.value = this.app.selectedYear;
       }
-      return;
+      return false;
     }
     if (!data) {
       // The loader has already reported the failure. The Filter sheet
@@ -113,7 +119,7 @@ export class FilterManager {
       // so it is told to read the dropdown again.
       yearSelect.value = previousYear;
       this.app.mobileBar?.sheet.refresh();
-      return;
+      return false;
     }
 
     // 2. Publish the year, the data and the aircraft list together, so the
@@ -123,9 +129,11 @@ export class FilterManager {
     this.app.store.batch(() => {
       this.app.selectedYear = requestedYear;
       this.app.currentData = data;
+      also?.();
       this.updateAircraftDropdown();
       this.clearSelectionUnlessInitializing();
     });
+    return true;
   }
 
   filterByAircraft(): void {

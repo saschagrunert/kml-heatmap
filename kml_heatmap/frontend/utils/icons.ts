@@ -39,6 +39,7 @@ import {
   Navigation,
   Pause,
   Play,
+  RotateCcw,
   Route,
   Ruler,
   SlidersHorizontal,
@@ -88,6 +89,7 @@ export type IconName =
   | "milestone"
   | "ruler"
   | "climb"
+  | "reset"
   | "aircraftTop";
 
 /**
@@ -144,6 +146,7 @@ const NODES: Record<Exclude<IconName, keyof typeof OWN_PATHS>, IconNode> = {
   milestone: Milestone,
   ruler: Ruler,
   climb: ArrowUpFromLine,
+  reset: RotateCcw,
 };
 
 /** One Lucide node list as the markup that goes inside an `<svg>` */

@@ -87,11 +87,20 @@ vi.mock("../../../../kml_heatmap/frontend/ui/layerManager", () => ({
     return m.mockLayerManagerInstance;
   }),
 }));
-vi.mock("../../../../kml_heatmap/frontend/ui/stateManager", () => ({
-  StateManager: vi.fn(function () {
-    return m.mockStateManagerInstance;
+vi.mock(
+  "../../../../kml_heatmap/frontend/ui/stateManager",
+  async (importOriginal) => ({
+    // Reset view follows the real list of flags
+    BOOLEAN_KEYS: (
+      await importOriginal<
+        typeof import("../../../../kml_heatmap/frontend/ui/stateManager")
+      >()
+    ).BOOLEAN_KEYS,
+    StateManager: vi.fn(function () {
+      return m.mockStateManagerInstance;
+    }),
   }),
-}));
+);
 vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
   WrappedManager: vi.fn(function () {
     return m.mockWrappedManagerInstance;
@@ -498,11 +507,12 @@ describe("MapApp controls and map", () => {
       const statsListener = vi.fn();
       app.store.subscribe("statsPanelVisible", statsListener);
       const signal = app.signal;
-      // `moveend` is listened to twice: the save, and the label declutter
-      // of MapOrientation, which also follows every turn and tilt
+      // `moveend` is listened to three times: the save, the label declutter
+      // of MapOrientation, which also follows every turn and tilt, and
+      // Reset view, which is unavailable at the start view
       const types = ["moveend", "zoomend", "click", "error", "rotate", "pitch"];
       for (const type of types) {
-        expect(map.listenerCount(type)).toBe(type === "moveend" ? 2 : 1);
+        expect(map.listenerCount(type)).toBe(type === "moveend" ? 3 : 1);
       }
 
       app.destroy();

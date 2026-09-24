@@ -327,6 +327,7 @@ export class Map
       | "getProjection"
       | "setProjection"
       | "fitBounds"
+      | "cameraForBounds"
       | "jumpTo"
       | "easeTo"
       | "flyTo"
@@ -661,6 +662,15 @@ export class Map
     if (options.pitch !== undefined) this.pitch = options.pitch;
     return this;
   });
+
+  /** Where fitBounds takes the camera: the centre of the bounds, north up */
+  cameraForBounds = vi.fn(
+    (bounds: unknown, options: MockCameraOptions = {}) => ({
+      center: new LngLatBounds(bounds).getCenter(),
+      zoom: this.zoom,
+      bearing: options.bearing ?? 0,
+    }),
+  );
 
   /** The camera moves apply at once; none of them animates or fires events */
   private moveTo(options: MockCameraOptions): this {

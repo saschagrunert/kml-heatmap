@@ -12,6 +12,7 @@ import {
   test,
   expect,
   slopeElevationM,
+  TERRAIN_ELEVATION_M,
   type Locator,
   type Page,
 } from "./fixtures";
@@ -21,6 +22,7 @@ import {
   findSegmentFarFromAirports,
   gotoApp,
   openWrapped,
+  toggleLayer,
   waitForPathData,
 } from "./helpers";
 import {
@@ -67,13 +69,18 @@ function airplaneRotation(page: Page): Promise<number> {
  * browser per core of the CI runner a frame took four seconds, and a view
  * with the relief a minute to complete. Cutting the flights anew on the
  * other ground holds the page up for seconds there as well. A smaller map
- * (RELIEF_VIEWPORT) draws a frame about twice as fast.
+ * (RELIEF_VIEWPORT) without the heat draws a frame a third faster.
  */
 const RELIEF_TIMEOUT_MS = 60000;
+/**
+ * What the relief's specs wait for: any step may wait on a frame of the
+ * relief, which took up to 16 s with a browser per core
+ */
+const reliefExpect = expect.configure({ timeout: RELIEF_TIMEOUT_MS });
 /** A test that enters the relief, three waits of RELIEF_TIMEOUT_MS */
 const RELIEF_TEST_TIMEOUT_MS = 180000;
-/** Still the desktop layout, with a little over half the pixels of 720p */
-const RELIEF_VIEWPORT = { width: 1024, height: 576 };
+/** Still the desktop layout (MOBILE_BREAKPOINT_PX), half the pixels of 720p */
+const RELIEF_VIEWPORT = { width: 800, height: 500 };
 
 /** The relief the map draws, null for none */
 function relief(page: Page): Promise<unknown> {
@@ -91,18 +98,22 @@ function hillshade(page: Page): Promise<unknown> {
 }
 
 /**
- * Whether the ribbons show and their tiles and the elevation tiles in view
- * have all been drawn. ui/terrain.ts shows the ribbons once they have, or
- * after a few seconds at most, which a slow frame in software WebGL takes.
+ * Whether the ribbons show and their tiles have all been drawn.
+ * ui/terrain.ts shows the ribbons once they have, or after a few seconds
+ * at most, which a slow frame in software WebGL takes. Not every elevation
+ * tile in view: towards the horizon of the tilted map they are many, and
+ * with a browser per core they took up to a minute to land after the
+ * ribbons had, while what is checked is in the middle of the map. The
+ * specs poll for the relief there instead.
  */
-function reliefSettled(page: Page): Promise<boolean> {
+function ribbonsSettled(page: Page): Promise<boolean> {
   return page.evaluate(() => {
     const app = window.mapApp!;
     const map = app.map!;
     return (
       app.layerManager.ribbonsShown === 1 &&
       Object.keys(map.getStyle().sources)
-        .filter((id) => id === "terrain" || id.endsWith("-3d"))
+        .filter((id) => id.endsWith("-3d"))
         .every((id) => map.isSourceLoaded(id))
     );
   });
@@ -110,36 +121,44 @@ function reliefSettled(page: Page): Promise<boolean> {
 
 /**
  * Move to `coord` at map zoom 11 (the state's 12), past TERRAIN_MIN_ZOOM
- * (9), on a smaller map (RELIEF_VIEWPORT), turn the 3D view on and wait
- * until the ribbons stand on the relief (reliefSettled)
+ * (9), on a smaller map (RELIEF_VIEWPORT) without the heat, which none of
+ * the relief's specs look at, turn the 3D view on and wait until the
+ * ribbons stand on the relief (ribbonsSettled)
  */
 async function enterRelief(
   page: Page,
   coord: readonly [number, number],
 ): Promise<void> {
   await page.setViewportSize(RELIEF_VIEWPORT);
+  await toggleLayer(page, "heatmap");
   // Zoomed in first, the flights are cut for the 3D view once, on the
   // relief, rather than for the whole map and then again
   await jumpToView(page, coord, 12);
   await page.locator("#three-d-btn").click();
-  await expect(page.locator("#three-d-btn")).toHaveAttribute(
+  await reliefExpect(page.locator("#three-d-btn")).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect
-    .poll(() => relief(page), { timeout: RELIEF_TIMEOUT_MS })
+  await reliefExpect
+    .poll(() => relief(page))
     .toMatchObject({ source: "terrain" });
-  await expect
-    .poll(() => reliefSettled(page), { timeout: RELIEF_TIMEOUT_MS })
-    .toBe(true);
+  await reliefExpect.poll(() => ribbonsSettled(page)).toBe(true);
 }
 
 /**
  * Find a point of the map where a ribbon of one flight alone is drawn, put
  * the pointer there, and expect the tooltip of that flight: the hit test
- * looks for the ribbon through `unproject`, which meets the relief
+ * looks for the ribbon through `unproject`, which meets the relief. Tried
+ * again until it holds: the elevation tiles still landing move the ribbons
+ * on the screen between the search and the pointer.
  */
 async function expectRibbonUnderPointer(page: Page): Promise<void> {
+  await expect(() => ribbonUnderPointer(page)).toPass({
+    timeout: RELIEF_TIMEOUT_MS,
+  });
+}
+
+async function ribbonUnderPointer(page: Page): Promise<void> {
   const ribbon = await page.evaluate(() => {
     const map = window.mapApp!.map!;
     const layers = ["paths-altitude-3d", "paths-altitude-selected-3d"];
@@ -245,164 +264,184 @@ test.describe("Map orientation", () => {
       .toMatchObject({ projection: "mercator" });
   });
 
-  test("the 3D view draws the relief from zoom 9 in, the flights on it stay under the pointer, and the globe only shades it", async ({
-    page,
-  }) => {
-    test.setTimeout(RELIEF_TEST_TIMEOUT_MS);
-    // A flight well away from the airports, whose markers lie over it
-    const at = await findSegmentFarFromAirports(page);
-    expect(at).not.toBeNull();
-    const coord = [at!.coord[0]!, at!.coord[1]!] as const;
-    await enterRelief(page, coord);
-    const demLoaded = (): Promise<boolean> =>
-      page.evaluate(() => {
-        const map = window.mapApp!.map!;
-        return !!map.getSource("terrain") && map.isSourceLoaded("terrain");
-      });
-    expect(await demLoaded()).toBe(true);
-    await expect.poll(() => hillshade(page)).not.toBe("none");
-    expect(await hillshade(page)).not.toBe("absent");
-    expect(
-      await page.evaluate(() => window.mapApp!.map!.getPitch()),
-    ).toBeGreaterThan(20);
-    // The flat ground of the fixture is 500 m up, 1 km with the
-    // exaggeration: a ribbon is found only where it is drawn over it
-    await expectRibbonUnderPointer(page);
+  test.describe("on the relief", () => {
+    // One after the other in one worker, not side by side: a frame of the
+    // relief takes seconds in software WebGL, and with two of them drawn
+    // at once besides the other specs of the run, a step took as long as
+    // their waits allow
+    test.describe.configure({ mode: "default" });
 
-    // The globe shades the relief but leaves it out, and the flights stand
-    // on the line between their fields there
-    await globe(page).click();
-    await expect
-      .poll(() => getOrientation(page))
-      .toMatchObject({ projection: "globe" });
-    await expect
-      .poll(() => relief(page), { timeout: RELIEF_TIMEOUT_MS })
-      .toBeNull();
-    expect(await hillshade(page)).not.toBe("none");
-    expect(
-      await page.evaluate(() => window.mapApp!.store.get("reliefShaded")),
-    ).toBe(true);
-    await globe(page).click();
-    await expect
-      .poll(() => relief(page), { timeout: RELIEF_TIMEOUT_MS })
-      .toMatchObject({ source: "terrain" });
-
-    // Back out of the band: no relief, and the ground under the flights
-    // is the line between their fields again. Asked for one by one rather
-    // than by waiting for the map to be idle, which takes the base map and
-    // the heat of the whole view along (see jumpToView)
-    await jumpToView(page, coord, 9);
-    await expect
-      .poll(() => relief(page), { timeout: RELIEF_TIMEOUT_MS })
-      .toBeNull();
-    expect(await hillshade(page)).toBe("none");
-    expect(
-      await page.evaluate(() => window.mapApp!.store.get("terrainActive")),
-    ).toBe(false);
-  });
-
-  test.describe("on a slope", () => {
-    // Elevation tiles that rise and fall with the longitude (see
-    // slopeElevationM). The ribbons stand on the ground the build sampled
-    // from the real elevation tiles, so they do not follow this one; what
-    // is checked is what uses the relief the page draws: the elevation the
-    // map reads from it, the markers on it, and the pointer finding the
-    // flights over it.
-    test.use({ terrain: "slope" });
-
-    test("the relief rises and falls with the ground, and the airports and the flights stand where it is drawn", async ({
+    test("the 3D view draws the relief from zoom 9 in, the flights on it stay under the pointer, and the globe only shades it", async ({
       page,
     }) => {
       test.setTimeout(RELIEF_TEST_TIMEOUT_MS);
+      // A flight well away from the airports, whose markers lie over it
       const at = await findSegmentFarFromAirports(page);
       expect(at).not.toBeNull();
       const coord = [at!.coord[0]!, at!.coord[1]!] as const;
       await enterRelief(page, coord);
-
-      // Two points on the same flank, a tenth of a degree apart, near the
-      // middle of the map where the elevation tiles are loaded
-      const flank = Math.floor(coord[1] * 2) / 2;
-      const west = Math.min(
-        Math.max(coord[1] - 0.05, flank + 0.01),
-        flank + 0.39,
-      );
-      const east = west + 0.1;
-      const readRelief = (): Promise<{
-        exaggeration: number;
-        elevations: (number | null)[];
-      }> =>
-        page.evaluate(
-          ([lat, lngs]) => {
-            const map = window.mapApp!.map!;
-            return {
-              exaggeration: map.getTerrain()!.exaggeration ?? 1,
-              elevations: lngs.map((lng) =>
-                map.queryTerrainElevation([lng, lat]),
-              ),
-            };
-          },
-          [coord[0], [west, east]] as const,
-        );
-      // Until the elevation tile under a point has landed, the map answers
-      // from a coarser one or not at all, so the reading is polled
-      const offBy = async (): Promise<number> => {
-        const { exaggeration, elevations } = await readRelief();
-        const [westM, eastM] = elevations;
-        if (westM == null || eastM == null) return Infinity;
-        return Math.max(
-          Math.abs(westM - slopeElevationM(west) * exaggeration),
-          Math.abs(eastM - slopeElevationM(east) * exaggeration),
-        );
-      };
-      const { exaggeration } = await readRelief();
-      // 200 m either way on the ground, twice that with the exaggeration
+      // The relief stands on the elevation tiles: the flat ground of the
+      // fixture, exaggerated, in the middle of the map once its tile landed
+      const ground = (): Promise<number | null> =>
+        page.evaluate(() => {
+          const map = window.mapApp!.map!;
+          return map.queryTerrainElevation(map.getCenter());
+        });
+      const { exaggeration } = (await relief(page)) as { exaggeration: number };
+      await reliefExpect
+        .poll(ground)
+        .toBeCloseTo(TERRAIN_ELEVATION_M * exaggeration, 0);
+      await reliefExpect.poll(() => hillshade(page)).not.toBe("none");
+      expect(await hillshade(page)).not.toBe("absent");
       expect(
-        Math.abs(
-          (slopeElevationM(east) - slopeElevationM(west)) * exaggeration,
-        ),
-      ).toBeGreaterThan(300);
-      await expect.poll(offBy, { timeout: RELIEF_TIMEOUT_MS }).toBeLessThan(10);
-
-      // The pointer finds a flight over the slope, the one drawn there
+        await page.evaluate(() => window.mapApp!.map!.getPitch()),
+      ).toBeGreaterThan(20);
+      // The flat ground of the fixture is 500 m up, 1 km with the
+      // exaggeration: a ribbon is found only where it is drawn over it
       await expectRibbonUnderPointer(page);
 
-      // An airport off the middle of the map, on ground a few hundred
-      // metres higher or lower than the middle: its marker is where the
-      // relief under it is drawn, so pointing there finds the airport
-      const name = await page.evaluate(
-        () => Object.keys(window.mapApp!.airportMarkers)[0]!,
-      );
-      const [lat, lng] = await airportPosition(page, name);
-      const side = Math.floor(lng * 2) / 2 + 0.25 > lng ? 0.1 : -0.1;
-      await jumpToView(page, [lat - 0.02, lng + side], 12);
-      await expect
-        .poll(() => page.evaluate(() => window.mapApp!.map!.loaded()), {
-          timeout: RELIEF_TIMEOUT_MS,
-        })
-        .toBe(true);
-      const placed = await page.evaluate((airport) => {
-        const map = window.mapApp!.map!;
-        const marker = window.mapApp!.airportMarkers[airport]!;
-        const box = marker.getElement().getBoundingClientRect();
-        const container = map.getContainer().getBoundingClientRect();
-        const point: [number, number] = [
-          box.x + box.width / 2 - container.x,
-          box.y + box.height / 2 - container.y,
-        ];
-        const { lat, lng } = marker.getLatLng();
-        const ground = map.unproject(point);
-        return {
-          ground: [ground.lat, ground.lng],
-          rise:
-            map.queryTerrainElevation([lng, lat])! -
-            map.queryTerrainElevation(map.getCenter())!,
+      // The globe shades the relief but leaves it out, and the flights stand
+      // on the line between their fields there
+      await globe(page).click();
+      await reliefExpect
+        .poll(() => getOrientation(page))
+        .toMatchObject({ projection: "globe" });
+      await reliefExpect.poll(() => relief(page)).toBeNull();
+      expect(await hillshade(page)).not.toBe("none");
+      expect(
+        await page.evaluate(() => window.mapApp!.store.get("reliefShaded")),
+      ).toBe(true);
+      await globe(page).click();
+      await reliefExpect
+        .poll(() => relief(page))
+        .toMatchObject({ source: "terrain" });
+
+      // Back out of the band: no relief, and the ground under the flights
+      // is the line between their fields again. Asked for one by one rather
+      // than by waiting for the map to be idle, which takes the base map and
+      // the heat of the whole view along (see jumpToView)
+      await jumpToView(page, coord, 9);
+      await reliefExpect.poll(() => relief(page)).toBeNull();
+      expect(await hillshade(page)).toBe("none");
+      expect(
+        await page.evaluate(() => window.mapApp!.store.get("terrainActive")),
+      ).toBe(false);
+    });
+
+    test.describe("on a slope", () => {
+      // Elevation tiles that rise and fall with the longitude (see
+      // slopeElevationM). The ribbons stand on the ground the build sampled
+      // from the real elevation tiles, so they do not follow this one; what
+      // is checked is what uses the relief the page draws: the elevation the
+      // map reads from it, the markers on it, and the pointer finding the
+      // flights over it.
+      test.use({ terrain: "slope" });
+
+      test("the relief rises and falls with the ground, and the airports and the flights stand where it is drawn", async ({
+        page,
+      }) => {
+        test.setTimeout(RELIEF_TEST_TIMEOUT_MS);
+        const at = await findSegmentFarFromAirports(page);
+        expect(at).not.toBeNull();
+        const coord = [at!.coord[0]!, at!.coord[1]!] as const;
+        await enterRelief(page, coord);
+
+        // Two points on the same flank, a tenth of a degree apart, near the
+        // middle of the map where the elevation tiles are loaded
+        const flank = Math.floor(coord[1] * 2) / 2;
+        const west = Math.min(
+          Math.max(coord[1] - 0.05, flank + 0.01),
+          flank + 0.39,
+        );
+        const east = west + 0.1;
+        const readRelief = (): Promise<{
+          exaggeration: number;
+          elevations: (number | null)[];
+        }> =>
+          page.evaluate(
+            ([lat, lngs]) => {
+              const map = window.mapApp!.map!;
+              return {
+                exaggeration: map.getTerrain()!.exaggeration ?? 1,
+                elevations: lngs.map((lng) =>
+                  map.queryTerrainElevation([lng, lat]),
+                ),
+              };
+            },
+            [coord[0], [west, east]] as const,
+          );
+        // Until the elevation tile under a point has landed, the map answers
+        // from a coarser one or not at all, so the reading is polled
+        const offBy = async (): Promise<number> => {
+          const { exaggeration, elevations } = await readRelief();
+          const [westM, eastM] = elevations;
+          if (westM == null || eastM == null) return Infinity;
+          return Math.max(
+            Math.abs(westM - slopeElevationM(west) * exaggeration),
+            Math.abs(eastM - slopeElevationM(east) * exaggeration),
+          );
         };
-      }, name);
-      expect(Math.abs(placed.rise)).toBeGreaterThan(150);
-      // About 50 m; a marker at the height of the middle of the map would
-      // point at ground a kilometre or more away
-      expect(Math.abs(placed.ground[0]! - lat)).toBeLessThan(0.0005);
-      expect(Math.abs(placed.ground[1]! - lng)).toBeLessThan(0.0008);
+        const { exaggeration } = await readRelief();
+        // 200 m either way on the ground, twice that with the exaggeration
+        expect(
+          Math.abs(
+            (slopeElevationM(east) - slopeElevationM(west)) * exaggeration,
+          ),
+        ).toBeGreaterThan(300);
+        await reliefExpect.poll(offBy).toBeLessThan(10);
+
+        // The pointer finds a flight over the slope, the one drawn there
+        await expectRibbonUnderPointer(page);
+
+        // An airport off the middle of the map, on ground a few hundred
+        // metres higher or lower than the middle: its marker is where the
+        // relief under it is drawn, so pointing there finds the airport
+        const name = await page.evaluate(
+          () => Object.keys(window.mapApp!.airportMarkers)[0]!,
+        );
+        const [lat, lng] = await airportPosition(page, name);
+        const side = Math.floor(lng * 2) / 2 + 0.25 > lng ? 0.1 : -0.1;
+        await jumpToView(page, [lat - 0.02, lng + side], 12);
+        const measure = (): Promise<{ ground: number[]; rise: number }> =>
+          page.evaluate((airport) => {
+            const map = window.mapApp!.map!;
+            const marker = window.mapApp!.airportMarkers[airport]!;
+            const box = marker.getElement().getBoundingClientRect();
+            const container = map.getContainer().getBoundingClientRect();
+            const point: [number, number] = [
+              box.x + box.width / 2 - container.x,
+              box.y + box.height / 2 - container.y,
+            ];
+            const { lat, lng } = marker.getLatLng();
+            const ground = map.unproject(point);
+            // Null until the tile under a point has landed: no rise yet
+            const at = map.queryTerrainElevation([lng, lat]);
+            const middle = map.queryTerrainElevation(map.getCenter());
+            return {
+              ground: [ground.lat, ground.lng],
+              rise: at === null || middle === null ? NaN : at - middle,
+            };
+          }, name);
+        // The elevation tiles under the airport and the middle land one by one,
+        // and in software WebGL the whole map is not loaded for minutes, so the
+        // placement itself is polled rather than map.loaded()
+        const off = (p: { ground: number[]; rise: number }): number =>
+          Math.abs(p.rise) > 150
+            ? Math.max(
+                Math.abs(p.ground[0]! - lat) / 0.0005,
+                Math.abs(p.ground[1]! - lng) / 0.0008,
+              )
+            : Infinity;
+        await reliefExpect
+          .poll(async () => off(await measure()))
+          .toBeLessThan(1);
+        const placed = await measure();
+        expect(Math.abs(placed.rise)).toBeGreaterThan(150);
+        // About 50 m; a marker at the height of the middle of the map would
+        // point at ground a kilometre or more away
+        expect(Math.abs(placed.ground[0]! - lat)).toBeLessThan(0.0005);
+        expect(Math.abs(placed.ground[1]! - lng)).toBeLessThan(0.0008);
+      });
     });
   });
 

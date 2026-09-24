@@ -82,6 +82,9 @@ function createMockApp() {
       replayManager.toggleReplay();
     }),
     loadWrapped: vi.fn(() => Promise.resolve(wrappedManager)),
+    resetView: vi.fn(() => Promise.resolve()),
+    // Something to reset unless a test says otherwise
+    isReset: vi.fn(() => false),
     get heatmapVisible() {
       return store.get("heatmapVisible");
     },
@@ -444,6 +447,7 @@ describe("MobileBar", () => {
       expect(sheetRows()).toEqual([
         "replay",
         "isolate",
+        "reset-view",
         "export",
         "share",
         "github",
@@ -636,6 +640,46 @@ describe("MobileBar", () => {
         document.querySelector<HTMLButtonElement>('[data-row="isolate"]')!
           .disabled,
       ).toBe(true);
+    });
+
+    it("resets the view from the sheet and closes it", () => {
+      const row = document.querySelector<HTMLButtonElement>(
+        '[data-row="reset-view"]',
+      )!;
+      expect(row.textContent).toContain("Reset view");
+      expect(row.querySelector("svg")).not.toBeNull();
+
+      expect(row.getAttribute("aria-disabled")).toBe("false");
+      row.click();
+
+      expect(app.resetView).toHaveBeenCalledTimes(1);
+      expect(document.querySelector<HTMLElement>(".mobile-sheet")!.hidden).toBe(
+        true,
+      );
+    });
+
+    it("dims the reset row with nothing to reset, where a tap does nothing", () => {
+      app.isReset.mockReturnValue(true);
+      dismissSheet();
+      tab("more").click();
+      const row = document.querySelector<HTMLButtonElement>(
+        '[data-row="reset-view"]',
+      )!;
+
+      // Dimmed like the replay row, and still reachable
+      expect(row.getAttribute("aria-disabled")).toBe("true");
+      expect(row.disabled).toBe(false);
+      row.click();
+
+      expect(app.resetView).not.toHaveBeenCalled();
+      expect(document.querySelector<HTMLElement>(".mobile-sheet")!.hidden).toBe(
+        false,
+      );
+
+      // It follows the page: once there is something to reset again
+      app.isReset.mockReturnValue(false);
+      app.store.set("heatmapVisible", false);
+      expect(row.getAttribute("aria-disabled")).toBe("false");
     });
 
     it("exports and shares", () => {

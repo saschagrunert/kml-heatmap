@@ -48,7 +48,7 @@ npm run test:ui          # Run tests with UI
 npm run test:coverage    # Generate coverage report
 npm run test:e2e         # Run E2E tests (Playwright, all projects)
 npm run test:e2e:mobile  # Run E2E tests with the mobile project
-npm run test:e2e:webkit  # Run E2E tests with the WebKit (iPhone) project
+npm run test:e2e:webkit  # Run E2E tests with the WebKit projects (iPhone and desktop Safari)
 npm run test:e2e:ui      # Run E2E tests with interactive UI
 npm run typecheck        # Type-check the frontend and the Node.js scripts
 npm run typecheck:node   # Type-check build.js, scripts/*.js and the tool configs only
@@ -310,7 +310,8 @@ decides it (`terrainActive` in the store) by the whole level the ribbons are
 cut for, and cuts them on the sampled ground inside the relief and on the
 line between the fields outside, in the same task as the relief is switched;
 `ui/terrain.ts` hides the ribbons until the map has drawn their new tiles and
-the elevation tiles. A `hillshade` layer from the same source shades the
+the elevation tiles, for `SETTLE_MAX_MS` (3 s) at most, since a frame of the
+relief takes seconds in software WebGL. A `hillshade` layer from the same source shades the
 relief while it is drawn, directly above the base map's last area fill (so
 below its roads, its labels and every layer of the app), in the colours of
 the `--terrain-*` tokens of `styles.css`; a second source would fetch about
