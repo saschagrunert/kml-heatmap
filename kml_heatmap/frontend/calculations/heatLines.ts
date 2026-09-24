@@ -11,7 +11,8 @@
  * out hot; a route flown once at cruise speed stays cool.
  */
 import type { PathSegment } from "../types";
-import { toLngLat, toLngLatAfter } from "../utils/mapHelpers";
+import { toLngLat, type LngLatTuple } from "../utils/mapHelpers";
+import { appendCurve, flatCurves } from "./curves";
 import { segmentDistance } from "./statistics";
 
 /**
@@ -164,13 +165,17 @@ function smoothAlongFlights(
  * two, so that neighbouring segments of about the same heat merge into one
  * line: far fewer features for the map's worker than one per segment. That
  * is two steps per stop of the colour ramp, which the eye does not tell
- * apart on a line.
+ * apart on a line. The lines run along the curve through the fixes (see
+ * calculations/curves.ts), the way the colour lines do; the time is added
+ * up at the fixes, where it was logged.
  */
 export function heatLineFeatures(
   segments: readonly PathSegment[],
   keep: (pathId: number) => boolean,
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, { heat: number }> {
   const kept: PathSegment[] = [];
+  /** Where each kept segment is in `segments`, and so on its curve */
+  const keptIndex: number[] = [];
   const cells = new Map<number, number>();
   const addTo = ([lat, lng]: [number, number], seconds: number): void => {
     const row = rowOf(lat);
@@ -184,6 +189,7 @@ export function heatLineFeatures(
     addTo(segment.coords[0], seconds / 2);
     addTo(segment.coords[1], seconds / 2);
     kept.push(segment);
+    keptIndex.push(index);
   });
 
   // The heat of every kept segment, as a power of two, and whether it
@@ -212,8 +218,9 @@ export function heatLineFeatures(
 
   const smoothed = smoothAlongFlights(heats, joins);
 
+  const curves = flatCurves(segments);
   const features: GeoJSON.Feature<GeoJSON.LineString, { heat: number }>[] = [];
-  let line: [number, number][] = [];
+  let line: LngLatTuple[] = [];
   let lineStep = 0;
   const flush = (): void => {
     if (line.length >= 2) {
@@ -227,14 +234,13 @@ export function heatLineFeatures(
   };
 
   kept.forEach((segment, index) => {
-    const [start, end] = segment.coords!;
     const step = Math.round(smoothed[index]!);
     if (!joins[index] || step !== lineStep) {
       flush();
-      line.push(toLngLat(start));
+      line.push(toLngLat(segment.coords![0]));
       lineStep = step;
     }
-    line.push(toLngLatAfter(end, line[line.length - 1]));
+    appendCurve(line, curves, keptIndex[index]!);
   });
   flush();
 

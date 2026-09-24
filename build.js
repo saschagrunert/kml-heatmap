@@ -294,7 +294,13 @@ const BUDGET_APP = { raw: 134 * 1024, gzip: 46 * 1024 };
 // line zoomed in close, and the airplane lifted to its height on the
 // flight's curve (41.22 KB).
 // 41,150 B raw and 13,712 B gzipped on 2026-09-24.
-const BUDGET_FEATURES = { raw: 42 * 1024, gzip: 14.5 * 1024 };
+// Raised from 42 KB for the replay along the flight's curve (2D and replay
+// smoothing): the airplane moved by time along the curve the lines are
+// drawn on, with the logged times smoothed and the speed eased across the
+// fixes, its heading from the curve, the trail ending at the airplane, and
+// the camera following it as a damped spring instead of a pan restarted on
+// every frame: 45,510 B raw and 15,587 B gzipped.
+const BUDGET_FEATURES = { raw: 47 * 1024, gzip: 16 * 1024 };
 
 // The year worker's bundle is fetched by every visit, but next to the first
 // year file rather than ahead of the app, so it holds up nothing on the page.

@@ -286,16 +286,22 @@ describe("ReplayManager display", () => {
       expect(drawnColors()).toHaveLength(3);
     });
 
-    it("tells the map of the trail only in frames that drew a segment", () => {
+    it("tells the map of the trail once per frame the airplane moved in", () => {
       const { trail } = replaySources(mockApp);
 
-      // Several frames on the first segment: one write, for the first
+      // The trail ends at the airplane, so every frame it moves in is one
+      // write, whether it drew a segment or not
       for (const time of [5, 10, 15, 20]) {
         replayManager.state.currentTime = time;
         replayManager.updateReplayDisplay();
         runFrame();
       }
-      expect(trail.setData).toHaveBeenCalledTimes(1);
+      expect(trail.setData).toHaveBeenCalledTimes(4);
+
+      // A frame that moves nothing, paused, writes nothing
+      replayManager.updateReplayDisplay();
+      runFrame();
+      expect(trail.setData).toHaveBeenCalledTimes(4);
 
       // Several positions of a slider drag within one frame: one write
       for (const time of [65, 125]) {
@@ -303,7 +309,7 @@ describe("ReplayManager display", () => {
         replayManager.updateReplayDisplay(true);
       }
       runFrame();
-      expect(trail.setData).toHaveBeenCalledTimes(2);
+      expect(trail.setData).toHaveBeenCalledTimes(5);
       expect(featuresOf(trail)).toHaveLength(3);
     });
 
@@ -360,22 +366,19 @@ describe("ReplayManager display", () => {
       );
     });
 
-    it("pans map when airplane is near edge during playing", () => {
+    it("follows the airplane near the edge with a jump per frame", () => {
       replayManager.state.playing = true;
       replayManager.state.currentTime = 65;
       airplaneAt(10, 300);
       mockApp.map!.easeTo.mockClear();
+      mockApp.map!.jumpTo.mockClear();
 
       replayManager.updateReplayDisplay();
 
-      // Half a second, in MapLibre's milliseconds
-      expect(mockApp.map!.easeTo).toHaveBeenCalledWith(
-        expect.objectContaining({
-          center: airplane().marker.getLngLat().toArray(),
-          duration: 500,
-          animate: true,
-        }),
-      );
+      // An animation asked for on every frame starts from rest on every
+      // frame, and stuttered (see ReplayCamera.trackAirplane)
+      expect(mockApp.map!.jumpTo).toHaveBeenCalledTimes(1);
+      expect(mockApp.map!.easeTo).not.toHaveBeenCalled();
     });
 
     it("does not pan on manual seek while the airplane is well inside the viewport", () => {
@@ -416,12 +419,15 @@ describe("ReplayManager display", () => {
 
       expect(airplane().marker.setLngLat).toHaveBeenCalledTimes(1);
       const [lat, lon] = positions()[0]!;
-      expect(lat).toBeCloseTo(48.05, 5);
-      expect(lon).toBeCloseTo(16.05, 5);
+      // Give or take the few milliseconds the replay smooths the times by
+      // (see replayCurve)
+      expect(lat).toBeCloseTo(48.05, 4);
+      expect(lon).toBeCloseTo(16.05, 4);
     });
 
     it("starts a segment at its first point and ends the flight at the last", () => {
-      replayManager.state.currentTime = 60;
+      // At its time, as the replay has smoothed it (see replayCurve)
+      replayManager.state.currentTime = replayManager.state.segments[1]!.time!;
       replayManager.updateReplayDisplay();
       expect(airplane().getLatLng()).toEqual([48.1, 16.1]);
 
@@ -478,10 +484,9 @@ describe("ReplayManager display", () => {
       const transform = iconDiv.style.transform;
       expect(transform).toContain("rotate(");
 
-      // The same heading a frame later is not written again (a valid
-      // transform is used as the sentinel; jsdom drops invalid values)
+      // The same heading in a frame paused there is not written again (a
+      // valid transform is used as the sentinel; jsdom drops invalid values)
       iconDiv.style.transform = "rotate(1deg)";
-      replayManager.state.currentTime = 66;
       replayManager.updateReplayDisplay();
       expect(iconDiv.style.transform).toBe("rotate(1deg)");
 
@@ -491,13 +496,25 @@ describe("ReplayManager display", () => {
         .getElement()
         .querySelector<HTMLElement>(".replay-airplane-icon")!;
       expect(rebuiltIcon).not.toBe(iconDiv);
-      replayManager.state.currentTime = 66;
+      replayManager.state.currentTime = 65;
       replayManager.updateReplayDisplay();
-      expect(rebuiltIcon.style.transform).toBe(transform);
+      const degrees = (value: string): number =>
+        Number(/rotate\(([-\d.e]+)deg\)/.exec(value)?.[1]);
+      expect(degrees(rebuiltIcon.style.transform)).toBeCloseTo(
+        degrees(transform),
+        6,
+      );
     });
 
-    it("uses last known bearing when smoothed bearing is null", () => {
-      vi.spyOn(replayFeature, "calculateSmoothedBearing").mockReturnValue(null);
+    it("keeps the last heading where the flight stands still", () => {
+      // Where the curve has no direction, standing and without a piece of
+      // it on either side that moves
+      vi.spyOn(replayFeature, "replayPoint").mockReturnValue({
+        position: [48.15, 16.15],
+        heightFt: 0,
+        track: null,
+        point: 1,
+      });
       replayManager.state.lastBearing = 45;
       replayManager.state.currentTime = 65;
       const iconDiv = airplane()

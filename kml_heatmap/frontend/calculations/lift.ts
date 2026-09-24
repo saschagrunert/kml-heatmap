@@ -278,7 +278,8 @@ function ribbonEdges(
  * How many degrees of turn at either end of a segment are one more point
  * on the curve through it, and the most points a segment is cut into. A
  * straight segment stays one, so smoothing costs only where the flight
- * turns; a straight climb stays a straight slope.
+ * turns; a straight climb stays a straight slope. The ribbons take 8, the
+ * flat lines 4 (see calculations/curves.ts).
  */
 const SMOOTH_TURN_DEG = 8;
 const SMOOTH_MAX_STEPS = 8;
@@ -371,6 +372,7 @@ function smoothHeight(
 export function smoothLine(
   points: readonly Coordinate[],
   heights: readonly number[],
+  turnStepDeg = SMOOTH_TURN_DEG,
 ): SmoothedLine {
   if (points.length === 0) return { points: [], heights: [], vertex: [] };
   // Planar metres around the line, so the curve is round on the ground
@@ -398,7 +400,7 @@ export function smoothLine(
     const h3 = heights[i + 2] ?? h2;
     const turn = Math.max(turnDeg(p0, p1, p2), turnDeg(p1, p2, p3));
     const steps = Math.min(
-      Math.max(Math.ceil(turn / SMOOTH_TURN_DEG), 1),
+      Math.max(Math.ceil(turn / turnStepDeg), 1),
       SMOOTH_MAX_STEPS,
     );
     for (let k = 1; k < steps; k++) {
@@ -456,7 +458,8 @@ export interface SmoothedFlights {
  * Smooth the flights of `segments`, the height of each point from
  * `heightOf`: the feet above ground a segment ends at. A segment's
  * altitude is the one at its end, so a chain's first point takes the
- * height of its first segment.
+ * height of its first segment. `turnStepDeg` is the turn per point of the
+ * curve (see SMOOTH_TURN_DEG).
  */
 export function smoothFlights(
   segments: readonly {
@@ -464,6 +467,7 @@ export function smoothFlights(
     coords?: readonly [Coordinate, Coordinate] | undefined;
   }[],
   heightOf: (index: number) => number,
+  turnStepDeg?: number,
 ): SmoothedFlights {
   const count = segments.length;
   const chainOf = new Int32Array(count).fill(-1);
@@ -502,7 +506,7 @@ export function smoothFlights(
       points.push(lng === end[1] ? end : [end[0], lng]);
       heights.push(heightOf(m));
     }
-    const line = smoothLine(points, heights);
+    const line = smoothLine(points, heights, turnStepDeg);
     members.forEach((m, j) => {
       chainOf[m] = chains.length;
       from[m] = line.vertex[j]!;

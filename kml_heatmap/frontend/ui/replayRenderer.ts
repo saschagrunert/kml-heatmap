@@ -16,7 +16,7 @@ import {
 } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { ReplayManager } from "./replayManager";
-import type { ReplayAirplane, ReplayState } from "./replayState";
+import type { ReplayAirplane, ReplayState, TrailTip } from "./replayState";
 import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
 import { frameCoalescer } from "../utils/frameCoalescer";
@@ -46,11 +46,13 @@ import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
 import {
   isLiftedAt,
-  pointOnFlight,
   ribbonOf,
+  ribbonPieces,
   ribbonWidthZoom,
+  type RibbonPiece,
 } from "../calculations/lift";
-import { calculateSmoothedBearing } from "../features/replay";
+import { appendCurve } from "../calculations/curves";
+import { replayPoint } from "../features/replay";
 import { prefersReducedMotion } from "../utils/motion";
 import { ReplayCamera } from "./replayCamera";
 
@@ -145,10 +147,37 @@ function replaySegmentColor(
 }
 
 /**
+ * Heading damping, in seconds of the flight: the airplane turns towards
+ * the direction of its curve with this time constant. The direction turns
+ * evenly along a piece of the curve but not across a point of it; this
+ * takes the edge off that, and trails the curve by a degree or two in a
+ * turn at the rate a light aircraft flies one.
+ */
+const HEADING_DAMPING_S = 0.4;
+
+/**
+ * The points of the curve the segment at `index` adds to a line that ends
+ * at its start (see appendCurve), or its end point without a curve
+ */
+function extendLine(
+  state: Pick<ReplayState, "smoothed">,
+  coords: [number, number][],
+  index: number,
+  to: readonly [number, number],
+): void {
+  const before = coords.length;
+  if (state.smoothed) appendCurve(coords, state.smoothed, index);
+  if (coords.length === before) {
+    coords.push(toLngLatAfter(to, coords[before - 1]));
+  }
+}
+
+/**
  * Add the segment at `index` to the trail. Consecutive segments of one
  * colour extend the last run, so the trail stays a handful of features
- * rather than one per segment. A run holds one vertex more than it has
- * segments, which is what lets a backward seek cut it (see truncateTrail).
+ * rather than one per segment. A run holds the points of the flight's
+ * curve along its segments (see calculations/curves.ts), which is what
+ * lets a backward seek cut it (see truncateTrail).
  */
 export function appendTrailSegment(
   state: ReplayState,
@@ -177,12 +206,14 @@ export function appendTrailSegment(
     tail[1] === start[1];
 
   if (continues) {
-    last.coords.push(toLngLatAfter(to, tail));
+    extendLine(state, last.coords, index, to);
     last.lastIndex = index;
   } else {
+    const coords = [start];
+    extendLine(state, coords, index, to);
     state.trailRuns.push({
       color,
-      coords: [start, toLngLatAfter(to, start)],
+      coords,
       firstIndex: index,
       lastIndex: index,
     });
@@ -211,7 +242,15 @@ export function truncateTrail(state: ReplayState, time: number): void {
   const last = runs[runs.length - 1];
   if (last && last.lastIndex > state.lastDrawnIndex) {
     last.lastIndex = state.lastDrawnIndex;
-    last.coords.length = last.lastIndex - last.firstIndex + 2;
+    // The points each of its segments added: those of its curve, or its end
+    const smoothed = state.smoothed;
+    let length = 1;
+    for (let i = last.firstIndex; i <= last.lastIndex; i++) {
+      length += smoothed?.chains[smoothed.chainOf[i]!]
+        ? smoothed.to[i]! - smoothed.from[i]!
+        : 1;
+    }
+    last.coords.length = length;
   }
   state.trailDirty = true;
 }
@@ -225,47 +264,92 @@ interface TrailProperties {
 type TrailFeature = Feature<LineString | MultiPolygon, TrailProperties>;
 
 /**
+ * The ribbon of the part of the segment of `tip` the airplane has flown,
+ * from the start of the segment to the airplane, joined to the ribbon
+ * before it corner to corner (see ribbonOf)
+ */
+function tipPieces(
+  curve: NonNullable<ReplayState["smoothed"]>,
+  tip: TrailTip,
+  widthZoom: number,
+): RibbonPiece[] {
+  const chain = curve.chains[curve.chainOf[tip.index]!]!;
+  const from = curve.from[tip.index]!;
+  const points = chain.points.slice(from, tip.point + 1);
+  const heights = chain.heights.slice(from, tip.point + 1);
+  points.push(tip.position);
+  heights.push(tip.heightFt);
+  return ribbonPieces(points, heights, widthZoom, chain.points[from - 1]);
+}
+
+/**
  * The trail as the data of its source: one line per colour run, or in the
- * 3D view, with the flight smoothed (`state.smoothed`), the runs as ribbons
- * at their height, as wide as `widthZoom` asks, for the ribbons' source;
- * zoomed in as far as LIFT_MAX_ZOOM, the lines again.
- * Only a run that has grown or changed its width is cut again: the others
- * keep their pieces, so the trail costs no more to write than its line.
+ * 3D view (`state.lifted`) the runs as ribbons at their height, as wide as
+ * `widthZoom` asks, for the ribbons' source; zoomed in as far as
+ * LIFT_MAX_ZOOM, the lines again. Both run along the flight's curve
+ * (`state.smoothed`), and end at the airplane (`state.trailTip`), part way
+ * along the segment it flies. Only a run that has grown or changed its
+ * width is cut again, and of the one the airplane is on only the part of
+ * its segment flown: the others keep their pieces, so the trail costs no
+ * more to write than its line.
  */
 export function trailFeatureCollection(
-  state: Pick<ReplayState, "trailRuns" | "smoothed" | "trailPieces">,
+  state: Pick<
+    ReplayState,
+    "trailRuns" | "smoothed" | "trailPieces" | "lifted" | "trailTip"
+  >,
   widthZoom: number,
 ): FeatureCollection<LineString | MultiPolygon, TrailProperties> {
-  const smoothed = isLiftedAt(widthZoom) ? state.smoothed : null;
+  const curve = state.smoothed;
+  const lifted = state.lifted && isLiftedAt(widthZoom) ? curve : null;
+  const tip = state.trailTip;
   return {
     type: "FeatureCollection",
     features: state.trailRuns.flatMap((run): TrailFeature[] => {
-      if (!smoothed) {
+      // The run the airplane flies on ends where it is
+      const cutAt =
+        tip?.index === run.lastIndex &&
+        curve?.chains[curve.chainOf[run.lastIndex]!]
+          ? tip
+          : null;
+      if (!lifted) {
+        let coordinates = run.coords;
+        if (cutAt) {
+          coordinates = run.coords.slice(
+            0,
+            cutAt.point - curve!.from[run.firstIndex]! + 1,
+          );
+          coordinates.push(
+            toLngLatAfter(cutAt.position, coordinates[coordinates.length - 1]),
+          );
+        }
         return [
           {
             type: "Feature" as const,
             properties: { color: run.color },
-            geometry: { type: "LineString" as const, coordinates: run.coords },
+            geometry: { type: "LineString" as const, coordinates },
           },
         ];
       }
+      const end = cutAt ? run.lastIndex : run.lastIndex + 1;
       let cut = state.trailPieces.get(run);
-      if (cut?.lastIndex !== run.lastIndex || cut.widthZoom !== widthZoom) {
+      if (cut?.end !== end || cut.widthZoom !== widthZoom) {
         // Cut from the flight's smoothed curve, so the runs of the trail
         // meet without a seam
         cut = {
-          lastIndex: run.lastIndex,
+          end,
           widthZoom,
-          pieces: ribbonOf(
-            smoothed,
-            run.firstIndex,
-            run.lastIndex + 1,
-            widthZoom,
-          ),
+          pieces:
+            end > run.firstIndex
+              ? ribbonOf(lifted, run.firstIndex, end, widthZoom)
+              : [],
         };
         state.trailPieces.set(run, cut);
       }
-      return cut.pieces.map((piece) => ({
+      const pieces = cutAt
+        ? [...cut.pieces, ...tipPieces(lifted, cutAt, widthZoom)]
+        : cut.pieces;
+      return pieces.map((piece) => ({
         type: "Feature" as const,
         properties: { color: run.color, h: piece.h },
         geometry: piece.geometry,
@@ -695,29 +779,52 @@ export class ReplayRenderer {
         fraction = Math.min(Math.max((currentTime - start) / duration, 0), 1);
       }
     }
-    // In the 3D view on the trail's ribbon, which follows the curve through
-    // the flight's points rather than the straight segment, at its height
-    // there. Known before the camera moves, which follows the airplane up.
+    // On the flight's curve, where the lines and the trail run, as far
+    // along it as the time says (see replayPoint); in the 3D view at its
+    // height there. Known before the camera moves, which follows the
+    // airplane up.
     const onCurve = state.smoothed
-      ? pointOnFlight(state.smoothed, currentIndex, fraction)
+      ? replayPoint(state.smoothed, currentIndex, fraction)
       : null;
-    const onLine: [number, number] = [
+    const currentPos: [number, number] = onCurve?.position ?? [
       lat1 + (lat2 - lat1) * fraction,
       lon1 + (lon2 - lon1) * fraction,
     ];
-    const currentPos =
-      onCurve && isLiftedAt(this.app.map.getZoom()) ? onCurve.position : onLine;
-    state.airplaneHeightFt = onCurve?.heightFt ?? null;
-    let bearing = calculateBearing(lat1, lon1, lat2, lon2);
+    state.airplaneHeightFt = state.lifted ? (onCurve?.heightFt ?? null) : null;
+    // Nothing is drawn at time 0 (see drawNewSegments)
+    this.setTrailTip(
+      state,
+      onCurve && currentTime > 0 && state.layerActive
+        ? {
+            index: currentIndex,
+            point: onCurve.point,
+            position: currentPos,
+            heightFt: onCurve.heightFt,
+          }
+        : null,
+    );
 
-    // Smooth the heading by looking ahead several segments
-    const smoothedBearing = calculateSmoothedBearing(segments, currentIndex, 5);
-    if (smoothedBearing !== null) {
-      bearing = smoothedBearing;
-      state.lastBearing = bearing;
-    } else if (state.lastBearing !== null) {
-      bearing = state.lastBearing;
+    // The direction of the curve where the airplane is, damped lightly
+    // over the time of the flight. A seek, a jump back or a stop takes it
+    // as it is. A flight standing still keeps the heading it had.
+    const track = onCurve
+      ? onCurve.track
+      : lat1 === lat2 && lon1 === lon2
+        ? null
+        : calculateBearing(lat1, lon1, lat2, lon2);
+    const last = state.lastBearing;
+    const elapsed = currentTime - state.bearingTime;
+    let bearing = last ?? track ?? 0;
+    if (track !== null && (last === null || isManualSeek || elapsed < 0)) {
+      bearing = track;
+    } else if (track !== null && last !== null && elapsed > 0) {
+      const turn = ((((track - last) % 360) + 540) % 360) - 180;
+      bearing =
+        (last + turn * (1 - Math.exp(-elapsed / HEADING_DAMPING_S)) + 360) %
+        360;
     }
+    state.lastBearing = bearing;
+    state.bearingTime = currentTime;
 
     this.updateReadout(lastSegment, bearing);
 
@@ -730,12 +837,18 @@ export class ReplayRenderer {
     // After the camera, which may have moved the map under the airplane
     this.camera.follow({
       marker,
-      position: onLine,
-      onCurve: onCurve?.position ?? null,
+      position: currentPos,
       track: bearing,
       heightFt: state.airplaneHeightFt,
       state,
     });
+
+    // While it plays, the trail is written in the frame the airplane moved
+    // in, not a frame behind it: one frame at 100x is a hundred metres
+    if (state.playing && state.trailDirty) {
+      this.trailFrame.cancel();
+      this.flushTrail(state);
+    }
 
     // The popup describes a segment, so an open one is rebuilt only once the
     // airplane has reached another segment, not on every frame
@@ -796,6 +909,24 @@ export class ReplayRenderer {
       if ((seg.time ?? 0) > state.currentTime) break;
       appendTrailSegment(state, i, useAirspeedColors);
     }
+    this.scheduleTrailFlush(state);
+  }
+
+  /**
+   * Let the trail end at the airplane, and be written again once it has
+   * moved on
+   */
+  private setTrailTip(state: ReplayState, tip: TrailTip | null): void {
+    const was = state.trailTip;
+    if (
+      was?.index === tip?.index &&
+      was?.position[0] === tip?.position[0] &&
+      was?.position[1] === tip?.position[1]
+    ) {
+      return;
+    }
+    state.trailTip = tip;
+    state.trailDirty = true;
     this.scheduleTrailFlush(state);
   }
 

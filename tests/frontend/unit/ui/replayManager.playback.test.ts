@@ -474,7 +474,8 @@ describe("ReplayManager playback", () => {
       replayManager.seekReplay("30");
       const firstRun = replayManager.state.trailRuns[0];
 
-      replayManager.seekReplay("60");
+      // The start of the second segment, as the replay has timed it
+      replayManager.seekReplay(String(replayManager.state.segments[1]!.time));
 
       expect(replayManager.state.trailRuns[0]).toBe(firstRun);
       expect(replayManager.state.lastDrawnIndex).toBe(1);

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   prepareReplaySegments,
-  calculateSmoothedBearing,
+  replayCurve,
+  replayPoint,
 } from "../../../../kml_heatmap/frontend/features/replay";
 import { calculateBearing } from "../../../../kml_heatmap/frontend/utils/geometry";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
@@ -90,82 +91,212 @@ describe("replay feature", () => {
     });
   });
 
-  describe("calculateSmoothedBearing", () => {
-    const sorted = prepareReplaySegments(mockSegments, 1);
+  describe("replayCurve and replayPoint", () => {
+    /** Segments of one path through `points`, `seconds` apart */
+    function flight(
+      points: [number, number][],
+      seconds: number[],
+    ): PathSegment[] {
+      let time = 0;
+      return points.slice(1).map((end, i) => {
+        const segment: PathSegment = {
+          path_id: 1,
+          time,
+          coords: [points[i]!, end],
+        };
+        time += seconds[i] ?? 0;
+        return segment;
+      });
+    }
 
-    it("calculates bearing with lookahead", () => {
-      const bearing = calculateSmoothedBearing(sorted, 0, 2);
+    /** Metres between two `[lat, lng]` points */
+    function metres(a: [number, number], b: [number, number]): number {
+      return Math.hypot(
+        (b[1] - a[1]) * 111320 * Math.cos((a[0] * Math.PI) / 180),
+        (b[0] - a[0]) * 111320,
+      );
+    }
 
-      expect(bearing).toBeGreaterThanOrEqual(0);
-      expect(bearing).toBeLessThan(360);
+    /** A right-hand turn of 90 degrees in six fixes, and straight after */
+    const turn: [number, number][] = [
+      [50, 8],
+      [50.002, 8],
+      [50.0038, 8.0012],
+      [50.0048, 8.0032],
+      [50.005, 8.0055],
+      [50.005, 8.008],
+      [50.005, 8.011],
+    ];
+
+    it("puts the airplane on its fixes at their times, and nowhere else", () => {
+      const segments = flight(turn, [2, 2, 2, 2, 2, 2]);
+      const curve = replayCurve(segments, () => 0);
+
+      segments.forEach((segment, i) => {
+        expect(replayPoint(curve, i, 0)!.position).toEqual(segment.coords![0]);
+        // The end of one segment is the start of the next
+        const end = replayPoint(curve, i, 1)!.position;
+        expect(end[0]).toBeCloseTo(segment.coords![1][0], 12);
+        expect(end[1]).toBeCloseTo(segment.coords![1][1], 12);
+      });
     });
 
-    it("returns null for invalid index", () => {
-      expect(calculateSmoothedBearing(sorted, -1)).toBeNull();
-      expect(calculateSmoothedBearing(sorted, 999)).toBeNull();
+    it("changes speed smoothly across a fix, where each segment had its own", () => {
+      // 10 m/s, then 30 m/s: moved evenly along each, the airplane tripled
+      // its speed at the fix
+      const segments = flight(
+        [
+          [50, 8],
+          [50.0009, 8],
+          [50.0036, 8],
+          [50.0045, 8],
+        ],
+        [10, 10, 10],
+      );
+      const curve = replayCurve(segments, () => 0);
+      const at = (index: number, fraction: number): [number, number] =>
+        replayPoint(curve, index, fraction)!.position;
+      // The segments' times as the replay has smoothed them
+      const first = curve.times[1]! - curve.times[0]!;
+      const second = curve.times[2]! - curve.times[1]!;
+      // Metres per second over a thousandth of a segment on either side
+      const before = metres(at(0, 0.998), at(0, 0.999)) / (0.001 * first);
+      const across =
+        metres(at(0, 0.999), at(1, 0.001)) / (0.001 * (first + second));
+      const after = metres(at(1, 0.001), at(1, 0.002)) / (0.001 * second);
+
+      expect(across / before).toBeGreaterThan(0.99);
+      expect(across / before).toBeLessThan(1.01);
+      expect(after / across).toBeGreaterThan(0.99);
+      expect(after / across).toBeLessThan(1.01);
+      // Between the two segments' own speeds
+      expect(across).toBeGreaterThan(metres(at(0, 0), at(0, 1)) / first);
+      expect(across).toBeLessThan(metres(at(1, 0), at(1, 1)) / second);
+      // Faster on the segment that is flown faster, and never backwards
+      let last = 0;
+      for (let k = 0; k <= 100; k++) {
+        const flown = metres([50, 8], at(1, k / 100));
+        expect(flown).toBeGreaterThanOrEqual(last);
+        last = flown;
+      }
     });
 
-    it("handles last segment", () => {
-      const bearing = calculateSmoothedBearing(sorted, sorted.length - 1, 5);
+    it("evens out logged times that disagree with the distance flown", () => {
+      // 100 m every 5 s, but every third fix logged 2 s early
+      const points = Array.from({ length: 13 }, (_, i): [number, number] => [
+        50 + i * 0.0009,
+        8,
+      ]);
+      const logged = points.map((_, i) => i * 5 - (i % 3 === 1 ? 2 : 0));
+      const segments = flight(
+        points,
+        logged.slice(1).map((time, i) => time - logged[i]!),
+      );
 
-      expect(typeof bearing).toBe("number");
+      const { times } = replayCurve(segments, () => 0);
+
+      // The first and the last as they were, the others in order
+      expect(times[0]).toBe(0);
+      expect(times[11]).toBe(logged[11]);
+      const steps = [...times].slice(1).map((time, i) => time - times[i]!);
+      for (const step of steps) expect(step).toBeGreaterThan(0);
+      // Logged, the segments took 3, 7 and 5 s by turns; smoothed, all of
+      // them within a second of the 5 they took
+      for (const step of steps.slice(1, -1)) {
+        expect(Math.abs(step - 5)).toBeLessThan(1);
+      }
     });
 
-    it("handles segments without enough lookahead", () => {
-      const bearing = calculateSmoothedBearing(sorted, sorted.length - 1, 10);
+    it("turns the track evenly through a turn, along the curve", () => {
+      const segments = flight(turn, [2, 2, 2, 2, 2, 2]);
+      const curve = replayCurve(segments, () => 0);
 
-      expect(typeof bearing).toBe("number");
+      let previous: number | null = null;
+      let largest = 0;
+      for (let i = 0; i < segments.length; i++) {
+        for (let k = 0; k < 100; k++) {
+          const { track } = replayPoint(curve, i, k / 100)!;
+          if (previous !== null) {
+            const change = Math.abs(((track! - previous + 540) % 360) - 180);
+            largest = Math.max(largest, change);
+          }
+          previous = track;
+        }
+      }
+      // A turn of 90 degrees in 12 s, sampled every 0.02 s
+      expect(largest).toBeLessThan(1);
+      // North into the turn and east out of it, give or take the curve
+      const off = (track: number | null, from: number): number =>
+        Math.abs(((track! - from + 540) % 360) - 180);
+      expect(off(replayPoint(curve, 0, 0)!.track, 0)).toBeLessThan(2);
+      expect(off(replayPoint(curve, 5, 1)!.track, 90)).toBeLessThan(2);
     });
 
-    it("returns null when coordinates are missing", () => {
+    it("heads the way the curve goes, not towards a fix further on", () => {
+      const segments = flight(turn, [2, 2, 2, 2, 2, 2]);
+      const curve = replayCurve(segments, () => 0);
+
+      for (let i = 0; i < segments.length; i++) {
+        for (const fraction of [0.2, 0.5, 0.8]) {
+          const here = replayPoint(curve, i, fraction)!;
+          const ahead = replayPoint(curve, i, fraction + 0.01)!.position;
+          const moving =
+            (Math.atan2(
+              (ahead[1] - here.position[1]) *
+                Math.cos((here.position[0] * Math.PI) / 180),
+              ahead[0] - here.position[0],
+            ) *
+              180) /
+            Math.PI;
+          const off = Math.abs(((here.track! - moving + 540) % 360) - 180);
+          expect(off).toBeLessThan(2.5);
+        }
+      }
+    });
+
+    it("has no track where the flight stands", () => {
+      const standing = flight(
+        [
+          [50, 8],
+          [50, 8],
+          [50, 8],
+        ],
+        [5, 5],
+      );
+
+      expect(
+        replayPoint(
+          replayCurve(standing, () => 0),
+          0,
+          0.5,
+        ),
+      ).toMatchObject({ position: [50, 8], track: null });
+    });
+
+    it("gives the height of the curve where the airplane is", () => {
+      const climb = flight(turn.slice(0, 3), [2, 2]);
+      const curve = replayCurve(climb, (i) => (i + 1) * 100);
+
+      expect(replayPoint(curve, 0, 0)!.heightFt).toBe(100);
+      expect(replayPoint(curve, 1, 1)!.heightFt).toBe(200);
+      const middle = replayPoint(curve, 1, 0.5)!.heightFt;
+      expect(middle).toBeGreaterThan(100);
+      expect(middle).toBeLessThan(200);
+    });
+
+    it("has nothing for a segment without coordinates", () => {
       const segments: PathSegment[] = [
         { path_id: 1, time: 0 },
         { path_id: 1, time: 10 },
       ];
 
-      expect(calculateSmoothedBearing(segments, 0, 1)).toBeNull();
-      expect(calculateSmoothedBearing(segments, 1, 1)).toBeNull();
-    });
-
-    it("keeps the track on the segment before the last one", () => {
-      // Heading east: the end of the current segment is the start of the
-      // last one, which used to give atan2(0, 0), north
-      const east: PathSegment[] = [0, 1, 2].map((i) => ({
-        path_id: 1,
-        time: i * 10,
-        coords: [
-          [50, 8 + i * 0.1],
-          [50, 8 + (i + 1) * 0.1],
-        ],
-      }));
-
-      const bearing = calculateSmoothedBearing(east, east.length - 2, 5);
-
-      expect(bearing).toBeCloseTo(90, 0);
-    });
-
-    it("returns null when the span starts and ends on the same point", () => {
-      const stationary: PathSegment[] = [
-        {
-          path_id: 1,
-          time: 0,
-          coords: [
-            [50, 8],
-            [50, 8],
-          ],
-        },
-        {
-          path_id: 1,
-          time: 10,
-          coords: [
-            [50, 8],
-            [50, 8],
-          ],
-        },
-      ];
-
-      expect(calculateSmoothedBearing(stationary, 0, 5)).toBeNull();
-      expect(calculateSmoothedBearing(stationary, 1, 5)).toBeNull();
+      expect(
+        replayPoint(
+          replayCurve(segments, () => 0),
+          0,
+          0.5,
+        ),
+      ).toBeNull();
     });
   });
 

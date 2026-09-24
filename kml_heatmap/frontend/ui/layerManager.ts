@@ -67,7 +67,6 @@ import {
   isInMarker,
   isOnMarker,
   toLngLat,
-  toLngLatAfter,
   unwrapLng,
   whenContextRestored,
   type LatLon,
@@ -88,10 +87,12 @@ import {
   smoothFlights,
   type SmoothedFlights,
 } from "../calculations/lift";
+import { appendCurve, flatCurves } from "../calculations/curves";
 import {
   calculateAirspeedRange,
   calculateAltitudeRange,
   calculateSegmentProperties,
+  findNearestOnCurve,
   findNearestSegment,
   formatAirspeedLabel,
   formatAltitudeLabel,
@@ -273,7 +274,8 @@ function nearPointer(latLon: LatLon, pointerLng: number): LngLatTuple {
 }
 
 /**
- * Distance in pixels between a point of the map and a drawn segment.
+ * Distance in pixels between a point of the map and a drawn segment, or a
+ * piece of its curve.
  *
  * `project` answers for the longitude it is given and does not wrap it, so
  * a segment lands in the copy of the world its data names, however far from
@@ -286,9 +288,8 @@ function pixelDistance(
   map: MapLibreMap,
   point: Point,
   pointerLng: number,
-  segment: PathSegment,
+  coords: readonly [LatLon, LatLon] | undefined,
 ): number {
-  const coords = segment.coords;
   if (!coords) return Infinity;
   const a = map.project(nearPointer(coords[0], pointerLng));
   const b = map.project(nearPointer(coords[1], pointerLng));
@@ -633,22 +634,33 @@ export class LayerManager implements PathHitTester {
       // taken down by as much before the segment and the distance to it
       // are looked for (see liftOffsetPx, which scales by the centre)
       const { h } = feature.properties as Partial<PathRunProperties>;
-      const lift =
-        h !== undefined && ribbonLayers.has(feature.layer.id)
-          ? liftOffsetPx(map, map.getCenter().lat, h)
-          : 0;
+      const ribbon = h !== undefined && ribbonLayers.has(feature.layer.id);
+      const lift = ribbon ? liftOffsetPx(map, map.getCenter().lat, h) : 0;
       const ground = lift ? map.unproject([point.x, point.y + lift]) : pointer;
-      const segment = findNearestSegment(
-        state.segments!.slice(run.start, run.end),
-        ground.lat,
-        ground.lng,
-      );
+      // A line is drawn along its flight's curve, and its points belong to
+      // the segment they lie on (see calculations/curves.ts)
+      const onCurve = ribbon
+        ? null
+        : findNearestOnCurve(
+            flatCurves(state.segments!),
+            run.start,
+            run.end,
+            ground.lat,
+            ground.lng,
+          );
+      const segment = onCurve
+        ? state.segments![onCurve.index]
+        : findNearestSegment(
+            state.segments!.slice(run.start, run.end),
+            ground.lat,
+            ground.lng,
+          );
       if (!segment) continue;
       const distance = pixelDistance(
         map,
         new PointClass(point.x, point.y + lift),
         pointer.lng,
-        segment,
+        onCurve?.piece ?? segment.coords,
       );
       const isSelected = set === "selected";
       if (
@@ -1016,6 +1028,8 @@ export class LayerManager implements PathHitTester {
       GeoJSON.LineString | GeoJSON.MultiPolygon,
       PathRunProperties
     >[] = [];
+    // Flat, along the curve through the fixes (see calculations/curves.ts)
+    const curves = smoothed ? null : flatCurves(segments);
     runs.forEach((run, r) => {
       const properties = { r, g, pathId: run.pathId, color: run.color };
       if (!smoothed) {
@@ -1023,9 +1037,7 @@ export class LayerManager implements PathHitTester {
           toLngLat(segments[run.start]!.coords![0]),
         ];
         for (let i = run.start; i < run.end; i++) {
-          coordinates.push(
-            toLngLatAfter(segments[i]!.coords![1], coordinates[i - run.start]),
-          );
+          appendCurve(coordinates, curves!, i);
         }
         features.push({
           type: "Feature",

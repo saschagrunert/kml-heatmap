@@ -3,8 +3,9 @@
  * Pure functions for flight replay calculations
  */
 
-import { calculateBearing } from "../utils/geometry";
 import { segmentsForPathIds } from "../calculations/statistics";
+import { smoothFlights, type SmoothedFlights } from "../calculations/lift";
+import { FLAT_TURN_STEP_DEG } from "../calculations/curves";
 import type { Coordinate } from "../utils/geometry";
 import type { PathSegment } from "../types";
 
@@ -28,42 +29,242 @@ export function prepareReplaySegments(
   return replaySegments.sort((a, b) => a.time - b.time);
 }
 
+/** The flight of a replay along its curve, timed (see replayCurve) */
+export interface ReplayCurve extends SmoothedFlights {
+  /** Per chain: metres along its curve to each of its points */
+  along: Float64Array[];
+  /**
+   * Per segment: metres along the curve per whole segment of time at its
+   * start and at its end, the slopes of the distance flown over time (see
+   * replayPoint)
+   */
+  startSlope: Float64Array;
+  endSlope: Float64Array;
+  /**
+   * Per segment: when the airplane is at its start, the logged time
+   * smoothed (see replayCurve)
+   */
+  times: Float64Array;
+}
+
+/** Fixes on either side of one that its time is smoothed over */
+const TIME_WINDOW = 2;
+
+/** Metres a degree of latitude spans */
+const METRES_PER_DEGREE = 111320;
+
 /**
- * Bearing from one point to another, or null when the two are the same
- * point: atan2(0, 0) is 0, which would turn the aircraft to north.
+ * The flight of `segments`, at the feet above ground `heightOf` gives (see
+ * smoothFlights), along the curve the lines are drawn on (see
+ * calculations/curves.ts), and when it is where.
+ *
+ * A segment's time is when it starts, so the one of the next segment is
+ * when it ends. Moved evenly along each segment the airplane changed speed
+ * at every fix, by as much as the logged speeds differ, which is a lot for
+ * fixes of a few seconds. The distance flown is taken as a curve over time
+ * instead, through the fixes at their times, with the speed at a fix the
+ * harmonic mean of the segments on either side of it (Fritsch and
+ * Butland): the speed changes smoothly, and the airplane never stops or
+ * goes back on a segment where it did neither.
+ *
+ * The times themselves are smoothed first. A logger's times and positions
+ * do not quite agree: in the sample data a fix 0.4 s after the one before
+ * is 32 m on at 70 kt, as far as 0.9 s would take it, and the segments on
+ * either side are slower by as much. The time of a fix is the one a
+ * straight line of time over the distance flown gives it, fitted to
+ * TIME_WINDOW fixes on either side, but never before the one of the fix
+ * before, nor past the logged ones of its neighbours. The first and the
+ * last fix keep theirs, and so does one where the flight stands.
  */
-function bearingBetween(from: Coordinate, to: Coordinate): number | null {
-  if (from[0] === to[0] && from[1] === to[1]) return null;
-  return calculateBearing(from[0], from[1], to[0], to[1]);
+export function replayCurve(
+  segments: readonly PathSegment[],
+  heightOf: (index: number) => number,
+): ReplayCurve {
+  const curves = smoothFlights(segments, heightOf, FLAT_TURN_STEP_DEG);
+  const along = curves.chains.map(({ points }) => {
+    const metres = new Float64Array(points.length);
+    for (let i = 1; i < points.length; i++) {
+      metres[i] = metres[i - 1]! + planarMetres(points[i - 1]!, points[i]!);
+    }
+    return metres;
+  });
+  const count = segments.length;
+  // Whether the segment at `i` carries on the one before along the curve
+  const joined = (i: number): boolean =>
+    i > 0 &&
+    curves.chainOf[i]! >= 0 &&
+    curves.chainOf[i] === curves.chainOf[i - 1] &&
+    curves.from[i] === curves.to[i - 1];
+  // Metres along its chain to the start of a segment
+  const flownTo = (i: number): number =>
+    along[curves.chainOf[i]!]?.[curves.from[i]!] ?? 0;
+  const logged = Float64Array.from(segments, (segment) => segment.time ?? 0);
+  const times = logged.slice();
+  for (let i = 1; i + 1 < count; i++) {
+    let first = i;
+    let last = i;
+    while (first > i - TIME_WINDOW && joined(first)) first--;
+    while (last < i + TIME_WINDOW && joined(last + 1)) last++;
+    let metres = 0;
+    let seconds = 0;
+    for (let j = first; j <= last; j++) {
+      metres += flownTo(j);
+      seconds += logged[j]!;
+    }
+    metres /= last - first + 1;
+    seconds /= last - first + 1;
+    let spread = 0;
+    let together = 0;
+    for (let j = first; j <= last; j++) {
+      spread += (flownTo(j) - metres) ** 2;
+      together += (flownTo(j) - metres) * (logged[j]! - seconds);
+    }
+    const fitted =
+      spread > 1
+        ? seconds + (together / spread) * (flownTo(i) - metres)
+        : logged[i]!;
+    times[i] = Math.min(
+      Math.max(fitted, times[i - 1]!, logged[i - 1]!),
+      logged[i + 1]!,
+    );
+  }
+  // Per segment: its length along the curve, and its time
+  const length = new Float64Array(count);
+  const seconds = new Float64Array(count);
+  for (let i = 0; i < count; i++) {
+    const chain = along[curves.chainOf[i]!];
+    if (!chain) continue;
+    length[i] = chain[curves.to[i]!]! - chain[curves.from[i]!]!;
+    seconds[i] = i + 1 < count ? Math.max(times[i + 1]! - times[i]!, 0) : 0;
+  }
+  // The speed of a segment, or null without a time to tell
+  const speed = (i: number): number | null =>
+    seconds[i]! > 0 ? length[i]! / seconds[i]! : null;
+  // The speed at the fix a segment starts at
+  const atStart = new Float64Array(count);
+  for (let i = 0; i < count; i++) {
+    const after = speed(i);
+    const before = joined(i) ? speed(i - 1) : null;
+    atStart[i] =
+      before === null
+        ? (after ?? 0)
+        : after === null
+          ? before
+          : before + after > 0
+            ? (2 * before * after) / (before + after)
+            : 0;
+  }
+  const startSlope = new Float64Array(count);
+  const endSlope = new Float64Array(count);
+  for (let i = 0; i < count; i++) {
+    const own = speed(i) ?? 0;
+    startSlope[i] = atStart[i]! * seconds[i]!;
+    endSlope[i] = (joined(i + 1) ? atStart[i + 1]! : own) * seconds[i]!;
+  }
+  return { ...curves, along, startSlope, endSlope, times };
+}
+
+/** Metres between two `[lat, lng]` points close to each other */
+function planarMetres(a: Coordinate, b: Coordinate): number {
+  return Math.hypot(
+    (b[1] - a[1]) *
+      METRES_PER_DEGREE *
+      Math.cos(((a[0] + b[0]) / 2) * DEGREES_TO_RADIANS),
+    (b[0] - a[0]) * METRES_PER_DEGREE,
+  );
+}
+
+const DEGREES_TO_RADIANS = Math.PI / 180;
+
+/** Where the airplane is on its curve, see replayPoint */
+export interface ReplayPoint {
+  /** `[lat, lng]` */
+  position: Coordinate;
+  /** Feet above the flight's ground */
+  heightFt: number;
+  /**
+   * The direction of the curve there, in degrees clockwise from north;
+   * null where the flight stands and has none
+   */
+  track: number | null;
+  /** The point of the curve the airplane has passed last */
+  point: number;
 }
 
 /**
- * Calculate smoothed bearing from multiple future segments
- * @param segments - All segments
- * @param currentIdx - Current segment index
- * @param lookAhead - Number of segments to look ahead
- * @returns Bearing in degrees, or null when there is no direction to take
- *   (the caller keeps the previous heading then)
+ * Where the airplane is `fraction` of the time of the segment at `index`
+ * on: on the curve, as far along it as the distance flown over time says
+ * (see replayCurve). Its track is the direction of the curve there, which
+ * turns evenly from the one at a point of the curve to the one at the
+ * next: at a point it is the mean of the two pieces that meet there. Null
+ * for a segment without coordinates.
  */
-export function calculateSmoothedBearing(
-  segments: PathSegment[],
-  currentIdx: number,
-  lookAhead: number = 5,
-): number | null {
-  if (currentIdx < 0 || currentIdx >= segments.length) {
-    return null;
-  }
+export function replayPoint(
+  curve: ReplayCurve,
+  index: number,
+  fraction: number,
+): ReplayPoint | null {
+  const chainIndex = curve.chainOf[index] ?? -1;
+  const chain = curve.chains[chainIndex];
+  const along = curve.along[chainIndex];
+  if (!chain || !along) return null;
+  const from = curve.from[index]!;
+  const to = curve.to[index]!;
+  const u = Math.min(Math.max(fraction, 0), 1);
+  const length = along[to]! - along[from]!;
+  // Cubic Hermite from 0 to the length over the segment's time
+  const flown =
+    (u * u * u - 2 * u * u + u) * curve.startSlope[index]! +
+    (3 * u * u - 2 * u * u * u) * length +
+    (u * u * u - u * u) * curve.endSlope[index]!;
+  const target = along[from]! + Math.min(Math.max(flown, 0), length);
+  let point = from;
+  while (point + 1 < to && along[point + 1]! <= target) point++;
+  const span = along[point + 1]! - along[point]!;
+  const w = to > from && span > 0 ? (target - along[point]!) / span : 0;
+  const a = chain.points[point]!;
+  const b = chain.points[Math.min(point + 1, to)]!;
+  // The directions at the two points, as vectors of metres, mixed
+  const [ax, ay] = directionAt(chain.points, point);
+  const [bx, by] = directionAt(chain.points, Math.min(point + 1, to));
+  const x = ax + (bx - ax) * w;
+  const y = ay + (by - ay) * w;
+  return {
+    position: [a[0] + (b[0] - a[0]) * w, a[1] + (b[1] - a[1]) * w],
+    heightFt:
+      chain.heights[point]! +
+      (chain.heights[Math.min(point + 1, to)]! - chain.heights[point]!) * w,
+    track:
+      Math.hypot(x, y) > 1e-9
+        ? (((Math.atan2(x, y) / DEGREES_TO_RADIANS) % 360) + 360) % 360
+        : null,
+    point,
+  };
+}
 
-  const currentSeg = segments[currentIdx]!;
-  const futureIdx = Math.min(currentIdx + lookAhead, segments.length - 1);
-  const futureSeg = segments[futureIdx]!;
-  if (!currentSeg.coords || !futureSeg.coords) {
-    return null;
+/**
+ * The direction of a line of `[lat, lng]` points at its point `i`: the sum
+ * of the unit vectors of the pieces on either side, east and north. A piece
+ * of no length has none.
+ */
+function directionAt(
+  points: readonly Coordinate[],
+  i: number,
+): [number, number] {
+  let x = 0;
+  let y = 0;
+  for (const [a, b] of [
+    [points[i - 1], points[i]],
+    [points[i], points[i + 1]],
+  ]) {
+    if (!a || !b) continue;
+    const dx = (b[1] - a[1]) * Math.cos(a[0] * DEGREES_TO_RADIANS);
+    const dy = b[0] - a[0];
+    const length = Math.hypot(dx, dy);
+    if (length > 0) {
+      x += dx / length;
+      y += dy / length;
+    }
   }
-
-  // From the start of the current segment to the end of the future one, so
-  // the span always covers at least the current segment. Measured from the
-  // current segment's end, the segment right before the last one looked
-  // ahead to the start of the last, which is the very same point.
-  return bearingBetween(currentSeg.coords[0], futureSeg.coords[1]);
+  return [x, y];
 }

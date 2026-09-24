@@ -12,6 +12,7 @@ import {
   AUTO_ZOOM_SETTLE_MS,
   RECENTER_PAN_DURATION_MS,
   SEEK_PAN_THROTTLE_MS,
+  followStep,
   iconHeading,
   unwrapRotation,
   zoomOutSteps,
@@ -20,9 +21,6 @@ import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import {
   liftFt,
   liftOffsetPx,
-  pointOnFlight,
-  smoothFlights,
-  type SmoothedFlights,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
 import { ReplayState } from "../../../../kml_heatmap/frontend/ui/replayState";
 import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
@@ -41,7 +39,7 @@ import {
 } from "../../../../kml_heatmap/frontend/utils/constants";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import { createMapLibreMock } from "../../testHelpers";
-import type { Map as MockMapLibreMap } from "../../../mocks/maplibre-gl";
+import { Point, type Map as MockMapLibreMap } from "../../../mocks/maplibre-gl";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateSegmentPopupHtml: vi.fn(() => "<div>popup</div>"),
@@ -185,6 +183,42 @@ describe("zoomOutSteps", () => {
 
   it("takes one level for a map without a size", () => {
     expect(zoomOutSteps({ x: 0, y: 0 }, { x: 0, y: 0 })).toBe(1);
+  });
+});
+
+describe("followStep", () => {
+  /** Where a camera that follows a point 100 px away is, frame by frame */
+  function follow(frames: number, dt: number): number[] {
+    let at = 0;
+    let velocity = { x: 0, y: 0 };
+    return Array.from({ length: frames }, () => {
+      const step = followStep({ x: 100 - at, y: 0 }, velocity, dt);
+      at += step.move.x;
+      velocity = step.velocity;
+      return at;
+    });
+  }
+
+  it.each([
+    ["short", 1 / 60, 120],
+    ["long", 0.1, 20],
+  ])(
+    "catches up with a point that stands, without overshooting it, in %s frames",
+    (_, dt, frames) => {
+      const path = follow(frames, dt);
+      path.forEach((at, i) => {
+        expect(at).toBeGreaterThanOrEqual(i > 0 ? path[i - 1]! : 0);
+        expect(at).toBeLessThanOrEqual(100);
+      });
+      expect(path[path.length - 1]).toBeGreaterThan(99);
+    },
+  );
+
+  it("starts from rest", () => {
+    const [first, second] = follow(2, 1 / 60);
+    // Less than a pixel in the first frame, then more
+    expect(first).toBeLessThan(1);
+    expect(second! - first!).toBeGreaterThan(first!);
   });
 });
 
@@ -347,6 +381,58 @@ describe("trail runs", () => {
     expect(state.lastDrawnIndex).toBe(1);
   });
 
+  it("runs along the flight's curve, cut at the fixes, when it has one", () => {
+    // A right angle at the second fix, which the curve rounds
+    const segments = makeChain([0, 0, 10000]);
+    segments[1]!.coords = [
+      [50.01, 8.01],
+      [50.01, 8.03],
+    ];
+    segments[2]!.coords = [
+      [50.01, 8.03],
+      [50.01, 8.05],
+    ];
+    const state = stateWith(segments);
+    state.smoothed = replayFeature.replayCurve(segments, () => 0);
+    for (let i = 0; i < 3; i++) appendTrailSegment(state, i, false);
+
+    const [first, second] = state.trailRuns;
+    const chain = state.smoothed.chains[0]!;
+    // The points of the curve, longitude first, the colour changing at the
+    // fix between the second and the third segment
+    expect(first!.coords).toEqual(
+      chain.points
+        .slice(0, state.smoothed.to[1]! + 1)
+        .map(([lat, lng]) => [lng, lat]),
+    );
+    expect(first!.coords.length).toBeGreaterThan(3);
+    expect(second!.coords[0]).toEqual([8.03, 50.01]);
+    expect(first!.coords[first!.coords.length - 1]).toEqual([8.03, 50.01]);
+
+    // A seek back into the second segment keeps the points of the first two
+    truncateTrail(state, 15);
+    expect(state.trailRuns).toHaveLength(1);
+    expect(first!.coords).toHaveLength(state.smoothed.to[1]! + 1);
+  });
+
+  it("ends the line at the airplane, part way along its segment", () => {
+    const segments = makeChain([0, 0, 0]);
+    const state = stateWith(segments);
+    state.smoothed = replayFeature.replayCurve(segments, () => 0);
+    for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
+    const at = replayFeature.replayPoint(state.smoothed, 1, 0.3)!;
+    state.trailTip = { index: 1, ...at };
+
+    const line = trailFeatureCollection(state, 13).features[0]!.geometry
+      .coordinates as [number, number][];
+
+    // Not the end of the segment, 70 % of it ahead of the airplane
+    expect(line[line.length - 1]).toEqual([at.position[1], at.position[0]]);
+    expect(line).toHaveLength(at.point + 2);
+    // The run itself keeps the whole segment, for the next frame
+    expect(state.trailRuns[0]!.coords[2]).toEqual([8.02, 50.02]);
+  });
+
   it("turns the runs into one coloured line each", () => {
     const state = stateWith(makeChain([0, 10000]));
     for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
@@ -370,9 +456,9 @@ describe("trail runs", () => {
 });
 
 describe("trail runs in the 3D view", () => {
-  /** The trail's flight smoothed at its height above 1000 ft */
-  function smoothed(segments: PathSegment[]): SmoothedFlights {
-    return smoothFlights(segments, (i) =>
+  /** The trail's flight along its curve at its height above 1000 ft */
+  function smoothed(segments: PathSegment[]): ReplayState["smoothed"] {
+    return replayFeature.replayCurve(segments, (i) =>
       Math.max((segments[i]!.altitude_ft ?? 0) - 1000, 0),
     );
   }
@@ -382,6 +468,7 @@ describe("trail runs in the 3D view", () => {
     const state = new ReplayState();
     state.segments = segments;
     state.smoothed = smoothed(segments);
+    state.lifted = true;
     for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
 
     const data = trailFeatureCollection(state, 13);
@@ -415,6 +502,7 @@ describe("trail runs in the 3D view", () => {
     const state = new ReplayState();
     state.segments = segments;
     state.smoothed = smoothed(segments);
+    state.lifted = true;
     for (let i = 0; i < 3; i++) appendTrailSegment(state, i, false);
     expect(state.trailRuns).toHaveLength(2);
     const [first, second] = state.trailRuns;
@@ -436,6 +524,37 @@ describe("trail runs in the 3D view", () => {
     trailFeatureCollection(state, 9);
     expect(state.trailPieces.get(first!)!.pieces).not.toBe(cutFirst);
     expect(state.trailPieces.get(first!)!.widthZoom).toBe(9);
+  });
+
+  it("ends the ribbons at the airplane, and cuts only its part of a segment each frame", () => {
+    const segments = makeChain([1000, 1500, 2000]);
+    const state = new ReplayState();
+    state.segments = segments;
+    state.smoothed = smoothed(segments);
+    state.lifted = true;
+    for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
+    const [run] = state.trailRuns;
+    // A third of the way along the second segment
+    const at = replayFeature.replayPoint(state.smoothed!, 1, 1 / 3)!;
+    state.trailTip = { index: 1, ...at };
+
+    const pieces = trailFeatureCollection(state, 13).features;
+    // The end of the last quad is the airplane, between its two edges
+    const quads = pieces[pieces.length - 1]!.geometry
+      .coordinates as number[][][][];
+    const [, left, right] = quads[quads.length - 1]![0]!;
+    expect((left![0]! + right![0]!) / 2).toBeCloseTo(at.position[1], 9);
+    expect((left![1]! + right![1]!) / 2).toBeCloseTo(at.position[0], 9);
+    // The run is cut up to the segment the airplane is on; the rest of the
+    // way is cut again for every frame
+    const cut = state.trailPieces.get(run!)!;
+    expect(cut.end).toBe(1);
+    state.trailTip = {
+      index: 1,
+      ...replayFeature.replayPoint(state.smoothed!, 1, 2 / 3)!,
+    };
+    trailFeatureCollection(state, 13);
+    expect(state.trailPieces.get(run!)).toBe(cut);
   });
 });
 
@@ -1248,23 +1367,31 @@ describe("ReplayRenderer", () => {
       const iconDiv = airplane
         .getElement()
         .querySelector<HTMLElement>(".replay-airplane-icon")!;
-      mockReplayManager.state.airplaneMarker = airplane;
-      mockReplayManager.state.currentTime = 5;
-      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
-      const bearing = vi.spyOn(replayFeature, "calculateSmoothedBearing");
+      const state = mockReplayManager.state;
+      state.airplaneMarker = airplane;
+      state.segments = [makeSegment({ time: 0 })];
+      state.smoothed = replayFeature.replayCurve(state.segments, () => 0);
+      const bearing = (track: number, time: number): void => {
+        vi.spyOn(replayFeature, "replayPoint").mockReturnValue({
+          position: [50, 8.5],
+          heightFt: 0,
+          track,
+          point: 0,
+        });
+        // Long enough after the last frame for the damping to have settled
+        state.currentTime = time;
+        callUpdateDisplay();
+      };
 
-      bearing.mockReturnValue(350);
-      callUpdateDisplay();
+      bearing(350, 5);
       expect(iconDiv.style.transform).toContain("rotate(350deg)");
 
       // 350 to 10 degrees is a 20 degree turn: 370, not a transition back
       // through 180 to 10
-      bearing.mockReturnValue(10);
-      callUpdateDisplay();
+      bearing(10, 105);
       expect(iconDiv.style.transform).toContain("rotate(370deg)");
 
-      bearing.mockReturnValue(340);
-      callUpdateDisplay();
+      bearing(340, 205);
       expect(iconDiv.style.transform).toContain("rotate(340deg)");
     });
 
@@ -1286,11 +1413,10 @@ describe("ReplayRenderer", () => {
         state.lifted = on;
         // Standing on 1000 ft all along
         state.groundFt = new Float64Array(state.segments.length).fill(1000);
-        state.smoothed = on
-          ? smoothFlights(state.segments, (i) =>
-              liftFt(state.segments[i]!.altitude_ft ?? 0, state.groundFt[i]!),
-            )
-          : null;
+        // The curve at its height, which a flat replay has as well
+        state.smoothed = replayFeature.replayCurve(state.segments, (i) =>
+          liftFt(state.segments[i]!.altitude_ft ?? 0, state.groundFt[i]!),
+        );
       };
 
       /** How far up the marker is drawn, in pixels */
@@ -1348,18 +1474,18 @@ describe("ReplayRenderer", () => {
           makeSegment({ time: 10, altitude_ft: 4000 }),
         ];
         mockReplayManager.state.currentTime = 5;
-        lifted(true);
         mockReplayManager.state.playing = true;
         map.jumpTo({ center: [8.505, 50.005], zoom: 15, pitch: 60 });
+        vi.mocked(map.jumpTo).mockClear();
 
-        callUpdateDisplay();
-
-        expect(map.easeTo).toHaveBeenCalled();
-
-        // Flat, the same airplane is in the middle and nothing moves
-        vi.mocked(map.easeTo).mockClear();
+        // Flat, the airplane is in the middle and nothing moves
         lifted(false);
         callUpdateDisplay();
+        expect(map.jumpTo).not.toHaveBeenCalled();
+
+        lifted(true);
+        callUpdateDisplay();
+        expect(map.jumpTo).toHaveBeenCalled();
         expect(map.easeTo).not.toHaveBeenCalled();
       });
 
@@ -1398,21 +1524,22 @@ describe("ReplayRenderer", () => {
 
         callUpdateDisplay();
 
-        // Halfway up the first segment, where its ribbon is: the curve is
-        // off the straight line already, swinging out to come into the turn
+        // Halfway through the time of the first segment, where its ribbon
+        // is: the curve is off the straight line already, swinging out to
+        // come into the turn
         const [lat, lon] = airplane.getLatLng();
-        const onCurve = pointOnFlight(
+        const onCurve = replayFeature.replayPoint(
           mockReplayManager.state.smoothed!,
           0,
           0.5,
         );
         expect(lat).toBeCloseTo(onCurve!.position[0], 9);
         expect(lon).toBeCloseTo(onCurve!.position[1], 9);
-        expect(Math.abs(lon - 8)).toBeGreaterThan(1e-4);
-        // Flat, straight up the segment
+        expect(Math.abs(lon - 8)).toBeGreaterThan(1e-5);
+        // Flat, on the same curve: the lines are drawn along it too
         lifted(false);
         callUpdateDisplay();
-        expect(airplane.getLatLng()[1]).toBeCloseTo(8, 9);
+        expect(airplane.getLatLng()[1]).toBeCloseTo(lon, 9);
       });
 
       it("hands the trail to its line and the airplane to the ground zoomed in close", () => {
@@ -1463,8 +1590,16 @@ describe("ReplayRenderer", () => {
           .querySelector<HTMLElement>(".replay-airplane-icon")!;
         mockReplayManager.state.airplaneMarker = airplane;
         mockReplayManager.state.currentTime = 5;
-        mockReplayManager.state.segments = [makeSegment({ time: 0 })];
-        vi.spyOn(replayFeature, "calculateSmoothedBearing").mockReturnValue(0);
+        // Due north
+        mockReplayManager.state.segments = [
+          makeSegment({
+            time: 0,
+            coords: [
+              [50, 8.5],
+              [50.01, 8.5],
+            ],
+          }),
+        ];
       });
 
       const rotation = (): number =>
@@ -1508,18 +1643,23 @@ describe("ReplayRenderer", () => {
     });
 
     it("starts the rotation afresh for the airplane of another replay", () => {
-      const bearing = vi.spyOn(replayFeature, "calculateSmoothedBearing");
-      mockReplayManager.state.currentTime = 5;
-      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+      const state = mockReplayManager.state;
+      state.segments = [makeSegment({ time: 0 })];
+      state.smoothed = replayFeature.replayCurve(state.segments, () => 0);
+      const bearing = vi.spyOn(replayFeature, "replayPoint");
+      const at = { position: [50, 8.5] as [number, number], heightFt: 0 };
+      state.currentTime = 5;
       const first = makeAirplane();
-      mockReplayManager.state.airplaneMarker = first;
-      bearing.mockReturnValue(725);
+      state.airplaneMarker = first;
+      bearing.mockReturnValue({ ...at, track: 365, point: 0 });
       callUpdateDisplay();
       first.remove();
 
+      // A replay starts with a stop, which the heading is taken at as it is
+      state.lastBearing = null;
       const second = makeAirplane();
-      mockReplayManager.state.airplaneMarker = second;
-      bearing.mockReturnValue(10);
+      state.airplaneMarker = second;
+      bearing.mockReturnValue({ ...at, track: 10, point: 0 });
       callUpdateDisplay();
 
       expect(
@@ -1528,19 +1668,26 @@ describe("ReplayRenderer", () => {
       ).toContain("rotate(10deg)");
     });
 
-    it("keeps the last bearing when no smoothed bearing is available", () => {
-      vi.spyOn(replayFeature, "calculateSmoothedBearing").mockReturnValue(null);
+    it("keeps the last bearing where the flight stands still", () => {
       mockReplayManager.state.lastBearing = 90;
       mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.currentTime = 5;
-      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+      mockReplayManager.state.segments = [
+        makeSegment({
+          time: 0,
+          coords: [
+            [50, 8.5],
+            [50, 8.5],
+          ],
+        }),
+      ];
 
       callUpdateDisplay();
 
       expect(mockReplayManager.state.lastBearing).toBe(90);
     });
 
-    it("auto-pans when airplane is near viewport edge during playback", () => {
+    it("follows when airplane is near viewport edge during playback", () => {
       airplaneAt(10, 10);
 
       mockReplayManager.state.airplaneMarker = makeAirplane();
@@ -1551,33 +1698,196 @@ describe("ReplayRenderer", () => {
       callUpdateDisplay();
 
       expect(map.project).toHaveBeenCalledWith([8.51, 50.01]);
-      // Milliseconds, where Leaflet counted seconds
-      expect(RECENTER_PAN_DURATION_MS).toBe(500);
-      expect(map.easeTo).toHaveBeenCalledWith({
-        center: [8.51, 50.01],
-        duration: RECENTER_PAN_DURATION_MS,
-        easing: expect.any(Function) as unknown,
-        animate: true,
-      });
+      // A jump per frame: no animation that restarts on every frame
+      expect(map.jumpTo).toHaveBeenCalledTimes(1);
+      expect(map.easeTo).not.toHaveBeenCalled();
       expect(mockReplayManager.state.recenterTimestamps).toHaveLength(1);
     });
 
-    it("eases the pan out, so restarting it every frame still moves the map", () => {
-      airplaneAt(10, 10);
-      mockReplayManager.state.airplaneMarker = makeAirplane();
-      mockReplayManager.state.playing = true;
-      mockReplayManager.state.currentTime = 5;
-      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+    it("ends the trail at the airplane in every frame", () => {
+      const state = mockReplayManager.state;
+      state.layerActive = true;
+      state.airplaneMarker = makeAirplane();
+      state.segments = makeChain([0, 0, 10000]);
+      state.smoothed = replayFeature.replayCurve(state.segments, () => 0);
+
+      for (const time of [3, 7, 12, 18, 25]) {
+        state.currentTime = time;
+        callUpdateDisplay();
+        runFrame();
+        const { features } = trailSource().data as {
+          features: { geometry: { coordinates: [number, number][] } }[];
+        };
+        const line = features[features.length - 1]!.geometry.coordinates;
+        const [lat, lng] = state.airplaneMarker.getLatLng();
+        expect(line[line.length - 1]).toEqual([lng, lat]);
+      }
+    });
+
+    it("writes the trail in the frame the airplane moved in while playing", () => {
+      const state = mockReplayManager.state;
+      state.layerActive = true;
+      state.playing = true;
+      state.airplaneMarker = makeAirplane();
+      state.segments = makeChain([0, 0, 0]);
+      state.smoothed = replayFeature.replayCurve(state.segments, () => 0);
+      state.currentTime = 12;
 
       callUpdateDisplay();
 
-      const { easing } = map.easeTo.mock.calls[0]![0] as unknown as {
-        easing: (t: number) => number;
-      };
-      expect(easing(0)).toBe(0);
-      expect(easing(1)).toBe(1);
-      // One frame of a 500 ms pan covers a tenth of the way
-      expect(easing(16 / 500)).toBeGreaterThan(0.1);
+      // No frame has run: the trail went to the map along with the airplane
+      expect(trailSource().setData).toHaveBeenCalledTimes(1);
+      runFrame();
+      expect(trailSource().setData).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([1, 10, 100])(
+      "turns the airplane through a turn a little in every frame at %sx",
+      (speed) => {
+        // A turn at 3 degrees a second, a fix every 2 s, 50 m/s
+        const radius = 50 / ((3 * Math.PI) / 180);
+        const points = Array.from({ length: 61 }, (_, i): [number, number] => {
+          const angle = (i * 6 * Math.PI) / 180;
+          return [
+            50 + (radius * Math.sin(angle)) / 111320,
+            8 +
+              (radius * (1 - Math.cos(angle))) /
+                (111320 * Math.cos((50 * Math.PI) / 180)),
+          ];
+        });
+        const state = mockReplayManager.state;
+        state.segments = points
+          .slice(1)
+          .map((end, i) =>
+            makeSegment({ time: i * 2, coords: [points[i]!, end] }),
+          );
+        state.smoothed = replayFeature.replayCurve(state.segments, () => 0);
+        state.airplaneMarker = makeAirplane();
+
+        const headings: number[] = [];
+        const tracks: number[] = [];
+        // Twenty seconds of frames, or the whole turn
+        const end = 4 + Math.min(96, 20 * speed);
+        for (let time = 4; time < end; time += 0.016 * speed) {
+          state.currentTime = time;
+          callUpdateDisplay();
+          headings.push(state.lastBearing!);
+          const index = Math.floor(time / 2);
+          tracks.push(
+            replayFeature.replayPoint(state.smoothed, index, time / 2 - index)!
+              .track!,
+          );
+        }
+        const turned = (a: number, b: number): number =>
+          Math.abs(((b - a + 540) % 360) - 180);
+        // As far as the turn goes in the time of a frame, and a little
+        const most = 3 * 0.016 * speed * 1.2 + 0.2;
+        for (let i = 1; i < headings.length; i++) {
+          expect(turned(headings[i - 1]!, headings[i]!)).toBeLessThan(most);
+        }
+        // Behind the curve by the damping only, never ahead of it
+        headings.slice(10).forEach((heading, i) => {
+          expect(turned(heading, tracks[i + 10]!)).toBeLessThan(2);
+        });
+      },
+    );
+
+    describe("following a replay at speed", () => {
+      /**
+       * A flight due east at 1000 km/h along 50 degrees north, and a map
+       * whose middle is at its screen's middle (the fake's is at 0, 0)
+       */
+      function flyEast(): void {
+        const state = mockReplayManager.state;
+        state.segments = Array.from({ length: 500 }, (_, i) =>
+          makeSegment({
+            time: i,
+            coords: [
+              [50, 8 + i * 0.004],
+              [50, 8 + (i + 1) * 0.004],
+            ],
+          }),
+        );
+        state.smoothed = replayFeature.replayCurve(state.segments, () => 0);
+        state.airplaneMarker = makeAirplane();
+        state.playing = true;
+        // Back to the fake's own projection, moved to the middle
+        map.project.mockReset();
+        const project = map.project.getMockImplementation()!;
+        const unproject = map.unproject.getMockImplementation()!;
+        map.project.mockImplementation((lngLat) => {
+          const p = project(lngLat);
+          return new Point(p.x + 400, p.y + 300);
+        });
+        map.unproject.mockImplementation((point) => {
+          const [x, y] = Array.isArray(point) ? point : [point.x, point.y];
+          return unproject([x - 400, y - 300]);
+        });
+        map.jumpTo({ center: [8, 50] });
+      }
+
+      /** Where the airplane is on the screen, and the camera, per frame */
+      function play(frames: number, speed: number) {
+        vi.useFakeTimers();
+        vi.setSystemTime(10_000);
+        const state = mockReplayManager.state;
+        const seen: { x: number; camera: number }[] = [];
+        for (let frame = 0; frame < frames; frame++) {
+          state.currentTime += 0.016 * speed;
+          callUpdateDisplay();
+          const [lat, lng] = state.airplaneMarker!.getLatLng();
+          seen.push({
+            x: map.project([lng, lat]).x,
+            camera: map.getCenter().lng,
+          });
+          vi.advanceTimersByTime(16);
+        }
+        return seen;
+      }
+
+      it("keeps the airplane on the map, and moves as steadily as it", () => {
+        flyEast();
+        // 100x: 44 km a second, 7 px per frame at this map's scale
+        const seen = play(260, 100);
+
+        for (const { x } of seen) {
+          expect(x).toBeGreaterThanOrEqual(0);
+          expect(x).toBeLessThanOrEqual(800);
+        }
+        // Once it has caught up, the airplane is back in the middle, and
+        // the camera steps about as far as it flies in every frame, the
+        // steps changing smoothly: none of the stutter of a restarted pan
+        expect(seen[seen.length - 1]!.x).toBeCloseTo(400, -1);
+        const steps = seen
+          .slice(200)
+          .map((frame, i, all) => (all[i + 1]?.camera ?? NaN) - frame.camera)
+          .filter((step) => !Number.isNaN(step));
+        const flown = 0.016 * 100 * 0.004;
+        steps.forEach((step, i) => {
+          expect(Math.abs(step / flown - 1)).toBeLessThan(0.03);
+          if (i > 0) {
+            expect(Math.abs(step - steps[i - 1]!)).toBeLessThan(flown / 100);
+          }
+        });
+        expect(map.easeTo).not.toHaveBeenCalled();
+      });
+
+      it("speeds up and slows down without jumps", () => {
+        flyEast();
+        const seen = play(90, 100);
+        const steps = seen
+          .map((frame, i, all) => (all[i + 1]?.camera ?? NaN) - frame.camera)
+          .filter((step) => !Number.isNaN(step));
+        const flown = 0.016 * 100 * 0.004;
+        // It picks up from rest, and never goes much faster than twice the
+        // airplane, catching up with it, or changes its step by more than
+        // a third of it
+        for (let i = 1; i < steps.length; i++) {
+          expect(steps[i]!).toBeGreaterThanOrEqual(0);
+          expect(steps[i]!).toBeLessThan(2.2 * flown);
+          expect(Math.abs(steps[i]! - steps[i - 1]!)).toBeLessThan(flown / 3);
+        }
+      });
     });
 
     it("does not pan while playing when the airplane is inside the margins", () => {
@@ -1658,9 +1968,9 @@ describe("ReplayRenderer", () => {
 
         callUpdateDisplay();
 
-        expect(map.easeTo).toHaveBeenCalledExactlyOnceWith(
-          expect.objectContaining({ center: [airplane.lng, airplane.lat] }),
-        );
+        expect(map.jumpTo).toHaveBeenCalledExactlyOnceWith({
+          center: [airplane.lng, airplane.lat],
+        });
       });
 
       it("zooms out for it at once when auto-zoom is on, like for one that left the map", () => {
@@ -1708,7 +2018,7 @@ describe("ReplayRenderer", () => {
 
       function expectCameraFollows(): void {
         callUpdateDisplay();
-        expect(map.easeTo).toHaveBeenCalledTimes(1);
+        expect(map.jumpTo).toHaveBeenCalledTimes(1);
       }
 
       it.each([
@@ -2018,7 +2328,7 @@ describe("ReplayRenderer", () => {
         callUpdateDisplay();
         vi.advanceTimersByTime(16);
       }
-      expect(map.easeTo).toHaveBeenCalledTimes(20);
+      expect(map.jumpTo).toHaveBeenCalledTimes(20);
       expect(mockReplayManager.state.recenterTimestamps).toHaveLength(1);
       expect(zoomOuts()).toEqual([]);
 
@@ -2042,10 +2352,12 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(map.easeTo).toHaveBeenCalledTimes(2);
-      for (const [options] of map.easeTo.mock.calls) {
-        expect(options).toMatchObject({ animate: false });
-      }
+      // Straight to the airplane, and the zoom without its animation
+      expect(map.jumpTo).toHaveBeenCalledExactlyOnceWith({
+        center: [8.51, 50.01],
+      });
+      expect(map.easeTo).toHaveBeenCalledTimes(1);
+      expect(map.easeTo.mock.calls[0]![0]).toMatchObject({ animate: false });
       expect(zoomOuts()).toEqual([expect.objectContaining({ zoom: 11 })]);
     });
 
@@ -2126,7 +2438,7 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay();
 
-      expect(map.easeTo).toHaveBeenCalledTimes(1);
+      expect(map.jumpTo).toHaveBeenCalledTimes(1);
       expect(zoomOuts()).toEqual([]);
     });
 

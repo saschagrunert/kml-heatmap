@@ -12,6 +12,7 @@ import type { GeoJSONSource } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { PathSegment } from "../types";
 import { segmentsForPathIds } from "../calculations/statistics";
+import { appendCurve, flatCurves } from "../calculations/curves";
 import { MAP_SOURCES } from "../utils/constants";
 import {
   toLngLat,
@@ -22,23 +23,25 @@ import {
 
 /**
  * The given segments as lines, one per path: the segments of a path are one
- * chain (see services/yearDataset.ts). Each point is taken into the copy of
- * the world of the point before, so a flight across the antimeridian does
- * not go round the world.
+ * chain (see services/yearDataset.ts). They run along the curve through the
+ * fixes, like the colour lines (see calculations/curves.ts). Each point is
+ * taken into the copy of the world of the point before, so a flight across
+ * the antimeridian does not go round the world.
  */
 export function selectionLines(
   segments: readonly PathSegment[],
 ): GeoJSON.FeatureCollection<GeoJSON.LineString> {
+  const curves = flatCurves(segments);
   const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
   let line: LngLatTuple[] = [];
   let pathId: number | undefined;
   // A segment without coordinates breaks the chain: the next one starts
   // where it does, not where the line got to
   let gap = false;
-  for (const { path_id, coords } of segments) {
+  segments.forEach(({ path_id, coords }, index) => {
     if (!coords) {
       gap = true;
-      continue;
+      return;
     }
     if (path_id !== pathId) {
       pathId = path_id;
@@ -52,8 +55,8 @@ export function selectionLines(
       line.push(toLngLatAfter(coords[0], line[line.length - 1]));
     }
     gap = false;
-    line.push(toLngLatAfter(coords[1], line[line.length - 1]));
-  }
+    appendCurve(line, curves, index);
+  });
   return { type: "FeatureCollection", features };
 }
 

@@ -15,11 +15,17 @@ import {
   airplaneLiftPx,
   groundProfileFt,
   liftFt,
-  smoothFlights,
+  type SmoothedFlights,
 } from "../calculations/lift";
-import { toBounds, toLngLat, type LngLatTuple } from "../utils/mapHelpers";
+import { appendCurve } from "../calculations/curves";
+import {
+  toBounds,
+  toLngLat,
+  toLngLatAfter,
+  type LngLatTuple,
+} from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
-import { prepareReplaySegments } from "../features/replay";
+import { prepareReplaySegments, replayCurve } from "../features/replay";
 import { segmentBounds } from "../features/wrapped";
 import { segmentsForPathIds } from "../calculations/statistics";
 
@@ -279,18 +285,12 @@ export class ReplayManager {
   }
 
   /**
-   * Lift the trail and the airplane, or put them on the ground: the flight
-   * is smoothed at its height once, and the trail's ribbons are cut from it
-   * (see lift.ts)
+   * Lift the trail and the airplane, or put them on the ground: the trail's
+   * ribbons are cut from the flight's curve at its height (see lift.ts)
    */
   private setLifted(lifted: boolean): void {
     const state = this.state;
     state.lifted = lifted;
-    state.smoothed = lifted
-      ? smoothFlights(state.segments, (i) =>
-          liftFt(state.segments[i]!.altitude_ft ?? 0, state.groundFt[i] ?? 0),
-        )
-      : null;
     state.trailPieces = new WeakMap();
     state.trailWidthZoom = null;
   }
@@ -422,7 +422,18 @@ export class ReplayManager {
     }
 
     this.calculateColorRanges(selectedPathId);
-    this.state.groundFt = groundProfileFt(this.state.segments);
+    const state = this.state;
+    state.groundFt = groundProfileFt(state.segments);
+    // The flight's curve, timed, and at its height for the 3D view: once
+    // per replay, flat or lifted. The replay goes by the times the curve
+    // has smoothed, on copies of the segments: the dataset keeps its own.
+    const curve = (state.smoothed = replayCurve(state.segments, (i) =>
+      liftFt(state.segments[i]!.altitude_ft ?? 0, state.groundFt[i] ?? 0),
+    ));
+    state.segments = state.segments.map((segment, i) => ({
+      ...segment,
+      time: curve.times[i]!,
+    }));
     this.setLifted(this.app.threeDVisible);
     this.setupReplayUI();
     // The speed select may hold a value restored by the browser, so the
@@ -512,7 +523,10 @@ export class ReplayManager {
    * source is written here and nowhere else.
    */
   private startReplayLayer(): void {
-    const coordinates = routeCoordinates(this.state.segments);
+    const coordinates = routeCoordinates(
+      this.state.segments,
+      this.state.smoothed,
+    );
     this.setReplaySource(
       MAP_SOURCES.replayRoute,
       coordinates.length < 2
@@ -842,16 +856,32 @@ function setTransportState(playing: boolean): void {
 }
 
 /**
- * The flight's whole track as one list of `[lng, lat]` points: the start of
- * every segment, plus the end of the last one.
+ * The flight's whole track as one list of `[lng, lat]` points: along its
+ * curve (see calculations/curves.ts), where the trail will run, or without
+ * one the start of every segment, plus the end of the last one.
  */
-function routeCoordinates(segments: PathSegment[]): LngLatTuple[] {
+export function routeCoordinates(
+  segments: PathSegment[],
+  curves: SmoothedFlights | null,
+): LngLatTuple[] {
   const coords: LngLatTuple[] = [];
-  for (const segment of segments) {
+  segments.forEach((segment, index) => {
     const start = segment.coords?.[0];
-    if (start) coords.push(toLngLat(start));
-  }
+    if (!start) return;
+    if (!curves) {
+      coords.push(toLngLat(start));
+      return;
+    }
+    // A segment that starts a curve (the first, or the first after a break
+    // in the flight) adds its start: appendCurve continues from the point
+    // before it
+    if (curves.from[index] === 0) {
+      const previous = coords[coords.length - 1];
+      coords.push(previous ? toLngLatAfter(start, previous) : toLngLat(start));
+    }
+    appendCurve(coords, curves, index);
+  });
   const last = segments[segments.length - 1]?.coords?.[1];
-  if (last) coords.push(toLngLat(last));
+  if (last && !curves) coords.push(toLngLat(last));
   return coords;
 }
