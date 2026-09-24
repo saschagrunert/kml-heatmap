@@ -83,6 +83,8 @@ export class ReplayState {
   groundFt: Float64Array = new Float64Array(0);
   /** Whether groundFt, and the heights of `smoothed`, are the sampled ones */
   onTerrain = false;
+  /** The relief level the sampled groundFt was smoothed for (reliefLevel) */
+  groundLevel = 0;
   /** Whether the trail and the airplane are lifted: the 3D view is on */
   lifted = false;
   /**

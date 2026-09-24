@@ -12,7 +12,11 @@
  * one jump, never an animation, which started from rest on every frame.
  */
 import { LngLat, type Map as MapLibreMap } from "maplibre-gl";
-import { liftMetres } from "../calculations/lift";
+import {
+  liftExaggeration,
+  liftMetres,
+  reliefLevel,
+} from "../calculations/lift";
 
 /**
  * How far the chase tilts the map, in degrees: well into the horizon, and
@@ -25,7 +29,8 @@ export const CHASE_PITCH = 70;
 const CHASE_PITCH_RANGE: readonly [number, number] = [45, 75];
 /**
  * Below the zoom the flights are drawn flat again at (LIFT_MAX_ZOOM), and
- * above the one the relief starts at (TERRAIN_MIN_ZOOM), with room to spare
+ * within the last relief level (see reliefLevel), with room to spare: the
+ * exaggeration is the same at every zoom the chase keeps
  */
 export const CHASE_ZOOM_RANGE: readonly [number, number] = [11, 16];
 
@@ -327,7 +332,10 @@ export class ChaseCamera {
       (this.map.queryTerrainElevation([lon, lat]) ?? 0) +
       (target.heightFt === null
         ? 0
-        : liftMetres(target.heightFt, this.map.getZoom()))
+        : liftMetres(
+            target.heightFt,
+            liftExaggeration(reliefLevel(this.map.getZoom())),
+          ))
     );
   }
 

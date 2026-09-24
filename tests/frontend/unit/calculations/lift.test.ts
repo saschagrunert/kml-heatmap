@@ -3,18 +3,20 @@ import type { Map as MapLibreMap } from "maplibre-gl";
 import {
   LIFT_MAX_ZOOM,
   LIFT_STEP_FT,
-  TERRAIN_EXAGGERATION,
-  TERRAIN_MIN_ZOOM,
+  TERRAIN_TILE_MAX_ZOOM,
   airplaneLiftPx,
   groundProfileFt,
   isLiftedAt,
-  isTerrainAt,
+  liftExaggeration,
   liftFt,
   liftOffsetPx,
   pointOnFlight,
+  reliefLevel,
+  reliefPixelM,
   ribbonHeights,
   ribbonOf,
   ribbonPieces,
+  smoothAlong,
   smoothFlights,
   smoothLine,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
@@ -171,6 +173,33 @@ describe("lift", () => {
       // under the second
       expect([...ground.slice(0, 9)]).toEqual(sampled);
       expect([...ground.slice(9)]).toEqual(segments.slice(9).map(() => 400));
+    });
+
+    it("smooths the sampled ground as coarsely as the relief of the level", () => {
+      const sampled = [420, 430, 400, 900, 1500, 1100, 2000, 2010, 2000];
+      const segments = flight(400, 2000).map((segment, i) => ({
+        ...segment,
+        ground_ft: sampled[i],
+      }));
+      // 0.01 degrees of longitude at 50 north, the length of a segment
+      const metres = 0.01 * METRES_PER_DEGREE * Math.cos((50 * Math.PI) / 180);
+      const along = sampled.map((_, i) => (i + 1) * metres);
+      const spread = (level: number): number => {
+        const ground = [...groundProfileFt(segments, true, level)];
+        return Math.max(...ground) - Math.min(...ground);
+      };
+
+      expect([...groundProfileFt(segments, true, 7)]).toEqual(
+        smoothAlong(sampled, along, reliefPixelM(7, 50)).map(
+          (feet) => expect.closeTo(feet, 6) as unknown as number,
+        ),
+      );
+      // Coarser further out, and as sampled beyond the deepest tiles
+      expect(spread(6)).toBeLessThan(spread(9));
+      expect(spread(9)).toBeLessThan(spread(TERRAIN_TILE_MAX_ZOOM));
+      expect([
+        ...groundProfileFt(segments, true, TERRAIN_TILE_MAX_ZOOM + 1),
+      ]).toEqual(sampled);
     });
 
     it("leaves the sampled ground out where the relief is not drawn", () => {
@@ -676,51 +705,110 @@ describe("lift", () => {
   });
 
   describe("ribbonHeights", () => {
-    it("interpolates on the zoom at the top, with the height inside every stop", () => {
+    /** What an expression comes to for a feature at `h` and `e` */
+    const evaluate = (expression: unknown, h: number, e: number): number => {
+      if (typeof expression === "number") return expression;
+      const [op, ...args] = expression as [string, ...unknown[]];
+      if (op === "get") return args[0] === "h" ? h : e;
+      const values = args.map((arg) => evaluate(arg, h, e));
+      if (op === "*") return values[0]! * values[1]!;
+      if (op === "+") return values.reduce((sum, value) => sum + value, 0);
+      if (op === "-") return values[0]! - values[1]!;
+      if (op === "max") return Math.max(values[0]!, values[1]!);
+      throw new Error(`unknown expression "${op}"`);
+    };
+    const stops = (expression: unknown[]): unknown[] =>
+      expression.slice(3).filter((_, i) => i % 2 === 1);
+
+    it("takes the exaggeration from the feature, and only the band from the zoom", () => {
       const { base, height } = ribbonHeights();
 
-      for (const expression of [base, height]) {
-        expect(expression.slice(0, 3)).toEqual([
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-        ]);
-        // Down to a map of half of Europe
-        expect(expression[3]).toBeLessThanOrEqual(4);
-        expect(JSON.stringify(expression)).toContain('["get","h"]');
-      }
+      // Without the zoom: MapLibre would take each tile's own, a level or
+      // two further out in the distance of a tilted view
+      expect(JSON.stringify(base)).not.toContain("zoom");
+      expect(evaluate(base, 1000, 4)).toBeCloseTo(
+        (1000 - LIFT_STEP_FT / 2) * FEET_TO_METERS * 4,
+        6,
+      );
+      expect(height.slice(0, 3)).toEqual(["interpolate", ["linear"], ["zoom"]]);
+      // Down to a map of half of Europe
+      expect(height[3]).toBeLessThanOrEqual(4);
     });
 
-    it("exaggerates the heights more zoomed out, and gives each piece its step and a band", () => {
+    it("gives each piece its step and a band, never below the ground", () => {
       const { base, height } = ribbonHeights();
-      /** What an expression of one stop comes to for a feature at `h` */
-      const evaluate = (expression: unknown, h: number): number => {
-        if (typeof expression === "number") return expression;
-        const [op, ...args] = expression as [string, ...unknown[]];
-        if (op === "get") return h;
-        const values = args.map((arg) => evaluate(arg, h));
-        if (op === "*") return values[0]! * values[1]!;
-        if (op === "+") return values[0]! + values[1]!;
-        if (op === "-") return values[0]! - values[1]!;
-        if (op === "max") return Math.max(values[0]!, values[1]!);
-        throw new Error(`unknown expression "${op}"`);
-      };
-      const stops = (expression: unknown[]): unknown[] =>
-        expression.slice(3).filter((_, i) => i % 2 === 1);
 
-      // 1,000 ft more zoomed out stands taller, and never at true scale
-      const bottoms = stops(base).map((stop) => evaluate(stop, 1000));
-      expect(bottoms).toEqual([...bottoms].sort((a, b) => b - a));
-      expect(bottoms[bottoms.length - 1]).toBeGreaterThan(304.8);
       // A piece reaches half a step below its middle and half above, and
       // a band beyond: the pieces of a slope meet
-      stops(base).forEach((stop, i) => {
-        const top = evaluate(stops(height)[i], 1000);
-        const nextBottom = evaluate(stop, 1000 + LIFT_STEP_FT);
-        expect(top).toBeGreaterThan(nextBottom);
-      });
-      // Never below the ground
-      for (const stop of stops(base)) expect(evaluate(stop, 0)).toBe(0);
+      for (const e of [2, 10]) {
+        for (const stop of stops(height)) {
+          expect(evaluate(stop, 1000, e)).toBeGreaterThan(
+            evaluate(base, 1000 + LIFT_STEP_FT, e),
+          );
+        }
+        expect(evaluate(base, 0, e)).toBe(0);
+      }
+    });
+  });
+
+  describe("reliefLevel and liftExaggeration", () => {
+    it("follows the whole zoom level up to the one on the deepest elevation tiles", () => {
+      expect(reliefLevel(4.9)).toBe(4);
+      expect(reliefLevel(9)).toBe(9);
+      expect(reliefLevel(TERRAIN_TILE_MAX_ZOOM + 1.5)).toBe(
+        TERRAIN_TILE_MAX_ZOOM + 1,
+      );
+      expect(reliefLevel(LIFT_MAX_ZOOM + 2)).toBe(TERRAIN_TILE_MAX_ZOOM + 1);
+    });
+
+    it("exaggerates more zoomed out, at most ten times and twice closer in", () => {
+      const levels = Array.from({ length: 20 }, (_, level) => level);
+      const exaggerations = levels.map(liftExaggeration);
+
+      expect(exaggerations).toEqual([...exaggerations].sort((a, b) => b - a));
+      expect(Math.max(...exaggerations)).toBe(10);
+      expect(liftExaggeration(9)).toBe(2);
+      expect(liftExaggeration(reliefLevel(20))).toBe(2);
+    });
+  });
+
+  describe("smoothAlong and reliefPixelM", () => {
+    const along = Array.from({ length: 101 }, (_, i) => i * 100);
+
+    it("spreads a peak over two pixels either side, and keeps its volume", () => {
+      const peak = along.map((_, i) => (i === 50 ? 1000 : 0));
+      const smoothed = smoothAlong(peak, along, 500);
+
+      // Twice an average over 1 km: a triangle 1 km either side
+      expect(smoothed[50]).toBeLessThan(200);
+      expect(smoothed[39]).toBe(0);
+      expect(smoothed[45]).toBeGreaterThan(0);
+      expect(smoothed[45]).toBeCloseTo(smoothed[55]!, 6);
+      expect(smoothed.reduce((a, b) => a + b, 0)).toBeCloseTo(1000, 0);
+    });
+
+    it("keeps a slope and a flat stretch as they are", () => {
+      const slope = along.map((metres) => metres / 10);
+      const smoothed = smoothAlong(slope, along, 500);
+
+      // Away from the ends, where the average is of the part flown
+      for (let i = 10; i <= 90; i++) {
+        expect(smoothed[i]).toBeCloseTo(slope[i]!, 6);
+      }
+      expect(smoothAlong([300, 300, 300], [0, 50, 5000], 5000)).toEqual([
+        300, 300, 300,
+      ]);
+    });
+
+    it("takes the tiles a level coarser than the ribbons, down to the deepest", () => {
+      // 256 pixel tiles; a level coarser is twice as wide
+      expect(reliefPixelM(5, 0)).toBeCloseTo(40075016.686 / (256 * 2 ** 4), 3);
+      expect(reliefPixelM(5, 60)).toBeCloseTo(reliefPixelM(5, 0) / 2, 3);
+      expect(reliefPixelM(9, 0)).toBeCloseTo(reliefPixelM(8, 0) / 2, 3);
+      expect(reliefPixelM(TERRAIN_TILE_MAX_ZOOM + 3, 0)).toBeCloseTo(
+        reliefPixelM(TERRAIN_TILE_MAX_ZOOM + 1, 0),
+        3,
+      );
     });
   });
 
@@ -735,17 +823,9 @@ describe("lift", () => {
       const map = createMapLibreMock() as unknown as MapLibreMap;
       map.jumpTo({ zoom: 12, pitch: 60 });
 
-      expect(airplaneLiftPx(map, 50, 1000)).toBeGreaterThan(0);
-      expect(airplaneLiftPx(map, 50, 1000, LIFT_MAX_ZOOM)).toBe(0);
-      expect(airplaneLiftPx(map, 50, null)).toBe(0);
-    });
-  });
-
-  describe("isTerrainAt", () => {
-    it("draws the relief from the whole level TERRAIN_MIN_ZOOM in", () => {
-      expect(isTerrainAt(TERRAIN_MIN_ZOOM - 0.01)).toBe(false);
-      expect(isTerrainAt(TERRAIN_MIN_ZOOM)).toBe(true);
-      expect(isTerrainAt(LIFT_MAX_ZOOM + 2)).toBe(true);
+      expect(airplaneLiftPx(map, 50, 1000, 2)).toBeGreaterThan(0);
+      expect(airplaneLiftPx(map, 50, 1000, 2, LIFT_MAX_ZOOM)).toBe(0);
+      expect(airplaneLiftPx(map, 50, null, 2)).toBe(0);
     });
   });
 
@@ -757,55 +837,43 @@ describe("lift", () => {
       const flat = map();
       flat.jumpTo({ zoom: 12, pitch: 0 });
 
-      expect(liftOffsetPx(flat, 51, 1000)).toBe(0);
+      expect(liftOffsetPx(flat, 51, 1000, 2)).toBe(0);
     });
 
     it("grows with the height, the tilt and the zoom", () => {
       const tilted = map();
       tilted.jumpTo({ zoom: 12, pitch: 60 });
-      const at1000 = liftOffsetPx(tilted, 51, 1000);
+      const at1000 = liftOffsetPx(tilted, 51, 1000, 2);
       expect(at1000).toBeGreaterThan(0);
-      expect(liftOffsetPx(tilted, 51, 2000)).toBeCloseTo(at1000 * 2, 6);
+      expect(liftOffsetPx(tilted, 51, 2000, 2)).toBeCloseTo(at1000 * 2, 6);
 
       tilted.jumpTo({ zoom: 12, pitch: 30 });
-      expect(liftOffsetPx(tilted, 51, 1000)).toBeLessThan(at1000);
+      expect(liftOffsetPx(tilted, 51, 1000, 2)).toBeLessThan(at1000);
 
       tilted.jumpTo({ zoom: 14, pitch: 60 });
-      expect(liftOffsetPx(tilted, 51, 1000)).toBeGreaterThan(at1000);
+      expect(liftOffsetPx(tilted, 51, 1000, 2)).toBeGreaterThan(at1000);
     });
 
-    it("holds the exaggeration of the first and the last stop beyond them", () => {
+    it("exaggerates the heights as it is told, not by the zoom's level", () => {
       const tilted = map();
-      /** Pixels of 1,000 ft at `zoom`, over those of the same exaggeration */
-      const exaggeration = (zoom: number): number => {
+      // The level the map is drawn for stays until a zoom ends: in the
+      // middle of one across it, the zoom's own level is not the one drawn
+      for (const [zoom, level] of [
+        [2, 2],
+        [7.9, 6],
+        [8.4, 7],
+        [9.6, 8],
+        [13, 13],
+      ] as const) {
         tilted.jumpTo({ zoom, pitch: 90 });
         const metresPerPixel =
           (40075016.686 * Math.cos((51 * Math.PI) / 180)) / (512 * 2 ** zoom);
-        return (
-          (liftOffsetPx(tilted, 51, 1000) * metresPerPixel) /
-          (1000 * FEET_TO_METERS)
-        );
-      };
-
-      // Below the first stop, at zoom 4, and above the last, at zoom 16
-      expect(exaggeration(2)).toBeCloseTo(60, 6);
-      expect(exaggeration(4)).toBeCloseTo(60, 6);
-      expect(exaggeration(19)).toBeCloseTo(TERRAIN_EXAGGERATION, 6);
-      // Between two stops, linear
-      expect(exaggeration(5)).toBeCloseTo((60 + 25) / 2, 6);
-    });
-
-    it("exaggerates the heights as much as the relief where it is drawn", () => {
-      const tilted = map();
-      for (const zoom of [TERRAIN_MIN_ZOOM, 11.5, 13, 16]) {
-        tilted.jumpTo({ zoom, pitch: 90 });
-        const metresPerPixel =
-          (40075016.686 * Math.cos((51 * Math.PI) / 180)) / (512 * 2 ** zoom);
+        const exaggeration = liftExaggeration(level);
 
         expect(
-          (liftOffsetPx(tilted, 51, 1000) * metresPerPixel) /
+          (liftOffsetPx(tilted, 51, 1000, exaggeration) * metresPerPixel) /
             (1000 * FEET_TO_METERS),
-        ).toBeCloseTo(TERRAIN_EXAGGERATION, 6);
+        ).toBeCloseTo(exaggeration, 6);
       }
     });
 
@@ -816,7 +884,7 @@ describe("lift", () => {
       const metresPerPixel =
         (40075016.686 * Math.cos((51 * Math.PI) / 180)) / (512 * 2 ** 13);
 
-      expect(liftOffsetPx(tilted, 51, 1000)).toBeCloseTo(
+      expect(liftOffsetPx(tilted, 51, 1000, 2)).toBeCloseTo(
         (2000 * FEET_TO_METERS) / metresPerPixel,
         3,
       );

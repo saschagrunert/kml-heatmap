@@ -27,8 +27,7 @@ import {
   type Popup as MockPopup,
 } from "../../../mocks/maplibre-gl";
 import {
-  TERRAIN_EXAGGERATION,
-  TERRAIN_MIN_ZOOM,
+  liftExaggeration,
   liftOffsetPx,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
 import { findNearestSegment } from "../../../../kml_heatmap/frontend/features/layers";
@@ -2225,7 +2224,7 @@ describe("LayerManager", () => {
 
   /**
    * Until the relief's code has arrived with the feature bundle: from
-   * TERRAIN_MIN_ZOOM in, the 3D view cuts the flights once it has
+   * any zoom, the 3D view cuts the flights once it has
    */
   const terrainCode = (): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve));
@@ -2316,9 +2315,10 @@ describe("LayerManager", () => {
       expect(features(ALTITUDE)).toHaveLength(1);
     });
 
-    it("draws the ribbons a few pixels wide, cut again for another zoom level", () => {
+    it("draws the ribbons a few pixels wide, cut again for another zoom level", async () => {
       mockApp.map!.jumpTo({ zoom: 7.2 });
       drawClimb();
+      await terrainCode();
       const at7 = ribbonWidthM();
       const writes = setDataCalls(RIBBONS);
 
@@ -2327,10 +2327,11 @@ describe("LayerManager", () => {
       mockApp.map!.emit("zoomend");
       expect(setDataCalls(RIBBONS)).toBe(writes);
 
-      // A level further in, half as wide on the ground: as wide on screen
+      // A level further in, half as wide on the ground: as wide on screen.
+      // Let go of first, as the relief and its ground change with it.
       mockApp.map!.jumpTo({ zoom: 8.1 });
       mockApp.map!.emit("zoomend");
-      expect(setDataCalls(RIBBONS)).toBe(writes + 1);
+      expect(setDataCalls(RIBBONS)).toBe(writes + 2);
       expect(ribbonWidthM()).toBeCloseTo(at7 / 2, 3);
       // About 3 pixels at zoom 8.5, 512 px tiles, at 48 degrees
       const metresPerPixel =
@@ -2339,13 +2340,16 @@ describe("LayerManager", () => {
     });
 
     it("still answers for the flights while the ribbons are cut for another zoom", async () => {
-      mockApp.map!.jumpTo({ zoom: 8.2 });
+      // Beyond the level of the deepest elevation tiles, where only the
+      // width of the ribbons changes
+      mockApp.map!.jumpTo({ zoom: 12.2 });
       drawClimb();
+      await terrainCode();
       await landed();
       const g = ribbons()[0]!.properties.g;
       const workerAnswers = holdSetData(RIBBONS);
 
-      mockApp.map!.jumpTo({ zoom: 9.1 });
+      mockApp.map!.jumpTo({ zoom: 13.1 });
       mockApp.map!.emit("zoomend");
 
       // The same runs, so the tiles of before still stand for them: no
@@ -2431,9 +2435,10 @@ describe("LayerManager", () => {
 
     it("finds the flight of a ribbon under the pointer", async () => {
       drawClimb();
+      await terrainCode();
       await landed();
       mockApp.map!.renderedFeatures = [
-        rendered(RIBBONS, { r: 0, g: 1, h: 100 }),
+        rendered(RIBBONS, { r: 0, g: ribbons()[0]!.properties.g, h: 100 }),
       ];
 
       expect(layerManager.hitTest(pointAt(48, 16.025))).toMatchObject({
@@ -2461,9 +2466,10 @@ describe("LayerManager", () => {
       expect(features(ALTITUDE)).toEqual([]);
     });
 
-    it("cuts each source again for the zoom level it was written at", () => {
+    it("cuts each source again for the zoom level it was written at", async () => {
       mockApp.map!.jumpTo({ zoom: 7.2 });
       drawClimb();
+      await terrainCode();
       const at7 = ribbonWidthM();
 
       // The selection is written at the next level before the zoom ends;
@@ -2508,6 +2514,7 @@ describe("LayerManager", () => {
       expect(smoothed()).toBeNull();
 
       mockApp.store.set("threeDVisible", true);
+      await terrainCode();
       expect(smoothed()).not.toBeNull();
       // Another dataset, drawn flat zoomed in
       mockApp.map!.jumpTo({ zoom: 17.5 });
@@ -2541,9 +2548,15 @@ describe("LayerManager", () => {
       mockApp.altitudeLayer.setVisible(true);
       mockApp.map!.jumpTo({ center: [16, 0], zoom: 12, pitch: 60 });
       layerManager.redrawAltitudePaths();
+      await terrainCode();
       await landed();
       mockApp.map!.renderedFeatures = [
-        rendered(RIBBONS, { r: 0, g: 1, h: 1000 }),
+        rendered(RIBBONS, {
+          r: 0,
+          g: ribbons()[0]!.properties.g,
+          h: 1000,
+          e: 2,
+        }),
       ];
 
       // Drawn up by the lift of the centre's latitude, half of that at 60
@@ -2552,6 +2565,7 @@ describe("LayerManager", () => {
         mockApp.map! as unknown as MapLibreMap,
         0,
         1000,
+        2,
       );
       const hit = layerManager.hitTest(new Point(ground.x, ground.y - lift));
 
@@ -2560,8 +2574,9 @@ describe("LayerManager", () => {
       });
     });
 
-    it("cuts and writes the flights again as the 3D view comes and goes", () => {
+    it("cuts and writes the flights again as the 3D view comes and goes", async () => {
       drawClimb();
+      await terrainCode();
       const writes = setDataCalls(ALTITUDE);
 
       mockApp.store.set("threeDVisible", false);
@@ -2651,20 +2666,31 @@ describe("LayerManager", () => {
       expect(mockApp.map!.getTerrain()).not.toBeNull();
     });
 
-    it("draws the relief from TERRAIN_MIN_ZOOM in and stands the flights on the sampled ground", async () => {
-      await drawOverHills(11);
+    /** The exaggerations the ribbons were cut for */
+    const exaggerations = (): Set<number | undefined> =>
+      new Set(features(RIBBONS).map((ribbon) => ribbon.properties.e));
 
-      expect(mockApp.terrainActive).toBe(true);
-      expect(mockApp.map!.getTerrain()).toEqual({
-        source: "terrain",
-        exaggeration: TERRAIN_EXAGGERATION,
-      });
+    it("draws the relief at every zoom, exaggerated as the flights, and stands them on the sampled ground", async () => {
+      await drawOverHills(11);
+      for (const zoom of [11, 4.5]) {
+        mockApp.map!.jumpTo({ zoom });
+        mockApp.map!.emit("zoomend");
+
+        expect(mockApp.terrainActive).toBe(true);
+        expect(mockApp.map!.getTerrain()).toEqual({
+          source: "terrain",
+          exaggeration: liftExaggeration(Math.floor(zoom)),
+        });
+        expect(exaggerations()).toEqual(
+          new Set([liftExaggeration(Math.floor(zoom))]),
+        );
+        // 2,000 ft over the relief, which the map adds itself
+        expect(Math.max(...heights())).toBeCloseTo(2000, 6);
+      }
       expect(mockApp.map!.source("terrain").spec).toMatchObject({
         type: "raster-dem",
         encoding: "terrarium",
       });
-      // 2,000 ft over the relief, which the map adds itself
-      expect(Math.max(...heights())).toBe(2000);
     });
 
     it("has the markers follow the ground a move ends on, while the relief is drawn", async () => {
@@ -2674,27 +2700,10 @@ describe("LayerManager", () => {
       mockApp.map!.emit("moveend");
       expect(fired).toHaveBeenCalledTimes(1);
 
-      mockApp.map!.jumpTo({ zoom: TERRAIN_MIN_ZOOM - 0.1 });
-      mockApp.map!.emit("zoomend");
+      mockApp.globeVisible = true;
       mockApp.map!.emit("moveend");
       expect(fired).toHaveBeenCalledTimes(1);
     });
-
-    it("keeps the flat map and the line between the fields further out", async () => {
-      await drawOverHills(TERRAIN_MIN_ZOOM - 0.1);
-
-      expect(mockApp.terrainActive).toBe(false);
-      expect(mockApp.map!.getTerrain()).toBeNull();
-      expect(Math.max(...heights())).toBe(2600);
-    });
-
-    /** Zoomed out of the relief after its code has arrived */
-    async function drawOverHillsOutside(): Promise<void> {
-      await drawOverHills(11);
-      mockApp.map!.jumpTo({ zoom: TERRAIN_MIN_ZOOM - 0.1 });
-      mockApp.map!.emit("zoomend");
-      expect(mockApp.map!.getTerrain()).toBeNull();
-    }
 
     /** How many features each write to the ribbons had, in order */
     const writes = (): number[] =>
@@ -2704,39 +2713,58 @@ describe("LayerManager", () => {
           ([data]) => (data as GeoJSON.FeatureCollection).features.length,
         );
 
-    it("switches the relief and the ground at the level they are cut for, once", async () => {
-      await drawOverHillsOutside();
+    it("switches the exaggeration and the ground at the level they are cut for, once", async () => {
+      await drawOverHills(11);
+      mockApp.map!.setTerrain.mockClear();
       const before = writes().length;
 
-      mockApp.map!.jumpTo({ zoom: TERRAIN_MIN_ZOOM + 0.2 });
+      mockApp.map!.jumpTo({ zoom: 7.2 });
       mockApp.map!.emit("zoomend");
 
-      expect(mockApp.map!.getTerrain()).not.toBeNull();
+      // The relief and the flights exaggerated alike, for the new level
+      expect(mockApp.reliefLevel).toBe(7);
+      expect(mockApp.map!.setTerrain.mock.calls).toEqual([
+        [{ source: "terrain", exaggeration: liftExaggeration(7) }],
+      ]);
+      expect(exaggerations()).toEqual(new Set([liftExaggeration(7)]));
       expect(Math.max(...heights())).toBe(2000);
       // Cut once, on the new ground and for the new level at the same time,
       // after the cut of before has been let go of: the map's worker holds
       // one of them at a time
       expect(writes().slice(before)).toEqual([0, heights().length]);
-
-      mockApp.map!.jumpTo({ zoom: TERRAIN_MIN_ZOOM - 0.2 });
-      mockApp.map!.emit("zoomend");
-      expect(mockApp.map!.getTerrain()).toBeNull();
-      expect(Math.max(...heights())).toBe(2600);
     });
 
-    it("cuts the flights once as the map first zooms onto the relief, as its code arrives", async () => {
-      await drawOverHills(TERRAIN_MIN_ZOOM - 0.1);
+    it("leaves the relief and the flights as they are while a zoom goes on", async () => {
+      await drawOverHills(7.2);
+      mockApp.map!.setTerrain.mockClear();
       const before = writes().length;
 
-      mockApp.map!.jumpTo({ zoom: TERRAIN_MIN_ZOOM + 0.2 });
-      mockApp.map!.emit("zoomend");
-      // Not on the flat ground first
+      // Mid-gesture, a level on: nothing follows before the zoom ends
+      mockApp.map!.jumpTo({ zoom: 8.6 });
+      mockApp.map!.emit("zoom");
+      expect(mockApp.reliefLevel).toBe(7);
+      expect(mockApp.map!.setTerrain).not.toHaveBeenCalled();
       expect(writes()).toHaveLength(before);
 
-      await new Promise((resolve) => setTimeout(resolve));
-      expect(mockApp.map!.getTerrain()).not.toBeNull();
-      expect(writes().slice(before)).toEqual([0, heights().length]);
-      expect(Math.max(...heights())).toBe(2000);
+      // Within the level it ends in, nothing is cut again either
+      mockApp.map!.jumpTo({ zoom: 7.8 });
+      mockApp.map!.emit("zoomend");
+      expect(mockApp.map!.setTerrain).not.toHaveBeenCalled();
+      expect(writes()).toHaveLength(before);
+    });
+
+    it("cuts the ribbons only for their width beyond the level of the deepest tiles", async () => {
+      await drawOverHills(12.2);
+      mockApp.map!.setTerrain.mockClear();
+      const before = writes().length;
+      const opacityBefore = opacity();
+
+      mockApp.map!.jumpTo({ zoom: 13.1 });
+      mockApp.map!.emit("zoomend");
+
+      expect(mockApp.map!.setTerrain).not.toHaveBeenCalled();
+      expect(writes().slice(before)).toEqual([heights().length]);
+      expect(opacity()).toBe(opacityBefore);
     });
 
     it("cuts the flights once as the 3D view is switched on over the relief", async () => {
@@ -2752,25 +2780,26 @@ describe("LayerManager", () => {
 
     it("cuts the flights for the new level on the flat map without the relief's code", async () => {
       featureBundle.available = false;
-      await drawOverHills(TERRAIN_MIN_ZOOM - 0.1);
+      await drawOverHills(7.2);
       const before = writes().length;
 
-      mockApp.map!.jumpTo({ zoom: TERRAIN_MIN_ZOOM + 0.2 });
+      mockApp.map!.jumpTo({ zoom: 8.2 });
       mockApp.map!.emit("zoomend");
       await new Promise((resolve) => setTimeout(resolve));
 
       expect(mockApp.terrainActive).toBe(false);
       expect(writes().slice(before)).toEqual([heights().length]);
+      expect(exaggerations()).toEqual(new Set([liftExaggeration(8)]));
       expect(Math.max(...heights())).toBe(2600);
     });
 
     it("hides the ribbons until the map has drawn them on their new ground", async () => {
-      await drawOverHillsOutside();
+      await drawOverHills(11);
       mockApp.map!.emit("render");
       expect(opacity()).toBeGreaterThan(0);
 
       mockApp.map!.isSourceLoaded.mockImplementation((id) => id !== "terrain");
-      mockApp.map!.jumpTo({ zoom: TERRAIN_MIN_ZOOM + 0.2 });
+      mockApp.map!.jumpTo({ zoom: 7.2 });
       mockApp.map!.emit("zoomend");
       expect(opacity()).toBe(0);
       expect(
@@ -2791,14 +2820,14 @@ describe("LayerManager", () => {
     });
 
     it("shows the ribbons after SETTLE_MAX_MS even when the relief is still loading", async () => {
-      await drawOverHillsOutside();
+      await drawOverHills(11);
       mockApp.map!.emit("render");
       vi.useFakeTimers();
       try {
         mockApp.map!.isSourceLoaded.mockImplementation(
           (id) => id !== "terrain",
         );
-        mockApp.map!.jumpTo({ zoom: TERRAIN_MIN_ZOOM + 0.2 });
+        mockApp.map!.jumpTo({ zoom: 7.2 });
         mockApp.map!.emit("zoomend");
         expect(opacity()).toBe(0);
 
@@ -2832,13 +2861,12 @@ describe("LayerManager", () => {
         mockApp.map!.getLayoutProperty(HILLSHADE_LAYER, "visibility"),
       ).not.toBe("none");
 
-      mockApp.map!.jumpTo({ zoom: TERRAIN_MIN_ZOOM - 0.2 });
-      mockApp.map!.emit("zoomend");
+      mockApp.store.set("threeDVisible", false);
       expect(
         mockApp.map!.getLayoutProperty(HILLSHADE_LAYER, "visibility"),
       ).toBe("none");
-      mockApp.map!.jumpTo({ zoom: 11 });
-      mockApp.map!.emit("zoomend");
+      expect(mockApp.map!.getTerrain()).toBeNull();
+      mockApp.store.set("threeDVisible", true);
       expect(
         mockApp.map!.getLayoutProperty(HILLSHADE_LAYER, "visibility"),
       ).toBe("visible");
@@ -2870,15 +2898,21 @@ describe("LayerManager", () => {
       // The flights stand on the line between their fields there
       expect(Math.max(...heights())).toBe(2600);
 
+      // Another level on the globe lifts them as much as off it
+      mockApp.map!.jumpTo({ zoom: 6.5 });
+      mockApp.map!.emit("zoomend");
+      expect(exaggerations()).toEqual(new Set([liftExaggeration(6)]));
+      expect(mockApp.map!.getTerrain()).toBeNull();
+
       mockApp.globeVisible = false;
       expect(mockApp.terrainActive).toBe(true);
       expect(mockApp.map!.getTerrain()).not.toBeNull();
       expect(shading()).toBe("visible");
-      expect(Math.max(...heights())).toBe(2000);
+      expect(Math.max(...heights())).toBeCloseTo(2000, 6);
       // Once off and once on: never the relief on the globe
       expect(mockApp.map!.setTerrain.mock.calls).toEqual([
         [null],
-        [{ source: "terrain", exaggeration: TERRAIN_EXAGGERATION }],
+        [{ source: "terrain", exaggeration: liftExaggeration(6) }],
       ]);
     });
 
@@ -2898,8 +2932,7 @@ describe("LayerManager", () => {
       expect(opacity()).toBeGreaterThan(0);
       expect(Math.max(...heights())).toBe(2600);
 
-      mockApp.map!.jumpTo({ zoom: TERRAIN_MIN_ZOOM - 0.2 });
-      mockApp.map!.emit("zoomend");
+      mockApp.store.set("threeDVisible", false);
       expect(mockApp.reliefShaded).toBe(false);
       expect(shading()).toBe("none");
     });
@@ -2921,7 +2954,7 @@ describe("LayerManager", () => {
 
       expect(mockApp.map!.setTerrain.mock.calls).toEqual([
         [null],
-        [{ source: "terrain", exaggeration: TERRAIN_EXAGGERATION }],
+        [{ source: "terrain", exaggeration: liftExaggeration(11) }],
       ]);
     });
   });

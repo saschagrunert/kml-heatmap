@@ -14,6 +14,8 @@ import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
 import {
   airplaneLiftPx,
   groundProfileFt,
+  liftExaggeration,
+  reliefLevel,
   type SmoothedFlights,
 } from "../calculations/lift";
 import { appendCurve } from "../calculations/curves";
@@ -296,7 +298,7 @@ export class ReplayManager {
       recolour,
     );
     const unsubscribeLift = store.subscribeKeys(
-      ["threeDVisible", "terrainActive"],
+      ["threeDVisible", "terrainActive", "reliefLevel"],
       () => {
         this.setLifted(this.app.threeDVisible);
         this.redrawReplayPath(this.trailMode());
@@ -327,11 +329,18 @@ export class ReplayManager {
     const state = this.state;
     state.lifted = lifted;
     const curve = state.smoothed;
-    if (curve && state.onTerrain !== this.app.terrainActive) {
+    const level = this.app.reliefLevel;
+    if (
+      curve &&
+      (state.onTerrain !== this.app.terrainActive ||
+        (state.onTerrain && state.groundLevel !== level))
+    ) {
       state.onTerrain = this.app.terrainActive;
+      state.groundLevel = level;
       const ground = (state.groundFt = groundProfileFt(
         state.segments,
         state.onTerrain,
+        level,
       ));
       state.smoothed = liftReplayCurve(
         curve,
@@ -483,9 +492,11 @@ export class ReplayManager {
     this.calculateColorRanges(selectedPathId);
     const state = this.state;
     state.onTerrain = this.app.terrainActive;
+    state.groundLevel = this.app.reliefLevel;
     const ground = (state.groundFt = groundProfileFt(
       state.segments,
       state.onTerrain,
+      state.groundLevel,
     ));
     // The flight's curve, timed, and at its height for the 3D view: once
     // per replay, flat or lifted, and on the ground of the view (see
@@ -903,11 +914,13 @@ export class ReplayManager {
     if (!position || !map) return;
     // In the 3D view the airplane is drawn up at its height: the ground
     // under it goes as far below the middle as it is drawn above it at the
-    // zoom this ends at, which brings the airplane itself to the middle
+    // zoom this ends at, which brings the airplane itself to the middle,
+    // exaggerated as the level of that zoom is once it has ended
     const lift = airplaneLiftPx(
       map,
       position[0],
       this.state.airplaneHeightFt,
+      liftExaggeration(reliefLevel(AUTO_ZOOM_FOLLOW)),
       AUTO_ZOOM_FOLLOW,
     );
     map.easeTo({

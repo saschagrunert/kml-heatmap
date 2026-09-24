@@ -87,6 +87,17 @@ function relief(page: Page): Promise<unknown> {
   return page.evaluate(() => window.mapApp!.map!.getTerrain());
 }
 
+/**
+ * The ground the relief stands on in the middle of the map, exaggerated;
+ * null until its elevation tile landed
+ */
+function ground(page: Page): Promise<number | null> {
+  return page.evaluate(() => {
+    const map = window.mapApp!.map!;
+    return map.queryTerrainElevation(map.getCenter());
+  });
+}
+
 /** Whether the shading of the relief shows, "absent" before it exists */
 function hillshade(page: Page): Promise<unknown> {
   return page.evaluate(() => {
@@ -120,10 +131,11 @@ function ribbonsSettled(page: Page): Promise<boolean> {
 }
 
 /**
- * Move to `coord` at map zoom 11 (the state's 12), past TERRAIN_MIN_ZOOM
- * (9), on a smaller map (RELIEF_VIEWPORT) without the heat, which none of
- * the relief's specs look at, turn the 3D view on and wait until the
- * ribbons stand on the relief (ribbonsSettled)
+ * Move to `coord` at map zoom 11 (the state's 12), where the relief is
+ * drawn from the deepest elevation tiles, on a smaller map
+ * (RELIEF_VIEWPORT) without the heat, which none of the relief's specs
+ * look at, turn the 3D view on and wait until the ribbons stand on the
+ * relief (ribbonsSettled)
  */
 async function enterRelief(
   page: Page,
@@ -277,7 +289,7 @@ test.describe("Map orientation", () => {
     // their waits allow
     test.describe.configure({ mode: "default" });
 
-    test("the 3D view draws the relief from zoom 9 in, the flights on it stay under the pointer, and the globe only shades it", async ({
+    test("the 3D view draws the relief, the flights on it stay under the pointer, and the globe only shades it", async ({
       page,
     }) => {
       test.setTimeout(RELIEF_TEST_TIMEOUT_MS);
@@ -287,15 +299,10 @@ test.describe("Map orientation", () => {
       const coord = [at!.coord[0]!, at!.coord[1]!] as const;
       await enterRelief(page, coord);
       // The relief stands on the elevation tiles: the flat ground of the
-      // fixture, exaggerated, in the middle of the map once its tile landed
-      const ground = (): Promise<number | null> =>
-        page.evaluate(() => {
-          const map = window.mapApp!.map!;
-          return map.queryTerrainElevation(map.getCenter());
-        });
+      // fixture, exaggerated
       const { exaggeration } = (await relief(page)) as { exaggeration: number };
       await reliefExpect
-        .poll(ground)
+        .poll(() => ground(page))
         .toBeCloseTo(TERRAIN_ELEVATION_M * exaggeration, 0);
       await reliefExpect.poll(() => hillshade(page)).not.toBe("none");
       expect(await hillshade(page)).not.toBe("absent");
@@ -321,12 +328,53 @@ test.describe("Map orientation", () => {
       await reliefExpect
         .poll(() => relief(page))
         .toMatchObject({ source: "terrain" });
+    });
 
-      // Back out of the band: no relief, and the ground under the flights
-      // is the line between their fields again. Asked for one by one rather
-      // than by waiting for the map to be idle, which takes the base map and
-      // the heat of the whole view along (see jumpToView)
-      await jumpToView(page, coord, 9);
+    // A test of its own: every step on the relief waits on its frames, and
+    // with the one above this took longer than RELIEF_TEST_TIMEOUT_MS
+    test("zoomed out, the 3D view still draws the relief, exaggerated more and the flights as much", async ({
+      page,
+    }) => {
+      test.setTimeout(RELIEF_TEST_TIMEOUT_MS);
+      const at = await findSegmentFarFromAirports(page);
+      expect(at).not.toBeNull();
+      const coord = [at!.coord[0]!, at!.coord[1]!] as const;
+      await enterRelief(page, coord);
+      const { exaggeration } = (await relief(page)) as { exaggeration: number };
+
+      // Asked for one by one rather than by waiting for the map to be idle,
+      // which takes the base map and the heat of the whole view along (see
+      // jumpToView)
+      await jumpToView(page, coord, 8);
+      await reliefExpect
+        .poll(
+          async () =>
+            ((await relief(page)) as { exaggeration: number } | null)
+              ?.exaggeration,
+        )
+        .toBeGreaterThan(exaggeration);
+      await reliefExpect.poll(() => ribbonsSettled(page)).toBe(true);
+      const lifted = await page.evaluate(() => {
+        const map = window.mapApp!.map!;
+        return {
+          relief: map.getTerrain()!.exaggeration ?? 1,
+          ribbons: [
+            ...new Set(
+              map
+                .querySourceFeatures("paths-altitude-3d")
+                .map((feature) => feature.properties["e"] as number),
+            ),
+          ],
+        };
+      });
+      expect(lifted.ribbons).toEqual([lifted.relief]);
+      await reliefExpect
+        .poll(() => ground(page))
+        .toBeCloseTo(TERRAIN_ELEVATION_M * lifted.relief, 0);
+      expect(await hillshade(page)).not.toBe("none");
+
+      // Out of the 3D view: no relief, and no shading
+      await page.locator("#three-d-btn").click();
       await reliefExpect.poll(() => relief(page)).toBeNull();
       expect(await hillshade(page)).toBe("none");
       expect(

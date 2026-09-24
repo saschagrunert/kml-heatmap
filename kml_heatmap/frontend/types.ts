@@ -240,6 +240,8 @@ export interface PathRunProperties {
   pathId: number;
   /** Feet above the flight's ground; only a ribbon of the 3D view has it */
   h?: number;
+  /** The exaggeration of `h` (see liftExaggeration), with it */
+  e?: number;
   color: string;
 }
 
