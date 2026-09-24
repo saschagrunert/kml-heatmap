@@ -19,6 +19,8 @@
 import type { ExpressionSpecification, Map as MapLibreMap } from "maplibre-gl";
 import type { Coordinate } from "../utils/geometry";
 import type { PathSegment } from "../types";
+import { FEET_TO_METERS, METERS_TO_FEET } from "../utils/constants";
+import { unwrapLng } from "../utils/mapHelpers";
 import { groundLevelsFt } from "./statistics";
 
 /**
@@ -63,8 +65,6 @@ export function isLiftedAt(zoom: number): boolean {
  */
 const MAX_SLOPE = 0.3;
 
-const FEET_PER_METRE = 1 / 0.3048;
-
 /** The circumference of the earth, in metres, at the equator */
 const EARTH_CIRCUMFERENCE_M = 40075016.686;
 
@@ -102,7 +102,6 @@ const LIFT_STOPS: readonly (readonly [
   [16, 1.5, 6],
 ];
 
-const FEET_TO_METRES = 0.3048;
 const METRES_PER_DEGREE = 111320;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 
@@ -185,7 +184,7 @@ export function groundProfileFt(
       if (coords) {
         const [[lat0, lng0], [lat1, lng1]] = coords;
         total += Math.hypot(
-          (lng1 - lng0) *
+          (unwrapLng(lng1, lng0) - lng0) *
             METRES_PER_DEGREE *
             Math.cos(((lat0 + lat1) / 2) * DEGREES_TO_RADIANS),
           (lat1 - lat0) * METRES_PER_DEGREE,
@@ -429,7 +428,7 @@ function limitSlope(points: readonly Coordinate[], heights: number[]): void {
       METRES_PER_DEGREE *
       Math.cos(((lat0 + lat1) / 2) * DEGREES_TO_RADIANS);
     const dy = (lat1 - lat0) * METRES_PER_DEGREE;
-    const reach = Math.hypot(dx, dy) * FEET_PER_METRE * MAX_SLOPE;
+    const reach = Math.hypot(dx, dy) * METERS_TO_FEET * MAX_SLOPE;
     const previous = heights[i - 1]!;
     heights[i] = Math.min(
       Math.max(heights[i]!, previous - reach),
@@ -496,7 +495,11 @@ export function smoothFlights(
     const points: Coordinate[] = [first.coords[0]];
     const heights: number[] = [heightOf(i)];
     for (const m of members) {
-      points.push(segments[m]!.coords![1]);
+      // Across the antimeridian the curve goes on past 180 rather than
+      // round the world, through the spline points it would add there
+      const end = segments[m]!.coords![1];
+      const lng = unwrapLng(end[1], points[points.length - 1]![1]);
+      points.push(lng === end[1] ? end : [end[0], lng]);
       heights.push(heightOf(m));
     }
     const line = smoothLine(points, heights);
@@ -633,7 +636,7 @@ export function ribbonHeights(): {
   const metres = (exaggeration: number): ExpressionSpecification => [
     "*",
     ["get", "h"],
-    FEET_TO_METRES * exaggeration,
+    FEET_TO_METERS * exaggeration,
   ];
   const byZoom = (
     at: (exaggeration: number, bandM: number) => ExpressionSpecification,
@@ -655,14 +658,14 @@ export function ribbonHeights(): {
       [
         "-",
         metres(exaggeration),
-        (LIFT_STEP_FT / 2) * FEET_TO_METRES * exaggeration,
+        (LIFT_STEP_FT / 2) * FEET_TO_METERS * exaggeration,
       ],
       0,
     ]),
     height: byZoom((exaggeration, bandM) => [
       "+",
       metres(exaggeration),
-      (LIFT_STEP_FT / 2) * FEET_TO_METRES * exaggeration + bandM,
+      (LIFT_STEP_FT / 2) * FEET_TO_METERS * exaggeration + bandM,
     ]),
   };
 }
@@ -688,11 +691,13 @@ function atZoom(
 
 /**
  * How far up the screen a point `heightFt` above the ground is drawn, in
- * pixels, where the map draws the ground at `lat`: the height as the
- * ribbons have it at this zoom, over the metres a pixel spans there,
- * foreshortened by the tilt. Flat, a height takes no room on the screen.
- * An approximation that leaves the perspective out, close enough to put
- * the airplane on its ribbon and to rank what is under the pointer.
+ * pixels: the height as the ribbons have it at this zoom, over the metres
+ * a pixel spans, foreshortened by the tilt. Flat, a height takes no room on
+ * the screen. MapLibre scales every extrusion by the metres of a pixel at
+ * the map's centre, wherever the extrusion stands, so `lat` is the centre's
+ * latitude (for a camera move, the one it ends at), not the point's. An
+ * approximation that leaves the perspective out, close enough to put the
+ * airplane on its ribbon and to rank what is under the pointer.
  */
 export function liftOffsetPx(
   map: MapLibreMap,
@@ -703,7 +708,7 @@ export function liftOffsetPx(
   const pitch = map.getPitch() * DEGREES_TO_RADIANS;
   const metres =
     heightFt *
-    FEET_TO_METRES *
+    FEET_TO_METERS *
     atZoom(zoom, ([, exaggeration]) => exaggeration);
   const metresPerPx = metresPerPixel(zoom) * Math.cos(lat * DEGREES_TO_RADIANS);
   return (metres / metresPerPx) * Math.sin(pitch);

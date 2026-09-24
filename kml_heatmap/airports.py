@@ -31,6 +31,7 @@ from .constants import (
     PATH_SAMPLE_MAX_SIZE,
     PATH_SAMPLE_MIN_SIZE,
 )
+from .date_tokens import strip_dates
 from .geometry import EARTH_RADIUS_KM, haversine_distance
 from .logger import logger
 
@@ -201,6 +202,8 @@ def extract_airport_name(full_name: str, is_at_path_end: bool = False) -> str | 
 
     ``deduplicate_airports`` stores the name of one airport. A route name
     ("DEPARTURE - ARRIVAL") yields the airport selected by ``is_at_path_end``.
+    Dates and times of day are taken out of the name (see
+    ``date_tokens.strip_dates``).
     """
     if not full_name or full_name in ["Airport", "Unknown", ""]:
         return None
@@ -209,7 +212,11 @@ def extract_airport_name(full_name: str, is_at_path_end: bool = False) -> str | 
     if is_point_marker(full_name):
         return None
 
-    airport_name = _airport_at(full_name, is_at_path_end)
+    # A free-text name may hold the date of the flight ("Sunday flight 16 Aug
+    # 2026"), which the marker would publish
+    airport_name = strip_dates(_airport_at(full_name, is_at_path_end))
+    if airport_name is None:
+        return None
 
     # Validate: must have ICAO code OR be multi-word name
     has_icao_code = bool(re.search(r"\b[A-Z]{4}\b", airport_name))

@@ -2,14 +2,12 @@
  * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, export, share)
  */
 import type { MapApp } from "../mapApp";
-import type { LayerHandle } from "../types";
 import { setControlLabel } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
 import { logError } from "../utils/logger";
 import { withMapStill } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
-
-type ColorLayerMode = "altitude" | "airspeed";
+import { setColorLayer } from "./layerVisibility";
 
 /**
  * html-to-image is only needed for export, so it is imported on first use.
@@ -189,38 +187,11 @@ export class UIToggles {
     this.app = app;
   }
 
-  /**
-   * Show or hide a layer and record the result in the store. The buttons
-   * and legends follow the store, so nothing here touches them.
-   */
-  private toggleSimpleLayer(
-    layer: LayerHandle,
-    visible: boolean,
-    setVisible: (v: boolean) => void,
-    onShow?: () => void,
-  ): void {
-    if (!this.app.map) return;
-
-    if (visible) {
-      layer.setVisible(false);
-      setVisible(false);
-    } else {
-      layer.setVisible(true);
-      onShow?.();
-      setVisible(true);
-    }
-  }
+  // The toggles only write the store: what the map shows, the buttons and
+  // the legends follow it (see ui/layerVisibility.ts)
 
   toggleHeatmap(): void {
-    this.toggleSimpleLayer(
-      this.app.heatmapLayer,
-      this.app.heatmapVisible,
-      (v) => {
-        this.app.heatmapVisible = v;
-      },
-      // The dimming under a colour layer comes with showing it
-      () => this.app.dataManager.showHeatmap(),
-    );
+    if (this.app.map) this.app.heatmapVisible = !this.app.heatmapVisible;
   }
 
   toggleAltitude(): void {
@@ -231,72 +202,20 @@ export class UIToggles {
     this.toggleColorLayer("airspeed");
   }
 
-  private toggleColorLayer(mode: ColorLayerMode): void {
+  private toggleColorLayer(mode: "altitude" | "airspeed"): void {
     if (!this.app.map) return;
-
-    const other: ColorLayerMode = mode === "altitude" ? "airspeed" : "altitude";
-    const replay = this.app.replayState.active;
-    const layers = this.app.layerManager;
-
-    // The buttons and the legends follow the store keys written below
-    if (this.app[`${mode}Visible`]) {
-      if (replay) {
-        // The layer is hidden for the replay already. The trail keeps
-        // its altitude colours without a colour layer, so only a speed
-        // trail changes (see ReplayManager.updateTrailLegend for the scale)
-        if (mode === "airspeed") {
-          this.app.replayManager?.redrawReplayPath("altitude");
-        }
-      } else {
-        this.app[`${mode}Layer`].setVisible(false);
-      }
-      this.app[`${mode}Visible`] = false;
-      // A hidden layer is rebuilt when it is shown again; kept, its
-      // features and their segment lists held tens of MB for nothing
-      layers.clearLayer(mode);
-    } else {
-      if (this.app[`${other}Visible`]) {
-        if (!replay) this.app[`${other}Layer`].setVisible(false);
-        this.app[`${other}Visible`] = false;
-        layers.clearLayer(other);
-        const label = other === "altitude" ? "Altitude" : "Speed";
-        showToast(`${label} layer disabled`, "info");
-      }
-
-      if (!replay) {
-        if (mode === "altitude") layers.redrawAltitudePaths();
-        else layers.redrawAirspeedPaths();
-        this.app[`${mode}Layer`].setVisible(true);
-      } else {
-        this.app.replayManager?.redrawReplayPath(mode);
-      }
-
-      this.app[`${mode}Visible`] = true;
-    }
-
-    if (replay && this.app.replayState.airplaneMarker?.isPopupOpen()) {
-      this.app.replayManager?.updateReplayAirplanePopup();
+    if (setColorLayer(this.app, mode, !this.app[`${mode}Visible`])) {
+      const label = mode === "altitude" ? "Speed" : "Altitude";
+      showToast(`${label} layer disabled`, "info");
     }
   }
 
   toggleAirports(): void {
-    this.toggleSimpleLayer(
-      this.app.airportLayer,
-      this.app.airportsVisible,
-      (v) => {
-        this.app.airportsVisible = v;
-      },
-    );
+    if (this.app.map) this.app.airportsVisible = !this.app.airportsVisible;
   }
 
   toggleAviation(): void {
-    this.toggleSimpleLayer(
-      this.app.aviationLayer,
-      this.app.aviationVisible,
-      (v) => {
-        this.app.aviationVisible = v;
-      },
-    );
+    if (this.app.map) this.app.aviationVisible = !this.app.aviationVisible;
   }
 
   /**

@@ -25,7 +25,7 @@ from .data_exporter import (
 )
 from .exceptions import KMLHeatmapError, KMLParseError
 from .logger import logger
-from .parser import load_cached_kml, parse_kml_coordinates
+from .parser import load_cached_kml, parse_kml_file
 from .parser_cache import prune_stale_cache_entries
 from .site_assets import (
     SITE_FILE_PATTERNS,
@@ -39,7 +39,7 @@ from .validation import validate_kml_file, validate_output_dir
 from .workers import init_worker, parse_worker_count
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Sequence
 
     from .airport_lookup import AirportRecord
     from .types import FlightPathGroup, PathMetadata, TrackPoint
@@ -113,32 +113,41 @@ class ParsedFile:
     path_metadata: list[PathMetadata] = field(default_factory=list)
 
 
-def _parse_with_error_handling(kml_file: str) -> ParsedFile:
-    """Parse a KML file in a worker and reduce the result for the parent."""
+def _parse_with_error_handling(
+    kml_file: str, cache_path: Path | None = None
+) -> ParsedFile:
+    """Parse a KML file in a worker and reduce the result for the parent.
+
+    ``cache_path`` is the parse cache entry the parent looked up and missed
+    (see ``parser.load_cached_kml``); the result is stored there.
+    """
     try:
-        coordinates, path_groups, path_metadata = parse_kml_coordinates(kml_file)
+        coordinates, path_groups, path_metadata = parse_kml_file(kml_file, cache_path)
     except (OSError, ValueError, TypeError, KMLParseError) as e:
         logger.error("Error processing %s: %s", kml_file, e)
         return ParsedFile(kml_file)
     return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata)
 
 
-def _load_cached(kml_file: str) -> ParsedFile | None:
-    """The parse result of a file from the parse cache, None on a miss."""
+def _load_cached(kml_file: str) -> ParsedFile | Path | None:
+    """The parse result of a file from the parse cache.
+
+    On a miss the cache entry to store the parse in, or None without one.
+    """
     try:
-        cached = load_cached_kml(kml_file)
+        cached, cache_path = load_cached_kml(kml_file)
     except OSError:
         return None
     if cached is None:
-        return None
+        return cache_path
     coordinates, path_groups, path_metadata = cached
     return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata)
 
 
-def _parse_inline(kml_file: str) -> ParsedFile:
+def _parse_inline(kml_file: str, cache_path: Path | None) -> ParsedFile:
     """Parse a file in this process, with the error handling of a worker."""
     try:
-        return _parse_with_error_handling(kml_file)
+        return _parse_with_error_handling(kml_file, cache_path)
     except KMLHeatmapError:
         raise
     except Exception:
@@ -157,15 +166,18 @@ def _uncached_bytes(kml_files: list[str]) -> int:
 
 
 def _parse_in_pool(
-    kml_files: list[str],
+    uncached: Sequence[tuple[str, Path | None]],
     record: Callable[[ParsedFile], None],
     airports: dict[str, AirportRecord],
 ) -> None:
     """Parse files in a process pool, handing each result to ``record``.
 
-    The workers get the airport database the parent loaded (see
-    ``workers.init_worker``).
+    ``uncached`` pairs each file with its parse cache entry (see
+    ``_parse_with_error_handling``). The workers get the airport database
+    the parent loaded (see ``workers.init_worker``).
     """
+    kml_files = [kml_file for kml_file, _ in uncached]
+    cache_paths = dict(uncached)
     debug = logger.isEnabledFor(logging.DEBUG)
     database = pickle.dumps(airports, protocol=pickle.HIGHEST_PROTOCOL)
     done: set[str] = set()
@@ -176,7 +188,8 @@ def _parse_in_pool(
         initargs=(debug, database),
     ) as executor:
         future_to_file = {
-            executor.submit(_parse_with_error_handling, f): f for f in kml_files
+            executor.submit(_parse_with_error_handling, f, cache_paths[f]): f
+            for f in kml_files
         }
         for future in as_completed(future_to_file):
             try:
@@ -213,7 +226,7 @@ def _parse_in_pool(
             for kml_file in remaining:
                 try:
                     parsed = executor.submit(
-                        _parse_with_error_handling, kml_file
+                        _parse_with_error_handling, kml_file, cache_paths[kml_file]
                     ).result()
                 except BrokenProcessPool:
                     raise KMLHeatmapError(
@@ -256,19 +269,24 @@ def _parse_kml_files(
             Path(parsed.kml_file).name,
         )
 
-    uncached: list[str] = []
+    # The files to parse, with the cache entry to store each one in
+    uncached: list[tuple[str, Path | None]] = []
     for kml_file in valid_files:
         cached = _load_cached(kml_file)
-        if cached is None:
-            uncached.append(kml_file)
-        else:
+        if isinstance(cached, ParsedFile):
             record(cached)
+        else:
+            uncached.append((kml_file, cached))
 
-    if uncached and _uncached_bytes(uncached) > INLINE_PARSE_MAX_BYTES:
+    if (
+        uncached
+        and _uncached_bytes([kml_file for kml_file, _ in uncached])
+        > INLINE_PARSE_MAX_BYTES
+    ):
         _parse_in_pool(uncached, record, airports)
     else:
-        for kml_file in uncached:
-            record(_parse_inline(kml_file))
+        for kml_file, cache_path in uncached:
+            record(_parse_inline(kml_file, cache_path))
 
     input_order = {kml_file: index for index, kml_file in enumerate(valid_files)}
     results.sort(key=lambda parsed: input_order[parsed.kml_file])
@@ -319,14 +337,22 @@ def _drop_paths_without_year(
     return kept_groups, kept_metadata
 
 
-def _map_extent(all_path_groups: FlightPathGroup) -> CoordinateExtent:
+def _map_extent(
+    all_path_groups: FlightPathGroup, exportable: Sequence[bool] | None = None
+) -> CoordinateExtent:
     """The extent of the exported paths, which the map is fitted to.
 
     Only exported paths count: an excluded path would widen the map and give
-    away where it was. Raises when there is nothing to export at all.
+    away where it was. ``exportable`` is ``is_exportable_path`` of every
+    path, when the caller has it. Raises when there is nothing to export.
     """
+    if exportable is None:
+        exportable = [is_exportable_path(path) for path in all_path_groups]
     extent = CoordinateExtent.of(
-        point for path in all_path_groups if is_exportable_path(path) for point in path
+        point
+        for path, exported in zip(all_path_groups, exportable, strict=True)
+        if exported
+        for point in path
     )
     if extent is None:
         raise KMLHeatmapError("No flight paths with a determinable year to export")
@@ -348,15 +374,19 @@ def _export_site(
     all_path_groups, all_path_metadata = _drop_paths_without_year(
         all_path_groups, all_path_metadata
     )
-    extent = _map_extent(all_path_groups)
+    # Once per path, for every stage that only looks at the exported ones
+    exportable = [is_exportable_path(path) for path in all_path_groups]
+    extent = _map_extent(all_path_groups, exportable)
 
     # Only exported paths contribute airports: a path that gets no id and no
     # segments (a single point, a recording that never moved) would still
     # publish its location and name through the airport list
     exported = [
         (path, metadata)
-        for path, metadata in zip(all_path_groups, all_path_metadata, strict=True)
-        if is_exportable_path(path)
+        for path, metadata, is_exported in zip(
+            all_path_groups, all_path_metadata, exportable, strict=True
+        )
+        if is_exported
     ]
     logger.info("\nProcessing %d start points...", len(exported))
     unique_airports = deduplicate_airports(
@@ -374,6 +404,7 @@ def _export_site(
             unique_airports,
             site.data_stage,
             aircraft_data=aircraft_data,
+            exportable=exportable,
         )
         # The page opens on the latest year, see resolveYearSelection
         render_html(

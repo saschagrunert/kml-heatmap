@@ -26,7 +26,7 @@ export default defineConfig({
       // Codecov enforces patch coverage on top.
       thresholds: {
         lines: 98,
-        branches: 89,
+        branches: 91,
         functions: 97,
         statements: 97,
       },

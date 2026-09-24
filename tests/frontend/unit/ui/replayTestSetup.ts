@@ -60,9 +60,9 @@ export function createSegments(): PathSegment[] {
 }
 
 /**
- * A mock app holding path 1 with timing data. The buttons and legends are
- * wired to the store the way MapApp does it, so the tests can read the
- * altitude button the way the user sees it.
+ * A mock app holding path 1 with timing data. The buttons, legends and
+ * layers are wired to the store the way MapApp does it, so the tests can
+ * read the altitude button and the layers the way the user sees them.
  */
 export function createReplayMockApp(): MockApp {
   const app = createMockApp({
@@ -74,7 +74,18 @@ export function createReplayMockApp(): MockApp {
   const container = app.map!.getContainer();
   Object.defineProperty(container, "clientWidth", { value: 800 });
   Object.defineProperty(container, "clientHeight", { value: 600 });
-  syncControlsWithStore(app.store);
+  // The layer manager's and the data manager's part of showing a layer
+  app.layerManager.syncModes.mockImplementation(() => {
+    for (const mode of ["altitude", "airspeed"] as const) {
+      app[`${mode}Layer`].setVisible(
+        app[`${mode}Visible`] && !app.replayActive,
+      );
+    }
+  });
+  app.dataManager.showHeatmap.mockImplementation(() =>
+    app.heatmapLayer.setVisible(true),
+  );
+  syncControlsWithStore(app);
   return app;
 }
 

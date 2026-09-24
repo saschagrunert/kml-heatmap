@@ -48,10 +48,17 @@ def local_name(tag: object) -> str:
 
 
 def altitude_mode(geometry: etree._Element) -> str | None:
-    """The altitudeMode (kml: or gx:) of a LineString or gx:Track, if any."""
+    """The altitudeMode (kml: or gx:) of a LineString or gx:Track, if any.
+
+    A gx:Track without one of its own has that of the gx:MultiTrack it is
+    in, if that has one.
+    """
     for child in geometry:
         if local_name(child.tag) == "altitudeMode":
             return (child.text or "").strip() or None
+    parent = geometry.getparent()
+    if parent is not None and local_name(parent.tag) == "MultiTrack":
+        return altitude_mode(parent)
     return None
 
 

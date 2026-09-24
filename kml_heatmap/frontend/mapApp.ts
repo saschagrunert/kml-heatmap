@@ -20,6 +20,7 @@ import { AirportManager } from "./ui/airportManager";
 import { MapOrientation } from "./ui/mapOrientation";
 
 import { UIToggles } from "./ui/uiToggles";
+import { followLayerVisibility } from "./ui/layerVisibility";
 import { MobileBar } from "./ui/mobileBar";
 import { bindActions } from "./ui/actions";
 import { loadInitialData } from "./appInitializer";
@@ -196,6 +197,20 @@ export const BASE_STYLE_RETRY_MS = 5_000;
 export const FEATURES_UNAVAILABLE_MESSAGE =
   "Replay and Wrapped are unavailable: their code could not be loaded";
 
+/**
+ * How long the map may take to draw once the data is in. The map draws
+ * through its worker; a worker that failed to start only says so in the
+ * console, and the page would otherwise show an empty map and nothing else.
+ */
+export const MAP_STALL_MS = 20_000;
+
+/** Said when the map has not finished drawing after MAP_STALL_MS */
+export const MAP_STALL_MESSAGE =
+  "The map is taking long to draw. If it stays empty, reload the page.";
+
+/** A failure whose message is for the user, shown in place of the map */
+export class UnsupportedBrowserError extends Error {}
+
 export class MapApp {
   // Observable state store
   readonly store: AppStore;
@@ -214,6 +229,7 @@ export class MapApp {
   declare aviationVisible: StoreAccessors["aviationVisible"];
   declare globeVisible: StoreAccessors["globeVisible"];
   declare threeDVisible: StoreAccessors["threeDVisible"];
+  declare replayActive: StoreAccessors["replayActive"];
   declare currentData: StoreAccessors["currentData"];
   declare hasTimingData: StoreAccessors["hasTimingData"];
 
@@ -360,7 +376,8 @@ export class MapApp {
    */
   get airportToPaths(): AirportToPathsMap {
     const data = this.currentData;
-    if (!data) return {};
+    // No prototype, like the index's own: an airport name is data
+    if (!data) return Object.create(null) as AirportToPathsMap;
     return datasetIndex(data)
       .filter(this.selectedYear, this.selectedAircraft)
       .pathIdsByAirport();
@@ -449,6 +466,7 @@ export class MapApp {
 
     // Load airports and metadata
     await loadInitialData(this);
+    if (this.map) this.watchMapStall(this.map);
 
     // Setup map event handlers
     this.setupEventHandlers();
@@ -478,6 +496,18 @@ export class MapApp {
     await this.applyPendingFilterChanges();
   }
 
+  /** Say so when the map has not drawn MAP_STALL_MS after the data came */
+  private watchMapStall(map: MapLibreMap): void {
+    const timer = setTimeout(() => {
+      // A hidden tab draws nothing, and is no sign of a failure. Nor is a
+      // map that has all it needs without having drawn since: no data came
+      if (!this.destroyed && !document.hidden && !map.loaded()) {
+        showToast(MAP_STALL_MESSAGE, "error");
+      }
+    }, MAP_STALL_MS);
+    map.once("idle", () => clearTimeout(timer));
+  }
+
   /**
    * Cancel pending work and take down everything the app set up: the DOM
    * listeners (through the lifetime signal), the map events, every store
@@ -505,6 +535,7 @@ export class MapApp {
     this.releaseMarkerTaps = null;
     this.mapHandlers = {};
     this.layerManager?.destroy();
+    this.airportManager?.destroy();
     this.mapOrientation?.destroy();
     this.dataManager?.destroy();
     this.stateManager?.cancelSave();
@@ -549,7 +580,7 @@ export class MapApp {
       return;
     }
     aircraftSelect.value = pendingAircraft;
-    await this.filterManager.filterByAircraft();
+    this.filterManager.filterByAircraft();
   }
 
   private restoreState(): void {
@@ -612,7 +643,7 @@ export class MapApp {
     const canvas = document.createElement("canvas");
     const gl = canvas.getContext("webgl2");
     if (!gl) {
-      throw new Error(
+      throw new UnsupportedBrowserError(
         "WebGL 2 is not available. The map requires a browser with WebGL 2 support.",
       );
     }
@@ -718,8 +749,6 @@ export class MapApp {
       // `mapReady`, so without this it would wait forever and the page would
       // show an empty map with no word of why.
       .catch((error: unknown) => this.rejectMapReady(error));
-
-    this.airportLayer.setVisible(this.airportsVisible);
   }
 
   /**
@@ -775,20 +804,18 @@ export class MapApp {
   /**
    * The store drives the toggle buttons and the colour legends: initial
    * state and every change are reflected in aria-pressed, the active class,
-   * the opacity and the legend visibility. Replay is the one other writer
-   * while it runs: it shows the heatmap as off, clears the opacity of the
-   * toggles it disables and shows the altitude scale for its trail, and
-   * puts all three back in step with the store when it closes.
+   * the opacity and the legend visibility. The heatmap's toggle and the
+   * altitude scale also depend on whether a replay runs, so they follow
+   * the layers (see ui/layerVisibility.ts). Replay only clears the opacity
+   * of the toggles it disables, and puts it back when it closes.
    */
   private setupButtonSync(): void {
-    syncToggleButton(this.store, "heatmapVisible", "heatmap-btn");
     syncToggleButton(this.store, "altitudeVisible", "altitude-btn");
     syncToggleButton(this.store, "airspeedVisible", "airspeed-btn");
     syncToggleButton(this.store, "airportsVisible", "airports-btn");
     syncToggleButton(this.store, "aviationVisible", "aviation-btn");
     syncToggleButton(this.store, "globeVisible", "globe-btn");
     syncToggleButton(this.store, "threeDVisible", "three-d-btn");
-    syncLegend(this.store, "altitudeVisible", "altitude-legend");
     syncLegend(this.store, "airspeedVisible", "airspeed-legend");
     // The isolate button depends on two keys, so PathSelection owns it
   }
@@ -833,8 +860,8 @@ export class MapApp {
     this.mapOrientation = new MapOrientation(this);
     this.uiToggles = new UIToggles(this);
     this.mobileBar = MobileBar.mountFor(this);
+    followLayerVisibility(this);
     this.followReplayAvailability();
-    this.followHeatmapEmphasis();
     this.followColumnScrollEnd();
   }
 
@@ -894,13 +921,13 @@ export class MapApp {
    * manager, which is only fetched once someone opens replay.
    */
   private followReplayAvailability(): void {
-    // A running replay owns the button (it reads Stop), and puts it back
-    // in step with the selection when it closes
+    // A running replay owns the button (it reads Stop); it is back in step
+    // with the selection as the replay closes
     const refresh = (): void => {
-      if (!this.replayState.active) updateReplayButtonState(this.canReplay());
+      if (!this.replayActive) updateReplayButtonState(this.canReplay());
     };
     this.store.subscribeKeys(
-      ["selectedPathIds", "hasTimingData", "currentData"],
+      ["selectedPathIds", "hasTimingData", "currentData", "replayActive"],
       refresh,
     );
     refresh();
@@ -920,23 +947,6 @@ export class MapApp {
       const column = domCache.get(id);
       if (column) this.columnScrollWatchers.push(watchScrollEnd(column));
     }
-  }
-
-  /**
-   * Keep the heatmap stepped back while a colour layer is drawn over it.
-   *
-   * Which of the two reads first follows from the layer flags alone, so it
-   * follows the store rather than every place that writes them: a toggle, a
-   * restored link and the start and end of a replay all set the same keys.
-   * DataManager applies it once more when it builds the heat layer, which is
-   * the one moment the canvas this styles does not exist yet.
-   */
-  private followHeatmapEmphasis(): void {
-    const apply = (): void => this.dataManager.applyHeatmapEmphasis();
-    this.store.subscribeKeys(["altitudeVisible", "airspeedVisible"], apply);
-    // State restored from a link is written before this runs, so the current
-    // value gets the same treatment as every later one
-    apply();
   }
 
   /**
@@ -1022,7 +1032,7 @@ export class MapApp {
     }
 
     const replay = this.replayState;
-    if (replay.active) {
+    if (this.replayActive) {
       // The colour layers are hidden during a replay; the only thing a
       // click on the map does is put the popups away
       this.airportManager.closePopup();
@@ -1104,6 +1114,10 @@ export function reportInitFailure(error: unknown): void {
   const mapEl = document.getElementById("map");
   if (mapEl) {
     mapEl.innerHTML = INIT_ERROR_HTML;
+    // Set as text: only a message of the app's own replaces the generic one
+    if (error instanceof UnsupportedBrowserError) {
+      mapEl.firstElementChild!.textContent = error.message;
+    }
   }
 }
 

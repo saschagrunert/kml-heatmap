@@ -10,6 +10,8 @@ import {
   showToast,
 } from "../../../../kml_heatmap/frontend/utils/toast";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
+import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
+import { HIDEABLE_CONTROL_IDS } from "../../../../kml_heatmap/frontend/utils/constants";
 import { LngLat, Popup } from "../../../mocks/maplibre-gl";
 import { asMapApp, type MockApp } from "../../testHelpers";
 import type { AirportMarker } from "../../../../kml_heatmap/frontend/types";
@@ -61,6 +63,19 @@ describe("WrappedManager dialog", () => {
       wrappedManager.showWrapped();
 
       expect(el("wrapped-stats").innerHTML).toBe("rendered once");
+    });
+
+    it("does not open twice on a page without controls to hide", () => {
+      for (const id of HIDEABLE_CONTROL_IDS)
+        document.getElementById(id)?.remove();
+      domCache.clear();
+      wrappedManager.showWrapped();
+      el("wrapped-stats").innerHTML = "rendered once";
+
+      wrappedManager.showWrapped();
+
+      expect(el("wrapped-stats").innerHTML).toBe("rendered once");
+      expect(mockApp.map!.fitBounds).toHaveBeenCalledOnce();
     });
 
     it("hides the control elements behind the dialog", () => {
@@ -129,7 +144,7 @@ describe("WrappedManager dialog", () => {
     });
 
     it("does not open while a replay runs", () => {
-      mockApp.replayManager.state.active = true;
+      mockApp.replayActive = true;
 
       wrappedManager.showWrapped();
 

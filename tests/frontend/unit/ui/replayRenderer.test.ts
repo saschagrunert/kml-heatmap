@@ -1,19 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  AUTO_ZOOM_DURATION_MS,
-  AUTO_ZOOM_SETTLE_MS,
   AirplaneMarker,
-  RECENTER_PAN_DURATION_MS,
   ReplayRenderer,
-  SEEK_PAN_THROTTLE_MS,
   appendTrailSegment,
   findSegmentIndexAtTime,
-  iconHeading,
   trailFeatureCollection,
   truncateTrail,
+} from "../../../../kml_heatmap/frontend/ui/replayRenderer";
+import {
+  AUTO_ZOOM_DURATION_MS,
+  AUTO_ZOOM_SETTLE_MS,
+  RECENTER_PAN_DURATION_MS,
+  SEEK_PAN_THROTTLE_MS,
+  iconHeading,
   unwrapRotation,
   zoomOutSteps,
-} from "../../../../kml_heatmap/frontend/ui/replayRenderer";
+} from "../../../../kml_heatmap/frontend/ui/replayCamera";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import {
   liftFt,
@@ -237,6 +239,28 @@ describe("trail runs", () => {
       getColorForAltitude(10000, 0, 10000),
     ]);
     expect(state.trailRuns[1]).toMatchObject({ firstIndex: 2, lastIndex: 2 });
+  });
+
+  it("carries a run on across the antimeridian instead of round the world", () => {
+    const segments = makeChain([3000, 3000, 3000]);
+    const lngs = [179.98, 179.99, -179.99, -179.98];
+    segments.forEach((segment, i) => {
+      segment.coords = [
+        [60, lngs[i]!],
+        [60, lngs[i + 1]!],
+      ];
+    });
+    const state = stateWith(segments);
+
+    for (let i = 0; i < 3; i++) appendTrailSegment(state, i, false);
+
+    expect(state.trailRuns).toHaveLength(1);
+    expect(state.trailRuns[0]!.coords.map(([lng]) => lng)).toEqual([
+      179.98,
+      179.99,
+      expect.closeTo(180.01, 9),
+      expect.closeTo(180.02, 9),
+    ]);
   });
 
   it("starts a run where the flight does not join up", () => {
@@ -639,6 +663,7 @@ describe("ReplayRenderer", () => {
     map: MockMapLibreMap;
     altitudeVisible: boolean;
     airspeedVisible: boolean;
+    replayActive: boolean;
   };
   let mockReplayManager: { state: ReplayState };
   let frames: FrameRequestCallback[];
@@ -700,6 +725,7 @@ describe("ReplayRenderer", () => {
       map,
       altitudeVisible: true,
       airspeedVisible: false,
+      replayActive: false,
     };
 
     mockReplayManager = {
@@ -720,7 +746,7 @@ describe("ReplayRenderer", () => {
 
   describe("updateAirplanePopup", () => {
     it("skips when no marker", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       mockReplayManager.state.airplaneMarker = null;
       mockReplayManager.state.segments = [makeSegment()];
 
@@ -730,7 +756,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("skips when not active", () => {
-      mockReplayManager.state.active = false;
+      mockApp.replayActive = false;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [makeSegment()];
@@ -741,7 +767,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("finds current segment by time", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 15;
@@ -762,7 +788,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("opens on a click on the airplane", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
@@ -774,7 +800,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("shows where the aircraft is, not where its segment ends", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
@@ -789,7 +815,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("uses the given index instead of searching", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       mockReplayManager.state.airplaneMarker = makeAirplane();
       mockReplayManager.state.currentTime = 25;
       const segments = [
@@ -807,7 +833,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("falls back to first segment when currentTime is before all", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 0;
@@ -823,7 +849,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("skips when no segments", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [];
@@ -834,7 +860,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("refills an open popup without opening it again", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
@@ -850,7 +876,7 @@ describe("ReplayRenderer", () => {
 
     it("pans the popup into view while paused, and never while playing", () => {
       const pan = vi.spyOn(mapHelpers, "panPopupIntoView");
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
@@ -1277,13 +1303,15 @@ describe("ReplayRenderer", () => {
       };
 
       it("lifts the airplane to its height on a tilted map, along its segment", () => {
-        map.jumpTo({ zoom: 13, pitch: 60 });
+        // The middle of the map far south of the airplane, at 50 degrees
+        map.jumpTo({ center: [8, 20], zoom: 13, pitch: 60 });
 
         callUpdateDisplay();
 
-        // 500 ft above the ground, halfway up the climb
+        // 500 ft above the ground, halfway up the climb, at the scale of the
+        // map's centre, which MapLibre raises every extrusion by
         expect(lift()).toBeCloseTo(
-          liftOffsetPx(map as unknown as MapLibreMap, 50, 500),
+          liftOffsetPx(map as unknown as MapLibreMap, 20, 500),
           0,
         );
         expect(lift()).toBeGreaterThan(0);
@@ -2103,7 +2131,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("refreshes an open popup with the current segment index", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 15;
@@ -2125,7 +2153,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("rebuilds an open popup only when the airplane reaches another segment", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.segments = [
@@ -2146,7 +2174,7 @@ describe("ReplayRenderer", () => {
     });
 
     it("leaves a closed popup closed as the airplane moves on", () => {
-      mockReplayManager.state.active = true;
+      mockApp.replayActive = true;
       const airplane = makeAirplane();
       mockReplayManager.state.airplaneMarker = airplane;
       mockReplayManager.state.currentTime = 15;

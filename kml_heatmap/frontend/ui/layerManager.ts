@@ -27,7 +27,9 @@
  *   pieces of one height each, and every piece is a feature of the same
  *   run, so the run table, the selection and the tooltip serve all of them
  *   as they do the line. Its width is part of its geometry, so the ribbons
- *   are written again as the map zooms to another whole level.
+ *   are written again as the map zooms to another whole level. A mode that
+ *   is hidden (the replay hides them without clearing them) is left as it
+ *   is until it is drawn again.
  * - Paths are pixels of a layer and have no events of their own. One
  *   `mousemove` handler per map asks what is rendered under the pointer, at
  *   most once per frame, and moves one reused tooltip along.
@@ -65,6 +67,9 @@ import {
   isInMarker,
   isOnMarker,
   toLngLat,
+  toLngLatAfter,
+  unwrapLng,
+  whenContextRestored,
   type LatLon,
   type LngLatTuple,
 } from "../utils/mapHelpers";
@@ -155,7 +160,10 @@ interface Run {
 /** The runs of one source; the index of a run is the `r` of its feature */
 interface RunTable {
   runs: Run[];
-  /** Bumped on every `setData`; features of an older one are stale */
+  /**
+   * Bumped on every change of the runs, written or not; features of an
+   * older one are stale
+   */
   g: number;
   /**
    * The source that holds the runs' features, null while none does, which
@@ -169,6 +177,11 @@ interface RunTable {
    * tiles answer for the data before it.
    */
   landing: "worker" | "tiles" | null;
+  /**
+   * The zoom level the runs were last written for in the 3D view (see
+   * ribbonWidthZoom), null outside it
+   */
+  widthZoom: number | null;
 }
 
 /** The selection a mode's layers were last styled for */
@@ -184,6 +197,11 @@ interface ModeState {
   shown: ShownSelection;
   /** The filter on the main layer, serialised, to set it only on a change */
   filterKey: string;
+  /**
+   * Its sources hold runs of before a change of the view that passed it by
+   * while it was hidden; it is drawn again as a whole
+   */
+  dirty: boolean;
 }
 
 function emptyModeState(): ModeState {
@@ -192,12 +210,14 @@ function emptyModeState(): ModeState {
     g: 0,
     written: null,
     landing: null,
+    widthZoom: null,
   });
   return {
     tables: { main: table(), selected: table() },
     segments: null,
     shown: { selected: new Set(), isolate: false },
     filterKey: "null",
+    dirty: false,
   };
 }
 
@@ -249,7 +269,7 @@ function runLook(
 /** A position of the data in the copy of the world nearest to `pointerLng` */
 function nearPointer(latLon: LatLon, pointerLng: number): LngLatTuple {
   const [lng, lat] = toLngLat(latLon);
-  return [lng + 360 * Math.round((pointerLng - lng) / 360), lat];
+  return [unwrapLng(lng, pointerLng), lat];
 }
 
 /**
@@ -306,8 +326,6 @@ export class LayerManager implements PathHitTester {
   private hovered: PathSegment | null = null;
   /** The popup a tap opened; a tap elsewhere replaces it */
   private touchPopup: Popup | null = null;
-  /** The zoom the ribbons were last written for (see ribbonWidthZoom) */
-  private widthZoom: number | null = null;
   /** Every flight of a dataset smoothed at its height, for the 3D view */
   private smoothed: {
     segments: PathSegment[];
@@ -332,19 +350,40 @@ export class LayerManager implements PathHitTester {
     this.hideTooltip();
   };
 
-  /** A ribbon is as wide as the zoom it was written for (see lift.ts) */
+  /**
+   * A ribbon is as wide as the zoom level it was written for (see lift.ts).
+   * A flat line is the same at every zoom: from LIFT_MAX_ZOOM on, where the
+   * 3D view draws the lines, only the zoom that lifts them again counts.
+   */
   private readonly handleZoomEnd = (): void => {
     const map = this.listeningTo;
-    if (!map || !this.app.threeDVisible || this.widthZoom === null) return;
-    if (ribbonWidthZoom(map.getZoom()) !== this.widthZoom) {
-      this.recutRuns();
+    if (!map || !this.app.threeDVisible) return;
+    const zoom = map.getZoom();
+    const level = ribbonWidthZoom(zoom);
+    for (const mode of MODES) {
+      const state = this.state[mode];
+      const config = this.getConfig(mode);
+      if (!this.drawsNow(mode)) continue;
+      for (const set of ["main", "selected"] as const) {
+        const table = state.tables[set];
+        if (table.widthZoom === null || table.widthZoom === level) continue;
+        if (table.written === config.ribbons[set] || isLiftedAt(zoom)) {
+          this.setRuns(config, set, table.runs, true);
+        } else {
+          table.widthZoom = level;
+        }
+      }
     }
   };
 
   constructor(app: MapApp) {
     this.app = app;
-    // Lifted or flat, the flights are cut and written anew
-    app.store.subscribe("threeDVisible", () => this.redrawVisibleModes());
+    // Lifted or flat, the flights are cut and written anew. The smoothed
+    // flights only the 3D view needs are let go with it.
+    app.store.subscribe("threeDVisible", (threeD) => {
+      if (!threeD) this.smoothed = null;
+      this.redrawVisibleModes();
+    });
     if (app.map) {
       this.listen(app.map);
     } else {
@@ -381,6 +420,7 @@ export class LayerManager implements PathHitTester {
     map.on("mousemove", this.handleMouseMove);
     map.on("mouseout", this.handleMouseOut);
     map.on("zoomend", this.handleZoomEnd);
+    whenContextRestored(map, () => this.restoreModes());
   }
 
   /** Stop following the pointer; the drawn layers stay on the map */
@@ -591,11 +631,11 @@ export class LayerManager implements PathHitTester {
 
       // A ribbon is drawn above the ground it stands on: the pointer is
       // taken down by as much before the segment and the distance to it
-      // are looked for (see liftOffsetPx)
+      // are looked for (see liftOffsetPx, which scales by the centre)
       const { h } = feature.properties as Partial<PathRunProperties>;
       const lift =
         h !== undefined && ribbonLayers.has(feature.layer.id)
-          ? liftOffsetPx(map, pointer.lat, h)
+          ? liftOffsetPx(map, map.getCenter().lat, h)
           : 0;
       const ground = lift ? map.unproject([point.x, point.y + lift]) : pointer;
       const segment = findNearestSegment(
@@ -762,6 +802,34 @@ export class LayerManager implements PathHitTester {
     });
   }
 
+  /**
+   * Show the colour layers the store asks for: a mode shows while its flag
+   * is on and no replay runs (see ui/layerVisibility.ts). One that shows
+   * again is drawn anew, since it may have missed changes while it was
+   * hidden (see drawsNow); one switched off lets go of its runs, which for
+   * a large year hold tens of MB. A mode the replay hides keeps them.
+   *
+   * @param rebuild - The data or the filter changed: draw every mode that
+   *   shows, whether it did before or not
+   */
+  syncModes(rebuild = false): void {
+    for (const mode of MODES) {
+      const config = this.getConfig(mode);
+      const wanted = this.app[`${mode}Visible`];
+      const shown = wanted && !this.app.replayActive;
+      const showing = config.handle.isVisible();
+      config.handle.setVisible(shown);
+      if (!wanted) {
+        if (rebuild || this.state[mode].segments) this.clearLayer(mode);
+      } else if (shown && (rebuild || !showing)) {
+        this.redrawPaths(config);
+      } else if (rebuild) {
+        // Hidden by the replay: drawn as it shows again
+        this.state[mode].dirty = true;
+      }
+    }
+  }
+
   redrawAltitudePaths(): void {
     this.redrawPaths(this.getConfig("altitude"));
   }
@@ -776,9 +844,15 @@ export class LayerManager implements PathHitTester {
    */
   clearLayer(mode: LayerMode): void {
     const config = this.getConfig(mode);
-    this.state[mode].segments = null;
+    const state = this.state[mode];
+    state.segments = null;
+    state.dirty = false;
     this.setRuns(config, "main", []);
     this.setRuns(config, "selected", []);
+    // Nothing drawn is left to smooth
+    if (MODES.every((other) => !this.state[other].segments)) {
+      this.smoothed = null;
+    }
     this.rehoverOnIdle();
   }
 
@@ -902,6 +976,14 @@ export class LayerManager implements PathHitTester {
     const state = this.state[config.mode];
     const table = state.tables[set];
     table.runs = runs;
+    // Before the map is asked: without a WebGL context it has no sources,
+    // and it comes back with the data of before, whose features must not
+    // index into these runs (see restoreModes). A source that never had
+    // any has no features to tell apart.
+    const g =
+      recut || (runs.length === 0 && table.written === null)
+        ? table.g
+        : ++table.g;
 
     const map = this.readyMap();
     if (!map) {
@@ -924,13 +1006,12 @@ export class LayerManager implements PathHitTester {
     }
 
     const moved = table.written !== null && table.written !== id;
-    const g = recut ? table.g : ++table.g;
     const segments = state.segments ?? [];
     // Every flight smoothed at its height, in the 3D view (see lift.ts),
     // and the ribbons as wide as the zoom asks
     const smoothed = lifted ? this.smoothedFlights(segments) : null;
     const widthZoom = ribbonWidthZoom(map.getZoom());
-    if (threeD) this.widthZoom = widthZoom;
+    table.widthZoom = threeD ? widthZoom : null;
     const features: GeoJSON.Feature<
       GeoJSON.LineString | GeoJSON.MultiPolygon,
       PathRunProperties
@@ -942,7 +1023,9 @@ export class LayerManager implements PathHitTester {
           toLngLat(segments[run.start]!.coords![0]),
         ];
         for (let i = run.start; i < run.end; i++) {
-          coordinates.push(toLngLat(segments[i]!.coords![1]));
+          coordinates.push(
+            toLngLatAfter(segments[i]!.coords![1], coordinates[i - run.start]),
+          );
         }
         features.push({
           type: "Feature",
@@ -989,7 +1072,11 @@ export class LayerManager implements PathHitTester {
     const data = this.app.currentData;
     if (!data) return;
 
-    this.state[config.mode].segments = data.path_segments;
+    const state = this.state[config.mode];
+    state.segments = data.path_segments;
+    state.dirty = false;
+    // The flights of another dataset are smoothed anew when they are lifted
+    if (this.smoothed?.segments !== data.path_segments) this.smoothed = null;
     this.setRuns(config, "main", this.cutRuns(config, data, config.range));
     this.showSelection(config, data);
     this.rehoverOnIdle();
@@ -1069,24 +1156,38 @@ export class LayerManager implements PathHitTester {
     }
   }
 
+  /**
+   * Whether a mode is drawn and shown. A drawn mode that is hidden (the
+   * replay hides the colour layers and keeps them) is marked to be drawn
+   * again as a whole instead: a change of the view is not worth writing to
+   * sources nobody sees, and the mode is redrawn as it shows again.
+   */
+  private drawsNow(mode: LayerMode): boolean {
+    const state = this.state[mode];
+    if (!state.segments) return false;
+    if (this.getConfig(mode).handle.isVisible()) return true;
+    state.dirty = true;
+    return false;
+  }
+
   /** Cut and write the visible modes again, as the 3D view comes or goes */
   private redrawVisibleModes(): void {
     for (const mode of MODES) {
-      if (this.state[mode].segments) this.redrawPaths(this.getConfig(mode));
+      if (this.drawsNow(mode)) this.redrawPaths(this.getConfig(mode));
     }
   }
 
   /**
-   * Write the runs of the drawn modes again, as they are, cut for the zoom
-   * the map is at now (see ribbonWidthZoom)
+   * After a lost WebGL context the sources are back with the data of before
+   * the loss, and their features with the generations of then, which the
+   * run tables may have gone past since: every mode is written again, or
+   * emptied, a hidden one once it shows.
    */
-  private recutRuns(): void {
+  private restoreModes(): void {
+    if (this.destroyed) return;
     for (const mode of MODES) {
-      const state = this.state[mode];
-      if (!state.segments) continue;
-      const config = this.getConfig(mode);
-      this.setRuns(config, "main", state.tables.main.runs, true);
-      this.setRuns(config, "selected", state.tables.selected.runs, true);
+      if (!this.state[mode].segments) this.clearLayer(mode);
+      else if (this.drawsNow(mode)) this.redrawPaths(this.getConfig(mode));
     }
   }
 
@@ -1121,8 +1222,12 @@ export class LayerManager implements PathHitTester {
         mode === "altitude"
           ? this.app.altitudeVisible
           : this.app.airspeedVisible;
-      if (!visible || !data || !this.state[mode].segments) continue;
-      this.showSelection(this.getConfig(mode), data);
+      const state = this.state[mode];
+      if (!visible || !data || !state.segments) continue;
+      const config = this.getConfig(mode);
+      // A mode left behind while it was hidden is drawn again as a whole
+      if (state.dirty && config.handle.isVisible()) this.redrawPaths(config);
+      else this.showSelection(config, data);
     }
     this.rehoverOnIdle();
   }

@@ -30,6 +30,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from .date_tokens import (
+    MONTHS_LONG,
+    MONTHS_SHORT,
+    find_date_tokens,
+    month_number,
+    near_jan_first,
+)
 from .helpers import normalize_timestamp_text, parse_iso_timestamp
 from .logger import logger
 from .validation import find_kml_files as _find_kml_files
@@ -101,11 +108,6 @@ MINUTES_PER_DAY = 24 * 60
 # The temp file of _write_atomic: ".<name>.kml.XXXXXXXX.tmp"
 TEMP_FILE_PATTERN = re.compile(r"^\..*\.kml\.[^.]+\.tmp$", re.IGNORECASE)
 
-# A flight keeps its intervals, so after the shift its timestamps may run
-# into the following days. Timestamps and dates up to this many days after
-# January 1st pass the check.
-MAX_DAYS_AFTER_JAN_1 = 2
-
 # Timestamps further apart than this belong to different flights, unless they
 # are in the same Placemark (see _timestamp_groups)
 FLIGHT_GAP = timedelta(hours=12)
@@ -118,35 +120,6 @@ COORDINATES_PATTERN = re.compile(
 )
 
 PLACEMARK_PATTERN = re.compile(r"<(" + _PREFIX + r"Placemark)\b.*?</\1\s*>", re.DOTALL)
-
-MONTHS_SHORT = (
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-)
-MONTHS_LONG = (
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-)
 
 
 def _timestamp_text(raw: str) -> str:
@@ -186,18 +159,10 @@ def _format_timestamp(dt: datetime, frac: str = "") -> str:
     return f"{dt.strftime('%Y-%m-%dT%H:%M:%S')}{frac}Z"
 
 
-def _month_number(month_str: str) -> int | None:
-    lowered = month_str.lower()
-    for index, name in enumerate(MONTHS_LONG):
-        if lowered in (name.lower(), name[:3].lower()):
-            return index + 1
-    return None
-
-
 def _parse_description_date(match: re.Match[str]) -> datetime | None:
     """Parse a Charterware description date match into a UTC datetime."""
     _, month_str, day, year, hour_str, minute, meridiem = match.groups()
-    month = _month_number(month_str)
+    month = month_number(month_str)
     if month is None:
         return None
     hour = int(hour_str)
@@ -222,7 +187,7 @@ def _format_description_date(prefix: str, dt: datetime, long_month: bool) -> str
 
 def _parse_route_date(match: re.Match[str]) -> datetime | None:
     """Parse a route name date match ("16 Aug 2026") into a UTC datetime."""
-    month = _month_number(match["month"])
+    month = month_number(match["month"])
     if month is None:
         return None
     try:
@@ -675,45 +640,8 @@ def obfuscate_kml_directory(directory: Path) -> int:
     return _obfuscate_listed_files(find_kml_files(directory))
 
 
-# Date shapes that may appear anywhere in a document written by another tool.
-# Numeric: 2024-03-14 (also inside 2024-03-14T09:12:00Z), 2024/03/14,
-# 2024.03.14, 14.03.2024, 14/03/2024, 14-03-2024, 3/14/2024, 14.03.24, the
-# compact 20240314, the year and month 2024-03, the ISO week 2024-W11 and the
-# ordinal date 2024-074. With a month name: "14 Mar 2024", "14th March 2024",
-# "14-MAR-2024", "March 14, 2024", "Mar14_2024" and "March 2024".
-# The ISO pattern leaves out the days after January 1st themselves: every
-# timestamp holds such a date, and testing each one in Python doubled the
-# time of the check. The other numeric shapes only pass as 01.01, since the
-# tool never writes them and 02/01 is February 1st in the US.
-_DAYS_AFTER_JAN_1 = "|".join(f"{day:02d}" for day in range(1, MAX_DAYS_AFTER_JAN_1 + 2))
-_STRAY_DATE_PATTERNS = (
-    re.compile(
-        rf"(?<!\d)\d{{4}}-(?!01-(?:{_DAYS_AFTER_JAN_1})(?!\d))\d{{2}}-\d{{2}}(?!\d)"
-    ),
-    re.compile(
-        r"(?<![\d.])\d{4}(?P<sep>[./])(?!01(?P=sep)01(?!\d))"
-        r"\d{2}(?P=sep)\d{2}(?!\d|\.\d)"
-    ),
-    # Day first or month first, with a two- or four-digit year
-    re.compile(
-        r"(?<![\d.])(?!0?1(?P<skip>[./-])0?1(?P=skip)\d{2}(?:\d{2})?(?!\d|\.\d))"
-        r"\d{1,2}(?P<sep>[./-])\d{1,2}(?P=sep)\d{2}(?:\d{2})?(?!\d|\.\d)"
-    ),
-    # 2024-03 (a year and month), 2024-W11 (an ISO week) and 2024-074 (an
-    # ordinal date); January, the first week and the first days pass
-    re.compile(r"(?<!\d)\d{4}-(?!01(?![\d-]))(?:0[1-9]|1[0-2])(?![\d-])"),
-    re.compile(r"(?<!\d)\d{4}-W(?!01(?!\d))(?:0[1-9]|[1-4]\d|5[0-3])(?:-[1-7])?(?!\d)"),
-    re.compile(
-        rf"(?<!\d)\d{{4}}-(?!0(?:{_DAYS_AFTER_JAN_1})(?!\d))"
-        r"(?:00[1-9]|0[1-9]\d|[12]\d\d|3[0-5]\d|36[0-6])(?![\d-])"
-    ),
-)
-# 20240314: only years of this and the last century, and a real month and
-# day, so that a serial number rarely passes as a date
-_COMPACT_DATE_PATTERN = re.compile(
-    rf"(?<!\d)(?:19|20)\d{{2}}(?!01(?:{_DAYS_AFTER_JAN_1})(?!\d))"
-    r"(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?!\d)"
-)
+# Date shapes that may appear anywhere in a document written by another tool
+# are those of date_tokens, plus one only data values hold:
 # Unix time (seconds or milliseconds) in a data value: "<value>1710406320</value>"
 _EPOCH_VALUE_PATTERN = re.compile(
     r"<("
@@ -724,22 +652,6 @@ _EPOCH_RANGE = (
     datetime(2000, 1, 1, tzinfo=UTC).timestamp(),
     datetime(2100, 1, 1, tzinfo=UTC).timestamp(),
 )
-_MONTH_RE = r"[A-Za-z]{3,9}"
-_DAY_RE = r"\d{1,2}(?:st|nd|rd|th)?"
-_SEP_RE = r"[\s_.,-]"
-_STRAY_TEXT_MONTH = re.compile(
-    rf"(?<![A-Za-z\d])(?P<day1>{_DAY_RE}){_SEP_RE}*(?P<month1>{_MONTH_RE})"
-    rf"{_SEP_RE}*(?P<year1>\d{{4}})(?!\d)|"
-    rf"(?<![A-Za-z])(?P<month2>{_MONTH_RE}){_SEP_RE}*(?P<day2>{_DAY_RE})"
-    rf"{_SEP_RE}*(?P<year2>\d{{4}})(?!\d)|"
-    rf"(?<![A-Za-z])(?P<month3>{_MONTH_RE}){_SEP_RE}+(?P<year3>\d{{4}})(?!\d)"
-)
-_MONTH_NUMBERS = {name.lower(): i + 1 for i, name in enumerate(MONTHS_LONG)}
-_MONTH_NUMBERS.update({name.lower(): i + 1 for i, name in enumerate(MONTHS_SHORT)})
-
-
-def _near_jan_first(month: int, day: int) -> bool:
-    return month == 1 and 1 <= day <= 1 + MAX_DAYS_AFTER_JAN_1
 
 
 def _epoch_near_jan_first(value: str) -> bool:
@@ -748,7 +660,7 @@ def _epoch_near_jan_first(value: str) -> bool:
         # Not a time of this era: some other number
         return True
     dt = datetime.fromtimestamp(seconds, tz=UTC)
-    return _near_jan_first(dt.month, dt.day)
+    return near_jan_first(dt.month, dt.day)
 
 
 def _find_stray_dates(content: str) -> list[str]:
@@ -756,29 +668,12 @@ def _find_stray_dates(content: str) -> list[str]:
     if "&#" in content:
         # A parser reads "2024&#45;03&#45;14" as a date as well
         content = content + "\n" + html.unescape(content)
-    found = [
-        match.group(0)
-        for pattern in (*_STRAY_DATE_PATTERNS, _COMPACT_DATE_PATTERN)
-        for match in pattern.finditer(content)
-    ]
-
+    found = find_date_tokens(content, skip_near_jan_first=True)
     found.extend(
         match.group(2)
         for match in _EPOCH_VALUE_PATTERN.finditer(content)
         if not _epoch_near_jan_first(match.group(2))
     )
-
-    for match in _STRAY_TEXT_MONTH.finditer(content):
-        month_name = match["month1"] or match["month2"] or match["month3"]
-        month = _MONTH_NUMBERS.get(month_name.lower())
-        if month is None:
-            continue
-        day_text = match["day1"] or match["day2"]
-        # A month with a year but no day gives the month away as well
-        day = int(re.sub(r"[a-z]+$", "", day_text)) if day_text else 1
-        if not _near_jan_first(month, day):
-            found.append(match.group(0))
-
     return found
 
 

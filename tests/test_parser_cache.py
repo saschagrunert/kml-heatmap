@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import time
@@ -318,8 +319,8 @@ class TestSaveAndLoad:
 
         loaded = load_cached_parse(cache_path)
 
-        assert loaded == (COORDS, PATHS, METADATA)
-        coordinates, path_groups, _ = loaded
+        assert loaded == (COORDS, PATHS, METADATA, [])
+        coordinates, path_groups, _, _ = loaded
         assert all(isinstance(p, TrackPoint) for p in coordinates)
         assert coordinates[1].alt is None
         assert coordinates[1].ts is None
@@ -386,9 +387,24 @@ class TestSaveAndLoad:
                     "coordinates": coordinates,
                     "path_groups": path_groups,
                     "path_metadata": [],
+                    "warnings": [],
                 }
             )
         )
+        assert load_cached_parse(cache_path) is None
+
+    def test_warnings_round_trip(self, tmp_path):
+        cache_path = tmp_path / "cache.json"
+        warnings = [(logging.WARNING, "a.kml: 2 line(s) without usable altitudes")]
+        save_to_cache(cache_path, COORDS, PATHS, METADATA, warnings)
+        assert load_cached_parse(cache_path).warnings == warnings
+
+    def test_entry_without_warnings_is_rejected(self, tmp_path):
+        cache_path = tmp_path / "cache.json"
+        save_to_cache(cache_path, COORDS, PATHS, METADATA)
+        raw = json.loads(cache_path.read_text())
+        del raw["warnings"]
+        cache_path.write_text(json.dumps(raw))
         assert load_cached_parse(cache_path) is None
 
     def test_missing_file(self, tmp_path):

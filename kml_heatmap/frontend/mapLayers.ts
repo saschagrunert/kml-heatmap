@@ -10,7 +10,11 @@ import type {
   StyleSpecification,
 } from "maplibre-gl";
 import { ribbonHeights } from "./calculations/lift";
-import { cssVar, firstSymbolLayerId } from "./utils/mapHelpers";
+import {
+  cssVar,
+  firstSymbolLayerId,
+  whenContextRestored,
+} from "./utils/mapHelpers";
 import {
   HEAT_LINES,
   HEATMAP_CLUSTER,
@@ -72,10 +76,15 @@ export class MapLayerHandle implements LayerHandle {
     this.visible = visible;
   }
 
-  /** Called once the layers exist; applies what was asked for until then */
+  /**
+   * Called once the layers exist; applies what was asked for until then.
+   * A style restored after a lost WebGL context has the visibility of the
+   * moment of the loss, and a switch in between found no layer to set.
+   */
   attach(map: MapLibreMap): void {
     this.map = map;
     this.apply();
+    whenContextRestored(map, () => this.apply());
   }
 
   isVisible(): boolean {

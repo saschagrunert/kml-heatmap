@@ -39,7 +39,7 @@ describe("ReplayManager display", () => {
     replayManager = createReplayManager(mockApp);
     mockApp.selectedPathIds = new Set([1]);
     replayManager.initializeReplay();
-    replayManager.state.active = true;
+    mockApp.replayActive = true;
     vi.mocked(generateSegmentPopupHtml).mockClear();
     replaySources(mockApp).route.setData.mockClear();
     replaySources(mockApp).trail.setData.mockClear();
@@ -606,7 +606,7 @@ describe("ReplayManager display", () => {
     });
 
     it("does nothing when replay is not active", () => {
-      replayManager.state.active = false;
+      mockApp.replayActive = false;
 
       replayManager.updateReplayAirplanePopup();
 

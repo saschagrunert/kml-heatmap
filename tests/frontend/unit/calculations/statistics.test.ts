@@ -228,6 +228,32 @@ describe("statistics calculations", () => {
       expect(aggregateAircraft([{ id: 1 }, { id: 2 }])).toHaveLength(0);
       expect(aggregateAircraft([])).toHaveLength(0);
     });
+
+    it("takes a registration that names an object property as data (regression)", () => {
+      const aircraft = aggregateAircraft(
+        [
+          {
+            id: 1,
+            aircraft_registration: "constructor",
+            aircraft_type: "C172",
+          },
+          { id: 2, aircraft_registration: "__proto__", aircraft_type: "PA28" },
+          { id: 3, aircraft_registration: "__proto__", aircraft_type: "PA28" },
+        ],
+        [
+          createSegment({ path_id: 1, time: 0 }),
+          createSegment({ path_id: 1, time: 60 }),
+        ],
+      );
+
+      expect(aircraft.map((a) => [a.registration, a.type, a.flights])).toEqual([
+        ["__proto__", "PA28", 2],
+        ["constructor", "C172", 1],
+      ]);
+      expect(aircraft[1]!.flight_time_seconds).toBe(60);
+      // Nothing was written into the prototype of every object
+      expect(({} as Record<string, unknown>)["flights"]).toBeUndefined();
+    });
   });
 
   describe("filterSegmentsByPaths", () => {
@@ -325,6 +351,72 @@ describe("statistics calculations", () => {
         { path_id: 2, altitude_ft: FT(1600) }, // +100
       ];
       expect(calculateAltitudeStats(segments).gain).toBeCloseTo(300, 6);
+    });
+
+    it("counts no gain for a level flight on a rounding boundary (regression)", () => {
+      // Cruising at about 2,550 ft, rounded to 100 ft either way
+      const segments: PathSegment[] = Array.from({ length: 200 }, (_, i) => ({
+        path_id: 1,
+        altitude_ft: i % 2 ? 2600 : 2500,
+      }));
+      expect(calculateAltitudeStats(segments).gain).toBe(0);
+    });
+
+    it("counts a climb in full, and a descent of 200 ft as its end", () => {
+      const segments: PathSegment[] = [
+        1000, 1100, 1200, 1300, 3000, 2900, 3000, 2900, 2700, 2800, 2700, 3500,
+      ].map((altitude_ft) => ({ path_id: 1, altitude_ft }));
+      // 1,000 to 3,000 ft, then 2,700 to 3,500 ft; the flicker at the top
+      // and on the way down is noise
+      expect(
+        calculateAltitudeStats(segments).gain * METERS_TO_FEET,
+      ).toBeCloseTo(2800, 6);
+    });
+
+    it("takes the exact gain of a path over its segments", () => {
+      const stats = calculateAltitudeStats(
+        [
+          { path_id: 1, altitude_ft: 1000 },
+          { path_id: 1, altitude_ft: 3000 },
+          { path_id: 2, altitude_ft: 1000 },
+          { path_id: 2, altitude_ft: 2000 },
+        ],
+        [
+          { id: 1, altitude_gain_ft: 2140.5 },
+          // No exact gain: counted from its segments
+          { id: 2 },
+          // No segments here: not part of the sum
+          { id: 3, altitude_gain_ft: 50000 },
+        ],
+      );
+      expect(stats.gain * METERS_TO_FEET).toBeCloseTo(3140.5, 6);
+    });
+
+    it("takes the exact gain alone for a path of several climbs (regression)", () => {
+      // Two climbs in the segments: the first one ended by the descent must
+      // not be added next to the exact gain
+      const segments: PathSegment[] = [1000, 3000, 2000, 3500].map(
+        (altitude_ft) => ({ path_id: 1, altitude_ft }),
+      );
+      const stats = calculateAltitudeStats(segments, [
+        { id: 1, altitude_gain_ft: 3400 },
+      ]);
+      expect(stats.gain * METERS_TO_FEET).toBeCloseTo(3400, 6);
+    });
+
+    it("sums the exact gain over the paths of the filter only", () => {
+      const stats = calculateFilteredStatistics({
+        pathInfo: [
+          { id: 1, year: 2024, altitude_gain_ft: 1500 },
+          { id: 2, year: 2025, altitude_gain_ft: 4000 },
+        ],
+        segments: [
+          createSegment({ path_id: 1, altitude_ft: 1000 }),
+          createSegment({ path_id: 2, altitude_ft: 1000 }),
+        ],
+        year: "2025",
+      });
+      expect(stats.total_altitude_gain_ft).toBeCloseTo(4000, 6);
     });
 
     it("keeps negative altitudes", () => {

@@ -37,6 +37,15 @@ describe("sanitizeSavedState", () => {
     });
   });
 
+  it("keeps only ids a link could carry: whole, not negative, below 2^40", () => {
+    expect(
+      sanitizeSavedState({
+        schemaVersion: 4,
+        selectedPathIds: [0, 1.5, -1, 2 ** 40, 2 ** 40 - 1, Infinity],
+      }),
+    ).toEqual({ selectedPathIds: [0, 2 ** 40 - 1] });
+  });
+
   it("drops path ids saved with an older id scheme", () => {
     // Version 2 ids were positions in the export, not content hashes
     expect(

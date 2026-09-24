@@ -31,8 +31,8 @@ export interface ReplayAirplane extends PopupHost {
   remove(): void;
 }
 
+/** Whether a replay runs is the store's `replayActive` */
 export class ReplayState {
-  active = false;
   playing = false;
   currentTime = 0;
   maxTime = 0;

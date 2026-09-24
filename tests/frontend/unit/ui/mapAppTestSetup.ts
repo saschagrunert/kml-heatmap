@@ -25,6 +25,7 @@ export const mockDataManagerInstance = {
   hideLoading: vi.fn(),
   destroy: vi.fn(),
   applyHeatmapEmphasis: vi.fn(),
+  showHeatmap: vi.fn(),
 };
 
 export const mockFilterManagerInstance = {
@@ -47,11 +48,11 @@ export const mockAirportManagerInstance = {
   closePopup: vi.fn(),
   activateAirport: vi.fn(),
   airportLabelAt: vi.fn((): string | null => null),
+  destroy: vi.fn(),
 };
 
 export const mockReplayManagerInstance = {
   state: {
-    active: false,
     airplaneMarker: null as null | {
       isPopupOpen: () => boolean;
       closePopup: ReturnType<typeof vi.fn>;
@@ -73,6 +74,7 @@ export const mockLayerManagerInstance = {
   redrawAltitudePaths: vi.fn(),
   redrawAirspeedPaths: vi.fn(),
   clearLayer: vi.fn(),
+  syncModes: vi.fn(),
   hitTest: vi.fn(),
   onPathClick: vi.fn(),
   closeSegmentPopup: vi.fn(),
@@ -225,13 +227,10 @@ export async function initializeApp(
   mockDataManagerInstance.loadAirports.mockResolvedValue(airports);
   mockDataManagerInstance.loadMetadata.mockResolvedValue(metadata);
   mockDataManagerInstance.loadData.mockResolvedValue(data);
-  // Keep implementations that a test installed before initializing
-  for (const fn of [
-    mockDataManagerInstance.updateLayers,
-    mockFilterManagerInstance.filterByYear,
-    mockFilterManagerInstance.filterByAircraft,
-  ]) {
-    if (!fn.getMockImplementation()) fn.mockResolvedValue(undefined);
+  // Keep an implementation that a test installed before initializing
+  const filterByYear = mockFilterManagerInstance.filterByYear;
+  if (!filterByYear.getMockImplementation()) {
+    filterByYear.mockResolvedValue(undefined);
   }
 
   await app.initialize();
@@ -255,7 +254,6 @@ export function resetManagerMocks(): void {
   fetchBaseStyle.mockReturnValue(new Promise(() => {}));
   vi.stubGlobal("fetch", fetchBaseStyle);
   mockStateManagerInstance.loadState.mockReturnValue(null);
-  mockReplayManagerInstance.state.active = false;
   mockReplayManagerInstance.state.airplaneMarker = null;
 }
 

@@ -26,6 +26,7 @@ import {
   mockControl,
   type Popup as MockPopup,
 } from "../../../mocks/maplibre-gl";
+import { liftOffsetPx } from "../../../../kml_heatmap/frontend/calculations/lift";
 
 // Mock domCache
 vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
@@ -483,6 +484,29 @@ describe("LayerManager", () => {
       expect(features(AIRSPEED)[0]!.geometry.coordinates).toEqual(
         points.map(([lat, lng]) => [lng, lat]),
       );
+    });
+
+    it("carries a flight on across the antimeridian instead of round the world", () => {
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        segmentsAlong([
+          [60, 179.98],
+          [60, 179.99],
+          [60, -179.99],
+          [60, -179.98],
+        ]),
+      );
+
+      layerManager.redrawAltitudePaths();
+
+      expect(
+        features(ALTITUDE)[0]!.geometry.coordinates.map(([lng]) => lng),
+      ).toEqual([
+        179.98,
+        179.99,
+        expect.closeTo(180.01, 9),
+        expect.closeTo(180.02, 9),
+      ]);
     });
 
     it("keeps every exported point, leaving simplification to the map", () => {
@@ -2249,6 +2273,123 @@ describe("LayerManager", () => {
       });
     });
 
+    it("writes nothing again as the map zooms on among the flat lines", () => {
+      mockApp.map!.jumpTo({ zoom: 17.2 });
+      drawClimb();
+      const writes = setDataCalls(ALTITUDE);
+
+      // A line is the same at every zoom
+      mockApp.map!.jumpTo({ zoom: 18.1 });
+      mockApp.map!.emit("zoomend");
+      mockApp.map!.jumpTo({ zoom: 19.1 });
+      mockApp.map!.emit("zoomend");
+      expect(setDataCalls(ALTITUDE)).toBe(writes);
+
+      // Out to where they are lifted again, as ribbons
+      mockApp.map!.jumpTo({ zoom: 16.5 });
+      mockApp.map!.emit("zoomend");
+      expect(ribbons().length).toBeGreaterThan(0);
+      expect(features(ALTITUDE)).toEqual([]);
+    });
+
+    it("cuts each source again for the zoom level it was written at", () => {
+      mockApp.map!.jumpTo({ zoom: 8.2 });
+      drawClimb();
+      const at8 = ribbonWidthM();
+
+      // The selection is written at the next level before the zoom ends;
+      // the main ribbons are still those of the level before
+      mockApp.map!.jumpTo({ zoom: 9.1 });
+      mockApp.altitudeVisible = true;
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+      mockApp.map!.emit("zoomend");
+
+      expect(ribbonWidthM()).toBeCloseTo(at8 / 2, 3);
+    });
+
+    it("leaves a mode the replay hides as it is, and draws it again as it shows", () => {
+      mockApp.map!.jumpTo({ zoom: 8.2 });
+      drawClimb();
+      const writes = setDataCalls(RIBBONS);
+
+      // Hidden, not cleared, as the replay does it
+      mockApp.altitudeLayer.setVisible(false);
+      mockApp.map!.jumpTo({ zoom: 9.1 });
+      mockApp.map!.emit("zoomend");
+      mockApp.store.set("threeDVisible", false);
+      expect(setDataCalls(RIBBONS)).toBe(writes);
+      expect(setDataCalls(ALTITUDE)).toBe(0);
+
+      // Shown again, a change of the selection draws it as a whole, flat
+      mockApp.altitudeLayer.setVisible(true);
+      mockApp.altitudeVisible = true;
+      layerManager.updateSelectionStyles();
+      expect(ribbons()).toEqual([]);
+      expect(features(ALTITUDE)).toHaveLength(1);
+    });
+
+    it("lets the smoothed flights go once nothing lifted needs them", () => {
+      const smoothed = (): unknown =>
+        (layerManager as unknown as { smoothed: unknown }).smoothed;
+      drawClimb();
+      expect(smoothed()).not.toBeNull();
+
+      mockApp.store.set("threeDVisible", false);
+      expect(smoothed()).toBeNull();
+
+      mockApp.store.set("threeDVisible", true);
+      expect(smoothed()).not.toBeNull();
+      // Another dataset, drawn flat zoomed in
+      mockApp.map!.jumpTo({ zoom: 17.5 });
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        [...mockApp.currentData!.path_segments],
+      );
+      layerManager.redrawAltitudePaths();
+      expect(smoothed()).toBeNull();
+
+      mockApp.map!.jumpTo({ zoom: 12 });
+      mockApp.map!.emit("zoomend");
+      expect(smoothed()).not.toBeNull();
+      layerManager.clearLayer("altitude");
+      expect(smoothed()).toBeNull();
+    });
+
+    it("takes a ribbon down by the lift at the map's centre, as MapLibre raises it", async () => {
+      // Due north at 60 degrees, a segment every 0.005 degrees, while the
+      // middle of the map is at the equator
+      const points = Array.from({ length: 40 }, (_, i): [number, number] => [
+        60 + i * 0.005,
+        16,
+      ]);
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        segmentsAlong(points),
+      );
+      mockApp.store.set("threeDVisible", true);
+      mockApp.altitudeLayer.setVisible(true);
+      mockApp.map!.jumpTo({ center: [16, 0], zoom: 12, pitch: 60 });
+      layerManager.redrawAltitudePaths();
+      await landed();
+      mockApp.map!.renderedFeatures = [
+        rendered(RIBBONS, { r: 0, g: 1, h: 1000 }),
+      ];
+
+      // Drawn up by the lift of the centre's latitude, half of that at 60
+      const ground = pointAt(60 + 20.5 * 0.005, 16);
+      const lift = liftOffsetPx(
+        mockApp.map! as unknown as MapLibreMap,
+        0,
+        1000,
+      );
+      const hit = layerManager.hitTest(new Point(ground.x, ground.y - lift));
+
+      expect(hit).toMatchObject({
+        segment: mockApp.currentData.path_segments[20],
+      });
+    });
+
     it("cuts and writes the flights again as the 3D view comes and goes", () => {
       drawClimb();
       const writes = setDataCalls(ALTITUDE);
@@ -2257,6 +2398,68 @@ describe("LayerManager", () => {
       expect(setDataCalls(ALTITUDE)).toBe(writes + 1);
       mockApp.store.set("threeDVisible", true);
       expect(setDataCalls(ALTITUDE)).toBe(writes + 2);
+    });
+  });
+
+  describe("a lost WebGL context", () => {
+    /**
+     * The map as MapLibre leaves it until the style is back: no style, so
+     * no source. Restored, the sources hold the data of before the loss.
+     */
+    function loseContext(): () => void {
+      const map = mockApp.map!;
+      const getSource = map.getSource.getMockImplementation()!;
+      map.getSource.mockImplementation(() => undefined);
+      return () => {
+        map.getSource.mockImplementation(getSource);
+        map.emit("webglcontextrestored");
+        map.emit("style.load");
+      };
+    }
+
+    it("does not let the features of before answer for the runs of a redraw", async () => {
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      await landed();
+      const restore = loseContext();
+
+      addSecondPath();
+      layerManager.redrawAltitudePaths();
+      restore();
+      // Features the restored tiles hold, from the data of before
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+
+      // Written again, as a new generation
+      expect(features(ALTITUDE).map((f) => f.properties.pathId)).toEqual([
+        1, 2,
+      ]);
+      expect(features(ALTITUDE)[0]!.properties.g).toBeGreaterThan(1);
+      expect(layerManager.hitTest(pointAt(48.5, 16.5))).toBe("stale");
+    });
+
+    it("empties a mode cleared during the loss, and leaves a hidden one for later", () => {
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      layerManager.redrawAirspeedPaths();
+      const restore = loseContext();
+
+      layerManager.clearLayer("altitude");
+      restore();
+
+      expect(features(ALTITUDE)).toEqual([]);
+      // Hidden: drawn once it shows
+      expect(setDataCalls(AIRSPEED)).toBe(1);
+    });
+
+    it("writes nothing once the manager is gone", () => {
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      const restore = loseContext();
+      layerManager.destroy();
+
+      restore();
+
+      expect(setDataCalls(ALTITUDE)).toBe(1);
     });
   });
 

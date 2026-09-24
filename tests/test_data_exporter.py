@@ -28,6 +28,8 @@ from kml_heatmap.data_exporter import (
     assign_path_ids,
     drop_duplicate_paths,
     export_all_data,
+    exported_contents,
+    is_exportable_path,
     path_content_id,
     process_year_chunk,
 )
@@ -117,6 +119,7 @@ class TestYearFile:
                 "year": 2025,
                 "min_altitude_ft": 328.1,
                 "max_altitude_ft": 984.3,
+                "altitude_gain_ft": 656.2,
                 "start_airport": "EDDF",
                 "end_airport": "EDDM",
                 "aircraft_registration": "D-EXYZ",
@@ -269,6 +272,25 @@ class TestGroundspeedRange:
         assert merged == GroundspeedRange(None, 0.0)
 
 
+def _contents(paths_by_year, paths):
+    exportable = [is_exportable_path(path) for path in paths]
+    return exported_contents(paths_by_year, paths, exportable)
+
+
+def _ids(paths_by_year, paths):
+    return assign_path_ids(paths_by_year, _contents(paths_by_year, paths))
+
+
+def _drop(paths_by_year, paths, metadata):
+    return drop_duplicate_paths(
+        paths_by_year, _contents(paths_by_year, paths), metadata
+    )
+
+
+def _group(paths, metadata):
+    return _group_paths_by_year(metadata, [is_exportable_path(p) for p in paths])
+
+
 class TestPathIds:
     def test_content_id_is_a_stable_40_bit_integer(self):
         path_id = path_content_id(_two_point_path(0))
@@ -299,7 +321,7 @@ class TestPathIds:
 
     def test_only_exported_paths_get_an_id(self):
         paths = [_two_point_path(0), _path((52.0, 10.0, 1.0)), _two_point_path(1)]
-        ids = assign_path_ids({2025: [0, 1], 2026: [2]}, paths)
+        ids = _ids({2025: [0, 1], 2026: [2]}, paths)
         assert ids == {
             0: path_content_id(paths[0]),
             2: path_content_id(paths[2]),
@@ -308,7 +330,7 @@ class TestPathIds:
     def test_a_taken_id_moves_to_the_next_free_one_in_input_order(self):
         paths = [_two_point_path(1), _two_point_path(0), _two_point_path(0)]
         # The later year comes first in the input: input order decides
-        ids = assign_path_ids({2026: [1, 2], 2025: [0]}, paths)
+        ids = _ids({2026: [1, 2], 2025: [0]}, paths)
         first = path_content_id(paths[1])
         assert ids[1] == first
         assert ids[2] == first + 1
@@ -316,10 +338,10 @@ class TestPathIds:
 
     def test_a_collision_wraps_around_the_id_space(self, monkeypatch):
         monkeypatch.setattr(
-            exporter_module, "path_content_id", lambda path: 2**PATH_ID_BITS - 1
+            exporter_module, "_content_id", lambda content: 2**PATH_ID_BITS - 1
         )
         paths = [_two_point_path(0), _two_point_path(1), _two_point_path(2)]
-        assert assign_path_ids({2025: [0, 1, 2]}, paths) == {
+        assert _ids({2025: [0, 1, 2]}, paths) == {
             0: 2**PATH_ID_BITS - 1,
             1: 0,
             2: 1,
@@ -386,22 +408,35 @@ class TestDropDuplicatePaths:
         assert "copy of 1_DEAGJ_DA20.kml" in err
         assert "same flight as in 1_DEAGJ_DA20.kml" in err
 
+    def test_content_is_packed_once_per_path(self, tmp_path, monkeypatch):
+        packed = []
+        real_content = exporter_module._path_content
+
+        def content(path):
+            packed.append(path)
+            return real_content(path)
+
+        monkeypatch.setattr(exporter_module, "_path_content", content)
+        paths = [_timed_path(), _timed_path(1.0), _timed_path()]
+        export_all_data(paths, [{"year": 2025}] * 3, [], output_dir=str(tmp_path))
+        assert packed == paths
+
     def test_content_is_compared_not_the_hash(self, monkeypatch):
         """Two flights that share a hash are still two flights."""
-        monkeypatch.setattr(exporter_module, "path_content_id", lambda path: 7)
+        monkeypatch.setattr(exporter_module, "_content_id", lambda content: 7)
         paths = [_two_point_path(0), _two_point_path(1)]
-        kept = drop_duplicate_paths({2025: [0, 1]}, paths, [{}, {}])
+        kept = _drop({2025: [0, 1]}, paths, [{}, {}])
         assert kept == {2025: [0, 1]}
-        assert assign_path_ids(kept, paths) == {0: 7, 1: 8}
+        assert _ids(kept, paths) == {0: 7, 1: 8}
 
     def test_across_years_the_first_in_input_order_is_kept(self):
         paths = [_two_point_path(0), _two_point_path(0)]
-        kept = drop_duplicate_paths({2026: [0], 2025: [1]}, paths, [{}, {}])
+        kept = _drop({2026: [0], 2025: [1]}, paths, [{}, {}])
         assert kept == {2026: [0]}
 
     def test_paths_that_are_not_exported_are_left_alone(self):
         paths = [_path((52.0, 10.0, 1.0)), _path((52.0, 10.0, 1.0)), _two_point_path(0)]
-        kept = drop_duplicate_paths({2025: [0, 1, 2]}, paths, [{}] * 3)
+        kept = _drop({2025: [0, 1, 2]}, paths, [{}] * 3)
         assert kept == {2025: [0, 1, 2]}
 
 
@@ -525,19 +560,19 @@ class TestGroupPathsByYear:
     def test_groups_by_year(self):
         paths = [_two_point_path(i) for i in range(3)]
         metadata = [{"year": 2025}, {"year": 2026}, {"year": 2025}]
-        assert _group_paths_by_year(paths, metadata) == {2025: [0, 2], 2026: [1]}
+        assert _group(paths, metadata) == {2025: [0, 2], 2026: [1]}
 
     def test_paths_without_year_are_skipped(self):
         paths = [_two_point_path(i) for i in range(3)]
         metadata = [{"year": None}, {"other": "data"}, {"year": 2024}]
-        assert _group_paths_by_year(paths, metadata) == {2024: [2]}
+        assert _group(paths, metadata) == {2024: [2]}
 
     def test_a_year_without_exportable_paths_is_not_listed(self):
         """Single point markers (Log Start/Stop) must not make an empty year."""
         marker = _path((51.5, 12.0, 20.0))
         paths = [marker, marker, marker, _timed_path()]
         metadata = [{"year": 2024}, {"year": 2024}, {"year": 2025}, {"year": 2025}]
-        assert _group_paths_by_year(paths, metadata) == {2025: [2, 3]}
+        assert _group(paths, metadata) == {2025: [2, 3]}
 
     def test_a_path_that_does_not_move_is_not_exported(self):
         """Jitter below the exported precision makes no segment row."""
@@ -548,7 +583,7 @@ class TestGroupPathsByYear:
         )
         paths = [standing, _timed_path()]
         metadata = [{"year": 2024}, {"year": 2025}]
-        assert _group_paths_by_year(paths, metadata) == {2025: [1]}
+        assert _group(paths, metadata) == {2025: [1]}
 
 
 class TestChunkPlanning:

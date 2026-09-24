@@ -101,23 +101,9 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     app.aircraftModels = metadata.aircraft_models ?? {};
   }
 
-  // Load the selected year's data; currentData is the single source of
-  // path_info and path_segments for all managers. The statistics panel and
-  // the airport markers follow it through their store subscriptions.
-  const data = await app.dataManager.loadData(app.selectedYear);
-  if (data) {
-    // One flush, so nobody sees the dataset with a selection it does not have
-    app.store.batch(() => {
-      dropUnknownPathIds(app, data);
-      app.currentData = data;
-    });
-  }
-
-  // Populate aircraft dropdown
-  app.filterManager.updateAircraftDropdown();
-
   // Load groundspeed range from metadata; exports without timestamps have
-  // no groundspeeds at all, and then no speed layer and no replay
+  // no groundspeeds at all, and then no speed layer and no replay. Settled
+  // before the dataset is published, which draws the layers.
   const hasTimingData = metadata !== null && metadata.max_groundspeed_knots > 0;
   app.hasTimingData = hasTimingData;
 
@@ -128,10 +114,10 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   if (!hasTimingData && app.airspeedVisible) app.airspeedVisible = false;
 
   if (hasTimingData) {
-    const minSpeed = metadata.min_groundspeed_knots;
-    const maxSpeed = metadata.max_groundspeed_knots;
-    app.airspeedRange = { min: minSpeed, max: maxSpeed };
-    app.layerManager.updateAirspeedLegend(minSpeed, maxSpeed);
+    app.airspeedRange = {
+      min: metadata.min_groundspeed_knots,
+      max: metadata.max_groundspeed_knots,
+    };
   }
 
   // Enable/disable airspeed button based on timing data availability
@@ -144,18 +130,22 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     airspeedBtn.disabled = !hasTimingData;
   }
 
-  // Initial layer build (heatmap, visible colour layers, stats, airports).
-  // The dataset is handed over: a year that failed to load above would be
-  // fetched and reported a second time otherwise.
-  await app.dataManager.updateLayers(data);
+  // Load the selected year's data; currentData is the single source of
+  // path_info and path_segments for all managers. The layers, the
+  // statistics panel and the airport markers follow it through their store
+  // subscriptions; one flush, so nobody sees the dataset with a selection
+  // it does not have or an aircraft filter it has no flights for.
+  const data = await app.dataManager.loadData(app.selectedYear);
+  app.store.batch(() => {
+    if (data) {
+      dropUnknownPathIds(app, data);
+      app.currentData = data;
+    }
+    app.filterManager.updateAircraftDropdown();
+  });
 
   // Set initial airport marker sizes
   app.airportManager.updateAirportMarkerSizes();
-
-  // Restore layer visibility; the legends follow the store
-  app.altitudeLayer.setVisible(app.altitudeVisible);
-  app.airspeedLayer.setVisible(app.airspeedVisible);
-  app.aviationLayer.setVisible(app.aviationVisible);
 
   // Restore stats panel visibility
   if (app.savedState && app.savedState.statsPanelVisible) {

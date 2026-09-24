@@ -162,7 +162,8 @@ export function calculateAirportFlightCounts(
   year: string = "all",
   aircraft: string = "all",
 ): AirportCounts {
-  const counts: AirportCounts = {};
+  // No prototype: an airport name is data, and "constructor" is no key
+  const counts = Object.create(null) as AirportCounts;
   const filteredPaths = filterPaths(pathInfo, year, aircraft);
 
   // Count unique airports per flight (avoid double-counting round trips)

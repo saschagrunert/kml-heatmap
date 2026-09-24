@@ -382,3 +382,94 @@ class TestProcessGxTrack:
         assert path_metadata[0]["timestamp"] == "2025-03-01T10:00:00Z"
         assert path_metadata[0]["end_timestamp"] == "2025-03-01T11:00:00Z"
         assert path_metadata[0]["year"] == 2025
+
+
+def _multi_track(parent, altitude_mode=None):
+    multi = etree.SubElement(parent, f"{{{GX_NS}}}MultiTrack")
+    if altitude_mode is not None:
+        etree.SubElement(multi, f"{{{KML_NS}}}altitudeMode").text = altitude_mode
+    return multi
+
+
+class TestYearOfATrack:
+    def test_a_flight_across_new_year_belongs_to_the_year_it_started(self):
+        """Like a TimeSpan, and like the obfuscator, which anchors on the start."""
+        start = datetime(2025, 12, 31, 23, 0, tzinfo=UTC)
+        whens = [_iso(start + timedelta(minutes=10 * i)) for i in range(19)]
+        coords = [f"{9.0 + 0.02 * i} 48.0 {400 + 20 * i}" for i in range(19)]
+        track = _track(_placemark(_document(), name="EDDS - EDDP"), coords, whens)
+
+        _, _, path_metadata = _run([track])
+
+        # Most of the stamps are in 2026: the median would say 2026
+        assert path_metadata[0]["year"] == 2025
+
+
+class TestMultiTrack:
+    def test_the_tracks_of_a_multi_track_are_one_flight(self):
+        """A recording that paused is still one flight, not one per part."""
+        pm = _placemark(_document(), name="EDDS - EDDP")
+        multi = _multi_track(pm)
+        first = _track(
+            multi,
+            ["8.5 50.0 300", "8.6 50.1 350"],
+            ["2025-03-01T10:00:00Z", "2025-03-01T10:01:00Z"],
+        )
+        second = _track(
+            multi,
+            ["8.9 50.4 500", "9.0 50.5 450"],
+            ["2025-03-01T10:20:00Z", "2025-03-01T10:21:00Z"],
+        )
+
+        coordinates, path_groups, path_metadata = _run([first, second])
+
+        assert len(coordinates) == 4
+        assert len(path_groups) == len(path_metadata) == 1
+        assert [point.alt for point in path_groups[0]] == [300, 350, 500, 450]
+        assert path_metadata[0]["timestamp"] == "2025-03-01T10:00:00Z"
+        assert path_metadata[0]["end_timestamp"] == "2025-03-01T10:21:00Z"
+
+    def test_two_multi_tracks_are_two_flights(self):
+        doc = _document()
+        tracks = []
+        for day in (1, 2):
+            multi = _multi_track(_placemark(doc, name="EDDS"))
+            tracks.extend(
+                _track(
+                    multi,
+                    [f"8.{hour} 50.0 300", f"8.{hour + 5} 50.1 300"],
+                    [f"2025-03-0{day}T{hour}:00:00Z", f"2025-03-0{day}T{hour}:01:00Z"],
+                )
+                for hour in (10, 11)
+            )
+
+        _, path_groups, path_metadata = _run(tracks)
+
+        assert [len(path) for path in path_groups] == [4, 4]
+        assert [m["timestamp"][:10] for m in path_metadata] == [
+            "2025-03-01",
+            "2025-03-02",
+        ]
+
+    def test_the_altitude_mode_of_the_multi_track_applies_to_its_tracks(self, capsys):
+        multi = _multi_track(_placemark(_document(), name="EDDS"), "relativeToGround")
+        tracks = [
+            _track(multi, ["8.5 50.0 300", "8.6 50.1 350"]),
+            _track(multi, ["8.9 50.4 500", "9.0 50.5 450"]),
+        ]
+
+        coordinates, path_groups, _ = _run(tracks)
+
+        assert path_groups == []
+        assert [point.alt for point in coordinates] == [None] * 4
+        # One warning for the flight, not one per track
+        assert capsys.readouterr().err.count("altitudeMode relativeToGround") == 1
+
+    def test_a_track_keeps_its_own_altitude_mode(self):
+        multi = _multi_track(_placemark(_document(), name="EDDS"), "relativeToGround")
+        track = _track(multi, ["8.5 50.0 300", "8.6 50.1 350"])
+        etree.SubElement(track, f"{{{KML_NS}}}altitudeMode").text = "absolute"
+
+        _, path_groups, _ = _run([track])
+
+        assert [point.alt for point in path_groups[0]] == [300, 350]

@@ -29,6 +29,25 @@ export function toLngLat(latLon: LatLon): LngLatTuple {
   return [latLon[1], latLon[0]];
 }
 
+/**
+ * `lng` moved by whole turns to the copy of the world within 180 degrees of
+ * `near`. A line through the points of a flight takes each one near the one
+ * before, so across the antimeridian it goes on past 180 rather than back
+ * round the world; MapLibre draws a longitude beyond 180 where it belongs.
+ */
+export function unwrapLng(lng: number, near: number): number {
+  return lng + 360 * Math.round((near - lng) / 360);
+}
+
+/** `toLngLat`, in the copy of the world of the point before on a line */
+export function toLngLatAfter(
+  latLon: LatLon,
+  previous: LngLatTuple | undefined,
+): LngLatTuple {
+  const [lng, lat] = toLngLat(latLon);
+  return [previous ? unwrapLng(lng, previous[0]) : lng, lat];
+}
+
 /** Turn a position MapLibre reports back into the data's `[lat, lon]` */
 export function fromLngLat(lngLat: {
   lng: number;
@@ -70,6 +89,21 @@ export function whenStyleReady(map: MapLibreMap): Promise<MapLibreMap> {
   return new Promise((resolve) => {
     void map.once("style.load", () => resolve(map));
   });
+}
+
+/**
+ * Call `onRestored` whenever the map has its style back after it lost its
+ * WebGL context. MapLibre builds the style anew from what it held at the
+ * loss, every source with the data it had then, and loads it a frame after
+ * `webglcontextrestored`; data handed over in between had no source to go
+ * to and has to be written again. For as long as the map lives: a caller
+ * that goes before it ignores the call.
+ */
+export function whenContextRestored(
+  map: MapLibreMap,
+  onRestored: () => void,
+): void {
+  map.on("webglcontextrestored", () => void map.once("style.load", onRestored));
 }
 
 /**

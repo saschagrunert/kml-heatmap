@@ -11,7 +11,7 @@
  * out hot; a route flown once at cruise speed stays cool.
  */
 import type { PathSegment } from "../types";
-import { toLngLat } from "../utils/mapHelpers";
+import { toLngLat, toLngLatAfter } from "../utils/mapHelpers";
 import { segmentDistance } from "./statistics";
 
 /**
@@ -35,22 +35,22 @@ const ROW_STRIDE = 2 ** 22;
 const COLUMN_OFFSET = 2 ** 21;
 
 /**
- * How long a segment took. The relative times of the log say it when both
- * ends have one; a track without them (a planned route, an old export)
- * falls back to its length at its groundspeed, and to no time at all
- * without either.
+ * How long a segment took. A segment's time is when it starts, so the time
+ * of the next one of its path is when it ends. The last segment of a path,
+ * and a track without times (a planned route, an old export), fall back to
+ * its length at its groundspeed, and to no time at all without either.
  */
 function segmentSeconds(
   segment: PathSegment,
-  previous: PathSegment | null,
+  next: PathSegment | undefined,
 ): number {
   let seconds = -1;
   if (
-    previous?.path_id === segment.path_id &&
+    next?.path_id === segment.path_id &&
     segment.time !== undefined &&
-    previous.time !== undefined
+    next.time !== undefined
   ) {
-    seconds = segment.time - previous.time;
+    seconds = next.time - segment.time;
   }
   if (seconds < 0 || seconds > MAX_LOGGED_STEP_S) {
     const knots = segment.groundspeed_knots ?? 0;
@@ -178,15 +178,13 @@ export function heatLineFeatures(
     cells.set(key, (cells.get(key) ?? 0) + seconds);
   };
 
-  let previous: PathSegment | null = null;
-  for (const segment of segments) {
-    if (!keep(segment.path_id) || !segment.coords) continue;
-    const seconds = segmentSeconds(segment, previous);
+  segments.forEach((segment, index) => {
+    if (!keep(segment.path_id) || !segment.coords) return;
+    const seconds = segmentSeconds(segment, segments[index + 1]);
     addTo(segment.coords[0], seconds / 2);
     addTo(segment.coords[1], seconds / 2);
     kept.push(segment);
-    previous = segment;
-  }
+  });
 
   // The heat of every kept segment, as a power of two, and whether it
   // carries on the one before (same flight, no gap in the log)
@@ -236,7 +234,7 @@ export function heatLineFeatures(
       line.push(toLngLat(start));
       lineStep = step;
     }
-    line.push(toLngLat(end));
+    line.push(toLngLatAfter(end, line[line.length - 1]));
   });
   flush();
 

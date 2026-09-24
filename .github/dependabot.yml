@@ -8,6 +8,11 @@ updates:
   # recompiles them as well.
   - package-ecosystem: "pip"
     directory: "/"
+    # A release has to be out this long before Dependabot proposes it, so a
+    # compromised or broken one is usually yanked before it reaches a pull
+    # request. Security updates are not held back.
+    cooldown:
+      default-days: 5
     schedule:
       interval: "daily"
       time: "09:00"
@@ -41,6 +46,9 @@ updates:
   # JavaScript/TypeScript dependencies
   - package-ecosystem: "npm"
     directory: "/"
+    # See the cooldown of the pip entry
+    cooldown:
+      default-days: 5
     schedule:
       interval: "daily"
       time: "09:00"
@@ -90,6 +98,9 @@ updates:
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
+    # See the cooldown of the pip entry
+    cooldown:
+      default-days: 5
     schedule:
       interval: "daily"
       time: "09:00"
@@ -106,6 +117,9 @@ updates:
   # it turns red.
   - package-ecosystem: "docker"
     directory: "/"
+    # See the cooldown of the pip entry
+    cooldown:
+      default-days: 5
     schedule:
       interval: "daily"
       time: "09:00"

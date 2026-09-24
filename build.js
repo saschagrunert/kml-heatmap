@@ -8,12 +8,18 @@
 import * as esbuild from "esbuild";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { statSync } from "fs";
+import { readFileSync } from "fs";
+import { gzipSync } from "zlib";
 import {
   buildBanner as makeBanner,
   computeSourceHash,
 } from "./scripts/source-hash.js";
-import { copyCountryFlags, copyVendorAssets } from "./scripts/vendor.js";
+import {
+  copyCountryFlags,
+  copyVendorAssets,
+  VENDOR_FILES,
+  VENDOR_MODULES,
+} from "./scripts/vendor.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -201,11 +207,25 @@ function analyzeBundleComposition(metafile, fileName) {
   }
 }
 
-// Size budgets of the minified bundles in bytes. Every production build
-// checks them, so every CI job that builds the bundles enforces them. Raise
-// one on purpose when a change needs the room, not to make a build pass.
+// Size budgets in bytes, each for the minified files as written (raw) and
+// for the same files gzipped at level 9 (gzip), which is closer to what a
+// visit downloads. Every production build checks them, so every CI job that
+// builds the bundles enforces them. Raise one on purpose when a change needs
+// the room, not to make a build pass.
+//
+// The policy: an app bundle gets about 2 KB of raw and 1 KB of gzipped room
+// over its size when the budget is set, a vendored file about 1 %. That is
+// little on purpose. The raw budget of the first visit has been raised seven
+// times, each for a change that was worth it, and each raise was a decision
+// someone wrote down below rather than a slow drift nobody saw. The gzipped
+// budget catches what the raw one rewards the wrong way: a change that saves
+// raw bytes by making the code harder to compress. Two pull requests that each
+// fit can still not fit together, since each is built against the main branch
+// of its day; the budget is checked again on main.
+//
 // The stylesheet has a budget of its own, in tests/test_asset_budget.py: it is
 // minified by the Python side, not here.
+//
 // What a first visit downloads: the app and the chunk it shares with the
 // features, which the page loads together.
 // Raised from 90 KB for the visual review of 2026-09-18: the selection chip,
@@ -258,9 +278,14 @@ function analyzeBundleComposition(metafile, fileName) {
 // the climb and smoothed along a spline through each flight, the switch
 // with its link flag and sheet row, the sky of a map tilted past 60
 // degrees, the airports hidden towards its horizon, and the ground of
-// each flight from its fields, which took 118.48 KB to 129.22 KB. A link may open in 3D, so none of it waits for a
-// later bundle.
-const BUDGET_APP = 130 * 1024;
+// each flight from its fields, which took 118.48 KB to 129.22 KB. A link
+// may open in 3D, so none of it waits for a later bundle.
+// Raised from 130 KB on 2026-09-24 for the fixes of that day's review (the
+// real init errors, the load watchdog, the checked metadata and airports,
+// the abandoned year, antimeridian unwrapping, the redraw after a lost
+// WebGL context), and given a gzipped budget next to the raw one: 135,184 B
+// raw and 45,871 B gzipped.
+const BUDGET_APP = { raw: 134 * 1024, gzip: 46 * 1024 };
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.
@@ -268,16 +293,43 @@ const BUDGET_APP = 130 * 1024;
 // ribbons sloped with the flight, each run cut once and handed back to its
 // line zoomed in close, and the airplane lifted to its height on the
 // flight's curve (41.22 KB).
-const BUDGET_FEATURES = 42 * 1024;
+// 41,150 B raw and 13,712 B gzipped on 2026-09-24.
+const BUDGET_FEATURES = { raw: 42 * 1024, gzip: 14.5 * 1024 };
 
 // The year worker's bundle is fetched by every visit, but next to the first
 // year file rather than ahead of the app, so it holds up nothing on the page.
-const BUDGET_WORKER = 6 * 1024;
+// 4,808 B raw and 2,273 B gzipped on 2026-09-24.
+const BUDGET_WORKER = { raw: 6 * 1024, gzip: 3 * 1024 };
+
+// The vendored files are copied as they are (scripts/vendor.js), so a budget
+// cannot make them smaller. It is there so a Dependabot bump that makes
+// MapLibre, which every visit loads before the map can draw, noticeably
+// larger fails the build and gets looked at instead of merged unseen. Raise
+// it in the pull request of the bump, with the new sizes here.
+// maplibre-gl 6.10.0: the three modules and the stylesheet come to
+// 1,200,360 B raw and 310,925 B gzipped.
+const BUDGET_MAPLIBRE = { raw: 1184 * 1024, gzip: 307 * 1024 };
+// html-to-image 1.11.13, bundled into one module: 13,667 B raw and 5,441 B
+// gzipped. Loaded on the first export only.
+const BUDGET_HTML_TO_IMAGE = { raw: 14 * 1024, gzip: 5.5 * 1024 };
 
 const APP_BUNDLE = "mapApp.bundle.js";
 const FEATURES_BUNDLE = "features.bundle.js";
 const SHARED_BUNDLE = "shared.bundle.js";
 const WORKER_BUNDLE = "yearWorker.bundle.js";
+
+/**
+ * Size of a file as written and gzipped at the highest level
+ * @param {string} path
+ * @returns {{raw: number, gzip: number}}
+ */
+function measure(path) {
+  const content = readFileSync(path);
+  return {
+    raw: content.length,
+    gzip: gzipSync(content, { level: 9 }).length,
+  };
+}
 
 /**
  * Print bundle size analysis and check it against the budget
@@ -287,25 +339,51 @@ function analyzeBundleSizes() {
   console.log("\n📦 Bundle Size Analysis:");
   console.log("─".repeat(60));
 
-  /** @type {[label: string, names: string[], budget: number][]} */
+  const vendor = (/** @type {string} */ name) => `vendor/${name}`;
+  /** @type {[label: string, names: string[], budget: {raw: number, gzip: number}][]} */
   const bundles = [
     ["🗺️  First visit", [APP_BUNDLE, SHARED_BUNDLE], BUDGET_APP],
     ["✨ Features", [FEATURES_BUNDLE], BUDGET_FEATURES],
     ["🧵 Year worker", [WORKER_BUNDLE], BUDGET_WORKER],
+    [
+      "🧭 MapLibre",
+      Object.keys(VENDOR_FILES)
+        .filter((name) => name.startsWith("maplibre-gl"))
+        .map(vendor),
+      BUDGET_MAPLIBRE,
+    ],
+    [
+      "🖼️  html-to-image",
+      Object.keys(VENDOR_MODULES).map(vendor),
+      BUDGET_HTML_TO_IMAGE,
+    ],
   ];
 
   let budgetExceeded = false;
   for (const [label, names, budget] of bundles) {
     const described = names.join(" + ");
     try {
-      let size = 0;
-      for (const name of names) size += statSync(join(STATIC_DIR, name)).size;
-      console.log(`  ${label} (${described}):  ${formatBytes(size)}`);
-      if (size > budget) {
-        console.log(
-          `  ⚠️  ${described} exceeds budget (${formatBytes(size)} > ${formatBytes(budget)})`,
-        );
-        budgetExceeded = true;
+      // Every file is its own download, so each is gzipped on its own
+      const size = { raw: 0, gzip: 0 };
+      for (const name of names) {
+        const file = measure(join(STATIC_DIR, name));
+        size.raw += file.raw;
+        size.gzip += file.gzip;
+      }
+      console.log(
+        `  ${label} (${described}):  ${formatBytes(size.raw)} ` +
+          `(budget ${formatBytes(budget.raw)}), ` +
+          `${formatBytes(size.gzip)} gzipped ` +
+          `(budget ${formatBytes(budget.gzip)})`,
+      );
+      for (const kind of /** @type {const} */ (["raw", "gzip"])) {
+        if (size[kind] > budget[kind]) {
+          console.log(
+            `  ⚠️  ${described} exceeds its ${kind} budget ` +
+              `(${size[kind]} B > ${budget[kind]} B)`,
+          );
+          budgetExceeded = true;
+        }
       }
     } catch (error) {
       console.error(

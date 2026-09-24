@@ -166,6 +166,7 @@ describe("URL state management", () => {
     it("ignores visibility string with wrong length", () => {
       expect(parseUrlParams("v=101")).toEqual({});
       expect(parseUrlParams("v=1010101010")).toEqual({});
+      expect(parseUrlParams("v=10101")).toEqual({});
     });
 
     it("parses map center", () => {

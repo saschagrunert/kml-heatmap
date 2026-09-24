@@ -55,10 +55,14 @@ export function decodeYear(raw: RawYearData): DecodedYear {
     throw new Error("Invalid year data: expected an object");
   }
   if (raw.format !== DATA_FORMAT_VERSION) {
-    throw new Error(
+    const error = new Error(
       `Invalid year data: format ${String(raw.format)}, expected ` +
         `${DATA_FORMAT_VERSION}; the data was written by another release`,
     );
+    // Told by name, not by class, by the loader (STALE_DATA_ERROR there):
+    // the page and the year worker each have a class of their own
+    error.name = "StaleDataError";
+    throw error;
   }
   const segmentsByPath = raw.segments;
   if (typeof segmentsByPath !== "object" || segmentsByPath === null) {

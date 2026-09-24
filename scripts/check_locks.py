@@ -180,7 +180,11 @@ def unsatisfied(requirements: list[str], pins: dict[str, str], lock: str) -> lis
 def main() -> int:
     """Print the mismatches and return the exit status."""
     with open(ROOT / "pyproject.toml", "rb") as f:
-        project = tomllib.load(f)["project"]
+        pyproject = tomllib.load(f)
+    project = pyproject["project"]
+    # What building the wheel needs; CI installs it from its own lock file to
+    # build without isolation (see `make lock`)
+    build: list[str] = pyproject.get("build-system", {}).get("requires", [])
     runtime: list[str] = project["dependencies"]
     extras: dict[str, list[str]] = project["optional-dependencies"]
     tooling = extras["test"] + extras["dev"]
@@ -190,6 +194,12 @@ def main() -> int:
 
     problems = unsatisfied(runtime, runtime_pins, "requirements.lock")
     problems += unsatisfied(runtime + tooling, test_pins, "requirements-test.lock")
+    if build and not (ROOT / "requirements-build.lock").is_file():
+        problems.append("requirements-build.lock is missing")
+    elif build:
+        problems += unsatisfied(
+            build, read_pins("requirements-build.lock"), "requirements-build.lock"
+        )
     # CI installs requirements-test.lock alone where it needs both, which is
     # only the same as installing both while the shared pins agree
     problems += [
@@ -213,7 +223,8 @@ def main() -> int:
     if problems:
         print(
             "The lock files are out of date; run `make lock` and commit "
-            "requirements.lock and requirements-test.lock.",
+            "requirements.lock, requirements-test.lock and "
+            "requirements-build.lock.",
             file=sys.stderr,
         )
     if image_problems:

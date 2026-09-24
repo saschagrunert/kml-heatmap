@@ -172,7 +172,7 @@ class TestParseWithoutAPool:
         real_submit = pool.submit
 
         def submit(fn, *args):
-            submitted.extend(args)
+            submitted.append(args[0])
             return real_submit(fn, *args)
 
         pool.submit = submit
@@ -187,6 +187,28 @@ class TestParseWithoutAPool:
         monkeypatch.setattr("kml_heatmap.renderer.INLINE_PARSE_MAX_BYTES", -1)
         with patch("kml_heatmap.renderer.ProcessPoolExecutor", _NoPool):
             assert _parse_kml_files(files) == first
+
+    def test_an_uncached_file_is_hashed_once(self, tmp_path):
+        """The cache key of the lookup is where the parse is stored."""
+        from kml_heatmap import parser_cache
+
+        files = [_write_kml(tmp_path / f"{i}_DEAGJ_DA20.kml", 2025) for i in (1, 2)]
+        hashed = []
+        real_digest = parser_cache._content_digest
+
+        def digest(path):
+            hashed.append(path.name)
+            return real_digest(path)
+
+        with patch.object(parser_cache, "_content_digest", digest):
+            _parse_kml_files(files)
+            assert sorted(hashed) == ["1_DEAGJ_DA20.kml", "2_DEAGJ_DA20.kml"]
+            hashed.clear()
+            # And the entry was written: the next run reads it
+            with patch(
+                "kml_heatmap.renderer.parse_kml_file", side_effect=AssertionError
+            ):
+                _parse_kml_files(files)
 
     def test_unreadable_cache_is_a_miss(self, tmp_path):
         kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
@@ -527,6 +549,32 @@ class TestExportSite:
             "EDDF Frankfurt Main",
             "EDDK Cologne Bonn",
         ]
+
+    def test_every_path_is_checked_for_export_once(self, tmp_path):
+        from kml_heatmap import data_exporter as exporter_module
+
+        paths = [
+            [TrackPoint(50.0, 8.0, 100.0), TrackPoint(51.0, 9.0, 200.0)],
+            [TrackPoint(49.5678, 10.1234, 320.0)],
+        ]
+        metadata = [
+            {"year": 2025, "start_point": [50.0, 8.0, 100.0], "airport_name": ""},
+            {"year": 2025, "start_point": [49.5, 10.1, 320.0], "airport_name": ""},
+        ]
+        checked = []
+        real_check = exporter_module.is_exportable_path
+
+        def check(path):
+            checked.append(len(path))
+            return real_check(path)
+
+        out = tmp_path / "out"
+        with (
+            patch("kml_heatmap.renderer.is_exportable_path", check),
+            patch.object(exporter_module, "is_exportable_path", check),
+        ):
+            _export_site(paths, metadata, out / "index.html", out / "data")
+        assert checked == [2, 1]
 
     def test_nothing_exportable_raises_before_writing(self, tmp_path):
         paths = [[TrackPoint(50.0, 8.0, 100.0), TrackPoint(51.0, 9.0, 200.0)]]

@@ -27,7 +27,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:mobile": "playwright test --project=mobile",
-    "test:e2e:webkit": "playwright test --project=webkit"
+    "test:e2e:webkit": "playwright test --project='webkit*'"
   },
   "//dependencies": "Vendored into the page by scripts/vendor.js and published with the site",
   "dependencies": {

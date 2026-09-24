@@ -78,7 +78,13 @@ except ImportError:  # pragma: no cover - Windows has no fcntl
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-    from .types import AirportData, FlightPath, FlightPathGroup, PathMetadata
+    from .types import (
+        AirportData,
+        FlightPath,
+        FlightPathGroup,
+        PathMetadata,
+        YearFileHeader,
+    )
 
 __all__ = [
     "MIN_PATHS_PER_CHUNK",
@@ -91,6 +97,7 @@ __all__ = [
     "assign_path_ids",
     "drop_duplicate_paths",
     "export_all_data",
+    "exported_contents",
     "is_exportable_path",
     "path_content_id",
     "process_year_chunk",
@@ -216,6 +223,11 @@ def _path_content(path: FlightPath) -> bytes:
     return struct.pack(f"<{len(values)}d", *values)
 
 
+def _content_id(content: bytes) -> int:
+    digest = hashlib.blake2b(content, digest_size=8).digest()
+    return int.from_bytes(digest, "big") >> (64 - PATH_ID_BITS)
+
+
 def path_content_id(path: FlightPath) -> int:
     """The id a path gets unless an earlier path already holds it.
 
@@ -224,17 +236,36 @@ def path_content_id(path: FlightPath) -> int:
     and the renaming of Charterware files, none of which a position in the
     input or a file name would.
     """
-    digest = hashlib.blake2b(_path_content(path), digest_size=8).digest()
-    return int.from_bytes(digest, "big") >> (64 - PATH_ID_BITS)
+    return _content_id(_path_content(path))
+
+
+def exported_contents(
+    paths_by_year: Mapping[int, list[int]],
+    all_path_groups: FlightPathGroup,
+    exportable: Sequence[bool],
+) -> dict[int, bytes]:
+    """The content of every exportable path (see ``_path_content``), by index.
+
+    In input order. Packed once here for ``drop_duplicate_paths``, which
+    compares it, and ``assign_path_ids``, which hashes it.
+    """
+    return {
+        index: _path_content(all_path_groups[index])
+        for index in sorted(
+            index for indices in paths_by_year.values() for index in indices
+        )
+        if exportable[index]
+    }
 
 
 def drop_duplicate_paths(
     paths_by_year: Mapping[int, list[int]],
-    all_path_groups: FlightPathGroup,
+    contents: Mapping[int, bytes],
     all_path_metadata: Sequence[PathMetadata],
 ) -> dict[int, list[int]]:
     """Leave out every exported path that repeats an earlier one exactly.
 
+    ``contents`` are those of the exported paths (see ``exported_contents``).
     The same recording under two file names (a copy, a renamed export)
     would otherwise count twice in every statistic. Paths are compared by
     their exported content itself, not by its hash, so two different
@@ -244,16 +275,8 @@ def drop_duplicate_paths(
     """
     first_by_content: dict[bytes, int] = {}
     duplicates: set[int] = set()
-    exported = sorted(
-        index
-        for indices in paths_by_year.values()
-        for index in indices
-        if is_exportable_path(all_path_groups[index])
-    )
-    for index in exported:
-        first = first_by_content.setdefault(
-            _path_content(all_path_groups[index]), index
-        )
+    for index in sorted(contents):
+        first = first_by_content.setdefault(contents[index], index)
         if first != index:
             duplicates.add(index)
             logger.warning(
@@ -270,15 +293,16 @@ def drop_duplicate_paths(
     return {
         year: indices
         for year, indices in kept.items()
-        if any(is_exportable_path(all_path_groups[i]) for i in indices)
+        if any(index in contents for index in indices)
     }
 
 
 def assign_path_ids(
-    paths_by_year: Mapping[int, list[int]], all_path_groups: FlightPathGroup
+    paths_by_year: Mapping[int, list[int]], contents: Mapping[int, bytes]
 ) -> dict[int, int]:
     """The id of every exported path, keyed by its index in the input.
 
+    ``contents`` are those of the exported paths (see ``exported_contents``).
     A path whose content id an earlier path (in input order) already holds,
     a real collision (``drop_duplicate_paths`` removes exact duplicates
     before), takes the next free id. The ids therefore only depend on the
@@ -288,12 +312,12 @@ def assign_path_ids(
         index
         for indices in paths_by_year.values()
         for index in indices
-        if is_exportable_path(all_path_groups[index])
+        if index in contents
     )
     ids: dict[int, int] = {}
     taken: set[int] = set()
     for index in exported:
-        path_id = path_content_id(all_path_groups[index])
+        path_id = _content_id(contents[index])
         while path_id in taken:
             path_id = (path_id + 1) % (1 << PATH_ID_BITS)
         taken.add(path_id)
@@ -406,11 +430,16 @@ def _assemble_year_file(
     original_points = sum(chunk.original_points for chunk in chunks)
     output_file = Path(output_dir) / str(year) / YEAR_FILE
 
+    header: YearFileHeader = {
+        "format": FORMAT_VERSION,
+        "year": year,
+        "original_points": original_points,
+    }
+    # The object stays open for the paths that follow
+    head = json.dumps(header, separators=JSON_SEPARATORS).removesuffix("}")
+
     def write(out: IO[str]) -> None:
-        out.write(
-            f'{{"format":{FORMAT_VERSION},"year":{year},'
-            f'"original_points":{original_points},"path_info":['
-        )
+        out.write(head + ',"path_info":[')
         _copy_fragments(
             out, [_part_paths(output_dir, year, chunk.index)[0] for chunk in chunks]
         )
@@ -439,10 +468,12 @@ def _assemble_year_file(
 
 
 def _group_paths_by_year(
-    all_path_groups: FlightPathGroup,
-    all_path_metadata: list[PathMetadata],
+    all_path_metadata: list[PathMetadata], exportable: Sequence[bool]
 ) -> dict[int, list[int]]:
     """Group path indices by year; paths without a year are skipped.
+
+    ``exportable`` tells for each path whether it is exported (see
+    ``is_exportable_path``).
 
     A year without a single exportable path is left out, so that a file with
     nothing but point markers does not add an empty year. In the other years
@@ -464,7 +495,7 @@ def _group_paths_by_year(
     return {
         year: indices
         for year, indices in paths_by_year.items()
-        if any(is_exportable_path(all_path_groups[i]) for i in indices)
+        if any(exportable[i] for i in indices)
     }
 
 
@@ -895,26 +926,28 @@ def export_all_data(
     unique_airports: list[AirportData],
     output_dir: str | Path = "data",
     aircraft_data: Mapping[str, str] | None = None,
+    exportable: Sequence[bool] | None = None,
 ) -> ExportResult:
     """Write the data files into ``output_dir``.
 
     ``output_dir`` is expected to hold no previous export: the pipeline
     passes the data staging directory of a ``SiteOutput``, which publishes
-    the files.
+    the files. ``exportable`` is ``is_exportable_path`` of every path, when
+    the caller has it already.
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
     logger.info("\n  Exporting data to JSON files...")
 
-    paths_by_year = drop_duplicate_paths(
-        _group_paths_by_year(all_path_groups, all_path_metadata),
-        all_path_groups,
-        all_path_metadata,
-    )
+    if exportable is None:
+        exportable = [is_exportable_path(path) for path in all_path_groups]
+    paths_by_year = _group_paths_by_year(all_path_metadata, exportable)
+    contents = exported_contents(paths_by_year, all_path_groups, exportable)
+    paths_by_year = drop_duplicate_paths(paths_by_year, contents, all_path_metadata)
     logger.info("\n  Splitting data by year: %s", sorted(paths_by_year))
 
-    path_ids = assign_path_ids(paths_by_year, all_path_groups)
+    path_ids = assign_path_ids(paths_by_year, contents)
     max_workers = os.process_cpu_count() or 4
     plans = _plan_chunks(paths_by_year, path_ids, max_workers)
 

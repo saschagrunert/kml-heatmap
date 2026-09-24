@@ -469,13 +469,25 @@ describe("MapApp controls and map", () => {
       app.selectedPathIds.add(1);
       app.store.notifyMutation("selectedPathIds");
       replayButton().title = "Stop replay";
-      app.replayState.active = true;
+      app.replayActive = true;
 
       app.selectedPathIds.clear();
       app.store.notifyMutation("selectedPathIds");
 
       expect(replayButton().style.opacity).toBe("1");
       expect(replayButton().title).toBe("Stop replay");
+    });
+
+    it("takes the button back in step as the replay closes", async () => {
+      await initializeApp(app);
+      app.replayActive = true;
+      app.selectedPathIds.clear();
+      app.store.notifyMutation("selectedPathIds");
+      replayButton().style.opacity = "1";
+
+      app.replayActive = false;
+
+      expect(replayButton().style.opacity).toBe("0.5");
     });
   });
 
@@ -686,7 +698,7 @@ describe("MapApp controls and map", () => {
       marker.dispatchEvent(originalEvent);
 
       mockMap(app).emit("click", { ...click, originalEvent });
-      app.replayState.active = true;
+      app.replayActive = true;
       mockMap(app).emit("click", { ...click, originalEvent });
 
       expect(mockLayerManagerInstance.hitTest).not.toHaveBeenCalled();
@@ -699,7 +711,7 @@ describe("MapApp controls and map", () => {
       await initializeApp(app);
       app.selectedPathIds.add(1);
       const closePopup = vi.fn();
-      app.replayState.active = true;
+      app.replayActive = true;
       app.replayState.airplaneMarker = {
         isPopupOpen: () => true,
         closePopup,
@@ -923,6 +935,7 @@ describe("MapApp controls and map", () => {
       // on acting on a map without layers
       expect(signal.aborted).toBe(true);
       expect(m.mockLayerManagerInstance.destroy).toHaveBeenCalled();
+      expect(m.mockAirportManagerInstance.destroy).toHaveBeenCalled();
       expect(map.remove).toHaveBeenCalledTimes(1);
       expect(app.map).toBeNull();
     });

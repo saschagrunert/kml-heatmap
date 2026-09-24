@@ -6,7 +6,6 @@ describe("ReplayState", () => {
     it("initializes with correct defaults", () => {
       const state = new ReplayState();
 
-      expect(state.active).toBe(false);
       expect(state.playing).toBe(false);
       expect(state.currentTime).toBe(0);
       expect(state.maxTime).toBe(0);
@@ -84,7 +83,6 @@ describe("ReplayState", () => {
 
     it("preserves non-drawing properties", () => {
       const state = new ReplayState();
-      state.active = true;
       state.playing = true;
       state.speed = 100;
       state.maxTime = 500;
@@ -94,7 +92,6 @@ describe("ReplayState", () => {
 
       state.resetDrawState();
 
-      expect(state.active).toBe(true);
       expect(state.playing).toBe(true);
       expect(state.speed).toBe(100);
       expect(state.maxTime).toBe(500);

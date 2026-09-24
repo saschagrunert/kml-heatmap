@@ -16,7 +16,6 @@ comment:
 
 ignore:
   - "tests/**"
-  - "scripts/**"
   - "**/*.test.ts"
   - "**/*.test.js"
   - "**/mocks/**"

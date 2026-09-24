@@ -42,6 +42,10 @@ GX_TRACK_KML = f"""{KML_HEADER}
 </kml>"""
 
 
+def _line_string(coordinates):
+    return f"<LineString><coordinates>{coordinates}</coordinates></LineString>"
+
+
 def _write(tmp_path, name, content):
     path = tmp_path / name
     path.write_text(content, encoding="utf-8")
@@ -85,6 +89,42 @@ class TestParseKmlCoordinates:
         second = parse_kml_coordinates(kml_file)
         assert second == first
         assert all(isinstance(p, TrackPoint) for p in second[1][0])
+
+    @pytest.mark.parametrize(
+        "kml",
+        [
+            (
+                f"{KML_HEADER}<Document><Placemark><Polygon><outerBoundaryIs>"
+                "<LinearRing><coordinates>9,48,0 9.1,48,0 9.1,48.1,0 9,48,0"
+                "</coordinates></LinearRing></outerBoundaryIs></Polygon>"
+                "</Placemark></Document></kml>"
+            ),
+            LINESTRING_KML.replace(
+                "<LineString>", "<LineString><altitudeMode>clampToGround</altitudeMode>"
+            ),
+        ],
+        ids=["nothing-usable", "partly-usable"],
+    )
+    def test_a_cache_hit_logs_the_warnings_again(self, tmp_path, capsys, kml):
+        kml_file = _write(tmp_path, "warn.kml", kml)
+        first = parse_kml_coordinates(kml_file)
+        warnings = capsys.readouterr().err
+        assert "WARNING: warn.kml:" in warnings
+
+        assert parse_kml_coordinates(kml_file) == first
+        captured = capsys.readouterr()
+        assert "(cached)" in captured.out
+        assert captured.err == warnings
+
+    def test_a_corrupt_cache_entry_is_parsed_again(self, tmp_path):
+        kml_file = _write(tmp_path, "corrupt.kml", GX_TRACK_KML)
+        first = parse_kml_coordinates(kml_file)
+        cache_path, _ = get_cache_key(kml_file)
+        cache_path.write_text("{not json", encoding="utf-8")
+        assert parse_kml_coordinates(kml_file) == first
+        assert get_cache_key(kml_file) == (cache_path, True)
+        assert cache_path.read_text(encoding="utf-8").startswith("{")
+        assert parse_kml_coordinates(kml_file) == first
 
     def test_invalid_xml_raises(self, tmp_path):
         with pytest.raises(KMLParseError, match="XML parsing error"):
@@ -370,6 +410,66 @@ class TestTimeSpanPlacemark:
         duration = path_duration(metadata[0])
         assert duration == 5400.0
 
+    @pytest.mark.parametrize("inherited", [False, True], ids=["multi", "folder"])
+    def test_lines_that_share_a_timespan_share_its_duration(self, tmp_path, inherited):
+        """Each line gets its part by distance, so all fly the average speed."""
+        from kml_heatmap.export_pipeline import path_duration
+
+        span = (
+            "<TimeSpan><begin>2025-06-15T12:00:00Z</begin>"
+            "<end>2025-06-15T13:30:00Z</end></TimeSpan>"
+        )
+        short = _line_string("8.0,50.0,300 8.0,50.1,300")
+        long = _line_string("9.0,50.0,300 9.0,50.3,300")
+        if inherited:
+            body = (
+                f"<Folder>{span}<Placemark><name>A</name>{short}</Placemark>"
+                f"<Placemark><name>B</name>{long}</Placemark></Folder>"
+            )
+        else:
+            body = (
+                f"<Placemark><name>A</name>{span}"
+                f"<MultiGeometry>{short}{long}</MultiGeometry></Placemark>"
+            )
+        kml = f"{KML_HEADER}<Document>{body}</Document></kml>"
+        _, paths, metadata = parse_kml_coordinates(_write(tmp_path, "s.kml", kml))
+
+        assert len(paths) == 2
+        durations = [path_duration(meta) for meta in metadata]
+        assert sum(durations) == pytest.approx(5400.0)
+        assert durations[1] == pytest.approx(3 * durations[0])
+
+    def test_lines_that_never_move_share_a_timespan_evenly(self, tmp_path):
+        from kml_heatmap.export_pipeline import path_duration
+
+        span = (
+            "<TimeSpan><begin>2025-06-15T12:00:00Z</begin>"
+            "<end>2025-06-15T13:00:00Z</end></TimeSpan>"
+        )
+        line = _line_string("8.0,50.0,300 8.0,50.0,310")
+        kml = (
+            f"{KML_HEADER}<Document><Placemark><name>A</name>{span}"
+            f"<MultiGeometry>{line}{line}</MultiGeometry></Placemark></Document></kml>"
+        )
+        _, _, metadata = parse_kml_coordinates(_write(tmp_path, "z.kml", kml))
+        assert [path_duration(meta) for meta in metadata] == [1800.0, 1800.0]
+
+    def test_lines_with_their_own_timespans_keep_them(self, tmp_path):
+        from kml_heatmap.export_pipeline import path_duration
+
+        placemarks = "".join(
+            f"<Placemark><name>{hour}</name><TimeSpan>"
+            f"<begin>2025-06-15T{hour}:00:00Z</begin>"
+            f"<end>2025-06-15T{hour}:30:00Z</end></TimeSpan><LineString>"
+            f"<coordinates>8.0,50.0,300 8.0,50.{hour},300</coordinates>"
+            "</LineString></Placemark>"
+            for hour in (10, 12)
+        )
+        kml = f"{KML_HEADER}<Document>{placemarks}</Document></kml>"
+        _, _, metadata = parse_kml_coordinates(_write(tmp_path, "o.kml", kml))
+        assert [path_duration(meta) for meta in metadata] == [1800.0, 1800.0]
+        assert all("span_share" not in meta for meta in metadata)
+
 
 def _line(geometry, mode=None):
     mode_elem = f"<altitudeMode>{mode}</altitudeMode>" if mode else ""
@@ -452,3 +552,60 @@ class TestInheritedTime:
         _, paths, metadata = parse_kml_coordinates(_write(tmp_path, "f.kml", kml))
         assert len(paths) == 1
         assert metadata[0]["year"] == 2024
+
+
+def _new_year_track():
+    """A flight from 2025-12-31T23:00Z to 2026-01-01T02:00Z, mostly in 2026."""
+    whens = []
+    coords = []
+    for i in range(19):
+        minutes = 23 * 60 + 10 * i
+        day = "2025-12-31" if minutes < 24 * 60 else "2026-01-01"
+        clock = f"{minutes // 60 % 24:02d}:{minutes % 60:02d}:00"
+        whens.append(f"<when>{day}T{clock}Z</when>")
+        coords.append(f"<gx:coord>{9.0 + 0.02 * i:.2f} 48.0 {400 + 20 * i}</gx:coord>")
+    return (
+        f"{KML_HEADER}<Document><Placemark><name>EDDS - EDDP</name><gx:Track>"
+        + "".join(whens)
+        + "".join(coords)
+        + "</gx:Track></Placemark></Document></kml>"
+    )
+
+
+class TestYearAcrossNewYear:
+    def test_the_year_survives_the_obfuscation(self, tmp_path):
+        """The parser and the obfuscator both go by the start of the flight."""
+        from pathlib import Path
+
+        from kml_heatmap.obfuscate import obfuscate_kml_file
+
+        kml_file = _write(tmp_path, "ny.kml", _new_year_track())
+        _, _, before = parse_kml_coordinates(kml_file)
+        assert obfuscate_kml_file(Path(kml_file)) is True
+        _, _, after = parse_kml_coordinates(kml_file)
+
+        assert before[0]["year"] == after[0]["year"] == 2025
+        assert after[0]["timestamp"].startswith("2025-01-01T23:00")
+
+
+class TestMultiTrackFile:
+    def test_a_paused_recording_is_one_flight(self, tmp_path):
+        tracks = "".join(
+            "<gx:Track>"
+            + "".join(
+                f"<when>2026-05-01T{hour:02d}:{minute:02d}:00Z</when>"
+                f"<gx:coord>{9 + hour / 10 + minute / 1000:.3f} 48.0 300</gx:coord>"
+                for minute in range(3)
+            )
+            + "</gx:Track>"
+            for hour in (10, 11)
+        )
+        kml = (
+            f"{KML_HEADER}<Document><Placemark><name>EDDS - EDDP</name>"
+            "<gx:MultiTrack><altitudeMode>absolute</altitudeMode>"
+            f"{tracks}</gx:MultiTrack></Placemark></Document></kml>"
+        )
+        _, paths, metadata = parse_kml_coordinates(_write(tmp_path, "m.kml", kml))
+        assert [len(path) for path in paths] == [6]
+        assert metadata[0]["timestamp"] == "2026-05-01T10:00:00Z"
+        assert metadata[0]["end_timestamp"] == "2026-05-01T11:02:00Z"

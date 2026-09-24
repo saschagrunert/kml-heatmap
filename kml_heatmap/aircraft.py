@@ -163,7 +163,8 @@ def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
     2. Charterware: YYYY-MM-DD_HHMMh_REGISTRATION_ROUTE.kml
 
     A numbered name whose second part is no registration (see
-    ``_is_registration``) names no aircraft.
+    ``_is_registration``) names no aircraft; a Charterware name without one
+    keeps its route.
     """
     name = Path(filename).stem
     parts = name.split("_")
@@ -194,8 +195,16 @@ def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
             logger.warning("Invalid date in Charterware filename: %s", filename)
             return {}
 
+        # The same rules as for a numbered name: "constructor" in
+        # "2026-01-12_1513h_constructor_LOAV-LOAV.kml" is no aircraft, but
+        # the route still names the airports
+        registration = None
+        if _is_registration(parts[2], after_date=False):
+            registration = normalize_registration(parts[2])
+        else:
+            logger.debug("No aircraft registration in filename: %s", filename)
         return {
-            "registration": normalize_registration(parts[2]),
+            "registration": registration,
             "type": None,
             "route": parts[3] or None,
             "format": "charterware",

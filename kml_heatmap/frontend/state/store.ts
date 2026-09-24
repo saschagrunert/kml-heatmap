@@ -25,6 +25,11 @@ export interface StoreState {
   globeVisible: boolean;
   /** Whether the flights are lifted to their altitude (calculations/lift.ts) */
   threeDVisible: boolean;
+  /**
+   * Whether a replay is running. The layer flags keep what the user chose;
+   * what the map shows follows from both (see ui/layerVisibility.ts).
+   */
+  replayActive: boolean;
   statsPanelVisible: boolean;
   /** Wrapped modal visibility */
   wrappedVisible: boolean;
@@ -65,6 +70,7 @@ export const STORE_ACCESSOR_KEYS = [
   "aviationVisible",
   "globeVisible",
   "threeDVisible",
+  "replayActive",
   "currentData",
   "hasTimingData",
 ] as const;
@@ -110,6 +116,7 @@ export function createDefaultState(): StoreState {
     aviationVisible: false,
     globeVisible: false,
     threeDVisible: false,
+    replayActive: false,
     statsPanelVisible: false,
     wrappedVisible: false,
     currentData: null,

@@ -8,11 +8,7 @@ import { domCache } from "../utils/domCache";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
 import { findMinMax } from "../utils/arrayHelpers";
 import { formatTime } from "../utils/formatters";
-import {
-  applyLegendVisibility,
-  applyToggleButtonState,
-  setControlLabel,
-} from "../utils/buttonState";
+import { applyToggleButtonState, setControlLabel } from "../utils/buttonState";
 import { setControlIcon } from "../utils/icons";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
 import {
@@ -37,7 +33,6 @@ import type { PathSegment } from "../types";
 import {
   REPLAY_BUTTON_LABEL,
   REPLAY_PRECONDITION_MESSAGE,
-  updateReplayButtonState,
 } from "./replayButton";
 
 const REPLAY_BUTTON_ACTIVE_LABEL = "Stop replay";
@@ -93,9 +88,6 @@ function sliderTarget(
   return Math.min(state.maxTime, Math.max(0, target));
 }
 
-/** Delay before the colour layers are redrawn after replay ends (ms) */
-const LAYER_REDRAW_DELAY_MS = 50;
-
 /**
  * Time the view takes to reach the aircraft (ms), at AUTO_ZOOM_FOLLOW both
  * when a replay opens with auto-zoom already on and when it is switched on
@@ -122,12 +114,10 @@ export const MAX_FRAME_DELTA_MS = 100;
 export class ReplayManager {
   private app: MapApp;
   private renderer: ReplayRenderer;
-  /** Pending colour layer redraws scheduled by restoreLayerVisibility */
-  private redrawTimers: ReturnType<typeof setTimeout>[] = [];
   /** Inline opacity of the controls replay disabled, put back afterwards */
   private savedOpacities = new Map<HTMLElement, string>();
-  /** Ends the layer subscriptions that keep the trail's scale in step */
-  private unsubscribeTrailLegend: (() => void) | null = null;
+  /** Ends the subscriptions that keep the trail in step with the layers */
+  private unsubscribeTrail: (() => void) | null = null;
   private readonly onVisibilityChange = (): void => {
     // No frames run in a hidden tab, so the first one after it comes back
     // would count all the hidden time; start timing afresh instead
@@ -178,19 +168,13 @@ export class ReplayManager {
   /** Cancel every pending timer; the panel itself stays as it is */
   destroy(): void {
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
-    this.stopFollowingTrailLegend();
-    this.cancelRedrawTimers();
+    this.stopFollowingLayers();
     this.renderer.cancelTrailFlush();
     this.renderer.stopWatchingMap();
     if (this.state.animationFrameId) {
       cancelAnimationFrame(this.state.animationFrameId);
       this.state.animationFrameId = null;
     }
-  }
-
-  private cancelRedrawTimers(): void {
-    for (const timer of this.redrawTimers) clearTimeout(timer);
-    this.redrawTimers = [];
   }
 
   /** Whether the current selection can be replayed; the app decides */
@@ -202,7 +186,7 @@ export class ReplayManager {
     const panel = domCache.get("replay-controls");
     if (!panel) return;
 
-    if (this.state.active) {
+    if (this.app.replayActive) {
       this.deactivateReplay(panel);
       return;
     }
@@ -232,11 +216,11 @@ export class ReplayManager {
       REPLAY_PANEL_HEIGHT_VAR,
       panel.offsetHeight + "px",
     );
-    this.state.active = true;
+    // The heatmap and the colour layers hide for the replay, and the panel
+    // takes the bottom edge: the mobile bar steps aside instead of stacking
+    // under it (see ui/layerVisibility.ts, MobileBar)
+    this.app.replayActive = true;
     this.renderer.watchUser();
-    // The panel takes the bottom edge; the bar steps aside instead of
-    // stacking under it
-    this.app.mobileBar?.setReplayActive(true);
     // Starting from the More sheet leaves focus on a tab the line above has
     // just removed from the document, so move it into the panel
     exit.focus();
@@ -253,31 +237,45 @@ export class ReplayManager {
     this.updateAutoZoomButton();
 
     document.body.classList.add("replay-active");
-    this.hideOtherLayersDuringReplay();
-    this.updateTrailLegend();
-    // The colour toggles stay usable during replay and change what colours
-    // the trail, so the scale follows them. Subscribed after the store's own
-    // legend sync, so this runs last and has the final word.
-    this.stopFollowingTrailLegend();
-    const unsubscribeLegend = this.app.store.subscribeKeys(
+    this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, true);
+    this.followLayers();
+  }
+
+  /**
+   * The colour toggles stay usable during replay and change what colours
+   * the trail; the 3D view comes or goes, and the flown trail is cut again,
+   * lifted or flat, with the airplane going up or down with it
+   */
+  private followLayers(): void {
+    this.stopFollowingLayers();
+    const store = this.app.store;
+    const recolour = (): void => {
+      this.redrawReplayPath(this.trailMode());
+      // Its values are coloured on the scale of the trail
+      if (this.state.airplaneMarker?.isPopupOpen()) {
+        this.updateReplayAirplanePopup();
+      }
+    };
+    const unsubscribeColours = store.subscribeKeys(
       ["altitudeVisible", "airspeedVisible"],
-      () => this.updateTrailLegend(),
+      recolour,
     );
-    // The 3D view comes or goes during a replay: the flown trail is cut
-    // again, lifted or flat, and the airplane goes up or down with it
-    const unsubscribeLift = this.app.store.subscribe("threeDVisible", (on) => {
+    const unsubscribeLift = store.subscribe("threeDVisible", (on) => {
       this.setLifted(on);
-      this.redrawReplayPath(
-        this.app.airspeedVisible && !this.app.altitudeVisible
-          ? "airspeed"
-          : "altitude",
-      );
+      this.redrawReplayPath(this.trailMode());
       this.updateReplayDisplay();
     });
-    this.unsubscribeTrailLegend = () => {
-      unsubscribeLegend();
+    this.unsubscribeTrail = () => {
+      unsubscribeColours();
       unsubscribeLift();
     };
+  }
+
+  /** The trail is coloured by altitude unless the speed layer is the one on */
+  private trailMode(): "altitude" | "airspeed" {
+    return this.app.airspeedVisible && !this.app.altitudeVisible
+      ? "airspeed"
+      : "altitude";
   }
 
   /**
@@ -297,9 +295,9 @@ export class ReplayManager {
     state.trailWidthZoom = null;
   }
 
-  private stopFollowingTrailLegend(): void {
-    this.unsubscribeTrailLegend?.();
-    this.unsubscribeTrailLegend = null;
+  private stopFollowingLayers(): void {
+    this.unsubscribeTrail?.();
+    this.unsubscribeTrail = null;
   }
 
   private deactivateReplay(panel: HTMLElement): void {
@@ -307,15 +305,13 @@ export class ReplayManager {
     this.stopReplay(false);
     panel.style.display = "none";
     document.body.style.removeProperty(REPLAY_PANEL_HEIGHT_VAR);
-    this.state.active = false;
-    this.app.mobileBar?.setReplayActive(false);
-    this.restoreFocusAfterReplay();
+    this.stopFollowingLayers();
 
     const replayBtn = domCache.get("replay-btn");
     if (replayBtn) {
       setControlIcon(replayBtn, "play");
       setControlLabel(replayBtn, REPLAY_BUTTON_TEXT);
-      // The opacity is settled by updateReplayButtonState below
+      // The opacity is settled by MapApp once the replay is off
       applyToggleButtonState(replayBtn, false);
       replayBtn.setAttribute("aria-label", REPLAY_BUTTON_LABEL);
       replayBtn.title = REPLAY_BUTTON_LABEL;
@@ -331,32 +327,16 @@ export class ReplayManager {
     // No camera follows the airplane any more
     this.renderer.stopWatchingMap();
 
-    // The layers come back the way the user left them: closing replay used
-    // to switch the altitude layer on when neither colour layer was
-    this.restoreLayerVisibility();
-    this.stopFollowingTrailLegend();
-    this.updateTrailLegend();
-    this.updateReplayButtonState();
+    // The inline opacity first: the store puts the toggles' own back. The
+    // layers come back the way the user left them, and the mobile bar
+    // returns (see ui/layerVisibility.ts, MobileBar).
+    this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, false);
+    this.app.replayActive = false;
+    // After the bar is back, which may be the control that takes focus
+    this.restoreFocusAfterReplay();
     // The panel's own live region is hidden with it by now, and a hidden
     // region is not read out
     announceStatus("Replay closed");
-  }
-
-  /**
-   * Show the altitude scale whenever the replay trail is drawn with it.
-   * The trail is coloured by altitude unless the speed layer is the one
-   * that is on, so with neither layer on it still needs the scale that the
-   * store keeps hidden. Outside replay the legend follows its layer again.
-   */
-  private updateTrailLegend(): void {
-    const legend = domCache.get("altitude-legend");
-    if (!legend) return;
-    const trailByAltitude = this.state.active && !this.app.airspeedVisible;
-    applyLegendVisibility(legend, this.app.altitudeVisible || trailByAltitude);
-  }
-
-  updateReplayButtonState(): void {
-    updateReplayButtonState(this.canReplay());
   }
 
   /**
@@ -611,57 +591,6 @@ export class ReplayManager {
     });
   }
 
-  hideOtherLayersDuringReplay(): void {
-    if (!this.app.map) return;
-
-    // What the user had switched on stays in the store, which the restore
-    // reads; only the layers themselves are hidden
-    if (this.app.heatmapVisible) this.app.heatmapLayer.setVisible(false);
-    // The heatmap is hidden for the replay, so its toggle must not report
-    // it as on; restoreLayerVisibility hands it back to the store
-    const heatmapBtn = domCache.get("heatmap-btn");
-    if (heatmapBtn) applyToggleButtonState(heatmapBtn, false);
-    if (this.app.altitudeVisible) this.app.altitudeLayer.setVisible(false);
-    if (this.app.airspeedVisible) this.app.airspeedLayer.setVisible(false);
-
-    this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, true);
-  }
-
-  restoreLayerVisibility(): void {
-    if (!this.app.map) return;
-
-    // With the points of the filter changes made during the replay, and
-    // the dimming under a colour layer
-    if (this.app.heatmapVisible) this.app.dataManager.showHeatmap();
-
-    // Redraw once the layer shows again: a colour layer switched on during
-    // the replay was never drawn. A redraw still pending from an earlier
-    // close is dropped rather than run twice.
-    this.cancelRedrawTimers();
-    if (this.app.altitudeVisible) {
-      this.app.altitudeLayer.setVisible(true);
-      this.scheduleRedraw(() => this.app.layerManager.redrawAltitudePaths());
-    }
-
-    if (this.app.airspeedVisible) {
-      this.app.airspeedLayer.setVisible(true);
-      this.scheduleRedraw(() => this.app.layerManager.redrawAirspeedPaths());
-    }
-
-    this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, false);
-    const heatmapBtn = domCache.get("heatmap-btn");
-    if (heatmapBtn) applyToggleButtonState(heatmapBtn, this.app.heatmapVisible);
-  }
-
-  private scheduleRedraw(redraw: () => void): void {
-    const timer = setTimeout(() => {
-      this.redrawTimers = this.redrawTimers.filter((t) => t !== timer);
-      redraw();
-      this.app.map?.resize();
-    }, LAYER_REDRAW_DELAY_MS);
-    this.redrawTimers.push(timer);
-  }
-
   private setElementsDisabled(ids: string[], disabled: boolean): void {
     ids.forEach((id) => {
       const el = domCache.get(id);
@@ -693,7 +622,7 @@ export class ReplayManager {
   }
 
   playReplay(): void {
-    if (!this.state.active || !this.app.map) return;
+    if (!this.app.replayActive || !this.app.map) return;
     // Never start a second animation loop
     if (this.state.playing) return;
 
@@ -798,7 +727,7 @@ export class ReplayManager {
       }
     }
     this.updateReplayDisplay();
-    if (this.state.active && announce) this.announce("Replay stopped");
+    if (this.app.replayActive && announce) this.announce("Replay stopped");
   }
 
   seekReplay(value: string): void {

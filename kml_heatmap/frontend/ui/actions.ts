@@ -46,9 +46,7 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
     filterByYear: () => {
       app.filterManager.filterByYear().catch(logError);
     },
-    filterByAircraft: () => {
-      app.filterManager.filterByAircraft().catch(logError);
-    },
+    filterByAircraft: () => app.filterManager.filterByAircraft(),
     exportMap: () => app.uiToggles.exportMap(),
     shareLink: () => {
       void app.uiToggles.shareLink();

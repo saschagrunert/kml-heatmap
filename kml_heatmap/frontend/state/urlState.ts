@@ -47,14 +47,22 @@ export function isSupportedSchemaVersion(version: unknown): boolean {
   );
 }
 
+/** Whether a value can be a path id, from a link or from localStorage */
+export function isPathId(id: unknown): id is number {
+  return (
+    Number.isInteger(id) &&
+    (id as number) >= 0 &&
+    (id as number) < PATH_ID_LIMIT
+  );
+}
+
 /** A path id as written in a link, or null when it is not one */
 function parsePathId(text: string, radix: number): number | null {
-  if (!text) return null;
   // parseInt stops at the first invalid digit, so the shape is checked first
   const valid = radix === 36 ? /^[0-9a-z]+$/ : /^[0-9]+$/;
   if (!valid.test(text)) return null;
   const id = parseInt(text, radix);
-  return Number.isInteger(id) && id >= 0 && id < PATH_ID_LIMIT ? id : null;
+  return isPathId(id) ? id : null;
 }
 
 /**
@@ -130,14 +138,8 @@ export function parseUrlParams(
   // isolate flag in place.
   if (urlParams.has("v")) {
     const vis = urlParams.get("v");
-    // Support old 6-char, 7-char, 8-char, and new 9-char format for backwards compatibility
-    if (
-      vis &&
-      (vis.length === 6 ||
-        vis.length === 7 ||
-        vis.length === 8 ||
-        vis.length === 9)
-    ) {
+    // Links from before the 7th, 8th and 9th flags have 6 to 8 of them
+    if (vis && vis.length >= 6 && vis.length <= 9) {
       state.heatmapVisible = vis[0] === "1";
       state.altitudeVisible = vis[1] === "1";
       state.airspeedVisible = vis[2] === "1";

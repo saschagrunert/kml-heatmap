@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   INIT_ERROR_HTML,
   MapApp,
+  UnsupportedBrowserError,
   initMapApp,
   reportInitFailure,
 } from "../../../../kml_heatmap/frontend/mapApp";
@@ -58,6 +59,9 @@ describe("MapApp", () => {
       ]);
       expect(app.threeDVisible).toBe(false);
       expect(app.airportToPaths).toEqual({});
+      // An airport name is data: no key of it reaches Object.prototype
+      expect(Object.getPrototypeOf(app.airportToPaths)).toBeNull();
+      expect(app.airportToPaths["constructor"]).toBeUndefined();
       expect(app.airportMarkers).toEqual({});
     });
   });
@@ -263,6 +267,23 @@ describe("MapApp", () => {
       expect(mapEl.querySelector(".kh-init-error")!.textContent).toBe(
         "Failed to initialize map. Please reload the page.",
       );
+    });
+
+    it("says why for a browser without WebGL 2, as text", async () => {
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+
+      await initMapApp(config).catch(reportInitFailure);
+
+      const notice = mapEl.querySelector(".kh-init-error")!;
+      expect(notice.textContent).toBe(
+        "WebGL 2 is not available. The map requires a browser with WebGL 2 support.",
+      );
+      expect(notice.getAttribute("role")).toBe("alert");
+      expect(loggerMock.logError).toHaveBeenCalledWith(
+        expect.any(UnsupportedBrowserError),
+      );
+      window.mapApp?.destroy();
+      delete window.mapApp;
     });
 
     it("still logs when there is no map element", () => {

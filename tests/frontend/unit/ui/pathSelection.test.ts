@@ -7,6 +7,15 @@ import {
   type MockApp,
 } from "../../testHelpers";
 import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
+import { DataManager } from "../../../../kml_heatmap/frontend/ui/dataManager";
+
+// The data manager is real, so the paths follow the selection the way they
+// do in the app; it loads nothing here
+vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
+  DataLoader: vi.fn(function () {
+    return { destroy: vi.fn() };
+  }),
+}));
 
 const mapHelpers = vi.hoisted(() => ({
   resizeMapAfterTransition: vi.fn(),
@@ -46,20 +55,29 @@ describe("PathSelection", () => {
         EDDF: new Set([1, 2, 3]),
         EDDM: new Set([4, 5]),
       },
+      currentData: createDataset([1, 2, 3, 4, 5].map((id) => ({ id }))),
     });
+    new DataManager(asMapApp(mockApp)).updateLayers();
+    vi.clearAllMocks();
     pathSelection = new PathSelection(asMapApp(mockApp));
   });
+
+  /** How often the layers were rebuilt, and restyled for the selection */
+  const rebuilds = (): number =>
+    vi.mocked(mockApp.layerManager.syncModes).mock.calls.length;
+  const restyles = (): number =>
+    vi.mocked(mockApp.layerManager.updateSelectionStyles).mock.calls.length;
+  /** Count from here: a test's own setup goes through the store as well */
+  const settle = (): void => {
+    vi.mocked(mockApp.layerManager.syncModes).mockClear();
+    vi.mocked(mockApp.layerManager.updateSelectionStyles).mockClear();
+  };
 
   afterEach(() => {
     btn.remove();
     chip.remove();
     domCache.clear();
   });
-
-  async function flush(): Promise<void> {
-    await Promise.resolve();
-    await Promise.resolve();
-  }
 
   describe("togglePathSelection", () => {
     it("adds path when not selected and notifies the store", () => {
@@ -86,14 +104,11 @@ describe("PathSelection", () => {
 
       pathSelection.togglePathSelection(1);
 
-      expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalledTimes(
-        1,
-      );
-      expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
+      expect(restyles()).toBe(1);
+      expect(rebuilds()).toBe(0);
       expect(mapHelpers.resizeMapAfterTransition).toHaveBeenCalledWith(
         mockApp.map,
       );
-      expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
       // Statistics, airports and the replay button subscribe to this
       expect(listener).toHaveBeenCalledTimes(1);
       expect(
@@ -116,24 +131,26 @@ describe("PathSelection", () => {
     it("rebuilds layers in isolate mode", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
+      settle();
 
       pathSelection.togglePathSelection(2);
 
-      expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
-      expect(mockApp.layerManager.updateSelectionStyles).not.toHaveBeenCalled();
+      expect(rebuilds()).toBe(1);
+      expect(restyles()).toBe(0);
     });
 
     it("disables isolate mode when the last path is deselected", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
+      settle();
 
       pathSelection.togglePathSelection(1);
 
       expect(mockApp.isolateSelection).toBe(false);
       // Isolate mode drew only the selected path, so the paths that were
       // hidden have to be drawn again
-      expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
-      expect(mockApp.layerManager.updateSelectionStyles).not.toHaveBeenCalled();
+      expect(rebuilds()).toBe(1);
+      expect(restyles()).toBe(0);
     });
 
     it("lets listeners see the final state of both keys at once", () => {
@@ -149,22 +166,6 @@ describe("PathSelection", () => {
       // Never an empty selection that is still isolating
       expect(seen).toEqual([[0, false]]);
     });
-
-    it("logs errors from updateLayers", async () => {
-      const error = new Error("boom");
-      mockApp.selectedPathIds.add(1);
-      mockApp.isolateSelection = true;
-      mockApp.dataManager.updateLayers.mockRejectedValueOnce(error);
-      const consoleSpy = vi
-        .spyOn(console, "error")
-        .mockImplementation(() => {});
-
-      pathSelection.togglePathSelection(2);
-      await flush();
-
-      expect(consoleSpy).toHaveBeenCalledWith(error);
-      consoleSpy.mockRestore();
-    });
   });
 
   describe("selectPathsByAirport", () => {
@@ -172,7 +173,7 @@ describe("PathSelection", () => {
       pathSelection.selectPathsByAirport("EDDF");
 
       expect([...mockApp.selectedPathIds]).toEqual([1, 2, 3]);
-      expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalled();
+      expect(restyles()).toBe(1);
     });
 
     it("adds to an existing selection", () => {
@@ -190,16 +191,18 @@ describe("PathSelection", () => {
 
       expect(mockApp.selectedPathIds.size).toBe(0);
       expect(notify).not.toHaveBeenCalled();
-      expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalled();
+      // Nothing changed, so nothing is drawn again
+      expect(restyles()).toBe(0);
     });
 
     it("rebuilds layers when isolate mode is active", () => {
       mockApp.selectedPathIds.add(4);
       mockApp.isolateSelection = true;
+      settle();
 
       pathSelection.selectPathsByAirport("EDDF");
 
-      expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
+      expect(rebuilds()).toBe(1);
     });
 
     it("selects only the flights the aircraft filter keeps (regression)", () => {
@@ -239,18 +242,19 @@ describe("PathSelection", () => {
       pathSelection.clearSelection();
 
       expect(mockApp.selectedPathIds.size).toBe(0);
-      expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalled();
+      expect(restyles()).toBe(1);
     });
 
     it("disables isolate mode when clearing selection", () => {
       mockApp.isolateSelection = true;
+      settle();
 
       pathSelection.clearSelection();
 
       expect(mockApp.isolateSelection).toBe(false);
       // Leaving isolate mode has to restore the previously hidden paths
-      expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
-      expect(mockApp.layerManager.updateSelectionStyles).not.toHaveBeenCalled();
+      expect(rebuilds()).toBe(1);
+      expect(restyles()).toBe(0);
     });
   });
 
@@ -261,31 +265,32 @@ describe("PathSelection", () => {
       pathSelection.toggleIsolateSelection();
 
       expect(mockApp.isolateSelection).toBe(true);
-      expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
+      expect(rebuilds()).toBe(1);
     });
 
     it("disables isolate mode when toggled again", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
+      settle();
 
       pathSelection.toggleIsolateSelection();
 
       expect(mockApp.isolateSelection).toBe(false);
-      expect(mockApp.dataManager.updateLayers).toHaveBeenCalledTimes(1);
+      expect(rebuilds()).toBe(1);
     });
 
     it("does nothing when no paths are selected", () => {
       pathSelection.toggleIsolateSelection();
 
       expect(mockApp.isolateSelection).toBe(false);
-      expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
+      expect(rebuilds()).toBe(0);
     });
   });
 
   describe("while replay runs", () => {
     beforeEach(() => {
       mockApp.selectedPathIds.add(1);
-      mockApp.replayState.active = true;
+      mockApp.replayActive = true;
     });
 
     it("keeps the selection the replay is playing", () => {
@@ -297,15 +302,15 @@ describe("PathSelection", () => {
 
       expect([...mockApp.selectedPathIds]).toEqual([1]);
       expect(onChange).not.toHaveBeenCalled();
-      expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
-      expect(mockApp.layerManager.updateSelectionStyles).not.toHaveBeenCalled();
+      expect(rebuilds()).toBe(0);
+      expect(restyles()).toBe(0);
     });
 
     it("ignores Isolate", () => {
       pathSelection.toggleIsolateSelection();
 
       expect(mockApp.isolateSelection).toBe(false);
-      expect(mockApp.dataManager.updateLayers).not.toHaveBeenCalled();
+      expect(rebuilds()).toBe(0);
     });
   });
 

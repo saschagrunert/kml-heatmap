@@ -1,9 +1,11 @@
 """Standard KML <coordinates> processing."""
 
 import re
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .geometry import haversine_distance
 from .logger import logger
 from .parser_common import (
     _build_path_metadata_dict,
@@ -44,6 +46,7 @@ def process_standard_coordinates(
     lines_without_altitude = 0
     # Once per file: parse_coordinate_point runs once per coordinate
     filename = Path(kml_file).name
+    first_path = len(path_groups)
 
     for idx, coord_elem in enumerate(coord_elements):
         if coord_elem.text is None:
@@ -102,6 +105,8 @@ def process_standard_coordinates(
             )
             logger.debug("Element %d: %s", idx, coord_type)
 
+    _share_time_spans(path_groups[first_path:], path_metadata[first_path:])
+
     if lines_without_altitude:
         # Only the file's point count would show it otherwise, and that is
         # not zero, so the missing flight would go unnoticed
@@ -110,3 +115,37 @@ def process_standard_coordinates(
             filename,
             lines_without_altitude,
         )
+
+
+def _path_distance_km(path: FlightPath) -> float:
+    return sum(
+        haversine_distance(p1.lat, p1.lon, p2.lat, p2.lon) for p1, p2 in pairwise(path)
+    )
+
+
+def _share_time_spans(paths: FlightPathGroup, metadata: list[PathMetadata]) -> None:
+    """Split a time span that several lines have between them.
+
+    A TimeSpan of a MultiGeometry, or one the lines inherit from their Folder
+    or Document, is the time of all of them together, not of each one: taken
+    for each line, it made every one of them as slow as all of them. The
+    lines of a file with the same begin and end share it, each by its part
+    of their distance (``span_share``, see ``export_pipeline.path_duration``).
+    That gives every line the average speed of all of them, the best guess
+    without the times of the lines themselves; their order in time is not
+    known, so no line gets a begin or end of its own.
+    """
+    sharing: dict[tuple[str, str], list[int]] = {}
+    for index, meta in enumerate(metadata):
+        begin, end = meta.get("timestamp"), meta.get("end_timestamp")
+        if begin and end:
+            sharing.setdefault((begin, end), []).append(index)
+    for indices in sharing.values():
+        if len(indices) < 2:
+            continue
+        distances = [_path_distance_km(paths[index]) for index in indices]
+        total = sum(distances)
+        for index, distance in zip(indices, distances, strict=True):
+            metadata[index]["span_share"] = (
+                distance / total if total > 0 else 1 / len(indices)
+            )

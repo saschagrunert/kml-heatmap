@@ -183,6 +183,17 @@ class TestParseAircraftFromFilenameCharterware:
     def test_malformed_date_rejected(self):
         assert parse_aircraft_from_filename("2026-1-2_1513h_OE-AKI_LOAV.kml") == {}
 
+    @pytest.mark.parametrize("registration", ["constructor", "x", "12345", "D-EHYLXYZ"])
+    def test_no_registration_keeps_the_route(self, registration):
+        """The same rules as for a numbered name decide what a registration is."""
+        name = f"2026-01-12_1513h_{registration}_LOAV-LOAV.kml"
+        assert parse_aircraft_from_filename(name) == {
+            "registration": None,
+            "type": None,
+            "route": "LOAV-LOAV",
+            "format": "charterware",
+        }
+
     @pytest.mark.parametrize("time_part", ["1513", "2513h", "1575h", "abcdh"])
     def test_invalid_time_rejected(self, time_part):
         name = f"2026-01-12_{time_part}_OE-AKI_LOAV-LOAV.kml"

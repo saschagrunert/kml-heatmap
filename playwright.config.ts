@@ -110,12 +110,29 @@ export default defineConfig<object, SiteOptions>({
       name: "webkit",
       // The page targets iOS and leans on :has(), @starting-style and dvh,
       // so the phone interface also runs in Safari's engine. Install it with
-      // `npx playwright install webkit`.
-      testMatch: /(core|mobile)\.spec\.ts$/,
+      // `npx playwright install webkit`. The same specs as the mobile
+      // project: the layers and the saved state set up the WebGL layers,
+      // the heat lines and the 3D view, which Safari draws with a WebGL of
+      // its own.
+      testMatch: /(core|layers|mobile|state)\.spec\.ts$/,
       // Like the mobile project: a retry would hide the flaky bar and sheet
       retries: 0,
+      // Software WebGL on a phone, as in the mobile project
+      timeout: 60000,
       use: {
         ...devices["iPhone 15"],
+      },
+    },
+    {
+      name: "webkit-desktop",
+      // Turning, tilting, the globe and the replay in Safari's engine. Their
+      // specs drive the desktop controls, which is why they run in a desktop
+      // viewport rather than in the webkit project above.
+      testMatch: /(orientation|replay)\.spec\.ts$/,
+      // Software WebGL, in a browser CI has no GPU for either
+      timeout: 60000,
+      use: {
+        ...devices["Desktop Safari"],
       },
     },
   ],

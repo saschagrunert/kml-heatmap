@@ -211,6 +211,31 @@ describe("FilterView", () => {
       expect(view.pathIdsByAirport()).toEqual({});
     });
 
+    it("takes an airport that names an object property as data (regression)", () => {
+      const data = createDataset(
+        [
+          { id: 1, start_airport: "constructor", end_airport: "__proto__" },
+          { id: 2, start_airport: "__proto__" },
+        ],
+        [],
+      );
+      const byAirport = new DatasetIndex(data)
+        .filter("all", "all")
+        .pathIdsByAirport();
+
+      expect(byAirport["constructor"]).toEqual(new Set([1]));
+      expect(byAirport["__proto__"]).toEqual(new Set([1, 2]));
+      expect(Object.keys(byAirport).sort()).toEqual([
+        "__proto__",
+        "constructor",
+      ]);
+    });
+
+    it("has no entry for an airport no path uses, whatever its name", () => {
+      const view = new DatasetIndex(makeDataset()).filter("all", "all");
+      expect(view.pathIdsByAirport()["constructor"]).toBeUndefined();
+    });
+
     it("handles paths with only a start or end airport", () => {
       const data = createDataset(
         [
