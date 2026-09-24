@@ -85,6 +85,16 @@ describe("appInitializer", () => {
       expect(yearSelect().value).toBe("all");
     });
 
+    it("remembers the year a first visit opens on, whatever was restored", () => {
+      // Reset view goes back to it (MapApp.resetView)
+      app.selectedYear = "2023";
+
+      resolveYearSelection(asMapApp(app), [2024, 2023]);
+
+      expect(app.selectedYear).toBe("2023");
+      expect(app.defaultYear).toBe("2024");
+    });
+
     it("keeps an available restored year", () => {
       app.selectedYear = "2023";
 

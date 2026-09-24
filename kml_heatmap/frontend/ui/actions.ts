@@ -23,6 +23,7 @@ export const DEFERRED_WHILE_INITIALIZING: ReadonlySet<string> = new Set([
   "showWrapped",
   "exportMap",
   "toggleIsolateSelection",
+  "resetView",
 ]);
 
 type ActionHandler = (e: Event) => void;
@@ -38,6 +39,9 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
     toggleGlobe: () => app.mapOrientation.toggleGlobe(),
     toggleThreeD: () => app.mapOrientation.toggleThreeD(),
     resetNorth: () => app.mapOrientation.resetNorth(),
+    resetView: () => {
+      app.resetView().catch(logError);
+    },
     // Replay and Wrapped live in the lazily loaded feature bundle. Only
     // these two can be the first thing a visitor touches; the rest are on
     // chrome that exists only once the feature is open, so they find the

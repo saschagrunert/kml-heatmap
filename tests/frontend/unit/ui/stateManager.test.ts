@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  BOOLEAN_KEYS,
   StateManager,
   sanitizeSavedState,
   storageKey,
 } from "../../../../kml_heatmap/frontend/ui/stateManager";
 import { LngLat } from "../../../mocks/maplibre-gl";
+import { createDefaultState } from "../../../../kml_heatmap/frontend/state/store";
 import { createMockApp, asMapApp, type MockApp } from "../../testHelpers";
 
 describe("sanitizeSavedState", () => {
@@ -141,6 +143,7 @@ describe("storageKey", () => {
 });
 
 describe("StateManager", () => {
+  const DEFAULTS = createDefaultState();
   let stateManager: StateManager;
   let mockApp: MockApp;
   let mockLocalStorage: { [key: string]: string };
@@ -448,6 +451,40 @@ describe("StateManager", () => {
       });
       const url = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
       expect(url).toContain("&b=-40.3&t=35&g=1");
+    });
+
+    it("saves a reset view as a first visit's and links it without the flags", () => {
+      // What MapApp.resetView leaves behind: the flags a session keeps back
+      // at their defaults, the newest year and the fitted view
+      vi.useFakeTimers();
+      mockApp.store.batch(() => {
+        for (const key of BOOLEAN_KEYS) mockApp.store.set(key, !DEFAULTS[key]);
+        mockApp.selectedAircraft = "D-ABCD";
+      });
+      mockApp.map!.jumpTo({ bearing: 30, pitch: 40 });
+      vi.advanceTimersByTime(300);
+      vi.mocked(history.replaceState).mockClear();
+
+      mockApp.store.batch(() => {
+        for (const key of BOOLEAN_KEYS) mockApp.store.set(key, DEFAULTS[key]);
+        mockApp.selectedAircraft = "all";
+        mockApp.selectedYear = "2025";
+      });
+      mockApp.map!.jumpTo({ bearing: 0, pitch: 0 });
+      vi.advanceTimersByTime(300);
+
+      expect(savedState()).toMatchObject({
+        ...Object.fromEntries(BOOLEAN_KEYS.map((key) => [key, DEFAULTS[key]])),
+        selectedYear: "2025",
+        selectedAircraft: "all",
+        bearing: 0,
+        pitch: 0,
+      });
+      expect(history.replaceState).toHaveBeenCalledWith(
+        null,
+        "",
+        "?y=2025&lat=50.000000&lng=8.000000&z=10.00",
+      );
     });
 
     it("saves current state to localStorage and the URL", () => {

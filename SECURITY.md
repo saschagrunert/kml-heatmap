@@ -39,12 +39,12 @@ current.
 
 The generated page carries a CSP in a `<meta>` tag. Scripts, styles, fonts
 and workers load only from the site itself; there is no `'unsafe-inline'`
-for scripts or styles. Only `img-src` and `connect-src` name foreign hosts:
-CARTO's subdomains (`*.basemaps.cartocdn.com`) for the tiles, glyphs and
-sprite of the base map, in `connect-src` also `basemaps.cartocdn.com`
-itself, which serves the style, and the open flightmaps tile server
-(`nwy-tiles-api.prod.newaydata.com`), and in `connect-src` the elevation
-tiles on AWS (`s3.amazonaws.com`) the 3D view draws its relief from.
+for scripts or styles. Only `connect-src` names foreign hosts: CARTO
+(`basemaps.cartocdn.com` for the style, `*.basemaps.cartocdn.com` for the
+tiles, glyphs and sprite of the base map), the open flightmaps tile server
+(`nwy-tiles-api.prod.newaydata.com`) and the elevation tiles on AWS
+(`s3.amazonaws.com`) the 3D view draws its relief from. MapLibre fetches
+every tile, so `img-src` allows only the site itself, `data:` and `blob:`.
 MapLibre GL JS is published with the
 site as ES modules and starts its worker from one of them, so
 `worker-src 'self'` is enough and no `blob:` worker is allowed.

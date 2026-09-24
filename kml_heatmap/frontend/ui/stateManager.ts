@@ -30,7 +30,11 @@ export function storageKey(
   return directory === "/" ? STORAGE_KEY : STORAGE_KEY + ":" + directory;
 }
 
-const BOOLEAN_KEYS = [
+/**
+ * The flags a session keeps. All of them start off but the heatmap and the
+ * airports, and Reset view puts them back (MapApp.resetView).
+ */
+export const BOOLEAN_KEYS = [
   "heatmapVisible",
   "altitudeVisible",
   "airspeedVisible",

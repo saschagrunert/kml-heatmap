@@ -54,7 +54,7 @@ const REPLAY_EXIT_LABEL = "Close replay";
  * with no way to pause, and the end of the replay zoomed the overview to
  * the single flight. Isolate and the selection chip's clear button would
  * change the selection the replay is playing (PathSelection ignores them
- * then as well).
+ * then as well), and so would Reset view (MapApp.resetView).
  */
 const REPLAY_DISABLED_CONTROL_IDS = [
   "heatmap-btn",
@@ -65,6 +65,7 @@ const REPLAY_DISABLED_CONTROL_IDS = [
   "aircraft-select",
   "isolate-btn",
   "selection-clear-btn",
+  "reset-view-btn",
 ];
 
 /** Custom property holding the replay panel's height, read by styles.css */

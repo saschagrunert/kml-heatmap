@@ -17,6 +17,7 @@ const BUTTON_ACTIONS = [
   "toggleAviation",
   "toggleGlobe",
   "resetNorth",
+  "resetView",
   "toggleReplay",
   "exportMap",
   "shareLink",
@@ -175,6 +176,26 @@ describe("bindActions", () => {
 
   it("ignores unknown actions", () => {
     expect(() => elements["unknownAction"]!.click()).not.toThrow();
+  });
+
+  it("binds Reset view, which waits for the data like the filters", () => {
+    elements["resetView"]!.click();
+    expect(app.resetView).toHaveBeenCalledTimes(1);
+
+    app.isInitializing = true;
+    elements["resetView"]!.click();
+    expect(app.resetView).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs a Reset view that failed instead of throwing", async () => {
+    const error = new Error("reset failed");
+    app.resetView.mockRejectedValueOnce(error);
+
+    elements["resetView"]!.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(loggerMock.logError).toHaveBeenCalledWith(error);
   });
 
   it("ignores data-dependent actions while initializing but keeps UI toggles", () => {

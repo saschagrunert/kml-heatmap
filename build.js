@@ -215,7 +215,7 @@ function analyzeBundleComposition(metafile, fileName) {
 //
 // The policy: an app bundle gets about 2 KB of raw and 1 KB of gzipped room
 // over its size when the budget is set, a vendored file about 1 %. That is
-// little on purpose. The raw budget of the first visit has been raised seven
+// little on purpose. The raw budget of the first visit has been raised eleven
 // times, each for a change that was worth it, and each raise was a decision
 // someone wrote down below rather than a slow drift nobody saw. The gzipped
 // budget catches what the raw one rewards the wrong way: a change that saves
@@ -295,7 +295,11 @@ function analyzeBundleComposition(metafile, fileName) {
 // cut of the ribbons as the relief's code arrives, the release of the old
 // cut before the new one, and North up shown unavailable while there is
 // nothing to reset: 138,262 B raw and 45.8 KB gzipped.
-const BUDGET_APP = { raw: 136 * 1024, gzip: 46 * 1024 };
+// Raised from 136 KB for Reset view (MapApp.resetView), with its button and
+// sheet row shown unavailable while there is nothing to reset: the start
+// view it measures and compares the camera with. The button is on the
+// first paint. 140,018 B raw and 46.31 KB gzipped together with the relief.
+const BUDGET_APP = { raw: 138 * 1024, gzip: 47 * 1024 };
 // The feature bundle is fetched only when replay or Wrapped is opened, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.

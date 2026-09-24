@@ -2,6 +2,7 @@
  * MapApp.initialize: data loading, year selection and restored state.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { createDefaultState } from "../../../../kml_heatmap/frontend/state/store";
 import {
   MAP_STALL_MESSAGE,
   MAP_STALL_MS,
@@ -79,11 +80,20 @@ vi.mock("../../../../kml_heatmap/frontend/ui/layerManager", () => ({
     return m.mockLayerManagerInstance;
   }),
 }));
-vi.mock("../../../../kml_heatmap/frontend/ui/stateManager", () => ({
-  StateManager: vi.fn(function () {
-    return m.mockStateManagerInstance;
+vi.mock(
+  "../../../../kml_heatmap/frontend/ui/stateManager",
+  async (importOriginal) => ({
+    // The flags Reset view puts back are the real list
+    BOOLEAN_KEYS: (
+      await importOriginal<
+        typeof import("../../../../kml_heatmap/frontend/ui/stateManager")
+      >()
+    ).BOOLEAN_KEYS,
+    StateManager: vi.fn(function () {
+      return m.mockStateManagerInstance;
+    }),
   }),
-}));
+);
 vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
   WrappedManager: vi.fn(function () {
     return m.mockWrappedManagerInstance;
@@ -426,6 +436,293 @@ describe("MapApp.initialize", () => {
         1,
       );
       expect(mockFilterManagerInstance.filterByYear).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("resetView", () => {
+    /**
+     * The year switch as FilterManager does it, reduced to what resetView
+     * relies on: the year and whatever `also` sets land in one batch
+     */
+    function switchYearsInOneBatch(): void {
+      mockFilterManagerInstance.filterByYear.mockImplementation(
+        (year: string, also?: () => void) => {
+          app.store.batch(() => {
+            app.selectedYear = year;
+            app.selectedPathIds.clear();
+            app.store.notifyMutation("selectedPathIds");
+            app.isolateSelection = false;
+            also?.();
+          });
+          return Promise.resolve(true);
+        },
+      );
+    }
+
+    /** Everything a visitor can change, changed */
+    function changeEverything(): void {
+      app.store.batch(() => {
+        app.selectedYear = "2024";
+        app.selectedAircraft = "D-ABCD";
+        app.selectedPathIds.add(1);
+        app.store.notifyMutation("selectedPathIds");
+        app.isolateSelection = true;
+        app.heatmapVisible = false;
+        app.altitudeVisible = true;
+        app.airspeedVisible = true;
+        app.airportsVisible = false;
+        app.aviationVisible = true;
+        app.globeVisible = true;
+        app.threeDVisible = true;
+        app.store.set("statsPanelVisible", true);
+      });
+      mockMap(app).jumpTo({ bearing: 40, pitch: 60 });
+    }
+
+    it("goes back to the newest year and every default, in one update", async () => {
+      await initializeApp(app);
+      switchYearsInOneBatch();
+      changeEverything();
+      const defaults = createDefaultState();
+      const keys = [
+        "selectedAircraft",
+        "isolateSelection",
+        "heatmapVisible",
+        "altitudeVisible",
+        "airspeedVisible",
+        "airportsVisible",
+        "aviationVisible",
+        "globeVisible",
+        "threeDVisible",
+        "statsPanelVisible",
+      ] as const;
+      const listener = vi.fn();
+      app.store.subscribeKeys([...keys, "selectedYear"], listener);
+
+      await app.resetView();
+
+      // The newest year of the metadata, as a first visit opens on
+      expect(mockFilterManagerInstance.filterByYear).toHaveBeenCalledWith(
+        "2025",
+        expect.any(Function),
+      );
+      expect(app.selectedYear).toBe("2025");
+      for (const key of keys) {
+        expect(app.store.get(key), key).toBe(defaults[key]);
+      }
+      expect(app.selectedPathIds.size).toBe(0);
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it("fits all the flights north up and flat once the year is in", async () => {
+      await initializeApp(app);
+      changeEverything();
+      let publish!: (applied: boolean) => void;
+      mockFilterManagerInstance.filterByYear.mockReturnValue(
+        new Promise<boolean>((resolve) => {
+          publish = resolve;
+        }),
+      );
+      const fitBounds = mockMap(app).fitBounds;
+
+      const reset = app.resetView();
+      await Promise.resolve();
+      expect(fitBounds).not.toHaveBeenCalled();
+      publish(true);
+      await reset;
+
+      // The bounds and padding of the start view (see the initialize tests)
+      expect(fitBounds).toHaveBeenCalledWith(
+        [
+          [8, 50],
+          [10, 52],
+        ],
+        { padding: 30, pitch: 0 },
+      );
+      expect(app.map!.getBearing()).toBe(0);
+      expect(app.map!.getPitch()).toBe(0);
+    });
+
+    it("leaves everything as it was when the year fails to load", async () => {
+      await initializeApp(app);
+      changeEverything();
+      // FilterManager puts the dropdown back and changes nothing
+      mockFilterManagerInstance.filterByYear.mockResolvedValue(false);
+      const fitBounds = mockMap(app).fitBounds;
+
+      await app.resetView();
+
+      expect(fitBounds).not.toHaveBeenCalled();
+      expect(app.map!.getPitch()).toBe(60);
+      expect(app.selectedAircraft).toBe("D-ABCD");
+      expect(app.threeDVisible).toBe(true);
+      expect(app.globeVisible).toBe(true);
+      expect(app.store.get("statsPanelVisible")).toBe(true);
+      expect(app.isReset()).toBe(false);
+    });
+
+    it("leaves the camera to a filter change made while the year loads", async () => {
+      await initializeApp(app);
+      changeEverything();
+      let settle!: (applied: boolean) => void;
+      mockFilterManagerInstance.filterByYear.mockReturnValue(
+        new Promise<boolean>((resolve) => {
+          settle = resolve;
+        }),
+      );
+      const fitBounds = mockMap(app).fitBounds;
+
+      const reset = app.resetView();
+      // Another year picked, and the camera moved, before the reset's
+      // year is in: FilterManager drops the reset's year
+      app.selectedYear = "2023";
+      mockMap(app).jumpTo({ center: [9.5, 51], zoom: 3 });
+      settle(false);
+      await reset;
+
+      expect(fitBounds).not.toHaveBeenCalled();
+      expect(app.selectedYear).toBe("2023");
+      expect(app.map!.getZoom()).toBe(3);
+      expect(app.map!.getPitch()).toBe(60);
+    });
+
+    it('opens on "all" years when there is no list of years', async () => {
+      await initializeApp(app, defaultAirports, null);
+      switchYearsInOneBatch();
+      changeEverything();
+
+      await app.resetView();
+
+      expect(mockFilterManagerInstance.filterByYear).toHaveBeenCalledWith(
+        "all",
+        expect.any(Function),
+      );
+    });
+  });
+
+  describe("Reset view availability", () => {
+    const button = (): HTMLElement =>
+      document.getElementById("reset-view-btn")!;
+
+    /** Unavailable like Isolate and Replay: announced and dimmed */
+    function expectAvailable(available: boolean): void {
+      expect(button().getAttribute("aria-disabled")).toBe(String(!available));
+      expect(button().style.opacity).toBe(available ? "1" : "0.5");
+    }
+
+    /** A camera change by hand: the map says so once it has come to rest */
+    function moveCamera(options: Parameters<MockMap["jumpTo"]>[0]): void {
+      mockMap(app).jumpTo(options);
+      mockMap(app).emit("moveend");
+    }
+
+    it("is unavailable on a first visit, where there is nothing to reset", async () => {
+      await initializeApp(app);
+
+      expectAvailable(false);
+      expect(app.isReset()).toBe(true);
+    });
+
+    it.each([
+      ["another year", () => (app.selectedYear = "2024")],
+      ["an aircraft", () => (app.selectedAircraft = "D-ABCD")],
+      ["a layer", () => (app.aviationVisible = true)],
+      ["the heatmap off", () => (app.heatmapVisible = false)],
+      ["3D flights", () => (app.threeDVisible = true)],
+      ["the globe", () => (app.globeVisible = true)],
+      ["the statistics", () => app.store.set("statsPanelVisible", true)],
+      [
+        "a selection",
+        () => {
+          app.selectedPathIds.add(1);
+          app.store.notifyMutation("selectedPathIds");
+        },
+      ],
+      ["a pan", () => moveCamera({ center: [9.5, 51] })],
+      ["a zoom", () => moveCamera({ zoom: 3 })],
+      ["a rotation", () => moveCamera({ bearing: 30 })],
+      ["a tilt", () => moveCamera({ pitch: 40 })],
+    ])("is available after %s", async (_change, change) => {
+      await initializeApp(app);
+
+      change();
+
+      expectAvailable(true);
+    });
+
+    it("stays unavailable through a move that ends where it started", async () => {
+      await initializeApp(app);
+
+      // A resize, or Wrapped handing the view back as it was
+      moveCamera({ center: [9, 51] });
+
+      expectAvailable(false);
+    });
+
+    it("is unavailable again once the fit of a reset has ended", async () => {
+      await initializeApp(app);
+      app.aviationVisible = true;
+      moveCamera({ center: [9.5, 51], zoom: 3, bearing: 30, pitch: 40 });
+      mockFilterManagerInstance.filterByYear.mockImplementation(
+        (_year: string, also?: () => void) => {
+          app.store.batch(() => also?.());
+          return Promise.resolve(true);
+        },
+      );
+
+      await app.resetView();
+
+      // The store is back, the camera still on its way to the start view
+      expectAvailable(true);
+      mockMap(app).emit("moveend");
+      expectAvailable(false);
+    });
+
+    it("does nothing when pressed with nothing to reset", async () => {
+      await initializeApp(app);
+
+      await app.resetView();
+
+      expect(mockFilterManagerInstance.filterByYear).not.toHaveBeenCalled();
+      expect(mockMap(app).fitBounds).not.toHaveBeenCalled();
+    });
+
+    it("is available on a page a link opens somewhere else", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({
+        center: { lat: 50.5, lng: 8.5 },
+        zoom: 12,
+      });
+
+      await initializeApp(app);
+
+      expectAvailable(true);
+    });
+
+    it("is unavailable on a reload of the start view", async () => {
+      // What a first visit saves: the centre of the bounds, at the zoom of
+      // the fit (the mock's fit keeps the zoom, 0 here, one below the state)
+      mockStateManagerInstance.loadState.mockReturnValue({
+        center: { lat: 51, lng: 9 },
+        zoom: 1,
+      });
+
+      await initializeApp(app);
+
+      expectAvailable(false);
+    });
+
+    it("leaves the button to a running replay and takes it back after", async () => {
+      await initializeApp(app);
+      const replay = button();
+      app.replayActive = true;
+      // What ReplayManager does to the controls it disables
+      replay.style.opacity = "";
+
+      moveCamera({ bearing: 30 });
+      expect(replay.style.opacity).toBe("");
+
+      app.replayActive = false;
+      expectAvailable(true);
     });
   });
 

@@ -6,12 +6,14 @@
 import {
   AttributionControl,
   Map as MapLibreMap,
+  type LngLat,
+  type LngLatBoundsLike,
   type MapMouseEvent,
   type RequestTransformFunction,
   type StyleSpecification,
 } from "maplibre-gl";
 import { DataManager } from "./ui/dataManager";
-import { StateManager } from "./ui/stateManager";
+import { BOOLEAN_KEYS, StateManager } from "./ui/stateManager";
 import { LayerManager } from "./ui/layerManager";
 import { FilterManager } from "./ui/filterManager";
 import { StatsManager } from "./ui/statsManager";
@@ -59,6 +61,7 @@ import {
 } from "./mapLayers";
 import {
   AppStore,
+  createDefaultState,
   DEFAULT_AIRSPEED_RANGE,
   DEFAULT_ALTITUDE_RANGE,
   defineStoreAccessors,
@@ -178,6 +181,9 @@ export const FALLBACK_STYLE: StyleSpecification = {
   ],
 };
 
+/** Padding around the flights when the view is fitted to all of them */
+const START_VIEW_PADDING = 30;
+
 /** Delay before a Wrapped panel restored from state opens again */
 const WRAPPED_RESTORE_DELAY_MS = 500;
 
@@ -266,6 +272,12 @@ export class MapApp {
   private readonly lifetime = new AbortController();
   /** Set while a click on Replay waits for the feature bundle */
   private pendingReplayToggle: Promise<void> | null = null;
+  /**
+   * Where the last fit to the start view takes the camera: the one of a
+   * first visit, measured as the map opens, then that of every Reset view.
+   * Undefined for a map that has no room to fit anything into.
+   */
+  private startCamera: ReturnType<MapLibreMap["cameraForBounds"]>;
   /** The map events setupEventHandlers() listens to, kept to remove them */
   private mapHandlers: {
     moveend?: () => void;
@@ -331,6 +343,8 @@ export class MapApp {
   // Saved state
   savedState: AppState | null;
   restoredYearFromState: boolean;
+  /** The year a first visit opens on: the newest one, see resolveYearSelection */
+  defaultYear = "all";
 
   // Managers (initialized in initialize(), always available after construction)
   stateManager!: StateManager;
@@ -542,6 +556,7 @@ export class MapApp {
       if (moveend) this.map.off("moveend", moveend);
       if (zoomend) this.map.off("zoomend", zoomend);
       if (click) this.map.off("click", click);
+      this.map.off("moveend", this.syncResetButton);
       this.map.off("error", this.handleMapError);
     }
     this.releaseMarkerTaps?.();
@@ -689,7 +704,7 @@ export class MapApp {
       : {
           bounds: toBounds(this.config.bounds),
           // A fit turns the map north up unless it is told the bearing
-          fitBoundsOptions: { padding: 30, bearing },
+          fitBoundsOptions: { padding: START_VIEW_PADDING, bearing },
         };
 
     // A style given as an object is taken in on the next animation frame,
@@ -717,6 +732,9 @@ export class MapApp {
     });
     map.addControl(new AttributionControl({ compact: false }), "bottom-right");
     this.map = map;
+    // A first visit has just been fitted to it, and a saved view or a link
+    // may show the very same (see isReset)
+    this.measureStartView(map);
     // An airport's label opens its popup like the marker does, so a double
     // click or tap on it does not zoom either
     this.releaseMarkerTaps = keepMarkerTapsFromZoom(
@@ -876,7 +894,95 @@ export class MapApp {
     followLayerVisibility(this);
     followSelectionHighlight(this);
     this.followReplayAvailability();
+    this.store.subscribeKeys(
+      [
+        ...BOOLEAN_KEYS,
+        "selectedYear",
+        "selectedAircraft",
+        "selectedPathIds",
+        "currentData",
+        "replayActive",
+      ],
+      this.syncResetButton,
+    );
+    this.map?.on("moveend", this.syncResetButton);
+    this.syncResetButton();
     this.followColumnScrollEnd();
+  }
+
+  /**
+   * Go back to what a first visit shows: the newest year, every aircraft,
+   * the heatmap and the airports, nothing selected or isolated, flat and
+   * north up over all the flights. It goes through the year filter, so the
+   * dropdowns, the loaded data and the store change together in one batch;
+   * the saved state and the link follow the store and the camera as ever.
+   * Out of reach during a replay, like the filters: the button is disabled
+   * (REPLAY_DISABLED_CONTROL_IDS) and the phone's bar steps aside.
+   */
+  async resetView(): Promise<void> {
+    // Like Isolate with nothing selected: unavailable, and a press does
+    // nothing (see syncResetButton)
+    if (this.isReset()) return;
+    const defaults = createDefaultState();
+    const applied = await this.filterManager.filterByYear(
+      this.defaultYear,
+      () => {
+        // The selection goes with the year switch, as with every filter
+        for (const key of [...BOOLEAN_KEYS, "selectedAircraft"] as const) {
+          this.store.set(key, defaults[key]);
+        }
+      },
+    );
+    // A reset happens whole or not at all. Replaced by a newer filter
+    // change, the view is that change's now, camera included. Failed to
+    // load, the loader has said so and the store is untouched; resetting
+    // the rest over the old year would leave neither the view the visitor
+    // had nor the one asked for, while leaving it all as it was keeps the
+    // button available to try again.
+    if (!applied) return;
+    // Measured first, as the fit itself does, and compared once it is over:
+    // the moves of its animation end in the camera it aims at.
+    const map = this.map;
+    map?.fitBounds(this.measureStartView(map), {
+      padding: START_VIEW_PADDING,
+      pitch: 0,
+    });
+  }
+
+  /** The bounds of the start view, and where a fit to them will end */
+  private measureStartView(map: MapLibreMap): LngLatBoundsLike {
+    const bounds = toBounds(this.config.bounds);
+    this.startCamera = map.cameraForBounds(bounds, {
+      padding: START_VIEW_PADDING,
+    });
+    return bounds;
+  }
+
+  /**
+   * Whether Reset view would change nothing: every key it sets has the
+   * value it sets, and the camera is where the last fit to the start view
+   * took it, north up and flat. The camera is compared within what a link
+   * rounds it to (state/urlState.ts), so a link to the start view, or a
+   * reload of it, still opens on it; a pan, a zoom, a turn or a tilt
+   * leaves it, and a resize or Wrapped's round trip does not.
+   */
+  isReset(): boolean {
+    const map = this.map;
+    const start = this.startCamera;
+    if (!map || !start) return false;
+    const defaults = createDefaultState();
+    const center = map.getCenter();
+    const target = start.center as LngLat;
+    return (
+      this.selectedYear === this.defaultYear &&
+      this.selectedAircraft === "all" &&
+      this.selectedPathIds.size === 0 &&
+      BOOLEAN_KEYS.every((key) => this.store.get(key) === defaults[key]) &&
+      Math.abs(center.lng - target.lng) + Math.abs(center.lat - target.lat) <
+        2e-6 &&
+      Math.abs(map.getZoom() - start.zoom!) < 0.01 &&
+      Math.abs(map.getBearing()) + Math.abs(map.getPitch()) < 0.2
+    );
   }
 
   togglePathSelection(pathId: string): void {
@@ -946,6 +1052,23 @@ export class MapApp {
     );
     refresh();
   }
+
+  /**
+   * Show Reset view unavailable while the page is what it would make of it,
+   * the way Isolate and Replay are: aria-disabled and dimmed, but still in
+   * the tab order. It runs for the keys Reset view sets, the data (a first
+   * visit's year is only known with it) and the end of every camera move,
+   * the fit's own included (see initializeManagers). A replay disables the
+   * button and puts its opacity aside (see ReplayManager), so it is left
+   * alone until the replay closes, which runs it again.
+   */
+  private readonly syncResetButton = (): void => {
+    const button = domCache.get("reset-view-btn");
+    if (!button || this.replayActive) return;
+    const reset = this.isReset();
+    button.setAttribute("aria-disabled", String(reset));
+    button.style.opacity = reset ? "0.5" : "1.0";
+  };
 
   /**
    * Fade the bottom of a control column that has more below the fold.

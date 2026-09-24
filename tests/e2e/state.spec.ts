@@ -1,21 +1,48 @@
-import { test, expect } from "./fixtures";
+import { test, expect, type Page } from "./fixtures";
 import {
+  closeMobileSheet,
   firstPathId,
   gotoApp,
   knownYears,
   layerButton,
+  openMobileSheet,
   readSavedState,
   selectionParams,
   selectPathForReplay,
   setAircraftFilter,
   setYearFilter,
   toggleLayer,
+  togglePathSelection,
   usesMobileBar,
+  waitForPathData,
   waitForAircraftFilter,
   waitForAppReady,
   waitForYearFilter,
 } from "./helpers";
-import { getCenter, getOrientation, setOrientation } from "./map";
+import {
+  getCenter,
+  getOrientation,
+  setOrientation,
+  waitForMapReady,
+} from "./map";
+
+/**
+ * Whether Reset view offers itself: its button, or on a phone the row of
+ * the More sheet, which is only there while the sheet is open
+ */
+async function expectResetAvailable(
+  page: Page,
+  mobile: boolean,
+  available: boolean,
+): Promise<void> {
+  if (mobile) await openMobileSheet(page, "more");
+  const control = page.locator(
+    mobile ? '.sheet-row[data-row="reset-view"]' : "#reset-view-btn",
+  );
+  await expect(control).toHaveAttribute("aria-disabled", String(!available));
+  await expect(control).toHaveCSS("opacity", available ? "1" : "0.5");
+  if (mobile) await closeMobileSheet(page);
+}
 
 test.describe("State Persistence", () => {
   test.beforeEach(async ({ page }) => {
@@ -385,5 +412,142 @@ test.describe("State Persistence", () => {
       await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
       await expect(layerButton(page, "airports")).toHaveCSS("opacity", "1");
     });
+  });
+
+  test("Reset view goes back to a first visit, saved and linked", async ({
+    page,
+  }) => {
+    // About forty steps, the 3D view on the globe among them, where every
+    // step takes a second in software WebGL with a browser per core: 35 s
+    // on a desktop in CI. The mobile project gives it the same time. The
+    // view stays zoomed out, so no relief is drawn (TERRAIN_MIN_ZOOM).
+    test.setTimeout(60000);
+    const mobile = await usesMobileBar(page);
+    // Nothing to reset on a first visit: announced and dimmed, like Isolate
+    // with nothing selected
+    await expectResetAvailable(page, mobile, false);
+    const years = await knownYears(page);
+    const newest = await page.evaluate(() => window.mapApp!.selectedYear);
+    expect(newest).toBe(String(Math.max(...years.map(Number))));
+    // Another year when the data has one, and all of them otherwise
+    const otherYear = years.find((year) => year !== newest) ?? "all";
+
+    // Change everything Reset view covers: the filters first, since they
+    // drop the selection
+    await setYearFilter(page, otherYear);
+    await waitForYearFilter(page, otherYear);
+    const aircraft = await page
+      .locator("#aircraft-select option:not([value='all'])")
+      .first()
+      .getAttribute("value");
+    await setAircraftFilter(page, aircraft!);
+    await waitForAircraftFilter(page, aircraft!);
+    // A flight the filters keep
+    await waitForPathData(page);
+    const pathId = await page.evaluate(
+      (registration) =>
+        window.mapApp!.fullPathInfo!.find(
+          (path) => path.aircraft_registration === registration,
+        )!.id,
+      aircraft!,
+    );
+    await togglePathSelection(page, pathId, 1);
+    await toggleLayer(page, "heatmap");
+    await toggleLayer(page, "airports");
+    await toggleLayer(page, "aviation");
+    await toggleLayer(page, "globe");
+    if (mobile) {
+      await openMobileSheet(page, "layers");
+      await page.locator('.sheet-row[data-row="three-d"]').click();
+      await closeMobileSheet(page);
+    } else {
+      await page.locator("#three-d-btn").click();
+    }
+    await expect(page.locator("#three-d-btn")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await setOrientation(page, { bearing: 70, pitch: 40 });
+    await expectResetAvailable(page, mobile, true);
+
+    if (mobile) {
+      await openMobileSheet(page, "more");
+      await page.locator('.sheet-row[data-row="reset-view"]').click();
+    } else {
+      await page.getByRole("button", { name: /^Reset view/ }).click();
+    }
+
+    await waitForYearFilter(page, newest);
+    await waitForAircraftFilter(page, "all");
+    await expect(page.locator("#year-select")).toHaveValue(newest);
+    await expect(page.locator("#aircraft-select")).toHaveValue("all");
+    for (const [layer, on] of [
+      ["heatmap", true],
+      ["airports", true],
+      ["altitude", false],
+      ["aviation", false],
+      ["globe", false],
+    ] as const) {
+      await expect(layerButton(page, layer), layer).toHaveAttribute(
+        "aria-pressed",
+        String(on),
+      );
+    }
+    await expect(page.locator("#three-d-btn")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(await page.evaluate(() => window.mapApp!.selectedPathIds.size)).toBe(
+      0,
+    );
+
+    // North up and flat over the bounds a first visit is fitted to
+    await waitForMapReady(page);
+    expect(await getOrientation(page)).toEqual({
+      bearing: 0,
+      pitch: 0,
+      projection: "mercator",
+    });
+    const camera = await page.evaluate(() => {
+      const app = window.mapApp!;
+      const map = app.map!;
+      const [[south, west], [north, east]] = app.config.bounds;
+      const fit = map.cameraForBounds(
+        [
+          [west, south],
+          [east, north],
+        ],
+        { padding: 30 },
+      )!;
+      const center = map.getCenter();
+      const target = fit.center as { lng: number; lat: number };
+      return {
+        zoom: [map.getZoom(), fit.zoom!],
+        lng: [center.lng, target.lng],
+        lat: [center.lat, target.lat],
+      };
+    });
+    for (const [actual, expected] of Object.values(camera)) {
+      expect(actual).toBeCloseTo(expected!, 4);
+    }
+    // Once the fit is over, there is nothing left to reset
+    await expectResetAvailable(page, mobile, false);
+
+    // Saved and linked, so a reload opens on the same view
+    await expect
+      .poll(async () => {
+        const saved = await readSavedState(page);
+        return [
+          saved["selectedYear"],
+          saved["heatmapVisible"],
+          saved["bearing"],
+        ];
+      })
+      .toEqual([newest, true, 0]);
+    const params = new URL(page.url()).searchParams;
+    expect(params.get("y")).toBe(newest);
+    for (const key of ["a", "p", "v", "g", "d", "b", "t"]) {
+      expect(params.has(key), key).toBe(false);
+    }
   });
 });

@@ -329,6 +329,57 @@ describe("FilterManager", () => {
       expect(mockApp.isolateSelection).toBe(false);
     });
 
+    it("picks the year it is given and changes more of the store in the same flush", async () => {
+      // What Reset view does: from 2024 and a registration that did not fly
+      // in 2025, back to 2025 and every aircraft
+      mockApp.selectedYear = "2024";
+      mockApp.selectedAircraft = "D-XXXX";
+      mockApp.heatmapVisible = false;
+      addYearOption("2024");
+      addYearOption("2025");
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      yearSelect.value = "2024";
+      const listener = vi.fn();
+      mockApp.store.subscribeKeys(
+        ["selectedYear", "selectedAircraft", "heatmapVisible"],
+        listener,
+      );
+
+      const applied = await filterManager.filterByYear("2025", () => {
+        mockApp.selectedAircraft = "all";
+        mockApp.heatmapVisible = true;
+      });
+
+      expect(applied).toBe(true);
+      expect(yearSelect.value).toBe("2025");
+      expect(mockApp.dataManager.loadData).toHaveBeenCalledWith(
+        "2025",
+        expect.any(AbortSignal),
+      );
+      expect(mockApp.selectedYear).toBe("2025");
+      expect(mockApp.heatmapVisible).toBe(true);
+      expect(listener).toHaveBeenCalledTimes(1);
+      // The aircraft went back before the list was rebuilt, so the
+      // registration that did not fly is not reported as dropped
+      expect(mockApp.selectedAircraft).toBe("all");
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+    });
+
+    it("changes nothing more when the year it is given fails to load", async () => {
+      mockApp.heatmapVisible = false;
+      mockApp.dataManager.loadData.mockResolvedValue(null);
+      const also = vi.fn();
+
+      const applied = await filterManager.filterByYear("all", also);
+
+      // Reset view relies on this to leave the rest alone too
+      expect(applied).toBe(false);
+      expect(also).not.toHaveBeenCalled();
+      expect(mockApp.heatmapVisible).toBe(false);
+    });
+
     it("puts the dropdown back and leaves the store alone when the year fails to load", async () => {
       const previous = mockApp.currentData;
       mockApp.selectedYear = "2025";
@@ -377,9 +428,10 @@ describe("FilterManager", () => {
       yearSelect.value = "2025";
       const second = filterManager.filterByYear();
 
-      await second;
+      expect(await second).toBe(true);
       resolveFirst(year2024Data());
-      await first;
+      // Reset view relies on this to leave the camera to the newer change
+      expect(await first).toBe(false);
 
       expect(mockApp.selectedYear).toBe("2025");
       expect(redraws).toHaveBeenCalledTimes(1);

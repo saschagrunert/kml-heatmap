@@ -100,8 +100,9 @@ parentheses back is undone on the next `make format`.
   flags of `flag-icons`). It is built by `npm run build` and, for the image,
   inside the Dockerfile; `make clean` removes it.
 - The Python dependencies are declared once, in `pyproject.toml` (runtime
-  dependencies plus the `test` and `dev` extras). `requirements.lock` and
-  `requirements-test.lock` are compiled from it with `make lock` (pip-compile
+  dependencies plus the `test` and `dev` extras). `requirements.lock`,
+  `requirements-test.lock` and `requirements-build.lock` are compiled from
+  it with `make lock` (pip-compile
   with hashes). Edit `pyproject.toml`, then regenerate the locks; the CI lint
   job fails while the locks no longer satisfy `pyproject.toml`, which is what
   a Dependabot `pip` pull request needs `make lock` for. `make lock`
@@ -129,8 +130,8 @@ parentheses back is undone on the next `make format`.
 
 ## Commits and pull requests
 
-- Use conventional prefixes as seen in the history: `fix:`, `feat:`, `chore:`,
-  `ci:` (Dependabot uses `npm`, `pip`, `docker`, `pre-commit` and `ci`).
+- Use conventional prefixes as seen in the history: `fix:`, `feat:`, `ui:`,
+  `test:`, `chore:`, `ci:` (Dependabot uses `npm`, `pip`, `docker`, `pre-commit` and `ci`).
 - Sign off every commit: `git commit -s`. The Developer Certificate of Origin
   applies.
 - Keep one commit per branch. Amend it when addressing review feedback and keep

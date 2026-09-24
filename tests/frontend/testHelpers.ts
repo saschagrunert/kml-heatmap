@@ -144,6 +144,8 @@ interface MockManagers {
   replayState: ReplayState;
   canReplay: Mock;
   toggleReplay: Mock;
+  resetView: Mock;
+  isReset: Mock;
   loadReplay: Mock;
   loadWrapped: Mock;
   replayManager: {
@@ -339,6 +341,9 @@ function createMockManagers(): MockManagers {
     toggleReplay: vi.fn(() => {
       replayManager.toggleReplay();
     }),
+    resetView: vi.fn(() => Promise.resolve()),
+    // Something to reset unless a test says otherwise
+    isReset: vi.fn(() => false),
     // Replay and Wrapped are fetched on demand in the app; the stubs are
     // already there, so the loaders hand them straight back
     loadReplay: vi.fn(() => Promise.resolve(replayManager)),
@@ -454,6 +459,7 @@ function buildMockApp(
     signal: new AbortController().signal,
     savedState: null,
     restoredYearFromState: false,
+    defaultYear: "all",
     mobileBar: null,
     ...mockManagers,
     ...other,

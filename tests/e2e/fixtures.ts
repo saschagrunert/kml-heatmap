@@ -40,7 +40,7 @@ const TRANSPARENT_PNG = Buffer.from(
  * on every run, and above sea level, so a spec can tell the relief is
  * there by the flights standing on it
  */
-const TERRAIN_ELEVATION_M = 500;
+export const TERRAIN_ELEVATION_M = 500;
 
 /**
  * The ground the elevation tiles answer with: flat, the default, or the
