@@ -1,16 +1,18 @@
 /* The stylesheet the page loads up front.
 
-   Everything replay and Wrapped need is in features.css instead, which
-   services/featureLoader.ts fetches next to features.bundle.js the first time
-   one of them is opened. Most visits open neither, and the two are more than
-   a third of the styles; keeping them out of the critical path is the same
-   trade the feature bundle makes for the JavaScript.
+   Everything replay needs is in features.css instead, and everything
+   Wrapped needs in wrapped.css, which services/featureLoader.ts fetches next
+   to features.bundle.js and wrapped.bundle.js the first time one of them is
+   opened. Most visits open neither, and the two are more than a third of
+   the styles; keeping them out of the critical path is the same trade the
+   lazy bundles make for the JavaScript.
 
-   A rule belongs in features.css when its selector names replay or Wrapped,
-   and here otherwise; a selector list that names both is written out in both
-   files, with the selectors that belong there. Design tokens, the control
-   surfaces the feature panels reuse (.btn-surface and friends) and every
-   shared media query stay here. */
+   A rule belongs in features.css when its selector names replay, in
+   wrapped.css when it names Wrapped, and here otherwise; a selector list
+   that names more than one is written out in each file, with the selectors
+   that belong there. Design tokens, the control surfaces the feature panels
+   reuse (.btn-surface and friends) and every shared media query stay
+   here. */
 
 /* ==========================================================================
    Design tokens
@@ -2323,24 +2325,25 @@ body.stats-open #left-buttons {
    Last in the file on purpose: `.initially-hidden` has to beat the display
    of `.control-row` and `.btn-surface`, which it ties with on specificity.
 
-   features.css is appended after this file, so a `display` on a bare class
-   there would outrank this one. #replay-pause-btn carries both classes; no
-   rule in features.css may set its display (`.replay-btn[hidden]` is fine,
-   it outranks this on specificity rather than on order).
+   features.css and wrapped.css are appended after this file, so a
+   `display` on a bare class there would outrank this one.
+   #replay-pause-btn carries both classes; no rule in features.css may set
+   its display (`.replay-btn[hidden]` is fine, it outranks this on
+   specificity rather than on order).
    ========================================================================== */
 .initially-hidden {
   display: none;
 }
 
 /* The feature panels are in the page from the first paint, but the rules
-   that lay them out are in features.css, which does not arrive until one of
-   them is opened. Hiding them has to be here, or they show unstyled until
-   then. ReplayManager opens the replay panel by setting an inline display,
-   which outranks this and the identical rule features.css carries for the
-   loaded case. The wrapped modal uses the hidden attribute instead, so it
-   does not need a display rule here. Everything else replay and Wrapped draw
-   is inside one of these two, so this is the whole of what core has to know
-   about them. */
+   that lay them out are in features.css and wrapped.css, which do not
+   arrive until one of them is opened. Hiding them has to be here, or they
+   show unstyled until then. ReplayManager opens the replay panel by setting
+   an inline display, which outranks this and the identical rule
+   features.css carries for the loaded case. The wrapped modal uses the
+   hidden attribute instead, so it does not need a display rule here.
+   Everything else replay and Wrapped draw is inside one of these two, so
+   this is the whole of what core has to know about them. */
 #replay-controls {
   display: none;
 }

@@ -3,6 +3,7 @@ import {
   calculateDistance,
   calculateBearing,
   ddToDms,
+  segmentBounds,
   toMapBearing,
   toMapCenter,
   toMapPitch,
@@ -231,6 +232,38 @@ describe("geometry utilities", () => {
       expect(ddToDms(51.549999, true)).toBe("51°33'0.0\"N");
       // ... and a full minute into the degree
       expect(ddToDms(-8.999999, false)).toBe("9°0'0.0\"W");
+    });
+  });
+
+  describe("segmentBounds", () => {
+    it("spans every point of the segments", () => {
+      expect(
+        segmentBounds([
+          {
+            path_id: 1,
+            coords: [
+              [50, 8],
+              [51, 7],
+            ],
+          },
+          { path_id: 2 },
+          {
+            path_id: 3,
+            coords: [
+              [49, 9],
+              [50.5, 8.5],
+            ],
+          },
+        ]),
+      ).toEqual([
+        [49, 7],
+        [51, 9],
+      ]);
+    });
+
+    it("returns null without coordinates", () => {
+      expect(segmentBounds([])).toBeNull();
+      expect(segmentBounds([{ path_id: 1 }])).toBeNull();
     });
   });
 });

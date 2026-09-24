@@ -93,9 +93,9 @@ parentheses back is undone on the next `make format`.
   pushed, needs nothing beyond Python 3.14 and refuses the push when it
   cannot check. The published site carries no flight date finer than the
   year either way; this is about the KML files this repository commits.
-- The frontend build output in `kml_heatmap/static/` is gitignored: the four
-  bundles (`mapApp.bundle.js`, `features.bundle.js`, `shared.bundle.js`,
-  `yearWorker.bundle.js`) with their `.map` files, `vendor/` (the
+- The frontend build output in `kml_heatmap/static/` is gitignored: the five
+  bundles (`mapApp.bundle.js`, `features.bundle.js`, `wrapped.bundle.js`,
+  `shared.bundle.js`, `yearWorker.bundle.js`) with their `.map` files, `vendor/` (the
   third-party code copied out of `node_modules`) and `flags/` (the country
   flags of `flag-icons`). It is built by `npm run build` and, for the image,
   inside the Dockerfile; `make clean` removes it.

@@ -100,18 +100,22 @@ vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
   }),
 }));
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
-  // Replay and Wrapped come from the lazily loaded feature bundle; here they
-  // are the doubles the module mocks above return
+  // Replay and Wrapped come from lazily loaded bundles of their own; here
+  // they are the doubles the module mocks above return
   loadFeatures: vi.fn(() =>
     Promise.resolve({
       ReplayManager: vi.fn(function () {
         return m.mockReplayManagerInstance;
       }),
+      // The satellite switch hands itself over to the bundle
+      followSatellite: vi.fn(),
+    }),
+  ),
+  loadWrapped: vi.fn(() =>
+    Promise.resolve({
       WrappedManager: vi.fn(function () {
         return m.mockWrappedManagerInstance;
       }),
-      // The satellite switch hands itself over to the bundle
-      followSatellite: vi.fn(),
     }),
   ),
 }));
@@ -982,7 +986,7 @@ describe("MapApp.initialize", () => {
       await initializeApp(app);
 
       expect(mockWrappedManagerInstance.showWrapped).not.toHaveBeenCalled();
-      // The timer fetches the feature bundle first, so let the promise settle
+      // The timer fetches the Wrapped bundle first, so let the promise settle
       await vi.advanceTimersByTimeAsync(500);
       expect(mockWrappedManagerInstance.showWrapped).toHaveBeenCalledTimes(1);
       // From then on the saves write what the store says

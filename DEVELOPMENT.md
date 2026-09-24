@@ -137,30 +137,38 @@ their traces in `test-results/`, and every run writes an HTML report to
   map needs WebGL 2
 - **Production**: Minified bundles for optimal performance; the build fails
   when `mapApp.bundle.js` and `shared.bundle.js` together,
-  `features.bundle.js`, `yearWorker.bundle.js` or the vendored MapLibre and
-  html-to-image files exceed their size budget in `build.js`. Each has a
+  `features.bundle.js`, `wrapped.bundle.js`, `yearWorker.bundle.js` or the
+  vendored MapLibre and html-to-image files exceed their size budget in
+  `build.js`. Each has a
   budget for its bytes as written and one for them gzipped (level 9); the
   comment above the budgets says how much room they leave and why
 - **Development**: Unminified for debugging
 - Both write a source map next to the bundle; it holds the mappings and file
   names only, not the TypeScript sources
 
-`npm run build` produces four bundles. `mapApp.bundle.js` is the map itself,
-and `features.bundle.js` holds Replay, Wrapped, the flight list of the
-airport popups, the relief of the 3D view and the satellite imagery, which
-the page imports the first time one of them is wanted.
-`shared.bundle.js` is what the two have in common. Their styles are split
-the same way and travel with them: `kml_heatmap/static/styles.css` is linked
-in the page, `features.css` is fetched alongside the feature bundle (see
+`npm run build` produces five bundles. `mapApp.bundle.js` starts the map,
+`features.bundle.js` holds Replay, the flight list of the airport popups,
+the relief of the 3D view and the satellite imagery, and `wrapped.bundle.js`
+holds Wrapped; the page
+imports each of the last two the first time one of its features is opened.
+`shared.bundle.js` is the app itself and everything the lazy bundles use of
+it. Their styles are split the same way and travel with them:
+`kml_heatmap/static/styles.css` is linked in the page, `features.css` and
+`wrapped.css` are fetched alongside their bundles (see
 `services/featureLoader.ts`), and each has its own budget in
 `tests/test_asset_budget.py`. A rule belongs in `features.css` when its
-selector names replay or Wrapped; the two file headers spell out the rest,
-including the one-way dependency between them. The bundler moves the
-modules both entry points use into `shared.bundle.js`, which each of them
-imports, because several of them hold state that has to be a single
-instance. Two entry points can only share one chunk, so it has a fixed name
-that the site publishes and the page preloads; the build fails if it ever
-writes another file (`assertExpectedOutputs` in `build.js`).
+selector names replay and in `wrapped.css` when it names Wrapped; the file
+headers spell out the rest, including the one-way dependency on
+`styles.css`. The bundler moves the modules the entry points share into a
+chunk that each of them imports, because several of them hold state that
+has to be a single instance. It makes one chunk for every set of entry
+points that reach a module, so both lazy entry points import `mapApp.ts`:
+everything the app reaches is then reached by all three and lands in the
+one chunk, which has a fixed name that the site publishes and the page
+preloads. A module replay and Wrapped share without the app would still get
+a chunk of its own, and the build fails if it ever writes another file
+(`assertExpectedOutputs` in `build.js`); such a module belongs where the app
+reaches it (`segmentBounds` in `utils/geometry.ts` is one).
 `yearWorker.bundle.js` is a build of its own and shares nothing with the
 others: it is everything that works on the year files. The page imports it
 next to the first year file (`services/dataLoader.ts`), and the file then
@@ -201,9 +209,11 @@ none and the statistics rail falls back to the ISO country code.
 - **Tests**
   - Unit tests: `tests/frontend/unit/` (Vitest)
   - E2E tests: `tests/e2e/` (Playwright)
-- **Stylesheets** in `kml_heatmap/static/` (`styles.css` and `features.css`)
+- **Stylesheets** in `kml_heatmap/static/` (`styles.css`, `features.css`
+  and `wrapped.css`)
 - **Build output** in `kml_heatmap/static/` (`mapApp.bundle.js`,
-  `features.bundle.js`, `shared.bundle.js`, `yearWorker.bundle.js`, their
+  `features.bundle.js`, `wrapped.bundle.js`, `shared.bundle.js`,
+  `yearWorker.bundle.js`, their
   source maps, `vendor/` and `flags/`)
 - **Build scripts** `build.js` and `scripts/*.js`, plain JavaScript with
   JSDoc types that `tsconfig.node.json` checks (`npm run typecheck`)

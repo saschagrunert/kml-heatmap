@@ -42,6 +42,7 @@ __all__ = [
     "SITE_FILES",
     "SITE_FILE_PATTERNS",
     "STATIC_DIR",
+    "WRAPPED_BUNDLE_FILE",
     "YEAR_WORKER_BUNDLE_FILE",
     "BuildCommit",
     "available_country_flags",
@@ -63,11 +64,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 # Built by `npm run build` and not committed
 BUNDLE_FILE = STATIC_DIR / "mapApp.bundle.js"
-# Replay and Wrapped, imported by the page the first time one of them is
-# opened (frontend/services/featureLoader.ts). Built by the same `npm run
-# build`, so a site without it is a site built wrong rather than a choice.
+# Replay, imported by the page the first time it is opened, and Wrapped,
+# likewise (frontend/services/featureLoader.ts). Built by the same `npm run
+# build`, so a site without them is a site built wrong rather than a choice.
 FEATURES_BUNDLE_FILE = STATIC_DIR / "features.bundle.js"
-# The modules the two above have in common, which both of them import
+WRAPPED_BUNDLE_FILE = STATIC_DIR / "wrapped.bundle.js"
+# The app and every module the two above use of it, which all three import
 SHARED_BUNDLE_FILE = STATIC_DIR / "shared.bundle.js"
 # The year worker, which parses and decodes the year files off the main
 # thread; the page imports the same file for what it does to year data itself
@@ -76,6 +78,7 @@ YEAR_WORKER_BUNDLE_FILE = STATIC_DIR / "yearWorker.bundle.js"
 BUNDLE_FILES = (
     BUNDLE_FILE,
     FEATURES_BUNDLE_FILE,
+    WRAPPED_BUNDLE_FILE,
     SHARED_BUNDLE_FILE,
     YEAR_WORKER_BUNDLE_FILE,
 )
@@ -92,6 +95,7 @@ BUILD_HASH_FILES = (
     "tsconfig.json",
     "kml_heatmap/static/styles.css",
     "kml_heatmap/static/features.css",
+    "kml_heatmap/static/wrapped.css",
 )
 # Packages whose pinned version changes a built site (the bundler, what it
 # bundles and what is vendored as it is), hashed after the files and in this
@@ -127,9 +131,11 @@ VENDOR_FILES = (
 )
 # The stylesheets, in the order the page applies them: styles.css is linked in
 # the head, features.css is fetched with the feature bundle the first time
-# replay or Wrapped is opened (see services/featureLoader.ts). The order
-# matters to the cascade, so it is the order they are written in.
-CSS_FILES = ("styles.css", "features.css")
+# replay is opened and wrapped.css with the Wrapped bundle the first time
+# Wrapped is (see services/featureLoader.ts). The order matters to the
+# cascade, so it is the order they are written in; the last two style
+# different elements, so which of them lands first does not.
+CSS_FILES = ("styles.css", "features.css", "wrapped.css")
 # The files the tool owns next to the page. Any of them that a run does not
 # produce (the source map of a bundle built without one) is removed.
 SITE_FILES = (

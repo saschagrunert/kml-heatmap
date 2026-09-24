@@ -29,7 +29,7 @@ import {
   prepareReplaySegments,
   replayCurve,
 } from "../features/replay";
-import { segmentBounds } from "../features/wrapped";
+import { segmentBounds } from "../utils/geometry";
 import { segmentsForPathIds } from "../calculations/statistics";
 
 import {

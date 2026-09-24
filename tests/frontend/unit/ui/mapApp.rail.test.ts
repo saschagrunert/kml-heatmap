@@ -6,7 +6,8 @@ import {
   cartoTransformRequest,
   BASE_STYLE_RETRY_MS,
   FALLBACK_STYLE,
-  FEATURES_UNAVAILABLE_MESSAGE,
+  REPLAY_UNAVAILABLE_MESSAGE,
+  WRAPPED_UNAVAILABLE_MESSAGE,
   MapApp,
 } from "../../../../kml_heatmap/frontend/mapApp";
 import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
@@ -18,7 +19,10 @@ import {
   type Map as MockMap,
 } from "../../../mocks/maplibre-gl";
 import { showToast } from "../../../../kml_heatmap/frontend/utils/toast";
-import { loadFeatures } from "../../../../kml_heatmap/frontend/services/featureLoader";
+import {
+  loadFeatures,
+  loadWrapped,
+} from "../../../../kml_heatmap/frontend/services/featureLoader";
 import { resizeMapAfterTransition } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
@@ -107,18 +111,22 @@ vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
   }),
 }));
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
-  // Replay and Wrapped come from the lazily loaded feature bundle; here they
-  // are the doubles the module mocks above return
+  // Replay and Wrapped come from lazily loaded bundles of their own; here
+  // they are the doubles the module mocks above return
   loadFeatures: vi.fn(() =>
     Promise.resolve({
       ReplayManager: vi.fn(function () {
         return m.mockReplayManagerInstance;
       }),
+      // The satellite switch hands itself over to the bundle
+      followSatellite: vi.fn(),
+    }),
+  ),
+  loadWrapped: vi.fn(() =>
+    Promise.resolve({
       WrappedManager: vi.fn(function () {
         return m.mockWrappedManagerInstance;
       }),
-      // The satellite switch hands itself over to the bundle
-      followSatellite: vi.fn(),
     }),
   ),
 }));
@@ -400,7 +408,7 @@ describe("MapApp controls and map", () => {
       // Not a dead control: a click that loads nothing has to explain itself
       expect(manager).toBeUndefined();
       expect(showToast).toHaveBeenCalledWith(
-        FEATURES_UNAVAILABLE_MESSAGE,
+        REPLAY_UNAVAILABLE_MESSAGE,
         "error",
       );
     });
@@ -444,15 +452,38 @@ describe("MapApp controls and map", () => {
       expect(m.mockReplayManagerInstance.toggleReplay).toHaveBeenCalledTimes(2);
     });
 
+    it("says so when the Wrapped bundle cannot be fetched", async () => {
+      await initializeApp(app);
+      vi.mocked(loadWrapped).mockResolvedValueOnce(null);
+
+      const manager = await app.loadWrapped();
+
+      expect(manager).toBeUndefined();
+      expect(showToast).toHaveBeenCalledWith(
+        WRAPPED_UNAVAILABLE_MESSAGE,
+        "error",
+      );
+    });
+
+    it("opens Wrapped from its own bundle, not the feature bundle", async () => {
+      await initializeApp(app);
+      vi.mocked(loadFeatures).mockClear();
+
+      expect(await app.loadWrapped()).toBeDefined();
+
+      expect(loadWrapped).toHaveBeenCalled();
+      expect(loadFeatures).not.toHaveBeenCalled();
+    });
+
     it("keeps the manager once it has been built", async () => {
       await initializeApp(app);
       const first = await app.loadWrapped();
 
-      vi.mocked(loadFeatures).mockClear();
+      vi.mocked(loadWrapped).mockClear();
       const second = await app.loadWrapped();
 
       expect(second).toBe(first);
-      expect(loadFeatures).not.toHaveBeenCalled();
+      expect(loadWrapped).not.toHaveBeenCalled();
     });
   });
 

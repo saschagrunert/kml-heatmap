@@ -192,32 +192,6 @@ export function calculateYearStats(
 }
 
 /**
- * The span of the latitudes and longitudes the segments touch, as a
- * [south-west, north-east] pair of [lat, lon], or null when none of them has coordinates.
- */
-export function segmentBounds(
-  segments: PathSegment[],
-): [Coordinate, Coordinate] | null {
-  let minLat = Infinity;
-  let minLon = Infinity;
-  let maxLat = -Infinity;
-  let maxLon = -Infinity;
-  for (const segment of segments) {
-    for (const [lat, lon] of segment.coords ?? []) {
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-      if (lon < minLon) minLon = lon;
-      if (lon > maxLon) maxLon = lon;
-    }
-  }
-  if (minLat === Infinity) return null;
-  return [
-    [minLat, minLon],
-    [maxLat, maxLon],
-  ];
-}
-
-/**
  * The period a fact talks about: the selected year, or all of them. "This
  * year" read wrong in the All Years view and for any year but the current.
  */

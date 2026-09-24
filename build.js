@@ -83,19 +83,28 @@ const STATIC_DIR = join(__dirname, "kml_heatmap/static");
 const FRONTEND_DIR = join(__dirname, "kml_heatmap/frontend");
 
 // The page loads mapApp.bundle.js as a module. Replay and Wrapped are a
-// quarter of the frontend and most visits open neither, so features.ts is an
-// entry point of its own that the app imports the first time one of them is
-// used (services/featureLoader.ts). With splitting, what the two entry points
-// both use is moved into one chunk that each of them imports, so there is a
-// single instance of every module that holds state (the DOM cache, the toast
-// live region). Two entry points can only ever share one chunk, which is why
-// it can carry a fixed name instead of a hash; assertExpectedOutputs() fails
-// the build if that stops being true.
+// quarter of the frontend and most visits open neither, so features.ts
+// (replay) and wrapped.ts are entry points of their own that the app imports
+// the first time each is used (services/featureLoader.ts). With splitting,
+// what the entry points have in common is moved into a chunk that each of
+// them imports, so there is a single instance of every module that holds
+// state (the DOM cache, the toast live region).
+//
+// esbuild makes one chunk for every set of entry points that reach a module,
+// so three entry points could share code in up to four chunks. Both lazy
+// entry points import mapApp.ts for that reason: everything the app reaches
+// is then reached by all three, and the one chunk that holds it (the app
+// itself; mapApp.bundle.js only starts it) can carry a fixed name instead of
+// a hash. What is left of each lazy bundle is its own code. A module that
+// replay and Wrapped use and the app does not would still get a chunk of
+// its own; assertExpectedOutputs() fails the build when that happens (move
+// it where the app reaches it, as with segmentBounds in utils/geometry.ts).
 /** @type {import("esbuild").BuildOptions} */
 const buildOptions = {
   entryPoints: [
     join(FRONTEND_DIR, "mapApp.ts"),
     join(FRONTEND_DIR, "features.ts"),
+    join(FRONTEND_DIR, "wrapped.ts"),
   ],
   outdir: STATIC_DIR,
   entryNames: "[name].bundle",
@@ -227,7 +236,9 @@ function analyzeBundleComposition(metafile, fileName) {
 // minified by the Python side, not here.
 //
 // What a first visit downloads: the app and the chunk it shares with the
-// features, which the page loads together.
+// lazy bundles, which the page loads together. Since Wrapped got a bundle of
+// its own, the chunk holds nearly all of the app and mapApp.bundle.js only
+// starts it; the sum is what counts.
 // Raised from 90 KB for the visual review of 2026-09-18: the selection chip,
 // the scroll-fade watcher, and the icon set moving to Lucide, whose shapes
 // carry more detail than the hand drawn paths they replaced (33 of them for
@@ -302,11 +313,15 @@ function analyzeBundleComposition(metafile, fileName) {
 // The Satellite switch fits without a raise: its button, sheet row, store
 // key and link parameter add 1.06 KB (141,095 B raw, 46.6 KB gzipped),
 // leaving about 200 B; the imagery itself waits in the feature bundle.
+// Wrapped moving into a bundle of its own made the app one chunk
+// (see buildOptions), which compresses better than two: 139,549 B raw and
+// 46,584 B gzipped, from 140,030 B and 47,417 B.
 const BUDGET_APP = { raw: 138 * 1024, gzip: 47 * 1024 };
-// The feature bundle is fetched only when replay or Wrapped is opened, the
-// 3D view first draws its relief or the Satellite switch is first on, so it
-// is not part of what a first visit downloads; it still gets a budget so it
-// cannot grow without anyone noticing.
+// The feature bundle is fetched only when replay is opened, the relief of
+// the 3D view is first drawn, the Satellite switch is first on or an
+// airport's popup is first opened, so
+// it is not part of what a first visit downloads; it still gets a budget so
+// it cannot grow without anyone noticing.
 // Raised from 40 KB for the replay in the 3D view: the trail drawn as
 // ribbons sloped with the flight, each run cut once and handed back to its
 // line zoomed in close, and the airplane lifted to its height on the
@@ -322,14 +337,19 @@ const BUDGET_APP = { raw: 138 * 1024, gzip: 47 * 1024 };
 // (ui/terrain.ts), which wait here for the first zoom that draws them
 // rather than in the first visit, and the replay's curve lifted anew as
 // the relief comes or goes: 47,861 B raw and 16,495 B gzipped.
-// Raised from 48 KB for the satellite imagery (ui/satellite.ts): its source
-// with the credit the licence asks for, its place in the base style and its
-// toned-down paint, 1.7 KB that wait here for the first time the switch is
-// on rather than in the first visit, which has no room for them:
-// 49,765 B raw and 17,181 B gzipped. The gzipped budget goes to 18 KB
-// with it: 17 KB would leave 227 B, and CI's zlib compresses these bundles
-// about 170 B worse than a local Node.
-const BUDGET_FEATURES = { raw: 49 * 1024, gzip: 18 * 1024 };
+// Lowered from 48 KB when Wrapped moved into a bundle of its own
+// (wrapped.ts), from 48,065 B raw and 16,575 B gzipped to 32,287 B raw and
+// 11,531 B gzipped. The budget keeps the policy's room over that rather than
+// the room Wrapped left, so what comes next is a decision like any other.
+// The satellite imagery (see its raise before) comes on top of that:
+// 33,989 B raw and 12,141 B gzipped with both.
+const BUDGET_FEATURES = { raw: 35.5 * 1024, gzip: 13.5 * 1024 };
+
+// The Wrapped bundle is fetched only when the Wrapped dialog is opened, and
+// no longer with replay's code or replay with it: the two have nothing in
+// common that the app does not have as well.
+// 15,731 B raw and 5,529 B gzipped on 2026-09-24.
+const BUDGET_WRAPPED = { raw: 17.5 * 1024, gzip: 6.5 * 1024 };
 
 // The year worker's bundle is fetched by every visit, but next to the first
 // year file rather than ahead of the app, so it holds up nothing on the page.
@@ -350,6 +370,7 @@ const BUDGET_HTML_TO_IMAGE = { raw: 14 * 1024, gzip: 5.5 * 1024 };
 
 const APP_BUNDLE = "mapApp.bundle.js";
 const FEATURES_BUNDLE = "features.bundle.js";
+const WRAPPED_BUNDLE = "wrapped.bundle.js";
 const SHARED_BUNDLE = "shared.bundle.js";
 const WORKER_BUNDLE = "yearWorker.bundle.js";
 
@@ -379,6 +400,7 @@ function analyzeBundleSizes() {
   const bundles = [
     ["🗺️  First visit", [APP_BUNDLE, SHARED_BUNDLE], BUDGET_APP],
     ["✨ Features", [FEATURES_BUNDLE], BUDGET_FEATURES],
+    ["🎁 Wrapped", [WRAPPED_BUNDLE], BUDGET_WRAPPED],
     ["🧵 Year worker", [WORKER_BUNDLE], BUDGET_WORKER],
     [
       "🧭 MapLibre",
@@ -435,11 +457,12 @@ function analyzeBundleSizes() {
 }
 
 /**
- * Fail the build when it wrote anything but the four bundles.
+ * Fail the build when it wrote anything but the five bundles.
  *
  * The site publishes them by name (SITE_FILES in kml_heatmap/site_assets.py)
- * and the page preloads the shared chunk by name. A third entry point or a
- * second dynamic import would make esbuild write further chunks, all called
+ * and the page preloads the shared chunk by name. A module the lazy entry
+ * points share without the app, another entry point or a second dynamic
+ * import would make esbuild write further chunks, all called
  * shared.bundle.js; that has to be a decision about naming, not a surprise.
  * @param {(import("esbuild").Metafile | undefined)[]} metafiles
  */
@@ -452,6 +475,7 @@ function assertExpectedOutputs(metafiles) {
   const expected = [
     APP_BUNDLE,
     FEATURES_BUNDLE,
+    WRAPPED_BUNDLE,
     SHARED_BUNDLE,
     WORKER_BUNDLE,
   ].sort();
@@ -500,7 +524,7 @@ async function build() {
       const withinBudget = analyzeBundleSizes();
 
       if (result.metafile) {
-        for (const name of [APP_BUNDLE, SHARED_BUNDLE, FEATURES_BUNDLE]) {
+        for (const name of [SHARED_BUNDLE, FEATURES_BUNDLE, WRAPPED_BUNDLE]) {
           analyzeBundleComposition(result.metafile, name);
         }
       }

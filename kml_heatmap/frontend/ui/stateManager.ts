@@ -190,7 +190,7 @@ export class StateManager {
 
     // While Wrapped has the map fitted to all the data, the view worth
     // keeping is the one the user had before. The `?.` is for Wrapped
-    // living in the lazily loaded feature bundle: before it has ever been
+    // living in a lazily loaded bundle: before it has ever been
     // opened there is no saved view either way.
     const view = this.app.wrappedManager?.userMapView() ?? {
       center: this.app.map.getCenter(),

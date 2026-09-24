@@ -680,15 +680,18 @@ output-dir/
 ├── index.html
 ├── mapApp.bundle.js
 ├── mapApp.bundle.js.map
-├── features.bundle.js     # Replay and Wrapped, imported on first use
+├── features.bundle.js     # Replay, imported on first use
 ├── features.bundle.js.map
-├── shared.bundle.js       # The modules both of the above import
+├── wrapped.bundle.js      # Wrapped, imported on first use
+├── wrapped.bundle.js.map
+├── shared.bundle.js       # The app, which the three above import
 ├── shared.bundle.js.map
 ├── yearWorker.bundle.js   # Decodes the year files, in a worker
 ├── yearWorker.bundle.js.map
 ├── map_config.js          # Map defaults, tile API key and the build stamp
 ├── styles.css             # Linked in the page
-├── features.css           # Replay and Wrapped, fetched with their bundle
+├── features.css           # Replay, fetched with its bundle
+├── wrapped.css            # Wrapped, fetched with its bundle
 ├── manifest.json
 ├── favicon.svg
 ├── favicon.ico

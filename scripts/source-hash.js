@@ -29,6 +29,7 @@ const BUILD_FILES = [
   "tsconfig.json",
   "kml_heatmap/static/styles.css",
   "kml_heatmap/static/features.css",
+  "kml_heatmap/static/wrapped.css",
 ].map((name) => join(REPO_ROOT, name));
 
 /**

@@ -206,10 +206,10 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           for asset in templates/map_template.html static/mapApp.bundle.js \
-            static/features.bundle.js static/shared.bundle.js \
-            static/yearWorker.bundle.js \
+            static/features.bundle.js static/wrapped.bundle.js \
+            static/shared.bundle.js static/yearWorker.bundle.js \
             static/vendor/maplibre-gl.mjs static/vendor/maplibre-gl-worker.mjs \
-            static/styles.css static/features.css; do
+            static/styles.css static/features.css static/wrapped.css; do
             result=$("$RUNNER_TEMP/wheel-venv/bin/python" -c "import importlib.resources as r, kml_heatmap; print(r.files(kml_heatmap).joinpath('$asset').is_file())")
             echo "$asset shipped: $result"
             test "$result" = "True"
@@ -237,8 +237,8 @@ jobs:
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --no-terrain smoke/input --output-dir smoke/site
           for file in index.html map_config.js mapApp.bundle.js \
-            features.bundle.js shared.bundle.js yearWorker.bundle.js \
-            styles.css features.css \
+            features.bundle.js wrapped.bundle.js shared.bundle.js \
+            yearWorker.bundle.js styles.css features.css wrapped.css \
             vendor/maplibre-gl.mjs vendor/maplibre-gl-worker.mjs data/metadata.json; do
             test -s "smoke/site/$file" || { echo "::error::smoke/site/$file was not generated"; exit 1; }
           done
@@ -481,8 +481,8 @@ jobs:
             -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
             kml-heatmap input --output-dir site
           for file in index.html map_config.js mapApp.bundle.js \
-            features.bundle.js shared.bundle.js yearWorker.bundle.js \
-            styles.css features.css \
+            features.bundle.js wrapped.bundle.js shared.bundle.js \
+            yearWorker.bundle.js styles.css features.css wrapped.css \
             vendor/maplibre-gl.mjs vendor/maplibre-gl-worker.mjs data/metadata.json; do
             test -s "$smoke/site/$file" || { echo "::error::$file was not generated"; exit 1; }
           done
@@ -503,8 +503,8 @@ jobs:
             -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
             kml-heatmap input --output-dir site
           for file in index.html map_config.js mapApp.bundle.js \
-            features.bundle.js shared.bundle.js yearWorker.bundle.js \
-            styles.css features.css \
+            features.bundle.js wrapped.bundle.js shared.bundle.js \
+            yearWorker.bundle.js styles.css features.css wrapped.css \
             vendor/maplibre-gl.mjs vendor/maplibre-gl-worker.mjs data/metadata.json; do
             test -s "$smoke/site/$file" || { echo "::error::$file was not generated as the image user"; exit 1; }
           done
