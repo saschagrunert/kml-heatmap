@@ -671,7 +671,7 @@ export async function pathWeights(
  */
 function layersOnMap(
   page: Page,
-  handle: "heatmapLayer" | "aviationLayer",
+  handle: "heatmapLayer" | "aviationLayer" | "selectionHighlightLayer",
 ): Promise<boolean> {
   return page.evaluate((name) => {
     const app = window.mapApp!;
@@ -711,6 +711,26 @@ export function airportsOnMap(page: Page): Promise<boolean> {
 /** Whether the aviation overlay is on the map right now */
 export function aviationOnMap(page: Page): Promise<boolean> {
   return layersOnMap(page, "aviationLayer");
+}
+
+/**
+ * The lines of a selection over the heatmap: whether they are on the map,
+ * and how many lines their source was handed. Read once the map is idle.
+ */
+export async function selectionHighlightOnMap(
+  page: Page,
+): Promise<{ shown: boolean; lines: number }> {
+  await waitForMapIdle(page);
+  const shown = await layersOnMap(page, "selectionHighlightLayer");
+  const lines = await page.evaluate(async () => {
+    const app = window.mapApp!;
+    const map = app.map!;
+    const layer = map.getLayer(app.selectionHighlightLayer.ids[0]!)!;
+    const source = map.getSource(layer.source) as GeoJSONSource;
+    const data = await source.getData();
+    return data.type === "FeatureCollection" ? data.features.length : 0;
+  });
+  return { shown, lines };
 }
 
 /**
@@ -772,6 +792,7 @@ export async function flightsOnMap(page: Page): Promise<FlightsOnMap> {
     const own = [
       ...app.aviationLayer.ids,
       ...app.heatmapLayer.ids,
+      ...app.selectionHighlightLayer.ids,
       "replay-route",
       ...app.altitudeLayer.ids,
       ...app.airspeedLayer.ids,

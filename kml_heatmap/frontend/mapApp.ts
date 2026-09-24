@@ -21,6 +21,7 @@ import { MapOrientation } from "./ui/mapOrientation";
 
 import { UIToggles } from "./ui/uiToggles";
 import { followLayerVisibility } from "./ui/layerVisibility";
+import { followSelectionHighlight } from "./ui/selectionHighlight";
 import { MobileBar } from "./ui/mobileBar";
 import { bindActions } from "./ui/actions";
 import { loadInitialData } from "./appInitializer";
@@ -311,7 +312,8 @@ export class MapApp {
   readonly altitudeLayer: LayerHandle;
   readonly airspeedLayer: LayerHandle;
   readonly airportLayer: LayerHandle;
-  /** The same five, for attaching them to the map in one go */
+  readonly selectionHighlightLayer: LayerHandle;
+  /** The same six, for attaching them to the map in one go */
   private readonly layerHandles: MapLayerHandle[];
 
   // Airport markers (non-store)
@@ -416,12 +418,21 @@ export class MapApp {
       MAP_LAYERS.pathsAirspeedSelectedRibbons,
     ]);
     const airports = new AirportLayerHandle();
+    const highlight = new MapLayerHandle([MAP_LAYERS.selectionHighlight]);
     this.heatmapLayer = heatmap;
     this.aviationLayer = aviation;
     this.altitudeLayer = altitude;
     this.airspeedLayer = airspeed;
     this.airportLayer = airports;
-    this.layerHandles = [heatmap, aviation, altitude, airspeed, airports];
+    this.selectionHighlightLayer = highlight;
+    this.layerHandles = [
+      heatmap,
+      aviation,
+      altitude,
+      airspeed,
+      airports,
+      highlight,
+    ];
 
     // Airport markers (non-store)
     this.airportMarkers = {};
@@ -861,6 +872,7 @@ export class MapApp {
     this.uiToggles = new UIToggles(this);
     this.mobileBar = MobileBar.mountFor(this);
     followLayerVisibility(this);
+    followSelectionHighlight(this);
     this.followReplayAvailability();
     this.followColumnScrollEnd();
   }

@@ -70,6 +70,9 @@
   /* How far the heatmap steps back under a colour layer, so the gradient
      rather than the bloom is what reads */
   --heatmap-dimmed-opacity: 0.35;
+  /* The selected flights over the heatmap with no colour layer on: a light
+     line, which no colour ramp uses, over the dimmed heat */
+  --selection-highlight-color: #f2f2f2;
   --shadow-color: rgba(0, 0, 0, 0.4);
   --shadow-color-strong: rgba(0, 0, 0, 0.6);
   /* One soft elevation per surface class */
@@ -2378,6 +2381,7 @@ body.stats-open #left-buttons {
     --color-divider: #4a4a4a;
     --color-text-muted: #b4b4b4;
     --color-text-dim: #b4b4b4;
+    --selection-highlight-color: #ffffff;
   }
   .control-group,
   .color-legend,

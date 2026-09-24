@@ -1378,6 +1378,23 @@ describe("DataManager", () => {
       expect(opacity()).toBe(1);
     });
 
+    it("steps back under the lines of a selection, and only while they show", () => {
+      mockApp.currentData = baseData();
+      mockApp.selectedPathIds.add(1);
+      dataManager.applyHeatmapEmphasis();
+      expect(opacity()).toBe(0.35);
+
+      // A replay hides the lines (and the heatmap): no dimming for them
+      mockApp.replayActive = true;
+      dataManager.applyHeatmapEmphasis();
+      expect(opacity()).toBe(1);
+
+      mockApp.replayActive = false;
+      mockApp.selectedPathIds.clear();
+      dataManager.applyHeatmapEmphasis();
+      expect(opacity()).toBe(1);
+    });
+
     it("takes how far from the stylesheet's token", () => {
       document.documentElement.style.setProperty(
         "--heatmap-dimmed-opacity",

@@ -22,6 +22,7 @@ import { formatFileSize } from "../utils/formatters";
 import { frameCoalescer } from "../utils/frameCoalescer";
 import { cssVar, toLngLat, whenContextRestored } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
+import { dimsHeatmap } from "./layerVisibility";
 import {
   HEATMAP_OPACITY,
   fadeOutToLines,
@@ -221,19 +222,22 @@ export class DataManager {
   }
 
   /**
-   * Fade the heatmap back while a colour layer is drawn over it.
+   * Fade the heatmap back while a colour layer or the selection's lines are
+   * drawn over it (see dimsHeatmap).
    *
    * Both are on by default, and the heatmap's cyan bloom under the altitude
    * or speed gradient washes out exactly the scale the user just switched on.
-   * The layer stays visible and its toggle still owns whether it is there at
-   * all; this only settles which of the two reads first.
+   * A thin line of a selection is lost in its white as well. The layer stays
+   * visible and its toggle still owns whether it is there at all; this only
+   * settles which reads first.
    */
   applyHeatmapEmphasis(): void {
     const map = this.app.map;
     // The store may change before the style, and with it the layer, is there
     if (!map?.getLayer(MAP_LAYERS.heat)) return;
-    const dimmed = this.app.altitudeVisible || this.app.airspeedVisible;
-    const opacity = dimmed ? dimmedHeatmapOpacity() : HEATMAP_OPACITY;
+    const opacity = dimsHeatmap(this.app)
+      ? dimmedHeatmapOpacity()
+      : HEATMAP_OPACITY;
     map.setPaintProperty(
       MAP_LAYERS.heat,
       "heatmap-opacity",

@@ -17,15 +17,42 @@ const LAYER_KEYS: readonly (keyof StoreState)[] = [
   "airportsVisible",
   "aviationVisible",
   "replayActive",
+  "selectedPathIds",
 ];
+
+/**
+ * Whether the selected flights are drawn as lines over the heatmap (see
+ * ui/selectionHighlight.ts): while there are any and nothing else draws
+ * them. A colour layer draws them on its own, and a replay its route.
+ * Isolate does not matter: it narrows the heatmap, the lines still say
+ * which flights are the selected ones.
+ */
+export function highlightsSelection(app: MapApp): boolean {
+  return (
+    app.selectedPathIds.size > 0 &&
+    !app.altitudeVisible &&
+    !app.airspeedVisible &&
+    !app.replayActive
+  );
+}
+
+/**
+ * Whether the heatmap steps back for what is drawn over it: a colour layer
+ * or the selection's lines. Worked out here with the lines themselves, so
+ * the two cannot disagree.
+ */
+export function dimsHeatmap(app: MapApp): boolean {
+  return app.altitudeVisible || app.airspeedVisible || highlightsSelection(app);
+}
 
 /**
  * Show every layer the store asks for. The layer flags keep what the user
  * chose, and a running replay hides the heatmap and the colour layers on
- * top of them, so closing it brings back exactly that choice. Nothing else
- * sets the visibility of these layers, the heatmap's toggle or the altitude
- * scale: a toggle, a restored link and the start and end of a replay only
- * write store keys.
+ * top of them, so closing it brings back exactly that choice. The lines of
+ * a selection show where nothing else draws it. Nothing else sets the
+ * visibility of these layers, the heatmap's toggle or the altitude scale:
+ * a toggle, a restored link and the start and end of a replay only write
+ * store keys.
  */
 export function followLayerVisibility(app: MapApp): void {
   const apply = (): void => {
@@ -40,6 +67,7 @@ export function followLayerVisibility(app: MapApp): void {
     app.layerManager.syncModes();
     app.airportLayer.setVisible(app.airportsVisible);
     app.aviationLayer.setVisible(app.aviationVisible);
+    app.selectionHighlightLayer.setVisible(highlightsSelection(app));
 
     // The heatmap is hidden for a replay, so its toggle must not report it
     // as on. The replay trail is coloured by altitude unless the speed
