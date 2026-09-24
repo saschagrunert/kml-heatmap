@@ -78,6 +78,11 @@
   --terrain-shadow: rgba(0, 0, 0, 0.7);
   --terrain-highlight: rgba(255, 255, 255, 0.12);
   --terrain-exaggeration: 0.5;
+  /* How far the satellite imagery (ui/satellite.ts) is toned down, so the
+     heat, the flights and the labels made for the dark map still read */
+  --satellite-brightness: 0.4;
+  --satellite-saturation: -0.5;
+  --satellite-contrast: -0.2;
   --shadow-color: rgba(0, 0, 0, 0.4);
   --shadow-color-strong: rgba(0, 0, 0, 0.6);
   /* One soft elevation per surface class */
@@ -2390,6 +2395,8 @@ body.stats-open #left-buttons {
     --terrain-shadow: rgba(0, 0, 0, 0.8);
     --terrain-highlight: rgba(255, 255, 255, 0.2);
     --terrain-exaggeration: 0.6;
+    --satellite-brightness: 0.3;
+    --satellite-saturation: -0.6;
   }
   .control-group,
   .color-legend,

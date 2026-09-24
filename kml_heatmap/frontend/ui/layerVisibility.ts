@@ -8,6 +8,12 @@ import {
   applyToggleButtonState,
 } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
+import { loadFeatures } from "../services/featureLoader";
+import { showToast } from "../utils/toast";
+
+/** Said when the imagery's code cannot be fetched and the switch goes off */
+export const SATELLITE_UNAVAILABLE_MESSAGE =
+  "Satellite imagery is unavailable: its code could not be loaded";
 
 /** The keys the layers follow */
 const LAYER_KEYS: readonly (keyof StoreState)[] = [
@@ -103,4 +109,36 @@ export function setColorLayer(
     if (visible) app[other] = false;
   });
   return replaced;
+}
+
+/**
+ * Fetch the code of the satellite imagery (ui/satellite.ts) the first time
+ * the switch is on, from a link or saved state too, and hand the switch to
+ * it. It comes with the feature bundle: most visits never turn it on. A
+ * bundle that cannot be fetched turns the switch back off if it is still on,
+ * so it does not claim imagery the map does not draw, and the next press
+ * asks again.
+ */
+export function followSatelliteSwitch(app: MapApp): void {
+  let loading = false;
+  const load = (): void => {
+    if (!app.satelliteVisible || loading) return;
+    loading = true;
+    void loadFeatures().then((features) => {
+      if (app.signal.aborted) return;
+      loading = false;
+      if (features) {
+        stop();
+        features.followSatellite(app);
+        return;
+      }
+      // A switch turned off again while the code was on its way claims
+      // nothing, so there is nothing to take back or to report
+      if (!app.satelliteVisible) return;
+      app.satelliteVisible = false;
+      showToast(SATELLITE_UNAVAILABLE_MESSAGE, "error");
+    });
+  };
+  const stop = app.store.subscribe("satelliteVisible", load);
+  load();
 }

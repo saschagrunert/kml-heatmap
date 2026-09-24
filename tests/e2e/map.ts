@@ -737,6 +737,22 @@ export function aviationOnMap(page: Page): Promise<boolean> {
 }
 
 /**
+ * Whether the satellite imagery is on the map right now, and its tiles have
+ * been asked for. Its layer only exists once the switch has first been on
+ * (ui/satellite.ts).
+ */
+export async function satelliteOnMap(page: Page): Promise<boolean> {
+  const shown = await page.evaluate(() => {
+    const map = window.mapApp!.map!;
+    return (
+      !!map.getLayer("satellite") &&
+      map.getLayoutProperty("satellite", "visibility") !== "none"
+    );
+  });
+  return shown && (await requestedUrls(page, "tiles.maps.eox.at")).length > 0;
+}
+
+/**
  * The lines of a selection over the heatmap: whether they are on the map,
  * and how many lines their source was handed. Read once the map is idle.
  */

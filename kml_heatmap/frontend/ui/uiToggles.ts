@@ -1,5 +1,5 @@
 /**
- * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, export, share)
+ * UI Toggles - Handles UI toggle functions (heatmap, altitude, airspeed, airports, aviation, satellite, export, share)
  */
 import type { MapApp } from "../mapApp";
 import { setControlLabel } from "../utils/buttonState";
@@ -216,6 +216,10 @@ export class UIToggles {
 
   toggleAviation(): void {
     if (this.app.map) this.app.aviationVisible = !this.app.aviationVisible;
+  }
+
+  toggleSatellite(): void {
+    if (this.app.map) this.app.satelliteVisible = !this.app.satelliteVisible;
   }
 
   /**

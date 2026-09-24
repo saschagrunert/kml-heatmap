@@ -44,6 +44,7 @@
 - A map that turns and tilts, and a globe for flights that span a continent
 - A 3D view that lifts the flights to their altitude above the ground they
   flew over, sampled from an elevation model when the site is built
+- Satellite imagery as the ground under the flights, keyless
 - Year-in-review "Wrapped" summary
 - Shareable URLs that encode the exact map state
 - Privacy protection: no flight date finer than the year reaches the
@@ -219,7 +220,8 @@ domain (referrer restriction) in the CARTO dashboard. The `site` job of the
 
 The Aviation Data layer needs no key: its tiles come from
 [open flightmaps](https://www.openflightmaps.org/), which covers most of
-Europe and a few other regions and is credited on the map.
+Europe and a few other regions and is credited on the map. Nor does the
+Satellite switch (see [Satellite Imagery](#satellite-imagery)).
 
 ### Makefile Variables and Targets
 
@@ -617,6 +619,12 @@ view is on and zoomed in to `z` 10 or closer, to draw or shade the relief: AWS s
 visitor's address and which tiles, so roughly where on the map they look, as
 CARTO does for the base map. Nothing is fetched from AWS otherwise.
 
+**The page asks EOX for the satellite imagery of the area in view** while the
+Satellite switch is on (see [Satellite Imagery](#satellite-imagery)): EOX
+sees the visitor's address and which tiles, as AWS and CARTO do. Nothing is
+fetched from EOX while it is off, and it is off unless the visitor, their
+saved state or the link they followed turns it on.
+
 ### Obfuscating the KML files themselves
 
 That is a separate need: this repository commits the files in `data/`, and
@@ -792,8 +800,9 @@ as scripts (`data.js`, `metadata.js`, `airports.js`), removes those files.
 - **Replay** - Animate one flight with adjustable speed (default 50x) and an auto-zoom button that follows the airplane. The whole track is drawn dimmed and the flown part paints over it in the colours of the active scale. Replay needs exactly one selected flight with timing data; a toast explains why it is unavailable otherwise. The airplane flies along the same smooth curve the lines are drawn on, turning with it, and the trail ends at the airplane
 - **North up** - The map turns and tilts (up to 85 degrees, with a sky above the horizon) by gesture: drag with the right mouse button or with Ctrl held, twist or drag with two fingers, or hold Shift with the arrow keys once the map has focus. The needle on this button points north, and a click turns the map back north up and flat. On a phone the compass floats at the top right of the map while the map is turned or tilted, and the globe switch is in the Layers sheet. Replay keeps the orientation you chose and points the airplane along its track on screen; Wrapped shows its overview north up and flat and gives your view back when it closes. While the map is already north up and flat the button is dimmed and does nothing
 - **Globe** - Draw the map as a globe instead of in Mercator. Above zoom 12 the two look the same, which is MapLibre's doing. Airport markers on the far side are hidden, and a popup closes once the globe has turned its place away. The space around the globe is the page background; no atmosphere is drawn
-- **3D** - Lift the flights to their altitude, as ribbons about as wide as the lines at every zoom that follow their climbs and descents in 20 ft steps and stand on the ground each flight flew over: the build samples it under every logged position from an elevation model (see [Elevation Data](#elevation-data)) and shifts it to meet the altitudes the flight recorded taxiing at the field it left and at the one it landed on, so a flight taxis on the map at both ends even where the model and the recorder disagree by tens of feet, and crosses a ridge at its true height above it. A flight whose ground is not known (a build with `--no-terrain` or without the tiles) stands on a line from the one field to the other instead, and an altitude glitch of the recorder takes no flight up with either. Heights are exaggerated where the map is zoomed out, 60 times at `z` 5 down to twice at `z` 10, so a flight still shows its shape on a map of half of Europe. Switching it on colours the paths by altitude if neither colour layer is on and tilts a flatter map to 50 degrees. From `z` 18 in, where the camera is lower than a traffic circuit, the flights are drawn flat again. Replay lifts its airplane and its trail with them. From `z` 10 in the map draws the relief under the flights, exaggerated twice like their heights and shaded faintly (dark slopes, a little light on the others) under the roads, the labels and the flights, and each flight stands on it at its height above the ground it flew over; further out the map stays flat and each flight stands on the line between its fields, since a ridge a few pixels high would only make a level flight climb and sink with it. The relief comes from the same elevation tiles as the ground (see [Elevation Data](#elevation-data)), which the browser fetches from AWS while it is drawn. The globe only shades it: the relief itself is left out there, and each flight stands on the line between its fields. As the relief comes or goes the flights are hidden until they are drawn on the new ground, for 3 seconds at most
-- **Reset view** - Go back to what a first visit shows: the newest year and all aircraft, the heatmap and airports on and the other layers, 3D and the globe off, nothing selected, the statistics closed, and the map flat and north up over all the flights. The saved session and the link follow. While there is nothing to reset, on a first visit and after a reset until the page or the map changes, it is dimmed and a press does nothing. On a phone it is in the More sheet; during a replay it is disabled like the filters
+- **3D** - Lift the flights to their altitude, as ribbons about as wide as the lines at every zoom that follow their climbs and descents in 20 ft steps and stand on the ground each flight flew over: the build samples it under every logged position from an elevation model (see [Elevation Data](#elevation-data)) and shifts it to meet the altitudes the flight recorded taxiing at the field it left and at the one it landed on, so a flight taxis on the map at both ends even where the model and the recorder disagree by tens of feet, and crosses a ridge at its true height above it. A flight whose ground is not known (a build with `--no-terrain` or without the tiles) stands on a line from the one field to the other instead, and an altitude glitch of the recorder takes no flight up with either. Heights are exaggerated where the map is zoomed out, 60 times at `z` 5 down to twice at `z` 10, so a flight still shows its shape on a map of half of Europe. Switching it on colours the paths by altitude if neither colour layer is on and tilts a flatter map to 50 degrees. From `z` 18 in, where the camera is lower than a traffic circuit, the flights are drawn flat again. Replay lifts its airplane and its trail with them. From `z` 10 in the map draws the relief under the flights, exaggerated twice like their heights and shaded faintly (dark slopes, a little light on the others) over the satellite imagery when it is on and under the labels and the flights, and each flight stands on it at its height above the ground it flew over; further out the map stays flat and each flight stands on the line between its fields, since a ridge a few pixels high would only make a level flight climb and sink with it. The relief comes from the same elevation tiles as the ground (see [Elevation Data](#elevation-data)), which the browser fetches from AWS while it is drawn. The globe only shades it: the relief itself is left out there, and each flight stands on the line between its fields. As the relief comes or goes the flights are hidden until they are drawn on the new ground, for 3 seconds at most
+- **Satellite** - Draw the ground from satellite imagery (Sentinel-2 cloudless 2024 by EOX, see [Satellite Imagery](#satellite-imagery)) instead of the dark map: over its land and water, under its roads, borders and place names, the flights, the heatmap and the Aviation Data overlay, which works over it too. The imagery is darkened and made paler so the heat, the colour layers and the labels made for the dark map still read. It is sharp to about `z` 14 and stretched further in, where the roads and the Aviation Data layer show the airfields better. In the 3D view it lies on the relief under the shading. Off on a first visit; kept in the link and the saved session. The browser fetches the tiles from EOX only while it is on, and the map credits them only then, in an exported image too. Should its code fail to load, the switch turns back off and says so. On a phone it is in the Layers sheet
+- **Reset view** - Go back to what a first visit shows: the newest year and all aircraft, the heatmap and airports on and the other layers, 3D, the globe and the satellite imagery off, nothing selected, the statistics closed, and the map flat and north up over all the flights. The saved session and the link follow. While there is nothing to reset, on a first visit and after a reset until the page or the map changes, it is dimmed and a press does nothing. On a phone it is in the More sheet; during a replay it is disabled like the filters
 - A map attribution, on the map at every width; it steps aside only while a sheet or the statistics panel covers the map it credits. There are no zoom buttons: use the scroll wheel, pinch, double click, or the keyboard once the map has focus
 - Below 768 px the two control columns are replaced by a bottom bar with five tabs. Layers, Filter and More open a sheet; Stats and Wrapped open their panel directly. Escape closes an open sheet, and Tab stays inside it. Replay takes over the bottom edge and the bar steps aside until it ends
 
@@ -836,6 +845,9 @@ browser's address bar or use the copy-link button:
   which is every link from before the map could turn, opens north up, flat
   and in Mercator
 - 3D view (`?d=1`), left out while the flights are drawn flat
+- Satellite imagery (`?s=1`), left out while the ground is the dark map. It
+  is a parameter of its own, like `g` and `d`, so the nine flags of `v` and
+  every older link stay as they were
 - Debug logging in the browser console (`?debug=true`)
 
 **Example URLs:**
@@ -936,6 +948,25 @@ this [attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution
   right 2015. All rights reserved;
 - United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data
   courtesy of the U.S. Geological Survey.
+
+### Satellite Imagery
+
+The Satellite switch draws
+[Sentinel-2 cloudless 2024](https://cloudless.eox.at) by EOX IT Services
+GmbH, a cloud-free mosaic of the
+Copernicus Sentinel-2 images of 2024 with pixels of 10 m, which the page
+fetches from `tiles.maps.eox.at` without a key. The map shows it to tile
+level 14 (about 6 m a pixel at 50 degrees north, `z` 14 in the UI), the
+last that adds detail, and stretches it beyond. It is licensed
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) for
+non-commercial use, which this site is; a commercial one would need another
+source. The map credits it while it is drawn, and an exported
+image carries the credit:
+
+> EOxCloudless [cloudless.eox.at](https://cloudless.eox.at) by EOX IT
+> Services GmbH (Contains modified Copernicus Sentinel data 2024)
+
+Nothing about the imagery is part of the build.
 
 ### Data Export
 

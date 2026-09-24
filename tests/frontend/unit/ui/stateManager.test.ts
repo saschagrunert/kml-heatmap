@@ -217,6 +217,7 @@ describe("StateManager", () => {
         "aviationVisible",
         "globeVisible",
         "threeDVisible",
+        "satelliteVisible",
         "statsPanelVisible",
         "wrappedVisible",
       ]);
@@ -502,6 +503,7 @@ describe("StateManager", () => {
         pitch: 0,
         globeVisible: false,
         threeDVisible: false,
+        satelliteVisible: false,
         heatmapVisible: true,
         altitudeVisible: false,
         airspeedVisible: false,
@@ -716,6 +718,26 @@ describe("StateManager", () => {
       });
 
       expect(stateManager.loadState()).toEqual(state);
+    });
+
+    it("keeps the satellite imagery through the saved state and the link", () => {
+      mockApp.store.set("satelliteVisible", true);
+      stateManager.saveMapState();
+
+      expect(savedState()["satelliteVisible"]).toBe(true);
+      const link = vi.mocked(history.replaceState).mock.calls.at(-1)![2];
+      expect(new URLSearchParams(link as string).get("s")).toBe("1");
+      // From this device, and from the link alone
+      expect(stateManager.loadState()).toMatchObject({
+        satelliteVisible: true,
+      });
+      mockLocalStorage = {};
+      setLocation(link as string);
+      expect(stateManager.loadState()).toMatchObject({
+        satelliteVisible: true,
+      });
+      // Anything but a flag is dropped
+      expect(sanitizeSavedState({ satelliteVisible: "1" })).toEqual({});
     });
 
     it("returns null if no state is available", () => {

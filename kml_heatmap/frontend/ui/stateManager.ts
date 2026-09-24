@@ -42,6 +42,7 @@ export const BOOLEAN_KEYS = [
   "aviationVisible",
   "globeVisible",
   "threeDVisible",
+  "satelliteVisible",
   "isolateSelection",
   "statsPanelVisible",
   "wrappedVisible",
@@ -133,6 +134,7 @@ export class StateManager {
       "aviationVisible",
       "globeVisible",
       "threeDVisible",
+      "satelliteVisible",
       "statsPanelVisible",
       "wrappedVisible",
     ];
@@ -212,6 +214,7 @@ export class StateManager {
       pitch: view.pitch,
       globeVisible: this.app.globeVisible,
       threeDVisible: this.app.threeDVisible,
+      satelliteVisible: this.app.satelliteVisible,
       heatmapVisible: this.app.heatmapVisible,
       altitudeVisible: this.app.altitudeVisible,
       airspeedVisible: this.app.airspeedVisible,

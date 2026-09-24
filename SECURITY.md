@@ -23,7 +23,8 @@ is a public client-side key that the browser needs to load the base map, so
 it is published with the site by design. The `site` job of the `test`
 workflow reads it from the repository secrets; the generated site itself is
 not committed. Reports about this key being visible on the site are not
-security issues. The aviation overlay (open flightmaps) needs no key.
+security issues. The aviation overlay (open flightmaps) and the satellite
+imagery (EOX) need no key.
 
 ## Automated checks
 
@@ -42,8 +43,11 @@ and workers load only from the site itself; there is no `'unsafe-inline'`
 for scripts or styles. Only `connect-src` names foreign hosts: CARTO
 (`basemaps.cartocdn.com` for the style, `*.basemaps.cartocdn.com` for the
 tiles, glyphs and sprite of the base map), the open flightmaps tile server
-(`nwy-tiles-api.prod.newaydata.com`) and the elevation tiles on AWS
-(`s3.amazonaws.com`) the 3D view draws its relief from. MapLibre fetches
+(`nwy-tiles-api.prod.newaydata.com`), the elevation tiles on AWS
+(`s3.amazonaws.com`) the 3D view draws its relief from, and EOX's satellite
+imagery (`tiles.maps.eox.at`), which the browser asks for only while the
+Satellite switch is on, and which then sees the visitor's address and the
+area in view (see Privacy in the README). MapLibre fetches
 every tile, so `img-src` allows only the site itself, `data:` and `blob:`.
 MapLibre GL JS is published with the
 site as ES modules and starts its worker from one of them, so

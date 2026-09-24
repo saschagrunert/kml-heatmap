@@ -299,8 +299,12 @@ function analyzeBundleComposition(metafile, fileName) {
 // sheet row shown unavailable while there is nothing to reset: the start
 // view it measures and compares the camera with. The button is on the
 // first paint. 140,018 B raw and 46.31 KB gzipped together with the relief.
+// The Satellite switch fits without a raise: its button, sheet row, store
+// key and link parameter add 1.06 KB (141,095 B raw, 46.6 KB gzipped),
+// leaving about 200 B; the imagery itself waits in the feature bundle.
 const BUDGET_APP = { raw: 138 * 1024, gzip: 47 * 1024 };
-// The feature bundle is fetched only when replay or Wrapped is opened, so it
+// The feature bundle is fetched only when replay or Wrapped is opened, the
+// 3D view first draws its relief or the Satellite switch is first on, so it
 // is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing.
 // Raised from 40 KB for the replay in the 3D view: the trail drawn as
@@ -318,7 +322,14 @@ const BUDGET_APP = { raw: 138 * 1024, gzip: 47 * 1024 };
 // (ui/terrain.ts), which wait here for the first zoom that draws them
 // rather than in the first visit, and the replay's curve lifted anew as
 // the relief comes or goes: 47,861 B raw and 16,495 B gzipped.
-const BUDGET_FEATURES = { raw: 48 * 1024, gzip: 17 * 1024 };
+// Raised from 48 KB for the satellite imagery (ui/satellite.ts): its source
+// with the credit the licence asks for, its place in the base style and its
+// toned-down paint, 1.7 KB that wait here for the first time the switch is
+// on rather than in the first visit, which has no room for them:
+// 49,765 B raw and 17,181 B gzipped. The gzipped budget goes to 18 KB
+// with it: 17 KB would leave 227 B, and CI's zlib compresses these bundles
+// about 170 B worse than a local Node.
+const BUDGET_FEATURES = { raw: 49 * 1024, gzip: 18 * 1024 };
 
 // The year worker's bundle is fetched by every visit, but next to the first
 // year file rather than ahead of the app, so it holds up nothing on the page.

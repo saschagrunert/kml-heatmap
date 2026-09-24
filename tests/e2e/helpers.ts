@@ -272,8 +272,9 @@ const LAYER_CONTROLS = {
   altitude: { buttonId: "altitude-btn", rowId: "altitude" },
   airspeed: { buttonId: "airspeed-btn", rowId: "speed" },
   aviation: { buttonId: "aviation-btn", rowId: "aviation" },
-  // Not a layer, but a switch of the same kind in the same two places
+  // Not layers, but switches of the same kind in the same two places
   globe: { buttonId: "globe-btn", rowId: "globe" },
+  satellite: { buttonId: "satellite-btn", rowId: "satellite" },
 } as const;
 
 export type LayerName = keyof typeof LAYER_CONTROLS;

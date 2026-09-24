@@ -20,8 +20,10 @@ import {
   waitForYearFilter,
 } from "./helpers";
 import {
+  attributionControl,
   getCenter,
   getOrientation,
+  satelliteOnMap,
   setOrientation,
   waitForMapReady,
 } from "./map";
@@ -549,5 +551,47 @@ test.describe("State Persistence", () => {
     for (const key of ["a", "p", "v", "g", "d", "b", "t"]) {
       expect(params.has(key), key).toBe(false);
     }
+  });
+
+  test("the satellite switch shows the imagery and its credit, kept in the link until Reset view", async ({
+    page,
+  }) => {
+    const mobile = await usesMobileBar(page);
+    const credit = attributionControl(page);
+    await expect(credit).not.toContainText("EOxCloudless");
+
+    await toggleLayer(page, "satellite");
+
+    await expect.poll(() => satelliteOnMap(page)).toBe(true);
+    await expect(credit).toContainText("EOxCloudless");
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("s"))
+      .toBe("1");
+
+    // The link opens with it on, and so does this device's saved state
+    await gotoApp(page, new URL(page.url()).search);
+    await expect(layerButton(page, "satellite")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect.poll(() => satelliteOnMap(page)).toBe(true);
+    await expect(credit).toContainText("EOxCloudless");
+
+    // Part of what a first visit shows, which has it off
+    if (mobile) {
+      await openMobileSheet(page, "more");
+      await page.locator('.sheet-row[data-row="reset-view"]').click();
+    } else {
+      await page.getByRole("button", { name: /^Reset view/ }).click();
+    }
+    await expect(layerButton(page, "satellite")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    await expect.poll(() => satelliteOnMap(page)).toBe(false);
+    await expect(credit).not.toContainText("EOxCloudless");
+    await expect
+      .poll(() => new URL(page.url()).searchParams.has("s"))
+      .toBe(false);
   });
 });

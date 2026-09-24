@@ -3,9 +3,10 @@
  *
  * The page carries its own JavaScript and CSS (see scripts/vendor.js), so
  * the only third parties left are CARTO, for the base map, the open
- * flightmaps tile server, and AWS for the elevation tiles of the 3D view's
- * relief. An outage of any used to fail the whole suite and a slow one made
- * timings unpredictable, so none is ever reached: the base style is
+ * flightmaps tile server, AWS for the elevation tiles of the 3D view's
+ * relief, and EOX for the satellite imagery. An outage of any used to fail
+ * the whole suite and a slow one made timings unpredictable, so none is
+ * ever reached: the base style is
  * answered with one that draws a background and asks for nothing else,
  * every elevation tile with flat ground (TERRAIN_ELEVATION_M), or a slope
  * for a spec that asks for one (`terrain`), and every other tile with a
@@ -185,6 +186,9 @@ const TILE_HOSTS = [
   /^tiles(-[a-d])?\.basemaps\.cartocdn\.com$/,
   /^nwy-tiles-api\.prod\.newaydata\.com$/,
   /^s3\.amazonaws\.com$/,
+  // The satellite imagery: JPEG tiles, but the map decodes the stub's PNG
+  // by its content, not by the name
+  /^tiles\.maps\.eox\.at$/,
 ];
 
 /** The site under test, served by the webServer in playwright.config.ts */

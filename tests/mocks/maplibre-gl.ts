@@ -249,6 +249,8 @@ export interface MockLayer {
   id: string;
   type: string;
   source?: string;
+  /** The `source-layer` of the spec, under the name the map's layers use */
+  sourceLayer?: string;
   minzoom?: number;
   maxzoom?: number;
   layout: Record<string, unknown>;
@@ -263,8 +265,10 @@ const URL_STYLE_LAYERS: MockLayer[] = [
 ];
 
 function toMockLayer(layer: Record<string, unknown>): MockLayer {
+  const sourceLayer = layer["source-layer"];
   return {
     ...(layer as unknown as MockLayer),
+    ...(typeof sourceLayer === "string" && { sourceLayer }),
     layout: { ...(layer["layout"] as Record<string, unknown> | undefined) },
     paint: { ...(layer["paint"] as Record<string, unknown> | undefined) },
   };
