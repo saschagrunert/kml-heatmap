@@ -2,7 +2,7 @@
 
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .airport_lookup import extract_icao_codes_from_name, lookup_airport_country
 from .airports import extract_airport_name
@@ -12,7 +12,7 @@ from .logger import logger
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .types import AirportData
+    from .types import AirportData, AirportMarker, SiteMetadata
 
 __all__ = [
     "export_airports_data",
@@ -74,7 +74,7 @@ def export_airports_data(
         # No flight count here: the frontend derives it per airport from the
         # path info of the active year/aircraft filter, so an exported count
         # would only ever be shown for the instant before the first refresh
-        airport_data: dict[str, Any] = {
+        airport_data: AirportMarker = {
             "lat": apt["lat"],
             "lon": apt["lon"],
             "name": airport_name,
@@ -121,7 +121,7 @@ def export_metadata(
     if not math.isfinite(max_groundspeed_knots):
         max_groundspeed_knots = 0.0
 
-    meta_data: dict[str, Any] = {
+    meta_data: SiteMetadata = {
         "min_groundspeed_knots": round(min_groundspeed_knots, 1),
         "max_groundspeed_knots": round(max_groundspeed_knots, 1),
         "available_years": sorted(available_years),

@@ -114,6 +114,11 @@ export function isPathInfo(value: unknown): value is PathInfo {
   ) {
     return false;
   }
+  // The climb, from the unrounded altitudes; never negative
+  const gain = value["altitude_gain_ft"];
+  if (!optional(gain, isFiniteNumber) || (gain !== undefined && gain < 0)) {
+    return false;
+  }
   // null values are omitted by the exporter: optional means absent or typed
   return (
     optional(value["aircraft_registration"], isString) &&
@@ -310,6 +315,7 @@ const sampleYear2025: RawYearData = {
       end_airport: "EDDM Munich",
       min_altitude_ft: 2950.5,
       max_altitude_ft: 4010,
+      altitude_gain_ft: 1059.5,
     },
     // A path without airports, aircraft or altitudes has only an id and a year
     { id: 5, year: 2025 },
@@ -469,6 +475,16 @@ describe("export contract (inline new-format sample)", () => {
     expect(isPathInfo(halfRange)).toBe(false);
     expect(isPathInfo({ ...full, min_altitude_ft: 5000 })).toBe(false);
     expect(isPathInfo({ ...full, min_altitude_ft: null })).toBe(false);
+  });
+
+  it("takes the altitude gain as optional, but only as a climb", () => {
+    const [full] = sampleYear2025.path_info;
+    const { altitude_gain_ft: _gain, ...withoutGain } = full!;
+    expect(isPathInfo(withoutGain)).toBe(true);
+    expect(isPathInfo({ ...full, altitude_gain_ft: 0 })).toBe(true);
+    expect(isPathInfo({ ...full, altitude_gain_ft: -1 })).toBe(false);
+    expect(isPathInfo({ ...full, altitude_gain_ft: null })).toBe(false);
+    expect(isPathInfo({ ...full, altitude_gain_ft: "100" })).toBe(false);
   });
 
   it("rejects path info with removed fields or an id out of range", () => {

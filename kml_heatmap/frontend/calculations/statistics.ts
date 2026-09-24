@@ -203,20 +203,24 @@ export function aggregateAircraft(
   segments?: PathSegment[],
   secondsByPath?: Map<number, number>,
 ): AircraftAggregate[] {
-  const aircraftMap: Record<string, AircraftAggregate> = {};
+  // A Map, as a registration is data: "constructor" is no key of it
+  const aircraftMap = new Map<string, AircraftAggregate>();
   const pathToReg = new Map<number, string>();
 
   for (const path of pathInfo) {
     if (path.aircraft_registration) {
       const reg = path.aircraft_registration;
       pathToReg.set(path.id, reg);
-      const entry = aircraftMap[reg] ?? {
-        registration: reg,
-        type: path.aircraft_type,
-        flights: 0,
-        flight_time_seconds: 0,
-      };
-      aircraftMap[reg] = entry;
+      let entry = aircraftMap.get(reg);
+      if (!entry) {
+        entry = {
+          registration: reg,
+          type: path.aircraft_type,
+          flights: 0,
+          flight_time_seconds: 0,
+        };
+        aircraftMap.set(reg, entry);
+      }
       entry.flights += 1;
       // Mixed sources: a later path may carry the type the first one lacks
       entry.type ??= path.aircraft_type;
@@ -228,12 +232,10 @@ export function aggregateAircraft(
       secondsByPath ??
       perPathSeconds(segments ?? [], new Set(pathToReg.keys()));
     for (const [pathId, secs] of seconds) {
-      const reg = pathToReg.get(pathId);
-      if (reg && aircraftMap[reg]) {
-        aircraftMap[reg].flight_time_seconds! += secs;
-      }
+      const entry = aircraftMap.get(pathToReg.get(pathId) ?? "");
+      if (entry) entry.flight_time_seconds! += secs;
     }
-    for (const agg of Object.values(aircraftMap)) {
+    for (const agg of aircraftMap.values()) {
       if (agg.flight_time_seconds && agg.flight_time_seconds > 0) {
         agg.flight_time_str = formatFlightTime(agg.flight_time_seconds);
       }
@@ -241,7 +243,7 @@ export function aggregateAircraft(
   }
 
   // Sort by flight count descending
-  return Object.values(aircraftMap).sort((a, b) => b.flights - a.flights);
+  return [...aircraftMap.values()].sort((a, b) => b.flights - a.flights);
 }
 
 /**
@@ -330,33 +332,64 @@ export function altitudeRangeFt(
 }
 
 /**
+ * Smallest climb or descent the gain of a path without an exact one counts.
+ * Segment altitudes are rounded to 100 ft, so a level flight on a rounding
+ * boundary flips between two values; a single 100 ft step is that noise.
+ */
+const GAIN_HYSTERESIS_FT = 200;
+
+/**
  * Calculate altitude statistics from segments (altitude_ft, converted)
  * @param segments - Array of segment objects
- * @param paths - Path info carrying the exact per-path altitude range
+ * @param paths - Path info carrying the exact per-path altitude range and gain
  * @returns Altitude statistics in meters
  */
 export function calculateAltitudeStats(
   segments: PathSegment[],
   paths?: PathInfo[],
 ): AltitudeStats {
-  let gain = 0;
-  let prevAlt: number | null = null;
-  let prevPathId: number | null = null;
+  const exact = paths ? pathsById(paths) : null;
+  let gainFt = 0;
+  // The climbs of the current path, used only when it has no exact gain
+  let pathGainFt = 0;
+  let pathId = NaN;
+  let low = NaN;
+  let high = NaN;
+
+  // A climb from its low to its high counts once it ends
+  const closeClimb = (): void => {
+    if (high - low >= GAIN_HYSTERESIS_FT) pathGainFt += high - low;
+  };
+  const closePath = (): void => {
+    closeClimb();
+    const info = exact?.get(pathId);
+    gainFt += info?.altitude_gain_ft ?? pathGainFt;
+    pathGainFt = 0;
+  };
 
   for (const segment of segments) {
-    // Altitude gain is accumulated per path (segments are grouped per
-    // path): the previous altitude resets at every path boundary
-    if (segment.path_id !== prevPathId) {
-      prevPathId = segment.path_id;
-      prevAlt = null;
+    // Altitude gain is accumulated per path (segments are grouped per path)
+    if (segment.path_id !== pathId) {
+      if (!Number.isNaN(pathId)) closePath();
+      pathId = segment.path_id;
+      low = high = NaN;
     }
-    if (segment.altitude_ft === undefined) continue;
-    const alt = segment.altitude_ft * FEET_TO_METERS;
-    if (prevAlt !== null && alt > prevAlt) {
-      gain += alt - prevAlt;
+    const alt = segment.altitude_ft;
+    if (alt === undefined) continue;
+    if (Number.isNaN(low)) {
+      low = high = alt;
+    } else if (alt > high) {
+      high = alt;
+    } else if (high - alt >= GAIN_HYSTERESIS_FT) {
+      // A descent of the threshold ends the climb, and the next starts here
+      closeClimb();
+      low = high = alt;
+    } else if (alt < low) {
+      low = high = alt;
     }
-    prevAlt = alt;
   }
+  if (!Number.isNaN(pathId)) closePath();
+  const gain = gainFt * FEET_TO_METERS;
 
   const range = altitudeRangeFt(segments, paths);
   if (range === null) {

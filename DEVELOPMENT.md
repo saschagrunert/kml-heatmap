@@ -67,8 +67,10 @@ full map rendering pipeline including map initialization, layer toggles,
 filters, statistics panel, wrapped modal, airport markers and replay. The
 `desktop` project runs every spec but `mobile.spec.ts` and `visual.spec.ts` in
 Chromium. The `mobile` project runs `mobile.spec.ts` and the viewport
-independent specs (`core`, `layers`, `state`) on a phone viewport, and the
-`webkit` project runs `core` and `mobile` on an emulated iPhone. The `visual`
+independent specs (`core`, `layers`, `state`) on a phone viewport. The
+`webkit` project runs the same specs as `mobile` on an emulated iPhone, and
+`webkit-desktop` runs `orientation` and `replay`, which drive the desktop
+controls, in a desktop Safari viewport. The `visual`
 project compares screenshots of a fixture site and only exists inside the
 Playwright image (or with `VISUAL_SNAPSHOTS=1`), so a plain run leaves it out
 (see CONTRIBUTING.md). Every page is scanned for accessibility violations with
@@ -83,14 +85,16 @@ asks it for the map's locators, zoom, layers and popups instead of naming a
 are the ones of shared links, one higher than MapLibre's own (see
 `ZOOM_OFFSET` in `utils/constants.ts`). A few specs depend on whether the site
 was built with `CARTO_API_KEY` (any value works) and skip otherwise; CI tests
-a site with a dummy key and one without.
+a site with a dummy key and, for the specs about the base map requests
+(`base-style`, `error-free`, `layers`) on the desktop, one without.
 
 The tests run against `docs/` (the `visual` project against `visual-site/`,
 with the same checks), which must be built from the current sources first. A
 fixture every spec gets (`tests/e2e/site-check.ts`) compares the build hash
 in `docs/mapApp.bundle.js` with the checkout (the frontend sources, the
-stylesheets, the build configuration and the pinned esbuild and Lucide
-versions, see `scripts/README.md`) and fails the tests with a hint when they
+stylesheets, the build configuration and the pinned versions of esbuild,
+Lucide and the vendored maplibre-gl, html-to-image and flag-icons, see
+`scripts/README.md`) and fails the tests with a hint when they
 differ. It also fails them when `docs/index.html` is older than the Python
 package, its templates and static assets or `package-lock.json`, and when
 `E2E_API_KEYS` (`dummy` or `none`, set by CI) does not match whether
@@ -112,7 +116,7 @@ npm run test:e2e:mobile
 # job of .github/workflows/test.yml runs; scripts/check_locks.py keeps the
 # reference here in step with it)
 nix-shell -p chromium python3 --run 'CHROMIUM_PATH=$(which chromium) npm run test:e2e -- --project=desktop --project=mobile'
-podman run --rm --userns=keep-id -v "$PWD:/work" -w /work mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27 npx playwright test --project=webkit
+podman run --rm --userns=keep-id -v "$PWD:/work" -w /work mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27 npx playwright test --project=webkit --project=webkit-desktop
 ```
 
 Tests are located in `tests/e2e/` and configured via `playwright.config.ts`.
@@ -130,11 +134,13 @@ their traces in `test-results/`, and every run writes an HTML report to
 
 - **Format**: ES modules with code splitting; the page has to be served
   over HTTP (`make serve`), it does not work when opened from disk, and the
-  map needs WebGL
+  map needs WebGL 2
 - **Production**: Minified bundles for optimal performance; the build fails
   when `mapApp.bundle.js` and `shared.bundle.js` together,
-  `features.bundle.js` or `yearWorker.bundle.js` exceed their size budget in
-  `build.js`
+  `features.bundle.js`, `yearWorker.bundle.js` or the vendored MapLibre and
+  html-to-image files exceed their size budget in `build.js`. Each has a
+  budget for its bytes as written and one for them gzipped (level 9); the
+  comment above the budgets says how much room they leave and why
 - **Development**: Unminified for debugging
 - Both write a source map next to the bundle; it holds the mappings and file
   names only, not the TypeScript sources
@@ -207,15 +213,19 @@ none and the statistics rail falls back to the ISO country code.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e '.[test,dev]'
+pip install --require-hashes -r requirements-test.lock -r requirements-build.lock
+pip install --no-deps --no-build-isolation -e .
 ```
 
 The dependencies are declared once, in `pyproject.toml`: the runtime
-dependencies plus the `test` and `dev` extras. The CI and the container images
-install the hashed lock files compiled from it (`requirements.lock`,
-`requirements-test.lock`) instead; regenerate them with `make lock` after
-changing the dependencies. The test lock is compiled with the runtime lock
-as a constraint, so a package both of them pin has the same version in each.
+dependencies plus the `test` and `dev` extras. CI, the container image and the
+setup above install the hashed lock files compiled from it instead
+(`requirements.lock`, `requirements-test.lock` and, for the setuptools that
+builds the package, `requirements-build.lock`), and the package on top with
+`--no-deps`, so nothing is resolved from the ranges. Regenerate the lock
+files with `make lock` after changing the dependencies. The test lock is
+compiled with the runtime lock as a constraint, so a package both of them
+pin has the same version in each.
 
 **Testing:**
 
@@ -226,12 +236,14 @@ is fast and readable. The flags used by CI and `make test` are:
 pytest                                          # Run all tests
 pytest tests/test_parser.py                     # Run specific test file
 pytest -x                                       # Stop on first failure
-pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml --cov-report=term
-pytest --cov=kml_heatmap --cov-report=html      # HTML coverage report (htmlcov/)
+pytest -n auto --cov --cov-branch --cov-report=xml --cov-report=term
+pytest --cov --cov-report=html                  # HTML coverage report (htmlcov/)
 ```
 
-A run with `--cov` fails below the `fail_under` floor in `pyproject.toml`,
-which is kept one to three points below what the suite reaches.
+A bare `--cov` measures what `[tool.coverage.run]` in `pyproject.toml` names:
+the package and `scripts/`, whose pre-push hook and lock check are gates of
+their own. A run with `--cov` fails below the `fail_under` floor there, which
+is kept one to three points below what the suite reaches.
 Property-based tests use [Hypothesis](https://hypothesis.readthedocs.io/).
 
 **Checks:**

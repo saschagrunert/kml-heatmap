@@ -162,7 +162,7 @@ describe("listFlights", () => {
   it("leaves the selection alone while replay runs", () => {
     const { popup, container } = openPopup();
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
-    mockApp.replayState.active = true;
+    mockApp.replayActive = true;
 
     buttons(container)[0]!.click();
 

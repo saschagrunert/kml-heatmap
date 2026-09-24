@@ -254,6 +254,47 @@ interface Download {
   before: number;
   /** Still in flight: neither arrived nor failed */
   pending: boolean;
+  /** Part of the indicator; not once every caller has given up on it */
+  held: boolean;
+  /** Callers waiting for it; one without a signal waits to the end */
+  waiters: number;
+}
+
+/**
+ * Name of the error a year file of another format fails with (decodeYear).
+ * Spelled out in both places: an import of the other module would move it
+ * into a chunk of its own, which the page would then load up front. A page
+ * that a cache kept next to newer data is what usually causes it.
+ */
+const STALE_DATA_ERROR = "StaleDataError";
+
+/** The value, if it passes the guard; the file's name in the error if not */
+function checked<T>(
+  json: unknown,
+  guard: (value: unknown) => value is T,
+  file: string,
+): T {
+  if (!guard(json)) throw new Error("Unexpected contents of " + file);
+  return json;
+}
+
+/** The fields of airports.json that the page reads */
+function isAirports(value: unknown): value is { airports: Airport[] } {
+  const airports = (value as { airports?: unknown } | null)?.airports;
+  return (
+    Array.isArray(airports) &&
+    airports.every(
+      (airport: Partial<Airport> | null) =>
+        typeof airport?.name === "string" &&
+        typeof airport.lat === "number" &&
+        typeof airport.lon === "number",
+    )
+  );
+}
+
+/** The field of metadata.json that the page cannot do without */
+function isMetadata(value: unknown): value is Metadata {
+  return Array.isArray((value as Partial<Metadata> | null)?.available_years);
 }
 
 /**
@@ -298,13 +339,17 @@ export class DataLoader {
   private destroyed = false;
   /** The year files of the loading operation; emptied with the indicator */
   private downloads = new Map<string, Download>();
+  /** Every year file in flight, shown or not */
+  private yearDownloads = new Map<string, Download>();
+  /** A year file was written by another release than this page's */
+  private staleData = false;
   /** The request in flight, so that concurrent callers share it */
   private airportsRequest: Promise<{ airports: Airport[] }> | null = null;
   private metadataRequest: Promise<Metadata> | null = null;
   private showLoading: (state: LoadingState) => void;
   private hideLoading: () => void;
   private getWindow: () => Window & typeof globalThis;
-  private onLoadError: (failedYears: string[]) => void;
+  private onLoadError: NonNullable<DataLoaderOptions["onLoadError"]>;
 
   constructor(options: DataLoaderOptions = {}) {
     this.dataDir = options.dataDir || "data";
@@ -383,12 +428,40 @@ export class DataLoader {
       received: 0,
       before: 0,
       pending: true,
+      held: false,
+      waiters: 0,
     };
-    this.loadingDepth++;
-    this.restartOperation();
-    this.downloads.set(year, download);
-    this.report();
+    this.yearDownloads.set(year, download);
     return download;
+  }
+
+  /**
+   * A caller waits for a year file. The file is part of the indicator for
+   * as long as one does: once each has aborted its signal (it switched to
+   * another year, one that may be cached), the indicator lets go of the
+   * file, which still downloads into the cache. A caller that comes back
+   * for it before it has arrived brings it back.
+   */
+  private wait(year: string, download: Download, signal?: AbortSignal): void {
+    download.waiters += signal ? 1 : Infinity;
+    if (!download.held) {
+      download.held = true;
+      this.loadingDepth++;
+      this.restartOperation();
+      this.downloads.set(year, download);
+      this.report();
+    }
+    signal?.addEventListener(
+      "abort",
+      () => {
+        if (--download.waiters > 0 || !download.held) return;
+        download.held = false;
+        this.downloads.delete(year);
+        this.restartOperation();
+        this.endLoading();
+      },
+      { once: true },
+    );
   }
 
   /** More of a year file has arrived */
@@ -411,7 +484,8 @@ export class DataLoader {
       // Counted up to its size already, so nothing on screen changes
       if (received >= size) return;
     }
-    this.report();
+    // Counted, not shown, while no caller waits for it (see wait)
+    if (download.held) this.report();
   }
 
   /**
@@ -420,8 +494,16 @@ export class DataLoader {
    * still advances file by file. One that failed is no part of what is
    * being loaded any more, so the rest goes on as a new operation.
    */
-  private endDownload(download: Download, arrived: boolean): void {
+  private endDownload(
+    year: string,
+    download: Download,
+    arrived: boolean,
+  ): void {
     download.pending = false;
+    this.yearDownloads.delete(year);
+    // Given up on by every caller: it left the indicator then
+    if (!download.held) return;
+    download.held = false;
     const { size, received } = download;
     if (!arrived) {
       this.restartOperation();
@@ -450,7 +532,10 @@ export class DataLoader {
    * @param year - Year string or 'all'
    * @returns Data object or null on error
    */
-  async loadData(year: string = "all"): Promise<KMLDataset | null> {
+  async loadData(
+    year: string = "all",
+    signal?: AbortSignal,
+  ): Promise<KMLDataset | null> {
     // Security: Validate input to prevent path traversal and arbitrary file loading
     if (!isValidYear(year)) {
       logError(`Invalid year parameter: ${year}`);
@@ -461,9 +546,11 @@ export class DataLoader {
       return this.loadAndCombineAllYears();
     }
 
-    const data = await this.getYear(year);
-    if (!data && !this.destroyed) {
-      this.onLoadError([year]);
+    const data = await this.getYear(year, signal);
+    // A caller that gave up on the year has moved on: its failure is news
+    // to nobody
+    if (!data && !this.destroyed && !signal?.aborted) {
+      this.onLoadError([year], this.staleData);
     }
     return data;
   }
@@ -523,8 +610,14 @@ export class DataLoader {
   /**
    * Cached and de-duplicated single-year load
    */
-  private getYear(year: string): Promise<KMLDataset | null> {
-    return this.shared(year, () => this.loadYear(year));
+  private getYear(
+    year: string,
+    signal?: AbortSignal,
+  ): Promise<KMLDataset | null> {
+    const promise = this.shared(year, () => this.loadYear(year));
+    const download = this.yearDownloads.get(year);
+    if (download) this.wait(year, download, signal);
+    return promise;
   }
 
   /** The cached dataset of `key`, or else the one request for it in flight */
@@ -577,9 +670,12 @@ export class DataLoader {
       return data;
     } catch (error) {
       logError("Error loading data for year " + year + ":", error);
+      if ((error as Error | null)?.name === STALE_DATA_ERROR) {
+        this.staleData = true;
+      }
       return null;
     } finally {
-      this.endDownload(download, arrived);
+      this.endDownload(year, download, arrived);
     }
   }
 
@@ -616,7 +712,7 @@ export class DataLoader {
 
       const failedYears = years.filter((_, i) => !yearDatasets[i]);
       if (failedYears.length > 0 && !this.destroyed) {
-        this.onLoadError(failedYears);
+        this.onLoadError(failedYears, this.staleData);
       }
       if (years.length > 0 && failedYears.length === years.length) {
         return null;
@@ -653,7 +749,7 @@ export class DataLoader {
       if (!win.KML_AIRPORTS) {
         this.airportsRequest ??= this.fetchJson(
           this.dataDir + "/airports.json",
-        ) as Promise<{ airports: Airport[] }>;
+        ).then((json) => checked(json, isAirports, "airports.json"));
         win.KML_AIRPORTS = await this.airportsRequest;
       }
       return win.KML_AIRPORTS?.airports || [];
@@ -675,7 +771,7 @@ export class DataLoader {
       if (!win.KML_METADATA) {
         this.metadataRequest ??= this.fetchJson(
           this.dataDir + "/metadata.json",
-        ) as Promise<Metadata>;
+        ).then((json) => checked(json, isMetadata, "metadata.json"));
         win.KML_METADATA = await this.metadataRequest;
       }
       return win.KML_METADATA || null;

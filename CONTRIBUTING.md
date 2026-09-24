@@ -15,13 +15,22 @@ git clone https://github.com/saschagrunert/kml-heatmap.git
 cd kml-heatmap
 
 python -m venv .venv && source .venv/bin/activate
-pip install -e '.[test,dev]'
+pip install --require-hashes -r requirements-test.lock -r requirements-build.lock
+pip install --no-deps --no-build-isolation -e .
 npm ci
 npm run build                 # frontend bundles (gitignored)
 
 pip install pre-commit && pre-commit install
 make hooks                    # pre-push check for real flight dates
 ```
+
+The lock files are what CI installs: `requirements-test.lock` pins the test
+and development tools together with the runtime dependencies, each with its
+hashes, and `requirements-build.lock` the setuptools that builds the package.
+The package itself is then installed on top without resolving anything
+again, so the virtual environment has exactly CI's versions.
+`pip install -e '.[test,dev]'` would resolve the ranges in `pyproject.toml`
+anew and can pick newer releases than CI tests with.
 
 The pre-commit hooks run ruff (check and format), prettier, typos, gitleaks and
 the whitespace fixers on every commit. When a commit touches `data/`, they also
@@ -30,8 +39,9 @@ fixers, the hooks run the tools from your own environment rather than from a
 pinned mirror, so no hook revision can drift on its own. ruff and the
 obfuscation check are resolved off `$PATH` and prettier out of `node_modules`,
 so commit with the virtual environment active and after `npm ci` to get the
-versions CI installs. typos is in neither lock file; the hook skips it when it
-is not installed and the CI job is the one that has to pass.
+versions CI installs. typos is in neither lock file; the hook and `make lint`
+skip it with a warning when it is not installed, and the CI job is the one
+that has to pass.
 
 npm 11 skips the install scripts of dependencies that `allowScripts` in
 `package.json` does not list. esbuild is the only dependency with one, and it
@@ -70,10 +80,10 @@ parentheses back is undone on the next `make format`.
   GitHub Pages, in its `site` and `deploy` jobs, which only start once every
   test job has passed and only while the commit is still the head of `main`
   (a re-run of an older run does not publish). The `unit` and `e2e` jobs
-  build their own copies; the e2e jobs test one with a dummy tile API key and
-  one without. The repository's Pages source has to be "GitHub Actions"
-  (Settings > Pages). Set it by hand: the workflow token is not allowed to
-  change it.
+  build their own copies; the e2e jobs test one with a dummy tile API key
+  and, for the specs that depend on it, one without. The repository's Pages
+  source has to be "GitHub Actions" (Settings > Pages). Set it by hand: the
+  workflow token is not allowed to change it.
 - **Never commit un-obfuscated KML files.** Generating a site no longer
   rewrites them: run `make obfuscate` after adding flights to `data/` (or
   pass `--obfuscate-inputs`). The pre-commit hook, `make check-obfuscation`

@@ -12,6 +12,8 @@ export class FilterManager {
   private requestId = 0;
   /** Request id of the latest year change */
   private yearRequestId = 0;
+  /** Aborted by the next year switch: this one has been replaced */
+  private yearLoad: AbortController | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -84,8 +86,15 @@ export class FilterManager {
     const requestId = ++this.requestId;
     this.yearRequestId = requestId;
 
+    this.yearLoad?.abort();
+    const yearLoad = new AbortController();
+    this.yearLoad = yearLoad;
+
     // 1. Load the new year's data first so the aircraft list is based on it
-    const data = await this.app.dataManager.loadData(requestedYear);
+    const data = await this.app.dataManager.loadData(
+      requestedYear,
+      yearLoad.signal,
+    );
     if (requestId !== this.requestId) {
       // Superseded. A newer year change owns the dropdown; an aircraft
       // change does not touch it, so it would keep showing a year that is
@@ -108,21 +117,18 @@ export class FilterManager {
     }
 
     // 2. Publish the year, the data and the aircraft list together, so the
-    //    statistics and the airports see the final combination once. The
-    //    dropdown may reset a registration that did not fly in the new year
-    //    back to "all".
+    //    layers, the statistics and the airports see the final combination
+    //    once. The dropdown may reset a registration that did not fly in
+    //    the new year back to "all".
     this.app.store.batch(() => {
       this.app.selectedYear = requestedYear;
       this.app.currentData = data;
       this.updateAircraftDropdown();
       this.clearSelectionUnlessInitializing();
     });
-
-    // 3. Redraw with the final year/aircraft combination
-    await this.app.dataManager.updateLayers(data);
   }
 
-  async filterByAircraft(): Promise<void> {
+  filterByAircraft(): void {
     const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
     if (!aircraftSelect) return;
 
@@ -133,8 +139,6 @@ export class FilterManager {
       this.app.selectedAircraft = aircraftSelect.value;
       this.clearSelectionUnlessInitializing();
     });
-
-    await this.app.dataManager.updateLayers();
   }
 
   /**

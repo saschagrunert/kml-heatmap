@@ -9,7 +9,14 @@ from hypothesis import strategies as st
 from lxml import etree
 
 from kml_heatmap.aircraft import parse_aircraft_from_filename
-from kml_heatmap.constants import ALT_MAX_M, ALT_MIN_M
+from kml_heatmap.constants import (
+    ALT_MAX_M,
+    ALT_MIN_M,
+    LAT_MAX,
+    LAT_MIN,
+    LON_MAX,
+    LON_MIN,
+)
 from kml_heatmap.parser_common import (
     _build_path_metadata_dict,
     empty_placemark_metadata,
@@ -149,10 +156,28 @@ class TestParseCoordinatePoint:
         assert parse_coordinate_point(value, "test.kml") is None
 
     @settings(max_examples=300, deadline=None)
-    @given(st.text())
+    @given(
+        st.one_of(
+            st.text(),
+            # Mostly well-formed, with any number: NaN, infinities, far out
+            st.builds(
+                lambda lon, lat, alt: f"{lon},{lat},{alt}",
+                st.floats(),
+                st.floats(),
+                st.floats(),
+            ),
+        )
+    )
     def test_never_raises(self, text):
         result = parse_coordinate_point(text, "test.kml")
-        assert result is None or (isinstance(result, tuple) and len(result) == 3)
+        if result is None:
+            return
+        lat, lon, alt = result
+        # Whatever the input, only a valid position comes out
+        assert LAT_MIN <= lat <= LAT_MAX
+        assert LON_MIN <= lon <= LON_MAX
+        assert (lat, lon) != (0.0, 0.0)
+        assert alt is None or ALT_MIN_M <= alt <= ALT_MAX_M
 
 
 class TestFindXmlElement:

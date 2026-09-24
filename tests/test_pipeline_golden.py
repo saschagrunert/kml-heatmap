@@ -275,6 +275,7 @@ def test_year_data_shape_and_unique_ids(golden_output):
                 "end_airport",
                 "min_altitude_ft",
                 "max_altitude_ft",
+                "altitude_gain_ft",
             }
             assert None not in info.values()
             assert info["year"] == year
@@ -357,7 +358,93 @@ def test_real_dates_export_exactly_like_obfuscated_ones(tmp_path):
     def data_files(root):
         return {
             path.relative_to(root): path.read_bytes()
-            for path in sorted((root / "site" / "data").rglob("*.js"))
+            for path in sorted((root / "site" / "data").rglob("*.json"))
         }
 
-    assert data_files(tmp_path / "a") == data_files(tmp_path / "b")
+    exported = data_files(tmp_path / "a")
+    assert len(exported) > 2
+    assert exported == data_files(tmp_path / "b")
+
+
+# Free-text names and a file name with the date of the flight in them
+DATED_FLIGHTS = {
+    "1_DEHYL_2026-08-16.kml": "Sunday flight 16 Aug 2026",
+    "2_DEAGJ_DA20.kml": "Flight EDDS-EDDP 2026-08-16",
+    "3_DEAGJ_DA20.kml": "EDXX 16 Aug 2026",
+    "4_DEAGJ_DA20.kml": "EDDS 16.08.2026 08:50 Z - EDDP",
+}
+
+
+def _dated_flight(directory, file_name, name, offset):
+    """A flight that takes off and lands (so its ends become airports)."""
+    points = 40
+    whens = "".join(f"<when>2026-08-16T10:{i:02d}:00Z</when>" for i in range(points))
+    coords = "".join(
+        f"<gx:coord>{8.0 + offset + i * 0.02:.3f} {48.5 + i * 0.01:.3f} "
+        f"{300 if i in (0, points - 1) else 1500}</gx:coord>"
+        for i in range(points)
+    )
+    path = directory / file_name
+    path.write_text(
+        '<kml xmlns="http://www.opengis.net/kml/2.2" '
+        'xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><Placemark>'
+        f"<name>{name}</name><gx:Track>{whens}{coords}</gx:Track>"
+        "</Placemark></Document></kml>",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_no_date_of_a_name_is_exported(tmp_path):
+    """Names are free text; the export publishes them without their dates.
+
+    And, as for the timestamps, the site is the same whether or not the
+    inputs were obfuscated.
+    """
+    from kml_heatmap.date_tokens import find_date_tokens
+
+    sources = {}
+    for label in ("a", "b"):
+        directory = tmp_path / f"{label}-input"
+        directory.mkdir()
+        sources[label] = [
+            _dated_flight(directory, file_name, name, offset)
+            for offset, (file_name, name) in enumerate(DATED_FLIGHTS.items())
+        ]
+    assert obfuscate_kml_files(sources["b"]) == len(sources["b"])
+    for label, inputs in sources.items():
+        assert _build_site(tmp_path / label, inputs) is True
+
+    data_dir = tmp_path / "a" / "site" / "data"
+    airports = _load_js(data_dir / "airports.json")["airports"]
+    path_info = _load_js(data_dir / "2026" / "data.json")["path_info"]
+    names = [airport["name"] for airport in airports] + [
+        info[key]
+        for info in path_info
+        for key in ("start_airport", "end_airport", "aircraft_type")
+        if key in info
+    ]
+    assert len(path_info) == len(DATED_FLIGHTS)
+    assert "Sunday flight" in names
+    assert "Flight EDDS-EDDP" in names
+    assert "EDXX" in names
+    for name in names:
+        assert not find_date_tokens(name), name
+        assert not re.search(r"\b16\b|Aug|08:50", name), name
+    # The dated file name has no type left, the others keep theirs
+    assert [info.get("aircraft_type") for info in path_info] == [
+        None,
+        "DA20",
+        "DA20",
+        "DA20",
+    ]
+
+    def data_files(root):
+        return {
+            path.relative_to(root): path.read_bytes()
+            for path in sorted((root / "site" / "data").rglob("*.json"))
+        }
+
+    exported = data_files(tmp_path / "a")
+    assert len(exported) == 3
+    assert exported == data_files(tmp_path / "b")

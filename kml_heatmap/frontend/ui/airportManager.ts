@@ -1,7 +1,13 @@
 /**
  * Airport Manager - Handles airport markers and popups
  */
-import { Popup, type GeoJSONSource, type Point } from "maplibre-gl";
+import {
+  Popup,
+  type GeoJSONSource,
+  type MapLayerMouseEvent,
+  type Point,
+  type Subscription,
+} from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { calculateVisibleAirports, findHomeBase } from "../features/airports";
 import type { AirportCounts } from "../features/airports";
@@ -96,6 +102,31 @@ export class AirportManager {
   private farAirports: ReadonlySet<string> = new Set();
   /** The airport whose label is under the pointer */
   private hoveredLabel: string | null = null;
+  /** The map's handlers below, once it is ready */
+  private subscriptions: Subscription[] = [];
+  private destroyed = false;
+
+  /**
+   * Once the map comes to rest. Asked on every frame of a gesture it cost
+   * a measurement of every airport, and a new label source mid-gesture.
+   */
+  private readonly handleMoveEnd = (): void => this.updateFarAirports();
+
+  /**
+   * A label opens a popup like its marker, and says so: the pointer, and
+   * the hover of both the label and the marker's dot
+   */
+  private readonly handleLabelMove = (event: MapLayerMouseEvent): void => {
+    const name: unknown = event.features?.[0]?.properties["name"];
+    if (typeof name !== "string") return;
+    event.target.getCanvas().style.cursor = "pointer";
+    this.hoverLabel(name);
+  };
+
+  private readonly handleLabelLeave = (event: MapLayerMouseEvent): void => {
+    event.target.getCanvas().style.cursor = "";
+    this.hoverLabel(null);
+  };
 
   constructor(app: MapApp) {
     this.app = app;
@@ -118,23 +149,22 @@ export class AirportManager {
     // The labels are there once the map's layers are
     app.mapReady
       .then((map) => {
-        map.on("move", () => this.updateFarAirports());
-        const canvas = map.getCanvas();
-        // A label opens a popup like its marker, and says so: the pointer,
-        // and the hover of both the label and the marker's dot
-        map.on("mousemove", MAP_LAYERS.airportLabels, (event) => {
-          const name: unknown = event.features?.[0]?.properties["name"];
-          if (typeof name !== "string") return;
-          canvas.style.cursor = "pointer";
-          this.hoverLabel(name);
-        });
-        map.on("mouseleave", MAP_LAYERS.airportLabels, () => {
-          canvas.style.cursor = "";
-          this.hoverLabel(null);
-        });
+        if (this.destroyed) return;
+        this.subscriptions = [
+          map.on("moveend", this.handleMoveEnd),
+          map.on("mousemove", MAP_LAYERS.airportLabels, this.handleLabelMove),
+          map.on("mouseleave", MAP_LAYERS.airportLabels, this.handleLabelLeave),
+        ];
       })
       // The start-up reports a map that never got ready
       .catch(() => {});
+  }
+
+  /** Stop following the map; the markers and labels stay as they are */
+  destroy(): void {
+    this.destroyed = true;
+    for (const subscription of this.subscriptions) subscription.unsubscribe();
+    this.subscriptions = [];
   }
 
   /**
@@ -179,7 +209,7 @@ export class AirportManager {
       this.closePopup(name);
       return;
     }
-    if (!this.app.replayState.active) {
+    if (!this.app.replayActive) {
       this.app.pathSelection.selectPathsByAirport(name);
     }
     this.openPopup(name);

@@ -7,7 +7,7 @@ import {
   AIRPORTS_HIDDEN_CLASS,
   withDataLayers,
 } from "../../../kml_heatmap/frontend/mapLayers";
-import { HEATMAP_RADIUS_PX } from "../../../kml_heatmap/frontend/ui/dataManager";
+import { HEATMAP_RADIUS_PX } from "../../../kml_heatmap/frontend/ui/heatmapPaint";
 import {
   HEAT_LINES,
   HEATMAP_CLUSTER,
@@ -62,6 +62,25 @@ describe("layer handles", () => {
       "none",
     );
     expect(app.altitudeLayer.setVisible).toHaveBeenCalledTimes(2);
+  });
+
+  it("apply a switch made while the WebGL context was lost once the style is back", () => {
+    const app = createMockApp();
+    const map = app.map!;
+    const getLayer = map.getLayer.getMockImplementation()!;
+    map.getLayer.mockImplementation(() => undefined);
+
+    app.altitudeLayer.setVisible(true);
+    map.getLayer.mockImplementation(getLayer);
+    expect(map.layer(MAP_LAYERS.pathsAltitude).layout["visibility"]).toBe(
+      "none",
+    );
+    map.emit("webglcontextrestored");
+    map.emit("style.load");
+
+    expect(map.layer(MAP_LAYERS.pathsAltitude).layout["visibility"]).toBe(
+      "visible",
+    );
   });
 
   it("draw the heat source, which clusters the fixes, with one layer below the paths", () => {

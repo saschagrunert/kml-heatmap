@@ -754,7 +754,7 @@ describe("DataLoader", () => {
       const result = await loader.loadData("2025");
 
       expect(result).toBeNull();
-      expect(onLoadError).toHaveBeenCalledWith(["2025"]);
+      expect(onLoadError).toHaveBeenCalledWith(["2025"], false);
       expect(mockHideLoading).toHaveBeenCalled();
     });
 
@@ -764,7 +764,16 @@ describe("DataLoader", () => {
       const result = await loader.loadData("2025");
 
       expect(result).toBeNull();
-      expect(onLoadError).toHaveBeenCalledWith(["2025"]);
+      expect(onLoadError).toHaveBeenCalledWith(["2025"], false);
+    });
+
+    it("suggests a reload for a year file of another format", async () => {
+      files["test-data/2025/data.json"] = { ...rawYear(2025, {}), format: 99 };
+
+      expect(await loader.loadData("2025")).toBeNull();
+
+      // A cached page next to newer data: the reload is what cures it
+      expect(onLoadError).toHaveBeenCalledWith(["2025"], true);
     });
 
     it('defaults to "all" if year not specified', async () => {
@@ -910,7 +919,7 @@ describe("DataLoader", () => {
       expect(result!.path_segments).toHaveLength(1);
       expect(result!.incomplete).toBe(true);
       expect(onLoadError).toHaveBeenCalledTimes(1);
-      expect(onLoadError).toHaveBeenCalledWith(["2024"]);
+      expect(onLoadError).toHaveBeenCalledWith(["2024"], false);
     });
 
     it("returns null and lists every year when all fail", async () => {
@@ -920,7 +929,7 @@ describe("DataLoader", () => {
       const result = await loader.loadAndCombineAllYears();
 
       expect(result).toBeNull();
-      expect(onLoadError).toHaveBeenCalledWith(["2024", "2025"]);
+      expect(onLoadError).toHaveBeenCalledWith(["2024", "2025"], false);
       expect(mockHideLoading).toHaveBeenCalled();
 
       // Nothing was cached, so the next call tries the files again
@@ -1110,7 +1119,7 @@ describe("DataLoader", () => {
         "all:2025 (300) 75/150",
         "all:2025 (300) 150/150",
       ]);
-      expect(onLoadError).toHaveBeenCalledWith(["2023", "2024"]);
+      expect(onLoadError).toHaveBeenCalledWith(["2023", "2024"], false);
     });
 
     it("starts over when another year joins, with what is still to come", async () => {
@@ -1213,6 +1222,79 @@ describe("DataLoader", () => {
         );
       },
     );
+
+    it("lets go of a year that every caller gave up on, and caches it all the same", async () => {
+      withSizes({ "2024": 100, "2025": 300 });
+      defineYear(2024);
+      defineYear(2025);
+      const cached = loader.loadData("2024");
+      request(2024).settle();
+      await cached;
+      mockShowLoading.mockClear();
+      mockHideLoading.mockClear();
+
+      // A slow 2025, then a switch to the cached 2024
+      const controller = new AbortController();
+      const slow = loader.loadData("2025", controller.signal);
+      request(2025).read(100);
+      controller.abort();
+      await loader.loadData("2024");
+
+      expect(shown()).toEqual(["2025 (300) 0/300", "2025 (300) 100/300"]);
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+
+      // The rest of the file says nothing, and ends up in the cache
+      request(2025).read(200);
+      request(2025).settle();
+      expect(await slow).not.toBeNull();
+      expect(mockShowLoading).toHaveBeenCalledTimes(2);
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+      await loader.loadData("2025");
+      expect(mockFetchJson).toHaveBeenCalledTimes(2);
+    });
+
+    it("shows a given-up year again for the caller that comes back to it", async () => {
+      withSizes({ "2025": 300 });
+      defineYear(2025);
+
+      const controller = new AbortController();
+      void loader.loadData("2025", controller.signal);
+      controller.abort();
+      const again = loader.loadData("2025");
+      request(2025).settle();
+      await again;
+
+      expect(shown()).toEqual(["2025 (300) 0/300", "2025 (300) 0/300"]);
+      expect(mockHideLoading).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps a year up while one of its callers still waits", async () => {
+      withSizes({ "2025": 300 });
+      defineYear(2025);
+
+      const controller = new AbortController();
+      void loader.loadData("2025", controller.signal);
+      const other = loader.loadData("2025", new AbortController().signal);
+      controller.abort();
+
+      expect(mockHideLoading).not.toHaveBeenCalled();
+      request(2025).settle();
+      await other;
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+    });
+
+    it("reports no failure of a year its caller gave up on", async () => {
+      withSizes({ "2025": 300 });
+
+      const controller = new AbortController();
+      const loading = loader.loadData("2025", controller.signal);
+      controller.abort();
+      request(2025).settle(false);
+
+      expect(await loading).toBeNull();
+      expect(onLoadError).not.toHaveBeenCalled();
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+    });
 
     it("counts the operations: one more for every load that joins or fails", async () => {
       withSizes({ "2024": 100, "2025": 100 });
@@ -1378,7 +1460,7 @@ describe("DataLoader", () => {
 
       expect(await loader.loadData("2025")).toBeNull();
 
-      expect(onLoadError).toHaveBeenCalledWith(["2025"]);
+      expect(onLoadError).toHaveBeenCalledWith(["2025"], false);
       expect(mockHideLoading).toHaveBeenCalledTimes(1);
       const [, failure] = vi.mocked(logError).mock.calls[0]!;
       expect(failure).toEqual(
@@ -1399,7 +1481,7 @@ describe("DataLoader", () => {
         await vi.advanceTimersByTimeAsync(120_000);
 
         expect(await loading).toBeNull();
-        expect(onLoadError).toHaveBeenCalledWith(["2025"]);
+        expect(onLoadError).toHaveBeenCalledWith(["2025"], false);
         expect(mockHideLoading).toHaveBeenCalledTimes(1);
         const [, failure] = vi.mocked(logError).mock.calls[0]!;
         expect((failure as Error).cause).toEqual(
@@ -1537,6 +1619,21 @@ describe("DataLoader", () => {
       expect(mockWindow.KML_AIRPORTS).toEqual({ airports: mockAirports });
     });
 
+    it.each([null, {}, { airports: [{ name: "EDDF" }] }])(
+      "refuses airports.json that is not a list of airports: %j",
+      async (json) => {
+        files["test-data/airports.json"] = json;
+
+        expect(await loader.loadAirports()).toEqual([]);
+
+        expect(mockWindow.KML_AIRPORTS).toBeUndefined();
+        expect(logError).toHaveBeenCalledWith(
+          "Error loading airports:",
+          new Error("Unexpected contents of airports.json"),
+        );
+      },
+    );
+
     it("asks again after a failure", async () => {
       expect(await loader.loadAirports()).toEqual([]);
 
@@ -1576,6 +1673,21 @@ describe("DataLoader", () => {
 
       expect(result).toBeNull();
     });
+
+    it.each([null, [], { available_years: "2025" }])(
+      "refuses metadata.json without the list of years: %j",
+      async (json) => {
+        files["test-data/metadata.json"] = json;
+
+        expect(await loader.loadMetadata()).toBeNull();
+
+        expect(mockWindow.KML_METADATA).toBeUndefined();
+        expect(logError).toHaveBeenCalledWith(
+          "Error loading metadata:",
+          new Error("Unexpected contents of metadata.json"),
+        );
+      },
+    );
   });
 
   describe("default options", () => {

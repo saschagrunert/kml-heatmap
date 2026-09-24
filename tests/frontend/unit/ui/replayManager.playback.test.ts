@@ -37,7 +37,7 @@ describe("ReplayManager playback", () => {
     replayManager = createReplayManager(mockApp);
     mockApp.selectedPathIds = new Set([1]);
     replayManager.initializeReplay();
-    replayManager.state.active = true;
+    mockApp.replayActive = true;
   });
 
   afterEach(() => {
@@ -48,7 +48,7 @@ describe("ReplayManager playback", () => {
 
   describe("playReplay", () => {
     it("returns early if not active", () => {
-      replayManager.state.active = false;
+      mockApp.replayActive = false;
 
       replayManager.playReplay();
 

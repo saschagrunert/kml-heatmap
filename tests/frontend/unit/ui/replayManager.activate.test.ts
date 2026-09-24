@@ -27,7 +27,8 @@ import {
   unmountReplayDom,
   type MockApp,
 } from "./replayTestSetup";
-import { createDataset, createMockApp } from "../../testHelpers";
+import { asMapApp, createDataset, createMockApp } from "../../testHelpers";
+import { setColorLayer } from "../../../../kml_heatmap/frontend/ui/layerVisibility";
 import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
@@ -59,7 +60,7 @@ describe("ReplayManager activation", () => {
 
   describe("constructor", () => {
     it("initializes with default replay state", () => {
-      expect(replayManager.state.active).toBe(false);
+      expect(mockApp.replayActive).toBe(false);
       expect(replayManager.state.playing).toBe(false);
       expect(replayManager.state.currentTime).toBe(0);
       expect(replayManager.state.maxTime).toBe(0);
@@ -112,18 +113,6 @@ describe("ReplayManager activation", () => {
     });
   });
 
-  describe("the replay button", () => {
-    it("shows availability again after the manager asks it to", () => {
-      const btn = el("replay-btn") as HTMLButtonElement;
-      mockApp.selectedPathIds.add(1);
-
-      replayManager.updateReplayButtonState();
-
-      expect(btn.style.opacity).toBe("1");
-      expect(btn.title).toBe("Replay selected flight path");
-    });
-  });
-
   describe("toggleReplay", () => {
     it("returns early if replay-controls panel not found", () => {
       el("replay-controls").remove();
@@ -131,7 +120,7 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleReplay();
 
-      expect(replayManager.state.active).toBe(false);
+      expect(mockApp.replayActive).toBe(false);
     });
 
     it("shows an explanatory toast when no path is selected", () => {
@@ -139,7 +128,7 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleReplay();
 
-      expect(replayManager.state.active).toBe(false);
+      expect(mockApp.replayActive).toBe(false);
       expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
     });
 
@@ -148,7 +137,7 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleReplay();
 
-      expect(replayManager.state.active).toBe(false);
+      expect(mockApp.replayActive).toBe(false);
       expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
     });
 
@@ -162,7 +151,7 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleReplay();
 
-      expect(replayManager.state.active).toBe(false);
+      expect(mockApp.replayActive).toBe(false);
       expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
     });
 
@@ -181,7 +170,7 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleReplay();
 
-      expect(replayManager.state.active).toBe(false);
+      expect(mockApp.replayActive).toBe(false);
       expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
     });
 
@@ -190,7 +179,7 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleReplay();
 
-      expect(replayManager.state.active).toBe(true);
+      expect(mockApp.replayActive).toBe(true);
       expect(el("replay-controls").style.display).toBe("block");
       expect(document.body.classList.contains("replay-active")).toBe(true);
     });
@@ -327,11 +316,11 @@ describe("ReplayManager activation", () => {
     it("deactivates replay when already active", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.toggleReplay();
-      expect(replayManager.state.active).toBe(true);
+      expect(mockApp.replayActive).toBe(true);
 
       replayManager.toggleReplay();
 
-      expect(replayManager.state.active).toBe(false);
+      expect(mockApp.replayActive).toBe(false);
       expect(el("replay-controls").style.display).toBe("none");
       expect(document.body.classList.contains("replay-active")).toBe(false);
     });
@@ -415,6 +404,7 @@ describe("ReplayManager activation", () => {
       mockApp.heatmapVisible = true;
 
       replayManager.toggleReplay();
+      mockApp.dataManager.showHeatmap.mockClear();
       replayManager.toggleReplay();
 
       // The data manager adds it, with the points of the filter changes
@@ -471,16 +461,47 @@ describe("ReplayManager activation", () => {
 
     it("stops following the colour layers once replay is closed", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.altitudeVisible = false;
-      mockApp.airspeedVisible = false;
       replayManager.toggleReplay();
       replayManager.toggleReplay();
+      const redraw = vi.spyOn(replayManager, "redrawReplayPath");
 
-      // Only the store's own sync, which never touches the altitude legend
-      // for the speed key, is left to react
-      el("altitude-legend").hidden = false;
       mockApp.airspeedVisible = true;
-      expect(el("altitude-legend").hidden).toBe(false);
+      mockApp.threeDVisible = true;
+
+      expect(redraw).not.toHaveBeenCalled();
+      expect(el("altitude-legend").hidden).toBe(true);
+    });
+
+    it("colours the flown trail by the colour layer that is on", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      const redraw = vi.spyOn(replayManager, "redrawReplayPath");
+
+      // The toggle writes both keys in one update: one redraw
+      setColorLayer(asMapApp(mockApp), "airspeed", true);
+      expect(redraw).toHaveBeenLastCalledWith("airspeed");
+      expect(redraw).toHaveBeenCalledTimes(1);
+
+      setColorLayer(asMapApp(mockApp), "altitude", true);
+      expect(redraw).toHaveBeenLastCalledWith("altitude");
+
+      // With neither on, the trail keeps its altitude colours
+      setColorLayer(asMapApp(mockApp), "altitude", false);
+      expect(redraw).toHaveBeenLastCalledWith("altitude");
+    });
+
+    it("brings an open airplane popup to the new scale", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      const update = vi.spyOn(replayManager, "updateReplayAirplanePopup");
+
+      mockApp.airspeedVisible = true;
+      expect(update).not.toHaveBeenCalled();
+
+      replayManager.state.airplaneMarker!.openPopup();
+      update.mockClear();
+      mockApp.airspeedVisible = false;
+      expect(update).toHaveBeenCalledTimes(1);
     });
 
     it("closes a popup left open on the map", () => {
@@ -528,59 +549,31 @@ describe("ReplayManager activation", () => {
       expect(el("airspeed-legend").hidden).toBe(false);
     });
 
-    it("redraws altitude paths exactly once after deactivation", () => {
+    it("hands the colour layers back to the layer manager on deactivation", () => {
       mockApp.selectedPathIds = new Set([1]);
       mockApp.altitudeVisible = true;
-      mockApp.airspeedVisible = false;
+      replayManager.toggleReplay();
+      expect(mockApp.altitudeLayer.isVisible()).toBe(false);
+      vi.mocked(mockApp.layerManager.syncModes).mockClear();
 
       replayManager.toggleReplay();
-      replayManager.toggleReplay();
-      vi.advanceTimersByTime(500);
 
-      expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalledTimes(1);
-      expect(mockApp.map!.resize).toHaveBeenCalled();
+      // It shows and redraws them (see layerVisibility.test.ts)
+      expect(mockApp.layerManager.syncModes).toHaveBeenCalled();
+      expect(mockApp.altitudeLayer.isVisible()).toBe(true);
+      expect(mockApp.airspeedLayer.isVisible()).toBe(false);
     });
 
-    it("redraws airspeed paths once after deactivation when airspeed was visible", () => {
+    it("cancels the frame loop and stops following the store on destroy", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.altitudeVisible = false;
-      mockApp.airspeedVisible = true;
-
-      replayManager.toggleReplay();
-      replayManager.toggleReplay();
-      vi.advanceTimersByTime(500);
-
-      expect(mockApp.layerManager.redrawAirspeedPaths).toHaveBeenCalledTimes(1);
-      expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
-      expect(mockApp.altitudeVisible).toBe(false);
-    });
-
-    it("drops a pending redraw when replay is closed again before it runs", () => {
-      mockApp.selectedPathIds = new Set([1]);
-      mockApp.altitudeVisible = true;
-
-      replayManager.toggleReplay();
-      replayManager.toggleReplay();
-      replayManager.toggleReplay();
-      replayManager.toggleReplay();
-      vi.advanceTimersByTime(500);
-
-      // Two closes, but the first redraw was still pending when the second
-      // close scheduled its own
-      expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalledTimes(1);
-    });
-
-    it("cancels pending redraws and the frame loop on destroy", () => {
-      mockApp.selectedPathIds = new Set([1]);
-      mockApp.altitudeVisible = true;
       replayManager.toggleReplay();
       replayManager.playReplay();
-      replayManager.toggleReplay();
+      const redraw = vi.spyOn(replayManager, "redrawReplayPath");
 
       replayManager.destroy();
-      vi.advanceTimersByTime(500);
+      mockApp.airspeedVisible = true;
 
-      expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
+      expect(redraw).not.toHaveBeenCalled();
       expect(replayManager.state.animationFrameId).toBeNull();
     });
   });
@@ -607,7 +600,7 @@ describe("ReplayManager activation", () => {
 
       panel.querySelector<HTMLButtonElement>(".replay-exit")!.click();
 
-      expect(replayManager.state.active).toBe(false);
+      expect(mockApp.replayActive).toBe(false);
       expect(panel.style.display).toBe("none");
     });
 
@@ -990,7 +983,7 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleReplay();
 
-      expect(replayManager.state.active).toBe(true);
+      expect(mockApp.replayActive).toBe(true);
       expect(replayManager.state.lifted).toBe(true);
       expect(replayManager.state.smoothed?.chains).toHaveLength(1);
     });
@@ -1163,82 +1156,42 @@ describe("ReplayManager activation", () => {
     });
   });
 
-  describe("hideOtherLayersDuringReplay", () => {
-    it("does nothing without a map", () => {
-      mockApp.map = null;
-      mockApp.heatmapVisible = true;
+  describe("while replay runs", () => {
+    function activate(): void {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+    }
 
-      replayManager.hideOtherLayersDuringReplay();
-
-      expect(mockApp.heatmapLayer.setVisible).not.toHaveBeenCalled();
-      expect((el("year-select") as HTMLSelectElement).disabled).toBe(false);
-    });
-
-    it("hides heatmap when visible", () => {
-      mockApp.heatmapVisible = true;
-
-      mockApp.heatmapLayer.setVisible(true);
-
-      replayManager.hideOtherLayersDuringReplay();
-
-      expect(mockApp.heatmapLayer.setVisible).toHaveBeenLastCalledWith(false);
-      expect(mockApp.map!.layer(MAP_LAYERS.heat).layout["visibility"]).toBe(
-        "none",
-      );
-    });
-
-    it("does not hide heatmap when not visible", () => {
-      mockApp.heatmapVisible = false;
-
-      replayManager.hideOtherLayersDuringReplay();
-
-      expect(mockApp.heatmapLayer.setVisible).not.toHaveBeenCalled();
-    });
-
-    it("leaves the airports and the aviation chart the way they are", () => {
-      mockApp.aviationLayer.setVisible(true);
-      mockApp.aviationLayer.setVisible.mockClear();
-
-      replayManager.hideOtherLayersDuringReplay();
-
-      expect(mockApp.airportLayer.setVisible).not.toHaveBeenCalled();
-      expect(mockApp.aviationLayer.setVisible).not.toHaveBeenCalled();
-      expect(mockApp.airportLayer.isVisible()).toBe(true);
-    });
-
-    it("hides altitude layer when visible", () => {
+    it("hides the heatmap and the colour layers, and keeps the flags", () => {
       mockApp.altitudeVisible = true;
+      expect(mockApp.heatmapLayer.isVisible()).toBe(true);
 
-      mockApp.altitudeLayer.setVisible(true);
+      activate();
 
-      replayManager.hideOtherLayersDuringReplay();
-
+      expect(mockApp.heatmapLayer.isVisible()).toBe(false);
       expect(mockApp.altitudeLayer.isVisible()).toBe(false);
-      // The main layer and the one the selection is drawn on
       for (const id of [
+        MAP_LAYERS.heat,
         MAP_LAYERS.pathsAltitude,
         MAP_LAYERS.pathsAltitudeSelected,
       ]) {
         expect(mockApp.map!.layer(id).layout["visibility"]).toBe("none");
       }
-      expect(mockApp.airspeedLayer.setVisible).not.toHaveBeenCalled();
+      expect(mockApp.heatmapVisible).toBe(true);
+      expect(mockApp.altitudeVisible).toBe(true);
     });
 
-    it("hides airspeed layer when visible", () => {
-      mockApp.airspeedVisible = true;
+    it("leaves the airports and the aviation chart the way they are", () => {
+      mockApp.aviationVisible = true;
 
-      mockApp.airspeedLayer.setVisible(true);
+      activate();
 
-      replayManager.hideOtherLayersDuringReplay();
-
-      expect(mockApp.airspeedLayer.isVisible()).toBe(false);
-      expect(
-        mockApp.map!.layer(MAP_LAYERS.pathsAirspeed).layout["visibility"],
-      ).toBe("none");
+      expect(mockApp.airportLayer.isVisible()).toBe(true);
+      expect(mockApp.aviationLayer.isVisible()).toBe(true);
     });
 
-    it("disables layer buttons and filters during replay", () => {
-      replayManager.hideOtherLayersDuringReplay();
+    it("disables layer buttons and filters", () => {
+      activate();
 
       expect((el("heatmap-btn") as HTMLButtonElement).disabled).toBe(true);
       expect((el("airports-btn") as HTMLButtonElement).disabled).toBe(true);
@@ -1250,14 +1203,14 @@ describe("ReplayManager activation", () => {
     it("disables the controls that would change the selection", () => {
       // Clearing it dimmed the running replay's Stop button and switched
       // the statistics to another view
-      replayManager.hideOtherLayersDuringReplay();
+      activate();
 
       expect((el("isolate-btn") as HTMLButtonElement).disabled).toBe(true);
       expect((el("selection-clear-btn") as HTMLButtonElement).disabled).toBe(
         true,
       );
 
-      replayManager.restoreLayerVisibility();
+      replayManager.toggleReplay();
 
       expect((el("isolate-btn") as HTMLButtonElement).disabled).toBe(false);
       expect((el("selection-clear-btn") as HTMLButtonElement).disabled).toBe(
@@ -1266,25 +1219,24 @@ describe("ReplayManager activation", () => {
     });
 
     it("disables Wrapped, which would take the map away from the replay", () => {
-      replayManager.hideOtherLayersDuringReplay();
+      activate();
 
       expect((el("wrapped-btn") as HTMLButtonElement).disabled).toBe(true);
     });
 
     it("lets the stylesheet dim the disabled toggles", () => {
-      mockApp.airportsVisible = true;
       expect(el("airports-btn").style.opacity).toBe("1");
+      expect(el("heatmap-btn").style.opacity).toBe("1");
 
-      replayManager.hideOtherLayersDuringReplay();
+      activate();
 
       // An inline 1.0 beat the disabled look, so the toggle looked live
       expect(el("airports-btn").style.opacity).toBe("");
+      expect(el("heatmap-btn").style.opacity).toBe("");
     });
 
-    it("does not report the removed heatmap as on", () => {
-      mockApp.heatmapVisible = true;
-
-      replayManager.hideOtherLayersDuringReplay();
+    it("does not report the hidden heatmap as on", () => {
+      activate();
 
       const heatmapBtn = el("heatmap-btn");
       expect(heatmapBtn.getAttribute("aria-pressed")).toBe("false");
@@ -1294,92 +1246,47 @@ describe("ReplayManager activation", () => {
     });
   });
 
-  describe("restoreLayerVisibility", () => {
-    it("does nothing without a map", () => {
-      mockApp.map = null;
-      mockApp.heatmapVisible = true;
-      mockApp.altitudeVisible = true;
-      (el("year-select") as HTMLSelectElement).disabled = true;
+  describe("closing replay", () => {
+    function openAndClose(): void {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      replayManager.toggleReplay();
+    }
 
-      replayManager.restoreLayerVisibility();
+    it("brings the heatmap back through the data manager when it was on", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      mockApp.dataManager.showHeatmap.mockClear();
 
-      expect(mockApp.dataManager.showHeatmap).not.toHaveBeenCalled();
-      expect(mockApp.altitudeLayer.setVisible).not.toHaveBeenCalled();
-      expect((el("year-select") as HTMLSelectElement).disabled).toBe(true);
-    });
-
-    it("restores the heatmap through the data manager when visible", () => {
-      mockApp.heatmapVisible = true;
-
-      replayManager.restoreLayerVisibility();
+      replayManager.toggleReplay();
 
       expect(mockApp.dataManager.showHeatmap).toHaveBeenCalledTimes(1);
+      expect(mockApp.heatmapLayer.isVisible()).toBe(true);
     });
 
-    it("does not restore heatmap when not visible", () => {
+    it("leaves a heatmap that was off hidden", () => {
       mockApp.heatmapVisible = false;
 
-      replayManager.restoreLayerVisibility();
+      openAndClose();
 
-      expect(mockApp.dataManager.showHeatmap).not.toHaveBeenCalled();
-      expect(mockApp.heatmapLayer.setVisible).not.toHaveBeenCalled();
-    });
-
-    it("puts back exactly what replay hid", () => {
-      mockApp.altitudeVisible = true;
-      mockApp.airspeedVisible = false;
-      mockApp.altitudeLayer.setVisible(true);
-      replayManager.hideOtherLayersDuringReplay();
-
-      replayManager.restoreLayerVisibility();
-
-      expect(mockApp.altitudeLayer.isVisible()).toBe(true);
-      expect(mockApp.airspeedLayer.isVisible()).toBe(false);
       expect(mockApp.heatmapLayer.isVisible()).toBe(false);
+      expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("false");
     });
 
     it("shows a colour layer that was switched on during the replay", () => {
-      mockApp.altitudeVisible = false;
-      replayManager.hideOtherLayersDuringReplay();
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
       // The toggle only records the wish while replay runs
       mockApp.altitudeVisible = true;
+      expect(mockApp.altitudeLayer.isVisible()).toBe(false);
 
-      replayManager.restoreLayerVisibility();
+      replayManager.toggleReplay();
 
       expect(mockApp.altitudeLayer.isVisible()).toBe(true);
     });
 
-    it("restores altitude layer when visible and redraws with delay", () => {
-      mockApp.altitudeVisible = true;
-
-      replayManager.restoreLayerVisibility();
-
-      expect(mockApp.altitudeLayer.setVisible).toHaveBeenCalledWith(true);
-      expect(
-        mockApp.map!.layer(MAP_LAYERS.pathsAltitude).layout["visibility"],
-      ).toBe("visible");
-      expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(100);
-      expect(mockApp.layerManager.redrawAltitudePaths).toHaveBeenCalledTimes(1);
-      expect(mockApp.map!.resize).toHaveBeenCalled();
-    });
-
-    it("restores airspeed layer when visible and redraws with delay", () => {
-      mockApp.airspeedVisible = true;
-
-      replayManager.restoreLayerVisibility();
-
-      expect(mockApp.airspeedLayer.setVisible).toHaveBeenCalledWith(true);
-      vi.advanceTimersByTime(100);
-      expect(mockApp.layerManager.redrawAirspeedPaths).toHaveBeenCalledTimes(1);
-      expect(mockApp.map!.resize).toHaveBeenCalled();
-    });
-
     it("re-enables disabled buttons and filters", () => {
-      replayManager.hideOtherLayersDuringReplay();
-      expect((el("year-select") as HTMLSelectElement).disabled).toBe(true);
-
-      replayManager.restoreLayerVisibility();
+      openAndClose();
 
       expect((el("heatmap-btn") as HTMLButtonElement).disabled).toBe(false);
       expect((el("year-select") as HTMLSelectElement).disabled).toBe(false);
@@ -1388,11 +1295,9 @@ describe("ReplayManager activation", () => {
     });
 
     it("hands the toggles their state and opacity back", () => {
-      mockApp.heatmapVisible = true;
       mockApp.airportsVisible = false;
-      replayManager.hideOtherLayersDuringReplay();
 
-      replayManager.restoreLayerVisibility();
+      openAndClose();
 
       const heatmapBtn = el("heatmap-btn");
       expect(heatmapBtn.getAttribute("aria-pressed")).toBe("true");
@@ -1401,61 +1306,12 @@ describe("ReplayManager activation", () => {
     });
 
     it("leaves the opacity of a control it did not disable alone", () => {
-      el("airports-btn").style.opacity = "0.7";
+      openAndClose();
+      el("airspeed-btn").style.opacity = "0.7";
 
-      replayManager.restoreLayerVisibility();
+      openAndClose();
 
-      expect(el("airports-btn").style.opacity).toBe("0.7");
-    });
-  });
-
-  describe("updateReplayButtonState", () => {
-    it("marks the button ready when exactly one path selected and timing data available", () => {
-      mockApp.selectedPathIds = new Set([1]);
-
-      replayManager.updateReplayButtonState();
-
-      const btn = el("replay-btn") as HTMLButtonElement;
-      expect(btn.style.opacity).toBe("1");
-      expect(btn.disabled).toBe(false);
-      expect(btn.getAttribute("aria-disabled")).toBe("false");
-      expect(btn.title).toBe("Replay selected flight path");
-    });
-
-    it("keeps the button enabled but marked unavailable when no paths selected", () => {
-      mockApp.selectedPathIds = new Set();
-
-      replayManager.updateReplayButtonState();
-
-      const btn = el("replay-btn") as HTMLButtonElement;
-      expect(btn.style.opacity).toBe("0.5");
-      expect(btn.disabled).toBe(false);
-      expect(btn.getAttribute("aria-disabled")).toBe("true");
-      expect(btn.title).toBe(
-        "Select exactly one flight with timing data to replay",
-      );
-    });
-
-    it("marks the button unavailable when no timing data", () => {
-      mockApp.selectedPathIds = new Set([1]);
-      mockApp.hasTimingData = false;
-
-      replayManager.updateReplayButtonState();
-
-      const btn = el("replay-btn") as HTMLButtonElement;
-      expect(btn.style.opacity).toBe("0.5");
-      expect(btn.getAttribute("aria-disabled")).toBe("true");
-      expect(btn.title).toBe(
-        "Select exactly one flight with timing data to replay",
-      );
-    });
-
-    it("does nothing without a replay button", () => {
-      el("replay-btn").remove();
-      mockApp.selectedPathIds = new Set([1]);
-
-      expect(() => replayManager.updateReplayButtonState()).not.toThrow();
-      expect(document.getElementById("replay-btn")).toBeNull();
+      expect(el("airspeed-btn").style.opacity).toBe("0.7");
     });
   });
 });

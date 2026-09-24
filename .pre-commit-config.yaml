@@ -53,13 +53,15 @@ repos:
         types: [text]
 
       # typos is not part of either lock file, so it is whatever is installed.
-      # Like `make lint`, skip it when the binary is missing; the CI typos job
-      # is the one that has to pass.
+      # Like `make lint`, skip it when the binary is missing, but say so: the
+      # CI typos job is the one that has to pass, and a skip nobody sees
+      # reads as a clean spell check. verbose shows the note on a pass too.
       - id: typos
         name: typos
-        entry: sh -c 'command -v typos >/dev/null 2>&1 || exit 0; exec typos --force-exclude "$@"' typos
+        entry: sh -c 'if ! command -v typos >/dev/null 2>&1; then echo "typos is not installed, skipping the spell check (CI runs it; see CONTRIBUTING.md)" >&2; exit 0; fi; exec typos --force-exclude "$@"' typos
         language: system
         types: [text]
+        verbose: true
 
       # The obfuscation CI job only runs once the dates are already pushed to
       # the public repository. Needs Python 3.14 as `python`, such as the

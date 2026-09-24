@@ -9,7 +9,8 @@ const DEG_PER_M = 1 / 111320;
 /**
  * A flight due north from `lat`, `lng`: `count` segments of `stepM` metres,
  * each taking `stepS` seconds, with the log's relative times unless
- * `timed` is false (then only the groundspeed says how long they took)
+ * `timed` is false (then only the groundspeed says how long they took).
+ * A segment's time is when it starts, as the exporter writes it.
  */
 function flight(
   pathId: number,
@@ -38,7 +39,7 @@ function flight(
         [lat + (i + 1) * stepM * DEG_PER_M, lng],
       ],
       groundspeed_knots: knots,
-      time: timed ? (i + 1) * stepS : undefined,
+      time: timed ? i * stepS : undefined,
     }),
   );
 }
@@ -113,14 +114,55 @@ describe("heatLineFeatures", () => {
 
   it("does not count a break in the log as time spent", () => {
     const segments = flight(1, { count: 3 });
-    // An hour between the second and the third fix: the logger was off
+    // An hour on the second segment: the logger was off
     segments[2]!.time = 3600;
     const withBreak = heatLineFeatures(segments, all);
     const without = heatLineFeatures(flight(1, { count: 3 }), all);
 
     // The segment takes what its groundspeed says instead, five seconds
-    const end = 50 + 3 * 235 * DEG_PER_M;
-    expect(heatAt(withBreak, end, 8)).toBe(heatAt(without, end, 8));
+    expect(withBreak).toEqual(without);
+  });
+
+  it("counts a wait on the segment that waited, which starts at its time", () => {
+    // Two segments of one flight far apart, the first with a wait of 100 s:
+    // the time from its start to the start of the next is its own
+    const segment = (lat: number, time: number): PathSegment =>
+      createSegment({
+        path_id: 1,
+        coords: [
+          [lat, 8],
+          [lat + 235 * DEG_PER_M, 8],
+        ],
+        // Five seconds at its groundspeed
+        groundspeed_knots: 235 / 5 / (1852 / 3600),
+        time,
+      });
+
+    const lines = heatLineFeatures([segment(50, 0), segment(51, 100)], all);
+
+    // The last segment of a flight has no end time: its groundspeed says
+    expect(heatAt(lines, 50, 8)).toBeGreaterThan(heatAt(lines, 51, 8) * 16);
+  });
+
+  it("carries a line on across the antimeridian", () => {
+    const segments = flight(1, { count: 2 });
+    segments[0]!.coords = [
+      [60, 179.99],
+      [60, -180],
+    ];
+    segments[1]!.coords = [
+      [60, -180],
+      [60, -179.99],
+    ];
+
+    const [line] = heatLineFeatures(segments, all).features;
+
+    // Not back round the world at 180 degrees
+    expect(line!.geometry.coordinates.map(([lng]) => lng)).toEqual([
+      179.99,
+      180,
+      expect.closeTo(180.01, 9),
+    ]);
   });
 
   it("adds up the flights over the same place", () => {

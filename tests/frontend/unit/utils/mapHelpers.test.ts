@@ -18,6 +18,8 @@ import {
   stateZoomToMap,
   toBounds,
   toLngLat,
+  toLngLatAfter,
+  unwrapLng,
   whenStyleReady,
   withMapStill,
 } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
@@ -80,6 +82,22 @@ describe("mapHelpers", () => {
 
     it("drops an altitude behind the pair", () => {
       expect(toLngLat([50.1, 8.6, 1200])).toEqual([8.6, 50.1]);
+    });
+
+    it("takes a longitude to the copy of the world nearest another", () => {
+      expect(unwrapLng(-179.9, 179.9)).toBeCloseTo(180.1, 9);
+      expect(unwrapLng(179.9, -179.9)).toBeCloseTo(-180.1, 9);
+      expect(unwrapLng(8.6, 8.5)).toBe(8.6);
+      expect(unwrapLng(8.6, 368.5)).toBe(368.6);
+    });
+
+    it("carries a line on across the antimeridian instead of round the world", () => {
+      const first = toLngLatAfter([60, 179.9], undefined);
+      const second = toLngLatAfter([60.1, -179.9], first);
+      expect(first).toEqual([179.9, 60]);
+      expect(second[0]).toBeCloseTo(180.1, 9);
+      expect(second[1]).toBe(60.1);
+      expect(toLngLatAfter([60.2, -179.8], second)[0]).toBeCloseTo(180.2, 9);
     });
 
     it("turns the configured bounds into south-west and north-east", () => {

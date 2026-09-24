@@ -16,6 +16,10 @@ import {
   smoothLine,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
 import { resetMapLibreMock } from "../../../mocks/maplibre-gl";
+import {
+  FEET_TO_METERS,
+  METERS_TO_FEET,
+} from "../../../../kml_heatmap/frontend/utils/constants";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import { createMapLibreMock } from "../../testHelpers";
 
@@ -99,6 +103,42 @@ describe("lift", () => {
       );
 
       expect([...groundProfileFt(segments)]).toEqual([800, 800, 800, 800]);
+    });
+
+    it("measures the way flown across the antimeridian the short way", () => {
+      // Taxiing at both fields, then two legs of the same length, the second
+      // across the antimeridian: the ground slopes evenly along them
+      const segment = (
+        from: number,
+        to: number,
+        altitude_ft: number,
+        groundspeed_knots: number,
+      ): PathSegment => ({
+        path_id: 1,
+        altitude_ft,
+        groundspeed_knots,
+        coords: [
+          [50, from],
+          [50, to],
+        ],
+      });
+      const segments = [
+        segment(179.96, 179.97, 400, 5),
+        segment(179.97, 179.98, 400, 5),
+        segment(179.98, 179.99, 400, 5),
+        segment(179.99, -179.99, 3000, 110),
+        segment(-179.99, -179.98, 800, 5),
+        segment(-179.98, -179.97, 800, 5),
+        segment(-179.97, -179.96, 800, 5),
+      ];
+
+      const ground = groundProfileFt(segments);
+
+      // Six legs of 0.01 degrees and one of 0.02: not one round the world
+      for (const i of [1, 2, 4, 5, 6]) {
+        expect(ground[i]! - ground[i - 1]!).toBeCloseTo(400 / 8, 6);
+      }
+      expect(ground[3]! - ground[2]!).toBeCloseTo(800 / 8, 6);
     });
 
     it("works out every flight on its own", () => {
@@ -366,7 +406,7 @@ describe("lift", () => {
 
       // No steeper than 0.3 ft per ft, and at the top by the next fix
       const metres = 0.0001 * 111320 * Math.cos((50 * Math.PI) / 180);
-      expect(line.heights[1]).toBeCloseTo((metres / 0.3048) * 0.3, 6);
+      expect(line.heights[1]).toBeCloseTo(metres * METERS_TO_FEET * 0.3, 6);
       expect(line.heights[2]).toBe(600);
     });
 
@@ -450,6 +490,25 @@ describe("lift", () => {
       // The first segment ends where the second starts
       expect(flights.to[0]).toBe(flights.from[1]);
       expect(flights.from[0]).toBe(0);
+    });
+
+    it("carries a flight on across the antimeridian, without a curve round the world", () => {
+      const segments = [
+        segment(1, [60, 179.98], [60, 179.99]),
+        segment(1, [60, 179.99], [60, -179.99]),
+        segment(1, [60, -179.99], [60, -179.98]),
+      ];
+
+      const [chain] = smoothFlights(segments, () => 500).chains;
+
+      // A straight line: no point is added along it, and the longitudes go
+      // on past 180
+      expect(chain!.points.map(([, lng]) => lng)).toEqual([
+        179.98,
+        179.99,
+        expect.closeTo(180.01, 9),
+        expect.closeTo(180.02, 9),
+      ]);
     });
 
     it("leaves a segment without coordinates out of every chain", () => {
@@ -617,7 +676,10 @@ describe("lift", () => {
         tilted.jumpTo({ zoom, pitch: 90 });
         const metresPerPixel =
           (40075016.686 * Math.cos((51 * Math.PI) / 180)) / (512 * 2 ** zoom);
-        return (liftOffsetPx(tilted, 51, 1000) * metresPerPixel) / 304.8;
+        return (
+          (liftOffsetPx(tilted, 51, 1000) * metresPerPixel) /
+          (1000 * FEET_TO_METERS)
+        );
       };
 
       // Below the first stop, at zoom 4, and above the last, at zoom 16
@@ -632,12 +694,12 @@ describe("lift", () => {
     it("draws 1,000 ft about as the ribbons do at zoom 13", () => {
       const tilted = map();
       tilted.jumpTo({ zoom: 13, pitch: 90 });
-      // Twice exaggerated at zoom 13, 609.6 m, over the metres of a pixel
+      // Twice exaggerated at zoom 13, about 609.6 m, over the metres of a pixel
       const metresPerPixel =
         (40075016.686 * Math.cos((51 * Math.PI) / 180)) / (512 * 2 ** 13);
 
       expect(liftOffsetPx(tilted, 51, 1000)).toBeCloseTo(
-        609.6 / metresPerPixel,
+        (2000 * FEET_TO_METERS) / metresPerPixel,
         3,
       );
     });

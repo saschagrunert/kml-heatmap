@@ -26,9 +26,15 @@ if TYPE_CHECKING:
     from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
 
 __all__ = [
+    "ParseResult",
     "load_cached_kml",
     "parse_kml_coordinates",
+    "parse_kml_file",
 ]
+
+# What a parse returns: the flat coordinate list, the flight paths and the
+# metadata of each path
+type ParseResult = tuple[FlightPath, FlightPathGroup, list[PathMetadata]]
 
 # gx:coord elements the track parser never reads. libxml2 counts them in one
 # pass; walking the tree twice in Python took a fifth of the parse time.
@@ -234,33 +240,62 @@ def _log_parse_result(
         )
 
 
-def _read_cache(
-    kml_file: str, cache_path: Path | None, cache_valid: bool
-) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]] | None:
-    if not (cache_valid and cache_path):
-        return None
-    cached_result = load_cached_parse(cache_path)
-    if cached_result:
-        _log_parse_result(kml_file, cached_result[0], cached_result[1], cached=True)
-    return cached_result
+class _WarningRecorder(logging.Handler):
+    """Collects what a parse logs at WARNING and above, for the cache."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.warnings: list[tuple[int, str]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.warnings.append((record.levelno, record.getMessage()))
 
 
-def load_cached_kml(
-    kml_file: str,
-) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]] | None:
-    """The cached parse result of a KML file, None when there is none."""
-    return _read_cache(kml_file, *get_cache_key(kml_file))
+def load_cached_kml(kml_file: str) -> tuple[ParseResult | None, Path | None]:
+    """The cached parse result of a KML file (None on a miss) and its entry.
 
-
-def parse_kml_coordinates(
-    kml_file: str,
-) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]]:
-    """Extract coordinates from a KML file."""
+    The entry is where ``parse_kml_file`` stores a fresh parse, which saves
+    hashing the file a second time; None when there is no cache. A hit logs
+    the warnings of the parse that was cached again.
+    """
     cache_path, cache_valid = get_cache_key(kml_file)
-    cached_result = _read_cache(kml_file, cache_path, cache_valid)
-    if cached_result:
-        return cached_result
+    if not (cache_valid and cache_path):
+        return None, cache_path
+    cached = load_cached_parse(cache_path)
+    if cached is None:
+        return None, cache_path
+    _log_parse_result(kml_file, cached.coordinates, cached.path_groups, cached=True)
+    for level, message in cached.warnings:
+        logger.log(level, "%s", message)
+    return (cached.coordinates, cached.path_groups, cached.path_metadata), cache_path
 
+
+def parse_kml_coordinates(kml_file: str) -> ParseResult:
+    """Extract coordinates from a KML file, from the parse cache if it has them."""
+    cached, cache_path = load_cached_kml(kml_file)
+    if cached is not None:
+        return cached
+    return parse_kml_file(kml_file, cache_path)
+
+
+def parse_kml_file(kml_file: str, cache_path: Path | None = None) -> ParseResult:
+    """Parse a KML file and store the result in the cache entry ``cache_path``.
+
+    The cache is not looked up (see ``load_cached_kml``). The warnings of the
+    parse are stored with the result.
+    """
+    recorder = _WarningRecorder()
+    logger.addHandler(recorder)
+    try:
+        result = _parse_kml(kml_file)
+    finally:
+        logger.removeHandler(recorder)
+    if cache_path:
+        save_to_cache(cache_path, *result, recorder.warnings)
+    return result
+
+
+def _parse_kml(kml_file: str) -> ParseResult:
     coordinates: FlightPath = []
     path_groups: FlightPathGroup = []
     path_metadata: list[PathMetadata] = []
@@ -316,8 +351,5 @@ def parse_kml_coordinates(
             "format; run with --debug for details)",
             Path(kml_file).name,
         )
-
-    if cache_path:
-        save_to_cache(cache_path, coordinates, path_groups, path_metadata)
 
     return coordinates, path_groups, path_metadata

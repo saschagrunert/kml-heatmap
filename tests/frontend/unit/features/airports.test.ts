@@ -76,6 +76,17 @@ describe("airports feature", () => {
       ).toEqual({ EDAV: 1 });
     });
 
+    it("counts an airport that names an object property (regression)", () => {
+      const counts = mod.calculateAirportFlightCounts([
+        { id: 1, start_airport: "constructor", end_airport: "__proto__" },
+        { id: 2, start_airport: "constructor" },
+      ]);
+      expect(counts["constructor"]).toBe(2);
+      expect(counts["__proto__"]).toBe(1);
+      expect(Object.keys(counts).sort()).toEqual(["__proto__", "constructor"]);
+      expect(mod.findHomeBase(counts)).toBe("constructor");
+    });
+
     it("handles paths without airports", () => {
       expect(
         mod.calculateAirportFlightCounts([

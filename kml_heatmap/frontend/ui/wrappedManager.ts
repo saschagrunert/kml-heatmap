@@ -72,19 +72,6 @@ export interface UserMapView {
   pitch: number;
 }
 
-/**
- * Write the heading.
- *
- * It used to open with a sparkle, an emoji that ignored the gradient the
- * heading is painted with and came out differently on every platform, and
- * then with the same star drawn from the icon set, which at 24px beside
- * 36px type sat low and read as a stray mark. The card is titled by its
- * words alone.
- */
-function setWrappedTitle(titleEl: HTMLElement, text: string): void {
-  titleEl.textContent = text;
-}
-
 const coordinatesByAirports = new WeakMap<Airport[], Map<string, Coordinate>>();
 
 /**
@@ -243,10 +230,10 @@ export class WrappedManager {
   }
 
   showWrapped(): void {
-    if (!this.app.map || this.savedControlDisplays.size > 0) return;
+    if (!this.app.map || this.app.store.get("wrappedVisible") === true) return;
     // Replay owns the map while it runs; its control is disabled then, and
     // this covers every other way in (the mobile tab, a restored state)
-    if (this.app.replayState.active) return;
+    if (this.app.replayActive) return;
 
     // A close that is still settling must not remeasure a map that is about
     // to move back into the dialog
@@ -380,11 +367,13 @@ export class WrappedManager {
     const titleEl = domCache.get("wrapped-title");
     const yearEl = domCache.get("wrapped-year");
 
+    // The card is titled by its words alone: a sparkle emoji ignored the
+    // heading's gradient, and a drawn star beside the type read as a stray
     if (year === "all") {
-      if (titleEl) setWrappedTitle(titleEl, "Your Flight History");
+      if (titleEl) titleEl.textContent = "Your Flight History";
       if (yearEl) yearEl.textContent = "All Years";
     } else {
-      if (titleEl) setWrappedTitle(titleEl, "Your Year in Flight");
+      if (titleEl) titleEl.textContent = "Your Year in Flight";
       if (yearEl) yearEl.textContent = year;
     }
 

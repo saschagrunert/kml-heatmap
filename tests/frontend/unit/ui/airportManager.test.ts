@@ -713,7 +713,7 @@ describe("AirportManager", () => {
     });
 
     it("opens the popup but leaves the selection alone while replay runs", () => {
-      mockApp.replayState.active = true;
+      mockApp.replayActive = true;
 
       airportManager.activateAirport("EDDF");
 
@@ -731,6 +731,7 @@ describe("AirportManager", () => {
       ).features as Label[];
     const label = (name: string): Label | undefined =>
       labels().find((feature) => feature.properties["name"] === name);
+    const labelSource = () => mockApp.map!.source(MAP_SOURCES.airportLabels);
 
     it("hands the label layer every airport, with its flights and the home base", () => {
       airportManager.updateAirportPopups();
@@ -763,9 +764,14 @@ describe("AirportManager", () => {
       airportManager.updateAirportOpacity();
 
       // Looking north over EDDF: EDDK is up at the horizon, three times as
-      // far from the camera as EDDF; the others are to the south, near
+      // far from the camera as EDDF; the others are to the south, near.
+      // Nothing is measured or written while the map moves, only at rest.
       map.jumpTo({ center: [8.67, 50.1], pitch: 80 });
+      const labelWrites = labelSource().setData.mock.calls.length;
       map.emit("move");
+      expect(markers["EDDK"]!.getElement().hidden).toBe(false);
+      expect(labelSource().setData).toHaveBeenCalledTimes(labelWrites);
+      map.emit("moveend");
 
       expect(markers["EDDK"]!.getElement().hidden).toBe(true);
       expect(markers["EDDF"]!.getElement().hidden).toBe(false);
@@ -773,7 +779,7 @@ describe("AirportManager", () => {
 
       // Flatter, it is back, marker and label
       map.jumpTo({ pitch: 45 });
-      map.emit("move");
+      map.emit("moveend");
 
       expect(markers["EDDK"]!.getElement().hidden).toBe(false);
       expect(names()).toEqual(airports.map((airport) => airport.name));
@@ -789,7 +795,7 @@ describe("AirportManager", () => {
       markers["EDDK"]!.getElement().focus();
 
       map.jumpTo({ center: [8.67, 50.1], pitch: 80 });
-      map.emit("move");
+      map.emit("moveend");
 
       expect(markers["EDDK"]!.getElement().hidden).toBe(false);
       expect(document.activeElement).toBe(markers["EDDK"]!.getElement());
@@ -803,15 +809,37 @@ describe("AirportManager", () => {
         value: 800,
       });
       map.jumpTo({ center: [8.67, 50.1], pitch: 80 });
-      map.emit("move");
+      map.emit("moveend");
       // 2024 has no flight to LOWW
       mockApp.selectedYear = "2024";
 
       map.jumpTo({ pitch: 0 });
-      map.emit("move");
+      map.emit("moveend");
 
       expect(markers["LOWW"]!.getElement().hidden).toBe(true);
       expect(markers["EDDK"]!.getElement().hidden).toBe(false);
+    });
+
+    it("stops following the map once destroyed", async () => {
+      await mockApp.mapReady;
+      await Promise.resolve();
+      const map = mockApp.map!;
+      expect(map.listenerCount("moveend")).toBeGreaterThan(0);
+      const listening = {
+        moveend: map.listenerCount("moveend"),
+        move: map.listenerCount(`mousemove:${MAP_LAYERS.airportLabels}`),
+        leave: map.listenerCount(`mouseleave:${MAP_LAYERS.airportLabels}`),
+      };
+
+      airportManager.destroy();
+
+      expect(map.listenerCount("moveend")).toBe(listening.moveend - 1);
+      expect(map.listenerCount(`mousemove:${MAP_LAYERS.airportLabels}`)).toBe(
+        listening.move - 1,
+      );
+      expect(map.listenerCount(`mouseleave:${MAP_LAYERS.airportLabels}`)).toBe(
+        listening.leave - 1,
+      );
     });
 
     it("leaves out the airports the filter hides, like their markers", () => {

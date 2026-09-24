@@ -142,7 +142,7 @@ lint: ## Run the same linters, formatters (check only) and type checkers as the 
 	npm run lint:unused
 	npm run format:check
 	@if command -v typos >/dev/null 2>&1; then typos; else \
-	  echo "note: typos is not installed, skipping the spell check (CI runs it)"; fi
+	  echo "warning: typos is not installed, skipping the spell check (CI runs it; see CONTRIBUTING.md)" >&2; fi
 
 format: ## Run formatters
 	ruff format .
@@ -150,7 +150,7 @@ format: ## Run formatters
 
 test: ## Run the JavaScript and Python test suites with coverage
 	npm run test:coverage
-	pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml --cov-report=term
+	pytest -n auto --cov --cov-branch --cov-report=xml --cov-report=term
 
 # The dependencies are declared once, in pyproject.toml: the runtime
 # dependencies become requirements.lock, the test and dev extras
@@ -161,9 +161,14 @@ test: ## Run the JavaScript and Python test suites with coverage
 # The test lock is compiled against the runtime lock as a constraint, so a
 # dependency both of them pin gets the same version in each: CI installs
 # requirements-test.lock alone where it needs both.
+# requirements-build.lock pins what build-system.requires asks for
+# (setuptools), which CI installs to build the wheel without build isolation;
+# with isolation pip would fetch whatever release satisfies the range, with
+# no hash. setuptools is one of the packages pip-compile leaves out unless
+# told otherwise, hence --allow-unsafe.
 PIP_TOOLS_VERSION := 7.6.1
 
-lock: ## Regenerate requirements.lock and requirements-test.lock from pyproject.toml with pip-compile
+lock: ## Regenerate the three lock files from pyproject.toml with pip-compile
 	@tmp=$$(mktemp -d) && \
 	  python -m venv "$$tmp" && \
 	  "$$tmp/bin/pip" install --quiet --disable-pip-version-check "pip-tools==$(PIP_TOOLS_VERSION)" && \
@@ -173,7 +178,11 @@ lock: ## Regenerate requirements.lock and requirements-test.lock from pyproject.
 	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
 	    --generate-hashes --strip-extras --upgrade --extra test --extra dev \
 	    --constraint requirements.lock \
-	    --output-file=requirements-test.lock pyproject.toml; \
+	    --output-file=requirements-test.lock pyproject.toml && \
+	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
+	    --generate-hashes --strip-extras --upgrade --allow-unsafe \
+	    --only-build-deps --build-deps-for wheel \
+	    --output-file=requirements-build.lock pyproject.toml; \
 	  status=$$?; rm -rf "$$tmp"; exit $$status
 
 clean: ## Remove the container image (when a runtime is available) and local build artifacts, including the frontend build output in kml_heatmap/static/

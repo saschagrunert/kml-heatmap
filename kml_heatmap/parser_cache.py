@@ -24,17 +24,21 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from .airport_lookup import database_fingerprint
 from .cache import CACHE_DIR, atomic_json_write
 from .logger import logger
 from .types import FlightPath, FlightPathGroup, PathMetadata, TrackPoint
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 __all__ = [
     "CACHE_FORMAT_VERSION",
     "CACHE_MAX_AGE_DAYS",
     "KML_CACHE_DIR",
+    "CachedParse",
     "get_cache_key",
     "load_cached_parse",
     "parser_fingerprint",
@@ -43,7 +47,7 @@ __all__ = [
 ]
 
 # Bump whenever the serialized structure changes.
-CACHE_FORMAT_VERSION = 4
+CACHE_FORMAT_VERSION = 5
 
 # Entries not read or written for this long are removed
 CACHE_MAX_AGE_DAYS = 30
@@ -56,6 +60,7 @@ _PARSER_MODULES = (
     "aircraft",
     "airport_lookup",
     "constants",
+    "geometry",
     "helpers",
     "parser",
     "parser_cache",
@@ -184,14 +189,26 @@ def prune_stale_cache_entries(cache_dir: Path | None = None) -> int:
     return removed
 
 
+class CachedParse(NamedTuple):
+    """A parse result read from the cache.
+
+    ``warnings`` are the (level, message) pairs the parse logged at WARNING
+    or above, which a cache hit logs again: a file that was empty or partly
+    unreadable the first time still is.
+    """
+
+    coordinates: FlightPath
+    path_groups: FlightPathGroup
+    path_metadata: list[PathMetadata]
+    warnings: list[tuple[int, str]]
+
+
 def _point_from_json(item: Any) -> TrackPoint:
     lat, lon, alt, ts = item
     return TrackPoint(float(lat), float(lon), alt, ts)
 
 
-def load_cached_parse(
-    cache_path: Path,
-) -> tuple[FlightPath, FlightPathGroup, list[PathMetadata]] | None:
+def load_cached_parse(cache_path: Path) -> CachedParse | None:
     """Load cached parse results, or None if the cache entry is invalid.
 
     Path points are stored as indices into the coordinate list, so a path
@@ -216,6 +233,7 @@ def load_cached_parse(
         path_metadata: list[PathMetadata] = cached["path_metadata"]
         if not isinstance(path_metadata, list):
             raise TypeError("path_metadata must be a list")
+        warnings = [(int(level), str(message)) for level, message in cached["warnings"]]
     except (
         json.JSONDecodeError,
         IndexError,
@@ -230,7 +248,7 @@ def load_cached_parse(
 
     with contextlib.suppress(OSError):
         os.utime(cache_path)
-    return coordinates, path_groups, path_metadata
+    return CachedParse(coordinates, path_groups, path_metadata, warnings)
 
 
 def save_to_cache(
@@ -238,8 +256,9 @@ def save_to_cache(
     coordinates: FlightPath,
     path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
+    warnings: Sequence[tuple[int, str]] = (),
 ) -> None:
-    """Save parse results to cache.
+    """Save parse results to cache, with the warnings the parse logged.
 
     The parser appends every path point to the coordinate list as well, so a
     path is stored as the indices of its points. A point that is not in the
@@ -258,5 +277,6 @@ def save_to_cache(
             "coordinates": [list(point) for point in coordinates],
             "path_groups": [[encode(point) for point in path] for path in path_groups],
             "path_metadata": path_metadata,
+            "warnings": [list(warning) for warning in warnings],
         },
     )

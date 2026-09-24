@@ -1,8 +1,9 @@
 """Google Earth Track (gx:Track) processing.
 
-Every gx:Track element becomes one flight path. The <when> and <gx:coord>
-children of a track are paired by position in document order; metadata is
-taken from the enclosing Placemark.
+Every gx:Track element becomes one flight path, and so do all tracks of one
+gx:MultiTrack together. The <when> and <gx:coord> children of a track are
+paired by position in document order; metadata is taken from the enclosing
+Placemark.
 """
 
 from bisect import bisect_right
@@ -31,6 +32,8 @@ from .types import TrackPoint
 MAX_TIMESTAMP_DISTANCE_SECONDS = 7 * 24 * 3600
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from lxml import etree
 
     from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
@@ -131,70 +134,78 @@ def _consistent_timestamps(timestamps: list[float | None]) -> list[bool]:
 def parse_gx_track(
     track: etree._Element, kml_file: str, coordinates: FlightPath
 ) -> tuple[FlightPath, list[str]]:
-    """Parse one gx:Track into a flight path.
+    """Parse one gx:Track into a flight path (see ``parse_gx_tracks``)."""
+    return parse_gx_tracks([track], kml_file, coordinates)
+
+
+def parse_gx_tracks(
+    tracks: Sequence[etree._Element], kml_file: str, coordinates: FlightPath
+) -> tuple[FlightPath, list[str]]:
+    """Parse gx:Track elements into one flight path, one track after another.
+
+    Several tracks are the children of one gx:MultiTrack: one flight whose
+    recording paused. Their points are joined into a single path, whose gap
+    in time the exporter and the frontend handle like any other.
 
     Returns the path (points with altitude) and the <when> texts of the
     path's points that carry a timestamp, in path order: the first and last
     of them are the time span of the path. A <when> that is unparsable,
-    inconsistent with the rest of the track (see ``_consistent_timestamps``),
+    inconsistent with the rest of the path (see ``_consistent_timestamps``),
     or that belongs to a coordinate that was rejected or has no altitude, is
     not among them. Points are appended to ``coordinates`` as well.
     """
-    whens, coord_texts = _collect_track_children(track)
     filename = Path(kml_file).name
     source = f"{filename} (gx:Track)"
-    # See NON_MSL_ALTITUDE_MODES: such a track has no usable altitudes
-    mode = altitude_mode(track)
-    msl_altitudes = mode not in NON_MSL_ALTITUDE_MODES
-    if not msl_altitudes:
+
+    # The valid coordinates with their <when> text and parsed timestamp
+    points: list[tuple[float, float, float | None, str]] = []
+    timestamps: list[float | None] = []
+    ignored_mode: str | None = None
+    for track in tracks:
+        whens, coord_texts = _collect_track_children(track)
+        # See NON_MSL_ALTITUDE_MODES: such a track has no usable altitudes
+        mode = altitude_mode(track)
+        msl_altitudes = mode not in NON_MSL_ALTITUDE_MODES
+        if not msl_altitudes:
+            ignored_mode = mode
+
+        if whens and len(whens) != len(coord_texts):
+            logger.warning(
+                "%s: gx:Track has %d <when> but %d <gx:coord> elements; "
+                "pairing them by position",
+                filename,
+                len(whens),
+                len(coord_texts),
+            )
+
+        for idx, coord_text in enumerate(coord_texts):
+            parsed = _parse_gx_coord(coord_text)
+            if parsed is None:
+                continue
+            lat, lon, alt = parsed
+            validated = validate_and_normalize_coordinate(
+                lat, lon, alt if msl_altitudes else None, source
+            )
+            if validated is None:
+                continue
+
+            when = whens[idx] if idx < len(whens) else ""
+            ts = None
+            if when:
+                ts = parse_timestamp_epoch(when)
+                if ts is None:
+                    logger.debug("Unparsable <when> in %s: %s", source, when)
+            points.append((*validated, when))
+            timestamps.append(ts)
+
+    if ignored_mode is not None:
+        # Once for all tracks of a gx:MultiTrack, which share the mode
         logger.warning(
             "%s: gx:Track with altitudeMode %s ignored: its altitudes are not "
             "above sea level",
             filename,
-            mode,
+            ignored_mode,
         )
-
-    if whens and len(whens) != len(coord_texts):
-        logger.warning(
-            "%s: gx:Track has %d <when> but %d <gx:coord> elements; "
-            "pairing them by position",
-            filename,
-            len(whens),
-            len(coord_texts),
-        )
-
-    # The valid coordinates with their <when> index and parsed timestamp
-    points: list[tuple[float, float, float | None, int]] = []
-    timestamps: list[float | None] = []
-    for idx, coord_text in enumerate(coord_texts):
-        if not coord_text or not coord_text.strip():
-            continue
-
-        parts = coord_text.split()
-        if len(parts) < 2:
-            continue
-
-        try:
-            lon = float(parts[0])
-            lat = float(parts[1])
-            alt = float(parts[2]) if len(parts) >= 3 else None
-        except ValueError:
-            logger.debug("Failed to parse gx:coord: %s", coord_text)
-            continue
-
-        validated = validate_and_normalize_coordinate(
-            lat, lon, alt if msl_altitudes else None, source
-        )
-        if validated is None:
-            continue
-
-        ts = None
-        if idx < len(whens) and whens[idx]:
-            ts = parse_timestamp_epoch(whens[idx])
-            if ts is None:
-                logger.debug("Unparsable <when> in %s: %s", source, whens[idx])
-        points.append((*validated, idx))
-        timestamps.append(ts)
 
     keep = _consistent_timestamps(timestamps)
     dropped = sum(
@@ -207,15 +218,51 @@ def parse_gx_track(
 
     path: FlightPath = []
     path_whens: list[str] = []
-    for (lat, lon, alt, idx), ts, kept in zip(points, timestamps, keep, strict=True):
+    for (lat, lon, alt, when), ts, kept in zip(points, timestamps, keep, strict=True):
         point = TrackPoint(lat, lon, alt, ts if kept else None)
         coordinates.append(point)
         if alt is not None:
             path.append(point)
             if point.ts is not None:
-                path_whens.append(whens[idx])
+                path_whens.append(when)
 
     return path, path_whens
+
+
+def _parse_gx_coord(coord_text: str | None) -> tuple[float, float, float | None] | None:
+    """The latitude, longitude and altitude of a <gx:coord>, unvalidated."""
+    if not coord_text:
+        return None
+    parts = coord_text.split()
+    if len(parts) < 2:
+        return None
+    try:
+        lon = float(parts[0])
+        lat = float(parts[1])
+        alt = float(parts[2]) if len(parts) >= 3 else None
+    except ValueError:
+        logger.debug("Failed to parse gx:coord: %s", coord_text)
+        return None
+    return lat, lon, alt
+
+
+def _flights(tracks: list[etree._Element]) -> list[list[etree._Element]]:
+    """The tracks grouped into flights, in document order.
+
+    A gx:Track on its own is a flight, and so are all tracks of one
+    gx:MultiTrack together.
+    """
+    flights: dict[int, tuple[etree._Element, list[etree._Element]]] = {}
+    for track in tracks:
+        parent = track.getparent()
+        # The owner is kept in the dictionary, so its id stays its own
+        owner = (
+            parent
+            if parent is not None and local_name(parent.tag) == "MultiTrack"
+            else track
+        )
+        flights.setdefault(id(owner), (owner, []))[1].append(track)
+    return [members for _, members in flights.values()]
 
 
 def process_gx_track(
@@ -227,15 +274,19 @@ def process_gx_track(
     path_metadata: list[PathMetadata],
     aircraft_info: dict[str, str | None],
 ) -> None:
-    """Process all gx:Track elements of a KML document, one path per track."""
+    """Process all gx:Track elements of a KML document.
+
+    Every gx:Track is one path, except that the tracks of a gx:MultiTrack
+    make one path together (see ``parse_gx_tracks``).
+    """
     if not tracks:
         return
 
     filename = Path(kml_file).name
     metadata_cache: dict[int, PlacemarkMetadata] = {}
 
-    for track in tracks:
-        placemark = _find_placemark(track)
+    for flight in _flights(tracks):
+        placemark = _find_placemark(flight[0])
         if placemark is None:
             placemark_meta = empty_placemark_metadata()
         else:
@@ -244,7 +295,7 @@ def process_gx_track(
                 metadata_cache[key] = extract_placemark_metadata(placemark, namespaces)
             placemark_meta = metadata_cache[key]
 
-        path, whens = parse_gx_track(track, kml_file, coordinates)
+        path, whens = parse_gx_tracks(flight, kml_file, coordinates)
         if not path:
             logger.debug("gx:Track without usable coordinates in %s", filename)
             continue
@@ -254,11 +305,13 @@ def process_gx_track(
             # The track's own timestamps are authoritative for its time span:
             # those of the path's points, not of the raw <when> list, whose
             # first entry may be unparsable or belong to a rejected coordinate.
-            # The year is the one of the median stamp (they are in order), the
-            # year most of the flight took place in.
+            # The year is the one of the start, like that of a LineString with
+            # a TimeSpan: the obfuscator moves a flight to January 1st of the
+            # year it started in, so a flight across New Year stays in its
+            # year after the obfuscation.
             track_meta["timestamp"] = whens[0]
             track_meta["end_timestamp"] = whens[-1] if len(whens) > 1 else None
-            track_meta["year"] = extract_year_from_timestamp(whens[len(whens) // 2])
+            track_meta["year"] = extract_year_from_timestamp(whens[0])
 
         if track_meta["timestamp"] is None and track_meta["airport_name"]:
             logger.debug(

@@ -4,7 +4,8 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from .airports import route_airports
-from .constants import METERS_TO_FEET
+from .constants import ALTITUDE_GAIN_HYSTERESIS_FT, METERS_TO_FEET
+from .date_tokens import strip_dates
 from .helpers import calculate_duration_seconds
 from .logger import logger
 from .segment_calculator import (
@@ -16,7 +17,7 @@ from .segment_calculator import (
 from .types import COORDINATE_DECIMALS
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Sequence
 
     from .types import FlightPath, PathInfo, PathMetadata, SegmentRow
 
@@ -24,7 +25,8 @@ if TYPE_CHECKING:
 def path_duration(metadata: PathMetadata) -> float:
     """The duration of a path in seconds, from the metadata timestamps.
 
-    0 when the metadata carries no usable start and end timestamp.
+    0 when the metadata carries no usable start and end timestamp. A path
+    that shares its time span with others gets its ``span_share`` of it.
     """
     path_duration_seconds = 0.0
     start_ts = metadata.get("timestamp")
@@ -35,7 +37,40 @@ def path_duration(metadata: PathMetadata) -> float:
         if path_duration_seconds == 0:
             logger.debug("  Could not parse timestamps '%s' -> '%s'", start_ts, end_ts)
 
-    return path_duration_seconds
+    return path_duration_seconds * metadata.get("span_share", 1.0)
+
+
+def altitude_gain_m(altitudes_m: Sequence[float]) -> float:
+    """The total climb of a path in meters, without the jitter.
+
+    Follows the lowest point (the trough) until the altitude rises
+    ``ALTITUDE_GAIN_HYSTERESIS_FT`` above it, then the highest point (the
+    peak) until the altitude falls as far below it. Each climb from a trough
+    to its peak counts once; rises and dips smaller than the hysteresis
+    count for nothing.
+    """
+    if not altitudes_m:
+        return 0.0
+    hysteresis_m = ALTITUDE_GAIN_HYSTERESIS_FT / METERS_TO_FEET
+    gain = 0.0
+    trough = peak = altitudes_m[0]
+    climbing = False
+    for altitude in altitudes_m[1:]:
+        if climbing:
+            if altitude > peak:
+                peak = altitude
+            elif peak - altitude >= hysteresis_m:
+                gain += peak - trough
+                climbing = False
+                trough = altitude
+        elif altitude < trough:
+            trough = altitude
+        elif altitude - trough >= hysteresis_m:
+            climbing = True
+            peak = altitude
+    if climbing:
+        gain += peak - trough
+    return gain
 
 
 def build_path_info(
@@ -59,8 +94,11 @@ def build_path_info(
     a name holding an ICAO code or of more than one word, at a real start
     or landing. None keeps every name (for callers without airports).
     """
-    # The names match the airport markers of airports.json exactly
-    start_airport, end_airport = route_airports(metadata)
+    # The names match the airport markers of airports.json exactly, which
+    # have their dates taken out the same way
+    start_airport, end_airport = (
+        strip_dates(name) for name in route_airports(metadata)
+    )
     if airport_names is not None:
         start_airport = start_airport if start_airport in airport_names else None
         end_airport = end_airport if end_airport in airport_names else None
@@ -68,11 +106,15 @@ def build_path_info(
     info: PathInfo = {"id": path_id, "year": year}
 
     # Segment altitudes are rounded to 100 ft for rendering, so the exact
-    # range is carried per path to keep the frontend statistics accurate
+    # range and climb are carried per path to keep the frontend statistics
+    # accurate
     altitudes_m = [point.alt for point in path if point.alt is not None]
     if altitudes_m:
         info["min_altitude_ft"] = round(min(altitudes_m) * METERS_TO_FEET, 1)
         info["max_altitude_ft"] = round(max(altitudes_m) * METERS_TO_FEET, 1)
+        info["altitude_gain_ft"] = round(
+            altitude_gain_m(altitudes_m) * METERS_TO_FEET, 1
+        )
     if start_airport:
         info["start_airport"] = start_airport
     if end_airport:
@@ -81,7 +123,9 @@ def build_path_info(
     registration = metadata.get("aircraft_registration")
     if registration:
         info["aircraft_registration"] = registration
-    aircraft_type = metadata.get("aircraft_type")
+    # The type is a part of the file name, which may be a date, as in
+    # 1_DEHYL_2026-08-16.kml
+    aircraft_type = strip_dates(metadata.get("aircraft_type"))
     if aircraft_type:
         info["aircraft_type"] = aircraft_type
 

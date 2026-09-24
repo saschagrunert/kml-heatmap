@@ -106,6 +106,9 @@ function createMockApp() {
     get selectedPathIds() {
       return store.get("selectedPathIds");
     },
+    get replayActive() {
+      return store.get("replayActive");
+    },
   };
 }
 
@@ -242,7 +245,7 @@ describe("MobileBar", () => {
     it("keeps the groups out of reach while replay owns the bottom edge", () => {
       const created = create();
 
-      created.setReplayActive(true);
+      app.store.set("replayActive", true);
 
       // The bar leaves the document, so a `body:has(.mobile-bar)` rule would
       // stop matching here; the attribute the stylesheet keys off must stay
@@ -650,7 +653,7 @@ describe("MobileBar", () => {
       const created = create();
       tab("layers").click();
 
-      created.setReplayActive(true);
+      app.store.set("replayActive", true);
 
       // Merely hiding it would still reserve its height for the stylesheet
       expect(document.contains(created.root)).toBe(false);
@@ -664,8 +667,8 @@ describe("MobileBar", () => {
     it("brings the bar back when replay closes", () => {
       const created = create();
 
-      created.setReplayActive(true);
-      created.setReplayActive(false);
+      app.store.set("replayActive", true);
+      app.store.set("replayActive", false);
 
       expect(document.contains(created.root)).toBe(true);
       expect(created.isVisible()).toBe(true);
@@ -674,7 +677,7 @@ describe("MobileBar", () => {
     it("stays out of the document when the bar mounts during replay", () => {
       setWidth(DESKTOP_WIDTH);
       const created = create();
-      created.setReplayActive(true);
+      app.store.set("replayActive", true);
 
       setWidth(PHONE_WIDTH);
 

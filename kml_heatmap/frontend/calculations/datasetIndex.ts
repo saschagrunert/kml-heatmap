@@ -64,7 +64,8 @@ export class FilterView {
   /** Kept path ids per airport they start or end at */
   pathIdsByAirport(): PathIdsByAirport {
     if (this.byAirport) return this.byAirport;
-    const byAirport: PathIdsByAirport = {};
+    // No prototype: an airport name is data, and "constructor" is no key
+    const byAirport = Object.create(null) as PathIdsByAirport;
     for (const path of this.paths) {
       for (const airport of [path.start_airport, path.end_airport]) {
         if (!airport) continue;

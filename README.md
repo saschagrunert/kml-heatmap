@@ -56,7 +56,7 @@
 
 - Python 3.14 (see `.python-version`) and Node.js 26 or newer (see `.nvmrc`)
 - podman or docker for `make build`/`serve` (auto-detected, podman first)
-- To view the site: a current browser with ES modules, `fetch()` and WebGL,
+- To view the site: a current browser with ES modules, `fetch()` and WebGL 2,
   and an HTTP server (`make serve`); the page does not work opened from disk
 
 ### Quick Start
@@ -76,8 +76,8 @@ make serve
 
 The page loads its code as ES modules and its data with `fetch()`, so it has
 to be served over HTTP; opening `docs/index.html` from disk shows an empty
-map. The map is drawn with WebGL, which every current browser has; one that
-has it switched off shows the controls over an empty map. `make serve` only
+map. The map is drawn with WebGL 2, which every current browser has; where it
+is missing or switched off, the page says so in place of the map. `make serve` only
 serves the existing `docs/` directory; run `make build` (or
 `make serve-build`) to regenerate it first. `docs/` is a local build output
 and is not committed: the published site is built from the sources in CI once

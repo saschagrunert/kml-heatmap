@@ -5,6 +5,7 @@ import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
 import type { MapCenter, SavedState } from "../types";
 import {
+  isPathId,
   isSupportedSchemaVersion,
   STATE_SCHEMA_VERSION,
   encodeStateToUrl,
@@ -92,9 +93,7 @@ export function sanitizeSavedState(candidate: unknown): SavedState {
     Array.isArray(pathIds) &&
     isSupportedSchemaVersion(candidate["schemaVersion"])
   ) {
-    result.selectedPathIds = pathIds.filter(
-      (id: unknown): id is number => typeof id === "number" && isFinite(id),
-    );
+    result.selectedPathIds = pathIds.filter(isPathId);
   }
   return result;
 }

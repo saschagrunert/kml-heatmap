@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; connect-src 'self' https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; font-src 'self'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://nwy-tiles-api.prod.newaydata.com; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'"
     />
     <meta
       name="viewport"
@@ -453,7 +453,7 @@
          that show the heat bloom alone it had no representation at all, and
          nothing anywhere said how many flights Isolate and the shared link
          would carry. Filled by ui/pathSelection.ts. -->
-    <div id="selection-chip" role="status" hidden>
+    <div id="selection-chip" hidden>
       <span id="selection-chip-count"></span>
       <button
         type="button"

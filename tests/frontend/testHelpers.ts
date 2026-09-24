@@ -20,6 +20,7 @@ import {
   type StoreState,
 } from "../../kml_heatmap/frontend/state/store";
 import { segmentsForPathIds } from "../../kml_heatmap/frontend/calculations/statistics";
+import { followLayerVisibility } from "../../kml_heatmap/frontend/ui/layerVisibility";
 import {
   syncLegend,
   syncToggleButton,
@@ -89,6 +90,7 @@ interface MockManagers {
     redrawAirspeedPaths: Mock;
     clearLayer: Mock;
     updateSelectionStyles: Mock;
+    syncModes: Mock;
     updateAltitudeLegend: Mock;
     updateAirspeedLegend: Mock;
     hitTest: Mock;
@@ -258,7 +260,7 @@ function createMockManagers(): MockManagers {
       loadData: vi.fn().mockResolvedValue(null),
       loadAirports: vi.fn().mockResolvedValue([]),
       loadMetadata: vi.fn().mockResolvedValue(null),
-      updateLayers: vi.fn().mockResolvedValue(undefined),
+      updateLayers: vi.fn(),
       showLoading: vi.fn(),
       hideLoading: vi.fn(),
       destroy: vi.fn(),
@@ -270,6 +272,7 @@ function createMockManagers(): MockManagers {
       redrawAirspeedPaths: vi.fn(),
       clearLayer: vi.fn(),
       updateSelectionStyles: vi.fn(),
+      syncModes: vi.fn(),
       updateAltitudeLegend: vi.fn(),
       updateAirspeedLegend: vi.fn(),
       hitTest: vi.fn(() => null),
@@ -529,18 +532,19 @@ export function asMapApp(app: MockApp): MapApp {
 }
 
 /**
- * Wire the store-driven toggle buttons and legends the way MapApp does in
- * setupButtonSync, for tests that assert on the button or legend state a
- * manager causes through the store.
+ * Wire the store-driven toggle buttons, legends and layers the way MapApp
+ * does (setupButtonSync, followLayerVisibility), for tests that assert on
+ * the state a manager causes through the store. The colour layers are the
+ * layer manager's, a stub here unless the test gives it a real one.
  */
-export function syncControlsWithStore(store: AppStore): void {
-  syncToggleButton(store, "heatmapVisible", "heatmap-btn");
+export function syncControlsWithStore(app: MockApp): void {
+  const store = app.store;
   syncToggleButton(store, "altitudeVisible", "altitude-btn");
   syncToggleButton(store, "airspeedVisible", "airspeed-btn");
   syncToggleButton(store, "airportsVisible", "airports-btn");
   syncToggleButton(store, "aviationVisible", "aviation-btn");
-  syncLegend(store, "altitudeVisible", "altitude-legend");
   syncLegend(store, "airspeedVisible", "airspeed-legend");
+  followLayerVisibility(asMapApp(app));
 }
 
 /**

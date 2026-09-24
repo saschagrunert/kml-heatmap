@@ -377,7 +377,6 @@ describe("appInitializer", () => {
         ["loadAirports", app.dataManager.loadAirports],
         ["loadMetadata", app.dataManager.loadMetadata],
         ["loadData", app.dataManager.loadData],
-        ["updateLayers", app.dataManager.updateLayers],
       ] as const) {
         const original = fn.getMockImplementation();
         fn.mockImplementation((...args: unknown[]) => {
@@ -399,7 +398,6 @@ describe("appInitializer", () => {
         "loadMetadata",
         "loadData",
         "dropdown",
-        "updateLayers",
         "markerSizes",
       ]);
       expect(app.allAirportsData).toBe(airports);
@@ -410,10 +408,34 @@ describe("appInitializer", () => {
       expect(app.currentData).toBe(data);
       expect(Object.keys(app.airportMarkers)).toHaveLength(2);
       expect(app.airspeedRange).toEqual({ min: 10, max: 150 });
-      expect(app.layerManager.updateAirspeedLegend).toHaveBeenCalledWith(
-        10,
-        150,
+    });
+
+    it("settles the speed range before the dataset draws the layers", async () => {
+      // Publishing the dataset is what draws the layers (DataManager
+      // follows the store), so what they are drawn with comes first
+      const atPublish: unknown[] = [];
+      app.store.subscribe("currentData", () =>
+        atPublish.push({ ...app.airspeedRange }, app.hasTimingData),
       );
+
+      await loadInitialData(asMapApp(app));
+
+      expect(atPublish).toEqual([{ min: 10, max: 150 }, true]);
+    });
+
+    it("publishes the dataset and the aircraft list in one update", async () => {
+      app.filterManager.updateAircraftDropdown.mockImplementation(() => {
+        app.selectedAircraft = "all";
+      });
+      app.selectedAircraft = "D-GONE";
+      const listener = vi.fn();
+      app.store.subscribeKeys(["currentData", "selectedAircraft"], listener);
+
+      await loadInitialData(asMapApp(app));
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(app.currentData).toBe(data);
+      expect(app.selectedAircraft).toBe("all");
     });
 
     it("falls back to no models for metadata from an older export", async () => {
@@ -437,7 +459,7 @@ describe("appInitializer", () => {
     });
 
     it("enables the airspeed button with timing data and leaves its look to the store", async () => {
-      syncControlsWithStore(app.store);
+      syncControlsWithStore(app);
 
       await loadInitialData(asMapApp(app));
 
@@ -449,13 +471,12 @@ describe("appInitializer", () => {
 
     it("keeps the airspeed button lit when airspeed is visible", async () => {
       app.airspeedVisible = true;
-      syncControlsWithStore(app.store);
+      syncControlsWithStore(app);
 
       await loadInitialData(asMapApp(app));
 
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.style.opacity).toBe("1");
-      expect(app.airspeedLayer.setVisible).toHaveBeenCalledWith(true);
       expect(document.getElementById("airspeed-legend")!.hidden).toBe(false);
     });
 
@@ -477,31 +498,11 @@ describe("appInitializer", () => {
       await expect(loadInitialData(asMapApp(app))).resolves.toBeUndefined();
     });
 
-    it("restores the altitude layer", async () => {
-      app.altitudeVisible = true;
-
-      await loadInitialData(asMapApp(app));
-
-      expect(app.altitudeLayer.setVisible).toHaveBeenCalledWith(true);
-      expect(app.airspeedLayer.setVisible).toHaveBeenCalledWith(false);
-    });
-
-    it("shows the aviation layer when visible", async () => {
-      app.aviationVisible = true;
-
-      await loadInitialData(asMapApp(app));
-
-      expect(app.aviationLayer.setVisible).toHaveBeenCalledWith(true);
-      expect(app.aviationLayer.isVisible()).toBe(true);
-    });
-
-    it("restores the layers without a map: the handles remember", async () => {
+    it("gets through without a map", async () => {
       app.map = null;
-      app.altitudeVisible = true;
 
       await expect(loadInitialData(asMapApp(app))).resolves.toBeUndefined();
       expect(app.airportManager.updateAirportMarkerSizes).toHaveBeenCalled();
-      expect(app.altitudeLayer.setVisible).toHaveBeenCalledWith(true);
     });
 
     it("restores the stats panel through the stats manager", async () => {
@@ -525,13 +526,8 @@ describe("appInitializer", () => {
       expect(app.dataManager.loadData).toHaveBeenCalledWith("all");
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(true);
-      expect(app.dataManager.updateLayers).toHaveBeenCalled();
-    });
-
-    it("builds the layers from the dataset it loaded (regression)", async () => {
-      await loadInitialData(asMapApp(app));
-
-      expect(app.dataManager.updateLayers).toHaveBeenCalledWith(data);
+      // The aircraft list is still settled
+      expect(app.filterManager.updateAircraftDropdown).toHaveBeenCalled();
     });
 
     it("does not load a year that failed a second time for the layers (regression)", async () => {
@@ -539,9 +535,8 @@ describe("appInitializer", () => {
 
       await loadInitialData(asMapApp(app));
 
-      // updateLayers() without the result would fetch and report it again
       expect(app.dataManager.loadData).toHaveBeenCalledTimes(1);
-      expect(app.dataManager.updateLayers).toHaveBeenCalledWith(null);
+      expect(app.dataManager.updateLayers).not.toHaveBeenCalled();
     });
 
     it("keeps created markers accessible for the airport manager", async () => {

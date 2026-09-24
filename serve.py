@@ -32,18 +32,27 @@ class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
 
 
-data_dir = "/data"
-if not os.path.isdir(data_dir):
-    print(f"Error: {data_dir} does not exist. Are you running inside Docker?")
-    sys.exit(1)
-os.chdir(data_dir)
-print(f"Starting HTTP server on {BIND_HOST}:{PORT}...")
-print(f"Serving files from: {os.getcwd()}")
-print(f"Open http://localhost:{PORT}/ in your browser")
+# The directory the image mounts the site at; DATA_DIR points elsewhere, as
+# tests/test_serve.py does
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
-with Server((BIND_HOST, PORT), CORSHTTPRequestHandler) as httpd:
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\nServer stopped.")
-        sys.exit(0)
+
+def main() -> int:
+    if not os.path.isdir(DATA_DIR):
+        print(f"Error: {DATA_DIR} does not exist. Are you running inside Docker?")
+        return 1
+    os.chdir(DATA_DIR)
+    print(f"Starting HTTP server on {BIND_HOST}:{PORT}...")
+    print(f"Serving files from: {os.getcwd()}")
+    print(f"Open http://localhost:{PORT}/ in your browser", flush=True)
+
+    with Server((BIND_HOST, PORT), CORSHTTPRequestHandler) as httpd:
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\nServer stopped.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

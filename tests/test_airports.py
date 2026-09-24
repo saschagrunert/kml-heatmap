@@ -164,6 +164,22 @@ class TestExtractAirportName:
     def test_single_word_without_icao(self):
         assert extract_airport_name("Somewhere", False) is None
 
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("Sunday flight 16 Aug 2026", "Sunday flight"),
+            ("Flight EDDS-EDDP 2026-08-16", "Flight EDDS-EDDP"),
+            ("EDXX 16 Aug 2026", "EDXX"),
+            ("EDDS Stuttgart (16.08.2026)", "EDDS Stuttgart"),
+            ("Sunday 16 Aug 2026", None),
+            ("2026-08-16", None),
+            ("16 Aug 2026 08:50 Z", None),
+        ],
+    )
+    def test_dates_are_taken_out(self, name, expected):
+        """A marker must not publish the day of the flight."""
+        assert extract_airport_name(name, False) == expected
+
     @pytest.mark.parametrize("is_at_path_end", [False, True])
     def test_airport_name_with_dash_is_not_split(self, is_at_path_end):
         """The deduplicator stores one airport; LFBN is "Niort - Marais Poitevin"."""

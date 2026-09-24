@@ -74,6 +74,9 @@ class PathMetadata(TypedDict):
     end_airport: NotRequired[str | None]
     timestamp: NotRequired[str | None]
     end_timestamp: NotRequired[str | None]
+    # The part of the time from timestamp to end_timestamp that is this
+    # path's, when several paths share one TimeSpan (1 when absent)
+    span_share: NotRequired[float]
     filename: NotRequired[str | None]
 
 
@@ -88,6 +91,39 @@ class PathInfo(TypedDict):
     end_airport: NotRequired[str]
     min_altitude_ft: NotRequired[float]
     max_altitude_ft: NotRequired[float]
+    altitude_gain_ft: NotRequired[float]
+
+
+class YearFileHeader(TypedDict):
+    """The keys of a year file (<year>/data.json) before its paths.
+
+    ``path_info`` (a list of ``PathInfo``) and ``segments`` follow them; the
+    exporter streams those from the chunk fragments.
+    """
+
+    format: int
+    year: int
+    original_points: int
+
+
+class SiteMetadata(TypedDict):
+    """metadata.json: what the frontend needs before it loads a year."""
+
+    min_groundspeed_knots: float
+    max_groundspeed_knots: float
+    available_years: list[int]
+    year_file_bytes: dict[str, int]
+    aircraft_models: dict[str, str]
+    available_flags: list[str]
+
+
+class AirportMarker(TypedDict):
+    """An airport of airports.json."""
+
+    lat: float
+    lon: float
+    name: str
+    country: NotRequired[str]
 
 
 class AirportData(TypedDict):
@@ -103,6 +139,7 @@ class AirportData(TypedDict):
 __all__ = [
     "COORDINATE_DECIMALS",
     "AirportData",
+    "AirportMarker",
     "FlightPath",
     "FlightPathGroup",
     "PathInfo",
@@ -110,5 +147,7 @@ __all__ = [
     "PathSegments",
     "PlacemarkMetadata",
     "SegmentRow",
+    "SiteMetadata",
     "TrackPoint",
+    "YearFileHeader",
 ]

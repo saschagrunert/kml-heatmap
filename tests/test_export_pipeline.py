@@ -6,8 +6,10 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from kml_heatmap.constants import ALTITUDE_GAIN_HYSTERESIS_FT, METERS_TO_FEET
 from kml_heatmap.export_pipeline import (
     _segment_groundspeed,
+    altitude_gain_m,
     build_path_info,
     path_duration,
     process_path_segments,
@@ -54,7 +56,13 @@ class TestBuildPathInfo:
         assert "start_airport" not in info
         assert "end_airport" not in info
         assert "aircraft_registration" not in info
-        assert set(info) == {"id", "year", "min_altitude_ft", "max_altitude_ft"}
+        assert set(info) == {
+            "id",
+            "year",
+            "min_altitude_ft",
+            "max_altitude_ft",
+            "altitude_gain_ft",
+        }
 
     def test_key_order_is_stable(self):
         """The exported JSON keeps this order; the frontend contract test pins it."""
@@ -64,6 +72,7 @@ class TestBuildPathInfo:
             "year",
             "min_altitude_ft",
             "max_altitude_ft",
+            "altitude_gain_ft",
             "start_airport",
             "end_airport",
         ]
@@ -158,6 +167,73 @@ class TestBuildPathInfo:
         path = [TrackPoint(50.0, 8.5, None, None), TrackPoint(50.1, 8.6, None, None)]
         info = build_path_info(path, {}, 0, 2025)
         assert "min_altitude_ft" not in info
+        assert "altitude_gain_ft" not in info
+
+    def test_altitude_gain_of_a_climb(self):
+        """_make_path climbs 50 m per point: 450 m, from the exact altitudes."""
+        info = build_path_info(_make_path(), {}, 0, 2025)
+        assert info["altitude_gain_ft"] == round(450 * METERS_TO_FEET, 1) == 1476.4
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Sunday flight 16 Aug 2026",
+            "Flight EDDS-EDDP 2026-08-16",
+            "EDXX 16 Aug 2026",
+            "16.08.2026",
+        ],
+    )
+    def test_no_date_in_the_airports(self, name):
+        metadata = {"airport_name": name, "start_airport": name, "end_airport": name}
+        info = build_path_info(_make_path(), metadata, 0, 2025)
+        for key in ("start_airport", "end_airport"):
+            assert "2026" not in info.get(key, "")
+            assert "16" not in info.get(key, "")
+
+    def test_a_date_is_no_aircraft_type(self):
+        """The type is a part of the file name: 1_DEHYL_2026-08-16.kml."""
+        metadata = {"aircraft_registration": "D-EHYL", "aircraft_type": "2026-08-16"}
+        info = build_path_info(_make_path(), metadata, 0, 2025)
+        assert "aircraft_type" not in info
+        metadata["aircraft_type"] = "DA40 16 Aug 2026"
+        assert build_path_info(_make_path(), metadata, 0, 2025)["aircraft_type"] == (
+            "DA40"
+        )
+
+
+class TestAltitudeGain:
+    HYSTERESIS_M = ALTITUDE_GAIN_HYSTERESIS_FT / METERS_TO_FEET
+
+    def test_jitter_adds_nothing(self):
+        """A level cruise with +-7 m of noise is no climb at all."""
+        noise = [0, 7, -7, 5, -6, 7, -7, 0, 6, -5] * 50
+        assert altitude_gain_m([1500.0 + n for n in noise]) == 0.0
+
+    def test_a_climb_with_jitter_counts_once(self):
+        """Up by 1000 m in wobbling steps: the wobbles do not add to it."""
+        altitudes = []
+        for step in range(100):
+            base = 500.0 + step * 10
+            altitudes.extend([base, base + 8, base - 4])
+        gain = altitude_gain_m(altitudes)
+        assert gain == pytest.approx(max(altitudes) - min(altitudes))
+
+    def test_climbs_after_descents_add_up(self):
+        altitudes = [300.0, 900.0, 600.0, 1200.0, 400.0]
+        assert altitude_gain_m(altitudes) == pytest.approx(600 + 600)
+
+    def test_rises_below_the_hysteresis_count_for_nothing(self):
+        below = self.HYSTERESIS_M - 0.1
+        assert altitude_gain_m([100.0, 100 + below, 100.0, 100 + below]) == 0.0
+        above = self.HYSTERESIS_M + 0.1
+        assert altitude_gain_m([100.0, 100 + above]) == pytest.approx(above)
+
+    def test_a_dip_below_the_hysteresis_does_not_end_a_climb(self):
+        altitudes = [100.0, 500.0, 500 - self.HYSTERESIS_M + 1, 800.0]
+        assert altitude_gain_m(altitudes) == pytest.approx(700.0)
+
+    def test_empty(self):
+        assert altitude_gain_m([]) == 0.0
 
 
 class TestSegmentGroundspeed:

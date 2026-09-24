@@ -140,9 +140,10 @@ jobs:
           retention-days: 1
       - name: Run JavaScript tests with coverage
         run: npm run test:coverage
-      # Also enforces fail_under from pyproject.toml
+      # Also enforces fail_under from pyproject.toml. A bare --cov measures
+      # the sources [tool.coverage.run] names, the scripts among them.
       - name: Run Python tests with coverage
-        run: pytest -n auto --cov=kml_heatmap --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
+        run: pytest -n auto --cov --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
       - name: Upload coverage to Codecov
         if: github.actor != 'dependabot[bot]'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -174,12 +175,20 @@ jobs:
       # Fails when the minified bundle exceeds the size budget in build.js
       - name: Build the JavaScript bundle
         run: npm ci && npm run build
+      # Without build isolation pip would fetch whatever setuptools satisfies
+      # build-system.requires at the time; requirements-build.lock pins it
+      # with its hashes like every other Python dependency
       - name: Build the wheel
-        run: pip wheel . --no-deps -w dist
+        run: |
+          pip install --require-hashes -r requirements-build.lock
+          pip wheel . --no-deps --no-build-isolation -w dist
+      # The runtime dependencies from the lock file with their hashes, then
+      # the wheel on top without resolving anything again
       - name: Install the wheel into a fresh virtual environment
         run: |
           python -m venv "$RUNNER_TEMP/wheel-venv"
-          "$RUNNER_TEMP/wheel-venv/bin/pip" install --disable-pip-version-check dist/*.whl
+          "$RUNNER_TEMP/wheel-venv/bin/pip" install --disable-pip-version-check --require-hashes -r requirements.lock
+          "$RUNNER_TEMP/wheel-venv/bin/pip" install --disable-pip-version-check --no-deps dist/*.whl
       - name: Check the shipped assets
         # Run outside the checkout so the installed package is imported, not the source tree
         working-directory: ${{ runner.temp }}
@@ -228,16 +237,30 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # The published site has a tile API key and a default build has none.
+      # Every project runs against the published setup; tests/e2e/fixtures.ts
+      # answers the tile servers locally, so the dummy key never leaves the
+      # runner. Without a key only the requests for the base map change, so
+      # that variant runs just the specs that make and check those requests,
+      # on the desktop, instead of the whole suite a second time.
       matrix:
-        project: [desktop, mobile]
-        # The published site has a tile API key and a default build has none.
-        # Both paths get tested; tests/e2e/fixtures.ts answers the tile
-        # servers locally, so the dummy key never leaves the runner.
-        api-keys: [dummy, none]
-        browser: [chromium]
         include:
-          # The phone interface in Safari's engine, with the published setup
+          - project: desktop
+            api-keys: dummy
+            browser: chromium
+          - project: mobile
+            api-keys: dummy
+            browser: chromium
+          - project: desktop
+            api-keys: none
+            browser: chromium
+            specs: base-style.spec.ts error-free.spec.ts layers.spec.ts
+          # The phone interface in Safari's engine
           - project: webkit
+            api-keys: dummy
+            browser: webkit
+          # Turning, the globe and the replay in Safari's engine
+          - project: webkit-desktop
             api-keys: dummy
             browser: webkit
     steps:
@@ -291,7 +314,7 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps ${{ matrix.browser }}
       - name: Run E2E tests (${{ matrix.project }}, ${{ matrix.api-keys }} API key)
-        run: npx playwright test --project=${{ matrix.project }}
+        run: npx playwright test --project=${{ matrix.project }} ${{ matrix.specs }}
         env:
           # Checked against docs/map_config.js by tests/e2e/site-check.ts
           E2E_API_KEYS: ${{ matrix.api-keys }}

@@ -27,6 +27,8 @@ export interface PathInfo {
   /** Exact altitude range; segment altitudes are rounded to 100 ft */
   min_altitude_ft?: number;
   max_altitude_ft?: number;
+  /** Climb in feet from the unrounded altitudes, without level-flight noise */
+  altitude_gain_ft?: number;
 }
 
 /**
@@ -438,9 +440,11 @@ export interface DataLoaderOptions {
   getWindow?: () => Window & typeof globalThis;
   /**
    * Invoked once per top-level load when one or more year files failed to
-   * load, with the list of failed years.
+   * load, with the list of failed years. `stale` is set once a year file
+   * turned out to be of another format than this page reads: a cached page
+   * next to newer data, which a reload of the page cures.
    */
-  onLoadError?: (failedYears: string[]) => void;
+  onLoadError?: (failedYears: string[], stale?: boolean) => void;
 }
 
 /**

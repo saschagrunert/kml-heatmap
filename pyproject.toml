@@ -93,7 +93,10 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["kml_heatmap"]
+# The scripts are measured too: pre_push.py keeps real dates from being
+# pushed and check_locks.py gates the lock files, and a gate that stops
+# checking fails open. `pytest --cov` without a value measures these.
+source = ["kml_heatmap", "scripts"]
 
 [tool.coverage.report]
 # One to three points below what the suite reaches, so a real regression fails

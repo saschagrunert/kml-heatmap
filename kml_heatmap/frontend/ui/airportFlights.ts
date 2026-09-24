@@ -80,7 +80,7 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
     const button = (event.target as Element).closest<HTMLElement>(
       "[data-path-id]",
     );
-    if (button && !app.replayState.active) {
+    if (button && !app.replayActive) {
       selectFlight(app, Number(button.dataset["pathId"]));
     }
   });

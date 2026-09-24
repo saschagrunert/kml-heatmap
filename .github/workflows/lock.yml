@@ -4,7 +4,7 @@
 # The compile job installs pip-tools and resolves every dependency, so it
 # runs with a read-only token that is not left in the checkout. Only the
 # pull-request job can write, and it runs nothing from the repository or
-# from PyPI: it takes the two lock files from the artifact and commits them.
+# from PyPI: it takes the three lock files from the artifact and commits them.
 #
 # Opening the pull request needs one of two one-time setups (see
 # CONTRIBUTING.md), or the job fails with "GitHub Actions is not permitted to
@@ -49,6 +49,7 @@ jobs:
           path: |
             requirements.lock
             requirements-test.lock
+            requirements-build.lock
           if-no-files-found: error
           retention-days: 1
 
@@ -83,6 +84,7 @@ jobs:
           add-paths: |
             requirements.lock
             requirements-test.lock
+            requirements-build.lock
           # The secret when it is set, the workflow token otherwise (see the
           # comment at the top)
           token: ${{ secrets.LOCK_PR_TOKEN || github.token }}

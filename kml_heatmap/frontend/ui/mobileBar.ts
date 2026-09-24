@@ -71,7 +71,8 @@ export class MobileBar {
   private readonly mql: MediaQueryList;
   private readonly onBreakpoint: (e: MediaQueryListEvent) => void;
   private mounted = false;
-  private replayActive = false;
+  /** Ends following the replay, which the bar does mounted or not */
+  private unsubscribeReplay: (() => void) | null = null;
   private openTab: TabId | null = null;
 
   constructor(app: MapApp) {
@@ -112,10 +113,15 @@ export class MobileBar {
   start(): void {
     this.syncBreakpoint(this.mql.matches);
     this.mql.addEventListener("change", this.onBreakpoint);
+    this.unsubscribeReplay ??= this.app.store.subscribe("replayActive", (on) =>
+      this.followReplay(on),
+    );
   }
 
   destroy(): void {
     this.mql.removeEventListener("change", this.onBreakpoint);
+    this.unsubscribeReplay?.();
+    this.unsubscribeReplay = null;
     this.unmount();
   }
 
@@ -129,8 +135,7 @@ export class MobileBar {
    * the replay panel off the bar with `body:has(.mobile-bar)`, so a bar
    * that is merely invisible would still reserve its height.
    */
-  setReplayActive(active: boolean): void {
-    this.replayActive = active;
+  private followReplay(active: boolean): void {
     if (!this.mounted) return;
     if (active) {
       this.closeSheet();
@@ -160,7 +165,7 @@ export class MobileBar {
     if (this.mounted) return;
     this.mounted = true;
 
-    if (!this.replayActive) document.body.append(this.root);
+    if (!this.app.replayActive) document.body.append(this.root);
     this.sheet.mount(document.body);
 
     // The floating button groups are what the bar replaces

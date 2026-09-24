@@ -6,7 +6,6 @@ import { applyToggleButtonState } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
 import { pluralFlights } from "../utils/htmlGenerators";
 import { resizeMapAfterTransition } from "../utils/mapHelpers";
-import { logError } from "../utils/logger";
 import { announceStatus } from "../utils/toast";
 
 export class PathSelection {
@@ -33,8 +32,6 @@ export class PathSelection {
   }
 
   togglePathSelection(pathId: number): void {
-    const wasIsolating = this.app.isolateSelection;
-
     // Both changes land in one flush so no listener sees a selection that is
     // empty while isolate mode is still on
     this.app.store.batch(() => {
@@ -51,7 +48,7 @@ export class PathSelection {
       }
     });
 
-    this.afterSelectionChange(wasIsolating);
+    this.afterSelectionChange();
   }
 
   selectPathsByAirport(airportName: string): void {
@@ -73,8 +70,7 @@ export class PathSelection {
    * Their controls are disabled then as well.
    */
   clearSelection(): void {
-    if (this.app.replayState.active) return;
-    const wasIsolating = this.app.isolateSelection;
+    if (this.app.replayActive) return;
 
     this.app.store.batch(() => {
       this.app.selectedPathIds.clear();
@@ -86,36 +82,23 @@ export class PathSelection {
       }
     });
 
-    this.afterSelectionChange(wasIsolating);
+    this.afterSelectionChange();
   }
 
   toggleIsolateSelection(): void {
-    if (this.app.replayState.active || this.app.selectedPathIds.size === 0) {
+    if (this.app.replayActive || this.app.selectedPathIds.size === 0) {
       return;
     }
 
     this.app.isolateSelection = !this.app.isolateSelection;
-
-    // Isolate mode changes which paths/coordinates are drawn: rebuild
-    this.app.dataManager.updateLayers().catch(logError);
   }
 
   /**
-   * Apply a selection change to the drawn paths: when isolate mode is active
-   * before or after the change the layers are rebuilt (isolate mode draws
-   * only the selected paths, so both entering and leaving it changes which
-   * paths exist), otherwise the drawn paths are restyled in place.
-   *
-   * Statistics, airport visibility and the replay button follow the store on
-   * their own.
+   * The drawn paths, the statistics, airport visibility and the replay
+   * button follow the store on their own (DataManager rebuilds or restyles
+   * the paths); what is left is the map's size.
    */
-  private afterSelectionChange(wasIsolating = this.app.isolateSelection): void {
-    if (this.app.isolateSelection || wasIsolating) {
-      this.app.dataManager.updateLayers().catch(logError);
-      return;
-    }
-
-    this.app.layerManager.updateSelectionStyles();
+  private afterSelectionChange(): void {
     if (this.app.altitudeVisible || this.app.airspeedVisible) {
       resizeMapAfterTransition(this.app.map);
     }

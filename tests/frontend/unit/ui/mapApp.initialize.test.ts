@@ -2,7 +2,11 @@
  * MapApp.initialize: data loading, year selection and restored state.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
+import {
+  MAP_STALL_MESSAGE,
+  MAP_STALL_MS,
+  MapApp,
+} from "../../../../kml_heatmap/frontend/mapApp";
 import {
   Marker as MockMarker,
   resetMapLibreMock,
@@ -158,6 +162,57 @@ describe("MapApp.initialize", () => {
     resetMapLibreMock();
   });
 
+  describe("a map that does not draw", () => {
+    it("says so once the map has not gone idle in time", async () => {
+      vi.useFakeTimers();
+      await initializeApp(app);
+      // The worker never answered: the sources are not loaded
+      mockMap(app).loaded.mockReturnValue(false);
+
+      vi.advanceTimersByTime(MAP_STALL_MS - 1);
+      expect(toastMock.showToast).not.toHaveBeenCalledWith(
+        MAP_STALL_MESSAGE,
+        "error",
+      );
+      vi.advanceTimersByTime(1);
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        MAP_STALL_MESSAGE,
+        "error",
+      );
+    });
+
+    it("says nothing once the map has drawn", async () => {
+      vi.useFakeTimers();
+      await initializeApp(app);
+      mockMap(app).loaded.mockReturnValue(false);
+      mockMap(app).emit("idle");
+
+      vi.advanceTimersByTime(MAP_STALL_MS);
+      expect(toastMock.showToast).not.toHaveBeenCalledWith(
+        MAP_STALL_MESSAGE,
+        "error",
+      );
+    });
+
+    it("says nothing for a map that has all it needs, or is gone", async () => {
+      vi.useFakeTimers();
+      await initializeApp(app);
+      // No idle since the data came, but nothing is missing either
+      vi.advanceTimersByTime(MAP_STALL_MS);
+
+      const other = createApp();
+      await initializeApp(other);
+      mockMap(other).loaded.mockReturnValue(false);
+      other.destroy();
+      vi.advanceTimersByTime(MAP_STALL_MS);
+
+      expect(toastMock.showToast).not.toHaveBeenCalledWith(
+        MAP_STALL_MESSAGE,
+        "error",
+      );
+    });
+  });
+
   describe("data loading", () => {
     it("loads airports, metadata and the selected year's data in order", async () => {
       await initializeApp(app);
@@ -189,22 +244,22 @@ describe("MapApp.initialize", () => {
       expect(
         mockFilterManagerInstance.updateAircraftDropdown,
       ).toHaveBeenCalled();
-      expect(mockDataManagerInstance.updateLayers).toHaveBeenCalled();
     });
 
-    it("populates the aircraft dropdown before building layers", async () => {
-      const order: string[] = [];
+    it("publishes the dataset with its aircraft list, in one update", async () => {
+      // The layers follow the store: they are drawn once, for the final
+      // combination of dataset and aircraft filter
+      const seen: unknown[] = [];
       mockFilterManagerInstance.updateAircraftDropdown.mockImplementation(() =>
-        order.push("dropdown"),
+        seen.push(app.currentData),
       );
-      mockDataManagerInstance.updateLayers.mockImplementation(() => {
-        order.push("updateLayers");
-        return Promise.resolve();
-      });
+      const listener = vi.fn();
+      app.store.subscribeKeys(["currentData", "selectedAircraft"], listener);
 
       await initializeApp(app);
 
-      expect(order).toEqual(["dropdown", "updateLayers"]);
+      expect(seen).toEqual([defaultData]);
+      expect(listener).toHaveBeenCalledTimes(1);
       expect(
         mockAirportManagerInstance.updateAirportMarkerSizes,
       ).toHaveBeenCalled();
@@ -339,11 +394,12 @@ describe("MapApp.initialize", () => {
     });
 
     it("applies a year change made through the select during initialization", async () => {
-      mockDataManagerInstance.updateLayers.mockImplementation(() => {
-        // user picks another year while data is loading
-        yearSelect().value = "2024";
-        return Promise.resolve();
-      });
+      mockAirportManagerInstance.updateAirportMarkerSizes.mockImplementation(
+        () => {
+          // user picks another year while data is loading
+          yearSelect().value = "2024";
+        },
+      );
 
       await initializeApp(app);
 
@@ -358,10 +414,11 @@ describe("MapApp.initialize", () => {
       const option = document.createElement("option");
       option.value = "D-ABCD";
       aircraftSelect.appendChild(option);
-      mockDataManagerInstance.updateLayers.mockImplementation(() => {
-        aircraftSelect.value = "D-ABCD";
-        return Promise.resolve();
-      });
+      mockAirportManagerInstance.updateAirportMarkerSizes.mockImplementation(
+        () => {
+          aircraftSelect.value = "D-ABCD";
+        },
+      );
 
       await initializeApp(app);
 
@@ -373,13 +430,16 @@ describe("MapApp.initialize", () => {
   });
 
   describe("airspeed availability", () => {
-    it("sets the airspeed range and legend when timing data is available", async () => {
+    it("sets the airspeed range before the dataset draws the layers", async () => {
+      let range: unknown = null;
+      app.store.subscribe("currentData", () => {
+        range = { ...app.airspeedRange };
+      });
+
       await initializeApp(app);
 
       expect(app.airspeedRange).toEqual({ min: 0, max: 150 });
-      expect(
-        mockLayerManagerInstance.updateAirspeedLegend,
-      ).toHaveBeenCalledWith(0, 150);
+      expect(range).toEqual({ min: 0, max: 150 });
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(false);
       // The button state itself follows the store
@@ -443,10 +503,8 @@ describe("MapApp.initialize", () => {
       await initializeApp(app);
 
       expect(app.altitudeVisible).toBe(true);
-      expect(app.altitudeLayer.isVisible()).toBe(true);
-      expect(visibility(app, "paths-altitude")).toBe("visible");
-      expect(visibility(app, "paths-altitude-selected")).toBe("visible");
-      expect(visibility(app, "paths-airspeed")).toBe("none");
+      // The layer manager shows the colour layers the store asks for
+      expect(mockLayerManagerInstance.syncModes).toHaveBeenCalled();
       expect(document.getElementById("altitude-legend")!.hidden).toBe(false);
       expect(document.getElementById("airspeed-legend")!.hidden).toBe(true);
     });
@@ -482,8 +540,8 @@ describe("MapApp.initialize", () => {
 
       await initializeApp(app);
 
-      expect(visibility(app, "paths-airspeed")).toBe("visible");
-      expect(visibility(app, "paths-airspeed-selected")).toBe("visible");
+      expect(app.airspeedVisible).toBe(true);
+      expect(mockLayerManagerInstance.syncModes).toHaveBeenCalled();
       expect(document.getElementById("airspeed-legend")!.hidden).toBe(false);
     });
 

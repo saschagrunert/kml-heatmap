@@ -4,9 +4,8 @@
 METERS_TO_FEET = 3.28084
 FEET_TO_METERS = 1.0 / METERS_TO_FEET
 
-# Nautical mile conversion (1 NM = exactly 1.852 km by definition)
-NAUTICAL_MILES_TO_KM = 1.852
-KM_TO_NAUTICAL_MILES = 1.0 / NAUTICAL_MILES_TO_KM
+# 1 NM = exactly 1.852 km by definition
+KM_TO_NAUTICAL_MILES = 1.0 / 1.852
 
 # Time conversion
 SECONDS_PER_HOUR = 3600
@@ -18,6 +17,14 @@ SECONDS_PER_HOUR = 3600
 MAX_GROUNDSPEED_KNOTS = 600
 MIN_SEGMENT_TIME_SECONDS = 0.1  # Avoid division by very small time differences
 SPEED_WINDOW_SECONDS = 120  # 2 minute rolling average window for speed calculation
+
+# === Altitude Gain ===
+# A climb counts toward the altitude gain of a path only once the altitude has
+# risen this far above the lowest point since the last descent, and a descent
+# ends it only once the altitude has fallen this far below the highest point.
+# GPS and barometric altitudes wander by a few meters from fix to fix; summing
+# every small rise would turn a level cruise into thousands of feet of climb.
+ALTITUDE_GAIN_HYSTERESIS_FT = 50.0
 
 # === Validation Ranges ===
 LAT_MIN = -90.0
