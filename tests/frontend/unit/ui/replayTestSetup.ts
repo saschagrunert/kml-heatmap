@@ -138,6 +138,7 @@ const REPLAY_PANEL: FixtureNode = {
             { id: "replay-time-display", tag: "div" },
             { id: "replay-speed", tag: "select" },
             { id: "replay-autozoom-btn", tag: "button" },
+            { id: "replay-chase-btn", tag: "button" },
           ],
         },
         {
@@ -191,7 +192,7 @@ function buildFixtureNode(node: FixtureNode): HTMLElement {
       icon("play", 16) + '<span class="control-label">Replay</span>';
   }
   if (node.id === "replay-speed") {
-    for (const speed of ["10", "50", "100"]) {
+    for (const speed of ["1", "10", "50", "100"]) {
       const option = document.createElement("option");
       option.value = speed;
       option.textContent = speed + "x";

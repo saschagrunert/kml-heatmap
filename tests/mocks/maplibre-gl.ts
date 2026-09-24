@@ -172,6 +172,7 @@ interface MockCameraOptions {
   zoom?: number;
   bearing?: number;
   pitch?: number;
+  elevation?: number;
 }
 
 /** `on`, `once` and `off` that keep their handlers, and `emit` to call them */
@@ -328,6 +329,11 @@ export class Map
       | "getBearing"
       | "getPitch"
       | "getVerticalFieldOfView"
+      | "getCenterElevation"
+      | "getCenterClampedToGround"
+      | "setCenterClampedToGround"
+      | "queryTerrainElevation"
+      | "calculateCameraOptionsFromTo"
       | "getProjection"
       | "setProjection"
       | "fitBounds"
@@ -636,6 +642,39 @@ export class Map
   getPitch = vi.fn(() => this.pitch);
   getVerticalFieldOfView = vi.fn(() => 36.87);
 
+  /**
+   * The height the camera looks at, in metres: the ground's while the
+   * centre is clamped to it (sea level here, the fake has no relief), and
+   * what a camera move says otherwise, like MapLibre
+   */
+  private elevation = 0;
+  private clampedToGround = true;
+  getCenterElevation = vi.fn(() => this.elevation);
+  getCenterClampedToGround = vi.fn(() => this.clampedToGround);
+  setCenterClampedToGround = vi.fn((clamped: boolean) => {
+    this.clampedToGround = clamped;
+    if (clamped) this.elevation = 0;
+  });
+  /** The relief under a point: none without terrain, level ground with it */
+  queryTerrainElevation = vi.fn((_lngLat: unknown): number | null =>
+    this.terrain ? 0 : null,
+  );
+  /** The camera that looks from one point at another, pointing where it is */
+  calculateCameraOptionsFromTo = vi.fn(
+    (
+      _from: unknown,
+      _altitudeFrom: number,
+      to: unknown,
+      altitudeTo?: number,
+    ) => ({
+      center: assertLngLat(to, "calculateCameraOptionsFromTo"),
+      elevation: altitudeTo ?? 0,
+      zoom: this.zoom,
+      bearing: this.bearing,
+      pitch: this.pitch,
+    }),
+  );
+
   getProjection = vi.fn(() => this.projection);
   /** Like MapLibre: a projection is part of the style, so it needs one */
   setProjection = vi.fn((projection: { type: string }) => {
@@ -684,6 +723,9 @@ export class Map
     if (options.zoom !== undefined) this.zoom = options.zoom;
     if (options.bearing !== undefined) this.bearing = options.bearing;
     if (options.pitch !== undefined) this.pitch = options.pitch;
+    if (options.elevation !== undefined && !this.clampedToGround) {
+      this.elevation = options.elevation;
+    }
     return this;
   }
 
@@ -944,6 +986,8 @@ export class Marker
       | "setRotation"
       | "getRotation"
       | "setOffset"
+      | "setPitchAlignment"
+      | "getPitchAlignment"
       | "addClassName"
       | "removeClassName"
     >
@@ -963,6 +1007,9 @@ export class Marker
     this.element.classList.add("maplibregl-marker");
     if (typeof options["rotation"] === "number") {
       this.rotation = options["rotation"];
+    }
+    if (typeof options["pitchAlignment"] === "string") {
+      this.pitchAlignment = options["pitchAlignment"];
     }
   }
 
@@ -1008,6 +1055,14 @@ export class Marker
 
   getRotation = vi.fn(() => this.rotation);
   setOffset = vi.fn(() => this);
+
+  /** Laid on the map or standing in the screen */
+  private pitchAlignment = "auto";
+  setPitchAlignment = vi.fn((alignment?: string) => {
+    this.pitchAlignment = alignment ?? "auto";
+    return this;
+  });
+  getPitchAlignment = vi.fn(() => this.pitchAlignment);
 
   addClassName = vi.fn((name: string) => {
     this.element.classList.add(name);

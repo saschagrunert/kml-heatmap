@@ -196,6 +196,123 @@ test.describe("Replay", () => {
     );
   });
 
+  test("the chase view stays off with reduced motion", async ({ page }) => {
+    // The suite asks for it (playwright.config.ts): a camera that turns
+    // with the airplane is what the setting spares
+    await activateReplay(page);
+    const chase = page.locator("#replay-chase-btn");
+    await chase.click();
+    await expect(chase).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator(".toast-notification")).toContainText(
+      "reduced motion",
+    );
+  });
+
+  test.describe("with motion", () => {
+    // Before the page loads: WebKit does not update a media query list
+    // the page already holds when the emulation changes
+    test.use({ reducedMotion: "no-preference" });
+
+    test("the chase view follows the track and gives the view back", async ({
+      page,
+    }) => {
+      // The chase tilts the map to 70 degrees, where a frame of software
+      // WebGL on a CI runner takes seconds; a smaller desktop window (the
+      // desktop layout starts at 768 px) makes each one cheaper, and the
+      // test gets the time the camera needs to settle three times over
+      test.setTimeout(120000);
+      if (!test.info().project.use.isMobile) {
+        await page.setViewportSize({ width: 800, height: 500 });
+      }
+      await activateReplay(page);
+      const camera = () =>
+        page.evaluate(() => {
+          const map = window.mapApp!.map!;
+          const { lng, lat } = map.getCenter();
+          return {
+            lng,
+            lat,
+            zoom: map.getZoom(),
+            bearing: map.getBearing(),
+            pitch: map.getPitch(),
+          };
+        });
+      // How far the camera looks from the airplane's heading, in degrees
+      const offTrack = () =>
+        page.evaluate(() => {
+          const app = window.mapApp!;
+          const track = app.replayState.lastBearing ?? 0;
+          const turn = (((app.map!.getBearing() - track) % 360) + 540) % 360;
+          return Math.abs(turn - 180);
+        });
+      await page.evaluate(() => {
+        const state = window.mapApp!.replayState;
+        window.mapApp!.seekReplay(String(Math.floor(state.maxTime / 2)));
+      });
+      // Settled where the replay opened, so the view to come back is known
+      await expect
+        .poll(() => page.evaluate(() => window.mapApp!.map!.isMoving()))
+        .toBe(false);
+      const before = await camera();
+
+      // From the keyboard: a control of the transport row like the others
+      const chase = page.locator("#replay-chase-btn");
+      await expect(chase).toHaveAttribute("aria-pressed", "false");
+      await chase.focus();
+      await page.keyboard.press("Enter");
+      await expect(chase).toHaveAttribute("aria-pressed", "true");
+      // A replay that fast would turn before the camera could follow
+      await expect(page.locator("#replay-speed")).toHaveValue("10");
+
+      // Paused, the camera still flies in behind the airplane and settles
+      await expect.poll(offTrack, { timeout: 30000 }).toBeLessThan(3);
+      const chased = await camera();
+      expect(chased.pitch).toBeGreaterThanOrEqual(45);
+      expect(chased.pitch).toBeLessThanOrEqual(75);
+
+      // Playing, it turns with the track, and stops where the replay pauses
+      await playUntilProgress(page);
+      await page.waitForTimeout(1000);
+      await page.locator("#replay-pause-btn").click();
+      await expect.poll(offTrack, { timeout: 30000 }).toBeLessThan(3);
+      expect((await camera()).pitch).toBeGreaterThanOrEqual(45);
+
+      // Off: the zoom, turn and tilt from before, over the airplane
+      await chase.click();
+      await expect(chase).toHaveAttribute("aria-pressed", "false");
+      await expect
+        .poll(async () => {
+          const { zoom, bearing, pitch } = await camera();
+          return [zoom, bearing, pitch].map((n) => Math.round(n * 10) / 10);
+        })
+        .toEqual(
+          [before.zoom, before.bearing, before.pitch].map(
+            (n) => Math.round(n * 10) / 10,
+          ),
+        );
+      await expect(page.locator("#replay-speed")).toHaveValue("50");
+
+      // On again, and closing the replay gives back the whole view
+      const again = await camera();
+      await chase.click();
+      await expect.poll(offTrack, { timeout: 30000 }).toBeLessThan(3);
+      await page.locator("#replay-exit-btn").click();
+      await expect(page.locator("#replay-controls")).toBeHidden();
+      await expect
+        .poll(async () => {
+          const { lng, lat, zoom, bearing, pitch } = await camera();
+          return [lng, lat, zoom, bearing, pitch].map(
+            (n) => Math.round(n * 1000) / 1000,
+          );
+        })
+        .toEqual(
+          [again.lng, again.lat, again.zoom, again.bearing, again.pitch].map(
+            (n) => Math.round(n * 1000) / 1000,
+          ),
+        );
+    });
+  });
+
   test("airplane marker appears during replay", async ({ page }) => {
     await activateReplay(page);
 
@@ -276,7 +393,17 @@ test.describe("Replay", () => {
       .locator("#replay-speed option")
       .evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value));
 
-    expect(values).toEqual(["10", "25", "50", "100", "200", "500"]);
+    expect(values).toEqual([
+      "1",
+      "2",
+      "5",
+      "10",
+      "25",
+      "50",
+      "100",
+      "200",
+      "500",
+    ]);
   });
 
   test("the readout follows the current position", async ({ page }) => {

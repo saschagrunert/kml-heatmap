@@ -127,6 +127,19 @@ describe("iconHeading", () => {
     expect(heading(90)).toBeCloseTo(0, 6);
   });
 
+  it("draws an upright airplane along its track as the tilt shows it", () => {
+    map.jumpTo({ bearing: 240, pitch: 70 });
+    const upright = (track: number): number =>
+      iconHeading(map as unknown as MapLibreMap, [0, 0], track, true);
+    // Along the view it points ahead, never back down the screen, and
+    // without asking the ground, which a slope turned the wrong way round
+    expect(upright(240)).toBeCloseTo(0, 6);
+    expect(upright(250)).toBeGreaterThan(10);
+    expect(upright(250)).toBeLessThan(90);
+    expect(upright(330)).toBeCloseTo(90, 6);
+    expect(map.project).not.toHaveBeenCalled();
+  });
+
   it("leaves the foreshortening of a tilted map to the marker's own tilt", () => {
     // At 60 degrees a north-east track runs 63 degrees off the vertical on
     // screen. The marker lies on the map and MapLibre tilts it back by the

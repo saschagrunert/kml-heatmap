@@ -228,9 +228,15 @@ test.describe("Map orientation", () => {
     await expect
       .poll(async () => Math.abs((await getOrientation(page)).bearing))
       .toBeGreaterThan(10);
-    // The needle points to where north went: the other way round
-    const { bearing } = await getOrientation(page);
-    expect(await needleTurn(page)).toBeCloseTo(-bearing, 3);
+    // The needle points to where north went: the other way round. The map
+    // may still be turning from the drag (WebKit carries it on), so the
+    // bearing and the needle are read again until they agree
+    await expect
+      .poll(async () => {
+        const { bearing } = await getOrientation(page);
+        return Math.abs((await needleTurn(page)) + bearing);
+      })
+      .toBeLessThan(0.001);
 
     await compass(page).click();
 

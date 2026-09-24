@@ -189,15 +189,17 @@ export class StateManager {
     if (!this.app.map) return;
 
     // While Wrapped has the map fitted to all the data, the view worth
-    // keeping is the one the user had before. The `?.` is for Wrapped
-    // living in a lazily loaded bundle: before it has ever been
-    // opened there is no saved view either way.
-    const view = this.app.wrappedManager?.userMapView() ?? {
-      center: this.app.map.getCenter(),
-      zoom: this.app.map.getZoom(),
-      bearing: this.app.map.getBearing(),
-      pitch: this.app.map.getPitch(),
-    };
+    // keeping is the one the user had before, and so it is while the
+    // replay's chase view flies the map along a flight. The `?.` is for
+    // both living in lazily loaded bundles: before one has ever been opened
+    // there is no saved view either way.
+    const view = this.app.wrappedManager?.userMapView() ??
+      this.app.replayManager?.userMapView() ?? {
+        center: this.app.map.getCenter(),
+        zoom: this.app.map.getZoom(),
+        bearing: this.app.map.getBearing(),
+        pitch: this.app.map.getPitch(),
+      };
     // Panning across the antimeridian takes the longitude past 180. The
     // wrapped one is the same place, and what a link is expected to carry;
     // wrapped by the rule a saved centre is read back with. The map's own

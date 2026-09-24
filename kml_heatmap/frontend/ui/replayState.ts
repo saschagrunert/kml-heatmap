@@ -34,10 +34,16 @@ export interface ReplayAirplane extends PopupHost {
   /** Move the airplane, and its popup with it while that is open */
   setLatLng(position: readonly [lat: number, lon: number]): void;
   /**
-   * Draw the airplane, and its popup, `px` above its position: at its
-   * height in the 3D view (see airplaneLiftPx)
+   * Draw the airplane, and its popup, `px` above its position and `across`
+   * right of it: at its height in the 3D view (see airplaneLiftPx), which
+   * the chase view places in perspective (see ChaseCamera.offsetOf)
    */
-  setLift(px: number): void;
+  setLift(px: number, across?: number): void;
+  /**
+   * Stand the airplane up in the screen, for the chase view, or lay it on
+   * the map
+   */
+  setUpright(upright: boolean): void;
   /** The marker's element: a real button, so it takes focus and Enter */
   getElement(): HTMLButtonElement;
   setPopupContent(html: string): void;
@@ -108,6 +114,8 @@ export class ReplayState {
   colorMinSpeed = 0;
   colorMaxSpeed = 200;
   autoZoom = false;
+  /** Whether the chase view is on (see ReplayCamera.chaseAirplane) */
+  chase = false;
   recenterTimestamps: number[] = [];
   /** Wall-clock time before which pans count as the same recenter */
   recenterPanEndsAt = 0;

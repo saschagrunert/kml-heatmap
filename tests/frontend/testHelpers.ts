@@ -159,6 +159,8 @@ interface MockManagers {
     seekReplay: Mock;
     changeReplaySpeed: Mock;
     toggleAutoZoom: Mock;
+    toggleChase: Mock;
+    userMapView: Mock;
     redrawReplayPath: Mock;
     updateReplayAirplanePopup: Mock;
     destroy: Mock;
@@ -251,6 +253,8 @@ function createMockManagers(): MockManagers {
     seekReplay: vi.fn(),
     changeReplaySpeed: vi.fn(),
     toggleAutoZoom: vi.fn(),
+    toggleChase: vi.fn(),
+    userMapView: vi.fn(() => null),
     redrawReplayPath: vi.fn(),
     updateReplayAirplanePopup: vi.fn(),
     destroy: vi.fn(),
