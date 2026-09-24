@@ -55,6 +55,7 @@ const PATH_LINE = { width: 4, opacity: 0.85 };
 const SELECTED_PATH_LINE = { width: 6, opacity: 1 };
 const REPLAY_ROUTE_LINE = { width: 2, opacity: 0.5 };
 const REPLAY_TRAIL_LINE = { width: 3, opacity: 0.8 };
+const SELECTION_LINE = { width: 1.5, opacity: 0.9 };
 
 /** Class on the map container that hides every airport marker */
 export const AIRPORTS_HIDDEN_CLASS = "airports-hidden";
@@ -253,25 +254,44 @@ export function addDataLayers(map: MapLibreMap): void {
     );
   }
 
-  // The replay layers are always visible and empty outside a replay
-  map.addSource(MAP_SOURCES.replayRoute, {
-    type: "geojson",
-    data: emptyGeoJson(),
-  });
-  map.addLayer(
-    {
-      id: MAP_LAYERS.replayRoute,
-      type: "line",
-      source: MAP_SOURCES.replayRoute,
-      layout: round,
-      paint: {
-        "line-color": cssVar("--color-text-dim") || "#8c8c8c",
-        "line-width": REPLAY_ROUTE_LINE.width,
-        "line-opacity": REPLAY_ROUTE_LINE.opacity,
+  // Two lines of one colour, each from a source of its own named like it.
+  // The selected flights over the heatmap while no colour layer draws them
+  // (see ui/selectionHighlight.ts): thin and light, so they read over the
+  // heatmap, which steps back for them, and are not taken for a colour
+  // layer; flat and as wide at every zoom. And the route of a replay, which
+  // is always visible and empty outside one
+  for (const [id, color, fallback, line, layout] of [
+    [
+      MAP_LAYERS.selectionHighlight,
+      "--selection-highlight-color",
+      "#f2f2f2",
+      SELECTION_LINE,
+      { ...round, ...hidden },
+    ],
+    [
+      MAP_LAYERS.replayRoute,
+      "--color-text-dim",
+      "#8c8c8c",
+      REPLAY_ROUTE_LINE,
+      round,
+    ],
+  ] as const) {
+    map.addSource(id, { type: "geojson", data: emptyGeoJson() });
+    map.addLayer(
+      {
+        id,
+        type: "line",
+        source: id,
+        layout,
+        paint: {
+          "line-color": cssVar(color) || fallback,
+          "line-width": line.width,
+          "line-opacity": line.opacity,
+        },
       },
-    },
-    before,
-  );
+      before,
+    );
+  }
 
   // Main layers first, then both selections, so a selected flight is
   // never painted over by an unselected one of the other mode

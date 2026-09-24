@@ -199,6 +199,7 @@ export type MockApp = Omit<
   | "altitudeLayer"
   | "airspeedLayer"
   | "airportLayer"
+  | "selectionHighlightLayer"
 > &
   MockManagers & {
     map: MockMapLibreMap | null;
@@ -207,6 +208,7 @@ export type MockApp = Omit<
     altitudeLayer: SpiedHandle<MapLayerHandle>;
     airspeedLayer: SpiedHandle<MapLayerHandle>;
     airportLayer: SpiedHandle<AirportLayerHandle>;
+    selectionHighlightLayer: SpiedHandle<MapLayerHandle>;
   };
 
 export interface MockAppOverrides extends Partial<StoreState> {
@@ -513,6 +515,9 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
       ]),
     ),
     airportLayer: spied(new AirportLayerHandle()),
+    selectionHighlightLayer: spied(
+      new MapLayerHandle([MAP_LAYERS.selectionHighlight]),
+    ),
   };
   if (map) {
     for (const handle of Object.values(handles)) {

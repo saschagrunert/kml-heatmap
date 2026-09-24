@@ -780,7 +780,7 @@ as scripts (`data.js`, `metadata.js`, `airports.js`), removes those files.
 
 - **Year Filter** - View flights from specific years or all years combined
 - **Aircraft Filter** - Filter by aircraft registration to see flights per aircraft
-- **Path Selection** - Click paths to highlight and view detailed statistics. A chip at the top of the map says how many flights are selected and clears them again, which is also the only sign of a selection at the zoom levels that draw the heatmap alone
+- **Path Selection** - Click paths to highlight and view detailed statistics. A chip at the top of the map says how many flights are selected and clears them again. With neither colour layer on, the selected flights are drawn as thin light lines over the heatmap, which steps back while they show, at every zoom level
 - **Airport Selection** - Click an airport marker to select all flights that visited it; click the map to clear the selection. The airport popup lists those flights (route, aircraft and year), each a button that selects that one flight, so a single flight and Replay are reachable from the keyboard: Tab to a marker, Enter opens the popup and moves focus into it, Escape closes it and returns focus to the marker
 - **Solo Mode** - Isolate selected paths, hiding all other paths and heatmap data
 

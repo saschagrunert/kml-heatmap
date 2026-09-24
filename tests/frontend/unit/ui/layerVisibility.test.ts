@@ -5,7 +5,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  dimsHeatmap,
   followLayerVisibility,
+  highlightsSelection,
   setColorLayer,
 } from "../../../../kml_heatmap/frontend/ui/layerVisibility";
 import { LayerManager } from "../../../../kml_heatmap/frontend/ui/layerManager";
@@ -182,6 +184,78 @@ describe("layer visibility", () => {
     app.altitudeVisible = true;
 
     expect(app.dataManager.applyHeatmapEmphasis).toHaveBeenCalledTimes(1);
+  });
+
+  describe("the selection's lines", () => {
+    const highlight = (): unknown => visibility(MAP_LAYERS.selectionHighlight);
+
+    // selected, altitude, airspeed, replay, isolate: shown
+    it.each([
+      [false, false, false, false, false, false],
+      [true, false, false, false, false, true],
+      [true, false, false, false, true, true],
+      [true, true, false, false, false, false],
+      [true, false, true, false, false, false],
+      [true, false, true, false, true, false],
+      [true, false, false, true, false, false],
+      [true, true, false, true, false, false],
+      [false, true, false, false, false, false],
+    ])(
+      "selection %s, altitude %s, speed %s, replay %s, isolate %s: shown %s",
+      (selected, altitude, airspeed, replay, isolate, expected) => {
+        app.store.batch(() => {
+          if (selected) {
+            app.selectedPathIds.add(1);
+            app.store.notifyMutation("selectedPathIds");
+          }
+          app.altitudeVisible = altitude;
+          app.airspeedVisible = airspeed;
+          app.replayActive = replay;
+          app.isolateSelection = isolate;
+        });
+
+        followLayerVisibility(asMapApp(app));
+
+        expect(highlightsSelection(asMapApp(app))).toBe(expected);
+        expect(highlight()).toEqual(expected ? "visible" : "none");
+        // The heatmap steps back for exactly what is drawn over it
+        expect(dimsHeatmap(asMapApp(app))).toBe(
+          expected || altitude || airspeed,
+        );
+      },
+    );
+
+    it("come and go with the selection, and dim the heatmap with them", () => {
+      followLayerVisibility(asMapApp(app));
+      app.dataManager.applyHeatmapEmphasis.mockClear();
+
+      app.selectedPathIds.add(1);
+      app.store.notifyMutation("selectedPathIds");
+      expect(highlight()).toBe("visible");
+      expect(app.dataManager.applyHeatmapEmphasis).toHaveBeenCalledTimes(1);
+
+      app.selectedPathIds.clear();
+      app.store.notifyMutation("selectedPathIds");
+      expect(highlight()).toBe("none");
+      expect(dimsHeatmap(asMapApp(app))).toBe(false);
+      expect(app.dataManager.applyHeatmapEmphasis).toHaveBeenCalledTimes(2);
+    });
+
+    it("give way to a colour layer and a replay, and come back after them", () => {
+      app.selectedPathIds.add(1);
+      followLayerVisibility(asMapApp(app));
+      expect(highlight()).toBe("visible");
+
+      setColorLayer(asMapApp(app), "altitude", true);
+      expect(highlight()).toBe("none");
+      setColorLayer(asMapApp(app), "altitude", false);
+      expect(highlight()).toBe("visible");
+
+      app.replayActive = true;
+      expect(highlight()).toBe("none");
+      app.replayActive = false;
+      expect(highlight()).toBe("visible");
+    });
   });
 
   describe("setColorLayer", () => {

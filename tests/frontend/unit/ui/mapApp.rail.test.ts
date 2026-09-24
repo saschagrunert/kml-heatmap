@@ -809,6 +809,7 @@ describe("MapApp controls and map", () => {
         "heat",
         "heat-lines-glow",
         "heat-lines-core",
+        "selection-highlight",
         "replay-route",
         "paths-altitude",
         "paths-airspeed",
@@ -826,6 +827,7 @@ describe("MapApp controls and map", () => {
       for (const id of [
         "heat",
         "heat-lines",
+        "selection-highlight",
         "replay-route",
         "paths-altitude",
         "paths-airspeed",
@@ -1022,6 +1024,9 @@ describe("MapApp controls and map", () => {
         void paths.setData(data);
         app.heatmapLayer.setVisible(true);
         app.aviationLayer.setVisible(true);
+        const highlight = map.source("selection-highlight");
+        void highlight.setData(data);
+        app.selectionHighlightLayer.setVisible(true);
         map.setPaintProperty("paths-altitude", "line-opacity", 0.1);
         map.setFilter("paths-airspeed", ["==", ["get", "pathId"], 7]);
         map.addSource.mockClear();
@@ -1037,6 +1042,7 @@ describe("MapApp controls and map", () => {
           "heat",
           "heat-lines-glow",
           "heat-lines-core",
+          "selection-highlight",
           "replay-route",
           "paths-altitude",
           "paths-airspeed",
@@ -1060,6 +1066,12 @@ describe("MapApp controls and map", () => {
         expect(map.source("carto")).toBeDefined();
         expect(map.layer("heat").layout["visibility"]).toBe("visible");
         expect(map.layer("aviation").layout["visibility"]).toBe("visible");
+        // The selection's lines, with their data and their visibility
+        expect(map.source("selection-highlight")).toBe(highlight);
+        expect(highlight.data).toBe(data);
+        expect(map.layer("selection-highlight").layout["visibility"]).toBe(
+          "visible",
+        );
         expect(map.layer("paths-altitude").paint["line-opacity"]).toBe(0.1);
         expect(map.layer("paths-airspeed").filter).toEqual([
           "==",

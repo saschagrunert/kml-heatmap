@@ -6,6 +6,7 @@ import {
   readSavedState,
   selectionParams,
   selectPathForReplay,
+  toggleLayer,
   togglePathSelection,
   waitForAppReady,
   waitForPathData,
@@ -14,9 +15,12 @@ import {
   airportMarkerCenter,
   centerOnAirport,
   focusAirportMarker,
+  heatmapOnMap,
+  heatmapOpacity,
   pathCount,
   pathWeights,
   segmentDetails,
+  selectionHighlightOnMap,
   setZoom,
 } from "./map";
 
@@ -189,6 +193,57 @@ test.describe("Path Selection", () => {
         ),
       )
       .toEqual(airport!.pathIds);
+  });
+
+  test("an airport's flights are drawn over the dimmed heatmap until a colour layer does", async ({
+    page,
+  }) => {
+    // Heatmap and airports only, as the page opens
+    await page.waitForFunction(
+      () => (window.mapApp?.fullPathInfo?.length ?? 0) > 0,
+      { timeout: 15000 },
+    );
+    expect(await heatmapOnMap(page)).toBe(true);
+    expect(await selectionHighlightOnMap(page)).toEqual({
+      shown: false,
+      lines: 0,
+    });
+    expect(await heatmapOpacity(page)).toBe(1);
+
+    const airport = await firstAirportWithPaths(page);
+    expect(airport).not.toBeNull();
+    await centerOnAirport(page, airport!.name, 12);
+    const marker = await airportMarkerCenter(page, airport!.name);
+    await page.mouse.click(marker.x, marker.y);
+    await expect.poll(() => selectedCount(page)).toBe(airport!.pathIds.length);
+
+    await expect
+      .poll(async () => (await selectionHighlightOnMap(page)).shown)
+      .toBe(true);
+    expect((await selectionHighlightOnMap(page)).lines).toBeGreaterThanOrEqual(
+      airport!.pathIds.length,
+    );
+    await expect.poll(() => heatmapOpacity(page)).toBeLessThan(1);
+
+    // The colour layer draws the selection itself
+    await toggleLayer(page, "altitude");
+    await expect
+      .poll(async () => (await selectionHighlightOnMap(page)).shown)
+      .toBe(false);
+
+    // Back without it, and with the selection cleared the heatmap is whole
+    await toggleLayer(page, "altitude");
+    await expect
+      .poll(async () => (await selectionHighlightOnMap(page)).shown)
+      .toBe(true);
+    await page.locator("#selection-clear-btn").click();
+    await expect
+      .poll(() => selectionHighlightOnMap(page))
+      .toEqual({
+        shown: false,
+        lines: 0,
+      });
+    await expect.poll(() => heatmapOpacity(page)).toBe(1);
   });
 
   test("Enter on a focused airport marker selects its paths", async ({

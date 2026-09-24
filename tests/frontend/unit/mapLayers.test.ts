@@ -138,8 +138,46 @@ describe("layer handles", () => {
       order.indexOf(MAP_LAYERS.heatLinesGlow) + 1,
     );
     expect(order[order.indexOf(MAP_LAYERS.heatLinesCore) + 1]).toBe(
-      MAP_LAYERS.replayRoute,
+      MAP_LAYERS.selectionHighlight,
     );
+  });
+
+  it("draw the selection's lines over the heat, below the paths and the labels", () => {
+    const app = createMockApp();
+    const map = app.map!;
+
+    expect(app.selectionHighlightLayer.ids).toEqual([
+      MAP_LAYERS.selectionHighlight,
+    ]);
+    const line = map.layer(MAP_LAYERS.selectionHighlight);
+    expect(line.type).toBe("line");
+    expect(line.source).toBe(MAP_SOURCES.selectionHighlight);
+    // At every zoom, the overview included
+    expect(line.minzoom).toBeUndefined();
+    expect(line.layout["visibility"]).toBe("none");
+    // Thin, and one colour: not a colour layer's line
+    expect(line.paint["line-width"]).toBeLessThanOrEqual(2);
+    expect(line.paint["line-color"]).toBe("#f2f2f2");
+
+    const order = map.getLayersOrder();
+    const at = order.indexOf(MAP_LAYERS.selectionHighlight);
+    expect(at).toBeGreaterThan(order.indexOf(MAP_LAYERS.heatLinesCore));
+    expect(at).toBeLessThan(order.indexOf(MAP_LAYERS.pathsAltitude));
+    expect(at).toBeLessThan(order.indexOf(MAP_LAYERS.airportLabels));
+  });
+
+  it("take the selection's colour from the stylesheet", () => {
+    const root = document.documentElement.style;
+    root.setProperty("--selection-highlight-color", "#ffffff");
+    try {
+      const map = createMockApp().map!;
+
+      expect(map.layer(MAP_LAYERS.selectionHighlight).paint["line-color"]).toBe(
+        "#ffffff",
+      );
+    } finally {
+      root.removeProperty("--selection-highlight-color");
+    }
   });
 
   it("draw the flights of each path source again as ribbons, from a source of their own", () => {
