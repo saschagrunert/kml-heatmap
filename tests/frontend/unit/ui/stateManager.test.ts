@@ -429,6 +429,27 @@ describe("StateManager", () => {
       expect(mockApp.map!.getBearing).not.toHaveBeenCalled();
     });
 
+    it("saves the user's own view while the replay's chase view flies the map", () => {
+      // A camera half way along a flight, tilted and turned with it, is no
+      // view to come back to
+      mockApp.replayManager.userMapView.mockReturnValue({
+        center: { lat: 51.5, lng: 12.1 },
+        zoom: 10,
+        bearing: 0,
+        pitch: 0,
+      });
+
+      stateManager.saveMapState();
+
+      expect(savedState()).toMatchObject({
+        center: { lat: 51.5, lng: 12.1 },
+        zoom: 11,
+        bearing: 0,
+        pitch: 0,
+      });
+      expect(mockApp.map!.getPitch).not.toHaveBeenCalled();
+    });
+
     it("saves the 3D view and links it", () => {
       mockApp.store.set("threeDVisible", true);
 

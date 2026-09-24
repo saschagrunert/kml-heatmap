@@ -95,11 +95,17 @@
 #replay-play-btn,
 #replay-pause-btn,
 #replay-stop-btn,
-#replay-autozoom-btn {
+#replay-autozoom-btn,
+#replay-chase-btn {
   font-size: var(--icon-sm);
   padding: 0;
   min-width: 44px;
   line-height: 1;
+}
+/* The aircraft filter's arrow, which points north-east, turned to point
+   ahead: the chase view looks where the aircraft flies */
+#replay-chase-btn .icon {
+  transform: rotate(-45deg);
 }
 #replay-time-display {
   color: var(--color-text);

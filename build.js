@@ -343,7 +343,13 @@ const BUDGET_APP = { raw: 138 * 1024, gzip: 47 * 1024 };
 // the room Wrapped left, so what comes next is a decision like any other.
 // The satellite imagery (see its raise before) comes on top of that:
 // 33,989 B raw and 12,141 B gzipped with both.
-const BUDGET_FEATURES = { raw: 35.5 * 1024, gzip: 13.5 * 1024 };
+// Raised for the chase view of the replay (ui/chaseCamera.ts): the camera
+// that looks at the airplane in the air from behind it, its springs for the
+// turn, the tilt, the zoom and where it looks, the tilt held above the
+// relief, the airplane drawn upright where that camera sees it, the control
+// with its slower speeds, and the camera given back as it ends, about 7.5 KB:
+// 41,650 B raw and 14,720 B gzipped.
+const BUDGET_FEATURES = { raw: 43 * 1024, gzip: 16 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog is opened, and
 // no longer with replay's code or replay with it: the two have nothing in

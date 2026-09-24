@@ -1,8 +1,8 @@
 /**
  * Replay Camera - What follows the airplane of a replay: the pan and the
- * auto zoom that keep it in view, the user's hand on the map that they
- * give way to, and the turn and the lift of its icon as the map moves
- * under it. Apart from the renderer, so a chase view (#300) has a home.
+ * auto zoom that keep it in view, or the chase view (see chaseCamera.ts),
+ * the user's hand on the map that they give way to, and the turn and the
+ * lift of its icon as the map moves under it.
  */
 import type { LngLatLike, Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
@@ -11,6 +11,7 @@ import { AUTO_ZOOM_MIN } from "../utils/constants";
 import { isBehindGlobe, toLngLat, unwrapLng } from "../utils/mapHelpers";
 import { airplaneLiftPx, ribbonWidthZoom } from "../calculations/lift";
 import { prefersReducedMotion } from "../utils/motion";
+import { ChaseCamera, dampStep, type SavedCamera } from "./chaseCamera";
 
 /** Minimum interval between map pans triggered by slider drags */
 export const SEEK_PAN_THROTTLE_MS = 250;
@@ -31,28 +32,23 @@ const FOLLOW_TIME_S = 0.6;
 /** Longest frame the follow is worked out over (s), as the replay's */
 const FOLLOW_MAX_STEP_S = 0.1;
 
+/** Time the view takes back to where it was before a chase (ms) */
+const CHASE_RESTORE_MS = 800;
+
 /**
  * One frame of the camera following the airplane: `offset` is where the
  * airplane is from the middle of the map, `velocity` the camera's speed
  * from the frame before, both in pixels (per second), and `dt` the time of
- * the frame. Returns how far the camera moves, and its speed now. The
- * damped spring of Game Programming Gems 4 (1.10), which is stable for any
- * length of frame.
+ * the frame. Returns how far the camera moves, and its speed now (see
+ * dampStep).
  */
 export function followStep(
   offset: { x: number; y: number },
   velocity: { x: number; y: number },
   dt: number,
 ): { move: { x: number; y: number }; velocity: { x: number; y: number } } {
-  const omega = 2 / FOLLOW_TIME_S;
-  const x = omega * dt;
-  const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
-  const axis = (d: number, v: number): [move: number, velocity: number] => {
-    const temp = (v - omega * d) * dt;
-    return [d + (temp - d) * decay, (v - omega * temp) * decay];
-  };
-  const [mx, vx] = axis(offset.x, velocity.x);
-  const [my, vy] = axis(offset.y, velocity.y);
+  const [mx, vx] = dampStep(offset.x, velocity.x, dt, FOLLOW_TIME_S);
+  const [my, vy] = dampStep(offset.y, velocity.y, dt, FOLLOW_TIME_S);
   return { move: { x: mx, y: my }, velocity: { x: vx, y: vy } };
 }
 
@@ -108,13 +104,30 @@ const HEADING_PROBE_PX = 16;
  * further along the track answers for both at once. On a tilted map that
  * measures the track foreshortened, as it runs on screen: the part up the
  * screen is stretched back by the tilt, or the marker's own tilt would
- * foreshorten it a second time.
+ * foreshorten it a second time. An `upright` marker (the chase view's)
+ * stands in the screen and takes the angle the track is drawn at.
  */
 export function iconHeading(
   map: MapLibreMap,
   position: readonly [lat: number, lon: number],
   track: number,
+  upright = false,
 ): number {
+  if (upright) {
+    // The chase keeps the airplane in the middle of a view along its track,
+    // where a direction in the air is drawn as the tilt foreshortens it.
+    // Measured on the ground it turned nose down over a slope that falls
+    // away faster than the view looks down it.
+    const turn = ((track - map.getBearing()) * Math.PI) / 180;
+    return (
+      (Math.atan2(
+        Math.sin(turn),
+        Math.cos(turn) * Math.cos((map.getPitch() * Math.PI) / 180),
+      ) *
+        180) /
+      Math.PI
+    );
+  }
   const globe = map.getProjection()?.type === "globe";
   if (!globe && map.getBearing() === 0 && map.getPitch() === 0) return track;
 
@@ -308,6 +321,12 @@ export class ReplayCamera {
     at: number;
     zoom: number;
   } | null = null;
+  /** The chase view while it has the camera (see chaseAirplane) */
+  private chase: ChaseCamera | null = null;
+  /** Whether the user's hand held the chase on the frame before */
+  private chaseHeld = false;
+  /** The frame a paused chase settles in, while one is pending */
+  private chaseFrame: number | null = null;
 
   /**
    * A map that turns under a paused airplane changes where its track
@@ -359,6 +378,7 @@ export class ReplayCamera {
 
   /** Stop listening to the map and to the user's hand on it; the replay is closing */
   stopWatchingMap(): void {
+    this.endChase();
     this.userMovement?.stop();
     this.userMovement = null;
     this.turningWith?.off("move", this.onMapMove);
@@ -379,7 +399,16 @@ export class ReplayCamera {
     const { marker, track, heightFt, state, position } = this.heading;
     const [lat, lon] = marker.getLatLng();
     if (lat !== position[0] || lon !== position[1]) marker.setLatLng(position);
-    marker.setLift(airplaneLiftPx(map, map.getCenter().lat, heightFt));
+    const chase = this.chase;
+    // Chased, the airplane stands up in the screen at a size to read, and
+    // is drawn where the camera sees it (see ChaseCamera.offsetOf)
+    marker.setUpright(chase !== null);
+    if (chase) {
+      const [x, y] = chase.offsetOf(this.heading);
+      marker.setLift(-y, x);
+    } else {
+      marker.setLift(airplaneLiftPx(map, map.getCenter().lat, heightFt));
+    }
     // The ribbons are as wide as the zoom they were cut for (see lift.ts)
     if (
       state.trailWidthZoom !== null &&
@@ -396,13 +425,100 @@ export class ReplayCamera {
     }
     this.rotation = unwrapRotation(
       this.rotation,
-      iconHeading(map, position, track),
+      iconHeading(map, position, track, chase !== null),
     );
     const transform = "translate3d(0,0,0) rotate(" + this.rotation + "deg)";
     if (transform !== this.lastTransform) {
       this.lastTransform = transform;
       iconDiv.style.transform = transform;
     }
+  }
+
+  /**
+   * Chase the airplane while the replay's chase view is on (see
+   * ChaseCamera), from behind and above, turning with it. Returns whether
+   * the chase has the camera, so the follow pan keeps away from it. A
+   * finished replay starts none, and reduced motion none at all: a camera
+   * that turns with the airplane is what that setting asks to be spared.
+   * The user's hand on the map holds it, as it does the follow pan, and it
+   * picks up from where they left the map once they let go.
+   */
+  chaseAirplane(heading: AirplaneHeading, isManualSeek: boolean): boolean {
+    const map = this.app.map;
+    const state = heading.state;
+    if (
+      !map ||
+      !state.chase ||
+      prefersReducedMotion() ||
+      (!this.chase && state.currentTime >= state.maxTime)
+    ) {
+      this.endChase();
+      return false;
+    }
+    if (this.userMovement?.isActive()) {
+      this.chaseHeld = true;
+      return true;
+    }
+    if (!this.chase) {
+      this.chase = new ChaseCamera(map, () =>
+        this.chaseAgain(this.heading?.state.playing ?? true),
+      );
+    } else if (this.chaseHeld) this.chase.resume();
+    this.chaseHeld = false;
+    const settled = this.chase.step(
+      heading,
+      state.speed,
+      performance.now(),
+      isManualSeek,
+    );
+    if (!settled) this.chaseAgain(state.playing);
+    return true;
+  }
+
+  /** Move a paused chase on: no frame of a paused replay comes to do it */
+  private chaseAgain(playing: boolean): void {
+    if (playing || this.chaseFrame !== null) return;
+    this.chaseFrame = requestAnimationFrame(() => {
+      this.chaseFrame = null;
+      const last = this.heading;
+      if (last && !last.state.playing) this.chaseAirplane(last, false);
+    });
+  }
+
+  /**
+   * Give the camera back from the chase, if it has it, and with `restore`
+   * the view from before it: all of it as the replay closes (`"all"`), and
+   * otherwise its zoom, turn and tilt over the airplane where it is now.
+   * Returns the camera from before the chase, for a view of its own.
+   */
+  endChase(restore?: "all" | "view"): SavedCamera | null {
+    const chase = this.chase;
+    if (this.chaseFrame !== null) cancelAnimationFrame(this.chaseFrame);
+    this.chaseFrame = null;
+    this.chaseHeld = false;
+    const map = this.app.map;
+    if (!chase || !map) return null;
+    this.chase = null;
+    chase.release();
+    const saved = chase.saved;
+    const position = this.heading?.position;
+    if (restore) {
+      map.easeTo({
+        ...saved,
+        ...(restore === "view" && position
+          ? { center: toLngLat(position) }
+          : {}),
+        duration: CHASE_RESTORE_MS,
+        animate: !prefersReducedMotion(),
+      });
+    }
+    this.turnIcon();
+    return saved;
+  }
+
+  /** The camera from before the chase, while one has the map */
+  chaseView(): SavedCamera | null {
+    return this.chase?.saved ?? null;
   }
 
   /**

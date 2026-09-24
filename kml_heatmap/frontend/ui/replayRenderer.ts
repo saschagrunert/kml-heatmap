@@ -55,17 +55,19 @@ import { appendCurve } from "../calculations/curves";
 import { replayPoint } from "../features/replay";
 import { prefersReducedMotion } from "../utils/motion";
 import { ReplayCamera } from "./replayCamera";
+import type { SavedCamera } from "./chaseCamera";
 
 /** Pixels between the airplane's position and the tip of its popup */
 const AIRPLANE_POPUP_OFFSET = 16;
 
 /**
  * The popup's offset for each side it may open on, as MapLibre makes of
- * AIRPLANE_POPUP_OFFSET, with the whole of it moved up by `lift` pixels to
- * where the airplane is drawn
+ * AIRPLANE_POPUP_OFFSET, with the whole of it moved up by `lift` pixels
+ * and right by `across` to where the airplane is drawn
  */
 function liftedPopupOffset(
   lift: number,
+  across = 0,
 ): Record<PositionAnchor, [number, number]> {
   const o = AIRPLANE_POPUP_OFFSET;
   const corner = Math.round(Math.sqrt(0.5 * o * o));
@@ -80,7 +82,10 @@ function liftedPopupOffset(
     left: [o, 0],
     right: [-o, 0],
   };
-  for (const offset of Object.values(sides)) offset[1] -= lift;
+  for (const offset of Object.values(sides)) {
+    offset[0] += across;
+    offset[1] -= lift;
+  }
   return sides;
 }
 
@@ -367,8 +372,9 @@ export function trailFeatureCollection(
 export class AirplaneMarker implements ReplayAirplane {
   readonly marker: Marker;
   readonly popup: Popup;
-  /** Pixels the airplane is drawn above its position (see setLift) */
+  /** Pixels the airplane is drawn above and right of its position */
   private lift = 0;
+  private across = 0;
   private readonly map: MapLibreMap;
   private readonly element: HTMLButtonElement;
 
@@ -446,13 +452,20 @@ export class AirplaneMarker implements ReplayAirplane {
     if (this.popup.isOpen()) this.popup.setLngLat(lngLat);
   }
 
-  setLift(px: number): void {
-    if (px === this.lift) return;
+  setLift(px: number, across = 0): void {
+    if (px === this.lift && across === this.across) return;
     this.lift = px;
-    this.marker.setOffset([0, -px]);
+    this.across = across;
+    this.marker.setOffset([across, -px]);
     // The popup points at the airplane where it is drawn, whichever side
     // of it the popup opens on
-    this.popup.setOffset(liftedPopupOffset(px));
+    this.popup.setOffset(liftedPopupOffset(px, across));
+  }
+
+  setUpright(upright: boolean): void {
+    // Laid on the map, a view from above goes flat as the map tilts: at
+    // the chase view's tilt it was a sixth of its height
+    this.marker.setPitchAlignment(upright ? "viewport" : "map");
   }
 
   getElement(): HTMLButtonElement {
@@ -703,6 +716,16 @@ export class ReplayRenderer {
     this.camera.stopWatchingMap();
   }
 
+  /** Give the camera back from the chase view (see ReplayCamera.endChase) */
+  endChase(restore?: "all" | "view"): SavedCamera | null {
+    return this.camera.endChase(restore);
+  }
+
+  /** The camera from before the chase view, while one has the map */
+  chaseView(): SavedCamera | null {
+    return this.camera.chaseView();
+  }
+
   updateDisplay(
     replayManager: ReplayManager,
     isManualSeek: boolean = false,
@@ -830,18 +853,22 @@ export class ReplayRenderer {
 
     marker.setLatLng(currentPos);
 
-    if (state.playing || isManualSeek) {
-      this.camera.keepAirplaneInView(state, currentPos, isManualSeek);
-    }
-
-    // After the camera, which may have moved the map under the airplane
-    this.camera.follow({
+    const heading = {
       marker,
       position: currentPos,
       track: bearing,
       heightFt: state.airplaneHeightFt,
       state,
-    });
+    };
+    if (
+      !this.camera.chaseAirplane(heading, isManualSeek) &&
+      (state.playing || isManualSeek)
+    ) {
+      this.camera.keepAirplaneInView(state, currentPos, isManualSeek);
+    }
+
+    // After the camera, which may have moved the map under the airplane
+    this.camera.follow(heading);
 
     // While it plays, the trail is written in the frame the airplane moved
     // in, not a frame behind it: one frame at 100x is a hundred metres

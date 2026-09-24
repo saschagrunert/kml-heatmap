@@ -569,6 +569,9 @@
             data-action="changeReplaySpeed"
             aria-label="Replay speed multiplier"
           >
+            <option value="1">1x</option>
+            <option value="2">2x</option>
+            <option value="5">5x</option>
             <option value="10">10x</option>
             <option value="25">25x</option>
             <option value="50" selected>50x</option>
@@ -584,6 +587,16 @@
             data-icon-size="20"
             title="Auto-zoom disabled"
             aria-label="Toggle automatic zoom adjustment"
+            aria-pressed="false"
+          ></button>
+          <!-- Bound by ReplayManager, not by a data-action -->
+          <button
+            id="replay-chase-btn"
+            class="btn-surface replay-btn"
+            data-icon="aircraft"
+            data-icon-size="20"
+            title="Chase view off"
+            aria-label="Chase view: follow the aircraft from behind"
             aria-pressed="false"
           ></button>
         </div>

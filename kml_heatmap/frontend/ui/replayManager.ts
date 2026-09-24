@@ -38,6 +38,7 @@ import {
   appendTrailSegment,
 } from "./replayRenderer";
 import type { ReplayState } from "./replayState";
+import type { SavedCamera } from "./chaseCamera";
 import type { PathSegment } from "../types";
 import {
   REPLAY_BUTTON_LABEL,
@@ -47,6 +48,16 @@ import {
 const REPLAY_BUTTON_ACTIVE_LABEL = "Stop replay";
 const REPLAY_BUTTON_TEXT = "Replay";
 const REPLAY_EXIT_LABEL = "Close replay";
+
+/**
+ * The fastest replay the chase view starts at: faster, a turn is over
+ * before the camera has come round, and a circuit takes half a minute at it
+ */
+const CHASE_MAX_SPEED = 10;
+
+/** Why the chase view does not start with reduced motion on */
+export const CHASE_REDUCED_MOTION_MESSAGE =
+  "The chase view turns with the aircraft, so it stays off while reduced motion is on";
 
 /**
  * Controls that stay disabled while replay runs. Wrapped is one of them: it
@@ -128,6 +139,11 @@ export class ReplayManager {
   private savedOpacities = new Map<HTMLElement, string>();
   /** Ends the subscriptions that keep the trail in step with the layers */
   private unsubscribeTrail: (() => void) | null = null;
+  /**
+   * The speed chosen before the chase view slowed the replay down, given
+   * back when it ends unless another one was chosen meanwhile
+   */
+  private speedBeforeChase: string | null = null;
   private readonly onVisibilityChange = (): void => {
     // No frames run in a hidden tab, so the first one after it comes back
     // would count all the hidden time; start timing afresh instead
@@ -168,6 +184,13 @@ export class ReplayManager {
         { signal: app.signal },
       );
     }
+    // Bound here rather than by its data-action: the handler list is part
+    // of the first visit, and this control only exists with a replay
+    domCache
+      .get("replay-chase-btn")
+      ?.addEventListener("click", () => this.toggleChase(), {
+        signal: app.signal,
+      });
 
     // Whether replay is available follows the selection and the timing
     // data, which MapApp watches: the control has to say so before this
@@ -245,6 +268,7 @@ export class ReplayManager {
     }
 
     this.updateAutoZoomButton();
+    this.updateChaseButton();
 
     document.body.classList.add("replay-active");
     this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, true);
@@ -344,6 +368,9 @@ export class ReplayManager {
 
     document.body.classList.remove("replay-active");
 
+    // The view from before the chase comes back with the map it chased on
+    this.renderer.endChase("all");
+
     // Remove airplane marker when closing replay completely
     this.state.airplaneMarker?.remove();
     this.state.airplaneMarker = null;
@@ -398,6 +425,13 @@ export class ReplayManager {
       ? document.getElementById("mobile-tab-more")
       : domCache.get("replay-btn");
     target?.focus();
+  }
+
+  private updateChaseButton(): void {
+    const button = domCache.get("replay-chase-btn");
+    if (!button) return;
+    applyToggleButtonState(button, this.state.chase);
+    button.title = this.state.chase ? "Chase view on" : "Chase view off";
   }
 
   private updateAutoZoomButton(): void {
@@ -734,11 +768,15 @@ export class ReplayManager {
     if (this.state.segments.length === 0 || !this.app.map) return;
 
     const bounds = segmentBounds(this.state.segments);
+    // The flight is over, and with it the chase: the overview is seen the
+    // way the map was before it
+    const saved = this.renderer.endChase();
     if (!bounds) return;
     this.app.map.fitBounds(toBounds(bounds), {
       // A fit turns the map north up unless it is told the bearing, and
       // the replay leaves the orientation to the user
-      bearing: this.app.map.getBearing(),
+      bearing: saved?.bearing ?? this.app.map.getBearing(),
+      ...(saved && { pitch: saved.pitch }),
       padding: FIT_BOUNDS_PADDING,
       duration: FIT_BOUNDS_MS,
       animate: !prefersReducedMotion(),
@@ -797,6 +835,50 @@ export class ReplayManager {
     const speed = parseFloat(select.value);
     if (!isFinite(speed) || speed <= 0) return;
     this.state.speed = speed;
+  }
+
+  /**
+   * Switch the chase view on or off (see ReplayCamera.chaseAirplane). On,
+   * a replay faster than CHASE_MAX_SPEED slows down to it; off, the speed
+   * from before comes back and so does the view, over the airplane.
+   */
+  toggleChase(): void {
+    const state = this.state;
+    if (!state.chase && prefersReducedMotion()) {
+      showToast(CHASE_REDUCED_MOTION_MESSAGE, "info");
+      return;
+    }
+    state.chase = !state.chase;
+    this.updateChaseButton();
+    const select = domCache.get("replay-speed", HTMLSelectElement);
+    const slow = String(CHASE_MAX_SPEED);
+    let message = state.chase ? "Chase view on" : "Chase view off";
+    if (state.chase) {
+      if (select && state.speed > CHASE_MAX_SPEED) {
+        this.speedBeforeChase = select.value;
+        select.value = slow;
+        this.changeReplaySpeed();
+        message += ", " + slow + "x";
+      }
+      this.updateReplayDisplay();
+    } else {
+      if (this.speedBeforeChase !== null && select?.value === slow) {
+        select.value = this.speedBeforeChase;
+        this.changeReplaySpeed();
+      }
+      this.speedBeforeChase = null;
+      this.renderer.endChase("view");
+    }
+    this.announce(message);
+  }
+
+  /**
+   * The user's view while the chase view has the map, null otherwise; the
+   * state manager saves this one rather than a camera half way through a
+   * flight
+   */
+  userMapView(): SavedCamera | null {
+    return this.renderer.chaseView();
   }
 
   toggleAutoZoom(): void {

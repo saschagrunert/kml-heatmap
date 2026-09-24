@@ -218,6 +218,51 @@ none and the statistics rail falls back to the ISO country code.
 - **Build scripts** `build.js` and `scripts/*.js`, plain JavaScript with
   JSDoc types that `tsconfig.node.json` checks (`npm run typecheck`)
 
+**Replay camera:**
+
+What moves the map during a replay is in `ui/replayCamera.ts`, apart from
+the renderer that draws the trail. By default the camera only pans once the
+airplane nears the edge of the map, as a critically damped spring
+(`dampStep` in `ui/chaseCamera.ts`) moved by one `jumpTo` a frame: an
+`easeTo` asked for on every frame starts from rest on every frame and
+stutters. Auto-zoom zooms out when the pan cannot keep up.
+
+The chase view (`ui/chaseCamera.ts`) drives bearing, pitch, zoom and centre
+on every frame instead, through the same kind of spring, at a tilt of
+`CHASE_PITCH` (70 degrees) and a map zoom of `CHASE_ZOOM` (14.5, app zoom
+15.5; the map's zoom is the app's minus `ZOOM_OFFSET`). It looks at a point
+in the air, at the airplane's height as the ribbons draw it (`elevation` in
+the camera options, with `setCenterClampedToGround(false)` while it chases),
+so the zoom is the camera's distance to the airplane and does not change
+over a valley or a ridge. The airplane sits at `CHASE_SCREEN_Y` (0.6) of the
+height between the top of the map and the replay panel; that height is
+measured again after a `resize` of the map or a change of the panel's size
+(a `ResizeObserver`), not on every frame. MapLibre's `project` knows no
+height but the ground's, so the airplane marker, upright
+(`pitchAlignment: "viewport"`) while chasing, is placed by the camera's own
+projection (`projectRelative`), which matches MapLibre's to a pixel. The
+bearing follows the smoothed heading with a time constant of three seconds
+of the flight, held between 0.2 and 1 s of the replay, led by the turn rate
+(at most `CHASE_MAX_LEAD`, 45 degrees) so a fast replay does not swing
+behind a turn. The tilt is held down to keep the camera and its line of
+sight 150 m above the relief behind the airplane (`clearPitch`, from
+`queryTerrainElevation`), and however far the spring lags, the camera never
+goes below the ground. On the globe the zoom goes no lower than
+`GLOBE_FLAT_ZOOM` (map zoom 12, app zoom 13), where MapLibre draws the globe
+flat and the chase's flat-map maths hold. Any movement of the user's
+(`UserMapMovement`) holds the chase; the next frame starts from their view
+and keeps their zoom and tilt within `CHASE_ZOOM_RANGE` (map zoom 11 to 16)
+and `CHASE_PITCH_RANGE` (45 to 75 degrees). `release()` hands the map back
+clamped to the ground without a jump. Switching it on slows a replay faster
+than `CHASE_MAX_SPEED` (10x) down to it and switching it off restores the
+speed from before; it also eases back to the zoom, bearing and pitch from
+before over the airplane, closing the replay back to the whole view, and a
+finished replay fits the flight at the bearing and pitch from before. While
+it chases, the state manager saves the view from before
+(`ReplayManager.userMapView`) to the session and the link, not a camera half
+way along a flight. Under `prefers-reduced-motion` it does not start, and a
+toast says why.
+
 ## Backend (Python)
 
 **Setup:**

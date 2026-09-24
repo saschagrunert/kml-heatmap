@@ -792,12 +792,19 @@ export function liftOffsetPx(
   zoom = map.getZoom(),
 ): number {
   const pitch = map.getPitch() * DEGREES_TO_RADIANS;
-  const metres =
-    heightFt *
-    FEET_TO_METERS *
-    atZoom(zoom, ([, exaggeration]) => exaggeration);
   const metresPerPx = metresPerPixel(zoom) * Math.cos(lat * DEGREES_TO_RADIANS);
-  return (metres / metresPerPx) * Math.sin(pitch);
+  return (liftMetres(heightFt, zoom) / metresPerPx) * Math.sin(pitch);
+}
+
+/**
+ * How high a point `heightFt` above the ground is drawn at the map zoom
+ * `zoom`, in metres over the ground under it: its height, exaggerated like
+ * the ribbons' (see LIFT_STOPS)
+ */
+export function liftMetres(heightFt: number, zoom: number): number {
+  return (
+    heightFt * FEET_TO_METERS * atZoom(zoom, ([, exaggeration]) => exaggeration)
+  );
 }
 
 /**
