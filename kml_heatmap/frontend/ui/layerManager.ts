@@ -81,8 +81,9 @@ import { loadFeatures } from "../services/featureLoader";
 import {
   groundProfileFt,
   isLiftedAt,
-  isTerrainAt,
+  liftExaggeration,
   liftOffsetPx,
+  reliefLevel,
   ribbonOf,
   ribbonWidthZoom,
   smoothFlights,
@@ -369,8 +370,9 @@ export class LayerManager implements PathHitTester {
   private readonly handleZoomEnd = (): void => {
     const map = this.listeningTo;
     if (!map || !this.app.threeDVisible) return;
-    // Onto or off the relief the flights are cut anew on their other ground,
-    // and for a level in it once its code has arrived (see syncTerrain)
+    // Onto or off the relief, or onto another level of it, the flights are
+    // cut anew on their other ground, once its code has arrived (see
+    // syncTerrain)
     const changed = this.syncTerrain();
     if (changed === null) return;
     if (changed || this.cutAwaited) this.redrawVisibleModes();
@@ -656,10 +658,14 @@ export class LayerManager implements PathHitTester {
       // taken down by as much before the segment and the distance to it
       // are looked for (see liftOffsetPx, which scales by the centre).
       // Over the relief that ground is raised too, but `project` and
-      // `unproject` meet the relief themselves
-      const { h } = feature.properties as Partial<PathRunProperties>;
-      const ribbon = h !== undefined && ribbonLayers.has(feature.layer.id);
-      const lift = ribbon ? liftOffsetPx(map, map.getCenter().lat, h) : 0;
+      // `unproject` meet the relief themselves. The ribbon's exaggeration
+      // is its own, which a zoom across a level leaves until it ends
+      const { h, e } = feature.properties as Partial<PathRunProperties>;
+      const ribbon =
+        h !== undefined &&
+        e !== undefined &&
+        ribbonLayers.has(feature.layer.id);
+      const lift = ribbon ? liftOffsetPx(map, map.getCenter().lat, h, e) : 0;
       const ground = lift ? map.unproject([point.x, point.y + lift]) : pointer;
       // A line is drawn along its flight's curve, and its points belong to
       // the segment they lie on (see calculations/curves.ts)
@@ -1048,6 +1054,7 @@ export class LayerManager implements PathHitTester {
     const smoothed = lifted ? this.smoothedFlights(segments) : null;
     const widthZoom = ribbonWidthZoom(map.getZoom());
     table.widthZoom = threeD ? widthZoom : null;
+    const e = liftExaggeration(this.app.reliefLevel);
     const features: GeoJSON.Feature<
       GeoJSON.LineString | GeoJSON.MultiPolygon,
       PathRunProperties
@@ -1076,7 +1083,7 @@ export class LayerManager implements PathHitTester {
       for (const piece of ribbonOf(smoothed, run.start, run.end, widthZoom)) {
         features.push({
           type: "Feature",
-          properties: { ...properties, h: piece.h },
+          properties: { ...properties, h: piece.h, e },
           geometry: piece.geometry,
         });
       }
@@ -1237,8 +1244,13 @@ export class LayerManager implements PathHitTester {
   private smoothedFlights(segments: PathSegment[]): SmoothedFlights {
     if (this.smoothed?.segments !== segments) {
       // Each flight stands on its own fields (groundProfileFt), and on the
-      // relief where it is drawn (let go of as that comes or goes)
-      const ground = groundProfileFt(segments, this.app.terrainActive);
+      // relief where it is drawn, as coarse as the level draws it (let go
+      // of as either changes)
+      const ground = groundProfileFt(
+        segments,
+        this.app.terrainActive,
+        this.app.reliefLevel,
+      );
       this.smoothed = {
         segments,
         flights: smoothFlights(segments, (i) => segments[i]!.altitude_ft ?? 0, {
@@ -1250,13 +1262,15 @@ export class LayerManager implements PathHitTester {
   }
 
   /**
-   * Whether the 3D view draws the relief (terrainActive): from
-   * TERRAIN_MIN_ZOOM in, by the level the ribbons are cut for, so they are
-   * cut on the sampled ground exactly where the relief is under them, and
-   * the map switches it in the same task as the ground changes. Returns
-   * whether it changed, which the caller answers by cutting the flights
-   * anew. The globe leaves the relief out (MapLibre 6.10 breaks the ribbons
-   * up on it) and only shades it (reliefShaded), over the flat ground the
+   * Whether the 3D view draws the relief (terrainActive), and the level it
+   * is drawn for (reliefLevel): its exaggeration and how coarse its ground
+   * is, which the heights of the flights and the ground they are cut on
+   * follow. The level is the one the ribbons are cut for, and changes only
+   * as a zoom ends: the map switches the relief in the same task as the
+   * ground changes, and the flights stay on it while the zoom goes on.
+   * Returns whether either changed, which the caller answers by cutting
+   * the flights anew. The globe leaves the relief out (MapLibre 6.10
+   * breaks the ribbons up on it) and only shades it (reliefShaded), over the flat ground the
    * ribbons stand on there. Its code comes with the feature bundle, which
    * is fetched the first time either is wanted: until it has arrived the
    * relief is not drawn and the cut is left to its arrival (cutAwaited),
@@ -1266,9 +1280,9 @@ export class LayerManager implements PathHitTester {
    */
   private syncTerrain(): boolean | null {
     const map = this.listeningTo;
-    const shaded =
-      !!map && this.app.threeDVisible && isTerrainAt(map.getZoom());
+    const shaded = !!map && this.app.threeDVisible;
     const wanted = shaded && !this.app.globeVisible;
+    const level = map ? reliefLevel(map.getZoom()) : this.app.reliefLevel;
     this.app.reliefShaded = shaded;
     if (shaded && !this.terrainLoaded) {
       void loadFeatures().then((features) => {
@@ -1283,11 +1297,18 @@ export class LayerManager implements PathHitTester {
         }
       });
       if (wanted) {
+        // Nothing follows the level before the code has arrived, but a cut
+        // of the flights meanwhile, on the flat map, is lifted by it
+        this.app.reliefLevel = level;
         this.cutAwaited = true;
         return null;
       }
     }
-    if (wanted === this.app.terrainActive) return false;
+    const moved = shaded && level !== this.app.reliefLevel;
+    if (wanted === this.app.terrainActive && !moved) return false;
+    // The relief goes before it would be built for the new level
+    if (!wanted) this.app.terrainActive = false;
+    this.app.reliefLevel = level;
     this.app.terrainActive = wanted;
     this.smoothed = null;
     this.releaseRibbons();

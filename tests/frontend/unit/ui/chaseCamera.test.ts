@@ -228,10 +228,7 @@ describe("ChaseCamera", () => {
       run(chase, 4, () => heading(0, heightFt));
       // The point looked at is in the air, at the airplane's height as the
       // ribbons draw it (level ground, no relief here)
-      expect(map.getCenterElevation()).toBeCloseTo(
-        liftMetres(heightFt, map.getZoom()),
-        0,
-      );
+      expect(map.getCenterElevation()).toBeCloseTo(liftMetres(heightFt, 2), 0);
       return map.getZoom();
     });
     // The same distance, and the same size of the airplane and the ground
@@ -419,7 +416,7 @@ describe("ChaseCamera", () => {
     expect(map.calculateCameraOptionsFromTo).toHaveBeenCalledTimes(1);
     const [, altitude, , altitudeTo]: unknown[] =
       map.calculateCameraOptionsFromTo.mock.calls[0]!;
-    expect(altitude).toBeGreaterThan(liftMetres(3000, CHASE_ZOOM));
+    expect(altitude).toBeGreaterThan(liftMetres(3000, 2));
     expect(altitudeTo).toBe(0);
     expect(map.jumpTo).toHaveBeenCalledTimes(1);
   });

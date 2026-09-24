@@ -316,7 +316,12 @@ function analyzeBundleComposition(metafile, fileName) {
 // Wrapped moving into a bundle of its own made the app one chunk
 // (see buildOptions), which compresses better than two: 139,549 B raw and
 // 46,584 B gzipped, from 140,030 B and 47,417 B.
-const BUDGET_APP = { raw: 138 * 1024, gzip: 47 * 1024 };
+// The relief at every zoom takes 1.99 KB of it: the ground smoothed as the
+// relief is drawn at each level, which every ribbon is cut on, and the
+// level and its exaggeration carried by the ribbons, the replay's trail
+// and its airplane; 141,543 B raw and 46.17 KB gzipped, over the 138 KB by
+// 231 B.
+const BUDGET_APP = { raw: 139 * 1024, gzip: 47 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief of
 // the 3D view is first drawn, the Satellite switch is first on or an
 // airport's popup is first opened, so

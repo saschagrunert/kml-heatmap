@@ -250,6 +250,7 @@ export class MapApp {
   declare satelliteVisible: StoreAccessors["satelliteVisible"];
   declare terrainActive: StoreAccessors["terrainActive"];
   declare reliefShaded: StoreAccessors["reliefShaded"];
+  declare reliefLevel: StoreAccessors["reliefLevel"];
   declare replayActive: StoreAccessors["replayActive"];
   declare currentData: StoreAccessors["currentData"];
   declare hasTimingData: StoreAccessors["hasTimingData"];

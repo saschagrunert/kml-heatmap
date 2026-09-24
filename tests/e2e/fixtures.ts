@@ -254,6 +254,22 @@ export async function failBaseStyle(page: Page): Promise<void> {
 }
 
 /**
+ * Never answer a request for an elevation tile, for a spec that turns the
+ * 3D view on without looking at the relief: out on the globe the map
+ * shades dozens of them, each a pass in software WebGL on CI, and a frame
+ * there held every step of the page up for seconds. The map waits for the
+ * tiles and draws the rest meanwhile, so it is never idle while it shades.
+ * Before the 3D view is turned on; a route of the page goes before the one
+ * of the context.
+ */
+export async function holdElevationTiles(page: Page): Promise<void> {
+  await page.route(
+    (url) => isTile(url) && url.pathname.includes("/terrarium/"),
+    () => new Promise<void>(() => {}),
+  );
+}
+
+/**
  * Install the routes on a browser context.
  *
  * Returns the list that collects forbidden requests, so a caller can assert

@@ -1091,6 +1091,30 @@ describe("ReplayManager activation", () => {
       );
     });
 
+    it("smooths the sampled ground as coarsely as the relief of the level", () => {
+      mockApp.currentData!.path_segments.forEach((segment, i) => {
+        segment.ground_ft = i % 2 ? 900 : 100;
+      });
+      mockApp.threeDVisible = true;
+      mockApp.store.set("reliefLevel", 11);
+      mockApp.store.set("terrainActive", true);
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      flyToTheEnd();
+      const spread = (): number =>
+        Math.max(...replayManager.state.groundFt) -
+        Math.min(...replayManager.state.groundFt);
+      expect(spread()).toBe(800);
+      const sharp = replayManager.state.smoothed!;
+
+      mockApp.store.set("reliefLevel", 4);
+      vi.advanceTimersByTime(100);
+
+      expect(spread()).toBeLessThan(800);
+      expect(replayManager.state.smoothed).not.toBe(sharp);
+      expect(replayManager.state.smoothed!.times).toBe(sharp.times);
+    });
+
     it("empties the trail's ribbons as the replay closes", () => {
       mockApp.threeDVisible = true;
       mockApp.selectedPathIds = new Set([1]);

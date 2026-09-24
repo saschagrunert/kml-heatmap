@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, holdElevationTiles, type Page } from "./fixtures";
 import {
   closeMobileSheet,
   firstPathId,
@@ -422,8 +422,11 @@ test.describe("State Persistence", () => {
     // About forty steps, the 3D view on the globe among them, where every
     // step takes a second in software WebGL with a browser per core: 35 s
     // on a desktop in CI. The mobile project gives it the same time. The
-    // view stays zoomed out, so no relief is drawn (TERRAIN_MIN_ZOOM).
+    // globe shades the relief at every zoom, which this spec does not look
+    // at: without its tiles there is nothing to shade, and the turn does
+    // not wait for them (holdElevationTiles).
     test.setTimeout(60000);
+    await holdElevationTiles(page);
     const mobile = await usesMobileBar(page);
     // Nothing to reset on a first visit: announced and dimmed, like Isolate
     // with nothing selected
@@ -469,7 +472,7 @@ test.describe("State Persistence", () => {
       "aria-pressed",
       "true",
     );
-    await setOrientation(page, { bearing: 70, pitch: 40 });
+    await setOrientation(page, { bearing: 70, pitch: 40 }, { idle: false });
     await expectResetAvailable(page, mobile, true);
 
     if (mobile) {

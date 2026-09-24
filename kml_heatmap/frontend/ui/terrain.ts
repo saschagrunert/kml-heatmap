@@ -1,39 +1,30 @@
 /**
  * Terrain - the relief under the 3D view
  *
- * From TERRAIN_MIN_ZOOM in, the 3D view draws the relief and stands the
- * flights on it (calculations/lift.ts). The layer manager decides when
- * (terrainActive), in the task it cuts the ribbons on the sampled ground;
- * this module makes the map follow. The globe only shades the relief
- * (reliefShaded) and leaves the relief itself out, whose mesh MapLibre
- * 6.10 breaks the ribbons up on. It comes with the feature bundle: most
- * visits never turn the 3D view on, let alone zoom in that far.
+ * The 3D view draws the relief and stands the flights on it, at every
+ * zoom, exaggerated as much as they are (calculations/lift.ts). The layer
+ * manager decides when, and for which level (terrainActive, reliefLevel),
+ * in the task it cuts the ribbons on their ground; this module makes the
+ * map follow. The globe only shades the relief (reliefShaded) and leaves
+ * the relief itself out, whose mesh MapLibre 6.10 breaks the ribbons up
+ * on. It comes with the feature bundle: most visits never turn the 3D
+ * view on.
  *
  * The elevation tiles are AWS's Terrarium tiles, the ones the build samples
- * the ground from (kml_heatmap/terrain.py), and of the same level, so the
- * relief and the ground the flights are measured against are the same
- * model. The browser fetches them only while the relief is drawn or
- * shaded, and the map shows their credit only then.
+ * the ground from (kml_heatmap/terrain.py), so the relief and the ground
+ * the flights are measured against are the same model, smoothed as the
+ * map draws it at each level. The browser fetches them only while the
+ * relief is drawn or shaded, and the map shows their credit only then.
  */
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
-import { TERRAIN_EXAGGERATION } from "../calculations/lift";
+import { liftExaggeration, TERRAIN_TILE_MAX_ZOOM } from "../calculations/lift";
 import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { cssVar, whenContextRestored } from "../utils/mapHelpers";
 import { SATELLITE_LAYER } from "./satellite";
 
 const TERRAIN_TILE_URL =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
-
-/**
- * The deepest level of the tiles fetched, the one the build samples the
- * ground at (TERRAIN_ZOOM in terrain.py); the map stretches it beyond. A
- * finer relief is sharper than the ground the flights are measured
- * against, and a flight level over a ridge rises and dips with every
- * crest the sampled ground cut across; it would also take four times the
- * tiles for every level more.
- */
-const TERRAIN_TILE_MAX_ZOOM = 10;
 
 /**
  * The shading of the relief, from the same elevation tiles. It is not a
@@ -52,10 +43,11 @@ const RIBBON_LAYERS = [
 ];
 
 /**
- * Switch the relief on and off with terrainActive, and its shading with
- * reliefShaded, from now on. Switching the relief builds it anew and
- * throws away what the map drew onto it, which is why it only follows that
- * flag and never the zoom itself.
+ * Switch the relief on and off with terrainActive, its exaggeration with
+ * reliefLevel, and its shading with reliefShaded, from now on. Each switch
+ * builds the relief anew and throws away what the map drew onto it (a few
+ * milliseconds), which is why it follows the level, once a zoom has
+ * ended, and never the zoom itself.
  */
 export function followTerrain(app: MapApp): void {
   const map = app.map;
@@ -65,20 +57,24 @@ export function followTerrain(app: MapApp): void {
     const shaded = app.reliefShaded;
     if (active || shaded) addSource(map);
     shade(map, shaded);
-    if (!!map.getTerrain() === active) return;
-    map.setTerrain(
-      active
-        ? { source: MAP_SOURCES.terrain, exaggeration: TERRAIN_EXAGGERATION }
-        : null,
-    );
+    const exaggeration = liftExaggeration(app.reliefLevel);
+    const terrain = map.getTerrain();
+    if (!active) {
+      if (terrain) map.setTerrain(null);
+      return;
+    }
+    if (terrain?.exaggeration === exaggeration) return;
+    map.setTerrain({ source: MAP_SOURCES.terrain, exaggeration });
   };
   // The relief is part of the style, so it waits for one
   void app.mapReady.then(() => {
     const settle = settleRibbons(app, map);
-    app.store.subscribe("terrainActive", () => {
+    const change = (): void => {
       settle();
       apply();
-    });
+    };
+    app.store.subscribe("terrainActive", change);
+    app.store.subscribe("reliefLevel", change);
     app.store.subscribe("reliefShaded", apply);
     // MapLibre restores the relief with the style after a lost WebGL
     // context, but some of what it draws onto it stays black until the

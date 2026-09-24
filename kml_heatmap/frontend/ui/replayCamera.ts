@@ -9,7 +9,11 @@ import type { MapApp } from "../mapApp";
 import type { ReplayAirplane, ReplayState } from "./replayState";
 import { AUTO_ZOOM_MIN } from "../utils/constants";
 import { isBehindGlobe, toLngLat, unwrapLng } from "../utils/mapHelpers";
-import { airplaneLiftPx, ribbonWidthZoom } from "../calculations/lift";
+import {
+  airplaneLiftPx,
+  liftExaggeration,
+  ribbonWidthZoom,
+} from "../calculations/lift";
 import { prefersReducedMotion } from "../utils/motion";
 import { ChaseCamera, dampStep, type SavedCamera } from "./chaseCamera";
 
@@ -407,7 +411,16 @@ export class ReplayCamera {
       const [x, y] = chase.offsetOf(this.heading);
       marker.setLift(-y, x);
     } else {
-      marker.setLift(airplaneLiftPx(map, map.getCenter().lat, heightFt));
+      // Exaggerated as the trail is drawn, which keeps its level until a
+      // zoom ends
+      marker.setLift(
+        airplaneLiftPx(
+          map,
+          map.getCenter().lat,
+          heightFt,
+          liftExaggeration(this.app.reliefLevel),
+        ),
+      );
     }
     // The ribbons are as wide as the zoom they were cut for (see lift.ts)
     if (
@@ -556,6 +569,7 @@ export class ReplayCamera {
       map,
       map.getCenter().lat,
       state.airplaneHeightFt,
+      liftExaggeration(this.app.reliefLevel),
     );
     const point = { x: ground.x, y: ground.y - lift };
     // The centre that brings the airplane itself to the middle of the map

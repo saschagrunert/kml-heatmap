@@ -46,6 +46,7 @@ import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
 import {
   isLiftedAt,
+  liftExaggeration,
   ribbonOf,
   ribbonPieces,
   ribbonWidthZoom,
@@ -264,6 +265,7 @@ export function truncateTrail(state: ReplayState, time: number): void {
 interface TrailProperties {
   color: string;
   h?: number;
+  e?: number;
 }
 
 type TrailFeature = Feature<LineString | MultiPolygon, TrailProperties>;
@@ -304,6 +306,7 @@ export function trailFeatureCollection(
     "trailRuns" | "smoothed" | "trailPieces" | "lifted" | "trailTip"
   >,
   widthZoom: number,
+  exaggeration: number,
 ): FeatureCollection<LineString | MultiPolygon, TrailProperties> {
   const curve = state.smoothed;
   const lifted = state.lifted && isLiftedAt(widthZoom) ? curve : null;
@@ -356,7 +359,7 @@ export function trailFeatureCollection(
         : cut.pieces;
       return pieces.map((piece) => ({
         type: "Feature" as const,
-        properties: { color: run.color, h: piece.h },
+        properties: { color: run.color, h: piece.h, e: exaggeration },
         geometry: piece.geometry,
       }));
     }),
@@ -694,7 +697,13 @@ export class ReplayRenderer {
     state.trailWrittenTo = id;
     void map
       .getSource<GeoJSONSource>(id)
-      ?.setData(trailFeatureCollection(state, widthZoom));
+      ?.setData(
+        trailFeatureCollection(
+          state,
+          widthZoom,
+          liftExaggeration(this.app.reliefLevel),
+        ),
+      );
   }
 
   /** Drop a write that is still pending; the replay layer is going away */

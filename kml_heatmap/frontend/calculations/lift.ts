@@ -11,12 +11,12 @@
  * under it from an elevation model, anchored to the fields it left and
  * landed on (kml_heatmap/terrain.py), and without it the line from the one
  * field to the other (see groundProfileFt); either way a flight taxis on
- * the map at both ends. From TERRAIN_MIN_ZOOM in, the map draws the relief
- * under the flights, and the ribbons stand on it.
+ * the map at both ends. Off the globe the map draws the relief under the
+ * flights, and the ribbons stand on it.
  *
- * The heights are exaggerated, more the further out the map is: at true
- * scale a circuit is a hair above the ground at any zoom where the
- * airfield is more than a dot.
+ * The heights are exaggerated, and the relief as much, more the further
+ * out the map is: at true scale a circuit is a hair above the ground at
+ * any zoom where the airfield is more than a dot.
  */
 import type { ExpressionSpecification, Map as MapLibreMap } from "maplibre-gl";
 import type { Coordinate } from "../utils/geometry";
@@ -53,29 +53,47 @@ const RIBBON_WIDTH_PX = 3;
 export const LIFT_MAX_ZOOM = 17;
 
 /**
- * The map zoom from which the 3D view draws the relief under the flights
- * (ui/terrain.ts), by the whole level the ribbons are cut for (see
- * ribbonWidthZoom). Further out a mountain is a few pixels high, while
- * every elevation tile in view would be fetched and the layers draped over
- * it drawn to textures; and the flights are lifted there many times more
- * than the relief could be (LIFT_STOPS). The map shapes the relief from
- * the tiles of its own level, one coarser than the ground was sampled at
- * on this one, which smooths a ridge by a pixel or two and no more; a
- * level further out a level flight would climb and sink with every crest.
+ * The deepest level of the elevation tiles, the one the build samples the
+ * ground at (TERRAIN_ZOOM in terrain.py); the map stretches it beyond.
  */
-export const TERRAIN_MIN_ZOOM = 9;
+export const TERRAIN_TILE_MAX_ZOOM = 10;
 
 /**
- * How much the relief is exaggerated, and the heights of the flights with
- * it, from TERRAIN_MIN_ZOOM in. The map adds the relief's exaggerated
- * elevation to a ribbon's own height, so a flight only stays at its height
- * over the ground it flew over where the two factors are the same.
+ * The whole level the relief and the heights of the flights are drawn for
+ * at the map zoom `zoom`: the level the ribbons are cut for (see
+ * ribbonWidthZoom), up to the one whose ribbons stand on the deepest
+ * elevation tiles (see reliefPixelM), from where neither the exaggeration
+ * nor the ground changes any more.
  */
-export const TERRAIN_EXAGGERATION = 2;
+export function reliefLevel(zoom: number): number {
+  return Math.min(ribbonWidthZoom(zoom), TERRAIN_TILE_MAX_ZOOM + 1);
+}
 
-/** Whether the 3D view draws the relief at the map zoom `zoom` */
-export function isTerrainAt(zoom: number): boolean {
-  return ribbonWidthZoom(zoom) >= TERRAIN_MIN_ZOOM;
+/**
+ * How much the relief and the heights of the flights are exaggerated, by
+ * relief level from 0 on, the last for every level beyond. Further out
+ * than 10x the Alps stand as a wall across the map, and a level flight
+ * saws up and down over the ridges: the ground it is measured against
+ * follows the relief the map draws only to within about 100 m there (see
+ * groundProfileFt), which the exaggeration multiplies, and at 10x that is
+ * under a pixel. The flights are lifted as much, so the lift ramps down
+ * from there as it did, to twice their height closer in.
+ */
+const EXAGGERATION_BY_LEVEL: readonly number[] = [
+  10, 10, 10, 10, 10, 10, 10, 7, 4, 2,
+];
+
+/**
+ * How much the relief and the heights of the flights are exaggerated at
+ * the relief level `level` (see reliefLevel). The map adds the relief's
+ * exaggerated elevation to a ribbon's own height, so a flight only stays
+ * at its height over the ground it flew over where the two factors are
+ * the same: the map takes one number for the relief, so both are one per
+ * level, and switch together (see LayerManager.syncTerrain).
+ */
+export function liftExaggeration(level: number): number {
+  const last = EXAGGERATION_BY_LEVEL.length - 1;
+  return EXAGGERATION_BY_LEVEL[Math.min(Math.max(level, 0), last)]!;
 }
 
 /** Whether the 3D view lifts the flights at the map zoom `zoom` */
@@ -111,28 +129,20 @@ export function ribbonWidthZoom(zoom: number): number {
 }
 
 /**
- * By map zoom: how much the heights are exaggerated, and the band of
- * height a ribbon has, in metres, about three pixels at every zoom. The
- * flights are lifted at every zoom, the whole of a long flight in view
- * included, so the stops reach down to a map of half of Europe. Where the
- * relief is drawn the heights are exaggerated as much as it is, and no
- * more (see TERRAIN_EXAGGERATION); the ramp comes down to that over the
- * two levels before, where the flights stay about as high on the screen
- * as the map grows.
+ * By map zoom: the band of height a ribbon has, in metres, about three
+ * pixels at every zoom. The flights are lifted at every zoom, the whole of
+ * a long flight in view included, so the stops reach down to a map of half
+ * of Europe.
  */
-const LIFT_STOPS: readonly (readonly [
-  zoom: number,
-  exaggeration: number,
-  bandM: number,
-])[] = [
-  [4, 60, 12000],
-  [6, 25, 3000],
-  [7, 10, 1900],
-  [TERRAIN_MIN_ZOOM, TERRAIN_EXAGGERATION, 480],
-  [10, TERRAIN_EXAGGERATION, 200],
-  [11, TERRAIN_EXAGGERATION, 110],
-  [13, TERRAIN_EXAGGERATION, 28],
-  [16, TERRAIN_EXAGGERATION, 6],
+const BAND_STOPS: readonly (readonly [zoom: number, bandM: number])[] = [
+  [4, 12000],
+  [6, 3000],
+  [7, 1900],
+  [9, 480],
+  [10, 200],
+  [11, 110],
+  [13, 28],
+  [16, 6],
 ];
 
 const METRES_PER_DEGREE = 111320;
@@ -178,10 +188,13 @@ function fieldFt(
 /**
  * The ground under every segment, in feet, by its index: what the build
  * sampled under a flight (PathSegment.ground_ft), where it has that for
- * every segment and `sampled` asks for it. The sampled ground follows the
- * relief, so it is only the ground where the relief is drawn: over a flat
- * map a level flight above it would climb and sink with every ridge it
- * crossed. Otherwise from the field a flight left to the one it
+ * every segment and `sampled` asks for it, smoothed as the relief the map
+ * draws at the relief level `level` (see reliefPixelM), and as sampled
+ * without one. The sampled ground follows the relief, so it is only the
+ * ground where the relief is drawn: over a flat map a level flight above
+ * it would climb and sink with every ridge it crossed, and over a relief
+ * coarser than it with every ridge the relief leaves out. Otherwise from
+ * the field a flight left to the one it
  * landed on, as its taxiing recorded them, and in between along the way it
  * flew, in proportion to the distance. The heights are the recorder's own,
  * so its taxiing is on the map whatever its altimeter was off by; and an
@@ -195,6 +208,7 @@ function fieldFt(
 export function groundProfileFt(
   segments: readonly PathSegment[],
   sampled = true,
+  level = Infinity,
 ): Float64Array {
   const byPath = new Map<number, number[]>();
   segments.forEach((segment, index) => {
@@ -207,41 +221,139 @@ export function groundProfileFt(
   for (const [pathId, indices] of byPath) {
     const samples = indices.map((index) => segments[index]!.ground_ft);
     if (sampled && !samples.includes(undefined)) {
-      samples.forEach((feet, i) => (ground[indices[i]!] = feet!));
+      const smoothed =
+        level > TERRAIN_TILE_MAX_ZOOM
+          ? (samples as number[])
+          : smoothAlong(
+              samples as number[],
+              alongMetres(segments, indices),
+              reliefPixelM(level, segments[indices[0]!]!.coords?.[0][0] ?? 0),
+            );
+      smoothed.forEach((feet, i) => (ground[indices[i]!] = feet));
       continue;
     }
     const start = fieldFt(segments, indices);
     const end = fieldFt(segments, [...indices].reverse());
     if (start === null && end === null) {
       lowest ??= groundLevelsFt(segments as PathSegment[]);
-      const level = lowest.get(pathId) ?? 0;
-      for (const index of indices) ground[index] = level;
+      const floor = lowest.get(pathId) ?? 0;
+      for (const index of indices) ground[index] = floor;
       continue;
     }
     const from = start ?? end!;
     const to = end ?? start!;
-    // Metres flown to the end of each segment
-    const along = new Float64Array(indices.length);
-    let total = 0;
-    indices.forEach((index, i) => {
-      const coords = segments[index]!.coords;
-      if (coords) {
-        const [[lat0, lng0], [lat1, lng1]] = coords;
-        total += Math.hypot(
-          (unwrapLng(lng1, lng0) - lng0) *
-            METRES_PER_DEGREE *
-            Math.cos(((lat0 + lat1) / 2) * DEGREES_TO_RADIANS),
-          (lat1 - lat0) * METRES_PER_DEGREE,
-        );
-      }
-      along[i] = total;
-    });
+    const along = alongMetres(segments, indices);
+    const total = along[along.length - 1] ?? 0;
     indices.forEach((index, i) => {
       const t = total > 0 ? along[i]! / total : 0;
       ground[index] = from + (to - from) * t;
     });
   }
   return ground;
+}
+
+/** Metres flown to the end of each of the segments `indices` of a flight */
+function alongMetres(
+  segments: readonly PathSegment[],
+  indices: readonly number[],
+): Float64Array {
+  const along = new Float64Array(indices.length);
+  let total = 0;
+  indices.forEach((index, i) => {
+    const coords = segments[index]!.coords;
+    if (coords) {
+      const [[lat0, lng0], [lat1, lng1]] = coords;
+      total += Math.hypot(
+        (unwrapLng(lng1, lng0) - lng0) *
+          METRES_PER_DEGREE *
+          Math.cos(((lat0 + lat1) / 2) * DEGREES_TO_RADIANS),
+        (lat1 - lat0) * METRES_PER_DEGREE,
+      );
+    }
+    along[i] = total;
+  });
+  return along;
+}
+
+/**
+ * The metres a pixel spans at `lat` of the elevation tiles the ribbons of
+ * the relief level `level` stand on. MapLibre raises a ribbon by the
+ * relief under it from the tiles one level coarser than its own (a
+ * raster-dem source's tiles are drawn at twice their size), so the ground
+ * sampled at TERRAIN_TILE_MAX_ZOOM is theirs only from a level beyond.
+ */
+export function reliefPixelM(level: number, lat: number): number {
+  const zoom = Math.min(level - 1, TERRAIN_TILE_MAX_ZOOM);
+  return (
+    (EARTH_CIRCUMFERENCE_M / (256 * 2 ** zoom)) *
+    Math.cos(lat * DEGREES_TO_RADIANS)
+  );
+}
+
+/**
+ * `values` at the distances `along`, smoothed as the relief the map draws
+ * from coarser tiles smooths the ground: a pixel `pixelM` across stands
+ * for the ground under and around it, and the map draws the straight line
+ * from one pixel to the next. Twice a moving average over two pixels,
+ * which of the averages tried followed the relief the map drew along a
+ * flight over the Alps closest: at every level from 4 to 9 it halved the
+ * difference, to about 100 m out to 30 m in. What is left is the relief
+ * beside the flight, which no smoothing along it can know. Where the
+ * flight ends, the average is of the part it flew.
+ */
+export function smoothAlong(
+  values: readonly number[],
+  along: ArrayLike<number>,
+  pixelM: number,
+): number[] {
+  const width = 2 * pixelM;
+  return boxAverage(boxAverage(values, along, width), along, width);
+}
+
+/**
+ * The average of the line through `values` at `along` over `width` metres
+ * around each point, cut off at the ends
+ */
+function boxAverage(
+  values: readonly number[],
+  along: ArrayLike<number>,
+  width: number,
+): number[] {
+  const n = values.length;
+  // The integral of the line from the first point to each point
+  const integral = new Float64Array(n);
+  for (let i = 1; i < n; i++) {
+    integral[i] =
+      integral[i - 1]! +
+      ((values[i]! + values[i - 1]!) / 2) * (along[i]! - along[i - 1]!);
+  }
+  // The integral up to `x`, and the point before it, looked for from the
+  // point `i` on: either end of the window only moves on
+  const integralAt = (x: number, i: number): [number, number] => {
+    while (i + 1 < n && along[i + 1]! <= x) i++;
+    if (i + 1 >= n) return [integral[n - 1]!, i];
+    const span = along[i + 1]! - along[i]!;
+    const t = span > 0 ? (x - along[i]!) / span : 0;
+    const v = values[i]! + (values[i + 1]! - values[i]!) * t;
+    return [integral[i]! + ((values[i]! + v) / 2) * (x - along[i]!), i];
+  };
+  const out = new Array<number>(n);
+  let lower = 0;
+  let upper = 0;
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(along[i]! - width / 2, along[0]!);
+    const b = Math.min(along[i]! + width / 2, along[n - 1]!);
+    if (b <= a) {
+      out[i] = values[i]!;
+      continue;
+    }
+    let from: number;
+    let to: number;
+    [from, lower] = integralAt(a, lower);
+    [to, upper] = integralAt(b, upper);
+    out[i] = (to - from) / (b - a);
+  }
+  return out;
 }
 
 /** How far a mitred corner may reach out, in ribbon half widths */
@@ -711,74 +823,50 @@ export function ribbonPieces(
 }
 
 /**
- * The paint of a ribbon's bottom and top by zoom, from the height `h` of
- * its feature, in feet. `zoom` may only be the input of a top-level
+ * The paint of a ribbon's bottom and top, from the height `h` of its
+ * feature, in feet, and the exaggeration `e` it was cut for (see
+ * liftExaggeration): the exaggeration is the relief's, which is one number
+ * per level, and a paint that followed the zoom would follow the zoom of
+ * each tile, a level or two further out in the distance of a tilted view.
+ * The band goes by zoom; `zoom` may only be the input of a top-level
  * interpolation, hence the height inside every stop.
  */
 export function ribbonHeights(): {
   base: ExpressionSpecification;
   height: ExpressionSpecification;
 } {
-  const metres = (exaggeration: number): ExpressionSpecification => [
+  const exaggeration: ExpressionSpecification = ["get", "e"];
+  const metres: ExpressionSpecification = [
     "*",
     ["get", "h"],
-    FEET_TO_METERS * exaggeration,
+    ["*", exaggeration, FEET_TO_METERS],
   ];
-  const byZoom = (
-    at: (exaggeration: number, bandM: number) => ExpressionSpecification,
-  ): ExpressionSpecification =>
-    [
+  // A piece spans its step, half of it below its middle and half above, so
+  // the pieces of a slope meet; the band goes on top of that
+  const halfStep: ExpressionSpecification = [
+    "*",
+    exaggeration,
+    (LIFT_STEP_FT / 2) * FEET_TO_METERS,
+  ];
+  return {
+    base: ["max", ["-", metres, halfStep], 0],
+    height: [
       "interpolate",
       ["linear"],
       ["zoom"],
-      ...LIFT_STOPS.flatMap(([zoom, exaggeration, bandM]) => [
+      ...BAND_STOPS.flatMap(([zoom, bandM]) => [
         zoom,
-        at(exaggeration, bandM),
+        ["+", metres, halfStep, bandM],
       ]),
-    ] as ExpressionSpecification;
-  return {
-    // A piece spans its step, half of it below its middle and half above,
-    // so the pieces of a slope meet; the band goes on top of that
-    base: byZoom((exaggeration) => [
-      "max",
-      [
-        "-",
-        metres(exaggeration),
-        (LIFT_STEP_FT / 2) * FEET_TO_METERS * exaggeration,
-      ],
-      0,
-    ]),
-    height: byZoom((exaggeration, bandM) => [
-      "+",
-      metres(exaggeration),
-      (LIFT_STEP_FT / 2) * FEET_TO_METERS * exaggeration + bandM,
-    ]),
+    ] as ExpressionSpecification,
   };
-}
-
-/** Linear between the stops of LIFT_STOPS, held beyond the ends */
-function atZoom(
-  zoom: number,
-  pick: (stop: (typeof LIFT_STOPS)[number]) => number,
-): number {
-  const first = LIFT_STOPS[0]!;
-  const last = LIFT_STOPS[LIFT_STOPS.length - 1]!;
-  if (zoom <= first[0]) return pick(first);
-  if (zoom >= last[0]) return pick(last);
-  for (let i = 1; i < LIFT_STOPS.length; i++) {
-    const upper = LIFT_STOPS[i]!;
-    if (zoom > upper[0]) continue;
-    const lower = LIFT_STOPS[i - 1]!;
-    const t = (zoom - lower[0]) / (upper[0] - lower[0]);
-    return pick(lower) + t * (pick(upper) - pick(lower));
-  }
-  return pick(last);
 }
 
 /**
  * How far up the screen a point `heightFt` above the ground is drawn, in
- * pixels: the height as the ribbons have it at this zoom, over the metres
- * a pixel spans, foreshortened by the tilt. Flat, a height takes no room on
+ * pixels: the height as the ribbons have it, exaggerated by `exaggeration`
+ * (the one they were cut with, see liftMetres), over the metres a pixel
+ * spans at `zoom`, foreshortened by the tilt. Flat, a height takes no room on
  * the screen. MapLibre scales every extrusion by the metres of a pixel at
  * the map's centre, wherever the extrusion stands, so `lat` is the centre's
  * latitude (for a camera move, the one it ends at), not the point's. An
@@ -789,22 +877,24 @@ export function liftOffsetPx(
   map: MapLibreMap,
   lat: number,
   heightFt: number,
+  exaggeration: number,
   zoom = map.getZoom(),
 ): number {
   const pitch = map.getPitch() * DEGREES_TO_RADIANS;
   const metresPerPx = metresPerPixel(zoom) * Math.cos(lat * DEGREES_TO_RADIANS);
-  return (liftMetres(heightFt, zoom) / metresPerPx) * Math.sin(pitch);
+  return (liftMetres(heightFt, exaggeration) / metresPerPx) * Math.sin(pitch);
 }
 
 /**
- * How high a point `heightFt` above the ground is drawn at the map zoom
- * `zoom`, in metres over the ground under it: its height, exaggerated like
- * the ribbons' (see LIFT_STOPS)
+ * How high a point `heightFt` above the ground is drawn, in metres over
+ * the ground under it: its height, exaggerated by `exaggeration` like the
+ * ribbons' (see liftExaggeration). That is the one of the level the map
+ * is drawn for (reliefLevel in the store), not of the zoom: while a zoom
+ * crosses a level the ribbons and the relief keep the level they were cut
+ * for until it ends.
  */
-export function liftMetres(heightFt: number, zoom: number): number {
-  return (
-    heightFt * FEET_TO_METERS * atZoom(zoom, ([, exaggeration]) => exaggeration)
-  );
+export function liftMetres(heightFt: number, exaggeration: number): number {
+  return heightFt * FEET_TO_METERS * exaggeration;
 }
 
 /**
@@ -816,9 +906,10 @@ export function airplaneLiftPx(
   map: MapLibreMap,
   lat: number,
   heightFt: number | null,
+  exaggeration: number,
   zoom = map.getZoom(),
 ): number {
   return heightFt === null || !isLiftedAt(zoom)
     ? 0
-    : liftOffsetPx(map, lat, heightFt, zoom);
+    : liftOffsetPx(map, lat, heightFt, exaggeration, zoom);
 }

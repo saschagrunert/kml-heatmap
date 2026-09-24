@@ -349,25 +349,43 @@ leaves the ground out with one warning instead of failing the build.
 
 **The relief of the 3D view:**
 
-From map zoom 9 in (`TERRAIN_MIN_ZOOM` in `calculations/lift.ts`, `z` 10 in
-the UI) the 3D view draws the relief with `setTerrain`, from a `raster-dem`
-source of the same Terrarium tiles and level the build samples
+At every zoom the 3D view draws the relief with `setTerrain`, from a
+`raster-dem` source of the same Terrarium tiles the build samples
 (`ui/terrain.ts`, which comes with the feature bundle and is fetched the
-first time the relief is wanted). The relief and the heights of the ribbons
-are exaggerated by the one `TERRAIN_EXAGGERATION` there, since the
-`fill-extrusion` shader adds the exaggerated relief to every ribbon; the
-`LIFT_STOPS` ramp comes down to it at that zoom. MapLibre shapes the relief
-from the elevation tiles of the map's own level (its terrain tiles are
-twice the source's 256 pixels), so at map zoom 9 they are a level coarser
-than the sampled ground and a level flight ripples by a pixel or two; at 8
-it would be two levels, where the ramp lifts the flights three times as
-much as the relief. `LayerManager.syncTerrain`
-decides it (`terrainActive` in the store) by the whole level the ribbons are
-cut for, and cuts them on the sampled ground inside the relief and on the
-line between the fields outside, in the same task as the relief is switched;
-`ui/terrain.ts` hides the ribbons until the map has drawn their new tiles and
-the elevation tiles, for `SETTLE_MAX_MS` (3 s) at most, since a frame of the
-relief takes seconds in software WebGL. A `hillshade` layer from the same source shades the
+first time the 3D view is on). The `fill-extrusion` shader adds the relief
+times its exaggeration to every ribbon, so a flight stays at its height
+only where the ribbon's lift is exaggerated as much as the relief; the map
+takes one exaggeration for the relief, and rebuilds it on every change (a
+few milliseconds). Both therefore go by the relief level (`reliefLevel` in
+`calculations/lift.ts`, and in the store): the whole level the ribbons are
+cut for, up to 11. `liftExaggeration` gives one number per level, 10 out to
+level 6 (`z` 7 in the UI), then 7, 4, and 2 from level 9 in. The ribbons
+carry it as a property `e` of every feature rather than as a zoom
+expression, which MapLibre would evaluate at each tile's zoom, a level or
+two further out in the distance of a tilted view. `LayerManager.syncTerrain`
+changes the level only as a zoom ends, in the same task as it lets go of
+the old ribbons and cuts them once for the new level, and `ui/terrain.ts`
+sets the relief's exaggeration then; during a zoom the ribbons and the
+relief keep the level they had, so the flights stay on it.
+
+MapLibre raises a ribbon by the relief of the elevation tiles one level
+coarser than the ribbon's own tile (`getSourceTile`, `deltaZoom` 1), so at
+level 5 the ground under a flight is drawn from tiles of about 3 km pixels
+while the build sampled 100 m ones. `groundProfileFt` smooths the sampled
+ground along each flight for the level (`reliefPixelM`, `smoothAlong`:
+twice a moving average over two pixels), which halved the difference to the
+relief MapLibre drew along a flight over the Alps at every level from 4 to 9
+(RMS 94 m at level 4, 31 m at 8, 4 m at 11). The rest is the relief beside
+the flight, which no smoothing along it knows; times the exaggeration it is
+why the ramp stops at 10: with 51 times at level 4 (the ramp before) a level
+cruise over the Alps sawed by 3 to 6 pixels and the Alps stood as a wall,
+at 10 times it is under a pixel. Mid-zoom the ribbon tiles of the new level
+stand on finer elevation tiles than their ground was smoothed for, so a
+level flight over mountains shows the saw until the zoom ends.
+`ui/terrain.ts` hides the ribbons as the level changes or the relief comes
+or goes, until the map has drawn their new tiles and the elevation tiles,
+for `SETTLE_MAX_MS` (3 s) at most, since a frame of the relief takes
+seconds in software WebGL. A `hillshade` layer from the same source shades the
 relief while it is drawn, directly above the base map's last area fill (its
 buildings in CARTO's style, so above its roads but below its labels and every
 layer of the app) and the satellite imagery, in the colours of
@@ -377,7 +395,7 @@ style (MapLibre warns about the shared source once). `withDataLayers`
 carries the source and the relief across a base style swap and
 `ui/terrain.ts` puts the shading back into the new style. The globe gets
 the shading alone (`reliefShaded` in the store, set by `syncTerrain` for the
-3D view in the same zoom band, globe or not) and no relief, since MapLibre
+3D view, globe or not) and no relief, since MapLibre
 6.10 breaks the ribbons up on the relief of the globe: `terrainActive`, and
 with it the ground the ribbons are cut on, stays off there.
 

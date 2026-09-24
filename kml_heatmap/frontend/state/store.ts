@@ -39,6 +39,13 @@ export interface StoreState {
    */
   reliefShaded: boolean;
   /**
+   * The whole zoom level the 3D view's relief, and the flights on it, are
+   * drawn for (see reliefLevel in calculations/lift.ts): their exaggeration
+   * and the ground the flights stand on. It follows the zoom where a zoom
+   * ends, and only there (see LayerManager.syncTerrain, its only writer).
+   */
+  reliefLevel: number;
+  /**
    * Whether a replay is running. The layer flags keep what the user chose;
    * what the map shows follows from both (see ui/layerVisibility.ts).
    */
@@ -86,6 +93,7 @@ export const STORE_ACCESSOR_KEYS = [
   "satelliteVisible",
   "terrainActive",
   "reliefShaded",
+  "reliefLevel",
   "replayActive",
   "currentData",
   "hasTimingData",
@@ -135,6 +143,7 @@ export function createDefaultState(): StoreState {
     satelliteVisible: false,
     terrainActive: false,
     reliefShaded: false,
+    reliefLevel: 0,
     replayActive: false,
     statsPanelVisible: false,
     wrappedVisible: false,

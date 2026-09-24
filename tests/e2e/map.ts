@@ -241,10 +241,14 @@ export function getOrientation(page: Page): Promise<MapOrientation> {
 /**
  * Turn and tilt the map without animating, the way a finished gesture leaves
  * it, and wait until it is there. The events a gesture fires come with it.
+ * `idle: false` skips waiting for the tiles of the new view, for a spec that
+ * only needs the orientation: in a 3D view out on the globe that is dozens
+ * of elevation tiles, each shaded in software WebGL on CI.
  */
 export async function setOrientation(
   page: Page,
   { bearing, pitch }: { bearing: number; pitch: number },
+  { idle = true }: { idle?: boolean } = {},
 ): Promise<void> {
   // Returns nothing: `jumpTo` returns the map, and Playwright would copy
   // all of it, tiles and buffers included, out of the page (seconds on CI)
@@ -257,7 +261,7 @@ export async function setOrientation(
   await expect
     .poll(() => getOrientation(page))
     .toMatchObject({ bearing, pitch });
-  await waitForMapIdle(page);
+  if (idle) await waitForMapIdle(page);
 }
 
 /**
