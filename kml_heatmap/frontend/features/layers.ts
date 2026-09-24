@@ -5,6 +5,8 @@
  */
 
 import type { PathInfo, PathSegment } from "../types";
+import type { Coordinate } from "../utils/geometry";
+import type { SmoothedFlights } from "../calculations/lift";
 import {
   DEFAULT_AIRSPEED_RANGE,
   DEFAULT_ALTITUDE_RANGE,
@@ -196,6 +198,40 @@ export function findNearestSegment(
     if (d < bestDistance) {
       bestDistance = d;
       best = segment;
+    }
+  }
+  return best;
+}
+
+/**
+ * `findNearestSegment` for segments drawn along their flight's curve (see
+ * calculations/curves.ts): the index, from `start` to `end` (exclusive), of
+ * the segment whose part of the curve passes nearest to the point, and the
+ * piece of the curve it passes nearest on. A point of the curve belongs to
+ * the segment it lies on, so near a fix in a turn the answer is the segment
+ * drawn under the point, not the one whose straight line is nearer.
+ */
+export function findNearestOnCurve(
+  curves: SmoothedFlights,
+  start: number,
+  end: number,
+  lat: number,
+  lng: number,
+): { index: number; piece: [Coordinate, Coordinate] } | null {
+  let best: { index: number; piece: [Coordinate, Coordinate] } | null = null;
+  let bestDistance = Infinity;
+  for (let index = start; index < end; index++) {
+    const points = curves.chains[curves.chainOf[index]!]?.points;
+    if (!points) continue;
+    for (let i = curves.from[index]!; i < curves.to[index]!; i++) {
+      const a = points[i]!;
+      const b = points[i + 1]!;
+      const turns = Math.round((a[1] - lng) / 360);
+      const d = distanceToSegmentSquared(lat, lng + 360 * turns, a, b);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = { index, piece: [a, b] };
+      }
     }
   }
   return best;

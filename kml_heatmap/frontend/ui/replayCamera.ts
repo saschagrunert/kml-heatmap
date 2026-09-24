@@ -4,31 +4,57 @@
  * give way to, and the turn and the lift of its icon as the map moves
  * under it. Apart from the renderer, so a chase view (#300) has a home.
  */
-import type { Map as MapLibreMap } from "maplibre-gl";
+import type { LngLatLike, Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { ReplayAirplane, ReplayState } from "./replayState";
 import { AUTO_ZOOM_MIN } from "../utils/constants";
-import { isBehindGlobe, toLngLat } from "../utils/mapHelpers";
-import {
-  airplaneLiftPx,
-  isLiftedAt,
-  ribbonWidthZoom,
-} from "../calculations/lift";
+import { isBehindGlobe, toLngLat, unwrapLng } from "../utils/mapHelpers";
+import { airplaneLiftPx, ribbonWidthZoom } from "../calculations/lift";
 import { prefersReducedMotion } from "../utils/motion";
 
 /** Minimum interval between map pans triggered by slider drags */
 export const SEEK_PAN_THROTTLE_MS = 250;
 
-/** Duration of the pan that brings the airplane back into view (ms) */
+/**
+ * Time the frames the airplane spends near the edge count as one recenter
+ * for auto zoom (ms)
+ */
 export const RECENTER_PAN_DURATION_MS = 500;
 
 /**
- * The pan is asked for again on every frame the airplane is near the edge,
- * and each request starts a new animation from rest. MapLibre's default
- * easing starts slowly, so restarted sixty times a second it hardly moved;
- * this one covers most of the way at once and then settles.
+ * About the time the camera takes to catch up with the airplane once it
+ * follows it (s). The camera follows it as a critically damped spring: it
+ * speeds up and slows down smoothly, and never overshoots.
  */
-const recenterEasing = (t: number): number => 1 - Math.pow(1 - t, 4);
+const FOLLOW_TIME_S = 0.6;
+
+/** Longest frame the follow is worked out over (s), as the replay's */
+const FOLLOW_MAX_STEP_S = 0.1;
+
+/**
+ * One frame of the camera following the airplane: `offset` is where the
+ * airplane is from the middle of the map, `velocity` the camera's speed
+ * from the frame before, both in pixels (per second), and `dt` the time of
+ * the frame. Returns how far the camera moves, and its speed now. The
+ * damped spring of Game Programming Gems 4 (1.10), which is stable for any
+ * length of frame.
+ */
+export function followStep(
+  offset: { x: number; y: number },
+  velocity: { x: number; y: number },
+  dt: number,
+): { move: { x: number; y: number }; velocity: { x: number; y: number } } {
+  const omega = 2 / FOLLOW_TIME_S;
+  const x = omega * dt;
+  const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  const axis = (d: number, v: number): [move: number, velocity: number] => {
+    const temp = (v - omega * d) * dt;
+    return [d + (temp - d) * decay, (v - omega * temp) * decay];
+  };
+  const [mx, vx] = axis(offset.x, velocity.x);
+  const [my, vy] = axis(offset.y, velocity.y);
+  return { move: { x: mx, y: my }, velocity: { x: vx, y: vy } };
+}
 
 /** Most levels one auto zoom-out takes; beyond that the jump disorients */
 const AUTO_ZOOM_MAX_STEP = 4;
@@ -44,6 +70,12 @@ export const AUTO_ZOOM_SETTLE_MS = 300;
 
 /** Fraction of the viewport used as the "near edge" margin for auto-panning */
 const EDGE_MARGIN_FRACTION = 0.1;
+
+/**
+ * The camera lets go of the airplane once it is this many pixels from the
+ * middle of the map, and moves slower than this many pixels per second
+ */
+const SETTLED_PX = 1;
 
 /**
  * The rotation that shows `target` degrees after `previous`, turning the
@@ -242,10 +274,8 @@ class UserMapMovement {
  */
 interface AirplaneHeading {
   marker: ReplayAirplane;
-  /** Where the airplane is on the line of its segment */
+  /** Where the airplane is on its flight's curve (see replayPoint) */
   position: [number, number];
-  /** And on its ribbon's curve, in the 3D view (see pointOnFlight) */
-  onCurve: [number, number] | null;
   track: number;
   heightFt: number | null;
   /** The replay's, whose trail's ribbons are as wide as the zoom asks */
@@ -267,6 +297,17 @@ export class ReplayCamera {
   private heading: AirplaneHeading | null = null;
   /** The map whose moves turn the icon, while a replay shows one */
   private turningWith: MapLibreMap | null = null;
+  /**
+   * While the camera follows the airplane: its speed in pixels per second,
+   * where the airplane was left on the screen, and the wall-clock time and
+   * the zoom of the frame before. Null while it leaves the map alone.
+   */
+  private following: {
+    velocity: { x: number; y: number };
+    left: { x: number; y: number };
+    at: number;
+    zoom: number;
+  } | null = null;
 
   /**
    * A map that turns under a paused airplane changes where its track
@@ -323,6 +364,7 @@ export class ReplayCamera {
     this.turningWith?.off("move", this.onMapMove);
     this.turningWith = null;
     this.heading = null;
+    this.following = null;
   }
 
   /**
@@ -334,11 +376,7 @@ export class ReplayCamera {
   private turnIcon(): void {
     const map = this.app.map;
     if (!map || !this.heading) return;
-    const { marker, track, heightFt, state, onCurve } = this.heading;
-    // On its ribbon in the 3D view, and up at its height; zoomed in so far
-    // that the trail is its line again, on the line
-    const position =
-      onCurve && isLiftedAt(map.getZoom()) ? onCurve : this.heading.position;
+    const { marker, track, heightFt, state, position } = this.heading;
     const [lat, lon] = marker.getLatLng();
     if (lat !== position[0] || lon !== position[1]) marker.setLatLng(position);
     marker.setLift(airplaneLiftPx(map, map.getCenter().lat, heightFt));
@@ -368,9 +406,9 @@ export class ReplayCamera {
   }
 
   /**
-   * Pan the map when the airplane approaches the viewport edge. During
-   * slider drags pans are throttled and not animated; auto zoom-out only
-   * happens while playing.
+   * Follow the airplane once it approaches the viewport edge, until it is
+   * back in the middle (see trackAirplane). During slider drags the map
+   * jumps to it, throttled; auto zoom-out only happens while playing.
    */
   keepAirplaneInView(
     state: ReplayState,
@@ -383,12 +421,15 @@ export class ReplayCamera {
     // A zoom in flight, auto-zoom's own or the user's, is left to finish:
     // a camera move of MapLibre ends the one before it, and the pan would
     // freeze the zoom half way
-    if (map.isZooming()) return;
     // The same goes for the user's hand on the map: a camera move resets
     // every gesture, so a pan on each frame would end a drag or a pinch the
-    // moment it starts. The follow pan picks up again once they let go.
-    // and so does the compass on its way north, which is a move of the app
-    if (this.userMovement?.isActive()) return;
+    // moment it starts. The follow picks up again once the airplane nears
+    // the edge after they let go, and so it does after the compass on its
+    // way north, which is a move of the app.
+    if (map.isZooming() || this.userMovement?.isActive()) {
+      this.following = null;
+      return;
+    }
 
     const container = map.getContainer();
     const mapSize = { x: container.clientWidth, y: container.clientHeight };
@@ -421,7 +462,7 @@ export class ReplayCamera {
       point.x > mapSize.x - marginX ||
       point.y < marginY ||
       point.y > mapSize.y - marginY;
-    if (!nearEdge) return;
+    if (!nearEdge && !this.following) return;
 
     const outsideViewport =
       behind ||
@@ -432,6 +473,8 @@ export class ReplayCamera {
 
     const now = Date.now();
     if (isManualSeek) {
+      this.following = null;
+      if (!nearEdge) return;
       const throttled = now - state.lastSeekPanTime < SEEK_PAN_THROTTLE_MS;
       if (throttled && !outsideViewport) return;
       state.lastSeekPanTime = now;
@@ -439,15 +482,17 @@ export class ReplayCamera {
       return;
     }
 
-    // The pan follows the airplane on every frame it is near the edge, which
-    // keeps a fast replay in view
-    const animate = !prefersReducedMotion();
-    map.easeTo({
+    this.trackAirplane(
+      map,
+      point,
+      ground,
+      currentPos,
+      mapSize,
       center,
-      duration: RECENTER_PAN_DURATION_MS,
-      easing: recenterEasing,
-      animate,
-    });
+      behind ? null : outsideViewport,
+      now,
+    );
+    if (!nearEdge) return;
 
     // Those frames are one recenter, though, until a pan had its time to
     // move the map. Counted per frame, three frames in a row fired a burst
@@ -485,9 +530,115 @@ export class ReplayCamera {
       center: toLngLat(currentPos),
       zoom: Math.max(AUTO_ZOOM_MIN, zoom - steps),
       duration: AUTO_ZOOM_DURATION_MS,
-      animate,
+      animate: !prefersReducedMotion(),
     });
+    this.following = null;
     state.recenterTimestamps = [];
     this.autoZoomSettlesAt = now + AUTO_ZOOM_SETTLE_MS;
+  }
+
+  /**
+   * Move the camera one frame after the airplane, which is at `point` on
+   * the screen, by a jump rather than an animation: an animation asked for
+   * on every frame starts from rest on every frame, and stuttered between
+   * steps of a few metres and of a hundred at 100x. The camera follows as a
+   * damped spring (see followStep) and keeps the airplane off the edge of
+   * the map, whatever the speed; it lets go once the airplane is back in
+   * the middle and at rest there. Without motion, with the airplane behind
+   * a globe (`outside` null), or off the map (`outside`) further than a
+   * spring could follow or before it followed, it jumps to the airplane's
+   * `center` instead. `point` is where the airplane is drawn, `ground`
+   * where the ground under it `position` is.
+   */
+  private trackAirplane(
+    map: MapLibreMap,
+    point: { x: number; y: number },
+    ground: { x: number; y: number },
+    position: [lat: number, lon: number],
+    mapSize: { x: number; y: number },
+    center: LngLatLike,
+    outside: boolean | null,
+    now: number,
+  ): void {
+    const zoom = map.getZoom();
+    // Pixels mean other metres at another zoom
+    const before = this.following?.zoom === zoom ? this.following : null;
+    // The middle of the map, on the screen
+    const middle = map.project(map.getCenter());
+    const offset = { x: point.x - middle.x, y: point.y - middle.y };
+    // A frame that took long may have taken it off the edge; one that is
+    // further off than the map is wide is lost to a spring
+    const lost =
+      Math.abs(offset.x) > mapSize.x || Math.abs(offset.y) > mapSize.y;
+    if (
+      outside === null ||
+      (outside && (lost || !before)) ||
+      prefersReducedMotion()
+    ) {
+      this.following = null;
+      map.jumpTo({ center });
+      return;
+    }
+    const velocity = before?.velocity ?? { x: 0, y: 0 };
+    const dt = before
+      ? Math.min(Math.max((now - before.at) / 1000, 1e-3), FOLLOW_MAX_STEP_S)
+      : 1 / 60;
+    // The spring aims as far ahead of the airplane as it flies in the time
+    // the spring takes, and so keeps up with it at any speed rather than
+    // trail it by that far
+    const flying = before
+      ? {
+          x: (point.x - before.left.x) / dt,
+          y: (point.y - before.left.y) / dt,
+        }
+      : { x: 0, y: 0 };
+    const step = followStep(
+      {
+        x: offset.x + flying.x * FOLLOW_TIME_S,
+        y: offset.y + flying.y * FOLLOW_TIME_S,
+      },
+      velocity,
+      dt,
+    );
+    // However far behind the spring is, the airplane stays on the map: a
+    // fast replay drags the camera along at its own speed. Half the margin
+    // the follow starts at, so the spring has the room to pick up speed.
+    const marginX = (mapSize.x * EDGE_MARGIN_FRACTION) / 2;
+    const marginY = (mapSize.y * EDGE_MARGIN_FRACTION) / 2;
+    const keep = (move: number, at: number, low: number, high: number) =>
+      Math.min(Math.max(move, at - high), at - low);
+    const move = {
+      x: keep(step.move.x, point.x, marginX, mapSize.x - marginX),
+      y: keep(step.move.y, point.y, marginY, mapSize.y - marginY),
+    };
+    const left = { x: point.x - move.x, y: point.y - move.y };
+    const settled =
+      Math.hypot(left.x - middle.x, left.y - middle.y) < SETTLED_PX &&
+      Math.hypot(step.velocity.x, step.velocity.y) < SETTLED_PX &&
+      Math.hypot(flying.x, flying.y) < SETTLED_PX;
+    this.following = settled
+      ? null
+      : {
+          // Held back by the margins, the camera went at the airplane's pace
+          velocity:
+            move.x === step.move.x && move.y === step.move.y
+              ? step.velocity
+              : { x: move.x / dt, y: move.y / dt },
+          left,
+          at: now,
+          zoom,
+        };
+    // Moved over the ground by as much as it takes to bring the ground
+    // under the airplane to where it is to be on the screen: a move of the
+    // middle by the same pixels would not do on a tilted map, whose far
+    // side has more ground to a pixel than its near one
+    const target = map.unproject([ground.x - move.x, ground.y - move.y]);
+    const middleNow = map.getCenter();
+    map.jumpTo({
+      center: [
+        middleNow.lng + unwrapLng(position[1], target.lng) - target.lng,
+        middleNow.lat + position[0] - target.lat,
+      ],
+    });
   }
 }

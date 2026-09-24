@@ -9,6 +9,7 @@ import {
   selectionLines,
 } from "../../../../kml_heatmap/frontend/ui/selectionHighlight";
 import { MAP_SOURCES } from "../../../../kml_heatmap/frontend/utils/constants";
+import { flatCurves } from "../../../../kml_heatmap/frontend/calculations/curves";
 import {
   asMapApp,
   createDataset,
@@ -193,6 +194,34 @@ describe("selection highlight", () => {
         [12, 50],
         [13, 50],
       ]);
+    });
+
+    it("draws a flight along the curve through its fixes, like the colour lines", () => {
+      // A right angle at the middle fix, which the curve rounds
+      const segments = [
+        createSegment({
+          path_id: 1,
+          coords: [
+            [50, 8],
+            [50.01, 8],
+          ],
+        }),
+        createSegment({
+          path_id: 1,
+          coords: [
+            [50.01, 8],
+            [50.01, 8.015],
+          ],
+        }),
+      ];
+
+      const [line] = selectionLines(segments).features;
+
+      const curve = flatCurves(segments);
+      expect(line!.geometry.coordinates).toEqual(
+        curve.chains[0]!.points.map(([lat, lng]) => [lng, lat]),
+      );
+      expect(line!.geometry.coordinates.length).toBeGreaterThan(3);
     });
 
     it("goes on past the antimeridian instead of round the world", () => {

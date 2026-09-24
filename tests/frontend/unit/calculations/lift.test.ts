@@ -445,6 +445,26 @@ describe("lift", () => {
       }
     });
 
+    it("cuts a turn a point per so many degrees of it", () => {
+      // About 20 degrees of turn at each fix
+      const points: [number, number][] = [
+        [50, 8],
+        [50.001, 8],
+        [50.002, 8.0006],
+        [50.0028, 8.0014],
+      ];
+      const coarse = smoothLine(points, [0, 0, 0, 0]);
+      const fine = smoothLine(points, [0, 0, 0, 0], 4);
+
+      // Twice as many points between the fixes at the flat lines' 4
+      // degrees as at the ribbons' 8
+      expect(fine.points.length - 4).toBeGreaterThanOrEqual(
+        2 * (coarse.points.length - 4),
+      );
+      // Through the logged points all the same
+      expect(fine.vertex.map((v) => fine.points[v])).toEqual(points);
+    });
+
     it("eases a climb in and out without going beyond its heights", () => {
       const line = smoothLine(
         [

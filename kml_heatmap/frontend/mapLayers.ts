@@ -234,7 +234,12 @@ export function addDataLayers(map: MapLibreMap): void {
   // glow and a core. Their look belongs to the data manager, like the
   // heatmap's. Below `fromZoom` they are fully transparent, and the minimum
   // zoom spares the map their tiles there. The hotter lines are drawn last,
-  // so a busy taxiway is not painted over by a flight that crossed it once
+  // so a busy taxiway is not painted over by a flight that crossed it once.
+  // A flight is a line per step of heat, end to end: round caps overlapped
+  // where one ends and the next begins, and the lines being translucent,
+  // every change of heat was a brighter bead. Cut square they meet edge to
+  // edge, and the curve they run along bends too little at a point for a
+  // gap to show (see calculations/curves.ts).
   map.addSource(MAP_SOURCES.heatLines, {
     type: "geojson",
     data: emptyGeoJson(),
@@ -248,7 +253,12 @@ export function addDataLayers(map: MapLibreMap): void {
         type: "line",
         source: MAP_SOURCES.heatLines,
         minzoom: HEAT_LINES.fromZoom,
-        layout: { ...round, ...hidden, "line-sort-key": ["get", "heat"] },
+        layout: {
+          ...round,
+          ...hidden,
+          "line-cap": "butt",
+          "line-sort-key": ["get", "heat"],
+        },
       },
       before,
     );

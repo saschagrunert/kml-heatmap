@@ -130,6 +130,10 @@ describe("layer handles", () => {
       expect(layer.source).toBe(MAP_SOURCES.heatLines);
       expect(layer.minzoom).toBe(HEAT_LINES.fromZoom);
       expect(layer.layout["visibility"]).toBe("none");
+      // The lines of one flight meet end to end where its heat changes:
+      // round caps overlapped there, a brighter bead on translucent lines
+      expect(layer.layout["line-cap"]).toBe("butt");
+      expect(layer.layout["line-join"]).toBe("round");
     }
     expect(HEAT_LINES.fullZoom).toBeGreaterThan(HEAT_LINES.fromZoom);
 

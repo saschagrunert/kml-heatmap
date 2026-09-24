@@ -3,7 +3,21 @@
  */
 import type { Marker, Popup } from "maplibre-gl";
 import type { PathSegment, PopupHost, TrailRun } from "../types";
-import type { RibbonPiece, SmoothedFlights } from "../calculations/lift";
+import type { RibbonPiece } from "../calculations/lift";
+import type { ReplayCurve } from "../features/replay";
+
+/**
+ * Where the airplane is on the segment it flies, which the trail ends at:
+ * the segment's index, the point of the flight's curve it has passed last,
+ * and its `[lat, lon]` and height above the flight's ground (see
+ * replayPoint)
+ */
+export interface TrailTip {
+  index: number;
+  point: number;
+  position: [lat: number, lon: number];
+  heightFt: number;
+}
 
 /**
  * The airplane on the map. MapLibre's marker knows nothing of popups the way
@@ -49,7 +63,9 @@ export class ReplayState {
   trailDirty = false;
   /** Index of the segment the airplane is currently on (-1 before start) */
   currentIndex = -1;
+  /** The heading the airplane was last shown with, and the time of it */
   lastBearing: number | null = null;
+  bearingTime = 0;
   animationFrameId: number | null = null;
   lastFrameTime: number | null = null;
   colorMinAlt = 0;
@@ -59,18 +75,21 @@ export class ReplayState {
   /** Whether the trail and the airplane are lifted: the 3D view is on */
   lifted = false;
   /**
-   * The flight smoothed at its height, which the trail's ribbons are cut
-   * from in the 3D view (see lift.ts); null while it is flat
+   * The flight along its curve, timed, at its height: where the airplane
+   * flies and the trail runs, and what its ribbons are cut from in the 3D
+   * view (see features/replay.ts); null without a replay
    */
-  smoothed: SmoothedFlights | null = null;
+  smoothed: ReplayCurve | null = null;
+  /** Where the trail ends: at the airplane, null before it has started */
+  trailTip: TrailTip | null = null;
   /**
-   * The ribbon pieces of each run of the trail, as last cut: a run that has
-   * not grown since, at the same width, is not cut again (see
-   * trailFeatureCollection)
+   * The ribbon pieces of each run of the trail, as last cut up to the
+   * segment `end` (exclusive): a run that has not grown since, at the same
+   * width, is not cut again (see trailFeatureCollection)
    */
   trailPieces = new WeakMap<
     TrailRun,
-    { lastIndex: number; widthZoom: number; pieces: RibbonPiece[] }
+    { end: number; widthZoom: number; pieces: RibbonPiece[] }
   >();
   /** The zoom the trail's ribbons were last written for, null for none */
   trailWidthZoom: number | null = null;
@@ -97,6 +116,7 @@ export class ReplayState {
     this.lastDrawnIndex = -1;
     this.trailRuns = [];
     this.currentIndex = -1;
+    this.trailTip = null;
     this.lastBearing = null;
     this.recenterTimestamps = [];
     this.recenterPanEndsAt = 0;

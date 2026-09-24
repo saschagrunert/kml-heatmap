@@ -763,9 +763,14 @@ describe("ReplayManager activation", () => {
 
       replayManager.initializeReplay();
 
+      // In order, at their times, which the replay smooths by a hair here
+      // (see replayCurve): the first and the last as they are
       expect(replayManager.state.segments[0]!.time).toBe(-10);
       expect(replayManager.state.segments.map((s) => s.time)).toEqual([
-        -10, 0, 60, 120,
+        -10,
+        expect.closeTo(0, 1),
+        expect.closeTo(60, 1),
+        120,
       ]);
     });
 
@@ -1021,14 +1026,16 @@ describe("ReplayManager activation", () => {
       replayManager.toggleReplay();
       replayManager.state.currentTime = replayManager.state.maxTime;
       replayManager.updateReplayDisplay();
-      expect(replayManager.state.smoothed).toBeNull();
+      // The flight's curve, as one chain, flat or lifted
+      const curve = replayManager.state.smoothed;
+      expect(curve?.chains).toHaveLength(1);
 
       mockApp.store.set("threeDVisible", true);
       vi.advanceTimersByTime(100);
 
       expect(replayManager.state.lifted).toBe(true);
-      // The flight smoothed once, as one chain, for the trail's ribbons
-      expect(replayManager.state.smoothed?.chains).toHaveLength(1);
+      // Worked out once per replay, and the trail's ribbons cut from it
+      expect(replayManager.state.smoothed).toBe(curve);
       expect(replayManager.state.trailRuns.length).toBeGreaterThan(0);
       // Written to the ribbons' source, and gone from the lines'
       expect(featuresOf(MAP_SOURCES.replayTrail)).toEqual([]);
@@ -1040,7 +1047,7 @@ describe("ReplayManager activation", () => {
       vi.advanceTimersByTime(100);
 
       expect(replayManager.state.lifted).toBe(false);
-      expect(replayManager.state.smoothed).toBeNull();
+      expect(replayManager.state.smoothed).toBe(curve);
       expect(featuresOf(MAP_SOURCES.replayTrailRibbons)).toEqual([]);
       expect(featuresOf(MAP_SOURCES.replayTrail).length).toBeGreaterThan(0);
     });

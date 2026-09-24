@@ -230,6 +230,89 @@ describe("heatLineFeatures", () => {
   });
 });
 
+describe("heatLineFeatures along the curve", () => {
+  /**
+   * A flight of segments of 235 m that turns by `turn` degrees at every
+   * fix, taking `stepS` seconds each
+   */
+  function turning(
+    pathId: number,
+    lng: number,
+    stepS: number[],
+    turn = 30,
+  ): PathSegment[] {
+    let heading = 0;
+    let at: [number, number] = [50, lng];
+    return stepS.map((_, i) => {
+      const from = at;
+      const radians = (heading * Math.PI) / 180;
+      at = [
+        from[0] + 235 * DEG_PER_M * Math.cos(radians),
+        from[1] +
+          (235 * DEG_PER_M * Math.sin(radians)) /
+            Math.cos((50 * Math.PI) / 180),
+      ];
+      heading += turn;
+      return createSegment({
+        path_id: pathId,
+        coords: [from, at],
+        // What `flight` gives its segments, for the last one's time
+        groundspeed_knots: 235 / 5 / (1852 / 3600),
+        time: stepS.slice(0, i).reduce((sum, s) => sum + s, 0),
+      });
+    });
+  }
+
+  // Slow, then fast, then slow: three heats
+  const times = [60, 60, 60, 60, 2, 2, 2, 2, 60, 60, 60, 60];
+
+  it("runs through the fixes along a curve, with more points in a turn", () => {
+    const segments = turning(1, 8, times);
+
+    const lines = heatLineFeatures(segments, all).features.map(
+      (feature) => feature.geometry.coordinates,
+    );
+    const points = lines.flatMap((line, index) =>
+      index === 0 ? line : line.slice(1),
+    );
+
+    // 30 degrees a fix is 8 points of the curve to a segment
+    expect(points).toHaveLength(segments.length * 8 + 1);
+    segments.forEach((segment, i) => {
+      expect(points[i * 8]).toEqual([
+        segment.coords![0][1],
+        segment.coords![0][0],
+      ]);
+    });
+  });
+
+  it("meets end to end where the heat changes, at a fix", () => {
+    const { features } = heatLineFeatures(turning(1, 8, times), all);
+
+    expect(features.length).toBeGreaterThan(1);
+    for (let i = 1; i < features.length; i++) {
+      const before = features[i - 1]!.geometry.coordinates;
+      expect(features[i]!.geometry.coordinates[0]).toEqual(
+        before[before.length - 1],
+      );
+    }
+  });
+
+  it("counts the time at the fixes, which the curve adds none to", () => {
+    // The same times, turning and straight, far enough apart not to share
+    // a cell, and the turn not coming round to where it started: the same
+    // heat, stretch for stretch
+    const heats = (segments: PathSegment[]): number[] =>
+      heatLineFeatures(segments, all).features.map((f) => f.properties.heat);
+    const straight = flight(1, { count: times.length }).map((segment, i) => ({
+      ...segment,
+      time: times.slice(0, i).reduce((sum, s) => sum + s, 0),
+    }));
+
+    expect(heats(turning(2, 9, times, 15))).toEqual(heats(straight));
+  });
+});
+
 describe("heatLineFeatures smoothing", () => {
   it("does not let one hot cell break a flight into a short hot stretch", () => {
     // A long lone flight, and a second one that shares a single fix of it

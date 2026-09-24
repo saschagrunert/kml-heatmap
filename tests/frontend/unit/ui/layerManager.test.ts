@@ -27,6 +27,7 @@ import {
   type Popup as MockPopup,
 } from "../../../mocks/maplibre-gl";
 import { liftOffsetPx } from "../../../../kml_heatmap/frontend/calculations/lift";
+import { findNearestSegment } from "../../../../kml_heatmap/frontend/features/layers";
 
 // Mock domCache
 vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
@@ -91,6 +92,20 @@ function zigZag(count: number, offset: number): [number, number][] {
     48 + (i % 2) * offset,
     16 + i * 0.01,
   ]);
+}
+
+/**
+ * Points of a turn: `count` of them round a circle of a kilometre, `step`
+ * degrees of turn apart
+ */
+function turn(count: number, step: number): [number, number][] {
+  return Array.from({ length: count }, (_, i) => {
+    const angle = (i * step * Math.PI) / 180;
+    return [
+      48 + 0.01 * Math.sin(angle),
+      16 + (0.01 * Math.cos(angle)) / Math.cos((48 * Math.PI) / 180),
+    ];
+  });
 }
 
 /** Consecutive segments of one path along `points`, all at `altitude` */
@@ -481,8 +496,52 @@ describe("LayerManager", () => {
       layerManager.redrawAirspeedPaths();
 
       expect(features(AIRSPEED)).toHaveLength(1);
-      expect(features(AIRSPEED)[0]!.geometry.coordinates).toEqual(
-        points.map(([lat, lng]) => [lng, lat]),
+      // Along the curve through the fixes (see calculations/curves.ts): the
+      // fixes are points of the line, in order, with the curve's between
+      const line = features(AIRSPEED)[0]!.geometry.coordinates;
+      expect(line.length).toBeGreaterThan(points.length);
+      let at = 0;
+      for (const [lat, lng] of points) {
+        at = line.findIndex((p, i) => i >= at && p[0] === lng && p[1] === lat);
+        expect(at).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it("draws the runs of a turn along one curve, cut at the fixes", () => {
+      const points = turn(7, 30);
+      const draw = (altitudes: number[]): [number, number][][] => {
+        mockApp.currentData = createDataset(
+          [{ id: 1, year: 2025 }],
+          points.slice(1).map((end, i) =>
+            createSegment({
+              path_id: 1,
+              altitude_ft: altitudes[i]!,
+              coords: [points[i]!, end],
+            }),
+          ),
+        );
+        layerManager.redrawAltitudePaths();
+        return features(ALTITUDE).map(
+          (feature) => feature.geometry.coordinates as [number, number][],
+        );
+      };
+      const [whole] = draw([3000, 3000, 3000, 3000, 3000, 3000]);
+      // A point every 4 degrees of the turn at most, 8 to a segment
+      expect(whole).toHaveLength(6 * 8 + 1);
+
+      const runs = draw([3000, 5000, 3000, 5000, 3000, 5000]);
+      expect(runs).toHaveLength(6);
+      runs.forEach((run, i) => {
+        // A colour changes at a fix, where one run ends and the next starts
+        expect(run[0]).toEqual([points[i]![1], points[i]![0]]);
+        expect(run[run.length - 1]).toEqual([
+          points[i + 1]![1],
+          points[i + 1]![0],
+        ]);
+      });
+      // End to end they are the line of the whole flight, point for point
+      expect(runs.flatMap((run, i) => (i === 0 ? run : run.slice(1)))).toEqual(
+        whole,
       );
     });
 
@@ -1280,6 +1339,89 @@ describe("LayerManager", () => {
       expect(layerManager.hitTest(pointAt(48.01, 16.01))).toEqual({
         pathId: 1,
         segment: slow,
+      });
+    });
+
+    it("gives a point of the curve to the segment it lies on", () => {
+      const points = turn(7, 30);
+      const segments = segmentsAlong(points);
+      mockApp.currentData = createDataset([{ id: 1, year: 2025 }], segments);
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+      const line = features(ALTITUDE)[0]!.geometry.coordinates;
+
+      // The points of the line between fix i and fix i + 1 are segment i's
+      let segment = 0;
+      for (let k = 0; k + 1 < line.length; k++) {
+        const [lng0, lat0] = line[k] as [number, number];
+        const [lng1, lat1] = line[k + 1] as [number, number];
+        const fix = points[segment + 1]!;
+        if (k > 0 && lat0 === fix[0] && lng0 === fix[1]) segment++;
+        const lat = (lat0 + lat1) / 2;
+        const lng = (lng0 + lng1) / 2;
+        expect(layerManager.hitTest(pointAt(lat, lng))).toEqual({
+          pathId: 1,
+          segment: segments[segment],
+        });
+      }
+      expect(segment).toBe(segments.length - 1);
+    });
+
+    it("ranks the runs by the curve they are drawn along, not their fixes", () => {
+      // A point on the curve of a turn, between two of its fixes, which
+      // bulges out of the straight line between them
+      const points = turn(7, 30);
+      const turning = segmentsAlong(points);
+      const line = (): [number, number][] =>
+        features(ALTITUDE)[0]!.geometry.coordinates as [number, number][];
+      mockApp.currentData = createDataset([{ id: 1, year: 2025 }], turning);
+      layerManager.redrawAltitudePaths();
+      const [a, b] = [line()[20]!, line()[21]!];
+      const on: [number, number] = [(a[1] + b[1]) / 2, (a[0] + b[0]) / 2];
+      // How far it is from that line, and which way (the map's pixels are
+      // degrees here)
+      const [from, to] = turning[2]!.coords!;
+      const along = [to[0] - from[0], to[1] - from[1]];
+      const length = Math.hypot(along[0]!, along[1]!);
+      const unit = [along[0]! / length, along[1]! / length];
+      const t = (on[0] - from[0]) * unit[0]! + (on[1] - from[1]) * unit[1]!;
+      const off = [
+        on[0] - from[0] - t * unit[0]!,
+        on[1] - from[1] - t * unit[1]!,
+      ];
+      // A second flight, straight, half as far out on the other side
+      const passing: [number, number] = [
+        on[0] + off[0]! / 2,
+        on[1] + off[1]! / 2,
+      ];
+      const straight = createSegment({
+        path_id: 2,
+        altitude_ft: 3000,
+        coords: [
+          [passing[0] - unit[0]! * 0.01, passing[1] - unit[1]! * 0.01],
+          [passing[0] + unit[0]! * 0.01, passing[1] + unit[1]! * 0.01],
+        ],
+      });
+      mockApp.currentData = createDataset(
+        [
+          { id: 1, year: 2025 },
+          { id: 2, year: 2025 },
+        ],
+        [...turning, straight],
+      );
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.redrawAltitudePaths();
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE, { r: 1, g: 2 }),
+        rendered(ALTITUDE, { r: 0, g: 2 }),
+      ];
+
+      // Its fixes' straight line is further than the other flight
+      expect(findNearestSegment([...turning, straight], ...on)).toBe(straight);
+      expect(layerManager.hitTest(pointAt(...on))).toEqual({
+        pathId: 1,
+        segment: turning[2],
       });
     });
 
