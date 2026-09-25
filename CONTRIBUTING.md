@@ -32,16 +32,17 @@ again, so the virtual environment has exactly CI's versions.
 `pip install -e '.[test,dev]'` would resolve the ranges in `pyproject.toml`
 anew and can pick newer releases than CI tests with.
 
-The pre-commit hooks run ruff (check and format), prettier, typos, gitleaks and
-the whitespace fixers on every commit. When a commit touches `data/`, they also
-check that the KML files are obfuscated. Apart from gitleaks and the whitespace
-fixers, the hooks run the tools from your own environment rather than from a
-pinned mirror, so no hook revision can drift on its own. ruff and the
-obfuscation check are resolved off `$PATH` and prettier out of `node_modules`,
-so commit with the virtual environment active and after `npm ci` to get the
-versions CI installs. typos is in neither lock file; the hook and `make lint`
-skip it with a warning when it is not installed, and the CI job is the one
-that has to pass.
+The pre-commit hooks run ruff (check and format), prettier, typos, gitleaks,
+the whitespace fixers and the checks for merge conflict markers and for valid
+TOML and YAML on every commit. When a commit touches `data/`, they also check
+that the KML files are obfuscated. Apart from gitleaks and the hooks of
+`pre-commit-hooks`, the hooks run the tools from your own environment rather
+than from a pinned mirror, so no hook revision can drift on its own. ruff and
+the obfuscation check are resolved off `$PATH` and prettier out of
+`node_modules`, so commit with the virtual environment active and after
+`npm ci` to get the versions CI installs. typos is in neither lock file; the
+hook and `make lint` skip it with a warning when it is not installed, and the
+CI job is the one that has to pass.
 
 npm 11 skips the install scripts of dependencies that `allowScripts` in
 `package.json` does not list. esbuild is the only dependency with one, and it
@@ -62,7 +63,7 @@ make test            # vitest and pytest with coverage; pytest flags are in DEVE
 npm run test:e2e     # Playwright: desktop, mobile and WebKit (see DEVELOPMENT.md)
 make obfuscate       # after adding flights to data/ (see README.md); rewrites them in place, irreversibly
 make check-obfuscation
-make lock            # regenerates the Python lock files after changing pyproject.toml
+make lock            # regenerates the Python lock files after changing pyproject.toml or requirements-tools.in
 ```
 
 `make help` lists all targets and the current variable values.
@@ -78,12 +79,12 @@ parentheses back is undone on the next `make format`.
   directory of a local `make build`. On every push to `main` the `test`
   workflow builds the site from the sources and `data/` and publishes it to
   GitHub Pages, in its `site` and `deploy` jobs, which only start once every
-  test job has passed and only while the commit is still the head of `main`
-  (a re-run of an older run does not publish). The `unit` and `e2e` jobs
-  build their own copies; the e2e jobs test one with a dummy tile API key
-  and, for the specs that depend on it, one without. The repository's Pages
-  source has to be "GitHub Actions" (Settings > Pages). Set it by hand: the
-  workflow token is not allowed to change it.
+  test job has passed and only while the commit is still the head of `main` (a
+  re-run of an older run does not publish). The `unit` job builds its own
+  copy, and the `e2e-sites` job the two the e2e jobs test: one with a dummy
+  tile API key and, for the specs that depend on it, one without. The
+  repository's Pages source has to be "GitHub Actions" (Settings > Pages). Set
+  it by hand: the workflow token is not allowed to change it.
 - **Never commit un-obfuscated KML files.** Generating a site no longer
   rewrites them: run `make obfuscate` after adding flights to `data/` (or
   pass `--obfuscate-inputs`). The pre-commit hook, `make check-obfuscation`
@@ -101,16 +102,18 @@ parentheses back is undone on the next `make format`.
   inside the Dockerfile; `make clean` removes it.
 - The Python dependencies are declared once, in `pyproject.toml` (runtime
   dependencies plus the `test` and `dev` extras). `requirements.lock`,
-  `requirements-test.lock` and `requirements-build.lock` are compiled from
-  it with `make lock` (pip-compile
-  with hashes). Edit `pyproject.toml`, then regenerate the locks; the CI lint
-  job fails while the locks no longer satisfy `pyproject.toml`, which is what
-  a Dependabot `pip` pull request needs `make lock` for. `make lock`
-  compiles the test lock with the runtime lock as a constraint, so the pins
-  both files share cannot drift apart. The weekly `lock` workflow
+  `requirements-test.lock` and `requirements-build.lock` are compiled from it
+  with `make lock` (pip-compile with hashes), and `requirements-tools.lock`,
+  the pip-tools `make lock` runs with its dependencies, from
+  `requirements-tools.in`. Edit `pyproject.toml`, then regenerate the locks;
+  the CI lint job fails while the locks no longer satisfy `pyproject.toml`,
+  which is what a Dependabot `pip` pull request needs `make lock` for.
+  `make lock` compiles the test lock with the runtime lock as a constraint, so
+  the pins both files share cannot drift apart. The weekly `lock` workflow
   regenerates them as well and opens a pull request, which needs one of two
   one-time setups. With neither, its pull-request job fails with "GitHub
-  Actions is not permitted to create or approve pull requests".
+  Actions is not permitted to create or approve pull requests", and its job
+  summary says what to set up.
   - Preferred: a `LOCK_PR_TOKEN` repository secret (Settings > Secrets and
     variables > Actions) holding a fine-grained personal access token, or a
     GitHub App token, for this repository only, with read and write access
@@ -188,14 +191,14 @@ pixel (Playwright's `threshold`), so a snapshot can be stale and pass; `=all`
 rewrites every snapshot that is not identical. The diff of a failing CI run
 is in the `visual-diff` artifact.
 
-The image is pinned by tag and digest, in the `visual` job of
+The image is pinned by tag and digest, in the `visual` and `e2e` jobs of
 `.github/workflows/test.yml` and in the command above alike. The tag has to
 match the `@playwright/test` version in `package-lock.json`, and
 `scripts/check_locks.py` fails the lint job when the workflow, this file,
 `DEVELOPMENT.md` and the lock file disagree. Dependabot opens the
 `@playwright/test` bump as a pull request of its own and does not touch the
-image: on that branch, set the new tag with the digest of its multi-arch
-index in all three places. The registry returns the digest in the
+image: on that branch, set the new tag with the digest of its multi-arch index
+in the two jobs and the two documents. The registry returns the digest in the
 `Docker-Content-Digest` header:
 
 ```sh

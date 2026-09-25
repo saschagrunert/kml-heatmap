@@ -14,5 +14,6 @@
     "*.js",
     "scripts/*.js"
   ],
-  "ignoreDependencies": ["flag-icons"]
+  "ignoreDependencies": ["flag-icons"],
+  "includeEntryExports": true
 }

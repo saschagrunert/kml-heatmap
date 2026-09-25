@@ -245,38 +245,13 @@ jobs:
           # Still the fixture, so nothing was downloaded
           cmp "$GITHUB_WORKSPACE/tests/fixtures/airports.csv" smoke/cache/airports.csv
 
-  e2e:
+  # The sites the e2e jobs test, built once for all of them. The published
+  # site has a tile API key and a default build has none, so there are two:
+  # one with a dummy key and one without (see the e2e job).
+  e2e-sites:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      # The published site has a tile API key and a default build has none.
-      # Every project runs against the published setup; tests/e2e/fixtures.ts
-      # answers the tile servers locally, so the dummy key never leaves the
-      # runner. Without a key only the requests for the base map change, so
-      # that variant runs just the specs that make and check those requests,
-      # on the desktop, instead of the whole suite a second time.
-      matrix:
-        include:
-          - project: desktop
-            api-keys: dummy
-            browser: chromium
-          - project: mobile
-            api-keys: dummy
-            browser: chromium
-          - project: desktop
-            api-keys: none
-            browser: chromium
-            specs: base-style.spec.ts error-free.spec.ts layers.spec.ts
-          # The phone interface in Safari's engine
-          - project: webkit
-            api-keys: dummy
-            browser: webkit
-          # Turning, the globe and the replay in Safari's engine
-          - project: webkit-desktop
-            api-keys: dummy
-            browser: webkit
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -314,36 +289,146 @@ jobs:
           path: ~/.cache/kml-heatmap/terrain
           key: terrain-${{ hashFiles('data/*.kml') }}
           restore-keys: terrain-
-      - name: Build the site from the current sources
-        run: python -m kml_heatmap data --output-dir docs
+      # tests/e2e/fixtures.ts answers the tile servers locally, so the dummy
+      # key never leaves the runner
+      - name: Build the site with a dummy tile API key
+        run: python -m kml_heatmap data --output-dir e2e-sites/dummy
         env:
           KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
-          CARTO_API_KEY: ${{ matrix.api-keys == 'dummy' && 'e2e-carto' || '' }}
-      - name: Get Playwright version
-        id: playwright-version
-        run: echo "version=$(npx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+          CARTO_API_KEY: e2e-carto
+      - name: Build the site without a tile API key
+        run: python -m kml_heatmap data --output-dir e2e-sites/none
+        env:
+          KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
+          CARTO_API_KEY: ""
+      - name: Upload the site with a dummy tile API key
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ steps.playwright-version.outputs.version }}-${{ matrix.browser }}
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps ${{ matrix.browser }}
-      - name: Install Playwright system deps
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps ${{ matrix.browser }}
-      - name: Run E2E tests (${{ matrix.project }}, ${{ matrix.api-keys }} API key)
-        run: npx playwright test --project=${{ matrix.project }} ${{ matrix.specs }}
+          name: e2e-site-dummy
+          path: e2e-sites/dummy
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload the site without a tile API key
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-site-none
+          path: e2e-sites/none
+          if-no-files-found: error
+          retention-days: 1
+
+  # Runs in the Playwright image the visual job uses (see there for how it is
+  # pinned and bumped), so the browsers and the libraries they draw with are
+  # the same on every run and the same as a local run in that image, and no
+  # job downloads browsers or installs system packages. WebGL is software
+  # rendered there, as it was on the bare runner.
+  e2e:
+    name: e2e (${{ matrix.name }})
+    needs: e2e-sites
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    # A failing run retries each failed test once; the relief tests allow
+    # three minutes each (orientation.spec.ts), so their job gets longer
+    timeout-minutes: ${{ matrix.timeout-minutes || 15 }}
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      # Docker caps /dev/shm at 64 MB, which a browser per core outgrows
+      options: --ipc=host
+    strategy:
+      fail-fast: false
+      # Every project runs against the published setup, with the dummy key.
+      # Without a key only the requests for the base map change, so that
+      # variant runs just the specs that make and check those requests, on
+      # the desktop, instead of the whole suite a second time.
+      #
+      # Software WebGL runs one browser per core of the 4-vCPU runner, and
+      # the two Chromium projects took 8 to 12 minutes each in one job. Each
+      # is split into two shards on runners of their own. The relief of the
+      # 3D view ("on the relief" in orientation.spec.ts) takes seconds per
+      # frame there and failed most often while three other browsers shared
+      # the cores, so it runs alone: its tests run one after the other in
+      # one worker, which then has the whole runner. A renamed describe
+      # leaves that job with no tests, which fails it.
+      matrix:
+        include:
+          - name: desktop-1
+            project: desktop
+            api-keys: dummy
+            shard: 1/2
+            grep-invert: on the relief
+          - name: desktop-2
+            project: desktop
+            api-keys: dummy
+            shard: 2/2
+            grep-invert: on the relief
+          - name: desktop-relief
+            project: desktop
+            api-keys: dummy
+            grep: on the relief
+            timeout-minutes: 25
+          - name: desktop-no-key
+            project: desktop
+            api-keys: none
+            specs: base-style.spec.ts error-free.spec.ts layers.spec.ts
+          - name: mobile-1
+            project: mobile
+            api-keys: dummy
+            shard: 1/2
+          - name: mobile-2
+            project: mobile
+            api-keys: dummy
+            shard: 2/2
+          # The phone interface in Safari's engine
+          - name: webkit
+            project: webkit
+            api-keys: dummy
+          # Turning, the globe and the replay in Safari's engine
+          - name: webkit-desktop
+            project: webkit-desktop
+            api-keys: dummy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install npm dependencies
+        run: npm ci
+      # After the checkout, so tests/e2e/site-check.ts finds the site newer
+      # than the sources; its bundles carry the hash of the sources they
+      # were built from, which the check compares with this checkout
+      - name: Download the site
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-site-${{ matrix.api-keys }}
+          path: docs
+      - name: Run the E2E tests
+        shell: bash
         env:
           # Checked against docs/map_config.js by tests/e2e/site-check.ts
           E2E_API_KEYS: ${{ matrix.api-keys }}
+          PROJECT: ${{ matrix.project }}
+          SHARD: ${{ matrix.shard }}
+          GREP: ${{ matrix.grep }}
+          GREP_INVERT: ${{ matrix.grep-invert }}
+          SPECS: ${{ matrix.specs }}
+        run: |
+          args=(--project="$PROJECT")
+          if [ -n "$SHARD" ]; then args+=(--shard="$SHARD"); fi
+          if [ -n "$GREP" ]; then args+=(--grep="$GREP"); fi
+          if [ -n "$GREP_INVERT" ]; then args+=(--grep-invert="$GREP_INVERT"); fi
+          # SPECS is a list of file names, split into words on purpose
+          # shellcheck disable=SC2086
+          npx playwright test "${args[@]}" $SPECS
+      # Also when the job timed out or was cancelled: the traces of the tests
+      # that failed until then are what shows why
       - name: Upload Playwright results
-        if: failure()
+        if: ${{ !success() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-results-${{ matrix.project }}-${{ matrix.api-keys }}
+          name: playwright-results-${{ matrix.name }}
           path: |
             test-results/
             playwright-report/
@@ -362,11 +447,12 @@ jobs:
   # The image tag has to match the
   # @playwright/test version package-lock.json pins; scripts/check_locks.py
   # fails the lint job when the two drift apart. Dependabot does not bump
-  # the image: with every @playwright/test bump set the new tag here, with
-  # the digest of its multi-arch index (the Docker-Content-Digest header of
+  # the image: with every @playwright/test bump set the new tag here and in
+  # the e2e job, with the digest of its multi-arch index (the
+  # Docker-Content-Digest header of
   # https://mcr.microsoft.com/v2/playwright/manifests/<tag>), and the same
   # reference in CONTRIBUTING.md and DEVELOPMENT.md (check_locks.py checks
-  # those as well). A digest left behind keeps pulling the old image,
+  # all of them). A digest left behind keeps pulling the old image,
   # whatever the tag next to it says.
   visual:
     needs: unit
@@ -396,7 +482,7 @@ jobs:
         run: npx playwright test --project=visual
       # The report carries the expected, actual and diff images side by side
       - name: Upload the visual diff
-        if: failure()
+        if: ${{ !success() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: visual-diff
@@ -425,9 +511,16 @@ jobs:
         run: pip install --require-hashes -r requirements-test.lock
       - name: Run bandit
         run: bandit -r kml_heatmap -ll
-      # pip-audit is pinned in requirements-test.lock like every other tool
+      # pip-audit is pinned in requirements-test.lock like every other tool.
+      # Every lock file, also the ones only the packaging job and `make lock`
+      # install. pip-audit resolves the files of one call together, and only
+      # the runtime and test locks are compiled to agree, so the build and
+      # tools locks get calls of their own.
       - name: Audit the Python lock files
-        run: pip-audit --no-deps -r requirements.lock -r requirements-test.lock
+        run: |
+          pip-audit --no-deps -r requirements.lock -r requirements-test.lock
+          pip-audit --no-deps -r requirements-build.lock
+          pip-audit --no-deps -r requirements-tools.lock
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -545,7 +638,16 @@ jobs:
   # new advisory for a test dependency must not hold back new flights, and
   # the weekly run reports it anyway.
   publishable:
-    needs: [lint, unit, packaging, e2e, visual, container, obfuscation, typos]
+    needs:
+      - lint
+      - unit
+      - packaging
+      - e2e-sites
+      - e2e
+      - visual
+      - container
+      - obfuscation
+      - typos
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5

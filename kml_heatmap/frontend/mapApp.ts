@@ -130,7 +130,7 @@ const CARTO_STYLE_URL =
 const CARTO_HOST = /(^|\.)basemaps\.cartocdn\.com$/;
 
 /** The base style, with the API key when the site was built with one */
-export function cartoStyleUrl(apiKey?: string): string {
+function cartoStyleUrl(apiKey?: string): string {
   return apiKey
     ? `${CARTO_STYLE_URL}?key=${encodeURIComponent(apiKey)}`
     : CARTO_STYLE_URL;

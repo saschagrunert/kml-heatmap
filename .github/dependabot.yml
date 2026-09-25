@@ -2,12 +2,17 @@
 version: 2
 updates:
   # Python dependencies: the ranges in pyproject.toml, the single source of
-  # the Python dependencies. Dependabot cannot recompile the hashed lock
-  # files CI installs, so the lint job fails a bump the locks no longer
-  # satisfy; run `make lock` on the branch. The weekly "lock" workflow
-  # recompiles them as well.
+  # the Python dependencies, and the pip-tools pin in requirements-tools.in.
+  # Dependabot does not read the *.lock files and cannot recompile them, so
+  # the lint job fails a bump the locks no longer satisfy; run `make lock` on
+  # the branch. The weekly "lock" workflow recompiles them as well.
   - package-ecosystem: "pip"
     directory: "/"
+    # Raise the lower bound of a range to the new release. pyproject.toml
+    # names a package, so the default ("auto") widens ranges instead, and a
+    # ">=" range already admits every new release: from April to September
+    # 2026 every run ended in "No update possible" and opened nothing.
+    versioning-strategy: increase
     # A release has to be out this long before Dependabot proposes it, so a
     # compromised or broken one is usually yanked before it reaches a pull
     # request. Security updates are not held back.
@@ -66,12 +71,12 @@ updates:
     # A dependency joins the first group it matches, so the named groups come
     # before the catch-all for the remaining minor and patch updates
     groups:
-      # On its own because it cannot be merged as it comes: the visual job
-      # runs in the Playwright image, whose tag and digest in test.yml (and
-      # the same reference in CONTRIBUTING.md and DEVELOPMENT.md) have to
-      # be bumped by hand on the same branch. scripts/check_locks.py fails
-      # the lint job until they are; the visual job comment in test.yml
-      # says how to look up the digest.
+      # On its own because it cannot be merged as it comes: the visual and
+      # e2e jobs run in the Playwright image, whose tag and digest in
+      # test.yml (and the same reference in CONTRIBUTING.md and
+      # DEVELOPMENT.md) have to be bumped by hand on the same branch.
+      # scripts/check_locks.py fails the lint job until they are; the
+      # visual job comment in test.yml says how to look up the digest.
       playwright:
         patterns:
           - "@playwright/test"

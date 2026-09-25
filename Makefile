@@ -130,7 +130,7 @@ hooks: ## Install the pre-push hook that refuses to push KML files with real dat
 	  mkdir -p "$$(dirname "$$hook")" && ln -sfn "$$target" "$$hook" && \
 	  echo "Installed $$hook"
 
-lint: ## Run the same linters, formatters (check only) and type checkers as the CI lint job
+lint: ## Run the linters, formatters (check only) and type checkers of the CI lint job, plus bandit and typos, which CI runs in the security and typos jobs
 	python scripts/check_locks.py
 	ruff check .
 	ruff format --check .
@@ -150,14 +150,16 @@ format: ## Run formatters
 
 test: ## Run the JavaScript and Python test suites with coverage
 	npm run test:coverage
-	pytest -n auto --cov --cov-branch --cov-report=xml --cov-report=term
+	pytest -n auto --cov --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
 
 # The dependencies are declared once, in pyproject.toml: the runtime
 # dependencies become requirements.lock, the test and dev extras
 # requirements-test.lock. pip-tools is installed into a throwaway environment
 # rather than added to the extras, so it cannot drift into what the lock
-# files pin. Its own version is pinned too, so the unattended lock workflow
-# does not install whatever pip-tools release happens to be the newest.
+# files pin. It comes from requirements-tools.lock with the hashes of its
+# dependencies as well, so the unattended lock workflow runs nothing it has
+# not pinned; that lock is compiled last from requirements-tools.in, with the
+# pip-tools it pins, and --allow-unsafe keeps pip and setuptools in it.
 # The test lock is compiled against the runtime lock as a constraint, so a
 # dependency both of them pin gets the same version in each: CI installs
 # requirements-test.lock alone where it needs both.
@@ -166,12 +168,10 @@ test: ## Run the JavaScript and Python test suites with coverage
 # with isolation pip would fetch whatever release satisfies the range, with
 # no hash. setuptools is one of the packages pip-compile leaves out unless
 # told otherwise, hence --allow-unsafe.
-PIP_TOOLS_VERSION := 7.6.1
-
-lock: ## Regenerate the three lock files from pyproject.toml with pip-compile
+lock: ## Regenerate the lock files from pyproject.toml and requirements-tools.in with pip-compile
 	@tmp=$$(mktemp -d) && \
 	  python -m venv "$$tmp" && \
-	  "$$tmp/bin/pip" install --quiet --disable-pip-version-check "pip-tools==$(PIP_TOOLS_VERSION)" && \
+	  "$$tmp/bin/pip" install --quiet --disable-pip-version-check --require-hashes -r requirements-tools.lock && \
 	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
 	    --generate-hashes --strip-extras --upgrade \
 	    --output-file=requirements.lock pyproject.toml && \
@@ -182,7 +182,10 @@ lock: ## Regenerate the three lock files from pyproject.toml with pip-compile
 	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
 	    --generate-hashes --strip-extras --upgrade --allow-unsafe \
 	    --only-build-deps --build-deps-for wheel \
-	    --output-file=requirements-build.lock pyproject.toml; \
+	    --output-file=requirements-build.lock pyproject.toml && \
+	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
+	    --generate-hashes --strip-extras --upgrade --allow-unsafe \
+	    --output-file=requirements-tools.lock requirements-tools.in; \
 	  status=$$?; rm -rf "$$tmp"; exit $$status
 
 clean: ## Remove the container image (when a runtime is available) and local build artifacts, including the frontend build output in kml_heatmap/static/

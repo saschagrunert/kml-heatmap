@@ -31,6 +31,7 @@ check_locks = _load_module()
 
 VERSION = "1.0.0"
 RUFF = "0.16.4"
+PIP_TOOLS = "7.6.1"
 PLAYWRIGHT = "1.63.0"
 DIGEST = "sha256:" + "ab" * 32
 IMAGE = f"mcr.microsoft.com/playwright:v{PLAYWRIGHT}-noble@{DIGEST}"
@@ -54,6 +55,14 @@ def repo(tmp_path, monkeypatch):
         "lxml==6.0.2 \\\n    --hash=sha256:abc\n"
         "pytest==9.0.2 \\\n    --hash=sha256:def\n"
         f"ruff=={RUFF} \\\n    --hash=sha256:ghi\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements-tools.in").write_text(
+        f"# The pip-tools of make lock\npip-tools=={PIP_TOOLS}\n", encoding="utf-8"
+    )
+    (tmp_path / "requirements-tools.lock").write_text(
+        "click==8.5.0 \\\n    --hash=sha256:abc\n"
+        f"pip-tools=={PIP_TOOLS} \\\n    --hash=sha256:def\n",
         encoding="utf-8",
     )
     (tmp_path / "package.json").write_text(
@@ -171,6 +180,46 @@ class TestLockFiles:
         assert check_locks.main() == 0
 
 
+class TestToolsLock:
+    """make lock installs pip-tools from requirements-tools.lock, unattended
+    in the lock workflow, so the lock has to pin what the .in file asks for."""
+
+    def test_a_pin_other_than_the_input_fails(self, repo, capsys):
+        (repo / "requirements-tools.in").write_text(
+            "pip-tools==7.7.0\n", encoding="utf-8"
+        )
+
+        assert check_locks.main() == 1
+
+        err = capsys.readouterr().err
+        assert (
+            f"requirements-tools.lock pins pip-tools=={PIP_TOOLS}, "
+            'requirements-tools.in asks for "pip-tools==7.7.0"'
+        ) in err
+        assert "requirements-tools.lock." in err
+
+    def test_a_lock_without_pip_tools_fails(self, repo, capsys):
+        (repo / "requirements-tools.lock").write_text(
+            "click==8.5.0 \\\n    --hash=sha256:abc\n", encoding="utf-8"
+        )
+
+        assert check_locks.main() == 1
+
+        assert "requirements-tools.lock does not pin pip-tools" in (
+            capsys.readouterr().err
+        )
+
+    @pytest.mark.parametrize(
+        "name", ["requirements-tools.in", "requirements-tools.lock"]
+    )
+    def test_a_missing_file_fails(self, repo, capsys, name):
+        (repo / name).unlink()
+
+        assert check_locks.main() == 1
+
+        assert f"{name} is missing" in capsys.readouterr().err
+
+
 class TestPlaywrightImage:
     def test_an_image_ahead_of_the_library_fails(self, repo, capsys):
         path = repo / ".github/workflows/test.yml"
@@ -208,7 +257,32 @@ class TestPlaywrightImage:
 
         assert check_locks.main() == 1
 
-        assert "runs no Playwright image" in capsys.readouterr().err
+        assert "by its @sha256 digest" in capsys.readouterr().err
+
+    def test_a_second_job_on_the_same_image_passes(self, repo):
+        path = repo / ".github/workflows/test.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8") + f"      image: {IMAGE}\n",
+            encoding="utf-8",
+        )
+
+        assert check_locks.main() == 0
+
+    def test_a_second_job_on_another_image_fails(self, repo, capsys):
+        """The e2e jobs run in the image as well; one left behind on a bump
+        would test other browsers than the visual job without a word."""
+        stale = f"mcr.microsoft.com/playwright:v1.62.0-noble@{DIGEST}"
+        path = repo / ".github/workflows/test.yml"
+        path.write_text(
+            path.read_text(encoding="utf-8") + f"      image: {stale}\n",
+            encoding="utf-8",
+        )
+
+        assert check_locks.main() == 1
+
+        err = capsys.readouterr().err
+        assert f"runs different Playwright images: {IMAGE}, {stale}" in err
+        assert "runs the Playwright image v1.62.0, package-lock.json pins" in err
 
     def test_a_document_quoting_the_same_image_passes(self, repo):
         (repo / "CONTRIBUTING.md").write_text(

@@ -1,14 +1,15 @@
 ---
 # Regenerates the Python lock files with `make lock` and opens a pull request.
 #
-# The compile job installs pip-tools and resolves every dependency, so it
-# runs with a read-only token that is not left in the checkout. Only the
-# pull-request job can write, and it runs nothing from the repository or
-# from PyPI: it takes the three lock files from the artifact and commits them.
+# The compile job installs pip-tools (from the hashed requirements-tools.lock)
+# and resolves every dependency, so it runs with a read-only token that is
+# not left in the checkout. Only the pull-request job can write, and it runs
+# nothing from the repository or from PyPI: it takes the lock files from the
+# artifact and commits them.
 #
 # Opening the pull request needs one of two one-time setups (see
 # CONTRIBUTING.md), or the job fails with "GitHub Actions is not permitted to
-# create or approve pull requests":
+# create or approve pull requests" and says in its summary what to set up:
 #
 # - a LOCK_PR_TOKEN repository secret: a fine-grained personal access token
 #   (or a GitHub App token) for this repository with read and write access
@@ -50,6 +51,7 @@ jobs:
             requirements.lock
             requirements-test.lock
             requirements-build.lock
+            requirements-tools.lock
           if-no-files-found: error
           retention-days: 1
 
@@ -70,6 +72,7 @@ jobs:
         with:
           name: lock-files
       - name: Open a pull request
+        id: pr
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           commit-message: "chore: regenerate Python lock files"
@@ -85,6 +88,29 @@ jobs:
             requirements.lock
             requirements-test.lock
             requirements-build.lock
+            requirements-tools.lock
           # The secret when it is set, the workflow token otherwise (see the
           # comment at the top)
           token: ${{ secrets.LOCK_PR_TOKEN || github.token }}
+      # The token cannot read the repository setting, so the failure itself
+      # is the only sign that neither setup is in place. The error of the
+      # step above is GitHub's; this says what to do about it.
+      - name: Explain a pull request that could not be opened
+        if: ${{ failure() && steps.pr.outcome == 'failure' }}
+        env:
+          HAS_LOCK_PR_TOKEN: ${{ secrets.LOCK_PR_TOKEN != '' }}
+        run: |
+          if [ "$HAS_LOCK_PR_TOKEN" = "true" ]; then
+            cause="The LOCK_PR_TOKEN secret is set but was refused: it may have expired, or it lacks read and write access to Contents and Pull requests of $GITHUB_REPOSITORY."
+          else
+            cause="There is no LOCK_PR_TOKEN secret, so the job used GITHUB_TOKEN, which may not open pull requests in this repository."
+          fi
+          {
+            echo "## The lock files were regenerated, but no pull request was opened"
+            echo
+            echo "$cause Do one of the following, then run the lock workflow again:"
+            echo
+            echo "- Add a repository secret LOCK_PR_TOKEN (Settings > Secrets and variables > Actions): a fine-grained personal access token or a GitHub App token for $GITHUB_REPOSITORY with read and write access to Contents and Pull requests. Its pull requests start the test workflow."
+            echo "- Or enable \"Allow GitHub Actions to create and approve pull requests\" under Settings > Actions > General > Workflow permissions. A pull request opened with GITHUB_TOKEN does not start the test workflow; close and reopen it to run CI."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=No pull request opened::$cause Add a LOCK_PR_TOKEN secret or allow GitHub Actions to create pull requests (see the job summary and the top of lock.yml)."
