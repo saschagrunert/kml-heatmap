@@ -1,7 +1,7 @@
 """Tests for validation module."""
 
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 import pytest
@@ -9,6 +9,7 @@ import pytest
 import kml_heatmap.validation as val_mod
 from kml_heatmap.validation import (
     find_kml_files,
+    is_protected_directory,
     protected_directories,
     validate_kml_file,
     validate_output_dir,
@@ -29,6 +30,7 @@ class TestValidateKmlFile:
     def test_nonexistent_file(self, tmp_path):
         is_valid, error = validate_kml_file(str(tmp_path / "missing.kml"))
         assert is_valid is False
+        assert error is not None
         assert "not found" in error
 
     def test_symlink_rejected(self, tmp_path):
@@ -38,6 +40,7 @@ class TestValidateKmlFile:
         os.symlink(target, link)
         is_valid, error = validate_kml_file(str(link))
         assert is_valid is False
+        assert error is not None
         assert "Symlinks" in error
 
     def test_non_kml_extension(self, tmp_path):
@@ -45,6 +48,7 @@ class TestValidateKmlFile:
         path.write_text("<kml/>")
         is_valid, error = validate_kml_file(str(path))
         assert is_valid is False
+        assert error is not None
         assert ".kml" in error
 
     def test_empty_file(self, tmp_path):
@@ -52,11 +56,13 @@ class TestValidateKmlFile:
         path.write_text("")
         is_valid, error = validate_kml_file(str(path))
         assert is_valid is False
+        assert error is not None
         assert "empty" in error.lower()
 
     def test_directory_instead_of_file(self, tmp_path):
         is_valid, error = validate_kml_file(str(tmp_path))
         assert is_valid is False
+        assert error is not None
         assert "Not a file" in error
 
     def test_unreadable_file(self, tmp_path):
@@ -68,6 +74,7 @@ class TestValidateKmlFile:
                 return  # running as root, permissions are not enforced
             is_valid, error = validate_kml_file(str(path))
             assert is_valid is False
+            assert error is not None
             assert "not readable" in error
         finally:
             path.chmod(0o644)
@@ -78,6 +85,7 @@ class TestValidateKmlFile:
         monkeypatch.setattr(val_mod, "MAX_KML_FILE_SIZE", 1)
         is_valid, error = validate_kml_file(str(path))
         assert is_valid is False
+        assert error is not None
         assert "too large" in error.lower()
 
 
@@ -86,6 +94,7 @@ class TestValidateOutputDir:
         kml = tmp_path / "a.kml"
         is_valid, error = validate_output_dir(tmp_path, [kml])
         assert is_valid is False
+        assert error is not None
         assert "Refusing to use output directory" in error
 
     def test_parent_of_input_dir_refused(self, tmp_path):
@@ -97,12 +106,36 @@ class TestValidateOutputDir:
         kml = tmp_path / "a.kml"
         is_valid, error = validate_output_dir(os.path.expanduser(dangerous), [kml])
         assert is_valid is False
+        assert error is not None
         assert "dangerous" in error
 
     def test_root_refused_without_home(self, tmp_path):
         with patch.object(Path, "home", side_effect=RuntimeError("no home")):
             assert protected_directories() == (Path("/"),)
             assert validate_output_dir("/", [])[0] is False
+
+    def test_home_behind_a_symlink_refused(self, tmp_path, monkeypatch):
+        """The output is resolved, so the home it is compared with must be."""
+        home = tmp_path / "real-home"
+        home.mkdir()
+        link = tmp_path / "home-link"
+        link.symlink_to(home)
+        monkeypatch.setenv("HOME", str(link))
+
+        assert home in protected_directories()
+        for given in (link, home):
+            is_valid, error = validate_output_dir(given, [tmp_path / "in" / "a.kml"])
+            assert is_valid is False
+            assert error is not None
+            assert "dangerous" in error
+
+    @pytest.mark.parametrize(
+        "root", [PureWindowsPath("D:/"), PureWindowsPath("//server/share/")]
+    )
+    def test_the_root_of_every_drive_is_protected(self, root):
+        """On Windows "/" is the root of the current drive only."""
+        assert is_protected_directory(root)
+        assert not is_protected_directory(root / "site")
 
     def test_separate_directories_are_fine(self, tmp_path):
         kml = tmp_path / "input" / "a.kml"
@@ -116,6 +149,7 @@ class TestValidateOutputDir:
         kml = tmp_path / "data" / "a.kml"
         is_valid, error = validate_output_dir(tmp_path / "data", [kml])
         assert is_valid is False
+        assert error is not None
         assert "Refusing" in error
         assert str(tmp_path / "data") in error
 

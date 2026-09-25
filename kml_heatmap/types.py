@@ -28,18 +28,12 @@ FlightPathGroup = list[FlightPath]
 # Exported segment row: [lat, lon, altitude_ft, groundspeed_knots] followed by
 # an optional relative time in seconds (omitted when unavailable). ``lat``/``lon``
 # are the segment's END point; its start is the end of the previous row, and
-# the first row continues from ``PathSegments.start``.
+# the first row continues from the start point of the path (see
+# ``export_pipeline.process_path_segments``).
 SegmentRow = list[float]
 
 # Number of decimals kept for exported coordinates (~1 m at the equator)
 COORDINATE_DECIMALS = 5
-
-
-class PathSegments(TypedDict):
-    """Exported segments of one path: a start point and the rows after it."""
-
-    start: list[float]
-    rows: list[SegmentRow]
 
 
 class PlacemarkMetadata(TypedDict):
@@ -144,7 +138,6 @@ __all__ = [
     "FlightPathGroup",
     "PathInfo",
     "PathMetadata",
-    "PathSegments",
     "PlacemarkMetadata",
     "SegmentRow",
     "SiteMetadata",

@@ -8,8 +8,8 @@ from kml_heatmap.aircraft import parse_aircraft_from_filename
 from kml_heatmap.constants import KML_NAMESPACES
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.parser_common import local_name
-from kml_heatmap.parser_gx_track import parse_gx_track, process_gx_track
-from kml_heatmap.types import TrackPoint
+from kml_heatmap.parser_gx_track import parse_gx_tracks, process_gx_track
+from kml_heatmap.types import FlightPath, FlightPathGroup, PathMetadata, TrackPoint
 
 KML_NS = KML_NAMESPACES["kml"]
 GX_NS = KML_NAMESPACES["gx"]
@@ -20,7 +20,9 @@ def _iso(moment):
 
 
 def _document():
-    return etree.Element(f"{{{KML_NS}}}Document", nsmap={None: KML_NS, "gx": GX_NS})
+    # lxml takes None for the default namespace, which its stubs do not know
+    nsmap = {None: KML_NS, "gx": GX_NS}
+    return etree.Element(f"{{{KML_NS}}}Document", nsmap=nsmap)  # type: ignore[arg-type]
 
 
 def _placemark(document, name=None, description=None, timestamp=None):
@@ -54,7 +56,9 @@ def _track(parent, coords=(), whens=(), interleave=True):
 
 
 def _run(tracks):
-    coordinates, path_groups, path_metadata = [], [], []
+    coordinates: FlightPath = []
+    path_groups: FlightPathGroup = []
+    path_metadata: list[PathMetadata] = []
     process_gx_track(
         tracks,
         KML_NAMESPACES,
@@ -83,8 +87,8 @@ class TestParseGxTrack:
             ["8.5 50.0 300", "9.0 51.0 400"],
             ["2025-03-01T10:00:00Z", "2025-03-01T11:00:00Z"],
         )
-        coordinates = []
-        path, whens = parse_gx_track(track, "test.kml", coordinates)
+        coordinates: FlightPath = []
+        path, whens = parse_gx_tracks([track], "test.kml", coordinates)
         assert path == [
             TrackPoint(50.0, 8.5, 300.0, parse_timestamp_epoch("2025-03-01T10:00:00Z")),
             TrackPoint(51.0, 9.0, 400.0, parse_timestamp_epoch("2025-03-01T11:00:00Z")),
@@ -99,26 +103,26 @@ class TestParseGxTrack:
             ["2025-03-01T10:00:00Z", "2025-03-01T11:00:00Z"],
             interleave=False,
         )
-        path, _ = parse_gx_track(track, "test.kml", [])
+        path, _ = parse_gx_tracks([track], "test.kml", [])
         assert path[1].ts == parse_timestamp_epoch("2025-03-01T11:00:00Z")
 
     def test_without_timestamps(self):
         track = _track(_document(), ["8.5 50.0 300"])
-        path, whens = parse_gx_track(track, "test.kml", [])
+        path, whens = parse_gx_tracks([track], "test.kml", [])
         assert path == [TrackPoint(50.0, 8.5, 300.0, None)]
         assert whens == []
 
     def test_coordinate_without_altitude_only_in_coordinates(self):
         track = _track(_document(), ["8.5 50.0"])
-        coordinates = []
-        path, _ = parse_gx_track(track, "test.kml", coordinates)
+        coordinates: FlightPath = []
+        path, _ = parse_gx_tracks([track], "test.kml", coordinates)
         assert path == []
         assert coordinates == [TrackPoint(50.0, 8.5, None, None)]
 
     def test_invalid_altitude_treated_as_missing(self):
         track = _track(_document(), ["8.5 50.0 999999"])
-        coordinates = []
-        path, _ = parse_gx_track(track, "test.kml", coordinates)
+        coordinates: FlightPath = []
+        path, _ = parse_gx_tracks([track], "test.kml", coordinates)
         assert path == []
         assert coordinates[0].alt is None
 
@@ -128,14 +132,14 @@ class TestParseGxTrack:
             ["", "   ", "8.5", "abc def ghi", "8.5 999.0 100", "8.5 50.0 300"],
         )
         etree.SubElement(track, f"{{{GX_NS}}}coord")  # text is None
-        path, _ = parse_gx_track(track, "test.kml", [])
+        path, _ = parse_gx_tracks([track], "test.kml", [])
         assert path == [TrackPoint(50.0, 8.5, 300.0, None)]
 
     def test_count_mismatch_warns_and_pairs_by_position(self, capsys):
         track = _track(
             _document(), ["8.5 50.0 300", "9.0 51.0 400"], ["2025-03-01T10:00:00Z"]
         )
-        path, whens = parse_gx_track(track, "test.kml", [])
+        path, whens = parse_gx_tracks([track], "test.kml", [])
         assert path[0].ts == parse_timestamp_epoch("2025-03-01T10:00:00Z")
         assert path[1].ts is None
         assert whens == ["2025-03-01T10:00:00Z"]
@@ -143,7 +147,7 @@ class TestParseGxTrack:
 
     def test_unparsable_when_gives_none_timestamp(self):
         track = _track(_document(), ["8.5 50.0 300"], ["yesterday"])
-        path, whens = parse_gx_track(track, "test.kml", [])
+        path, whens = parse_gx_tracks([track], "test.kml", [])
         assert path[0].ts is None
         assert whens == []
 
@@ -158,7 +162,7 @@ class TestParseGxTrack:
                 "2025-03-01T11:00:00Z",
             ],
         )
-        path, whens = parse_gx_track(track, "test.kml", [])
+        path, whens = parse_gx_tracks([track], "test.kml", [])
         assert len(path) == 2
         assert whens == ["2025-03-01T10:00:00Z", "2025-03-01T11:00:00Z"]
 
@@ -174,7 +178,7 @@ class TestParseGxTrack:
                 "2025-03-01T10:10:00Z",
             ],
         )
-        path, whens = parse_gx_track(track, "test.kml", [])
+        path, whens = parse_gx_tracks([track], "test.kml", [])
         assert [p.ts for p in path] == [
             parse_timestamp_epoch("2025-03-01T10:00:00Z"),
             parse_timestamp_epoch("2025-03-01T10:05:00Z"),
@@ -193,7 +197,7 @@ class TestParseGxTrack:
         whens = [_iso(base + timedelta(seconds=10 * i)) for i in range(300)]
         whens[5] = "2031-01-01T00:00:00Z"
         coords = [f"{8.5 + i * 0.001} 50.0 300" for i in range(300)]
-        path, kept = parse_gx_track(_track(_document(), coords, whens), "t.kml", [])
+        path, kept = parse_gx_tracks([_track(_document(), coords, whens)], "t.kml", [])
         assert [p.ts is None for p in path].count(True) == 1
         assert path[5].ts is None
         assert kept[-1] == whens[-1]
@@ -208,7 +212,7 @@ class TestParseGxTrack:
             "2025-03-01T10:00:30Z",
         ]
         coords = [f"{8.5 + i * 0.01} 50.0 300" for i in range(5)]
-        path, kept = parse_gx_track(_track(_document(), coords, whens), "t.kml", [])
+        path, kept = parse_gx_tracks([_track(_document(), coords, whens)], "t.kml", [])
         assert [p.ts is not None for p in path] == [True, True, False, True, True]
         assert kept == [whens[0], whens[1], whens[3], whens[4]]
 
@@ -218,7 +222,7 @@ class TestParseGxTrack:
             f"2025-06-01T10:00:{s:02d}Z" for s in range(0, 50, 10)
         ]
         coords = [f"{8.5 + i * 0.01} 50.0 300" for i in range(7)]
-        path, kept = parse_gx_track(_track(_document(), coords, whens), "t.kml", [])
+        path, kept = parse_gx_tracks([_track(_document(), coords, whens)], "t.kml", [])
         assert path[0].ts is None
         assert path[1].ts is None
         assert kept == whens[2:]
@@ -241,8 +245,8 @@ class TestParseGxTrack:
             ["8.5 50.0 300", "0 0 0", "8.6 50.1 300"],
             ["2025-03-01T10:00:00Z", "2025-03-01T10:00:05Z", "2025-03-01T10:00:10Z"],
         )
-        coordinates = []
-        path, whens = parse_gx_track(track, "t.kml", coordinates)
+        coordinates: FlightPath = []
+        path, whens = parse_gx_tracks([track], "t.kml", coordinates)
         assert [(p.lat, p.lon) for p in path] == [(50.0, 8.5), (50.1, 8.6)]
         assert len(coordinates) == 2
         assert whens == ["2025-03-01T10:00:00Z", "2025-03-01T10:00:10Z"]
@@ -251,7 +255,7 @@ class TestParseGxTrack:
         track = _track(_document(), ["8.5 50.0 300"], ["2025-03-01T10:00:00Z"])
         track.append(etree.Comment("ignored"))
         etree.SubElement(track, f"{{{GX_NS}}}angles").text = "1 2 3"
-        path, _ = parse_gx_track(track, "test.kml", [])
+        path, _ = parse_gx_tracks([track], "test.kml", [])
         assert len(path) == 1
 
 
@@ -431,7 +435,7 @@ class TestMultiTrack:
 
     def test_two_multi_tracks_are_two_flights(self):
         doc = _document()
-        tracks = []
+        tracks: list[etree._Element] = []
         for day in (1, 2):
             multi = _multi_track(_placemark(doc, name="EDDS"))
             tracks.extend(

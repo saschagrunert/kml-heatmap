@@ -3,7 +3,7 @@
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
-from .airports import route_airports
+from .airports import extract_airport_name, route_airports
 from .constants import ALTITUDE_GAIN_HYSTERESIS_FT, METERS_TO_FEET
 from .date_tokens import strip_dates
 from .helpers import calculate_duration_seconds
@@ -92,7 +92,11 @@ def build_path_info(
     count as an airport nobody can see. The marker rules are those of
     ``airports.deduplicate_airports`` and ``airports.extract_airport_name``:
     a name holding an ICAO code or of more than one word, at a real start
-    or landing. None keeps every name (for callers without airports).
+    or landing. A name that is no route ("EDDS" for a local flight) is the
+    start of the path when it is one of the markers, since
+    ``airports.deduplicate_airports`` puts the start of every path on the
+    map under its name. None keeps every route name (for callers without
+    airports) and no other.
     """
     # The names match the airport markers of airports.json exactly, which
     # have their dates taken out the same way
@@ -100,6 +104,10 @@ def build_path_info(
         strip_dates(name) for name in route_airports(metadata)
     )
     if airport_names is not None:
+        if start_airport is None and end_airport is None:
+            # The marker of a single airport, named as export_writers names
+            # it (route_airports found no route in the name)
+            start_airport = extract_airport_name(metadata.get("airport_name", ""))
         start_airport = start_airport if start_airport in airport_names else None
         end_airport = end_airport if end_airport in airport_names else None
 

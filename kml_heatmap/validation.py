@@ -1,7 +1,8 @@
 """Input validation utilities."""
 
+import contextlib
 import os
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING
 
 from .helpers import numeric_filename_key
@@ -14,6 +15,7 @@ MAX_KML_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
 __all__ = [
     "find_kml_files",
+    "is_protected_directory",
     "protected_directories",
     "validate_kml_file",
     "validate_output_dir",
@@ -87,11 +89,27 @@ def find_kml_files(directory: Path) -> list[Path]:
 
 
 def protected_directories() -> tuple[Path, ...]:
-    """Directories that must never be used as an output directory."""
-    try:
-        return (Path("/"), Path.home())
-    except RuntimeError:  # no HOME and no passwd entry (containers)
-        return (Path("/"),)
+    """Directories that must never be used as an output directory.
+
+    Resolved, like the output directory they are compared with: a home
+    directory that is a symlink (or a HOME set to one) is its target there.
+    """
+    protected = [Path("/")]
+    # No HOME and no passwd entry (containers)
+    with contextlib.suppress(RuntimeError):
+        protected.append(Path.home())
+    return tuple(dict.fromkeys(directory.resolve() for directory in protected))
+
+
+def is_protected_directory(resolved: PurePath) -> bool:
+    """Whether a resolved directory must never be used as an output directory.
+
+    The root of every file system counts, not only the one of
+    ``protected_directories``: "/" resolves to the root of the current drive
+    on Windows, and every other drive and network share has a root of its
+    own.
+    """
+    return resolved.parent == resolved or resolved in protected_directories()
 
 
 def validate_output_dir(
@@ -109,7 +127,7 @@ def validate_output_dir(
     """
     output = Path(output_dir).resolve()
 
-    if output in protected_directories():
+    if is_protected_directory(output):
         return False, f"Refusing to use dangerous output directory: {output_dir}"
 
     for input_path in input_paths:

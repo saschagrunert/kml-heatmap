@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from kml_heatmap.parser_common import empty_placemark_metadata
 from kml_heatmap.parser_standard import process_standard_coordinates
-from kml_heatmap.types import TrackPoint
+from kml_heatmap.types import FlightPath, FlightPathGroup, PathMetadata, TrackPoint
 
 
 def _elem(text):
@@ -14,7 +14,9 @@ def _elem(text):
 
 
 def _run(elements, metadata=None, kml_file="test.kml"):
-    coordinates, path_groups, path_metadata = [], [], []
+    coordinates: FlightPath = []
+    path_groups: FlightPathGroup = []
+    path_metadata: list[PathMetadata] = []
     process_standard_coordinates(
         elements,
         metadata or {},
@@ -136,7 +138,9 @@ class TestProcessStandardCoordinates:
         assert capsys.readouterr().err == ""
 
     def test_aircraft_info_of_the_file_is_used(self):
-        coordinates, path_groups, path_metadata = [], [], []
+        coordinates: FlightPath = []
+        path_groups: FlightPathGroup = []
+        path_metadata: list[PathMetadata] = []
         process_standard_coordinates(
             [_elem("8.5,50.0,100.0 8.6,50.1,150.0")],
             {},

@@ -74,7 +74,9 @@ class TestParseKmlCoordinates:
         assert len(coords) == 2
         assert len(paths) == 1
         assert paths[0][0].ts == parse_timestamp_epoch("2025-03-15T10:00:00Z")
-        assert paths[0][1].ts == paths[0][0].ts + 60
+        first_ts = paths[0][0].ts
+        assert first_ts is not None
+        assert paths[0][1].ts == first_ts + 60
         assert metadata[0]["timestamp"] == "2025-03-15T10:00:00Z"
         assert metadata[0]["end_timestamp"] == "2025-03-15T10:01:00Z"
         assert metadata[0]["year"] == 2025
@@ -120,6 +122,7 @@ class TestParseKmlCoordinates:
         kml_file = _write(tmp_path, "corrupt.kml", GX_TRACK_KML)
         first = parse_kml_coordinates(kml_file)
         cache_path, _ = get_cache_key(kml_file)
+        assert cache_path is not None
         cache_path.write_text("{not json", encoding="utf-8")
         assert parse_kml_coordinates(kml_file) == first
         assert get_cache_key(kml_file) == (cache_path, True)
@@ -585,7 +588,7 @@ class TestYearAcrossNewYear:
         _, _, after = parse_kml_coordinates(kml_file)
 
         assert before[0]["year"] == after[0]["year"] == 2025
-        assert after[0]["timestamp"].startswith("2025-01-01T23:00")
+        assert (after[0].get("timestamp") or "").startswith("2025-01-01T23:00")
 
 
 class TestMultiTrackFile:

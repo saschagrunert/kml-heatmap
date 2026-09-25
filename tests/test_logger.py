@@ -23,6 +23,8 @@ class TestSetupLogger:
     def test_stdout_and_stderr_handlers(self):
         test_logger = setup_logger("test_logger_streams")
         stdout_handler, stderr_handler = test_logger.handlers
+        assert isinstance(stdout_handler, logging.StreamHandler)
+        assert isinstance(stderr_handler, logging.StreamHandler)
         assert stdout_handler.stream is sys.stdout
         assert stdout_handler.level == logging.INFO
         assert stderr_handler.stream is sys.stderr
@@ -47,6 +49,7 @@ class TestSetupLogger:
 
     def test_logger_handler_format(self):
         handler = setup_logger("test_logger_format").handlers[0]
+        assert handler.formatter is not None
         assert handler.formatter._fmt == "%(levelname)s: %(message)s"
 
     def test_debug_overrides_level(self):

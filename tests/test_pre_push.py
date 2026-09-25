@@ -106,6 +106,13 @@ class TestCheck:
         assert "2025-03-03" in err
         assert "Push refused" in err
 
+    def test_refuses_a_date_with_a_one_digit_month(self, repo, capsys):
+        """The shapes of date_tokens: the hook checks what the export strips."""
+        kml = CLEAN_KML.replace("</kml>", "<name>Trip 2025/3/3</name></kml>")
+        sha = commit(repo, {"data/2.kml": kml})
+        assert run_check(repo, push_of(sha)) == 1
+        assert "2025/3/3" in capsys.readouterr().err
+
     def test_refuses_a_real_date_a_later_commit_fixes(self, repo, capsys):
         bad = commit(repo, {"data/2.kml": REAL_KML})
         fixed = commit(repo, {"data/2.kml": CLEAN_KML})

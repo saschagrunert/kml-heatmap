@@ -509,15 +509,17 @@ The build log names the file in every warning. `--debug` (or
 **A flight is missing.** Look for these lines:
 
 - `Excluding path without a determinable year: <file> (<name>)`: the parser
-  found no date. It takes the year from the track's own times (the median
-  `<when>` of a `gx:Track`, or a `<TimeStamp>`), then from a `<TimeSpan>`,
-  then from a `<TimeStamp>` or `<TimeSpan>` of the enclosing `<Folder>` or
-  `<Document>`, then from a date in the track's placemark name
-  (`EDDS to EDDP - 16 Aug 2026`) and finally from a Charterware
-  `<description>`, never from the file name. A time that cannot be read
-  (neither ISO 8601 nor `YYYY-MM-DD HH:MM:SSZ`) does not count. Export the
-  flight again with its times. When no flight at all has a year, the run
-  fails with `No flight paths with a determinable year to export`.
+  found no date. It takes the year from the track's own times (the first
+  `<when>` of a `gx:Track` that belongs to a point of the path, so a flight
+  across New Year stays in the year it started in, or a `<TimeStamp>`), then
+  from a `<TimeSpan>`, then from a date in the track's placemark name
+  (`EDDS to EDDP - 16 Aug 2026`), then from a Charterware `<description>`
+  and finally from a `<TimeStamp>` or `<TimeSpan>` of the enclosing
+  `<Folder>` or `<Document>`, never from the file name. A time that cannot
+  be read (neither ISO 8601, `YYYY-MM-DD HH:MM:SSZ` nor a date without a
+  time of day such as `2026-08-16`, `2026-08` or `2026`) does not count.
+  Export the flight again with its times. When no flight at all has a year,
+  the run fails with `No flight paths with a determinable year to export`.
 - A `gx:Track` time more than seven days from the track's median, or out of
   order with its neighbours, is a logger glitch: that point loses its time
   (and so its groundspeed), the rest of the track keeps theirs. A position
@@ -570,7 +572,9 @@ up in the [OurAirports](https://ourairports.com/) database:
   only where it has a marker.
 - A recording that starts in the air (more than 400 m above the airport and
   level) gets no departure marker, and the arrival only gets one when the
-  name is a route and the track ends in a landing.
+  name is a route and the track ends in a landing. A name that is a single
+  airport (`EDDS` for a local flight) gets its marker at the start, and the
+  flight counts for it.
 - Markers with the same ICAO code are merged into one. Names without a code
   are merged with a marker closer than 1.5 km. Two different ICAO codes are
   never merged, however close the airports are.
@@ -644,8 +648,9 @@ Obfuscated KML files still contain:
 
 `python -m kml_heatmap.obfuscate <dir> --check` verifies a directory: every
 flight must start on January 1st, and no other date may appear anywhere in a
-file or its name, except the two days after January 1st that a flight past
-midnight runs into. Timestamps within one Placemark, or no more than 12 hours
+file or its name (numeric, or with an English or German month name such as
+`16 Aug 2026` or `16. Mai 2026`), except the two days after January 1st that
+a flight past midnight runs into. Timestamps within one Placemark, or no more than 12 hours
 apart, count as one flight and are never split; a recording that runs longer
 than those days fails the check rather than being cut in two. When a date
 cannot be removed (in a file name, say, or an element the tool does not
@@ -663,6 +668,13 @@ Kept in the site:
 Removed from the site:
 
 - Individual flight dates and times
+- Dates and times of day in placemark and file names (`16 Aug 2026`,
+  `16/08`, `16AUG26`, `03/2026`, `2026/8/16`, `14:30`, `1430Z`,
+  `2026-08-16_1430`), also with German month names written day first
+  (`16. Mai 2026`, `16. März`, `16MAI26`, `Mai 2026`); a month name alone
+  (`Flugplatz Juli`) stays, and so do runway designators in a name that
+  speaks of a runway (`RWY 08/26`, `07L/25R`), while a bare `26/08` is
+  August 26th
 
 The CARTO key is a public client-side tile key. It is embedded in the
 generated `map_config.js` and published with the site by design, because the
@@ -763,8 +775,6 @@ one per airport from the active year and aircraft filter.
 The data is plain JSON, organized by year and fetched on demand. The page
 preloads the two index files and the latest year's file, which it opens with,
 so the downloads start together with the bundles rather than after them.
-Regenerating a site written by an earlier version, which loaded the same data
-as scripts (`data.js`, `metadata.js`, `airports.js`), removes those files.
 
 ## Map Features
 

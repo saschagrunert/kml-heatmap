@@ -15,6 +15,13 @@ Nd = "Nd"
 paeth = "paeth"
 # The National Elevation Dataset, in the attribution of the terrain tiles
 NED = "NED"
+# German month names, which kml_heatmap/date_tokens.py takes out of names
+januar = "januar"
+februar = "februar"
+juni = "juni"
+juli = "juli"
+oktober = "oktober"
+dezember = "dezember"
 
 [default.extend-identifiers]
 # The plural of the image format, which typos would split into "PN" and "Gs"

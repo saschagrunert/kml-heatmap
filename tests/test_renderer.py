@@ -10,10 +10,12 @@ import sys
 from concurrent.futures import Future
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
 
+import kml_heatmap.cache as cache_module
 import kml_heatmap.data_exporter as exporter_module
 from kml_heatmap.data_exporter import STAGING_PREFIX
 from kml_heatmap.exceptions import KMLHeatmapError
@@ -27,7 +29,7 @@ from kml_heatmap.renderer import (
     _parse_with_error_handling,
     create_progressive_heatmap,
 )
-from kml_heatmap.types import TrackPoint
+from kml_heatmap.types import PathMetadata, TrackPoint
 from tests.conftest import FIXTURE_AIRPORTS_CSV, decoded_segments
 
 BOUNDS = {
@@ -180,8 +182,10 @@ class TestParseWithoutAPool:
             submitted.append(args[0])
             return real_submit(fn, *args)
 
-        pool.submit = submit
-        with patch("kml_heatmap.renderer.ProcessPoolExecutor", pool):
+        with (
+            patch.object(pool, "submit", submit),
+            patch("kml_heatmap.renderer.ProcessPoolExecutor", pool),
+        ):
             _, metadata = _parse_kml_files([cached, fresh])
         assert submitted == [fresh]
         assert [m["year"] for m in metadata] == [2025, 2026]
@@ -282,7 +286,7 @@ class _FakeExecutor:
         return False
 
     def submit(self, fn, *args):
-        future = Future()
+        future: Future[object] = Future()
         future.set_exception(self.error)
         return future
 
@@ -297,7 +301,7 @@ class _InlineExecutor(_FakeExecutor):
         super().__init__(None)
 
     def submit(self, fn, *args):
-        future = Future()
+        future: Future[object] = Future()
         future.set_result(fn(*args))
         return future
 
@@ -453,11 +457,15 @@ class TestParseKmlFiles:
 class TestDropPathsWithoutYear:
     def test_excludes_paths_without_year(self, capsys):
         paths = [[TrackPoint(1, 1, 1)], [TrackPoint(2, 2, 2)], [TrackPoint(3, 3, 3)]]
-        metadata = [
-            {"year": 2025, "filename": "a.kml"},
-            {"year": None, "filename": "b.kml", "airport_name": "Somewhere"},
-            {"filename": "c.kml"},
-        ]
+        # Partial metadata: the function only reads the year and the names
+        metadata = cast(
+            "list[PathMetadata]",
+            [
+                {"year": 2025, "filename": "a.kml"},
+                {"year": None, "filename": "b.kml", "airport_name": "Somewhere"},
+                {"filename": "c.kml"},
+            ],
+        )
 
         kept_paths, kept_metadata = _drop_paths_without_year(paths, metadata)
 
@@ -477,7 +485,7 @@ class TestExportSite:
             TrackPoint(52.0, 10.0, 1.0),
         ]
         paths = [coords[:2], [coords[2], TrackPoint(52.1, 10.1, 2.0)]]
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "year": 2025,
                 "start_point": [50.0, 8.0, 100.0],
@@ -501,8 +509,8 @@ class TestExportSite:
         # The map is fitted to the exported path only
         assert _map_bounds(out) == [[50.0, 8.0], [51.0, 9.0]]
         assert result.years == [2025]
-        metadata = parse_data(out / "data" / "metadata.json")
-        assert metadata["aircraft_models"] == {"D-EAGJ": "Katana"}
+        site_metadata = parse_data(out / "data" / "metadata.json")
+        assert site_metadata["aircraft_models"] == {"D-EAGJ": "Katana"}
         year = parse_data(out / "data" / "2025" / "data.json")
         assert len(year["path_info"]) == 1
         assert year["original_points"] == 2
@@ -528,7 +536,7 @@ class TestExportSite:
             # A recording that never moved
             [TrackPoint(47.654321, 7.123456, 400.0)] * 3,
         ]
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "year": 2025,
                 "start_point": [50.0, 8.0, 100.0],
@@ -556,13 +564,12 @@ class TestExportSite:
         ]
 
     def test_every_path_is_checked_for_export_once(self, tmp_path):
-        from kml_heatmap import data_exporter as exporter_module
 
         paths = [
             [TrackPoint(50.0, 8.0, 100.0), TrackPoint(51.0, 9.0, 200.0)],
             [TrackPoint(49.5678, 10.1234, 320.0)],
         ]
-        metadata = [
+        metadata: list[PathMetadata] = [
             {"year": 2025, "start_point": [50.0, 8.0, 100.0], "airport_name": ""},
             {"year": 2025, "start_point": [49.5, 10.1, 320.0], "airport_name": ""},
         ]
@@ -583,7 +590,9 @@ class TestExportSite:
 
     def test_nothing_exportable_raises_before_writing(self, tmp_path):
         paths = [[TrackPoint(50.0, 8.0, 100.0), TrackPoint(51.0, 9.0, 200.0)]]
-        metadata = [{"year": None, "start_point": [50.0, 8.0, 100.0]}]
+        metadata: list[PathMetadata] = [
+            {"year": None, "start_point": [50.0, 8.0, 100.0], "airport_name": ""}
+        ]
         out = tmp_path / "out"
 
         with pytest.raises(KMLHeatmapError, match="No flight paths"):
@@ -763,7 +772,7 @@ class TestCreateProgressiveHeatmap:
         previous = _tree(out)
 
         second = _write_kml(tmp_path / "input" / "2_DEAGJ_DA20.kml", 2026)
-        real_atomic_write = exporter_module.atomic_write
+        real_atomic_write = cache_module.atomic_write
 
         def atomic_write(path, write):
             if path.name == "data.json":

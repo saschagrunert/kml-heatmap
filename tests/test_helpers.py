@@ -21,7 +21,9 @@ class TestParseIsoTimestamp:
     def test_valid_timezone_offset(self):
         result = parse_iso_timestamp("2025-03-15T14:30:00+01:00")
         assert result is not None
-        assert result.utcoffset().total_seconds() == 3600
+        offset = result.utcoffset()
+        assert offset is not None
+        assert offset.total_seconds() == 3600
 
     def test_seven_digit_fraction(self):
         result = parse_iso_timestamp("2025-03-03T08:25:15.5848380Z")

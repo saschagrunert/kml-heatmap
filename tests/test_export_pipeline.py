@@ -1,6 +1,7 @@
 """Tests for export_pipeline module."""
 
 from itertools import pairwise
+from typing import Any, cast
 
 import pytest
 from hypothesis import given, settings
@@ -16,7 +17,16 @@ from kml_heatmap.export_pipeline import (
 )
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.segment_calculator import SegmentSpeed, SpeedWindow
-from kml_heatmap.types import TrackPoint
+from kml_heatmap.types import PathMetadata, TrackPoint
+
+
+def _metadata(fields: dict[str, Any]) -> PathMetadata:
+    """Metadata built by hand, with only the keys a test is about.
+
+    The functions under test read every key with ``get``, so the keys the
+    parser always sets may be missing here.
+    """
+    return cast("PathMetadata", fields)
 
 
 def _make_path(count=10, alt=1000.0, timed=False):
@@ -29,21 +39,23 @@ def _make_path(count=10, alt=1000.0, timed=False):
 
 class TestPathDuration:
     def test_duration(self):
-        metadata = {
-            "timestamp": "2025-03-03T08:00:00Z",
-            "end_timestamp": "2025-03-03T09:30:00Z",
-        }
+        metadata = _metadata(
+            {
+                "timestamp": "2025-03-03T08:00:00Z",
+                "end_timestamp": "2025-03-03T09:30:00Z",
+            }
+        )
         assert path_duration(metadata) == pytest.approx(5400.0)
 
     def test_missing_or_invalid_timestamps_give_zero_duration(self):
-        assert path_duration({}) == 0.0
-        metadata = {"timestamp": "invalid", "end_timestamp": "also-invalid"}
+        assert path_duration(_metadata({})) == 0.0
+        metadata = _metadata({"timestamp": "invalid", "end_timestamp": "also-invalid"})
         assert path_duration(metadata) == 0.0
 
 
 class TestBuildPathInfo:
     def test_airport_name_parsing(self):
-        metadata = {"airport_name": "EDDS - EDDP"}
+        metadata = _metadata({"airport_name": "EDDS - EDDP"})
         info = build_path_info(_make_path(), metadata, 4, 2025)
         assert info["start_airport"] == "EDDS"
         assert info["end_airport"] == "EDDP"
@@ -51,7 +63,7 @@ class TestBuildPathInfo:
         assert info["id"] == 4
 
     def test_none_values_are_omitted(self):
-        metadata = {"airport_name": "", "aircraft_registration": None}
+        metadata = _metadata({"airport_name": "", "aircraft_registration": None})
         info = build_path_info(_make_path(), metadata, 1, 2025)
         assert "start_airport" not in info
         assert "end_airport" not in info
@@ -66,7 +78,9 @@ class TestBuildPathInfo:
 
     def test_key_order_is_stable(self):
         """The exported JSON keeps this order; the frontend contract test pins it."""
-        info = build_path_info(_make_path(), {"airport_name": "A - B"}, 1, 2025)
+        info = build_path_info(
+            _make_path(), _metadata({"airport_name": "A - B"}), 1, 2025
+        )
         assert list(info) == [
             "id",
             "year",
@@ -78,31 +92,62 @@ class TestBuildPathInfo:
         ]
 
     def test_single_airport_no_split(self):
-        info = build_path_info(_make_path(), {"airport_name": "EDDS"}, 0, 2025)
+        info = build_path_info(
+            _make_path(), _metadata({"airport_name": "EDDS"}), 0, 2025
+        )
         assert "start_airport" not in info
+        assert "end_airport" not in info
+
+    @pytest.mark.parametrize(
+        ("name", "markers", "expected"),
+        [
+            # A local flight: its marker has the name of the placemark
+            ("EDDS Stuttgart", {"EDDS Stuttgart"}, "EDDS Stuttgart"),
+            # The marker name has the date taken out as well
+            ("Aunt farm 16 Aug", {"Aunt farm"}, "Aunt farm"),
+            # A start in the air gets no marker
+            ("EDDS Stuttgart", {"EDDP Leipzig"}, None),
+            ("Home", {"Home"}, None),
+            ("Takeoff: 03 Mar 2025 08:31 Z", {"Takeoff"}, None),
+        ],
+    )
+    def test_single_airport_is_the_start_when_it_has_a_marker(
+        self, name, markers, expected
+    ):
+        """The page only shows the markers of names in the path info."""
+        metadata = _metadata(
+            {"airport_name": name, "start_airport": None, "end_airport": None}
+        )
+        info = build_path_info(_make_path(), metadata, 0, 2025, frozenset(markers))
+        assert info.get("start_airport") == expected
+        assert "end_airport" not in info
 
     def test_three_part_name_not_split(self):
-        metadata = {"airport_name": "EDDF - EDDM - EDDT"}
+        metadata = _metadata({"airport_name": "EDDF - EDDM - EDDT"})
         info = build_path_info(_make_path(), metadata, 0, 2025)
         assert "start_airport" not in info
 
     def test_airports_come_from_the_parsed_metadata(self):
         """LFBN is "Niort - Marais Poitevin"; splitting the display name fails."""
-        metadata = {
-            "airport_name": "EDAQ Halle-Oppin - LFBN Niort - Marais Poitevin",
-            "start_airport": "EDAQ Halle-Oppin",
-            "end_airport": "LFBN Niort - Marais Poitevin",
-        }
+        metadata = _metadata(
+            {
+                "airport_name": "EDAQ Halle-Oppin - LFBN Niort - Marais Poitevin",
+                "start_airport": "EDAQ Halle-Oppin",
+                "end_airport": "LFBN Niort - Marais Poitevin",
+            }
+        )
         info = build_path_info(_make_path(), metadata, 0, 2025)
         assert info["start_airport"] == "EDAQ Halle-Oppin"
         assert info["end_airport"] == "LFBN Niort - Marais Poitevin"
 
     def test_parsed_non_route_is_not_split(self):
-        metadata = {
-            "airport_name": "Some Field - Other Field",
-            "start_airport": None,
-            "end_airport": None,
-        }
+        metadata = _metadata(
+            {
+                "airport_name": "Some Field - Other Field",
+                "start_airport": None,
+                "end_airport": None,
+            }
+        )
         info = build_path_info(_make_path(), metadata, 0, 2025)
         assert "start_airport" not in info
         assert "end_airport" not in info
@@ -136,42 +181,79 @@ class TestBuildPathInfo:
         assert names == [info["start_airport"], info["end_airport"]]
         assert names == ["EDAQ Halle-Oppin", "LFBN Niort - Marais Poitevin"]
 
+    def test_a_local_flight_names_its_marker(self, tmp_path, parse_data):
+        """A single-airport name puts a marker on the map: the path names it."""
+        from kml_heatmap.airports import deduplicate_airports
+        from kml_heatmap.export_writers import (
+            export_airports_data,
+            exported_airport_names,
+        )
+        from kml_heatmap.parser import parse_kml_coordinates
+
+        kml = tmp_path / "1_DEAGJ_DA20.kml"
+        coords = "".join(
+            f"<gx:coord>{9.22 + i * 0.01} {48.69 + (i % 20) * 0.005} "
+            f"{400 if i in (0, 39) else 900}</gx:coord>"
+            for i in range(40)
+        )
+        kml.write_text(
+            '<kml xmlns="http://www.opengis.net/kml/2.2" '
+            'xmlns:gx="http://www.google.com/kml/ext/2.2"><Placemark>'
+            f"<name>EDDS</name><gx:Track>{coords}</gx:Track></Placemark></kml>",
+            encoding="utf-8",
+        )
+        _, paths, metadata = parse_kml_coordinates(str(kml))
+        airports = deduplicate_airports(metadata, paths)
+
+        info = build_path_info(
+            paths[0], metadata[0], 0, 2025, exported_airport_names(airports)
+        )
+        export_airports_data(airports, str(tmp_path))
+        names = [a["name"] for a in parse_data(tmp_path / "airports.json")["airports"]]
+
+        assert names == [info["start_airport"]]
+        assert names == ["EDDS Stuttgart"]
+
     def test_an_end_without_a_marker_is_no_airport(self):
         """A "Home" end gets no marker, so it must not count as an airport."""
-        metadata = {
-            "airport_name": "Home - EDDP",
-            "start_airport": "Home",
-            "end_airport": "EDDP",
-        }
+        metadata = _metadata(
+            {
+                "airport_name": "Home - EDDP",
+                "start_airport": "Home",
+                "end_airport": "EDDP",
+            }
+        )
         info = build_path_info(_make_path(), metadata, 0, 2025, frozenset({"EDDP"}))
         assert "start_airport" not in info
         assert info["end_airport"] == "EDDP"
 
     def test_without_marker_names_every_end_is_kept(self):
-        metadata = {"airport_name": "Home - Away", "start_airport": "Home"}
+        metadata = _metadata({"airport_name": "Home - Away", "start_airport": "Home"})
         info = build_path_info(_make_path(), metadata, 0, 2025)
         assert info["start_airport"] == "Home"
 
     def test_aircraft_metadata_included(self):
-        metadata = {"aircraft_registration": "D-EAGJ", "aircraft_type": "C172"}
+        metadata = _metadata(
+            {"aircraft_registration": "D-EAGJ", "aircraft_type": "C172"}
+        )
         info = build_path_info(_make_path(), metadata, 0, 2025)
         assert info["aircraft_registration"] == "D-EAGJ"
         assert info["aircraft_type"] == "C172"
 
     def test_no_coordinates_or_counts(self):
         """The frontend reads both from the segments; see types.PathInfo."""
-        info = build_path_info(_make_path(count=5), {}, 0, 2025)
+        info = build_path_info(_make_path(count=5), _metadata({}), 0, 2025)
         assert not {"start_coords", "end_coords", "segment_count"} & set(info)
 
     def test_altitude_range_omitted_without_altitudes(self):
         path = [TrackPoint(50.0, 8.5, None, None), TrackPoint(50.1, 8.6, None, None)]
-        info = build_path_info(path, {}, 0, 2025)
+        info = build_path_info(path, _metadata({}), 0, 2025)
         assert "min_altitude_ft" not in info
         assert "altitude_gain_ft" not in info
 
     def test_altitude_gain_of_a_climb(self):
         """_make_path climbs 50 m per point: 450 m, from the exact altitudes."""
-        info = build_path_info(_make_path(), {}, 0, 2025)
+        info = build_path_info(_make_path(), _metadata({}), 0, 2025)
         assert info["altitude_gain_ft"] == round(450 * METERS_TO_FEET, 1) == 1476.4
 
     @pytest.mark.parametrize(
@@ -184,15 +266,19 @@ class TestBuildPathInfo:
         ],
     )
     def test_no_date_in_the_airports(self, name):
-        metadata = {"airport_name": name, "start_airport": name, "end_airport": name}
+        metadata = _metadata(
+            {"airport_name": name, "start_airport": name, "end_airport": name}
+        )
         info = build_path_info(_make_path(), metadata, 0, 2025)
-        for key in ("start_airport", "end_airport"):
-            assert "2026" not in info.get(key, "")
-            assert "16" not in info.get(key, "")
+        for airport in (info.get("start_airport", ""), info.get("end_airport", "")):
+            assert "2026" not in airport
+            assert "16" not in airport
 
     def test_a_date_is_no_aircraft_type(self):
         """The type is a part of the file name: 1_DEHYL_2026-08-16.kml."""
-        metadata = {"aircraft_registration": "D-EHYL", "aircraft_type": "2026-08-16"}
+        metadata = _metadata(
+            {"aircraft_registration": "D-EHYL", "aircraft_type": "2026-08-16"}
+        )
         info = build_path_info(_make_path(), metadata, 0, 2025)
         assert "aircraft_type" not in info
         metadata["aircraft_type"] = "DA40 16 Aug 2026"

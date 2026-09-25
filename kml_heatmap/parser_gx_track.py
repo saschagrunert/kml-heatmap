@@ -131,13 +131,6 @@ def _consistent_timestamps(timestamps: list[float | None]) -> list[bool]:
     return keep
 
 
-def parse_gx_track(
-    track: etree._Element, kml_file: str, coordinates: FlightPath
-) -> tuple[FlightPath, list[str]]:
-    """Parse one gx:Track into a flight path (see ``parse_gx_tracks``)."""
-    return parse_gx_tracks([track], kml_file, coordinates)
-
-
 def parse_gx_tracks(
     tracks: Sequence[etree._Element], kml_file: str, coordinates: FlightPath
 ) -> tuple[FlightPath, list[str]]:

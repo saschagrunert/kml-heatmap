@@ -1,5 +1,7 @@
 """Tests for export_writers module."""
 
+from typing import Any
+
 import pytest
 
 from kml_heatmap.export_writers import (
@@ -121,7 +123,7 @@ class TestExportAirportsData:
 
 class TestExportMetadata:
     def _export(self, tmp_path, **overrides):
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "min_groundspeed_knots": 50.0,
             "max_groundspeed_knots": 180.0,
             "available_years": [2025, 2024],

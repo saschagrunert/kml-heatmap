@@ -17,9 +17,12 @@ if TYPE_CHECKING:
     from .types import PathMetadata, PlacemarkMetadata, TrackPoint
 
 # Pre-compiled regex patterns for performance
-YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
+YEAR_PATTERN = re.compile(r"\b((?:19|20)\d{2})\b")
 # A KML time without a time of day: xsd:date, xsd:gYearMonth or xsd:gYear
 _DATE_ONLY_PATTERN = re.compile(r"\d{4}(?:-\d{2}(?:-\d{2})?)?(?:Z|[+-]\d{2}:\d{2})?")
+# The years a date without a time of day may name: anything else in its
+# four leading digits is no year of a flight log
+_DATE_ONLY_YEARS = range(1900, 2100)
 # Charterware description: "Flight Jan 12 2026 03:01PM" or "Flight January 12 ..."
 CHARTERWARE_PATTERN = re.compile(
     r"Flight\s+(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}):(\d{2})(AM|PM)"
@@ -74,10 +77,26 @@ def empty_placemark_metadata() -> PlacemarkMetadata:
     }
 
 
+def _date_only_year(text: str) -> int | None:
+    """The year of a KML time without a time of day, None for other text.
+
+    xsd:date, gYearMonth and gYear all start with the year: "1998-05-01",
+    "1998-05" and "1998".
+    """
+    if not _DATE_ONLY_PATTERN.fullmatch(text):
+        return None
+    year = int(text[:4])
+    return year if year in _DATE_ONLY_YEARS else None
+
+
 def extract_year_from_timestamp(timestamp: str | None) -> int | None:
     """Extract year from a timestamp string."""
     if not timestamp:
         return None
+
+    date_only_year = _date_only_year(timestamp)
+    if date_only_year is not None:
+        return date_only_year
 
     # Try to parse ISO format timestamp (e.g., "2025-03-03T08:58:01Z").
     # The obfuscator anchors on the UTC date, so this is the UTC year:
@@ -219,13 +238,13 @@ def _usable_time(text: str | None) -> str | None:
     """A KML time as it was written, or None when it cannot be read.
 
     A timestamp has to parse; a date without a time of day (xsd:date,
-    gYearMonth and gYear are valid KML times) still tells the year. An
-    unreadable <when> must not take the place of a date that the name or
-    the description still holds.
+    gYearMonth and gYear are valid KML times) still tells the year, as long
+    as its leading digits are a plausible one. An unreadable <when> must not
+    take the place of a date that the name or the description still holds.
     """
     if text is None:
         return None
-    if parse_iso_timestamp(text) is not None or _DATE_ONLY_PATTERN.fullmatch(text):
+    if parse_iso_timestamp(text) is not None or _date_only_year(text) is not None:
         return text
     return None
 

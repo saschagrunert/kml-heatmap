@@ -160,10 +160,10 @@ class TestSpeedWindow:
         ]
         segments = extract_segment_speeds(path, None)
         window = SpeedWindow(segments)
-        assert window.totals(segments[1].timestamp)[1] == 120.0
-        assert window.groundspeed(segments[1].timestamp) == pytest.approx(
-            50.0, rel=1e-3
-        )
+        timestamp = segments[1].timestamp
+        assert timestamp is not None
+        assert window.totals(timestamp)[1] == 120.0
+        assert window.groundspeed(timestamp) == pytest.approx(50.0, rel=1e-3)
 
     def test_window_average(self):
         segments = [
@@ -225,7 +225,7 @@ def test_running_totals_match_summing_every_window(name):
         window = SpeedWindow(segments)
         timed = sorted(
             (s for s in segments if s.valid and s.timestamp is not None),
-            key=lambda s: s.timestamp,
+            key=lambda s: s.timestamp or 0.0,
         )
         for seg in segments:
             if seg.timestamp is None:
