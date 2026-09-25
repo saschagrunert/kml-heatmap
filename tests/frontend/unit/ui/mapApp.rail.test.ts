@@ -1090,6 +1090,7 @@ describe("MapApp controls and map", () => {
         "paths-airspeed-3d",
         "paths-altitude-selected-3d",
         "paths-airspeed-selected-3d",
+        "selection-highlight-3d",
         "replay-trail-3d",
         "airport-labels",
       ]);
@@ -1325,6 +1326,7 @@ describe("MapApp controls and map", () => {
           "paths-airspeed-3d",
           "paths-altitude-selected-3d",
           "paths-airspeed-selected-3d",
+          "selection-highlight-3d",
           "replay-trail-3d",
           "place-labels",
           // Labels themselves, on top of the base style's
@@ -1342,6 +1344,9 @@ describe("MapApp controls and map", () => {
         expect(map.source("selection-highlight")).toBe(highlight);
         expect(highlight.data).toBe(data);
         expect(map.layer("selection-highlight").layout["visibility"]).toBe(
+          "visible",
+        );
+        expect(map.layer("selection-highlight-3d").layout["visibility"]).toBe(
           "visible",
         );
         expect(map.layer("paths-altitude").paint["line-opacity"]).toBe(0.1);

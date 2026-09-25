@@ -170,6 +170,7 @@ describe("layer handles", () => {
 
     expect(app.selectionHighlightLayer.ids).toEqual([
       MAP_LAYERS.selectionHighlight,
+      MAP_LAYERS.selectionHighlightRibbons,
     ]);
     const line = map.layer(MAP_LAYERS.selectionHighlight);
     expect(line.type).toBe("line");
@@ -188,6 +189,33 @@ describe("layer handles", () => {
     expect(at).toBeLessThan(order.indexOf(MAP_LAYERS.airportLabels));
   });
 
+  it("draw the selection's lines in the air of the 3D view as ribbons in their colour, with the other ribbons", () => {
+    const map = createMockApp().map!;
+
+    const ribbon = map.layer(MAP_LAYERS.selectionHighlightRibbons);
+    expect(ribbon.type).toBe("fill-extrusion");
+    expect(ribbon.source).toBe(MAP_SOURCES.selectionHighlightRibbons);
+    expect(ribbon.layout["visibility"]).toBe("none");
+    expect(ribbon.paint["fill-extrusion-color"]).toBe("#f2f2f2");
+    expect(ribbon.paint["fill-extrusion-opacity"]).toBe(
+      map.layer(MAP_LAYERS.selectionHighlight).paint["line-opacity"],
+    );
+    // Known by the id of their cut, like the other ribbons (see ribbonId)
+    expect(map.source(ribbon.source!).spec).toMatchObject({
+      tolerance: 0,
+      promoteId: "k",
+    });
+    // In the air, among the ribbons: between the layers on the ground it
+    // would have the relief drawn once more for every run of them
+    const order = map.getLayersOrder();
+    expect(order.indexOf(MAP_LAYERS.selectionHighlightRibbons)).toBe(
+      order.indexOf(MAP_LAYERS.pathsAirspeedSelectedRibbons) + 1,
+    );
+    expect(order.indexOf(MAP_LAYERS.selectionHighlightRibbons)).toBe(
+      order.indexOf(MAP_LAYERS.replayTrailRibbons) - 1,
+    );
+  });
+
   it("take the selection's colour from the stylesheet", () => {
     const root = document.documentElement.style;
     root.setProperty("--selection-highlight-color", "#ffffff");
@@ -197,6 +225,11 @@ describe("layer handles", () => {
       expect(map.layer(MAP_LAYERS.selectionHighlight).paint["line-color"]).toBe(
         "#ffffff",
       );
+      expect(
+        map.layer(MAP_LAYERS.selectionHighlightRibbons).paint[
+          "fill-extrusion-color"
+        ],
+      ).toBe("#ffffff");
     } finally {
       root.removeProperty("--selection-highlight-color");
     }
@@ -245,7 +278,7 @@ describe("layer handles", () => {
       order.indexOf(MAP_LAYERS.pathsAirspeedSelected),
     );
     expect(order.indexOf(MAP_LAYERS.pathsAirspeedSelectedRibbons)).toBe(
-      order.indexOf(MAP_LAYERS.replayTrailRibbons) - 1,
+      order.indexOf(MAP_LAYERS.replayTrailRibbons) - 2,
     );
   });
 

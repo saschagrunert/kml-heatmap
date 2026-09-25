@@ -426,15 +426,40 @@ export async function toggleStatsPanel(page: Page): Promise<void> {
 }
 
 /**
+ * The longest the cards of the year in review take to fill. The dialog
+ * opens at once and works out the statistics of the filter in slices, with
+ * a task of the page's own between two of them; in software WebGL each of
+ * those may wait on a frame of the map, which took seconds with a browser
+ * per core of the CI runner.
+ */
+const WRAPPED_CARDS_TIMEOUT_MS = 30000;
+
+/**
  * Open the year in review from the bar or the desktop button and wait until
- * the dialog is showing. Returns the dialog.
+ * the dialog shows its cards, not only its loading line. Returns the dialog.
  */
 export async function openWrapped(page: Page): Promise<Locator> {
   const mobile = await usesMobileBar(page);
   await page.locator(mobile ? "#mobile-tab-wrapped" : "#wrapped-btn").click();
   const modal = page.locator("#wrapped-modal");
   await expect(modal).toBeVisible({ timeout: 5000 });
+  await waitForWrappedCards(page);
   return modal;
+}
+
+/**
+ * Wait until the open Wrapped dialog has filled its cards: the column is
+ * busy while the statistics are worked out, and the stats card holds a
+ * loading line in place of its figures.
+ */
+async function waitForWrappedCards(page: Page): Promise<void> {
+  await expect(page.locator("#wrapped-stats .stat-card").first()).toBeVisible({
+    timeout: WRAPPED_CARDS_TIMEOUT_MS,
+  });
+  await expect(page.locator("#wrapped-cards-column")).not.toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
 }
 
 /**

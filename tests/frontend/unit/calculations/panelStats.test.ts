@@ -808,6 +808,42 @@ describe("panel statistics", () => {
       expect(filterStatisticsInSlices(view)).toBe(stats);
     });
 
+    it("stops a run its signal aborts, and keeps nothing of it", async () => {
+      const view = datasetIndex(
+        createDataset(mockPathInfo, mockSegments),
+      ).filter("all", "all");
+      slowClock();
+      const controller = new AbortController();
+
+      const pending = filterStatisticsInSlices(view, controller.signal);
+      controller.abort();
+
+      await expect(pending).rejects.toThrow();
+      const timeout = vi.spyOn(globalThis, "setTimeout");
+      await new Promise((resolve) => setImmediate(resolve));
+      // No slice after the abort
+      expect(timeout).not.toHaveBeenCalled();
+      expect(filterStatisticsInSlices(view)).toBeInstanceOf(Promise);
+    });
+
+    it("starts a run of its own for a caller right after an abort", async () => {
+      const view = datasetIndex(
+        createDataset(mockPathInfo, mockSegments),
+      ).filter("all", "all");
+      slowClock();
+      const controller = new AbortController();
+      const aborted = filterStatisticsInSlices(view, controller.signal);
+      controller.abort();
+
+      const again = filterStatisticsInSlices(view);
+
+      expect(again).not.toBe(aborted);
+      await expect(aborted).rejects.toThrow();
+      const stats = await again;
+      expect(stats).toEqual(filterStatistics(view));
+      expect(filterStatisticsInSlices(view)).toBe(stats);
+    });
+
     it("keeps the figures a synchronous caller worked out in between", async () => {
       const view = datasetIndex(
         createDataset(mockPathInfo, mockSegments),

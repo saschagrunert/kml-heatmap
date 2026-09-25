@@ -9,6 +9,7 @@ import {
   waitForPathData,
 } from "./helpers";
 import {
+  PATH_POLL,
   aviationOnMap,
   baseMapStyleRequest,
   expectAviationTiles,
@@ -434,7 +435,9 @@ test.describe("Layers", () => {
 
     // The heat layer off the map threw on its new points, and the
     // altitude layer kept every polyline of the previous filter
-    await expect.poll(() => pathCount(page, "altitude")).toBeLessThan(before);
+    await expect
+      .poll(() => pathCount(page, "altitude"), PATH_POLL)
+      .toBeLessThan(before);
   });
 
   test("the heat canvas stays under the paths across a heatmap toggle", async ({

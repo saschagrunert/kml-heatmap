@@ -61,6 +61,9 @@ const CARTO_LIKE: StyleSpecification = {
 /** The trail's opacity as addDataLayers creates it */
 const TRAIL_OPACITY = 0.8;
 
+/** The opacity of the ribbons of a selection, as addDataLayers creates it */
+const SELECTION_OPACITY = 0.9;
+
 describe("the relief", () => {
   let app: MockApp;
   let lifetime: AbortController;
@@ -70,6 +73,11 @@ describe("the relief", () => {
   const trailOpacity = (): unknown =>
     map().getPaintProperty(
       MAP_SOURCES.replayTrailRibbons,
+      "fill-extrusion-opacity",
+    );
+  const selectionOpacity = (): unknown =>
+    map().getPaintProperty(
+      MAP_LAYERS.selectionHighlightRibbons,
       "fill-extrusion-opacity",
     );
 
@@ -173,7 +181,7 @@ describe("the relief", () => {
   });
 
   describe("the ribbons as the ground changes", () => {
-    it("hide, the trail's too, until the map has drawn them on the new ground", async () => {
+    it("hide, the trail's and the selection's too, until the map has drawn them on the new ground", async () => {
       await follow();
       map().isSourceLoaded.mockReturnValue(false);
 
@@ -184,6 +192,7 @@ describe("the relief", () => {
       expect(app.relief.ribbonsShown).toBe(0);
       expect(restyle).toHaveBeenCalledTimes(1);
       expect(trailOpacity()).toBe(0);
+      expect(selectionOpacity()).toBe(0);
 
       // Asked after every frame, until the tiles have landed
       map().emit("render");
@@ -194,6 +203,7 @@ describe("the relief", () => {
       expect(app.relief.ribbonsShown).toBe(1);
       expect(restyle).toHaveBeenCalledTimes(2);
       expect(trailOpacity()).toBe(TRAIL_OPACITY);
+      expect(selectionOpacity()).toBe(SELECTION_OPACITY);
       expect(map().listenerCount("render")).toBe(0);
     });
 
@@ -260,7 +270,7 @@ describe("the relief", () => {
     });
   });
 
-  it("gives the trail its opacity again after a lost WebGL context", async () => {
+  it("gives the trail and the selection their opacity again after a lost WebGL context", async () => {
     // Hidden as the context is lost, and shown by the longest wait during
     // the loss: MapLibre restores the style of the loss, the trail hidden
     vi.useFakeTimers();
@@ -275,11 +285,13 @@ describe("the relief", () => {
     expect(app.relief.ribbonsShown).toBe(1);
     // The map had no style to take it
     expect(trailOpacity()).toBe(0);
+    expect(selectionOpacity()).toBe(0);
 
     map().emit("webglcontextrestored");
     map().emit("style.load");
 
     expect(trailOpacity()).toBe(TRAIL_OPACITY);
+    expect(selectionOpacity()).toBe(SELECTION_OPACITY);
   });
 
   describe("the far labels of a tilted view", () => {

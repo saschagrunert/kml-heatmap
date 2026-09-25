@@ -12,6 +12,7 @@ import {
   waitForPathData,
 } from "./helpers";
 import {
+  PATH_POLL,
   airportMarkerCenter,
   centerOnAirport,
   focusAirportMarker,
@@ -417,7 +418,9 @@ test.describe("Solo Mode", () => {
       .toBe(true);
 
     // In solo: only the selected path is visible with the normal weight
-    await expect.poll(() => pathWeights(page, "altitude")).not.toContain(6);
+    await expect
+      .poll(() => pathWeights(page, "altitude"), PATH_POLL)
+      .not.toContain(6);
     const weightsInSolo = await pathWeights(page, "altitude");
     expect(weightsInSolo.length).toBeGreaterThan(0);
     for (const w of weightsInSolo) {
@@ -429,7 +432,9 @@ test.describe("Solo Mode", () => {
       .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
       .toBe(false);
 
-    await expect.poll(() => pathWeights(page, "altitude")).toContain(6);
+    await expect
+      .poll(() => pathWeights(page, "altitude"), PATH_POLL)
+      .toContain(6);
   });
 
   test("solo mode hides unselected paths from altitude layer", async ({
@@ -445,7 +450,7 @@ test.describe("Solo Mode", () => {
       .toBe(true);
 
     await expect
-      .poll(() => pathCount(page, "altitude"))
+      .poll(() => pathCount(page, "altitude"), PATH_POLL)
       .toBeLessThan(totalBefore);
     expect(await pathCount(page, "altitude")).toBeGreaterThan(0);
   });

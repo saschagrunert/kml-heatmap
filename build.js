@@ -282,9 +282,9 @@ function analyzeBundleComposition(metafile, fileName) {
 // flights isolate mode hides left as they are, one toast per lazy file):
 // 145.44 KB raw and 49.92 KB gzipped in a local build, about 50.12 KB in CI.
 const BUDGET_APP = { raw: 147.5 * 1024, gzip: 51.25 * 1024 };
-// The feature bundle is fetched only when replay is opened, the relief and
-// the heat cloud of the 3D view are first drawn or the Satellite switch is
-// first on, so it is
+// The feature bundle is fetched only when replay is opened, the relief, the
+// heat cloud and the ribbons of a selection of the 3D view are first drawn
+// or the Satellite switch is first on, so it is
 // not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing. 41.01 KB raw and 14.53 KB gzipped.
 // Raised from 43 KB for the replay camera's own rest and the relief and
@@ -298,7 +298,11 @@ const BUDGET_APP = { raw: 147.5 * 1024, gzip: 51.25 * 1024 };
 // with its own shaders, which esbuild leaves as they are written, and its
 // points, cached for the last relief levels): 55.99 KB raw and 20.3 KB
 // gzipped in a local build, about 20.38 KB in CI going by the 0.4 % above.
-const BUDGET_FEATURES = { raw: 57.5 * 1024, gzip: 21 * 1024 };
+// Raised from 57.5 KB and 21 KB for the selection drawn as ribbons in the
+// 3D view, cut around the view only when zoomed in: 58.1 KB raw and
+// 21.08 KB gzipped in a local build, about 21.19 KB in CI; the budget keeps
+// the room the policy asks for.
+const BUDGET_FEATURES = { raw: 60 * 1024, gzip: 22.25 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay
@@ -319,13 +323,15 @@ const BUDGET_WRAPPED = { raw: 28 * 1024, gzip: 9.75 * 1024 };
 // 4.95 KB raw and 2.34 KB gzipped.
 const BUDGET_WORKER = { raw: 6 * 1024, gzip: 3 * 1024 };
 
-// The vendored files are copied as they are (scripts/vendor.js), so a budget
-// cannot make them smaller. It is there so a Dependabot bump that makes
+// The vendored files are copied as they are but for a few bytes of fixes
+// (VENDOR_PATCHES in scripts/vendor.js), so a budget cannot make them
+// smaller. It is there so a Dependabot bump that makes
 // MapLibre, which every visit loads before the map can draw, noticeably
 // larger fails the build and gets looked at instead of merged unseen. Raise
 // it in the pull request of the bump, with the new sizes here.
 // maplibre-gl 6.10.0: the three modules and the stylesheet come to
-// 1,200,360 B raw and 312,146 B gzipped.
+// 1,200,360 B raw and 312,146 B gzipped, and with the fixes of
+// VENDOR_PATCHES to 1,200,425 B raw and 310,938 B gzipped in a local build.
 const BUDGET_MAPLIBRE = { raw: 1184 * 1024, gzip: 307 * 1024 };
 // html-to-image 1.11.13, bundled into one module: 13,667 B raw and 5.3 KB
 // gzipped. Loaded on the first export only.

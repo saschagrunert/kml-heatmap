@@ -97,6 +97,7 @@ describe("ReliefState", () => {
     expect(new Set(RIBBON_SOURCES).size).toBe(RIBBON_SOURCES.length);
     expect(RIBBON_SOURCES).toEqual([
       ...PATH_RIBBON_SOURCES,
+      MAP_SOURCES.selectionHighlightRibbons,
       MAP_SOURCES.replayTrailRibbons,
     ]);
     expect(Object.values(MAP_LAYERS)).toEqual(

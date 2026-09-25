@@ -86,12 +86,12 @@ describe("WrappedManager content", () => {
   it("reuses the statistics the panel computed for the same filter", () => {
     const view = datasetIndex(mockApp.currentData!).filter("2024", "all");
     const panelStats = statistics.filterStatistics(view);
-    const spy = vi.spyOn(statistics, "filterStatistics");
+    const spy = vi.spyOn(statistics, "filterStatisticsInSlices");
 
     wrappedManager.showWrapped();
 
-    // The same filter view, so the statistics it keeps
-    expect(spy).toHaveBeenCalledWith(view);
+    // The same filter view, so the statistics it keeps, at once
+    expect(spy).toHaveBeenCalledWith(view, expect.any(AbortSignal));
     expect(spy.mock.results[0]!.value).toBe(panelStats);
     expect(statCards()["Flights"]).toBe(String(panelStats.num_paths));
     spy.mockRestore();

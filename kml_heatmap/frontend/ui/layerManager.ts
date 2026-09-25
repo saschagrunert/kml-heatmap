@@ -60,7 +60,7 @@ import {
   altitudeColorAt,
   scalePosition,
 } from "../utils/colors";
-import { FEET_TO_METERS, MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
+import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 import { logError } from "../utils/logger";
@@ -80,7 +80,6 @@ import { loadFeatures } from "../services/featureLoader";
 import {
   followsLevel,
   isLiftedAt,
-  liftExaggeration,
   reliefLevel,
   ribbonWidthZoom,
 } from "../calculations/lift";
@@ -102,7 +101,15 @@ import {
   rangeMiddle,
 } from "../features/layers";
 import { formatNumber } from "../utils/formatters";
-import { DEGREES_TO_RADIANS, METRES_PER_DEGREE } from "../utils/geometry";
+import {
+  CULL_FROM_ZOOM,
+  leavesBox,
+  overlaps,
+  ribbonsTopM,
+  VIEW_SPARE,
+  viewBox,
+  type Box,
+} from "../utils/viewBox";
 import { PathHover, type DrawnRuns, type RunsOnLayer } from "./pathHover";
 
 export type LayerMode = "altitude" | "airspeed";
@@ -148,52 +155,6 @@ interface LayerConfig {
 
 /** Colour steps a range is cut into; the merge key of a run */
 const COLOR_BINS = 32;
-
-/**
- * The whole zoom level (see ribbonWidthZoom) from which the 3D view writes
- * only the ribbons around the view (see viewBox), app zoom 9: at app zoom
- * 12, 916 of the 205,000 ribbons of all years were in view
- */
-const CULL_FROM_ZOOM = 8;
-
-/**
- * How far around the view the ribbons are written, in spans of the view:
- * a pan of a quarter of a view or a zoom out of about half a level writes
- * them again
- */
-const VIEW_SPARE = 0.25;
-
-/** `[west, south, east, north]`, in degrees */
-type Box = readonly [number, number, number, number];
-
-/**
- * The part of the map a view of `map` may show ribbons of, and `spare`
- * spans of it around: the ground in view, which MapLibre draws no further
- * than the bounds of the view, and as far beyond as a ribbon `topM` metres
- * up as drawn reaches into view from outside it in a tilted view.
- */
-function viewBox(map: MapLibreMap, topM: number, spare: number): Box {
-  const bounds = map.getBounds();
-  const { lng: west, lat: south } = bounds.getSouthWest();
-  const { lng: east, lat: north } = bounds.getNorthEast();
-  const reach =
-    (topM * Math.tan(map.getPitch() * DEGREES_TO_RADIANS)) / METRES_PER_DEGREE;
-  const lat = reach + spare * (north - south);
-  const lng =
-    reach /
-      Math.cos(Math.min(Math.max(-south, north), 85) * DEGREES_TO_RADIANS) +
-    spare * (east - west);
-  return [west - lng, south - lat, east + lng, north + lat];
-}
-
-/** Whether two boxes overlap, in any copy of the world */
-function overlaps(a: Box, b: Box): boolean {
-  return (
-    a[1] <= b[3] &&
-    b[1] <= a[3] &&
-    [-360, 0, 360].some((shift) => a[0] <= b[2] + shift && b[0] + shift <= a[2])
-  );
-}
 
 const MODES: readonly LayerMode[] = ["altitude", "airspeed"];
 
@@ -464,9 +425,7 @@ export class LayerManager implements PathHitTester {
         const view = box && viewBox(map, this.topM(), 0);
         // Written again once the view reaches past one of its edges, or as
         // they show again when isolate mode hides them
-        if (
-          view?.some((edge, i) => (i < 2 ? edge < box![i]! : edge > box![i]!))
-        ) {
+        if (view && leavesBox(view, box)) {
           if (this.isolatedOut(state, set)) table.behind = true;
           else this.setRuns(CONFIGS[mode], set, runs, true);
         }
@@ -1210,11 +1169,7 @@ export class LayerManager implements PathHitTester {
    * in the 3D view: no higher than its altitude
    */
   private topM(): number {
-    return (
-      this.app.altitudeRange.max *
-      FEET_TO_METERS *
-      liftExaggeration(this.app.reliefLevel)
-    );
+    return ribbonsTopM(this.app.altitudeRange.max, this.app.reliefLevel);
   }
 
   /** The part of the map the ribbon of a run lies in, along its curve */
@@ -1270,6 +1225,7 @@ export class LayerManager implements PathHitTester {
         if (features) {
           features.followTerrain(this.app);
           features.followHeatCloud(this.app);
+          features.followSelectionRibbons(this.app);
           this.terrainLoaded = true;
         }
         // A failure is tried again by the next zoom, not from here

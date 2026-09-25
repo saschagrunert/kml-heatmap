@@ -48,6 +48,7 @@ const FLIGHT_LAYERS = [
   "paths-airspeed-3d",
   "paths-altitude-selected-3d",
   "paths-airspeed-selected-3d",
+  "selection-highlight-3d",
   "replay-trail-3d",
 ];
 

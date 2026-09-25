@@ -164,8 +164,9 @@ their traces in `test-results/`, and every run writes an HTML report to
   names only, not the TypeScript sources
 
 `npm run build` produces five bundles. `mapApp.bundle.js` starts the map,
-`features.bundle.js` holds Replay, the relief and the heat cloud of the 3D
-view and the satellite imagery, and `wrapped.bundle.js` holds Wrapped and the content of
+`features.bundle.js` holds Replay, the relief, the heat cloud and the
+ribbons of a selection of the 3D view and the satellite imagery, and
+`wrapped.bundle.js` holds Wrapped and the content of
 the statistics panel (the rail itself is part of the app, and says it is
 loading until the bundle is in; see `ui/statsPanel.ts`); the page
 imports each of the last two the first time one of its features is opened.
@@ -238,7 +239,12 @@ none and the statistics rail falls back to the ISO country code.
     (Vitest)
   - E2E tests: `tests/e2e/` (Playwright)
 - **Stylesheets** in `kml_heatmap/static/` (`styles.css`, `features.css`
-  and `wrapped.css`)
+  and `wrapped.css`). A surface across the whole width of the map on a
+  phone (the tab bar, its sheet, the statistics sheet) takes
+  `--color-bg-edge`, the secondary surface at an alpha of 0.99: Chrome
+  leaves out the part of the map's canvas an opaque one covers and the same
+  strip at the opposite edge, and the top of the map showed the page
+  background as high as the bar (`tests/frontend/unit/edgeSurfaces.test.ts`)
 - **Build output** in `kml_heatmap/static/` (`mapApp.bundle.js`,
   `features.bundle.js`, `wrapped.bundle.js`, `shared.bundle.js`,
   `yearWorker.bundle.js`, their
@@ -526,9 +532,10 @@ relief while it is drawn, directly above the base map's ground and the
 satellite imagery on it (`aboveGround` in `ui/satellite.ts`, see below), so
 below its runways, roads, buildings and labels and every layer of the app,
 in the colours of the `--terrain-*` tokens of `styles.css`; a second source
-would fetch about
-2.6 times the tiles, for a sharper shading nobody sees under the dark
-style (MapLibre warns about the shared source once). `withDataLayers`
+would fetch about twice the tiles (89 instead of 41 for a session into the
+3D view and two levels in and out, see `shade` in `ui/terrain.ts`), for a
+sharper shading nobody sees under the dark style (MapLibre warns about the
+shared source once). `withDataLayers`
 carries the source and the relief across a base style swap and
 `ui/terrain.ts` puts the shading back into the new style. The globe gets
 the shading alone (`reliefShaded` in the store, set by `syncTerrain` for the
@@ -557,6 +564,31 @@ instead of 128, and no simplification: with
 it, far tiles of a tilted view dropped the ribbons whose walls still
 showed. The replay's trail is cut as the data has it, into a source as
 before; the chase camera looks at it from close up.
+
+The lines of a selection over the heatmap (`ui/selectionHighlight.ts`)
+lie flat on the ground, and in the 3D view the cloud draws the same
+flights at their height beside them. While the 3D view lifts the flights,
+`ui/selectionRibbons.ts` (with the feature bundle) draws the selection as
+ribbons instead, in the colour of the lines (`selection-highlight-3d`,
+among the other ribbons above the cloud), cut for the pixels of the level
+as the colour layers' are, and sets `selectionRibbons` in the store, for
+which the lines empty their source. The source is one of `RIBBON_SOURCES`,
+so its ribbons take the exaggeration of a new level by feature state with
+the others, and `ui/terrain.ts` hides them with the trail while they settle
+on new ground. They are cut again for a new selection, dataset, ground or
+relief level and at the end of a zoom into another whole level, only while
+the lines show, and from `CULL_FROM_ZOOM` on only around the view, again
+as the view leaves that (`utils/viewBox.ts`, shared with the layer
+manager): at map zoom 16 a year's flights, all selected, came to 83,000
+pieces and 125 ms of every zoom's end, around the view to 7,000 and
+20 ms. A lost context has them written again as they were; hidden by a
+colour layer or a replay they stay as long as they still fit. Their curves
+are the ones `groundedFlights` holds for the level, or makes where the
+selection is more than half of the segments (the flights of the home
+field), and otherwise the selected flights smoothed alone
+(`smoothGrounded`), each the same curve: smoothing every flight of 2026
+again for a level whose cloud points were kept took 35 ms of a zoom's end
+on a desktop. Like the lines they are not hit tested.
 
 The page fetches the tiles from `s3.amazonaws.com`, whose
 `elevation-tiles-prod/` bucket alone the CSP names in `connect-src`

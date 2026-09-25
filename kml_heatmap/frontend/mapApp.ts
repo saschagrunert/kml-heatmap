@@ -450,7 +450,10 @@ export class MapApp {
       MAP_LAYERS.pathsAirspeedSelectedRibbons,
     ]);
     const airports = new AirportLayerHandle();
-    const highlight = new MapLayerHandle([MAP_LAYERS.selectionHighlight]);
+    const highlight = new MapLayerHandle([
+      MAP_LAYERS.selectionHighlight,
+      MAP_LAYERS.selectionHighlightRibbons,
+    ]);
     this.heatmapLayer = heatmap;
     this.aviationLayer = aviation;
     this.altitudeLayer = altitude;

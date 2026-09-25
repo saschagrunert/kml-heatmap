@@ -552,7 +552,10 @@ export function createMockApp(overrides: MockAppOverrides = {}): MockApp {
     ),
     airportLayer: spied(new AirportLayerHandle()),
     selectionHighlightLayer: spied(
-      new MapLayerHandle([MAP_LAYERS.selectionHighlight]),
+      new MapLayerHandle([
+        MAP_LAYERS.selectionHighlight,
+        MAP_LAYERS.selectionHighlightRibbons,
+      ]),
     ),
   };
   if (map) {

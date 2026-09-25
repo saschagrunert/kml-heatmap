@@ -213,20 +213,52 @@ export function groundedFlights(
   sampled: boolean,
   level: number,
 ): SmoothedFlights {
-  const key = sampled ? Math.min(Math.max(level, 0), RELIEF_MAX_LEVEL) : -1;
-  if (grounded?.segments === segments && grounded.level === key) {
-    return grounded.flights;
-  }
+  const held = heldFlights(segments, sampled, level);
+  if (held) return held;
+  const flights = smoothGrounded(segments, sampled, level);
+  grounded = { segments, level: groundedKey(sampled, level), flights };
+  return flights;
+}
+
+/** The level groundedFlights holds its flights by: -1 for the fields' line */
+function groundedKey(sampled: boolean, level: number): number {
+  return sampled ? Math.min(Math.max(level, 0), RELIEF_MAX_LEVEL) : -1;
+}
+
+/**
+ * The flights of `segments` as groundedFlights would give them, where it
+ * holds them already, and null otherwise
+ */
+export function heldFlights(
+  segments: readonly PathSegment[],
+  sampled: boolean,
+  level: number,
+): SmoothedFlights | null {
+  return grounded?.segments === segments &&
+    grounded.level === groundedKey(sampled, level)
+    ? grounded.flights
+    : null;
+}
+
+/**
+ * The flights of `segments` smoothed as groundedFlights smooths them, each
+ * on its own, without holding them: for a few flights, such as the
+ * selected ones (ui/selectionRibbons.ts), it takes a fraction of the time
+ * of every flight of the dataset.
+ */
+export function smoothGrounded(
+  segments: readonly PathSegment[],
+  sampled: boolean,
+  level: number,
+): SmoothedFlights {
   // Each flight stands on its own fields (groundProfileFt), and on the
   // relief where it is drawn, as coarse as the level draws it, with the
   // ground of the levels around it
   const { ground, offsets } = groundProfilesFt(segments, sampled, level);
-  const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
+  return smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
     groundOf: (i) => ground[i]!,
     offsets,
   });
-  grounded = { segments, level: key, flights };
-  return flights;
 }
 
 /** Whether flights smoothed by groundedFlights are held, and of what */

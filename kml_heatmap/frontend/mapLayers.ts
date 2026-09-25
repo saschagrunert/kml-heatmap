@@ -58,6 +58,8 @@ const SELECTED_PATH_LINE = { width: 6, opacity: 1 };
 const REPLAY_ROUTE_LINE = { width: 2, opacity: 0.5 };
 const REPLAY_TRAIL_LINE = { width: 3, opacity: 0.8 };
 const SELECTION_LINE = { width: 1.5, opacity: 0.9 };
+/** The colour of the lines of a selection where the stylesheet has none */
+const SELECTION_COLOR = "#f2f2f2";
 
 /** Class on the map container that hides every airport marker */
 export const AIRPORTS_HIDDEN_CLASS = "airports-hidden";
@@ -148,6 +150,7 @@ function addRibbons(
   layout: { visibility?: "none" },
   opacity: number | undefined,
   before: string | undefined,
+  color?: string,
 ): void {
   map.addSource(id, {
     type: "geojson",
@@ -157,13 +160,15 @@ function addRibbons(
     maxzoom: 14,
     promoteId: "k",
   });
-  map.addLayer(ribbonLayer(id, layout, opacity), before);
+  map.addLayer(ribbonLayer(id, layout, opacity, color), before);
 }
 
+/** A layer of ribbons in `color`, or in the colour of each feature */
 function ribbonLayer(
   id: string,
   layout: { visibility?: "none" },
   opacity: number | undefined,
+  color: string | undefined,
 ): FillExtrusionLayerSpecification {
   const { base, height } = ribbonHeights();
   return {
@@ -173,7 +178,7 @@ function ribbonLayer(
     layout,
     paint: {
       ...(opacity !== undefined && { "fill-extrusion-opacity": opacity }),
-      "fill-extrusion-color": ["get", "color"],
+      "fill-extrusion-color": color ?? ["get", "color"],
       "fill-extrusion-base": base,
       "fill-extrusion-height": height,
     },
@@ -284,7 +289,7 @@ function addDataLayersTo(map: MapLibreMap): void {
     [
       MAP_LAYERS.selectionHighlight,
       "--selection-highlight-color",
-      "#f2f2f2",
+      SELECTION_COLOR,
       SELECTION_LINE,
       { ...round, ...hidden },
     ],
@@ -380,6 +385,15 @@ function addDataLayersTo(map: MapLibreMap): void {
   for (const id of PATH_RIBBON_SOURCES) {
     addRibbons(map, id, hidden, undefined, before);
   }
+  // The lines of a selection, at their height (see ui/selectionRibbons.ts)
+  addRibbons(
+    map,
+    MAP_SOURCES.selectionHighlightRibbons,
+    hidden,
+    SELECTION_LINE.opacity,
+    before,
+    cssVar("--selection-highlight-color") || SELECTION_COLOR,
+  );
 
   // In the 3D view the trail is written here instead (see ReplayRenderer)
   addRibbons(

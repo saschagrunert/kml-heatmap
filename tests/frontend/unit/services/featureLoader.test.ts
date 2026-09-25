@@ -35,6 +35,7 @@ const features = {
   listFlights: vi.fn(),
   followTerrain: vi.fn(),
   followHeatCloud: vi.fn(),
+  followSelectionRibbons: vi.fn(),
 } as unknown as FeatureModule;
 
 const wrapped = {

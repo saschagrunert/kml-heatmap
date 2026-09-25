@@ -115,6 +115,7 @@ export const MAP_SOURCES = {
   pathsAirspeedRibbons: "paths-airspeed-3d",
   pathsAltitudeSelectedRibbons: "paths-altitude-selected-3d",
   pathsAirspeedSelectedRibbons: "paths-airspeed-selected-3d",
+  selectionHighlightRibbons: "selection-highlight-3d",
   replayTrail: "replay-trail",
   replayTrailRibbons: "replay-trail-3d",
   airportLabels: "airport-labels",
@@ -125,13 +126,13 @@ export const MAP_SOURCES = {
 /**
  * Ids of the layers the map is created with, one per source and named like
  * it, except for the heat lines, which are drawn twice: a wide blurred glow
- * and a thin core over it. The flights and the replay trail have a source
- * and a layer each for their lines and for their ribbons at their altitude
- * in the 3D view (see calculations/lift.ts). The order here is the drawing order,
- * bottom to top. All of them sit below the first label layer of the base
- * style, but the airport labels: they are labels themselves and go on top
- * of every layer, where the map places them first and the place names give
- * way.
+ * and a thin core over it. The flights, the lines of a selection and the
+ * replay trail have a source and a layer each for their lines and for their
+ * ribbons at their altitude in the 3D view (see calculations/lift.ts). The
+ * order here is the drawing order, bottom to top. All of them sit below the
+ * first label layer of the base style, but the airport labels: they are
+ * labels themselves and go on top of every layer, where the map places them
+ * first and the place names give way.
  */
 export const MAP_LAYERS = {
   aviation: "aviation",
@@ -149,6 +150,7 @@ export const MAP_LAYERS = {
   pathsAirspeedRibbons: "paths-airspeed-3d",
   pathsAltitudeSelectedRibbons: "paths-altitude-selected-3d",
   pathsAirspeedSelectedRibbons: "paths-airspeed-selected-3d",
+  selectionHighlightRibbons: "selection-highlight-3d",
   replayTrail: "replay-trail",
   replayTrailRibbons: "replay-trail-3d",
   airportLabels: "airport-labels",

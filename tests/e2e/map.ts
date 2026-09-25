@@ -674,6 +674,14 @@ async function drawnPaths(page: Page, layer: ColorLayer): Promise<DrawnPath[]> {
   }, layer);
 }
 
+/**
+ * Options for `expect.poll` over pathCount, pathColors and pathWeights. Each
+ * call first waits for the map to be idle (up to 15 s, waitForMapIdle), so a
+ * poll with the default 5 s gave up before one call had answered on a slow
+ * engine: WebKit in software WebGL did in CI.
+ */
+export const PATH_POLL = { timeout: 20000 };
+
 /** How many pieces of path a colour layer has drawn */
 export async function pathCount(
   page: Page,

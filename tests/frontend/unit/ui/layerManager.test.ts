@@ -77,17 +77,20 @@ const featureBundle = vi.hoisted(() => ({
   available: true,
   held: false,
   followHeatCloud: vi.fn(),
+  followSelectionRibbons: vi.fn(),
 }));
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", async () => {
   const { followTerrain } =
     await import("../../../../kml_heatmap/frontend/ui/terrain");
-  const { followHeatCloud } = featureBundle;
+  const { followHeatCloud, followSelectionRibbons } = featureBundle;
   return {
     loadFeatures: vi.fn(() =>
       featureBundle.held
         ? new Promise<never>(() => {})
         : Promise.resolve(
-            featureBundle.available ? { followTerrain, followHeatCloud } : null,
+            featureBundle.available
+              ? { followTerrain, followHeatCloud, followSelectionRibbons }
+              : null,
           ),
     ),
   };

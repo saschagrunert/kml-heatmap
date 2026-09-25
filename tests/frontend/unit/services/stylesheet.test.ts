@@ -36,8 +36,8 @@ describe("loadStylesheet", () => {
   });
 
   it("leaves the link in the document, unlike a script", async () => {
-    // A link only applies while it is in the head; removing it as loadScript
-    // removes its script would undo the styles it just brought in
+    // A link only applies while it is in the head; removing it once it has
+    // loaded, as a loader of scripts may, would undo the styles it brought in
     const appendChildSpy = vi
       .spyOn(document.head, "appendChild")
       .mockImplementation((node: Node) => {

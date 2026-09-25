@@ -141,12 +141,19 @@ file next to them (the package ships it as a dozen, and the page imports it
 with `import()` on the first export), and copies every country flag of
 `flag-icons` into `kml_heatmap/static/flags/`. Both directories are
 generated and gitignored, and each build replaces them, so a file dropped
-from the list does not linger. A copy differs from its original only in
-the closing `sourceMappingURL` comment, left off because the maps (five
+from the list does not linger. A copy differs from its original in the
+closing `sourceMappingURL` comment, left off because the maps (five
 megabytes for MapLibre) are not shipped and every DevTools session would
-ask for them and get a 404. Serving the files from the site keeps the page
-working during a CDN outage, keeps visitors' addresses away from CDNs and
-leaves `package-lock.json` as the one place their versions are pinned.
+ask for them and get a 404, and `maplibre-gl.mjs` in two fixes of a few
+characters each for MapLibre bugs the app cannot work around from the
+outside (`VENDOR_PATCHES` in `vendor.js`): tiles of the chase view's trail
+culled below the camera on the relief, and the raw data of before kept by
+a GeoJSON tile that loads empty. The texts of their upstream issues are
+with the owner and not filed yet. A fix that no longer matches exactly
+once fails the build, so a MapLibre bump shows whether it is still needed.
+Serving the files from the site keeps the page working during a CDN
+outage, keeps visitors' addresses away from CDNs and leaves
+`package-lock.json` as the one place their versions are pinned.
 `kml_heatmap/site_assets.py` keeps its own list of the files it publishes,
 in step with `VENDOR_FILES` and `VENDOR_MODULES`, which
 `tests/test_site_assets.py` checks; `tests/frontend/unit/vendor.test.ts`

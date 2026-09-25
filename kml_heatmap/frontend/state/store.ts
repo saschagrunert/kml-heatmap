@@ -50,6 +50,12 @@ export interface StoreState extends ToggleFlags {
    */
   heatCloud: boolean;
   /**
+   * Whether the 3D view draws the lines of a selection as ribbons at their
+   * height, for which the flat lines step aside (see ui/selectionRibbons.ts,
+   * its only writer)
+   */
+  selectionRibbons: boolean;
+  /**
    * Whether a replay is running. The layer flags keep what the user chose;
    * what the map shows follows from both (see ui/layerVisibility.ts).
    */
@@ -88,6 +94,7 @@ export const STORE_ACCESSOR_KEYS = [
   "reliefShaded",
   "reliefLevel",
   "heatCloud",
+  "selectionRibbons",
   "replayActive",
   "currentData",
   "hasTimingData",
@@ -131,6 +138,7 @@ export function createDefaultState(): StoreState {
     reliefShaded: false,
     reliefLevel: 0,
     heatCloud: false,
+    selectionRibbons: false,
     replayActive: false,
     currentData: null,
     hasTimingData: false,
