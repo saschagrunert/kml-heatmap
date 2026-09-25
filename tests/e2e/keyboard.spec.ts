@@ -159,6 +159,23 @@ test.describe("Keyboard", () => {
     await expect(slider).toHaveValue("0");
   });
 
+  test("Clear on the selection chip hands focus to the map", async ({
+    page,
+  }) => {
+    await focusBusiestAirport(page);
+    await page.keyboard.press("Enter");
+    const chip = page.locator("#selection-chip");
+    await expect(chip).toBeVisible();
+
+    await page.locator("#selection-clear-btn").focus();
+    await page.keyboard.press("Enter");
+
+    // The chip hides with the selection; focus went to the map rather than
+    // falling to <body> with it
+    await expect(chip).toBeHidden();
+    await expect(page.locator("#map .maplibregl-canvas")).toBeFocused();
+  });
+
   test("the airport markers leave the tab order while Wrapped is open", async ({
     page,
   }) => {

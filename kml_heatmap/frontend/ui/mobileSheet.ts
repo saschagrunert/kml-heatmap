@@ -246,16 +246,11 @@ export class MobileSheet {
       row.element.classList.toggle("active", on);
     }
 
-    if (spec.kind === "switch" && row.element instanceof HTMLButtonElement) {
-      row.element.disabled = spec.isDisabled?.() ?? false;
-    }
-
-    // An action that cannot run dims like a switch that cannot: the Replay
-    // row used to read as available while its own hint said it was not,
-    // beside an isolate row that dimmed correctly. It stays a live control
-    // rather than a disabled one, because tapping it is what explains the
-    // precondition, and a disabled button is not even reachable by keyboard.
-    if (spec.kind === "action") {
+    // A row that cannot run dims, and says why in its hint. It stays a
+    // live control rather than a disabled one, as its desktop counterpart
+    // does: a disabled button is not even reachable by keyboard, and for
+    // Replay the tap is what explains the precondition.
+    if (spec.kind !== "select") {
       const unavailable = spec.isDisabled?.() ?? false;
       row.element.setAttribute("aria-disabled", String(unavailable));
     }
@@ -320,6 +315,9 @@ export class MobileSheet {
       element.setAttribute("role", "switch");
       control.append(createSwitch());
       element.addEventListener("click", () => {
+        // Unlike an action, a switch has nothing to explain on a tap: its
+        // hint already says why it cannot move
+        if (spec.isDisabled?.()) return;
         spec.onToggle();
         this.refresh();
       });

@@ -1110,7 +1110,6 @@ describe("ReplayRenderer", () => {
       callUpdateDisplay();
 
       expect(el("replay-time-display").textContent).toBe("1:05 / 5:00");
-      expect(el("replay-slider-start").textContent).toBe("1:05");
     });
 
     it("updates slider value and spoken value text", () => {

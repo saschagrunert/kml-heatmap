@@ -21,7 +21,7 @@ import { domCache } from "../utils/domCache";
 import { formatFileSize } from "../utils/formatters";
 import { frameCoalescer } from "../utils/frameCoalescer";
 import { cssVar, toLngLat, whenContextRestored } from "../utils/mapHelpers";
-import { showToast } from "../utils/toast";
+import { dismissToast, showToast, type ToastAction } from "../utils/toast";
 import { dimsHeatmap } from "./layerVisibility";
 import {
   HEATMAP_OPACITY,
@@ -64,6 +64,11 @@ export class DataManager {
   private dataLoader: DataLoader;
   /** Set when the loader already reported a failure via toast */
   private loadErrorReported = false;
+  /** The Retry of the failure toast of the load under way, and its year */
+  private retry: ToastAction | undefined;
+  private retryYear = "";
+  /** The failures on screen, which stay until dismissed */
+  private failures = new Set<string>();
   /** What the layers were last drawn for, to tell a restyle from a rebuild */
   private drawn: {
     data: KMLDataset;
@@ -112,12 +117,17 @@ export class DataManager {
       hideLoading: () => this.hideLoading(),
       onLoadError: (failedYears, stale) => {
         this.loadErrorReported = true;
-        showToast(
+        this.fail(
           "Failed to load flight data for " +
             failedYears.join(", ") +
             // The site was published again since the page was loaded
             (stale ? ". Reload the page to update it." : ""),
-          "error",
+          // The load of all years is not given up when a switch replaces
+          // it, and reports its years later: the Retry of that switch is
+          // not one for them
+          this.retryYear === "all" || failedYears.includes(this.retryYear)
+            ? this.retry
+            : undefined,
         );
       },
     });
@@ -376,21 +386,35 @@ export class DataManager {
   async loadData(
     year: string,
     signal?: AbortSignal,
+    retry?: ToastAction,
   ): Promise<KMLDataset | null> {
     this.loadErrorReported = false;
+    // What the failure toast offers: the caller knows what trying again means
+    this.retry = retry;
+    this.retryYear = year;
     const data = await this.dataLoader.loadData(year, signal);
-    if (
+    if (data && !data.incomplete) {
+      // The page has a whole dataset again: what failed before is over
+      for (const message of this.failures) dismissToast(message);
+      this.failures.clear();
+    } else if (
       !data &&
       !this.loadErrorReported &&
       !signal?.aborted &&
       !this.destroyed
     ) {
-      showToast(
+      this.fail(
         "No flight data available for " + (year === "all" ? "all years" : year),
-        "error",
+        retry,
       );
     }
     return data;
+  }
+
+  /** Say that a load failed; an error stays until dismissed */
+  private fail(message: string, retry: ToastAction | undefined): void {
+    this.failures.add(message);
+    showToast(message, "error", retry);
   }
 
   async loadAirports(): Promise<Airport[]> {

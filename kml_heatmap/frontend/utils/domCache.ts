@@ -47,61 +47,24 @@ export class DOMCache {
     }
     return element;
   }
-
-  /**
-   * Clear the cache (useful for cleanup or when DOM changes)
-   */
-  clear(): void {
-    this.cache.clear();
-  }
-
-  /**
-   * Remove a specific element from cache
-   * @param id - Element ID to remove
-   */
-  remove(id: string): void {
-    this.cache.delete(id);
-  }
-
-  /**
-   * Check if element is cached
-   * @param id - Element ID
-   */
-  has(id: string): boolean {
-    return this.cache.has(id);
-  }
-
-  /**
-   * Get cache size
-   */
-  get size(): number {
-    return this.cache.size;
-  }
 }
 
 // Export singleton instance for global use
 export const domCache = new DOMCache();
 
-export function getControlElements(
-  extraIds: string[] = [],
-): (HTMLElement | null)[] {
-  return [
-    ...HIDEABLE_CONTROL_IDS.map((id) => domCache.get(id)),
-    ...extraIds.map((id) => domCache.get(id)),
-  ];
-}
-
-export function hideControls(
-  extraIds: string[] = [],
-): Map<HTMLElement, string> {
+/**
+ * Hide the controls that must not show while Wrapped has the map, and
+ * return their inline display to put back with restoreControls
+ */
+export function hideControls(): Map<HTMLElement, string> {
   const savedDisplays = new Map<HTMLElement, string>();
-  getControlElements(extraIds).forEach((el) => {
-    // An element listed twice must keep its original display value
-    if (el && !savedDisplays.has(el)) {
+  for (const id of HIDEABLE_CONTROL_IDS) {
+    const el = domCache.get(id);
+    if (el) {
       savedDisplays.set(el, el.style.display);
       el.style.display = "none";
     }
-  });
+  }
   return savedDisplays;
 }
 

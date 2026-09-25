@@ -250,7 +250,11 @@ function analyzeBundleComposition(metafile, fileName) {
 // Raised from 139 KB and 47 KB for the ribbons that carry the ground of the
 // relief levels around their own, stand on the one of each tile and switch
 // their exaggeration with the relief: 140.70 KB raw and 47.19 KB gzipped.
-const BUDGET_APP = { raw: 142 * 1024, gzip: 48 * 1024 };
+// Raised from 142 KB and 48 KB for the UI fixes of the review of 2026-09-25
+// (guarded phone actions, the failed first load with Retry, sticky error
+// toasts, the wrapping map credit, new icons): 144.21 KB raw and 48.45 KB
+// gzipped.
+const BUDGET_APP = { raw: 145 * 1024, gzip: 49 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief of
 // the 3D view is first drawn, the Satellite switch is first on or an
 // airport's popup is first opened, so it is not part of what a first visit

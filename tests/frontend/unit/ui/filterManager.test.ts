@@ -9,7 +9,10 @@ import {
   type MockApp,
 } from "../../testHelpers";
 
-const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
+const toastMock = vi.hoisted(() => ({
+  showToast: vi.fn(),
+  dismissToast: vi.fn(),
+}));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
 
 describe("FilterManager", () => {
@@ -227,6 +230,7 @@ describe("FilterManager", () => {
       expect(mockApp.dataManager.loadData).toHaveBeenCalledWith(
         "2024",
         expect.any(AbortSignal),
+        expect.objectContaining({ label: "Retry" }),
       );
       expect(mockApp.currentData).toEqual(year2024Data());
     });
@@ -354,9 +358,11 @@ describe("FilterManager", () => {
 
       expect(applied).toBe(true);
       expect(yearSelect.value).toBe("2025");
+      // A Reset view is more than the switch; its button is the retry
       expect(mockApp.dataManager.loadData).toHaveBeenCalledWith(
         "2025",
         expect.any(AbortSignal),
+        undefined,
       );
       expect(mockApp.selectedYear).toBe("2025");
       expect(mockApp.heatmapVisible).toBe(true);
@@ -486,6 +492,128 @@ describe("FilterManager", () => {
       await first;
 
       expect(yearSelect.value).toBe("2024");
+    });
+
+    it("retries the switch from the toast of its failure", async () => {
+      addYearOption("2024");
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      yearSelect.value = "2024";
+      mockApp.dataManager.loadData.mockResolvedValueOnce(null);
+      await filterManager.filterByYear();
+      const [, , retry] = mockApp.dataManager.loadData.mock.calls[0] as [
+        string,
+        AbortSignal,
+        { run: () => void },
+      ];
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
+
+      retry.run();
+
+      await vi.waitFor(() => expect(mockApp.selectedYear).toBe("2024"));
+    });
+
+    it("shows no year when a switch fails with nothing loaded", async () => {
+      // The first load failed: re-picking the year the dropdown showed was
+      // no change and asked for nothing
+      mockApp.currentData = null;
+      mockApp.selectedYear = "2025";
+      addYearOption("2025");
+      addYearOption("2024");
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      yearSelect.value = "2024";
+      mockApp.dataManager.loadData.mockResolvedValue(null);
+
+      await filterManager.filterByYear();
+
+      expect(yearSelect.selectedIndex).toBe(-1);
+    });
+
+    it("retries the year of the store and keeps the selection it can", async () => {
+      // The page was opened with a selection the failed load never checked
+      mockApp.currentData = null;
+      mockApp.selectedYear = "2024";
+      addYearOption("2024");
+      mockApp.selectedPathIds.add(3);
+      mockApp.selectedPathIds.add(99);
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
+
+      expect(await filterManager.retryLoad()).toBe(true);
+
+      expect(mockApp.dataManager.loadData.mock.calls[0]![0]).toBe("2024");
+      expect(mockApp.currentData).toEqual(year2024Data());
+      expect([...mockApp.selectedPathIds]).toEqual([3]);
+    });
+
+    it("gives way to a replay that starts while the year loads", async () => {
+      // The switch used to land in the middle of the replay: the selection
+      // it played went, and the statistics reset under it
+      mockApp.selectedYear = "2025";
+      addYearOption("2025");
+      addYearOption("2024");
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      mockApp.selectedPathIds.add(1);
+      const previous = mockApp.currentData;
+      let resolve: (d: KMLDataset) => void = () => {};
+      mockApp.dataManager.loadData.mockImplementation(
+        () =>
+          new Promise<KMLDataset>((r) => {
+            resolve = r;
+          }),
+      );
+
+      yearSelect.value = "2024";
+      const pending = filterManager.filterByYear();
+      mockApp.replayActive = true;
+      const signal = mockApp.dataManager.loadData.mock
+        .calls[0]![1] as AbortSignal;
+
+      // The dropdown shows the year the replay plays in again
+      expect(yearSelect.value).toBe("2025");
+      expect(signal.aborted).toBe(true);
+      resolve(year2024Data());
+      expect(await pending).toBe(false);
+      expect(mockApp.selectedYear).toBe("2025");
+      expect(mockApp.currentData).toBe(previous);
+      expect([...mockApp.selectedPathIds]).toEqual([1]);
+    });
+
+    it("leaves a running replay alone when the toast's Retry is pressed", async () => {
+      // The toast of a failed switch stays into a replay, and its Retry
+      // swapped the dataset under the flight being played
+      addYearOption("2025");
+      addYearOption("2024");
+      mockApp.selectedYear = "2025";
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      yearSelect.value = "2024";
+      mockApp.dataManager.loadData.mockResolvedValueOnce(null);
+      await filterManager.filterByYear();
+      const [, , retry] = mockApp.dataManager.loadData.mock.calls[0] as [
+        string,
+        AbortSignal,
+        { run: () => void },
+      ];
+      const previous = mockApp.currentData;
+      mockApp.selectedPathIds.add(1);
+      mockApp.replayActive = true;
+      mockApp.dataManager.loadData.mockClear();
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
+
+      retry.run();
+      await Promise.resolve();
+
+      expect(mockApp.dataManager.loadData).not.toHaveBeenCalled();
+      expect(yearSelect.value).toBe("2025");
+      expect(mockApp.selectedYear).toBe("2025");
+      expect(mockApp.currentData).toBe(previous);
+      expect([...mockApp.selectedPathIds]).toEqual([1]);
     });
 
     it("does nothing if year select element doesn't exist", async () => {

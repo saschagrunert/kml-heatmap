@@ -17,7 +17,6 @@ import { formatBuildTime, formatNumber } from "../utils/formatters";
 import {
   escapeHtml,
   markFlightTimeUnits,
-  pluralFlights,
   pluralize,
   splitAirportName,
 } from "../utils/htmlGenerators";
@@ -289,7 +288,11 @@ function aircraftSection(stats: FilteredStatistics): string {
       "</span>" +
       '<span class="kh-stats-metric-values">' +
       '<span class="kh-stats-metric-value">' +
-      pluralFlights(aircraft.flights) +
+      // The count in the figures' face, the noun in the text's
+      formatNumber(aircraft.flights) +
+      ' <span class="kh-stats-noun">' +
+      (aircraft.flights === 1 ? "flight" : "flights") +
+      "</span>" +
       "</span>" +
       (aircraft.flight_time_str
         ? '<span class="kh-stats-metric-alt">' +

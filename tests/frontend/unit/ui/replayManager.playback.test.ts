@@ -657,7 +657,7 @@ describe("ReplayManager playback", () => {
 
       expect(replayManager.state.autoZoom).toBe(true);
       const btn = el("replay-autozoom-btn");
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.classList.contains("active")).toBe(true);
       expect(btn.getAttribute("aria-pressed")).toBe("true");
       expect(btn.title).toBe("Auto-zoom enabled");
     });
@@ -669,7 +669,7 @@ describe("ReplayManager playback", () => {
 
       expect(replayManager.state.autoZoom).toBe(false);
       const btn = el("replay-autozoom-btn");
-      expect(btn.style.opacity).toBe("0.5");
+      expect(btn.classList.contains("active")).toBe(false);
       expect(btn.getAttribute("aria-pressed")).toBe("false");
       expect(btn.title).toBe("Auto-zoom disabled");
     });

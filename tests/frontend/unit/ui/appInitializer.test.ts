@@ -21,7 +21,10 @@ import {
 } from "../../testHelpers";
 import { Marker as MockMarker } from "../../../mocks/maplibre-gl";
 
-const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
+const toastMock = vi.hoisted(() => ({
+  showToast: vi.fn(),
+  dismissToast: vi.fn(),
+}));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
 
 function setupDOM(): void {
@@ -30,8 +33,12 @@ function setupDOM(): void {
     <button id="airspeed-btn"></button>
     <div id="altitude-legend"></div>
     <div id="airspeed-legend"></div>
+    <div id="map-empty" hidden><button id="map-empty-retry"></button></div>
   `;
 }
+
+/** The Retry the failure toast of the first load offers */
+const RETRY: unknown = expect.objectContaining({ label: "Retry" });
 
 function yearSelect(): HTMLSelectElement {
   return document.getElementById("year-select") as HTMLSelectElement;
@@ -414,7 +421,11 @@ describe("appInitializer", () => {
       expect(app.aircraftModels).toBe(metadata.aircraft_models);
       expect(app.hasTimingData).toBe(true);
       expect(app.selectedYear).toBe("2025");
-      expect(app.dataManager.loadData).toHaveBeenCalledWith("2025");
+      expect(app.dataManager.loadData).toHaveBeenCalledWith(
+        "2025",
+        undefined,
+        RETRY,
+      );
       expect(app.currentData).toBe(data);
       expect(Object.keys(app.airportMarkers)).toHaveLength(2);
       expect(app.airspeedRange).toEqual({ min: 10, max: 150 });
@@ -475,7 +486,8 @@ describe("appInitializer", () => {
 
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(false);
-      expect(btn.style.opacity).toBe("0.5");
+      // Off, and available: no style of its own, the stylesheet draws it
+      expect(btn.style.opacity).toBe("");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
     });
 
@@ -486,7 +498,8 @@ describe("appInitializer", () => {
       await loadInitialData(asMapApp(app));
 
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.getAttribute("aria-pressed")).toBe("true");
+      expect(btn.classList.contains("active")).toBe(true);
       expect(document.getElementById("airspeed-legend")!.hidden).toBe(false);
     });
 
@@ -533,7 +546,11 @@ describe("appInitializer", () => {
       expect(app.hasTimingData).toBe(false);
       expect(app.currentData).toBeNull();
       expect(app.selectedYear).toBe("all");
-      expect(app.dataManager.loadData).toHaveBeenCalledWith("all");
+      expect(app.dataManager.loadData).toHaveBeenCalledWith(
+        "all",
+        undefined,
+        RETRY,
+      );
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(true);
       // The aircraft list is still settled
@@ -554,6 +571,146 @@ describe("appInitializer", () => {
 
       const marker = app.airportMarkers["Frankfurt EDDF"]!;
       expect(marker.getLatLng()).toEqual({ lat: 50.1, lng: 8.67 });
+    });
+
+    it("stretches the speed scale over the speeds of the dataset", async () => {
+      const segments = Array.from({ length: 101 }, (_, i) =>
+        createSegment({ path_id: 1, groundspeed_knots: 40 + i }),
+      );
+      app.dataManager.loadData.mockResolvedValue(
+        createDataset(
+          [{ id: 1, year: 2025, aircraft_registration: "D-ABCD" }],
+          segments,
+        ),
+      );
+
+      await loadInitialData(asMapApp(app));
+
+      // The 5th and the 95th of 40 to 140 kt, not the metadata's 10 to 150
+      expect(app.airspeedRange).toEqual({ min: 45, max: 135 });
+    });
+
+    it("drops its dataset when the year was switched while it loaded", async () => {
+      // A Reset view from the phone's bar went ahead during the first load,
+      // and its year was then covered by this one's dataset
+      const newer = createDataset([{ id: 2, year: 2024 }]);
+      app.dataManager.loadData.mockImplementation(() => {
+        app.store.batch(() => {
+          app.selectedYear = "2024";
+          app.currentData = newer;
+        });
+        return Promise.resolve(data);
+      });
+
+      await loadInitialData(asMapApp(app));
+
+      expect(app.selectedYear).toBe("2024");
+      expect(app.currentData).toBe(newer);
+    });
+
+    it("writes the dropdown before the store announces the year", async () => {
+      // The Filter sheet mirrors the dropdown when the store says the year
+      // changed, and read the one of before
+      const seen: string[] = [];
+      app.store.subscribe("selectedYear", () => seen.push(yearSelect().value));
+
+      await loadInitialData(asMapApp(app));
+
+      expect(seen).toEqual(["2025"]);
+    });
+
+    describe("when the year fails to load", () => {
+      beforeEach(() => {
+        app.dataManager.loadData.mockResolvedValue(null);
+      });
+
+      it("shows no year in the dropdown, so picking it again asks again", async () => {
+        await loadInitialData(asMapApp(app));
+
+        expect(app.selectedYear).toBe("2025");
+        expect(yearSelect().selectedIndex).toBe(-1);
+      });
+
+      it("has an open Filter sheet read the dropdown again", async () => {
+        // The store did not change, and the sheet kept showing the year
+        const refresh = vi.fn();
+        app.mobileBar = {
+          sheet: { refresh },
+        } as unknown as MockApp["mobileBar"];
+
+        await loadInitialData(asMapApp(app));
+
+        expect(refresh).toHaveBeenCalled();
+      });
+
+      it("keeps a year someone picked during the load", async () => {
+        app.dataManager.loadData.mockImplementation(() => {
+          yearSelect().value = "2024";
+          return Promise.resolve(null);
+        });
+
+        await loadInitialData(asMapApp(app));
+
+        // Applied once the load is over (MapApp.applyPendingFilterChanges)
+        expect(yearSelect().value).toBe("2024");
+      });
+
+      it("says so on the map, and loads the year again from there", async () => {
+        const panel = document.getElementById("map-empty")!;
+        const loaded = createDataset([{ id: 1, year: 2025 }]);
+        app.filterManager.retryLoad.mockImplementation(() => {
+          // Hidden while it loads: the loading indicator takes its place
+          expect(panel.hidden).toBe(true);
+          app.currentData = loaded;
+          return Promise.resolve(true);
+        });
+
+        await loadInitialData(asMapApp(app));
+        expect(panel.hidden).toBe(false);
+
+        document.getElementById("map-empty-retry")!.click();
+
+        expect(app.filterManager.retryLoad).toHaveBeenCalledTimes(1);
+        // The failure it said is being acted on
+        expect(toastMock.dismissToast).toHaveBeenCalled();
+        await vi.waitFor(() => expect(panel.hidden).toBe(true));
+      });
+
+      it("offers the same retry on the toast of the failure", async () => {
+        await loadInitialData(asMapApp(app));
+        const [, , retry] = app.dataManager.loadData.mock.calls[0] as [
+          string,
+          undefined,
+          { run: () => void },
+        ];
+
+        retry.run();
+
+        expect(app.filterManager.retryLoad).toHaveBeenCalledTimes(1);
+      });
+
+      it("shows the panel again when the retry fails too", async () => {
+        const panel = document.getElementById("map-empty")!;
+        app.filterManager.retryLoad.mockResolvedValue(false);
+        await loadInitialData(asMapApp(app));
+
+        document.getElementById("map-empty-retry")!.click();
+
+        expect(panel.hidden).toBe(true);
+        await vi.waitFor(() => expect(panel.hidden).toBe(false));
+      });
+
+      it("hands the focus of its Retry to the map as it hides", async () => {
+        document.body.append(app.map!.getCanvas());
+        app.map!.getCanvas().tabIndex = 0;
+        await loadInitialData(asMapApp(app));
+        const retry = document.getElementById("map-empty-retry")!;
+        retry.focus();
+
+        retry.click();
+
+        expect(document.activeElement).toBe(app.map!.getCanvas());
+      });
     });
 
     it("keeps no restored path the dataset does not have", async () => {

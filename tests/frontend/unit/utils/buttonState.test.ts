@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   applyToggleButtonState,
   setControlLabel,
@@ -6,13 +7,11 @@ import {
   syncToggleButton,
 } from "../../../../kml_heatmap/frontend/utils/buttonState";
 import { AppStore } from "../../../../kml_heatmap/frontend/state/store";
-import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 
 describe("buttonState", () => {
   let button: HTMLButtonElement;
 
   beforeEach(() => {
-    domCache.clear();
     button = document.createElement("button");
     button.id = "heatmap-btn";
     document.body.appendChild(button);
@@ -20,26 +19,27 @@ describe("buttonState", () => {
 
   afterEach(() => {
     button.remove();
-    domCache.clear();
   });
 
   describe("applyToggleButtonState", () => {
-    it("sets aria-pressed, active class and opacity for an active button", () => {
+    it("sets aria-pressed and the active class for an active button", () => {
       applyToggleButtonState(button, true);
 
       expect(button.getAttribute("aria-pressed")).toBe("true");
       expect(button.classList.contains("active")).toBe(true);
-      expect(button.style.opacity).toBe("1");
+      expect(button.style.opacity).toBe("");
     });
 
-    it("clears them for an inactive button", () => {
+    it("clears them for an inactive button, without dimming it", () => {
       button.classList.add("active");
 
       applyToggleButtonState(button, false);
 
       expect(button.getAttribute("aria-pressed")).toBe("false");
       expect(button.classList.contains("active")).toBe(false);
-      expect(button.style.opacity).toBe("0.5");
+      // Off is not unavailable: an inline 0.5 made the two look alike, and
+      // an inline 1.0 beat the stylesheet's look for a disabled control
+      expect(button.style.opacity).toBe("");
     });
   });
 
@@ -50,7 +50,7 @@ describe("buttonState", () => {
       syncToggleButton(store, "heatmapVisible", "heatmap-btn");
 
       expect(button.getAttribute("aria-pressed")).toBe("false");
-      expect(button.style.opacity).toBe("0.5");
+      expect(button.classList.contains("active")).toBe(false);
     });
 
     it("follows store changes", () => {
@@ -62,7 +62,6 @@ describe("buttonState", () => {
 
       expect(button.getAttribute("aria-pressed")).toBe("false");
       expect(button.classList.contains("active")).toBe(false);
-      expect(button.style.opacity).toBe("0.5");
     });
 
     it("stops following after unsubscribe", () => {
@@ -85,6 +84,50 @@ describe("buttonState", () => {
         syncToggleButton(store, "altitudeVisible", "missing-btn"),
       ).not.toThrow();
       expect(() => store.set("altitudeVisible", true)).not.toThrow();
+    });
+  });
+
+  describe("the look the stylesheet gives the states", () => {
+    let style: HTMLStyleElement;
+
+    beforeEach(() => {
+      style = document.createElement("style");
+      style.textContent = readFileSync("kml_heatmap/static/styles.css", "utf8");
+      document.head.append(style);
+    });
+
+    afterEach(() => {
+      style.remove();
+    });
+
+    /** A control in a row of a column, the way the template has them */
+    function control(attributes: string): HTMLElement {
+      const row = document.createElement("div");
+      row.className = "control-row";
+      row.innerHTML = `<button class="btn-surface control-btn" ${attributes}></button>`;
+      document.body.append(row);
+      return row.firstElementChild as HTMLElement;
+    }
+
+    const opacity = (element: HTMLElement): string =>
+      getComputedStyle(element).opacity;
+
+    it("draws a toggle at full strength, on or off", () => {
+      const off = control('aria-pressed="false"');
+      const on = control('aria-pressed="true"');
+      applyToggleButtonState(off, false);
+      applyToggleButtonState(on, true);
+
+      expect(opacity(off)).toBe("1");
+      expect(opacity(on)).toBe("1");
+    });
+
+    it("dims a control that cannot act, either way it says so", () => {
+      // Replay, Isolate, North up and Reset view stay in the tab order;
+      // what a replay turns off is disabled outright
+      expect(opacity(control('aria-disabled="true"'))).toBe("0.5");
+      expect(opacity(control("disabled"))).toBe("0.5");
+      expect(opacity(control('aria-disabled="false"'))).toBe("1");
     });
   });
 

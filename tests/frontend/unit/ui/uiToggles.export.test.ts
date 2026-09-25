@@ -311,17 +311,17 @@ describe("UIToggles export and share", () => {
       uiToggles.exportMap();
       await finishExport();
 
-      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-disabled")).not.toBe("true");
       expect(toJpeg).not.toHaveBeenCalled();
     });
 
-    it("disables the button while exporting and leaves the other controls alone", () => {
+    it("marks the button unavailable while exporting and leaves the other controls alone", () => {
       installHtmlToImage();
       const btn = el("export-btn") as HTMLButtonElement;
 
       uiToggles.exportMap();
 
-      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.textContent).toBe("Exporting…");
       // Only #map is captured and the controls are its siblings, so hiding
       // them would only make the page flicker
@@ -421,7 +421,7 @@ describe("UIToggles export and share", () => {
 
       expect(app.map!.getPixelRatio()).toBe(1);
       expect(toast()?.textContent).toBe("Export failed: tainted");
-      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-disabled")).not.toBe("true");
     });
 
     it("reports a canvas that cannot be read, and takes no picture", async () => {
@@ -497,7 +497,7 @@ describe("UIToggles export and share", () => {
       expect(revokeObjectURL).not.toHaveBeenCalled();
       vi.advanceTimersByTime(10000);
       expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url");
-      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-disabled")).not.toBe("true");
       expect(btn.textContent).toBe("Export image");
     });
 
@@ -624,7 +624,7 @@ describe("UIToggles export and share", () => {
 
       expect(clickSpy).not.toHaveBeenCalled();
       expect(toast()).toBeNull();
-      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-disabled")).not.toBe("true");
     });
 
     it("shows an error toast and re-enables the button when html-to-image is unavailable", async () => {
@@ -636,7 +636,7 @@ describe("UIToggles export and share", () => {
 
       expect(toast()?.textContent).toBe("Export unavailable");
       expect(toast()?.classList.contains("toast-error")).toBe(true);
-      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-disabled")).not.toBe("true");
       expect(btn.textContent).toBe("Export image");
       expect(clickSpy).not.toHaveBeenCalled();
     });
@@ -650,13 +650,14 @@ describe("UIToggles export and share", () => {
 
       expect(toast()?.textContent).toBe("Export failed: Export failed");
       expect(toast()?.classList.contains("toast-error")).toBe(true);
-      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-disabled")).not.toBe("true");
       expect(btn.textContent).toBe("Export image");
     });
   });
 
   describe("shareLink", () => {
     it("flushes the pending state so the URL is current, then uses the share sheet", async () => {
+      setInnerWidth(390);
       const share = vi.fn().mockResolvedValue(undefined);
       defineNavigatorProperty("share", share);
 
@@ -673,6 +674,7 @@ describe("UIToggles export and share", () => {
     it("stays silent when the user cancels the share sheet", async () => {
       const abort = new Error("cancelled");
       abort.name = "AbortError";
+      setInnerWidth(390);
       defineNavigatorProperty("share", vi.fn().mockRejectedValue(abort));
       const writeText = vi.fn().mockResolvedValue(undefined);
       defineNavigatorProperty("clipboard", { writeText });
@@ -683,7 +685,29 @@ describe("UIToggles export and share", () => {
       expect(toast()).toBeNull();
     });
 
+    it("copies the link on a desktop that has a share sheet too", async () => {
+      // The control says "Copy link"; desktop Safari and Chrome opened their
+      // share sheet instead
+      setInnerWidth(1280);
+      Object.defineProperty(window, "matchMedia", {
+        value: vi.fn(() => ({ matches: false })),
+        configurable: true,
+        writable: true,
+      });
+      const share = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("share", share);
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("clipboard", { writeText });
+
+      await uiToggles.shareLink();
+
+      expect(share).not.toHaveBeenCalled();
+      expect(writeText).toHaveBeenCalledWith(window.location.href);
+      expect(toast()?.textContent).toBe("Link copied");
+    });
+
     it("falls back to the clipboard when sharing fails", async () => {
+      setInnerWidth(390);
       defineNavigatorProperty(
         "share",
         vi.fn().mockRejectedValue(new Error("boom")),

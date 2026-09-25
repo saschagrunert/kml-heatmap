@@ -159,6 +159,35 @@ describe("layers feature", () => {
       ];
       expect(calculateAirspeedRange(segments)).toEqual({ min: 80, max: 80 });
     });
+
+    it("spans the 5th to the 95th percentile of the speeds", () => {
+      // A few taxi crawls and one fast descent stretched the scale so far
+      // that most of the flying fell into a handful of its steps
+      const speeds = [
+        ...Array.from({ length: 5 }, () => 5),
+        ...Array.from({ length: 91 }, (_, i) => 90 + i * 0.5),
+        ...Array.from({ length: 5 }, () => 250),
+      ];
+      const segments: PathSegment[] = speeds.map((groundspeed_knots) => ({
+        path_id: 1,
+        groundspeed_knots,
+      }));
+
+      expect(calculateAirspeedRange(segments)).toEqual({ min: 90, max: 135 });
+    });
+
+    it("keeps the full range when the middle has no spread", () => {
+      const segments: PathSegment[] = [
+        { path_id: 1, groundspeed_knots: 20 },
+        ...Array.from({ length: 98 }, () => ({
+          path_id: 1,
+          groundspeed_knots: 100,
+        })),
+        { path_id: 1, groundspeed_knots: 160 },
+      ];
+
+      expect(calculateAirspeedRange(segments)).toEqual({ min: 20, max: 160 });
+    });
   });
 
   describe("calculateSegmentProperties", () => {

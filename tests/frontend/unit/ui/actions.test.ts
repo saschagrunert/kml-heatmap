@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   DEFERRED_WHILE_INITIALIZING,
   bindActions,
+  runAction,
 } from "../../../../kml_heatmap/frontend/ui/actions";
 import { createMockApp, asMapApp, type MockApp } from "../../testHelpers";
 
@@ -236,5 +237,43 @@ describe("bindActions", () => {
     await Promise.resolve();
 
     expect(loggerMock.logError).toHaveBeenCalledWith(error);
+  });
+});
+
+describe("runAction", () => {
+  let app: MockApp;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    app = createMockApp();
+  });
+
+  it("runs an action the way its control does", () => {
+    expect(runAction(asMapApp(app), "exportMap")).toBe(true);
+    expect(runAction(asMapApp(app), "toggleSatellite")).toBe(true);
+
+    expect(app.uiToggles.exportMap).toHaveBeenCalledTimes(1);
+    expect(app.uiToggles.toggleSatellite).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the ones that need data back during the first load, as a click does", () => {
+    // The phone's bar called the app directly and skipped this check
+    app.isInitializing = true;
+
+    for (const action of DEFERRED_WHILE_INITIALIZING) {
+      if (action === "seekReplay") continue;
+      expect(runAction(asMapApp(app), action), action).toBe(false);
+    }
+    expect(runAction(asMapApp(app), "toggleHeatmap")).toBe(true);
+
+    expect(app.resetView).not.toHaveBeenCalled();
+    expect(app.uiToggles.exportMap).not.toHaveBeenCalled();
+    expect(app.pathSelection.toggleIsolateSelection).not.toHaveBeenCalled();
+    expect(app.loadWrapped).not.toHaveBeenCalled();
+    expect(app.uiToggles.toggleHeatmap).toHaveBeenCalledTimes(1);
+  });
+
+  it("says so for an action it does not know", () => {
+    expect(runAction(asMapApp(app), "unknownAction")).toBe(false);
   });
 });

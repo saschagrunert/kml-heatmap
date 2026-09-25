@@ -27,7 +27,8 @@ export function escapeHtml(str: string): string {
 
 /**
  * A count with its noun, pluralised: `pluralize(1, "flight")` is "1 flight",
- * `pluralize(2, "flight")` is "2 flights".
+ * `pluralize(2, "flight")` is "2 flights", and `pluralize(44143, "point")`
+ * is "44,143 points", grouped like every other figure of the page.
  *
  * @param count - The number to render
  * @param singular - Noun in its singular form
@@ -38,7 +39,7 @@ export function pluralize(
   singular: string,
   plural: string = singular + "s",
 ): string {
-  return count + " " + (count === 1 ? singular : plural);
+  return formatNumber(count) + " " + (count === 1 ? singular : plural);
 }
 
 /** "1 flight" or "12 flights" for a count */

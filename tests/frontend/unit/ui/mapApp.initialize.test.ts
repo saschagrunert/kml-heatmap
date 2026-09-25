@@ -42,7 +42,10 @@ vi.mock(
     resizeMapAfterTransition: vi.fn(),
   }),
 );
-const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
+const toastMock = vi.hoisted(() => ({
+  showToast: vi.fn(),
+  dismissToast: vi.fn(),
+}));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
 // The real bar registers a window resize listener it never removes, so every
 // test would leak one along with the MapApp it pins
@@ -197,6 +200,19 @@ describe("MapApp.initialize", () => {
       );
     });
 
+    it("takes the notice away once the map has drawn after all", async () => {
+      vi.useFakeTimers();
+      await initializeApp(app);
+      mockMap(app).loaded.mockReturnValue(false);
+      vi.advanceTimersByTime(MAP_STALL_MS);
+      toastMock.dismissToast.mockClear();
+
+      // An error stays until dismissed, and this one is no longer true
+      mockMap(app).emit("idle");
+
+      expect(toastMock.dismissToast).toHaveBeenCalledWith(MAP_STALL_MESSAGE);
+    });
+
     it("says nothing once the map has drawn", async () => {
       vi.useFakeTimers();
       await initializeApp(app);
@@ -235,7 +251,11 @@ describe("MapApp.initialize", () => {
 
       expect(mockDataManagerInstance.loadAirports).toHaveBeenCalledTimes(1);
       expect(mockDataManagerInstance.loadMetadata).toHaveBeenCalledTimes(1);
-      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("2025");
+      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith(
+        "2025",
+        undefined,
+        expect.objectContaining({ label: "Retry" }),
+      );
       expect(app.allAirportsData).toEqual(defaultAirports);
       expect(app.aircraftModels).toBe(defaultMetadata.aircraft_models);
       expect(app.hasTimingData).toBe(true);
@@ -314,7 +334,11 @@ describe("MapApp.initialize", () => {
       expect(app.aircraftModels).toEqual({});
       expect(app.hasTimingData).toBe(false);
       expect(app.selectedYear).toBe("all");
-      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("all");
+      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith(
+        "all",
+        undefined,
+        expect.objectContaining({ label: "Retry" }),
+      );
     });
   });
 
@@ -333,7 +357,11 @@ describe("MapApp.initialize", () => {
         "The list of years is unavailable, showing all years",
         "error",
       );
-      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("all");
+      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith(
+        "all",
+        undefined,
+        expect.objectContaining({ label: "Retry" }),
+      );
     });
   });
 
@@ -388,7 +416,11 @@ describe("MapApp.initialize", () => {
         "Year 2019 is not available, showing 2025",
         "info",
       );
-      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("2025");
+      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith(
+        "2025",
+        undefined,
+        expect.objectContaining({ label: "Retry" }),
+      );
     });
 
     it('falls back to "all" when no years are available', async () => {
@@ -612,10 +644,13 @@ describe("MapApp.initialize", () => {
     const button = (): HTMLElement =>
       document.getElementById("reset-view-btn")!;
 
-    /** Unavailable like Isolate and Replay: announced and dimmed */
+    /**
+     * Unavailable like Isolate and Replay: announced, which the stylesheet
+     * dims; nothing is written into the button's own style
+     */
     function expectAvailable(available: boolean): void {
       expect(button().getAttribute("aria-disabled")).toBe(String(!available));
-      expect(button().style.opacity).toBe(available ? "1" : "0.5");
+      expect(button().style.opacity).toBe("");
     }
 
     /** A camera change by hand: the map says so once it has come to rest */
@@ -722,15 +757,38 @@ describe("MapApp.initialize", () => {
 
     it("leaves the button to a running replay and takes it back after", async () => {
       await initializeApp(app);
-      const replay = button();
       app.replayActive = true;
-      // What ReplayManager does to the controls it disables
-      replay.style.opacity = "";
 
+      // The replay has disabled it; the move does not touch it
       moveCamera({ bearing: 30 });
-      expect(replay.style.opacity).toBe("");
+      expect(button().getAttribute("aria-disabled")).toBe("true");
 
       app.replayActive = false;
+      expectAvailable(true);
+    });
+
+    it("is unavailable until the first load is over", async () => {
+      // The actions that need data wait for it (ui/actions.ts), and a
+      // pressed Reset view switched the year under the load
+      mockStateManagerInstance.loadState.mockReturnValue({
+        aviationVisible: true,
+      });
+      const during: boolean[] = [];
+      app.store.subscribe("currentData", () => during.push(app.canResetView()));
+
+      await initializeApp(app);
+
+      expect(during).toEqual([false]);
+      expectAvailable(true);
+    });
+
+    it("is available when the first year failed to load", async () => {
+      // An empty map is not what a first visit shows, and Reset view loads
+      // the newest year again; it was left unavailable as if all was well
+      await initializeApp(app, defaultAirports, defaultMetadata, null);
+
+      expect(app.currentData).toBeNull();
+      expect(app.isReset()).toBe(false);
       expectAvailable(true);
     });
   });
@@ -749,7 +807,7 @@ describe("MapApp.initialize", () => {
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(false);
       // The button state itself follows the store
-      expect(btn.style.opacity).toBe("0.5");
+      expect(btn.style.opacity).toBe("");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
     });
 
@@ -795,12 +853,28 @@ describe("MapApp.initialize", () => {
       await initializeApp(app);
 
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.classList.contains("active")).toBe(true);
       expect(btn.getAttribute("aria-pressed")).toBe("true");
     });
   });
 
   describe("restored layer state", () => {
+    it("keeps altitude alone when both colour layers are restored", async () => {
+      // `v=111111111` turned both on, which the toggles never leave
+      mockStateManagerInstance.loadState.mockReturnValue({
+        altitudeVisible: true,
+        airspeedVisible: true,
+      });
+
+      await initializeApp(app);
+
+      expect(app.altitudeVisible).toBe(true);
+      expect(app.airspeedVisible).toBe(false);
+      expect(
+        document.getElementById("airspeed-btn")!.getAttribute("aria-pressed"),
+      ).toBe("false");
+    });
+
     it("adds the altitude layer and shows its legend", async () => {
       mockStateManagerInstance.loadState.mockReturnValue({
         altitudeVisible: true,

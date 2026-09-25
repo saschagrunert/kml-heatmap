@@ -18,7 +18,10 @@ import {
   resetMapLibreMock,
   type Map as MockMap,
 } from "../../../mocks/maplibre-gl";
-import { showToast } from "../../../../kml_heatmap/frontend/utils/toast";
+import {
+  dismissToast,
+  showToast,
+} from "../../../../kml_heatmap/frontend/utils/toast";
 import {
   loadFeatures,
   loadWrapped,
@@ -59,6 +62,7 @@ vi.mock(
 );
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => ({
   showToast: vi.fn(),
+  dismissToast: vi.fn(),
 }));
 const mobileBarMock = vi.hoisted(() => ({ mountFor: vi.fn() }));
 vi.mock("../../../../kml_heatmap/frontend/ui/mobileBar", () => ({
@@ -201,7 +205,7 @@ describe("MapApp controls and map", () => {
       await initializeApp(app);
       const btn = document.getElementById("replay-btn") as HTMLButtonElement;
 
-      expect(btn.style.opacity).toBe("0.5");
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.title).toBe(
         "Select exactly one flight with timing data to replay",
       );
@@ -209,8 +213,10 @@ describe("MapApp controls and map", () => {
       app.selectedPathIds.add(1);
       app.store.notifyMutation("selectedPathIds");
 
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
       expect(btn.title).toBe("Replay selected flight path");
+      // The stylesheet dims it from the attribute
+      expect(btn.style.opacity).toBe("");
     });
 
     it("follows the timing data of the loaded metadata", async () => {
@@ -218,11 +224,11 @@ describe("MapApp controls and map", () => {
       app.selectedPathIds.add(1);
       app.store.notifyMutation("selectedPathIds");
       const btn = document.getElementById("replay-btn") as HTMLButtonElement;
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
 
       app.hasTimingData = false;
 
-      expect(btn.style.opacity).toBe("0.5");
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
     });
 
     it("reflects a selection restored before the first paint", async () => {
@@ -233,7 +239,7 @@ describe("MapApp controls and map", () => {
       await initializeApp(app);
 
       const btn = document.getElementById("replay-btn") as HTMLButtonElement;
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
     });
 
     it("reflects the restored visibility state in the toggle buttons", async () => {
@@ -254,10 +260,12 @@ describe("MapApp controls and map", () => {
           el.style.opacity,
         ];
       };
-      expect(state("heatmap-btn")).toEqual(["false", false, "0.5"]);
-      expect(state("altitude-btn")).toEqual(["true", true, "1"]);
-      expect(state("airports-btn")).toEqual(["false", false, "0.5"]);
-      expect(state("aviation-btn")).toEqual(["true", true, "1"]);
+      // Off or on, nothing is written into the style: an off toggle is not
+      // dimmed, only an unavailable control is, by the stylesheet
+      expect(state("heatmap-btn")).toEqual(["false", false, ""]);
+      expect(state("altitude-btn")).toEqual(["true", true, ""]);
+      expect(state("airports-btn")).toEqual(["false", false, ""]);
+      expect(state("aviation-btn")).toEqual(["true", true, ""]);
     });
 
     it("updates buttons when the store changes after initialization", async () => {
@@ -416,6 +424,18 @@ describe("MapApp controls and map", () => {
       );
     });
 
+    it("takes the failure of an earlier try away once the bundle comes", async () => {
+      await initializeApp(app);
+      vi.mocked(loadFeatures).mockResolvedValueOnce(null);
+      await app.loadReplay();
+      vi.mocked(dismissToast).mockClear();
+
+      // The error stays until dismissed, and said replay was unavailable
+      // over the panel it had just opened
+      expect(await app.loadReplay()).toBeDefined();
+      expect(dismissToast).toHaveBeenCalledWith(REPLAY_UNAVAILABLE_MESSAGE);
+    });
+
     it("hands both callers the same manager and builds it once", async () => {
       await initializeApp(app);
 
@@ -506,21 +526,21 @@ describe("MapApp controls and map", () => {
 
       // It would finish the moment it started, with nothing drawn
       expect(app.canReplay()).toBe(false);
-      expect(replayButton().style.opacity).toBe("0.5");
+      expect(replayButton().getAttribute("aria-disabled")).toBe("true");
     });
 
     it("leaves the button to a running replay", async () => {
       await initializeApp(app);
       app.selectedPathIds.add(1);
       app.store.notifyMutation("selectedPathIds");
-      replayButton().title = "Stop replay";
+      replayButton().title = "Replay running";
       app.replayActive = true;
 
       app.selectedPathIds.clear();
       app.store.notifyMutation("selectedPathIds");
 
-      expect(replayButton().style.opacity).toBe("1");
-      expect(replayButton().title).toBe("Stop replay");
+      expect(replayButton().getAttribute("aria-disabled")).toBe("false");
+      expect(replayButton().title).toBe("Replay running");
     });
 
     it("takes the button back in step as the replay closes", async () => {
@@ -528,11 +548,11 @@ describe("MapApp controls and map", () => {
       app.replayActive = true;
       app.selectedPathIds.clear();
       app.store.notifyMutation("selectedPathIds");
-      replayButton().style.opacity = "1";
+      replayButton().setAttribute("aria-disabled", "false");
 
       app.replayActive = false;
 
-      expect(replayButton().style.opacity).toBe("0.5");
+      expect(replayButton().getAttribute("aria-disabled")).toBe("true");
     });
   });
 
@@ -1303,17 +1323,17 @@ describe("MapApp controls and map", () => {
       "creates the map for reduced motion %s with a fade of %s ms",
       async (reduced, fadeDuration) => {
         // MapLibre cuts its camera moves and the glide after a drag short by
-        // itself when told; the tile fade is the one thing it keeps
+        // itself; the tile fade is the one thing it keeps
         const spy = vi
           .spyOn(motion, "prefersReducedMotion")
           .mockReturnValue(reduced);
 
         await initializeApp(app);
 
-        expect(lastMap().options).toMatchObject({
-          reduceMotion: reduced,
-          fadeDuration,
-        });
+        expect(lastMap().options).toMatchObject({ fadeDuration });
+        // Not pinned: left out, MapLibre asks the media query on every move,
+        // so turning the setting on or off takes effect without a reload
+        expect(lastMap().options).not.toHaveProperty("reduceMotion");
         spy.mockRestore();
       },
     );

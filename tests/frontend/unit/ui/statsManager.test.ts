@@ -366,6 +366,11 @@ describe("StatsManager", () => {
       expect(
         aircraft[0]!.querySelector(".kh-stats-metric-value")!.textContent,
       ).toBe("30 flights");
+      // The noun in the face of the text, the count in that of the figures
+      expect(
+        aircraft[0]!.querySelector(".kh-stats-metric-value .kh-stats-noun")!
+          .textContent,
+      ).toBe("flights");
       // Second aircraft carries no type
       expect(aircraft[1]!.querySelector(".kh-stats-aircraft-type")).toBeNull();
       expect(aircraft[1]!.querySelector(".kh-stats-code")!.textContent).toBe(
@@ -389,7 +394,7 @@ describe("StatsManager", () => {
       statsManager.updateStatsPanel(mockStats, false);
 
       expect(statsPanel.querySelector(".kh-stats-footer")!.textContent).toBe(
-        "10000 data points",
+        "10,000 data points",
       );
       // And not also one of the lead figures. Match the label the lead grid
       // would render, not the pre-redesign "Data Points:" markup, which

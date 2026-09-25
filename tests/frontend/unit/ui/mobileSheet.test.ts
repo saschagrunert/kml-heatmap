@@ -252,7 +252,8 @@ describe("MobileSheet", () => {
       expect(row(sheet, "altitude").classList.contains("active")).toBe(true);
     });
 
-    it("disables a row whose control is unavailable", () => {
+    it("marks a row whose control is unavailable, and ignores a tap on it", () => {
+      const onToggle = vi.fn();
       sheet.openWith("Layers", [
         {
           kind: "switch",
@@ -261,11 +262,18 @@ describe("MobileSheet", () => {
           label: "Speed",
           isOn: () => false,
           isDisabled: () => true,
-          onToggle: vi.fn(),
+          onToggle,
         },
       ]);
+      const speed = row(sheet, "speed") as HTMLButtonElement;
 
-      expect((row(sheet, "speed") as HTMLButtonElement).disabled).toBe(true);
+      // Announced as unavailable and still reachable by keyboard, like an
+      // action row and like the desktop controls
+      expect(speed.getAttribute("aria-disabled")).toBe("true");
+      expect(speed.disabled).toBe(false);
+      speed.click();
+      expect(onToggle).not.toHaveBeenCalled();
+      expect(speed.getAttribute("aria-checked")).toBe("false");
     });
   });
 

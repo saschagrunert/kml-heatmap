@@ -6,7 +6,6 @@ import {
   asMapApp,
   type MockApp,
 } from "../../testHelpers";
-import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import { DataManager } from "../../../../kml_heatmap/frontend/ui/dataManager";
 
 // The data manager is real, so the paths follow the selection the way they
@@ -76,7 +75,6 @@ describe("PathSelection", () => {
   afterEach(() => {
     btn.remove();
     chip.remove();
-    domCache.clear();
   });
 
   describe("togglePathSelection", () => {
@@ -351,6 +349,27 @@ describe("PathSelection", () => {
       expect(mockApp.selectedPathIds.size).toBe(0);
       expect(chip.hidden).toBe(true);
     });
+
+    it("hands the focus of its Clear to the map before it hides", () => {
+      // Hidden with its own chip, the focused Clear dropped focus to <body>
+      const canvas = mockApp.map!.getCanvas();
+      canvas.tabIndex = 0;
+      document.body.append(canvas);
+      pathSelection.togglePathSelection(1);
+      clearBtn.focus();
+
+      clearBtn.click();
+
+      expect(document.activeElement).toBe(canvas);
+      canvas.remove();
+    });
+
+    it("counts in groups of thousands", () => {
+      for (let id = 1; id <= 1200; id++) mockApp.selectedPathIds.add(id);
+      mockApp.store.notifyMutation("selectedPathIds");
+
+      expect(chipCount.textContent).toBe("1,200 flights selected");
+    });
   });
 
   describe("isolate button", () => {
@@ -366,11 +385,12 @@ describe("PathSelection", () => {
       expect(btn.getAttribute("aria-disabled")).toBe("false");
     });
 
-    it("is dimmed and not pressed at construction without a selection", () => {
-      expect(btn.style.opacity).toBe("0.5");
+    it("is unavailable and not pressed at construction without a selection", () => {
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
       expect(btn.classList.contains("active")).toBe(false);
-      // Colours come from the stylesheet, not from inline styles
+      // The look comes from the stylesheet, not from inline styles
+      expect(btn.style.opacity).toBe("");
       expect(btn.style.borderColor).toBe("");
       expect(btn.style.backgroundColor).toBe("");
     });
@@ -383,7 +403,7 @@ describe("PathSelection", () => {
 
       new PathSelection(asMapApp(app));
 
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
       expect(btn.getAttribute("aria-pressed")).toBe("true");
       expect(btn.classList.contains("active")).toBe(true);
     });
@@ -392,7 +412,7 @@ describe("PathSelection", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.store.notifyMutation("selectedPathIds");
 
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
       expect(btn.classList.contains("active")).toBe(false);
     });
@@ -404,21 +424,21 @@ describe("PathSelection", () => {
       mockApp.isolateSelection = true;
       expect(btn.getAttribute("aria-pressed")).toBe("true");
       expect(btn.classList.contains("active")).toBe(true);
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
 
       mockApp.isolateSelection = false;
       expect(btn.getAttribute("aria-pressed")).toBe("false");
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
     });
 
-    it("dims again once the selection is cleared", () => {
+    it("is unavailable again once the selection is cleared", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.store.notifyMutation("selectedPathIds");
-      expect(btn.style.opacity).toBe("1");
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
 
       pathSelection.clearSelection();
 
-      expect(btn.style.opacity).toBe("0.5");
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
     });
 

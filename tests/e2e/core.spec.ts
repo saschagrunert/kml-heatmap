@@ -218,6 +218,29 @@ test.describe("Core", () => {
     await expect(replayBtn).toHaveAttribute("aria-pressed", "false");
   });
 
+  test("the controls come before the map's markers in the tab order", async ({
+    page,
+  }) => {
+    // The markers are dozens of tab stops; the skip link goes past the
+    // controls to them, and the controls are not behind them
+    await expect(page.locator(".skip-nav")).toHaveAttribute("href", "#map");
+    const before = await page.evaluate(() => {
+      const map = document.getElementById("map")!;
+      const precedes = (id: string): boolean | null => {
+        const element = document.getElementById(id);
+        if (!element) return null;
+        return !!(
+          element.compareDocumentPosition(map) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+        );
+      };
+      return ["left-buttons", "right-buttons", "mobile-bar"].map(precedes);
+    });
+    expect(before.slice(0, 2)).toEqual([true, true]);
+    // The phone's bar, where there is one
+    expect(before[2]).not.toBe(false);
+  });
+
   test("replay controls are hidden by default", async ({ page }) => {
     await expect(page.locator("#replay-controls")).toBeHidden();
   });

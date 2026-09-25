@@ -55,7 +55,11 @@ test.describe("Replay", () => {
 
     await expect(replayBtn).toHaveAttribute("data-icon", "stop");
     await expect(replayBtn).toHaveAttribute("aria-pressed", "true");
-    await expect(replayBtn).toHaveAttribute("aria-label", "Stop replay");
+    // A toggle keeps its name; aria-pressed says it is on
+    await expect(replayBtn).toHaveAttribute(
+      "aria-label",
+      "Replay selected flight path",
+    );
 
     await replayBtn.click();
     await expect(page.locator("#replay-controls")).toBeHidden();
@@ -80,7 +84,8 @@ test.describe("Replay", () => {
     await expect(page.locator("#replay-slider")).toHaveValue("0");
     await expect(page.locator("#replay-slider")).toHaveAttribute(
       "aria-valuetext",
-      /^0:00 of \d+(:\d{2}){1,2}$/,
+      // The start is written in the total's format: 0:00:00 of 3:22:57
+      /^0(:00){1,2} of \d+(:\d{2}){1,2}$/,
     );
   });
 
@@ -178,19 +183,23 @@ test.describe("Replay", () => {
 
     const autoZoomBtn = page.locator("#replay-autozoom-btn");
 
-    await expect(autoZoomBtn).toHaveCSS("opacity", "0.5");
+    // Off is drawn at full strength, without the accent; only an
+    // unavailable control is dimmed
+    await expect(autoZoomBtn).toHaveCSS("opacity", "1");
     await expect(autoZoomBtn).toHaveAttribute("aria-pressed", "false");
+    await expect(autoZoomBtn).not.toHaveClass(/\bactive\b/);
 
     await autoZoomBtn.click();
     await expect(autoZoomBtn).toHaveCSS("opacity", "1");
     await expect(autoZoomBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(autoZoomBtn).toHaveClass(/\bactive\b/);
     expect(await page.evaluate(() => window.mapApp!.replayState.autoZoom)).toBe(
       true,
     );
 
     await autoZoomBtn.click();
-    await expect(autoZoomBtn).toHaveCSS("opacity", "0.5");
     await expect(autoZoomBtn).toHaveAttribute("aria-pressed", "false");
+    await expect(autoZoomBtn).not.toHaveClass(/\bactive\b/);
     expect(await page.evaluate(() => window.mapApp!.replayState.autoZoom)).toBe(
       false,
     );
@@ -358,6 +367,11 @@ test.describe("Replay", () => {
     await expect(page.locator("#airports-btn")).toBeDisabled();
     await expect(page.locator("#year-select")).toBeDisabled();
     await expect(page.locator("#aircraft-select")).toBeDisabled();
+    // Dimmed once: the row at half strength, and the browser's own dimming
+    // of a disabled select undone, which took the filters to a third
+    await expect(page.locator("#heatmap-btn")).toHaveCSS("opacity", "0.5");
+    await expect(page.locator("#year-filter")).toHaveCSS("opacity", "0.5");
+    await expect(page.locator("#year-select")).toHaveCSS("opacity", "1");
   });
 
   test("replay keeps the selection it is playing", async ({ page }) => {
@@ -370,8 +384,12 @@ test.describe("Replay", () => {
       "1 flight selected",
     );
     await expect(page.locator("#replay-btn")).toHaveAttribute(
-      "title",
-      "Stop replay",
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.locator("#replay-btn")).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
     );
   });
 
@@ -384,6 +402,17 @@ test.describe("Replay", () => {
     await expect(startLabel).toBeVisible();
     await expect(endLabel).toBeVisible();
     await expect(endLabel).not.toHaveText("0:00");
+    // The start is where the timeline begins, not a second clock: the
+    // current time is in the transport row, in the format of the total
+    await expect(startLabel).toHaveText(/^0:00(:00)?$/);
+    const total = (await endLabel.textContent())!;
+    const elapsed =
+      total.split(":").length === 3
+        ? String.raw`\d+:\d{2}:\d{2}`
+        : String.raw`\d+:\d{2}`;
+    await expect(page.locator("#replay-time-display")).toHaveText(
+      new RegExp(`^${elapsed} / ${total}$`),
+    );
   });
 
   test("replay speed dropdown has all options", async ({ page }) => {

@@ -22,8 +22,7 @@ export function updateReplayButtonState(ready: boolean): void {
 
   // The button stays enabled so it can explain why replay is unavailable:
   // aria-disabled says so without taking it out of the tab order, which
-  // the disabled attribute would
-  btn.style.opacity = ready ? "1.0" : "0.5";
+  // the disabled attribute would, and the stylesheet dims it
   btn.setAttribute("aria-disabled", String(!ready));
   btn.title = ready ? REPLAY_BUTTON_LABEL : REPLAY_PRECONDITION_MESSAGE;
 }

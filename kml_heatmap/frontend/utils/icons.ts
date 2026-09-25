@@ -6,11 +6,12 @@
  * instead: Lucide carries no brand marks, and the replay marker needs an
  * aircraft seen from above, which no general purpose set has.
  *
- * They are inlined rather than drawn from an icon font: the content security
- * policy allows no external font (`font-src 'self' file:`), and the page has
- * to work straight off the filesystem. Every shape uses `currentColor`, so
- * one colour rule drives them, and one family on a 24px grid means one
- * stroke weight per size: 24px at 1.45, 20px at 1.5, 16px at 1.6.
+ * They are inlined rather than drawn from an icon font: an icon is part of
+ * the markup it is drawn into, so it shows with the first paint, needs no
+ * request of its own and takes its colour from the text around it. Every
+ * shape uses `currentColor`, so one colour rule drives them, and one family
+ * on a 24px grid means one stroke weight per size: 24px at 1.45, 20px at
+ * 1.5, 16px at 1.6.
  */
 import {
   ArrowUpFromLine,
@@ -32,12 +33,14 @@ import {
   Info,
   Layers,
   Link2,
+  LocateFixed,
   MapPin,
   Menu,
   Milestone,
   Mountain,
   Navigation,
   Pause,
+  Plane,
   Play,
   RotateCcw,
   Route,
@@ -76,6 +79,7 @@ export type IconName =
   | "autoZoom"
   | "close"
   | "aircraft"
+  | "chase"
   | "calendar"
   | "more"
   | "github"
@@ -130,7 +134,10 @@ const NODES: Record<Exclude<IconName, keyof typeof OWN_PATHS>, IconNode> = {
   collapse: ChevronLeft,
   autoZoom: ZoomIn,
   close: X,
-  aircraft: Navigation,
+  aircraft: Plane,
+  // The chase view keeps the camera on the aircraft, which the glyph of a
+  // map that follows a position says; the arrow is the compass's
+  chase: LocateFixed,
   calendar: Calendar,
   more: Ellipsis,
   info: Info,
@@ -138,9 +145,8 @@ const NODES: Record<Exclude<IconName, keyof typeof OWN_PATHS>, IconNode> = {
   threeD: Box,
   satellite: Satellite,
   // An arrow rather than Lucide's compass rose: the control turns it to
-  // where north is, and the rose reads the same from every side. The arrow
-  // of the aircraft filter, which points north-east; the stylesheet turns
-  // it upright, and the set stays one shape smaller.
+  // where north is, and the rose reads the same from every side. It points
+  // north-east; the stylesheet turns it upright.
   compass: Navigation,
   clock: Clock,
   trophy: Trophy,

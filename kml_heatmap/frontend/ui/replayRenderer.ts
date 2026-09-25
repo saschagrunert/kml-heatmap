@@ -524,7 +524,6 @@ export class AirplaneMarker implements ReplayAirplane {
 interface TransportCache {
   timeText: string;
   sliderValue: string;
-  startText: string;
 }
 
 export class ReplayRenderer {
@@ -532,7 +531,6 @@ export class ReplayRenderer {
   private transport: TransportCache = {
     timeText: "",
     sliderValue: "",
-    startText: "",
   };
   /** Segment index the airplane popup content was last built for */
   private popupIndex = -1;
@@ -764,7 +762,9 @@ export class ReplayRenderer {
     const state = replayManager.state;
     const segments = state.segments;
     const currentTime = state.currentTime;
-    const currentLabel = formatTime(currentTime);
+    // In the format of the total, so "0:03:26 / 3:22:57" rather than a
+    // minute count beside an hour count
+    const currentLabel = formatTime(currentTime, state.maxTime);
     const maxLabel = formatTime(state.maxTime);
 
     // The transport row is written only when its text changes: at 50x the
@@ -789,12 +789,6 @@ export class ReplayRenderer {
       if (slider.getAttribute("aria-valuetext") !== valueText) {
         slider.setAttribute("aria-valuetext", valueText);
       }
-    }
-
-    if (currentLabel !== this.transport.startText) {
-      this.transport.startText = currentLabel;
-      const sliderStart = domCache.get("replay-slider-start");
-      if (sliderStart) sliderStart.textContent = currentLabel;
     }
 
     // Find current position in replay timeline (for airplane positioning)

@@ -1,7 +1,8 @@
 /**
  * Declarative event binding: every `[data-action]` element in the document
  * is wired to the app method of the same name. Buttons get "click", selects
- * get "change", inputs get "input".
+ * get "change", inputs get "input". The mobile bar and its sheets run the
+ * same actions through `runAction`, so both ways in obey the same rules.
  */
 import type { MapApp } from "../mapApp";
 import { logError } from "../utils/logger";
@@ -26,7 +27,7 @@ export const DEFERRED_WHILE_INITIALIZING: ReadonlySet<string> = new Set([
   "resetView",
 ]);
 
-type ActionHandler = (e: Event) => void;
+type ActionHandler = (e?: Event) => void;
 
 function actionHandlers(app: MapApp): Record<string, ActionHandler> {
   return {
@@ -68,31 +69,42 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
     pauseReplay: () => app.replayManager?.pauseReplay(),
     stopReplay: () => app.replayManager?.stopReplay(),
     seekReplay: (e) =>
-      app.replayManager?.seekReplay((e.target as HTMLInputElement).value),
+      app.replayManager?.seekReplay((e?.target as HTMLInputElement).value),
     changeReplaySpeed: () => app.replayManager?.changeReplaySpeed(),
     toggleAutoZoom: () => app.replayManager?.toggleAutoZoom(),
   };
 }
 
 /**
+ * Run an action by name, the way a click on its control does. Data-dependent
+ * actions are ignored while `app.isInitializing` is true: the phone's bar
+ * called the app directly and skipped this, and a Reset view during the
+ * first load switched the year under the load that was still running.
+ * Returns whether the action ran.
+ */
+export function runAction(app: MapApp, action: string, e?: Event): boolean {
+  // Built for the one call: a click is rare enough, and nothing has to
+  // keep the handlers of an app that is gone
+  const fn = actionHandlers(app)[action];
+  if (!fn) return false;
+  if (app.isInitializing && DEFERRED_WHILE_INITIALIZING.has(action)) {
+    return false;
+  }
+  fn(e);
+  return true;
+}
+
+/**
  * Bind data-action attributes to app methods via addEventListener.
- * Handlers are bound before initialization completes; data-dependent
- * actions are ignored while `app.isInitializing` is true.
+ * Handlers are bound before initialization completes; see runAction for
+ * the ones that wait for it.
  */
 export function bindActions(app: MapApp): void {
-  const actions = actionHandlers(app);
-
   document.querySelectorAll<HTMLElement>("[data-action]").forEach((el) => {
     const action = el.dataset["action"];
     if (!action) return;
-    const fn = actions[action];
-    if (!fn) return;
-
     const handler = (e: Event): void => {
-      if (app.isInitializing && DEFERRED_WHILE_INITIALIZING.has(action)) {
-        return;
-      }
-      fn(e);
+      runAction(app, action, e);
     };
     const type =
       el.tagName === "SELECT"

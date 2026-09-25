@@ -1,3 +1,5 @@
+import { icon } from "./icons";
+
 /** Delay between clearing a live region and writing its new message (ms) */
 export const LIVE_REGION_DELAY_MS = 100;
 
@@ -61,28 +63,98 @@ export function announceStatus(message: string): void {
   announceInRegion(toastRegion("info"), message);
 }
 
+/** A button on a toast, such as Retry after a failed load */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
+/** How long an info toast stays on screen (ms) */
+const TOAST_DURATION_MS = 4000;
+
+/**
+ * Take a toast off the screen. One that holds focus hands it to the map's
+ * canvas, where the arrow keys move the map; on the container around it
+ * they did nothing.
+ */
+function removeToast(toast: HTMLElement): void {
+  if (toast.contains(document.activeElement)) {
+    document.querySelector<HTMLElement>("#map canvas")?.focus();
+  }
+  toast.classList.remove("toast-visible");
+  toast.addEventListener("transitionend", () => toast.remove());
+  setTimeout(() => toast.remove(), 1000);
+}
+
+/** A button that takes its toast away and then does its work */
+function toastButton(
+  toast: HTMLElement,
+  run: () => void,
+  label: string,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "toast-button";
+  button.textContent = label;
+  button.addEventListener("click", () => {
+    removeToast(toast);
+    run();
+  });
+  return button;
+}
+
+/**
+ * Take the error toast with this message off the screen, if one is there,
+ * or every error toast without one
+ */
+export function dismissToast(message?: string): void {
+  for (const toast of document.querySelectorAll<HTMLElement>(".toast-error")) {
+    if (message === undefined || toast.dataset["message"] === message) {
+      removeToast(toast);
+    }
+  }
+}
+
+/**
+ * Show a message. Info goes after TOAST_DURATION_MS; an error stays until it
+ * is dismissed, since it says something is wrong until someone acts on it,
+ * and it can carry the action that puts it right. The same error shown
+ * again replaces the one on screen rather than stacking a copy.
+ */
 export function showToast(
   message: string,
   type: "error" | "info" = "info",
+  action?: ToastAction,
 ): void {
   // Several toasts in a row stack in one container instead of being drawn
   // on top of each other at the same fixed position
   const stack = ensureElement(TOAST_STACK_ID, (container) => {
     container.className = "toast-stack";
-    // The live regions speak the message; this is only its picture
-    container.setAttribute("aria-hidden", "true");
   });
 
   const toast = document.createElement("div");
   toast.className = `toast-notification toast-${type}`;
   toast.textContent = message;
-  stack.appendChild(toast);
+  toast.dataset["message"] = message;
   announceInRegion(toastRegion(type), message);
 
+  if (type === "info") {
+    // The live region speaks the message; this is only its picture
+    toast.setAttribute("aria-hidden", "true");
+    setTimeout(() => removeToast(toast), TOAST_DURATION_MS);
+  } else {
+    dismissToast(message);
+    if (action) {
+      toast.append(toastButton(toast, action.run, action.label));
+    }
+    // An icon, so the toast's text stays its message
+    const dismiss = toastButton(toast, () => {}, "");
+    dismiss.innerHTML = icon("close", 16);
+    dismiss.setAttribute("aria-label", "Dismiss");
+    dismiss.title = "Dismiss";
+    toast.append(dismiss);
+  }
+
+  stack.appendChild(toast);
   requestAnimationFrame(() => toast.classList.add("toast-visible"));
-  setTimeout(() => {
-    toast.classList.remove("toast-visible");
-    toast.addEventListener("transitionend", () => toast.remove());
-    setTimeout(() => toast.remove(), 1000);
-  }, 4000);
 }

@@ -287,6 +287,19 @@ export function layerButton(page: Page, layer: LayerName): Locator {
   return page.locator("#" + LAYER_CONTROLS[layer].buttonId);
 }
 
+/**
+ * Whether a toggle is on. On or off, it is drawn at full strength: only a
+ * control that is unavailable is dimmed, and a toggle that is off only
+ * lacks the accent.
+ */
+export async function expectToggle(
+  button: Locator,
+  on: boolean,
+): Promise<void> {
+  await expect(button).toHaveAttribute("aria-pressed", String(on));
+  await expect(button).toHaveCSS("opacity", "1");
+}
+
 /** The switch the mobile Layers sheet carries for a layer */
 export function layerSwitch(page: Page, layer: LayerName): Locator {
   return page.locator(`.sheet-row[data-row="${LAYER_CONTROLS[layer].rowId}"]`);

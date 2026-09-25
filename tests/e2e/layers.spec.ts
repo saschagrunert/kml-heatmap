@@ -1,6 +1,7 @@
 import { test, expect, type Locator, type Page } from "./fixtures";
 import {
   findSegmentFarFromAirports,
+  expectToggle,
   gotoApp,
   setAircraftFilter,
   toggleLayer,
@@ -134,12 +135,10 @@ test.describe("Layers", () => {
     await expect(btn.locator("svg.icon")).toHaveCount(1);
 
     await btn.click();
-    await expect(btn).toHaveCSS("opacity", "0.5");
-    await expect(btn).toHaveAttribute("aria-pressed", "false");
+    await expectToggle(btn, false);
 
     await btn.click();
-    await expect(btn).toHaveCSS("opacity", "1");
-    await expect(btn).toHaveAttribute("aria-pressed", "true");
+    await expectToggle(btn, true);
   });
 
   test("altitude toggle shows altitude layer and legend", async ({
@@ -161,18 +160,18 @@ test.describe("Layers", () => {
         .locator(".ramp-chip-altitude"),
     ).toHaveCount(1);
 
-    await expect(altBtn).toHaveCSS("opacity", "0.5");
+    await expectToggle(altBtn, false);
     await expect(altLegend).toBeHidden();
 
     await altBtn.click();
-    await expect(altBtn).toHaveCSS("opacity", "1");
+    await expectToggle(altBtn, true);
     await expect(altLegend).toBeVisible();
 
     await expect(page.locator("#legend-min")).toBeVisible();
     await expect(page.locator("#legend-max")).toBeVisible();
 
     await altBtn.click();
-    await expect(altBtn).toHaveCSS("opacity", "0.5");
+    await expectToggle(altBtn, false);
     await expect(altLegend).toBeHidden();
   });
 
@@ -194,18 +193,18 @@ test.describe("Layers", () => {
         .locator(".ramp-chip-speed"),
     ).toHaveCount(1);
 
-    await expect(airspeedBtn).toHaveCSS("opacity", "0.5");
+    await expectToggle(airspeedBtn, false);
     await expect(airspeedLegend).toBeHidden();
 
     await airspeedBtn.click();
-    await expect(airspeedBtn).toHaveCSS("opacity", "1");
+    await expectToggle(airspeedBtn, true);
     await expect(airspeedLegend).toBeVisible();
 
     await expect(page.locator("#airspeed-legend-min")).toBeVisible();
     await expect(page.locator("#airspeed-legend-max")).toBeVisible();
 
     await airspeedBtn.click();
-    await expect(airspeedBtn).toHaveCSS("opacity", "0.5");
+    await expectToggle(airspeedBtn, false);
     await expect(airspeedLegend).toBeHidden();
   });
 
@@ -221,12 +220,12 @@ test.describe("Layers", () => {
     const airspeedBtn = page.locator("#airspeed-btn");
 
     await altBtn.click();
-    await expect(altBtn).toHaveCSS("opacity", "1");
-    await expect(airspeedBtn).toHaveCSS("opacity", "0.5");
+    await expectToggle(altBtn, true);
+    await expectToggle(airspeedBtn, false);
 
     await airspeedBtn.click();
-    await expect(airspeedBtn).toHaveCSS("opacity", "1");
-    await expect(altBtn).toHaveCSS("opacity", "0.5");
+    await expectToggle(airspeedBtn, true);
+    await expectToggle(altBtn, false);
   });
 
   test("airports button toggles airport markers", async ({
@@ -243,14 +242,14 @@ test.describe("Layers", () => {
     await expect(page.locator(`${LAYERS_GROUP} .control-sep`)).toHaveCount(1);
     await expect(page.locator("#layers-group-title")).toHaveText("Layers");
 
-    await expect(btn).toHaveCSS("opacity", "1");
+    await expectToggle(btn, true);
 
     await btn.click();
-    await expect(btn).toHaveCSS("opacity", "0.5");
+    await expectToggle(btn, false);
     await expect(page.locator(".airport-marker").first()).toBeHidden();
 
     await btn.click();
-    await expect(btn).toHaveCSS("opacity", "1");
+    await expectToggle(btn, true);
     await expect(page.locator(".airport-marker").first()).toBeAttached();
   });
 
@@ -266,17 +265,17 @@ test.describe("Layers", () => {
 
     await expect(btn).toBeVisible();
     await expect(btn.locator("svg.icon")).toHaveCount(1);
-    await expect(btn).toHaveCSS("opacity", "0.5");
+    await expectToggle(btn, false);
 
     await btn.click();
-    await expect(btn).toHaveCSS("opacity", "1");
+    await expectToggle(btn, true);
     expect(await page.evaluate(() => window.mapApp!.aviationVisible)).toBe(
       true,
     );
     await expectAviationTiles(page);
 
     await btn.click();
-    await expect(btn).toHaveCSS("opacity", "0.5");
+    await expectToggle(btn, false);
     await expect.poll(() => aviationOnMap(page)).toBe(false);
   });
 

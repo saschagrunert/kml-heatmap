@@ -209,10 +209,9 @@ export const HEATMAP_LAYER_IDS = [
 ] as const;
 
 /**
- * Elements hidden while the map is captured as an image (export, wrapped).
- * The two grouped control columns and the statistics rail are listed as
- * containers so their titles and separators disappear with their buttons;
- * the individual ids stay for panels that live outside a column.
+ * Elements hidden while Wrapped has the map. The two control columns and the
+ * statistics rail go as a whole, with every control, title and separator
+ * inside them; the rest are panels that live outside them.
  *
  * The loading indicator is not listed: the dialog covers it anyway, and
  * restoring the display saved on opening put back a `block` that a load
@@ -222,18 +221,6 @@ export const HIDEABLE_CONTROL_IDS = [
   "left-buttons",
   "right-buttons",
   "stats-rail",
-  "stats-btn",
-  "export-btn",
-  "share-btn",
-  "wrapped-btn",
-  "heatmap-btn",
-  "airports-btn",
-  "altitude-btn",
-  "airspeed-btn",
-  "aviation-btn",
-  "year-filter",
-  "aircraft-filter",
-  "stats-panel",
   "altitude-legend",
   "airspeed-legend",
   "selection-chip",

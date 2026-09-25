@@ -2,6 +2,7 @@ import { test, expect, holdElevationTiles, type Page } from "./fixtures";
 import {
   closeMobileSheet,
   firstPathId,
+  expectToggle,
   gotoApp,
   knownYears,
   layerButton,
@@ -42,7 +43,9 @@ async function expectResetAvailable(
     mobile ? '.sheet-row[data-row="reset-view"]' : "#reset-view-btn",
   );
   await expect(control).toHaveAttribute("aria-disabled", String(!available));
-  await expect(control).toHaveCSS("opacity", available ? "1" : "0.5");
+  // A sheet row dims its label and keeps its hint at full strength
+  const dimmed = mobile ? control.locator(".sheet-row-label") : control;
+  await expect(dimmed).toHaveCSS("opacity", available ? "1" : "0.5");
   if (mobile) await closeMobileSheet(page);
 }
 
@@ -56,7 +59,7 @@ test.describe("State Persistence", () => {
       await page.evaluate(() => localStorage.removeItem("kml-heatmap-state"));
 
       await toggleLayer(page, "heatmap");
-      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
+      await expectToggle(layerButton(page, "heatmap"), false);
 
       await expect
         .poll(async () => (await readSavedState(page))["heatmapVisible"])
@@ -65,7 +68,7 @@ test.describe("State Persistence", () => {
 
     test("state is restored on reload", async ({ page }) => {
       await toggleLayer(page, "heatmap");
-      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
+      await expectToggle(layerButton(page, "heatmap"), false);
       await expect
         .poll(async () => (await readSavedState(page))["heatmapVisible"])
         .toBe(false);
@@ -73,7 +76,7 @@ test.describe("State Persistence", () => {
       await page.reload();
       await waitForAppReady(page);
 
-      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
+      await expectToggle(layerButton(page, "heatmap"), false);
     });
 
     test("localStorage stores expected state fields", async ({ page }) => {
@@ -136,7 +139,7 @@ test.describe("State Persistence", () => {
 
       await gotoApp(page, "/?v=100100000");
 
-      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "1");
+      await expectToggle(layerButton(page, "heatmap"), true);
     });
 
     test("URL year parameter overrides localStorage year", async ({ page }) => {
@@ -186,8 +189,8 @@ test.describe("State Persistence", () => {
 
       await gotoApp(page, "/?v=010100000");
 
-      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
-      await expect(layerButton(page, "altitude")).toHaveCSS("opacity", "1");
+      await expectToggle(layerButton(page, "heatmap"), false);
+      await expectToggle(layerButton(page, "altitude"), true);
     });
 
     test("a legacy shared link keeps its flags and drops the hide-controls bit", async ({
@@ -319,7 +322,7 @@ test.describe("State Persistence", () => {
 
       await gotoApp(page, "/");
 
-      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
+      await expectToggle(layerButton(page, "heatmap"), false);
     });
 
     test("URL updates when state changes", async ({ page }) => {
@@ -411,8 +414,8 @@ test.describe("State Persistence", () => {
       await gotoApp(page, `/?y=${year}&v=000100000`);
 
       await expect(page.locator("#year-select")).toHaveValue(year);
-      await expect(layerButton(page, "heatmap")).toHaveCSS("opacity", "0.5");
-      await expect(layerButton(page, "airports")).toHaveCSS("opacity", "1");
+      await expectToggle(layerButton(page, "heatmap"), false);
+      await expectToggle(layerButton(page, "airports"), true);
     });
   });
 

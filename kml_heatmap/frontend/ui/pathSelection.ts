@@ -20,15 +20,19 @@ export class PathSelection {
       this.updateIsolateButton();
       this.updateSelectionChip();
     };
-    app.store.subscribe("selectedPathIds", refresh);
-    app.store.subscribe("isolateSelection", refresh);
+    app.store.subscribeKeys(["selectedPathIds", "isolateSelection"], refresh);
     refresh();
 
-    domCache
-      .get("selection-clear-btn")
-      ?.addEventListener("click", () => this.clearSelection(), {
-        signal: app.signal,
-      });
+    domCache.get("selection-clear-btn")?.addEventListener(
+      "click",
+      () => {
+        // The chip hides with the selection, and would drop the focus on
+        // its Clear to <body>; the map is what the selection was on
+        if (!app.replayActive) app.map?.getCanvas().focus();
+        this.clearSelection();
+      },
+      { signal: app.signal },
+    );
   }
 
   togglePathSelection(pathId: number): void {
@@ -132,19 +136,17 @@ export class PathSelection {
 
   /**
    * Isolate is a toggle that also needs a selection: `active` carries the
-   * mode, the dimmed state carries "nothing to isolate yet". Colours belong
-   * to the stylesheet, so only the opacity is set here.
+   * mode, aria-disabled "nothing to isolate yet", which the stylesheet dims.
    */
   updateIsolateButton(): void {
     const btn = domCache.get("isolate-btn");
     if (!btn) return;
 
     applyToggleButtonState(btn, this.app.isolateSelection);
-    const empty = this.app.selectedPathIds.size === 0;
     // Still focusable, like the replay button, but announced as unavailable
-    btn.setAttribute("aria-disabled", String(empty));
-    if (!this.app.isolateSelection) {
-      btn.style.opacity = empty ? "0.5" : "1.0";
-    }
+    btn.setAttribute(
+      "aria-disabled",
+      String(this.app.selectedPathIds.size === 0),
+    );
   }
 }

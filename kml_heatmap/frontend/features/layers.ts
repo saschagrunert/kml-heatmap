@@ -51,23 +51,35 @@ export function calculateAltitudeRange(
   return min < 0 ? { min: 0, max: Math.max(max, 0) } : { min, max };
 }
 
+/** Share of the speeds that falls below and above the ends of the scale */
+const AIRSPEED_RANGE_TAIL = 0.05;
+
 /**
- * Groundspeed range (knots) of the given segments, ignoring segments without
- * a positive speed. Falls back to `defaultRange` when none has one.
+ * Groundspeed colour range (knots) of the given segments, ignoring segments
+ * without a positive speed. Falls back to `defaultRange` when none has one.
+ *
+ * The scale runs from the 5th to the 95th percentile rather than from the
+ * slowest to the fastest segment. Most of a flight is spent near its cruise
+ * speed, and a few taxi crawls and one fast descent stretched the full range
+ * so far that more than half the segments fell into a handful of adjacent
+ * steps of the ramp. The tails take the colours of the ends, and the legend
+ * says so. A dataset whose middle has no spread keeps the full range.
  */
 export function calculateAirspeedRange(
   segments: PathSegment[],
   defaultRange: Range = DEFAULT_AIRSPEED_RANGE,
 ): Range {
-  let min = Infinity;
-  let max = -Infinity;
+  const speeds: number[] = [];
   for (const segment of segments) {
     const speed = segment.groundspeed_knots;
-    if (speed === undefined || speed <= 0) continue;
-    if (speed < min) min = speed;
-    if (speed > max) max = speed;
+    if (speed !== undefined && speed > 0) speeds.push(speed);
   }
-  return min === Infinity ? defaultRange : { min, max };
+  if (speeds.length === 0) return defaultRange;
+  const sorted = Float64Array.from(speeds).sort();
+  const last = sorted.length - 1;
+  const min = sorted[Math.floor(AIRSPEED_RANGE_TAIL * last)]!;
+  const max = sorted[Math.ceil((1 - AIRSPEED_RANGE_TAIL) * last)]!;
+  return min < max ? { min, max } : { min: sorted[0]!, max: sorted[last]! };
 }
 
 /**

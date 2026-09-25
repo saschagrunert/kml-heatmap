@@ -15,9 +15,13 @@ import type { Popup } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { escapeHtml, splitAirportName } from "../utils/htmlGenerators";
+import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
 
 /** Apps whose selection the open list already follows */
 const following = new WeakSet<MapApp>();
+
+/** Keeps the fade of the list that is shown; one popup, so one list */
+let listEnd: ScrollEndWatcher | null = null;
 
 /** An airport as the list names it: its code where the label has one */
 function airportCode(label = "?"): string {
@@ -75,6 +79,11 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
   list.setAttribute("aria-label", "Select a flight");
   list.innerHTML = html;
   host.append(title, list);
+  // A long list stops mid-row; the bottom fades while there is more
+  listEnd?.stop();
+  const watcher = watchScrollEnd(list);
+  listEnd = watcher;
+  popup.once("close", () => watcher.stop());
 
   list.addEventListener("click", (event) => {
     const button = (event.target as Element).closest<HTMLElement>(
