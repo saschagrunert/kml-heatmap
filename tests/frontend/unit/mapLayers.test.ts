@@ -1,13 +1,16 @@
 /**
  * The layer handles, on the mock app every ported suite builds on.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import type {
+  Map as MapLibreMap,
   RasterDEMSourceSpecification,
+  RasterSourceSpecification,
   StyleSpecification,
 } from "maplibre-gl";
 import {
   AIRPORTS_HIDDEN_CLASS,
+  setBaseStyle,
   withDataLayers,
 } from "../../../kml_heatmap/frontend/mapLayers";
 import { HEATMAP_RADIUS_PX } from "../../../kml_heatmap/frontend/ui/heatmapPaint";
@@ -340,16 +343,22 @@ describe("layer handles", () => {
 });
 
 describe("withDataLayers", () => {
+  const EMPTY = { type: "FeatureCollection", features: [] };
   const heat = { type: "geojson", data: "fixes", cluster: true } as const;
-  const previous: StyleSpecification = {
-    version: 8,
-    sources: { [MAP_SOURCES.heat]: heat },
-    layers: [
-      { id: "background", type: "background" },
-      { id: MAP_LAYERS.heat, type: "heatmap", source: MAP_SOURCES.heat },
-      { id: MAP_LAYERS.replayTrail, type: "line", source: MAP_SOURCES.heat },
-    ],
-  };
+  // The map serialises its style anew for every transform, and the
+  // transform may change it
+  let previous: StyleSpecification;
+  beforeEach(() => {
+    previous = {
+      version: 8,
+      sources: { [MAP_SOURCES.heat]: heat },
+      layers: [
+        { id: "background", type: "background" },
+        { id: MAP_LAYERS.heat, type: "heatmap", source: MAP_SOURCES.heat },
+        { id: MAP_LAYERS.replayTrail, type: "line", source: MAP_SOURCES.heat },
+      ],
+    };
+  });
 
   it("leaves a style alone that has none before it", () => {
     const next: StyleSpecification = { version: 8, sources: {}, layers: [] };
@@ -381,6 +390,24 @@ describe("withDataLayers", () => {
     expect(style.glyphs).toBe(next.glyphs);
     expect(next.layers).toHaveLength(1);
     expect(style.projection).toBeUndefined();
+  });
+
+  it("carries a GeoJSON source without its data into a style the map diffs, the same in the style before", () => {
+    const next: StyleSpecification = { version: 8, sources: {}, layers: [] };
+    const aviation: RasterSourceSpecification = { type: "raster", tiles: [] };
+    previous.sources[MAP_SOURCES.aviation] = aviation;
+
+    const style = withDataLayers(previous, next, true);
+
+    // The map compares the two, copies the new one and keeps the copy for
+    // as long as it is on: equal, it leaves the source and its data alone
+    const carried = style.sources[MAP_SOURCES.heat];
+    expect(carried).toEqual({ ...heat, data: EMPTY });
+    expect(previous.sources[MAP_SOURCES.heat]).toBe(carried);
+    // Its options stay what they were, and the old data where it was
+    expect(heat.data).toBe("fixes");
+    // A source without data is carried as it is
+    expect(style.sources[MAP_SOURCES.aviation]).toBe(aviation);
   });
 
   it("keeps the airport labels on top of the new style's labels", () => {
@@ -459,5 +486,76 @@ describe("withDataLayers", () => {
     expect(style.terrain).toEqual(terrain);
     expect(style.sources[MAP_SOURCES.terrain]).toBe(dem);
     expect(withDataLayers(previous, next).terrain).toBeUndefined();
+  });
+});
+
+describe("setBaseStyle", () => {
+  /** A source's data: one fix */
+  const fixesAt = (lng: number, lat: number): GeoJSON.FeatureCollection => ({
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: null,
+        geometry: { type: "Point", coordinates: [lng, lat] },
+      },
+    ],
+  });
+  const next: StyleSpecification = {
+    version: 8,
+    sources: {},
+    layers: [{ id: "base", type: "background" }],
+  };
+
+  afterEach(() => {
+    resetMapLibreMock();
+  });
+
+  it("leaves the data of the sources where it is when the map applies the difference", async () => {
+    const app = createMockApp();
+    await app.mapReady;
+    const map = app.map!;
+    const fixes = fixesAt(8, 50);
+    const heat = map.source(MAP_SOURCES.heat);
+    void heat.setData(fixes);
+    heat.setData.mockClear();
+
+    setBaseStyle(map as unknown as MapLibreMap, next);
+
+    expect(map.source(MAP_SOURCES.heat)).toBe(heat);
+    expect(heat.data).toBe(fixes);
+    expect(heat.setData).not.toHaveBeenCalled();
+    expect(map.getLayersOrder()[0]).toBe("base");
+  });
+
+  it("carries the data of the sources when the map builds the style anew", () => {
+    // A map whose difference failed: it builds the style from the one it
+    // was given, a frame later, on a style that has not loaded yet
+    const fixes = fixesAt(8, 50);
+    const map = {
+      getStyle: () => undefined,
+      setStyle: vi.fn(),
+    };
+
+    setBaseStyle(map as unknown as MapLibreMap, next);
+    const { transformStyle } = map.setStyle.mock.calls[0]![1] as {
+      transformStyle: (
+        previous: StyleSpecification,
+        next: StyleSpecification,
+      ) => StyleSpecification;
+    };
+    const built = transformStyle(
+      {
+        version: 8,
+        sources: { [MAP_SOURCES.heat]: { type: "geojson", data: fixes } },
+        layers: [],
+      },
+      next,
+    );
+
+    expect(built.sources[MAP_SOURCES.heat]).toEqual({
+      type: "geojson",
+      data: fixes,
+    });
   });
 });

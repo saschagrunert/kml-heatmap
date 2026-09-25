@@ -26,9 +26,13 @@ import {
   switchesExaggeration,
   TERRAIN_TILE_MAX_ZOOM,
 } from "../calculations/lift";
-import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
-import { cssVar, whenContextRestored } from "../utils/mapHelpers";
-import { SATELLITE_LAYER } from "./satellite";
+import { MAP_SOURCES } from "../utils/constants";
+import {
+  cssVar,
+  isReplayCameraMove,
+  whenContextRestored,
+} from "../utils/mapHelpers";
+import { aboveGround } from "./satellite";
 
 const TERRAIN_TILE_URL =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
@@ -76,8 +80,10 @@ export function followTerrain(app: MapApp): void {
   };
   // The relief is part of the style, so it waits for one
   void app.mapReady.then(() => {
-    const settle = settleRibbons(app, map);
-    const ribbons = exaggerateRibbons(app, map);
+    const signal = app.signal;
+    if (signal.aborted) return;
+    const settle = settleRibbons(app, map, signal);
+    const ribbons = exaggerateRibbons(app, map, signal);
     // Onto or off the relief the ribbons stand on other ground; another
     // level of it they stand on already (see ribbonHeights), and take its
     // exaggeration along with the relief, all but those the map does not
@@ -96,6 +102,7 @@ export function followTerrain(app: MapApp): void {
     // context, but some of what it draws onto it stays black until the
     // relief is built anew
     whenContextRestored(map, () => {
+      if (signal.aborted) return;
       map.setTerrain(null);
       ribbons(null);
       apply();
@@ -106,14 +113,21 @@ export function followTerrain(app: MapApp): void {
     // map's moves and would stay where the ground was until the next one,
     // an airport a few dozen pixels off its field. A "terrain" event has
     // them follow every frame until the map has loaded, as when the relief
-    // is switched on (MapLibre 6.10's markers).
-    map.on("moveend", () => {
-      if (map.getTerrain()) map.fire("terrain");
+    // is switched on (MapLibre 6.10's markers). Not for every frame of
+    // the replay's camera, which rests of its own: it updates the whole
+    // style.
+    const moved = map.on("moveend", (event) => {
+      if (map.getTerrain() && !isReplayCameraMove(event)) map.fire("terrain");
     });
     // A new base style drops the shading, which is none of the app's layers
     // for `withDataLayers` to carry; it goes back where it belongs in it
-    map.on("styledata", () => {
+    const styled = map.on("styledata", () => {
       if (app.reliefShaded && !map.getLayer(HILLSHADE_LAYER)) apply();
+    });
+    // For as long as the app lives, like its other map events
+    signal.addEventListener("abort", () => {
+      moved.unsubscribe();
+      styled.unsubscribe();
     });
     // The layer manager may have switched it on already, as it loaded this
     if (app.terrainActive) settle();
@@ -137,11 +151,12 @@ function addSource(map: MapLibreMap): void {
 
 /**
  * Show the shading while the relief is drawn or, on the globe, would be,
- * hide it otherwise: created the first time, directly above the last of
- * the base map's area fills (land, parks, water) and the satellite imagery
- * (ui/satellite.ts), and so below its labels and every layer of the app.
- * Its colours are the stylesheet's (--terrain-*), subtle on the dark map,
- * so the heat and the flights stay what reads.
+ * hide it otherwise: created the first time, directly above the ground of
+ * the base map (land cover, parks, water) and the satellite imagery on it
+ * (see aboveGround), and so below its roads, runways, buildings and labels
+ * and every layer of the app. Its colours are the stylesheet's
+ * (--terrain-*), subtle on the dark map, so the heat and the flights stay
+ * what reads.
  */
 function shade(map: MapLibreMap, shown: boolean): void {
   if (map.getLayer(HILLSHADE_LAYER)) {
@@ -153,16 +168,6 @@ function shade(map: MapLibreMap, shown: boolean): void {
     return;
   }
   if (!shown) return;
-  const own = new Set<string>(Object.values(MAP_LAYERS));
-  let before: string | undefined;
-  const order = map.getLayersOrder();
-  for (const [i, id] of order.entries()) {
-    const type = map.getLayer(id)?.type;
-    if (own.has(id) || type === "symbol") break;
-    if (type === "fill" || type === "background" || id === SATELLITE_LAYER) {
-      before = order[i + 1];
-    }
-  }
   const shadow = cssVar("--terrain-shadow") || "rgba(0, 0, 0, 0.7)";
   map.addLayer(
     {
@@ -178,8 +183,13 @@ function shade(map: MapLibreMap, shown: boolean): void {
           Number.parseFloat(cssVar("--terrain-exaggeration")) || 0.5,
       },
     },
-    before,
+    aboveGround(map),
   );
+}
+
+/** Whether a source of `ids` the map has has not drawn its data yet */
+function loading(map: MapLibreMap, ids: readonly string[]): boolean {
+  return ids.some((id) => map.getSource(id) && !map.isSourceLoaded(id));
 }
 
 /**
@@ -202,6 +212,7 @@ function shade(map: MapLibreMap, shown: boolean): void {
 function exaggerateRibbons(
   app: MapApp,
   map: MapLibreMap,
+  signal: AbortSignal,
 ): (level: number | null) => boolean {
   const cutOf = (level: number): { level: number; id: number | null } => ({
     level,
@@ -235,14 +246,13 @@ function exaggerateRibbons(
     }
   };
   const landed = (): void => {
-    const loading = RIBBON_LAYERS.some(
-      (id) => map.getSource(id) && !map.isSourceLoaded(id),
-    );
-    if (loading) return;
+    if (loading(map, RIBBON_LAYERS)) return;
     map.off("render", landed);
     cuts = [cutOf(app.reliefLevel)];
     given.clear();
   };
+  // A map the app has let go of is waited on no longer
+  signal.addEventListener("abort", () => map.off("render", landed));
   return (level) => {
     if (level === null) {
       given.clear();
@@ -276,7 +286,11 @@ const SETTLE_MAX_MS = 3000;
  * since the relief asks for its tiles as it is drawn; not on `idle`, which
  * waits for the base map and its labels as well.
  */
-function settleRibbons(app: MapApp, map: MapLibreMap): () => void {
+function settleRibbons(
+  app: MapApp,
+  map: MapLibreMap,
+  signal: AbortSignal,
+): () => void {
   const trail = MAP_SOURCES.replayTrailRibbons;
   const trailOpacity = map.getPaintProperty(
     trail,
@@ -297,11 +311,13 @@ function settleRibbons(app: MapApp, map: MapLibreMap): () => void {
     map.off("render", settled);
     show(1);
   };
+  // A map the app has let go of is waited on no longer
+  signal.addEventListener("abort", () => {
+    clearTimeout(timer);
+    map.off("render", settled);
+  });
   const settled = (): void => {
-    const loading = [...RIBBON_LAYERS, MAP_SOURCES.terrain].some(
-      (id) => map.getSource(id) && !map.isSourceLoaded(id),
-    );
-    if (!loading) done();
+    if (!loading(map, [...RIBBON_LAYERS, MAP_SOURCES.terrain])) done();
   };
   return () => {
     if (app.layerManager.ribbonsShown) map.on("render", settled);

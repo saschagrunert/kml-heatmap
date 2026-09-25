@@ -19,7 +19,13 @@
  * any zoom where the airfield is more than a dot.
  */
 import type { ExpressionSpecification, Map as MapLibreMap } from "maplibre-gl";
-import type { Coordinate } from "../utils/geometry";
+import {
+  DEGREES_TO_RADIANS,
+  EARTH_CIRCUMFERENCE_M,
+  METRES_PER_DEGREE,
+  planarMetres,
+  type Coordinate,
+} from "../utils/geometry";
 import type { PathSegment } from "../types";
 import { FEET_TO_METERS, METERS_TO_FEET } from "../utils/constants";
 import { unwrapLng } from "../utils/mapHelpers";
@@ -182,9 +188,6 @@ export function isLiftedAt(zoom: number): boolean {
  */
 const MAX_SLOPE = 0.3;
 
-/** The circumference of the earth, in metres, at the equator */
-const EARTH_CIRCUMFERENCE_M = 40075016.686;
-
 /** Metres a pixel spans at the equator at a map zoom, of 512 pixel tiles */
 function metresPerPixel(zoom: number): number {
   return EARTH_CIRCUMFERENCE_M / (512 * 2 ** zoom);
@@ -215,9 +218,6 @@ const BAND_STOPS: readonly (readonly [zoom: number, bandM: number])[] = [
   [13, 28],
   [16, 6],
 ];
-
-const METRES_PER_DEGREE = 111320;
-const DEGREES_TO_RADIANS = Math.PI / 180;
 
 /**
  * The step the ground offsets of ribbons cut at the zoom `widthZoom` (see
@@ -479,15 +479,7 @@ function alongMetres(
   let total = 0;
   indices.forEach((index, i) => {
     const coords = segments[index]!.coords;
-    if (coords) {
-      const [[lat0, lng0], [lat1, lng1]] = coords;
-      total += Math.hypot(
-        (unwrapLng(lng1, lng0) - lng0) *
-          METRES_PER_DEGREE *
-          Math.cos(((lat0 + lat1) / 2) * DEGREES_TO_RADIANS),
-        (lat1 - lat0) * METRES_PER_DEGREE,
-      );
-    }
+    if (coords) total += planarMetres(coords[0], coords[1]);
     along[i] = total;
   });
   return along;
@@ -840,14 +832,8 @@ export function smoothLine(
  */
 function limitSlope(points: readonly Coordinate[], heights: number[]): void {
   for (let i = 1; i < points.length; i++) {
-    const [lat0, lng0] = points[i - 1]!;
-    const [lat1, lng1] = points[i]!;
-    const dx =
-      (lng1 - lng0) *
-      METRES_PER_DEGREE *
-      Math.cos(((lat0 + lat1) / 2) * DEGREES_TO_RADIANS);
-    const dy = (lat1 - lat0) * METRES_PER_DEGREE;
-    const reach = Math.hypot(dx, dy) * METERS_TO_FEET * MAX_SLOPE;
+    const reach =
+      planarMetres(points[i - 1]!, points[i]!) * METERS_TO_FEET * MAX_SLOPE;
     const previous = heights[i - 1]!;
     heights[i] = Math.min(
       Math.max(heights[i]!, previous - reach),
@@ -984,36 +970,6 @@ export function ribbonOf(
     chain.points[b + 1],
     chain.offsets?.map((level) => level.slice(a, b + 1)),
   );
-}
-
-/**
- * Where on its flight's smoothed curve a segment is at `fraction` of the
- * way from its start to its end, and the feet above ground there: on the
- * ribbon, which runs along the curve and not along the straight segment.
- * The points the curve cuts a segment into are evenly spaced in its
- * parameter, which is close enough to evenly in time. Null for a segment
- * without coordinates.
- */
-export function pointOnFlight(
-  smoothed: SmoothedFlights,
-  index: number,
-  fraction: number,
-): { position: Coordinate; heightFt: number } | null {
-  const chain = smoothed.chains[smoothed.chainOf[index] ?? -1];
-  if (!chain) return null;
-  const from = smoothed.from[index]!;
-  const to = smoothed.to[index]!;
-  const along = from + Math.min(Math.max(fraction, 0), 1) * (to - from);
-  const i = Math.min(Math.floor(along), to - 1);
-  const t = to > from ? along - i : 0;
-  const a = chain.points[i]!;
-  const b = chain.points[Math.min(i + 1, to)]!;
-  const ha = chain.heights[i]!;
-  const hb = chain.heights[Math.min(i + 1, to)]!;
-  return {
-    position: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t],
-    heightFt: ha + (hb - ha) * t,
-  };
 }
 
 /** A piece of a ribbon: the quads it is made of, at one height step */

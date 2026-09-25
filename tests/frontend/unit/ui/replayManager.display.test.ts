@@ -402,9 +402,12 @@ describe("ReplayManager display", () => {
       replayManager.updateReplayDisplay(true);
 
       expect(mockApp.map!.jumpTo).toHaveBeenCalledTimes(1);
-      expect(mockApp.map!.jumpTo).toHaveBeenCalledWith({
-        center: airplane().marker.getLngLat().toArray(),
-      });
+      expect(mockApp.map!.jumpTo).toHaveBeenCalledWith(
+        {
+          center: airplane().marker.getLngLat().toArray(),
+        },
+        mapHelpers.REPLAY_CAMERA_MOVE,
+      );
       expect(mockApp.map!.easeTo).not.toHaveBeenCalled();
     });
 

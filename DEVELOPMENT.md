@@ -237,7 +237,15 @@ the renderer that draws the trail. By default the camera only pans once the
 airplane nears the edge of the map, as a critically damped spring
 (`dampStep` in `ui/chaseCamera.ts`) moved by one `jumpTo` a frame: an
 `easeTo` asked for on every frame starts from rest on every frame and
-stutters. Auto-zoom zooms out when the pan cannot keep up.
+stutters. Auto-zoom zooms out when the pan cannot keep up. MapLibre ends
+every `jumpTo` with `moveend` (and `zoomend` when it zoomed), so the
+camera's jumps carry `REPLAY_CAMERA_MOVE` (`utils/mapHelpers.ts`) as event
+data, and what the app does once the map comes to rest (the airports
+towards the horizon, the markers on the relief, the saved view, the cut of
+the ribbons for the zoom) skips them. The camera fires both events itself,
+untagged, once a frame passes without a jump, every `CAMERA_REST_MS`
+(1 s) while it keeps moving, as a chase does, and as a chase gives the map
+back, before the view from before it eases in.
 
 The chase view (`ui/chaseCamera.ts`) drives bearing, pitch, zoom and centre
 on every frame instead, through the same kind of spring, at a tilt of
@@ -443,10 +451,11 @@ relief takes seconds in software WebGL. The layer manager lets go of such a
 cut first, as it does of the ribbons of a mode out of sight at every change
 of the level, which would otherwise show the cut of before when the mode
 shows again. A `hillshade` layer from the same source shades the
-relief while it is drawn, directly above the base map's last area fill (its
-buildings in CARTO's style, so above its roads but below its labels and every
-layer of the app) and the satellite imagery, in the colours of
-the `--terrain-*` tokens of `styles.css`; a second source would fetch about
+relief while it is drawn, directly above the base map's ground and the
+satellite imagery on it (`aboveGround` in `ui/satellite.ts`, see below), so
+below its runways, roads, buildings and labels and every layer of the app,
+in the colours of the `--terrain-*` tokens of `styles.css`; a second source
+would fetch about
 2.6 times the tiles, for a sharper shading nobody sees under the dark
 style (MapLibre warns about the shared source once). `withDataLayers`
 carries the source and the relief across a base style swap and

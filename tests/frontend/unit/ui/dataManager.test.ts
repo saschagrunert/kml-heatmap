@@ -761,19 +761,39 @@ describe("DataManager", () => {
       expect(heatSource().setData).toHaveBeenCalledTimes(1);
     });
 
-    it("rebuilds for a selection in isolate mode, and for leaving it", () => {
+    it("gives the heatmap its points for a selection in isolate mode, and restyles the paths", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
       publish(baseData());
       vi.mocked(mockApp.layerManager.syncModes).mockClear();
 
+      // The colour layers keep their runs: isolation is a filter on them
       mockApp.selectedPathIds.add(2);
       mockApp.store.notifyMutation("selectedPathIds");
-      mockApp.isolateSelection = false;
 
-      expect(mockApp.layerManager.syncModes).toHaveBeenCalledTimes(2);
-      expect(mockApp.layerManager.syncModes).toHaveBeenCalledWith(true);
-      expect(mockApp.layerManager.updateSelectionStyles).not.toHaveBeenCalled();
+      expect(heatPoints()).toEqual(ALL_FIXES);
+      expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalledTimes(
+        1,
+      );
+
+      // Leaving it, and coming back
+      mockApp.selectedPathIds.delete(1);
+      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.isolateSelection = false;
+      // Back to the dataset's own points
+      expect(heatPoints()).toEqual(
+        baseData().coordinates.map(([lat, lng]) => [lng, lat]),
+      );
+      mockApp.isolateSelection = true;
+      expect(heatPoints()).toEqual([
+        [10.0, 52.0],
+        [11.0, 53.0],
+      ]);
+
+      expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalledTimes(
+        4,
+      );
+      expect(mockApp.layerManager.syncModes).not.toHaveBeenCalled();
     });
 
     it("draws a filter change that lands in one update once", () => {
@@ -867,7 +887,7 @@ describe("DataManager", () => {
     beforeEach(() => mockApp.heatmapLayer.setVisible(true));
 
     it("are not worked out while the heatmap is zoomed out", () => {
-      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fromZoom - 0.5 });
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fromZoom - 1.5 });
 
       mockApp.currentData = baseData();
 
@@ -875,17 +895,22 @@ describe("DataManager", () => {
       expect(heatLinesSource().setData).not.toHaveBeenCalled();
     });
 
-    it("are worked out once zoomed in to the hand-over, once per set of points", () => {
+    it("are worked out once a zoom ends near the hand-over, once per set of points", () => {
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fromZoom - 1.5 });
       mockApp.currentData = baseData();
 
-      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fromZoom });
+      // Not in a frame of the zoom, which they would hold up
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fromZoom - 0.5 });
       mockApp.map!.emit("zoom");
+      expect(heatLinesSource().setData).not.toHaveBeenCalled();
+      // A level short of it, so a zoom on in finds them ready
+      mockApp.map!.emit("zoomend");
       expect(heatLinesSource().setData).toHaveBeenCalledTimes(1);
       expect(heatLinePoints()).toEqual(ALL_FIXES);
 
       // Zooming on, and a redraw with the same points, work out nothing
       mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
-      mockApp.map!.emit("zoom");
+      mockApp.map!.emit("zoomend");
       dataManager.updateLayers();
       expect(heatLinesSource().setData).toHaveBeenCalledTimes(1);
     });
@@ -895,7 +920,7 @@ describe("DataManager", () => {
       mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
 
       mockApp.currentData = baseData();
-      mockApp.map!.emit("zoom");
+      mockApp.map!.emit("zoomend");
       expect(heatLinesSource().setData).not.toHaveBeenCalled();
 
       mockApp.heatmapVisible = true;
@@ -904,17 +929,52 @@ describe("DataManager", () => {
       expect(heatLinePoints()).toEqual(ALL_FIXES);
     });
 
+    it("of other points are taken off while they are not worked out, so a zoom in from further out shows none of them (regression)", () => {
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
+      mockApp.currentData = baseData();
+      expect(heatLinePoints()).toEqual(ALL_FIXES);
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fromZoom - 1.5 });
+      mockApp.map!.emit("zoomend");
+
+      // Other points, with the map zoomed out: the lines of the old ones
+      // would show from HEAT_LINES.fromZoom on until a zoom in ends
+      mockApp.selectedYear = "2025";
+      expect(heatLinePoints()).toEqual([]);
+      // And once off, they are not taken off again
+      mockApp.selectedYear = "all";
+      expect(heatLinesSource().setData).toHaveBeenCalledTimes(2);
+
+      mockApp.selectedYear = "2025";
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
+      mockApp.map!.emit("zoomend");
+      expect(heatLinePoints()).toEqual([
+        [8.0, 50.0],
+        [8.1, 50.1],
+        [8.2, 50.2],
+      ]);
+    });
+
+    it("of other points are taken off for a hidden heatmap as well", () => {
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
+      mockApp.currentData = baseData();
+      mockApp.heatmapLayer.setVisible(false);
+
+      mockApp.selectedYear = "2025";
+
+      expect(heatLinePoints()).toEqual([]);
+    });
+
     it("stops following the map with the app", () => {
       mockApp.currentData = baseData();
       dataManager.destroy();
 
       mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
-      mockApp.map!.emit("zoom");
+      mockApp.map!.emit("zoomend");
       mockApp.map!.emit("webglcontextrestored");
       mockApp.map!.emit("style.load");
 
       expect(heatLinesSource().setData).not.toHaveBeenCalled();
-      expect(mockApp.map!.listenerCount("zoom")).toBe(0);
+      expect(mockApp.map!.listenerCount("zoomend")).toBe(0);
     });
   });
 
@@ -954,13 +1014,21 @@ describe("DataManager", () => {
       expect(heatLinePoints()).toEqual(kept);
     });
 
-    it("writes nothing again that the restored sources hold already", () => {
+    it("leaves the heat and its lines the restored sources hold as they are, the last written", () => {
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
+      mockApp.heatmapLayer.setVisible(true);
       mockApp.currentData = baseData();
       const restore = loseContext();
 
       restore();
 
+      // MapLibre builds the style anew from the one at the loss, which
+      // holds the data last handed to each source
       expect(heatSource().setData).toHaveBeenCalledTimes(1);
+      expect(
+        mockApp.map!.source(MAP_SOURCES.heatLines).setData,
+      ).toHaveBeenCalledTimes(1);
+      expect(heatLinePoints()).toEqual(ALL_FIXES);
     });
   });
 

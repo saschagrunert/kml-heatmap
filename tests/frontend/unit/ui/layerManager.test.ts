@@ -3,6 +3,7 @@ import { Point, type LngLat, type Map as MapLibreMap } from "maplibre-gl";
 import {
   LayerManager,
   isTouchDevice,
+  type LayerMode,
 } from "../../../../kml_heatmap/frontend/ui/layerManager";
 import { addDataLayers } from "../../../../kml_heatmap/frontend/mapLayers";
 import {
@@ -33,8 +34,10 @@ import {
   ribbonId,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
 import { findNearestSegment } from "../../../../kml_heatmap/frontend/features/layers";
+import * as statistics from "../../../../kml_heatmap/frontend/calculations/statistics";
 import { HILLSHADE_LAYER } from "../../../../kml_heatmap/frontend/ui/terrain";
 import { MAP_LAYERS } from "../../../../kml_heatmap/frontend/utils/constants";
+import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 
 // Mock domCache
 vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
@@ -138,6 +141,16 @@ function segmentsAlong(
       altitude_ft: altitude,
       coords: [points[i]!, end],
     }),
+  );
+}
+
+/**
+ * Draw every flight of a mode as the manager does for a mode that shows
+ * (see syncModes), without touching the visibility that goes with it
+ */
+function drawMode(manager: LayerManager, mode: LayerMode): void {
+  (manager as unknown as { redrawPaths(mode: LayerMode): void }).redrawPaths(
+    mode,
   );
 }
 
@@ -381,11 +394,11 @@ describe("LayerManager", () => {
     });
   });
 
-  describe("redrawAltitudePaths", () => {
+  describe("drawing the altitude paths", () => {
     it("returns early if no currentData", () => {
       mockApp.currentData = null;
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(setDataCalls(ALTITUDE)).toBe(0);
       expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
@@ -393,7 +406,7 @@ describe("LayerManager", () => {
     });
 
     it("hands the main source one LineString per run, longitude first", () => {
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       const color = stepColor(getColorForAltitude, 3000, 0, 5000);
       expect(features(ALTITUDE)).toEqual([
@@ -420,15 +433,15 @@ describe("LayerManager", () => {
     });
 
     it("leaves the visibility of the layers to their handle", () => {
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(mockApp.map!.setLayoutProperty).not.toHaveBeenCalled();
       expect(mockApp.altitudeLayer.setVisible).not.toHaveBeenCalled();
     });
 
     it("counts the generation of a source up with every setData", () => {
-      layerManager.redrawAltitudePaths();
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
+      drawMode(layerManager, "altitude");
 
       expect(features(ALTITUDE)[0]!.properties.g).toBe(2);
     });
@@ -475,7 +488,7 @@ describe("LayerManager", () => {
         ],
       );
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       const runs = features(ALTITUDE);
       expect(runs.map((f) => f.geometry.coordinates)).toEqual([
@@ -512,7 +525,7 @@ describe("LayerManager", () => {
         ),
       );
 
-      layerManager.redrawAirspeedPaths();
+      drawMode(layerManager, "airspeed");
 
       expect(features(AIRSPEED)).toHaveLength(1);
       // Along the curve through the fixes (see calculations/curves.ts): the
@@ -539,7 +552,7 @@ describe("LayerManager", () => {
             }),
           ),
         );
-        layerManager.redrawAltitudePaths();
+        drawMode(layerManager, "altitude");
         return features(ALTITUDE).map(
           (feature) => feature.geometry.coordinates as [number, number][],
         );
@@ -575,7 +588,7 @@ describe("LayerManager", () => {
         ]),
       );
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(
         features(ALTITUDE)[0]!.geometry.coordinates.map(([lng]) => lng),
@@ -594,7 +607,7 @@ describe("LayerManager", () => {
         segmentsAlong(zigZag(40, 0.00005)),
       );
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(features(ALTITUDE)[0]!.geometry.coordinates).toHaveLength(40);
       expect(mockApp.map!.listenerCount("zoom")).toBe(0);
@@ -606,7 +619,7 @@ describe("LayerManager", () => {
         segmentsAlong(zigZag(3, 0.01), 5000),
       );
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       // The top of the range falls in the last step, not past it
       expect(features(ALTITUDE)[0]!.properties.color).toBe(
@@ -638,7 +651,7 @@ describe("LayerManager", () => {
         ],
       );
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(features(ALTITUDE).map((f) => f.properties.pathId)).toEqual([
         1, 2,
@@ -648,7 +661,7 @@ describe("LayerManager", () => {
     it("draws a selected path on the selection's layer, on its own range", () => {
       mockApp.selectedPathIds.add(1);
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       // The main source keeps the path, cut on the full range
       expect(features(ALTITUDE)[0]!.properties.color).toBe(
@@ -689,7 +702,7 @@ describe("LayerManager", () => {
       addSecondPath();
       mockApp.selectedPathIds.add(1);
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(paint(ALTITUDE)["line-opacity"]).toBe(0.1);
       expect(paint(ALTITUDE)["line-width"]).toBe(4);
@@ -707,16 +720,16 @@ describe("LayerManager", () => {
 
     it("filters segments by year and aircraft", () => {
       mockApp.selectedYear = "2024";
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       expect(features(ALTITUDE)).toEqual([]);
 
       mockApp.selectedYear = "all";
       mockApp.selectedAircraft = "D-EFGH";
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       expect(features(ALTITUDE)).toEqual([]);
 
       mockApp.selectedAircraft = "D-ABCD";
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       expect(features(ALTITUDE)).toHaveLength(1);
     });
 
@@ -726,7 +739,7 @@ describe("LayerManager", () => {
       mockApp.selectedPathIds.add(2);
       mockApp.selectedYear = "2025";
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(features(ALTITUDE).map((f) => f.properties.pathId)).toEqual([1]);
       expect(features(ALTITUDE_SELECTED)).toEqual([]);
@@ -736,7 +749,7 @@ describe("LayerManager", () => {
       mockApp.currentData = createDataset([], [segA()]);
       mockApp.selectedYear = "2025";
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(features(ALTITUDE)).toEqual([]);
     });
@@ -744,13 +757,13 @@ describe("LayerManager", () => {
     it("skips segments without coordinates", () => {
       mockApp.currentData!.path_segments[0]!.coords = undefined;
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(features(ALTITUDE)).toEqual([]);
     });
 
     it("does not compute statistics or airport visibility (callers do)", () => {
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(
         mockApp.statsManager.updateStatsForSelection,
@@ -761,7 +774,7 @@ describe("LayerManager", () => {
     });
 
     it("updates the altitude legend with the full range", () => {
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(document.getElementById("legend-min")!.textContent).toBe(
         "0 ft (0 m)",
@@ -776,7 +789,7 @@ describe("LayerManager", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       // The main layer shows nothing; its visibility is the handle's
       expect(selectionFilter(ALTITUDE)).toEqual(["literal", false]);
@@ -802,10 +815,10 @@ describe("LayerManager", () => {
       addSecondPath();
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       mockApp.isolateSelection = false;
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(features(ALTITUDE).map((f) => f.properties.pathId)).toEqual([
         1, 2,
@@ -819,20 +832,20 @@ describe("LayerManager", () => {
       expect(drawn("altitude").map((entry) => entry.pathId)).toEqual([2, 1]);
 
       mockApp.selectedPathIds.clear();
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(selectionFilter(ALTITUDE)).toBeNull();
       expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
     });
 
     it("sets the filter of the main layer only when it changes", () => {
-      layerManager.redrawAltitudePaths();
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
+      drawMode(layerManager, "altitude");
       expect(mockApp.map!.setFilter).not.toHaveBeenCalled();
 
       mockApp.selectedPathIds.add(1);
-      layerManager.redrawAltitudePaths();
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
+      drawMode(layerManager, "altitude");
       // Once for the lines and once for the ribbons of the same source
       expect(mockApp.map!.setFilter).toHaveBeenCalledTimes(2);
     });
@@ -840,7 +853,7 @@ describe("LayerManager", () => {
     it("falls back to the full range when selected segments are empty", () => {
       mockApp.selectedPathIds.add(999);
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(features(ALTITUDE)[0]!.properties.color).toBe(
         stepColor(getColorForAltitude, 3000, 0, 5000),
@@ -865,7 +878,7 @@ describe("LayerManager", () => {
       );
       mockApp.selectedPathIds.add(1);
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       expect(
         features(ALTITUDE_SELECTED).map((f) => f.properties.pathId),
@@ -873,17 +886,17 @@ describe("LayerManager", () => {
     });
   });
 
-  describe("redrawAirspeedPaths", () => {
+  describe("drawing the speed paths", () => {
     it("returns early if no currentData", () => {
       mockApp.currentData = null;
 
-      layerManager.redrawAirspeedPaths();
+      drawMode(layerManager, "airspeed");
 
       expect(setDataCalls(AIRSPEED)).toBe(0);
     });
 
     it("draws with airspeed colours and updates the airspeed legend", () => {
-      layerManager.redrawAirspeedPaths();
+      drawMode(layerManager, "airspeed");
 
       expect(setDataCalls(ALTITUDE)).toBe(0);
       expect(features(AIRSPEED)[0]!.properties.color).toBe(
@@ -897,7 +910,7 @@ describe("LayerManager", () => {
     it("uses selected paths' airspeed range when paths are selected", () => {
       mockApp.selectedPathIds.add(1);
 
-      layerManager.redrawAirspeedPaths();
+      drawMode(layerManager, "airspeed");
 
       expect(features(AIRSPEED_SELECTED)[0]!.properties.color).toBe(
         stepColor(getColorForAirspeed, 100, 100, 100),
@@ -908,7 +921,7 @@ describe("LayerManager", () => {
       mockApp.currentData!.path_segments[0]!.groundspeed_knots = 0;
       mockApp.selectedPathIds.add(1);
 
-      layerManager.redrawAirspeedPaths();
+      drawMode(layerManager, "airspeed");
 
       expect(features(AIRSPEED)).toEqual([]);
       expect(features(AIRSPEED_SELECTED)).toEqual([]);
@@ -917,7 +930,7 @@ describe("LayerManager", () => {
     it("falls back to the full airspeed range when selection has no speed data", () => {
       mockApp.selectedPathIds.add(999);
 
-      layerManager.redrawAirspeedPaths();
+      drawMode(layerManager, "airspeed");
 
       expect(features(AIRSPEED)[0]!.properties.color).toBe(
         stepColor(getColorForAirspeed, 100, 0, 200),
@@ -943,8 +956,8 @@ describe("LayerManager", () => {
       layerManager = new LayerManager(asMapApp(mockApp));
 
       expect(() => {
-        layerManager.redrawAltitudePaths();
-        layerManager.redrawAirspeedPaths();
+        drawMode(layerManager, "altitude");
+        drawMode(layerManager, "airspeed");
         layerManager.clearLayer("airspeed");
         layerManager.updateSelectionStyles();
       }).not.toThrow();
@@ -975,7 +988,7 @@ describe("LayerManager", () => {
         (resolve) => (ready = resolve),
       );
       layerManager = new LayerManager(asMapApp(mockApp));
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
       // The sources are there, and one of them refuses its data: a source
@@ -1004,7 +1017,7 @@ describe("LayerManager", () => {
       });
       layerManager = new LayerManager(asMapApp(mockApp));
 
-      expect(() => layerManager.redrawAltitudePaths()).not.toThrow();
+      expect(() => drawMode(layerManager, "altitude")).not.toThrow();
       await Promise.resolve();
     });
   });
@@ -1012,8 +1025,8 @@ describe("LayerManager", () => {
   describe("clearLayer", () => {
     it("empties both sources of the mode", () => {
       mockApp.selectedPathIds.add(1);
-      layerManager.redrawAltitudePaths();
-      layerManager.redrawAirspeedPaths();
+      drawMode(layerManager, "altitude");
+      drawMode(layerManager, "airspeed");
       expect(features(ALTITUDE_SELECTED)).toHaveLength(1);
 
       layerManager.clearLayer("altitude");
@@ -1040,7 +1053,7 @@ describe("LayerManager", () => {
 
     it("rebuilds only the selection's source and dims the main layer", () => {
       mockApp.altitudeVisible = true;
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       const before = features(ALTITUDE);
 
       mockApp.selectedPathIds.add(1);
@@ -1111,7 +1124,7 @@ describe("LayerManager", () => {
         ],
       );
       mockApp.altitudeVisible = true;
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       expect(features(ALTITUDE)).toHaveLength(1);
 
       mockApp.selectedPathIds.add(1);
@@ -1128,7 +1141,7 @@ describe("LayerManager", () => {
     it("returns a path to the main layer when it is deselected", () => {
       mockApp.altitudeVisible = true;
       mockApp.selectedPathIds.add(1);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       mockApp.selectedPathIds.clear();
       layerManager.updateSelectionStyles();
@@ -1156,7 +1169,7 @@ describe("LayerManager", () => {
 
     it("counts the selection's generation up, leaving stale features behind", () => {
       mockApp.altitudeVisible = true;
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       mockApp.selectedPathIds.add(1);
       layerManager.updateSelectionStyles();
@@ -1171,7 +1184,7 @@ describe("LayerManager", () => {
 
     it("skips hidden layers", () => {
       mockApp.altitudeVisible = false;
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       mockApp.selectedPathIds.add(1);
       layerManager.updateSelectionStyles();
@@ -1192,7 +1205,7 @@ describe("LayerManager", () => {
 
     it("does nothing for a layer that was cleared", () => {
       mockApp.altitudeVisible = true;
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       layerManager.clearLayer("altitude");
 
       mockApp.selectedPathIds.add(1);
@@ -1203,7 +1216,7 @@ describe("LayerManager", () => {
 
     it("updates the airspeed layer when visible", () => {
       mockApp.airspeedVisible = true;
-      layerManager.redrawAirspeedPaths();
+      drawMode(layerManager, "airspeed");
 
       mockApp.selectedPathIds.add(2);
       layerManager.updateSelectionStyles();
@@ -1297,13 +1310,13 @@ describe("LayerManager", () => {
       ];
       mockApp.currentData = createDataset([{ id: 1, year: 2025 }], segments);
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       expect(features(ALTITUDE)).toHaveLength(1);
       return segments;
     }
 
     it("finds nothing while no colour layer is shown", () => {
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
 
       expect(layerManager.hitTest(new Point(10, 10))).toBeNull();
@@ -1366,7 +1379,7 @@ describe("LayerManager", () => {
       const segments = segmentsAlong(points);
       mockApp.currentData = createDataset([{ id: 1, year: 2025 }], segments);
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
       const line = features(ALTITUDE)[0]!.geometry.coordinates;
 
@@ -1395,7 +1408,7 @@ describe("LayerManager", () => {
       const line = (): [number, number][] =>
         features(ALTITUDE)[0]!.geometry.coordinates as [number, number][];
       mockApp.currentData = createDataset([{ id: 1, year: 2025 }], turning);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       const [a, b] = [line()[20]!, line()[21]!];
       const on: [number, number] = [(a[1] + b[1]) / 2, (a[0] + b[0]) / 2];
       // How far it is from that line, and which way (the map's pixels are
@@ -1430,7 +1443,7 @@ describe("LayerManager", () => {
         [...turning, straight],
       );
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [
         rendered(ALTITUDE, { r: 1, g: 2 }),
         rendered(ALTITUDE, { r: 0, g: 2 }),
@@ -1446,7 +1459,7 @@ describe("LayerManager", () => {
 
     it("drops features of a generation before the last setData", () => {
       drawMergedRun();
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
 
       // Not null: a flight may well be there, the tiles cannot tell yet
@@ -1460,7 +1473,7 @@ describe("LayerManager", () => {
 
     it("prefers a current feature over the stale ones beside it", () => {
       drawMergedRun();
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [
         rendered(ALTITUDE, { r: 0, g: 1 }),
         rendered(ALTITUDE, { r: 0, g: 2 }),
@@ -1484,7 +1497,7 @@ describe("LayerManager", () => {
     it("ranks the runs by their distance in the copy of the world hit", () => {
       addSecondPath();
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [
         rendered(ALTITUDE, { r: 0, g: 1 }),
         rendered(ALTITUDE, { r: 1, g: 1 }),
@@ -1532,7 +1545,7 @@ describe("LayerManager", () => {
       );
       mockApp.map!.setCenter([179.97, 10]);
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [
         rendered(ALTITUDE, { r: 0, g: 1 }),
         rendered(ALTITUDE, { r: 1, g: 1 }),
@@ -1555,7 +1568,7 @@ describe("LayerManager", () => {
       drawMergedRun();
       await landed();
       const workerAnswers = holdSetData(ALTITUDE);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       const point = pointAt(48.1, 16.1);
 
       expect(layerManager.hitTest(point)).toBe("stale");
@@ -1586,9 +1599,9 @@ describe("LayerManager", () => {
       drawMergedRun();
       await landed();
       const first = holdSetData(ALTITUDE);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       const second = holdSetData(ALTITUDE);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       await first();
       expect(layerManager.hitTest(pointAt(48.1, 16.1))).toBe("stale");
@@ -1617,7 +1630,7 @@ describe("LayerManager", () => {
       mockApp.currentData = createDataset([{ id: 1, year: 2025 }], segments);
       mockApp.map!.setCenter([180, 10]);
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       await landed();
       expect(features(ALTITUDE)).toHaveLength(1);
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
@@ -1668,7 +1681,7 @@ describe("LayerManager", () => {
     it("prefers the run that is closest in pixels", () => {
       addSecondPath();
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [
         rendered(ALTITUDE, { r: 0, g: 1 }),
         rendered(ALTITUDE, { r: 1, g: 1 }),
@@ -1708,7 +1721,7 @@ describe("LayerManager", () => {
       mockApp.altitudeLayer.setVisible(true);
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       await landed();
       // Tiles cut before the filter still show path 2
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 1, g: 1 })];
@@ -1726,8 +1739,8 @@ describe("LayerManager", () => {
     it("queries both modes when both are shown", () => {
       mockApp.altitudeLayer.setVisible(true);
       mockApp.airspeedLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
-      layerManager.redrawAirspeedPaths();
+      drawMode(layerManager, "altitude");
+      drawMode(layerManager, "airspeed");
       mockApp.map!.renderedFeatures = [rendered(AIRSPEED, { r: 0, g: 1 })];
 
       expect(layerManager.hitTest(pointAt(48.5, 16.5))).toMatchObject({
@@ -1769,7 +1782,7 @@ describe("LayerManager", () => {
       );
       mockApp.altitudeLayer.setVisible(true);
       mockApp.altitudeVisible = true;
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
     });
 
@@ -1782,7 +1795,7 @@ describe("LayerManager", () => {
       moveTo(pointAt(48.19, 16.19));
       const tooltip = tooltips()[0]!;
       // Drawn again: generation 2, and the tiles still hold generation 1
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       moveTo(pointAt(48.18, 16.18));
 
@@ -1826,6 +1839,26 @@ describe("LayerManager", () => {
       expect(mockApp.map!.queryRenderedFeatures).toHaveBeenCalledOnce();
       // The last position counts
       expect(content(tooltips()[0]!)).toContain("90 kt");
+    });
+
+    it("works the selection's colour ranges out once, not for every segment it shows", () => {
+      const slices = vi.spyOn(statistics, "segmentsForPathIds");
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+      // The altitude range, which the selection's runs are cut on
+      expect(slices).toHaveBeenCalledOnce();
+
+      moveTo(pointAt(48.19, 16.19));
+      moveTo(pointAt(48.01, 16.01));
+      moveTo(pointAt(48.19, 16.19));
+      // The speed range, once, for the first segment the tooltip showed
+      expect(slices).toHaveBeenCalledTimes(2);
+
+      // Another selection has ranges of its own
+      mockApp.selectedPathIds.delete(1);
+      mockApp.selectedPathIds.add(2);
+      layerManager.updateSelectionStyles();
+      expect(slices).toHaveBeenCalledTimes(3);
     });
 
     it("sets the content only when the nearest segment changes", () => {
@@ -1886,7 +1919,7 @@ describe("LayerManager", () => {
         }),
       );
       mockApp.selectedPathIds.add(2);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
 
       moveTo(pointAt(48.19, 16.19));
@@ -2044,7 +2077,7 @@ describe("LayerManager", () => {
 
     beforeEach(() => {
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
     });
 
@@ -2093,7 +2126,7 @@ describe("LayerManager", () => {
 
         // The marker has moved away; the event still names it
         under(mockApp.map!.getCanvas());
-        layerManager.redrawAltitudePaths();
+        drawMode(layerManager, "altitude");
         mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
         mockApp.map!.emit("idle");
 
@@ -2111,7 +2144,7 @@ describe("LayerManager", () => {
         expect(tooltips()[0]!.isOpen()).toBe(true);
 
         under((onMarker().target as Element).closest(".maplibregl-marker"));
-        layerManager.redrawAltitudePaths();
+        drawMode(layerManager, "altitude");
         mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
         mockApp.map!.emit("idle");
 
@@ -2135,14 +2168,14 @@ describe("LayerManager", () => {
   describe("a hover the tiles cannot answer yet", () => {
     beforeEach(async () => {
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       await landed();
     });
 
     it("looks again on idle, also when the pointer came after the redraw", async () => {
       // The pointer is off the map, so the redraw asks for no look on idle
       const workerAnswers = holdSetData(ALTITUDE);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       expect(mockApp.map!.listenerCount("idle")).toBe(0);
 
       moveTo(pointAt(48.5, 16.5));
@@ -2161,7 +2194,7 @@ describe("LayerManager", () => {
       moveTo(pointAt(48.5, 16.5));
       expect(tooltips()[0]!.isOpen()).toBe(true);
       holdSetData(ALTITUDE);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       // The flight may well still be there
       moveTo(pointAt(48.51, 16.51));
@@ -2190,7 +2223,7 @@ describe("LayerManager", () => {
   describe("while the Wrapped dialog shows the map as its overview", () => {
     beforeEach(() => {
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
     });
 
@@ -2216,7 +2249,7 @@ describe("LayerManager", () => {
       mockApp.store.set("wrappedVisible", true);
       layerManager.closeSegmentPopup();
 
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
       mockApp.map!.emit("idle");
 
@@ -2269,7 +2302,7 @@ describe("LayerManager", () => {
       mockApp.altitudeRange = { min: 0, max: 32000 };
       mockApp.store.set("threeDVisible", true);
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
     }
 
     const ribbons = (): RunFeature[] => features(RIBBONS);
@@ -2340,6 +2373,21 @@ describe("LayerManager", () => {
       const metresPerPixel =
         (40075016.686 * Math.cos((48 * Math.PI) / 180)) / (512 * 2 ** 8.5);
       expect(ribbonWidthM() / metresPerPixel).toBeCloseTo(3, 1);
+    });
+
+    it("leaves the zooms of the replay's camera to its own rest", async () => {
+      mockApp.map!.jumpTo({ zoom: 7.2 });
+      drawClimb();
+      await terrainCode();
+      const writes = setDataCalls(RIBBONS);
+
+      mockApp.map!.jumpTo({ zoom: 8.1 });
+      mockApp.map!.emit("zoomend", REPLAY_CAMERA_MOVE);
+      expect(setDataCalls(RIBBONS)).toBe(writes);
+
+      // Which it tells the map of as MapLibre would
+      mockApp.map!.emit("zoomend");
+      expect(setDataCalls(RIBBONS)).toBe(writes + 1);
     });
 
     it("still answers for the flights while the ribbons are cut for another zoom", async () => {
@@ -2449,6 +2497,28 @@ describe("LayerManager", () => {
       });
     });
 
+    it("finds no ribbon while they are hidden on their way to another ground, and takes that for no empty map", async () => {
+      drawClimb();
+      await terrainCode();
+      await landed();
+      mockApp.map!.renderedFeatures = [
+        rendered(RIBBONS, { r: 0, g: ribbons()[0]!.properties.g, h: 100 }),
+      ];
+
+      // A query finds a feature whatever its opacity
+      layerManager.ribbonsShown = 0;
+      expect(layerManager.hitTest(pointAt(48, 16.025))).toBe("stale");
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenLastCalledWith(
+        expect.anything(),
+        { layers: [ALTITUDE, ALTITUDE_SELECTED] },
+      );
+
+      layerManager.ribbonsShown = 1;
+      expect(layerManager.hitTest(pointAt(48, 16.025))).toMatchObject({
+        pathId: 1,
+      });
+    });
+
     it("writes nothing again as the map zooms on among the flat lines", async () => {
       mockApp.map!.jumpTo({ zoom: 17.2 });
       drawClimb();
@@ -2525,7 +2595,7 @@ describe("LayerManager", () => {
         [{ id: 1, year: 2025 }],
         [...mockApp.currentData!.path_segments],
       );
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       expect(smoothed()).toBeNull();
 
       mockApp.map!.jumpTo({ zoom: 12 });
@@ -2550,7 +2620,7 @@ describe("LayerManager", () => {
       mockApp.store.set("threeDVisible", true);
       mockApp.altitudeLayer.setVisible(true);
       mockApp.map!.jumpTo({ center: [16, 0], zoom: 12, pitch: 60 });
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       await terrainCode();
       await landed();
       mockApp.map!.renderedFeatures = [
@@ -2643,7 +2713,7 @@ describe("LayerManager", () => {
       mockApp.altitudeVisible = true;
       mockApp.altitudeLayer.setVisible(true);
       mockApp.store.set("threeDVisible", threeD);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       // The relief's code arrives with the feature bundle
       await new Promise((resolve) => setTimeout(resolve));
     }
@@ -2879,7 +2949,7 @@ describe("LayerManager", () => {
           ground_ft: i === 4 ? 4000 : 1000,
         })),
       };
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
 
       const ribbons = features(RIBBONS);
       expect(ribbons.every((ribbon) => ribbon.properties.l === 9)).toBe(true);
@@ -3141,12 +3211,12 @@ describe("LayerManager", () => {
 
     it("does not let the features of before answer for the runs of a redraw", async () => {
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       await landed();
       const restore = loseContext();
 
       addSecondPath();
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       restore();
       // Features the restored tiles hold, from the data of before
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
@@ -3161,8 +3231,8 @@ describe("LayerManager", () => {
 
     it("empties a mode cleared during the loss, and leaves a hidden one for later", () => {
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
-      layerManager.redrawAirspeedPaths();
+      drawMode(layerManager, "altitude");
+      drawMode(layerManager, "airspeed");
       const restore = loseContext();
 
       layerManager.clearLayer("altitude");
@@ -3173,9 +3243,26 @@ describe("LayerManager", () => {
       expect(setDataCalls(AIRSPEED)).toBe(1);
     });
 
+    it("sets the filters again, whatever the map came back with", () => {
+      mockApp.altitudeLayer.setVisible(true);
+      mockApp.selectedPathIds.add(1);
+      drawMode(layerManager, "altitude");
+      const restore = loseContext();
+      mockApp.map!.setFilter.mockClear();
+
+      restore();
+
+      const filter = ["!", ["in", ["get", "pathId"], ["literal", [1]]]];
+      expect(mockApp.map!.setFilter).toHaveBeenCalledWith(ALTITUDE, filter);
+      expect(mockApp.map!.setFilter).toHaveBeenCalledWith(
+        "paths-altitude-3d",
+        filter,
+      );
+    });
+
     it("writes nothing once the manager is gone", () => {
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       const restore = loseContext();
       layerManager.destroy();
 
@@ -3193,7 +3280,7 @@ describe("LayerManager", () => {
 
     it("removes the listeners, the popups and the pending frame", () => {
       mockApp.altitudeLayer.setVisible(true);
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
       moveTo(pointAt(48.5, 16.5));
       (window as { ontouchstart?: unknown }).ontouchstart = null;
@@ -3219,7 +3306,7 @@ describe("LayerManager", () => {
     it("ignores an idle that arrives afterwards", () => {
       mockApp.altitudeLayer.setVisible(true);
       mockApp.altitudeVisible = true;
-      layerManager.redrawAltitudePaths();
+      drawMode(layerManager, "altitude");
       mockApp.map!.emit("mousemove", { point: pointAt(48.5, 16.5) });
       layerManager.updateSelectionStyles();
       mockApp.map!.queryRenderedFeatures.mockClear();

@@ -64,12 +64,15 @@ export function followSatellite(app: MapApp): void {
   if (!map) return;
   const apply = (): void => show(map, app.satelliteVisible);
   void app.mapReady.then(() => {
+    if (app.signal.aborted) return;
     app.store.subscribe("satelliteVisible", apply);
     // A new base style drops the layer, which is none of the app's for
-    // `withDataLayers` to carry; it goes back where it belongs in it
-    map.on("styledata", () => {
+    // `withDataLayers` to carry; it goes back where it belongs in it. For
+    // as long as the app lives, like its other map events.
+    const styled = map.on("styledata", () => {
       if (app.satelliteVisible && !map.getLayer(SATELLITE_LAYER)) apply();
     });
+    app.signal.addEventListener("abort", () => styled.unsubscribe());
     apply();
   });
 }
@@ -110,22 +113,8 @@ function show(map: MapLibreMap, shown: boolean): void {
         'EOxCloudless <a href="https://cloudless.eox.at">cloudless.eox.at</a> by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2024)',
     });
   }
-  // Right above the ground of the base map, or its background in a style
-  // without one (the map's own before CARTO's arrives), and below its
-  // roads, the shading of the relief and every layer of the app
-  const own = new Set<string>(Object.values(MAP_LAYERS));
-  const order = map.getLayersOrder();
-  let above = -1;
-  for (const [i, id] of order.entries()) {
-    const layer = map.getLayer(id);
-    if (own.has(id) || layer?.type === "symbol") break;
-    if (
-      layer?.type === "background" ||
-      GROUND.includes(layer?.sourceLayer ?? "")
-    ) {
-      above = i;
-    }
-  }
+  // Right above the ground of the base map, and below its roads, the
+  // shading of the relief and every layer of the app
   const paint = Object.fromEntries(
     PAINT.map(([property, token, fallback]) => {
       const value = Number.parseFloat(cssVar(token));
@@ -139,9 +128,39 @@ function show(map: MapLibreMap, shown: boolean): void {
       source: MAP_SOURCES.satellite,
       paint,
     },
-    order[above + 1],
+    aboveGround(map),
   );
   liftBorders(map);
+}
+
+/**
+ * The layer right above the ground of the base map, to add a layer before:
+ * above its land cover, land use, parks and water (GROUND), or its
+ * background in a style without them (the map's own before CARTO's
+ * arrives), and above the imagery, which lies on them, with the borders
+ * lifted over it; below its roads, buildings and labels and every layer of
+ * the app. The imagery goes there, and the shading of the relief
+ * (ui/terrain.ts) above it, whichever comes first.
+ */
+export function aboveGround(map: MapLibreMap): string | undefined {
+  const own = new Set<string>(Object.values(MAP_LAYERS));
+  const order = map.getLayersOrder();
+  let top = -1;
+  let imagery = -1;
+  for (const [i, id] of order.entries()) {
+    const layer = map.getLayer(id);
+    if (own.has(id) || layer?.type === "symbol") break;
+    if (id === SATELLITE_LAYER) imagery = i;
+    if (
+      imagery === i ||
+      (imagery >= 0 && top === i - 1 && layer?.sourceLayer === BORDERS) ||
+      layer?.type === "background" ||
+      GROUND.includes(layer?.sourceLayer ?? "")
+    ) {
+      top = i;
+    }
+  }
+  return order[top + 1];
 }
 
 /** Move the borders below the imagery right above it, once */

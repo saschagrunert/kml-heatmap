@@ -107,6 +107,20 @@ export function whenContextRestored(
 }
 
 /**
+ * What the replay's camera passes along with the jumps it makes on every
+ * frame of a follow pan and of the chase view (see ReplayCamera). MapLibre
+ * ends each jump with `moveend`, and `zoomend` if it zoomed: what the app
+ * does once the map comes to rest skips these (isReplayCameraMove) and runs
+ * once the camera itself rests, which fires both again untagged.
+ */
+export const REPLAY_CAMERA_MOVE = { replayCamera: true } as const;
+
+/** Whether an event of the map is one of a jump of the replay's camera */
+export function isReplayCameraMove(event: object): boolean {
+  return (event as { replayCamera?: unknown }).replayCamera === true;
+}
+
+/**
  * Whether an event of the map was aimed at a marker. MapLibre listens on
  * the container the markers sit in and does not ask: a pointer over a marker
  * moves over the map as well, and a click on one is a click on the map. The

@@ -71,8 +71,6 @@ export const mockReplayManagerInstance = {
 
 export const mockLayerManagerInstance = {
   updateAirspeedLegend: vi.fn(),
-  redrawAltitudePaths: vi.fn(),
-  redrawAirspeedPaths: vi.fn(),
   clearLayer: vi.fn(),
   syncModes: vi.fn(),
   hitTest: vi.fn(),

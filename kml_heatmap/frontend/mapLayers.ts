@@ -403,17 +403,25 @@ export function addDataLayers(map: MapLibreMap): void {
  * airport labels go on top of all. The projection comes along too: it
  * lives in the style, and a globe chosen before the base style arrived
  * would otherwise turn back into Mercator; and so does the relief of the
- * 3D view (ui/terrain.ts), which would otherwise go while the flights
- * stay cut for it.
+ * 3D view (ui/terrain.ts), which would otherwise go while the flights stay
+ * cut for it.
+ *
+ * `diffed` leaves the data of the GeoJSON sources out, for a style the map
+ * applies as the difference to the one before (see setBaseStyle).
  */
 export function withDataLayers(
   previous: StyleSpecification | undefined,
   next: StyleSpecification,
+  diffed = false,
 ): StyleSpecification {
   if (!previous) return next;
   const sources = { ...next.sources };
   for (const id of Object.values(MAP_SOURCES)) {
-    const source = previous.sources[id];
+    let source = previous.sources[id];
+    if (diffed && source?.type === "geojson") {
+      // In the style before as well, so the two are equal
+      source = previous.sources[id] = { ...source, data: emptyGeoJson() };
+    }
     if (source) sources[id] = source;
   }
   const ids: readonly string[] = Object.values(MAP_LAYERS);
@@ -436,4 +444,25 @@ export function withDataLayers(
     ...(sky && { sky }),
     ...(terrain && { terrain }),
   };
+}
+
+/**
+ * Put a base style under the app's sources and layers (see withDataLayers).
+ * The map applies the difference to the style on it, which leaves the
+ * app's sources alone, with their data and their tiles; so the data is left
+ * out of both. Otherwise the map validates the style it is given, copies
+ * it, compares it with the one before and keeps the copy for as long as it
+ * is on: for all the flights of every year that took a second and 140 MB.
+ * Where the map cannot apply the difference it builds the style anew, a
+ * frame later, from no style it has loaded, and the sources are made anew
+ * from the style: with their data.
+ */
+export function setBaseStyle(
+  map: MapLibreMap,
+  style: StyleSpecification,
+): void {
+  map.setStyle(style, {
+    transformStyle: (previous, next) =>
+      withDataLayers(previous, next, !!map.getStyle()),
+  });
 }

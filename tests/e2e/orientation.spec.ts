@@ -564,6 +564,10 @@ test.describe("Map orientation", () => {
   test("a globe that turns an airport away closes its popup and takes its focus", async ({
     page,
   }) => {
+    // A dozen steps on the globe with the paths loaded, where a click took up
+    // to 4 s in software WebGL with a browser per core: 30 s ran out on CI
+    // while the view was still turning
+    test.setTimeout(60000);
     await globe(page).click();
     await waitForPathData(page);
     const name = await page.evaluate(

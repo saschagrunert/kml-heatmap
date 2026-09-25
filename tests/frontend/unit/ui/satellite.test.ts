@@ -362,6 +362,19 @@ describe("the satellite imagery", () => {
     );
   });
 
+  it("stops following the map with the app", async () => {
+    const lifetime = new AbortController();
+    app = createMockApp({ signal: lifetime.signal });
+    app.satelliteVisible = true;
+    followSatellite(asMapApp(app));
+    await settle();
+
+    lifetime.abort();
+    swapBaseStyle(CARTO_LIKE);
+
+    expect(map().getLayer(SATELLITE_LAYER)).toBeUndefined();
+  });
+
   it("does nothing on an app without a map", () => {
     const bare = createMockApp({ map: null });
 

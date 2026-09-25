@@ -11,6 +11,7 @@
  * out hot; a route flown once at cruise speed stays cool.
  */
 import type { PathSegment } from "../types";
+import { DEGREES_TO_RADIANS, METRES_PER_DEGREE } from "../utils/geometry";
 import { toLngLat, type LngLatTuple } from "../utils/mapHelpers";
 import { appendCurve, flatCurves } from "./curves";
 import { segmentDistance } from "./statistics";
@@ -28,9 +29,7 @@ const HEAT_CELL_M = 40;
 const MAX_LOGGED_STEP_S = 600;
 /** Most time one segment adds, so a long stand at one spot saturates */
 const MAX_SEGMENT_S = 120;
-const METRES_PER_DEGREE = 111320;
 const KNOTS_TO_METRES_PER_SECOND = 1852 / 3600;
-const DEGREES_TO_RADIANS = Math.PI / 180;
 /** Rows of the grid are numbered into one key with their column */
 const ROW_STRIDE = 2 ** 22;
 const COLUMN_OFFSET = 2 ** 21;

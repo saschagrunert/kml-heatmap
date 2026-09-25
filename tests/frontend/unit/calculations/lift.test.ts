@@ -18,7 +18,6 @@ import {
   liftExaggeration,
   liftFt,
   liftOffsetPx,
-  pointOnFlight,
   reliefLevel,
   reliefPixelM,
   ribbonHeightFt,
@@ -674,45 +673,6 @@ describe("lift", () => {
       // The end of the one is the start of the other, on both edges
       expect(firstQuad[0]).toEqual(lastQuad[1]);
       expect(firstQuad[3]).toEqual(lastQuad[2]);
-    });
-
-    it("finds a place on a segment's curve, at its height there", () => {
-      const segments = [
-        segment(1, [50, 8], [50, 8.01]),
-        segment(1, [50, 8.01], [50.01, 8.01]),
-        segment(1, [50.01, 8.01], [50.01, 8.02]),
-      ];
-      const heights = [0, 100, 100];
-      const flights = smoothFlights(segments, (i) => heights[i]!);
-      const chain = flights.chains[0]!;
-
-      // The ends of a segment are its logged points
-      expect(pointOnFlight(flights, 1, 0)!.position).toEqual([50, 8.01]);
-      expect(pointOnFlight(flights, 1, 1)!.position).toEqual([50.01, 8.01]);
-      expect(pointOnFlight(flights, 1, 1)!.heightFt).toBe(100);
-      // In between it is on the curve the ribbon is cut from, which the
-      // turns have cut into more points than the segment has
-      expect(flights.to[1]! - flights.from[1]!).toBeGreaterThan(1);
-      const middle = pointOnFlight(flights, 1, 0.5)!;
-      const onCurve = chain.points.slice(flights.from[1], flights.to[1]! + 1);
-      const nearest = Math.min(
-        ...onCurve.map(([lat, lng]) =>
-          Math.hypot(lat - middle.position[0], lng - middle.position[1]),
-        ),
-      );
-      expect(nearest).toBeLessThan(0.003);
-      expect(middle.heightFt).toBeGreaterThanOrEqual(0);
-      expect(middle.heightFt).toBeLessThanOrEqual(100);
-      // Out of range, it keeps to the segment's ends
-      expect(pointOnFlight(flights, 1, 2)).toEqual(
-        pointOnFlight(flights, 1, 1),
-      );
-    });
-
-    it("finds no place on a segment without coordinates", () => {
-      const flights = smoothFlights([{ path_id: 1 }], () => 0);
-
-      expect(pointOnFlight(flights, 0, 0.5)).toBeNull();
     });
   });
 

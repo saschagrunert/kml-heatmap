@@ -39,6 +39,7 @@ import { renderControlIcons } from "./utils/icons";
 import {
   createActivationFilter,
   isOnMarker,
+  isReplayCameraMove,
   keepMarkerTapsFromZoom,
   resizeMapAfterTransition,
   stateZoomToMap,
@@ -58,7 +59,7 @@ import {
 } from "./utils/constants";
 import {
   addDataLayers,
-  withDataLayers,
+  setBaseStyle,
   AirportLayerHandle,
   MapLayerHandle,
 } from "./mapLayers";
@@ -293,8 +294,8 @@ export class MapApp {
   private startCamera: ReturnType<MapLibreMap["cameraForBounds"]>;
   /** The map events setupEventHandlers() listens to, kept to remove them */
   private mapHandlers: {
-    moveend?: () => void;
-    zoomend?: () => void;
+    moveend?: (e: object) => void;
+    zoomend?: (e: object) => void;
     click?: (e: MapMouseEvent) => void;
   } = {};
 
@@ -746,15 +747,23 @@ export class MapApp {
     // writes every error to the console itself.
     map.on("error", this.handleMapError);
 
+    // For as long as the app lives, like its other DOM listeners
     const mapCanvas = map.getCanvas();
-    mapCanvas.addEventListener("webglcontextlost", (e) => {
-      e.preventDefault();
-      logError("WebGL context lost");
-      showToast("Map rendering interrupted, restoring…", "error");
-    });
-    mapCanvas.addEventListener("webglcontextrestored", () => {
-      showToast("Map rendering restored", "info");
-    });
+    const lifetime = { signal: this.signal };
+    mapCanvas.addEventListener(
+      "webglcontextlost",
+      (e) => {
+        e.preventDefault();
+        logError("WebGL context lost");
+        showToast("Map rendering interrupted, restoring…", "error");
+      },
+      lifetime,
+    );
+    mapCanvas.addEventListener(
+      "webglcontextrestored",
+      () => showToast("Map rendering restored", "info"),
+      lifetime,
+    );
 
     whenStyleReady(map)
       .then(() => {
@@ -792,9 +801,10 @@ export class MapApp {
    *
    * `setStyle` compares the new style with the one on the map and applies
    * the difference. `withDataLayers` puts the app's sources and layers into
-   * the new style as they are, so for them there is none: the sources keep
-   * their data and their tiles, the layers their filters, visibility and
-   * paint, and a `setData` that is on its way lands as if nothing happened.
+   * the new style as they are, their data left out, so for them there is
+   * none: the sources keep their data and their tiles, the layers their
+   * filters, visibility and paint, and a `setData` that is on its way lands
+   * as if nothing happened (see setBaseStyle).
    */
   private async loadBaseStyle(): Promise<void> {
     const map = this.map;
@@ -810,7 +820,7 @@ export class MapApp {
       // already being read when the request was aborted
       if (this.destroyed) return;
       this.baseStyle = "loaded";
-      map.setStyle(style, { transformStyle: withDataLayers });
+      setBaseStyle(map, style);
     } catch (error) {
       if (this.destroyed) return;
       this.baseStyle = "idle";
@@ -1140,9 +1150,14 @@ export class MapApp {
   private setupEventHandlers(): void {
     if (!this.map) return;
 
+    // Not for every frame of the replay's camera, which rests of its own
+    // (see isReplayCameraMove)
     this.mapHandlers = {
-      moveend: () => this.stateManager.scheduleSave(),
-      zoomend: () => {
+      moveend: (e) => {
+        if (!isReplayCameraMove(e)) this.stateManager.scheduleSave();
+      },
+      zoomend: (e) => {
+        if (isReplayCameraMove(e)) return;
         this.stateManager.scheduleSave();
         this.airportManager.updateAirportMarkerSizes();
       },

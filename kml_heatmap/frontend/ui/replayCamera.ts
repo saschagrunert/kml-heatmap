@@ -4,11 +4,20 @@
  * the user's hand on the map that they give way to, and the turn and the
  * lift of its icon as the map moves under it.
  */
-import type { LngLatLike, Map as MapLibreMap } from "maplibre-gl";
+import type {
+  JumpToOptions,
+  LngLatLike,
+  Map as MapLibreMap,
+} from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { ReplayAirplane, ReplayState } from "./replayState";
 import { AUTO_ZOOM_MIN } from "../utils/constants";
-import { isBehindGlobe, toLngLat, unwrapLng } from "../utils/mapHelpers";
+import {
+  isBehindGlobe,
+  REPLAY_CAMERA_MOVE,
+  toLngLat,
+  unwrapLng,
+} from "../utils/mapHelpers";
 import {
   airplaneLiftPx,
   heightAtZoomFt,
@@ -17,6 +26,7 @@ import {
   type GroundedHeight,
 } from "../calculations/lift";
 import { prefersReducedMotion } from "../utils/motion";
+import { turnOf } from "../utils/geometry";
 import { ChaseCamera, dampStep, type SavedCamera } from "./chaseCamera";
 
 /** Minimum interval between map pans triggered by slider drags */
@@ -40,6 +50,14 @@ const FOLLOW_MAX_STEP_S = 0.1;
 
 /** Time the view takes back to where it was before a chase (ms) */
 const CHASE_RESTORE_MS = 800;
+
+/**
+ * The longest the camera moves the map on without a rest (ms): what the app
+ * does once the map comes to rest (see REPLAY_CAMERA_MOVE) runs this often
+ * during a chase that never stops, so the airports ahead show as they come
+ * near
+ */
+const CAMERA_REST_MS = 1000;
 
 /**
  * One frame of the camera following the airplane: `offset` is where the
@@ -90,8 +108,7 @@ export function unwrapRotation(
   target: number,
 ): number {
   if (previous === null) return target;
-  const delta = ((((target - previous) % 360) + 540) % 360) - 180;
-  return previous + delta;
+  return previous + turnOf(previous, target);
 }
 
 /** Pixels between the two points a heading on screen is measured from */
@@ -297,6 +314,8 @@ interface AirplaneHeading extends GroundedHeight {
   /** Where the airplane is on its flight's curve (see replayPoint) */
   position: [number, number];
   track: number;
+  /** The relief's exaggeration of the height (see ChaseTarget) */
+  exaggeration: number;
   /** The replay's, whose trail's ribbons are as wide as the zoom asks */
   state: ReplayState;
 }
@@ -333,6 +352,15 @@ export class ReplayCamera {
   private chaseHeld = false;
   /** The frame a paused chase settles in, while one is pending */
   private chaseFrame: number | null = null;
+  /**
+   * Since when the camera has moved the map without a rest, and whether it
+   * zoomed it; null while it has not moved it (see rest)
+   */
+  private unrested: { since: number; zoomed: boolean } | null = null;
+  /** Whether it has moved the map in the frame the rest was looked for */
+  private jumped = false;
+  /** The frame the rest is looked for in, while one is pending */
+  private restFrame: number | null = null;
 
   /**
    * A map that turns under a paused airplane changes where its track
@@ -385,12 +413,64 @@ export class ReplayCamera {
   /** Stop listening to the map and to the user's hand on it; the replay is closing */
   stopWatchingMap(): void {
     this.endChase();
+    this.rest();
     this.userMovement?.stop();
     this.userMovement = null;
     this.turningWith?.off("move", this.onMapMove);
     this.turningWith = null;
     this.heading = null;
     this.following = null;
+  }
+
+  /**
+   * Move the camera by one frame's jump, tagged so what the app does once
+   * the map comes to rest skips it (see REPLAY_CAMERA_MOVE)
+   */
+  private jump(map: MapLibreMap, options: JumpToOptions): void {
+    const zoom = map.getZoom();
+    map.jumpTo(options, REPLAY_CAMERA_MOVE);
+    this.moved(map, zoom);
+  }
+
+  /**
+   * The camera has moved the map, from `zoom`: its rest is looked for in
+   * the frames that follow, until one passes without a move, or every
+   * CAMERA_REST_MS while the moves go on
+   */
+  private moved(map: MapLibreMap, zoom: number): void {
+    this.unrested ??= { since: performance.now(), zoomed: false };
+    this.unrested.zoomed ||= map.getZoom() !== zoom;
+    this.jumped = true;
+    this.restFrame ??= requestAnimationFrame(this.lookForRest);
+  }
+
+  private readonly lookForRest = (): void => {
+    this.restFrame = null;
+    const since = this.unrested?.since ?? -Infinity;
+    const moving = this.jumped && performance.now() - since < CAMERA_REST_MS;
+    this.jumped = false;
+    // A gesture or an animation of the map ends in a `moveend` of its own
+    if (moving || this.app.map?.isMoving()) {
+      this.restFrame = requestAnimationFrame(this.lookForRest);
+    } else this.rest();
+  };
+
+  /**
+   * Tell the map's listeners the camera has come to rest: `zoomend` if it
+   * zoomed and `moveend`, untagged, the events MapLibre fires at the end of
+   * a move
+   */
+  private rest(): void {
+    if (this.restFrame !== null) cancelAnimationFrame(this.restFrame);
+    this.restFrame = null;
+    this.jumped = false;
+    const unrested = this.unrested;
+    const map = this.app.map;
+    this.unrested = null;
+    // Nobody is told of a map the app has let go of
+    if (!unrested || !map || this.app.signal.aborted) return;
+    if (unrested.zoomed) map.fire("zoomend");
+    map.fire("moveend");
   }
 
   /**
@@ -481,12 +561,14 @@ export class ReplayCamera {
       );
     } else if (this.chaseHeld) this.chase.resume();
     this.chaseHeld = false;
+    const zoom = map.getZoom();
     const settled = this.chase.step(
       heading,
       state.speed,
       performance.now(),
       isManualSeek,
     );
+    this.moved(map, zoom);
     if (!settled) this.chaseAgain(state.playing);
     return true;
   }
@@ -515,6 +597,9 @@ export class ReplayCamera {
     const map = this.app.map;
     if (!chase || !map) return null;
     this.chase = null;
+    // At rest where the chase left the map, and not half way into the view
+    // it eases back to, which ends in a `moveend` of its own
+    this.rest();
     chase.release();
     const saved = chase.saved;
     const position = this.heading?.position;
@@ -611,7 +696,7 @@ export class ReplayCamera {
       const throttled = now - state.lastSeekPanTime < SEEK_PAN_THROTTLE_MS;
       if (throttled && !outsideViewport) return;
       state.lastSeekPanTime = now;
-      map.jumpTo({ center });
+      this.jump(map, { center });
       return;
     }
 
@@ -709,7 +794,7 @@ export class ReplayCamera {
       prefersReducedMotion()
     ) {
       this.following = null;
-      map.jumpTo({ center });
+      this.jump(map, { center });
       return;
     }
     const velocity = before?.velocity ?? { x: 0, y: 0 };
@@ -767,7 +852,7 @@ export class ReplayCamera {
     // side has more ground to a pixel than its near one
     const target = map.unproject([ground.x - move.x, ground.y - move.y]);
     const middleNow = map.getCenter();
-    map.jumpTo({
+    this.jump(map, {
       center: [
         middleNow.lng + unwrapLng(position[1], target.lng) - target.lng,
         middleNow.lat + position[0] - target.lat,

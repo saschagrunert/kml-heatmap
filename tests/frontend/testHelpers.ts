@@ -86,8 +86,6 @@ interface MockManagers {
     showHeatmap: Mock;
   };
   layerManager: {
-    redrawAltitudePaths: Mock;
-    redrawAirspeedPaths: Mock;
     clearLayer: Mock;
     updateSelectionStyles: Mock;
     syncModes: Mock;
@@ -278,8 +276,6 @@ function createMockManagers(): MockManagers {
       showHeatmap: vi.fn(),
     },
     layerManager: {
-      redrawAltitudePaths: vi.fn(),
-      redrawAirspeedPaths: vi.fn(),
       clearLayer: vi.fn(),
       updateSelectionStyles: vi.fn(),
       syncModes: vi.fn(),

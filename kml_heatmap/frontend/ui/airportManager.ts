@@ -23,7 +23,9 @@ import { generateAirportPopupHtml } from "../utils/htmlGenerators";
 import {
   cameraDistanceRatio,
   closeWhenBehindGlobe,
+  isReplayCameraMove,
   panPopupIntoView,
+  whenContextRestored,
 } from "../utils/mapHelpers";
 import { isTouchDevice } from "./layerManager";
 import { airportLabelFeatures, setAirportLabelHover } from "./airportLabels";
@@ -108,9 +110,12 @@ export class AirportManager {
 
   /**
    * Once the map comes to rest. Asked on every frame of a gesture it cost
-   * a measurement of every airport, and a new label source mid-gesture.
+   * a measurement of every airport, and a new label source mid-gesture;
+   * the replay's camera ends a move on every frame, and rests of its own.
    */
-  private readonly handleMoveEnd = (): void => this.updateFarAirports();
+  private readonly handleMoveEnd = (event: object): void => {
+    if (!isReplayCameraMove(event)) this.updateFarAirports();
+  };
 
   /**
    * A label opens a popup like its marker, and says so: the pointer, and
@@ -134,7 +139,8 @@ export class AirportManager {
     // The markers follow the data, the filters and the selection; nothing
     // has to remember to refresh them. A year switch changes four of these
     // keys at once, and both refreshes touch every marker, so each runs once
-    // per update rather than once per key.
+    // per update rather than once per key; only the second writes the
+    // labels.
     app.store.subscribeKeys(POPUP_KEYS, () => this.updateAirportPopups());
     app.store.subscribeKeys(VISIBILITY_KEYS, () => this.updateAirportOpacity());
 
@@ -155,6 +161,13 @@ export class AirportManager {
           map.on("mousemove", MAP_LAYERS.airportLabels, this.handleLabelMove),
           map.on("mouseleave", MAP_LAYERS.airportLabels, this.handleLabelLeave),
         ];
+        // What was written while the WebGL context was lost had no source
+        // to go to, and the hover of a label went with the old one
+        whenContextRestored(map, () => {
+          if (this.destroyed) return;
+          this.hoverLabel(null);
+          this.updateLabels();
+        });
       })
       // The start-up reports a map that never got ready
       .catch(() => {});
@@ -181,7 +194,8 @@ export class AirportManager {
 
   /**
    * Update the home-base marker and the open popup with the counts of the
-   * current year/aircraft filter
+   * current year/aircraft filter; the labels, which mark the home base as
+   * well, follow the visibility (see updateAirportOpacity)
    */
   updateAirportPopups(): void {
     if (!this.app.allAirportsData || !this.app.airportMarkers) return;
@@ -196,7 +210,6 @@ export class AirportManager {
     }
 
     if (this.openAirport !== null) this.writePopupContent(this.openAirport);
-    this.updateLabels();
   }
 
   /**
