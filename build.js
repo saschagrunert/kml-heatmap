@@ -331,7 +331,7 @@ const BUDGET_WORKER = { raw: 6 * 1024, gzip: 3 * 1024 };
 // it in the pull request of the bump, with the new sizes here.
 // maplibre-gl 6.10.0: the three modules and the stylesheet come to
 // 1,200,360 B raw and 312,146 B gzipped, and with the fixes of
-// VENDOR_PATCHES to 1,200,425 B raw and 310,938 B gzipped in a local build.
+// VENDOR_PATCHES to 1,200,570 B raw and 311,014 B gzipped in a local build.
 const BUDGET_MAPLIBRE = { raw: 1184 * 1024, gzip: 307 * 1024 };
 // html-to-image 1.11.13, bundled into one module: 13,667 B raw and 5.3 KB
 // gzipped. Loaded on the first export only.

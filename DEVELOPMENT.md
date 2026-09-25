@@ -202,10 +202,15 @@ page loads them from (html-to-image with `import()`, on the first export, as
 one module that `scripts/vendor.js` bundles from the package's own), and the
 country flags of `flag-icons` into
 `kml_heatmap/static/flags/` (`scripts/vendor.js`). All of it is gitignored,
-and `make clean` removes it. MapLibre is copied with two fixes of bugs of
-6.10 made to its minified code (`VENDOR_PATCHES`): tiles under a camera
-that looks at a point above the relief (the chase view) were culled, and a
-GeoJSON tile that loads empty kept the raw data of before. Each fix has to
+and `make clean` removes it. MapLibre is copied with three fixes made to
+its minified code (`VENDOR_PATCHES`): two for bugs of 6.10, where tiles
+under a camera that looks at a point above the relief (the chase view)
+were culled and a GeoJSON tile that loads empty kept the raw data of
+before, and one for WebKit on Linux (WebKitGTK and WPE, the WebKit of the
+e2e tests), whose page process crashed or hung as MapLibre's worker took
+apart an elevation tile it was sent as an ImageBitmap: there the tile is
+read into plain pixels on the main thread first, as MapLibre does where
+OffscreenCanvas is missing. Every other browser keeps the bitmap. Each fix has to
 find its code exactly once, or the build fails: after a bump of MapLibre,
 drop the fix it has made unnecessary, or match its code again.
 
