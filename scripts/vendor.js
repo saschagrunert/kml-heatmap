@@ -9,7 +9,8 @@
  * the single place their versions are pinned and Dependabot can bump them
  * like any other dependency. The one thing left off a copy is the closing
  * comment that names a source map the site does not carry, and the one
- * thing changed in one is a few fixes of MapLibre bugs (VENDOR_PATCHES).
+ * thing changed in one is a few fixes of bugs of MapLibre or of a browser
+ * under it (VENDOR_PATCHES).
  * html-to-image is the exception to "as it is": the package has no module
  * in one file, so its module is bundled into one here (VENDOR_MODULES).
  *
@@ -131,6 +132,22 @@ export function stripSourceMapComment(content, published = "") {
 }
 
 /**
+ * Whether the page runs in WebKit on Linux: WebKitGTK (Epiphany) or WPE
+ * (Playwright's WebKit), as a JavaScript expression for the main thread of
+ * the page, which a fix of VENDOR_PATCHES inserts. The platform, not the
+ * user agent, tells Linux: Playwright's WebKit says "Macintosh" in its user
+ * agent, and "Linux x86_64" in navigator.platform, as WebKitGTK does. The
+ * engine is WebKit when the user agent names AppleWebKit and no Chrome:
+ * Chrome, Chromium, Edge and Opera on Linux name AppleWebKit and Chrome,
+ * Chrome on Android both and Android. Safari says MacIntel, iPhone or iPad,
+ * and Firefox names no AppleWebKit.
+ */
+export const LINUX_WEBKIT =
+  'typeof navigator<"u"&&/^Linux/.test(navigator.platform)' +
+  "&&/AppleWebKit/.test(navigator.userAgent)" +
+  "&&!/Chrom|Android/.test(navigator.userAgent)";
+
+/**
  * @typedef {object} VendorPatch
  * @property {string} name - What it fixes, for the error when it no longer
  *   applies
@@ -144,8 +161,9 @@ export function stripSourceMapComment(content, published = "") {
  * Published path inside vendor/ -> the fixes made to that file as it is
  * copied, each to the minified code of the version package-lock.json pins.
  *
- * Kept to MapLibre bugs that the app cannot work around from the outside,
- * each a few characters, with its upstream issue text in the owner's hands.
+ * Kept to bugs of MapLibre, or of a browser that MapLibre meets, that the
+ * app cannot work around from the outside, each a few characters, with its
+ * upstream issue text in the owner's hands.
  * A fix whose code is no longer found exactly once fails the build: after a
  * bump, see whether the new version fixed the bug (drop the patch) or only
  * renamed the code around it (match it again). A patch in place of a copy
@@ -174,6 +192,24 @@ export const VENDOR_PATCHES = {
       name: "raw tile data kept by a tile that loads empty",
       find: /(!(\w+)\)\{this\.collisionBoxArray=new \w+)(;return\}\2\.featureIndex&&\(this\.latestFeatureIndex=\2\.featureIndex,\2\.rawTileData\?)/,
       replace: "$1,this.latestRawTileData=null,this.latestEncoding=null$3",
+    },
+    {
+      // RasterDEMTileSource.loadTile: an elevation tile goes to the worker
+      // as the ImageBitmap it was fetched as. In WebKit on Linux (WebKitGTK,
+      // as in Epiphany, and WPE, the WebKit of Playwright), which draws with
+      // Skia, that crashed or hung the page's process: Skia aborted under
+      // ImageBitmap::create as the worker took the bitmap in, a page that
+      // closed met a null pointer in Skia's GPU resource cache, and the
+      // worker never answered for some tiles. The relief's e2e tests in
+      // Playwright's WebKit (build webkit-2359) lost 8 processes and hung 4
+      // times in 95 tests, and passed 40 of 40 with this. There the tile is
+      // read into plain pixels on the main thread first (readImageNow), as
+      // MapLibre does where OffscreenCanvas is missing; every other browser
+      // keeps sending the bitmap (see LINUX_WEBKIT). Not reported upstream
+      // yet: the text is with the owner.
+      name: "elevation tiles taken apart in the worker by Linux WebKit",
+      find: /(\w+)=(\w+)\((\w+)\)&&(\w+)\(\)\?\3:await this\.readImageNow\(\3\)/,
+      replace: `$1=$2($3)&&$4()&&!(${LINUX_WEBKIT})?$3:await this.readImageNow($3)`,
     },
   ],
 };

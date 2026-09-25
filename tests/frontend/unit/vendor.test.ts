@@ -10,11 +10,13 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { join, posix } from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
   VENDOR_FILES,
   VENDOR_MODULES,
   VENDOR_PATCHES,
+  LINUX_WEBKIT,
   applyVendorPatches,
   stripSourceMapComment,
 } from "../../../scripts/vendor.js";
@@ -108,6 +110,106 @@ describe("vendored third-party files", () => {
       expect(patched).toMatch(
         /this\.collisionBoxArray=new \w+,this\.latestRawTileData=null,this\.latestEncoding=null;return\}/,
       );
+    });
+
+    it("read the elevation tiles on the main thread in Linux WebKit alone", () => {
+      const patched = applyVendorPatches(entry(), "maplibre-gl.mjs").toString(
+        "latin1",
+      );
+      // Whatever the minifier named them: the tile, the check for a bitmap
+      // and the one for OffscreenCanvas
+      const gated = [
+        ...patched.matchAll(
+          /(\w+)=(\w+)\((\w+)\)&&(\w+)\(\)&&!\((.*?)\)\?\3:await this\.readImageNow\(\3\)/g,
+        ),
+      ];
+      expect(gated).toHaveLength(1);
+      expect(gated[0]![5]).toBe(LINUX_WEBKIT);
+    });
+
+    describe("tell WebKit on Linux by the browser's own words", () => {
+      // The very expression the fix inserts, run with the browser's words
+      const isLinuxWebKit = (userAgent: string, platform: string): boolean =>
+        runInNewContext(LINUX_WEBKIT, {
+          navigator: { userAgent, platform },
+        }) as boolean;
+
+      it.each([
+        [
+          "Playwright's WebKit (WPE), which says Macintosh",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
+          "Linux x86_64",
+          true,
+        ],
+        [
+          "Epiphany (WebKitGTK)",
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+          "Linux x86_64",
+          true,
+        ],
+        [
+          "Epiphany on ARM",
+          "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+          "Linux aarch64",
+          true,
+        ],
+        [
+          "Safari on macOS",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+          "MacIntel",
+          false,
+        ],
+        [
+          "Safari on iOS",
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+          "iPhone",
+          false,
+        ],
+        [
+          "Safari on iPad",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+          "MacIntel",
+          false,
+        ],
+        [
+          "Chrome on Linux",
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+          "Linux x86_64",
+          false,
+        ],
+        [
+          "Playwright's headless Chromium",
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "Linux x86_64",
+          false,
+        ],
+        [
+          "Chromium on Linux",
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chromium/154.0.0.0 Chrome/154.0.0.0 Safari/537.36",
+          "Linux x86_64",
+          false,
+        ],
+        [
+          "Edge on Linux",
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+          "Linux x86_64",
+          false,
+        ],
+        [
+          "Chrome on Android",
+          "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36",
+          "Linux armv81",
+          false,
+        ],
+        [
+          "Firefox on Linux",
+          "Mozilla/5.0 (X11; Linux x86_64; rv:155.0) Gecko/20100101 Firefox/155.0",
+          "Linux x86_64",
+          false,
+        ],
+      ])("%s", (_browser, userAgent, platform, linuxWebKit) => {
+        expect(isLinuxWebKit(userAgent, platform)).toBe(linuxWebKit);
+      });
     });
 
     it("fail loudly once the code they fix has changed", () => {

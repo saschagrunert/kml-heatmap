@@ -144,12 +144,16 @@ generated and gitignored, and each build replaces them, so a file dropped
 from the list does not linger. A copy differs from its original in the
 closing `sourceMappingURL` comment, left off because the maps (five
 megabytes for MapLibre) are not shipped and every DevTools session would
-ask for them and get a 404, and `maplibre-gl.mjs` in two fixes of a few
-characters each for MapLibre bugs the app cannot work around from the
-outside (`VENDOR_PATCHES` in `vendor.js`): tiles of the chase view's trail
-culled below the camera on the relief, and the raw data of before kept by
-a GeoJSON tile that loads empty. The texts of their upstream issues are
-with the owner and not filed yet. A fix that no longer matches exactly
+ask for them and get a 404, and `maplibre-gl.mjs` in three fixes of a few
+characters each for bugs the app cannot work around from the outside
+(`VENDOR_PATCHES` in `vendor.js`): tiles of the chase view's trail culled
+below the camera on the relief, the raw data of before kept by a GeoJSON
+tile that loads empty, and, in WebKit on Linux alone (WebKitGTK as in
+Epiphany, and WPE, Playwright's WebKit), elevation tiles read into pixels
+on the main thread rather than sent to MapLibre's worker as bitmaps, which
+crashed or hung the page's process there (`LINUX_WEBKIT` in `vendor.js`
+tells that browser by `navigator.platform` and the user agent). The texts
+of their upstream issues are with the owner and not filed yet. A fix that no longer matches exactly
 once fails the build, so a MapLibre bump shows whether it is still needed.
 Serving the files from the site keeps the page working during a CDN
 outage, keeps visitors' addresses away from CDNs and leaves
