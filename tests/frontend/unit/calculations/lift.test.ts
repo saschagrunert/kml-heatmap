@@ -28,6 +28,10 @@ import {
   groundProfileFt,
   groundProfilesFt,
   smoothAlong,
+  groundedFlights,
+  heldGroundedFlights,
+  releaseGroundedFlights,
+  releaseGroundProfiles,
 } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import {
   groundOffsetStepFt,
@@ -1313,6 +1317,51 @@ describe("lift", () => {
         (2000 * FEET_TO_METERS) / metresPerPixel,
         3,
       );
+    });
+  });
+
+  describe("the flights smoothed on their ground (groundedFlights)", () => {
+    const sampled = [420, 430, 400, 900, 1500, 1100, 2000, 2010, 2000];
+    const segments = sampled.map((ground_ft, i) => ({
+      path_id: 1,
+      altitude_ft: 5000,
+      groundspeed_knots: 100,
+      ground_ft,
+      coords: [
+        [50, 8 + i / 100],
+        [50, 8.01 + i / 100],
+      ] as [[number, number], [number, number]],
+    }));
+
+    afterEach(() => releaseGroundedFlights());
+
+    it("smooths once for the ribbons and the heat cloud, on the ground of the level", () => {
+      const flights = groundedFlights(segments, true, 8);
+      expect(groundedFlights(segments, true, 8)).toBe(flights);
+      const ground = groundProfileFt(segments, true, 8);
+      // The ground under the end of every segment, on the curve
+      segments.forEach((_, i) => {
+        const chain = flights.chains[flights.chainOf[i]!]!;
+        expect(chain.ground![flights.to[i]!]).toBeCloseTo(ground[i]!, 9);
+      });
+      expect(heldGroundedFlights()).toBe(segments);
+    });
+
+    it("smooths anew for another level on the relief, another ground or another dataset", () => {
+      const flights = groundedFlights(segments, true, 8);
+      expect(groundedFlights(segments, true, 9)).not.toBe(flights);
+      const flat = groundedFlights(segments, false, 9);
+      // The line between the fields is the same at every level
+      expect(groundedFlights(segments, false, 4)).toBe(flat);
+      const copy = segments.map((segment) => ({ ...segment }));
+      expect(groundedFlights(copy, false, 4)).not.toBe(flat);
+      expect(heldGroundedFlights()).toBe(copy);
+    });
+
+    it("lets go of them with the ground of the levels, as the 3D view goes", () => {
+      groundedFlights(segments, true, 8);
+      releaseGroundProfiles();
+      expect(heldGroundedFlights()).toBeNull();
     });
   });
 });

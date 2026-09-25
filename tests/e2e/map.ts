@@ -756,6 +756,27 @@ export function heatmapOnMap(page: Page): Promise<boolean> {
 }
 
 /**
+ * The heat cloud of the 3D view (ui/heatCloud.ts): whether its layer is on
+ * the map, whether the flat heatmap steps aside for it, and how many
+ * stretches it drew in the last frame the map drew, which a layer of
+ * shaders of its own tells rather than the map
+ */
+export function heatCloudOnMap(
+  page: Page,
+): Promise<{ onMap: boolean; stepsIn: boolean; drawn: number }> {
+  return page.evaluate(() => {
+    const app = window.mapApp!;
+    const layer = app.map!.getLayer("heat-cloud") as
+      { implementation?: { drawn: number } } | undefined;
+    return {
+      onMap: !!layer,
+      stepsIn: app.store.get("heatCloud"),
+      drawn: layer?.implementation?.drawn ?? 0,
+    };
+  });
+}
+
+/**
  * Whether the airport markers are on the map right now. They are DOM, and
  * what hides them all is a class on the map (AIRPORTS_HIDDEN_CLASS in
  * mapLayers.ts), with a rule of the stylesheet behind it.

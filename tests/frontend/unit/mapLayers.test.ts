@@ -234,13 +234,18 @@ describe("layer handles", () => {
       expect(ribbon.minzoom).toBeUndefined();
       expect(ribbon.paint["fill-extrusion-color"]).toEqual(["get", "color"]);
     }
-    // Drawn over the lines, under the replay's trail and the airport codes
+    // Drawn over every line, the replay's trail too, so the layers on the
+    // ground are one run the relief draws in one pass, and under the
+    // replay's trail in the air and the airport codes
     const order = map.getLayersOrder();
-    expect(order.indexOf(MAP_LAYERS.pathsAltitudeRibbons)).toBeGreaterThan(
+    expect(order.indexOf(MAP_LAYERS.pathsAltitudeRibbons)).toBe(
+      order.indexOf(MAP_LAYERS.replayTrail) + 1,
+    );
+    expect(order.indexOf(MAP_LAYERS.replayTrail)).toBeGreaterThan(
       order.indexOf(MAP_LAYERS.pathsAirspeedSelected),
     );
-    expect(order.indexOf(MAP_LAYERS.pathsAltitudeRibbons)).toBeLessThan(
-      order.indexOf(MAP_LAYERS.replayTrail),
+    expect(order.indexOf(MAP_LAYERS.pathsAirspeedSelectedRibbons)).toBe(
+      order.indexOf(MAP_LAYERS.replayTrailRibbons) - 1,
     );
   });
 

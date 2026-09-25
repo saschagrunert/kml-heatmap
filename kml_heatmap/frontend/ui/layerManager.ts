@@ -84,9 +84,11 @@ import {
   reliefLevel,
   ribbonWidthZoom,
 } from "../calculations/lift";
-import { smoothFlights, type SmoothedFlights } from "../calculations/smoothing";
+import type { SmoothedFlights } from "../calculations/smoothing";
 import {
-  groundProfilesFt,
+  groundedFlights,
+  heldGroundedFlights,
+  releaseGroundedFlights,
   releaseGroundProfiles,
 } from "../calculations/groundProfile";
 import { ribbonOf, ribbonProperties } from "../calculations/ribbons";
@@ -392,11 +394,6 @@ export class LayerManager implements PathHitTester {
   private listeningTo: MapLibreMap | null = null;
   /** The flight under the pointer, and its values (ui/pathHover.ts) */
   private readonly pathHover: PathHover;
-  /** Every flight of a dataset smoothed at its height, for the 3D view */
-  private smoothed: {
-    segments: PathSegment[];
-    flights: SmoothedFlights;
-  } | null = null;
   /** The relief's code has been loaded and follows terrainActive */
   private terrainLoaded = false;
   /** A cut of the flights waits for the relief's code (see syncTerrain) */
@@ -488,10 +485,7 @@ export class LayerManager implements PathHitTester {
     // flights and the ground of every level only the 3D view needs are let
     // go with it.
     app.store.subscribe("threeDVisible", (threeD) => {
-      if (!threeD) {
-        this.smoothed = null;
-        releaseGroundProfiles();
-      }
+      if (!threeD) releaseGroundProfiles();
       if (this.syncTerrain() !== null) this.redrawVisibleModes();
     });
     app.store.subscribe("globeVisible", () => {
@@ -794,9 +788,13 @@ export class LayerManager implements PathHitTester {
     state.dirty = false;
     this.setRuns(config, "main", []);
     this.setRuns(config, "selected", []);
-    // Nothing drawn is left to smooth
-    if (MODES.every((other) => !this.state[other].segments)) {
-      this.smoothed = null;
+    // Nothing drawn is left to smooth, unless the heat cloud draws along
+    // the smoothed flights (see groundedFlights)
+    if (
+      MODES.every((other) => !this.state[other].segments) &&
+      !(this.app.heatCloud && this.app.heatmapVisible)
+    ) {
+      releaseGroundedFlights();
     }
     this.pathHover.rehoverOnIdle();
   }
@@ -1056,7 +1054,8 @@ export class LayerManager implements PathHitTester {
     state.segments = data.path_segments;
     state.dirty = false;
     // The flights of another dataset are smoothed anew when they are lifted
-    if (this.smoothed?.segments !== data.path_segments) this.smoothed = null;
+    const held = heldGroundedFlights();
+    if (held && held !== data.path_segments) releaseGroundedFlights();
     this.setRuns(
       config,
       "main",
@@ -1194,29 +1193,16 @@ export class LayerManager implements PathHitTester {
   }
 
   /**
-   * Every flight smoothed at its height above its ground, kept for the
-   * dataset it was worked out for: the data of a year does not change while
-   * it is on the map
+   * Every flight smoothed at its height above its ground, on the ground and
+   * at the level the relief is drawn for (see groundedFlights), kept for as
+   * long as the dataset, the ground and the level are the same
    */
   private smoothedFlights(segments: PathSegment[]): SmoothedFlights {
-    if (this.smoothed?.segments !== segments) {
-      // Each flight stands on its own fields (groundProfileFt), and on the
-      // relief where it is drawn, as coarse as the level draws it, with the
-      // ground of the levels around it (let go of as either changes)
-      const { ground, offsets } = groundProfilesFt(
-        segments,
-        this.app.terrainActive,
-        this.app.reliefLevel,
-      );
-      this.smoothed = {
-        segments,
-        flights: smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
-          groundOf: (i) => ground[i]!,
-          offsets,
-        }),
-      };
-    }
-    return this.smoothed.flights;
+    return groundedFlights(
+      segments,
+      this.app.terrainActive,
+      this.app.reliefLevel,
+    );
   }
 
   /**
@@ -1258,8 +1244,9 @@ export class LayerManager implements PathHitTester {
    * until they are cut for the new level, as wide as it asks. Returns
    * whether the relief came or went, which the caller answers by cutting
    * the flights anew on their other ground; a level that moved on the
-   * relief lets go of the smoothed flights, for the cut at the end of the
-   * zoom, and of the ribbons that cannot stay on the relief until then
+   * relief has the flights smoothed anew for it (see groundedFlights) for
+   * the cut at the end of the zoom, and lets go of the ribbons that cannot
+   * stay on the relief until then
    * (see followsLevel) or are out of sight. The globe leaves the relief out
    * (MapLibre 6.10 breaks the ribbons up on it) and only shades it
    * (reliefShaded), over the flat ground the ribbons stand on there. Its
@@ -1282,6 +1269,7 @@ export class LayerManager implements PathHitTester {
         if (this.destroyed || this.terrainLoaded) return;
         if (features) {
           features.followTerrain(this.app);
+          features.followHeatCloud(this.app);
           this.terrainLoaded = true;
         }
         // A failure is tried again by the next zoom, not from here
@@ -1302,11 +1290,11 @@ export class LayerManager implements PathHitTester {
     const switched = wanted !== this.app.terrainActive;
     if (!switched && !moved) return false;
     relief.moveTo(level, wanted);
-    // Flights on the relief stand on the ground of its level; on the
-    // globe, the line between their fields, the same at every level: there
-    // a zoom that ends on another one smooths every flight again for
-    // nothing, a third of the work of that zoom's end
-    if (switched || wanted) this.smoothed = null;
+    // Flights on the relief stand on the ground of its level, and are
+    // smoothed anew for another (see groundedFlights); on the globe, on the
+    // line between their fields, the same at every level: there a zoom that
+    // ends on another one would smooth every flight again for nothing, a
+    // third of the work of that zoom's end
     if (switched || !followsLevel(was, level)) {
       // Out of sight until the new cut has landed (ui/terrain.ts)
       this.releaseRibbons(false);

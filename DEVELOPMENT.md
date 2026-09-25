@@ -164,8 +164,8 @@ their traces in `test-results/`, and every run writes an HTML report to
   names only, not the TypeScript sources
 
 `npm run build` produces five bundles. `mapApp.bundle.js` starts the map,
-`features.bundle.js` holds Replay, the relief of the 3D view and the
-satellite imagery, and `wrapped.bundle.js` holds Wrapped and the content of
+`features.bundle.js` holds Replay, the relief and the heat cloud of the 3D
+view and the satellite imagery, and `wrapped.bundle.js` holds Wrapped and the content of
 the statistics panel (the rail itself is part of the app, and says it is
 loading until the bundle is in; see `ui/statsPanel.ts`); the page
 imports each of the last two the first time one of its features is opened.
@@ -567,6 +567,117 @@ The e2e fixture (`tests/e2e/fixtures.ts`) answers them itself with a flat
 tile 500 m up, or with a slope of ridges and valleys for a spec that asks
 for one (the `terrain` option), so specs and screenshots stay deterministic
 and a spec can tell the flights stand on the relief.
+
+**The heat cloud of the 3D view:**
+
+While the 3D view is on, the heat is drawn as a cloud in the air instead of
+the flat heatmap: `ui/heatCloud.ts` (with the feature bundle, started with
+the relief's code by `LayerManager.syncTerrain`) puts a MapLibre custom
+layer (`ui/heatCloudLayer.ts`, id `heat-cloud`) on the map while the 3D
+view is on, and sets `heatCloud` in the
+store, for which `followLayerVisibility` hides the flat heatmap and its heat
+lines; the Heatmap switch, its button, the sheet row, the saved state and
+the link are the heatmap's as before. It draws what the heatmap would: the
+flights the year and aircraft filters keep, the selected ones alone while
+isolated, nothing while the switch is off or a replay runs, and at the
+heatmap's dimmed opacity under a colour layer, the aviation chart or a
+selection's lines (`dimsHeatmap`). No style layer draws a glow at a height:
+`heatmap` lies on the ground, `circle` has no depth, and deck.gl or
+three.js would be several hundred kilobytes for one layer.
+
+`calculations/heatCloud.ts` makes the data, once per dataset, filter,
+isolated selection, relief level and relief on or off (the points of the
+last four levels are kept, so a zoom back into one takes no work), along the
+curves the
+ribbons are cut from: every flight smoothed through its fixes on its ground
+at the relief level (`groundedFlights` in `calculations/groundProfile.ts`,
+which keeps the last smoothing for both, so the flights are smoothed once;
+the layer manager lets go of it when no colour layer draws in 3D and the
+cloud does not show either, and with the 3D view). The points of a curve are
+merged where they are closer than `CLOUD_STEP_PX` (6 px in the middle of the
+level) unless the height changed by a pixel, and kept as x and y in Mercator
+units from an origin in the middle of them (so 32-bit floats hold them to a
+fraction of a pixel), the ground under the point and the height above it in
+feet, and the seconds spent on the stretch to the next point: those of each
+segment (`segmentSeconds`, as the heat lines count them; counting fixes, as
+the heatmap does, left a cruise logged at an uneven pace in beads), spread
+over the stretches of the curve along it by their length. The heights are
+the ribbons': the smoothed altitude above the ground of the flight at the
+relief level, never below it, on the relief standing on that ground, and
+exaggerated by the relief's own exaggeration (`map.getTerrain()`), or by the
+level's without a relief. A custom layer cannot read the relief MapLibre
+draws, so where the ribbons stand on the elevation tiles of the level drawn
+under them (see above), the cloud stands on the ground the build sampled,
+smoothed for the level: within about a pixel of them, and a flight whose
+ground is not known stands on the line between its fields. All years at `z`
+12 are about 100,000 points (2 MB), at `z` 6 about 5,000.
+
+The layer draws every stretch between two points as one instance of a quad
+on the screen, reaching three blurs around it (`CLOUD_STOPS`: 7 CSS px in
+the middle of the map out to map zoom 9.5, `z` 10.5, narrowing to 4.5 px at
+10.5 and 2.5 px from 13 in, and wider in front and narrower behind in a
+tilted view, held between 0.15 and 3 times that). Close in its gain goes
+down with it, to half at 13: at the full width and gain the glow of every
+track around a busy field covered twice the map the flat heatmap does at
+`z` 12 and 25 times as much at `z` 14, over the roads and place names,
+where the flat heatmap has handed over to thin heat lines. Now it covers
+about as much as the flat heatmap at `z` 12 (7 % of the map lifted by the
+glow against 8.5 %, place names at a contrast of 7.0 against 7.2), and at
+`z` 14 a crisp glow along each circuit (8 % against the heat lines' 1 %,
+contrast 4.3 against 4.5). A pixel gets the Gaussian of its
+distance across the stretch, integrated along it (with `erf`) from the join
+with the stretch before to the join with the one after, the bisectors of the
+bends, so the stretches of a flight add up to the blur of the whole line
+without gaps or beads, and one shorter than its blur is a soft point; the
+heat is the seconds over the pixels of the stretch, so a lone track flown at
+100 kt is 1 at any zoom and depth, as the heatmap's intensity keeps a lone
+track alike by zoom. Each channel is `1 - exp(-heat * k)` of full, blended
+as a screen (`ONE, ONE_MINUS_SRC_COLOR`), which adds up the same over every
+glow on a pixel whatever the order: blue fills first, then green, then red
+(`CLOUD_COLOUR`), a lone cruise faint azure, four cyan, and some sixty white,
+the stops of the heatmap's gradient. The vertex shader projects with the
+code MapLibre hands a custom layer (`shaderData.vertexShaderPrelude`,
+`projectTileFor3D`), so the same shaders work on the globe, which gets its
+own matrix and the flat map's (`fallbackMatrix`, scaled to heights in
+metres) for the way into and out of it; a program is compiled per variant.
+It is a 3D layer, right below the first ribbon layer: above every layer
+of the app that lies on the ground, the flat lines of the selection, the
+flights and the replay's route and trail among them, and below the ribbons
+and the labels. On the relief MapLibre draws the layers on the ground into
+a texture of each relief tile and the relief with it (`drawTerrain`, with
+`depthRangeFor3D`) once for every run of them another layer breaks, so
+they are all one run below the ribbons (`mapLayers.ts` puts the flat trail
+of the replay below the ribbons too): between the heatmaps and the heat
+lines, where it first was, the cloud had the relief drawn three times a
+frame instead of once, and a frame of the relief in software WebGL in
+Safari's engine (the Playwright image, 800x500) took about 90 ms instead of 30. The cloud tests against the relief's depth
+without writing to it, so a ridge in front of a flight hides its glow and no
+glow hides another. Each glow is pulled towards the camera by its reach for
+the test, so a fix on the ground glows round rather than cut by the ground
+in front of it. Its GL objects are made in its first frame, where MapLibre
+takes up the state of its context anew after a custom layer; a lost context
+drops them (`webglcontextlost`), and the style MapLibre gets back has no
+custom layers, so `ui/heatCloud.ts` adds the layer again on `style.load`,
+and on `styledata` after a new base style. Shaders that do not compile turn
+it off for good with one logged error, and the flat heatmap stays. It only
+draws: a custom layer has no features for `queryRenderedFeatures`, and the
+ribbons stay what is hovered and clicked. An exported image has it, since
+the canvas is read in the frame that drew it (`withMapStill`). It is drawn
+in the world copy of the flights only, where the flat map shows several.
+
+On a desktop GPU (Radeon RX 9070 XT, 1440x900) the cloud's draw took 0.35 ms
+of a frame for all years at `z` 6, 0.6 ms for 2025 at `z` 8 and 1.4 ms for
+all years at `z` 12, and the camera turned at 60 frames a second with and
+without it. Working out the points took 13 ms for 2026 and 31 ms for all
+years at `z` 12 with the altitude layer on, which smooths the flights for
+its ribbons anyway, and 72 and 131 ms with the heatmap alone, which smooths
+them for the cloud; holding the smoothed flights then is 4 MB of the page's
+heap for 2026 and 12 MB for all years. A level kept takes none of that. The
+upload took under a millisecond. In software WebGL (SwiftShader) it took
+28 ms of a frame of
+170 to 250 ms. The e2e test (`orientation.spec.ts`, "on the relief") checks
+that the layer is on the map and drew stretches (`drawn`, which the layer
+counts per frame), not what the pixels look like.
 
 **The satellite imagery:**
 

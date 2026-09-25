@@ -39,8 +39,9 @@ const COLUMN_OFFSET = 2 ** 21;
  * of the next one of its path is when it ends. The last segment of a path,
  * and a track without times (a planned route, an old export), fall back to
  * its length at its groundspeed, and to no time at all without either.
+ * The heat cloud of the 3D view counts the time alike (heatCloud.ts).
  */
-function segmentSeconds(
+export function segmentSeconds(
   segment: PathSegment,
   next: PathSegment | undefined,
 ): number {

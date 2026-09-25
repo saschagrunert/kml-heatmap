@@ -45,6 +45,11 @@ export interface StoreState extends ToggleFlags {
    */
   reliefLevel: number;
   /**
+   * Whether the 3D view draws the heat as a cloud in the air, for which
+   * the flat heatmap steps aside (see ui/heatCloud.ts, its only writer)
+   */
+  heatCloud: boolean;
+  /**
    * Whether a replay is running. The layer flags keep what the user chose;
    * what the map shows follows from both (see ui/layerVisibility.ts).
    */
@@ -82,6 +87,7 @@ export const STORE_ACCESSOR_KEYS = [
   "terrainActive",
   "reliefShaded",
   "reliefLevel",
+  "heatCloud",
   "replayActive",
   "currentData",
   "hasTimingData",
@@ -124,6 +130,7 @@ export function createDefaultState(): StoreState {
     terrainActive: false,
     reliefShaded: false,
     reliefLevel: 0,
+    heatCloud: false,
     replayActive: false,
     currentData: null,
     hasTimingData: false,

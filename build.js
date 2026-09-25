@@ -282,8 +282,9 @@ function analyzeBundleComposition(metafile, fileName) {
 // flights isolate mode hides left as they are, one toast per lazy file):
 // 145.44 KB raw and 49.92 KB gzipped in a local build, about 50.12 KB in CI.
 const BUDGET_APP = { raw: 147.5 * 1024, gzip: 51.25 * 1024 };
-// The feature bundle is fetched only when replay is opened, the relief of
-// the 3D view is first drawn or the Satellite switch is first on, so it is
+// The feature bundle is fetched only when replay is opened, the relief and
+// the heat cloud of the 3D view are first drawn or the Satellite switch is
+// first on, so it is
 // not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing. 41.01 KB raw and 14.53 KB gzipped.
 // Raised from 43 KB for the replay camera's own rest and the relief and
@@ -293,7 +294,11 @@ const BUDGET_APP = { raw: 147.5 * 1024, gzip: 51.25 * 1024 };
 // Raised from 43.5 KB, which the relief fixes of the second review of
 // 2026-09-25 had filled to 370 B: 43.13 KB raw in both, 15.09 KB gzipped
 // in a local build and 15.16 KB in CI (the run of 7a79b77).
-const BUDGET_FEATURES = { raw: 45 * 1024, gzip: 16 * 1024 };
+// Raised from 45 KB and 16 KB for the heat cloud of the 3D view (its layer
+// with its own shaders, which esbuild leaves as they are written, and its
+// points, cached for the last relief levels): 55.99 KB raw and 20.3 KB
+// gzipped in a local build, about 20.38 KB in CI going by the 0.4 % above.
+const BUDGET_FEATURES = { raw: 57.5 * 1024, gzip: 21 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

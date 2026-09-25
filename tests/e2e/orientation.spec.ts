@@ -21,6 +21,7 @@ import {
   expectNoA11yViolations,
   findSegmentFarFromAirports,
   gotoApp,
+  layerButton,
   openWrapped,
   toggleLayer,
   waitForPathData,
@@ -30,6 +31,9 @@ import {
   centerOnAirport,
   coveredMarkers,
   dragRotate,
+  expectHeatmapPainted,
+  heatCloudOnMap,
+  heatmapOnMap,
   focusAirportMarker,
   getOrientation,
   jumpToView,
@@ -331,6 +335,48 @@ test.describe("Map orientation", () => {
       await reliefExpect
         .poll(() => relief(page))
         .toMatchObject({ source: "terrain" });
+    });
+
+    test("the 3D view draws the heat as a cloud in place of the flat heatmap, under the same switch", async ({
+      page,
+    }) => {
+      test.setTimeout(RELIEF_TEST_TIMEOUT_MS);
+      await page.setViewportSize(RELIEF_VIEWPORT);
+      await expectHeatmapPainted(page);
+      await page.locator("#three-d-btn").click();
+
+      // The flat heatmap steps aside for the cloud, and the switch stays on
+      await reliefExpect
+        .poll(() => heatCloudOnMap(page))
+        .toMatchObject({ onMap: true, stepsIn: true });
+      expect(await heatmapOnMap(page)).toBe(false);
+      await expect(layerButton(page, "heatmap")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      // Drawn in a frame of the map: a frame of the relief takes seconds
+      // in software WebGL, where the cloud's own shaders run as well
+      await reliefExpect
+        .poll(async () => (await heatCloudOnMap(page)).drawn)
+        .toBeGreaterThan(0);
+
+      // The switch hides the cloud as it hides the heatmap
+      await toggleLayer(page, "heatmap");
+      await reliefExpect
+        .poll(async () => (await heatCloudOnMap(page)).drawn)
+        .toBe(0);
+      expect(await heatmapOnMap(page)).toBe(false);
+      await toggleLayer(page, "heatmap");
+      await reliefExpect
+        .poll(async () => (await heatCloudOnMap(page)).drawn)
+        .toBeGreaterThan(0);
+
+      // Out of the 3D view: the flat heatmap again, and no cloud
+      await page.locator("#three-d-btn").click();
+      await reliefExpect
+        .poll(() => heatCloudOnMap(page))
+        .toMatchObject({ onMap: false, stepsIn: false });
+      await reliefExpect.poll(() => heatmapOnMap(page)).toBe(true);
     });
 
     // A test of its own: every step on the relief waits on its frames, and
