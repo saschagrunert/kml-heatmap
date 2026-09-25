@@ -76,6 +76,17 @@ class TestIsMidFlightStart:
         assert is_mid_flight_start(_flat(2000, 5), 2000.0) is False
         assert is_mid_flight_start(_flat(2000), None) is False
 
+    def test_the_limits_are_not_mid_flight(self):
+        """More than 400 m up and less than 100 m of variation, exactly."""
+        assert is_mid_flight_start(_flat(400), 400.0) is False
+        assert is_mid_flight_start(_flat(401), 401.0) is True
+        start = [2000.0, 2100.0]
+        assert is_mid_flight_start(_profile(*start, *[2050.0] * 98), 2000.0) is False
+        assert (
+            is_mid_flight_start(_profile(2000.0, 2099.0, *[2050.0] * 98), 2000.0)
+            is True
+        )
+
     def test_height_is_measured_above_the_reference(self):
         """A taxi at Munich (453 m) is flat and above 400 m, but on the ground."""
         assert is_mid_flight_start(_flat(453), 453.0) is True
@@ -512,7 +523,7 @@ class TestDeduplicateAirports:
         metadata: list[PathMetadata] = [
             {
                 "start_point": [50.0, 8.5, 100],
-                "airport_name": "Some Field - Other Field - Third",
+                "airport_name": "EDDS Some Field - Other Field - Third",
                 "start_airport": None,
                 "end_airport": None,
             }
@@ -520,7 +531,43 @@ class TestDeduplicateAirports:
 
         result = deduplicate_airports(metadata, [path])
 
-        assert [a["name"] for a in result] == ["Some Field - Other Field - Third"]
+        assert [a["name"] for a in result] == ["EDDS Some Field - Other Field - Third"]
+
+    @pytest.mark.parametrize(
+        "name", ["Flight with Anna", "Untitled Path", "Sunday flight 16 Aug 2026"]
+    )
+    def test_free_text_is_no_airport(self, name):
+        """A placemark name that is no route and has no code is no marker."""
+        path = _path((50.0, 8.5, 100), (50.1, 8.6, 200))
+        metadata: list[PathMetadata] = [
+            {"start_point": [50.0, 8.5, 100], "airport_name": name}
+        ]
+
+        assert deduplicate_airports(metadata, [path]) == []
+
+    def test_equal_names_without_a_code_are_one_airport(self):
+        """The page keys its airports by name: one name is one marker."""
+        paths = [
+            _path((50.0, 8.5, 100), (50.1, 8.6, 200)),
+            # Far from the first, but from the same field by its name
+            _path((50.5, 9.5, 100), (50.6, 9.6, 200)),
+        ]
+        metadata: list[PathMetadata] = [
+            {
+                "start_point": [p[0].lat, p[0].lon, 100],
+                "airport_name": "Home strip - Aunt farm",
+                "start_airport": "Home strip",
+                "end_airport": "Aunt farm",
+            }
+            for p in paths
+        ]
+
+        result = deduplicate_airports(metadata, paths)
+
+        assert [(a["name"], a["lat"]) for a in result] == [
+            ("Home strip", 50.0),
+            ("Aunt farm", 50.1),
+        ]
 
     def test_mid_flight_route_omits_departure(self):
         cruise = [3000.0] * 30

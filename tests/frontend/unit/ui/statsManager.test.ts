@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { siteData } from "../../../../kml_heatmap/frontend/state/siteData";
 import { StatsManager } from "../../../../kml_heatmap/frontend/ui/statsManager";
-import * as statistics from "../../../../kml_heatmap/frontend/calculations/statistics";
+import * as panelStats from "../../../../kml_heatmap/frontend/calculations/panelStats";
 import type { FilteredStatistics } from "../../../../kml_heatmap/frontend/types";
 import {
   createMockApp,
@@ -42,16 +43,33 @@ describe("StatsManager", () => {
   beforeEach(() => {
     // features/airports caches the country map on its first lookup, so every
     // test needs the airport data before the first render happens
-    window.KML_AIRPORTS = {
-      airports: [
-        { name: "EDAQ Halle-Oppin", lat: 51.55, lon: 12.05, country: "DE" },
-        { name: "EDDM Munich", lat: 48.35, lon: 11.79, country: "DE" },
-        { name: "LOWW Vienna", lat: 48.11, lon: 16.57, country: "AT" },
-        { name: "EDDF", lat: 50.03, lon: 8.57, country: "DE" },
-        { name: "EDDM", lat: 48.35, lon: 11.79, country: "DE" },
-        { name: "EDDK", lat: 50.87, lon: 7.14, country: "DE" },
-      ],
-    };
+    // Each with the code the export found in its name
+    siteData.airports = [
+      {
+        name: "EDAQ Halle-Oppin",
+        lat: 51.55,
+        lon: 12.05,
+        code: "EDAQ",
+        country: "DE",
+      },
+      {
+        name: "EDDM Munich",
+        lat: 48.35,
+        lon: 11.79,
+        code: "EDDM",
+        country: "DE",
+      },
+      {
+        name: "LOWW Vienna",
+        lat: 48.11,
+        lon: 16.57,
+        code: "LOWW",
+        country: "AT",
+      },
+      { name: "EDDF", lat: 50.03, lon: 8.57, code: "EDDF", country: "DE" },
+      { name: "EDDM", lat: 48.35, lon: 11.79, code: "EDDM", country: "DE" },
+      { name: "EDDK", lat: 50.87, lon: 7.14, code: "EDDK", country: "DE" },
+    ];
 
     const railTitle = document.createElement("h2");
     railTitle.id = "stats-rail-title";
@@ -352,6 +370,23 @@ describe("StatsManager", () => {
       );
     });
 
+    it("says above field for a cruise measured without terrain (regression)", () => {
+      // The height above a flight's own lowest altitude used to be called
+      // AGL; it is only that where the export carries the terrain
+      statsManager.updateStatsPanel(
+        { ...mockStats, cruise_height_above_terrain: false },
+        false,
+      );
+
+      expect(
+        metricRow(statsPanel, "Cruise Speed (> 1000 ft above field)"),
+      ).toBe("125kt (232km/h)");
+      expect(
+        metricRow(statsPanel, "Most Common Cruise Altitude (above field)"),
+      ).toBe("5,500ft (1,676m)");
+      expect(statsPanel.textContent).not.toContain("AGL");
+    });
+
     it("lists every aircraft with registration, type and flights", () => {
       statsManager.updateStatsPanel(mockStats, false);
 
@@ -642,30 +677,34 @@ describe("StatsManager", () => {
     });
   });
 
-  describe("panel visibility", () => {
-    it("toggleStats flips the store key the rail follows", () => {
-      statsManager.toggleStats();
-      expect(mockApp.store.get("statsPanelVisible")).toBe(true);
-
-      statsManager.toggleStats();
-      expect(mockApp.store.get("statsPanelVisible")).toBe(false);
-    });
-
-    it("setStatsPanelVisible writes the store and nothing else", () => {
-      statsManager.setStatsPanelVisible(true);
-
-      expect(mockApp.store.get("statsPanelVisible")).toBe(true);
-      // The rail's hidden attribute is the only thing that shows the panel;
-      // no inline style, class or explicit save is involved
-      expect(statsPanel.style.display).toBe("");
-      expect(statsPanel.classList.contains("visible")).toBe(false);
-      expect(mockApp.stateManager.saveMapState).not.toHaveBeenCalled();
-    });
-
-    it("works without a panel element", () => {
+  describe("lazy start", () => {
+    it("renders straight away when it starts with the panel open", () => {
+      // The app starts it on the first opening, once the bundle is in
+      const app = createMockApp({ statsPanelVisible: true });
+      app.currentData = mockApp.currentData;
+      const panel = document.createElement("div");
+      panel.id = "stats-panel";
+      panel.innerHTML = '<p class="kh-stats-loading">Loading statistics…</p>';
       statsPanel.remove();
-      expect(() => statsManager.toggleStats()).not.toThrow();
-      expect(mockApp.store.get("statsPanelVisible")).toBe(true);
+      document.body.appendChild(panel);
+      try {
+        new StatsManager(asMapApp(app));
+
+        expect(panel.querySelector(".kh-stats-loading")).toBeNull();
+        expect(leadValue(panel, "Flights")).toBe("2");
+      } finally {
+        panel.remove();
+      }
+    });
+
+    it("leaves a closed panel alone", () => {
+      const spy = vi.spyOn(panelStats, "filterStatistics");
+
+      new StatsManager(asMapApp(mockApp));
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(statsPanel.firstChild).toBeNull();
+      spy.mockRestore();
     });
   });
 
@@ -721,7 +760,7 @@ describe("StatsManager", () => {
       document.body.appendChild(panel);
       try {
         new StatsManager(asMapApp(app));
-        expect(panel.firstChild).toBeNull();
+        expect(leadValue(panel, "Flights")).toBe("0");
 
         app.currentData = mockApp.currentData;
 
@@ -746,9 +785,31 @@ describe("StatsManager", () => {
     });
   });
 
+  describe("destroy", () => {
+    it("stops following the store and the size of the panel", () => {
+      const removed = vi.spyOn(window, "removeEventListener");
+      mockApp.store.set("statsPanelVisible", true);
+      statsManager.updateStatsForSelection();
+      expect(leadValue(statsPanel, "Flights")).toBe("2");
+
+      statsManager.destroy();
+
+      // The watcher of the fade no longer listens to the window
+      expect(removed).toHaveBeenCalledWith("resize", expect.any(Function));
+      mockApp.selectedYear = "2025";
+      expect(leadValue(statsPanel, "Flights")).toBe("2");
+      // A resize leaves the panel as it is
+      statsPanel.classList.remove("is-at-end");
+      window.dispatchEvent(new Event("resize"));
+      expect(statsPanel.classList.contains("is-at-end")).toBe(false);
+      removed.mockRestore();
+    });
+  });
+
   describe("closed panel", () => {
     it("computes nothing while the panel is closed (regression)", () => {
-      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+      const spy = vi.spyOn(panelStats, "calculateFilteredStatistics");
+      const filterSpy = vi.spyOn(panelStats, "filterStatistics");
 
       mockApp.selectedYear = "2025";
       mockApp.selectedPathIds.add(1);
@@ -757,8 +818,10 @@ describe("StatsManager", () => {
       mockApp.store.notifyMutation("selectedPathIds");
 
       expect(spy).not.toHaveBeenCalled();
+      expect(filterSpy).not.toHaveBeenCalled();
       expect(statsPanel.firstChild).toBeNull();
       spy.mockRestore();
+      filterSpy.mockRestore();
     });
 
     it("renders what changed while closed when the panel opens", () => {
@@ -792,18 +855,21 @@ describe("StatsManager", () => {
 
     it("computes the statistics once for unchanged inputs", () => {
       statsManager.updateStatsForSelection();
-      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+      const spy = vi.spyOn(panelStats, "calculateFilteredStatistics");
+      const filterSpy = vi.spyOn(panelStats, "filterStatistics");
 
       statsManager.updateStatsForSelection();
       // A mutation notification without an actual change is also a no-op
       mockApp.store.notifyMutation("selectedPathIds");
 
       expect(spy).not.toHaveBeenCalled();
+      expect(filterSpy).not.toHaveBeenCalled();
       spy.mockRestore();
+      filterSpy.mockRestore();
     });
 
     it("recomputes when the selection changes and again when it is cleared", () => {
-      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+      const spy = vi.spyOn(panelStats, "calculateFilteredStatistics");
 
       mockApp.selectedPathIds.add(1);
       mockApp.store.notifyMutation("selectedPathIds");
@@ -822,7 +888,8 @@ describe("StatsManager", () => {
     });
 
     it("keeps the filter's statistics for the next time a selection is cleared (regression)", () => {
-      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+      const spy = vi.spyOn(panelStats, "calculateFilteredStatistics");
+      const filterSpy = vi.spyOn(panelStats, "filterStatistics");
 
       for (let i = 0; i < 3; i++) {
         mockApp.selectedPathIds.add(1);
@@ -832,21 +899,23 @@ describe("StatsManager", () => {
       }
 
       // The filter's statistics were computed when the panel opened and are
-      // kept; only each selection itself is computed again
-      const filterRuns = spy.mock.calls.filter(
-        ([options]) => options.pathInfo === mockApp.fullPathInfo,
-      );
-      expect(filterRuns).toHaveLength(0);
+      // kept with the filter view; only each selection is computed again
       expect(spy).toHaveBeenCalledTimes(3);
+      expect(filterSpy).toHaveBeenCalledTimes(3);
+      const [first, ...rest] = filterSpy.mock.results.map(
+        (result) => result.value as FilteredStatistics,
+      );
+      for (const stats of rest) expect(stats).toBe(first);
       expect(leadValue(statsPanel, "Flights")).toBe("2");
       spy.mockRestore();
+      filterSpy.mockRestore();
     });
 
     it("treats the same ids in another order as the same selection", () => {
       mockApp.selectedPathIds.add(2);
       mockApp.selectedPathIds.add(1);
       mockApp.store.notifyMutation("selectedPathIds");
-      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+      const spy = vi.spyOn(panelStats, "calculateFilteredStatistics");
 
       mockApp.selectedPathIds = new Set([1, 2]);
 
@@ -855,7 +924,7 @@ describe("StatsManager", () => {
     });
 
     it("recomputes for a replaced dataset of the same shape", () => {
-      const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+      const spy = vi.spyOn(panelStats, "filterStatistics");
 
       // The loader always builds new arrays for a new dataset
       mockApp.currentData = createDataset(

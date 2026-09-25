@@ -15,6 +15,7 @@ from pprint import pformat
 import pytest
 from lxml import html as lxml_html
 
+from kml_heatmap.airport_lookup import airport_icao_code
 from kml_heatmap.data_exporter import PATH_ID_BITS
 from kml_heatmap.geometry import haversine_distance
 from kml_heatmap.obfuscate import obfuscate_kml_files
@@ -26,6 +27,7 @@ from kml_heatmap.segment_codec import (
     decode_ground,
     decode_rows,
 )
+from kml_heatmap.site_assets import CARTO_STYLE_URL, CARTO_TILEJSON_URL
 from kml_heatmap.terrain import TILE_SIZE
 from tests.conftest import parse_data as _load_js
 
@@ -62,8 +64,9 @@ GOLDEN = {
     "distance_km": {2025: 387.5, 2026: 1176.2},
     "flight_seconds": {2025: 12338.5, 2026: 23987.6},
     # Paths with a ground, and its lowest, highest and mean, over Hills
-    "ground_ft": {2025: (4, 80.0, 550.0, 368.8), 2026: (4, -60.0, 980.0, 430.0)},
-    "groundspeed_knots": (0.1, 167.4),
+    "ground_ft": {2025: (4, 30.0, 550.0, 364.3), 2026: (4, -60.0, 980.0, 430.1)},
+    # Whole knots, and a positive speed at 1 kt at least
+    "groundspeed_knots": (1.0, 167.0),
     "path_count": 8,
     "path_ids": {
         2025: [411100833082, 642456146975, 336383306180, 68245584272],
@@ -238,12 +241,17 @@ def test_index_html_preloads_the_latest_year(golden_output):
         for link in page.iter("link")
         if link.get("rel") == "preload"
     ]
-    assert preloads == [
+    assert preloads[:3] == [
         ("fetch", "data/metadata.json"),
         ("fetch", "data/airports.json"),
         ("fetch", f"data/{latest}/data.json"),
     ]
     assert (out / "data" / str(latest) / "data.json").exists()
+    # Then CARTO's style and tile index, with the key of the build if any
+    assert [str(href).split("?")[0] for _, href in preloads[3:]] == [
+        CARTO_STYLE_URL,
+        CARTO_TILEJSON_URL,
+    ]
 
 
 def test_top_level_data_files(golden_output):
@@ -266,8 +274,10 @@ def test_top_level_data_files(golden_output):
     assert set(airports) == {"airports"}
     assert airports["airports"]
     for airport in airports["airports"]:
-        assert set(airport) <= {"name", "lat", "lon", "country"}
+        assert set(airport) <= {"name", "lat", "lon", "code", "country"}
         assert {"name", "lat", "lon"} <= set(airport)
+        # The code the page shows, the one the airports were merged by
+        assert airport.get("code") == airport_icao_code(airport["name"])
 
 
 def test_year_files_match_available_years(golden_output):
@@ -473,7 +483,8 @@ def test_no_date_of_a_name_is_exported(tmp_path):
         if key in info
     ]
     assert len(path_info) == len(DATED_FLIGHTS)
-    assert "Sunday flight" in names
+    # Free text without a code and no route is no airport at all
+    assert not any("Sunday" in name for name in names)
     assert "Flight EDDS-EDDP" in names
     assert "EDXX" in names
     for name in names:

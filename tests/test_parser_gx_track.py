@@ -227,6 +227,20 @@ class TestParseGxTrack:
         assert path[1].ts is None
         assert kept == whens[2:]
 
+    def test_a_stamp_more_than_a_week_from_the_median_is_dropped(self):
+        """Seven days: a logger left running for days keeps its stamps."""
+        base = datetime(2025, 6, 1, 10, 0, tzinfo=UTC)
+        whens = [
+            _iso(base - timedelta(days=8)),
+            _iso(base - timedelta(days=6)),
+            *(_iso(base + timedelta(seconds=10 * i)) for i in range(5)),
+        ]
+        coords = [f"{8.5 + i * 0.01} 50.0 300" for i in range(7)]
+        path, kept = parse_gx_tracks([_track(_document(), coords, whens)], "t.kml", [])
+        assert path[0].ts is None
+        assert path[1].ts is not None
+        assert kept == whens[1:]
+
     def test_year_is_that_of_the_majority_of_the_track(self):
         doc = _document()
         pm = _placemark(doc, name="EDDS")

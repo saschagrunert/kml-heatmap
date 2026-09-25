@@ -44,6 +44,7 @@ class TestExportAirportsData:
         assert data == {
             "airports": [
                 {
+                    "code": "EDDS",
                     "country": "DE",
                     "lat": 48.6899,
                     "lon": 9.222,
@@ -74,6 +75,29 @@ class TestExportAirportsData:
         export_airports_data([_airport("ZZZZ Nowhere")], str(tmp_path))
         data = parse_data(tmp_path / "airports.json")
         assert "country" not in data["airports"][0]
+        assert data["airports"][0]["code"] == "ZZZZ"
+
+    @pytest.mark.parametrize(
+        ("name", "code"),
+        [
+            ("EDAQ Halle-Oppin", "EDAQ"),
+            # One code anywhere in the name is the airport's
+            ("Flugplatz EDAQ Halle", "EDAQ"),
+            # A leading code wins over a second one further on
+            ("EDAQ near EDDP", "EDAQ"),
+            # Two codes, neither leading: which one is the airport's is
+            # unknown, and the page shows no code rather than a guess
+            ("Between EDAQ and EDDP", None),
+            # Not an ICAO region: I, J, Q and X lead no airport code
+            ("JUNE Fly-in Meadow", None),
+            ("Grass Strip Oppin", None),
+        ],
+    )
+    def test_code_is_the_one_airports_merge_by(self, tmp_path, parse_data, name, code):
+        """The frontend shows this code rather than reading the name again."""
+        export_airports_data([_airport(name)], str(tmp_path))
+        data = parse_data(tmp_path / "airports.json")
+        assert data["airports"][0].get("code") == code
 
     def test_route_name_uses_position(self, tmp_path, parse_data):
         airports = [

@@ -15,9 +15,10 @@ import { LngLat, type Map as MapLibreMap } from "maplibre-gl";
 import {
   DEGREES_TO_RADIANS as RAD,
   EARTH_CIRCUMFERENCE_M,
+  TILE_SIZE_PX,
   turnOf,
 } from "../utils/geometry";
-import { REPLAY_CAMERA_MOVE } from "../utils/mapHelpers";
+import { mapSize, REPLAY_CAMERA_MOVE } from "../utils/mapHelpers";
 import {
   heightAtZoomFt,
   liftMetres,
@@ -313,11 +314,15 @@ export class ChaseCamera {
     this.measured = false;
   }
 
-  /** Pixels a map pixel is, and the camera's distance in pixels */
+  /**
+   * Pixels a map pixel is, and the camera's distance in pixels. Asked in
+   * every frame, so of the map's size and not its container's, whose size
+   * lays the page out (see mapSize).
+   */
   private scale(zoom: number): { world: number; distance: number } {
-    const height = this.map.getContainer().clientHeight;
+    const { height } = mapSize(this.map);
     return {
-      world: 512 * 2 ** zoom,
+      world: TILE_SIZE_PX * 2 ** zoom,
       distance:
         height / 2 / Math.tan((this.map.getVerticalFieldOfView() * RAD) / 2),
     };
@@ -374,7 +379,7 @@ export class ChaseCamera {
       const panel = document
         .getElementById("replay-controls")
         ?.getBoundingClientRect().top;
-      const height = map.getContainer().clientHeight;
+      const { height } = mapSize(map);
       this.visibleHeight =
         panel && panel > top ? Math.min(panel - top, height) : height;
     }
@@ -405,7 +410,7 @@ export class ChaseCamera {
     const { world, distance } = this.scale(this.zoom.value);
     const metresPerPx = ChaseCamera.metresPerPx(lat, world);
     const b = this.bearing.value * RAD;
-    const height = map.getContainer().clientHeight;
+    const { height } = mapSize(map);
     const ahead =
       chaseLead(
         CHASE_SCREEN_Y * this.visibleHeight - height / 2,
@@ -528,12 +533,9 @@ export class ChaseCamera {
       map.getPitch(),
       distance,
     );
-    const container = map.getContainer();
+    const { width, height } = mapSize(map);
     const ground = map.project([lon, lat]);
-    return [
-      container.clientWidth / 2 + drawn.x - ground.x,
-      container.clientHeight / 2 + drawn.y - ground.y,
-    ];
+    return [width / 2 + drawn.x - ground.x, height / 2 + drawn.y - ground.y];
   }
 
   /**

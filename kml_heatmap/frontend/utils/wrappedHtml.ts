@@ -208,11 +208,15 @@ export function generateAircraftFleetHtml(yearStats: YearStats): string {
 
 /**
  * Generate home base HTML
+ * @param code - The airport's ICAO code, which the export writes
  */
-export function generateHomeBaseHtml(homeBase: AirportCount): string {
-  const { code, name } = splitAirportName(homeBase.name);
-  const codeHtml = code
-    ? '<span class="top-airport-code">' + escapeHtml(code) + "</span>"
+export function generateHomeBaseHtml(
+  homeBase: AirportCount,
+  code?: string,
+): string {
+  const { code: shownCode, name } = splitAirportName(homeBase.name, code);
+  const codeHtml = shownCode
+    ? '<span class="top-airport-code">' + escapeHtml(shownCode) + "</span>"
     : "";
 
   return (
@@ -236,6 +240,8 @@ export interface DestinationsOptions {
   countryName: (code: string) => string;
   /** Resolve a country code to its flag, or null when the site has none */
   flagSrc: (code: string) => string | null;
+  /** Resolve an airport to its ICAO code, which the export writes */
+  airportCode: (name: string) => string | undefined;
   /** Airport that carries the home base accent */
   homeBase?: string | null;
   /** Airport furthest from the home base; carries the second accent */
@@ -245,10 +251,11 @@ export interface DestinationsOptions {
 /** One airport row: code, name and at most one accent tag */
 function destinationRow(
   name: string,
+  airportCode: string | undefined,
   isHome: boolean,
   isFurthest: boolean,
 ): string {
-  const { code, name: place } = splitAirportName(name);
+  const { code, name: place } = splitAirportName(name, airportCode);
   const stateClass = isHome ? " is-home" : isFurthest ? " is-furthest" : "";
   const codeHtml = code
     ? '<span class="destination-code">' + escapeHtml(code) + "</span>"
@@ -275,7 +282,7 @@ export function generateDestinationsHtml(
 ): string {
   if (grouped.size === 0) return "";
 
-  const { countryName, flagSrc, homeBase, furthest } = options;
+  const { countryName, flagSrc, airportCode, homeBase, furthest } = options;
   let html = wrappedSectionTitle(
     "airports-grid-title",
     "airport",
@@ -314,7 +321,7 @@ export function generateDestinationsHtml(
     for (const name of airports) {
       const isHome = !!homeBase && name === homeBase;
       const isFurthest = !isHome && !!furthest && name === furthest;
-      html += destinationRow(name, isHome, isFurthest);
+      html += destinationRow(name, airportCode(name), isHome, isFurthest);
     }
     html += "</ul></div>";
   }

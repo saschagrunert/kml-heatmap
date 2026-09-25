@@ -69,6 +69,9 @@ async function expectTapTargets(page: Page, selector: string): Promise<void> {
   }
 }
 
+/** The tag of a test that loads the page itself, see the beforeEach below */
+const OWN_LOAD = "@own-load";
+
 test.describe("Mobile bar", () => {
   test.skip(
     ({ isMobile }) => !isMobile,
@@ -80,9 +83,13 @@ test.describe("Mobile bar", () => {
   // error-free.spec.ts drives the columns, which are not here.
   let errors: ErrorCollector;
 
-  test.beforeEach(async ({ page }) => {
+  // A test tagged OWN_LOAD opens the page itself, with a link of its own.
+  // Loading it a second time made WebKit report the tile requests the first
+  // page left open as failed while it unloaded, which the checks below
+  // counted against the test.
+  test.beforeEach(async ({ page }, testInfo) => {
     errors = await attachErrorCollectors(page);
-    await gotoApp(page);
+    if (!testInfo.tags.includes(OWN_LOAD)) await gotoApp(page);
   });
 
   test.afterEach(() => {
@@ -444,20 +451,24 @@ test.describe("Mobile bar", () => {
       await expect(map).toBeInViewport();
     });
 
-    test("closing it from a link puts focus on the Wrapped tab", async ({
-      page,
-    }) => {
-      // Restored from the link, nothing opened it, and focus used to fall
-      // to the page once it closed
-      await gotoApp(page, "/?v=000000100");
-      const modal = page.locator("#wrapped-modal");
-      await expect(modal).toBeVisible({ timeout: 10000 });
+    test(
+      "closing it from a link puts focus on the Wrapped tab",
+      {
+        tag: OWN_LOAD,
+      },
+      async ({ page }) => {
+        // Restored from the link, nothing opened it, and focus used to fall
+        // to the page once it closed
+        await gotoApp(page, "/?v=000000100");
+        const modal = page.locator("#wrapped-modal");
+        await expect(modal).toBeVisible({ timeout: 10000 });
 
-      await page.keyboard.press("Escape");
+        await page.keyboard.press("Escape");
 
-      await expect(modal).toBeHidden();
-      await expect(page.locator("#mobile-tab-wrapped")).toBeFocused();
-    });
+        await expect(modal).toBeHidden();
+        await expect(page.locator("#mobile-tab-wrapped")).toBeFocused();
+      },
+    );
 
     test("reopening starts at the top", async ({ page }) => {
       const modal = await openWrapped(page);

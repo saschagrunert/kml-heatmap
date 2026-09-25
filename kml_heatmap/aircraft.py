@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .constants import ICAO_REGION_PREFIXES
+from .date_tokens import strip_dates
 from .logger import logger
 
 if TYPE_CHECKING:
@@ -164,6 +165,21 @@ def _is_registration(text: str, after_date: bool) -> bool:
     return not (after_date and _ICAO_CODE.fullmatch(text))
 
 
+def _dated_registration(text: str, filename: str) -> bool:
+    """Whether a registration holds a date, which it would publish.
+
+    "16AUG26" in "1_16AUG26_DA40.kml" has the shape of a registration, but
+    it is the day of the flight, and the registration is published with
+    every path. Warns about it.
+    """
+    if strip_dates(text) == text:
+        return False
+    logger.warning(
+        "Ignoring the registration %s in %s: it holds a date", text, filename
+    )
+    return True
+
+
 def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
     """Parse aircraft information from KML filename.
 
@@ -173,7 +189,8 @@ def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
 
     A numbered name whose second part is no registration (see
     ``_is_registration``) names no aircraft; a Charterware name without one
-    keeps its route.
+    keeps its route. A registration that holds a date is none either (see
+    ``_dated_registration``), but the type and route stay.
     """
     name = Path(filename).stem
     parts = name.split("_")
@@ -188,7 +205,9 @@ def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
                 filename,
             )
         return {
-            "registration": normalize_registration(parts[1]),
+            "registration": None
+            if _dated_registration(parts[1], filename)
+            else normalize_registration(parts[1]),
             "type": parts[2],
             "format": "numbered",
         }
@@ -208,7 +227,9 @@ def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
         # "2026-01-12_1513h_constructor_LOAV-LOAV.kml" is no aircraft, but
         # the route still names the airports
         registration = None
-        if _is_registration(parts[2], after_date=False):
+        if _is_registration(parts[2], after_date=False) and not _dated_registration(
+            parts[2], filename
+        ):
             registration = normalize_registration(parts[2])
         else:
             logger.debug("No aircraft registration in filename: %s", filename)

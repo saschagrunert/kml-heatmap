@@ -10,6 +10,7 @@ import {
   airportPosition,
   containerPoint,
   pathCount,
+  ribbonCount,
   setView,
   waitForMapReady,
 } from "./map";
@@ -21,7 +22,7 @@ import {
  */
 export async function knownYears(page: Page): Promise<string[]> {
   const years = await page.evaluate(() =>
-    (window.KML_METADATA?.available_years ?? []).map(String),
+    (window.mapApp?.siteData.metadata?.available_years ?? []).map(String),
   );
   expect(years.length, "the site exports no years").toBeGreaterThan(0);
   return years;
@@ -74,6 +75,13 @@ export async function attachErrorCollectors(
  * Every console error. The fixture in fixtures.ts answers all CDN and tile
  * requests locally, so a failed resource load is a defect of the page or of
  * the test setup, never a network hiccup to filter out.
+ *
+ * Not the page's: in WebKit, "Refused to apply a stylesheet because its
+ * hash, its nonce, or 'unsafe-inline' does not appear in the style-src
+ * directive" in a trace after a failure. Playwright adds and removes a
+ * <style> element to line up the animations before every screenshot in
+ * WebKit, which the CSP refuses; only the screenshot of a failed test takes
+ * one here, after the checks.
  */
 export function relevantConsoleErrors(collector: ErrorCollector): string[] {
   return collector.consoleErrors;
@@ -230,7 +238,7 @@ export async function findSegmentFarFromAirports(
    drive whichever control the viewport actually offers.
    ========================================================================== */
 
-/** Matches MOBILE_BAR_BREAKPOINT_PX in ui/mobileBar.ts */
+/** Matches MOBILE_BREAKPOINT_PX in utils/constants.ts (see utils/device.ts) */
 export const MOBILE_BAR_BREAKPOINT_PX = 768;
 
 /** Whether this viewport gets the bottom bar instead of the columns */
@@ -394,10 +402,27 @@ export function setAircraftFilter(page: Page, aircraft: string): Promise<void> {
   return selectFilter(page, "aircraft", "aircraft-select", aircraft);
 }
 
-/** Toggle the statistics panel from the bar or the desktop button */
+/**
+ * Wait until the statistics panel shows its figures. They come with the
+ * Wrapped bundle, which the first opening fetches (ui/statsPanel.ts); until
+ * then the rail is open over a panel that says it is loading.
+ */
+export async function waitForStatsContent(page: Page): Promise<Locator> {
+  const panel = page.locator("#stats-panel");
+  await expect(panel.locator(".kh-stats")).toBeVisible();
+  await expect(panel).not.toHaveAttribute("aria-busy", "true");
+  return panel;
+}
+
+/**
+ * Toggle the statistics panel from the bar or the desktop button. Opened, it
+ * is waited for until it shows its figures (see waitForStatsContent).
+ */
 export async function toggleStatsPanel(page: Page): Promise<void> {
   const mobile = await usesMobileBar(page);
+  const opening = await page.locator("#stats-rail").isHidden();
   await page.locator(mobile ? "#mobile-tab-stats" : "#stats-btn").click();
+  if (opening) await waitForStatsContent(page);
 }
 
 /**
@@ -464,7 +489,10 @@ export async function togglePathSelection(
   );
 }
 
-/** Enable altitude layer and wait for path data to load */
+/**
+ * Enable altitude layer and wait for path data to load: drawn as lines, or
+ * in the 3D view as ribbons, where the lines are left empty
+ */
 export async function waitForPathData(page: Page): Promise<void> {
   const altBtn = layerButton(page, "altitude");
   if ((await altBtn.getAttribute("aria-pressed")) !== "true") {
@@ -479,7 +507,12 @@ export async function waitForPathData(page: Page): Promise<void> {
     { timeout: 15000 },
   );
   await expect
-    .poll(() => pathCount(page, "altitude"), { timeout: 15000 })
+    .poll(
+      async () =>
+        (await pathCount(page, "altitude")) +
+        (await ribbonCount(page, "altitude")),
+      { timeout: 15000 },
+    )
     .toBeGreaterThan(0);
 }
 

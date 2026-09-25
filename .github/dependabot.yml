@@ -6,8 +6,20 @@ updates:
   # Dependabot does not read the *.lock files and cannot recompile them, so
   # the lint job fails a bump the locks no longer satisfy; run `make lock` on
   # the branch. The weekly "lock" workflow recompiles them as well.
+  #
+  # Until then such a pull request tests nothing new: every job installs the
+  # old lock files. The test workflow therefore runs only its cheap jobs
+  # for Dependabot's own pushes to a dependabot/pip/ branch, and everything
+  # once `make lock` is pushed on top.
   - package-ecosystem: "pip"
     directory: "/"
+    # Such a pull request gets a commit of its own (`make lock`) to test
+    # the new versions, which the lint job also needs where the lock files
+    # no longer satisfy the range; Dependabot stops rebasing it after that
+    # anyway. Before that a rebase for every push to main only starts
+    # another run of the cheap jobs against the old versions; comment
+    # `@dependabot rebase` when one is wanted.
+    rebase-strategy: disabled
     # Raise the lower bound of a range to the new release. pyproject.toml
     # names a package, so the default ("auto") widens ranges instead, and a
     # ">=" range already admits every new release: from April to September
@@ -15,9 +27,11 @@ updates:
     versioning-strategy: increase
     # A release has to be out this long before Dependabot proposes it, so a
     # compromised or broken one is usually yanked before it reaches a pull
-    # request. Security updates are not held back.
+    # request. Security updates are not held back. Every ecosystem below
+    # waits the same week: that is what zizmor's dependabot-cooldown audit
+    # asks for at least, and nothing here needs a release sooner.
     cooldown:
-      default-days: 5
+      default-days: 7
     schedule:
       interval: "daily"
       time: "09:00"
@@ -53,7 +67,7 @@ updates:
     directory: "/"
     # See the cooldown of the pip entry
     cooldown:
-      default-days: 5
+      default-days: 7
     schedule:
       interval: "daily"
       time: "09:00"
@@ -94,6 +108,13 @@ updates:
         patterns:
           - "typescript"
           - "typescript-eslint"
+      # The style specification validates the app's layers in a unit test
+      # (the map itself does not, see withoutValidation in mapHelpers.ts),
+      # so it moves with the MapLibre release that depends on it
+      maplibre:
+        patterns:
+          - "maplibre-gl"
+          - "@maplibre/maplibre-gl-style-spec"
       dev-dependencies:
         dependency-type: "development"
         update-types:
@@ -105,7 +126,7 @@ updates:
     directory: "/"
     # See the cooldown of the pip entry
     cooldown:
-      default-days: 5
+      default-days: 7
     schedule:
       interval: "daily"
       time: "09:00"
@@ -124,7 +145,7 @@ updates:
     directory: "/"
     # See the cooldown of the pip entry
     cooldown:
-      default-days: 5
+      default-days: 7
     schedule:
       interval: "daily"
       time: "09:00"
@@ -150,10 +171,15 @@ updates:
   # pre-commit hook revisions. Only the two pinned repos are left in
   # .pre-commit-config.yaml; the linters and formatters run from the project
   # environment, so nothing here can drift from what CI installs. The CI
-  # security job reads the gitleaks release the hook pins, so its bump moves
-  # CI along.
+  # security job runs the gitleaks image test.yml pins by digest and checks
+  # that it is the release the hook pins, so a bump of the gitleaks rev fails
+  # that job until the digest is updated by hand on the same branch (the
+  # comment of that step says how to look it up).
   - package-ecosystem: "pre-commit"
     directory: "/"
+    # See the cooldown of the pip entry
+    cooldown:
+      default-days: 7
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3

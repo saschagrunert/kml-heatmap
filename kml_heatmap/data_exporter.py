@@ -53,6 +53,7 @@ from typing import IO, TYPE_CHECKING, Self
 
 from .aircraft import resolve_aircraft_models
 from .cache import atomic_write
+from .duplicates import drop_overlapping_paths
 from .exceptions import KMLHeatmapError
 from .export_pipeline import build_path_info, path_duration, process_path_segments
 from .export_writers import (
@@ -95,6 +96,7 @@ if TYPE_CHECKING:
 __all__ = [
     "MIN_PATHS_PER_CHUNK",
     "PATH_ID_BITS",
+    "STABLE_MTIMES_ENV",
     "ChunkResult",
     "ExportResult",
     "GroundspeedRange",
@@ -128,6 +130,13 @@ JSON_SEPARATORS = (",", ":")
 PATH_ID_BITS = 40
 # Segment row layout: [lat, lon, altitude_ft, groundspeed_knots, time?]
 SEGMENT_SPEED_INDEX = 3
+# Set to "1", every published file gets a modification time derived from
+# its content (see content_mtime)
+STABLE_MTIMES_ENV = "KML_HEATMAP_STABLE_MTIMES"
+# The content-derived modification times lie this many seconds after
+# 2001-09-09 at most: in the past, where no tool warns about them
+_CONTENT_MTIME_EPOCH = 1_000_000_000
+_CONTENT_MTIME_RANGE = 1 << 28
 
 
 @dataclass
@@ -716,6 +725,27 @@ def _check_target(root: Path, relative: Path) -> None:
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(directory))
 
 
+def content_mtime(path: Path) -> int:
+    """A modification time for a file that only its content decides.
+
+    GitHub Pages derives the ETag of a file from its modification time and
+    size, and a site built afresh on every deploy gives every file the time
+    of the build: every deploy made every browser download every file again,
+    changed or not. A time taken from a hash of the content keeps the ETag
+    of a file that did not change. It is no real time, only a label, and
+    only for a server that compares it for equality (nginx, GitHub Pages)
+    and sends a Cache-Control of its own: ``python -m http.server`` answers
+    304 to an older time and sends none, so browsers would cache a file of
+    2005 for years. Hence only on request, see ``STABLE_MTIMES_ENV``.
+    """
+    digest = hashlib.blake2b(digest_size=8)
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    offset = int.from_bytes(digest.digest(), "big") % _CONTENT_MTIME_RANGE
+    return _CONTENT_MTIME_EPOCH + offset
+
+
 def _staged_files(stage: Path) -> list[Path]:
     """The files of a staging directory, relative to it, in publishing order.
 
@@ -832,6 +862,7 @@ class SiteOutput:
         data_dir: str | Path,
         site_files: Iterable[str] = (),
         site_patterns: Iterable[str] = (),
+        stable_mtimes: bool = False,
     ) -> None:
         """Prepare the output of a site.
 
@@ -841,7 +872,9 @@ class SiteOutput:
         patterns of owned files whose names are not known in advance, such
         as the flag of each country visited: every match that a run does
         not produce is removed as well, or a flight removed from the input
-        would still give away its country.
+        would still give away its country. ``stable_mtimes`` gives every
+        published file a modification time derived from its content (see
+        ``content_mtime``).
         """
         self.output_dir = Path(output_dir).resolve()
         self.data_dir = Path(data_dir).resolve()
@@ -853,6 +886,7 @@ class SiteOutput:
                 raise ValueError(f"Refusing to use dangerous output directory: {given}")
         self.site_files = tuple(site_files)
         self.site_patterns = tuple(site_patterns)
+        self.stable_mtimes = stable_mtimes
         self._cleanup = contextlib.ExitStack()
 
     def __enter__(self) -> Self:
@@ -899,6 +933,10 @@ class SiteOutput:
 
         for _, destination, relative in moves:
             _check_target(destination, relative)
+        if self.stable_mtimes:
+            for stage, _, relative in moves:
+                mtime = content_mtime(stage / relative)
+                os.utime(stage / relative, (mtime, mtime))
         for stage, destination, relative in moves:
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -961,6 +999,10 @@ def export_all_data(
     paths_by_year = _group_paths_by_year(all_path_metadata, exportable)
     contents = exported_contents(paths_by_year, all_path_groups, exportable)
     paths_by_year = drop_duplicate_paths(paths_by_year, contents, all_path_metadata)
+    # The same flight in two recordings of their own, see duplicates
+    paths_by_year = drop_overlapping_paths(
+        paths_by_year, all_path_groups, all_path_metadata, contents
+    )
     logger.info("\n  Splitting data by year: %s", sorted(paths_by_year))
 
     path_ids = assign_path_ids(paths_by_year, contents)

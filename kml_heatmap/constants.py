@@ -18,6 +18,14 @@ MAX_GROUNDSPEED_KNOTS = 600
 MIN_SEGMENT_TIME_SECONDS = 0.1  # Avoid division by very small time differences
 SPEED_WINDOW_SECONDS = 120  # 2 minute rolling average window for speed calculation
 
+# === Timestamps ===
+# How far a timestamp may be from the median of its track before it counts
+# as a clock error. Generous for a flight, which is over within a day, and
+# even for a logger left running for days; far below the errors it catches
+# (a clock at its default date, a GPS week rollover of almost 20 years). The
+# parser drops such a stamp, and the obfuscator moves it on its own.
+MAX_TIMESTAMP_DISTANCE_SECONDS = 7 * 24 * 3600
+
 # === Altitude Gain ===
 # A climb counts toward the altitude gain of a path only once the altitude has
 # risen this far above the lowest point since the last descent, and a descent

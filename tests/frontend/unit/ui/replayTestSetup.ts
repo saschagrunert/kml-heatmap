@@ -64,10 +64,22 @@ export function createSegments(): PathSegment[] {
  * layers are wired to the store the way MapApp does it, so the tests can
  * read the altitude button and the layers the way the user sees them.
  */
+/**
+ * The lifetime of the app of the current test, ended by unmountReplayDom: a
+ * manager listens on the document for as long as its app lives, and one of
+ * an earlier test would otherwise still take the keys of the next
+ */
+let lifetime = new AbortController();
+
 export function createReplayMockApp(): MockApp {
   const app = createMockApp({
-    currentData: createDataset([{ id: 1 }], createSegments()),
+    // With the exact range of its altitudes, as the export writes it
+    currentData: createDataset(
+      [{ id: 1, min_altitude_ft: 3000, max_altitude_ft: 5000 }],
+      createSegments(),
+    ),
     hasTimingData: true,
+    signal: lifetime.signal,
   });
   // jsdom lays nothing out, so the map is given a size: the follow logic
   // measures the airplane against it
@@ -213,6 +225,8 @@ export function mountReplayDom(): void {
 }
 
 export function unmountReplayDom(): void {
+  lifetime.abort();
+  lifetime = new AbortController();
   for (const node of [REPLAY_PANEL, ...PAGE_CHROME]) {
     document.getElementById(node.id)?.remove();
   }

@@ -40,15 +40,18 @@ that the KML files are obfuscated. Apart from gitleaks and the hooks of
 than from a pinned mirror, so no hook revision can drift on its own. ruff and
 the obfuscation check are resolved off `$PATH` and prettier out of
 `node_modules`, so commit with the virtual environment active and after
-`npm ci` to get the versions CI installs. typos is in neither lock file; the
-hook and `make lint` skip it with a warning when it is not installed, and the
-CI job is the one that has to pass.
+`npm ci` to get the versions CI installs. typos is in none of the lock
+files; the hook and `make lint` skip it with a warning when it is not
+installed, and the CI job is the one that has to pass.
 
 npm 11 skips the install scripts of dependencies that `allowScripts` in
-`package.json` does not list. esbuild is the only dependency with one, and it
-is listed, so `npm ci` runs it and prints no warning. A new dependency that
-needs its install script has to be added there on purpose
-(`npm install-scripts approve <pkg>`).
+`package.json` does not list. esbuild's is listed, so `npm ci` runs it. The
+only other one is fsevents, an optional dependency of vite that npm installs
+on macOS alone: its script compiles the native module anew
+(`node-gyp rebuild`), which needs a compiler, and the package ships that
+module prebuilt, so it is left unlisted and npm skips it with a warning
+there. A new dependency that needs its install script has to be added on
+purpose (`npm install-scripts approve <pkg>`).
 
 ## Checks
 
@@ -59,7 +62,7 @@ container is involved:
 ```bash
 make lint            # lock files and version pins, ruff (check and format), mypy, bandit, tsc (frontend, build scripts, tests), eslint, knip, prettier, typos
 make format          # ruff format, prettier
-make test            # vitest and pytest with coverage; pytest flags are in DEVELOPMENT.md
+make test            # npm run build, then vitest and pytest with coverage; pytest flags are in DEVELOPMENT.md
 npm run test:e2e     # Playwright: desktop, mobile and WebKit (see DEVELOPMENT.md)
 make obfuscate       # after adding flights to data/ (see README.md); rewrites them in place, irreversibly
 make check-obfuscation
@@ -106,8 +109,10 @@ parentheses back is undone on the next `make format`.
   with `make lock` (pip-compile with hashes), and `requirements-tools.lock`,
   the pip-tools `make lock` runs with its dependencies, from
   `requirements-tools.in`. Edit `pyproject.toml`, then regenerate the locks;
-  the CI lint job fails while the locks no longer satisfy `pyproject.toml`,
-  which is what a Dependabot `pip` pull request needs `make lock` for.
+  the CI lint job fails while the locks no longer satisfy `pyproject.toml`.
+  A Dependabot `pip` pull request fails it only when its new range leaves
+  out the version the locks pin, and tests the old versions either way until
+  `make lock` is pushed on top.
   `make lock` compiles the test lock with the runtime lock as a constraint, so
   the pins both files share cannot drift apart. The weekly `lock` workflow
   regenerates them as well and opens a pull request, which needs one of two
@@ -155,7 +160,7 @@ there (or with `VISUAL_SNAPSHOTS=1`, for an equivalent setup), so a plain
 was never going to match:
 
 ```sh
-podman run --rm --network host --userns=keep-id --user "$(id -u):$(id -g)" \
+podman run --rm --ipc=host --network host --userns=keep-id --user "$(id -u):$(id -g)" \
   --security-opt label=disable -v "$PWD:/work" -w /work -e HOME=/tmp \
   mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27 \
   npx playwright test --project=visual
@@ -198,7 +203,9 @@ match the `@playwright/test` version in `package-lock.json`, and
 `DEVELOPMENT.md` and the lock file disagree. Dependabot opens the
 `@playwright/test` bump as a pull request of its own and does not touch the
 image: on that branch, set the new tag with the digest of its multi-arch index
-in the two jobs and the two documents. The registry returns the digest in the
+in the two jobs and the two documents. Until you push that, the `visual` and
+`e2e` jobs skip Dependabot's own pushes to the branch rather than fail against
+the old image, and the lint job is the one that fails. The registry returns the digest in the
 `Docker-Content-Digest` header:
 
 ```sh

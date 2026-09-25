@@ -35,14 +35,20 @@ export default defineConfig<object, SiteOptions>({
   timeout: 30000,
   fullyParallel: true,
   forbidOnly: isCI,
+  // A test that only passes on its retry is still a failure, not a green
+  // run, so a retry never turns a run green: it only tells a flaky failure
+  // (reported as flaky) from one that fails every time; the trace of every
+  // failed attempt is kept. That is worth the time of one more attempt in
+  // the desktop project alone. The mobile, visual, webkit and
+  // webkit-desktop projects (below) do not retry, and neither do the relief
+  // tests of the 3D view, where one attempt takes minutes: their describe
+  // in orientation.spec.ts turns retries off in every project.
   retries: isCI ? 1 : 0,
-  // The retry keeps the trace of the first attempt; a test that only passes
-  // on the retry is still a failure, not a green run
   failOnFlakyTests: isCI,
   // One browser per core of the runner, each drawing WebGL in software. The
   // e2e job of .github/workflows/test.yml splits the desktop and mobile
   // projects into shards and gives the relief tests of orientation.spec.ts,
-  // the slowest to draw, a runner of their own.
+  // the slowest to draw, a runner of their own in either engine.
   ...(isCI ? { workers: "100%" } : {}),
   // The console reporter Playwright would pick anyway, plus the HTML report
   // that CI uploads with the traces when a run fails
@@ -129,10 +135,15 @@ export default defineConfig<object, SiteOptions>({
     },
     {
       name: "webkit-desktop",
-      // Turning, tilting, the globe and the replay in Safari's engine. Their
-      // specs drive the desktop controls, which is why they run in a desktop
-      // viewport rather than in the webkit project above.
-      testMatch: /(orientation|replay)\.spec\.ts$/,
+      // Turning, tilting, the globe, the replay and the interactions that
+      // must not log an error in Safari's engine. Their specs drive the
+      // desktop controls, which is why they run in a desktop viewport rather
+      // than in the webkit project above.
+      testMatch: /(error-free|orientation|replay)\.spec\.ts$/,
+      // Like the phone projects: a retry would not turn the run green
+      // (failOnFlakyTests), and an attempt in Safari's engine drawing WebGL
+      // in software is slow
+      retries: 0,
       // Software WebGL, in a browser CI has no GPU for either
       timeout: 60000,
       use: {

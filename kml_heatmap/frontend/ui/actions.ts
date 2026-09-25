@@ -5,34 +5,44 @@
  * same actions through `runAction`, so both ways in obey the same rules.
  */
 import type { MapApp } from "../mapApp";
+import type { ToggleAction } from "../state/toggles";
 import { logError } from "../utils/logger";
 
 /**
  * Actions that need loaded data. They are ignored while the app is still
  * initializing; pending filter changes are applied afterwards.
  */
-export const DEFERRED_WHILE_INITIALIZING: ReadonlySet<string> = new Set([
-  "filterByYear",
-  "filterByAircraft",
-  "toggleReplay",
-  "playReplay",
-  "pauseReplay",
-  "stopReplay",
-  "seekReplay",
-  "changeReplaySpeed",
-  "toggleAutoZoom",
-  "showWrapped",
-  "exportMap",
-  "toggleIsolateSelection",
-  "resetView",
-]);
+export const DEFERRED_WHILE_INITIALIZING: ReadonlySet<ActionName> =
+  new Set<ActionName>([
+    "filterByYear",
+    "filterByAircraft",
+    "toggleReplay",
+    "playReplay",
+    "pauseReplay",
+    "stopReplay",
+    "seekReplay",
+    "changeReplaySpeed",
+    "toggleAutoZoom",
+    "showWrapped",
+    "exportMap",
+    "toggleIsolateSelection",
+    "resetView",
+  ]);
 
 type ActionHandler = (e?: Event) => void;
 
-function actionHandlers(app: MapApp): Record<string, ActionHandler> {
+/**
+ * Every action by name. The toggles name theirs in state/toggles.ts, and
+ * the compiler holds this to handling each of them.
+ */
+function actionHandlers(app: MapApp) {
   return {
     toggleHeatmap: () => app.uiToggles.toggleHeatmap(),
-    toggleStats: () => app.statsManager.toggleStats(),
+    // A store write: the rail follows the key, and the panel's own code,
+    // which is lazily loaded, arrives on the first opening (ui/statsPanel.ts)
+    toggleStats: () => {
+      app.statsPanelVisible = !app.statsPanelVisible;
+    },
     toggleAltitude: () => app.uiToggles.toggleAltitude(),
     toggleAirspeed: () => app.uiToggles.toggleAirspeed(),
     toggleAirports: () => app.uiToggles.toggleAirports(),
@@ -72,8 +82,12 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
       app.replayManager?.seekReplay((e?.target as HTMLInputElement).value),
     changeReplaySpeed: () => app.replayManager?.changeReplaySpeed(),
     toggleAutoZoom: () => app.replayManager?.toggleAutoZoom(),
-  };
+  } satisfies Record<ToggleAction, ActionHandler> &
+    Record<string, ActionHandler>;
 }
+
+/** The name of an action, as a control's `data-action` gives it */
+export type ActionName = keyof ReturnType<typeof actionHandlers>;
 
 /**
  * Run an action by name, the way a click on its control does. Data-dependent
@@ -82,10 +96,12 @@ function actionHandlers(app: MapApp): Record<string, ActionHandler> {
  * first load switched the year under the load that was still running.
  * Returns whether the action ran.
  */
-export function runAction(app: MapApp, action: string, e?: Event): boolean {
+export function runAction(app: MapApp, action: ActionName, e?: Event): boolean {
   // Built for the one call: a click is rare enough, and nothing has to
-  // keep the handlers of an app that is gone
-  const fn = actionHandlers(app)[action];
+  // keep the handlers of an app that is gone. A name from the page may be
+  // none the app knows.
+  const handlers: Partial<Record<string, ActionHandler>> = actionHandlers(app);
+  const fn = handlers[action];
   if (!fn) return false;
   if (app.isInitializing && DEFERRED_WHILE_INITIALIZING.has(action)) {
     return false;
@@ -103,8 +119,10 @@ export function bindActions(app: MapApp): void {
   document.querySelectorAll<HTMLElement>("[data-action]").forEach((el) => {
     const action = el.dataset["action"];
     if (!action) return;
+    // The template names the action; runAction ignores one it has not
+    // got, and a unit test checks the template against the handlers
     const handler = (e: Event): void => {
-      runAction(app, action, e);
+      runAction(app, action as ActionName, e);
     };
     const type =
       el.tagName === "SELECT"

@@ -14,9 +14,9 @@ import type { PathSegment } from "../types";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { appendCurve, flatCurves } from "../calculations/curves";
 import { MAP_SOURCES } from "../utils/constants";
+import { highlightsSelection } from "./layerVisibility";
 import {
   toLngLat,
-  toLngLatAfter,
   whenContextRestored,
   type LngLatTuple,
 } from "../utils/mapHelpers";
@@ -35,14 +35,7 @@ export function selectionLines(
   const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
   let line: LngLatTuple[] = [];
   let pathId: number | undefined;
-  // A segment without coordinates breaks the chain: the next one starts
-  // where it does, not where the line got to
-  let gap = false;
   segments.forEach(({ path_id, coords }, index) => {
-    if (!coords) {
-      gap = true;
-      return;
-    }
     if (path_id !== pathId) {
       pathId = path_id;
       line = [toLngLat(coords[0])];
@@ -51,42 +44,53 @@ export function selectionLines(
         properties: null,
         geometry: { type: "LineString", coordinates: line },
       });
-    } else if (gap) {
-      line.push(toLngLatAfter(coords[0], line[line.length - 1]));
     }
-    gap = false;
     appendCurve(line, curves, index);
   });
   return { type: "FeatureCollection", features };
 }
 
 /**
- * Keep the lines on the selected flights of the dataset on the map. The
- * year and aircraft filter need not be asked: a change of either clears
- * the selection, and a click selects only flights it keeps. The lines are
- * worked out for every change, shown or not, which costs the size of the
- * selection rather than of the dataset. After a lost WebGL context the
+ * Keep the lines on the selected flights of the dataset on the map while
+ * they show (see highlightsSelection), and bring them up to date as they
+ * come to show: under a colour layer, which draws the selection itself,
+ * the lines of the busiest airport's hundreds of flights took a fifth of
+ * the click that selected them, for nobody to see. The year and aircraft
+ * filter need not be asked: a change of either clears the selection, and
+ * a click selects only flights it keeps. After a lost WebGL context the
  * source is back with the data of the moment of the loss, and gets them
  * again.
  */
 export function followSelectionHighlight(app: MapApp): void {
   let lines = selectionLines([]);
+  // The lines are of another dataset or selection than the store's
+  let stale = true;
   const write = (): void => {
     void app.map
       ?.getSource<GeoJSONSource>(MAP_SOURCES.selectionHighlight)
       ?.setData(lines);
   };
   const update = (): void => {
-    const data = app.currentData;
     const selected = app.selectedPathIds;
+    // Taken away as the selection is cleared, whether they show or not
+    if (!stale || (selected.size > 0 && !highlightsSelection(app))) return;
+    stale = false;
     // Nothing selected, and nothing drawn to take away
     if (selected.size === 0 && lines.features.length === 0) return;
+    const data = app.currentData;
     lines = selectionLines(
       data ? segmentsForPathIds(data.path_segments, selected) : [],
     );
     write();
   };
-  app.store.subscribeKeys(["currentData", "selectedPathIds"], update);
+  app.store.subscribeKeys(["currentData", "selectedPathIds"], () => {
+    stale = true;
+    update();
+  });
+  app.store.subscribeKeys(
+    ["altitudeVisible", "airspeedVisible", "replayActive"],
+    update,
+  );
   update();
   void app.mapReady.then(
     (map) => {

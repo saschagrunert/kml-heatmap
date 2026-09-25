@@ -18,6 +18,7 @@ import {
   waitForPathData,
   waitForAircraftFilter,
   waitForAppReady,
+  waitForStatsContent,
   waitForYearFilter,
 } from "./helpers";
 import {
@@ -243,6 +244,11 @@ test.describe("State Persistence", () => {
       await gotoApp(page, "/?v=100111000");
 
       await expect(page.locator("#stats-panel")).toBeVisible();
+      // Its figures follow with the Wrapped bundle, which a page opening
+      // with the panel fetches ahead (ui/statsPanel.ts)
+      const panel = await waitForStatsContent(page);
+      await expect(panel).toContainText("Flights");
+      await expect(panel.locator(".kh-stats-loading")).toHaveCount(0);
     });
 
     test("URL map position overrides localStorage position", async ({

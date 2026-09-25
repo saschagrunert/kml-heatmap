@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { PathSelection } from "../../../../kml_heatmap/frontend/ui/pathSelection";
+import {
+  mapChromePadding,
+  PathSelection,
+} from "../../../../kml_heatmap/frontend/ui/pathSelection";
 import {
   createMockApp,
   createDataset,
+  createSegment,
   asMapApp,
   type MockApp,
 } from "../../testHelpers";
@@ -19,6 +23,11 @@ vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
 const mapHelpers = vi.hoisted(() => ({
   resizeMapAfterTransition: vi.fn(),
 }));
+const toastMock = vi.hoisted(() => ({ announceStatus: vi.fn() }));
+vi.mock(
+  import("../../../../kml_heatmap/frontend/utils/toast"),
+  async (importOriginal) => ({ ...(await importOriginal()), ...toastMock }),
+);
 // Partial: the mock app builds its map with the real helpers
 vi.mock(
   import("../../../../kml_heatmap/frontend/utils/mapHelpers"),
@@ -286,6 +295,92 @@ describe("PathSelection", () => {
       expect(mockApp.isolateSelection).toBe(false);
       expect(rebuilds()).toBe(0);
     });
+
+    it("frames the isolated flights, and leaves the view alone on the way out", () => {
+      // An isolated flight could stay half off the screen (regression)
+      mockApp.currentData = createDataset(
+        [{ id: 1 }, { id: 2 }],
+        [
+          createSegment({
+            path_id: 1,
+            coords: [
+              [50, 8],
+              [51, 9],
+            ],
+          }),
+          createSegment({
+            path_id: 2,
+            coords: [
+              [40, 2],
+              [41, 3],
+            ],
+          }),
+        ],
+      );
+      mockApp.selectedPathIds.add(1);
+      const map = mockApp.map!;
+      map.getBearing.mockReturnValue(30);
+
+      pathSelection.toggleIsolateSelection();
+
+      expect(map.fitBounds).toHaveBeenCalledTimes(1);
+      const [bounds, options] = map.fitBounds.mock.calls[0]!;
+      // The selected flight alone, as [lng, lat] corners
+      expect(bounds).toEqual([
+        [8, 50],
+        [9, 51],
+      ]);
+      expect(options).toMatchObject({ bearing: 30 });
+
+      pathSelection.toggleIsolateSelection();
+      expect(map.fitBounds).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("mapChromePadding", () => {
+    const rect = (x: number, y: number, w: number, h: number): DOMRect =>
+      ({
+        x,
+        y,
+        left: x,
+        top: y,
+        width: w,
+        height: h,
+        right: x + w,
+        bottom: y + h,
+      }) as DOMRect;
+
+    it("keeps a fit clear of the panels at each edge, and no more than a third", () => {
+      const map = mockApp.map!;
+      vi.spyOn(map.getContainer(), "getBoundingClientRect").mockReturnValue(
+        rect(0, 0, 1200, 800),
+      );
+      const panels: [string, DOMRect][] = [
+        // A column at the right edge, 172px wide
+        ["right-buttons", rect(1018, 10, 172, 600)],
+        // The chip at the top, 38px tall
+        ["selection-chip", rect(500, 8, 180, 38)],
+        // A tall column at the left, wider than a third of the map
+        ["left-buttons", rect(10, 10, 500, 700)],
+      ];
+      const made = panels.map(([id, box]) => {
+        const element =
+          document.getElementById(id) ?? document.createElement("div");
+        element.id = id;
+        element.hidden = false;
+        vi.spyOn(element, "getBoundingClientRect").mockReturnValue(box);
+        document.body.append(element);
+        return element;
+      });
+
+      const padding = mapChromePadding(map as never);
+
+      expect(padding.right).toBe(182 + 24);
+      expect(padding.top).toBe(46 + 24);
+      expect(padding.left).toBe(400 + 24);
+      expect(padding.bottom).toBe(24);
+      for (const element of made) if (element !== chip) element.remove();
+    });
   });
 
   describe("while replay runs", () => {
@@ -339,6 +434,19 @@ describe("PathSelection", () => {
       pathSelection.togglePathSelection(1);
 
       expect(chip.hidden).toBe(true);
+    });
+
+    it("says the selection is cleared, where its going said nothing", () => {
+      pathSelection.togglePathSelection(1);
+      expect(toastMock.announceStatus).toHaveBeenLastCalledWith(
+        "1 flight selected",
+      );
+
+      clearBtn.click();
+
+      expect(toastMock.announceStatus).toHaveBeenLastCalledWith(
+        "Selection cleared",
+      );
     });
 
     it("clears the selection from its own control", () => {

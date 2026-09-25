@@ -146,7 +146,7 @@ names keep sorting in flight order. An existing file is never replaced.
 
 **Note:** Charterware KML files do not include per-point timestamps. As
 coordinates are not at fixed intervals, the tool does not attempt to infer
-timing or speed data for Charterware files. The Speed layer and the flight time
+timing or speed data for Charterware files. The Groundspeed layer and the flight time
 statistics are unavailable when viewing Charterware-only data. Altitude
 visualization, path selection, and all other features remain available.
 
@@ -241,14 +241,14 @@ Targets (`make help` prints this list with the current variable values):
 - `build` - Build the image and generate `OUTPUT_DIR` from `INPUT_DIR` (leaves the input KML files alone)
 - `serve` - Serve `OUTPUT_DIR` on `http://HOST_BIND:PORT` (run `make build` first)
 - `serve-build` - Run `build`, then `serve`
-- `test` - Run the JavaScript and Python test suites with coverage
+- `test` - Build the frontend bundles, then run the JavaScript and Python test suites with coverage
 - `lint` - Run the linters, formatters (check only) and type checkers of the CI lint job, plus bandit and typos, which CI runs in the security and typos jobs
 - `format` - Run formatters
 - `lock` - Regenerate the lock files (`requirements.lock`, `requirements-test.lock`, `requirements-build.lock` and `requirements-tools.lock`) from `pyproject.toml` and `requirements-tools.in` with pip-compile
 - `obfuscate` - Rewrite the KML files in `INPUT_DIR` in place so they carry no real dates (irreversible)
 - `check-obfuscation` - Check that the KML files in `INPUT_DIR` and the fixture flights of the visual snapshots are obfuscated
 - `hooks` - Install the pre-push hook that refuses to push KML files with real dates
-- `clean` - Remove the container image (when a runtime is available) and local build artifacts, including the frontend build output in `kml_heatmap/static/`
+- `clean` - Remove the container image (when a runtime is available) and local build artifacts, including the frontend build output in `kml_heatmap/static/` and the fixture site of the visual snapshots (`visual-site/`)
 - `help` - Show available targets and variables
 
 Only `build`, `serve` and `serve-build` need podman or docker; `clean`
@@ -326,7 +326,7 @@ wrapper.
 ### Command-Line Options
 
 ```
-kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--version] path [path ...]
+kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--force] [--version] path [path ...]
 ```
 
 - `path` - KML files and/or directories. Directories are scanned with their
@@ -338,7 +338,12 @@ kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--
   run if the output directory is the directory of an input file or contains
   one, or is a directory it must never clean out (`/`, the home directory).
   An output directory below the input directory is fine, so
-  `kml-heatmap flight.kml` in the file's directory writes to `./docs/`.
+  `kml-heatmap flight.kml` in the file's directory writes to `./docs/`. It
+  also refuses an output directory that holds files the site is made of (an
+  `index.html`, a `styles.css`, a `data/airports.json` and the like) but no
+  sign of an earlier run (`map_config.js`, `data/metadata.json`): many a
+  project keeps a site of its own in `docs/`, and the run would replace it
+  file by file.
 - `--debug` - Show debug output
 - `--obfuscate-inputs` - Also rewrite the input KML files themselves, in place
   and irreversibly, so that the files on disk carry no real dates either. Off
@@ -349,6 +354,8 @@ kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--
   elevation tiles (see [Elevation Data](#elevation-data)); nothing is
   downloaded for it, and the 3D view puts each flight on a line between its
   airfields
+- `--force` - Replace the files of a site in the output directory that no
+  earlier run wrote (see `--output-dir`)
 - `--version` - Show the version and exit
 
 Every file is written into a hidden staging directory inside the output first
@@ -360,7 +367,13 @@ to one output directory at the same time; the second one stops. Afterwards the
 tool removes only its own files that the new site no longer has (the files of
 years that dropped out, a stale `mapApp.bundle.js.map`) and leaves anything
 else in the output directory alone. It never writes through a symlink: a
-symlink in place of one of its files stops the run.
+symlink in place of one of its files stops the run. With
+`KML_HEATMAP_STABLE_MTIMES=1` every published file gets a modification time
+taken from its content instead of the time of the build (some day between
+2001 and 2010), so a server that derives its ETags from it, as GitHub Pages
+does, keeps them for the files a new build did not change; CI sets it for the
+deployed site. Leave it off for a server that compares the times by age
+(`python -m http.server`).
 
 The exit status is 1 when no site could be generated: a missing input path, a
 missing JavaScript bundle, an input file that is not valid KML or cannot be
@@ -566,24 +579,42 @@ up in the [OurAirports](https://ourairports.com/) database:
 - `Airport database unavailable`: the database could not be downloaded, so
   the names stay as the KML file spells them and have no country. Run the
   build again with network access; CI refuses to publish without it.
-- A code OurAirports does not know keeps the name from the file. A
-  single-word name without an ICAO code (`Home`) is not shown as an airport
-  and does not count as one in the statistics either: a route end counts
-  only where it has a marker.
+- A code OurAirports does not know keeps the name from the file. A name
+  without an ICAO code is shown as an airport only as an end of a route
+  (`Home strip - Aunt farm`), and not as a single word (`Home`). Any other
+  placemark name without a code (`Flight with Anna`) is free text: its start
+  gets no marker and does not count as an airport in the statistics either,
+  since a route end counts only where it has a marker.
 - A recording that starts in the air (more than 400 m above the airport and
   level) gets no departure marker, and the arrival only gets one when the
   name is a route and the track ends in a landing. A name that is a single
   airport (`EDDS` for a local flight) gets its marker at the start, and the
   flight counts for it.
-- Markers with the same ICAO code are merged into one. Names without a code
-  are merged with a marker closer than 1.5 km. Two different ICAO codes are
-  never merged, however close the airports are.
+- Markers with the same ICAO code are merged into one. A name without a
+  code is merged with the marker of the same name, wherever that is, or
+  else with a marker closer than 1.5 km. Two different ICAO codes are never
+  merged, however close the airports are.
 
 **A flight appears twice.** The same file named twice on the command line
 (directly and through its directory) is read once, with
 `Ignoring duplicate input`. The same flight in two files, such as one
 export copied under two numbers, is kept once and the copy is skipped with
-a warning. Delete the copy from `data/`.
+a warning. So is the same flight recorded twice, by a phone and the panel
+GPS or exported by two tools: two recordings with times that overlap by
+more than half of the shorter one, and are in the same place at the times
+they share, are one flight. The one whose file name gives the aircraft
+stays, otherwise the one with more points, and the warning names both
+files. Delete the copy from `data/`.
+
+**One flight shows as several, or two as one.** A logger that writes a
+long track as several `LineString`s, each starting where the one before
+ended, splits one flight into pieces, and the parser joins them again: a
+line continues the one before it when both have the same placemark name,
+the one before did not end on the ground, and the line starts within 50 m
+of its end, at the same `<TimeSpan>` or within 30 minutes of its end.
+Without times, only the point of the split written twice joins them. A
+`gx:Track` is never joined. Give the pieces of a flight one name, and
+flights of their own different names or times.
 
 **`make check-obfuscation` or the commit hook fails.** Run
 `make obfuscate`, then check again. When a date cannot be removed (in a file
@@ -664,17 +695,29 @@ Kept in the site:
 - Coordinates, altitudes, distances, groundspeeds
 - Airport visit counts
 - Flight time per year and per aircraft
+- Airport names: a placemark name that holds an ICAO code (`EDDS`,
+  `EDAQ Halle-Oppin`), and the airports of a route name (`Home strip - Aunt
+farm`)
+- The aircraft registration and type of a file name (`1_DEHYL_DA40.kml`)
 
 Removed from the site:
 
 - Individual flight dates and times
+- Any other placemark name: free text such as `Flight with Anna` or
+  `Untitled Path` is no airport name, and the start of such a flight gets no
+  airport marker at all
 - Dates and times of day in placemark and file names (`16 Aug 2026`,
-  `16/08`, `16AUG26`, `03/2026`, `2026/8/16`, `14:30`, `1430Z`,
-  `2026-08-16_1430`), also with German month names written day first
-  (`16. Mai 2026`, `16. März`, `16MAI26`, `Mai 2026`); a month name alone
-  (`Flugplatz Juli`) stays, and so do runway designators in a name that
-  speaks of a runway (`RWY 08/26`, `07L/25R`), while a bare `26/08` is
-  August 26th
+  `the 16th of August 2026`, `16/Aug/2026`, `16/08`, `16-08`, `16_08`,
+  `26.08`, `16.8`, `16 08 2026`, `16AUG26`, `16-AUG-26`, `260816`,
+  `03/2026`, `2026/8/16`, `KW33 2026`, `14:30`, `1430Z`, `1430L`,
+  `14h30`, `14.30 Uhr`, `2026-08-16_1430`), also with German month names
+  written day first (`16. Mai 2026`, `16. März`, `16MAI26`, `Mai 2026`); a
+  month name alone (`Flugplatz Juli`) stays, and so do runway designators in
+  a name that speaks of a runway (`RWY 08/26`, `07L/25R`) and a version
+  after a word that says so (`firmware 12.10`), while a bare `26/08` is
+  August 26th and `EDDS 07/25` July 25th (or July 2025): where a name could
+  hold a date, the date goes
+- A registration that holds a date (`1_16AUG26_DA40.kml`), with a warning
 
 The CARTO key is a public client-side tile key. It is embedded in the
 generated `map_config.js` and published with the site by design, because the
@@ -692,9 +735,9 @@ output-dir/
 ├── index.html
 ├── mapApp.bundle.js
 ├── mapApp.bundle.js.map
-├── features.bundle.js     # Replay, imported on first use
+├── features.bundle.js     # Map features a first visit does not need (replay among them), imported on first use
 ├── features.bundle.js.map
-├── wrapped.bundle.js      # Wrapped, imported on first use
+├── wrapped.bundle.js      # Wrapped and the statistics panel, imported on first use
 ├── wrapped.bundle.js.map
 ├── shared.bundle.js       # The app, which the three above import
 ├── shared.bundle.js.map
@@ -702,8 +745,8 @@ output-dir/
 ├── yearWorker.bundle.js.map
 ├── map_config.js          # Map defaults, tile API key and the build stamp
 ├── styles.css             # Linked in the page
-├── features.css           # Replay, fetched with its bundle
-├── wrapped.css            # Wrapped, fetched with its bundle
+├── features.css           # The styles of those features, fetched with their bundle
+├── wrapped.css            # Wrapped and the statistics panel, fetched with its bundle
 ├── manifest.json
 ├── favicon.svg
 ├── favicon.ico
@@ -731,12 +774,13 @@ Each year file holds an object with `format`,
 format of the rows, which the page checks before reading them so a file
 written by another version is refused rather than misread. `path_info` lists
 the flights in input order, each with its id, year, airports, aircraft,
-exact altitude range and total climb (`altitude_gain_ft`); where a flight starts and ends is read from its
+exact altitude range and total climb (`altitude_gain_ft`), the last three written together for every flight with an altitude; where a flight starts and ends is read from its
 segments. `segments` maps a path id to
 `{"start": [lat, lon], "columns": [lats, lons, altitudes, speeds, times], "ground": [...]}`,
 one row per segment, written column by column: the n-th entry of each column
-is the n-th row's latitude, longitude, altitude in feet, groundspeed in knots
-and relative time in seconds. The `times` column is only present for files
+is the n-th row's latitude, longitude, altitude in feet, groundspeed in whole
+knots (0 for a speed that is not known, and at least 1 for one that is) and
+relative time in seconds. The `times` column is only present for files
 with timestamps, and holds `null` for a row without one. `ground` is the
 ground under each row in feet (see [Elevation Data](#elevation-data)); a path
 whose ground the build does not know has none, and the page takes it from
@@ -753,8 +797,8 @@ Every value above is written as an integer difference to the row before it
 rather than as the number itself (`kml_heatmap/segment_codec.py`, mirrored by
 `decodeYear` in `services/yearDecode.ts`, which the page runs in a worker).
 The exporter has already rounded each column to a fixed step (1e-5 degrees,
-100 ft, 0.1 kt, 0.1 s and 10 ft of ground), so counting in that step is
-exact, and neighbouring rows barely differ: the encoding is lossless and roughly halves
+100 ft, 1 kt, 0.1 s and 10 ft of ground), so counting in the step of the
+format (1e-5 degrees, 100 ft, 0.1 kt, 0.1 s and 10 ft) is exact, and neighbouring rows barely differ: the encoding is lossless and roughly halves
 a year file. Writing the rows column by column puts the repeating
 differences of one quantity next to each other, which takes another sixth
 off the compressed download. The numbers the page works with are the ones
@@ -769,12 +813,18 @@ exported aircraft (`aircraft_models`). It carries no statistics: the frontend
 computes them from the year files for the active year, aircraft and selection.
 Flights without a recognizable year are skipped instead of being grouped under
 an "unknown" year, and the map bounds in `map_config.js` cover only the
-exported flights. Airport entries carry no flight count: the frontend derives
-one per airport from the active year and aircraft filter.
+exported flights. `airports.json` lists every airport marker with its name,
+position, the ICAO code in its name (`code`, left out for a name without one)
+and its country where the airport database knows it. Airport entries carry no
+flight count: the frontend derives one per airport from the active year and
+aircraft filter.
 
 The data is plain JSON, organized by year and fetched on demand. The page
 preloads the two index files and the latest year's file, which it opens with,
-so the downloads start together with the bundles rather than after them.
+so the downloads start together with the bundles rather than after them. It
+preloads CARTO's style and the index of its tiles as well (with the API key
+when the site has one), which the map would otherwise only ask for one after
+the other once it has started.
 
 ## Map Features
 
@@ -787,17 +837,21 @@ so the downloads start together with the bundles rather than after them.
   so the taxiways and circuits of a busy airport stay apart
 - **Altitude** (toggle) - Paths coloured by elevation, on a scale that runs
   purple through magenta to orange
-- **Speed** (toggle) - Paths coloured by groundspeed, on a scale that runs
+- **Groundspeed** (toggle) - Paths coloured by groundspeed, on a scale that runs
   blue through green to yellow. The two scales share no hue, so a map or an
   exported image says which of them is drawn without its legend; both
   brighten from end to end, so they survive being printed in grey. Both
   colour layers draw 32 steps of their scale, one line per run of a path in
   the same step, and draw every recorded point, joined by a smooth curve
-  through the fixes. The speed scale spans the middle nine tenths of the
-  speeds drawn (from the 5th to the 95th percentile), so a few taxi crawls
-  and one fast descent do not squeeze the rest of the flying into a few of
-  its steps; the slower and faster ones take the colours of its ends, which
-  the legend marks with ≤ and ≥. Hovering a path shows the
+  through the fixes. The colours are spread by rank rather than evenly over
+  the values: every stretch of a scale colours as much of the flying as any
+  other, so the climb-out, the cruise and the taxiing each get colours of
+  their own, and the middle of the legend names the median. The altitude
+  scale runs from the lowest to the highest altitude drawn; the speed scale
+  spans the middle nine tenths of the speeds drawn (from the 5th to the
+  95th percentile), and the slower and faster ones take the colours of its
+  ends, which the legend marks with ≤ and ≥. A selection and a replay are
+  coloured on their own flights. Hovering a path shows the
   exact value
 - **Airports** (toggle) - Airport markers with their ICAO codes above them.
   The codes are placed together with the place names of the base map, so
@@ -805,19 +859,20 @@ so the downloads start together with the bundles rather than after them.
   then the busier airport keep theirs. They are left out below `z` 5, and
   on a map tilted past about 55 degrees the airports more than twice as
   far from the camera as the middle of the map are hidden, markers and
-  codes, where they would crowd into a strip along the horizon
+  codes, where they would crowd into a strip along the horizon. Below `z` 3
+  the markers are hidden too, a clump of dots on the heat
 - **Aviation Data** (toggle) - Airspaces, airports, navaids, and reporting points from open flightmaps, where it has coverage. Drawn from `z` 7 to 14; its charts end at `z` 12, and further in than two levels of upscaling they would only blur the base map
 
 ### Controls
 
 - **Stats** - View statistics (distance, altitude, airports, flight time). Flight time runs from the first to the last recorded point that moved at the exported precision (about 1 m), so standing perfectly still before and after is not counted, while GPS noise on the ground still is
 - **Export** - Save the current map view as a JPG image
-- **Copy link** - Share the current URL: the native share dialog on a phone or a tablet, where there is one, and copied to the clipboard otherwise
+- **Copy link** - Copy the current URL to the clipboard. On a phone, where there is a native share dialog, the More sheet's row says **Share link** and opens that instead
 - **Wrapped** - View the year-in-review summary; Escape closes it
-- **Replay** - Animate one flight with adjustable speed (1x to 500x, default 50x) and an auto-zoom button that follows the airplane. The whole track is drawn dimmed and the flown part paints over it in the colours of the active scale. Replay needs exactly one selected flight with timing data; a toast explains why it is unavailable otherwise. The chase button (the target next to auto-zoom) watches the flight from a chase plane: the camera sits behind and above the airplane, tilted to 70 degrees at about `z` 15.5, and turns with it, lagging a little into each turn. The airplane stands upright, a little below the middle of the map above the replay panel. In the 3D view the camera looks at the airplane at its height and tilts down steeper rather than fly into a ridge behind it. Switching it on slows a replay faster than 10x down to 10x, and switching it off brings back the speed from before, unless another one was chosen while it chased. Dragging, zooming or turning the map holds the chase until you let go, and the chase keeps the zoom (`z` 12 to 17) and tilt (45 to 75 degrees) you left it at. On the globe it zooms out no further than `z` 13, where the globe is still drawn flat. Switching it off gives back your zoom, turn and tilt over the airplane, and closing the replay gives back the whole view from before; the link and the saved session keep that view, not the chase camera. It stays off while the system asks for reduced motion, and a toast says why
+- **Replay** - Animate one flight with adjustable speed (1x to 500x, default 50x) and an auto-zoom button that follows the airplane; Escape closes it. The whole track is drawn dimmed and the flown part paints over it in the colours of the active scale. Replay needs exactly one selected flight with timing data; a toast explains why it is unavailable otherwise. The chase button (the target next to auto-zoom) watches the flight from a chase plane: the camera sits behind and above the airplane, tilted to 70 degrees at about `z` 15.5, and turns with it, lagging a little into each turn. The airplane stands upright, a little below the middle of the map above the replay panel. In the 3D view the camera looks at the airplane at its height and tilts down steeper rather than fly into a ridge behind it. Switching it on slows a replay faster than 10x down to 10x, and switching it off brings back the speed from before, unless another one was chosen while it chased. Dragging, zooming or turning the map holds the chase until you let go, and the chase keeps the zoom (`z` 12 to 17) and tilt (45 to 75 degrees) you left it at. On the globe it zooms out no further than `z` 13, where the globe is still drawn flat. Switching it off gives back your zoom, turn and tilt over the airplane, and closing the replay gives back the whole view from before; the link and the saved session keep that view, not the chase camera. It stays off while the system asks for reduced motion, and a toast says why
 - **North up** - The map turns and tilts (up to 85 degrees, with a sky above the horizon) by gesture: drag with the right mouse button or with Ctrl held, twist or drag with two fingers, or hold Shift with the arrow keys once the map has focus. The needle on this button points north, and a click turns the map back north up and flat. On a phone the compass floats at the top right of the map while the map is turned or tilted, and the globe switch is in the Layers sheet. Replay keeps the orientation you chose and points the airplane along its track on screen; Wrapped shows its overview north up and flat and gives your view back when it closes. While the map is already north up and flat the button is dimmed and does nothing
 - **Globe** - Draw the map as a globe instead of in Mercator. From `z` 13 in the two look the same, which is MapLibre's doing. Airport markers on the far side are hidden, and a popup closes once the globe has turned its place away. The space around the globe is the page background; no atmosphere is drawn
-- **3D** - Lift the flights to their altitude, as ribbons about as wide as the lines at every zoom that follow their climbs and descents in 20 ft steps and stand on the ground each flight flew over: the build samples it under every logged position from an elevation model (see [Elevation Data](#elevation-data)) and shifts it to meet the altitudes the flight recorded taxiing at the field it left and at the one it landed on, so a flight taxis on the map at both ends even where the model and the recorder disagree by tens of feet, and crosses a ridge at its true height above it. A flight whose ground is not known (a build with `--no-terrain` or without the tiles) stands on a line from the one field to the other instead, and an altitude glitch of the recorder takes no flight up with either. Heights are exaggerated, and the relief under them as much, so a flight still shows its shape on a map of half of Europe: 10 times at `z` 7 and further out, 7 at `z` 8, 4 at `z` 9 and twice from `z` 10 in. Switching it on colours the paths by altitude if neither colour layer is on and tilts a flatter map to 50 degrees. From `z` 18 in, where the camera is lower than a traffic circuit, the flights are drawn flat again. Replay lifts its airplane and its trail with them. At every zoom the map draws the relief under the flights, shaded faintly (dark slopes, a little light on the others) over the satellite imagery when it is on and under the labels and the flights, and each flight stands on it at its height above the ground it flew over. Further out the map draws the relief from coarser elevation tiles, and the ground under the flights is smoothed as much, so a level flight stays level over the ridges to within about a pixel; the exaggeration stops at 10 times since further out the Alps stood as a wall and a flight over them sawed up and down. While a zoom goes on, and in the distance of a tilted map, the map draws parts of the relief from the elevation tiles of another level, and each flight stands on the ground of the level drawn under it, so it stays level over the ridges there too. The exaggeration of the relief and the flights changes as a zoom ends in another level, not during it, for both at once, and the flights stay in sight. The relief comes from the same elevation tiles as the ground (see [Elevation Data](#elevation-data)), which the browser fetches from AWS while it is drawn. The globe only shades it: the relief itself is left out there, and each flight stands on the line between its fields. As the relief comes or goes, and as a zoom ends in another exaggeration while the map still draws flights cut at `z` 6 or further out or at `z` 11 or further in (after a zoom across more than one level from there, or another zoom before those flights were drawn anew), the flights are hidden until they are drawn on the new ground, for 3 seconds at most
+- **3D** - Lift the flights to their altitude, as ribbons about as wide as the lines at every zoom that follow their climbs and descents in 20 ft steps close in (in steps of no more than a pixel further out) and stand on the ground each flight flew over: the build samples it under every logged position from an elevation model (see [Elevation Data](#elevation-data)) and shifts it to meet the altitudes the flight recorded taxiing at the field it left and at the one it landed on, so a flight taxis on the map at both ends even where the model and the recorder disagree by tens of feet, and crosses a ridge at its true height above it. A flight whose ground is not known (a build with `--no-terrain` or without the tiles) stands on a line from the one field to the other instead, and an altitude glitch of the recorder takes no flight up with either. Heights are exaggerated, and the relief under them as much, so a flight still shows its shape on a map of half of Europe: 10 times at `z` 7 and further out, 7 at `z` 8, 4 at `z` 9 and twice from `z` 10 in. Switching it on colours the paths by altitude if neither colour layer is on and tilts a flatter map to 50 degrees. From `z` 18 in, where the camera is lower than a traffic circuit, the flights are drawn flat again. Replay lifts its airplane and its trail with them. At every zoom the map draws the relief under the flights, shaded faintly (dark slopes, a little light on the others) over the satellite imagery when it is on and under the labels and the flights, and each flight stands on it at its height above the ground it flew over. Further out the map draws the relief from coarser elevation tiles, and the ground under the flights is smoothed as much, so a level flight stays level over the ridges to within about a pixel; the exaggeration stops at 10 times since further out the Alps stood as a wall and a flight over them sawed up and down. While a zoom goes on, and in the distance of a tilted map, the map draws parts of the relief from the elevation tiles of another level, and each flight stands on the ground of the level drawn under it, so it stays level over the ridges there too. The exaggeration of the relief and the flights changes as a zoom ends in another level, not during it, for both at once, and the flights stay in sight. The relief comes from the same elevation tiles as the ground (see [Elevation Data](#elevation-data)), which the browser fetches from AWS while it is drawn. The globe only shades it: the relief itself is left out there, and each flight stands on the line between its fields. As the relief comes or goes, and as a zoom ends in another exaggeration while the map still draws flights cut at `z` 6 or further out or at `z` 11 or further in (after a zoom across more than one level from there, or another zoom before those flights were drawn anew), the flights are hidden until they are drawn on the new ground, for 3 seconds at most (a playing replay's trail, drawn anew in every frame, is not waited for). Tilted past 45 degrees, the map leaves out the place names of its far distance, which stood along the horizon over the fog
 - **Satellite** - Draw the ground from satellite imagery (Sentinel-2 cloudless 2024 by EOX, see [Satellite Imagery](#satellite-imagery)) instead of the dark map: over its land and water, under its roads, borders and place names, the flights, the heatmap and the Aviation Data overlay, which works over it too. The imagery is darkened and made paler so the heat, the colour layers and the labels made for the dark map still read. It is sharp to about `z` 14 and stretched further in, where the roads and the Aviation Data layer show the airfields better. In the 3D view it lies on the relief under the shading. Off on a first visit; kept in the link and the saved session. The browser fetches the tiles from EOX only while it is on, and the map credits them only then, in an exported image too. Should its code fail to load, the switch turns back off and says so. On a phone it is in the Layers sheet
 - **Reset view** - Go back to what a first visit shows: the newest year and all aircraft, the heatmap and airports on and the other layers, 3D, the globe and the satellite imagery off, nothing selected, the statistics closed, and the map flat and north up over all the flights. The saved session and the link follow. While there is nothing to reset, on a first visit and after a reset until the page or the map changes, it is dimmed and a press does nothing. On a phone it is in the More sheet; during a replay it is disabled like the filters
 - A map attribution, on the map at every width; it steps aside only while a sheet or the statistics panel covers the map it credits. It wraps when the relief, the satellite imagery or the aviation layer add their credits; on a phone it shows two lines, and a tap on it shows the rest. There are no zoom buttons: use the scroll wheel, pinch, double click, or the keyboard once the map has focus
@@ -850,7 +905,7 @@ browser's address bar or use the copy-link button:
   (`?p=695806902132,104044549516&sv=3`), still work. Links written before
   version 3, when ids were positions in the export, lose their selection
   instead of selecting different flights
-- Layer visibility (9 flags: heatmap, altitude, speed, airports, aviation, stats, wrapped, an unused legacy slot, isolateSelection). The 8th slot belonged to a control-visibility toggle that no longer exists; it is always written as `0` and kept so older shared links still read their isolate flag from the 9th
+- Layer visibility (9 flags: heatmap, altitude, speed, airports, aviation, stats, wrapped, an unused legacy slot, isolateSelection). The 8th slot belonged to a control-visibility toggle that no longer exists; it is always written as `0` and not read, and kept so shared links still read their isolate flag from the 9th. The shorter strings of the releases before the isolate flag (6 to 8 flags) are no longer read; such a link opens with the layers of a first visit. The slots and parameters of every toggle are listed in `kml_heatmap/frontend/state/toggles.ts`
   - Example: `?v=100100000`
 - Map position (`?lat=51.5&lng=13.4&z=10`). A centre without `z` opens at
   zoom 10. `z` counts in 256 pixel tiles, as links always did, which is one
@@ -938,12 +993,15 @@ as much before it stands the flight on it.
 
 The tiles are downloaded on the first run, eight at a time, and kept in
 `terrain/` of the cache directory (see [Airport Database](#airport-database)),
-about 100 KB each: the flights of `data/` touch 389 of them, 44 MB. A tile
-never changes, so it is never fetched again. Offline, or when a tile cannot
-be fetched, the build goes on without it: a flight with a position under a
-missing tile gets no ground and stands on the line between its airfields, and
-one warning says how many flights that affects. `--no-terrain` skips the
-tiles altogether.
+about 100 KB each: the flights of `data/` touch 389 of them, 44 MB, and the
+decoded pixels of each are kept next to it, about as much again. A tile
+never changes, so it is never fetched again. A download that fails is tried
+again a few times. Offline, or when a tile cannot be fetched, the build goes
+on without it: a flight with a position under a missing tile gets no ground
+and stands on the line between its airfields, and one warning says how many
+flights that affects. Set `KML_HEATMAP_REQUIRE_TERRAIN=1` to fail instead,
+as CI does for the published site. `--no-terrain` skips the tiles
+altogether.
 
 The terrain tiles are made by Mapzen's
 [Joerd](https://github.com/tilezen/joerd) from several sources, which ask for
@@ -1004,7 +1062,13 @@ The tool exports all flight data without downsampling:
   [Output](#output))
 - **Duplicates skipped**: A flight whose exported content is identical to an
   earlier one (the same export under two names) is skipped with a warning
-  naming both files, so it is not counted twice
+  naming both files, so it is not counted twice. So is the same flight
+  recorded twice (two devices or two tools), told apart by where each
+  recording was when: the one that names the aircraft, or else the one with
+  more points, is kept
+- **Split tracks joined**: The `LineString`s a logger split one flight into
+  are one path again (see
+  [Troubleshooting](#troubleshooting))
 - **Plausible speeds**: A groundspeed above 600 kt comes from timestamp
   jitter, not from the aircraft; it counts as unknown rather than as 0
 - **Stable path ids**: A path id is a 40-bit hash of the path's coordinates,

@@ -38,10 +38,9 @@ from kml_heatmap.data_exporter import (
 from kml_heatmap.exceptions import KMLHeatmapError
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.segment_codec import FORMAT_VERSION, decode_ground
-from kml_heatmap.terrain import FlatTiles
 from kml_heatmap.types import AirportData, PathMetadata, TrackPoint
 from kml_heatmap.validation import protected_directories
-from tests.conftest import decoded_segments
+from tests.conftest import FlatTiles, decoded_segments
 
 
 def _metadata(entries: list[dict[str, Any]]) -> list[PathMetadata]:
@@ -257,7 +256,6 @@ class TestYearFile:
         # A row without a speed does not pull the range down to zero
         assert result.groundspeed == GroundspeedRange()
 
-    @pytest.mark.slow
     def test_large_single_path(self, tmp_path, parse_data):
         count = 50_001
         path = [
@@ -918,6 +916,58 @@ def _stages(directory):
 
 
 class TestSiteOutput:
+    def test_stable_mtimes_follow_the_content(self, tmp_path):
+        """An unchanged file keeps its time, and with it its ETag on Pages."""
+
+        def publish(out, version):
+            with SiteOutput(out, out / "data", stable_mtimes=True) as site:
+                _stage_site(site, years=(2025,), version="same")
+                (site.site_stage / "index.html").write_text(f"{version} page")
+                site.publish([2025])
+            return {
+                name: (out / name).stat().st_mtime
+                for name in ("index.html", "data/2025/data.json", "data/metadata.json")
+            }
+
+        first = publish(tmp_path / "a", "old")
+        again = publish(tmp_path / "b", "old")
+        changed = publish(tmp_path / "c", "new")
+
+        assert first == again
+        assert changed["data/2025/data.json"] == first["data/2025/data.json"]
+        assert changed["index.html"] != first["index.html"]
+        # In the past, whole seconds
+        assert all(mtime < 1.3e9 and mtime == int(mtime) for mtime in first.values())
+
+    def test_mtimes_are_left_alone_by_default(self, tmp_path):
+        before = time.time()
+        _publish_site(tmp_path / "out")
+        assert (tmp_path / "out" / "index.html").stat().st_mtime >= before - 2
+
+    def test_the_entry_points_are_published_last(self, tmp_path):
+        """A page loaded meanwhile never points at a file not in place yet."""
+        out = tmp_path / "out"
+        moved = []
+        replace = os.replace
+
+        def record(source, target):
+            moved.append(Path(target).relative_to(out).as_posix())
+            replace(source, target)
+
+        with SiteOutput(out, out / "data", ("manifest.json",)) as site:
+            _stage_site(site, years=(2025, 2026))
+            with patch("kml_heatmap.data_exporter.os.replace", record):
+                site.publish([2025, 2026])
+
+        assert moved == [
+            "data/2025/data.json",
+            "data/2026/data.json",
+            "data/airports.json",
+            "data/metadata.json",
+            "manifest.json",
+            "index.html",
+        ]
+
     def test_publishes_the_staged_files(self, tmp_path):
         out = tmp_path / "out"
 

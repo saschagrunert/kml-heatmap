@@ -12,6 +12,7 @@ import type {
   Popup,
 } from "maplibre-gl";
 import { ZOOM_OFFSET } from "./constants";
+import { DEGREES_TO_RADIANS } from "./geometry";
 import { withTimeout } from "./withTimeout";
 
 /** A position the way the data files carry it: latitude first */
@@ -37,6 +38,34 @@ export function toLngLat(latLon: LatLon): LngLatTuple {
  */
 export function unwrapLng(lng: number, near: number): number {
   return lng + 360 * Math.round((near - lng) / 360);
+}
+
+/** The size of each map, as mapSize last measured it */
+const measuredSizes = new WeakMap<
+  MapLibreMap,
+  { width: number; height: number } | null
+>();
+
+/**
+ * The size of the map's container in CSS pixels, measured once and again
+ * after each `resize` of the map, which MapLibre fires as it follows the
+ * container. Asking the container itself lays the page out, which the
+ * map's own writes of the frame before (the markers it moved) have made
+ * stale: the replay's camera asked in every frame, and on a phone spent up
+ * to half a second of a frame of the chase view laying the page out.
+ */
+export function mapSize(map: MapLibreMap): { width: number; height: number } {
+  let size = measuredSizes.get(map);
+  if (size === undefined) {
+    // Once per map: its size is measured anew when next asked
+    map.on("resize", () => measuredSizes.set(map, null));
+  }
+  if (!size) {
+    const container = map.getContainer();
+    size = { width: container.clientWidth, height: container.clientHeight };
+    measuredSizes.set(map, size);
+  }
+  return size;
 }
 
 /** `toLngLat`, in the copy of the world of the point before on a line */
@@ -104,6 +133,28 @@ export function whenContextRestored(
   onRestored: () => void,
 ): void {
   map.on("webglcontextrestored", () => void map.once("style.load", onRestored));
+}
+
+/** Maps that have lost their WebGL context and not had their style back */
+const lostContexts = new WeakSet<MapLibreMap>();
+
+/**
+ * Follow the WebGL context of the map from now on, for hasLostContext.
+ * Called as the map is created, so the style that comes back after a loss
+ * says so before anyone else hears of it (see whenContextRestored).
+ */
+export function followContextLoss(map: MapLibreMap): void {
+  map.on("webglcontextlost", () => lostContexts.add(map));
+  whenContextRestored(map, () => lostContexts.delete(map));
+}
+
+/**
+ * Whether the map has lost its WebGL context and has not had its style
+ * back yet. MapLibre drops the style meanwhile, and most of what is asked
+ * of the map throws: the replay's frames skip their work on it until then.
+ */
+export function hasLostContext(map: MapLibreMap): boolean {
+  return lostContexts.has(map);
 }
 
 /**
@@ -229,6 +280,39 @@ export function firstSymbolLayerId(map: MapLibreMap): string | undefined {
 }
 
 /**
+ * Run `apply` with MapLibre's validation of the layers and sources it adds
+ * turned off, whether it adds them itself or through the difference a
+ * `setStyle` applies. The map validates each of them against a copy of the
+ * whole style it serialises anew for every one, so a style of a hundred
+ * layers cost a hundred copies of itself: on a phone the swap to the base
+ * style went from about 130 to over 400 ms once the 3D ribbons' layers
+ * grew, and takes 30 ms without it. `setStyle(..., { validate: false })` alone does not reach them, as
+ * the difference adds its layers without passing the option on, and
+ * `Map.addLayer` takes none. The app's own layers are validated by a unit
+ * test instead (mapLayers.test.ts), and CARTO's style is one MapLibre
+ * reads every day.
+ */
+export function withoutValidation<T>(map: MapLibreMap, apply: () => T): T {
+  const style = map.style;
+  // A map that has no style yet (the tests' fake has none at all)
+  if (!style) return apply();
+  const addLayer = style.addLayer.bind(style);
+  const addSource = style.addSource.bind(style);
+  style.addLayer = (layer, before, options) =>
+    addLayer(layer, before, { ...options, validate: false });
+  style.addSource = (id, source, options) =>
+    addSource(id, source, { ...options, validate: false });
+  try {
+    return apply();
+  } finally {
+    // Back to the methods of the style's prototype
+    const own: Partial<typeof style> = style;
+    delete own.addLayer;
+    delete own.addSource;
+  }
+}
+
+/**
  * Resize the map after a CSS transition completes on the given element.
  * MapLibre follows its container through a ResizeObserver, but a container
  * that is mid-transition reports every size on the way; this settles on the
@@ -259,6 +343,61 @@ export function resizeMapAfterTransition(
   } else {
     setTimeout(() => map.resize(), FALLBACK_MS);
   }
+}
+
+/** Longest a slide of the map beside the rail may take: --duration-base */
+const RAIL_SLIDE_MS = 350;
+
+/** The end of the slide under way, by map container */
+const railSlides = new WeakMap<HTMLElement, () => void>();
+
+/**
+ * Open or close the statistics rail beside the map (`stats-open` on the
+ * body) and slide the map along. Sliding it by its `left` edge resized it
+ * on every frame of the transition, and each resize is a new drawing
+ * buffer for the canvas and a render of the whole map: 7 or 8 of them, and
+ * half a second of main thread with the 3D flights on. So for the length
+ * of the slide the map keeps the larger of its two sizes, the whole width,
+ * and moves by half the rail with a transform, which is where its middle
+ * ends up (styles.css, `rail-sliding`). It is resized once: when the rail
+ * has opened, and as it starts to close. MapLibre follows the size of its
+ * container by itself, and keeps the middle of the map where the middle of
+ * the container is, so the view does not jump either time.
+ */
+export function slideMapBesideRail(
+  container: HTMLElement | null,
+  open: boolean,
+  animate: boolean,
+): void {
+  const body = document.body;
+  if (container) railSlides.get(container)?.();
+  if (!container || !animate) {
+    body.classList.toggle("stats-open", open);
+    return;
+  }
+  if (open) {
+    body.classList.add("stats-open", "rail-sliding");
+  } else {
+    // The slide starts where the open rail left the map, at the whole
+    // width; the style is read so the transform has a start to leave from
+    body.classList.add("rail-leaving");
+    body.classList.remove("stats-open");
+    void getComputedStyle(container).transform;
+    body.classList.replace("rail-leaving", "rail-sliding");
+  }
+  const onEnd = (e: TransitionEvent): void => {
+    if (e.target === container && e.propertyName === "transform") end();
+  };
+  const end = (): void => {
+    clearTimeout(timer);
+    container.removeEventListener("transitionend", onEnd);
+    railSlides.delete(container);
+    body.classList.remove("rail-sliding");
+  };
+  container.addEventListener("transitionend", onEnd);
+  // The phone's rail is a sheet over the map, which does not move for it
+  const timer = setTimeout(end, RAIL_SLIDE_MS);
+  railSlides.set(container, end);
 }
 
 /**
@@ -325,11 +464,11 @@ export function cameraDistanceRatio(
   map: MapLibreMap,
   place: { lng: number; lat: number },
 ): number {
-  const pitch = (map.getPitch() * Math.PI) / 180;
+  const pitch = map.getPitch() * DEGREES_TO_RADIANS;
   if (pitch === 0) return 1;
-  const fov = (map.getVerticalFieldOfView() * Math.PI) / 180;
+  const fov = map.getVerticalFieldOfView() * DEGREES_TO_RADIANS;
   // The distance from the camera to the screen, in pixels
-  const focal = map.getContainer().clientHeight / 2 / Math.tan(fov / 2);
+  const focal = mapSize(map).height / 2 / Math.tan(fov / 2);
   const centre = map.project(map.getCenter());
   const at = map.project([place.lng, place.lat]);
   // The ray's angle from the ground straight below the camera

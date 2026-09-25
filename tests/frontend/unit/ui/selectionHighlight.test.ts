@@ -145,6 +145,29 @@ describe("selection highlight", () => {
     expect(source.setData).not.toHaveBeenCalled();
   });
 
+  it("works the lines out only while they show, and as they come to show", () => {
+    const source = app.map!.source(MAP_SOURCES.selectionHighlight);
+    app.altitudeVisible = true;
+    source.setData.mockClear();
+
+    // A colour layer draws the selection itself
+    select(1, 2);
+    expect(source.setData).not.toHaveBeenCalled();
+
+    app.altitudeVisible = false;
+    expect(source.setData).toHaveBeenCalledOnce();
+    expect(lines()).toHaveLength(2);
+    // Nothing changed since: shown again, they are as they were
+    app.replayActive = true;
+    app.replayActive = false;
+    expect(source.setData).toHaveBeenCalledOnce();
+
+    // Hidden, a cleared selection still takes them away
+    app.airspeedVisible = true;
+    select();
+    expect(lines()).toEqual([]);
+  });
+
   it("writes the lines again once the map has its WebGL context back", () => {
     select(1);
     const map = app.map!;
@@ -159,41 +182,13 @@ describe("selection highlight", () => {
   });
 
   describe("selectionLines", () => {
-    it("draws a line per flight, and skips a segment without a position", () => {
+    it("draws a line per flight", () => {
       const collection = selectionLines([
         createSegment({ path_id: 1 }),
-        createSegment({ path_id: 1, coords: undefined }),
         createSegment({ path_id: 2 }),
       ]);
 
       expect(collection.features).toHaveLength(2);
-    });
-
-    it("starts the segment after a gap where it starts", () => {
-      const collection = selectionLines([
-        createSegment({
-          path_id: 1,
-          coords: [
-            [50, 10],
-            [50, 11],
-          ],
-        }),
-        createSegment({ path_id: 1, coords: undefined }),
-        createSegment({
-          path_id: 1,
-          coords: [
-            [50, 12],
-            [50, 13],
-          ],
-        }),
-      ]);
-
-      expect(collection.features[0]!.geometry.coordinates).toEqual([
-        [10, 50],
-        [11, 50],
-        [12, 50],
-        [13, 50],
-      ]);
     });
 
     it("draws a flight along the curve through its fixes, like the colour lines", () => {

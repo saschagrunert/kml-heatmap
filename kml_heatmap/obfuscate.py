@@ -30,6 +30,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from .constants import MAX_TIMESTAMP_DISTANCE_SECONDS
 from .date_tokens import (
     MONTHS_LONG,
     MONTHS_SHORT,
@@ -49,7 +50,6 @@ __all__ = [
     "check_kml_obfuscated",
     "find_kml_files",
     "obfuscate_kml_content",
-    "obfuscate_kml_directory",
     "obfuscate_kml_file",
     "obfuscate_kml_files",
     "rename_charterware_files",
@@ -213,10 +213,23 @@ def _timestamp_groups(
     move into the year of the flight that ended the night before. A flight is
     never split: one that runs past the days after January 1st keeps its
     intervals and fails the check instead of running backwards in time.
+
+    A timestamp of a Placemark more than ``MAX_TIMESTAMP_DISTANCE_SECONDS``
+    from the median of the Placemark is a clock error, as the parser has it
+    (a logger's clock at its default date until the GPS fix): it is a piece
+    of its own, so it neither holds the flight back from moving nor stays
+    behind with a date of its own.
     """
-    pieces = [sorted(set(placemark)) for placemark in placemarks]
+    pieces: list[list[datetime]] = []
+    for placemark in placemarks:
+        piece = sorted(set(placemark))
+        if not piece:
+            continue
+        median = piece[len(piece) // 2]
+        limit = timedelta(seconds=MAX_TIMESTAMP_DISTANCE_SECONDS)
+        pieces.append([dt for dt in piece if abs(dt - median) <= limit])
+        pieces.extend([dt] for dt in piece if abs(dt - median) > limit)
     in_placemark = {dt for piece in pieces for dt in piece}
-    pieces = [piece for piece in pieces if piece]
     pieces.extend([dt] for dt in set(timestamps) - in_placemark)
     pieces.sort()
 
@@ -630,14 +643,6 @@ def _obfuscate_listed_files(kml_files: list[Path]) -> int:
         if obfuscate_kml_files([path]) or path != original:
             modified += 1
     return modified
-
-
-def obfuscate_kml_directory(directory: Path) -> int:
-    """Obfuscate all KML files in a directory, including Charterware names.
-
-    Returns the number of files that were renamed or rewritten.
-    """
-    return _obfuscate_listed_files(find_kml_files(directory))
 
 
 # Date shapes that may appear anywhere in a document written by another tool

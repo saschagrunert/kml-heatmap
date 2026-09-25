@@ -4,6 +4,7 @@ __all__ = [
     "AirportDatabaseError",
     "KMLHeatmapError",
     "KMLParseError",
+    "TerrainUnavailableError",
 ]
 
 
@@ -13,6 +14,10 @@ class KMLHeatmapError(Exception):
 
 class AirportDatabaseError(KMLHeatmapError):
     """Raised when a required airport database cannot be loaded."""
+
+
+class TerrainUnavailableError(KMLHeatmapError):
+    """Raised when required elevation tiles cannot be fetched or decoded."""
 
 
 class KMLParseError(KMLHeatmapError):

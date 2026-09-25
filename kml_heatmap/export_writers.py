@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .airport_lookup import extract_icao_codes_from_name, lookup_airport_country
+from .airport_lookup import airport_icao_code, lookup_airport_country
 from .airports import extract_airport_name
 from .cache import atomic_data_write
 from .logger import logger
@@ -54,10 +54,10 @@ def exported_country_codes(unique_airports: list[AirportData]) -> list[str]:
     """
     codes: set[str] = set()
     for _, airport_name in _exported_airports(unique_airports):
-        icao_codes = extract_icao_codes_from_name(airport_name)
-        if not icao_codes:
+        icao_code = airport_icao_code(airport_name)
+        if not icao_code:
             continue
-        country = lookup_airport_country(icao_codes[0])
+        country = lookup_airport_country(icao_code)
         if country:
             codes.add(country)
     return sorted(codes)
@@ -80,9 +80,12 @@ def export_airports_data(
             "name": airport_name,
         }
 
-        icao_codes = extract_icao_codes_from_name(airport_name)
-        if icao_codes:
-            country = lookup_airport_country(icao_codes[0])
+        # The code the airports were merged by, written out so the frontend
+        # shows the same one rather than working it out from the name again
+        icao_code = airport_icao_code(airport_name)
+        if icao_code:
+            airport_data["code"] = icao_code
+            country = lookup_airport_country(icao_code)
             if country:
                 airport_data["country"] = country
 

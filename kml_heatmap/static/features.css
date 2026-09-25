@@ -35,6 +35,11 @@
   display: none;
   box-shadow: var(--shadow-panel);
   min-width: 400px;
+  /* As wide as its row of controls. Shrunk to fit from the middle of the
+     window, it had half the window to fill, and at 1024 px that pressed
+     the time readout onto two lines. */
+  width: max-content;
+  max-width: calc(100vw - 2 * var(--edge-gap));
   box-sizing: border-box;
 }
 /* The aircraft marker is a button, like the airport markers: see
@@ -80,6 +85,9 @@
 }
 #replay-buttons {
   display: flex;
+  /* A panel narrower than the row, beside the rail just above the
+     breakpoint, takes the last controls onto a second line */
+  flex-wrap: wrap;
   gap: var(--space-sm);
   align-items: center;
   justify-content: center;
@@ -110,6 +118,7 @@
   font-family: var(--font-mono);
   text-align: center;
   min-width: 120px;
+  white-space: nowrap;
 }
 #replay-slider-container {
   display: flex;
@@ -196,8 +205,12 @@
   gap: 2px;
   min-width: 0;
 }
+/* Labelled like every other figure on the page (the popups' and the
+   legends' labels), not in a sentence case of its own */
 .replay-readout-label {
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: var(--color-text-muted);
 }
 .replay-readout-value {
@@ -252,6 +265,26 @@ body.replay-active .toast-stack {
     var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
       var(--space-sm)
   );
+}
+
+/* Where the legend stands on top of the panel (the two ranges above), the
+   toasts that stack above the panel stood on the legend's scale: they go
+   above both then. ReplayManager measures --replay-legend-h. */
+@media (min-width: 768px) and (max-width: 959.98px) {
+  body.replay-active:has(.color-legend:not([hidden])) .toast-stack {
+    bottom: calc(
+      var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
+        var(--space-sm) + var(--replay-legend-h, 0px) + var(--space-sm)
+    );
+  }
+}
+@media (min-width: 960px) and (max-width: 1339.98px) {
+  body.stats-open.replay-active:has(.color-legend:not([hidden])) .toast-stack {
+    bottom: calc(
+      var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
+        var(--space-sm) + var(--replay-legend-h, 0px) + var(--space-sm)
+    );
+  }
 }
 
 /* Centred beside the rail, the panel covers the GitHub link in the bottom
@@ -334,6 +367,28 @@ body.replay-active .toast-stack {
       var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
         var(--safe-bottom)
     );
+  }
+}
+
+/* Raised contrast gives the panels' borders real weight (see styles.css);
+   this one's rule comes after that list, so it is repeated here */
+@media (prefers-contrast: more) {
+  #replay-controls {
+    border-width: 2px;
+  }
+}
+
+/* Below 400 px the row of transport controls was 13 px too wide for the
+   panel, and the chase view's button went onto a third line of its own,
+   which made the panel 38% of the screen. The speed picker gives up the
+   inside of its padding, the controls some of the space between them. */
+@media (max-width: 399.98px) {
+  #replay-buttons {
+    gap: var(--space-xs);
+  }
+  #replay-speed {
+    padding-left: var(--space-xs);
+    padding-right: var(--space-xs);
   }
 }
 

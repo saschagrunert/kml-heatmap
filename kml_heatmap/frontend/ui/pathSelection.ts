@@ -1,12 +1,84 @@
 /**
  * Path Selection - Handles path selection logic
  */
+import type { Map as MapLibreMap, PaddingOptions } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
+import { segmentsForPathIds } from "../calculations/statistics";
 import { applyToggleButtonState } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
+import { segmentBounds } from "../utils/geometry";
 import { pluralFlights } from "../utils/htmlGenerators";
-import { resizeMapAfterTransition } from "../utils/mapHelpers";
+import { resizeMapAfterTransition, toBounds } from "../utils/mapHelpers";
+import { prefersReducedMotion } from "../utils/motion";
 import { announceStatus } from "../utils/toast";
+
+/** What floats over the map along its edges and would cover a framed flight */
+const MAP_CHROME_SELECTOR = [
+  "#left-buttons",
+  "#right-buttons",
+  "#selection-chip",
+  "#mobile-bar",
+  ".color-legend",
+].join(", ");
+
+/** How far from an edge something may sit and still count as standing at it */
+const EDGE_REACH_PX = 48;
+
+/** Room kept between the framed flights and the edge or a panel (px) */
+const FRAME_MARGIN_PX = 24;
+
+/** Time the view takes to frame the isolated flights (ms) */
+const FRAME_MS = 800;
+
+type Edge = "top" | "right" | "bottom" | "left";
+
+/**
+ * The padding a fit of the map needs to keep what it frames clear of the
+ * panels over it: the control columns at the sides, the selection chip at
+ * the top, the legend and the phone's bar at the bottom. Each panel counts
+ * at the edge it stands at from which it reaches in least, and no edge
+ * takes more than a third of the map.
+ */
+export function mapChromePadding(map: MapLibreMap): PaddingOptions {
+  const box = map.getContainer().getBoundingClientRect();
+  const padding: Record<Edge, number> = {
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  };
+  for (const element of document.querySelectorAll<HTMLElement>(
+    MAP_CHROME_SELECTOR,
+  )) {
+    if (element.hidden) continue;
+    const r = element.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    // [how far it is from the edge, how far it reaches in from it]
+    const edges: [Edge, number, number][] = [
+      ["top", r.top - box.top, r.bottom - box.top],
+      ["bottom", box.bottom - r.bottom, box.bottom - r.top],
+      ["left", r.left - box.left, r.right - box.left],
+      ["right", box.right - r.right, box.right - r.left],
+    ];
+    let edge: Edge | null = null;
+    let depth = Infinity;
+    for (const [side, distance, reach] of edges) {
+      if (distance >= -1 && distance <= EDGE_REACH_PX && reach < depth) {
+        edge = side;
+        depth = reach;
+      }
+    }
+    if (edge) padding[edge] = Math.max(padding[edge], depth);
+  }
+  const limit = (edge: Edge, size: number): number =>
+    Math.min(padding[edge], size / 3) + FRAME_MARGIN_PX;
+  return {
+    top: limit("top", box.height),
+    bottom: limit("bottom", box.height),
+    left: limit("left", box.width),
+    right: limit("right", box.width),
+  };
+}
 
 export class PathSelection {
   private app: MapApp;
@@ -95,6 +167,28 @@ export class PathSelection {
     }
 
     this.app.isolateSelection = !this.app.isolateSelection;
+    if (this.app.isolateSelection) this.frameSelection();
+  }
+
+  /**
+   * Bring the selected flights into view, clear of the panels: isolated,
+   * they are all the map shows, and one could stay half off the screen or
+   * under the chip that says it is selected. The map keeps its bearing.
+   */
+  private frameSelection(): void {
+    const map = this.app.map;
+    const data = this.app.currentData;
+    if (!map || !data) return;
+    const bounds = segmentBounds(
+      segmentsForPathIds(data.path_segments, this.app.selectedPathIds),
+    );
+    if (!bounds) return;
+    map.fitBounds(toBounds(bounds), {
+      padding: mapChromePadding(map),
+      bearing: map.getBearing(),
+      duration: FRAME_MS,
+      animate: !prefersReducedMotion(),
+    });
   }
 
   /**
@@ -130,8 +224,9 @@ export class PathSelection {
 
     // The polite region rather than a live chip: the count changes on every
     // click on a path, and a live region that replaces its own text is read
-    // once things settle rather than once per click
-    if (changed && selected > 0) announceStatus(text);
+    // once things settle rather than once per click. The chip going away
+    // is said too; with the Clear that had the focus gone, nothing did.
+    if (changed) announceStatus(selected > 0 ? text : "Selection cleared");
   }
 
   /**

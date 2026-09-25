@@ -9,9 +9,6 @@ import {
   airplaneLiftPx,
   followsLevel,
   groundOffsetFt,
-  groundOffsetStepFt,
-  groundProfileFt,
-  groundProfilesFt,
   heightAtZoomFt,
   heightOnReliefFt,
   isLiftedAt,
@@ -20,17 +17,29 @@ import {
   liftOffsetPx,
   reliefLevel,
   reliefPixelM,
-  ribbonHeightFt,
-  ribbonHeights,
-  ribbonOf,
   ribbonId,
-  ribbonPieces,
-  ribbonProperties,
-  smoothAlong,
-  smoothFlights,
-  smoothLine,
   switchesExaggeration,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
+import {
+  smoothFlights,
+  smoothLine,
+} from "../../../../kml_heatmap/frontend/calculations/smoothing";
+import {
+  groundProfileFt,
+  groundProfilesFt,
+  smoothAlong,
+} from "../../../../kml_heatmap/frontend/calculations/groundProfile";
+import {
+  groundOffsetStepFt,
+  ribbonOf,
+  ribbonPieces,
+  ribbonProperties,
+  screenCut,
+} from "../../../../kml_heatmap/frontend/calculations/ribbons";
+import {
+  ribbonHeightFt,
+  ribbonHeights,
+} from "../../../../kml_heatmap/frontend/calculations/ribbonPaint";
 import { resetMapLibreMock } from "../../../mocks/maplibre-gl";
 import {
   FEET_TO_METERS,
@@ -60,7 +69,7 @@ describe("lift", () => {
     const at = (
       lng: number,
       altitude_ft: number,
-      groundspeed_knots: number | undefined,
+      groundspeed_knots: number,
       path_id = 1,
     ): PathSegment => ({
       path_id,
@@ -104,7 +113,7 @@ describe("lift", () => {
 
       // The lowest part of its time would have been the glitch
       expect([...ground]).toEqual(segments.map(() => 400));
-      expect(liftFt(segments[3]!.altitude_ft!, ground[3]!)).toBe(2600);
+      expect(liftFt(segments[3]!.altitude_ft, ground[3]!)).toBe(2600);
     });
 
     it("stands a flight that starts in the air on the field it landed on", () => {
@@ -114,11 +123,29 @@ describe("lift", () => {
     });
 
     it("falls back to the lowest part of its time without speeds to tell", () => {
+      // A log without timing, whose speeds the build writes as 0 (no
+      // speed). Were a 0 taxiing, the field would be the middle of the
+      // altitudes, 3,000 ft (regression)
       const segments = [800, 800, 3000, 5000].map((altitude, i) =>
-        at(8 + i / 100, altitude, undefined),
+        at(8 + i / 100, altitude, 0),
       );
 
       expect([...groundProfileFt(segments)]).toEqual([800, 800, 800, 800]);
+    });
+
+    it("ends the taxiing at a speed of 0, as the build does", () => {
+      // Taxiing at the start, then no speed: the start field only
+      const segments = [
+        at(8, 400, 5),
+        at(8.01, 400, 10),
+        at(8.02, 400, 8),
+        at(8.03, 3000, 0),
+        at(8.04, 2000, 0),
+        at(8.05, 2000, 0),
+        at(8.06, 2000, 0),
+      ];
+
+      expect([...groundProfileFt(segments)]).toEqual(segments.map(() => 400));
     });
 
     it("measures the way flown across the antimeridian the short way", () => {
@@ -648,15 +675,6 @@ describe("lift", () => {
       ]);
     });
 
-    it("leaves a segment without coordinates out of every chain", () => {
-      const flights = smoothFlights(
-        [{ path_id: 1 }, segment(1, [50, 8], [50, 8.01])],
-        () => 0,
-      );
-
-      expect([...flights.chainOf]).toEqual([-1, 0]);
-    });
-
     it("cuts ribbons that meet their neighbours corner to corner", () => {
       const segments = [
         segment(1, [50, 8], [50, 8.01]),
@@ -673,6 +691,175 @@ describe("lift", () => {
       // The end of the one is the start of the other, on both edges
       expect(firstQuad[0]).toEqual(lastQuad[1]);
       expect(firstQuad[3]).toEqual(lastQuad[2]);
+    });
+  });
+
+  describe("screenCut and ribbonOf for the screen", () => {
+    /** The metres of a pixel in the middle of the level `zoom` at `lat` */
+    const pixelM = (zoom: number, lat: number): number =>
+      (40075016.686 / (512 * 2 ** (zoom + 0.5))) *
+      Math.cos((lat * Math.PI) / 180);
+    /** A flight due east at 48 N, a point every `step` degrees */
+    const east = (
+      count: number,
+      step: number,
+      heightOf: (i: number) => number = () => 3000,
+    ) => {
+      const segments = Array.from({ length: count }, (_, i) => ({
+        path_id: 1,
+        coords: [
+          [48, 16 + i * step],
+          [48, 16 + (i + 1) * step],
+        ] as [[number, number], [number, number]],
+      }));
+      return smoothFlights(segments, (i) => heightOf(i), {
+        groundOf: () => 1000,
+      });
+    };
+    const quads = (pieces: ReturnType<typeof ribbonOf>): number[][][] =>
+      pieces.flatMap((piece) =>
+        piece.geometry.coordinates.map((polygon) => polygon[0]!),
+      );
+
+    it("coarsens the step of the pieces zoomed out, to within a pixel", () => {
+      for (let zoom = 3; zoom < 14; zoom++) {
+        const { stepFt, spanFt, pixelM: pixel } = screenCut(zoom, 48);
+        expect(pixel).toBeCloseTo(pixelM(zoom, 48), 6);
+        const pixelFt =
+          pixel / liftExaggeration(reliefLevel(zoom)) / FEET_TO_METERS;
+        expect(stepFt % LIFT_STEP_FT).toBe(0);
+        if (spanFt > 0) {
+          expect(spanFt).toBe(stepFt);
+          expect(stepFt).toBeLessThanOrEqual(pixelFt);
+          expect(stepFt * 2).toBeGreaterThan(pixelFt);
+        } else {
+          // Closer in than a step fits in a pixel: as the data has it
+          expect(stepFt).toBe(LIFT_STEP_FT);
+          expect(LIFT_STEP_FT).toBeGreaterThan(pixelFt);
+        }
+      }
+      expect(screenCut(5, 48).stepFt).toBeGreaterThan(100);
+      expect(screenCut(13, 48).spanFt).toBe(0);
+    });
+
+    it("draws a straight level flight in quads of many points, as wide", () => {
+      // 200 points 30 m apart: 6 km, about 80 pixels at zoom 9
+      const flights = east(200, 0.0004);
+      const exact = quads(ribbonOf(flights, 0, 200, 9));
+      const cut = quads(ribbonOf(flights, 0, 200, 9, true));
+
+      expect(exact).toHaveLength(200);
+      expect(cut.length).toBeGreaterThanOrEqual(5);
+      expect(cut.length).toBeLessThanOrEqual(7);
+      // Where it starts and ends, and as wide
+      expect(cut[0]![0]).toEqual(exact[0]![0]);
+      expect(cut.at(-1)![2]).toEqual(exact.at(-1)![2]);
+    });
+
+    it("keeps a quad no longer than 16 to 24 pixels, and a turn in steps of a few degrees", () => {
+      // 60 km due east at zoom 9, a point every 8 pixels: 820 pixels
+      const straight = quads(ribbonOf(east(100, 0.008), 0, 100, 9, true));
+      const lengthPx = (quad: number[][], zoom = 9): number =>
+        (Math.hypot(
+          (quad[1]![0]! - quad[0]![0]!) * Math.cos((48 * Math.PI) / 180),
+          quad[1]![1]! - quad[0]![1]!,
+        ) *
+          111320) /
+        pixelM(zoom, 48);
+      for (const quad of straight) {
+        expect(lengthPx(quad)).toBeLessThanOrEqual(16 + 11);
+      }
+      expect(straight.length).toBeLessThan(60);
+      // Zoomed in, where the points are 260 px apart: no quad longer than
+      // 24 px, so none reaches past the buffer of a tile
+      for (const quad of quads(ribbonOf(east(4, 0.008), 0, 4, 14, true))) {
+        expect(lengthPx(quad, 14)).toBeLessThanOrEqual(24);
+      }
+
+      // A circle of 2 km across, 72 points: a point every 20 to 30 px of
+      // turn at zoom 12, and a blot of a few pixels at zoom 6
+      const circle = Array.from({ length: 73 }, (_, i): [number, number] => [
+        48 + 0.009 * Math.sin((i * Math.PI) / 36),
+        16 + 0.0134 * Math.cos((i * Math.PI) / 36),
+      ]);
+      const segments = circle.slice(1).map((end, i) => ({
+        path_id: 1,
+        coords: [circle[i]!, end] as [[number, number], [number, number]],
+      }));
+      const flights = smoothFlights(segments, () => 3000, {
+        groundOf: () => 1000,
+      });
+      const close = quads(ribbonOf(flights, 0, 72, 12, true)).length;
+      const far = quads(ribbonOf(flights, 0, 72, 6, true)).length;
+      expect(close).toBeGreaterThanOrEqual(36);
+      expect(far).toBeLessThan(close / 4);
+    });
+
+    it("keeps the height within a step of the exact cut, and runs that meet corner to corner", () => {
+      // Climbing 3,000 ft over 200 points, cut into two runs
+      const flights = east(200, 0.0004, (i) => 1000 + i * 15);
+      const { stepFt } = screenCut(7, 48);
+      const first = ribbonOf(flights, 0, 90, 7, true);
+      const rest = ribbonOf(flights, 90, 200, 7, true);
+      const exact = ribbonOf(flights, 0, 200, 7);
+
+      expect(first.length + rest.length).toBeLessThan(exact.length / 3);
+      const heights = [...first, ...rest].map((piece) => piece.h);
+      expect(heights).toEqual([...heights].sort((a, b) => a - b));
+      expect(heights[0]!).toBeLessThanOrEqual(stepFt);
+      expect(heights.at(-1)!).toBeGreaterThanOrEqual(3000 - 15 - stepFt);
+      const lastQuad = quads(first).at(-1)!;
+      const firstQuad = quads(rest)[0]!;
+      expect(firstQuad[0]).toEqual(lastQuad[1]);
+      expect(firstQuad[3]).toEqual(lastQuad[2]);
+    });
+
+    it("gives a segment without length a quad of numbers, cut for the screen too", () => {
+      const pieces = ribbonPieces(
+        [
+          [48, 16],
+          [48, 16],
+          [48, 16.01],
+        ],
+        [1000, 1000, 1000],
+        14,
+        undefined,
+        undefined,
+        undefined,
+        screenCut(14, 48),
+      );
+
+      const coordinates = pieces.flatMap((piece) =>
+        piece.geometry.coordinates.flat(3),
+      );
+      expect(coordinates.length).toBeGreaterThan(0);
+      expect(coordinates.every(Number.isFinite)).toBe(true);
+    });
+
+    it("merges level pieces whose heights span no more than a step", () => {
+      const points: [number, number][] = [
+        [48, 16],
+        [48, 16.01],
+        [48, 16.02],
+        [48, 16.03],
+      ];
+      const cut = { stepFt: 80, spanFt: 80, pixelM: 1 };
+      const pieces = ribbonPieces(
+        points,
+        [1000, 1030, 1000, 1200],
+        9,
+        undefined,
+        undefined,
+        undefined,
+        cut,
+      );
+
+      // Up 30 ft and back in one piece, drawn at the middle of its heights,
+      // then a climb of 200 ft in pieces a step apart
+      expect(pieces[0]!.geometry.coordinates.length).toBeGreaterThanOrEqual(2);
+      expect(pieces[0]!.h).toBeGreaterThanOrEqual(1000);
+      expect(pieces[0]!.h).toBeLessThanOrEqual(1080);
+      expect(pieces.length).toBeLessThanOrEqual(4);
     });
   });
 

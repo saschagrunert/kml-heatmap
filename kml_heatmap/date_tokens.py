@@ -7,17 +7,32 @@ and file names are free text, and "Sunday flight 16 Aug 2026" would publish
 the day of the flight.
 
 Numeric dates: 2024-03-14, 2024.03.14, 14.03.2024, 14/03/2024, 14-03-2024,
-3/14/2024, 14.03.24, 2024/3/14, 2024-3-4, the compact 20240314, the year
-and month 2024-03, the ISO week 2024-W11 and the ordinal date 2024-074.
-With a month name: "14 Mar 2024", "14th March 2024", "14-MAR-2024",
-"March 14, 2024", "Mar14_2024" and "March 2024", and in German, day first:
-"14. März 2024", "14.Mrz.2024", "14-Okt-2024" and "Mai 2024".
+14_03_2024, 14 03 2024, 14 - 03 - 2024, 3/14/2024, 14.03.24, 2024/3/14,
+2024-3-4, the compact 20240314, the year and month 2024-03, the ISO week
+2024-W11, the German calendar week KW11 2024 and the ordinal date 2024-074.
+With a month name: "14 Mar 2024", "14th March 2024", "the 14th of March
+2024", "14-MAR-2024",
+"14/Mar/2024", "March 14, 2024", "Mar/14/2024", "Mar14_2024", "2024/Mar/14"
+and "March 2024", with a two-digit year "14 Mar 24", "14-MAR-24" and
+"14MAR24", and in German, day first: "14. März 2024", "14.Mrz.2024",
+"14-Okt-2024" and "Mai 2024". And the date of flight of an ICAO flight plan,
+"DOF/240314".
 
 Names lose more than that (``strip_dates``): a day and month without the
-year ("16 Aug", "16. Mai", "16AUG26", "16.08.", "16/08"), which the year of
-the flight completes, a month and year ("03/2026", "03.2026", "2026/03")
-and a time of day ("14:30", "1430Z", the time after a date as in
-20260816T1430 or 2026-08-16_1430).
+year ("16 Aug", "16. Mai", "16.08.", "26.08", "16.8", "16/08", "16-08",
+"16_08") and a calendar week without it ("KW33"), which the year of the
+flight completes, six digits that are a date ("260816"), a month and year
+("03/2026", "03.2026", "2026/03") and a time of day ("14:30", "1430Z",
+"1430L", "14h30", "14.30 Uhr", the time after a date as in 20260816T1430 or
+2026-08-16_1430).
+
+Where a name could hold a date or something else, it loses the date: a
+decimal such as "fuel 16.8" goes with the dates it looks like. Two numbers
+18 apart are a runway ("RWY 07/25") only in a name that says it speaks of
+runways: "EDDS 07/25" reads as July 25th and as July 2025 as well, and an
+airport code or a place name before them says nothing about which it is.
+Two numbers with a dot after a word that names a version ("firmware
+12.10") are the version.
 """
 
 import re
@@ -98,6 +113,13 @@ _GERMAN_MONTH_NUMBERS = {
 
 _DAYS_AFTER_JAN_1 = "|".join(f"{day:02d}" for day in range(1, MAX_DAYS_AFTER_JAN_1 + 2))
 
+# A day and a month of the numeric shapes, and a week of the year
+_DAY = r"(?:0?[1-9]|[12]\d|3[01])"
+_MONTH = r"(?:0?[1-9]|1[0-2])"
+_WEEK = r"(?:0?[1-9]|[1-4]\d|5[0-3])"
+# What stands between the day and the month of a date written with spaces
+_SPACED = r"(?:\s+(?:[./_-]\s*)?|[./_-]\s+)"
+
 
 def _numeric_patterns(skip_near_jan_first: bool) -> tuple[re.Pattern[str], ...]:
     """The numeric date shapes, with or without the days after January 1st.
@@ -136,11 +158,23 @@ def _numeric_patterns(skip_near_jan_first: bool) -> tuple[re.Pattern[str], ...]:
             + r"(?=\d(?!\d)|\d{2}(?P=sep)\d(?!\d))"
             + r"(?:0?[1-9]|1[0-2])(?P=sep)(?:0?[1-9]|[12]\d|3[01])(?!\d|\.\d)"
         ),
-        # Day first or month first, with a two- or four-digit year
+        # Day first or month first, with a two- or four-digit year, and
+        # 16_08_2026 from a file name
         re.compile(
             r"(?<![\d.])"
-            + unless(r"0?1(?P<skip>[./-])0?1(?P=skip)\d{2}(?:\d{2})?(?!\d|\.\d)")
-            + r"\d{1,2}(?P<sep>[./-])\d{1,2}(?P=sep)\d{2}(?:\d{2})?(?!\d|\.\d)"
+            + unless(r"0?1(?P<skip>[./_-])0?1(?P=skip)\d{2}(?:\d{2})?(?!\d|\.\d)")
+            + r"\d{1,2}(?P<sep>[./_-])\d{1,2}(?P=sep)\d{2}(?:\d{2})?(?!\d|\.\d)"
+        ),
+        # The same with spaces, "16 08 2026" and "16 - 08 - 2026": only a
+        # real day and month, not both of one digit, and a year of this or
+        # the last century, since numbers in a row are anything as often
+        re.compile(
+            r"(?<![\w.])"
+            + unless(r"0?1\s*[./_-]?\s*0?1\s*[./_-]?\s*\d")
+            + rf"(?=(?:{_DAY}{_SPACED}{_MONTH}|{_MONTH}{_SPACED}{_DAY})(?!\d))"
+            + r"(?!\d\D+\d(?!\d))"
+            + r"\d{1,2}(?P<sep>\s+(?:[./_-]\s*)?|[./_-]\s+)\d{1,2}(?P=sep)"
+            + r"(?:19|20)\d{2}(?!\d|[.,]\d)"
         ),
         # 2024-03 (a year and month), 2024-W11 (an ISO week) and 2024-074 (an
         # ordinal date); January, the first week and the first days pass
@@ -151,6 +185,12 @@ def _numeric_patterns(skip_near_jan_first: bool) -> tuple[re.Pattern[str], ...]:
             r"(?<!\d)\d{4}-W"
             + unless(r"01(?!\d)")
             + r"(?:0[1-9]|[1-4]\d|5[0-3])(?:-[1-7])?(?!\d)"
+        ),
+        # The German calendar week with its year, "KW33 2026" and "KW 33/2026"
+        re.compile(
+            r"(?<![A-Za-z\d])(?i:KW)\s?"
+            + unless(r"0?1(?!\d)")
+            + rf"{_WEEK}[\s/._-]*(?:19|20)\d{{2}}(?!\d|[.,]\d)"
         ),
         re.compile(
             r"(?<!\d)\d{4}-"
@@ -170,25 +210,38 @@ def _numeric_patterns(skip_near_jan_first: bool) -> tuple[re.Pattern[str], ...]:
 _NUMERIC_STRAY = _numeric_patterns(skip_near_jan_first=True)
 _NUMERIC_ALL = _numeric_patterns(skip_near_jan_first=False)
 
-_MONTH_RE = r"[A-Za-z]{3,9}"
+# Only the month names themselves: a word that merely looks like one would
+# take the place of a date after it ("EDDS 2026/Aug/16" is no "EDDS 2026")
+_MONTH_NAME_RE = "(?i:" + "|".join(sorted(_MONTH_NUMBERS, key=len, reverse=True)) + ")"
+_MONTH_RE = rf"{_MONTH_NAME_RE}(?![A-Za-z])"
 _DAY_RE = r"\d{1,2}(?:st|nd|rd|th)?"
-_SEP_RE = r"[\s_.,-]"
+# A slash as well: "16/Aug/2026" and "2026/Aug/16"
+_SEP_RE = r"[\s_.,/-]"
+# Only years of this and the last century: "Juli 7000" is a squawk, and in
+# "16-AUG-26 1430L" the time is no year
+_YEAR_RE = r"(?:19|20)\d{2}"
+# "16th of August" as well
+_OF_RE = rf"(?:(?i:of){_SEP_RE}+)?"
 _TEXT_MONTH = re.compile(
-    rf"(?<![A-Za-z\d])(?P<day1>{_DAY_RE}){_SEP_RE}*(?P<month1>{_MONTH_RE})"
-    rf"{_SEP_RE}*(?P<year1>\d{{4}})(?!\d)|"
+    rf"(?<![A-Za-z\d])(?P<day1>{_DAY_RE}){_SEP_RE}*{_OF_RE}(?P<month1>{_MONTH_RE})"
+    rf"{_SEP_RE}*(?P<year1>{_YEAR_RE})(?!\d)|"
     rf"(?<![A-Za-z])(?P<month2>{_MONTH_RE}){_SEP_RE}*(?P<day2>{_DAY_RE})"
-    rf"{_SEP_RE}*(?P<year2>\d{{4}})(?!\d)|"
-    rf"(?<![A-Za-z])(?P<month3>{_MONTH_RE}){_SEP_RE}+(?P<year3>\d{{4}})(?!\d)"
+    rf"{_SEP_RE}*(?P<year2>{_YEAR_RE})(?!\d)|"
+    rf"(?<![A-Za-z])(?P<month3>{_MONTH_RE}){_SEP_RE}+(?P<year3>{_YEAR_RE})(?!\d)|"
+    # The year first, "2026-Aug-16" and "2026/Aug/16"
+    rf"(?<![\w.])(?P<year4>{_YEAR_RE}){_SEP_RE}*(?P<month4>{_MONTH_RE})"
+    rf"{_SEP_RE}*(?P<day4>{_DAY_RE})(?![A-Za-z\d])"
 )
 # Only taken out of names: a day and a month without the year ("16 Aug",
 # "August 16th"), which the year of the flight completes, and a time of day
 # ("Flight 16 August" must not match "Flight 16" first, so only month names)
-_MONTH_NAME_RE = "(?i:" + "|".join(sorted(_MONTH_NUMBERS, key=len, reverse=True)) + ")"
 # The day-first form takes a two-digit year written right after the month
-# along ("16AUG26"), or the year would be left behind on its own.
+# along ("16AUG26", "16-AUG-26"), or the year would be left behind on its
+# own. A time of day is no year ("16 Aug 14:30").
 _TEXT_MONTH_WITHOUT_YEAR = re.compile(
-    rf"(?<![A-Za-z\d])(?P<day1>{_DAY_RE}){_SEP_RE}*(?P<month1>{_MONTH_NAME_RE})"
-    r"(?![A-Za-z])(?:\d{2}(?!\d))?|"
+    rf"(?<![A-Za-z\d])(?P<day1>{_DAY_RE}){_SEP_RE}*{_OF_RE}"
+    rf"(?P<month1>{_MONTH_NAME_RE})"
+    rf"(?![A-Za-z])(?:{_SEP_RE}?\d{{2}}(?![\d:]))?|"
     rf"(?<![A-Za-z])(?P<month2>{_MONTH_NAME_RE}){_SEP_RE}*(?P<day2>{_DAY_RE})"
     r"(?![A-Za-z\d])"
 )
@@ -196,8 +249,6 @@ _TEXT_MONTH_WITHOUT_YEAR = re.compile(
 # "16.Mai.2026", "16-Mai-2026") or without one ("16. Mai", "16MAI26" with its
 # two-digit year), and a month with a year ("Mai 2026"). No letter may touch
 # the name on either side, umlauts included ("Maier 2026" is no date).
-# Only years of this and the last century: "Juli 7000" is a squawk
-_YEAR_RE = r"(?:19|20)\d{2}"
 _GERMAN_MONTH_RE = (
     "(?i:" + "|".join(sorted(_GERMAN_MONTH_NUMBERS, key=len, reverse=True)) + ")"
 )
@@ -209,16 +260,52 @@ _TEXT_MONTH_GERMAN = re.compile(
 )
 _TEXT_MONTH_GERMAN_WITHOUT_YEAR = re.compile(
     rf"(?<![^\W_])(?P<day1>\d{{1,2}}){_SEP_RE}*(?P<month1>{_GERMAN_MONTH})"
-    r"(?:\d{2}(?!\d))?"
+    rf"(?:{_SEP_RE}?\d{{2}}(?![\d:]))?"
 )
-# A day and month in German notation, "16.08.", with the year left out
+# A day, a month name and a two-digit year: "16 Aug 26", "16-AUG-26",
+# "16AUG26" (the aviation form) and "16. Mai 26". The separators after the
+# month have to be those before it, which keeps "3 May 10 minutes" out: the
+# obfuscator's check reports these, where a day and month alone say too
+# little to fail a file on.
+_TEXT_MONTH_SHORT_YEAR = re.compile(
+    rf"(?<![A-Za-z\d])(?P<day1>{_DAY_RE})(?P<sep>{_SEP_RE}*)"
+    rf"(?P<month1>{_MONTH_NAME_RE}|{_GERMAN_MONTH_RE})(?![^\W\d_])"
+    r"(?P=sep)(?P<year1>\d{2})(?![\d:]|\.\d)"
+)
+# A day and month in German notation, "16.08.", with the year left out, and
+# "26.08" or "16.8" without the last dot when the day has two digits: 118.30
+# is a frequency and 1.2 a version, which the digits and dots around keep
+# out. After a word that says it is a version ("firmware 12.10") it is one
+# (see _day_month_dotted_spans).
 _DAY_MONTH_DOTTED = re.compile(
-    r"(?<![\d.])(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])\.(?![\d.])"
+    r"(?<![\d.])(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])\.(?![\d.])|"
+    r"(?<![\w.])(?:(?:0[1-9]|[12]\d|3[01])\.(?:0[1-9]|1[0-2])|"
+    r"(?:[12]\d|3[01])\.[1-9])(?![\w.]|,\d)"
 )
-# A day and month with a slash, "16/08" or "08/16", with the year left out;
-# which of them is a date is up to _is_day_month
+_VERSION_WORD = re.compile(
+    r"(?i:\b(?:v|ver|version|firmware|fw|software|sw|release|build|update|app"
+    r"|ios|android))\.?\s*$"
+)
+# A day and month with a slash, "16/08" or "08/16", or with a hyphen or an
+# underscore and two digits each, "16-08" and the "16_08" of a file name (a
+# range such as 5-10 has a single digit more often), with the year left
+# out; which of them is a date is up to _is_day_month
 _DAY_MONTH_SLASHED = re.compile(
-    r"(?<![\w./])(?P<first>\d{1,2})/(?P<second>\d{1,2})(?![\w/]|\.\d)"
+    r"(?<![^\W_]|[./-])(?:(?P<first>\d{1,2})/(?P<second>\d{1,2})|"
+    r"(?P<first_h>\d{2})[-_](?P<second_h>\d{2}))(?![^\W_]|[/-]|\.\d)"
+)
+# Six digits that are a date with a two-digit year, the year first as in the
+# DOF/260816 of an ICAO flight plan or last as in 160826. Only taken out of
+# names: a number of six digits is rarely anything else there.
+_SIX_DIGIT_DATE = re.compile(
+    r"(?<![\w./-])(?:\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])|"
+    r"(?:0[1-9]|[12]\d|3[01])(?:0[1-9]|1[0-2])\d{2})(?![\w/-]|\.\d)"
+)
+# The date of flight of an ICAO flight plan, which the obfuscator's check
+# reports in any document: "DOF/260816", YYMMDD
+_FLIGHT_PLAN_DATE = re.compile(
+    r"\bDOF/(?P<year>\d{2})(?P<month>0[1-9]|1[0-2])(?P<day>0[1-9]|[12]\d|3[01])"
+    r"(?!\d)"
 )
 # A runway is named by its two directions, which are 180 degrees apart:
 # 08/26, 16/34. 26/08 is August 26th as well, so such a pair only counts as
@@ -238,12 +325,23 @@ _TIME_OF_DAY = re.compile(
     r"(?<![\d:])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?"
     r"(?:\s*(?:Z|UTC|[AaPp]\.?[Mm]\.?)(?![A-Za-z]))?(?![\d:])"
 )
-# A time of day without a colon: "1430Z", "1430 UTC", and the "T1430" an
-# ISO basic timestamp (20260816T1430) leaves once its date is out. Four
-# digits alone are an altitude or a squawk as often, so only these forms.
+# The French and German forms: "14h30" (two digits for the hour, "1h30" is
+# a duration), and anything with "Uhr" ("14.30 Uhr", "14 Uhr")
+_TIME_OF_DAY_WORDS = re.compile(
+    r"(?<![\w.:])(?:(?:[01]\d|2[0-3])h[0-5]\d|"
+    r"(?:[01]?\d|2[0-3])(?:[.:][0-5]\d)?\s*Uhr)(?![^\W_])"
+)
+# A calendar week without the year, "KW33" and "KW 33", which the year of
+# the flight completes
+_WEEK_ONLY = re.compile(rf"(?<![A-Za-z\d])(?i:KW)\s?{_WEEK}(?![\w])")
+# A time of day without a colon: "1430Z", "1430 UTC", the local "1430L"
+# and "1430 LT", and the "T1430" an ISO basic timestamp (20260816T1430)
+# leaves once its date is out. Four digits alone are an altitude or a squawk
+# as often, so only these forms.
 _HHMM = r"(?:[01]\d|2[0-3])[0-5]\d(?:[0-5]\d)?"
+_ZONE = r"(?:\s*(?:Z|UTC|LT)|L)"
 _COMPACT_TIME = re.compile(
-    rf"(?<![A-Za-z\d])(?:T{_HHMM}(?:Z|UTC)?|{_HHMM}\s*(?:Z|UTC))(?![A-Za-z\d])"
+    rf"(?<![A-Za-z\d])(?:T{_HHMM}(?:Z|UTC)?|{_HHMM}{_ZONE})(?![A-Za-z\d])"
 )
 # The time of day right after a date is one in any form: the "T14:30:00Z"
 # of an ISO timestamp, whose T would be left behind otherwise, and the
@@ -251,7 +349,7 @@ _COMPACT_TIME = re.compile(
 # a UTC offset
 _TIME_AFTER_DATE = re.compile(
     rf"(?:[-_\s]|T)(?:{_HHMM}|(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)"
-    r"(?:\.\d+)?h?(?:\s*(?:Z|UTC)|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?"
+    rf"(?:\.\d+)?h?(?:{_ZONE}|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?"
     r"(?![A-Za-z\d:])"
 )
 # What is left around a removed date: separators at either end, a separator
@@ -293,7 +391,20 @@ def _day_month_slashed_spans(text: str) -> list[tuple[int, int]]:
     return [
         match.span()
         for match in _DAY_MONTH_SLASHED.finditer(text)
-        if _is_day_month(match["first"], match["second"], runways)
+        if _is_day_month(
+            match["first"] or match["first_h"],
+            match["second"] or match["second_h"],
+            runways,
+        )
+    ]
+
+
+def _day_month_dotted_spans(text: str) -> list[tuple[int, int]]:
+    """The days and months with dots, but none of a version ("v 12.10")."""
+    return [
+        match.span()
+        for match in _DAY_MONTH_DOTTED.finditer(text)
+        if not _VERSION_WORD.search(text, 0, match.start())
     ]
 
 
@@ -315,6 +426,10 @@ def _german_month_number(name: str) -> int | None:
     return _GERMAN_MONTH_NUMBERS.get(name.lower())
 
 
+def _any_month_number(name: str) -> int | None:
+    return month_number(name) or _german_month_number(name)
+
+
 def _text_month_spans(
     pattern: re.Pattern[str],
     text: str,
@@ -329,13 +444,19 @@ def _text_month_spans(
     spans = []
     for match in pattern.finditer(text):
         groups = match.groupdict()
-        month_name = (
-            groups.get("month1") or groups.get("month2") or groups.get("month3")
+        month_name = next(
+            (value for key, value in groups.items() if key[:5] == "month" and value),
+            "",
         )
-        month = months(month_name or "")
+        month = months(month_name)
         if month is None:
             continue
-        day = _day_number(groups.get("day1") or groups.get("day2"))
+        day = _day_number(
+            next(
+                (value for key, value in groups.items() if key[:3] == "day" and value),
+                None,
+            )
+        )
         if skip_near_jan_first and near_jan_first(month, day):
             continue
         spans.append(match.span())
@@ -356,6 +477,15 @@ def find_date_tokens(text: str, *, skip_near_jan_first: bool = False) -> list[st
         + _text_month_spans(
             _TEXT_MONTH_GERMAN, text, skip_near_jan_first, _german_month_number
         )
+        + _text_month_spans(
+            _TEXT_MONTH_SHORT_YEAR, text, skip_near_jan_first, _any_month_number
+        )
+    )
+    found.extend(
+        match.group(0)
+        for match in _FLIGHT_PLAN_DATE.finditer(text)
+        if not skip_near_jan_first
+        or not near_jan_first(int(match["month"]), int(match["day"]))
     )
     return found
 
@@ -364,7 +494,9 @@ def strip_dates(text: str | None) -> str | None:
     """A name without its dates and times of day, None when nothing is left.
 
     Every date shape of ``find_date_tokens`` is taken out, and so are a day
-    and month without a year and a time of day. The separators the date
+    and month without a year ("16 Aug", "16/08", "16-08", "26.08"), six
+    digits that are a date ("260816") and a time of day ("14:30", "1430Z",
+    "1430L", "14h30", "14.30 Uhr"). The separators the date
     stood between go with it ("EDDS to EDDP - 16 Aug 2026" is "EDDS to
     EDDP"). A name without a single letter left says nothing and is None.
 
@@ -380,15 +512,19 @@ def strip_dates(text: str | None) -> str | None:
     spans.extend(
         _text_month_spans(_TEXT_MONTH_GERMAN, text, False, _german_month_number)
     )
+    spans.extend(match.span() for match in _FLIGHT_PLAN_DATE.finditer(text))
     # The common case, and the one that keeps a name exactly as it was
     if (
         not spans
         and not _TEXT_MONTH_WITHOUT_YEAR.search(text)
         and not _TEXT_MONTH_GERMAN_WITHOUT_YEAR.search(text)
-        and not _DAY_MONTH_DOTTED.search(text)
+        and not _day_month_dotted_spans(text)
         and not _day_month_slashed_spans(text)
+        and not _WEEK_ONLY.search(text)
+        and not _SIX_DIGIT_DATE.search(text)
         and not _MONTH_YEAR.search(text)
         and not _TIME_OF_DAY.search(text)
+        and not _TIME_OF_DAY_WORDS.search(text)
         and not _COMPACT_TIME.search(text)
     ):
         return text if any(c.isalpha() for c in text) else None
@@ -402,11 +538,14 @@ def strip_dates(text: str | None) -> str | None:
             + _text_month_spans(
                 _TEXT_MONTH_GERMAN_WITHOUT_YEAR, stripped, False, _german_month_number
             )
-            + [match.span() for match in _DAY_MONTH_DOTTED.finditer(stripped)]
+            + _day_month_dotted_spans(stripped)
             + _day_month_slashed_spans(stripped)
+            + [match.span() for match in _WEEK_ONLY.finditer(stripped)]
+            + [match.span() for match in _SIX_DIGIT_DATE.finditer(stripped)]
             + [match.span() for match in _MONTH_YEAR.finditer(stripped)],
         )
         + [match.span() for match in _TIME_OF_DAY.finditer(stripped)]
+        + [match.span() for match in _TIME_OF_DAY_WORDS.finditer(stripped)]
         + [match.span() for match in _COMPACT_TIME.finditer(stripped)],
     )
     stripped = _EMPTY_BRACKETS.sub(" ", stripped)

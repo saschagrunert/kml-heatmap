@@ -279,9 +279,18 @@ test.describe("Replay", () => {
       expect(chased.pitch).toBeGreaterThanOrEqual(45);
       expect(chased.pitch).toBeLessThanOrEqual(75);
 
-      // Playing, it turns with the track, and stops where the replay pauses
+      // Playing, it turns with the track, and stops where the replay pauses.
+      // It plays on for ten seconds of the flight, what a second of playing
+      // at this speed gives: a frame of software WebGL takes long, and each
+      // moves the replay by a capped step, so the replay's own clock is the
+      // one to wait on rather than the wall's.
       await playUntilProgress(page);
-      await page.waitForTimeout(1000);
+      const replayTime = () =>
+        page.evaluate(() => window.mapApp!.replayState.currentTime);
+      const playedFrom = await replayTime();
+      await expect
+        .poll(replayTime, { timeout: 30000 })
+        .toBeGreaterThanOrEqual(playedFrom + 10);
       await page.locator("#replay-pause-btn").click();
       await expect.poll(offTrack, { timeout: 30000 }).toBeLessThan(3);
       expect((await camera()).pitch).toBeGreaterThanOrEqual(45);

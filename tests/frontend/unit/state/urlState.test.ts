@@ -7,6 +7,11 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
 } from "../../../../kml_heatmap/frontend/utils/constants";
+import {
+  initialToggles,
+  TOGGLES,
+  type ToggleKey,
+} from "../../../../kml_heatmap/frontend/state/toggles";
 import type { AppState } from "../../../../kml_heatmap/frontend/types";
 
 /**
@@ -43,7 +48,6 @@ function randomState(rnd: () => number): AppState {
     aviationVisible: bool(),
     statsPanelVisible: bool(),
     wrappedVisible: bool(),
-    buttonsHidden: bool(),
     isolateSelection: bool(),
     center: {
       lat: Math.round((rnd() * 180 - 90) * 1e6) / 1e6,
@@ -114,19 +118,8 @@ describe("URL state management", () => {
       });
     });
 
-    it("parses visibility flags (6-char legacy format)", () => {
-      expect(parseUrlParams("v=101010")).toEqual({
-        heatmapVisible: true,
-        altitudeVisible: false,
-        airspeedVisible: true,
-        airportsVisible: false,
-        aviationVisible: true,
-        statsPanelVisible: false,
-      });
-    });
-
-    it("parses visibility flags (7-char format with wrapped)", () => {
-      expect(parseUrlParams("v=1010101")).toEqual({
+    it("parses the nine visibility flags", () => {
+      expect(parseUrlParams("v=101010101")).toEqual({
         heatmapVisible: true,
         altitudeVisible: false,
         airspeedVisible: true,
@@ -134,33 +127,22 @@ describe("URL state management", () => {
         aviationVisible: true,
         statsPanelVisible: false,
         wrappedVisible: true,
-      });
-    });
-
-    it("parses visibility flags (8-char format with buttonsHidden)", () => {
-      expect(parseUrlParams("v=10101011")).toEqual({
-        heatmapVisible: true,
-        altitudeVisible: false,
-        airspeedVisible: true,
-        airportsVisible: false,
-        aviationVisible: true,
-        statsPanelVisible: false,
-        wrappedVisible: true,
-        buttonsHidden: true,
-      });
-    });
-
-    it("parses visibility flags (9-char format with isolateSelection)", () => {
-      expect(parseUrlParams("v=101010111")).toEqual({
-        heatmapVisible: true,
-        altitudeVisible: false,
-        airspeedVisible: true,
-        airportsVisible: false,
-        aviationVisible: true,
-        statsPanelVisible: false,
-        wrappedVisible: true,
-        buttonsHidden: true,
         isolateSelection: true,
+      });
+    });
+
+    it("reads nothing from slot 7, which the control chrome had", () => {
+      expect(parseUrlParams("v=100100010")).toEqual(
+        parseUrlParams("v=100100000"),
+      );
+    });
+
+    it("ignores the shorter visibility strings of older releases", () => {
+      // 6 to 8 flags, from before Wrapped, the chrome and isolating
+      expect(parseUrlParams("v=101010")).toEqual({});
+      expect(parseUrlParams("v=1010101")).toEqual({});
+      expect(parseUrlParams("y=2025&v=10101011")).toEqual({
+        selectedYear: "2025",
       });
     });
 
@@ -215,7 +197,7 @@ describe("URL state management", () => {
 
     it("parses complete state", () => {
       const url =
-        "y=2025&a=D-EAGJ&p=1,5,12&sv=3&v=010101&lat=51.5&lng=13.4&z=10.5";
+        "y=2025&a=D-EAGJ&p=1,5,12&sv=3&v=010101000&lat=51.5&lng=13.4&z=10.5";
       expect(parseUrlParams(url)).toEqual({
         selectedYear: "2025",
         selectedAircraft: "D-EAGJ",
@@ -226,6 +208,8 @@ describe("URL state management", () => {
         airportsVisible: true,
         aviationVisible: false,
         statsPanelVisible: true,
+        wrappedVisible: false,
+        isolateSelection: false,
         center: { lat: 51.5, lng: 13.4 },
         zoom: 10.5,
       });
@@ -344,13 +328,12 @@ describe("URL state management", () => {
           aviationVisible: false,
           statsPanelVisible: false,
           wrappedVisible: false,
-          buttonsHidden: false,
           isolateSelection: false,
         }),
       ).toBe("");
     });
 
-    it("encodes wrappedVisible, buttonsHidden and isolateSelection flags", () => {
+    it("encodes wrappedVisible and isolateSelection, and slot 7 as 0", () => {
       const base = {
         heatmapVisible: true,
         altitudeVisible: false,
@@ -361,9 +344,6 @@ describe("URL state management", () => {
       };
       expect(encodeStateToUrl({ ...base, wrappedVisible: true })).toBe(
         "v=100100100",
-      );
-      expect(encodeStateToUrl({ ...base, buttonsHidden: true })).toBe(
-        "v=100100010",
       );
       expect(encodeStateToUrl({ ...base, isolateSelection: true })).toBe(
         "v=100100001",
@@ -403,7 +383,6 @@ describe("URL state management", () => {
           aviationVisible: false,
           statsPanelVisible: true,
           wrappedVisible: false,
-          buttonsHidden: false,
           center: { lat: 51.5, lng: 13.4 },
           zoom: 10.5,
         }),
@@ -455,7 +434,6 @@ describe("URL state management", () => {
         aviationVisible: false,
         statsPanelVisible: true,
         wrappedVisible: true,
-        buttonsHidden: true,
         isolateSelection: true,
         center: { lat: 51.5, lng: 13.4 },
         zoom: 10.5,
@@ -497,7 +475,7 @@ describe("URL state management", () => {
           state.aviationVisible,
           state.statsPanelVisible,
           state.wrappedVisible,
-          state.buttonsHidden,
+          false,
           state.isolateSelection,
         ];
         const isDefaultVisibility =
@@ -512,7 +490,6 @@ describe("URL state management", () => {
             "aviationVisible",
             "statsPanelVisible",
             "wrappedVisible",
-            "buttonsHidden",
             "isolateSelection",
           ] as const) {
             delete expected[key];
@@ -520,6 +497,121 @@ describe("URL state management", () => {
         }
         expect(decoded, `case ${i}`).toEqual(expected);
       }
+    });
+  });
+
+  describe("links of every toggle", () => {
+    /**
+     * The link of a state as the app saves it (every toggle set) with one
+     * toggle flipped from what a first visit shows. Written out rather than
+     * derived, so a change to the table that moves a slot or renames a
+     * parameter breaks the links already shared, and this test with them.
+     */
+    const LINK_OF_TOGGLE: Record<ToggleKey, string> = {
+      heatmapVisible: "v=000100000",
+      airportsVisible: "v=100000000",
+      altitudeVisible: "v=110100000",
+      airspeedVisible: "v=101100000",
+      aviationVisible: "v=100110000",
+      globeVisible: "g=1",
+      threeDVisible: "d=1",
+      satelliteVisible: "s=1",
+      isolateSelection: "v=100100001",
+      statsPanelVisible: "v=100101000",
+      wrappedVisible: "v=100100100",
+    };
+
+    it("covers the whole table", () => {
+      expect(Object.keys(LINK_OF_TOGGLE).sort()).toEqual(
+        TOGGLES.map((toggle) => toggle.key).sort(),
+      );
+    });
+
+    for (const toggle of TOGGLES) {
+      it(`writes and reads ${toggle.key} the way shared links have it`, () => {
+        const state: AppState = { ...initialToggles() };
+        state[toggle.key] = !toggle.initial;
+
+        const link = encodeStateToUrl(state);
+
+        expect(link).toBe(LINK_OF_TOGGLE[toggle.key]);
+        const parsed = parseUrlParams(link)!;
+        // What the link leaves out is what a first visit shows
+        for (const other of TOGGLES) {
+          expect(parsed[other.key] ?? other.initial, other.key).toBe(
+            state[other.key],
+          );
+        }
+      });
+    }
+
+    it("writes nothing for a first visit's toggles", () => {
+      expect(encodeStateToUrl(initialToggles())).toBe("");
+    });
+
+    it("keeps reading the links shared so far", () => {
+      const links: [string, AppState][] = [
+        [
+          "y=2025&p=1,2&sv=3&v=011010111&lat=50.5&lng=8.5&z=12.25",
+          {
+            selectedYear: "2025",
+            selectedPathIds: [1, 2],
+            heatmapVisible: false,
+            altitudeVisible: true,
+            airspeedVisible: true,
+            airportsVisible: false,
+            aviationVisible: true,
+            statsPanelVisible: false,
+            wrappedVisible: true,
+            isolateSelection: true,
+            center: { lat: 50.5, lng: 8.5 },
+            zoom: 12.25,
+          },
+        ],
+        [
+          // Slot 7 set by a release whose controls could hide
+          "y=all&a=D-EAGJ&p=a5%2C1x&sv=4&v=100100011&b=-40.3&t=35&g=1&d=1&s=1",
+          {
+            selectedYear: "all",
+            selectedAircraft: "D-EAGJ",
+            selectedPathIds: [365, 69],
+            heatmapVisible: true,
+            altitudeVisible: false,
+            airspeedVisible: false,
+            airportsVisible: true,
+            aviationVisible: false,
+            statsPanelVisible: false,
+            wrappedVisible: false,
+            isolateSelection: true,
+            bearing: -40.3,
+            pitch: 35,
+            globeVisible: true,
+            threeDVisible: true,
+            satelliteVisible: true,
+          },
+        ],
+        [
+          "y=2024&v=100100000",
+          {
+            selectedYear: "2024",
+            heatmapVisible: true,
+            altitudeVisible: false,
+            airspeedVisible: false,
+            airportsVisible: true,
+            aviationVisible: false,
+            statsPanelVisible: false,
+            wrappedVisible: false,
+            isolateSelection: false,
+          },
+        ],
+      ];
+      for (const [link, state] of links) {
+        expect(parseUrlParams(link), link).toEqual(state);
+      }
+      // and writes the same link back, bar the retired slot
+      expect(encodeStateToUrl(parseUrlParams(links[1]![0])!)).toBe(
+        "y=all&a=D-EAGJ&p=a5%2C1x&sv=4&v=100100001&b=-40.3&t=35&g=1&d=1&s=1",
+      );
     });
   });
 });

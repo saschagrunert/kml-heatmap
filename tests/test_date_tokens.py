@@ -35,6 +35,29 @@ class TestFindDateTokens:
             "14 JULI 2024",
             "Mai 2024",
             "Dezember 2024",
+            # With slashes, and the year first
+            "16/Aug/2024",
+            "Aug/16/2024",
+            "2024/Aug/16",
+            "2024-Aug-16",
+            # A day and month name with a two-digit year
+            "16 Aug 24",
+            "16-AUG-24",
+            "16AUG24",
+            "16/Aug/24",
+            "16MAI24",
+            # The date of flight of an ICAO flight plan
+            "DOF/240816",
+            # Underscores and spaces between the numbers
+            "16_08_2024",
+            "16 08 2024",
+            "16 - 08 - 2024",
+            "8 16 2024",
+            # The German calendar week with its year
+            "KW33 2024",
+            "KW 33/2024",
+            # "of" between the day and the month
+            "16th of August 2024",
         ],
     )
     def test_every_shape_is_found(self, text):
@@ -55,6 +78,13 @@ class TestFindDateTokens:
             "1. Januar 2024",
             "3. Jänner 2024",
             "Januar 2024",
+            "2024/Jan/2",
+            "1 JAN 24",
+            "01JAN24",
+            "DOF/240103",
+            "01_01_2024",
+            "01 01 2024",
+            "KW1 2024",
         ],
     )
     def test_the_days_after_jan_first_pass_only_when_asked(self, text):
@@ -81,10 +111,35 @@ class TestFindDateTokens:
             "Maier 2026",
             "Juli 7000",
             "16. Mai",
+            # A letter before a German month name makes it another word,
+            # an umlaut as well; an underscore does not (see below)
+            "Ämai 2026",
+            "Rosenmai 2026",
+            # A time is no two-digit year, nor is anything after other
+            # separators than those between the day and the month
+            "16 Aug 14:30",
+            "16-Aug 26",
+            "DOF/261316",
+            # Numbers in a row: not both of one digit, a real day and month,
+            # and a year of this or the last century
+            "1 8 2024",
+            "Heading 270 15 2024",
+            "16 13 2024",
+            "16 08 1024",
+            "KW 54 2024",
         ],
     )
     def test_not_a_date_with_a_year(self, text):
         assert find_date_tokens(text) == []
+
+    def test_a_german_month_after_an_underscore(self):
+        # File names separate their words with underscores
+        assert find_date_tokens("Flug_Mai_2026") == ["Mai_2026"]
+
+    def test_a_time_is_no_year(self):
+        # The four digits of a time of day are no year: the day, the month
+        # and the two-digit year are the date, and nothing else
+        assert find_date_tokens("Local flight 16-AUG-26 1430L") == ["16-AUG-26"]
 
     def test_a_date_near_jan_first_only_when_it_is_one(self):
         assert find_date_tokens("2024-1-4", skip_near_jan_first=True) == ["2024-1-4"]
@@ -164,6 +219,46 @@ class TestStripDates:
             ("EDDS 20260816T1430", "EDDS"),
             ("EDDS 20260816T143000Z", "EDDS"),
             ("EDDS T0850Z - EDDP", "EDDS - EDDP"),
+            # Slashes around a month name, and the year first
+            ("Rundflug 16/Aug/2026", "Rundflug"),
+            ("EDDS Aug/16/2026", "EDDS"),
+            ("EDDS 2026/Aug/16", "EDDS"),
+            # A two-digit year after a separator, and a local time
+            ("Local flight 16-AUG-26 1430L", "Local flight"),
+            ("EDDS 16 Aug 26", "EDDS"),
+            ("EDDS 1430 LT", "EDDS"),
+            # German and French times, the date of an ICAO flight plan
+            ("EDDS 14h30", "EDDS"),
+            ("EDDS 14.30 Uhr", "EDDS"),
+            ("Rundflug 9 Uhr EDDS", "Rundflug EDDS"),
+            ("EDDS DOF/260816", "EDDS"),
+            ("EDDS 260816", "EDDS"),
+            ("EDDS 160826", "EDDS"),
+            # A day and month without the last dot or with a hyphen
+            ("EDDS 26.08", "EDDS"),
+            ("EDDS 16-08 EDDP", "EDDS EDDP"),
+            # ... with a month of one digit, and a decimal that looks like one
+            ("Flight 16.8", "Flight"),
+            ("Fuel 16.8 l", "Fuel l"),
+            # Underscores and spaces between the numbers
+            ("Flight 16_08_2026", "Flight"),
+            ("Log_16_08", "Log"),
+            ("EDDS 16_08 EDDP", "EDDS EDDP"),
+            ("Flight 16 08 2026", "Flight"),
+            ("Flight 16 - 08 - 2026 EDDS", "Flight EDDS"),
+            # The German calendar week, with and without the year
+            ("Flight KW33 2026", "Flight"),
+            ("EDDS KW 33", "EDDS"),
+            # "of" between the day and the month
+            ("the 16th of August 2026 flight", "the flight"),
+            ("EDDS 16th of Aug", "EDDS"),
+            # A version is written with dots too
+            ("Firmware 12.10 EDDS", "Firmware 12.10 EDDS"),
+            ("EDDS app v 16.8", "EDDS app v 16.8"),
+            # Runway directions without a word for a runway read as dates
+            # ("07/25" is July 25th, and July 2025): the date goes
+            ("Stuttgart 07/25", "Stuttgart"),
+            ("EDDS 07-25", "EDDS"),
             # No dates: runways, frequencies, squawks, registrations, versions
             ("Runway 08/26 EDDS", "Runway 08/26 EDDS"),
             ("RWY 16/34 EDDS", "RWY 16/34 EDDS"),
@@ -171,6 +266,14 @@ class TestStripDates:
             ("Landebahn 08/26", "Landebahn 08/26"),
             ("EDDS 07L/25R", "EDDS 07L/25R"),
             ("EDDS 118.500", "EDDS 118.500"),
+            ("EDDS 118.30", "EDDS 118.30"),
+            ("EDDS 1h30 flight", "EDDS 1h30 flight"),
+            ("Heading 270-15", "Heading 270-15"),
+            ("RWY 08-26 EDDS", "RWY 08-26 EDDS"),
+            ("EDDS 5-10 kt", "EDDS 5-10 kt"),
+            ("PA-28-181 EDDS", "PA-28-181 EDDS"),
+            ("EDDS 1234567", "EDDS 1234567"),
+            ("EDDS 999999", "EDDS 999999"),
             ("EDDS 123.45/121.5", "EDDS 123.45/121.5"),
             ("Squawk 7000 EDDS", "Squawk 7000 EDDS"),
             ("EDDS FL100 1430", "EDDS FL100 1430"),
@@ -184,6 +287,9 @@ class TestStripDates:
             ("Circuit 3 of 45/60", "Circuit 3 of 45/60"),
             ("Circuits 3-2026", "Circuits 3-2026"),
             ("EDDS 2026 7000 ft", "EDDS 2026 7000 ft"),
+            ("EDDS 1 8 2026", "EDDS 1 8 2026"),
+            ("EDDS kW 100", "EDDS kW 100"),
+            ("16_34_DA40", "16_34_DA40"),
             ("2026-08-16", None),
             ("16 Aug 2026 08:50 Z", None),
             ("1234", None),

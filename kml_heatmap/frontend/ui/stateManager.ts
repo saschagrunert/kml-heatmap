@@ -3,6 +3,7 @@
  */
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
+import { TOGGLE_KEYS, TOGGLES, type ToggleKey } from "../state/toggles";
 import type { MapCenter, SavedState } from "../types";
 import {
   isPathId,
@@ -30,23 +31,13 @@ export function storageKey(
   return directory === "/" ? STORAGE_KEY : STORAGE_KEY + ":" + directory;
 }
 
-/**
- * The flags a session keeps. All of them start off but the heatmap and the
- * airports, and Reset view puts them back (MapApp.resetView).
- */
-export const BOOLEAN_KEYS = [
-  "heatmapVisible",
-  "altitudeVisible",
-  "airspeedVisible",
-  "airportsVisible",
-  "aviationVisible",
-  "globeVisible",
-  "threeDVisible",
-  "satelliteVisible",
-  "isolateSelection",
-  "statsPanelVisible",
-  "wrappedVisible",
-] as const;
+/** What a session keeps of the store: the filters and every toggle */
+const PERSISTED_KEYS: readonly (keyof StoreState)[] = [
+  "selectedYear",
+  "selectedAircraft",
+  "selectedPathIds",
+  ...TOGGLE_KEYS,
+];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -83,7 +74,7 @@ export function sanitizeSavedState(candidate: unknown): SavedState {
   if (bearing !== null) result.bearing = bearing;
   const pitch = toMapPitch(candidate["pitch"]);
   if (pitch !== null) result.pitch = pitch;
-  for (const key of BOOLEAN_KEYS) {
+  for (const key of TOGGLE_KEYS) {
     const value = candidate[key];
     if (typeof value === "boolean") {
       result[key] = value;
@@ -122,23 +113,7 @@ export class StateManager {
       { signal: app.signal },
     );
 
-    const persistKeys: (keyof StoreState)[] = [
-      "selectedYear",
-      "selectedAircraft",
-      "selectedPathIds",
-      "isolateSelection",
-      "heatmapVisible",
-      "altitudeVisible",
-      "airspeedVisible",
-      "airportsVisible",
-      "aviationVisible",
-      "globeVisible",
-      "threeDVisible",
-      "satelliteVisible",
-      "statsPanelVisible",
-      "wrappedVisible",
-    ];
-    for (const key of persistKeys) {
+    for (const key of PERSISTED_KEYS) {
       app.store.subscribe(key, () => {
         this.changed.add(key);
         this.scheduleSave();
@@ -161,10 +136,10 @@ export class StateManager {
    * a share, which flushes one) writes what was restored, not "closed".
    * MapApp drops a restored flag it gave up on.
    */
-  private panelVisible(key: "statsPanelVisible" | "wrappedVisible"): boolean {
+  private panelVisible(key: ToggleKey): boolean {
     return (
       (!this.changed.has(key) && this.app.savedState?.[key] === true) ||
-      this.app.store.get(key)
+      this.app[key]
     );
   }
 
@@ -214,22 +189,17 @@ export class StateManager {
       zoom: mapZoomToState(view.zoom),
       bearing: view.bearing,
       pitch: view.pitch,
-      globeVisible: this.app.globeVisible,
-      threeDVisible: this.app.threeDVisible,
-      satelliteVisible: this.app.satelliteVisible,
-      heatmapVisible: this.app.heatmapVisible,
-      altitudeVisible: this.app.altitudeVisible,
-      airspeedVisible: this.app.airspeedVisible,
-      airportsVisible: this.app.airportsVisible,
-      aviationVisible: this.app.aviationVisible,
       selectedYear: this.app.selectedYear,
       selectedAircraft: this.app.selectedAircraft,
       selectedPathIds: Array.from(this.app.selectedPathIds),
-      statsPanelVisible: this.panelVisible("statsPanelVisible"),
-      wrappedVisible: this.panelVisible("wrappedVisible"),
-      isolateSelection: this.app.isolateSelection,
       // Replay state is not persisted: too complex to restore reliably
     };
+    for (const toggle of TOGGLES) {
+      state[toggle.key] =
+        "panel" in toggle
+          ? this.panelVisible(toggle.key)
+          : this.app[toggle.key];
+    }
     try {
       localStorage.setItem(storageKey(), JSON.stringify(state));
     } catch (_e) {
@@ -242,17 +212,7 @@ export class StateManager {
 
   loadMapState(): SavedState | null {
     try {
-      const key = storageKey();
-      let saved = localStorage.getItem(key);
-      if (!saved && key !== STORAGE_KEY) {
-        // Releases before the per-directory key saved every map under the
-        // plain key; the first map to find it there adopts it once
-        saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          localStorage.setItem(key, saved);
-          localStorage.removeItem(STORAGE_KEY);
-        }
-      }
+      const saved = localStorage.getItem(storageKey());
       if (saved) {
         const parsed: unknown = JSON.parse(saved);
         const state = sanitizeSavedState(parsed);

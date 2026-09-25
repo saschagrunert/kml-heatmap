@@ -19,10 +19,10 @@ import {
 } from "../../../../kml_heatmap/frontend/utils/constants";
 import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import type {
-  DataLoaderOptions,
   KMLDataset,
   LoadingState,
 } from "../../../../kml_heatmap/frontend/types";
+import type { DataLoaderOptions } from "../../../../kml_heatmap/frontend/services/dataLoader";
 import {
   createMockApp,
   createDataset,
@@ -56,6 +56,7 @@ vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
 
 const toastMock = vi.hoisted(() => ({
   showToast: vi.fn(),
+  announceStatus: vi.fn(),
   dismissToast: vi.fn(),
 }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
@@ -79,14 +80,28 @@ describe("DataManager", () => {
 
   const heatSource = (): MockSource => mockApp.map!.source(MAP_SOURCES.heat);
   const heatLayer = (): MockLayer => mockApp.map!.layer(MAP_LAYERS.heat);
-  /** The `[lng, lat]` points the heat source holds, in full detail */
-  const heatPoints = (): [number, number][] => {
-    const data = heatSource().data as GeoJSON.FeatureCollection<GeoJSON.Point>;
+  const isolatedSource = (): MockSource =>
+    mockApp.map!.source(MAP_SOURCES.heatIsolated);
+  /** The `[lng, lat]` points a heat source holds, in full detail */
+  const pointsOf = (source: MockSource): [number, number][] => {
+    const data = source.data as GeoJSON.FeatureCollection<GeoJSON.Point>;
     expect(data.type).toBe("FeatureCollection");
     return data.features.map((feature) => {
       expect(feature.geometry.type).toBe("Point");
       return feature.geometry.coordinates as [number, number];
     });
+  };
+  const heatPoints = (): [number, number][] => pointsOf(heatSource());
+  /**
+   * The points of the heatmap that is drawn: the one of an isolated
+   * selection while there is one, and only one of the two
+   */
+  const drawnHeatPoints = (): [number, number][] => {
+    const opacity = (id: string): unknown =>
+      mockApp.map!.layer(id).paint["heatmap-opacity"];
+    const isolated = opacity(MAP_LAYERS.heatIsolated) !== 0;
+    expect(opacity(MAP_LAYERS.heat) === 0).toBe(isolated);
+    return pointsOf(isolated ? isolatedSource() : heatSource());
   };
   /** Every fix of baseData's segments, `[lng, lat]` */
   const ALL_FIXES = [
@@ -117,8 +132,21 @@ describe("DataManager", () => {
   const baseData = (): KMLDataset =>
     createDataset(
       [
-        { id: 1, year: 2025, aircraft_registration: "D-ABCD" },
-        { id: 2, year: 2024, aircraft_registration: "D-EFGH" },
+        // The exact altitude range of every path, as the exporter writes it
+        {
+          id: 1,
+          year: 2025,
+          aircraft_registration: "D-ABCD",
+          min_altitude_ft: 1000,
+          max_altitude_ft: 5000,
+        },
+        {
+          id: 2,
+          year: 2024,
+          aircraft_registration: "D-EFGH",
+          min_altitude_ft: 3000,
+          max_altitude_ft: 3000,
+        },
       ],
       [
         createSegment({ path_id: 1, altitude_ft: 1000 }),
@@ -644,6 +672,26 @@ describe("DataManager", () => {
       );
     });
 
+    it("takes only the failures of loads away when told to", async () => {
+      loaderMocks.loadData.mockImplementationOnce(() => {
+        loaderMocks.options!.onLoadError!(["2025"]);
+        return Promise.resolve(null);
+      });
+      await dataManager.loadData("2025");
+
+      dataManager.dismissFailures();
+
+      // By message: a Retry took every error on screen with it, another
+      // one that is still true included (regression)
+      expect(toastMock.dismissToast).toHaveBeenCalledTimes(1);
+      expect(toastMock.dismissToast).toHaveBeenCalledWith(
+        "Failed to load flight data for 2025",
+      );
+      toastMock.dismissToast.mockClear();
+      dataManager.dismissFailures();
+      expect(toastMock.dismissToast).not.toHaveBeenCalled();
+    });
+
     it("asks for a reload when the site changed since the page loaded", () => {
       loaderMocks.options!.onLoadError!(["2024", "2025"], true);
 
@@ -739,10 +787,10 @@ describe("DataManager", () => {
       expect(mockApp.heatmapLayer.setVisible).not.toHaveBeenCalled();
     });
 
-    it("calculates altitude range from segments", () => {
+    it("calculates altitude range from the paths of the segments", () => {
       publish(baseData());
 
-      expect(mockApp.altitudeRange).toEqual({ min: 1000, max: 5000 });
+      expect(mockApp.altitudeRange).toMatchObject({ min: 1000, max: 5000 });
     });
 
     it("takes the exact altitude of a path over its rounded segments", () => {
@@ -752,7 +800,10 @@ describe("DataManager", () => {
 
       publish(data);
 
-      expect(mockApp.altitudeRange).toEqual({ min: 1012.5, max: 4960.4 });
+      expect(mockApp.altitudeRange).toMatchObject({
+        min: 1012.5,
+        max: 4960.4,
+      });
     });
 
     it("keeps the previous altitude range when there are no segments", () => {
@@ -808,10 +859,15 @@ describe("DataManager", () => {
         mockApp.isolateSelection = true;
       });
 
-      expect(heatPoints()).toEqual([
+      expect(drawnHeatPoints()).toEqual([
         [10.0, 52.0],
         [11.0, 53.0],
       ]);
+      // The heat source keeps the dataset's points, and is not written again
+      expect(heatPoints()).toEqual(
+        baseData().coordinates.map(([lat, lng]) => [lng, lat]),
+      );
+      expect(heatSource().setData).toHaveBeenCalledOnce();
     });
 
     it("isolates only the selected paths the aircraft filter keeps (regression)", () => {
@@ -824,7 +880,7 @@ describe("DataManager", () => {
 
       publish(baseData());
 
-      expect(heatPoints()).toEqual([
+      expect(drawnHeatPoints()).toEqual([
         [10.0, 52.0],
         [11.0, 53.0],
       ]);
@@ -854,7 +910,7 @@ describe("DataManager", () => {
       mockApp.selectedPathIds.add(2);
       mockApp.store.notifyMutation("selectedPathIds");
 
-      expect(heatPoints()).toEqual(ALL_FIXES);
+      expect(drawnHeatPoints()).toEqual(ALL_FIXES);
       expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalledTimes(
         1,
       );
@@ -864,11 +920,11 @@ describe("DataManager", () => {
       mockApp.store.notifyMutation("selectedPathIds");
       mockApp.isolateSelection = false;
       // Back to the dataset's own points
-      expect(heatPoints()).toEqual(
+      expect(drawnHeatPoints()).toEqual(
         baseData().coordinates.map(([lat, lng]) => [lng, lat]),
       );
       mockApp.isolateSelection = true;
-      expect(heatPoints()).toEqual([
+      expect(drawnHeatPoints()).toEqual([
         [10.0, 52.0],
         [11.0, 53.0],
       ]);
@@ -912,31 +968,43 @@ describe("DataManager", () => {
       expect(heatPoints()).not.toEqual(held);
     });
 
-    it("sends the points again once a filter or the isolation changes them", () => {
+    it("isolates to a source of its own, and sends the heat source's points again only once they change", () => {
       mockApp.map!.jumpTo({ zoom: HEAT_LINES.fromZoom });
       mockApp.heatmapLayer.setVisible(true);
       const data = baseData();
       publish(data);
 
+      // Isolate costs the points of the selection, not of every flight
       mockApp.store.batch(() => {
         mockApp.selectedPathIds = new Set([2]);
         mockApp.isolateSelection = true;
       });
-      expect(heatSource().setData).toHaveBeenCalledTimes(2);
-      expect(heatPoints()).toEqual([
+      expect(heatSource().setData).toHaveBeenCalledOnce();
+      expect(isolatedSource().setData).toHaveBeenCalledOnce();
+      expect(drawnHeatPoints()).toEqual([
         [10.0, 52.0],
         [11.0, 53.0],
       ]);
-      expect(heatLinePoints()).toEqual(heatPoints());
+      expect(heatLinePoints()).toEqual(drawnHeatPoints());
 
+      // And leaving it nothing but a switch of the two
       mockApp.isolateSelection = false;
-      expect(heatSource().setData).toHaveBeenCalledTimes(3);
-      expect(heatPoints()).toHaveLength(data.coordinates.length);
+      expect(heatSource().setData).toHaveBeenCalledOnce();
+      expect(isolatedSource().setData).toHaveBeenCalledOnce();
+      expect(drawnHeatPoints()).toHaveLength(data.coordinates.length);
       expect(heatLinePoints()).toEqual(ALL_FIXES);
+      // Isolated again, the same selection's points are still there
+      mockApp.isolateSelection = true;
+      expect(isolatedSource().setData).toHaveBeenCalledOnce();
+      expect(drawnHeatPoints()).toEqual([
+        [10.0, 52.0],
+        [11.0, 53.0],
+      ]);
+      mockApp.isolateSelection = false;
 
       // The same points of another dataset are other points
       publish(baseData());
-      expect(heatSource().setData).toHaveBeenCalledTimes(4);
+      expect(heatSource().setData).toHaveBeenCalledTimes(2);
     });
 
     it("brings the colour layers along, as a rebuild", () => {
@@ -1427,15 +1495,6 @@ describe("DataManager", () => {
         otherEnd,
       ]);
       expect(heatmapCoordinates(segments, () => false)).toEqual([]);
-    });
-
-    it("skips segments without coordinates", () => {
-      expect(
-        heatmapCoordinates(
-          [{ path_id: 1 }, createSegment({ path_id: 1, coords: [start, mid] })],
-          () => true,
-        ),
-      ).toEqual([start, mid]);
     });
   });
 

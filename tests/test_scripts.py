@@ -8,12 +8,17 @@ import importlib.util
 import os
 import subprocess
 import sys
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
+from kml_heatmap.constants import KM_TO_NAUTICAL_MILES
+from kml_heatmap.export_pipeline import path_duration
+from kml_heatmap.geometry import haversine_distance
 from kml_heatmap.parser import parse_kml_file
+from kml_heatmap.segment_calculator import calculate_fallback_groundspeed
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -61,6 +66,34 @@ class TestGenerateTestData:
         out = capsys.readouterr().out
         assert "Successfully generated 3 KML files" in out
         assert f"make build INPUT_DIR={output}" in out
+
+    def test_flights_have_an_end_and_so_a_speed(self, tmp_path):
+        # A <TimeStamp> alone gave every flight a start and no end, so no
+        # duration, and the speed layer had no path average to fall back on
+        name = generate_test_data.generate_kml_file(
+            1, "EDDF", "EDDM", "D-ABCD", "DA40", tmp_path
+        )
+
+        _, paths, metadata = parse_kml_file(str(tmp_path / name))
+        path = paths[0]
+        seconds = path_duration(metadata[0])
+        assert seconds > 0
+        distance_nm = (
+            sum(
+                haversine_distance(a.lat, a.lon, b.lat, b.lon)
+                for a, b in pairwise(path)
+            )
+            * KM_TO_NAUTICAL_MILES
+        )
+        low, high = generate_test_data.GROUNDSPEED_KNOTS
+        # The file keeps whole seconds
+        assert low - 1 <= distance_nm / (seconds / 3600) <= high + 1
+        middle = haversine_distance(
+            path[24].lat, path[24].lon, path[25].lat, path[25].lon
+        )
+        assert calculate_fallback_groundspeed(
+            middle, distance_nm / KM_TO_NAUTICAL_MILES, seconds
+        ) == pytest.approx(distance_nm / (seconds / 3600))
 
     def test_reports_progress_every_thousand_files(self, tmp_path, monkeypatch, capsys):
         written = []

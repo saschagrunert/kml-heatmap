@@ -46,13 +46,4 @@ describe("appendCurve", () => {
     }
     expect(line[line.length - 1]![0]).toBeCloseTo(180.02, 9);
   });
-
-  it("adds nothing for a segment without coordinates", () => {
-    const segments = [createSegment({ path_id: 1, coords: undefined })];
-    const line: [number, number][] = [[8, 50]];
-
-    appendCurve(line, flatCurves(segments), 0);
-
-    expect(line).toEqual([[8, 50]]);
-  });
 });

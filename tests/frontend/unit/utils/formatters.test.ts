@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   formatNumber,
   formatTime,
@@ -109,6 +109,21 @@ describe("formatter utilities", () => {
     it("falls back to zero for values that are not finite", () => {
       expect(formatNumber(Number.NaN)).toBe("0");
       expect(formatNumber(Number.POSITIVE_INFINITY)).toBe("0");
+    });
+
+    it("makes one formatter per number of decimals and reuses it", () => {
+      const made = vi.spyOn(Intl, "NumberFormat");
+      try {
+        // Two counts of decimals no other test in this file asks for
+        formatNumber(1.5, 3);
+        formatNumber(2.5, 3);
+        formatNumber(3.25, 4);
+        formatNumber(4.25, 4);
+        expect(made).toHaveBeenCalledTimes(2);
+        expect(formatNumber(1234.5678, 3)).toBe("1,234.568");
+      } finally {
+        made.mockRestore();
+      }
     });
   });
 

@@ -271,24 +271,4 @@ describe("FilterView", () => {
       expect(view.segments()).toBe(view.segments());
     });
   });
-
-  describe("statistics", () => {
-    it("returns statistics for the kept paths", () => {
-      const view = new DatasetIndex(makeDataset()).filter("all", "all");
-      const stats = view.statistics();
-      expect(stats.num_paths).toBe(4);
-      expect(stats.total_distance_km).toBeGreaterThan(0);
-    });
-
-    it("caches the result", () => {
-      const view = new DatasetIndex(makeDataset()).filter("all", "all");
-      expect(view.statistics()).toBe(view.statistics());
-    });
-
-    it("respects the filter", () => {
-      const view = new DatasetIndex(makeDataset()).filter("2024", "all");
-      const stats = view.statistics();
-      expect(stats.num_paths).toBe(1);
-    });
-  });
 });

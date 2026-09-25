@@ -11,6 +11,7 @@ import {
 
 const toastMock = vi.hoisted(() => ({
   showToast: vi.fn(),
+  announceStatus: vi.fn(),
   dismissToast: vi.fn(),
 }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
@@ -529,7 +530,13 @@ describe("FilterManager", () => {
 
       await filterManager.filterByYear();
 
-      expect(yearSelect.selectedIndex).toBe(-1);
+      // A placeholder that cannot be picked; with no option selected the
+      // control showed no text at all
+      expect(yearSelect.value).toBe("");
+      expect(yearSelect.selectedOptions[0]!.disabled).toBe(true);
+      // Picking a year is then a change again
+      yearSelect.value = "2025";
+      expect(yearSelect.value).toBe("2025");
     });
 
     it("retries the year of the store and keeps the selection it can", async () => {
@@ -544,8 +551,45 @@ describe("FilterManager", () => {
       expect(await filterManager.retryLoad()).toBe(true);
 
       expect(mockApp.dataManager.loadData.mock.calls[0]![0]).toBe("2024");
+      // The panel on the map offers the retry, so its toast does not
+      expect(mockApp.dataManager.loadData.mock.calls[0]![2]).toBeUndefined();
       expect(mockApp.currentData).toEqual(year2024Data());
       expect([...mockApp.selectedPathIds]).toEqual([3]);
+    });
+
+    it("says which year it shows once the switch is applied", async () => {
+      addYearOption("2024");
+
+      await filterManager.filterByYear("2024");
+
+      expect(toastMock.announceStatus).toHaveBeenCalledWith("Showing 2024");
+    });
+
+    it("keeps the toast of a failed switch whose Retry is pressed during a replay", async () => {
+      addYearOption("2024");
+      mockApp.dataManager.loadData.mockResolvedValue(null);
+      await filterManager.filterByYear("2024");
+      const [, , retry] = mockApp.dataManager.loadData.mock.calls[0] as [
+        string,
+        AbortSignal,
+        { run: () => boolean | void },
+      ];
+      mockApp.replayActive = true;
+      mockApp.dataManager.loadData.mockClear();
+
+      // False keeps the toast: the failure was lost to a press that did
+      // nothing (regression)
+      expect(retry.run()).toBe(false);
+      expect(mockApp.dataManager.loadData).not.toHaveBeenCalled();
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "Stop the replay to load 2024 again",
+        "info",
+      );
+
+      mockApp.replayActive = false;
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
+      expect(retry.run()).toBe(true);
+      expect(mockApp.dataManager.loadData).toHaveBeenCalledTimes(1);
     });
 
     it("gives way to a replay that starts while the year loads", async () => {
@@ -697,33 +741,88 @@ describe("FilterManager", () => {
       expect(seen).toEqual([[0, false]]);
     });
 
-    it("supersedes a year change that is still loading", async () => {
-      addYearOption("2024");
-      const yearSelect = document.getElementById(
-        "year-select",
-      ) as HTMLSelectElement;
-      let resolveYear: (d: KMLDataset) => void = () => {};
-      mockApp.dataManager.loadData.mockImplementationOnce(
-        () =>
-          new Promise<KMLDataset>((resolve) => {
-            resolveYear = resolve;
-          }),
-      );
-      const before = mockApp.currentData;
-      const redraws = followDrawnKeys();
+    describe("while a year switch loads", () => {
+      let yearSelect: HTMLSelectElement;
+      let resolveYear: (d: KMLDataset | null) => void;
 
-      yearSelect.value = "2024";
-      const pendingYear = filterManager.filterByYear();
-      filterManager.filterByAircraft();
-      resolveYear(year2024Data());
-      await pendingYear;
+      beforeEach(() => {
+        addYearOption("2024");
+        yearSelect = document.getElementById(
+          "year-select",
+        ) as HTMLSelectElement;
+        resolveYear = () => {};
+        mockApp.dataManager.loadData.mockImplementationOnce(
+          () =>
+            new Promise<KMLDataset | null>((resolve) => {
+              resolveYear = resolve;
+            }),
+        );
+      });
 
-      // The year that finished loading after the aircraft change is dropped
-      expect(mockApp.selectedYear).toBe("all");
-      expect(mockApp.currentData).toBe(before);
-      expect(redraws).toHaveBeenCalledTimes(1);
-      // ... and so is the year the dropdown showed for it (regression)
-      expect(yearSelect.value).toBe("all");
+      function pickAircraft(registration: string): void {
+        const select = aircraftSelect();
+        const option = document.createElement("option");
+        option.value = registration;
+        select.appendChild(option);
+        select.value = registration;
+        filterManager.filterByAircraft();
+      }
+
+      it("applies the aircraft with the year, in one flush", async () => {
+        const redraws = followDrawnKeys();
+
+        yearSelect.value = "2024";
+        const pendingYear = filterManager.filterByYear();
+        pickAircraft("D-ABCD");
+        // Nothing yet: the aircraft goes in with the year
+        expect(mockApp.selectedAircraft).toBe("all");
+        resolveYear(year2024Data());
+
+        // The year used to be thrown away silently (regression)
+        expect(await pendingYear).toBe(true);
+        expect(mockApp.selectedYear).toBe("2024");
+        expect(mockApp.selectedAircraft).toBe("D-ABCD");
+        expect(redraws).toHaveBeenCalledTimes(1);
+        expect(yearSelect.value).toBe("2024");
+      });
+
+      it("says so when the new year has no flights of the aircraft", async () => {
+        yearSelect.value = "2024";
+        const pendingYear = filterManager.filterByYear();
+        pickAircraft("D-EFGH");
+        resolveYear(year2024Data());
+        await pendingYear;
+
+        expect(mockApp.selectedYear).toBe("2024");
+        expect(mockApp.selectedAircraft).toBe("all");
+        expect(toastMock.showToast).toHaveBeenCalledWith(
+          "D-EFGH has no flights in 2024, showing all aircraft",
+          "info",
+        );
+      });
+
+      it("applies the aircraft to the year still shown when the switch fails", async () => {
+        yearSelect.value = "2024";
+        const pendingYear = filterManager.filterByYear();
+        pickAircraft("D-ABCD");
+        resolveYear(null);
+        await pendingYear;
+
+        expect(mockApp.selectedYear).toBe("all");
+        expect(mockApp.selectedAircraft).toBe("D-ABCD");
+      });
+
+      it("drops the aircraft when a replay cancels the switch", async () => {
+        yearSelect.value = "2024";
+        const pendingYear = filterManager.filterByYear();
+        pickAircraft("D-ABCD");
+        filterManager.cancelPending();
+        resolveYear(year2024Data());
+        await pendingYear;
+
+        expect(mockApp.selectedYear).toBe("all");
+        expect(mockApp.selectedAircraft).toBe("all");
+      });
     });
 
     it("does nothing if aircraft select element doesn't exist", () => {

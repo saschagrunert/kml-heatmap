@@ -53,10 +53,10 @@ describe("buildDataset", () => {
 
     expect(data.path_segments).toHaveLength(3);
     expect(data.coordinates).toHaveLength(4);
-    expect(data.path_segments[1]!.coords![0]).toBe(
-      data.path_segments[0]!.coords![1],
+    expect(data.path_segments[1]!.coords[0]).toBe(
+      data.path_segments[0]!.coords[1],
     );
-    expect(data.coordinates[3]).toBe(data.path_segments[2]!.coords![1]);
+    expect(data.coordinates[3]).toBe(data.path_segments[2]!.coords[1]);
   });
 
   it("leaves the time out of a segment whose row has none", () => {

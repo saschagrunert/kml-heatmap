@@ -12,8 +12,9 @@ import type { MapApp } from "../mapApp";
 import { calculateVisibleAirports, findHomeBase } from "../features/airports";
 import type { AirportCounts } from "../features/airports";
 import { datasetIndex } from "../calculations/datasetIndex";
-import type { PathInfo } from "../types";
+import type { Airport } from "../types";
 import {
+  AIRPORT_HIDE_MARKERS_BELOW_ZOOM,
   AIRPORT_SIZE_ZOOMS,
   MAP_LAYERS,
   MAP_SOURCES,
@@ -27,8 +28,14 @@ import {
   panPopupIntoView,
   whenContextRestored,
 } from "../utils/mapHelpers";
-import { isTouchDevice } from "./layerManager";
+import { isTouchDevice } from "../utils/device";
+import { siteData } from "../state/siteData";
 import { airportLabelFeatures, setAirportLabelHover } from "./airportLabels";
+
+/** The airports of the site, none until airports.json has loaded */
+function siteAirports(): Airport[] {
+  return siteData.airports ?? [];
+}
 
 /**
  * How far from a click an airport label still counts as hit, in pixels: a
@@ -42,8 +49,7 @@ const LABEL_TOUCH_HIT_PADDING_PX = 6;
 /** Class on a marker whose label is under the pointer */
 const LABEL_HOVERED_CLASS = "is-label-hovered";
 import { prefersReducedMotion } from "../utils/motion";
-import { loadFeatures } from "../services/featureLoader";
-import { logError } from "../utils/logger";
+import { listFlights } from "./airportFlights";
 
 /** Room kept between an airport popup and the edge of the map, in pixels */
 const POPUP_PAN_PADDING_PX = 50;
@@ -198,12 +204,10 @@ export class AirportManager {
    * well, follow the visibility (see updateAirportOpacity)
    */
   updateAirportPopups(): void {
-    if (!this.app.allAirportsData || !this.app.airportMarkers) return;
-
     // Home base: airport with most flights in the current filter
     const homeBaseName = findHomeBase(this.airportFlightCounts());
 
-    for (const airport of this.app.allAirportsData) {
+    for (const airport of siteAirports()) {
       this.app.airportMarkers[airport.name]?.setHome(
         airport.name === homeBaseName,
       );
@@ -270,8 +274,13 @@ export class AirportManager {
     this.openAirport = name;
     this.setExpanded(name, true);
     this.popup.setLngLat(marker.getLatLng());
+    // The list goes into the popup's element, which an open popup has
+    const wasOpen = this.popup.isOpen();
     this.writePopupContent(name);
-    if (!this.popup.isOpen()) this.popup.addTo(map);
+    if (!wasOpen) {
+      this.popup.addTo(map);
+      this.listPopupFlights(name);
+    }
 
     if (marker.getElement().matches(":focus-visible")) {
       this.popup
@@ -301,18 +310,10 @@ export class AirportManager {
 
   /**
    * Write the popup for an airport, with the counts of the current filter
-   * and the flights it lists.
-   *
-   * The list is what lets a keyboard pick a single flight, and with it
-   * replay: otherwise only a click on a path does. It lives in the feature
-   * bundle, which the first popup fetches, so it arrives after the content
-   * and makes the popup taller. MapLibre neither tells when content changes
-   * nor keeps a popup inside the map the way Leaflet did, so both are done
-   * here: once everything is in, the popup is laid out again and the map
-   * panned until it shows in full.
+   * and, once it is open, the flights it lists.
    */
   private writePopupContent(name: string): void {
-    const airport = this.app.allAirportsData?.find((a) => a.name === name);
+    const airport = siteAirports().find((a) => a.name === name);
     if (!airport) return;
 
     const counts = this.airportFlightCounts();
@@ -327,32 +328,32 @@ export class AirportManager {
         isHomeBase: airport.name === findHomeBase(counts),
       }),
     );
+    if (this.popup.isOpen()) this.listPopupFlights(name);
+  }
 
-    void loadFeatures()
-      .then((features) => {
-        const map = this.app.map;
-        // The popup can have closed or moved on while the bundle loaded
-        if (!map || this.openAirport !== name || !this.popup.isOpen()) return;
-        features?.listFlights(this.app, this.popup, name);
-        // The side the popup hangs on was chosen for the height it had
-        // before the list; setting the same position chooses again
-        this.popup.setLngLat(this.popup.getLngLat());
-        panPopupIntoView(
-          map,
-          this.popup,
-          POPUP_PAN_PADDING_PX,
-          !prefersReducedMotion(),
-        );
-      })
-      .catch((error) => {
-        logError(error);
-        if (this.popup.isOpen()) {
-          this.popup
-            .getElement()
-            ?.querySelector(".kh-popup-flights-loading")
-            ?.remove();
-        }
-      });
+  /**
+   * Add the flights of the airport to its open popup.
+   *
+   * The list is what lets a keyboard pick a single flight, and with it
+   * replay: otherwise only a click on a path does. It goes into the popup's
+   * element, which exists only once the popup is on the map, and makes the
+   * popup taller. MapLibre neither tells when content changes nor keeps a
+   * popup inside the map the way Leaflet did, so both are done here: the
+   * popup is laid out again and the map panned until it shows in full.
+   */
+  private listPopupFlights(name: string): void {
+    const map = this.app.map;
+    if (!map) return;
+    listFlights(this.app, this.popup, name);
+    // The side the popup hangs on was chosen for the height it had before
+    // the list; setting the same position chooses again
+    this.popup.setLngLat(this.popup.getLngLat());
+    panPopupIntoView(
+      map,
+      this.popup,
+      POPUP_PAN_PADDING_PX,
+      !prefersReducedMotion(),
+    );
   }
 
   /**
@@ -382,16 +383,18 @@ export class AirportManager {
 
   updateAirportOpacity(): void {
     const data = this.app.currentData;
-    const visibleAirports = calculateVisibleAirports({
-      pathInfo: data?.path_info ?? [],
-      selectedYear: this.app.selectedYear,
-      selectedAircraft: this.app.selectedAircraft,
-      selectedPathIds: this.app.selectedPathIds,
-      isolateSelection: this.app.isolateSelection,
-      pathInfoById: data
-        ? datasetIndex(data).pathInfoById
-        : new Map<number, PathInfo>(),
-    });
+    // No dataset, no flights to say which airports to show: before the
+    // first one has loaded, or after it failed to, none is
+    const visibleAirports = data
+      ? calculateVisibleAirports({
+          pathInfo: data.path_info,
+          selectedYear: this.app.selectedYear,
+          selectedAircraft: this.app.selectedAircraft,
+          selectedPathIds: this.app.selectedPathIds,
+          isolateSelection: this.app.isolateSelection,
+          pathInfoById: datasetIndex(data).pathInfoById,
+        })
+      : new Set<string>();
 
     this.visibleAirports = visibleAirports;
     this.applyVisibility();
@@ -403,13 +406,13 @@ export class AirportManager {
    */
   private updateFarAirports(): void {
     const map = this.app.map;
-    if (!map || !this.app.allAirportsData) return;
+    if (!map) return;
     const far = new Set<string>();
     if (
       map.getPitch() > AIRPORT_ALL_NEAR_PITCH &&
       map.getProjection()?.type !== "globe"
     ) {
-      for (const airport of this.app.allAirportsData) {
+      for (const airport of siteAirports()) {
         const place = { lng: airport.lon, lat: airport.lat };
         // The one the keyboard is on stays, or focus would fall to the page
         const focused =
@@ -459,11 +462,11 @@ export class AirportManager {
     const source = this.app.map?.getSource<GeoJSONSource>(
       MAP_SOURCES.airportLabels,
     );
-    if (!source || !this.app.allAirportsData) return;
+    if (!source) return;
     const counts = this.airportFlightCounts();
     void source.setData(
       airportLabelFeatures(
-        this.app.allAirportsData,
+        siteAirports(),
         counts,
         findHomeBase(counts),
         this.shownAirports(),
@@ -476,8 +479,7 @@ export class AirportManager {
     const far = this.farAirports;
     if (far.size === 0) return this.visibleAirports;
     const names = new Set(
-      this.visibleAirports ??
-        (this.app.allAirportsData ?? []).map((airport) => airport.name),
+      this.visibleAirports ?? siteAirports().map((airport) => airport.name),
     );
     for (const name of far) names.delete(name);
     return names;
@@ -514,7 +516,10 @@ export class AirportManager {
     if (!mapContainer) return;
 
     const sizeClass =
-      AIRPORT_SIZE_ZOOMS.find((size) => zoom >= size.minZoom)?.sizeClass ?? "";
+      zoom < AIRPORT_HIDE_MARKERS_BELOW_ZOOM
+        ? "hidden"
+        : (AIRPORT_SIZE_ZOOMS.find((size) => zoom >= size.minZoom)?.sizeClass ??
+          "");
 
     mapContainer.dataset["zoomSize"] = sizeClass;
   }

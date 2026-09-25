@@ -3,9 +3,10 @@
  * generators from a small flight history.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { resetSiteData } from "../../../../kml_heatmap/frontend/state/siteData";
 import { WrappedManager } from "../../../../kml_heatmap/frontend/ui/wrappedManager";
 import { datasetIndex } from "../../../../kml_heatmap/frontend/calculations/datasetIndex";
-import * as statistics from "../../../../kml_heatmap/frontend/calculations/statistics";
+import * as statistics from "../../../../kml_heatmap/frontend/calculations/panelStats";
 import { createDataset, asMapApp, type MockApp } from "../../testHelpers";
 import {
   createWrappedMockApp,
@@ -40,7 +41,7 @@ describe("WrappedManager content", () => {
     wrappedManager.destroy();
     vi.useRealTimers();
     document.body.innerHTML = "";
-    delete window.KML_AIRPORTS;
+    resetSiteData();
   });
 
   it("returns early when the map is null", () => {
@@ -84,12 +85,14 @@ describe("WrappedManager content", () => {
 
   it("reuses the statistics the panel computed for the same filter", () => {
     const view = datasetIndex(mockApp.currentData!).filter("2024", "all");
-    const panelStats = view.statistics();
-    const spy = vi.spyOn(statistics, "calculateFilteredStatistics");
+    const panelStats = statistics.filterStatistics(view);
+    const spy = vi.spyOn(statistics, "filterStatistics");
 
     wrappedManager.showWrapped();
 
-    expect(spy).not.toHaveBeenCalled();
+    // The same filter view, so the statistics it keeps
+    expect(spy).toHaveBeenCalledWith(view);
+    expect(spy.mock.results[0]!.value).toBe(panelStats);
     expect(statCards()["Flights"]).toBe(String(panelStats.num_paths));
     spy.mockRestore();
   });
@@ -228,7 +231,7 @@ describe("WrappedManager content", () => {
   });
 
   it("marks no destination as furthest without airport coordinates", () => {
-    delete window.KML_AIRPORTS;
+    resetSiteData();
 
     wrappedManager.showWrapped();
 

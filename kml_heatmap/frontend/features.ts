@@ -5,7 +5,6 @@
  * is an entry point of its own that the app imports the first time it is
  * used (see services/featureLoader.ts). Everything it shares with the app
  * lives in shared.bundle.js, so this bundle adds only replay itself, the
- * flight list of the airport popups, which replay's button fetches, the
  * relief of the 3D view, which the layer manager fetches as it is first
  * wanted, and the satellite imagery, which its switch fetches. Wrapped has
  * a bundle of its own (wrapped.ts).
@@ -20,16 +19,14 @@
  * all the same: by the time this bundle is imported, the page has run it.
  */
 import "./mapApp";
-import { listFlights } from "./ui/airportFlights";
 import { ReplayManager } from "./ui/replayManager";
 import { followTerrain } from "./ui/terrain";
 import { followSatellite } from "./ui/satellite";
 
 export interface FeatureModule {
   ReplayManager: typeof ReplayManager;
-  listFlights: typeof listFlights;
   followTerrain: typeof followTerrain;
   followSatellite: typeof followSatellite;
 }
 
-export { ReplayManager, listFlights, followTerrain, followSatellite };
+export { ReplayManager, followTerrain, followSatellite };

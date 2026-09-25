@@ -74,8 +74,8 @@ describe("heatLineFeatures", () => {
       index === 0 ? line : line.slice(1),
     );
     expect(fixes).toEqual([
-      ...segments.map((s) => [s.coords![0][1], s.coords![0][0]]),
-      [segments[3]!.coords![1][1], segments[3]!.coords![1][0]],
+      ...segments.map((s) => [s.coords[0][1], s.coords[0][0]]),
+      [segments[3]!.coords[1][1], segments[3]!.coords[1][0]],
     ]);
   });
 
@@ -212,14 +212,6 @@ describe("heatLineFeatures", () => {
     expect(heatLineFeatures(segments, () => false).features).toEqual([]);
   });
 
-  it("skips segments without coordinates", () => {
-    expect(
-      heatLineFeatures([{ path_id: 1 }, ...flight(1, { count: 2 })], all)
-        .features.length,
-    ).toBeGreaterThan(0);
-    expect(heatLineFeatures([{ path_id: 1 }], all).features).toEqual([]);
-  });
-
   it("never joins two flights, even where one starts at the other's end", () => {
     const first = flight(1, { count: 1 });
     const second = flight(2, { count: 1, lat: 50 + 235 * DEG_PER_M });
@@ -280,8 +272,8 @@ describe("heatLineFeatures along the curve", () => {
     expect(points).toHaveLength(segments.length * 8 + 1);
     segments.forEach((segment, i) => {
       expect(points[i * 8]).toEqual([
-        segment.coords![0][1],
-        segment.coords![0][0],
+        segment.coords[0][1],
+        segment.coords[0][0],
       ]);
     });
   });
@@ -317,7 +309,7 @@ describe("heatLineFeatures smoothing", () => {
   it("does not let one hot cell break a flight into a short hot stretch", () => {
     // A long lone flight, and a second one that shares a single fix of it
     const lone = flight(1, { count: 40 });
-    const at = lone[20]!.coords![0];
+    const at = lone[20]!.coords[0];
     const crossing = createSegment({
       path_id: 2,
       coords: [

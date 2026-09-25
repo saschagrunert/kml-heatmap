@@ -157,6 +157,22 @@ class TestNotARegistration:
     def test_registrations(self, name, registration):
         assert parse_aircraft_from_filename(name)["registration"] == registration
 
+    @pytest.mark.parametrize(
+        ("name", "aircraft_type"),
+        [
+            ("1_16AUG26_DA40.kml", "DA40"),
+            ("3_1430Z_DA40.kml", "DA40"),
+            ("2026-01-01_0000h_16AUG26_LOAV-LOAV.kml", None),
+        ],
+    )
+    def test_a_date_is_no_registration(self, name, aircraft_type, caplog):
+        """The registration is published with every path, a date must not be."""
+        result = parse_aircraft_from_filename(name)
+        assert result["registration"] is None
+        # The type and the route are still what the name says
+        assert result["type"] == aircraft_type
+        assert "it holds a date" in caplog.text
+
 
 class TestParseAircraftFromFilenameCharterware:
     def test_charterware_format(self):

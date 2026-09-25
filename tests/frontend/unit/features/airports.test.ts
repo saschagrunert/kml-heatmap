@@ -1,15 +1,23 @@
-import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import type {
+  Metadata,
+  PathInfo,
+} from "../../../../kml_heatmap/frontend/types";
+import type { SiteData } from "../../../../kml_heatmap/frontend/state/siteData";
 
 type AirportsModule =
   typeof import("../../../../kml_heatmap/frontend/features/airports");
 
 describe("airports feature", () => {
   let mod: AirportsModule;
+  /** The site data of the module instance under test */
+  let siteData: SiteData;
 
   beforeEach(async () => {
     vi.resetModules();
     mod = await import("../../../../kml_heatmap/frontend/features/airports");
+    ({ siteData } =
+      await import("../../../../kml_heatmap/frontend/state/siteData"));
   });
 
   const mockPathInfo: PathInfo[] = [
@@ -220,26 +228,22 @@ describe("airports feature", () => {
   });
 
   describe("countryFlagSrc", () => {
-    afterEach(() => {
-      delete window.KML_METADATA;
-    });
-
     it("points at the flag the site published", () => {
-      window.KML_METADATA = { available_flags: ["de", "at"] } as never;
+      siteData.metadata = { available_flags: ["de", "at"] } as Metadata;
 
       expect(mod.countryFlagSrc("DE")).toBe("flags/de.svg");
       expect(mod.countryFlagSrc("at")).toBe("flags/at.svg");
     });
 
     it("has none for a country the site did not publish", () => {
-      window.KML_METADATA = { available_flags: ["de"] } as never;
+      siteData.metadata = { available_flags: ["de"] } as Metadata;
 
       expect(mod.countryFlagSrc("FR")).toBeNull();
     });
 
     it("has none at all without the list", () => {
       // A site built from a wheel, which leaves the flag files out
-      window.KML_METADATA = {} as never;
+      siteData.metadata = {} as Metadata;
 
       expect(mod.countryFlagSrc("DE")).toBeNull();
     });
@@ -247,15 +251,13 @@ describe("airports feature", () => {
 
   describe("country lookups", () => {
     beforeEach(() => {
-      window.KML_AIRPORTS = {
-        airports: [
-          { name: "EDAV Halle-Oppin", lat: 51, lon: 12, country: "DE" },
-          { name: "EDDF Frankfurt", lat: 50, lon: 8, country: "DE" },
-          { name: "LSZH Zurich", lat: 47, lon: 8, country: "CH" },
-          { name: "LKPR Prague", lat: 50, lon: 14, country: "CZ" },
-          { name: "NOCOUNTRY", lat: 0, lon: 0 },
-        ],
-      };
+      siteData.airports = [
+        { name: "EDAV Halle-Oppin", lat: 51, lon: 12, country: "DE" },
+        { name: "EDDF Frankfurt", lat: 50, lon: 8, country: "DE" },
+        { name: "LSZH Zurich", lat: 47, lon: 8, country: "CH" },
+        { name: "LKPR Prague", lat: 50, lon: 14, country: "CZ" },
+        { name: "NOCOUNTRY", lat: 0, lon: 0 },
+      ];
     });
 
     it("countCountries returns unique country codes for given airports", () => {
@@ -297,12 +299,12 @@ describe("airports feature", () => {
 
     it("follows a replaced airport list", () => {
       expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
-      window.KML_AIRPORTS = { airports: [] };
+      siteData.airports = [];
       expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
     });
 
     it("keeps the map while the airport list stays the same", () => {
-      const airports = window.KML_AIRPORTS!.airports;
+      const airports = siteData.airports!;
       expect(mod.groupByCountry(["LSZH Zurich"]).get("CH")).toEqual([
         "LSZH Zurich",
       ]);
@@ -312,19 +314,17 @@ describe("airports feature", () => {
       expect(mod.countCountries(["LOWW Vienna"]).size).toBe(0);
     });
 
-    it("handles missing KML_AIRPORTS", () => {
-      delete window.KML_AIRPORTS;
+    it("handles airports that have not loaded", () => {
+      siteData.airports = null;
       expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
     });
 
     it("picks up airports.js when it arrives after the first lookup", () => {
-      delete window.KML_AIRPORTS;
+      siteData.airports = null;
       expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
-      window.KML_AIRPORTS = {
-        airports: [
-          { name: "EDAV Halle-Oppin", lat: 51, lon: 12, country: "DE" },
-        ],
-      };
+      siteData.airports = [
+        { name: "EDAV Halle-Oppin", lat: 51, lon: 12, country: "DE" },
+      ];
       expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
     });
   });

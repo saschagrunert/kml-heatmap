@@ -3,11 +3,13 @@
  */
 import type { MapApp } from "../mapApp";
 import { setControlLabel } from "../utils/buttonState";
+import { canShareLink, isPhoneLayout, isSmallDevice } from "../utils/device";
 import { domCache } from "../utils/domCache";
+import { importWithRetry } from "../services/lazyImport";
 import { logError } from "../utils/logger";
 import { withMapStill } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
-import { setColorLayer } from "./layerVisibility";
+import { altitudeColours, setColorLayer } from "./layerVisibility";
 
 /**
  * html-to-image is only needed for export, so it is imported on first use.
@@ -17,7 +19,6 @@ import { setColorLayer } from "./layerVisibility";
  */
 export const HTML_TO_IMAGE_URL = "./vendor/html-to-image.mjs";
 
-import { MOBILE_BREAKPOINT_PX } from "../utils/constants";
 /** Largest canvas iOS Safari will draw into (16.7 million pixels) */
 export const MAX_CANVAS_PIXELS = 16_777_216;
 /** Phones get their pixel density up to this factor */
@@ -29,20 +30,15 @@ const EXPORT_BUTTON_BUSY_LABEL = "Exporting…";
 export type HtmlToImage = Pick<typeof import("html-to-image"), "toJpeg">;
 
 /**
- * The import itself, replaceable by tests and exported for them. A retry
- * names the vendored module under a URL the page has not tried yet, because
- * a browser may answer a failed import() from memory (see
- * services/featureLoader.ts).
+ * The import itself, replaceable by tests and exported for them (see
+ * services/lazyImport.ts)
  */
-export const importFromVendor = (
-  failedImports: number,
-): Promise<HtmlToImage> =>
-  failedImports === 0
-    ? import("html-to-image")
-    : (import(
-        new URL(`${HTML_TO_IMAGE_URL}?retry=${failedImports}`, import.meta.url)
-          .href
-      ) as Promise<HtmlToImage>);
+export const importFromVendor = (failedImports: number): Promise<HtmlToImage> =>
+  importWithRetry(
+    () => import("html-to-image"),
+    HTML_TO_IMAGE_URL,
+    failedImports,
+  );
 
 let importHtmlToImage = importFromVendor;
 let htmlToImagePromise: Promise<HtmlToImage | null> | null = null;
@@ -74,15 +70,6 @@ export function resetHtmlToImageLoader(
   importHtmlToImage = importer;
 }
 
-/** Small viewport or touch device */
-export function isSmallDevice(): boolean {
-  if (window.innerWidth < MOBILE_BREAKPOINT_PX) return true;
-  return (
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(pointer: coarse)").matches
-  );
-}
-
 /**
  * Scale of the exported image relative to the map's CSS size. Desktops get
  * 2x. A phone gets its own pixel density, since 1x left a 390x844 image on
@@ -90,13 +77,12 @@ export function isSmallDevice(): boolean {
  * past which the export comes out blank.
  */
 export function exportScale(width: number, height: number): number {
-  const preferred =
-    window.innerWidth < MOBILE_BREAKPOINT_PX
-      ? Math.min(
-          Math.max(window.devicePixelRatio || 1, 1),
-          MAX_PHONE_EXPORT_SCALE,
-        )
-      : 2;
+  const preferred = isPhoneLayout()
+    ? Math.min(
+        Math.max(window.devicePixelRatio || 1, 1),
+        MAX_PHONE_EXPORT_SCALE,
+      )
+    : 2;
   const area = width * height;
   if (area <= 0) return preferred;
   return Math.min(preferred, Math.sqrt(MAX_CANVAS_PIXELS / area));
@@ -204,8 +190,27 @@ export class UIToggles {
 
   private toggleColorLayer(mode: "altitude" | "airspeed"): void {
     if (!this.app.map) return;
-    if (setColorLayer(this.app, mode, !this.app[`${mode}Visible`])) {
-      const label = mode === "altitude" ? "Speed" : "Altitude";
+    // A replay trail is always coloured by one of the two, altitude when
+    // neither layer is on (see altitudeColours): the pair works as a choice
+    // then, and switching the one on screen off switches to the other. A
+    // plain flip of the altitude flag changed nothing on screen.
+    if (this.app.replayActive && mode === "altitude") {
+      if (altitudeColours(this.app)) {
+        this.switchColorLayer("airspeed", true);
+      } else {
+        this.switchColorLayer("altitude", true);
+      }
+      return;
+    }
+    this.switchColorLayer(mode, !this.app[`${mode}Visible`]);
+  }
+
+  private switchColorLayer(
+    mode: "altitude" | "airspeed",
+    visible: boolean,
+  ): void {
+    if (setColorLayer(this.app, mode, visible)) {
+      const label = mode === "altitude" ? "Groundspeed" : "Altitude";
       showToast(`${label} layer disabled`, "info");
     }
   }
@@ -300,17 +305,18 @@ export class UIToggles {
   }
 
   /**
-   * Share the current view: the native share sheet on a phone or a tablet,
-   * as with an exported image, otherwise the link is copied to the
-   * clipboard. The control says "Copy link", and desktop Safari and Chrome
-   * have a share sheet too, which opened instead of copying.
+   * Share the current view: the native share sheet in the phone layout,
+   * whose row says "Share link" then (see MobileBar), otherwise the link
+   * is copied to the clipboard. The column's control says "Copy link", and
+   * desktop Safari and Chrome have a share sheet too, as have tablets and
+   * touch laptops, which opened it instead of copying.
    */
   async shareLink(): Promise<void> {
     // The URL is read right now, so the debounced save has to land first
     this.app.stateManager.flush();
     const url = window.location.href;
 
-    if (isSmallDevice() && typeof navigator.share === "function") {
+    if (canShareLink()) {
       try {
         await navigator.share({ url, title: document.title });
         return;

@@ -1,14 +1,17 @@
 /* The stylesheet the page loads up front.
 
    Everything replay needs is in features.css instead, and everything
-   Wrapped needs in wrapped.css, which services/featureLoader.ts fetches next
-   to features.bundle.js and wrapped.bundle.js the first time one of them is
-   opened. Most visits open neither, and the two are more than a third of
-   the styles; keeping them out of the critical path is the same trade the
-   lazy bundles make for the JavaScript.
+   Wrapped and the content of the statistics panel need in wrapped.css,
+   which services/featureLoader.ts fetches next to features.bundle.js and
+   wrapped.bundle.js the first time one of them is opened. Most visits open
+   none of them, and the two are more than a third of the styles; keeping
+   them out of the critical path is the same trade the lazy bundles make for
+   the JavaScript.
 
    A rule belongs in features.css when its selector names replay, in
-   wrapped.css when it names Wrapped, and here otherwise; a selector list
+   wrapped.css when it names Wrapped or what the statistics panel renders
+   (.kh-stats-*, bar the rail's title and loading state), and here
+   otherwise; a selector list
    that names more than one is written out in each file, with the selectors
    that belong there. Design tokens, the control surfaces the feature panels
    reuse (.btn-surface and friends) and every shared media query stay
@@ -53,12 +56,16 @@
   /* The same blue a step darker, for text on it: --color-text reads at
      5.2:1 on this where it reached 3.6:1 on the marker's own blue */
   --color-home-blue-deep: #0062cc;
+  /* And a step lighter, for text and edges in the home colour on the dark
+     surfaces, where the marker's own blue reads at about 4:1 */
+  --color-home-blue-light: #4d9fff;
   --color-error: #ff4444;
 
   /* RGB triplets for translucent variants: rgba(var(--x-rgb), alpha) */
   --color-bg-secondary-rgb: 28, 28, 28;
   --color-text-rgb: 242, 242, 242;
   --color-accent-blue-rgb: 79, 172, 254;
+  --color-home-blue-rgb: 0, 123, 255;
   --color-accent-cyan-rgb: 0, 242, 254;
   --color-accent-pink-rgb: 240, 147, 251;
   --color-accent-red-rgb: 245, 87, 108;
@@ -238,7 +245,6 @@ body {
   inset: 0;
   background: var(--color-map-bg);
   overscroll-behavior: none;
-  transition: left var(--duration-base) ease;
 }
 
 .noscript-message {
@@ -824,14 +830,22 @@ body {
   margin-bottom: var(--space-xs);
 }
 .color-legend .labels {
-  display: flex;
-  justify-content: space-between;
+  /* The ends and the median, which stays under the middle of the bar: the
+     two outer columns are as wide as the wider end */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   /* The two ends carry both units ("166 kt (307 km/h)"), which left them
      touching in the middle of a 200px box */
   gap: var(--space-md);
   white-space: nowrap;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
+}
+.color-legend .labels > :nth-child(2) {
+  text-align: center;
+}
+.color-legend .labels > :last-child {
+  text-align: end;
 }
 
 /* ==========================================================================
@@ -927,6 +941,21 @@ body {
 body.stats-open #map {
   left: var(--stats-rail-w);
 }
+/* While the rail opens or closes, the map keeps the whole width and slides
+   by half the rail, where its middle ends up: it is resized once rather than
+   on every frame (see slideMapBesideRail). Past the right edge of the page
+   for as long as that takes, which the page does not scroll to. */
+body.rail-sliding #map,
+body.rail-leaving #map {
+  left: 0;
+}
+body.rail-sliding #map {
+  transition: transform var(--duration-base) ease;
+}
+body.rail-sliding.stats-open #map,
+body.rail-leaving #map {
+  transform: translateX(calc(var(--stats-rail-w) / 2));
+}
 /* The rail spans the full height at a higher layer than the legend, so the
    legend has to move with the map or it is covered outright and the colour
    ramp becomes unreadable while the statistics are open. */
@@ -978,8 +1007,10 @@ body.stats-open #left-buttons {
     gap: var(--space-xs);
     padding: var(--space-xs) var(--space-sm);
   }
+  /* As wide as the icon it underlines: a wider chip made its group wider
+     than the others, which moved the group's icons 2px off theirs */
   body.stats-open .control-column .ramp-chip {
-    width: var(--icon-md);
+    width: var(--icon-sm);
     height: 3px;
   }
   body.stats-open .control-column .control-btn {
@@ -1241,6 +1272,12 @@ body.stats-open #left-buttons {
 [data-zoom-size="xlarge"] {
   --marker-size: 12px;
   --marker-border: 2px;
+}
+/* Zoomed out to a continent and beyond, the airports are a clump of dots
+   on the heat (AIRPORT_HIDE_MARKERS_BELOW_ZOOM); one that has the focus
+   stays, like one on the far side of a globe */
+[data-zoom-size="hidden"] .airport-marker-root:not(:focus-within) {
+  visibility: hidden;
 }
 
 /* A dot with a ring of the page's own dark around it, so it reads against
@@ -1692,8 +1729,9 @@ body.stats-open #left-buttons {
     /* The extra step at the top is the room the grabber sits in */
     padding: calc(var(--space-base) + var(--space-xs)) var(--space-base)
       var(--space-md);
-    /* 17px: one step above --text-base, short of --text-lg */
-    font-size: calc(var(--text-md) + var(--space-xs));
+    /* The size of the statistics sheet's title, which opens from the same
+       bar; 17px, between two steps, was off the type scale */
+    font-size: var(--text-base);
     font-weight: 600;
     line-height: 1.2;
     color: var(--color-text);
@@ -1922,6 +1960,10 @@ body.stats-open #left-buttons {
   body.stats-open #map {
     left: 0;
   }
+  body.rail-sliding.stats-open #map,
+  body.rail-leaving #map {
+    transform: none;
+  }
   #stats-panel {
     padding: var(--space-md) var(--space-base)
       calc(var(--space-md) + var(--safe-bottom));
@@ -1993,10 +2035,14 @@ body.stats-open #left-buttons {
     );
   }
   /* The statistics sheet stops above the bar rather than painting over it:
-     the Stats tab is what closes it again. */
+     the Stats tab is what closes it again. At its full height it stops
+     below the status bar too: on a notched iPhone, where the page runs
+     under it (viewport-fit=cover), the sheet's title sat behind the clock. */
   body:has(.mobile-bar) #stats-rail:not([hidden]) {
     bottom: calc(var(--mobile-bar-h) + var(--safe-bottom));
-    max-height: calc(100dvh - var(--mobile-bar-h) - var(--safe-bottom));
+    max-height: calc(
+      100dvh - var(--mobile-bar-h) - var(--safe-bottom) - var(--safe-top)
+    );
     z-index: calc(var(--z-controls) - 3);
   }
   body:has(.mobile-bar) #stats-panel {
@@ -2020,6 +2066,12 @@ body.stats-open #left-buttons {
   margin-bottom: var(--space-sm);
   padding-bottom: var(--space-sm);
   border-color: var(--color-accent-green);
+}
+/* The home base's popup is in the home colour, like its marker and badge,
+   where every other airport's is in the green of theirs */
+.kh-popup-header-airport.kh-popup-header-home {
+  color: var(--color-home-blue-light);
+  border-color: var(--color-home-blue-light);
 }
 .kh-popup-home-badge {
   font-size: var(--text-sm);
@@ -2052,13 +2104,11 @@ body.stats-open #left-buttons {
   outline: 2px solid var(--color-accent-blue);
   outline-offset: 2px;
 }
+/* A figure, not a control: the accent's bar and tint are what a toggle that
+   is on looks like, and made the box read as one */
 .kh-popup-metric-flights {
-  background: linear-gradient(
-    135deg,
-    rgba(var(--color-accent-blue-rgb), 0.15) 0%,
-    rgba(var(--color-accent-cyan-rgb), 0.15) 100%
-  );
-  border-color: var(--color-accent-blue);
+  background: var(--color-bg-raised);
+  border-left: none;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -2136,18 +2186,34 @@ body.stats-open #left-buttons {
 .kh-popup-metric-colored .popup-metric-value {
   color: var(--kh-metric-color);
 }
-/* --------------------------------------------------------------------------
-   Statistics content (inside #stats-panel)
-
-   An instrument readout: a lead block of the four headline figures, then
-   labelled sections of label/value rows. Numbers carry the emphasis; the
-   labels stay quiet.
-   -------------------------------------------------------------------------- */
-.kh-stats {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
+/* A finger gets the touch size the controls have (--btn-min-height): the
+   toasts' buttons were 28px high, a popup's close 24px square and its
+   flight rows 23px tall with 2px between them. The popup's header keeps
+   its text clear of the larger close. */
+@media (pointer: coarse) {
+  .toast-button {
+    min-height: var(--btn-min-height);
+    min-width: var(--btn-min-height);
+    justify-content: center;
+  }
+  .maplibregl-popup-close-button {
+    width: var(--btn-min-height);
+    height: var(--btn-min-height);
+  }
+  .popup-header {
+    padding-right: calc(var(--btn-min-height) - var(--space-md));
+  }
+  .kh-popup-flight {
+    min-height: var(--btn-min-height);
+  }
 }
+/* --------------------------------------------------------------------------
+   Statistics rail title and loading state
+
+   The rail and its title are here, as they open at once; what the panel
+   shows is in wrapped.css, which arrives with the panel's code the first
+   time the rail opens (ui/statsPanel.ts). Until then it says so.
+   -------------------------------------------------------------------------- */
 .kh-stats-title {
   display: flex;
   align-items: center;
@@ -2160,296 +2226,10 @@ body.stats-open #left-buttons {
 .kh-stats-title-text {
   min-width: 0;
 }
-.kh-stats-note {
-  margin: 0 0 calc(var(--space-lg) * -1 + var(--space-sm));
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-control);
-  background-color: rgba(var(--color-accent-blue-rgb), 0.12);
-  border-left: 2px solid var(--color-accent-blue);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-}
-
-/* Lead figures: two per row. The dividers are borders on the items, not
-   gaps over a coloured container: a dataset without timing data renders
-   three figures, and the empty fourth cell has to read as the panel. */
-.kh-stats-lead {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  background-color: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-panel);
-  overflow: hidden;
-}
-.kh-stats-lead-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-md);
-  background-color: var(--color-bg-primary);
-  border-top: 1px solid var(--color-divider);
-  border-left: 1px solid var(--color-divider);
-  min-width: 0;
-}
-.kh-stats-lead-item:nth-child(-n + 2) {
-  border-top: 0;
-}
-.kh-stats-lead-item:nth-child(odd) {
-  border-left: 0;
-}
-.kh-stats-lead-value {
-  font-family: var(--font-mono);
-  font-size: var(--text-lg);
-  font-weight: 600;
-  line-height: 1.1;
-  color: var(--color-text);
-  /* The figure and its unit are one thing to read. Breaking at the space
-     before the unit made the distance cell two lines tall while the three
-     beside it stayed one, and the row of lead figures came out ragged. */
-  white-space: nowrap;
-}
-/* Numbers are set in the monospace face, the words beside them are not:
-   "12 flights" was monospace from end to end */
-.kh-stats-lead-unit,
-.kh-stats-unit,
-.kh-stats-noun {
-  font-family: var(--font-ui);
-}
-.kh-stats-lead-unit {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  margin-left: var(--unit-gap);
-}
-.kh-stats-lead-alt {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-.kh-stats-lead-label {
-  /* Bottom-aligned: a figure with an alt line must not push its label
-     below the one beside it */
-  margin-top: auto;
-  padding-top: var(--space-xs);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted);
-}
-
-/* Sections */
-.kh-stats-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-.kh-stats-section-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
+.kh-stats-loading {
   margin: 0;
-  padding-bottom: var(--space-xs);
-  border-bottom: 1px solid var(--color-divider);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-text-muted);
-}
-.kh-stats-section-title .icon {
-  color: var(--color-text-dim);
-}
-.kh-stats-section-label {
-  min-width: 0;
-}
-.kh-stats-section-count {
-  margin-left: auto;
-  padding: 0 var(--space-xs);
-  border-radius: var(--radius-pill);
-  background-color: var(--color-bg-raised);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  letter-spacing: 0;
-  color: var(--color-text-secondary);
-}
-
-.kh-stats-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-/* Metric rows: label left, value stack right */
-.kh-stats-metric {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-md);
-  padding: var(--space-xs) 0;
   font-size: var(--text-sm);
-}
-.kh-stats-metric + .kh-stats-metric {
-  border-top: 1px solid var(--color-divider);
-}
-.kh-stats-metric-label {
-  min-width: 0;
-  color: var(--color-text-secondary);
-}
-.kh-stats-metric-values {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  flex-shrink: 0;
-  text-align: right;
-}
-.kh-stats-metric-value {
-  font-family: var(--font-mono);
-  font-weight: 600;
-  color: var(--color-text);
-  white-space: nowrap;
-}
-.kh-stats-metric-alt {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
   color: var(--color-text-muted);
-  white-space: nowrap;
-}
-/* The unit of a metric row or of the line under a lead figure. The same
-   hairline the lead units get, which matters more here: these are set in the
-   monospace face, whose word space is a full character wide and left the
-   unit reading as a word of its own.
-
-   Muted, like `.kh-stats-lead-unit`: throughout the panel the unit is a step
-   quieter than the figure it belongs to, so the number is what the eye lands
-   on. A metric row drew its unit at full strength and was the one figure in
-   the panel that did. The two conversion lines are muted throughout, so
-   there the unit simply matches. */
-.kh-stats-unit {
-  margin-left: var(--unit-gap);
-  color: var(--color-text-muted);
-}
-
-/* Aircraft rows put a registration over its type */
-.kh-stats-aircraft .kh-stats-metric-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.kh-stats-aircraft-type {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
-.kh-stats-code {
-  font-family: var(--font-mono);
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-/* Airports: a count line above the list, which flows with the panel rather
-   than becoming a second scroller inside it */
-.kh-stats-airports-summary {
-  margin: 0 0 var(--space-sm);
-  padding: 0;
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-}
-.kh-stats-groups {
-  min-width: 0;
-}
-.kh-stats-group {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin: 0;
-  padding: var(--space-md) 0 var(--space-xs);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted);
-}
-.kh-stats-group:first-child {
-  padding-top: var(--space-sm);
-}
-/* The flag of the group, where the site carries one. It is an SVG published
-   beside the page, not an emoji: emoji carry their own colour and weight,
-   and Windows has no flag glyphs at all. */
-.kh-stats-group-flag {
-  flex-shrink: 0;
-  width: 16px;
-  height: 12px;
-  border-radius: var(--radius-bar);
-  /* The rim is what gives a flag its box on a dark panel: without it the
-     black band of a German or Belgian flag merges into the surface and the
-     colours below it read as sitting low beside the label. */
-  box-shadow: 0 0 0 1px rgba(var(--color-text-rgb), 0.35);
-}
-
-/* The ISO code, for a site built without the flags */
-.kh-stats-group-code {
-  flex-shrink: 0;
-  min-width: 22px;
-  padding: 0 var(--space-xs);
-  border-radius: var(--radius-bar);
-  background-color: var(--color-bg-raised);
-  color: var(--color-text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  letter-spacing: 0;
-  text-align: center;
-}
-.kh-stats-group-name {
-  min-width: 0;
-}
-.kh-stats-group-count {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  letter-spacing: 0;
-  color: var(--color-text-muted);
-}
-.kh-stats-airport {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-sm);
-  padding: var(--space-xs) 0;
-  font-size: var(--text-sm);
-}
-.kh-stats-airport .kh-stats-code {
-  flex-shrink: 0;
-  min-width: 44px;
-  font-size: var(--text-xs);
-}
-.kh-stats-airport-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-secondary);
-}
-
-.kh-stats-footer {
-  margin: 0;
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--color-divider);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
-/* Reads as a second line of the footer, not as a section of its own: the
-   margin takes back the gap .kh-stats puts between its children */
-.kh-stats-build {
-  margin: calc(var(--space-xs) - var(--space-lg)) 0 0;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
-.kh-stats-build a {
-  color: inherit;
-  text-underline-offset: 2px;
-}
-.kh-stats-build a:hover,
-.kh-stats-build a:focus-visible {
-  color: var(--color-text);
 }
 .kh-init-error {
   display: flex;
@@ -2500,7 +2280,7 @@ body.stats-open #left-buttons {
     animation-delay: 0s;
     opacity: 1;
   }
-  #map,
+  body.rail-sliding #map,
   #left-buttons,
   .color-legend,
   .btn-surface,
@@ -2551,7 +2331,8 @@ body.stats-open #left-buttons {
   .mobile-sheet,
   .mobile-bar,
   .toast-notification,
-  .maplibregl-popup-content {
+  .maplibregl-popup-content,
+  #map-empty {
     border-width: 2px;
   }
   /* Unavailable controls are still told apart, at more strength */
@@ -2568,22 +2349,73 @@ body.stats-open #left-buttons {
 }
 
 @media (forced-colors: active) {
+  /* Forced colours drop a gradient background, which left the legend bars
+     and the ramp chips as empty outlines: they are the colour key, so they
+     keep their own colours, framed by the system's text colour. */
   .color-legend .gradient-bar,
-  .ramp-chip {
+  .ramp-chip,
+  .gradient-chip {
+    forced-color-adjust: none;
     border: 1px solid CanvasText;
   }
   /* A toggle that is on differs from one that is off by the accent's tint,
      edge and icon alone, which forced colours paint over or leave faint:
      it takes the system's highlight instead. Not adjusted, as the text
-     would otherwise stand on a plate of the page colour. */
+     would otherwise stand on a plate of the page colour. In a row the row
+     takes it, so the ramp chip next to the button is inside the highlight
+     too, and two rows that are on keep a line of the page colour between
+     them rather than running together. */
   .btn-surface.active,
-  .control-row > .control-btn.active {
+  .control-row:has(> .control-btn.active),
+  .control-row:hover:has(> .control-btn.active) {
     forced-color-adjust: none;
     background-color: Highlight;
     color: HighlightText;
   }
+  .control-row:has(> .control-btn.active)
+    + .control-row:has(> .control-btn.active) {
+    box-shadow: inset 0 1px 0 0 Canvas;
+  }
+  .control-row > .control-btn.active {
+    background-color: transparent;
+    color: inherit;
+  }
   .control-row > .control-btn.active .icon {
     color: inherit;
+  }
+  .control-row:has(> .control-btn.active):has(> .control-btn:focus-visible) {
+    outline-color: HighlightText;
+  }
+  /* A disabled toggle that is on is not a live selection */
+  .control-row:has(> .control-btn.active:disabled),
+  .control-row:hover:has(> .control-btn.active:disabled) {
+    background-color: Canvas;
+    color: GrayText;
+    box-shadow: inset 2px 0 0 0 GrayText;
+  }
+  /* The phone's switches are drawn with background colours alone, which
+     forced colours turn into the page colour: track and thumb vanished and
+     every row looked the same. They get an outline and a thumb of the text
+     colour, and the system's highlight when on. */
+  .sheet-switch {
+    forced-color-adjust: none;
+    padding: 1px;
+    border: 1px solid CanvasText;
+    background-color: Canvas;
+  }
+  .sheet-switch-thumb {
+    forced-color-adjust: none;
+    background-color: CanvasText;
+  }
+  .sheet-row.active .sheet-switch {
+    border-color: Highlight;
+    background-color: Highlight;
+  }
+  .sheet-row.active .sheet-switch-thumb {
+    background-color: HighlightText;
+  }
+  .mobile-tab.active {
+    color: Highlight;
   }
 }
 

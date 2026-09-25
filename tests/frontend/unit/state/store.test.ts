@@ -5,6 +5,7 @@ import {
   createDefaultState,
   defineStoreAccessors,
 } from "../../../../kml_heatmap/frontend/state/store";
+import { TOGGLES } from "../../../../kml_heatmap/frontend/state/toggles";
 
 describe("createDefaultState", () => {
   it("returns expected defaults", () => {
@@ -576,12 +577,17 @@ describe("AppStore", () => {
       expect(fn).toHaveBeenCalledWith("D-EAGJ", "all");
     });
 
-    it("covers every non-panel key of the default state", () => {
-      const panelKeys = new Set(["statsPanelVisible", "wrappedVisible"]);
-      const expected = Object.keys(createDefaultState()).filter(
-        (key) => !panelKeys.has(key),
+    it("covers every key of the default state, the panels included", () => {
+      expect([...STORE_ACCESSOR_KEYS].sort()).toEqual(
+        Object.keys(createDefaultState()).sort(),
       );
-      expect([...STORE_ACCESSOR_KEYS].sort()).toEqual(expected.sort());
+    });
+
+    it("starts every toggle as its entry in the table says", () => {
+      const state = createDefaultState();
+      for (const toggle of TOGGLES) {
+        expect(state[toggle.key], toggle.key).toBe(toggle.initial);
+      }
     });
   });
 });

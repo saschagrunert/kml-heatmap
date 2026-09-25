@@ -4,6 +4,7 @@ import {
   createAirportMarkers,
   dropUnknownPathIds,
   loadInitialData,
+  NO_YEAR_LABEL,
   resolveYearSelection,
 } from "../../../../kml_heatmap/frontend/appInitializer";
 import type {
@@ -23,6 +24,7 @@ import { Marker as MockMarker } from "../../../mocks/maplibre-gl";
 
 const toastMock = vi.hoisted(() => ({
   showToast: vi.fn(),
+  announceStatus: vi.fn(),
   dismissToast: vi.fn(),
 }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
@@ -36,9 +38,6 @@ function setupDOM(): void {
     <div id="map-empty" hidden><button id="map-empty-retry"></button></div>
   `;
 }
-
-/** The Retry the failure toast of the first load offers */
-const RETRY: unknown = expect.objectContaining({ label: "Retry" });
 
 function yearSelect(): HTMLSelectElement {
   return document.getElementById("year-select") as HTMLSelectElement;
@@ -417,18 +416,20 @@ describe("appInitializer", () => {
         "dropdown",
         "markerSizes",
       ]);
-      expect(app.allAirportsData).toBe(airports);
       expect(app.aircraftModels).toBe(metadata.aircraft_models);
       expect(app.hasTimingData).toBe(true);
       expect(app.selectedYear).toBe("2025");
-      expect(app.dataManager.loadData).toHaveBeenCalledWith(
-        "2025",
-        undefined,
-        RETRY,
-      );
+      expect(app.dataManager.loadData).toHaveBeenCalledWith("2025");
       expect(app.currentData).toBe(data);
       expect(Object.keys(app.airportMarkers)).toHaveLength(2);
       expect(app.airspeedRange).toEqual({ min: 10, max: 150 });
+    });
+
+    it("says which year it shows once the flights are there", async () => {
+      await loadInitialData(asMapApp(app));
+
+      // The loading indicator's region went quiet after a load (regression)
+      expect(toastMock.announceStatus).toHaveBeenCalledWith("Showing 2025");
     });
 
     it("settles the speed range before the dataset draws the layers", async () => {
@@ -528,12 +529,12 @@ describe("appInitializer", () => {
       expect(app.airportManager.updateAirportMarkerSizes).toHaveBeenCalled();
     });
 
-    it("restores the stats panel through the stats manager", async () => {
+    it("restores the stats panel through the store key the rail follows", async () => {
       app.savedState = { statsPanelVisible: true };
 
       await loadInitialData(asMapApp(app));
 
-      expect(app.statsManager.setStatsPanelVisible).toHaveBeenCalledWith(true);
+      expect(app.store.get("statsPanelVisible")).toBe(true);
     });
 
     it("handles null metadata and data", async () => {
@@ -546,11 +547,8 @@ describe("appInitializer", () => {
       expect(app.hasTimingData).toBe(false);
       expect(app.currentData).toBeNull();
       expect(app.selectedYear).toBe("all");
-      expect(app.dataManager.loadData).toHaveBeenCalledWith(
-        "all",
-        undefined,
-        RETRY,
-      );
+      // No Retry on the toast: the panel on the map has the one
+      expect(app.dataManager.loadData).toHaveBeenCalledWith("all");
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.disabled).toBe(true);
       // The aircraft list is still settled
@@ -587,7 +585,7 @@ describe("appInitializer", () => {
       await loadInitialData(asMapApp(app));
 
       // The 5th and the 95th of 40 to 140 kt, not the metadata's 10 to 150
-      expect(app.airspeedRange).toEqual({ min: 45, max: 135 });
+      expect(app.airspeedRange).toMatchObject({ min: 45, max: 135 });
     });
 
     it("drops its dataset when the year was switched while it loaded", async () => {
@@ -628,7 +626,25 @@ describe("appInitializer", () => {
         await loadInitialData(asMapApp(app));
 
         expect(app.selectedYear).toBe("2025");
-        expect(yearSelect().selectedIndex).toBe(-1);
+        // A placeholder that cannot be picked, where no selection at all
+        // left the control without text (regression)
+        const shown = yearSelect().selectedOptions[0]!;
+        expect(shown.value).toBe("");
+        expect(shown.textContent).toBe(NO_YEAR_LABEL);
+        expect(shown.disabled).toBe(true);
+        expect(yearSelect().value).toBe("");
+      });
+
+      it("says nothing loaded, where a load that worked says which year", async () => {
+        await loadInitialData(asMapApp(app));
+
+        expect(toastMock.announceStatus).not.toHaveBeenCalled();
+      });
+
+      it("hides every airport, which no flights say to show", async () => {
+        await loadInitialData(asMapApp(app));
+
+        expect(app.airportManager.updateAirportOpacity).toHaveBeenCalled();
       });
 
       it("has an open Filter sheet read the dropdown again", async () => {
@@ -671,22 +687,41 @@ describe("appInitializer", () => {
         document.getElementById("map-empty-retry")!.click();
 
         expect(app.filterManager.retryLoad).toHaveBeenCalledTimes(1);
-        // The failure it said is being acted on
-        expect(toastMock.dismissToast).toHaveBeenCalled();
+        // The failures of loads it said are being acted on, and no other
+        // error on screen is taken with them (regression)
+        expect(app.dataManager.dismissFailures).toHaveBeenCalled();
+        expect(toastMock.dismissToast).not.toHaveBeenCalled();
         await vi.waitFor(() => expect(panel.hidden).toBe(true));
       });
 
-      it("offers the same retry on the toast of the failure", async () => {
+      it("offers no second Retry on the toast of the failure", async () => {
         await loadInitialData(asMapApp(app));
-        const [, , retry] = app.dataManager.loadData.mock.calls[0] as [
-          string,
-          undefined,
-          { run: () => void },
-        ];
 
-        retry.run();
+        // The panel's Retry is the one; two of them at once, styled apart,
+        // were two ways of doing one thing
+        expect(app.dataManager.loadData).toHaveBeenCalledWith("2025");
+      });
 
-        expect(app.filterManager.retryLoad).toHaveBeenCalledTimes(1);
+      it("takes the keyboard to its Retry as it appears", async () => {
+        await loadInitialData(asMapApp(app));
+
+        expect(document.activeElement).toBe(
+          document.getElementById("map-empty-retry"),
+        );
+      });
+
+      it("leaves the focus where someone put it meanwhile", async () => {
+        const elsewhere = document.createElement("button");
+        document.body.append(elsewhere);
+        app.dataManager.loadData.mockImplementation(() => {
+          elsewhere.focus();
+          return Promise.resolve(null);
+        });
+
+        await loadInitialData(asMapApp(app));
+
+        expect(document.activeElement).toBe(elsewhere);
+        elsewhere.remove();
       });
 
       it("shows the panel again when the retry fails too", async () => {

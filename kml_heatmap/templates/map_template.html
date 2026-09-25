@@ -68,14 +68,18 @@
     <link rel="stylesheet" href="./vendor/maplibre-gl.css" />
     <link rel="stylesheet" href="./styles.css" />
     <!-- What the app asks for as soon as it runs: the chunk its bundle
-         imports, MapLibre, the two index files, and the latest year, which
-         is what the page shows first. Requesting them here overlaps their
-         download with the bundle instead of starting it once that has run;
-         the loader's fetch for the same URL is then served from the preload
-         (crossorigin is what makes the two requests match). -->
+         imports, MapLibre, the two workers (the year files' and the map's,
+         each started once the modules before it have run, a round trip
+         late on a slow network), the two index files, and the latest year,
+         which is what the page shows first. Requesting them here overlaps
+         their download with the bundle instead of starting it once that
+         has run; the loader's fetch for the same URL is then served from
+         the preload (crossorigin is what makes the two requests match). -->
     <link rel="modulepreload" href="./shared.bundle.js" />
     <link rel="modulepreload" href="./vendor/maplibre-gl.mjs" />
     <link rel="modulepreload" href="./vendor/maplibre-gl-shared.mjs" />
+    <link rel="modulepreload" href="./yearWorker.bundle.js" />
+    <link rel="modulepreload" href="./vendor/maplibre-gl-worker.mjs" />
     <link
       rel="preload"
       as="fetch"
@@ -89,6 +93,11 @@
       href="$data_dir_name/airports.json"
     />
     $year_preload
+    <!-- CARTO's style and the index of its tiles, a round trip each that
+         would otherwise wait for the map and then for the style; with the
+         key on when the site has one, as the page asks for them. After the
+         site's own files, which the flights are drawn from. -->
+    $base_style_preload
   </head>
   <body>
     <noscript>
@@ -276,12 +285,12 @@
         <div class="control-row">
           <button
             id="altitude-btn"
-            class="btn-surface control-btn active"
+            class="btn-surface control-btn"
             data-action="toggleAltitude"
             data-icon="altitude"
             title="Toggle altitude color visualization"
             aria-label="Toggle altitude color visualization"
-            aria-pressed="true"
+            aria-pressed="false"
           >
             <span class="control-label">Altitude</span>
           </button>
@@ -294,11 +303,11 @@
             data-action="toggleAirspeed"
             data-icon="speed"
             disabled
-            title="Speed: color paths by groundspeed"
-            aria-label="Speed: color paths by groundspeed"
+            title="Groundspeed: color paths by speed over the ground"
+            aria-label="Groundspeed: color paths by speed over the ground"
             aria-pressed="false"
           >
-            <span class="control-label">Speed</span>
+            <span class="control-label">Groundspeed</span>
           </button>
           <span class="ramp-chip ramp-chip-speed" aria-hidden="true"></span>
         </div>
@@ -447,10 +456,16 @@
       <div
         class="gradient-bar"
         role="img"
-        aria-label="Altitude gradient from low to high"
+        aria-label="Altitude gradient from low to high, spread by rank"
       ></div>
+      <!-- The colours are spread by rank (see scalePosition): the middle
+           label is the median, which the middle of the bar colours -->
       <div class="labels">
         <span id="legend-min">0 ft</span>
+        <span
+          ><span class="visually-hidden">median </span
+          ><span id="legend-mid">5,000 ft</span></span
+        >
         <span id="legend-max">10,000 ft</span>
       </div>
     </div>
@@ -465,13 +480,18 @@
       <div
         class="gradient-bar"
         role="img"
-        aria-label="Groundspeed gradient from slow to fast"
+        aria-label="Groundspeed gradient from slow to fast, spread by rank"
       ></div>
       <!-- The scale spans the middle nine tenths of the speeds, and the
            slowest and fastest take the colours of its ends (see
-           calculateAirspeedRange), which the signs say -->
+           calculateAirspeedRange), which the signs say. Between them the
+           colours are spread by rank: the middle label is the median. -->
       <div class="labels">
         <span>≤ <span id="airspeed-legend-min">0 kt</span></span>
+        <span
+          ><span class="visually-hidden">median </span
+          ><span id="airspeed-legend-mid">100 kt</span></span
+        >
         <span>≥ <span id="airspeed-legend-max">200 kt</span></span>
       </div>
     </div>
@@ -495,15 +515,10 @@
       </button>
     </div>
 
-    <div
-      id="map"
-      role="application"
-      aria-label="Flight map visualization"
-      tabindex="-1"
-    ></div>
-
     <!-- Said in place of the flights when the first year could not be
-         loaded, with the way to ask for it again (appInitializer.ts) -->
+         loaded, with the way to ask for it again (appInitializer.ts). Ahead
+         of the map, like the controls: after it, its Retry was 55 presses
+         of Tab away, past every airport marker. -->
     <div id="map-empty" hidden>
       <p>The flights could not be loaded.</p>
       <button
@@ -516,6 +531,17 @@
         <span class="control-label">Retry</span>
       </button>
     </div>
+
+    <!-- The toasts stack here (utils/toast.ts), ahead of the map for the
+         same reason: an error's Retry and Dismiss are buttons -->
+    <div id="toast-stack" class="toast-stack"></div>
+
+    <div
+      id="map"
+      role="application"
+      aria-label="Flight map visualization"
+      tabindex="-1"
+    ></div>
 
     <!-- Toast announcements. Present from the start, so screen readers track
          them before utils/toast.ts writes a message into one. -->

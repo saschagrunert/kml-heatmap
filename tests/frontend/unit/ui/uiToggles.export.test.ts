@@ -7,7 +7,6 @@ import {
   UIToggles,
   dataUrlToBlob,
   exportScale,
-  isSmallDevice,
   loadHtmlToImage,
   importFromVendor,
   resetHtmlToImageLoader,
@@ -94,6 +93,8 @@ describe("UIToggles export and share", () => {
     delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
     document.querySelectorAll(".toast-notification").forEach((e) => e.remove());
     resetHtmlToImageLoader();
+    // Without media queries the phone layout goes by the width alone
+    Reflect.deleteProperty(window, "matchMedia");
     setInnerWidth(1024);
     setDevicePixelRatio(1);
     deleteNavigatorProperty("share");
@@ -217,33 +218,6 @@ describe("UIToggles export and share", () => {
     it("tolerates a map that has no size yet", () => {
       setInnerWidth(1280);
       expect(exportScale(0, 0)).toBe(2);
-    });
-  });
-
-  describe("isSmallDevice", () => {
-    it("is true for narrow viewports", () => {
-      setInnerWidth(500);
-      expect(isSmallDevice()).toBe(true);
-    });
-
-    it("is true for coarse pointers on wide viewports", () => {
-      setInnerWidth(1200);
-      Object.defineProperty(window, "matchMedia", {
-        value: vi.fn(() => ({ matches: true })),
-        configurable: true,
-        writable: true,
-      });
-      expect(isSmallDevice()).toBe(true);
-    });
-
-    it("is false for wide viewports with a fine pointer", () => {
-      setInnerWidth(1200);
-      Object.defineProperty(window, "matchMedia", {
-        value: vi.fn(() => ({ matches: false })),
-        configurable: true,
-        writable: true,
-      });
-      expect(isSmallDevice()).toBe(false);
     });
   });
 
@@ -704,6 +678,28 @@ describe("UIToggles export and share", () => {
       expect(share).not.toHaveBeenCalled();
       expect(writeText).toHaveBeenCalledWith(window.location.href);
       expect(toast()?.textContent).toBe("Link copied");
+    });
+
+    it("copies the link on a tablet, whose control says Copy link", async () => {
+      // A finger for a pointer, but the columns' layout: the share sheet
+      // opened there instead of copying (regression)
+      setInnerWidth(1024);
+      Object.defineProperty(window, "matchMedia", {
+        value: vi.fn((query: string) => ({
+          matches: query.includes("coarse") || query.includes("hover: none"),
+        })),
+        configurable: true,
+        writable: true,
+      });
+      const share = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("share", share);
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("clipboard", { writeText });
+
+      await uiToggles.shareLink();
+
+      expect(share).not.toHaveBeenCalled();
+      expect(writeText).toHaveBeenCalledWith(window.location.href);
     });
 
     it("falls back to the clipboard when sharing fails", async () => {

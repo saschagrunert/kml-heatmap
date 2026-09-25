@@ -43,12 +43,26 @@ export function highlightsSelection(app: MapApp): boolean {
 }
 
 /**
- * Whether the heatmap steps back for what is drawn over it: a colour layer
- * or the selection's lines. Worked out here with the lines themselves, so
- * the two cannot disagree.
+ * Whether the heatmap steps back for what is drawn over it: a colour layer,
+ * the selection's lines, or the aviation chart, whose airspace outlines and
+ * labels drowned under the bloom at full strength. Worked out here with the
+ * lines themselves, so the two cannot disagree.
  */
 export function dimsHeatmap(app: MapApp): boolean {
-  return app.altitudeVisible || app.airspeedVisible || highlightsSelection(app);
+  return (
+    app.altitudeVisible ||
+    app.airspeedVisible ||
+    app.aviationVisible ||
+    highlightsSelection(app)
+  );
+}
+
+/**
+ * Whether paths are coloured by altitude: the altitude layer, or a replay
+ * trail, which takes altitude colours unless the speed layer is on
+ */
+export function altitudeColours(app: MapApp): boolean {
+  return app.altitudeVisible || (app.replayActive && !app.airspeedVisible);
 }
 
 /**
@@ -77,16 +91,16 @@ export function followLayerVisibility(app: MapApp): void {
 
     // The heatmap is hidden for a replay, so its toggle must not report it
     // as on. The replay trail is coloured by altitude unless the speed
-    // layer is on, so it needs the altitude scale with neither layer on.
+    // layer is on, so it needs the altitude scale with neither layer on,
+    // and the altitude toggle says so: it said off over a trail and a
+    // legend in altitude colours.
     const button = domCache.get("heatmap-btn");
     if (button) applyToggleButtonState(button, heatmap);
+    const altitude = altitudeColours(app);
+    const altitudeButton = domCache.get("altitude-btn");
+    if (altitudeButton) applyToggleButtonState(altitudeButton, altitude);
     const legend = domCache.get("altitude-legend");
-    if (legend) {
-      applyLegendVisibility(
-        legend,
-        app.altitudeVisible || (replay && !app.airspeedVisible),
-      );
-    }
+    if (legend) applyLegendVisibility(legend, altitude);
   };
   app.store.subscribeKeys(LAYER_KEYS, apply);
   apply();

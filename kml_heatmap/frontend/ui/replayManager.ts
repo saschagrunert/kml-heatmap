@@ -6,19 +6,18 @@ import type { GeoJSONSource } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
-import { findMinMax } from "../utils/arrayHelpers";
 import { formatTime } from "../utils/formatters";
 import { applyToggleButtonState } from "../utils/buttonState";
 import { setControlIcon } from "../utils/icons";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
 import {
   airplaneLiftPx,
-  groundProfilesFt,
   heightAtZoomFt,
   liftExaggeration,
   reliefLevel,
-  type SmoothedFlights,
 } from "../calculations/lift";
+import type { SmoothedFlights } from "../calculations/smoothing";
+import { groundProfilesFt } from "../calculations/groundProfile";
 import { appendCurve } from "../calculations/curves";
 import {
   toBounds,
@@ -48,7 +47,10 @@ import {
   REPLAY_BUTTON_LABEL,
   REPLAY_PRECONDITION_MESSAGE,
 } from "./replayButton";
-import { calculateAirspeedRange } from "../features/layers";
+import {
+  calculateAirspeedRange,
+  calculateAltitudeRange,
+} from "../features/layers";
 
 const REPLAY_EXIT_LABEL = "Close replay";
 
@@ -84,6 +86,16 @@ const REPLAY_DISABLED_CONTROL_IDS = [
 
 /** Custom property holding the replay panel's height, read by styles.css */
 export const REPLAY_PANEL_HEIGHT_VAR = "--replay-panel-h";
+
+/**
+ * Custom property holding the height of the colour legend on screen during
+ * a replay, read by features.css: where the legend stands on top of the
+ * panel, the toasts go above it
+ */
+export const REPLAY_LEGEND_HEIGHT_VAR = "--replay-legend-h";
+
+/** The colour legends, one of which may show during a replay */
+const LEGEND_IDS = ["altitude-legend", "airspeed-legend"];
 
 /**
  * How far a key moves the timeline, as a share of the flight. The native
@@ -145,6 +157,8 @@ export class ReplayManager {
    * back when it ends unless another one was chosen meanwhile
    */
   private speedBeforeChase: string | null = null;
+  /** Measures the legends while a replay runs (REPLAY_LEGEND_HEIGHT_VAR) */
+  private legendWatch: ResizeObserver | null = null;
   private readonly onVisibilityChange = (): void => {
     // No frames run in a hidden tab, so the first one after it comes back
     // would count all the hidden time; start timing afresh instead
@@ -163,6 +177,27 @@ export class ReplayManager {
     this.state = app.replayState;
 
     document.addEventListener("visibilitychange", this.onVisibilityChange);
+
+    // Escape leaves the replay, as it leaves Wrapped and the sheets. Not
+    // from the speed picker, whose own list it closes, nor from a popup or
+    // a marker on the map, where it closes the popup.
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key !== "Escape" || !app.replayActive) return;
+        if (event.defaultPrevented) return;
+        const target = event.target;
+        if (
+          target instanceof Element &&
+          target.closest("#replay-speed, .maplibregl-popup, .maplibregl-marker")
+        ) {
+          return;
+        }
+        event.preventDefault();
+        this.toggleReplay();
+      },
+      { signal: app.signal },
+    );
 
     // Announce the final position once a slider drag ends (not per frame)
     const slider = domCache.get("replay-slider");
@@ -216,6 +251,7 @@ export class ReplayManager {
   destroy(): void {
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.stopFollowingLayers();
+    this.unwatchLegends();
     this.renderer.cancelTrailFlush();
     this.renderer.stopWatchingMap();
     if (this.state.animationFrameId) {
@@ -263,6 +299,7 @@ export class ReplayManager {
       REPLAY_PANEL_HEIGHT_VAR,
       panel.offsetHeight + "px",
     );
+    this.watchLegends();
     // The heatmap and the colour layers hide for the replay, and the panel
     // takes the bottom edge: the mobile bar steps aside instead of stacking
     // under it (see ui/layerVisibility.ts, MobileBar)
@@ -288,6 +325,31 @@ export class ReplayManager {
     document.body.classList.add("replay-active");
     this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, true);
     this.followLayers();
+  }
+
+  /**
+   * Keep REPLAY_LEGEND_HEIGHT_VAR at the height of the legend on screen,
+   * which the colour toggles show, swap or hide during the replay
+   */
+  private watchLegends(): void {
+    this.unwatchLegends();
+    const legends = LEGEND_IDS.map((id) => domCache.get(id)).filter(
+      (legend): legend is HTMLElement => legend !== null,
+    );
+    const measure = (): void => {
+      const height = Math.max(0, ...legends.map((l) => l.offsetHeight));
+      document.body.style.setProperty(REPLAY_LEGEND_HEIGHT_VAR, height + "px");
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    this.legendWatch = new ResizeObserver(measure);
+    for (const legend of legends) this.legendWatch.observe(legend);
+  }
+
+  private unwatchLegends(): void {
+    this.legendWatch?.disconnect();
+    this.legendWatch = null;
+    document.body.style.removeProperty(REPLAY_LEGEND_HEIGHT_VAR);
   }
 
   /**
@@ -359,7 +421,7 @@ export class ReplayManager {
       state.smoothed = liftReplayCurve(
         curve,
         state.segments,
-        (i) => state.segments[i]!.altitude_ft ?? 0,
+        (i) => state.segments[i]!.altitude_ft,
         (i) => ground[i]!,
         offsets,
       );
@@ -378,6 +440,7 @@ export class ReplayManager {
     this.stopReplay(false);
     panel.style.display = "none";
     document.body.style.removeProperty(REPLAY_PANEL_HEIGHT_VAR);
+    this.unwatchLegends();
     this.stopFollowingLayers();
 
     // Whether it is available again is settled by MapApp once the replay
@@ -482,7 +545,7 @@ export class ReplayManager {
   }
 
   updateReplayAirplanePopup(): void {
-    this.renderer.updateAirplanePopup(this);
+    this.renderer.updateAirplanePopup(this.state);
   }
 
   initializeReplay(): boolean {
@@ -517,7 +580,7 @@ export class ReplayManager {
     // copies of the segments: the dataset keeps its own.
     const curve = (state.smoothed = replayCurve(
       state.segments,
-      (i) => state.segments[i]!.altitude_ft ?? 0,
+      (i) => state.segments[i]!.altitude_ft,
       (i) => ground[i]!,
       offsets,
     ));
@@ -563,19 +626,17 @@ export class ReplayManager {
     const sourceSegments =
       currentResSegments.length > 0 ? currentResSegments : this.state.segments;
 
-    const altitudes = sourceSegments.map((s) => s.altitude_ft ?? 0);
-    const altRange = findMinMax(altitudes);
-    this.state.colorMinAlt = altRange.min;
-    this.state.colorMaxAlt = altRange.max;
-
-    // Stretched over the middle of the flight's speeds, as the speed layer
-    // is (see calculateAirspeedRange)
-    const speedRange = calculateAirspeedRange(
+    // The flight's own ranges, as the colour layers draw it selected (see
+    // LayerManager.resolveColorRange), its colours spread by its values
+    this.state.colorAltRange = calculateAltitudeRange(
+      sourceSegments,
+      this.app.altitudeRange,
+      this.app.currentData.path_info,
+    );
+    this.state.colorSpeedRange = calculateAirspeedRange(
       sourceSegments,
       this.app.airspeedRange,
     );
-    this.state.colorMinSpeed = speedRange.min;
-    this.state.colorMaxSpeed = speedRange.max;
   }
 
   private setupReplayUI(): void {
@@ -597,14 +658,8 @@ export class ReplayManager {
       sliderStart.textContent = formatTime(0, this.state.maxTime);
     }
 
-    this.app.layerManager.updateAltitudeLegend(
-      this.state.colorMinAlt,
-      this.state.colorMaxAlt,
-    );
-    this.app.layerManager.updateAirspeedLegend(
-      this.state.colorMinSpeed,
-      this.state.colorMaxSpeed,
-    );
+    this.app.layerManager.updateAltitudeLegend(this.state.colorAltRange);
+    this.app.layerManager.updateAirspeedLegend(this.state.colorSpeedRange);
   }
 
   /**
@@ -676,7 +731,7 @@ export class ReplayManager {
     this.state.airplaneMarker = null;
 
     const firstSegment = this.state.segments[0];
-    const startCoords = firstSegment?.coords?.[0];
+    const startCoords = firstSegment?.coords[0];
     if (!startCoords || !this.app.map) return false;
 
     this.startReplayLayer();
@@ -694,7 +749,7 @@ export class ReplayManager {
 
   private setInitialView(): void {
     const firstSegment = this.state.segments[0];
-    const startCoords = firstSegment?.coords?.[0];
+    const startCoords = firstSegment?.coords[0];
     if (!startCoords || !this.app.map) return;
 
     this.app.map.easeTo({
@@ -726,7 +781,7 @@ export class ReplayManager {
 
       if (this.state.airplaneMarker && this.state.segments.length > 0) {
         const firstSeg = this.state.segments[0];
-        const startCoords = firstSeg?.coords?.[0];
+        const startCoords = firstSeg?.coords[0];
         if (startCoords) {
           this.state.airplaneMarker.setLatLng([startCoords[0], startCoords[1]]);
 
@@ -819,7 +874,7 @@ export class ReplayManager {
     this.state.resetDrawState();
     if (this.state.airplaneMarker && this.state.segments.length > 0) {
       const firstSeg = this.state.segments[0];
-      const startCoords = firstSeg?.coords?.[0];
+      const startCoords = firstSeg?.coords[0];
       if (startCoords) {
         this.state.airplaneMarker.setLatLng([startCoords[0], startCoords[1]]);
       }
@@ -835,7 +890,7 @@ export class ReplayManager {
     if (newTime < this.state.currentTime) {
       // Drop only the segments after the new position; starting the trail
       // over would colour the entire flight again on every drag event
-      this.renderer.removeSegmentsAfter(this, newTime);
+      this.renderer.removeSegmentsAfter(this.state, newTime);
     }
 
     this.state.currentTime = newTime;
@@ -954,7 +1009,7 @@ export class ReplayManager {
   }
 
   updateReplayDisplay(isManualSeek: boolean = false): void {
-    this.renderer.updateDisplay(this, isManualSeek);
+    this.renderer.updateDisplay(this.state, isManualSeek);
   }
 }
 
@@ -996,8 +1051,7 @@ export function routeCoordinates(
 ): LngLatTuple[] {
   const coords: LngLatTuple[] = [];
   segments.forEach((segment, index) => {
-    const start = segment.coords?.[0];
-    if (!start) return;
+    const start = segment.coords[0];
     if (!curves) {
       coords.push(toLngLat(start));
       return;
@@ -1011,7 +1065,7 @@ export function routeCoordinates(
     }
     appendCurve(coords, curves, index);
   });
-  const last = segments[segments.length - 1]?.coords?.[1];
+  const last = segments[segments.length - 1]?.coords[1];
   if (last && !curves) coords.push(toLngLat(last));
   return coords;
 }

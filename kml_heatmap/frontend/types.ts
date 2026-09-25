@@ -5,8 +5,8 @@
 import type { LngLat, Marker, Point } from "maplibre-gl";
 import type { Coordinate } from "./utils/geometry";
 import type { IconName } from "./utils/icons";
-import type { importYearTools } from "./services/dataLoader";
-import type { RibbonProperties } from "./calculations/lift";
+import type { RibbonProperties } from "./calculations/ribbons";
+import type { ToggleFlags } from "./state/toggles";
 
 /**
  * Path information from KML data.
@@ -35,12 +35,17 @@ export interface PathInfo {
 /**
  * Path segment (in-memory shape expanded by the DataLoader), representing a
  * line between two points with associated altitude, speed, and timing data.
+ * The decoder sets the first four for every segment (services/yearDataset.ts).
  */
 export interface PathSegment {
   path_id: number;
-  coords?: [Coordinate, Coordinate] | undefined;
-  altitude_ft?: number | undefined;
-  groundspeed_knots?: number | undefined;
+  coords: [Coordinate, Coordinate];
+  altitude_ft: number;
+  /**
+   * Knots; 0 where the build knew none (a log without timing), which is
+   * no speed rather than standing still
+   */
+  groundspeed_knots: number;
   time?: number | undefined;
   /**
    * Feet of ground under the segment's end, from the elevation model of the
@@ -145,6 +150,12 @@ export interface FilteredStatistics {
   max_groundspeed_knots?: number | undefined;
   avg_groundspeed_knots?: number | undefined;
   cruise_speed_knots?: number | undefined;
+  /**
+   * The cruise figures are heights above the terrain under the flights
+   * (AGL); false when some flight had no terrain in the export and was
+   * measured above its own airfield instead. Undefined without a cruise.
+   */
+  cruise_height_above_terrain?: boolean | undefined;
   longest_flight_km?: number | undefined;
   longest_flight_nm?: number | undefined;
   total_flight_time_seconds?: number | undefined;
@@ -160,6 +171,11 @@ export interface Airport {
   name: string;
   lat: number;
   lon: number;
+  /**
+   * ICAO code the export found in the name (airport_icao_code in
+   * kml_heatmap/airport_lookup.py); left out for a name without one
+   */
+  code?: string;
   country?: string;
 }
 
@@ -306,28 +322,15 @@ export interface TrailRun {
 }
 
 /**
- * Application state (used for URL encoding and state management)
+ * Application state (used for URL encoding and state management). The
+ * toggles (state/toggles.ts) are each absent or a flag.
  */
-export interface AppState {
+export interface AppState extends Partial<ToggleFlags> {
   /** Schema version of selectedPathIds; see STATE_SCHEMA_VERSION */
   schemaVersion?: number;
   selectedYear?: string;
   selectedAircraft?: string;
   selectedPathIds?: number[];
-  heatmapVisible?: boolean;
-  altitudeVisible?: boolean;
-  airspeedVisible?: boolean;
-  airportsVisible?: boolean;
-  aviationVisible?: boolean;
-  statsPanelVisible?: boolean;
-  wrappedVisible?: boolean;
-  /**
-   * Legacy control-visibility flag. The control chrome no longer hides, so
-   * the value is parsed and then dropped; the slot stays in the URL string
-   * to keep older shared links readable.
-   */
-  buttonsHidden?: boolean;
-  isolateSelection?: boolean;
   center?: MapCenter;
   /** In state (legacy) units, one above the map's; see ZOOM_OFFSET */
   zoom?: number;
@@ -335,12 +338,6 @@ export interface AppState {
   bearing?: number;
   /** Degrees the map is tilted, 0 to MAP_MAX_PITCH; absent means flat */
   pitch?: number;
-  /** Whether the map is drawn as a globe; absent means Mercator */
-  globeVisible?: boolean;
-  /** Whether the flights are lifted to their altitude; absent means flat */
-  threeDVisible?: boolean;
-  /** Whether the ground is satellite imagery; absent means the dark map */
-  satelliteVisible?: boolean;
 }
 
 /**
@@ -430,43 +427,4 @@ export interface FetchJsonOptions {
    * to show but that the file is loading.
    */
   onProgress?: (loadedBytes: number) => void;
-}
-
-/**
- * DataLoader constructor options
- */
-export interface DataLoaderOptions {
-  dataDir?: string;
-  /** `onProgress` is given for year files of a known size, the ones a bar is drawn for */
-  fetchJson?: (url: string, options?: FetchJsonOptions) => Promise<unknown>;
-  /** Fetches the year files, which the year worker parses; same options */
-  fetchBytes?: (
-    url: string,
-    options?: FetchJsonOptions,
-  ) => Promise<ArrayBuffer>;
-  /** Imports the year worker's bundle, see importYearTools in the loader */
-  importYearTools?: typeof importYearTools;
-  /** Invoked whenever the loading operation changes, see LoadingState */
-  showLoading?: (state: LoadingState) => void;
-  hideLoading?: () => void;
-  getWindow?: () => Window & typeof globalThis;
-  /**
-   * Invoked once per top-level load when one or more year files failed to
-   * load, with the list of failed years. `stale` is set once a year file
-   * turned out to be of another format than this page reads: a cached page
-   * next to newer data, which a reload of the page cures.
-   */
-  onLoadError?: (failedYears: string[], stale?: boolean) => void;
-}
-
-/**
- * Where the data loader publishes airports.json and metadata.json
- */
-declare global {
-  interface Window {
-    KML_AIRPORTS?: {
-      airports: Airport[];
-    };
-    KML_METADATA?: Metadata;
-  }
 }

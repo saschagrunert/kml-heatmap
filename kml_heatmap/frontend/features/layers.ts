@@ -5,8 +5,8 @@
  */
 
 import type { PathInfo, PathSegment } from "../types";
-import type { Coordinate } from "../utils/geometry";
-import type { SmoothedFlights } from "../calculations/lift";
+import { DEGREES_TO_RADIANS, type Coordinate } from "../utils/geometry";
+import type { SmoothedFlights } from "../calculations/smoothing";
 import {
   DEFAULT_AIRSPEED_RANGE,
   DEFAULT_ALTITUDE_RANGE,
@@ -29,26 +29,114 @@ export interface SegmentProperties {
 export { DEFAULT_ALTITUDE_RANGE, DEFAULT_AIRSPEED_RANGE };
 
 /**
+ * How many evenly spaced steps of rank a colour range keeps the values of
+ * (see Range.ranks): as many as the steps a run of the flights is cut at
+ * (see LayerManager), more than the eye tells apart on the ramp
+ */
+export const RANK_STEPS = 32;
+
+/**
+ * Where the `i`-th of the ranks rankValues reads is in a sorted array whose
+ * last index is `last`
+ */
+function rankIndex(i: number, last: number, from: number, to: number): number {
+  return Math.round((from + ((to - from) * i) / RANK_STEPS) * last);
+}
+
+/**
+ * Put the values a sort would put at the indices `ks` (ascending) there,
+ * and every smaller value before each, every larger one after it: a
+ * quickselect of all of them at once, which goes into the parts of the
+ * array with one of `ks` in them only. The ranks of a year's groundspeeds
+ * took a sort of all of them at every change of the dataset, 30 to 50 ms on
+ * a phone; this is two to three times faster.
+ */
+export function selectRanks(values: Float64Array, ks: readonly number[]): void {
+  const parts = [0, values.length - 1, 0, ks.length];
+  while (parts.length > 0) {
+    const [lo, hi, from, to] = parts.splice(-4) as [
+      number,
+      number,
+      number,
+      number,
+    ];
+    if (from >= to) continue;
+    if (hi - lo < 64) {
+      values.subarray(lo, hi + 1).sort();
+      continue;
+    }
+    const pivot = values[(lo + hi) >> 1]!;
+    let i = lo;
+    let j = hi;
+    while (i <= j) {
+      while (values[i]! < pivot) i++;
+      while (values[j]! > pivot) j--;
+      if (i <= j) {
+        [values[i], values[j]] = [values[j]!, values[i]!];
+        i++;
+        j--;
+      }
+    }
+    // Up to j at most the pivot, from i on at least it, the pivot between
+    let m = from;
+    while (m < to && ks[m]! <= j) m++;
+    let n = m;
+    while (n < to && ks[n]! < i) n++;
+    parts.push(lo, j, from, m, i, hi, n, to);
+  }
+}
+
+/**
+ * The values of `sorted` (ascending) at RANK_STEPS + 1 evenly spaced ranks
+ * from the share `from` of them to the share `to`, held between `min` and
+ * `max`, which the first and the last are
+ */
+export function rankValues(
+  sorted: ArrayLike<number>,
+  min: number,
+  max: number,
+  from = 0,
+  to = 1,
+): number[] {
+  const ranks: number[] = [];
+  for (let i = 0; i <= RANK_STEPS; i++) {
+    const value = sorted[rankIndex(i, sorted.length - 1, from, to)] ?? min;
+    // Never below the rank before: rounding at either end may reach past
+    ranks.push(
+      Math.max(Math.min(Math.max(value, min), max), ranks[i - 1] ?? min),
+    );
+  }
+  ranks[0] = min;
+  ranks[RANK_STEPS] = max;
+  return ranks;
+}
+
+/**
  * Altitude colour range (feet) of the given segments, falling back to
  * `defaultRange` when none has an altitude. Callers pass the segments of the
  * paths the range is for (the selection, or the whole dataset).
  *
- * The range uses the exact per-path altitudes from `paths` where they exist,
- * like the statistics panel beside the legend does (see altitudeRangeFt).
+ * The ends are the exact per-path altitudes from `paths`, like the
+ * statistics panel beside the legend (see altitudeRangeFt), and the colours
+ * are spread by the segments' altitudes between them (see scalePosition),
+ * the median in the middle of the ramp, where the legend names it.
  * Negative altitudes (below the MSL reference) are kept in the data but drawn
  * with the lowest colour: the scale's lower bound is clamped at 0 ft so the
  * legend and colours match the previous (clamped) exports.
  */
 export function calculateAltitudeRange(
   segments: PathSegment[],
-  defaultRange: Range = DEFAULT_ALTITUDE_RANGE,
-  paths?: PathInfo[],
+  defaultRange: Range,
+  paths: PathInfo[],
 ): Range {
   const range = altitudeRangeFt(segments, paths);
   if (range === null) return defaultRange;
 
-  const { min, max } = range;
-  return min < 0 ? { min: 0, max: Math.max(max, 0) } : { min, max };
+  const min = Math.max(range.min, 0);
+  const max = Math.max(range.max, 0);
+  const altitudes = new Float64Array(segments.length);
+  segments.forEach((segment, i) => (altitudes[i] = segment.altitude_ft));
+  return { min, max, ranks: rankValues(altitudes.sort(), min, max) };
 }
 
 /** Share of the speeds that falls below and above the ends of the scale */
@@ -59,27 +147,65 @@ const AIRSPEED_RANGE_TAIL = 0.05;
  * without a positive speed. Falls back to `defaultRange` when none has one.
  *
  * The scale runs from the 5th to the 95th percentile rather than from the
- * slowest to the fastest segment. Most of a flight is spent near its cruise
- * speed, and a few taxi crawls and one fast descent stretched the full range
- * so far that more than half the segments fell into a handful of adjacent
- * steps of the ramp. The tails take the colours of the ends, and the legend
- * says so. A dataset whose middle has no spread keeps the full range.
+ * slowest to the fastest segment, whose tails take the colours of its ends,
+ * which the legend says: a GPS fix that jumped made one segment of a year
+ * fly at several hundred knots. Between them the colours are spread by the
+ * speeds (see scalePosition): a flight taxis at a crawl and cruises near
+ * one speed, and spread evenly over the values the taxiing and the cruise
+ * each took a few neighbouring colours. A dataset whose middle has no
+ * spread keeps the full range.
  */
 export function calculateAirspeedRange(
   segments: PathSegment[],
   defaultRange: Range = DEFAULT_AIRSPEED_RANGE,
 ): Range {
-  const speeds: number[] = [];
+  let count = 0;
+  const speeds = new Float64Array(segments.length);
   for (const segment of segments) {
     const speed = segment.groundspeed_knots;
-    if (speed !== undefined && speed > 0) speeds.push(speed);
+    if (speed > 0) speeds[count++] = speed;
   }
-  if (speeds.length === 0) return defaultRange;
-  const sorted = Float64Array.from(speeds).sort();
-  const last = sorted.length - 1;
-  const min = sorted[Math.floor(AIRSPEED_RANGE_TAIL * last)]!;
-  const max = sorted[Math.ceil((1 - AIRSPEED_RANGE_TAIL) * last)]!;
-  return min < max ? { min, max } : { min: sorted[0]!, max: sorted[last]! };
+  if (count === 0) return defaultRange;
+  // Only the values the scale reads are put in their place, see selectRanks
+  const sorted = speeds.subarray(0, count);
+  const last = count - 1;
+  const low = Math.floor(AIRSPEED_RANGE_TAIL * last);
+  const high = Math.ceil((1 - AIRSPEED_RANGE_TAIL) * last);
+  const tail = [AIRSPEED_RANGE_TAIL, 1 - AIRSPEED_RANGE_TAIL] as const;
+  selectRanks(
+    sorted,
+    [
+      low,
+      high,
+      ...Array.from({ length: RANK_STEPS + 1 }, (_, i) =>
+        rankIndex(i, last, ...tail),
+      ),
+    ].sort((a, b) => a - b),
+  );
+  const min = sorted[low]!;
+  const max = sorted[high]!;
+  if (min < max) {
+    return { min, max, ranks: rankValues(sorted, min, max, ...tail) };
+  }
+  sorted.sort();
+  return {
+    min: sorted[0]!,
+    max: sorted[last]!,
+    ranks: rankValues(sorted, sorted[0]!, sorted[last]!),
+  };
+}
+
+/**
+ * The value in the middle of a colour range's ramp: its median where the
+ * colours are spread by rank, halfway between its ends otherwise
+ */
+export function rangeMiddle(range: Range): number {
+  const ranks = range.ranks;
+  if (ranks && ranks.length > 2) {
+    const half = (ranks.length - 1) / 2;
+    return (ranks[Math.floor(half)]! + ranks[Math.ceil(half)]!) / 2;
+  }
+  return (range.min + range.max) / 2;
 }
 
 /**
@@ -156,7 +282,7 @@ function distanceToSegmentSquared(
   a: [number, number],
   b: [number, number],
 ): number {
-  const scale = Math.cos((lat * Math.PI) / 180);
+  const scale = Math.cos(lat * DEGREES_TO_RADIANS);
   const ax = a[1] * scale;
   const ay = a[0];
   const bx = b[1] * scale;
@@ -199,7 +325,6 @@ export function findNearestSegment(
   let bestDistance = Infinity;
   for (const segment of segments) {
     const coords = segment.coords;
-    if (!coords) continue;
     const turns = Math.round((coords[0][1] - lng) / 360);
     const d = distanceToSegmentSquared(
       lat,

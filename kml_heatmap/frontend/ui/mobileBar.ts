@@ -16,14 +16,17 @@
  * the bottom edge, so the two never stack.
  */
 import type { MapApp } from "../mapApp";
-import type { SheetRow } from "./mobileSheet";
+import type { SheetRow, SheetSwitchRow } from "./mobileSheet";
 import { MobileSheet } from "./mobileSheet";
 import { icon, type IconName } from "../utils/icons";
-import { MOBILE_BREAKPOINT_PX } from "../utils/constants";
+import { canShareLink, PHONE_LAYOUT_QUERY } from "../utils/device";
+import {
+  TOGGLES,
+  type Toggle,
+  type ToggleKey,
+  type ToggleSheetRow,
+} from "../state/toggles";
 import { runAction } from "./actions";
-
-/** Bar and sheet exist only below this width (matches the CSS breakpoint) */
-export const MOBILE_BAR_BREAKPOINT_PX = MOBILE_BREAKPOINT_PX;
 
 /** Control columns the bar replaces while it is mounted */
 const LEGACY_CONTROL_IDS = ["left-buttons", "right-buttons"];
@@ -34,21 +37,37 @@ const LEGACY_CONTROL_IDS = ["left-buttons", "right-buttons"];
  * opened during the first load showed an empty aircraft list until closed.
  */
 const SHEET_KEYS = [
-  "heatmapVisible",
-  "altitudeVisible",
-  "airspeedVisible",
-  "airportsVisible",
-  "aviationVisible",
-  "globeVisible",
-  "threeDVisible",
-  "satelliteVisible",
+  ...TOGGLES.filter((toggle: Toggle) => "sheet" in toggle).map(
+    (toggle) => toggle.key,
+  ),
   "selectedPathIds",
-  "isolateSelection",
   "selectedYear",
   "selectedAircraft",
   "currentData",
   "hasTimingData",
 ] as const;
+
+/** A toggle's switch in a sheet: when it is unavailable, and what says why */
+type SwitchState = Pick<SheetSwitchRow, "isDisabled" | "hint">;
+
+/** What the switches of the toggles have beyond their entry in the table */
+function switchStates(
+  app: Pick<MapApp, "hasTimingData" | "selectedPathIds">,
+): Partial<Record<ToggleKey, SwitchState>> {
+  return {
+    // Read from the store rather than off the desktop button, which is a
+    // copy of the same flag
+    airspeedVisible: {
+      isDisabled: () => !app.hasTimingData,
+      hint: () => (app.hasTimingData ? null : "No timing data in the flights"),
+    },
+    isolateSelection: {
+      isDisabled: () => app.selectedPathIds.size === 0,
+      hint: () =>
+        app.selectedPathIds.size === 0 ? "Select flights to isolate" : null,
+    },
+  };
+}
 
 type TabId = "layers" | "filter" | "stats" | "wrapped" | "more";
 
@@ -103,11 +122,7 @@ export class MobileBar {
       this.root.append(tab);
     }
 
-    // Just under the breakpoint, like the stylesheet, so the two agree on
-    // a fractional width such as 767.5px
-    this.mql = window.matchMedia(
-      `(max-width: ${MOBILE_BAR_BREAKPOINT_PX - 0.02}px)`,
-    );
+    this.mql = window.matchMedia(PHONE_LAYOUT_QUERY);
     this.onBreakpoint = (e) => this.syncBreakpoint(e.matches);
   }
 
@@ -206,7 +221,13 @@ export class MobileBar {
     const store = this.app.store;
     this.unsubscribes.push(
       store.subscribe("statsPanelVisible", () => this.syncTabs()),
-      store.subscribe("wrappedVisible", () => this.syncTabs()),
+      store.subscribe("wrappedVisible", (visible) => {
+        this.syncTabs();
+        // A bar mounted while Wrapped held the map went to the end of the
+        // page, after the map's markers in the tab order; the map is back
+        // by the time the dialog says it closed
+        if (!visible && this.isVisible()) insertBeforeMap(this.root);
+      }),
     );
     for (const key of SHEET_KEYS) {
       this.unsubscribes.push(
@@ -262,7 +283,7 @@ export class MobileBar {
     }
     switch (id) {
       case "layers":
-        this.openSheet(id, "Layers", this.layerRows());
+        this.openSheet(id, "Layers", this.toggleRows("layers"));
         break;
       case "filter":
         this.openSheet(id, "Filter", this.filterRows());
@@ -322,89 +343,31 @@ export class MobileBar {
   }
 
   private isTabActive(id: TabId): boolean {
-    if (id === "stats") return this.app.store.get("statsPanelVisible");
-    if (id === "wrapped") return this.app.store.get("wrappedVisible") === true;
+    if (id === "stats") return this.app.statsPanelVisible;
+    if (id === "wrapped") return this.app.wrappedVisible;
     return this.openTab === id;
   }
 
-  private layerRows(): SheetRow[] {
+  /** The switches of the toggles a sheet group holds, in table order */
+  private toggleRows(group: "layers" | "more"): SheetRow[] {
     const app = this.app;
-    return [
-      {
+    const states = switchStates(app);
+    const rows: SheetRow[] = [];
+    for (const toggle of TOGGLES) {
+      if (!("sheet" in toggle) || toggle.sheet.group !== group) continue;
+      const sheet: ToggleSheetRow = toggle.sheet;
+      rows.push({
         kind: "switch",
-        id: "heatmap",
-        icon: "heatmap",
-        label: "Heatmap",
-        isOn: () => app.heatmapVisible,
-        onToggle: () => runAction(app, "toggleHeatmap"),
-      },
-      {
-        kind: "switch",
-        id: "airports",
-        icon: "airport",
-        label: "Airports",
-        isOn: () => app.airportsVisible,
-        onToggle: () => runAction(app, "toggleAirports"),
-      },
-      {
-        kind: "switch",
-        id: "altitude",
-        icon: "altitude",
-        label: "Altitude",
-        chip: "altitude",
-        isOn: () => app.altitudeVisible,
-        onToggle: () => runAction(app, "toggleAltitude"),
-      },
-      {
-        kind: "switch",
-        id: "speed",
-        icon: "speed",
-        label: "Speed",
-        chip: "speed",
-        isOn: () => app.airspeedVisible,
-        // Read from the store rather than off the desktop button, which is
-        // a copy of the same flag
-        isDisabled: () => !app.hasTimingData,
-        hint: () =>
-          app.hasTimingData ? null : "No timing data in the flights",
-        onToggle: () => runAction(app, "toggleAirspeed"),
-      },
-      {
-        kind: "switch",
-        id: "aviation",
-        icon: "aviation",
-        label: "Aviation",
-        isOn: () => app.aviationVisible,
-        onToggle: () => runAction(app, "toggleAviation"),
-      },
-      // Not a layer, but how the layers are drawn, and this is the sheet
-      // someone looks in for it. The compass floats over the map instead
-      // (see MapOrientation): it has to be in reach while the map is turned.
-      {
-        kind: "switch",
-        id: "globe",
-        icon: "globe",
-        label: "Globe",
-        isOn: () => app.globeVisible,
-        onToggle: () => runAction(app, "toggleGlobe"),
-      },
-      {
-        kind: "switch",
-        id: "three-d",
-        icon: "threeD",
-        label: "3D",
-        isOn: () => app.threeDVisible,
-        onToggle: () => runAction(app, "toggleThreeD"),
-      },
-      {
-        kind: "switch",
-        id: "satellite",
-        icon: "satellite",
-        label: "Satellite",
-        isOn: () => app.satelliteVisible,
-        onToggle: () => runAction(app, "toggleSatellite"),
-      },
-    ];
+        id: sheet.id,
+        icon: toggle.icon,
+        label: sheet.label ?? toggle.label,
+        ...(sheet.chip ? { chip: sheet.chip } : {}),
+        ...states[toggle.key],
+        isOn: () => app[toggle.key],
+        onToggle: () => runAction(app, toggle.action),
+      });
+    }
+    return rows;
   }
 
   private filterRows(): SheetRow[] {
@@ -433,7 +396,8 @@ export class MobileBar {
         kind: "action",
         id: "replay",
         icon: "play",
-        label: "Replay flight",
+        // The name the control has in the columns
+        label: "Replay",
         hint: () =>
           app.canReplay() ? null : "Select one flight with timing data",
         isDisabled: () => !app.canReplay(),
@@ -441,17 +405,7 @@ export class MobileBar {
           runAction(app, "toggleReplay");
         },
       },
-      {
-        kind: "switch",
-        id: "isolate",
-        icon: "isolate",
-        label: "Isolate selection",
-        isOn: () => app.isolateSelection,
-        isDisabled: () => app.selectedPathIds.size === 0,
-        hint: () =>
-          app.selectedPathIds.size === 0 ? "Select flights to isolate" : null,
-        onToggle: () => runAction(app, "toggleIsolateSelection"),
-      },
+      ...this.toggleRows("more"),
       {
         kind: "action",
         id: "reset-view",
@@ -477,7 +431,8 @@ export class MobileBar {
         kind: "action",
         id: "share",
         icon: "share",
-        label: "Copy link",
+        // What the row does: the share sheet, where the phone has one
+        label: canShareLink() ? "Share link" : "Copy link",
         onSelect: () => runAction(app, "shareLink"),
       },
       {

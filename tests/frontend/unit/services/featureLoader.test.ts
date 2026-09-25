@@ -26,7 +26,7 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
 }));
 
 const loadStylesheet = vi.hoisted(() => vi.fn());
-vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
+vi.mock("../../../../kml_heatmap/frontend/services/stylesheet", () => ({
   loadStylesheet,
 }));
 

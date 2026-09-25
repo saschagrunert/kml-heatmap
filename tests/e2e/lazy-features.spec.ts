@@ -1,12 +1,15 @@
 /**
- * Replay and Wrapped are fetched only when they are used.
+ * Replay, Wrapped and the statistics panel are fetched only when they are
+ * used.
  *
- * They are a quarter of the frontend and most visits open neither, so each
- * is built into a bundle of its own, and its styles into a stylesheet of its
- * own, that the page imports on demand. The saving is only real if a first
- * visit fetches none of them, and a feature only works if both of its files
- * arrive when it is opened, so both halves are checked here. Opening Wrapped
- * says nothing about replay, so it must not fetch replay's files either.
+ * They are a large part of the frontend and most visits open none of them,
+ * so replay and Wrapped are each built into a bundle of its own, and its
+ * styles into a stylesheet of its own, that the page imports on demand; the
+ * statistics panel rides in the Wrapped bundle. The saving is only real if a
+ * first visit fetches none of them, and a feature only works if both of its
+ * files arrive when it is opened, so both halves are checked here. Opening
+ * Wrapped says nothing about replay, so it must not fetch replay's files
+ * either.
  */
 import { test, expect } from "./fixtures";
 import {
@@ -14,9 +17,13 @@ import {
   gotoApp,
   openWrapped,
   toastMessage,
+  toggleStatsPanel,
   usesMobileBar,
   waitForAppReady,
+  waitForPathData,
+  waitForStatsContent,
 } from "./helpers";
+import { mapPopup, openAirportPopup } from "./map";
 import type { Page } from "./fixtures";
 
 const FEATURES = "features.bundle.js";
@@ -168,5 +175,88 @@ test.describe("the lazy bundles", () => {
       .locator("#wrapped-container")
       .evaluate((el) => getComputedStyle(el).display);
     expect(styled).toBe("flex");
+  });
+
+  test("bring the statistics panel with the Wrapped bundle, once", async ({
+    page,
+  }) => {
+    const requested = trackBundleRequests(page, WRAPPED);
+    const css = trackCssRequests(page, WRAPPED_CSS);
+    const features = trackBundleRequests(page, FEATURES);
+    await gotoApp(page);
+    await waitForAppReady(page);
+
+    await toggleStatsPanel(page);
+    const panel = page.locator("#stats-panel");
+    await expect(panel).toContainText("Flights");
+    // Styled, not merely filled: the lead figures' grid is in wrapped.css
+    const lead = await panel
+      .locator(".kh-stats-lead")
+      .evaluate((el) => getComputedStyle(el).display);
+    expect(lead).toBe("grid");
+    expect(requested).toHaveLength(1);
+    expect(css).toHaveLength(1);
+
+    // Closing and opening again, and Wrapped after it, fetch nothing more
+    await toggleStatsPanel(page);
+    await toggleStatsPanel(page);
+    await expect(await openWrapped(page)).toBeVisible();
+    expect(requested).toHaveLength(1);
+    expect(css).toHaveLength(1);
+    expect(features).toEqual([]);
+  });
+
+  test("close the statistics after a failed load, and load them on the next try", async ({
+    page,
+  }) => {
+    const errors = await attachErrorCollectors(page);
+    await gotoApp(page);
+    await waitForAppReady(page);
+    let failed = false;
+    await page.route(`**/${WRAPPED}*`, (route) => {
+      if (failed) return route.continue();
+      failed = true;
+      return route.abort();
+    });
+
+    const mobile = await usesMobileBar(page);
+    await page.locator(mobile ? "#mobile-tab-stats" : "#stats-btn").click();
+    await expect(
+      toastMessage(page, "their code could not be loaded"),
+    ).toBeVisible();
+    await expect(page.locator("#stats-rail")).toBeHidden();
+
+    await page.locator(mobile ? "#mobile-tab-stats" : "#stats-btn").click();
+    await expect(await waitForStatsContent(page)).toContainText("Flights");
+    expect(errors.pageErrors).toEqual([]);
+  });
+
+  test("list an airport's flights without fetching either bundle", async ({
+    page,
+  }) => {
+    const requested = [FEATURES, WRAPPED].map((name) =>
+      trackBundleRequests(page, name),
+    );
+    const css = [FEATURES_CSS, WRAPPED_CSS].map((name) =>
+      trackCssRequests(page, name),
+    );
+    await gotoApp(page);
+    await waitForPathData(page);
+    const airport = await page.evaluate(
+      () =>
+        Object.entries(window.mapApp!.airportToPaths).sort(
+          (a, b) => b[1].size - a[1].size,
+        )[0]![0],
+    );
+
+    await openAirportPopup(page, airport);
+
+    // The list used to be part of the feature bundle, which the first
+    // popup fetched with its stylesheet
+    await expect(
+      mapPopup(page).locator(".kh-popup-flight").first(),
+    ).toBeVisible();
+    expect(requested.flat()).toEqual([]);
+    expect(css.flat()).toEqual([]);
   });
 });

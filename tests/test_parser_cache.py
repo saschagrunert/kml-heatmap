@@ -213,6 +213,36 @@ class TestParserFingerprint:
         assert len(first) == 8
         assert parser_fingerprint() != first
 
+    def test_covers_every_module_the_parser_imports(self):
+        """A module the parse depends on has to change the fingerprint.
+
+        Its code decides what a parse returns (date_tokens decides what a
+        registration is), and an entry cached before a change to it would be
+        read as if nothing had changed. Only the modules that cannot change
+        a parse result are left out.
+        """
+        import ast
+
+        package = Path(parser_cache_module.__file__).parent
+        without_effect = {"__init__", "cache", "exceptions", "logger"}
+        seen: set[str] = set()
+        pending = ["parser"]
+        while pending:
+            module = pending.pop()
+            if module in seen:
+                continue
+            seen.add(module)
+            tree = ast.parse((package / f"{module}.py").read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.level == 1:
+                    pending.extend(
+                        [node.module]
+                        if node.module
+                        else [alias.name for alias in node.names]
+                    )
+        imported = {m for m in seen if (package / f"{m}.py").is_file()}
+        assert imported - without_effect == set(parser_cache_module._PARSER_MODULES)
+
 
 class TestPruneStaleCacheEntries:
     def _current_suffix(self):

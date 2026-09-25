@@ -3,17 +3,28 @@ import {
   calculateDistance,
   calculateBearing,
   ddToDms,
+  EARTH_CIRCUMFERENCE_M,
   METRES_PER_DEGREE,
+  metresPerPixel,
   planarMetres,
   segmentBounds,
+  TILE_SIZE_PX,
   toMapBearing,
   toMapCenter,
   toMapPitch,
   turnOf,
   type Coordinate,
 } from "../../../../kml_heatmap/frontend/utils/geometry";
+import { createSegment } from "../../testHelpers";
 
 describe("geometry utilities", () => {
+  describe("metresPerPixel", () => {
+    it("spans the equator in the pixels of the world at a zoom", () => {
+      expect(metresPerPixel(0) * TILE_SIZE_PX).toBe(EARTH_CIRCUMFERENCE_M);
+      expect(metresPerPixel(10)).toBeCloseTo(40075016.686 / 512 / 1024, 9);
+    });
+  });
+
   describe("turnOf", () => {
     it("turns the short way round", () => {
       expect(turnOf(350, 10)).toBe(20);
@@ -280,21 +291,20 @@ describe("geometry utilities", () => {
     it("spans every point of the segments", () => {
       expect(
         segmentBounds([
-          {
+          createSegment({
             path_id: 1,
             coords: [
               [50, 8],
               [51, 7],
             ],
-          },
-          { path_id: 2 },
-          {
+          }),
+          createSegment({
             path_id: 3,
             coords: [
               [49, 9],
               [50.5, 8.5],
             ],
-          },
+          }),
         ]),
       ).toEqual([
         [49, 7],
@@ -302,9 +312,8 @@ describe("geometry utilities", () => {
       ]);
     });
 
-    it("returns null without coordinates", () => {
+    it("returns null without segments", () => {
       expect(segmentBounds([])).toBeNull();
-      expect(segmentBounds([{ path_id: 1 }])).toBeNull();
     });
   });
 });

@@ -63,7 +63,9 @@ FORMAT_VERSION = 4
 COORDINATE_SCALE = 10**COORDINATE_DECIMALS
 # ... altitudes to multiples of 100 ft, which are written in hundreds ...
 ALTITUDE_STEP = 100
-# ... and groundspeeds and relative times to one decimal
+# ... and groundspeeds and relative times to one decimal. The exporter
+# rounds the speeds further, to whole knots (see
+# export_pipeline.exported_knots), which the format carries as they are
 SPEED_SCALE = 10
 TIME_SCALE = 10
 # The ground is written in steps of 10 ft: the altitudes above it are

@@ -137,7 +137,7 @@ describe("UIToggles layers", () => {
       expect(el("airspeed-btn").getAttribute("aria-pressed")).toBe("false");
       expect(el("airspeed-legend").hidden).toBe(true);
       expect(toastMock.showToast).toHaveBeenCalledWith(
-        "Speed layer disabled",
+        "Groundspeed layer disabled",
         "info",
       );
     });
@@ -172,19 +172,42 @@ describe("UIToggles layers", () => {
       expect(app.altitudeVisible).toBe(false);
     });
 
-    it("during replay records the choice, and the layer waits for the end", () => {
+    it("says it is on during a replay whose trail is in altitude colours", () => {
       app.replayActive = true;
 
-      uiToggles.toggleAltitude();
-
-      expect(app.altitudeVisible).toBe(true);
-      expect(visibility(MAP_LAYERS.pathsAltitude)).toBe("none");
-      expect(runs(MAP_SOURCES.pathsAltitude)).toBe(0);
+      // Neither layer is on, and the trail and its legend are in altitude
+      // colours: the toggle said off over them (regression)
       expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("true");
+      expect(el("altitude-btn").classList.contains("active")).toBe(true);
       expect(el("altitude-legend").hidden).toBe(false);
 
       app.replayActive = false;
 
+      expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("false");
+      expect(el("altitude-legend").hidden).toBe(true);
+    });
+
+    it("during a replay switches the trail to groundspeed, and back", () => {
+      app.replayActive = true;
+
+      // A plain flip of the flag changed nothing on screen: the trail is
+      // always in one of the two colours
+      uiToggles.toggleAltitude();
+
+      expect(app.altitudeVisible).toBe(false);
+      expect(app.airspeedVisible).toBe(true);
+      expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("false");
+      expect(el("airspeed-btn").getAttribute("aria-pressed")).toBe("true");
+
+      uiToggles.toggleAltitude();
+
+      expect(app.altitudeVisible).toBe(true);
+      expect(app.airspeedVisible).toBe(false);
+      expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("true");
+
+      // The layer the choice left on waits for the end of the replay
+      expect(visibility(MAP_LAYERS.pathsAltitude)).toBe("none");
+      app.replayActive = false;
       expect(visibility(MAP_LAYERS.pathsAltitude)).toBe("visible");
       expect(runs(MAP_SOURCES.pathsAltitude)).toBeGreaterThan(0);
     });

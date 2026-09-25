@@ -3,8 +3,14 @@
  */
 import type { Marker, Popup } from "maplibre-gl";
 import type { PathSegment, PopupHost, TrailRun } from "../types";
-import type { GroundedHeight, RibbonPiece } from "../calculations/lift";
+import type { GroundedHeight } from "../calculations/lift";
+import type { RibbonPiece } from "../calculations/ribbons";
 import type { ReplayCurve } from "../features/replay";
+import {
+  DEFAULT_AIRSPEED_RANGE,
+  DEFAULT_ALTITUDE_RANGE,
+  type Range,
+} from "../state/store";
 
 /**
  * Where the airplane is on the segment it flies, which the trail ends at:
@@ -75,8 +81,12 @@ export class ReplayState {
   bearingTime = 0;
   animationFrameId: number | null = null;
   lastFrameTime: number | null = null;
-  colorMinAlt = 0;
-  colorMaxAlt = 10000;
+  /**
+   * The colour ranges of the trail: the flight's own, as the colour layers
+   * draw a selection of it (see ReplayManager.calculateColorRanges)
+   */
+  colorAltRange: Range = DEFAULT_ALTITUDE_RANGE;
+  colorSpeedRange: Range = DEFAULT_AIRSPEED_RANGE;
   /**
    * The ground under each segment of the flight, in feet (groundProfileFt):
    * sampled where the relief is drawn, the line between its fields elsewhere
@@ -120,8 +130,6 @@ export class ReplayState {
    * airplaneHeight)
    */
   airplaneOffsetsFt: number[] | undefined = undefined;
-  colorMinSpeed = 0;
-  colorMaxSpeed = 200;
   autoZoom = false;
   /** Whether the chase view is on (see ReplayCamera.chaseAirplane) */
   chase = false;

@@ -23,6 +23,7 @@ from kml_heatmap.site_assets import (
     package_assets,
     render_html,
 )
+from tests.conftest import missing_frontend_build, pytest_terminal_summary
 
 
 def _install_vendor_files(tmp_path, monkeypatch):
@@ -135,7 +136,7 @@ class TestRenderHtml:
         assert "my_data_dir" in content
         assert "$data_dir_name" not in content
         substituted = string.Template(load_template()).substitute(
-            data_dir_name="my_data_dir", year_preload=""
+            data_dir_name="my_data_dir", year_preload="", base_style_preload=""
         )
         assert len(content) < len(substituted)
 
@@ -151,6 +152,7 @@ class TestRenderHtml:
             link.get("href")
             for link in lxml_html.fromstring(content).iter("link")
             if link.get("rel") == "preload"
+            and not str(link.get("href")).startswith("https:")
         ]
         assert preloads == ['da"ta<x>/metadata.json', 'da"ta<x>/airports.json']
 
@@ -166,9 +168,41 @@ class TestRenderHtml:
             if link.get("rel") == "preload"
         ]
         # The same URL and the same mode the loader's fetch requests, so the
-        # preload is what it gets
-        assert preloads[-1] == ("fetch", "", 'da"ta/2026/data.json')
+        # preload is what it gets. CARTO's files come after the site's own.
+        assert preloads[-3] == ("fetch", "", 'da"ta/2026/data.json')
         assert {preload[:2] for preload in preloads} == {("fetch", "")}
+
+    @pytest.mark.parametrize(
+        ("key", "query"),
+        [
+            ("", ""),
+            # encoded as encodeURIComponent does it, which the page uses
+            ("k'y (1)&x", "?key=k'y%20(1)%26x"),
+        ],
+    )
+    def test_preloads_the_base_style_as_the_page_asks_for_it(
+        self, tmp_path, key, query
+    ):
+        """CARTO's style and tile index, with the site's key or without."""
+        from lxml import html as lxml_html
+
+        output_file = tmp_path / "index.html"
+        with patch.dict(os.environ, {"CARTO_API_KEY": key}):
+            render_html(output_file, "data", 2026)
+        preloads = [
+            (link.get("as"), link.get("crossorigin"), link.get("href"))
+            for link in lxml_html.fromstring(output_file.read_text()).iter("link")
+            if link.get("rel") == "preload"
+        ]
+        assert preloads[-2:] == [
+            ("fetch", "", assets_module.CARTO_STYLE_URL + query),
+            ("fetch", "", assets_module.CARTO_TILEJSON_URL + query),
+        ]
+        # The style is the one the page fetches
+        app = (
+            Path(__file__).parents[1] / "kml_heatmap" / "frontend" / "mapApp.ts"
+        ).read_text()
+        assert f'"{assets_module.CARTO_STYLE_URL}"' in app
 
     def test_preloads_no_year_without_one(self, tmp_path):
         output_file = tmp_path / "index.html"
@@ -197,7 +231,29 @@ class TestRenderHtml:
             "./shared.bundle.js",
             "./vendor/maplibre-gl.mjs",
             "./vendor/maplibre-gl-shared.mjs",
+            "./yearWorker.bundle.js",
+            "./vendor/maplibre-gl-worker.mjs",
         ]
+
+    def test_preloads_only_files_the_site_has(self, tmp_path):
+        """Every module the page preloads is one the build publishes next
+        to it, so a renamed bundle or vendored file cannot leave a preload
+        of a file that is not there."""
+        from lxml import html as lxml_html
+
+        output_file = tmp_path / "index.html"
+        render_html(output_file, "data")
+        page = lxml_html.fromstring(output_file.read_text())
+        published = {f"./{path.name}" for path in assets_module.BUNDLE_FILES} | {
+            f"./vendor/{name}" for name in assets_module.VENDOR_FILES
+        }
+        preloaded = [
+            link.get("href")
+            for link in page.iter("link")
+            if link.get("rel") == "modulepreload"
+        ]
+        assert preloaded
+        assert set(preloaded) <= published
 
     def test_output_is_world_readable(self, tmp_path):
         previous = os.umask(0o022)
@@ -430,6 +486,50 @@ class TestBundleIsAvailable:
         err = capsys.readouterr().err
         assert "vendor/maplibre-gl-worker.mjs" in err
         assert "npm run build" in err
+
+
+class TestMissingFrontendBuild:
+    """Without `npm run build` every test that builds a site fails."""
+
+    def test_nothing_is_missing_after_a_build(self, tmp_path, monkeypatch, bundle):
+        _install_vendor_files(tmp_path, monkeypatch)
+
+        assert missing_frontend_build() == []
+
+    def test_names_what_is_missing(self, tmp_path, monkeypatch, bundle):
+        static = _install_vendor_files(tmp_path, monkeypatch)
+        bundle.unlink()
+        (static / "vendor" / "maplibre-gl-worker.mjs").unlink()
+
+        assert missing_frontend_build() == [
+            "mapApp.bundle.js",
+            "vendor/maplibre-gl-worker.mjs",
+        ]
+
+    @pytest.mark.parametrize(
+        ("exitstatus", "hint"),
+        [(pytest.ExitCode.TESTS_FAILED, True), (pytest.ExitCode.OK, False)],
+    )
+    def test_a_failed_run_says_to_build_first(
+        self, tmp_path, monkeypatch, bundle, exitstatus, hint
+    ):
+        _install_vendor_files(tmp_path, monkeypatch)
+        bundle.unlink()
+        lines = []
+
+        class Reporter:
+            def write_sep(self, sep, title, **markup):
+                lines.append(title)
+
+            def write_line(self, line):
+                lines.append(line)
+
+        pytest_terminal_summary(Reporter(), exitstatus, None)
+
+        assert bool(lines) is hint
+        if hint:
+            assert "mapApp.bundle.js" in lines[-1]
+            assert "npm run build" in lines[-1]
 
 
 class TestStaleBundleWarning:

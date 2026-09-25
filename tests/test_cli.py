@@ -270,6 +270,27 @@ class TestOutputHandling:
         assert args[2] == str(Path("docs") / "data")
         assert (input_dir / "docs").is_dir()
 
+    def test_a_site_of_its_own_is_refused_before_processing(self, workspace, capsys):
+        _, kml, out = workspace
+        out.mkdir()
+        (out / "index.html").write_text("my own page")
+
+        with pytest.raises(SystemExit) as exc_info:
+            _run([str(kml), "--output-dir", str(out)])
+
+        assert exc_info.value.code == 1
+        assert "--force" in capsys.readouterr().err
+        assert (out / "index.html").read_text() == "my own page"
+
+    def test_force_replaces_a_site_of_its_own(self, workspace):
+        _, kml, out = workspace
+        out.mkdir()
+        (out / "index.html").write_text("my own page")
+
+        mock_create = _run([str(kml), "--output-dir", str(out), "--force"])
+
+        assert mock_create.call_args.kwargs["force"] is True
+
     def test_unusable_output_dir_is_one_line(self, workspace, capsys):
         _, kml, out = workspace
         out.write_text("a file, not a directory")

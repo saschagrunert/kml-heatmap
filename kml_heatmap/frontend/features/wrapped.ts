@@ -9,14 +9,15 @@ import { escapeHtml } from "../utils/htmlGenerators";
 import {
   aggregateAircraft,
   calculateTotalDistance,
-  collectAirports,
   filterPaths,
   filterSegmentsByPaths,
   perPathSeconds,
 } from "../calculations/statistics";
+import { collectAirports } from "../calculations/panelStats";
 import { countCountries } from "./airports";
 import { calculateDistance, type Coordinate } from "../utils/geometry";
 import type {
+  AircraftAggregate,
   AircraftModels,
   FilteredStatistics,
   FunFact,
@@ -65,6 +66,7 @@ type FunFactStats = Pick<
   | "total_altitude_gain_ft"
   | "total_flight_time_seconds"
   | "cruise_speed_knots"
+  | "cruise_height_above_terrain"
   | "longest_flight_nm"
   | "max_altitude_ft"
   | "most_common_cruise_altitude_ft"
@@ -117,6 +119,11 @@ export function findClosestReferenceDistance(
   return closest;
 }
 
+/**
+ * The figures of Wrapped's title card. `filtered`, the statistics of the
+ * same filter, saves the passes over every segment they share with it: the
+ * distance, the flight time and the aircraft.
+ */
 export function calculateYearStats(
   pathInfo: PathInfo[] | null,
   segments: PathSegment[],
@@ -124,6 +131,7 @@ export function calculateYearStats(
   aircraftModels: AircraftModels = {},
   aircraft: string = "all",
   preFiltered?: { paths: PathInfo[]; segments: PathSegment[] },
+  filtered?: FilteredStatistics,
 ): YearStats {
   const emptyResult: YearStats = {
     total_flights: 0,
@@ -152,25 +160,31 @@ export function calculateYearStats(
   const airports = collectAirports(filteredPaths);
   const airportNames = Array.from(airports);
 
-  // Calculate total distance
-  const totalDistanceKm = calculateTotalDistance(filteredSegments);
-  const totalDistanceNm = totalDistanceKm * KM_TO_NAUTICAL_MILES;
-
-  // One grouping pass feeds both the total flight time and the per-aircraft
-  // times inside aggregateAircraft
-  const secondsByPath = perPathSeconds(
-    filteredSegments,
-    new Set(filteredPaths.map((p) => p.id)),
-  );
+  let totalDistanceKm: number;
   let totalSeconds = 0;
-  for (const secs of secondsByPath.values()) totalSeconds += secs;
+  let aircraftList: AircraftAggregate[];
+  if (filtered) {
+    totalDistanceKm = filtered.total_distance_km;
+    totalSeconds = filtered.total_flight_time_seconds ?? 0;
+    // Copies: the model is added below, and the statistics are kept
+    aircraftList = filtered.aircraft_list.map((ac) => ({ ...ac }));
+  } else {
+    totalDistanceKm = calculateTotalDistance(filteredSegments);
+    // One grouping pass feeds both the total flight time and the
+    // per-aircraft times inside aggregateAircraft
+    const secondsByPath = perPathSeconds(
+      filteredSegments,
+      new Set(filteredPaths.map((p) => p.id)),
+    );
+    for (const secs of secondsByPath.values()) totalSeconds += secs;
+    aircraftList = aggregateAircraft(
+      filteredPaths,
+      filteredSegments,
+      secondsByPath,
+    );
+  }
+  const totalDistanceNm = totalDistanceKm * KM_TO_NAUTICAL_MILES;
   const flightTime = formatFlightTime(totalSeconds);
-
-  const aircraftList = aggregateAircraft(
-    filteredPaths,
-    filteredSegments,
-    secondsByPath,
-  );
 
   // The full model name only comes from aircraft.json. An own-key lookup, so
   // a registration can never read something off the object prototype
@@ -371,9 +385,14 @@ export function generateFunFacts(
     ) {
       const cruiseAltFt = filteredStats.most_common_cruise_altitude_ft;
       const cruiseAltM = filteredStats.most_common_cruise_altitude_m;
+      // Above the field where a flight had no terrain in the export
+      const reference =
+        filteredStats.cruise_height_above_terrain === false
+          ? "above the field"
+          : "AGL";
       facts.push({
         icon: "ruler",
-        text: `Most common cruise: <strong>${formatNumber(cruiseAltFt)} ft</strong> AGL (<strong>${formatNumber(cruiseAltM)} m</strong>).`,
+        text: `Most common cruise: <strong>${formatNumber(cruiseAltFt)} ft</strong> ${reference} (<strong>${formatNumber(cruiseAltM)} m</strong>).`,
         category: "altitude",
         priority: 7,
       });

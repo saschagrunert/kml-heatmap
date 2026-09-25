@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  BOOLEAN_KEYS,
   StateManager,
   sanitizeSavedState,
   storageKey,
 } from "../../../../kml_heatmap/frontend/ui/stateManager";
 import { LngLat } from "../../../mocks/maplibre-gl";
 import { createDefaultState } from "../../../../kml_heatmap/frontend/state/store";
+import { TOGGLE_KEYS } from "../../../../kml_heatmap/frontend/state/toggles";
 import { createMockApp, asMapApp, type MockApp } from "../../testHelpers";
 
 describe("sanitizeSavedState", () => {
@@ -209,15 +209,15 @@ describe("StateManager", () => {
         "selectedYear",
         "selectedAircraft",
         "selectedPathIds",
-        "isolateSelection",
         "heatmapVisible",
+        "airportsVisible",
         "altitudeVisible",
         "airspeedVisible",
-        "airportsVisible",
         "aviationVisible",
         "globeVisible",
         "threeDVisible",
         "satelliteVisible",
+        "isolateSelection",
         "statsPanelVisible",
         "wrappedVisible",
       ]);
@@ -480,7 +480,7 @@ describe("StateManager", () => {
       // at their defaults, the newest year and the fitted view
       vi.useFakeTimers();
       mockApp.store.batch(() => {
-        for (const key of BOOLEAN_KEYS) mockApp.store.set(key, !DEFAULTS[key]);
+        for (const key of TOGGLE_KEYS) mockApp.store.set(key, !DEFAULTS[key]);
         mockApp.selectedAircraft = "D-ABCD";
       });
       mockApp.map!.jumpTo({ bearing: 30, pitch: 40 });
@@ -488,7 +488,7 @@ describe("StateManager", () => {
       vi.mocked(history.replaceState).mockClear();
 
       mockApp.store.batch(() => {
-        for (const key of BOOLEAN_KEYS) mockApp.store.set(key, DEFAULTS[key]);
+        for (const key of TOGGLE_KEYS) mockApp.store.set(key, DEFAULTS[key]);
         mockApp.selectedAircraft = "all";
         mockApp.selectedYear = "2025";
       });
@@ -496,7 +496,7 @@ describe("StateManager", () => {
       vi.advanceTimersByTime(300);
 
       expect(savedState()).toMatchObject({
-        ...Object.fromEntries(BOOLEAN_KEYS.map((key) => [key, DEFAULTS[key]])),
+        ...Object.fromEntries(TOGGLE_KEYS.map((key) => [key, DEFAULTS[key]])),
         selectedYear: "2025",
         selectedAircraft: "all",
         bearing: 0,
@@ -781,7 +781,9 @@ describe("StateManager", () => {
       expect(stateManager.loadState()).toMatchObject({ selectedYear: "2024" });
     });
 
-    it("adopts the state saved under the key of earlier releases once", () => {
+    it("leaves the state of the map at the root to that map", () => {
+      // Releases before the per-directory key saved every map under the
+      // plain key; that is the root map's key now, and no other adopts it
       mockLocalStorage[KEY] = JSON.stringify({
         schemaVersion: 3,
         center: { lat: 48.0, lng: 11.0 },
@@ -790,14 +792,8 @@ describe("StateManager", () => {
       });
       setLocation("", "/kml-heatmap/");
 
-      expect(stateManager.loadState()).toMatchObject({ selectedYear: "2024" });
-      expect(Object.keys(mockLocalStorage)).toEqual([
-        "kml-heatmap-state:/kml-heatmap/",
-      ]);
-
-      // A second map on the origin finds nothing left to adopt
-      setLocation("", "/other/");
       expect(stateManager.loadState()).toBeNull();
+      expect(Object.keys(mockLocalStorage)).toEqual([KEY]);
     });
 
     it("parses the full URL state including visibility flags", () => {

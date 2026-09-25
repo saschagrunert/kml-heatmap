@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 import minify_html as mh
 import rcssmin
@@ -274,13 +275,45 @@ def warn_about_a_stale_bundle() -> None:
         )
 
 
+#: The base style the app fetches (CARTO_STYLE_URL in mapApp.ts), and the
+#: index of the vector tiles it names, which MapLibre asks for next
+CARTO_STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+CARTO_TILEJSON_URL = (
+    "https://tiles.basemaps.cartocdn.com/vector/carto.streets/v1/tiles.json"
+)
+
+
+def _carto_api_key() -> str:
+    """The CARTO API key the site is built with, "" for none."""
+    return os.environ.get("CARTO_API_KEY", "")
+
+
+def _carto_preloads(api_key: str) -> str:
+    """Preloads of CARTO's style and tile index, as the page asks for them.
+
+    Without them each is a round trip that only starts once the one before
+    has answered: the page's scripts, the map's start, the style and then
+    the index. A preload is only used for the very same URL, so the key goes
+    on as the page puts it on (encodeURIComponent, see cartoStyleUrl and
+    cartoTransformRequest in mapApp.ts), and none goes on without one.
+    """
+    # encodeURIComponent leaves these as they are, and quote() does not
+    query = "?key=" + quote(api_key, safe="!*'()") if api_key else ""
+    return "".join(
+        '<link rel="preload" as="fetch" crossorigin '
+        f'href="{html.escape(url + query)}" />'
+        for url in (CARTO_STYLE_URL, CARTO_TILEJSON_URL)
+    )
+
+
 def render_html(
     output_file: Path, data_dir_name: str, latest_year: int | None = None
 ) -> None:
     """Render and minify the HTML template.
 
     ``latest_year`` is the year the page opens on, whose data file is
-    preloaded; None preloads nothing.
+    preloaded; None preloads nothing. CARTO's style and tile index are
+    preloaded after the site's own files.
     """
     logger.info("\nGenerating progressive HTML...")
 
@@ -292,7 +325,11 @@ def render_html(
         else ""
     )
     tmpl = string.Template(load_template())
-    html_content = tmpl.substitute(data_dir_name=data_dir, year_preload=year_preload)
+    html_content = tmpl.substitute(
+        data_dir_name=data_dir,
+        year_preload=year_preload,
+        base_style_preload=_carto_preloads(_carto_api_key()),
+    )
 
     logger.info("\nMinifying HTML...")
     minified_html = minify_html(html_content)
@@ -431,7 +468,7 @@ def _generate_map_config(
     data_dir_name: str,
 ) -> None:
     """Generate minified map_config.js from template."""
-    carto_api_key = os.environ.get("CARTO_API_KEY", "")
+    carto_api_key = _carto_api_key()
 
     map_config_template_path = TEMPLATES_DIR / "map_config_template.js"
     map_config_dst = output_dir / "map_config.js"

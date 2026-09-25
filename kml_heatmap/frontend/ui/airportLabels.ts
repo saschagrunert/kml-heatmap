@@ -21,8 +21,8 @@ import {
   AIRPORT_HIDE_LABELS_BELOW_ZOOM,
   MAP_LAYERS,
   MAP_SOURCES,
-  MOBILE_BREAKPOINT_PX,
 } from "../utils/constants";
+import { isPhoneLayout, matchesMedia } from "../utils/device";
 import { cssVar } from "../utils/mapHelpers";
 
 /**
@@ -38,9 +38,11 @@ const AIRPORT_LABEL_FONT = ["Roboto Medium", "Noto Sans Regular", "sans-serif"];
 
 /**
  * Label size by zoom, `[size, zoom, size, ...]`: it grows at the zooms the
- * markers do (AIRPORT_SIZE_ZOOMS). Pixels.
+ * markers do (AIRPORT_SIZE_ZOOMS). Pixels, from the stylesheet's smallest
+ * text (`--text-xs`) up: the 10 and 10.5 px it started at were off the
+ * page's type scale, at the zooms a first visit opens on.
  */
-const LABEL_SIZE_STEPS = [10, 5, 10.5, 7, 11, 9, 12, 13, 13] as const;
+const LABEL_SIZE_STEPS = [11, 9, 12, 13, 13] as const;
 
 /**
  * Nothing on a phone reads smaller than the stylesheet's small text there
@@ -90,10 +92,8 @@ interface AirportLabelProperties {
   home: boolean;
 }
 
-/** The ICAO code in an airport's name, or `APT` for a name without one */
-export function icaoCode(name: string): string {
-  return /\b([A-Z]{4})\b/.exec(name)?.[1] ?? "APT";
-}
+/** What an airport's label says without an ICAO code of its own */
+export const NO_CODE_LABEL = "APT";
 
 /** The label size by zoom, never under `minPx` */
 export function airportLabelSize(minPx = 0): ExpressionSpecification {
@@ -104,11 +104,6 @@ export function airportLabelSize(minPx = 0): ExpressionSpecification {
       index % 2 ? value : Math.max(value, minPx),
     ),
   ] as ExpressionSpecification;
-}
-
-/** Whether the page matches a media query; false where there are none */
-function matches(query: string): boolean {
-  return typeof matchMedia === "function" && matchMedia(query).matches;
 }
 
 /** An expression for the hovered label, and one for every other */
@@ -137,9 +132,9 @@ export function airportLabelLayer(): SymbolLayerSpecification {
   const text = token("--color-text-rgb", "242, 242, 242");
   const accent = token("--color-accent-blue-rgb", "79, 172, 254");
   const hover = token("--color-bg-hover", "#262626");
-  const contrast = matches("(prefers-contrast: more)");
-  // The phone layout (MOBILE_BREAKPOINT_PX), as the page opened
-  const phone = matches(`(max-width: ${MOBILE_BREAKPOINT_PX - 0.02}px)`);
+  const contrast = matchesMedia("(prefers-contrast: more)");
+  // The phone layout, as the page opened
+  const phone = isPhoneLayout();
 
   return {
     id: MAP_LAYERS.airportLabels,
@@ -266,7 +261,9 @@ export function airportLabelFeatures(
         type: "Feature",
         properties: {
           name: airport.name,
-          icao: icaoCode(airport.name),
+          // The code the export found in the name, as the markers and the
+          // lists of the panels have it
+          icao: airport.code ?? NO_CODE_LABEL,
           count: counts[airport.name] ?? 0,
           home: airport.name === homeBase,
         },

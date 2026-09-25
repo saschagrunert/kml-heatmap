@@ -137,13 +137,18 @@ def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
 
 
 def _generate(
-    paths: list[str], output_dir: Path, obfuscate_inputs: bool, terrain: bool = True
+    paths: list[str],
+    output_dir: Path,
+    obfuscate_inputs: bool,
+    terrain: bool = True,
+    force: bool = False,
 ) -> None:
     """Generate the site into ``output_dir``.
 
     ``terrain`` samples the ground under the flights from the elevation
     tiles of AWS (see ``kml_heatmap.terrain``), which are downloaded once
-    into the cache directory.
+    into the cache directory. ``force`` replaces the files of a site that
+    no earlier run wrote (see ``renderer.foreign_output_error``).
 
     The generated site never carries a flight date finer than the year,
     whatever the inputs hold: the exported paths keep their year, their
@@ -164,15 +169,18 @@ def _generate(
 
     aircraft_files = _find_aircraft_files(kml_files)
 
-    from .renderer import create_progressive_heatmap
+    from .renderer import create_progressive_heatmap, foreign_output_error
     from .site_assets import BUNDLE_FILE
     from .validation import validate_output_dir
 
-    # Both are checked again inside create_progressive_heatmap, which is
+    # All are checked again inside create_progressive_heatmap, which is
     # public API; checking here stops before --obfuscate-inputs rewrites them
     is_safe, error_msg = validate_output_dir(output_dir, [*kml_files, *aircraft_files])
     if not is_safe:
         _fatal(error_msg or "Unsafe output directory")
+    foreign = None if force else foreign_output_error(output_file, data_dir)
+    if foreign:
+        _fatal(foreign)
     if not BUNDLE_FILE.is_file():
         _fatal(
             f"JavaScript bundle not found: {BUNDLE_FILE} (run 'npm run build' "
@@ -192,6 +200,7 @@ def _generate(
         data_dir,
         aircraft_files=aircraft_files,
         terrain=TerrariumTiles() if terrain else None,
+        force=force,
     )
 
     if not success:
@@ -233,7 +242,9 @@ The output directory must not be the directory of an input file, or contain
 one: the tool replaces and removes its own files in there. An output
 directory below the input directory (such as the default, docs) is fine. A
 run that fails while generating the site leaves the previous site in the
-output directory untouched.
+output directory untouched. An output directory with files of another site
+(an index.html, a styles.css) and no sign of an earlier run of this tool
+(map_config.js, data/metadata.json) is refused unless --force is given.
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -274,6 +285,14 @@ output directory untouched.
         ),
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "replace the files of a site in the output directory that no "
+            "earlier run of this tool wrote (such as an index.html of its own)"
+        ),
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -286,7 +305,11 @@ output directory untouched.
 
     try:
         _generate(
-            args.paths, Path(args.output_dir), args.obfuscate_inputs, args.terrain
+            args.paths,
+            Path(args.output_dir),
+            args.obfuscate_inputs,
+            args.terrain,
+            args.force,
         )
     except (KMLHeatmapError, OSError) as e:
         # Expected failures (an unwritable output directory, a missing airport

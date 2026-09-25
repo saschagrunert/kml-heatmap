@@ -14,6 +14,8 @@ import { describe, expect, it } from "vitest";
 import {
   VENDOR_FILES,
   VENDOR_MODULES,
+  VENDOR_PATCHES,
+  applyVendorPatches,
   stripSourceMapComment,
 } from "../../../scripts/vendor.js";
 import { HTML_TO_IMAGE_URL } from "../../../kml_heatmap/frontend/ui/uiToggles";
@@ -38,17 +40,23 @@ describe("vendored third-party files", () => {
   );
 
   whenBuilt(
-    "copies every declared file byte for byte, up to a closing source map comment",
+    "copies every declared file byte for byte, up to a closing source map comment and its fixes",
     () => {
       for (const [published, source] of Object.entries(VENDOR_FILES)) {
         const copied = readFileSync(join(VENDOR_DIR, published));
         const original = readFileSync(join(REPO_ROOT, "node_modules", source));
-        // The helper itself says what may be left off, so the two cannot
-        // disagree about the forms a closing comment takes
+        // The helpers themselves say what may be left off and changed, so
+        // the two cannot disagree about the forms a closing comment takes
         expect(
-          copied.equals(stripSourceMapComment(original, published)),
+          copied.equals(
+            applyVendorPatches(
+              stripSourceMapComment(original, published),
+              published,
+            ),
+          ),
           `${published} differs`,
         ).toBe(true);
+        if (Object.hasOwn(VENDOR_PATCHES, published)) continue;
         expect(
           original.subarray(0, copied.length).equals(copied),
           `${published} is not a prefix of its original`,
@@ -56,6 +64,83 @@ describe("vendored third-party files", () => {
       }
     },
   );
+
+  describe("the fixes of MapLibre", () => {
+    const entry = (): Buffer =>
+      readFileSync(
+        join(REPO_ROOT, "node_modules", VENDOR_FILES["maplibre-gl.mjs"]!),
+      );
+
+    it("are made to vendored files only", () => {
+      for (const published of Object.keys(VENDOR_PATCHES)) {
+        expect(Object.keys(VENDOR_FILES)).toContain(published);
+      }
+    });
+
+    it("each find their code once in the pinned version, and change it", () => {
+      // What the build asks as well, which fails it once MapLibre changes
+      const original = entry().toString("latin1");
+      const patched = applyVendorPatches(entry(), "maplibre-gl.mjs").toString(
+        "latin1",
+      );
+      for (const { find } of VENDOR_PATCHES["maplibre-gl.mjs"]!) {
+        expect([
+          ...original.matchAll(new RegExp(find.source, "g")),
+        ]).toHaveLength(1);
+        // Applied, a fix does not find its code again
+        expect(patched).not.toMatch(find);
+      }
+      expect(patched).not.toBe(original);
+    });
+
+    it("keep the relief's tiles under a camera that looks at a point above it", () => {
+      const patched = applyVendorPatches(entry(), "maplibre-gl.mjs").toString(
+        "latin1",
+      );
+      // Mercator's box of a tile reaches up to the camera's centre, as the
+      // globe's does already
+      expect(
+        patched.match(
+          /getTileBoundingVolume\(\w+,\w+,\w+,\w+\)\{let \w+=Math\.min\(0,\w+\),(\w+)=[^}]*\}/g,
+        )?.[0],
+      ).toMatch(/(\w+)=Math\.max\(\w+\.maxElevation\?\?\1,\1\)/);
+      // A tile that loads empty lets go of the raw data it held
+      expect(patched).toMatch(
+        /this\.collisionBoxArray=new \w+,this\.latestRawTileData=null,this\.latestEncoding=null;return\}/,
+      );
+    });
+
+    it("fail loudly once the code they fix has changed", () => {
+      const moved = Buffer.from(
+        entry()
+          .toString("latin1")
+          .replace(/this\.collisionBoxArray=new/, "this.collisionBoxes=new"),
+        "latin1",
+      );
+      expect(() => applyVendorPatches(moved, "maplibre-gl.mjs")).toThrow(
+        /matches 0 places in maplibre-gl\.mjs/,
+      );
+      const twice = Buffer.concat([entry(), entry()]);
+      expect(() => applyVendorPatches(twice, "maplibre-gl.mjs")).toThrow(
+        /matches 2 places/,
+      );
+    });
+
+    it("leave every byte around them as it was", () => {
+      // Bytes that are no text in UTF-8 come back as they went in
+      const tail = Buffer.from([0x0a, 0xc3, 0xa0, 0xff, 0x00]);
+      const patched = applyVendorPatches(
+        Buffer.concat([entry(), tail]),
+        "maplibre-gl.mjs",
+      );
+      expect(patched.subarray(patched.length - tail.length).equals(tail)).toBe(
+        true,
+      );
+      // A file without fixes is the very same buffer
+      const css = Buffer.from("a{}");
+      expect(applyVendorPatches(css, "maplibre-gl.css")).toBe(css);
+    });
+  });
 
   whenBuilt("no vendored file names a source map that is not shipped", () => {
     for (const published of Object.keys(VENDOR_FILES)) {

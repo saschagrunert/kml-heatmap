@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { AirportManager } from "../../../../kml_heatmap/frontend/ui/airportManager";
 import { createAirportMarkers } from "../../../../kml_heatmap/frontend/appInitializer";
 import {
+  resetSiteData,
+  siteData,
+} from "../../../../kml_heatmap/frontend/state/siteData";
+import {
   DOUBLE_TAP_MS,
   panPopupIntoView,
 } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
@@ -24,13 +28,13 @@ import type { Popup as MockPopup } from "../../../mocks/maplibre-gl";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import type { Point } from "maplibre-gl";
 
-const { loadFeatures, listFlights } = vi.hoisted(() => {
-  const listFlights = vi.fn();
-  return {
-    listFlights,
-    loadFeatures: vi.fn(() => Promise.resolve({ listFlights })),
-  };
-});
+const { loadFeatures, listFlights } = vi.hoisted(() => ({
+  listFlights: vi.fn(),
+  loadFeatures: vi.fn(),
+}));
+vi.mock("../../../../kml_heatmap/frontend/ui/airportFlights", () => ({
+  listFlights,
+}));
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
   loadFeatures,
 }));
@@ -50,11 +54,6 @@ function countHtml(count: number): string {
 }
 
 /** Let the feature bundle "load" */
-async function featuresLoaded(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-}
-
 /** jsdom does not track how focus arrived; say it here */
 function focusVisible(element: HTMLElement, visible: boolean): void {
   Object.defineProperty(element, "matches", {
@@ -96,10 +95,10 @@ describe("AirportManager", () => {
   ];
 
   const airports = [
-    { name: "EDDF", lat: 50.1, lon: 8.67 },
-    { name: "EDDM", lat: 48.35, lon: 11.78 },
-    { name: "EDDK", lat: 50.87, lon: 7.14 },
-    { name: "LOWW", lat: 48.11, lon: 16.57 },
+    { name: "EDDF", lat: 50.1, lon: 8.67, code: "EDDF" },
+    { name: "EDDM", lat: 48.35, lon: 11.78, code: "EDDM" },
+    { name: "EDDK", lat: 50.87, lon: 7.14, code: "EDDK" },
+    { name: "LOWW", lat: 48.11, lon: 16.57, code: "LOWW" },
   ];
 
   function isHome(name: string): boolean {
@@ -114,20 +113,19 @@ describe("AirportManager", () => {
     mapContainer.id = "map";
     document.body.appendChild(mapContainer);
 
-    mockApp = createMockApp({
-      currentData: createDataset(pathInfo),
-      allAirportsData: airports.map((airport) => ({ ...airport })),
-    });
+    siteData.airports = airports.map((airport) => ({ ...airport }));
+    mockApp = createMockApp({ currentData: createDataset(pathInfo) });
     airportManager = new AirportManager(asMapApp(mockApp));
     // The markers are the app's own, wired to this manager like the app's
     (mockApp as unknown as { airportManager: AirportManager }).airportManager =
       airportManager;
-    createAirportMarkers(asMapApp(mockApp), mockApp.allAirportsData);
+    createAirportMarkers(asMapApp(mockApp), siteData.airports);
     markers = mockApp.airportMarkers;
     popup = (airportManager as unknown as { popup: MockPopup }).popup;
   });
 
   afterEach(() => {
+    resetSiteData();
     document.body.innerHTML = "";
     listFlights.mockReset();
     loadFeatures.mockClear();
@@ -269,7 +267,7 @@ describe("AirportManager", () => {
   });
 
   describe("the flight list and the pan into view", () => {
-    it("lists the flights after the content is written, then pans", async () => {
+    it("lists the flights once the content is written, then pans", () => {
       const order: string[] = [];
       popup.setHTML.mockImplementationOnce((html: string) => {
         order.push("setHTML");
@@ -278,20 +276,23 @@ describe("AirportManager", () => {
           .querySelector(".maplibregl-popup-content")!.innerHTML = html;
         return popup;
       });
+      popup.addTo.mockImplementationOnce(function (this: MockPopup) {
+        order.push("addTo");
+        return this;
+      });
       listFlights.mockImplementation(() => order.push("listFlights"));
       vi.mocked(panPopupIntoView).mockImplementation(() => {
         order.push("pan");
       });
+      popup.setLngLat.mockClear();
 
       markers["EDDF"]!.openPopup();
-      popup.setLngLat.mockClear();
-      await featuresLoaded();
 
-      expect(loadFeatures).toHaveBeenCalled();
       expect(listFlights).toHaveBeenCalledWith(mockApp, popup, "EDDF");
-      expect(order).toEqual(["setHTML", "listFlights", "pan"]);
-      // Laid out again for the height the list added, where it stood
-      expect(popup.setLngLat).toHaveBeenCalledTimes(1);
+      // The list goes into the element of a popup that is on the map
+      expect(order).toEqual(["setHTML", "addTo", "listFlights", "pan"]);
+      // Placed, then laid out again for the height the list added
+      expect(popup.setLngLat).toHaveBeenCalledTimes(2);
       expect(popup.getLngLat()).toMatchObject({ lng: 8.67, lat: 50.1 });
       expect(panPopupIntoView).toHaveBeenCalledWith(
         mockApp.map,
@@ -301,35 +302,29 @@ describe("AirportManager", () => {
       );
     });
 
-    it("lists them again whenever the content is rewritten", async () => {
+    it("fetches no bundle for the list (regression)", () => {
+      // The list lived in the feature bundle, which the first popup fetched
+      // with its stylesheet: 15 KB gzipped for a list of a few buttons
       markers["EDDF"]!.openPopup();
-      await featuresLoaded();
+
+      expect(listFlights).toHaveBeenCalledTimes(1);
+      expect(loadFeatures).not.toHaveBeenCalled();
+    });
+
+    it("lists them again whenever the content is rewritten", () => {
+      markers["EDDF"]!.openPopup();
       mockApp.selectedAircraft = "D-EFGH";
-      await featuresLoaded();
 
       expect(listFlights).toHaveBeenCalledTimes(2);
       expect(panPopupIntoView).toHaveBeenCalledTimes(2);
     });
 
-    it("pans without the list when the bundle failed to load", async () => {
-      loadFeatures.mockResolvedValueOnce(
-        null as unknown as { listFlights: typeof listFlights },
-      );
-
-      markers["EDDF"]!.openPopup();
-      await featuresLoaded();
-
-      expect(listFlights).not.toHaveBeenCalled();
-      expect(panPopupIntoView).toHaveBeenCalledTimes(1);
-    });
-
-    it("pans without animation under reduced motion", async () => {
+    it("pans without animation under reduced motion", () => {
       const reduced = vi
         .spyOn(motion, "prefersReducedMotion")
         .mockReturnValue(true);
 
       markers["EDDF"]!.openPopup();
-      await featuresLoaded();
       reduced.mockRestore();
 
       expect(panPopupIntoView).toHaveBeenCalledWith(
@@ -340,22 +335,22 @@ describe("AirportManager", () => {
       );
     });
 
-    it("drops the list of a popup that closed while the bundle loaded", async () => {
+    it("lists nothing for a closed popup", () => {
       markers["EDDF"]!.openPopup();
       markers["EDDF"]!.closePopup();
-      await featuresLoaded();
+      listFlights.mockClear();
+
+      mockApp.selectedAircraft = "D-EFGH";
 
       expect(listFlights).not.toHaveBeenCalled();
-      expect(panPopupIntoView).not.toHaveBeenCalled();
     });
 
-    it("drops the list of an airport the popup has left", async () => {
+    it("lists the flights of the airport the popup moved to", () => {
       markers["EDDF"]!.openPopup();
       markers["EDDM"]!.openPopup();
-      await featuresLoaded();
 
-      expect(listFlights).toHaveBeenCalledTimes(1);
-      expect(listFlights).toHaveBeenCalledWith(mockApp, popup, "EDDM");
+      expect(listFlights).toHaveBeenCalledTimes(2);
+      expect(listFlights).toHaveBeenLastCalledWith(mockApp, popup, "EDDM");
     });
   });
 
@@ -552,7 +547,7 @@ describe("AirportManager", () => {
     });
 
     it("skips airports without markers", () => {
-      mockApp.allAirportsData.push({ name: "NEW", lat: 1, lon: 1 });
+      siteData.airports!.push({ name: "NEW", lat: 1, lon: 1 });
       expect(() => airportManager.updateAirportPopups()).not.toThrow();
     });
   });
@@ -570,6 +565,16 @@ describe("AirportManager", () => {
       airportManager.updateAirportOpacity();
 
       expect(hidden()).toEqual([]);
+    });
+
+    it("shows none without a dataset, whose flights would say which", () => {
+      // A first load that failed left the dots of every year on the map,
+      // unlabelled (regression)
+      mockApp.currentData = null;
+
+      airportManager.updateAirportOpacity();
+
+      expect(hidden()).toEqual(Object.keys(markers));
     });
 
     it("shows only airports matching the year filter", () => {
@@ -662,6 +667,9 @@ describe("AirportManager", () => {
       [5, "small"],
       [4.9, ""],
       [2, ""],
+      // A continent in a few hundred pixels: a clump of dots
+      [1.9, "hidden"],
+      [0, "hidden"],
     ])("sets data-zoom-size for zoom %s", (zoom, expected) => {
       mockApp.map!.getZoom.mockReturnValue(zoom);
 

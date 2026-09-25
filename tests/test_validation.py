@@ -9,6 +9,7 @@ import pytest
 import kml_heatmap.validation as val_mod
 from kml_heatmap.validation import (
     find_kml_files,
+    foreign_site_files,
     is_protected_directory,
     protected_directories,
     validate_kml_file,
@@ -181,6 +182,49 @@ class TestValidateOutputDir:
 
     def test_no_inputs(self, tmp_path):
         assert validate_output_dir(tmp_path / "data", []) == (True, None)
+
+
+class TestForeignSiteFiles:
+    OWNED = ("index.html", "styles.css", "vendor/maplibre-gl.js")
+
+    def test_nothing_there(self, tmp_path):
+        assert foreign_site_files(tmp_path, tmp_path / "data", self.OWNED) == []
+
+    def test_the_files_a_run_would_replace(self, tmp_path):
+        (tmp_path / "index.html").write_text("")
+        (tmp_path / "vendor").mkdir()
+        (tmp_path / "vendor" / "maplibre-gl.js").write_text("")
+        (tmp_path / "flags").mkdir()
+        (tmp_path / "flags" / "de.svg").write_text("")
+        (tmp_path / "data" / "2025").mkdir(parents=True)
+        (tmp_path / "data" / "2025" / "data.json").write_text("")
+        (tmp_path / "data" / "airports.json").write_text("")
+        (tmp_path / "notes.txt").write_text("")
+
+        found = foreign_site_files(
+            tmp_path, tmp_path / "data", self.OWNED, ("flags/*.svg",)
+        )
+
+        assert [path.relative_to(tmp_path).as_posix() for path in found] == [
+            "index.html",
+            "vendor/maplibre-gl.js",
+            "flags/de.svg",
+            "data/airports.json",
+            "data/2025/data.json",
+        ]
+
+    def test_a_symlink_counts(self, tmp_path):
+        (tmp_path / "index.html").symlink_to(tmp_path / "missing")
+        assert foreign_site_files(tmp_path, tmp_path / "data", self.OWNED) == [
+            tmp_path / "index.html"
+        ]
+
+    @pytest.mark.parametrize("marker", ["map_config.js", "data/metadata.json"])
+    def test_an_earlier_run_is_no_foreign_site(self, tmp_path, marker):
+        (tmp_path / "index.html").write_text("")
+        (tmp_path / marker).parent.mkdir(exist_ok=True)
+        (tmp_path / marker).write_text("")
+        assert foreign_site_files(tmp_path, tmp_path / "data", self.OWNED) == []
 
 
 class TestFindKmlFiles:

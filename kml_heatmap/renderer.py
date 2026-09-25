@@ -4,6 +4,8 @@ The files the site is made of live in ``site_assets``; this module is about
 the order the stages run in and what they hand each other.
 """
 
+import contextlib
+import gc
 import logging
 import os
 import pickle  # nosec B403
@@ -18,6 +20,7 @@ from .aircraft import merge_aircraft_data
 from .airport_lookup import load_airport_database
 from .airports import deduplicate_airports
 from .data_exporter import (
+    STABLE_MTIMES_ENV,
     ExportResult,
     SiteOutput,
     export_all_data,
@@ -35,11 +38,11 @@ from .site_assets import (
     render_html,
     warn_about_a_stale_bundle,
 )
-from .validation import validate_kml_file, validate_output_dir
+from .validation import foreign_site_files, validate_kml_file, validate_output_dir
 from .workers import init_worker, parse_worker_count
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from .airport_lookup import AirportRecord
     from .terrain import TileSource
@@ -49,6 +52,7 @@ __all__ = [
     "CoordinateExtent",
     "ParsedFile",
     "create_progressive_heatmap",
+    "foreign_output_error",
 ]
 
 # Files that are not in the parse cache are parsed in this process up to
@@ -56,6 +60,13 @@ __all__ = [
 # costs about as much as parsing 4 MB of KML, and 4 MB take about 60 MB of
 # memory to parse, which the main process can well afford.
 INLINE_PARSE_MAX_BYTES = 4 * 1024 * 1024
+# Files the parse cache holds are read in this process, unless there is this
+# much KML and at least POOLED_CACHE_MIN_WORKERS cores to read their entries
+# in the pool: 3090 files (494 MB, 4.7 million points) took 3.4 s here and
+# 2.0 s in 16 workers, 1030 of them (165 MB) 1.1 and 0.8 s, and 103 of them
+# 0.1 s here and 0.3 s in the pool, which takes time to start.
+POOLED_CACHE_MIN_BYTES = 128 * 1024 * 1024
+POOLED_CACHE_MIN_WORKERS = 8
 
 
 @dataclass(frozen=True)
@@ -145,6 +156,24 @@ def _load_cached(kml_file: str) -> ParsedFile | Path | None:
     return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata)
 
 
+def _load_or_parse(kml_file: str, cache_path: Path | None = None) -> ParsedFile:
+    """The parse of a file, from the parse cache if it has it, in a worker.
+
+    ``cache_path`` is not used: the worker looks the entry up itself. The
+    collector is paused meanwhile, see ``_collector_paused``.
+    """
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        cached = _load_cached(kml_file)
+        if isinstance(cached, ParsedFile):
+            return cached
+        return _parse_with_error_handling(kml_file, cached)
+    finally:
+        if enabled:
+            gc.enable()
+
+
 def _parse_inline(kml_file: str, cache_path: Path | None) -> ParsedFile:
     """Parse a file in this process, with the error handling of a worker."""
     try:
@@ -156,7 +185,7 @@ def _parse_inline(kml_file: str, cache_path: Path | None) -> ParsedFile:
         return ParsedFile(kml_file)
 
 
-def _uncached_bytes(kml_files: list[str]) -> int:
+def _file_bytes(kml_files: list[str]) -> int:
     total = 0
     for kml_file in kml_files:
         try:
@@ -170,12 +199,14 @@ def _parse_in_pool(
     uncached: Sequence[tuple[str, Path | None]],
     record: Callable[[ParsedFile], None],
     airports: dict[str, AirportRecord],
+    parse: Callable[[str, Path | None], ParsedFile] = _parse_with_error_handling,
 ) -> None:
     """Parse files in a process pool, handing each result to ``record``.
 
     ``uncached`` pairs each file with its parse cache entry (see
-    ``_parse_with_error_handling``). The workers get the airport database
-    the parent loaded (see ``workers.init_worker``).
+    ``_parse_with_error_handling``); ``parse`` is what a worker runs for
+    each, ``_load_or_parse`` to look the cache up there. The workers get the
+    airport database the parent loaded (see ``workers.init_worker``).
     """
     kml_files = [kml_file for kml_file, _ in uncached]
     cache_paths = dict(uncached)
@@ -189,8 +220,7 @@ def _parse_in_pool(
         initargs=(debug, database),
     ) as executor:
         future_to_file = {
-            executor.submit(_parse_with_error_handling, f, cache_paths[f]): f
-            for f in kml_files
+            executor.submit(parse, f, cache_paths[f]): f for f in kml_files
         }
         for future in as_completed(future_to_file):
             try:
@@ -227,7 +257,7 @@ def _parse_in_pool(
             for kml_file in remaining:
                 try:
                     parsed = executor.submit(
-                        _parse_with_error_handling, kml_file, cache_paths[kml_file]
+                        parse, kml_file, cache_paths[kml_file]
                     ).result()
                 except BrokenProcessPool:
                     raise KMLHeatmapError(
@@ -237,15 +267,68 @@ def _parse_in_pool(
                 record(parsed)
 
 
+def _load_or_parse_here(
+    valid_files: list[str],
+    record: Callable[[ParsedFile], None],
+    airports: dict[str, AirportRecord],
+) -> None:
+    """Read the parse cache in this process and parse what it misses.
+
+    The misses are parsed here as well up to ``INLINE_PARSE_MAX_BYTES``, in
+    a process pool beyond.
+    """
+    # The files to parse, with the cache entry to store each one in
+    uncached: list[tuple[str, Path | None]] = []
+    for kml_file in valid_files:
+        cached = _load_cached(kml_file)
+        if isinstance(cached, ParsedFile):
+            record(cached)
+        else:
+            uncached.append((kml_file, cached))
+
+    if (
+        uncached
+        and _file_bytes([kml_file for kml_file, _ in uncached]) > INLINE_PARSE_MAX_BYTES
+    ):
+        _parse_in_pool(uncached, record, airports)
+    else:
+        for kml_file, cache_path in uncached:
+            record(_parse_inline(kml_file, cache_path))
+
+
+@contextlib.contextmanager
+def _collector_paused() -> Iterator[None]:
+    """Pause the cyclic garbage collector, and freeze what exists after.
+
+    Parsing or loading a few million points creates as many objects, none
+    of them part of a cycle, and every few hundred thousand of them the
+    collector walks all of them again: at 4.7 million points that took
+    close to half the time of loading the parse cache. Afterwards they live
+    until the export is written, so they are frozen out of the collector's
+    walks (``gc.freeze``) for the rest of the run: sampling the ground under
+    them was a third slower otherwise. ``create_progressive_heatmap`` hands
+    them back to the collector when it is done.
+    """
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        gc.freeze()
+        if enabled:
+            gc.enable()
+
+
 def _parse_kml_files(
     valid_files: list[str],
 ) -> tuple[FlightPathGroup, list[PathMetadata]]:
     """Parse KML files and merge the results in input order.
 
     Files the parse cache holds are read from it in this process: a worker
-    pool takes longer to start than reading them does. Of the rest, a few
-    small files are parsed here as well (up to ``INLINE_PARSE_MAX_BYTES``),
-    anything more in a process pool.
+    pool takes longer to start than reading them does, unless there are many
+    of them (see ``POOLED_CACHE_MIN_BYTES``), when every file goes to the
+    pool. Of the rest, a few small files are parsed here as well (up to
+    ``INLINE_PARSE_MAX_BYTES``), anything more in a process pool.
 
     The input order decides the path ids, so the merge must not depend on
     which worker finished first or on the file names: two directories may
@@ -270,34 +353,28 @@ def _parse_kml_files(
             Path(parsed.kml_file).name,
         )
 
-    # The files to parse, with the cache entry to store each one in
-    uncached: list[tuple[str, Path | None]] = []
-    for kml_file in valid_files:
-        cached = _load_cached(kml_file)
-        if isinstance(cached, ParsedFile):
-            record(cached)
+    with _collector_paused():
+        if (os.process_cpu_count() or 1) >= POOLED_CACHE_MIN_WORKERS and _file_bytes(
+            valid_files
+        ) > POOLED_CACHE_MIN_BYTES:
+            _parse_in_pool(
+                [(kml_file, None) for kml_file in valid_files],
+                record,
+                airports,
+                _load_or_parse,
+            )
         else:
-            uncached.append((kml_file, cached))
+            _load_or_parse_here(valid_files, record, airports)
 
-    if (
-        uncached
-        and _uncached_bytes([kml_file for kml_file, _ in uncached])
-        > INLINE_PARSE_MAX_BYTES
-    ):
-        _parse_in_pool(uncached, record, airports)
-    else:
-        for kml_file, cache_path in uncached:
-            record(_parse_inline(kml_file, cache_path))
-
-    input_order = {kml_file: index for index, kml_file in enumerate(valid_files)}
-    results.sort(key=lambda parsed: input_order[parsed.kml_file])
-    total_points = 0
-    all_path_groups: FlightPathGroup = []
-    all_path_metadata: list[PathMetadata] = []
-    for parsed in results:
-        total_points += parsed.point_count
-        all_path_groups.extend(parsed.path_groups)
-        all_path_metadata.extend(parsed.path_metadata)
+        input_order = {kml_file: index for index, kml_file in enumerate(valid_files)}
+        results.sort(key=lambda parsed: input_order[parsed.kml_file])
+        total_points = 0
+        all_path_groups: FlightPathGroup = []
+        all_path_metadata: list[PathMetadata] = []
+        for parsed in results:
+            total_points += parsed.point_count
+            all_path_groups.extend(parsed.path_groups)
+            all_path_metadata.extend(parsed.path_metadata)
 
     parse_time = time.time() - parse_start
     logger.info(
@@ -399,7 +476,11 @@ def _export_site(
 
     data_dir_name = data_dir.name
     with SiteOutput(
-        output_file.parent, data_dir, SITE_FILES, SITE_FILE_PATTERNS
+        output_file.parent,
+        data_dir,
+        SITE_FILES,
+        SITE_FILE_PATTERNS,
+        stable_mtimes=os.environ.get(STABLE_MTIMES_ENV) == "1",
     ) as site:
         result = export_all_data(
             all_path_groups,
@@ -429,12 +510,32 @@ def _export_site(
     return result
 
 
+def foreign_output_error(output_file: str | Path, data_dir: str | Path) -> str | None:
+    """Why a run must not write into the output directory, None when it may.
+
+    It may not when it would replace files there that no earlier run wrote
+    (see ``validation.foreign_site_files``).
+    """
+    output = Path(output_file)
+    found = foreign_site_files(
+        output.parent, data_dir, [output.name, *SITE_FILES], SITE_FILE_PATTERNS
+    )
+    if not found:
+        return None
+    return (
+        f"Refusing to replace {len(found)} file(s) in {output.parent} that no "
+        f"earlier run of kml-heatmap wrote, such as {found[0]}: choose another "
+        "output directory, or pass --force to replace them"
+    )
+
+
 def create_progressive_heatmap(
     kml_files: list[str],
     output_file: str = "index.html",
     data_dir: str = "data",
     aircraft_files: list[Path] | None = None,
     terrain: TileSource | None = None,
+    force: bool = False,
 ) -> bool:
     """Create a progressive-loading heatmap with external data files.
 
@@ -445,6 +546,10 @@ def create_progressive_heatmap(
     ``terrain`` is where the ground under the flights comes from (see
     ``kml_heatmap.terrain``). The default, None, leaves it out of the year
     files; the command line passes ``TerrariumTiles`` unless told not to.
+
+    An output directory with files of a site that no earlier run wrote (an
+    ``index.html`` of its own, see ``foreign_output_error``) is refused
+    unless ``force`` is set.
     """
     aircraft_files = aircraft_files or []
 
@@ -463,6 +568,10 @@ def create_progressive_heatmap(
     is_safe, error_msg = validate_output_dir(output_dir, [*kml_files, *aircraft_files])
     if not is_safe:
         logger.error("%s", error_msg)
+        return False
+    foreign = None if force else foreign_output_error(output_file, data_dir)
+    if foreign:
+        logger.error("%s", foreign)
         return False
 
     if not bundle_is_available():
@@ -495,28 +604,32 @@ def create_progressive_heatmap(
     logger.info("Parsing %d KML file(s)...", len(valid_files))
 
     try:
-        all_path_groups, all_path_metadata = _parse_kml_files(valid_files)
-    except (ValueError, OSError, KMLHeatmapError) as e:
-        logger.error(str(e))
-        return False
+        try:
+            all_path_groups, all_path_metadata = _parse_kml_files(valid_files)
+        except (ValueError, OSError, KMLHeatmapError) as e:
+            logger.error(str(e))
+            return False
 
-    # Stage 2: Export the data, the page and the assets
-    aircraft_data = merge_aircraft_data(aircraft_files) if aircraft_files else None
-    try:
-        _export_site(
-            all_path_groups,
-            all_path_metadata,
-            Path(output_file),
-            Path(data_dir),
-            aircraft_data=aircraft_data,
-            terrain=terrain,
+        # Stage 2: Export the data, the page and the assets
+        aircraft_data = merge_aircraft_data(aircraft_files) if aircraft_files else None
+        try:
+            _export_site(
+                all_path_groups,
+                all_path_metadata,
+                Path(output_file),
+                Path(data_dir),
+                aircraft_data=aircraft_data,
+                terrain=terrain,
+            )
+        except (ValueError, RuntimeError, OSError, KMLHeatmapError) as e:
+            logger.error("Export failed: %s", e)
+            return False
+
+        logger.info(
+            "  Serve %s over HTTP to view it (e.g. python -m http.server)", output_file
         )
-    except (ValueError, RuntimeError, OSError, KMLHeatmapError) as e:
-        logger.error("Export failed: %s", e)
-        return False
 
-    logger.info(
-        "  Serve %s over HTTP to view it (e.g. python -m http.server)", output_file
-    )
-
-    return True
+        return True
+    finally:
+        # The parsed flights go back to the collector (see _collector_paused)
+        gc.unfreeze()

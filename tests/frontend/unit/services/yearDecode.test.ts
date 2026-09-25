@@ -315,7 +315,7 @@ describe("expandYearData", () => {
     const data = expandYearData(
       rawYear(2025, { "1": path([50, 8], [[50.1, 8.1, 1, 1]]) }),
     );
-    expect(data.coordinates[0]).toBe(data.path_segments[0]!.coords![0]);
+    expect(data.coordinates[0]).toBe(data.path_segments[0]!.coords[0]);
   });
 
   it("shares one coordinate array between neighbouring segments", () => {
@@ -331,8 +331,8 @@ describe("expandYearData", () => {
       }),
     );
     // The end of a segment is the very same array as the next one's start
-    expect(data.path_segments[0]!.coords![1]).toBe(
-      data.path_segments[1]!.coords![0],
+    expect(data.path_segments[0]!.coords[1]).toBe(
+      data.path_segments[1]!.coords[0],
     );
   });
 
