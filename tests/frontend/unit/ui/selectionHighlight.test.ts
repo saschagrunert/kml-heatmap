@@ -168,6 +168,20 @@ describe("selection highlight", () => {
     expect(lines()).toEqual([]);
   });
 
+  it("steps aside while the 3D view draws the selection as ribbons at its height", () => {
+    select(1);
+    expect(lines()).toHaveLength(1);
+
+    // ui/selectionRibbons.ts
+    app.selectionRibbons = true;
+    expect(lines()).toEqual([]);
+    select(1, 2);
+    expect(lines()).toEqual([]);
+
+    app.selectionRibbons = false;
+    expect(lines()).toHaveLength(2);
+  });
+
   it("writes the lines again once the map has its WebGL context back", () => {
     select(1);
     const map = app.map!;

@@ -195,10 +195,10 @@ export interface Metadata {
   available_years: number[];
   /** Size of each year file in bytes, by year */
   year_file_bytes: Record<string, number>;
-  /** Only the registrations aircraft.json knows a model for */
   /**
-   * Missing from exports made before it was added, which a browser can still
-   * hold in its cache next to a newer bundle
+   * Only the registrations aircraft.json knows a model for. Missing from
+   * exports made before it was added, which a browser can still hold in its
+   * cache next to a newer bundle.
    */
   aircraft_models?: AircraftModels;
   /**

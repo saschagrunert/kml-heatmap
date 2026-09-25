@@ -306,29 +306,36 @@ const SETTLE_MAX_MS = 3000;
  * while some ribbons would stand on the ground of the other view. Asked
  * after every frame, since the relief asks for its tiles as it is drawn;
  * not on `idle`, which waits for the base map and its labels as well.
- * `restyle` gives the trail the opacity it has now again, to a style the
+ * The layer manager hides the ribbons of the colour layers; this hides
+ * the trail and the lines of a selection, whose opacity nobody else sets.
+ * `restyle` gives them the opacity they have now again, to a style the
  * map has built anew after a lost WebGL context: MapLibre builds it from
- * the style at the loss, whose trail may have been hidden then.
+ * the style at the loss, whose ribbons may have been hidden then.
  */
 function settleRibbons(
   app: MapApp,
   map: MapLibreMap,
   signal: AbortSignal,
 ): { start: () => void; restyle: () => void } {
-  const trail = MAP_SOURCES.replayTrailRibbons;
-  const trailOpacity = map.getPaintProperty(
-    trail,
-    "fill-extrusion-opacity",
-  ) as number;
+  // Each layer with the opacity the map was made with
+  const own = [
+    MAP_LAYERS.replayTrailRibbons,
+    MAP_LAYERS.selectionHighlightRibbons,
+  ].map((id) => ({
+    id,
+    opacity: map.getPaintProperty(id, "fill-extrusion-opacity") as number,
+  }));
   const restyle = (): void => {
     // Without its context the map has no style to write to; the restore
     // calls this again
     if (hasLostContext(map)) return;
-    map.setPaintProperty(
-      trail,
-      "fill-extrusion-opacity",
-      app.relief.ribbonsShown ? trailOpacity : 0,
-    );
+    for (const { id, opacity } of own) {
+      map.setPaintProperty(
+        id,
+        "fill-extrusion-opacity",
+        app.relief.ribbonsShown ? opacity : 0,
+      );
+    }
   };
   const show = (shown: boolean): void => {
     app.relief.showRibbons(shown);

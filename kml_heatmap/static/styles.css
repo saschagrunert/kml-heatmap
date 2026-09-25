@@ -63,6 +63,17 @@
 
   /* RGB triplets for translucent variants: rgba(var(--x-rgb), alpha) */
   --color-bg-secondary-rgb: 28, 28, 28;
+  /* The secondary surface a hair short of opaque, for every surface that
+     spans the whole width of the map at its top or bottom edge on a phone:
+     the tab bar, its sheet and the statistics sheet. Chrome leaves out the
+     part of the map's WebGL canvas an opaque element covers, and for one
+     across a whole edge of the viewport it left out the same strip at the
+     opposite edge as well, as if the canvas were upside down: at 390 px
+     the top 57 px of the map, the bar's height, showed the page background
+     in every screenshot since those surfaces became opaque. At 0.99 Chrome
+     leaves nothing out, and no one tells the surface from an opaque one.
+     Opaque again, the band comes back. */
+  --color-bg-edge: rgba(var(--color-bg-secondary-rgb), 0.99);
   --color-text-rgb: 242, 242, 242;
   --color-accent-blue-rgb: 79, 172, 254;
   --color-home-blue-rgb: 0, 123, 255;
@@ -1614,7 +1625,8 @@ body.stats-open #left-buttons {
     bottom: 0;
     display: flex;
     align-items: stretch;
-    background-color: var(--color-bg-secondary);
+    /* Across the bottom edge (see --color-bg-edge) */
+    background-color: var(--color-bg-edge);
     border-top: 1px solid var(--color-border);
     padding-bottom: var(--safe-bottom);
     padding-left: var(--safe-left);
@@ -1688,7 +1700,8 @@ body.stats-open #left-buttons {
     display: flex;
     flex-direction: column;
     max-height: calc(80dvh - var(--mobile-bar-h) - var(--safe-bottom));
-    background-color: var(--color-bg-secondary);
+    /* The whole width (see --color-bg-edge) */
+    background-color: var(--color-bg-edge);
     border: 1px solid var(--color-border);
     border-bottom: none;
     border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
@@ -1941,13 +1954,16 @@ body.stats-open #left-buttons {
     min-height: var(--btn-min-height);
   }
 
-  /* The rail becomes a bottom sheet; the map keeps the whole viewport */
+  /* The rail becomes a bottom sheet; the map keeps the whole viewport. It
+     spans the whole width, and the top edge at its full height (see
+     --color-bg-edge). */
   #stats-rail:not([hidden]) {
     top: auto;
     left: 0;
     right: 0;
     bottom: 0;
     width: auto;
+    background-color: var(--color-bg-edge);
     max-height: 70vh;
     max-height: 70dvh;
     border-right: none;

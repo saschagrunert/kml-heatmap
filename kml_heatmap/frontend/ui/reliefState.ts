@@ -25,9 +25,13 @@ export const PATH_RIBBON_SOURCES: readonly string[] = [
   MAP_SOURCES.pathsAirspeedSelectedRibbons,
 ];
 
-/** Every source of ribbons, the replay's trail's too: all on the relief */
+/**
+ * Every source of ribbons, those of the lines of a selection and of the
+ * replay's trail too: all on the relief
+ */
 export const RIBBON_SOURCES: readonly string[] = [
   ...PATH_RIBBON_SOURCES,
+  MAP_SOURCES.selectionHighlightRibbons,
   MAP_SOURCES.replayTrailRibbons,
 ];
 

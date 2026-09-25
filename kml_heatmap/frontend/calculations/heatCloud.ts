@@ -34,7 +34,7 @@ import type { SmoothedFlights } from "./smoothing";
  * The points of a flight's curve are kept this many pixels apart at most,
  * in the middle of the relief level the cloud is cut for: closer ones are
  * merged into the stretch between the ones kept, and their heat with it.
- * The glow of a stretch is wider (see CLOUD_SIGMA_STOPS in
+ * The glow of a stretch is wider (see CLOUD_STOPS in
  * ui/heatCloudLayer.ts), so a stretch is a chord of the curve that no one
  * tells from it, and zoomed out a year's flights are a few thousand
  * stretches instead of a hundred thousand.

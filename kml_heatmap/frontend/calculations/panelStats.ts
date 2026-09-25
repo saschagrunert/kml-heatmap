@@ -434,10 +434,14 @@ export function filterStatistics(view: FilterView): FilteredStatistics {
  * phone, in one task. The work runs in slices of up to SLICE_MS, with a
  * task of the page's own between two of them. What is done within the
  * first slice (a view whose statistics are kept, or a small one) is
- * returned as it is; anything longer as a promise.
+ * returned as it is; anything longer as a promise. A run that `signal`
+ * aborts stops at its next slice, and its promise rejects with the
+ * signal's reason: the one who asked has gone (Wrapped closed while it
+ * loaded), and the next to ask starts a run of their own.
  */
 export function filterStatisticsInSlices(
   view: FilterView,
+  signal?: AbortSignal,
 ): FilteredStatistics | Promise<FilteredStatistics> {
   const kept = viewStatistics.get(view) ?? pendingStatistics.get(view);
   if (kept) return kept;
@@ -452,17 +456,32 @@ export function filterStatisticsInSlices(
   };
   const done = slice();
   if (done) return done;
-  const pending = (async () => {
+  const run = async (): Promise<FilteredStatistics> => {
     try {
       for (;;) {
         await new Promise((resolve) => setTimeout(resolve, 0));
+        signal?.throwIfAborted();
         const stats = slice();
         if (stats) return stats;
       }
     } finally {
-      pendingStatistics.delete(view);
+      if (pendingStatistics.get(view) === pending) {
+        pendingStatistics.delete(view);
+      }
     }
-  })();
+  };
+  const pending = run();
   pendingStatistics.set(view, pending);
+  // Let go of the run at once, not at its next slice: a caller in between
+  // (Wrapped opened again right after a close) would get its rejection
+  signal?.addEventListener(
+    "abort",
+    () => {
+      if (pendingStatistics.get(view) === pending) {
+        pendingStatistics.delete(view);
+      }
+    },
+    { once: true },
+  );
   return pending;
 }

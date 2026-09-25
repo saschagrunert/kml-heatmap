@@ -18,6 +18,7 @@ import {
   type LayerName,
 } from "./helpers";
 import {
+  PATH_POLL,
   centerOnAirport,
   expectHeatmapPainted,
   focusAirportMarker,
@@ -240,7 +241,9 @@ test.describe("Error-Free Interactions", () => {
 
     test("zooming preserves airspeed path colors", async ({ page }) => {
       await toggleLayer(page, "airspeed");
-      await expect.poll(() => pathCount(page, "airspeed")).toBeGreaterThan(0);
+      await expect
+        .poll(() => pathCount(page, "airspeed"), PATH_POLL)
+        .toBeGreaterThan(0);
 
       const before = await pathColors(page, "airspeed");
       expectColorRamp(before);

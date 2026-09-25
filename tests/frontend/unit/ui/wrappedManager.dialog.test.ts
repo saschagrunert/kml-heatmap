@@ -77,32 +77,142 @@ describe("WrappedManager dialog", () => {
       expect(mockApp.map!.fitBounds).toHaveBeenCalledOnce();
     });
 
-    it("opens once the statistics of a long filter are worked out", async () => {
-      mockApp.currentData = createFlightHistory();
-      // A clock that has run past a slice at every look
+    /** A clock that has run past a slice of the statistics at every look */
+    function slowClock(): () => number {
       let now = 0;
-      vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));
+      const clock = vi
+        .spyOn(performance, "now")
+        .mockImplementation(() => (now += 1000));
+      return () => clock.mock.calls.length;
+    }
+
+    /** The figure of the stats card labelled `label` */
+    function statValue(label: string): string | undefined {
+      return Array.from(el("wrapped-stats").querySelectorAll(".stat-card"))
+        .find(
+          (card) => card.querySelector(".stat-label")?.textContent === label,
+        )
+        ?.querySelector(".stat-value")
+        ?.textContent.trim();
+    }
+
+    it("opens at once and says it prepares the cards of a long filter", async () => {
+      mockApp.currentData = createFlightHistory();
+      slowClock();
 
       wrappedManager.showWrapped();
-      // A second click while they are worked out opens it no sooner
-      wrappedManager.showWrapped();
 
-      expect(el("wrapped-modal").hidden).toBe(true);
-      await vi.runAllTimersAsync();
+      // Open, titled and focused while the statistics are worked out
       expect(el("wrapped-modal").hidden).toBe(false);
-      expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(2);
+      expect(mockApp.store.get("wrappedVisible")).toBe(true);
+      expect(document.activeElement).toBe(
+        el("wrapped-modal").querySelector(".close-btn"),
+      );
+      expect(el("wrapped-year").textContent).toBe("2024");
+      expect(el("wrapped-cards-column").getAttribute("aria-busy")).toBe("true");
+      const loading = el("wrapped-stats").querySelector(".kh-stats-loading");
+      expect(loading?.getAttribute("role")).toBe("status");
+      expect(loading?.textContent).toBe("Preparing your year…");
+      expect(statValue("Flights")).toBeUndefined();
+
+      // A second click while they are worked out changes nothing
+      wrappedManager.showWrapped();
+      expect(mockApp.map!.fitBounds).toHaveBeenCalledOnce();
+
+      await vi.runAllTimersAsync();
+      expect(el("wrapped-cards-column").hasAttribute("aria-busy")).toBe(false);
+      expect(el("wrapped-stats").querySelector(".kh-stats-loading")).toBeNull();
+      expect(statValue("Flights")).toBe("3");
     });
 
-    it("does not open for statistics that arrive after the teardown", async () => {
+    it("prepares the flight history for all the years", () => {
+      mockApp.selectedYear = "all";
       mockApp.currentData = createFlightHistory();
-      let now = 0;
-      vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));
+      slowClock();
+
+      wrappedManager.showWrapped();
+
+      expect(el("wrapped-stats").textContent).toBe(
+        "Preparing your flight history…",
+      );
+    });
+
+    it("clears the cards of the last opening while it prepares new ones", () => {
+      openWrapped();
+      wrappedManager.closeWrapped();
+      expect(el("wrapped-fun-facts").innerHTML).not.toBe("");
+      mockApp.currentData = createFlightHistory();
+      slowClock();
+
+      wrappedManager.showWrapped();
+
+      expect(statValue("Flights")).toBeUndefined();
+      for (const id of [
+        "wrapped-fun-facts",
+        "wrapped-aircraft-fleet",
+        "wrapped-top-airports",
+        "wrapped-airports-grid",
+      ]) {
+        expect(el(id).innerHTML).toBe("");
+      }
+    });
+
+    it("stops preparing the cards when it closes while they load", async () => {
+      mockApp.currentData = createFlightHistory();
+      const looks = slowClock();
+
+      wrappedManager.showWrapped();
+      wrappedManager.closeWrapped();
+      const looksAtClose = looks();
+      await vi.runAllTimersAsync();
+
+      // Not a slice more of the work, and no cards in a closed dialog
+      expect(looks()).toBe(looksAtClose);
+      expect(el("wrapped-modal").hidden).toBe(true);
+      expect(statValue("Flights")).toBeUndefined();
+    });
+
+    it("prepares the cards anew when it reopens after a close while they loaded", async () => {
+      mockApp.currentData = createFlightHistory();
+      slowClock();
+
+      wrappedManager.showWrapped();
+      wrappedManager.closeWrapped();
+      vi.advanceTimersByTime(100);
+      wrappedManager.showWrapped();
+      await vi.runAllTimersAsync();
+
+      expect(el("wrapped-modal").hidden).toBe(false);
+      expect(el("wrapped-cards-column").hasAttribute("aria-busy")).toBe(false);
+      expect(statValue("Flights")).toBe("3");
+    });
+
+    it("fills the cards from the data that loaded while they were prepared", async () => {
+      mockApp.currentData = createFlightHistory();
+      slowClock();
+      wrappedManager.showWrapped();
+
+      const history = createFlightHistory();
+      history.path_info = history.path_info.filter((path) => path.id !== 3);
+      history.path_segments = history.path_segments.filter(
+        (segment) => segment.path_id !== 3,
+      );
+      mockApp.currentData = history;
+      await vi.runAllTimersAsync();
+
+      expect(statValue("Flights")).toBe("2");
+    });
+
+    it("does not fill the cards for statistics that arrive after the teardown", async () => {
+      mockApp.currentData = createFlightHistory();
+      slowClock();
 
       wrappedManager.showWrapped();
       wrappedManager.destroy();
       await vi.runAllTimersAsync();
 
-      expect(el("wrapped-modal").hidden).toBe(true);
+      expect(statValue("Flights")).toBeUndefined();
+      expect(el("wrapped-cards-column").getAttribute("aria-busy")).toBe("true");
     });
 
     it("hides the control elements behind the dialog", () => {

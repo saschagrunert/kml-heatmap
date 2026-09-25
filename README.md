@@ -838,7 +838,7 @@ the other once it has started.
   so the taxiways and circuits of a busy airport stay apart. In the 3D view
   the heat is a cloud in the air instead: every flight glows where it flew,
   at its height as the 3D view draws it, along the same curve as its
-  ribbon, and brighter the more time was spent there; from `z` 11 in the
+  ribbon, and brighter the more time was spent there; from `z` 10.5 in the
   glow narrows to a crisp line along each track, so the roads and place
   names stay readable. A route flown once is a faint blue, the circuits
   and the climbs out of a busy field glow white, and a ridge in front of a
@@ -896,7 +896,7 @@ the other once it has started.
 
 - **Year Filter** - View flights from specific years or all years combined
 - **Aircraft Filter** - Filter by aircraft registration to see flights per aircraft
-- **Path Selection** - Click paths to highlight and view detailed statistics. A chip at the top of the map says how many flights are selected and clears them again. With neither colour layer on, the selected flights are drawn as thin light lines over the heatmap, which steps back while they show, at every zoom level
+- **Path Selection** - Click paths to highlight and view detailed statistics. A chip at the top of the map says how many flights are selected and clears them again. With neither colour layer on, the selected flights are drawn as thin light lines over the heatmap, which steps back while they show, at every zoom level; in the 3D view they are lifted to their height with the heat cloud
 - **Airport Selection** - Click an airport marker to select all flights that visited it; click the map to clear the selection. The airport popup lists those flights (route, aircraft and year), each a button that selects that one flight, so a single flight and Replay are reachable from the keyboard: Tab to a marker, Enter opens the popup and moves focus into it, Escape closes it and returns focus to the marker
 - **Solo Mode** - Isolate selected paths, hiding all other paths and heatmap data
 

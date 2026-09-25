@@ -6,7 +6,9 @@
  * selection on purpose (only Isolate narrows it), so a selected flight was
  * nowhere to be seen. These lines mark it instead. Whether they show is
  * worked out with the other layers (see ui/layerVisibility.ts); this module
- * keeps their data in step with the selection and the dataset.
+ * keeps their data in step with the selection and the dataset. Where the
+ * 3D view lifts the flights, it draws them as ribbons at their height
+ * instead (ui/selectionRibbons.ts), and the lines step aside.
  */
 import type { GeoJSONSource } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
@@ -57,9 +59,10 @@ export function selectionLines(
  * the lines of the busiest airport's hundreds of flights took a fifth of
  * the click that selected them, for nobody to see. The year and aircraft
  * filter need not be asked: a change of either clears the selection, and
- * a click selects only flights it keeps. After a lost WebGL context the
- * source is back with the data of the moment of the loss, and gets them
- * again.
+ * a click selects only flights it keeps. While the 3D view draws the
+ * selection as ribbons (selectionRibbons), the lines are of no flight.
+ * After a lost WebGL context the source is back with the data of the
+ * moment of the loss, and gets them again.
  */
 export function followSelectionHighlight(app: MapApp): void {
   let lines = selectionLines([]);
@@ -71,7 +74,9 @@ export function followSelectionHighlight(app: MapApp): void {
       ?.setData(lines);
   };
   const update = (): void => {
-    const selected = app.selectedPathIds;
+    const selected = app.selectionRibbons
+      ? new Set<number>()
+      : app.selectedPathIds;
     // Taken away as the selection is cleared, whether they show or not
     if (!stale || (selected.size > 0 && !highlightsSelection(app))) return;
     stale = false;
@@ -83,7 +88,8 @@ export function followSelectionHighlight(app: MapApp): void {
     );
     write();
   };
-  app.store.subscribeKeys(["currentData", "selectedPathIds"], () => {
+  const keys = ["currentData", "selectedPathIds", "selectionRibbons"] as const;
+  app.store.subscribeKeys(keys, () => {
     stale = true;
     update();
   });

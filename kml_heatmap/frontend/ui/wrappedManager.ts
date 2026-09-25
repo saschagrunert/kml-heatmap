@@ -27,9 +27,9 @@ import {
 import { segmentBounds, type Coordinate } from "../utils/geometry";
 import {
   calculateFilteredStatistics,
-  filterStatistics,
   filterStatisticsInSlices,
 } from "../calculations/panelStats";
+import type { FilteredStatistics } from "../types";
 import { datasetIndex, type FilterView } from "../calculations/datasetIndex";
 import { logError } from "../utils/logger";
 import {
@@ -127,8 +127,11 @@ export class WrappedManager {
    * fitted view for the user's.
    */
   private savedView: UserMapView | null = null;
-  /** An opening that waits for the statistics of its filter */
-  private pendingOpen: Promise<void> | null = null;
+  /**
+   * Stops the statistics the cards wait for (see fillCards), null when
+   * they wait for none
+   */
+  private statsAbort: AbortController | null = null;
   private destroyed = false;
   private unsubscribeData: () => void;
 
@@ -151,7 +154,7 @@ export class WrappedManager {
     // A year that finishes loading while the dialog is open replaces the
     // cards, which were computed from the data that was there before
     this.unsubscribeData = app.store.subscribe("currentData", () => {
-      if (app.wrappedVisible) this.renderContent();
+      if (app.wrappedVisible) this.fillCards();
     });
   }
 
@@ -249,32 +252,11 @@ export class WrappedManager {
     // this covers every other way in (the mobile tab, a restored state)
     if (this.app.replayActive) return;
 
-    // The cards need the statistics of the filter, which walk every flight
-    // it keeps: a third of a second on a phone for all the years, and the
-    // page did nothing else meanwhile. They are worked out in slices, and
-    // the dialog opens once they are in; at once for a filter they are
-    // kept for, or a small one (see filterStatisticsInSlices).
-    if (this.pendingOpen) return;
-    const view = this.filterView();
-    const stats = view ? filterStatisticsInSlices(view) : null;
-    if (stats instanceof Promise) {
-      this.pendingOpen = stats
-        .then(() => {
-          this.pendingOpen = null;
-          if (!this.destroyed) this.showWrapped();
-        })
-        .catch((error: unknown) => {
-          this.pendingOpen = null;
-          logError(error);
-        });
-      return;
-    }
-
     // A close that is still settling must not remeasure a map that is about
     // to move back into the dialog
     this.cancelPendingMapTimers();
 
-    this.renderContent();
+    this.fillCards();
 
     // Move the map into the wrapped container
     const mapContainer = domCache.get("map");
@@ -379,11 +361,97 @@ export class WrappedManager {
   }
 
   /**
-   * Fill the cards for the selected year and aircraft from the loaded data.
-   * Runs on opening and again when other data finishes loading while the
-   * dialog is open.
+   * Fill the cards for the selected year and aircraft from the loaded data,
+   * on opening and again when other data finishes loading while the dialog
+   * is open.
+   *
+   * The cards need the statistics of the filter, which walk every flight it
+   * keeps: a third of a second on a phone for all the years, and the page
+   * did nothing else meanwhile. They are worked out in slices (see
+   * filterStatisticsInSlices), at once for a filter they are kept for or a
+   * small one. Until a longer one is in, the dialog is open and says it is
+   * preparing the cards: it used to open only then, and a click showed
+   * nothing for seconds on a slow device. A close or newer data stops the
+   * work.
    */
-  private renderContent(): void {
+  private fillCards(): void {
+    this.stopStats();
+    const view = this.filterView();
+    const controller = new AbortController();
+    const stats = view
+      ? filterStatisticsInSlices(view, controller.signal)
+      : calculateFilteredStatistics({ pathInfo: [], segments: [] });
+    if (!(stats instanceof Promise)) {
+      this.renderContent(stats);
+      return;
+    }
+    this.statsAbort = controller;
+    this.renderLoading();
+    stats.then(
+      (filteredStats) => {
+        if (controller.signal.aborted || this.destroyed) return;
+        this.statsAbort = null;
+        this.renderContent(filteredStats);
+      },
+      (error: unknown) => {
+        if (controller.signal.aborted) return;
+        this.statsAbort = null;
+        logError(error);
+      },
+    );
+  }
+
+  /** Stop the statistics the cards wait for, if they wait for any */
+  private stopStats(): void {
+    this.statsAbort?.abort();
+    this.statsAbort = null;
+  }
+
+  /** Title the dialog for the selected year, or for all of them */
+  private renderTitle(): void {
+    const titleEl = domCache.get("wrapped-title");
+    const yearEl = domCache.get("wrapped-year");
+    // The card is titled by its words alone: a sparkle emoji ignored the
+    // heading's gradient, and a drawn star beside the type read as a stray
+    const year = this.app.selectedYear;
+    if (year === "all") {
+      if (titleEl) titleEl.textContent = "Your Flight History";
+      if (yearEl) yearEl.textContent = "All Years";
+    } else {
+      if (titleEl) titleEl.textContent = "Your Year in Flight";
+      if (yearEl) yearEl.textContent = year;
+    }
+  }
+
+  /**
+   * Empty the cards and say they are being prepared, in the words and the
+   * style of the statistics panel's loading line. The column is busy until
+   * renderContent fills it: the cards of the last opening, or of the data
+   * before, must not show for the new filter.
+   */
+  private renderLoading(): void {
+    this.renderTitle();
+    const statsEl = domCache.get("wrapped-stats");
+    if (statsEl) {
+      const what = this.app.selectedYear === "all" ? "flight history" : "year";
+      statsEl.innerHTML = `<p class="kh-stats-loading" role="status">Preparing your ${what}…</p>`;
+    }
+    for (const id of [
+      "wrapped-fun-facts",
+      "wrapped-aircraft-fleet",
+      "wrapped-top-airports",
+      "wrapped-airports-grid",
+    ]) {
+      const section = domCache.get(id);
+      if (section) section.innerHTML = "";
+    }
+    domCache.get("wrapped-cards-column")?.setAttribute("aria-busy", "true");
+    this.cardsScroll?.update();
+  }
+
+  /** Fill the cards with the statistics of the selected filter */
+  private renderContent(filteredStats: FilteredStatistics): void {
+    domCache.get("wrapped-cards-column")?.removeAttribute("aria-busy");
     // Use the currently selected year (including 'all')
     const year = this.app.selectedYear;
 
@@ -398,10 +466,6 @@ export class WrappedManager {
       segments: view?.segments() ?? [],
     };
 
-    const filteredStats = view
-      ? filterStatistics(view)
-      : calculateFilteredStatistics({ pathInfo: [], segments: [] });
-
     const yearStats = calculateYearStats(
       data?.path_info ?? [],
       data?.path_segments ?? [],
@@ -412,19 +476,7 @@ export class WrappedManager {
       filteredStats,
     );
 
-    // Update title and year display based on selection
-    const titleEl = domCache.get("wrapped-title");
-    const yearEl = domCache.get("wrapped-year");
-
-    // The card is titled by its words alone: a sparkle emoji ignored the
-    // heading's gradient, and a drawn star beside the type read as a stray
-    if (year === "all") {
-      if (titleEl) titleEl.textContent = "Your Flight History";
-      if (yearEl) yearEl.textContent = "All Years";
-    } else {
-      if (titleEl) titleEl.textContent = "Your Year in Flight";
-      if (yearEl) yearEl.textContent = year;
-    }
+    this.renderTitle();
 
     // Check if we have timing data (flight time and groundspeed)
     const hasTimingData =
@@ -631,6 +683,7 @@ export class WrappedManager {
   /** Drop every pending timer and listener; the dialog stays as it is */
   destroy(): void {
     this.destroyed = true;
+    this.stopStats();
     this.unsubscribeData();
     this.cancelPendingMapTimers();
     this.cardsScroll?.stop();
@@ -644,6 +697,8 @@ export class WrappedManager {
   }
 
   closeWrapped(): void {
+    // Cards nobody will see are not worked out any further
+    this.stopStats();
     this.cancelPendingMapTimers();
     this.cardsScroll?.stop();
     this.cardsScroll = null;
