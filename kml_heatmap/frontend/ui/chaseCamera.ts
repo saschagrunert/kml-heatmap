@@ -13,9 +13,11 @@
  */
 import { LngLat, type Map as MapLibreMap } from "maplibre-gl";
 import {
+  heightAtZoomFt,
   liftExaggeration,
   liftMetres,
   reliefLevel,
+  type GroundedHeight,
 } from "../calculations/lift";
 
 /**
@@ -216,12 +218,13 @@ export interface SavedCamera {
   pitch: number;
 }
 
-/** Where the airplane is and where it heads (see AirplaneHeading) */
-export interface ChaseTarget {
+/**
+ * Where the airplane is and where it heads (see AirplaneHeading), and its
+ * height above the flight's ground, null while the trail is flat
+ */
+export interface ChaseTarget extends GroundedHeight {
   position: readonly [lat: number, lon: number];
   track: number;
-  /** Above the flight's ground, null while the trail is flat */
-  heightFt: number | null;
 }
 
 /** A value the camera follows, and its speed */
@@ -325,17 +328,19 @@ export class ChaseCamera {
     return (EARTH_CIRCUMFERENCE_M * Math.cos(lat * RAD)) / world;
   }
 
-  /** The airplane's height as the map draws it, in metres above the sea */
+  /**
+   * The airplane's height as the map draws it, in metres above the sea:
+   * over the relief under it at the map's zoom
+   */
   private altitude(target: ChaseTarget): number {
     const [lat, lon] = target.position;
+    const zoom = this.map.getZoom();
+    const heightFt = heightAtZoomFt(target, zoom);
     return (
       (this.map.queryTerrainElevation([lon, lat]) ?? 0) +
-      (target.heightFt === null
+      (heightFt === null
         ? 0
-        : liftMetres(
-            target.heightFt,
-            liftExaggeration(reliefLevel(this.map.getZoom())),
-          ))
+        : liftMetres(heightFt, liftExaggeration(reliefLevel(zoom))))
     );
   }
 

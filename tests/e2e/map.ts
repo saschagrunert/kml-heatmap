@@ -250,17 +250,25 @@ export async function setOrientation(
   { bearing, pitch }: { bearing: number; pitch: number },
   { idle = true }: { idle?: boolean } = {},
 ): Promise<void> {
-  // Returns nothing: `jumpTo` returns the map, and Playwright would copy
-  // all of it, tiles and buffers included, out of the page (seconds on CI)
-  await page.evaluate(
+  // `jumpTo` is synchronous, so the orientation is read in the same call
+  // rather than polled for: on CI a page drawing the 3D view took longer to
+  // answer a second call than the poll waited. Not `jumpTo`'s own return
+  // value, the map, which Playwright would copy out of the page with all its
+  // tiles and buffers (seconds on CI).
+  const turned = await page.evaluate(
     (to) => {
-      window.mapApp!.map!.jumpTo(to);
+      const map = window.mapApp!.map!;
+      map.jumpTo(to);
+      const rounded = (degrees: number): number =>
+        Math.round(degrees * 1e6) / 1e6 || 0;
+      return {
+        bearing: rounded(map.getBearing()),
+        pitch: rounded(map.getPitch()),
+      };
     },
     { bearing, pitch },
   );
-  await expect
-    .poll(() => getOrientation(page))
-    .toMatchObject({ bearing, pitch });
+  expect(turned).toEqual({ bearing, pitch });
   if (idle) await waitForMapIdle(page);
 }
 

@@ -247,7 +247,10 @@ function analyzeBundleComposition(metafile, fileName) {
 // the app and mapApp.bundle.js only starts it, so the sum is what counts.
 // Nothing on the first paint can move to a lazy bundle: a link may open
 // turned, as a globe, zoomed in or in 3D. 138.19 KB raw and 46.36 KB gzipped.
-const BUDGET_APP = { raw: 139 * 1024, gzip: 47 * 1024 };
+// Raised from 139 KB and 47 KB for the ribbons that carry the ground of the
+// relief levels around their own, stand on the one of each tile and switch
+// their exaggeration with the relief: 140.70 KB raw and 47.19 KB gzipped.
+const BUDGET_APP = { raw: 142 * 1024, gzip: 48 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief of
 // the 3D view is first drawn, the Satellite switch is first on or an
 // airport's popup is first opened, so it is not part of what a first visit

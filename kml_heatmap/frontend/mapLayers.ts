@@ -130,8 +130,10 @@ export class AirportLayerHandle extends MapLayerHandle {
  * A source of lifted flights, which the 3D view draws as ribbons at their
  * height (see calculations/lift.ts), and its layer. The source is not
  * simplified: a ribbon is a few pixels across, and its quads would be
- * dropped from the tiles. The layer's opacity is the owner's business: the
- * layer manager dims it for a selection, as it does the lines.
+ * dropped from the tiles. A ribbon is known to the map by the id of its
+ * cut where its exaggeration is switched by it (see ribbonId). The layer's
+ * opacity is the owner's business: the layer manager dims it for a
+ * selection, as it does the lines.
  */
 function addRibbons(
   map: MapLibreMap,
@@ -145,6 +147,7 @@ function addRibbons(
     data: emptyGeoJson(),
     tolerance: 0,
     maxzoom: 14,
+    promoteId: "k",
   });
   map.addLayer(ribbonLayer(id, layout, opacity), before);
 }

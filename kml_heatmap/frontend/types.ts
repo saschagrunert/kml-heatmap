@@ -6,6 +6,7 @@ import type { LngLat, Marker, Point } from "maplibre-gl";
 import type { Coordinate } from "./utils/geometry";
 import type { IconName } from "./utils/icons";
 import type { importYearTools } from "./services/dataLoader";
+import type { RibbonProperties } from "./calculations/lift";
 
 /**
  * Path information from KML data.
@@ -229,7 +230,7 @@ export interface LayerHandle {
  * Properties of one feature in a paths source: a run of consecutive
  * segments of one path that share a colour step.
  */
-export interface PathRunProperties {
+export interface PathRunProperties extends Partial<RibbonProperties> {
   /** Index of the run in the layer manager's run table */
   r: number;
   /**
@@ -238,10 +239,6 @@ export interface PathRunProperties {
    */
   g: number;
   pathId: number;
-  /** Feet above the flight's ground; only a ribbon of the 3D view has it */
-  h?: number;
-  /** The exaggeration of `h` (see liftExaggeration), with it */
-  e?: number;
   color: string;
 }
 

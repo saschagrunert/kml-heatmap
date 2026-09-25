@@ -354,20 +354,24 @@ test.describe("Map orientation", () => {
         )
         .toBeGreaterThan(exaggeration);
       await reliefExpect.poll(() => ribbonsSettled(page)).toBe(true);
+      // The ribbons are cut for the level the relief is drawn for, and
+      // exaggerated as it is by that (see ribbonHeights in lift.ts)
       const lifted = await page.evaluate(() => {
-        const map = window.mapApp!.map!;
+        const app = window.mapApp!;
+        const map = app.map!;
         return {
           relief: map.getTerrain()!.exaggeration ?? 1,
+          level: app.store.get("reliefLevel"),
           ribbons: [
             ...new Set(
               map
                 .querySourceFeatures("paths-altitude-3d")
-                .map((feature) => feature.properties["e"] as number),
+                .map((feature) => feature.properties["l"] as number),
             ),
           ],
         };
       });
-      expect(lifted.ribbons).toEqual([lifted.relief]);
+      expect(lifted.ribbons).toEqual([lifted.level]);
       await reliefExpect
         .poll(() => ground(page))
         .toBeCloseTo(TERRAIN_ELEVATION_M * lifted.relief, 0);

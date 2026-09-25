@@ -823,6 +823,20 @@ export class Map
       this.featureStates.set(key, { ...this.featureStates.get(key), ...state });
     },
   );
+  removeFeatureState = vi.fn(
+    (feature: { source: string; id?: string | number }, key?: string) => {
+      const id = `${feature.source}:${String(feature.id)}`;
+      const state: Record<string, unknown> = {
+        ...this.featureStates.get(id),
+      };
+      if (key === undefined) {
+        this.featureStates.delete(id);
+        return;
+      }
+      delete state[key];
+      this.featureStates.set(id, state);
+    },
+  );
 
   /** The images the map was given, by name */
   readonly images = new globalThis.Map<string, unknown>();

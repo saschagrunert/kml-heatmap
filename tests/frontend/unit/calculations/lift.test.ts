@@ -1,11 +1,19 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import {
+  GROUND_LEVELS,
   LIFT_MAX_ZOOM,
   LIFT_STEP_FT,
+  RELIEF_MAX_LEVEL,
   TERRAIN_TILE_MAX_ZOOM,
   airplaneLiftPx,
+  followsLevel,
+  groundOffsetFt,
+  groundOffsetStepFt,
   groundProfileFt,
+  groundProfilesFt,
+  heightAtZoomFt,
+  heightOnReliefFt,
   isLiftedAt,
   liftExaggeration,
   liftFt,
@@ -13,12 +21,16 @@ import {
   pointOnFlight,
   reliefLevel,
   reliefPixelM,
+  ribbonHeightFt,
   ribbonHeights,
   ribbonOf,
+  ribbonId,
   ribbonPieces,
+  ribbonProperties,
   smoothAlong,
   smoothFlights,
   smoothLine,
+  switchesExaggeration,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
 import { resetMapLibreMock } from "../../../mocks/maplibre-gl";
 import {
@@ -705,49 +717,315 @@ describe("lift", () => {
   });
 
   describe("ribbonHeights", () => {
-    /** What an expression comes to for a feature at `h` and `e` */
-    const evaluate = (expression: unknown, h: number, e: number): number => {
+    /**
+     * What an expression comes to for a feature with `properties` and the
+     * feature state `state` in a tile of the zoom `zoom`, as MapLibre works
+     * it out: a step by zoom at the tile's own
+     */
+    const evaluate = (
+      expression: unknown,
+      zoom: number,
+      properties: Record<string, number>,
+      state: Record<string, number> = {},
+    ): unknown => {
       if (typeof expression === "number") return expression;
       const [op, ...args] = expression as [string, ...unknown[]];
-      if (op === "get") return args[0] === "h" ? h : e;
-      const values = args.map((arg) => evaluate(arg, h, e));
-      if (op === "*") return values[0]! * values[1]!;
-      if (op === "+") return values.reduce((sum, value) => sum + value, 0);
-      if (op === "-") return values[0]! - values[1]!;
-      if (op === "max") return Math.max(values[0]!, values[1]!);
+      const at = (arg: unknown): unknown =>
+        evaluate(arg, zoom, properties, state);
+      const numbers = (): number[] => args.map((arg) => at(arg) as number);
+      switch (op) {
+        case "zoom":
+          return zoom;
+        case "get":
+          return properties[args[0] as string] ?? null;
+        case "feature-state":
+          return state[args[0] as string] ?? null;
+        case "coalesce":
+          return args.map(at).find((value) => value !== null) ?? null;
+        case "step": {
+          const input = at(args[0]) as number;
+          let output = args[1];
+          for (let i = 2; i < args.length; i += 2) {
+            if (input >= (args[i] as number)) output = args[i + 1];
+          }
+          return at(output);
+        }
+        case "case":
+          for (let i = 0; i + 1 < args.length; i += 2) {
+            if (at(args[i])) return at(args[i + 1]);
+          }
+          return at(args[args.length - 1]);
+        case "<=":
+          return (at(args[0]) as number) <= (at(args[1]) as number);
+        case ">":
+          return (at(args[0]) as number) > (at(args[1]) as number);
+        case "*":
+          return numbers().reduce((product, value) => product * value, 1);
+        case "+":
+          return numbers().reduce((sum, value) => sum + value, 0);
+        case "-":
+          return (at(args[0]) as number) - (at(args[1]) as number);
+        case "max":
+          return Math.max(...numbers());
+      }
       throw new Error(`unknown expression "${op}"`);
     };
-    const stops = (expression: unknown[]): unknown[] =>
-      expression.slice(3).filter((_, i) => i % 2 === 1);
+    /** A ribbon cut for level 7, over ground that differs at the others */
+    const ribbon = { h: 1000, l: 7, "o-2": 300, "o-1": 100, o1: -200 };
+    /** Metres of the bottom of `ribbon` at 1000 + `offset` ft, at `e` */
+    const bottom = (offset: number, e = liftExaggeration(7)): number =>
+      (1000 + offset - LIFT_STEP_FT / 2) * FEET_TO_METERS * e;
 
-    it("takes the exaggeration from the feature, and only the band from the zoom", () => {
-      const { base, height } = ribbonHeights();
+    it("stands a ribbon on the ground of the level of each tile", () => {
+      const { base } = ribbonHeights();
+      const at = (zoom: number): number =>
+        evaluate(base, zoom, ribbon) as number;
 
-      // Without the zoom: MapLibre would take each tile's own, a level or
-      // two further out in the distance of a tilted view
-      expect(JSON.stringify(base)).not.toContain("zoom");
-      expect(evaluate(base, 1000, 4)).toBeCloseTo(
-        (1000 - LIFT_STEP_FT / 2) * FEET_TO_METERS * 4,
-        6,
-      );
-      expect(height.slice(0, 3)).toEqual(["interpolate", ["linear"], ["zoom"]]);
-      // Down to a map of half of Europe
-      expect(height[3]).toBeLessThanOrEqual(4);
+      expect(at(7.6)).toBeCloseTo(bottom(0), 6);
+      // A level in, as a zoom in goes on, and one and two further out
+      expect(at(8)).toBeCloseTo(bottom(-200), 6);
+      expect(at(6)).toBeCloseTo(bottom(100), 6);
+      expect(at(5)).toBeCloseTo(bottom(300), 6);
+      // Beyond them, the nearest carried
+      expect(at(2)).toBeCloseTo(bottom(300), 6);
+      expect(at(14)).toBeCloseTo(bottom(-200), 6);
+      // A ground left out is the one the ribbon was cut on
+      expect(evaluate(base, 8, { h: 1000, l: 7 })).toBeCloseTo(bottom(0), 6);
     });
 
-    it("gives each piece its step and a band, never below the ground", () => {
+    it("takes the exaggeration of its level, or the map's from a feature state", () => {
+      const { base } = ribbonHeights();
+
+      expect(evaluate(base, 7, ribbon)).toBeCloseTo(bottom(0), 6);
+      // Cut four levels further in: on the ground of the coarsest carried
+      expect(evaluate(base, 7, { ...ribbon, l: 11 }, {})).toBeCloseTo(
+        (1000 + 300 - LIFT_STEP_FT / 2) * FEET_TO_METERS * liftExaggeration(11),
+        6,
+      );
+      expect(evaluate(base, 7, ribbon, { e: 4 })).toBeCloseTo(bottom(0, 4), 6);
+    });
+
+    it("gives each piece its step and a band of the middle of its level, never below the ground", () => {
       const { base, height } = ribbonHeights();
+      const band = (zoom: number): number =>
+        (evaluate(height, zoom, ribbon) as number) -
+        (evaluate(base, zoom, ribbon) as number);
 
       // A piece reaches half a step below its middle and half above, and
       // a band beyond: the pieces of a slope meet
-      for (const e of [2, 10]) {
-        for (const stop of stops(height)) {
-          expect(evaluate(stop, 1000, e)).toBeGreaterThan(
-            evaluate(base, 1000 + LIFT_STEP_FT, e),
-          );
-        }
-        expect(evaluate(base, 0, e)).toBe(0);
+      const step = LIFT_STEP_FT * FEET_TO_METERS * liftExaggeration(7);
+      // Between the stops at 10 and 11 of 200 and 110 m
+      expect(band(10.2)).toBeCloseTo(step + 155, 6);
+      expect(band(10.9)).toBeCloseTo(band(10.2), 6);
+      // A map of half of Europe has one too, and further in it is thinner
+      expect(band(3)).toBeGreaterThan(step);
+      for (let zoom = 4; zoom < LIFT_MAX_ZOOM - 1; zoom++) {
+        expect(band(zoom + 1)).toBeLessThan(band(zoom));
       }
+      // On the tiles of a level further out than the one cut for, in the
+      // distance of a tilted map, the band of the next level in, as thin
+      // as an interpolation by zoom made it there: 1,190 m at zoom 8,
+      // between the stops at 7 and 9 of 1,900 and 480 m, and 480 m at 9.
+      // Its own level's tiles and those further in have the band of their
+      // middle.
+      const cutAt9 = { h: 1000, l: 9 };
+      const bandOf9 = (zoom: number): number =>
+        (evaluate(height, zoom, cutAt9) as number) -
+        (evaluate(base, zoom, cutAt9) as number) -
+        LIFT_STEP_FT * FEET_TO_METERS * liftExaggeration(9);
+      expect(bandOf9(7)).toBeCloseTo(1190, 6);
+      expect(bandOf9(8)).toBeCloseTo(480, 6);
+      expect(bandOf9(9)).toBeCloseTo(340, 6);
+      expect(bandOf9(10)).toBeCloseTo(155, 6);
+      // Never below the ground, whatever the other level's ground
+      expect(evaluate(base, 8, { h: 0, l: 7, o1: -300 })).toBe(0);
+      expect(evaluate(height, 8, { h: 0, l: 7, o1: -300 })).toBeGreaterThan(0);
+    });
+  });
+
+  describe("the ground of the levels around", () => {
+    it("carries each level's ground as an offset to the one cut for", () => {
+      const sampled = [420, 430, 400, 900, 1500, 1100, 2000, 2010, 2000];
+      const segments = sampled.map((ground_ft, i) => ({
+        path_id: 1,
+        altitude_ft: 5000,
+        groundspeed_knots: 100,
+        ground_ft,
+        coords: [
+          [50, 8 + i / 100],
+          [50, 8.01 + i / 100],
+        ] as [[number, number], [number, number]],
+      }));
+
+      const { ground, offsets } = groundProfilesFt(segments, true, 8);
+
+      expect([...ground]).toEqual([...groundProfileFt(segments, true, 8)]);
+      GROUND_LEVELS.forEach((step, k) => {
+        const other = groundProfileFt(segments, true, 8 + step);
+        expect([...offsets![k]!]).toEqual(
+          [...ground].map(
+            (feet, i) => expect.closeTo(feet - other[i]!, 9) as unknown,
+          ),
+        );
+      });
+      // None beyond the first and the last level
+      expect(
+        groundProfilesFt(segments, true, 0).offsets![0]!.every((o) => o === 0),
+      ).toBe(true);
+      expect(
+        groundProfilesFt(segments, true, RELIEF_MAX_LEVEL).offsets![
+          GROUND_LEVELS.indexOf(1)
+        ]!.every((o) => o === 0),
+      ).toBe(true);
+      // The line between the fields is the same at every level
+      expect(groundProfilesFt(segments, false, 8).offsets).toBeNull();
+    });
+
+    it("picks the ground of the level of a zoom, the nearest carried beyond them", () => {
+      const offsets = [300, 100, -200];
+
+      expect(groundOffsetFt(offsets, 7, 7.9)).toBe(0);
+      expect(groundOffsetFt(offsets, 7, 8.1)).toBe(-200);
+      expect(groundOffsetFt(offsets, 7, 6.5)).toBe(100);
+      expect(groundOffsetFt(offsets, 7, 5)).toBe(300);
+      expect(groundOffsetFt(offsets, 7, 1)).toBe(300);
+      expect(groundOffsetFt(offsets, 7, 15)).toBe(-200);
+      expect(groundOffsetFt(undefined, 7, 8.1)).toBe(0);
+      // Beyond the deepest elevation tiles the ground is the same
+      expect(groundOffsetFt(offsets, RELIEF_MAX_LEVEL, 16)).toBe(0);
+    });
+
+    it("lifts a point above the relief of a zoom, never below it", () => {
+      expect(heightOnReliefFt(1000, [300, 100, -200], 7, 8.5)).toBe(800);
+      expect(heightOnReliefFt(100, [300, 100, -200], 7, 8.5)).toBe(0);
+      expect(
+        heightAtZoomFt(
+          { heightFt: 1000, offsetsFt: [300, 100, -200], level: 7 },
+          6.2,
+        ),
+      ).toBe(1100);
+      expect(heightAtZoomFt({ heightFt: 1000 }, 6.2)).toBe(1000);
+      expect(heightAtZoomFt({ heightFt: null }, 6.2)).toBeNull();
+    });
+
+    it("interpolates the offsets along the curve as the ground", () => {
+      const line = smoothLine(
+        [
+          [50, 8],
+          [50, 8.01],
+          [50.01, 8.01],
+        ],
+        [3000, 3000, 3000],
+        { ground: [0, 0, 0], offsets: [[0, 90, 180]] },
+      );
+
+      const [level] = line.offsets!;
+      expect(level).toHaveLength(line.points.length);
+      // The given points keep theirs, the curve between them runs from one
+      // to the next
+      expect(line.vertex.map((i) => level![i])).toEqual([0, 90, 180]);
+      expect(level).toEqual([...level!].sort((a, b) => a - b));
+      expect(line.points.length).toBeGreaterThan(3);
+    });
+
+    it("hands each piece its offsets at its middle, rounded to under a pixel", () => {
+      const pieces = ribbonPieces(
+        [
+          [50, 8],
+          [50, 8.01],
+        ],
+        [1000, 1040],
+        Z,
+        undefined,
+        undefined,
+        [[0, 44]],
+      );
+
+      // Two pieces a step each, the offsets of a quarter and three
+      // quarters of the way, in steps of 10 ft at zoom 12
+      expect(groundOffsetStepFt(Z)).toBe(10);
+      expect(pieces.map((piece) => piece.o)).toEqual([[10], [30]]);
+      // A level stretch over ground that differs at another level is cut
+      // where that rounds to another offset
+      const level = ribbonPieces(
+        [
+          [50, 8],
+          [50, 8.01],
+          [50, 8.02],
+        ],
+        [1000, 1000, 1000],
+        Z,
+        undefined,
+        undefined,
+        [[0, 0, 40]],
+      );
+      expect(level.map((piece) => piece.o)).toEqual([[0], [20]]);
+    });
+
+    it("rounds the offsets coarser zoomed out, to at most a quarter of a pixel", () => {
+      const steps = Array.from({ length: 14 }, (_, zoom) =>
+        groundOffsetStepFt(zoom),
+      );
+
+      expect(steps).toEqual([...steps].sort((a, b) => b - a));
+      expect(groundOffsetStepFt(5)).toBeGreaterThan(40);
+      expect(groundOffsetStepFt(11)).toBe(10);
+      for (let zoom = 3; zoom < 12; zoom++) {
+        const pixelFt =
+          40075016.686 /
+          (512 * 2 ** (zoom + 0.5)) /
+          liftExaggeration(reliefLevel(zoom)) /
+          FEET_TO_METERS;
+        expect(groundOffsetStepFt(zoom)).toBeLessThanOrEqual(
+          Math.max(pixelFt / 4, 10),
+        );
+      }
+    });
+
+    it("writes the offsets that are not nothing, and the id where the map switches the exaggeration", () => {
+      const geometry: GeoJSON.MultiPolygon = {
+        type: "MultiPolygon",
+        coordinates: [],
+      };
+
+      expect(
+        ribbonProperties({ h: 1000, o: [0, 40, -80], geometry }, 7, 0),
+      ).toEqual({ h: 1000, l: 7, k: 7, "o-1": 40, o1: -80 });
+      expect(ribbonProperties({ h: 1000, geometry }, 5, 0)).toEqual({
+        h: 1000,
+        l: 5,
+      });
+      // Every visit of a level has ids of its own, which no other level's
+      // cut has in any visit
+      expect(ribbonProperties({ h: 1000, geometry }, 7, 3).k).toBe(
+        ribbonId(7, 3),
+      );
+      const ids = [0, 1, 2, 3].flatMap((epoch) =>
+        [6, 7, 8, 9].map((level) => ribbonId(level, epoch)),
+      );
+      expect(new Set(ids).size).toBe(ids.length);
+      // The ribbons of a level next to one of another exaggeration
+      expect(
+        Array.from(
+          { length: RELIEF_MAX_LEVEL + 1 },
+          (_, level) => level,
+        ).filter(switchesExaggeration),
+      ).toEqual([6, 7, 8, 9]);
+      expect(ribbonHeightFt({ h: 1000, l: 7, "o-1": 40, o1: -80 }, 8.4)).toBe(
+        920,
+      );
+    });
+
+    it("tells which cuts stay on the relief of another level until cut for it", () => {
+      // The same exaggeration, or one they switch to by their id
+      expect(followsLevel(3, 5)).toBe(true);
+      expect(followsLevel(9, 11)).toBe(true);
+      expect(followsLevel(8, 6)).toBe(true);
+      expect(followsLevel(6, 9)).toBe(true);
+      // Without an id, into another exaggeration
+      expect(followsLevel(5, 7)).toBe(false);
+      expect(followsLevel(11, 7)).toBe(false);
+      expect(followsLevel(10, 8)).toBe(false);
     });
   });
 

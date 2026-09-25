@@ -4,7 +4,11 @@
  */
 
 import { segmentsForPathIds } from "../calculations/statistics";
-import { smoothFlights, type SmoothedFlights } from "../calculations/lift";
+import {
+  smoothFlights,
+  type SmoothedFlights,
+  type SmoothFlightsOptions,
+} from "../calculations/lift";
 import { FLAT_TURN_STEP_DEG } from "../calculations/curves";
 import type { Coordinate } from "../utils/geometry";
 import type { PathSegment } from "../types";
@@ -55,9 +59,10 @@ const METRES_PER_DEGREE = 111320;
 
 /**
  * The flight of `segments`, at the feet above ground `heightOf` gives, or
- * with `groundOf` at the altitudes it gives over that ground (see
- * smoothFlights), along the curve the lines are drawn on (see
- * calculations/curves.ts), and when it is where.
+ * with `groundOf` at the altitudes it gives over that ground, and the
+ * ground of the levels around its one as `offsets` (see smoothFlights),
+ * along the curve the lines are drawn on (see calculations/curves.ts), and
+ * when it is where.
  *
  * A segment's time is when it starts, so the one of the next segment is
  * when it ends. Moved evenly along each segment the airplane changed speed
@@ -81,10 +86,12 @@ export function replayCurve(
   segments: readonly PathSegment[],
   heightOf: (index: number) => number,
   groundOf?: (index: number) => number,
+  offsets?: SmoothFlightsOptions["offsets"],
 ): ReplayCurve {
   const curves = smoothFlights(segments, heightOf, {
     turnStepDeg: FLAT_TURN_STEP_DEG,
     groundOf,
+    offsets,
   });
   const along = curves.chains.map(({ points }) => {
     const metres = new Float64Array(points.length);
@@ -181,10 +188,12 @@ export function liftReplayCurve(
   segments: readonly PathSegment[],
   heightOf: (index: number) => number,
   groundOf?: (index: number) => number,
+  offsets?: SmoothFlightsOptions["offsets"],
 ): ReplayCurve {
   const { chains } = smoothFlights(segments, heightOf, {
     turnStepDeg: FLAT_TURN_STEP_DEG,
     groundOf,
+    offsets,
   });
   return { ...curve, chains };
 }
@@ -207,6 +216,11 @@ export interface ReplayPoint {
   position: Coordinate;
   /** Feet above the flight's ground */
   heightFt: number;
+  /**
+   * The ground of the levels around the one of `heightFt` there, where the
+   * curve has it (see SmoothedLine)
+   */
+  offsetsFt?: number[];
   /**
    * The direction of the curve there, in degrees clockwise from north;
    * null where the flight stands and has none
@@ -254,11 +268,17 @@ export function replayPoint(
   const [bx, by] = directionAt(chain.points, Math.min(point + 1, to));
   const x = ax + (bx - ax) * w;
   const y = ay + (by - ay) * w;
+  const next = Math.min(point + 1, to);
   return {
     position: [a[0] + (b[0] - a[0]) * w, a[1] + (b[1] - a[1]) * w],
     heightFt:
       chain.heights[point]! +
-      (chain.heights[Math.min(point + 1, to)]! - chain.heights[point]!) * w,
+      (chain.heights[next]! - chain.heights[point]!) * w,
+    ...(chain.offsets && {
+      offsetsFt: chain.offsets.map(
+        (level) => level[point]! + (level[next]! - level[point]!) * w,
+      ),
+    }),
     track:
       Math.hypot(x, y) > 1e-9
         ? (((Math.atan2(x, y) / DEGREES_TO_RADIANS) % 360) + 360) % 360

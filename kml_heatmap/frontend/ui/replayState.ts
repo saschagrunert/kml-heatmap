@@ -3,20 +3,21 @@
  */
 import type { Marker, Popup } from "maplibre-gl";
 import type { PathSegment, PopupHost, TrailRun } from "../types";
-import type { RibbonPiece } from "../calculations/lift";
+import type { GroundedHeight, RibbonPiece } from "../calculations/lift";
 import type { ReplayCurve } from "../features/replay";
 
 /**
  * Where the airplane is on the segment it flies, which the trail ends at:
  * the segment's index, the point of the flight's curve it has passed last,
- * and its `[lat, lon]` and height above the flight's ground (see
- * replayPoint)
+ * and its `[lat, lon]` and height above the flight's ground, with the
+ * ground of the levels around there (see replayPoint)
  */
 export interface TrailTip {
   index: number;
   point: number;
   position: [lat: number, lon: number];
   heightFt: number;
+  offsetsFt?: number[] | undefined;
 }
 
 /**
@@ -113,6 +114,12 @@ export class ReplayState {
    * while it is not lifted; the camera follows it up there
    */
   airplaneHeightFt: number | null = null;
+  /**
+   * The ground of the relief levels around the one of groundFt where the
+   * airplane is now, for its height over the relief of another level (see
+   * airplaneHeight)
+   */
+  airplaneOffsetsFt: number[] | undefined = undefined;
   colorMinSpeed = 0;
   colorMaxSpeed = 200;
   autoZoom = false;
@@ -123,6 +130,15 @@ export class ReplayState {
   recenterPanEndsAt = 0;
   /** Wall-clock time of the last pan triggered by a manual seek */
   lastSeekPanTime = 0;
+
+  /** Where the airplane is lifted to (see airplaneHeightFt) */
+  airplaneHeight(): GroundedHeight {
+    return {
+      heightFt: this.airplaneHeightFt,
+      offsetsFt: this.airplaneOffsetsFt,
+      level: this.groundLevel,
+    };
+  }
 
   resetDrawState(): void {
     this.currentTime = 0;

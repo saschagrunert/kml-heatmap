@@ -378,14 +378,10 @@ takes one exaggeration for the relief, and rebuilds it on every change (a
 few milliseconds). Both therefore go by the relief level (`reliefLevel` in
 `calculations/lift.ts`, and in the store): the whole level the ribbons are
 cut for, up to 11. `liftExaggeration` gives one number per level, 10 out to
-level 6 (`z` 7 in the UI), then 7, 4, and 2 from level 9 in. The ribbons
-carry it as a property `e` of every feature rather than as a zoom
-expression, which MapLibre would evaluate at each tile's zoom, a level or
-two further out in the distance of a tilted view. `LayerManager.syncTerrain`
-changes the level only as a zoom ends, in the same task as it lets go of
-the old ribbons and cuts them once for the new level, and `ui/terrain.ts`
-sets the relief's exaggeration then; during a zoom the ribbons and the
-relief keep the level they had, so the flights stay on it.
+level 6 (`z` 7 in the UI), then 7, 4, and 2 from level 9 in.
+`LayerManager.syncTerrain` changes the level only as a zoom ends, and
+`ui/terrain.ts` sets the relief's exaggeration then; the flights are cut
+once for the new level, as wide as it asks, over the cut of before.
 
 MapLibre raises a ribbon by the relief of the elevation tiles one level
 coarser than the ribbon's own tile (`getSourceTile`, `deltaZoom` 1), so at
@@ -398,13 +394,55 @@ relief MapLibre drew along a flight over the Alps at every level from 4 to 9
 the flight, which no smoothing along it knows; times the exaggeration it is
 why the ramp stops at 10: with 51 times at level 4 (the ramp before) a level
 cruise over the Alps sawed by 3 to 6 pixels and the Alps stood as a wall,
-at 10 times it is under a pixel. Mid-zoom the ribbon tiles of the new level
-stand on finer elevation tiles than their ground was smoothed for, so a
-level flight over mountains shows the saw until the zoom ends.
-`ui/terrain.ts` hides the ribbons as the level changes or the relief comes
-or goes, until the map has drawn their new tiles and the elevation tiles,
-for `SETTLE_MAX_MS` (3 s) at most, since a frame of the relief takes
-seconds in software WebGL. A `hillshade` layer from the same source shades the
+at 10 times it is under a pixel.
+
+Not every tile is of the level the flights are cut for: while a zoom goes
+on the tiles of the next level take over (in the middle of the map from
+about a tenth of a level before the next), in the distance of a tilted view
+the tiles are a level or two further out, and at a tilt of 75 degrees and
+more the nearest ones one or two further in. So a ribbon carries the
+ground of the levels around its own (`GROUND_LEVELS`: two out, one out and
+one in), as offsets `o-2`, `o-1` and `o1` to the ground its height `h` is
+above, beside the level `l` it was cut for (`ribbonProperties`). The paint
+(`ribbonHeights`) is a `step` by zoom, which MapLibre works out for each
+tile at the tile's own zoom, and takes the ground of the tile's level, the
+nearest carried beyond them (the nearest tiles of a steep tilt stand on the
+ground of `o1`); the band of height goes by the middle of the tile's level,
+as the width does, and on a level further out than the one cut for by the
+next level in, as thin as the interpolation by zoom before it had the
+distance of a tilted view. The offsets are the smoothed ground of the
+other levels worked out in the browser (`groundProfilesFt`, kept per level
+for the dataset), rounded to a quarter of a pixel of the level
+(`groundOffsetStepFt`) and left out where that is zero, which over flat land
+most of them are. Ground of every level from the build would have cost 10
+columns of the year files for what the browser smooths from one (the ground
+column is about 200 KB of 2025's 1.6 MB, 36 KB gzipped).
+
+The exaggeration is one for the whole map, which a zoom expression would not
+give (every tile has its own zoom), so the paint takes it from `l`. As a
+zoom ends in a level of another exaggeration, the ribbons of the old cut get
+the new one from a feature state in the same task as the relief
+(`exaggerateRibbons` in `ui/terrain.ts`), which MapLibre applies to all of
+their tiles in the next frame; a new paint would have them cut again tile by
+tile. A feature state needs a feature id, which costs every tile a few bytes
+per feature (about 5 % of the worker's heap with all years), so only the
+levels next to one of another exaggeration have one (`k`, promoted to the
+id; `switchesExaggeration`: 6 to 9). The id is a new one for every visit of
+a level (`ribbonId`, `LayerManager.ribbonEpoch`): MapLibre keeps an entry
+for every id it was given a state for, even one taken away again, and works
+out the paint of every feature of such an id anew, on the main thread, in
+each tile it loads, which for the cut of the map's level took seconds per
+zoom in software WebGL. So only a cut that has to switch gets a state, and
+never the one for the level of the map. The flights stay in sight and on the
+relief through a zoom and its end. `ui/terrain.ts` hides them only as the
+relief comes or goes, and as a zoom ends in another exaggeration while the
+map may still draw a cut without an id (every cut since all the ribbons last
+landed, `followsLevel`), until the map has drawn their new tiles and the
+elevation tiles, for `SETTLE_MAX_MS` (3 s) at most, since a frame of the
+relief takes seconds in software WebGL. The layer manager lets go of such a
+cut first, as it does of the ribbons of a mode out of sight at every change
+of the level, which would otherwise show the cut of before when the mode
+shows again. A `hillshade` layer from the same source shades the
 relief while it is drawn, directly above the base map's last area fill (its
 buildings in CARTO's style, so above its roads but below its labels and every
 layer of the app) and the satellite imagery, in the colours of
