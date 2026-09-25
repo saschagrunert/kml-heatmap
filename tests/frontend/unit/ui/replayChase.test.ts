@@ -10,6 +10,7 @@ import {
   CHASE_ZOOM,
 } from "../../../../kml_heatmap/frontend/ui/chaseCamera";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
+import { isReplayCameraMove } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import {
   createReplayManager,
   createReplayMockApp,
@@ -137,9 +138,79 @@ describe("ReplayManager chase view", () => {
     expect(bearing).toBeLessThan(40);
     // Moved by one jump a frame, never an animation that restarts on each
     expect(mockApp.map!.easeTo).not.toHaveBeenCalled();
-    // And the airplane stands up in the screen
+    // And the airplane stands up in the screen, set once and not on every
+    // frame: a marker lays itself out anew for each
     const marker = replayManager.state.airplaneMarker!.marker;
-    expect(marker.setPitchAlignment).toHaveBeenLastCalledWith("viewport");
+    expect(marker.setPitchAlignment).toHaveBeenCalledExactlyOnceWith(
+      "viewport",
+    );
+  });
+
+  it("tells the map once it has come to rest, and not at every frame of the chase", () => {
+    openReplay();
+    const map = mockApp.map!;
+    const ends: string[] = [];
+    for (const type of ["moveend", "zoomend"]) {
+      map.on(type, (event) => {
+        if (!isReplayCameraMove(event as object)) ends.push(type);
+      });
+    }
+    replayManager.toggleChase();
+    replayManager.playReplay();
+    vi.advanceTimersByTime(160);
+    // Asked of the map a second on at most, the chase zooming in on the way
+    expect(ends).toEqual([]);
+
+    replayManager.pauseReplay();
+    settle();
+    expect(ends).toEqual(["zoomend", "moveend"]);
+  });
+
+  /** The untagged ends of a move the map is told of, from now on */
+  function restsOf(map: NonNullable<MockApp["map"]>): string[] {
+    const ends: string[] = [];
+    for (const type of ["moveend", "zoomend"]) {
+      map.on(type, (event) => {
+        if (!isReplayCameraMove(event as object)) {
+          // And whether the view from before the chase was eased to yet
+          ends.push(
+            type + (vi.mocked(map.easeTo).mock.calls.length ? "*" : ""),
+          );
+        }
+      });
+    }
+    return ends;
+  }
+
+  it("is at rest where the chase left the map before it eases back to the view from before it (regression)", () => {
+    openReplay();
+    const map = mockApp.map!;
+    const ends = restsOf(map);
+    replayManager.toggleChase();
+    replayManager.playReplay();
+    vi.advanceTimersByTime(160);
+
+    replayManager.toggleReplay();
+
+    // Told once, before the ease; the ease ends in a `moveend` of its own
+    expect(ends).toEqual(["zoomend", "moveend"]);
+    expect(map.easeTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells a map the app has let go of nothing", () => {
+    const lifetime = new AbortController();
+    Object.assign(mockApp, { signal: lifetime.signal });
+    openReplay();
+    const ends = restsOf(mockApp.map!);
+    replayManager.toggleChase();
+    replayManager.playReplay();
+    vi.advanceTimersByTime(160);
+
+    lifetime.abort();
+    replayManager.destroy();
+    settle();
+
+    expect(ends).toEqual([]);
   });
 
   it("moves a paused chase on as the map resizes under it", () => {

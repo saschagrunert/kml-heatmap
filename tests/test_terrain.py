@@ -815,7 +815,7 @@ def _ts_constant(relative, name):
         ("calculations/lift.ts", "TAXI_KNOTS", terrain_module.TAXI_KNOTS),
         ("calculations/lift.ts", "TAXI_MIN_FIXES", terrain_module.TAXI_MIN_FIXES),
         (
-            "calculations/lift.ts",
+            "utils/geometry.ts",
             "METRES_PER_DEGREE",
             terrain_module.METRES_PER_DEGREE,
         ),

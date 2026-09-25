@@ -66,6 +66,7 @@ import {
   closeWhenBehindGlobe,
   isInMarker,
   isOnMarker,
+  isReplayCameraMove,
   toLngLat,
   unwrapLng,
   whenContextRestored,
@@ -111,9 +112,13 @@ export type LayerMode = "altitude" | "airspeed";
 /** The two sources of a mode, and the layers drawn from them */
 type RunSet = "main" | "selected";
 
+/**
+ * What sets the two modes apart, the same for every app. The handle of a
+ * mode's layers and its colour range are the app's (see handleOf and
+ * rangeOf).
+ */
 interface LayerConfig {
   mode: LayerMode;
-  handle: LayerHandle;
   /** Source and layer share their id, see MAP_SOURCES and MAP_LAYERS */
   sources: Record<RunSet, string>;
   layers: Record<RunSet, string>;
@@ -122,7 +127,6 @@ interface LayerConfig {
    * layers, which share their id
    */
   ribbons: Record<RunSet, string>;
-  range: Range;
   getValue: (seg: PathSegment) => number;
   getColor: (value: number, min: number, max: number) => string;
   /** Range of the given segments, `fallback` when they have no value */
@@ -151,6 +155,59 @@ const TOUCH_HIT_PADDING_PX = 12;
 const TOOLTIP_OFFSET_PX = 10;
 
 const MODES: readonly LayerMode[] = ["altitude", "airspeed"];
+
+/** The two modes, made once rather than on every call that needs one */
+const CONFIGS: Readonly<Record<LayerMode, LayerConfig>> = {
+  altitude: {
+    mode: "altitude",
+    sources: {
+      main: MAP_SOURCES.pathsAltitude,
+      selected: MAP_SOURCES.pathsAltitudeSelected,
+    },
+    layers: {
+      main: MAP_LAYERS.pathsAltitude,
+      selected: MAP_LAYERS.pathsAltitudeSelected,
+    },
+    ribbons: {
+      main: MAP_SOURCES.pathsAltitudeRibbons,
+      selected: MAP_SOURCES.pathsAltitudeSelectedRibbons,
+    },
+    getValue: (seg) => seg.altitude_ft ?? 0,
+    getColor: getColorForAltitude,
+    computeRange: calculateAltitudeRange,
+    legendMinId: "legend-min",
+    legendMaxId: "legend-max",
+    formatLegend: formatAltitudeLabel,
+  },
+  airspeed: {
+    mode: "airspeed",
+    sources: {
+      main: MAP_SOURCES.pathsAirspeed,
+      selected: MAP_SOURCES.pathsAirspeedSelected,
+    },
+    layers: {
+      main: MAP_LAYERS.pathsAirspeed,
+      selected: MAP_LAYERS.pathsAirspeedSelected,
+    },
+    ribbons: {
+      main: MAP_SOURCES.pathsAirspeedRibbons,
+      selected: MAP_SOURCES.pathsAirspeedSelectedRibbons,
+    },
+    getValue: (seg) => seg.groundspeed_knots ?? 0,
+    getColor: getColorForAirspeed,
+    computeRange: (segments, fallback) =>
+      calculateAirspeedRange(segments, fallback),
+    filterSegment: (seg) => (seg.groundspeed_knots ?? 0) > 0,
+    legendMinId: "airspeed-legend-min",
+    legendMaxId: "airspeed-legend-max",
+    formatLegend: formatAirspeedLabel,
+  },
+};
+
+/** The layers of the ribbons of both modes */
+const RIBBON_LAYERS: ReadonlySet<string> = new Set(
+  MODES.flatMap((mode) => Object.values(CONFIGS[mode].ribbons)),
+);
 
 /** One feature of a source: a run of segments of one path in one colour */
 interface Run {
@@ -204,6 +261,16 @@ interface ModeState {
   /** The filter on the main layer, serialised, to set it only on a change */
   filterKey: string;
   /**
+   * The colour range of the selection, and what it was worked out for (see
+   * resolveColorRange)
+   */
+  selectionRange: {
+    data: KMLDataset;
+    full: Range;
+    selected: Set<number>;
+    range: Range;
+  } | null;
+  /**
    * Its sources hold runs of before a change of the view that passed it by
    * while it was hidden; it is drawn again as a whole
    */
@@ -223,6 +290,7 @@ function emptyModeState(): ModeState {
     segments: null,
     shown: { selected: new Set(), isolate: false },
     filterKey: "null",
+    selectionRange: null,
     dirty: false,
   };
 }
@@ -375,9 +443,10 @@ export class LayerManager implements PathHitTester {
    * A flat line is the same at every zoom: from LIFT_MAX_ZOOM on, where the
    * 3D view draws the lines, only the zoom that lifts them again counts.
    */
-  private readonly handleZoomEnd = (): void => {
+  private readonly handleZoomEnd = (event: object): void => {
     const map = this.listeningTo;
-    if (!map || !this.app.threeDVisible) return;
+    // The replay's camera rests of its own (see isReplayCameraMove)
+    if (!map || !this.app.threeDVisible || isReplayCameraMove(event)) return;
     // Onto or off the relief the flights are cut anew on their other
     // ground, once its code has arrived (see syncTerrain); onto another
     // level of it, as wide as the new level asks, below
@@ -388,7 +457,7 @@ export class LayerManager implements PathHitTester {
     const level = ribbonWidthZoom(zoom);
     for (const mode of MODES) {
       const state = this.state[mode];
-      const config = this.getConfig(mode);
+      const config = CONFIGS[mode];
       if (!this.drawsNow(mode)) continue;
       for (const set of ["main", "selected"] as const) {
         const table = state.tables[set];
@@ -470,57 +539,18 @@ export class LayerManager implements PathHitTester {
     this.touchPopup = null;
   }
 
-  private getConfig(mode: LayerMode): LayerConfig {
-    if (mode === "altitude") {
-      return {
-        mode,
-        handle: this.app.altitudeLayer,
-        sources: {
-          main: MAP_SOURCES.pathsAltitude,
-          selected: MAP_SOURCES.pathsAltitudeSelected,
-        },
-        layers: {
-          main: MAP_LAYERS.pathsAltitude,
-          selected: MAP_LAYERS.pathsAltitudeSelected,
-        },
-        ribbons: {
-          main: MAP_SOURCES.pathsAltitudeRibbons,
-          selected: MAP_SOURCES.pathsAltitudeSelectedRibbons,
-        },
-        range: this.app.altitudeRange,
-        getValue: (seg) => seg.altitude_ft ?? 0,
-        getColor: getColorForAltitude,
-        computeRange: calculateAltitudeRange,
-        legendMinId: "legend-min",
-        legendMaxId: "legend-max",
-        formatLegend: formatAltitudeLabel,
-      };
-    }
-    return {
-      mode,
-      handle: this.app.airspeedLayer,
-      sources: {
-        main: MAP_SOURCES.pathsAirspeed,
-        selected: MAP_SOURCES.pathsAirspeedSelected,
-      },
-      layers: {
-        main: MAP_LAYERS.pathsAirspeed,
-        selected: MAP_LAYERS.pathsAirspeedSelected,
-      },
-      ribbons: {
-        main: MAP_SOURCES.pathsAirspeedRibbons,
-        selected: MAP_SOURCES.pathsAirspeedSelectedRibbons,
-      },
-      range: this.app.airspeedRange,
-      getValue: (seg) => seg.groundspeed_knots ?? 0,
-      getColor: getColorForAirspeed,
-      computeRange: (segments, fallback) =>
-        calculateAirspeedRange(segments, fallback),
-      filterSegment: (seg) => (seg.groundspeed_knots ?? 0) > 0,
-      legendMinId: "airspeed-legend-min",
-      legendMaxId: "airspeed-legend-max",
-      formatLegend: formatAirspeedLabel,
-    };
+  /** The handle of a mode's layers */
+  private handleOf(mode: LayerMode): LayerHandle {
+    return mode === "altitude"
+      ? this.app.altitudeLayer
+      : this.app.airspeedLayer;
+  }
+
+  /** The colour range of a mode over every flight */
+  private rangeOf(mode: LayerMode): Range {
+    return mode === "altitude"
+      ? this.app.altitudeRange
+      : this.app.airspeedRange;
   }
 
   /**
@@ -549,7 +579,7 @@ export class LayerManager implements PathHitTester {
       if (!this.readyMap()) return;
       for (const pendingMode of pending) {
         if (this.state[pendingMode].segments) {
-          this.redrawPaths(this.getConfig(pendingMode));
+          this.redrawPaths(pendingMode);
         } else {
           this.clearLayer(pendingMode);
         }
@@ -580,14 +610,19 @@ export class LayerManager implements PathHitTester {
     // and a camera move must not make a click on the empty map one to
     // ignore
     let landing = false;
+    // Only the 3D view writes ribbons to look for, and not while they are
+    // hidden as they settle on another ground (ui/terrain.ts): a query
+    // finds a feature whatever its opacity. Nothing found then is no word
+    // of the empty map either.
+    const ribbons = this.app.threeDVisible && this.ribbonsShown > 0;
+    const settling = this.app.threeDVisible && !ribbons;
     for (const mode of MODES) {
-      const config = this.getConfig(mode);
+      const config = CONFIGS[mode];
       const state = this.state[mode];
-      if (!config.handle.isVisible() || !state.segments) continue;
+      if (!this.handleOf(mode).isVisible() || !state.segments) continue;
       tableOfLayer.set(config.layers.main, [state, "main"]);
       tableOfLayer.set(config.layers.selected, [state, "selected"]);
-      // Only the 3D view writes ribbons to look for
-      if (this.app.threeDVisible) {
+      if (ribbons) {
         tableOfLayer.set(config.ribbons.main, [state, "main"]);
         tableOfLayer.set(config.ribbons.selected, [state, "selected"]);
       }
@@ -605,7 +640,7 @@ export class LayerManager implements PathHitTester {
       }
     }
     if (tableOfLayer.size === 0) return { result: null, found: false };
-    const nothing: PathHitResult = landing ? "stale" : null;
+    const nothing: PathHitResult = landing || settling ? "stale" : null;
 
     const pad = isTouchDevice() ? TOUCH_HIT_PADDING_PX : HIT_PADDING_PX;
     const features = map.queryRenderedFeatures(
@@ -623,9 +658,6 @@ export class LayerManager implements PathHitTester {
     // map reports it, unwrapped, and put each segment into the copy of the
     // world nearest to it (see findNearestSegment and pixelDistance).
     const pointer = map.unproject(point);
-    const ribbonLayers = new Set<string>(
-      MODES.flatMap((mode) => Object.values(this.getConfig(mode).ribbons)),
-    );
     const seen = new Set<Run>();
     let stale = false;
     let best: PathHit | null = null;
@@ -671,7 +703,7 @@ export class LayerManager implements PathHitTester {
       // one the map is drawn for, which every ribbon has (see ribbonHeights)
       const properties = feature.properties as Partial<PathRunProperties>;
       const ribbon =
-        properties.h !== undefined && ribbonLayers.has(feature.layer.id);
+        properties.h !== undefined && RIBBON_LAYERS.has(feature.layer.id);
       const lift = ribbon
         ? liftOffsetPx(
             map,
@@ -870,15 +902,15 @@ export class LayerManager implements PathHitTester {
    */
   syncModes(rebuild = false): void {
     for (const mode of MODES) {
-      const config = this.getConfig(mode);
+      const handle = this.handleOf(mode);
       const wanted = this.app[`${mode}Visible`];
       const shown = wanted && !this.app.replayActive;
-      const showing = config.handle.isVisible();
-      config.handle.setVisible(shown);
+      const showing = handle.isVisible();
+      handle.setVisible(shown);
       if (!wanted) {
         if (rebuild || this.state[mode].segments) this.clearLayer(mode);
       } else if (shown && (rebuild || !showing)) {
-        this.redrawPaths(config);
+        this.redrawPaths(mode);
       } else if (rebuild) {
         // Hidden by the replay: drawn as it shows again
         this.state[mode].dirty = true;
@@ -886,20 +918,12 @@ export class LayerManager implements PathHitTester {
     }
   }
 
-  redrawAltitudePaths(): void {
-    this.redrawPaths(this.getConfig("altitude"));
-  }
-
-  redrawAirspeedPaths(): void {
-    this.redrawPaths(this.getConfig("airspeed"));
-  }
-
   /**
    * Empty both sources of a mode (used for hidden layers so they do not
    * keep stale geometry around)
    */
   clearLayer(mode: LayerMode): void {
-    const config = this.getConfig(mode);
+    const config = CONFIGS[mode];
     const state = this.state[mode];
     state.segments = null;
     state.dirty = false;
@@ -914,21 +938,35 @@ export class LayerManager implements PathHitTester {
 
   /**
    * Colour range used for the layer: the selected paths' range when a
-   * selection exists, the layer's full range otherwise.
+   * selection exists, the layer's full range otherwise. The selection's is
+   * kept until the selection, the dataset or the full range changes: the
+   * tooltip asks for both modes' on every segment it shows, and working
+   * them out took milliseconds with a hundred flights selected.
    */
   private resolveColorRange(config: LayerConfig): Range {
     const selected = this.app.selectedPathIds;
     const data = this.app.currentData;
-    if (selected.size === 0 || !data) {
-      return config.range;
+    const full = this.rangeOf(config.mode);
+    if (selected.size === 0 || !data) return full;
+    const state = this.state[config.mode];
+    const held = state.selectionRange;
+    if (
+      held?.data === data &&
+      held.full === full &&
+      held.selected.size === selected.size &&
+      [...selected].every((id) => held.selected.has(id))
+    ) {
+      return held.range;
     }
     // Only the selected paths' segments, sliced out through the path index:
     // a selection click should not walk the whole dataset
-    return config.computeRange(
+    const range = config.computeRange(
       segmentsForPathIds(data.path_segments, selected),
-      config.range,
+      full,
       data.path_info,
     );
+    state.selectionRange = { data, full, selected: new Set(selected), range };
+    return range;
   }
 
   /**
@@ -1128,16 +1166,21 @@ export class LayerManager implements PathHitTester {
   }
 
   /** Draw every flight of a mode, and the selection on top of them */
-  private redrawPaths(config: LayerConfig): void {
+  private redrawPaths(mode: LayerMode): void {
     const data = this.app.currentData;
     if (!data) return;
 
-    const state = this.state[config.mode];
+    const config = CONFIGS[mode];
+    const state = this.state[mode];
     state.segments = data.path_segments;
     state.dirty = false;
     // The flights of another dataset are smoothed anew when they are lifted
     if (this.smoothed?.segments !== data.path_segments) this.smoothed = null;
-    this.setRuns(config, "main", this.cutRuns(config, data, config.range));
+    this.setRuns(
+      config,
+      "main",
+      this.cutRuns(config, data, this.rangeOf(mode)),
+    );
     this.showSelection(config, data);
     this.rehoverOnIdle();
   }
@@ -1226,7 +1269,7 @@ export class LayerManager implements PathHitTester {
   private drawsNow(mode: LayerMode): boolean {
     const state = this.state[mode];
     if (!state.segments) return false;
-    if (this.getConfig(mode).handle.isVisible()) return true;
+    if (this.handleOf(mode).isVisible()) return true;
     state.dirty = true;
     return false;
   }
@@ -1235,7 +1278,7 @@ export class LayerManager implements PathHitTester {
   private redrawVisibleModes(): void {
     this.cutAwaited = false;
     for (const mode of MODES) {
-      if (this.drawsNow(mode)) this.redrawPaths(this.getConfig(mode));
+      if (this.drawsNow(mode)) this.redrawPaths(mode);
     }
   }
 
@@ -1243,13 +1286,15 @@ export class LayerManager implements PathHitTester {
    * After a lost WebGL context the sources are back with the data of before
    * the loss, and their features with the generations of then, which the
    * run tables may have gone past since: every mode is written again, or
-   * emptied, a hidden one once it shows.
+   * emptied, a hidden one once it shows. The filters are set again with
+   * them, whatever the map came back with.
    */
   private restoreModes(): void {
     if (this.destroyed) return;
     for (const mode of MODES) {
+      this.state[mode].filterKey = "";
       if (!this.state[mode].segments) this.clearLayer(mode);
-      else if (this.drawsNow(mode)) this.redrawPaths(this.getConfig(mode));
+      else if (this.drawsNow(mode)) this.redrawPaths(mode);
     }
   }
 
@@ -1366,7 +1411,7 @@ export class LayerManager implements PathHitTester {
     const map = this.readyMap();
     for (const mode of MODES) {
       if (hiddenOnly && this.drawsNow(mode)) continue;
-      const ribbons = Object.values(this.getConfig(mode).ribbons);
+      const ribbons = Object.values(CONFIGS[mode].ribbons);
       for (const { written } of Object.values(this.state[mode].tables)) {
         if (written && ribbons.includes(written)) {
           void map
@@ -1379,7 +1424,7 @@ export class LayerManager implements PathHitTester {
 
   /** Style the layers of both modes again, for ribbonsShown */
   restyle(): void {
-    for (const mode of MODES) this.applyLook(this.getConfig(mode));
+    for (const mode of MODES) this.applyLook(CONFIGS[mode]);
   }
 
   /**
@@ -1396,18 +1441,19 @@ export class LayerManager implements PathHitTester {
           : this.app.airspeedVisible;
       const state = this.state[mode];
       if (!visible || !data || !state.segments) continue;
-      const config = this.getConfig(mode);
+      const config = CONFIGS[mode];
       // A mode left behind while it was hidden is drawn again as a whole
-      if (state.dirty && config.handle.isVisible()) this.redrawPaths(config);
-      else this.showSelection(config, data);
+      if (state.dirty && this.handleOf(mode).isVisible()) {
+        this.redrawPaths(mode);
+      } else this.showSelection(config, data);
     }
     this.rehoverOnIdle();
   }
 
   /** Coloured on the same range as the runs, the selection's if any */
   private formatSegmentTooltip(segment: PathSegment): string {
-    const altitude = this.resolveColorRange(this.getConfig("altitude"));
-    const speed = this.resolveColorRange(this.getConfig("airspeed"));
+    const altitude = this.resolveColorRange(CONFIGS.altitude);
+    const speed = this.resolveColorRange(CONFIGS.airspeed);
     return generateSegmentPopupHtml({
       segment,
       altMin: altitude.min,
@@ -1440,10 +1486,10 @@ export class LayerManager implements PathHitTester {
   }
 
   updateAltitudeLegend(minAlt: number, maxAlt: number): void {
-    this.updateLegend(minAlt, maxAlt, this.getConfig("altitude"));
+    this.updateLegend(minAlt, maxAlt, CONFIGS.altitude);
   }
 
   updateAirspeedLegend(minSpeed: number, maxSpeed: number): void {
-    this.updateLegend(minSpeed, maxSpeed, this.getConfig("airspeed"));
+    this.updateLegend(minSpeed, maxSpeed, CONFIGS.airspeed);
   }
 }

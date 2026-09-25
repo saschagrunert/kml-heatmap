@@ -128,15 +128,15 @@ describe("PathSelection", () => {
       expect(mapHelpers.resizeMapAfterTransition).not.toHaveBeenCalled();
     });
 
-    it("rebuilds layers in isolate mode", () => {
+    it("restyles the paths in isolate mode, which keep their runs", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
       settle();
 
       pathSelection.togglePathSelection(2);
 
-      expect(rebuilds()).toBe(1);
-      expect(restyles()).toBe(0);
+      expect(rebuilds()).toBe(0);
+      expect(restyles()).toBe(1);
     });
 
     it("disables isolate mode when the last path is deselected", () => {
@@ -147,10 +147,10 @@ describe("PathSelection", () => {
       pathSelection.togglePathSelection(1);
 
       expect(mockApp.isolateSelection).toBe(false);
-      // Isolate mode drew only the selected path, so the paths that were
-      // hidden have to be drawn again
-      expect(rebuilds()).toBe(1);
-      expect(restyles()).toBe(0);
+      // Isolate mode filtered the other paths out; they come back with
+      // the filter, in one restyle for both keys
+      expect(rebuilds()).toBe(0);
+      expect(restyles()).toBe(1);
     });
 
     it("lets listeners see the final state of both keys at once", () => {
@@ -195,14 +195,15 @@ describe("PathSelection", () => {
       expect(restyles()).toBe(0);
     });
 
-    it("rebuilds layers when isolate mode is active", () => {
+    it("restyles the paths when isolate mode is active", () => {
       mockApp.selectedPathIds.add(4);
       mockApp.isolateSelection = true;
       settle();
 
       pathSelection.selectPathsByAirport("EDDF");
 
-      expect(rebuilds()).toBe(1);
+      expect(rebuilds()).toBe(0);
+      expect(restyles()).toBe(1);
     });
 
     it("selects only the flights the aircraft filter keeps (regression)", () => {
@@ -252,20 +253,21 @@ describe("PathSelection", () => {
       pathSelection.clearSelection();
 
       expect(mockApp.isolateSelection).toBe(false);
-      // Leaving isolate mode has to restore the previously hidden paths
-      expect(rebuilds()).toBe(1);
-      expect(restyles()).toBe(0);
+      // Leaving isolate mode lifts the filter that hid the other paths
+      expect(rebuilds()).toBe(0);
+      expect(restyles()).toBe(1);
     });
   });
 
   describe("toggleIsolateSelection", () => {
-    it("enables isolate mode when paths are selected and rebuilds", () => {
+    it("enables isolate mode when paths are selected and restyles", () => {
       mockApp.selectedPathIds.add(1);
 
       pathSelection.toggleIsolateSelection();
 
       expect(mockApp.isolateSelection).toBe(true);
-      expect(rebuilds()).toBe(1);
+      expect(rebuilds()).toBe(0);
+      expect(restyles()).toBe(1);
     });
 
     it("disables isolate mode when toggled again", () => {
@@ -276,7 +278,8 @@ describe("PathSelection", () => {
       pathSelection.toggleIsolateSelection();
 
       expect(mockApp.isolateSelection).toBe(false);
-      expect(rebuilds()).toBe(1);
+      expect(rebuilds()).toBe(0);
+      expect(restyles()).toBe(1);
     });
 
     it("does nothing when no paths are selected", () => {

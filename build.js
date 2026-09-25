@@ -255,8 +255,10 @@ const BUDGET_APP = { raw: 142 * 1024, gzip: 48 * 1024 };
 // the 3D view is first drawn, the Satellite switch is first on or an
 // airport's popup is first opened, so it is not part of what a first visit
 // downloads; it still gets a budget so it cannot grow without anyone
-// noticing. 41.01 KB raw and 14.53 KB gzipped.
-const BUDGET_FEATURES = { raw: 43 * 1024, gzip: 16 * 1024 };
+// noticing. 41.01 KB raw and 14.53 KB gzipped. Raised from 43 KB for the
+// replay camera's own rest and the relief and imagery placed on the ground:
+// 43.19 KB raw and 15.18 KB gzipped.
+const BUDGET_FEATURES = { raw: 43.5 * 1024, gzip: 16 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog is opened, and
 // not with replay's code or replay with it: the two have nothing in common

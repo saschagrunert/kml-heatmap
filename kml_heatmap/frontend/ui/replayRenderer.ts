@@ -43,9 +43,10 @@ import {
   unwrapLng,
 } from "../utils/mapHelpers";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
-import { calculateBearing } from "../utils/geometry";
+import { calculateBearing, turnOf } from "../utils/geometry";
 import {
   isLiftedAt,
+  liftExaggeration,
   ribbonOf,
   ribbonPieces,
   ribbonProperties,
@@ -482,8 +483,13 @@ export class AirplaneMarker implements ReplayAirplane {
 
   setUpright(upright: boolean): void {
     // Laid on the map, a view from above goes flat as the map tilts: at
-    // the chase view's tilt it was a sixth of its height
-    this.marker.setPitchAlignment(upright ? "viewport" : "map");
+    // the chase view's tilt it was a sixth of its height. Asked on every
+    // frame, and a marker lays itself out anew for every alignment it is
+    // given, the same one included.
+    const alignment = upright ? "viewport" : "map";
+    if (this.marker.getPitchAlignment() !== alignment) {
+      this.marker.setPitchAlignment(alignment);
+    }
   }
 
   getElement(): HTMLButtonElement {
@@ -868,7 +874,7 @@ export class ReplayRenderer {
     if (track !== null && (last === null || isManualSeek || elapsed < 0)) {
       bearing = track;
     } else if (track !== null && last !== null && elapsed > 0) {
-      const turn = ((((track - last) % 360) + 540) % 360) - 180;
+      const turn = turnOf(last, track);
       bearing =
         (last + turn * (1 - Math.exp(-elapsed / HEADING_DAMPING_S)) + 360) %
         360;
@@ -885,6 +891,7 @@ export class ReplayRenderer {
       position: currentPos,
       track: bearing,
       ...state.airplaneHeight(),
+      exaggeration: liftExaggeration(this.app.reliefLevel),
       state,
     };
     if (

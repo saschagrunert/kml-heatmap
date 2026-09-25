@@ -9,11 +9,12 @@ import {
   clearPitch,
   dampStep,
   projectRelative,
-  turnOf,
   turnTime,
   type ChaseTarget,
 } from "../../../../kml_heatmap/frontend/ui/chaseCamera";
 import { liftMetres } from "../../../../kml_heatmap/frontend/calculations/lift";
+import { turnOf } from "../../../../kml_heatmap/frontend/utils/geometry";
+import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { Map as MockMapLibreMap } from "../../../mocks/maplibre-gl";
 import { createMapLibreMock } from "../../testHelpers";
@@ -42,14 +43,6 @@ describe("dampStep", () => {
     const [move] = dampStep(100, 0, 5, 0.2);
     expect(move).toBeGreaterThan(99);
     expect(move).toBeLessThanOrEqual(100);
-  });
-});
-
-describe("turnOf", () => {
-  it("turns the short way round", () => {
-    expect(turnOf(350, 10)).toBe(20);
-    expect(turnOf(10, 350)).toBe(-20);
-    expect(turnOf(0, 180)).toBe(-180);
   });
 });
 
@@ -138,7 +131,8 @@ describe("ChaseCamera", () => {
     track: number,
     heightFt: number | null = null,
     position: [number, number] = [51.55, 12.06],
-  ): ChaseTarget => ({ position, track, heightFt });
+    exaggeration = 2,
+  ): ChaseTarget => ({ position, track, heightFt, exaggeration });
 
   function camera(): ChaseCamera {
     return new ChaseCamera(map as unknown as MapLibreMap);
@@ -234,6 +228,17 @@ describe("ChaseCamera", () => {
     // The same distance, and the same size of the airplane and the ground
     // around it, however high it flies
     for (const zoom of zooms) expect(zoom).toBeCloseTo(CHASE_ZOOM, 3);
+  });
+
+  it("lifts the airplane as much as its trail, whatever the zoom of the moment", () => {
+    const chase = camera();
+    // A pinch out of the chase's zoom, onto a level that lifts four times:
+    // the trail keeps its level until the pinch ends, and so does the
+    // airplane
+    map.jumpTo({ zoom: 8 });
+    chase.step(heading(0, 3000, undefined, 2), 1, (now += 16), true);
+
+    expect(map.getCenterElevation()).toBeCloseTo(liftMetres(3000, 2), 0);
   });
 
   it("draws the airplane below the middle, where the camera sees it", () => {
@@ -403,6 +408,16 @@ describe("ChaseCamera", () => {
     expect(map.getZoom()).toBeCloseTo(CHASE_ZOOM_RANGE[1], 2);
     expect(map.getPitch()).toBeCloseTo(45, 1);
     expect(map.getBearing()).toBeCloseTo(0, 1);
+  });
+
+  it("tags the jumps of its frames, which the app's handlers at rest skip", () => {
+    const chase = camera();
+    run(chase, 0.05, () => heading(0, 3000));
+
+    expect(map.jumpTo).toHaveBeenCalledTimes(3);
+    for (const [, eventData] of vi.mocked(map.jumpTo).mock.calls) {
+      expect(eventData).toBe(REPLAY_CAMERA_MOVE);
+    }
   });
 
   it("gives the map back clamped to the ground, seen from where it was", () => {

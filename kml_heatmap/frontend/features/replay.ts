@@ -10,7 +10,11 @@ import {
   type SmoothFlightsOptions,
 } from "../calculations/lift";
 import { FLAT_TURN_STEP_DEG } from "../calculations/curves";
-import type { Coordinate } from "../utils/geometry";
+import {
+  DEGREES_TO_RADIANS,
+  planarMetres,
+  type Coordinate,
+} from "../utils/geometry";
 import type { PathSegment } from "../types";
 
 /**
@@ -53,9 +57,6 @@ export interface ReplayCurve extends SmoothedFlights {
 
 /** Fixes on either side of one that its time is smoothed over */
 const TIME_WINDOW = 2;
-
-/** Metres a degree of latitude spans */
-const METRES_PER_DEGREE = 111320;
 
 /**
  * The flight of `segments`, at the feet above ground `heightOf` gives, or
@@ -197,18 +198,6 @@ export function liftReplayCurve(
   });
   return { ...curve, chains };
 }
-
-/** Metres between two `[lat, lng]` points close to each other */
-function planarMetres(a: Coordinate, b: Coordinate): number {
-  return Math.hypot(
-    (b[1] - a[1]) *
-      METRES_PER_DEGREE *
-      Math.cos(((a[0] + b[0]) / 2) * DEGREES_TO_RADIANS),
-    (b[0] - a[0]) * METRES_PER_DEGREE,
-  );
-}
-
-const DEGREES_TO_RADIANS = Math.PI / 180;
 
 /** Where the airplane is on its curve, see replayPoint */
 export interface ReplayPoint {

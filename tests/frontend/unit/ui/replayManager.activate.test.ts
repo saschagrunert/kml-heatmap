@@ -426,7 +426,6 @@ describe("ReplayManager activation", () => {
       expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("false");
       expect(el("altitude-legend").hidden).toBe(true);
       expect(mockApp.altitudeLayer.isVisible()).toBe(false);
-      expect(mockApp.layerManager.redrawAltitudePaths).not.toHaveBeenCalled();
     });
 
     it("shows the altitude scale for the trail while neither layer is on", () => {

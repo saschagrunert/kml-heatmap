@@ -243,6 +243,8 @@ export interface MockSource {
   data: unknown;
   setData: Mock;
   setTiles: Mock;
+  /** The specification with the data it holds now, as the map reports it */
+  serialize: Mock;
 }
 
 /** A layer as the mock map keeps it; the setters of the map write through */
@@ -478,6 +480,9 @@ export class Map
         return Promise.resolve();
       }),
       setTiles: vi.fn(() => source),
+      serialize: vi.fn(() =>
+        source.data === undefined ? spec : { ...spec, data: source.data },
+      ),
     };
     this.sources[id] = source;
     return this;
@@ -565,7 +570,7 @@ export class Map
   getStyle = vi.fn(() => ({
     version: 8,
     sources: Object.fromEntries(
-      Object.values(this.sources).map((s) => [s.id, s.spec]),
+      Object.values(this.sources).map((s) => [s.id, s.serialize()]),
     ),
     layers: this.layers,
   }));
@@ -573,7 +578,9 @@ export class Map
   /**
    * With `transformStyle` on a loaded style, like the map's diff: sources
    * and layers the next style keeps stay the objects they are, the others
-   * come and go, and `style.load` fires at once. Anything else starts over.
+   * come and go, and `style.load` fires at once. A GeoJSON source whose
+   * data differs from the data in the style before, as the transform left
+   * it, is handed the new data. Anything else starts over.
    */
   setStyle = vi.fn(
     (
@@ -592,12 +599,24 @@ export class Map
         this.loadStyle(style);
         return this;
       }
-      const next = options.transformStyle(this.getStyle(), style);
+      const previous = this.getStyle() as {
+        sources: Record<string, { data?: unknown } | undefined>;
+      };
+      const next = options.transformStyle(previous, style);
       for (const id of Object.keys(this.sources)) {
         if (!(id in next.sources)) delete this.sources[id];
       }
       for (const [id, spec] of Object.entries(next.sources)) {
-        if (!this.sources[id]) this.addSource(id, spec);
+        const source = this.sources[id];
+        if (!source) {
+          this.addSource(id, spec);
+        } else if (
+          spec["type"] === "geojson" &&
+          JSON.stringify(previous.sources[id]?.data) !==
+            JSON.stringify(spec["data"])
+        ) {
+          void source.setData(spec["data"]);
+        }
       }
       this.layers = next.layers.map(
         (layer) =>
@@ -729,7 +748,10 @@ export class Map
     return this;
   }
 
-  jumpTo = vi.fn((options: MockCameraOptions) => this.moveTo(options));
+  /** `eventData` goes with the events of a move, which the fake fires none of */
+  jumpTo = vi.fn((options: MockCameraOptions, _eventData?: object) =>
+    this.moveTo(options),
+  );
   easeTo = vi.fn((options: MockCameraOptions) => this.moveTo(options));
   flyTo = vi.fn((options: MockCameraOptions) => this.moveTo(options));
   panTo = vi.fn((center: unknown, _options?: object) =>

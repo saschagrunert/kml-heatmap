@@ -14,6 +14,7 @@
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
+import { isReplayCameraMove } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
 
 /**
@@ -49,9 +50,9 @@ export class MapOrientation {
    * leaves it, faded, until the map has taken the focus. A frame later:
    * MapLibre marks the markers in the frame after a move.
    */
-  private readonly onMoveEnd = (): void => {
+  private readonly onMoveEnd = (event: object): void => {
     const map = this.app.map;
-    if (!map || !this.app.globeVisible) return;
+    if (!map || !this.app.globeVisible || isReplayCameraMove(event)) return;
     requestAnimationFrame(() => {
       if (document.activeElement?.closest(".maplibregl-marker-covered")) {
         map.getCanvas().focus();

@@ -10,6 +10,44 @@ import type { PathSegment } from "../types";
 export type Coordinate = [number, number];
 
 /**
+ * Metres a degree of latitude spans, and of longitude at the equator. The
+ * exporter measures the flights with the same (kml_heatmap/terrain.py).
+ */
+export const METRES_PER_DEGREE = 111320;
+
+export const DEGREES_TO_RADIANS = Math.PI / 180;
+
+/** The circumference of the earth, in metres, at the equator */
+export const EARTH_CIRCUMFERENCE_M = 40075016.686;
+
+/**
+ * The difference of two angles, the short way round (degrees), from -180
+ * up to 180. Exact where there is no way round to take: the difference is
+ * left as it is.
+ */
+export function turnOf(from: number, to: number): number {
+  const turn = to - from;
+  return turn - 360 * Math.round(turn / 360);
+}
+
+/**
+ * Metres between two `[lat, lng]` points close to each other, measured on
+ * the plane there, and the short way across the antimeridian, as the
+ * exporter measures them
+ */
+export function planarMetres(
+  a: Readonly<Coordinate>,
+  b: Readonly<Coordinate>,
+): number {
+  return Math.hypot(
+    turnOf(a[1], b[1]) *
+      METRES_PER_DEGREE *
+      Math.cos(((a[0] + b[0]) / 2) * DEGREES_TO_RADIANS),
+    (b[0] - a[0]) * METRES_PER_DEGREE,
+  );
+}
+
+/**
  * The pair as a place a map can be centred on, or null when it is none.
  * Links and saved state both go through here before they reach the map:
  * MapLibre throws for a latitude past the poles, and a saved view that

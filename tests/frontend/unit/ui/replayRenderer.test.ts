@@ -841,6 +841,7 @@ describe("ReplayRenderer", () => {
     replayActive: boolean;
     reliefLevel: number;
     layerManager: { ribbonEpoch: number };
+    signal: AbortSignal;
   };
   let mockReplayManager: { state: ReplayState };
   let frames: FrameRequestCallback[];
@@ -905,6 +906,7 @@ describe("ReplayRenderer", () => {
       replayActive: false,
       reliefLevel: 13,
       layerManager: { ribbonEpoch: 0 },
+      signal: new AbortController().signal,
     };
 
     mockReplayManager = {
@@ -2060,9 +2062,12 @@ describe("ReplayRenderer", () => {
 
         callUpdateDisplay();
 
-        expect(map.jumpTo).toHaveBeenCalledExactlyOnceWith({
-          center: [airplane.lng, airplane.lat],
-        });
+        expect(map.jumpTo).toHaveBeenCalledExactlyOnceWith(
+          {
+            center: [airplane.lng, airplane.lat],
+          },
+          mapHelpers.REPLAY_CAMERA_MOVE,
+        );
       });
 
       it("zooms out for it at once when auto-zoom is on, like for one that left the map", () => {
@@ -2082,9 +2087,12 @@ describe("ReplayRenderer", () => {
 
         callUpdateDisplay(true);
 
-        expect(map.jumpTo).toHaveBeenCalledWith({
-          center: [airplane.lng, airplane.lat],
-        });
+        expect(map.jumpTo).toHaveBeenCalledWith(
+          {
+            center: [airplane.lng, airplane.lat],
+          },
+          mapHelpers.REPLAY_CAMERA_MOVE,
+        );
       });
     });
 
@@ -2314,7 +2322,10 @@ describe("ReplayRenderer", () => {
 
       callUpdateDisplay(true);
       expect(map.jumpTo).toHaveBeenCalledTimes(1);
-      expect(map.jumpTo).toHaveBeenCalledWith({ center: [8.51, 50.01] });
+      expect(map.jumpTo).toHaveBeenCalledWith(
+        { center: [8.51, 50.01] },
+        mapHelpers.REPLAY_CAMERA_MOVE,
+      );
       expect(map.easeTo).not.toHaveBeenCalled();
 
       // A second seek shortly after is throttled
@@ -2328,6 +2339,55 @@ describe("ReplayRenderer", () => {
       expect(map.jumpTo).toHaveBeenCalledTimes(2);
       // Manual seeks do not feed the auto-zoom recenter counter
       expect(mockReplayManager.state.recenterTimestamps).toHaveLength(0);
+    });
+
+    it("tells the map it has come to rest once a frame passes without a pan, and not at every pan", () => {
+      airplaneAt(10, 300);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+      const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+      const rests = (): unknown[] => map.fire.mock.calls.map(([type]) => type);
+
+      callUpdateDisplay(true);
+      expect(map.jumpTo).toHaveBeenCalledWith(
+        expect.anything(),
+        mapHelpers.REPLAY_CAMERA_MOVE,
+      );
+      // A frame with a pan in it is no rest
+      runFrame();
+      expect(rests()).toEqual([]);
+      // The frame after it, without one, is
+      runFrame();
+      expect(rests()).toEqual(["moveend"]);
+      expect(frames).toEqual([]);
+
+      // Nor does it wait for good while the camera pans on and on
+      for (let frame = 0; frame < 5; frame++) {
+        now.mockReturnValue(2000 + frame * 300);
+        vi.mocked(map.jumpTo).mockClear();
+        mockReplayManager.state.lastSeekPanTime = 0;
+        callUpdateDisplay(true);
+        expect(map.jumpTo).toHaveBeenCalledOnce();
+        runFrame();
+      }
+      expect(rests()).toEqual(["moveend", "moveend"]);
+    });
+
+    it("tells the map the camera has come to rest as the replay closes", () => {
+      airplaneAt(10, 300);
+      mockReplayManager.state.airplaneMarker = makeAirplane();
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [makeSegment({ time: 0 })];
+
+      callUpdateDisplay(true);
+      renderer.stopWatchingMap();
+
+      expect(map.fire.mock.calls.map(([type]) => type)).toEqual(["moveend"]);
+      // Once
+      renderer.stopWatchingMap();
+      runFrame();
+      expect(map.fire).toHaveBeenCalledOnce();
     });
 
     it("pans immediately on manual seek when the airplane left the viewport", () => {
@@ -2445,9 +2505,12 @@ describe("ReplayRenderer", () => {
       callUpdateDisplay();
 
       // Straight to the airplane, and the zoom without its animation
-      expect(map.jumpTo).toHaveBeenCalledExactlyOnceWith({
-        center: [8.51, 50.01],
-      });
+      expect(map.jumpTo).toHaveBeenCalledExactlyOnceWith(
+        {
+          center: [8.51, 50.01],
+        },
+        mapHelpers.REPLAY_CAMERA_MOVE,
+      );
       expect(map.easeTo).toHaveBeenCalledTimes(1);
       expect(map.easeTo.mock.calls[0]![0]).toMatchObject({ animate: false });
       expect(zoomOuts()).toEqual([expect.objectContaining({ zoom: 11 })]);

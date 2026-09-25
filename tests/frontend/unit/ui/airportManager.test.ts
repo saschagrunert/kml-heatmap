@@ -21,6 +21,7 @@ import {
   type MockApp,
 } from "../../testHelpers";
 import type { Popup as MockPopup } from "../../../mocks/maplibre-gl";
+import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import type { Point } from "maplibre-gl";
 
 const { loadFeatures, listFlights } = vi.hoisted(() => {
@@ -734,7 +735,7 @@ describe("AirportManager", () => {
     const labelSource = () => mockApp.map!.source(MAP_SOURCES.airportLabels);
 
     it("hands the label layer every airport, with its flights and the home base", () => {
-      airportManager.updateAirportPopups();
+      airportManager.updateAirportOpacity();
 
       expect(labels().map((feature) => feature.properties["name"])).toEqual(
         airports.map((airport) => airport.name),
@@ -818,6 +819,43 @@ describe("AirportManager", () => {
 
       expect(markers["LOWW"]!.getElement().hidden).toBe(true);
       expect(markers["EDDK"]!.getElement().hidden).toBe(false);
+    });
+
+    it("leaves the frames of the replay's camera to its own rest", async () => {
+      await mockApp.mapReady;
+      await Promise.resolve();
+      const map = mockApp.map!;
+      Object.defineProperty(map.getContainer(), "clientHeight", {
+        value: 800,
+      });
+      map.jumpTo({ center: [8.67, 50.1], pitch: 80 });
+
+      map.emit("moveend", REPLAY_CAMERA_MOVE);
+      expect(markers["EDDK"]!.getElement().hidden).toBe(false);
+
+      map.emit("moveend");
+      expect(markers["EDDK"]!.getElement().hidden).toBe(true);
+    });
+
+    it("writes the labels again once the map has its style back after a lost WebGL context", async () => {
+      await mockApp.mapReady;
+      await Promise.resolve();
+      const map = mockApp.map!;
+      airportManager.updateAirportOpacity();
+      // What changed during the loss had no source to go to
+      const getSource = map.getSource.getMockImplementation()!;
+      map.getSource.mockImplementation(() => undefined);
+      mockApp.selectedYear = "2024";
+      map.getSource.mockImplementation(getSource);
+      expect(labels()).toHaveLength(airports.length);
+
+      map.emit("webglcontextrestored");
+      map.emit("style.load");
+
+      expect(labels().map((feature) => feature.properties["name"])).toEqual([
+        "EDDF",
+        "EDDK",
+      ]);
     });
 
     it("stops following the map once destroyed", async () => {
@@ -929,9 +967,10 @@ describe("AirportManager", () => {
   });
 
   describe("store subscriptions", () => {
-    it("refreshes each once for an update that changes several keys (regression)", () => {
-      const popups = vi.spyOn(airportManager, "updateAirportPopups");
+    it("refreshes once, and writes the labels once, for an update that changes several keys (regression)", () => {
       const opacity = vi.spyOn(airportManager, "updateAirportOpacity");
+      const labels = mockApp.map!.source(MAP_SOURCES.airportLabels).setData;
+      labels.mockClear();
 
       // What a year switch publishes
       mockApp.selectedPathIds.add(1);
@@ -943,8 +982,9 @@ describe("AirportManager", () => {
         mockApp.store.notifyMutation("selectedPathIds");
       });
 
-      expect(popups).toHaveBeenCalledTimes(1);
       expect(opacity).toHaveBeenCalledTimes(1);
+      expect(labels).toHaveBeenCalledTimes(1);
+      expect(isHome("EDDF")).toBe(true);
     });
 
     it("closes the popup when the airports are hidden", () => {
@@ -955,30 +995,32 @@ describe("AirportManager", () => {
       expect(popup.isOpen()).toBe(false);
     });
 
-    it("refreshes the popups and the visibility when the filter changes", () => {
-      const popups = vi.spyOn(airportManager, "updateAirportPopups");
+    it("counts the home base again, and refreshes the visibility, when the filter changes", () => {
       const opacity = vi.spyOn(airportManager, "updateAirportOpacity");
+      markers["EDDF"]!.openPopup();
+      popup.setHTML.mockClear();
 
       mockApp.selectedYear = "2024";
 
-      expect(popups).toHaveBeenCalledTimes(1);
+      expect(popup.setHTML).toHaveBeenCalledTimes(1);
       expect(opacity).toHaveBeenCalledTimes(1);
 
       mockApp.selectedAircraft = "D-ABCD";
 
-      expect(popups).toHaveBeenCalledTimes(2);
+      expect(popup.setHTML).toHaveBeenCalledTimes(2);
       expect(opacity).toHaveBeenCalledTimes(2);
     });
 
     it("refreshes only the visibility for a selection change", () => {
-      const popups = vi.spyOn(airportManager, "updateAirportPopups");
       const opacity = vi.spyOn(airportManager, "updateAirportOpacity");
+      markers["EDDF"]!.openPopup();
+      popup.setHTML.mockClear();
 
       mockApp.selectedPathIds.add(3);
       mockApp.store.notifyMutation("selectedPathIds");
       mockApp.isolateSelection = true;
 
-      expect(popups).not.toHaveBeenCalled();
+      expect(popup.setHTML).not.toHaveBeenCalled();
       expect(opacity).toHaveBeenCalledTimes(2);
     });
 

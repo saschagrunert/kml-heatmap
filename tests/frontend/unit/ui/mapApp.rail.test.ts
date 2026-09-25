@@ -23,7 +23,10 @@ import {
   loadFeatures,
   loadWrapped,
 } from "../../../../kml_heatmap/frontend/services/featureLoader";
-import { resizeMapAfterTransition } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import {
+  REPLAY_CAMERA_MOVE,
+  resizeMapAfterTransition,
+} from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
 // The instances the mocked manager constructors hand out live in the setup
@@ -609,6 +612,32 @@ describe("MapApp controls and map", () => {
       expect(
         mockAirportManagerInstance.updateAirportMarkerSizes,
       ).toHaveBeenCalledTimes(2);
+    });
+
+    it("leaves the frames of the replay's camera to its own rest", async () => {
+      await initializeApp(app);
+      const sizes = mockAirportManagerInstance.updateAirportMarkerSizes;
+      sizes.mockClear();
+
+      mockMap(app).emit("moveend", REPLAY_CAMERA_MOVE);
+      mockMap(app).emit("zoomend", REPLAY_CAMERA_MOVE);
+
+      expect(mockStateManagerInstance.scheduleSave).not.toHaveBeenCalled();
+      expect(sizes).not.toHaveBeenCalled();
+    });
+
+    it("says what happens to the WebGL context, for as long as the app lives", async () => {
+      await initializeApp(app);
+      const canvas = mockMap(app).getCanvas();
+
+      canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
+      canvas.dispatchEvent(new Event("webglcontextrestored"));
+      expect(showToast).toHaveBeenCalledTimes(2);
+
+      app.destroy();
+      canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
+      canvas.dispatchEvent(new Event("webglcontextrestored"));
+      expect(showToast).toHaveBeenCalledTimes(2);
     });
 
     it("clears the selection on map click outside replay", async () => {

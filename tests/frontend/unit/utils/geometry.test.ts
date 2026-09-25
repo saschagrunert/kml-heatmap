@@ -3,14 +3,55 @@ import {
   calculateDistance,
   calculateBearing,
   ddToDms,
+  METRES_PER_DEGREE,
+  planarMetres,
   segmentBounds,
   toMapBearing,
   toMapCenter,
   toMapPitch,
+  turnOf,
   type Coordinate,
 } from "../../../../kml_heatmap/frontend/utils/geometry";
 
 describe("geometry utilities", () => {
+  describe("turnOf", () => {
+    it("turns the short way round", () => {
+      expect(turnOf(350, 10)).toBe(20);
+      expect(turnOf(10, 350)).toBe(-20);
+      expect(turnOf(0, 180)).toBe(-180);
+      expect(turnOf(-170, 170)).toBe(-20);
+    });
+
+    it("gives -180 for half a turn either way, however many turns round", () => {
+      for (const to of [180, -180, 540, -540, 900, -900]) {
+        expect(turnOf(0, to)).toBe(-180);
+      }
+    });
+
+    it("leaves a difference without a way round exact", () => {
+      expect(turnOf(0, 0.1)).toBe(0.1);
+      expect(turnOf(8.3, 8.1)).toBe(8.1 - 8.3);
+      expect(turnOf(10, 370.5)).toBe(0.5);
+    });
+  });
+
+  describe("planarMetres", () => {
+    it("measures a degree of latitude, and one of longitude by its latitude", () => {
+      expect(planarMetres([50, 8], [51, 8])).toBeCloseTo(METRES_PER_DEGREE, 6);
+      expect(planarMetres([60, 8], [60, 9])).toBeCloseTo(
+        METRES_PER_DEGREE / 2,
+        6,
+      );
+    });
+
+    it("measures the short way across the antimeridian", () => {
+      expect(planarMetres([0, 179.99], [0, -179.99])).toBeCloseTo(
+        planarMetres([0, 0], [0, 0.02]),
+        3,
+      );
+    });
+  });
+
   describe("calculateDistance", () => {
     it("calculates distance between Berlin and Paris", () => {
       const berlin: Coordinate = [52.52, 13.405];

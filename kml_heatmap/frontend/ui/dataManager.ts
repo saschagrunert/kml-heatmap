@@ -34,6 +34,12 @@ import {
 /** Stand-in for `--heatmap-dimmed-opacity` when the stylesheet has none */
 const HEATMAP_DIMMED_OPACITY_FALLBACK = 0.35;
 
+/**
+ * How many levels short of the hand-over to the heat lines a zoom may end
+ * for them to be worked out (see writeHeatLines)
+ */
+const HEAT_LINES_LEAD = 1;
+
 /** The keys that decide what the heatmap and the colour layers draw */
 const DRAWN_KEYS: readonly (keyof StoreState)[] = [
   "currentData",
@@ -80,10 +86,10 @@ export class DataManager {
   } | null = null;
   /** The points the heat source holds, to not send them a second time */
   private heatmapPoints: readonly Coordinate[] | null = null;
-  /** The points the heat lines source was last worked out for */
+  /** The points the heat lines source was last worked out for, if any */
   private heatLinesPoints: readonly Coordinate[] | null = null;
-  /** Zoomed in to the hand-over, the heat lines are worked out */
-  private readonly handleZoom = (): void => this.writeHeatLines();
+  /** Come to rest near the hand-over, the heat lines are worked out */
+  private readonly handleZoomEnd = (): void => this.writeHeatLines();
   /** The indicator is up; asked on every chunk, so not asked of the DOM */
   private loadingShown = false;
   /** The operation the bar on screen belongs to, see LoadingState */
@@ -122,7 +128,10 @@ export class DataManager {
 
     void app.mapReady.then(
       (map) => {
-        map.on("zoom", this.handleZoom);
+        map.on("zoomend", this.handleZoomEnd);
+        // The sources are back with the data they held at the loss, the
+        // last written (MapLibre keeps it with the style); what could not
+        // reach them since is written now
         whenContextRestored(map, () => this.writeHeat());
       },
       () => {},
@@ -168,7 +177,7 @@ export class DataManager {
    */
   destroy(): void {
     this.destroyed = true;
-    this.app.map?.off("zoom", this.handleZoom);
+    this.app.map?.off("zoomend", this.handleZoomEnd);
     this.dataLoader.destroy();
     this.hideLoading();
   }
@@ -320,27 +329,30 @@ export class DataManager {
 
   /**
    * The heat lines of the points the heatmap shows, worked out once they
-   * can show: with the heatmap shown and zoomed in to where it hands over
-   * to them (see HEAT_LINES), once per set of points. They are the same
-   * flights as the points, and 150000 segments take 80 to 95 ms, which a
-   * hidden or zoomed out heatmap has no use for.
+   * can show soon: with the heatmap shown and a zoom that ended a level
+   * short of where it hands over to them (see HEAT_LINES) or further in,
+   * once per set of points. They are the same flights as the points, and
+   * 150000 segments take 80 to 95 ms, which a hidden or zoomed out heatmap
+   * has no use for. Worked out in a frame of the zoom, they held up the
+   * pinch that crossed into them; a zoom in from a level short of them
+   * finds them ready. The lines of other points are taken off meanwhile:
+   * a zoom from further out would show them until it ends.
    */
   private writeHeatLines(): void {
     const map = this.app.map;
     const heat = this.heat;
-    if (
-      !map ||
-      !heat ||
-      this.heatLinesPoints === heat.points ||
-      !this.app.heatmapLayer.isVisible() ||
-      map.getZoom() < HEAT_LINES.fromZoom
-    ) {
+    const source = map?.getSource<GeoJSONSource>(MAP_SOURCES.heatLines);
+    if (!map || !source || !heat || this.heatLinesPoints === heat.points) {
       return;
     }
-    const source = map.getSource<GeoJSONSource>(MAP_SOURCES.heatLines);
-    if (!source) return;
-    this.heatLinesPoints = heat.points;
-    void source.setData(heatLineFeatures(heat.segments, heat.keep));
+    const shown =
+      this.app.heatmapLayer.isVisible() &&
+      map.getZoom() >= HEAT_LINES.fromZoom - HEAT_LINES_LEAD;
+    if (!shown && !this.heatLinesPoints) return;
+    this.heatLinesPoints = shown ? heat.points : null;
+    void source.setData(
+      heatLineFeatures(shown ? heat.segments : [], heat.keep),
+    );
   }
 
   /**
@@ -390,24 +402,27 @@ export class DataManager {
   }
 
   /**
-   * Rebuild what a change of the dataset, the filter or isolation changes,
-   * and only restyle the paths for a change of the selection alone
+   * Rebuild what a change of the dataset or the filter changes. A change of
+   * the selection or of isolation alone leaves the runs of the colour layers
+   * as they are, whose layers leave out what they must not show by a filter
+   * (see LayerManager.updateSelectionStyles); only the heatmap, which
+   * isolation narrows to the selection, is given its points again.
    */
   private followStore(): void {
     const { currentData, selectedYear, selectedAircraft, isolateSelection } =
       this.app;
     const drawn = this.drawn;
     if (
-      drawn?.data === currentData &&
-      drawn.year === selectedYear &&
-      drawn.aircraft === selectedAircraft &&
-      !drawn.isolate &&
-      !isolateSelection
+      !currentData ||
+      drawn?.data !== currentData ||
+      drawn.year !== selectedYear ||
+      drawn.aircraft !== selectedAircraft
     ) {
-      this.app.layerManager.updateSelectionStyles();
-    } else {
       this.updateLayers();
+      return;
     }
+    if (drawn.isolate || isolateSelection) this.drawHeatmap(currentData);
+    this.app.layerManager.updateSelectionStyles();
   }
 
   /**
@@ -419,6 +434,24 @@ export class DataManager {
     const data = this.app.currentData;
     if (!this.app.map || !data) return;
 
+    this.drawHeatmap(data);
+
+    // Calculate altitude range from all segments
+    if (data.path_segments.length > 0) {
+      this.app.altitudeRange = calculateAltitudeRange(
+        data.path_segments,
+        this.app.altitudeRange,
+        data.path_info,
+      );
+    }
+
+    // Only the colour layers that show are drawn; the others are drawn as
+    // they show, and hold no stale data meanwhile
+    this.app.layerManager.syncModes(true);
+  }
+
+  /** Give the heatmap the points of what the filter and isolation keep */
+  private drawHeatmap(data: KMLDataset): void {
     this.drawn = {
       data,
       year: this.app.selectedYear,
@@ -453,19 +486,6 @@ export class DataManager {
       data.path_segments,
       hasIsolation || !view.keepsAll ? keep : () => true,
     );
-
-    // Calculate altitude range from all segments
-    if (data.path_segments.length > 0) {
-      this.app.altitudeRange = calculateAltitudeRange(
-        data.path_segments,
-        this.app.altitudeRange,
-        data.path_info,
-      );
-    }
-
-    // Only the colour layers that show are drawn; the others are drawn as
-    // they show, and hold no stale data meanwhile
-    this.app.layerManager.syncModes(true);
   }
 }
 

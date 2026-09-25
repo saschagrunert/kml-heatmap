@@ -24,6 +24,7 @@ import {
   toBounds,
   toLngLat,
   toLngLatAfter,
+  whenContextRestored,
   type LngLatTuple,
 } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
@@ -199,6 +200,19 @@ export class ReplayManager {
     // data, which MapApp watches: the control has to say so before this
     // bundle is ever fetched. This manager only nudges the button after an
     // activation changes it.
+
+    // The trail written while the WebGL context was lost had no source to
+    // go to, and a paused replay writes it again only once it moves on. It
+    // is written whole, and the route with it. Not on a map the app has
+    // let go of.
+    if (app.map) {
+      whenContextRestored(app.map, () => {
+        if (!this.state.layerActive || app.signal.aborted) return;
+        this.writeRoute();
+        this.state.trailDirty = true;
+        this.renderer.scheduleTrailFlush(this.state);
+      });
+    }
   }
 
   /** Cancel every pending timer; the panel itself stays as it is */
@@ -605,6 +619,17 @@ export class ReplayManager {
    * source is written here and nowhere else.
    */
   private startReplayLayer(): void {
+    this.writeRoute();
+    this.setReplaySource(MAP_SOURCES.replayTrail, []);
+    this.setReplaySource(MAP_SOURCES.replayTrailRibbons, []);
+    this.state.trailWrittenTo = null;
+    this.state.trailRuns = [];
+    this.state.trailDirty = false;
+    this.state.layerActive = true;
+  }
+
+  /** The route of the flight replayed, see startReplayLayer */
+  private writeRoute(): void {
     const coordinates = routeCoordinates(
       this.state.segments,
       this.state.smoothed,
@@ -621,12 +646,6 @@ export class ReplayManager {
             },
           ],
     );
-    this.setReplaySource(MAP_SOURCES.replayTrail, []);
-    this.setReplaySource(MAP_SOURCES.replayTrailRibbons, []);
-    this.state.trailWrittenTo = null;
-    this.state.trailRuns = [];
-    this.state.trailDirty = false;
-    this.state.layerActive = true;
   }
 
   /** Empty both replay sources; their layers stay on the map, showing nothing */

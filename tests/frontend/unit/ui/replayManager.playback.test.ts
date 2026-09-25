@@ -164,8 +164,13 @@ describe("ReplayManager playback", () => {
       expect(replayManager.state.currentTime).toBeLessThan(
         replayManager.state.maxTime,
       );
-      // Three of the loop, and one that hands the first segment to the map
-      expect(requestAnimationFrame).toHaveBeenCalledTimes(4);
+      // Three of the loop, and one that hands the first segment to the
+      // map; the camera looks for its rest after its pans in frames of its
+      // own
+      const frames = vi
+        .mocked(requestAnimationFrame)
+        .mock.calls.filter(([callback]) => callback.name !== "lookForRest");
+      expect(frames).toHaveLength(4);
     });
 
     it("keeps the user's bearing and pitch through the fit at the end", () => {
@@ -391,6 +396,40 @@ describe("ReplayManager playback", () => {
       expect(replayManager.state.currentTime).toBe(0);
       expect(replayManager.state.lastDrawnIndex).toBe(-1);
       expect(liveRegionText()).toBe("Replay stopped");
+    });
+
+    it("writes the route and the trail again once the map has its style back after a lost WebGL context", () => {
+      const { route, trail } = replaySources(mockApp);
+      const map = mockApp.map!;
+      const getSource = map.getSource.getMockImplementation()!;
+      // Written while the context was lost: no source to go to
+      map.getSource.mockImplementation(() => undefined);
+      replayManager.seekReplay("100");
+      vi.advanceTimersByTime(16);
+      map.getSource.mockImplementation(getSource);
+      void route.setData({ type: "FeatureCollection", features: [] });
+      expect(featuresOf(trail)).toEqual([]);
+
+      map.emit("webglcontextrestored");
+      map.emit("style.load");
+      vi.advanceTimersByTime(16);
+
+      expect(featuresOf(route)).toHaveLength(1);
+      expect(featuresOf(trail)).toHaveLength(2);
+    });
+
+    it("writes nothing to a map the app has let go of after a lost WebGL context", () => {
+      const { route } = replaySources(mockApp);
+      const map = mockApp.map!;
+      const lifetime = new AbortController();
+      Object.assign(mockApp, { signal: lifetime.signal });
+      lifetime.abort();
+      route.setData.mockClear();
+
+      map.emit("webglcontextrestored");
+      map.emit("style.load");
+
+      expect(route.setData).not.toHaveBeenCalled();
     });
 
     it("takes the trail off the map and keeps the route", () => {

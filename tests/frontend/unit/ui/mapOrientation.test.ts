@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { MapOrientation } from "../../../../kml_heatmap/frontend/ui/mapOrientation";
 import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
+import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import {
   asMapApp,
   createMockApp,
@@ -305,6 +306,15 @@ describe("MapOrientation", () => {
       await nextFrame();
 
       expect(document.activeElement).toBe(compass());
+    });
+
+    it("does not look at every frame of the replay's camera", async () => {
+      marker.classList.add("maplibregl-marker-covered");
+
+      app.map!.emit("moveend", REPLAY_CAMERA_MOVE);
+      await nextFrame();
+
+      expect(document.activeElement).toBe(marker);
     });
 
     it("does not look on a flat map, where nothing is ever behind", async () => {

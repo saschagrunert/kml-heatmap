@@ -13,10 +13,14 @@
  */
 import { LngLat, type Map as MapLibreMap } from "maplibre-gl";
 import {
+  DEGREES_TO_RADIANS as RAD,
+  EARTH_CIRCUMFERENCE_M,
+  turnOf,
+} from "../utils/geometry";
+import { REPLAY_CAMERA_MOVE } from "../utils/mapHelpers";
+import {
   heightAtZoomFt,
-  liftExaggeration,
   liftMetres,
-  reliefLevel,
   type GroundedHeight,
 } from "../calculations/lift";
 
@@ -88,10 +92,6 @@ const CHASE_CLEARANCE_M = 150;
 /** Longest frame a spring is worked out over (s), as the replay's */
 const MAX_STEP_S = 0.1;
 
-const RAD = Math.PI / 180;
-/** The circumference of the earth, in metres, at the equator */
-const EARTH_CIRCUMFERENCE_M = 40075016.686;
-
 /**
  * One frame of a critically damped spring that takes about `time` seconds:
  * `offset` is how far the target is, `velocity` the speed from the frame
@@ -111,11 +111,6 @@ export function dampStep(
   const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
   const temp = (velocity - omega * offset) * dt;
   return [offset + (temp - offset) * decay, (velocity - omega * temp) * decay];
-}
-
-/** The difference of two angles, the short way round (degrees) */
-export function turnOf(from: number, to: number): number {
-  return ((((to - from) % 360) + 540) % 360) - 180;
 }
 
 /** How long the camera takes into a turn at a replay speed (see above) */
@@ -225,6 +220,11 @@ export interface SavedCamera {
 export interface ChaseTarget extends GroundedHeight {
   position: readonly [lat: number, lon: number];
   track: number;
+  /**
+   * How much the height is exaggerated: the relief's, which keeps its level
+   * until a zoom ends, as the trail does (see liftExaggeration)
+   */
+  exaggeration: number;
 }
 
 /** A value the camera follows, and its speed */
@@ -330,7 +330,8 @@ export class ChaseCamera {
 
   /**
    * The airplane's height as the map draws it, in metres above the sea:
-   * over the relief under it at the map's zoom
+   * over the relief under it at the map's zoom, at the relief's
+   * exaggeration, which a pinch across a relief level leaves until it ends
    */
   private altitude(target: ChaseTarget): number {
     const [lat, lon] = target.position;
@@ -338,9 +339,7 @@ export class ChaseCamera {
     const heightFt = heightAtZoomFt(target, zoom);
     return (
       (this.map.queryTerrainElevation([lon, lat]) ?? 0) +
-      (heightFt === null
-        ? 0
-        : liftMetres(heightFt, liftExaggeration(reliefLevel(zoom))))
+      (heightFt === null ? 0 : liftMetres(heightFt, target.exaggeration))
     );
   }
 
@@ -461,13 +460,18 @@ export class ChaseCamera {
       clearPitch(elevation, distanceM, ground, 0),
     );
 
-    map.jumpTo({
-      center: [lng, lookLat],
-      elevation,
-      zoom: this.zoom.value,
-      bearing: this.bearing.value,
-      pitch: this.pitch.value,
-    });
+    // Tagged: what the app does at rest waits for the camera's own rest
+    // (see ReplayCamera)
+    map.jumpTo(
+      {
+        center: [lng, lookLat],
+        elevation,
+        zoom: this.zoom.value,
+        bearing: this.bearing.value,
+        pitch: this.pitch.value,
+      },
+      REPLAY_CAMERA_MOVE,
+    );
 
     const still = (s: Spring, within: number) => Math.abs(s.velocity) < within;
     return (
